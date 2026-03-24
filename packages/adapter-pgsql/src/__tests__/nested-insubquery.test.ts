@@ -6,7 +6,7 @@
  * to PlanDecision, then normalizeToDecision() sees column !== undefined and
  * returns early -- never re-normalizing inner 'in'+subquery to 'inSubquery'.
  *
- * Fix: normalizeToDecision() must re-process Decision objects that have
+ * Fix: normalizeToDecision() must re-process CompilerDecision objects that have
  * operator='in'/'notIn' + subquery property even when column is already set.
  *
  * Schema:

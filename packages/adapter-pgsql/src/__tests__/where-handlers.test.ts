@@ -9,7 +9,7 @@ import {
 	clearHandlers,
 	createCompilerState,
 	createWhereDispatcher,
-	type Decision,
+	type CompilerDecision,
 } from '../handlers/index.js';
 import {
 	registerAllWhereHandlers,
@@ -19,7 +19,7 @@ import { identityNaming } from '../naming-plugin.js';
 
 // Helper to compile a decision to SQL
 function compileToSql(
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx?: Partial<CompilerContext>,
 ): { sql: string; params: unknown[] } {
 	const fullCtx: CompilerContext = {

@@ -13,7 +13,7 @@
  *
  * Fix: convertWhereCondition() detects SubqueryRefIntent in comparison values
  * and converts { kind: 'ref', column } → { kind: 'fieldRef', scope: 'outer', column }
- * before the Decision is created, so compileValueOrFieldRef() routes it to
+ * before the CompilerDecision is created, so compileValueOrFieldRef() routes it to
  * columnRef() with the outer query alias.
  */
 

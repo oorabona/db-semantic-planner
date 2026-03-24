@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	denseRankHandler,
@@ -40,7 +40,7 @@ describe('rowNumberHandler', () => {
 
 	it('compiles with no PARTITION BY or ORDER BY', () => {
 		const state = createCompilerState();
-		const decision = { type: 'rowNumber' } as Decision;
+		const decision = { type: 'rowNumber' } as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result).toHaveProperty('FuncCall');
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('row_number');
@@ -52,7 +52,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			partition: ['dept_id'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 	});
@@ -62,7 +62,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			orderBy: [{ column: 'salary', direction: 'ASC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause?.[0]?.SortBy?.sortby_dir).toBe(
@@ -75,7 +75,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			orderBy: [{ column: 'salary', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause?.[0]?.SortBy?.sortby_dir).toBe(
 			'SORTBY_DESC',
@@ -87,7 +87,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			orderBy: [{ column: 'salary', direction: undefined }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause?.[0]?.SortBy?.sortby_dir).toBe(
 			'SORTBY_ASC',
@@ -100,7 +100,7 @@ describe('rowNumberHandler', () => {
 			type: 'rowNumber',
 			partition: ['dept_id'],
 			orderBy: [{ column: 'salary', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
@@ -111,7 +111,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			partition: ['dept_id', 'location'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(2);
 	});
@@ -124,7 +124,7 @@ describe('rowNumberHandler', () => {
 				{ column: 'salary', direction: 'DESC' },
 				{ column: 'name', direction: 'ASC' },
 			],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(2);
 	});
@@ -135,7 +135,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			partition: ['dept_id'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctxWithAlias, state);
 		// Verify alias1 is used in partition clause
 		const colRef = result.FuncCall?.over?.partitionClause?.[0]?.ColumnRef;
@@ -147,7 +147,7 @@ describe('rowNumberHandler', () => {
 		const decision = {
 			type: 'rowNumber',
 			frame: 'ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rowNumberHandler.compile(decision, ctx, state);
 		// Frame is currently ignored in implementation
 		expect(result.FuncCall?.over).toBeDefined();
@@ -163,7 +163,7 @@ describe('rankHandler', () => {
 
 	it('compiles with no PARTITION BY or ORDER BY', () => {
 		const state = createCompilerState();
-		const decision = { type: 'rank' } as Decision;
+		const decision = { type: 'rank' } as CompilerDecision;
 		const result = rankHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('rank');
 	});
@@ -174,7 +174,7 @@ describe('rankHandler', () => {
 			type: 'rank',
 			partition: ['category'],
 			orderBy: [{ column: 'score', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = rankHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
@@ -190,7 +190,7 @@ describe('denseRankHandler', () => {
 
 	it('compiles with no PARTITION BY or ORDER BY', () => {
 		const state = createCompilerState();
-		const decision = { type: 'denseRank' } as Decision;
+		const decision = { type: 'denseRank' } as CompilerDecision;
 		const result = denseRankHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('dense_rank');
 	});
@@ -201,7 +201,7 @@ describe('denseRankHandler', () => {
 			type: 'denseRank',
 			partition: ['team'],
 			orderBy: [{ column: 'points', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = denseRankHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
@@ -217,7 +217,7 @@ describe('ntileHandler', () => {
 
 	it('compiles with default n=4 when value is undefined', () => {
 		const state = createCompilerState();
-		const decision = { type: 'ntile' } as Decision;
+		const decision = { type: 'ntile' } as CompilerDecision;
 		const result = ntileHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('ntile');
 		expect(state.parameters).toContain(4);
@@ -225,14 +225,14 @@ describe('ntileHandler', () => {
 
 	it('compiles with value from decision.value', () => {
 		const state = createCompilerState();
-		const decision = { type: 'ntile', value: 10 } as Decision;
+		const decision = { type: 'ntile', value: 10 } as CompilerDecision;
 		const result = ntileHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(10);
 	});
 
 	it('compiles with value from decision.args[0]', () => {
 		const state = createCompilerState();
-		const decision = { type: 'ntile', args: [5] } as unknown as Decision;
+		const decision = { type: 'ntile', args: [5] } as unknown as CompilerDecision;
 		const result = ntileHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(5);
 	});
@@ -243,7 +243,7 @@ describe('ntileHandler', () => {
 			type: 'ntile',
 			value: 3,
 			partition: ['dept'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = ntileHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 	});
@@ -258,7 +258,7 @@ describe('lagHandler', () => {
 
 	it('compiles with column and default offset=1', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lag', column: 'price' } as Decision;
+		const decision = { type: 'lag', column: 'price' } as CompilerDecision;
 		const result = lagHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('lag');
 		expect(result.FuncCall?.args).toHaveLength(2); // column + offset
@@ -271,7 +271,7 @@ describe('lagHandler', () => {
 			type: 'lag',
 			column: 'price',
 			args: [3],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = lagHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(2);
 		expect(state.parameters).toContain(3);
@@ -283,7 +283,7 @@ describe('lagHandler', () => {
 			type: 'lag',
 			column: 'price',
 			value: 0,
-		} as Decision;
+		} as CompilerDecision;
 		const result = lagHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(3); // column + offset + default
 		expect(state.parameters).toContain(1); // offset
@@ -297,7 +297,7 @@ describe('lagHandler', () => {
 			column: 'price',
 			args: [2],
 			value: 100,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = lagHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(3);
 		expect(state.parameters).toContain(2);
@@ -311,7 +311,7 @@ describe('lagHandler', () => {
 			column: 'price',
 			partition: ['product_id'],
 			orderBy: [{ column: 'date', direction: 'ASC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = lagHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
@@ -320,7 +320,7 @@ describe('lagHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 't1' });
-		const decision = { type: 'lag', column: 'price' } as Decision;
+		const decision = { type: 'lag', column: 'price' } as CompilerDecision;
 		const result = lagHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 't1' } });
@@ -336,7 +336,7 @@ describe('leadHandler', () => {
 
 	it('compiles with column and default offset=1', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lead', column: 'price' } as Decision;
+		const decision = { type: 'lead', column: 'price' } as CompilerDecision;
 		const result = leadHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('lead');
 		expect(result.FuncCall?.args).toHaveLength(2);
@@ -349,7 +349,7 @@ describe('leadHandler', () => {
 			type: 'lead',
 			column: 'price',
 			args: [3],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = leadHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(2);
 		expect(state.parameters).toContain(3);
@@ -361,7 +361,7 @@ describe('leadHandler', () => {
 			type: 'lead',
 			column: 'price',
 			value: 0,
-		} as Decision;
+		} as CompilerDecision;
 		const result = leadHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(3);
 		expect(state.parameters).toContain(1);
@@ -375,7 +375,7 @@ describe('leadHandler', () => {
 			column: 'price',
 			args: [2],
 			value: 999,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = leadHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(3);
 		expect(state.parameters).toContain(2);
@@ -389,7 +389,7 @@ describe('leadHandler', () => {
 			column: 'price',
 			partition: ['category'],
 			orderBy: [{ column: 'date', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = leadHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
@@ -398,7 +398,7 @@ describe('leadHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 't2' });
-		const decision = { type: 'lead', column: 'amount' } as Decision;
+		const decision = { type: 'lead', column: 'amount' } as CompilerDecision;
 		const result = leadHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 't2' } });
@@ -414,7 +414,7 @@ describe('firstValueHandler', () => {
 
 	it('compiles with column', () => {
 		const state = createCompilerState();
-		const decision = { type: 'firstValue', column: 'price' } as Decision;
+		const decision = { type: 'firstValue', column: 'price' } as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('first_value');
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -426,7 +426,7 @@ describe('firstValueHandler', () => {
 			type: 'firstValue',
 			column: 'price',
 			partition: ['group_id'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 	});
@@ -437,7 +437,7 @@ describe('firstValueHandler', () => {
 			type: 'firstValue',
 			column: 'price',
 			orderBy: [{ column: 'timestamp', direction: 'ASC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
 	});
@@ -445,7 +445,7 @@ describe('firstValueHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 'w1' });
-		const decision = { type: 'firstValue', column: 'value' } as Decision;
+		const decision = { type: 'firstValue', column: 'value' } as CompilerDecision;
 		const result = firstValueHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'w1' } });
@@ -461,7 +461,7 @@ describe('lastValueHandler', () => {
 
 	it('compiles with column', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lastValue', column: 'price' } as Decision;
+		const decision = { type: 'lastValue', column: 'price' } as CompilerDecision;
 		const result = lastValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('last_value');
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -473,7 +473,7 @@ describe('lastValueHandler', () => {
 			type: 'lastValue',
 			column: 'price',
 			partition: ['group_id'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = lastValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 	});
@@ -484,7 +484,7 @@ describe('lastValueHandler', () => {
 			type: 'lastValue',
 			column: 'price',
 			orderBy: [{ column: 'timestamp', direction: 'DESC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = lastValueHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
 	});
@@ -492,7 +492,7 @@ describe('lastValueHandler', () => {
 	it('uses currentAlias when set', () => {
 		const state = createCompilerState();
 		const ctxWithAlias = makeCtx({ currentAlias: 'w2' });
-		const decision = { type: 'lastValue', column: 'result' } as Decision;
+		const decision = { type: 'lastValue', column: 'result' } as CompilerDecision;
 		const result = lastValueHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'w2' } });
@@ -511,7 +511,7 @@ describe('genericWindowHandler', () => {
 		const decision = {
 			type: 'window',
 			function: 'count',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('count');
 		expect(result.FuncCall?.agg_star).toBe(true);
@@ -522,7 +522,7 @@ describe('genericWindowHandler', () => {
 		const decision = {
 			type: 'window',
 			function: 'COUNT',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.agg_star).toBe(true);
 	});
@@ -533,7 +533,7 @@ describe('genericWindowHandler', () => {
 			type: 'window',
 			function: 'count',
 			column: 'user_id',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.agg_star).toBeUndefined();
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -545,7 +545,7 @@ describe('genericWindowHandler', () => {
 			type: 'window',
 			function: 'count',
 			args: [1],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.agg_star).toBeUndefined();
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -558,7 +558,7 @@ describe('genericWindowHandler', () => {
 			type: 'window',
 			function: 'sum',
 			column: 'amount',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.funcname?.[0]?.String?.sval).toBe('sum');
 		expect(result.FuncCall?.args).toHaveLength(1);
@@ -570,7 +570,7 @@ describe('genericWindowHandler', () => {
 			type: 'window',
 			function: 'custom_func',
 			args: [10, 20],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(2);
 		expect(state.parameters).toContain(10);
@@ -584,7 +584,7 @@ describe('genericWindowHandler', () => {
 			function: 'substring',
 			column: 'text',
 			args: [1, 5],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(3); // column + 2 args
 	});
@@ -596,7 +596,7 @@ describe('genericWindowHandler', () => {
 			function: 'coalesce',
 			column: 'score',
 			value: 0,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(2); // column + value
 		expect(state.parameters).toContain(0);
@@ -610,7 +610,7 @@ describe('genericWindowHandler', () => {
 			column: 'text',
 			args: ['old', 'new'],
 			value: 'fallback',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(4); // column + 2 args + value
 	});
@@ -622,7 +622,7 @@ describe('genericWindowHandler', () => {
 			function: 'sum',
 			column: 'amount',
 			partition: ['category'],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(1);
 	});
@@ -634,7 +634,7 @@ describe('genericWindowHandler', () => {
 			function: 'avg',
 			column: 'score',
 			orderBy: [{ column: 'date', direction: 'ASC' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(1);
 	});
@@ -650,7 +650,7 @@ describe('genericWindowHandler', () => {
 				{ column: 'date', direction: 'DESC' },
 				{ column: 'id', direction: 'ASC' },
 			],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.over?.partitionClause).toHaveLength(2);
 		expect(result.FuncCall?.over?.orderClause).toHaveLength(2);
@@ -663,7 +663,7 @@ describe('genericWindowHandler', () => {
 			type: 'window',
 			function: 'min',
 			column: 'price',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = genericWindowHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.FuncCall?.args?.[0]?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'w3' } });

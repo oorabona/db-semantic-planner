@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { caseHandler, simpleCaseHandler } from './case.js';
 
@@ -29,7 +29,7 @@ describe('caseHandler errors', () => {
 
 	it('throws when conditions is undefined', () => {
 		const state = createCompilerState();
-		const decision = { type: 'case' } as Decision;
+		const decision = { type: 'case' } as CompilerDecision;
 		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
 			'CASE requires at least one WHEN condition',
 		);
@@ -40,7 +40,7 @@ describe('caseHandler errors', () => {
 		const decision = {
 			type: 'case',
 			conditions: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
 			'CASE requires at least one WHEN condition',
 		);
@@ -51,7 +51,7 @@ describe('caseHandler errors', () => {
 		const decision = {
 			type: 'case',
 			conditions: null,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => caseHandler.compile(decision, ctx, state)).toThrow(
 			'CASE requires at least one WHEN condition',
 		);
@@ -71,7 +71,7 @@ describe('simpleCaseHandler errors', () => {
 			type: 'simpleCase',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { type: 'eq', value: 1 }, then: 'a' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires a column',
 		);
@@ -84,7 +84,7 @@ describe('simpleCaseHandler errors', () => {
 			column: undefined,
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { type: 'eq', value: 1 }, then: 'a' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires a column',
 		);
@@ -97,7 +97,7 @@ describe('simpleCaseHandler errors', () => {
 			column: '',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { type: 'eq', value: 1 }, then: 'a' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires a column',
 		);
@@ -108,7 +108,7 @@ describe('simpleCaseHandler errors', () => {
 		const decision = {
 			type: 'simpleCase',
 			column: 'status',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires at least one WHEN condition',
 		);
@@ -120,7 +120,7 @@ describe('simpleCaseHandler errors', () => {
 			type: 'simpleCase',
 			column: 'status',
 			conditions: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires at least one WHEN condition',
 		);
@@ -128,7 +128,7 @@ describe('simpleCaseHandler errors', () => {
 
 	it('throws column error before conditions error when both missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'simpleCase' } as Decision;
+		const decision = { type: 'simpleCase' } as CompilerDecision;
 		// Column check comes first (line 113) before conditions check (line 117)
 		expect(() => simpleCaseHandler.compile(decision, ctx, state)).toThrow(
 			'Simple CASE requires a column',

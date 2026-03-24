@@ -20,8 +20,8 @@ import {
 } from '../compiler-utils.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 } from '../handlers/types.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import { buildReturningList } from './mutation-compiler.js';
@@ -44,7 +44,7 @@ export interface ConflictTarget {
 	/** Named constraint */
 	constraint?: string;
 	/** WHERE clause for partial index */
-	where?: Decision[];
+	where?: CompilerDecision[];
 }
 
 /**

@@ -77,8 +77,6 @@ export type {
 	CompilerContext,
 	CompilerDecision,
 	CompilerState,
-	/** @deprecated Use CompilerDecision instead */
-	Decision,
 	ExpressionHandler,
 	IncludeHandler,
 	IncludeResult,

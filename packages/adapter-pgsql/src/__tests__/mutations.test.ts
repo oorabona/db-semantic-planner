@@ -8,7 +8,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 } from '../handlers/types.js';
 import { registerAllWhereHandlers } from '../handlers/where/index.js';
 import {
@@ -206,7 +206,7 @@ describe('Mutation Compiler', () => {
 						column: 'id',
 						value: 123,
 						table: 'posts',
-					} as Decision,
+					} as CompilerDecision,
 				],
 			};
 
@@ -311,7 +311,7 @@ describe('Mutation Compiler', () => {
 						column: 'id',
 						value: 456,
 						table: 'posts',
-					} as Decision,
+					} as CompilerDecision,
 				],
 			};
 
@@ -333,13 +333,13 @@ describe('Mutation Compiler', () => {
 						column: 'published',
 						value: false,
 						table: 'posts',
-					} as Decision,
+					} as CompilerDecision,
 					{
 						type: '=',
 						column: 'archived',
 						value: true,
 						table: 'posts',
-					} as Decision,
+					} as CompilerDecision,
 				],
 			};
 
@@ -373,7 +373,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('users');
 			const state = createState();
 
-			const decision: Decision = {
+			const decision: CompilerDecision = {
 				type: 'insert',
 				table: 'users',
 				columns: ['name', 'email'],
@@ -389,7 +389,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('users');
 			const state = createState();
 
-			const decision: Decision = {
+			const decision: CompilerDecision = {
 				type: 'update',
 				table: 'users',
 				set: [{ column: 'name', value: 'Updated' }],
@@ -405,7 +405,7 @@ describe('Mutation Compiler', () => {
 			const ctx = createContext('posts');
 			const state = createState();
 
-			const decision: Decision = {
+			const decision: CompilerDecision = {
 				type: 'delete',
 				table: 'posts',
 				conditions: [{ type: '=', column: 'id', value: 999, table: 'posts' }],
@@ -675,7 +675,7 @@ describe('DELETE with notExists / exists WHERE (DELETE-NOT-EXISTS)', () => {
 		};
 		const config: DeleteConfig = {
 			table: 'embeddings',
-			where: [{ kind: 'notExists', relation: 'symbol' } as unknown as Decision],
+			where: [{ kind: 'notExists', relation: 'symbol' } as unknown as CompilerDecision],
 		};
 		const result = compileDelete(config, ctx, state);
 		const stmt = (result as any).DeleteStmt;

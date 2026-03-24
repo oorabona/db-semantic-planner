@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	prefixedRelationColumnHandler,
@@ -36,7 +36,7 @@ describe('relationStarHandler errors', () => {
 
 	it('throws when relation is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'relationStar' } as Decision;
+		const decision = { type: 'relationStar' } as CompilerDecision;
 		expect(() => relationStarHandler.compile(decision, ctx, state)).toThrow(
 			'Relation star handler requires relation name',
 		);
@@ -52,7 +52,7 @@ describe('relationColumnHandler errors', () => {
 
 	it('throws when relation is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'relationColumn', column: 'name' } as Decision;
+		const decision = { type: 'relationColumn', column: 'name' } as CompilerDecision;
 		expect(() => relationColumnHandler.compile(decision, ctx, state)).toThrow(
 			'Relation column handler requires relation name',
 		);
@@ -63,7 +63,7 @@ describe('relationColumnHandler errors', () => {
 		const decision = {
 			type: 'relationColumn',
 			relation: 'posts',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => relationColumnHandler.compile(decision, ctx, state)).toThrow(
 			'Relation column handler requires column name',
 		);
@@ -82,7 +82,7 @@ describe('relationColumnsHandler errors', () => {
 		const decision = {
 			type: 'relationColumns',
 			columns: ['id', 'name'],
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => relationColumnsHandler.compile(decision, ctx, state)).toThrow(
 			'Relation columns handler requires relation name',
 		);
@@ -93,7 +93,7 @@ describe('relationColumnsHandler errors', () => {
 		const decision = {
 			type: 'relationColumns',
 			relation: 'posts',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => relationColumnsHandler.compile(decision, ctx, state)).toThrow(
 			'Relation columns handler requires columns array',
 		);
@@ -105,7 +105,7 @@ describe('relationColumnsHandler errors', () => {
 			type: 'relationColumns',
 			relation: 'posts',
 			columns: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => relationColumnsHandler.compile(decision, ctx, state)).toThrow(
 			'Relation columns handler requires columns array',
 		);
@@ -125,7 +125,7 @@ describe('relationAliasHandler errors', () => {
 			type: 'relationAlias',
 			column: 'name',
 			alias: 'author_name',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => relationAliasHandler.compile(decision, ctx, state)).toThrow(
 			'Relation alias handler requires relation name',
 		);
@@ -137,7 +137,7 @@ describe('relationAliasHandler errors', () => {
 			type: 'relationAlias',
 			relation: 'posts',
 			alias: 'post_title',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => relationAliasHandler.compile(decision, ctx, state)).toThrow(
 			'Relation alias handler requires column name',
 		);
@@ -156,7 +156,7 @@ describe('prefixedRelationColumnHandler errors', () => {
 		const decision = {
 			type: 'prefixedRelationColumn',
 			column: 'title',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() =>
 			prefixedRelationColumnHandler.compile(decision, ctx, state),
 		).toThrow('Prefixed relation column handler requires relation name');
@@ -167,7 +167,7 @@ describe('prefixedRelationColumnHandler errors', () => {
 		const decision = {
 			type: 'prefixedRelationColumn',
 			relation: 'posts',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() =>
 			prefixedRelationColumnHandler.compile(decision, ctx, state),
 		).toThrow('Prefixed relation column handler requires column name');

@@ -171,9 +171,6 @@ export interface CompilerDecision {
 	readonly escape?: string;
 }
 
-/** @deprecated Use CompilerDecision instead. */
-export type Decision = CompilerDecision;
-
 
 // ============================================================================
 // Handler Interfaces
