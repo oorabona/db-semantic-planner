@@ -2,6 +2,8 @@
  * Tests for intentToDecisions converter
  *
  * E05 regression: Verify WhereSubqueryIntent is converted correctly.
+ * Note: WHERE intents are now emitted as whereRaw decisions — the raw WhereIntent
+ * is stored in expressionIntent and compiled directly by the PlanCompiler.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -9,7 +11,7 @@ import { intentToDecisions } from '../intent-to-decisions.js';
 
 describe('intentToDecisions', () => {
 	describe('E05 Regression: WhereSubqueryIntent', () => {
-		it('converts scalar subquery comparison with aggregate', () => {
+		it('emits whereRaw decision for scalar subquery comparison', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'products',
@@ -31,20 +33,17 @@ describe('intentToDecisions', () => {
 
 			const decisions = intentToDecisions(intent, 'products');
 
-			// Should have select decisions + where decision
-			const whereDecision = decisions.find(
-				(d) => d.type === 'where' && d.operator === 'scalarSubquery',
-			);
-
+			// WHERE is now emitted as whereRaw — expressionIntent holds the original WhereIntent
+			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
 			expect(whereDecision).toBeDefined();
-			expect(whereDecision?.column).toBe('price');
-			expect(whereDecision?.targetTable).toBe('products');
-			expect(whereDecision?.selectColumn).toBe('price');
-			expect(whereDecision?.aggregate).toBe('avg');
-			expect(whereDecision?.subqueryOperator).toBe('>');
+			expect(whereDecision?.expressionIntent).toMatchObject({
+				kind: 'subquery',
+				field: 'price',
+				operator: 'gt',
+			});
 		});
 
-		it('converts scalar subquery with inner WHERE condition', () => {
+		it('emits whereRaw decision for scalar subquery with inner WHERE condition', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'users',
@@ -68,30 +67,26 @@ describe('intentToDecisions', () => {
 
 			const decisions = intentToDecisions(intent, 'users');
 
-			const whereDecision = decisions.find(
-				(d) => d.type === 'where' && d.operator === 'scalarSubquery',
-			);
-
+			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
 			expect(whereDecision).toBeDefined();
-			expect(whereDecision?.column).toBe('id');
-			expect(whereDecision?.targetTable).toBe('orders');
-			expect(whereDecision?.selectColumn).toBe('user_id');
-			expect(whereDecision?.subqueryOperator).toBe('=');
-			expect(whereDecision?.conditions).toHaveLength(1);
-			expect(whereDecision?.conditions?.[0]?.column).toBe('status');
+			expect(whereDecision?.expressionIntent).toMatchObject({
+				kind: 'subquery',
+				field: 'id',
+				operator: 'eq',
+			});
 		});
 
-		it('converts all comparison operators correctly', () => {
+		it('emits whereRaw for all comparison operators', () => {
 			const operators = [
-				{ op: 'eq', sql: '=' },
-				{ op: 'neq', sql: '!=' },
-				{ op: 'gt', sql: '>' },
-				{ op: 'gte', sql: '>=' },
-				{ op: 'lt', sql: '<' },
-				{ op: 'lte', sql: '<=' },
+				{ op: 'eq' },
+				{ op: 'neq' },
+				{ op: 'gt' },
+				{ op: 'gte' },
+				{ op: 'lt' },
+				{ op: 'lte' },
 			] as const;
 
-			for (const { op, sql } of operators) {
+			for (const { op } of operators) {
 				const intent = {
 					type: 'select' as const,
 					from: 'products',
@@ -111,31 +106,22 @@ describe('intentToDecisions', () => {
 				};
 
 				const decisions = intentToDecisions(intent, 'products');
-				const whereDecision = decisions.find(
-					(d) => d.operator === 'scalarSubquery',
-				);
-
-				expect(whereDecision?.subqueryOperator).toBe(sql);
+				const whereDecision = decisions.find((d) => d.type === 'whereRaw');
+				expect(whereDecision).toBeDefined();
+				expect((whereDecision?.expressionIntent as { operator: string })?.operator).toBe(op);
 			}
 		});
 
-		it('returns null for missing subquery', () => {
+		it('emits no whereRaw for intent with no where field', () => {
 			const intent = {
 				from: 'products',
-				where: {
-					kind: 'subquery' as const,
-					field: 'price',
-					operator: 'eq' as const,
-					// subquery missing
-				},
+				// no where field
 			};
 
 			const decisions = intentToDecisions(intent as any, 'products');
 
-			// Should not produce a where decision for invalid intent
-			const whereDecision = decisions.find(
-				(d) => d.operator === 'scalarSubquery',
-			);
+			// No where → no whereRaw
+			const whereDecision = decisions.find((d) => d.type === 'whereRaw');
 			expect(whereDecision).toBeUndefined();
 		});
 	});

@@ -210,112 +210,6 @@ export function valueToNode(value: unknown): Node {
  * Handles comparison, and, or, not.
  * @deprecated Use compileWhereIntent instead
  */
-export function convertWhereToDecisions(
-	where: unknown,
-	table: string,
-): PlanDecision[] {
-	if (!where || typeof where !== 'object') return [];
-	const w = where as Record<string, unknown>;
-
-	switch (w.kind) {
-		case 'comparison': {
-			// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef { kind: 'fieldRef', scope: 'outer', column }
-			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
-			const rawValue = w.value;
-			const resolvedValue = isSubqueryRef(rawValue)
-				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: (rawValue as { column: string }).column }
-				: rawValue;
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: w.operator as string,
-					value: resolvedValue,
-					table,
-				},
-			];
-		}
-		case 'like':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'like',
-					value: w.pattern,
-					table,
-				},
-			];
-		case 'in':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'in',
-					value: w.values ?? w.subquery,
-					table,
-				},
-			];
-		case 'range':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: (w.operator as string) ?? 'between',
-					value: w.value,
-					table,
-				},
-			];
-		case 'null':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: w.operator as string,
-					value: null,
-					table,
-				},
-			];
-		case 'and': {
-			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
-			);
-			if (subDecisions.length === 0) return [];
-			if (subDecisions.length === 1) return subDecisions;
-			return [{ type: 'whereAnd', conditions: subDecisions }];
-		}
-		case 'or': {
-			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
-			);
-			if (subDecisions.length === 0) return [];
-			if (subDecisions.length === 1) return subDecisions;
-			return [{ type: 'whereOr', conditions: subDecisions }];
-		}
-		case 'not': {
-			const subDecisions = convertWhereToDecisions(w.condition, table);
-			if (subDecisions.length === 0) return [];
-			return [{ type: 'whereNot', conditions: subDecisions }];
-		}
-		// Custom expression: { kind: 'expression', expr, operator, value }
-		// Produced by ExpressionRef.eq(), .neq(), .gt(), etc.
-		// e.g. op('~', ref('path'), param(regex)).eq(true)
-		case 'expression':
-			return [
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: w.expr,
-					value: w.value,
-					subqueryOperator: w.operator as string,
-					table,
-				},
-			];
-		default:
-			return [];
-	}
-}
 
 // ============================================================================
 // Decision Extractors
@@ -767,7 +661,7 @@ function toJoinIncludeDecision(
 	// table's alias = relationName) to actually filter the root rows.
 	let conditions: PlanDecision[] | undefined;
 	if (includeIntent?.where) {
-		const converted = convertWhereToDecisions(
+		const converted = buildNestedConditions(
 			includeIntent.where,
 			relationName as string,
 		);

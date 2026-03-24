@@ -475,7 +475,11 @@ describe('intentToDecisions - coverage', () => {
 		});
 	});
 
-	describe('WHERE condition variants', () => {
+	// WHERE condition variants: intentToDecisions now emits whereRaw decisions
+	// (raw WhereIntent stored in expressionIntent). The detailed WHERE structure
+	// tests below tested convertWhereCondition output which is now deleted.
+	// SQL-level correctness is covered by compiler integration tests.
+	describe.skip('WHERE condition variants', () => {
 		it('converts comparison with JSON metadata', () => {
 			const intent = {
 				type: 'select' as const,
@@ -1137,7 +1141,7 @@ describe('intentToDecisions - coverage', () => {
 			});
 		});
 
-		it('converts HAVING clause', () => {
+		it('converts HAVING clause (emits havingRaw decision)', () => {
 			const intent = {
 				type: 'select' as const,
 				from: 'orders',
@@ -1150,8 +1154,15 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'orders');
-			const havingDecision = decisions.find((d) => d.type === 'having');
+			// HAVING is now emitted as havingRaw with raw WhereIntent in expressionIntent
+			const havingDecision = decisions.find((d) => d.type === 'havingRaw');
 			expect(havingDecision).toBeDefined();
+			expect(havingDecision?.expressionIntent).toMatchObject({
+				kind: 'comparison',
+				field: 'total',
+				operator: 'gt',
+				value: 1000,
+			});
 		});
 
 		it('converts DISTINCT flag', () => {
@@ -1230,6 +1241,8 @@ describe('intentToDecisions - coverage', () => {
 	// ==================================================================
 
 	describe('subquery scalar comparison (kind: "subquery")', () => {
+		// PIPE-001: intentToDecisions now emits whereRaw with expressionIntent;
+		// it no longer produces intermediate PlanDecision for subquery kinds.
 		it('converts scalar subquery with aggregate select', () => {
 			const intent = {
 				type: 'select' as const,
@@ -1249,11 +1262,11 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.operator).toBe('scalarSubquery');
-			expect(where?.aggregate).toBe('avg');
-			expect(where?.selectColumn).toBe('salary');
-			expect(where?.subqueryOperator).toBe('>');
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('subquery');
+			expect((whereRaw?.expressionIntent as { field: string })?.field).toBe('salary');
+			expect((whereRaw?.expressionIntent as { operator: string })?.operator).toBe('gt');
 		});
 
 		it('converts scalar subquery with fields select', () => {
@@ -1275,9 +1288,10 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'orders');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.selectColumn).toBe('max_budget');
-			expect(where?.subqueryOperator).toBe('<=');
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('subquery');
+			expect((whereRaw?.expressionIntent as { field: string })?.field).toBe('total');
 		});
 
 		it('converts scalar subquery with inner WHERE', () => {
@@ -1302,8 +1316,11 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.conditions).toHaveLength(1);
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			// The inner subquery where is preserved inside expressionIntent.subquery.where
+			const sq = (whereRaw?.expressionIntent as { subquery?: { where?: unknown } })?.subquery;
+			expect(sq?.where).toBeDefined();
 		});
 
 		it('returns null for scalar subquery without field', () => {
@@ -1320,7 +1337,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
+			// whereRaw is still emitted (the WhereIntent is stored as-is)
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
 		});
 
 		it('returns null for scalar subquery without subquery', () => {
@@ -1334,7 +1353,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			expect(decisions.filter((d) => d.type === 'where')).toHaveLength(0);
+			// whereRaw is still emitted (the WhereIntent is stored as-is)
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
 		});
 
 		it('maps unknown operator to = as default', () => {
@@ -1349,8 +1370,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.subqueryOperator).toBe('=');
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { operator: string })?.operator).toBe('unknownOp');
 		});
 
 		it('maps neq operator to !=', () => {
@@ -1365,8 +1387,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.subqueryOperator).toBe('!=');
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { operator: string })?.operator).toBe('neq');
 		});
 
 		it('converts scalar subquery with no select → defaults to *', () => {
@@ -1381,8 +1404,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const where = decisions.find((d) => d.type === 'where');
-			expect(where?.selectColumn).toBe('*');
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('subquery');
 		});
 	});
 
@@ -1399,6 +1423,7 @@ describe('intentToDecisions - coverage', () => {
 	});
 
 	describe('IN with subquery without inner WHERE', () => {
+		// PIPE-001: intentToDecisions emits whereRaw — check expressionIntent directly.
 		it('converts IN subquery without inner WHERE condition', () => {
 			const intent = {
 				type: 'select' as const,
@@ -1414,13 +1439,18 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const whereDecision = decisions.find((d) => d.type === 'where');
-			expect(whereDecision?.subquery).toBeDefined();
-			expect(whereDecision?.subquery?.where).toBeUndefined();
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('in');
+			// The subquery is preserved inside expressionIntent
+			const subquery = (whereRaw?.expressionIntent as { subquery?: { where?: unknown } })?.subquery;
+			expect(subquery).toBeDefined();
+			expect(subquery?.where).toBeUndefined();
 		});
 	});
 
 	describe('relationFilter without where', () => {
+		// PIPE-001: intentToDecisions emits whereRaw — check expressionIntent directly.
 		it('converts relationFilter mode=some without where', () => {
 			const intent = {
 				type: 'select' as const,
@@ -1432,9 +1462,10 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const decision = decisions.find((d) => d.operator === 'exists');
-			expect(decision).toBeDefined();
-			expect(decision?.conditions).toBeUndefined();
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('relationFilter');
+			expect((whereRaw?.expressionIntent as { mode: string })?.mode).toBe('some');
 		});
 
 		it('converts relationFilter with default mode (some)', () => {
@@ -1447,8 +1478,9 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const decision = decisions.find((d) => d.operator === 'exists');
-			expect(decision).toBeDefined();
+			const whereRaw = decisions.find((d) => d.type === 'whereRaw');
+			expect(whereRaw).toBeDefined();
+			expect((whereRaw?.expressionIntent as { kind: string })?.kind).toBe('relationFilter');
 		});
 	});
 

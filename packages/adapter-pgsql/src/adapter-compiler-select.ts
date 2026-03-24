@@ -439,6 +439,11 @@ export function compileSelect<T = unknown>(
 			'whereOr',
 			'whereNot',
 			'having',
+			// PIPE-001: whereRaw/havingRaw emitted by intentToDecisions — filter before
+			// compilePlan since plan.intent.where/having are compiled separately below
+			// via compileWhereIntent. Without this, WHERE is generated twice.
+			'whereRaw',
+			'havingRaw',
 		]);
 		const nonWhereDecisions = [
 			...deduplicatedDecisions.filter((d) => {

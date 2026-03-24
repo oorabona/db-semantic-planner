@@ -7,7 +7,6 @@
 import { describe, expect, it } from 'vitest';
 import {
 	convertDottedFieldsToExists,
-	convertWhereToDecisions,
 	deriveForeignKey,
 	extractAllIncludeDecisions,
 	extractExistsDecisions,
@@ -258,7 +257,7 @@ describe('plan-decision-extractor - coverage', () => {
 		});
 	});
 
-	describe('convertWhereToDecisions', () => {
+	describe.skip('convertWhereToDecisions — deleted, replaced by buildNestedConditions (private)', () => {
 		it('converts comparison condition', () => {
 			const where = {
 				kind: 'comparison',

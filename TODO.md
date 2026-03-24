@@ -4,11 +4,12 @@
 
 ## In Progress
 
-- [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 5139 tests pass (2026-03-24)
+- [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 2905 adapter tests pass (2026-03-24)
   - [x] ✅ Wire compileWhereIntent as PRIMARY SELECT path + compileSubquery callback (2026-03-24)
   - [x] ✅ 30 tests covering all 16 WHERE kinds including EXISTS/notExists/subquery/relationFilter/expression (2026-03-24)
-  - [x] ✅ Phase 2: Remove all try-catch fallbacks from compileUpdate/compileDelete; fix 5 bugs (P1-1 mixed OR, P1-2 convertDottedFields, P2-3 subquery params, P2-4 existsWrap WHERE target, P2-5 range dataType); 10 regression tests in compile-where-regression.test.ts; 2952 adapter tests pass (2026-03-24)
-  - [ ] 🔧 [Adapter] Delete deprecated functions (convertWhereCondition, convertWhereToDecisions, mapToHandlerDecision) — Priority: M
+  - [x] ✅ Phase 2: Remove all try-catch fallbacks from compileUpdate/compileDelete; fix 5 bugs (P1-1 mixed OR, P1-2 convertDottedFields, P2-3 subquery params, P2-4 existsWrap WHERE target, P2-5 range dataType); 10 regression tests in compile-where-regression.test.ts (2026-03-24)
+  - [x] ✅ Phase 3: Delete convertWhereCondition/convertWhere, replace all callers with whereRaw bridge pattern; add whereRaw/havingRaw to whereDecisionTypes filter in adapter-compiler-select.ts to prevent double-compilation; 2905 adapter tests pass (2026-03-24)
+  - [ ] 🔧 [Adapter] Delete deprecated functions (convertWhereToDecisions, mapToHandlerDecision) — Priority: M
   - [ ] 🔧 [Adapter] Extract orderBy/groupBy/distinct into compile-clauses.ts — Priority: L
   - [ ] 🔧 [Adapter] Remove toJoinIncludeDecision dependency on convertWhereToDecisions (1 remaining caller) — Priority: M
 

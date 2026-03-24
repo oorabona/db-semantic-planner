@@ -30,7 +30,6 @@ import {
 	type CompilerContext,
 	createCompilerState,
 	type CompilerState,
-	type CompilerDecision,
 } from './handlers/index.js';
 import {
 	type BatchUpdateConfig,
@@ -51,18 +50,10 @@ import {
 	type UpsertFromConfig,
 } from './mutations/index.js';
 
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
-
-/**
- * Bridge a WhereIntent into a Decision for mutation config.
- * The WHERE dispatcher's `normalizeToDecision` handles the actual
- * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
- */
-function whereIntentAsDecision(where: WhereIntent): CompilerDecision {
-	return where as never as CompilerDecision;
-}
 
 /**
  * Resolve relation metadata for an exists/notExists WHERE condition.
@@ -245,16 +236,32 @@ export function compileInsertFrom(
 	};
 	const state = createCompilerState();
 
+	// Build config WITHOUT where so the mutation compiler assigns no WHERE params.
+	// We compile WHERE separately via compileWhereIntent and inject into the AST.
 	const config: InsertFromConfig = {
 		targetTable: intent.table,
 		sourceTable: intent.source,
 		...(intent.columns && { columns: [...intent.columns] }),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
 	const ast = compileInsertFromMutation(config, ctx, state);
+
+	if (intent.where) {
+		const whereCtx: WhereCompilerCtx = {
+			rootTable: intent.source,
+			aliases: new Map(),
+			paramState: state,
+			naming: deps.naming,
+			...(schemaName !== undefined && { schemaName }),
+			compileSubquery: (sqIntent, offset) =>
+				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
+		};
+		const whereNode = compileWhereIntent(intent.where, whereCtx);
+		injectSelectWhereClause(ast, whereNode);
+	}
+
 	const sql = deparseQuoted(ast);
 
 	return {
@@ -279,6 +286,18 @@ function injectWhereClause(
 	(ast as { [K in typeof stmtKey]: Record<string, unknown> })[stmtKey][
 		'whereClause'
 	] = whereNode;
+}
+
+/**
+ * Inject a pre-built WHERE Node into the SelectStmt embedded inside an InsertStmt.
+ * Used by compileInsertFrom / compileUpsertFrom to apply WHERE after building the AST.
+ */
+function injectSelectWhereClause(ast: Node, whereNode: Node): void {
+	const insertNode = (ast as { InsertStmt: Record<string, unknown> }).InsertStmt;
+	const selectQuery = insertNode?.selectStmt as Record<string, unknown> | undefined;
+	if (selectQuery && 'SelectStmt' in selectQuery) {
+		(selectQuery.SelectStmt as Record<string, unknown>).whereClause = whereNode;
+	}
 }
 
 // ============================================================================
@@ -674,17 +693,33 @@ export function compileUpsertFrom(
 		}
 	}
 
+	// Build config WITHOUT where so the mutation compiler assigns no WHERE params.
+	// We compile WHERE separately via compileWhereIntent and inject into the AST.
 	const config: UpsertFromConfig = {
 		targetTable: intent.table,
 		sourceTable: intent.source,
 		conflictColumns: [...intent.conflictColumns],
 		...(columns && { columns }),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
 	const ast = compileUpsertFromMutation(config, ctx, state);
+
+	if (intent.where) {
+		const whereCtx: WhereCompilerCtx = {
+			rootTable: intent.source,
+			aliases: new Map(),
+			paramState: state,
+			naming: deps.naming,
+			...(schemaName !== undefined && { schemaName }),
+			compileSubquery: (sqIntent, offset) =>
+				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
+		};
+		const whereNode = compileWhereIntent(intent.where, whereCtx);
+		injectSelectWhereClause(ast, whereNode);
+	}
+
 	const sql = deparseQuoted(ast);
 
 	return {
