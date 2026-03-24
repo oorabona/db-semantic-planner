@@ -37,6 +37,31 @@ import {
  * Used only in the legacy/test path where mock plans carry adapter-format decisions
  * inside a core PlanReport. At runtime the data is already in adapter format.
  */
+/**
+ * Recursively strip exists/notExists decisions from a decision tree.
+ * Handles top-level decisions and those nested inside whereAnd/whereOr/whereNot.
+ * Returns null when the decision itself should be removed.
+ * Containers (whereAnd/whereOr/whereNot) that become empty after stripping are also removed.
+ */
+function stripExistsFromDecision(
+	d: PlanDecision,
+): PlanDecision | null {
+	if (d.type === 'where' && (d.operator === 'exists' || d.operator === 'notExists')) {
+		return null;
+	}
+	if (
+		(d.type === 'whereAnd' || d.type === 'whereOr' || d.type === 'whereNot') &&
+		d.conditions
+	) {
+		const stripped = (d.conditions as PlanDecision[])
+			.map(stripExistsFromDecision)
+			.filter((c): c is PlanDecision => c !== null);
+		if (stripped.length === 0) return null;
+		return { ...d, conditions: stripped };
+	}
+	return d;
+}
+
 export function bridgeLegacyDecisions(
 	decisions: readonly unknown[],
 ): SimplifiedPlanReport['decisions'] {
@@ -79,15 +104,14 @@ export function compileSelect<T = unknown>(
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(plan.intent, plan.rootTable);
 
-		// Filter out broken EXISTS decisions from intentToDecisions
-		// (they use relation name as targetTable instead of actual table name)
-		decisions = decisions.filter(
-			(d) =>
-				!(
-					d.type === 'where' &&
-					(d.operator === 'exists' || d.operator === 'notExists')
-				),
-		);
+		// Strip exists/notExists decisions from intentToDecisions — they use the
+		// relation name as targetTable (unresolved). extractExistsDecisions (below)
+		// provides the correct decisions with the actual table name from the planner.
+		// Must recurse into whereAnd/whereOr/whereNot to catch nested occurrences
+		// (e.g. notExists inside and() produces a whereAnd containing a notExists).
+		decisions = decisions
+			.map(stripExistsFromDecision)
+			.filter((d): d is PlanDecision => d !== null);
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
