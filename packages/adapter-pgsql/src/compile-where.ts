@@ -107,6 +107,7 @@ export function buildSubqueryFromIntent(
 	intent: QueryIntent,
 	paramOffset: number,
 	naming: NamingPlugin = identityNaming,
+	schemaName?: string,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	const targetTable = intent.from;
 	const innerAlias = `${targetTable}_sq`;
@@ -151,7 +152,9 @@ export function buildSubqueryFromIntent(
 
 	const stmt: SelectStmt = {
 		targetList,
-		fromClause: [rangeVar(targetTable, innerAlias, undefined, naming)],
+		// Bug 3 fix: propagate schema name from outer context so schema-scoped
+		// queries generate "schema"."table" AS alias instead of bare "table" AS alias.
+		fromClause: [rangeVar(targetTable, innerAlias, schemaName, naming)],
 	};
 
 	let paramCount = 0;
@@ -163,7 +166,9 @@ export function buildSubqueryFromIntent(
 		// Seed inner param index from outer offset so params are contiguous ($offset+1, $offset+2, ...)
 		innerState.paramIndex = paramOffset;
 		const innerCtx: WhereCompilerCtx = {
-			rootTable: targetTable,
+			// Bug 2 fix: use the alias name as rootTable so WHERE handlers emit
+			// "posts_sq"."col" = $N instead of "posts"."col" = $N (table is aliased).
+			rootTable: innerAlias,
 			aliases: new Map(),
 			paramState: innerState,
 			naming,
@@ -396,7 +401,16 @@ export function compileWhereIntent(
 		const relation = Array.isArray(rf.relation)
 			? (rf.relation[0] as string)
 			: (rf.relation as string);
-		const existsKind = rf.mode === 'none' ? 'notExists' : 'exists';
+		// Bug 4 fix: mode:'every' requires NOT EXISTS (... WHERE NOT condition)
+		// i.e. "no rows fail the condition" = "all rows satisfy the condition".
+		// mode:'some'  → EXISTS        (at least one matches)
+		// mode:'none'  → NOT EXISTS    (none match)
+		// mode:'every' → NOT EXISTS WHERE NOT condition  (all match)
+		const existsKind = rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
+		const innerWhere: WhereIntent =
+			rf.mode === 'every'
+				? ({ kind: 'not', condition: rf.where } as WhereIntent)
+				: rf.where;
 		// Resolve the relation alias to its actual target table via ModelIR.
 		// `relation` is a relation name (e.g. 'author'), not a table name (e.g. 'users').
 		// The exists handler falls back to `decision.relation` when `targetTable` is absent,
@@ -404,7 +418,7 @@ export function compileWhereIntent(
 		const resolvedRelation = ctx.model?.getRelation(`${ctx.rootTable}.${relation}`);
 		const targetTable = resolvedRelation?.target ?? relation;
 		return compileWhereIntent(
-			{ kind: existsKind, relation, targetTable, where: rf.where } as unknown as WhereIntent,
+			{ kind: existsKind, relation, targetTable, where: innerWhere } as unknown as WhereIntent,
 			ctx,
 		);
 	}

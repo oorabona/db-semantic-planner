@@ -161,7 +161,7 @@ function compileFilterCondition(
 			...(ctx.schema !== undefined && { schemaName: ctx.schema }),
 			...(ctx.model !== undefined && { model: ctx.model }),
 			compileSubquery: (sqIntent, offset) =>
-				buildSubqueryFromIntent(sqIntent, offset, ctx.naming),
+				buildSubqueryFromIntent(sqIntent, offset, ctx.naming, ctx.schema),
 		};
 		return compileWhereIntent(
 			filterCondition.expressionIntent as import('@dbsp/types').WhereIntent,
@@ -438,7 +438,7 @@ export class PlanCompiler {
 				...(this.schema !== undefined && { schemaName: this.schema }),
 				...(this.model !== undefined && { model: this.model }),
 				compileSubquery: (sqIntent, offset) =>
-					buildSubqueryFromIntent(sqIntent, offset, this.naming),
+					buildSubqueryFromIntent(sqIntent, offset, this.naming, this.schema),
 			};
 			return compileWhereIntent(
 				decision.expressionIntent as import('@dbsp/types').WhereIntent,

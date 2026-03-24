@@ -217,3 +217,131 @@ describe("P2-5: range operators compile correctly", () => {
 		expect(params).toHaveLength(1);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Bug 1: stripExistsFromIntent — dotted comparisons compiled twice
+// ---------------------------------------------------------------------------
+
+describe("Bug 1: stripExistsFromIntent strips dotted comparisons", () => {
+	it("plain field compiles correctly (control)", () => {
+		const { sql, params } = compileIntent({
+			kind: "comparison",
+			field: "status",
+			operator: "eq",
+			value: "active",
+		});
+		expect(sql).toBe("users.status = $1");
+		expect(params).toEqual(["active"]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Bug 2: Scalar subquery alias mismatch — rootTable must be the alias
+// ---------------------------------------------------------------------------
+
+describe("Bug 2: buildSubqueryFromIntent rootTable uses alias", () => {
+	it("inner WHERE uses the alias not the raw table name", () => {
+		const result = buildSubqueryFromIntent(
+			{
+				from: "posts",
+				select: { type: "fields", fields: ["author_id"] } as never,
+				where: {
+					kind: "comparison",
+					field: "status",
+					operator: "eq",
+					value: "published",
+				},
+			} as never,
+			0,
+		);
+		// Deparse the SelectStmt and check the column reference uses the alias
+		const sql = deparseSync([result.sql]);
+		// The WHERE clause must reference "posts_sq"."status", not bare "posts"."status"
+		expect(sql).toContain("posts_sq");
+		expect(sql).not.toMatch(/"posts"\."status"/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Bug 3: Schema qualification in scalar subqueries
+// ---------------------------------------------------------------------------
+
+describe("Bug 3: buildSubqueryFromIntent schema qualification", () => {
+	it("without schemaName — no schema prefix in FROM", () => {
+		const result = buildSubqueryFromIntent(
+			{ from: "posts", select: { type: "fields", fields: ["id"] } as never } as never,
+			0,
+		);
+		const sql = deparseSync([result.sql]);
+		expect(sql).not.toContain("myschema");
+	});
+
+	it("with schemaName — FROM clause is schema-qualified", () => {
+		const result = buildSubqueryFromIntent(
+			{ from: "posts", select: { type: "fields", fields: ["id"] } as never } as never,
+			0,
+			undefined,
+			"myschema",
+		);
+		const sql = deparseSync([result.sql]);
+		// rangeVar with schema emits "myschema"."posts" AS posts_sq
+		expect(sql).toContain("myschema");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Bug 4: relationFilter mode:'every' — must use NOT EXISTS WHERE NOT condition
+// ---------------------------------------------------------------------------
+
+describe("Bug 4: relationFilter mode:every uses NOT EXISTS WHERE NOT", () => {
+	it("mode:some compiles to EXISTS (not NOT EXISTS)", () => {
+		const result = compileIntent(
+			{
+				kind: "relationFilter",
+				relation: "posts",
+				mode: "some",
+				where: { kind: "comparison", field: "published", operator: "eq", value: true },
+			} as unknown as WhereIntent,
+		);
+		expect(result.sql.toUpperCase()).toContain("EXISTS");
+		expect(result.sql.toUpperCase()).not.toContain("NOT EXISTS");
+	});
+
+	it("mode:none compiles to NOT + EXISTS (anti-join)", () => {
+		const result = compileIntent(
+			{
+				kind: "relationFilter",
+				relation: "posts",
+				mode: "none",
+				where: { kind: "comparison", field: "published", operator: "eq", value: true },
+			} as unknown as WhereIntent,
+		);
+		// Deparser emits NOT (EXISTS (...)) — both tokens must be present
+		const upper = result.sql.toUpperCase();
+		expect(upper).toContain("NOT");
+		expect(upper).toContain("EXISTS");
+		// mode:none has exactly 1 NOT (only the outer negation)
+		const notCount = (result.sql.match(/\bNOT\b/gi) ?? []).length;
+		expect(notCount).toBe(1);
+	});
+
+	it("mode:every compiles to NOT EXISTS with negated inner condition (double NOT)", () => {
+		const result = compileIntent(
+			{
+				kind: "relationFilter",
+				relation: "posts",
+				mode: "every",
+				where: { kind: "comparison", field: "published", operator: "eq", value: true },
+			} as unknown as WhereIntent,
+		);
+		// Universal quantification: NOT (EXISTS (... WHERE NOT (condition)))
+		// Both NOT tokens must appear — outer negation + inner condition negation
+		const upper = result.sql.toUpperCase();
+		expect(upper).toContain("NOT");
+		expect(upper).toContain("EXISTS");
+		// mode:every has 2 NOT: outer NOT + inner NOT (condition)
+		// mode:none has only 1 NOT: outer NOT
+		const notCount = (result.sql.match(/\bNOT\b/gi) ?? []).length;
+		expect(notCount).toBeGreaterThanOrEqual(2);
+	});
+});

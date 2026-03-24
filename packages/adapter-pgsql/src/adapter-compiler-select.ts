@@ -518,8 +518,9 @@ export function compileSelect<T = unknown>(
 		naming: deps.naming,
 		...(schemaName && { schemaName }),
 		...(resolvedModelForCompiler != null && { model: resolvedModelForCompiler }),
-		compileSubquery: (intent, offset) =>
-			buildSubqueryFromIntent(intent, offset, deps.naming),
+		// Bug 3 fix: pass schemaName through so scalar subqueries are schema-qualified
+	compileSubquery: (intent, offset) =>
+			buildSubqueryFromIntent(intent, offset, deps.naming, schemaName),
 	});
 
 	// Resolve the SelectStmt node for WHERE/HAVING injection.
@@ -555,6 +556,17 @@ export function compileSelect<T = unknown>(
 	): import('@dbsp/types').WhereIntent | null {
 		const k = intent.kind;
 		if (k === 'exists' || k === 'notExists' || k === 'relationFilter') {
+			return null;
+		}
+		// Bug 1 fix: dotted comparisons (e.g. eq('author.name', 'X')) are converted
+		// to EXISTS decisions by convertDottedFieldsToExists → compilePlan handles them.
+		// compileWhereIntent must NOT also emit them or the WHERE is duplicated/broken.
+		if (
+			(k === 'comparison' || k === 'like' || k === 'null' || k === 'any' || k === 'in') &&
+			'field' in intent &&
+			typeof (intent as { field?: unknown }).field === 'string' &&
+			(intent as { field: string }).field.includes('.')
+		) {
 			return null;
 		}
 		if (k === 'and') {
