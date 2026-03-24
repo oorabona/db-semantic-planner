@@ -12,9 +12,17 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
+
+/**
+ * Default window frame options for bare OVER() clause.
+ * Value: FRAMEOPTION_NONDEFAULT | FRAMEOPTION_RANGE | FRAMEOPTION_BETWEEN |
+ *        FRAMEOPTION_START_UNBOUNDED_PRECEDING | FRAMEOPTION_END_CURRENT_ROW
+ * See: src/include/nodes/parsenodes.h in PostgreSQL source
+ */
+const WINDOW_FRAME_DEFAULT = 1034;
 
 /**
  * Build a SortBy node for ORDER BY clause
@@ -39,14 +47,17 @@ function buildSortBy(
 /**
  * Build a WindowDef (OVER clause)
  */
-function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
+function buildWindowDef(decision: CompilerDecision, ctx: CompilerContext): WindowDef {
 	const partition = decision.partition;
 	const orderBy = decision.orderBy;
 	const frame = decision.frame;
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 
-	const windowDef: WindowDef = {};
+	// frameOptions: WINDOW_FRAME_DEFAULT is the default implicit frame (NONDEFAULT
+	// bit not set → no frame clause emitted by deparser). Required for the OVER()
+	// clause to be emitted correctly even when there are no PARTITION BY or ORDER BY.
+	const windowDef: WindowDef = { frameOptions: WINDOW_FRAME_DEFAULT };
 
 	// PARTITION BY
 	if (partition && partition.length > 0) {
@@ -62,12 +73,11 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 		);
 	}
 
-	// Frame clause (ROWS/RANGE BETWEEN ... AND ...)
-	// For simplicity, we use a predefined frame or default
+	// Frame clause (ROWS/RANGE BETWEEN ... AND ...): skipped for now,
+	// PostgreSQL uses defaults when frame is not explicitly set.
 	if (frame) {
-		// Parse frame string like "ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW"
-		// This would need more complex parsing - for now, we skip it
-		// and let PostgreSQL use defaults
+		// Future: parse and emit frame clause
+		void frame;
 	}
 
 	return windowDef;
@@ -79,7 +89,7 @@ function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 function buildWindowFunction(
 	funcName: string,
 	args: Node[],
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 ): Node {
 	const windowDef = buildWindowDef(decision, ctx);
@@ -104,7 +114,7 @@ function createNoArgWindowHandler(
 	return {
 		types,
 		compile(
-			decision: Decision,
+			decision: CompilerDecision,
 			ctx: CompilerContext,
 			_state: CompilerState,
 		): Node {
@@ -137,7 +147,7 @@ export const ntileHandler: ExpressionHandler = {
 	types: ['ntile', 'NTILE'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -161,7 +171,7 @@ function createLagLeadHandler(
 	return {
 		types,
 		compile(
-			decision: Decision,
+			decision: CompilerDecision,
 			ctx: CompilerContext,
 			state: CompilerState,
 		): Node {
@@ -211,7 +221,7 @@ function createColumnWindowHandler(
 	return {
 		types,
 		compile(
-			decision: Decision,
+			decision: CompilerDecision,
 			ctx: CompilerContext,
 			_state: CompilerState,
 		): Node {
@@ -249,7 +259,7 @@ export const genericWindowHandler: ExpressionHandler = {
 	types: ['window', 'windowFunc'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

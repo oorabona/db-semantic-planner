@@ -33,8 +33,8 @@ import {
 import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 	InsertStmtNode,
 } from '../handlers/types.js';
 import { createTypeCastParamRef } from '../param-ref.js';
@@ -93,7 +93,7 @@ export interface UpdateConfig {
 	/** Column-value pairs to set */
 	set: { column: string; value: unknown }[];
 	/** WHERE conditions */
-	where?: Decision[];
+	where?: CompilerDecision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	/** Column database types for type-cast emission (e.g. range types) */
@@ -107,7 +107,7 @@ export interface DeleteConfig {
 	/** Table to delete from */
 	table: string;
 	/** WHERE conditions */
-	where?: Decision[];
+	where?: CompilerDecision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 }
@@ -123,7 +123,7 @@ export interface InsertFromConfig {
 	/** Columns to insert (same names in target and source) */
 	columns?: string[];
 	/** WHERE conditions for source query */
-	where?: Decision[];
+	where?: CompilerDecision[];
 	/** LIMIT for source query */
 	limit?: number;
 	/** Columns to return (RETURNING clause) */
@@ -140,7 +140,7 @@ export interface UpsertFromConfig {
 	/** Columns to insert (same names in target and source) */
 	columns?: string[];
 	/** WHERE conditions for source query */
-	where?: Decision[];
+	where?: CompilerDecision[];
 	/** LIMIT for source query */
 	limit?: number;
 	/** Columns to return (RETURNING clause) */
@@ -820,7 +820,7 @@ function valueToNode(
  * Determines mutation type from decision.type and delegates.
  */
 export function compileMutation(
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {

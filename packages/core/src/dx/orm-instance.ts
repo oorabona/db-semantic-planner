@@ -20,9 +20,12 @@ import { CteBuilder } from './cte-builder.js';
 import { createNqlTag, type NqlTag } from './nql.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { DefaultFilters } from './schema.js';
+import { TABLE_META } from './symbols.js';
+import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
 	ListHierarchyOptions,
 	OrmInstance,
+	OrmInstanceInternal,
 	QueryBuilder,
 	RelationHints,
 } from './types.js';
@@ -46,7 +49,8 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	hookStore?: HookStore,
 	onHookError?: HookErrorHandler,
 	inTransaction?: boolean,
-): OrmInstance<DB> {
+	tablesProxy?: object,
+): OrmInstanceInternal<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
 	const nql: NqlTag = createNqlTag(
@@ -56,9 +60,42 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		schemaName,
 	);
 
+	// Helper: build a MutationBuilder options object (shared across mutation methods)
+	const mutationOpts = {
+		model,
+		adapter,
+		schemaName,
+		hookStore,
+		onHookError,
+		inTransaction,
+	} as const;
+
 	return {
 		strictMode,
 		nql,
+		tables: (tablesProxy ?? {}) as OrmInstance<DB>['tables'],
+		from<TTable extends TableRef<any, any, any>>(
+			table: TTable,
+		): QueryBuilder<InferTableRow<TTable>> {
+			const tableName = table[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new QueryBuilderImpl<InferTableRow<TTable>>(
+				model,
+				strictMode,
+				tableName as string,
+				relationHints,
+				adapter,
+				schemaName,
+				dialectCapabilities,
+				globalPlanOptions,
+				defaultFilters,
+				hookStore,
+				onHookError,
+				inTransaction,
+			);
+		},
 		select<K extends keyof DB & string, TResult = DB[K]>(
 			from: K,
 		): QueryBuilder<TResult> {
@@ -77,7 +114,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				inTransaction,
 			);
 		},
-		withSchema(schemaName: string): OrmInstance<DB> {
+		withSchema(schemaName: string): OrmInstanceInternal<DB> {
 			// Validate schema name to prevent SQL injection
 			if (adapter) {
 				adapter.validateIdentifier(schemaName, 'schema');
@@ -97,6 +134,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				hookStore,
 				onHookError,
 				inTransaction,
+				tablesProxy,
 			);
 		},
 
@@ -232,82 +270,69 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		},
 
 		// =====================================================================
+		// Typed Mutation Entry Points (DX-040-SURFACE)
+		// Extract table name from TableRef metadata and delegate to string methods
+		// =====================================================================
+
+		into(tableRef: TableRef<any, any, any>): InsertBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new InsertBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		modify(tableRef: TableRef<any, any, any>): UpdateBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new UpdateBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		removeFrom(tableRef: TableRef<any, any, any>): DeleteBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new DeleteBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		upsertInto(tableRef: TableRef<any, any, any>): UpsertBuilder {
+			const tableName = tableRef[TABLE_META];
+			if (tableName === undefined) {
+				throw new Error('Invalid TableRef: missing TABLE_META symbol');
+			}
+			return new UpsertBuilder({ table: tableName as string, ...mutationOpts });
+		},
+
+		// =====================================================================
 		// Mutation Methods (DX-010)
 		// =====================================================================
 
 		insert(table: string): InsertBuilder {
-			return new InsertBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new InsertBuilder({ table, ...mutationOpts });
 		},
 
 		update(table: string): UpdateBuilder {
-			return new UpdateBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpdateBuilder({ table, ...mutationOpts });
 		},
 
 		delete(table: string): DeleteBuilder {
-			return new DeleteBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new DeleteBuilder({ table, ...mutationOpts });
 		},
 
 		updateAll(table: string): UpdateBuilder {
-			return new UpdateBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				allowAll: true,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpdateBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		deleteAll(table: string): DeleteBuilder {
-			return new DeleteBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				allowAll: true,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new DeleteBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		// DX-026: Upsert support
 		upsert(table: string): UpsertBuilder {
-			return new UpsertBuilder({
-				table,
-				model,
-				adapter,
-				schemaName,
-				hookStore,
-				onHookError,
-				inTransaction,
-			});
+			return new UpsertBuilder({ table, ...mutationOpts });
 		},
 
 		// =====================================================================
@@ -338,6 +363,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 					hookStore,
 					onHookError,
 					true, // inTransaction
+					tablesProxy,
 				);
 				return fn(txOrm);
 			});

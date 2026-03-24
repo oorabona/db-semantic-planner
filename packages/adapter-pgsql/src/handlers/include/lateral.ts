@@ -24,8 +24,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
@@ -128,7 +128,7 @@ function buildLateralJoin(
  * Returns an array of JOIN nodes: [self, child1, grandchild1, child2, ...]
  */
 function compileLateralCascade(
-	decision: Decision,
+	decision: CompilerDecision,
 	outerAlias: string,
 	sourceColumn: string,
 	targetColumn: string,
@@ -213,7 +213,7 @@ export const lateralIncludeHandler: IncludeHandler = {
 	strategy: 'lateral',
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {

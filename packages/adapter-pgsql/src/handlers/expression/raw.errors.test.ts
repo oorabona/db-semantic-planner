@@ -7,7 +7,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { literalHandler, rawHandler, sqlFunctionHandler } from './raw.js';
 
@@ -29,7 +29,7 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is a number', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: 123 } as unknown as Decision;
+		const decision = { type: 'raw', value: 123 } as unknown as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression requires a string SQL value',
 		);
@@ -37,7 +37,7 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is null', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: null } as Decision;
+		const decision = { type: 'raw', value: null } as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression requires a string SQL value',
 		);
@@ -45,7 +45,7 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is undefined', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw' } as Decision;
+		const decision = { type: 'raw' } as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression requires a string SQL value',
 		);
@@ -53,7 +53,7 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is an object', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: { sql: 'SELECT 1' } } as Decision;
+		const decision = { type: 'raw', value: { sql: 'SELECT 1' } } as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression requires a string SQL value',
 		);
@@ -61,7 +61,7 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is an empty string', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: '' } as Decision;
+		const decision = { type: 'raw', value: '' } as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression cannot be empty',
 		);
@@ -71,7 +71,7 @@ describe('rawHandler errors', () => {
 		const onRawSQL = vi.fn();
 		const ctxWithCallback = makeCtx({ onRawSQL });
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: 'NOW()' } as Decision;
+		const decision = { type: 'raw', value: 'NOW()' } as CompilerDecision;
 
 		rawHandler.compile(decision, ctxWithCallback, state);
 
@@ -82,7 +82,7 @@ describe('rawHandler errors', () => {
 	it('does not crash when ctx.onRawSQL is absent', () => {
 		const ctxNoCallback = makeCtx();
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: 'NOW()' } as Decision;
+		const decision = { type: 'raw', value: 'NOW()' } as CompilerDecision;
 
 		expect(() =>
 			rawHandler.compile(decision, ctxNoCallback, state),
@@ -99,7 +99,7 @@ describe('sqlFunctionHandler errors', () => {
 
 	it('throws when function name is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'sqlFunction' } as Decision;
+		const decision = { type: 'sqlFunction' } as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'SQL function requires function name',
 		);
@@ -110,7 +110,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: '',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'SQL function requires function name',
 		);
@@ -121,7 +121,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: '123func',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'Invalid function name: 123func',
 		);
@@ -132,7 +132,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: 'func name',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'Invalid function name: func name',
 		);
@@ -143,7 +143,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: 'func;',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'Invalid function name: func;',
 		);
@@ -154,7 +154,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: 'func--',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'Invalid function name: func--',
 		);
@@ -165,7 +165,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: '; DROP TABLE users',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => sqlFunctionHandler.compile(decision, ctx, state)).toThrow(
 			'Invalid function name:',
 		);
@@ -176,7 +176,7 @@ describe('sqlFunctionHandler errors', () => {
 		const decision = {
 			type: 'sqlFunction',
 			function: 'now',
-		} as Decision;
+		} as CompilerDecision;
 
 		expect(() =>
 			sqlFunctionHandler.compile(decision, ctx, state),
@@ -189,7 +189,7 @@ describe('sqlFunctionHandler errors', () => {
 			type: 'sqlFunction',
 			function: 'now',
 			args: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const result = sqlFunctionHandler.compile(decision, ctx, state);
 		expect(result).toBeDefined();
@@ -205,49 +205,49 @@ describe('literalHandler edge cases', () => {
 
 	it('produces isnull for null value', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: null } as Decision;
+		const decision = { type: 'literal', value: null } as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { isnull: true } });
 	});
 
 	it('produces isnull for undefined value', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal' } as Decision;
+		const decision = { type: 'literal' } as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { isnull: true } });
 	});
 
 	it('produces boolval for true', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: true } as Decision;
+		const decision = { type: 'literal', value: true } as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { boolval: { boolval: true } } });
 	});
 
 	it('produces boolval for false', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: false } as Decision;
+		const decision = { type: 'literal', value: false } as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { boolval: { boolval: false } } });
 	});
 
 	it('produces ival for integer', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: 42 } as unknown as Decision;
+		const decision = { type: 'literal', value: 42 } as unknown as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { ival: { ival: 42 } } });
 	});
 
 	it('produces fval for float', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: 3.14 } as unknown as Decision;
+		const decision = { type: 'literal', value: 3.14 } as unknown as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { fval: { fval: '3.14' } } });
 	});
 
 	it('produces sval for string', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: 'hello' } as Decision;
+		const decision = { type: 'literal', value: 'hello' } as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { sval: { sval: 'hello' } } });
 	});
@@ -257,7 +257,7 @@ describe('literalHandler edge cases', () => {
 		const decision = {
 			type: 'literal',
 			value: { foo: 'bar' },
-		} as Decision;
+		} as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({
 			A_Const: { sval: { sval: '[object Object]' } },
@@ -269,7 +269,7 @@ describe('literalHandler edge cases', () => {
 		const decision = {
 			type: 'literal',
 			value: [1, 2, 3],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { sval: { sval: '1,2,3' } } });
 	});

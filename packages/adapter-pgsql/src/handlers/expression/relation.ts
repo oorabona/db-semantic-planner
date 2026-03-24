@@ -13,7 +13,7 @@ import { columnRef, columnRefStar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -28,7 +28,7 @@ export const relationStarHandler: ExpressionHandler = {
 	types: ['relationStar', 'relation.*', 'expandStar'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -62,7 +62,7 @@ export const relationColumnHandler: ExpressionHandler = {
 	types: ['relationColumn', 'relation.column', 'relCol'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -103,7 +103,7 @@ export const relationColumnsHandler: ExpressionHandler = {
 	types: ['relationColumns', 'expandColumns', 'relCols'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -151,7 +151,7 @@ export const relationAliasHandler: ExpressionHandler = {
 	types: ['relationAlias', 'relation.column.as', 'relColAs'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -197,7 +197,7 @@ export const prefixedRelationColumnHandler: ExpressionHandler = {
 	types: ['prefixedRelationColumn', 'prefixedRelCol'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

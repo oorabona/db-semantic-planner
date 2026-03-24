@@ -9,7 +9,7 @@ import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 	IncludeHandler,
 	WhereDispatcher,
@@ -168,16 +168,16 @@ function ensureHandlersRegistered(): void {
 }
 
 /**
- * Superset of Decision that also accepts WhereIntent-shaped data.
+ * Superset of CompilerDecision that also accepts WhereIntent-shaped data.
  * The normalizer inspects `kind`/`field` (WhereIntent) and converts to
- * `type`/`column`/`operator` (Decision).
+ * `type`/`column`/`operator` (CompilerDecision).
  */
-interface RawDecisionInput extends Decision {
+interface RawCompilerDecisionInput extends CompilerDecision {
 	readonly kind?: string;
 	readonly field?: string;
 	readonly pattern?: unknown;
 	readonly not?: boolean;
-	readonly condition?: Decision;
+	readonly condition?: CompilerDecision;
 	readonly caseInsensitive?: boolean;
 	readonly subquery?: Record<string, unknown>;
 	// JSON-related fields
@@ -190,15 +190,15 @@ interface RawDecisionInput extends Decision {
 }
 
 /**
- * Normalize a WhereIntent (IntentAST format) into a Decision (handler format).
- * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
+ * Normalize a WhereIntent (IntentAST format) into a CompilerDecision (handler format).
+ * WhereIntent uses `kind` + `field`, CompilerDecision uses `type` + `column` + `operator`.
  */
-function normalizeToDecision(input: Decision): Decision {
-	// If it already has `column`, it's already a Decision.
+function normalizeToCompilerDecision(input: CompilerDecision): CompilerDecision {
+	// If it already has `column`, it's already a CompilerDecision.
 	// BUT: if jsonPath is present, reroute to jsonComparison handler
 	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
 	if (input.column !== undefined) {
-		const raw = input as RawDecisionInput;
+		const raw = input as RawCompilerDecisionInput;
 		if (raw.jsonPath && raw.jsonPath.length > 0) {
 			return {
 				type: 'where',
@@ -212,7 +212,7 @@ function normalizeToDecision(input: Decision): Decision {
 		return input;
 	}
 
-	const raw = input as RawDecisionInput;
+	const raw = input as RawCompilerDecisionInput;
 
 	// Handle PlanDecision compound types (from compiler.ts WHERE compilation)
 	// These have `type` but no `kind` and no `column`
@@ -228,14 +228,14 @@ function normalizeToDecision(input: Decision): Decision {
 			type: op,
 			operator: op,
 			conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-				normalizeToDecision(c as Decision),
+				normalizeToCompilerDecision(c as CompilerDecision),
 			),
 		};
 	}
 
 	// Handle PlanDecision 'having' type — same as 'where', just different type label
 	if (planType === 'having' && !raw.kind) {
-		return { ...input, type: 'where' } as Decision;
+		return { ...input, type: 'where' } as CompilerDecision;
 	}
 
 	const kind = raw.kind as string | undefined;
@@ -266,7 +266,7 @@ function normalizeToDecision(input: Decision): Decision {
 				type: 'and',
 				operator: 'and',
 				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-					normalizeToDecision(c as Decision),
+					normalizeToCompilerDecision(c as CompilerDecision),
 				),
 			};
 		case 'or':
@@ -274,14 +274,14 @@ function normalizeToDecision(input: Decision): Decision {
 				type: 'or',
 				operator: 'or',
 				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-					normalizeToDecision(c as Decision),
+					normalizeToCompilerDecision(c as CompilerDecision),
 				),
 			};
 		case 'not':
 			return {
 				type: 'not',
 				operator: 'not',
-				conditions: [normalizeToDecision(raw.condition as Decision)],
+				conditions: [normalizeToCompilerDecision(raw.condition as CompilerDecision)],
 			};
 		case 'null':
 			return {
@@ -308,7 +308,7 @@ function normalizeToDecision(input: Decision): Decision {
 							? (rawSelect.fields?.[0] ?? '*')
 							: '*';
 				const subConditions = sub.where
-					? [normalizeToDecision(sub.where as Decision)]
+					? [normalizeToCompilerDecision(sub.where as CompilerDecision)]
 					: [];
 				const rawLimit = sub.limit as number | undefined;
 				const rawOrderBy = sub.orderBy as
@@ -330,13 +330,14 @@ function normalizeToDecision(input: Decision): Decision {
 								| 'DESC',
 						})),
 					}),
-				} as Decision;
+				} as CompilerDecision;
 			}
+			// Use 'value' (not 'values') to match what inHandler.compile() reads
 			return {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.not ? 'notIn' : 'in',
-				values: raw.values as readonly unknown[],
+				value: raw.values as readonly unknown[],
 			};
 		}
 		case 'like':
@@ -367,22 +368,41 @@ function normalizeToDecision(input: Decision): Decision {
 			// through the planner, so we normalize them here for the EXISTS/NOT EXISTS handlers.
 			const relation = raw.relation as string;
 			const conditions = raw.where
-				? [normalizeToDecision(raw.where as Decision)]
+				? [normalizeToCompilerDecision(raw.where as CompilerDecision)]
 				: undefined;
 			// Prefer explicit targetTable if already resolved (e.g. by compileDelete's
 			// resolveExistsIntent which maps the logical relation name → real table name).
 			// Fall back to relation name when no ModelIR is available.
 			const targetTable = (raw.targetTable as string | undefined) ?? relation;
+			// Pass through FK column hints resolved by resolveExistsIntent from ModelIR.
+			const sourceColumn = raw.sourceColumn as string | undefined;
+			const targetColumn = raw.targetColumn as string | undefined;
+			// Pass through include declarations (JOIN inside the subquery).
+			const includeIntent = raw.include as
+				| Record<string, { join?: 'inner' | 'left' }>
+				| undefined;
+			// Convert include map to a CompilerDecision[] for the handler.
+			// Each entry becomes a minimal join decision: { type: 'existsInclude', relation, joinType }.
+			const includeCompilerDecisions: CompilerDecision[] | undefined = includeIntent
+				? Object.entries(includeIntent).map(([rel, opts]) => ({
+						type: 'existsInclude',
+						relation: rel,
+						joinType: opts.join ?? 'inner',
+					}))
+				: undefined;
 			return {
 				type: 'exists',
 				operator: kind, // 'exists' | 'notExists'
 				relation,
 				targetTable,
+				...(sourceColumn !== undefined && { sourceColumn }),
+				...(targetColumn !== undefined && { targetColumn }),
 				...(conditions && { conditions }),
+				...(includeCompilerDecisions && { include: includeCompilerDecisions }),
 			};
 		}
 		default:
-			// Pass through for types already in Decision format or unknown
+			// Pass through for types already in CompilerDecision format or unknown
 			return input;
 	}
 }
@@ -392,12 +412,12 @@ function normalizeToDecision(input: Decision): Decision {
  */
 export function createWhereDispatcher(): WhereDispatcher {
 	return (
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node => {
 		ensureHandlersRegistered();
-		const normalized = normalizeToDecision(decision);
+		const normalized = normalizeToCompilerDecision(decision);
 		const rawOperator = normalized.operator ?? '=';
 		const operator = OPERATOR_ALIASES[rawOperator] ?? rawOperator;
 		const handler = getWhereHandler(operator);

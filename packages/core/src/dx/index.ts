@@ -5,6 +5,12 @@
 
 // Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
 export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
+// CTE Builder (BATCH-001 Block 5)
+export {
+	CteBuilder,
+	type CteDump,
+	CteQueryBuilder,
+} from './cte-builder.js';
 // Errors
 export {
 	AmbiguousRelationError,
@@ -24,10 +30,27 @@ export {
 	TableNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
+// Expression primitives (EXT-001)
+export {
+	array,
+	cast,
+	ExpressionRef,
+	type ExprInput,
+	fn,
+	literal,
+	namedArg,
+	op,
+	param,
+	ref as exprRef,
+	star,
+	unary,
+} from './expressions.js';
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
 	and,
+	// Array
+	any,
 	// Expression
 	coalesce,
 	// Column alias (native Kysely API)
@@ -45,14 +68,16 @@ export {
 	exists,
 	gt,
 	gte,
-	// Array
-	any,
 	inArray,
+	inSubquery,
 	// Type guards
 	isDistinctField,
+	isDistinctFrom,
 	// Null
 	isNotNull,
 	isNull,
+	// Raw SQL set expression (for doUpdate() / set() mutations)
+	isSqlRaw,
 	lag,
 	lead,
 	// String
@@ -72,15 +97,13 @@ export {
 	rank,
 	// Raw SQL escape hatch
 	raw,
-	// Raw SQL set expression (for doUpdate() / set() mutations)
-	isSqlRaw,
-	sql,
-	type SqlRawExpression,
-	SQL_RAW_MARKER,
 	// Relation column (select from joined table)
 	relationColumn,
 	rowNumber,
+	SQL_RAW_MARKER,
+	type SqlRawExpression,
 	some,
+	sql,
 	WindowBuilder,
 	wAvg,
 	wCount,
@@ -143,12 +166,6 @@ export {
 	setLogger,
 	silentLogger,
 } from './logger.js';
-// CTE Builder (BATCH-001 Block 5)
-export {
-	CteBuilder,
-	CteQueryBuilder,
-	type CteDump,
-} from './cte-builder.js';
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,
@@ -179,6 +196,7 @@ export {
 	// ARCH-006: Simplified ORM options (preferred)
 	type SimplifiedOrmOptions,
 } from './orm.js';
+export type { OrmOf } from './orm-instance-types.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)
@@ -195,7 +213,6 @@ export {
 	type HydrateOptions,
 	ResultHydrator,
 } from './result-hydrator.js';
-
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
@@ -232,7 +249,6 @@ export {
 	schemaToModelIR,
 	type TableDef,
 } from './schema.js';
-
 // Schema Bridge (ARCH-002 codegen-first)
 export {
 	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
@@ -264,6 +280,13 @@ export {
 	type SchemaConversionResult,
 	type ValidatedResolvedSchema,
 } from './schema-bridge.js';
+// DX-040-SURFACE: InferTables utility type for typed table refs
+export type { InferTables } from './schema-tables-types.js';
+// Set Operation Builder (UNION / INTERSECT / EXCEPT)
+export {
+	type SetOperationBuilder,
+	SetOperationBuilderImpl,
+} from './set-operation-builder.js';
 // Subquery Builder (DX-012 Block 3)
 export {
 	isSubqueryExpression,
@@ -305,6 +328,7 @@ export {
 // Types
 export type {
 	AggregateOptions,
+	AliasedExprColumn,
 	ColumnSpec,
 	// Pagination (DX-028)
 	CursorPaginatedResult,
@@ -320,6 +344,7 @@ export type {
 	OrderByRecord,
 	OrderBySpec,
 	OrmInstance,
+	OrmInstanceInternal,
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
@@ -334,18 +359,3 @@ export type {
 } from './types.js';
 // Type guard
 export { isExpressionSpec } from './types.js';
-// Expression primitives (EXT-001)
-export {
-	array,
-	cast,
-	ExpressionRef,
-	fn,
-	literal,
-	namedArg,
-	op,
-	param,
-	ref as exprRef,
-	star,
-	type ExprInput,
-	unary,
-} from './expressions.js';

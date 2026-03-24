@@ -5,7 +5,7 @@
  *
  * Unlike the `in` handler which omits the type cast, this handler always
  * emits an explicit `$N::type[]` cast, derived from:
- *   1. decision.dataType  (set by normalizeToDecision when schema info is available)
+ *   1. decision.dataType  (set by normalizeToCompilerDecision when schema info is available)
  *   2. Runtime value inspection of the first non-null value in the array
  */
 
@@ -15,7 +15,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
@@ -59,7 +59,7 @@ export const anyHandler: WhereHandler = {
 	operators: [COLLECTION_OPERATORS.ANY],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

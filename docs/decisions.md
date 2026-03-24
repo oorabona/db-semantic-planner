@@ -4,6 +4,25 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## PIPE-001 — Pipeline Simplification (2026-03-24)
+
+### Architecture
+- **Option A (complete elimination)**: Delete Decision type entirely, not partial (Option B WHERE-only)
+- **CompilerDecision** (adapter-local, strict): replaces Decision. Extends PlanDecision with guaranteed non-optional fields for handlers
+- **WHERE bypass**: compileWhereIntent() compiles WhereIntent → PG AST directly (no decision intermediate) — WHERE has no strategic decision
+- **Include keeps decisions**: PlanDecision → enrichForCompile → CompilerDecision → handler (planner makes strategy choice)
+- **PlanDecision unchanged** in packages/types (shared type stays clean)
+- **Deferred deletion strategy**: deprecate in blocks 1-4, delete in block 5 (from /llm consensus)
+
+### Implementation
+- `enrichForCompile()` returns shallow copy (immutability guarantee — PlanReport.decisions never mutated)
+- Field normalization: `column ?? field` in enrichForCompile (from /llm consensus — mapToHandlerDecision did this implicitly)
+- `_compiledFilterWhere` produced via compileWhereIntent() in enrichForCompile, attached to CompilerDecision
+- HAVING clause uses compileWhereIntent (same path as WHERE)
+- EXISTS/notExists: ctx.compileSubquery callback pattern (from /adversarial)
+
+---
+
 ## Session marathon 2026-03-20 — Expression primitives, extensions, DDL, refactors
 
 ### EXT-001 — Expression primitives + pgvector

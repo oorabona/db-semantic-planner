@@ -156,11 +156,19 @@ export function parseDotNotationInclude(
 	}
 	let current: IncludeIntent = includeOptionsToIntent(lastPart, options);
 
-	// Work backwards through the path, wrapping each level
+	// Work backwards through the path, wrapping each level.
+	// Propagate the `join` option to intermediate wrappers so the planner
+	// picks the join strategy for ALL hops, not just the leaf.
+	// Without this, `.include('a.b', {join:'inner'})` produces an outer 'a'
+	// with no join → json_agg strategy → 'a' table not in outer FROM →
+	// the leaf 'b' JOIN ON clause references a table missing from outer FROM.
 	for (let i = parts.length - 2; i >= 0; i--) {
 		const part = parts[i];
 		if (!part) continue;
-		current = { relation: part, include: [current] };
+		current =
+			options?.join !== undefined
+				? { relation: part, join: options.join, include: [current] }
+				: { relation: part, include: [current] };
 	}
 
 	return current;

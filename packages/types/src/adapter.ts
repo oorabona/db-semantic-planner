@@ -15,6 +15,7 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	SelectIntent,
+	SetOperationIntent,
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
@@ -322,6 +323,13 @@ export interface CompilingAdapter extends BaseAdapter {
 	/** Compile a CTE query backed by unnest() arrays (BATCH-001). */
 	compileCteQuery(
 		intent: CteQueryIntent,
+		options?: CompileOptions,
+	): CompiledQuery;
+
+	/** Compile a set operation (UNION / INTERSECT / EXCEPT) to SQL. */
+	compileSetOperation(
+		intent: SetOperationIntent,
+		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
 

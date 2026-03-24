@@ -8,6 +8,7 @@
  * @since R01
  */
 
+import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
@@ -178,34 +179,182 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  * // users is { id: number; name: string; email: string }[]
  * ```
  */
+/**
+ * PUBLIC ORM instance type — the interface consumers see from createOrm().
+ *
+ * String-based table entry points (select, insert, update, delete, upsert) are
+ * intentionally absent. Use the typed TableRef-based methods instead:
+ *   - `orm.from(table)` — SELECT
+ *   - `orm.into(table)` — INSERT
+ *   - `orm.modify(table)` — UPDATE
+ *   - `orm.removeFrom(table)` — DELETE
+ *   - `orm.upsertInto(table)` — UPSERT (INSERT ... ON CONFLICT)
+ *
+ * Internal code (NQL, planner, tests) that needs string-based access should
+ * cast to `OrmInstanceInternal<DB>`.
+ *
+ * @typeParam DB - Database schema type (Kysely-like).
+ *   Keys are table names, values are row types.
+ *
+ * @example
+ * ```typescript
+ * const { users } = orm.tables;
+ * const activeUsers = await orm.from(users).where(eq(users.active, true)).all();
+ * await orm.into(users).values({ name: 'Alice', email: 'a@b.com' }).execute();
+ * ```
+ *
+ * @since DX-040-SURFACE
+ */
+/**
+ * Convenience alias for explicit ORM type annotations.
+ * Accepts BOTH raw SchemaDefinition AND Schema<T> wrapper (auto-unwraps).
+ *
+ * @example
+ * ```typescript
+ * // With Schema wrapper (from schema() / defineSchema())
+ * const db = schema({ users: { id: 'integer', name: 'string' } });
+ * type MyOrm = OrmOf<typeof db>;  // unwraps Schema<T> → InferDB<T>
+ *
+ * // With raw SchemaDefinition
+ * type MyOrm = OrmOf<{ users: { id: 'integer' } }>;  // uses InferDB directly
+ * ```
+ */
+export type OrmOf<S> =
+	S extends import('./schema.js').Schema<infer T extends import('./schema.js').SchemaDefinition>
+		? OrmInstance<import('./schema.js').InferDB<T>>
+		: S extends import('./schema.js').SchemaDefinition
+			? OrmInstance<import('./schema.js').InferDB<S>>
+			: never;
+
+/**
+ * Convert a row type `{ col: Type }` to column refs `{ col: ColumnRef<Table, 'col', Type> }`
+ * so that `InferTableRow` can extract the types back from a `TableRef`.
+ *
+ * This is used exclusively to type `OrmInstance.tables` with full column type info.
+ *
+ * @typeParam TTable - The table name literal (e.g. `'users'`)
+ * @typeParam TRow   - The row type from `DB[K]` (e.g. `{ id: number; name: string }`)
+ */
+type RowToColumnRefs<TTable extends string, TRow> = {
+	[K in keyof TRow & string]: ColumnRef<TTable, K, TRow[K]>;
+};
+
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
-	 * Start building a SELECT query from a table.
+	 * Type-safe table references for query building.
 	 *
-	 * When DB generic is provided:
-	 * - Table name is constrained to `keyof DB`
-	 * - Result type defaults to `DB[TableName]`
-	 *
-	 * @typeParam K - Table name (inferred from DB keys when typed)
-	 * @typeParam TResult - Override result type (defaults to DB[K])
-	 * @param from - The root table name to select from
-	 * @returns A QueryBuilder for constructing the select
+	 * Provides access to tables and their columns as typed objects.
+	 * Use destructuring to get individual table references, then pass
+	 * them to `from()` for type-safe queries.
 	 *
 	 * @example
 	 * ```typescript
-	 * // Typed select (with DB generic)
-	 * const orm = createOrm<Database>({ model });
-	 * const users = await orm.select('users').all();
-	 * // users is Database['users'][]
-	 *
-	 * // Override type if needed
-	 * type CustomUser = { id: number; extra: string };
-	 * const custom = await orm.select<CustomUser>('users').all();
+	 * const { users, posts } = orm.tables;
+	 * const activeUsers = await orm.from(users).where(eq(users.active, true)).all();
 	 * ```
+	 *
+	 * @since DX-040-SURFACE
 	 */
-	select<K extends keyof DB & string, TResult = DB[K]>(
-		from: K,
-	): QueryBuilder<TResult>;
+	readonly tables: { [K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any> };
+
+	/**
+	 * Start a type-safe SELECT query from a TableRef.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns A QueryBuilder typed to the table's row type
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * const user = await orm.from(users).where(eq(users.id, 1)).first();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	from<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): QueryBuilder<InferTableRow<TTable>>;
+
+	/**
+	 * Start a type-safe INSERT operation from a TableRef.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns An InsertBuilder typed to the table's row type
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * await orm.into(users).values({ name: 'Alice', email: 'a@b.com' }).execute();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	into<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): InsertBuilder;
+
+	/**
+	 * Start a type-safe UPDATE operation from a TableRef.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns An UpdateBuilder for constructing the update
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * await orm.modify(users).set({ active: false }).where(eq(users.id, 1)).execute();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	modify<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): UpdateBuilder;
+
+	/**
+	 * Start a type-safe DELETE operation from a TableRef.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns A DeleteBuilder for constructing the delete
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * await orm.removeFrom(users).where(eq(users.id, 1)).execute();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	removeFrom<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): DeleteBuilder;
+
+	/**
+	 * Start a type-safe UPSERT (INSERT ... ON CONFLICT) operation from a TableRef.
+	 *
+	 * @typeParam TTable - The TableRef type (inferred from the argument)
+	 * @param table - A TableRef from `orm.tables`
+	 * @returns An UpsertBuilder for constructing the upsert
+	 *
+	 * @example
+	 * ```typescript
+	 * const { users } = orm.tables;
+	 * await orm.upsertInto(users)
+	 *   .values({ id: 1, name: 'Alice', email: 'a@b.com' })
+	 *   .onConflict(['email'])
+	 *   .doUpdate({ name: 'Alice' })
+	 *   .execute();
+	 * ```
+	 *
+	 * @since DX-040-SURFACE
+	 */
+	upsertInto<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): UpsertBuilder;
 
 	/**
 	 * The strict mode setting for this ORM instance.
@@ -223,8 +372,9 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @example
 	 * ```typescript
 	 * const scopedOrm = orm.withSchema('blog');
-	 * const users = await scopedOrm.select('users').all();
-	 * // SQL: SELECT * FROM blog.users
+	 * const { users } = scopedOrm.tables;
+	 * const rows = await scopedOrm.from(users).all();
+	 * // SQL: SELECT * FROM "blog"."users"
 	 * ```
 	 */
 	withSchema(schemaName: string): OrmInstance<DB>;
@@ -288,56 +438,8 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	): Promise<TResult[]>;
 
 	// =========================================================================
-	// Mutation Methods (DX-010)
+	// Bulk delete/update (no typed TableRef variant — no WHERE guard needed)
 	// =========================================================================
-
-	/**
-	 * Start building an INSERT operation.
-	 *
-	 * @param table - The table to insert into
-	 * @returns An InsertBuilder for constructing the insert
-	 *
-	 * @example
-	 * ```typescript
-	 * await orm.insert('users')
-	 *   .values({ name: 'John', email: 'john@example.com' })
-	 *   .execute();
-	 * ```
-	 */
-	insert(table: string): InsertBuilder;
-
-	/**
-	 * Start building an UPDATE operation.
-	 * Requires a WHERE clause unless using updateAll().
-	 *
-	 * @param table - The table to update
-	 * @returns An UpdateBuilder for constructing the update
-	 *
-	 * @example
-	 * ```typescript
-	 * await orm.update('users')
-	 *   .set({ active: false })
-	 *   .where(eq('id', 123))
-	 *   .execute();
-	 * ```
-	 */
-	update(table: string): UpdateBuilder;
-
-	/**
-	 * Start building a DELETE operation.
-	 * Requires a WHERE clause unless using deleteAll().
-	 *
-	 * @param table - The table to delete from
-	 * @returns A DeleteBuilder for constructing the delete
-	 *
-	 * @example
-	 * ```typescript
-	 * await orm.delete('users')
-	 *   .where(eq('id', 123))
-	 *   .execute();
-	 * ```
-	 */
-	delete(table: string): DeleteBuilder;
 
 	/**
 	 * Start building an UPDATE operation that affects all rows.
@@ -369,40 +471,6 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 */
 	deleteAll(table: string): DeleteBuilder;
 
-	/**
-	 * Start building an UPSERT operation (INSERT ... ON CONFLICT).
-	 * Combines insert with conflict handling for idempotent operations.
-	 *
-	 * @param table - The table to upsert into
-	 * @returns An UpsertBuilder for constructing the upsert
-	 *
-	 * @example
-	 * ```typescript
-	 * // Upsert with doUpdate
-	 * await orm.upsert('users')
-	 *   .values({ id: 1, name: 'Alice', email: 'alice@example.com' })
-	 *   .onConflict(['id'])
-	 *   .doUpdate({ name: 'Alice Updated' })
-	 *   .execute();
-	 *
-	 * // Upsert with doNothing
-	 * await orm.upsert('users')
-	 *   .values({ id: 1, name: 'Alice' })
-	 *   .onConflict(['id'])
-	 *   .doNothing()
-	 *   .execute();
-	 *
-	 * // With returning (requires PostgreSQL)
-	 * const upserted = await orm.upsert('users')
-	 *   .values({ id: 1, name: 'Alice' })
-	 *   .onConflict(['id'])
-	 *   .doUpdate()
-	 *   .returning(['id', 'updated_at'])
-	 *   .execute();
-	 * ```
-	 */
-	upsert(table: string): UpsertBuilder;
-
 	// =========================================================================
 	// Transaction Methods (DX-025)
 	// =========================================================================
@@ -411,44 +479,21 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * Execute a callback within a database transaction.
 	 * Auto-commits on success, auto-rolls back on exception.
 	 *
-	 * This is a passthrough to Kysely's transaction API.
-	 * The callback receives a transaction-scoped ORM instance.
-	 *
 	 * @typeParam T - The return type of the callback
 	 * @param fn - Async callback that receives a transaction-scoped ORM instance
 	 * @returns Promise resolving to the callback's return value
 	 *
 	 * @example
 	 * ```typescript
-	 * // Basic transaction
 	 * const result = await orm.transaction(async (tx) => {
-	 *   await tx.insert('orders').values({ userId: 1, total: 100 }).execute();
-	 *   await tx.update('users').set({ balance: 0 }).where(eq('id', 1)).execute();
+	 *   const { users, orders } = tx.tables;
+	 *   await tx.into(orders).values({ userId: 1, total: 100 }).execute();
+	 *   await tx.modify(users).set({ balance: 0 }).where(eq(users.id, 1)).execute();
 	 *   return { success: true };
 	 * });
-	 *
-	 * // Multi-tenant transaction
-	 * await orm.withSchema('schema_name').transaction(async (tx) => {
-	 *   await tx.insert('events').values({ type: 'order_created' }).execute();
-	 * });
-	 *
-	 * // Auto-rollback on exception
-	 * try {
-	 *   await orm.transaction(async (tx) => {
-	 *     await tx.insert('orders').values({ userId: 1 }).execute();
-	 *     throw new Error('Validation failed');
-	 *     // Transaction is automatically rolled back
-	 *   });
-	 * } catch (err) {
-	 *   // Handle error
-	 * }
 	 * ```
 	 */
 	transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T>;
-
-	// =========================================================================
-	// Raw SQL Execution (DX-027)
-	// =========================================================================
 
 	// =========================================================================
 	// NQL Template Literal API (DX-040 Block 8)
@@ -457,36 +502,13 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
 	 * NQL template tag for writing queries in Natural Query Language.
 	 *
-	 * NQL provides a pipe-based syntax that compiles to the same IntentIR
-	 * as the native query builder, ensuring both APIs produce identical
-	 * execution plans and SQL.
-	 *
-	 * ⚠️  Type parameter `T` is required - NQL uses explicit type annotation
-	 * since the query string cannot provide TypeScript inference.
-	 *
 	 * @typeParam T - The expected result row type
 	 * @returns An NqlBuilder with .all(), .first(), .toIntentIR(), .plan(), .dump()
 	 *
 	 * @example
 	 * ```typescript
-	 * // Basic select with explicit type
 	 * type UserRow = { id: string; name: string };
 	 * const users = await orm.nql<UserRow>`users | select id, name`.all();
-	 *
-	 * // Filtering and ordering
-	 * const activeUsers = await orm.nql<UserRow>`
-	 *   users
-	 *   | filter active = true
-	 *   | sort name asc
-	 *   | take 10
-	 * `.all();
-	 *
-	 * // Debug: inspect the IntentIR
-	 * const intent = orm.nql<UserRow>`users | select name`.toIntentIR();
-	 * console.log(JSON.stringify(intent, null, 2));
-	 *
-	 * // Debug: get full dump (plan + SQL + params)
-	 * const { plan, sql, params } = orm.nql<UserRow>`users | select name`.dump();
 	 * ```
 	 */
 	readonly nql: NqlTag;
@@ -501,59 +523,78 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * expressed via the intent system.
 	 *
 	 * ⚠️  WARNING: This bypasses the planner and all type safety.
-	 * The SQL string is NOT validated - ensure it's safe!
-	 * Use parameter placeholders for any dynamic values.
-	 * Note: Placeholder syntax varies by dialect ($1, $2 for PostgreSQL; ? for SQLite/MySQL).
 	 *
 	 * @typeParam T - Expected result type (defaults to unknown)
 	 * @param sql - Raw SQL string with parameter placeholders
 	 * @param parameters - Parameter values for placeholders
 	 * @returns Promise resolving to array of results
-	 *
-	 * @example
-	 * ```typescript
-	 * // Simple query with parameters
-	 * const users = await orm.raw<User>(
-	 *   'SELECT * FROM users WHERE age > $1 AND status = $2',
-	 *   [18, 'active']
-	 * );
-	 *
-	 * // Complex analytics query not expressible via intents
-	 * const stats = await orm.raw<{ month: Date; count: number }>(
-	 *   `SELECT date_trunc('month', created_at) as month,
-	 *           COUNT(*) as count
-	 *    FROM orders
-	 *    GROUP BY 1
-	 *    ORDER BY 1 DESC`,
-	 *   []
-	 * );
-	 *
-	 * // Multi-tenant: raw() does NOT auto-prefix tables with schema.
-	 * // You must include the schema name in your SQL manually:
-	 * const products = await orm.withSchema('acme').raw<Product>(
-	 *   'SELECT * FROM "acme"."products" WHERE inventory > $1',
-	 *   [0]
-	 * );
-	 * ```
 	 */
 	raw<T = unknown>(sql: string, parameters?: readonly unknown[]): Promise<T[]>;
+
 	/**
 	 * Create a CTE (Common Table Expression) backed by unnest() arrays.
-	 * Use .fromUnnest() to provide column data, .withIndex() to add an ordinality index,
-	 * then .query() to attach an outer SELECT.
 	 *
 	 * @param name - The CTE name
 	 * @returns A CteBuilder for constructing the CTE
-	 *
-	 * @example
-	 * ```typescript
-	 * const result = await orm.withCte('lookups')
-	 *   .fromUnnest({ id: [1, 2, 3], name: ['a', 'b', 'c'] })
-	 *   .withIndex('idx')
-	 *   .query(orm.select('symbols'))
-	 *   .all();
-	 * ```
 	 */
 	withCte(name: string): CteBuilder;
+}
+
+/**
+ * INTERNAL ORM instance type — extends public OrmInstance with string-based
+ * table entry points used by NQL, the planner, and internal tests.
+ *
+ * External consumers should NOT use this type. Cast to it only when internal
+ * string-based access is explicitly required:
+ * ```typescript
+ * const internal = orm as OrmInstanceInternal<DB>;
+ * internal.select('users');
+ * ```
+ *
+ * @internal
+ */
+export interface OrmInstanceInternal<DB = Record<string, unknown>>
+	extends OrmInstance<DB> {
+	/**
+	 * Start building a SELECT query from a table name (string-based API).
+	 *
+	 * @internal Use `orm.from(orm.tables.tableName)` for type-safe queries.
+	 *
+	 * @typeParam K - Table name (inferred from DB keys when typed)
+	 * @typeParam TResult - Override result type (defaults to DB[K])
+	 * @param from - The root table name to select from
+	 * @returns A QueryBuilder for constructing the select
+	 */
+	select<K extends keyof DB & string, TResult = DB[K]>(
+		from: K,
+	): QueryBuilder<TResult>;
+
+	/**
+	 * Start building an INSERT operation (string-based API).
+	 *
+	 * @internal Use `orm.into(orm.tables.tableName)` for type-safe inserts.
+	 */
+	insert(table: string): InsertBuilder;
+
+	/**
+	 * Start building an UPDATE operation (string-based API).
+	 *
+	 * @internal Use `orm.modify(orm.tables.tableName)` for type-safe updates.
+	 */
+	update(table: string): UpdateBuilder;
+
+	/**
+	 * Start building a DELETE operation (string-based API).
+	 *
+	 * @internal Use `orm.removeFrom(orm.tables.tableName)` for type-safe deletes.
+	 */
+	delete(table: string): DeleteBuilder;
+
+	/**
+	 * Start building an UPSERT operation (string-based API).
+	 *
+	 * @internal Use `orm.upsertInto(orm.tables.tableName)` for type-safe upserts.
+	 */
+	upsert(table: string): UpsertBuilder;
 }
 

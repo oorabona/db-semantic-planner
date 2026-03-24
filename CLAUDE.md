@@ -194,8 +194,13 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 | Expression primitives | `op()`, `fn()`, `ref()`, `param()`, `cast()`, `literal()`, `unary()`, `namedArg()` | `op('<=>', ref('vector'), cast(param(qv), 'vector'))` |
 | pgvector | `cosineDistance()`, `rawDistance()`, `l2Distance()`, `innerProduct()` | `cosineDistance('vector', qv).as('score')` |
 | ParadeDB | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
+| PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
 | DISTINCT ON | `.distinctOn('col1', 'col2')` | PostgreSQL DISTINCT ON |
+| Set operations | `.union()`, `.unionAll()`, `.intersect()`, `.except()` | `q1.union(q2).all()` |
+| IN subquery | `inSubquery('id', subquery('posts').select('userId'))` | WHERE id IN (SELECT ...) |
+| Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
+| Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md` | |
 
 ## Observability

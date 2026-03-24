@@ -1,5 +1,5 @@
 /**
- * Plan Decision Extractor Tests
+ * Plan CompilerDecision Extractor Tests
  *
  * Tests for extractJsonAggDecisions tree-building logic:
  * - Single root include (no nesting)
@@ -13,10 +13,10 @@ import type { PlanReport } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { extractJsonAggDecisions } from '../plan-decision-extractor.js';
 
-type Decision = PlanReport['decisions'][number];
+type CompilerDecision = PlanReport['decisions'][number];
 
 function makePlanReport(
-	decisions: Decision[],
+	decisions: CompilerDecision[],
 	rootTable = 'users',
 ): PlanReport {
 	return {
@@ -27,7 +27,7 @@ function makePlanReport(
 	} as unknown as PlanReport;
 }
 
-function makeIncludeDecision(context: Record<string, unknown>): Decision {
+function makeIncludeDecision(context: Record<string, unknown>): CompilerDecision {
 	return {
 		id: 'test',
 		type: 'include-strategy',
@@ -38,7 +38,7 @@ function makeIncludeDecision(context: Record<string, unknown>): Decision {
 			sourceTable: 'users',
 			...context,
 		},
-	} as unknown as Decision;
+	} as unknown as CompilerDecision;
 }
 
 describe('extractJsonAggDecisions', () => {
@@ -51,7 +51,7 @@ describe('extractJsonAggDecisions', () => {
 				reasoning: 'test',
 				alternatives: [],
 				context: { sourceTable: 'users', target: 'roles' },
-			} as unknown as Decision,
+			} as unknown as CompilerDecision,
 		]);
 		expect(extractJsonAggDecisions(plan)).toEqual([]);
 	});
@@ -192,7 +192,7 @@ describe('extractJsonAggDecisions', () => {
 					relation: 'author',
 					intentPath: 'include[0]',
 				},
-			} as unknown as Decision,
+			} as unknown as CompilerDecision,
 		]);
 
 		const result = extractJsonAggDecisions(plan);

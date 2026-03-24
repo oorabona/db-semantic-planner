@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision, WhereDispatcher } from '../types.js';
+import type { CompilerContext, CompilerDecision, WhereDispatcher } from '../types.js';
 import { createCompilerState } from '../types.js';
 
 /** No-op dispatcher — range handler never recurses */
@@ -37,7 +37,7 @@ describe('rangeHandler errors', () => {
 			type: 'where',
 			operator: 'contains',
 			value: '[1,10)',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() =>
 			rangeHandler.compile(decision, ctx, state, noopDispatch),
 		).toThrow('Range handler requires a column');
@@ -50,7 +50,7 @@ describe('rangeHandler errors', () => {
 			column: '',
 			operator: 'contains',
 			value: '[1,10)',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() =>
 			rangeHandler.compile(decision, ctx, state, noopDispatch),
 		).toThrow('Range handler requires a column');
@@ -71,7 +71,7 @@ describe('rangeHandler RangeValue branch', () => {
 			column: 'age',
 			operator: 'contains',
 			value: { lower: 10, upper: 20 },
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['[10,20)']);
 	});
@@ -83,7 +83,7 @@ describe('rangeHandler RangeValue branch', () => {
 			column: 'age',
 			operator: 'contains',
 			value: { upper: 20 },
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['[,20)']);
 	});
@@ -95,7 +95,7 @@ describe('rangeHandler RangeValue branch', () => {
 			column: 'age',
 			operator: 'contains',
 			value: { lower: 5 },
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['[5,)']);
 	});
@@ -115,7 +115,7 @@ describe('rangeHandler string range literal branch', () => {
 			column: 'period',
 			operator: 'contains',
 			value: '[2024-01-01,2024-12-31)',
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['[2024-01-01,2024-12-31)']);
 	});
@@ -127,7 +127,7 @@ describe('rangeHandler string range literal branch', () => {
 			column: 'period',
 			operator: 'overlaps',
 			value: '[1,10]',
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['[1,10]']);
 	});
@@ -147,7 +147,7 @@ describe('rangeHandler scalar fallback', () => {
 			column: 'score',
 			operator: 'contains',
 			value: 42,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual([42]);
 	});
@@ -159,7 +159,7 @@ describe('rangeHandler scalar fallback', () => {
 			column: 'name',
 			operator: 'contains',
 			value: 'not-a-range',
-		} as Decision;
+		} as CompilerDecision;
 		rangeHandler.compile(decision, ctx, state, noopDispatch);
 		expect(state.parameters).toEqual(['not-a-range']);
 	});
@@ -180,7 +180,7 @@ describe('rangeHandler type cast normalization', () => {
 			operator: 'contains',
 			value: 25,
 			dataType: 'int4range',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const node = rangeHandler.compile(decision, ctx, state, noopDispatch);
 		// Should have TypeCast with 'integer'
 		const rexpr = (node as Record<string, unknown>).A_Expr as Record<
@@ -199,7 +199,7 @@ describe('rangeHandler type cast normalization', () => {
 			operator: 'contains',
 			value: 999,
 			dataType: 'int8range',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const node = rangeHandler.compile(decision, ctx, state, noopDispatch);
 		const rexpr = (node as Record<string, unknown>).A_Expr as Record<
 			string,
@@ -217,7 +217,7 @@ describe('rangeHandler type cast normalization', () => {
 			operator: 'contains',
 			value: { lower: 1, upper: 10 },
 			dataType: 'int4range',
-		} as Decision;
+		} as CompilerDecision;
 		const node = rangeHandler.compile(decision, ctx, state, noopDispatch);
 		const rexpr = (node as Record<string, unknown>).A_Expr as Record<
 			string,
@@ -242,7 +242,7 @@ describe('rangeHandler operator fallback', () => {
 			type: 'where',
 			column: 'tags',
 			value: '[1,10)',
-		} as Decision;
+		} as CompilerDecision;
 		const node = rangeHandler.compile(decision, ctx, state, noopDispatch);
 		const expr = (node as Record<string, unknown>).A_Expr as Record<
 			string,
@@ -259,7 +259,7 @@ describe('rangeHandler operator fallback', () => {
 			column: 'tags',
 			operator: 'customOp',
 			value: '[1,10)',
-		} as Decision;
+		} as CompilerDecision;
 		const node = rangeHandler.compile(decision, ctx, state, noopDispatch);
 		const expr = (node as Record<string, unknown>).A_Expr as Record<
 			string,

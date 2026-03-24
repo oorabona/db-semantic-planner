@@ -11,6 +11,7 @@ export {
 	parse,
 	score,
 } from './paradedb.js';
+export { generateSeries, nextval } from './pgsql-builtins.js';
 export {
 	cosineDistance,
 	innerProduct,

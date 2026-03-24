@@ -17,7 +17,7 @@ import {
 	minHandler,
 	sumHandler,
 } from '../handlers/expression/aggregate.js';
-import type { CompilerContext, Decision } from '../handlers/types.js';
+import type { CompilerContext, CompilerDecision } from '../handlers/types.js';
 import { createCompilerState } from '../handlers/types.js';
 import { identityNaming } from '../naming-plugin.js';
 
@@ -54,7 +54,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'count',
 			column: '*',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = countHandler.compile(decision, ctx, state);
 
@@ -71,7 +71,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'count',
 			column: 'id',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = countHandler.compile(decision, ctx, state);
 
@@ -87,7 +87,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'sum',
 			column: 'amount',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = sumHandler.compile(decision, ctx, state);
 
@@ -102,7 +102,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'avg',
 			column: 'price',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = avgHandler.compile(decision, ctx, state);
 
@@ -117,7 +117,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'min',
 			column: 'price',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = minHandler.compile(decision, ctx, state);
 
@@ -132,7 +132,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'max',
 			column: 'price',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = maxHandler.compile(decision, ctx, state);
 
@@ -148,7 +148,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			function: 'sum',
 			column: 'revenue',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = genericAggregateHandler.compile(decision, ctx, state);
 
@@ -163,7 +163,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 			type: 'countDistinct',
 			column: 'user_id',
 			filterWhere,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 
 		const node = countDistinctHandler.compile(decision, ctx, state);
 
@@ -174,7 +174,7 @@ describe('aggregate handler: FILTER (WHERE ...) injection', () => {
 
 	it('countHandler: COUNT(*) without filter does NOT produce agg_filter', () => {
 		const state = createCompilerState();
-		const decision = { type: 'count', column: '*' } as Decision;
+		const decision = { type: 'count', column: '*' } as CompilerDecision;
 
 		const node = countHandler.compile(decision, ctx, state);
 

@@ -48,10 +48,12 @@ export function inferPgArrayType(
 }
 
 /**
- * Map a PostgreSQL type string (as produced by mapColumnType / mapBaseType in type-mapping.ts)
- * to the canonical base type name used in array casts.
+ * Map a type string to the canonical PostgreSQL base type name used in array casts.
+ * Accepts both PostgreSQL native types (as produced by type-mapping.ts) and
+ * ColumnType values from ModelIR (e.g. 'integer', 'string', 'datetime').
  *
- * E.g. "INTEGER" → "int4", "VARCHAR(255)" → "text", "BOOLEAN" → "bool"
+ * E.g. "INTEGER" → "int4", "VARCHAR(255)" → "text", "BOOLEAN" → "bool",
+ *      "string" → "text", "datetime" → "timestamptz", "number" → "float8"
  */
 function mapToPgBaseType(pgType: string): string {
 	// Strip length/precision qualifiers like VARCHAR(255), NUMERIC(10,2)
@@ -60,6 +62,16 @@ function mapToPgBaseType(pgType: string): string {
 		.replace(/\(.*\)/, '')
 		.trim();
 	switch (normalized) {
+		// ColumnType aliases (lowercase ColumnType values from ModelIR)
+		case 'STRING':
+			return 'text';
+		case 'NUMBER':
+			return 'float8';
+		case 'DATETIME':
+			return 'timestamptz';
+		case 'TIME':
+			return 'time';
+		// PostgreSQL native types
 		case 'INTEGER':
 		case 'INT':
 		case 'INT4':

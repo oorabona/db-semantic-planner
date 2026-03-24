@@ -8,6 +8,7 @@
  */
 
 import type { ColumnIR, ColumnType } from '@dbsp/types';
+import { validateDbTypeName } from '../validate.js';
 
 /**
  * Map ColumnType to PostgreSQL data type string.
@@ -21,7 +22,7 @@ import type { ColumnIR, ColumnType } from '@dbsp/types';
 export function mapColumnType(col: ColumnIR): string {
 	// Prefer original DB type if available (preserves precision/scale)
 	if (col.originalDbType) {
-		return col.originalDbType.toUpperCase();
+		return validateDbTypeName(col.originalDbType.toUpperCase()).toUpperCase();
 	}
 
 	// Auto-increment columns use SERIAL/BIGSERIAL

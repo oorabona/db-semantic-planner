@@ -5,6 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
+import type { ModelIR } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
@@ -35,6 +36,25 @@ export interface CompilerContext {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 	/** Alias of the outer (parent) query — used for FieldRef scope:'outer' resolution in EXISTS subqueries */
 	readonly outerAlias?: string;
+	/**
+	 * Optional callback to compile a QueryIntent into an AST Node (SubLink subselect).
+	 * Set by PlanCompiler when compiling selectCustomExpression — enables SubqueryExpressionIntent
+	 * to embed a fully compiled sub-SELECT into the parent SELECT column list.
+	 *
+	 * @param query - The inner QueryIntent to compile
+	 * @param paramOffset - Current outer paramIndex; inner $N are renumbered by this offset
+	 * @returns The compiled SelectStmt AST node and the inner parameters
+	 */
+	readonly compileSubquery?: (
+		query: import('@dbsp/types').QueryIntent,
+		paramOffset: number,
+	) => { ast: Node; parameters: readonly unknown[] };
+	/**
+	 * Optional ModelIR for type-aware parameter casting.
+	 * When provided, WHERE comparisons emit `$N::type` to eliminate
+	 * PostgreSQL type inference ambiguity for nullable columns.
+	 */
+	readonly model?: ModelIR;
 }
 
 // ============================================================================
@@ -75,9 +95,10 @@ export function createCompilerState(): CompilerState {
 // ============================================================================
 
 /**
- * Base decision interface matching core's PlanDecision structure.
+ * Primary adapter-local decision type for handler consumption.
+ * Matches core's PlanDecision structure.
  */
-export interface Decision {
+export interface CompilerDecision {
 	readonly type: string;
 	readonly table?: string;
 	readonly column?: string;
@@ -94,7 +115,7 @@ export interface Decision {
 	readonly targetTable?: string;
 	readonly function?: string;
 	readonly args?: readonly unknown[];
-	readonly conditions?: readonly Decision[];
+	readonly conditions?: readonly CompilerDecision[];
 	readonly columns?: readonly string[];
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
@@ -104,12 +125,12 @@ export interface Decision {
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
 	readonly relationName?: string;
-	readonly include?: readonly Decision[];
+	readonly include?: readonly CompilerDecision[];
 	// Relation metadata (for json_agg nesting)
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
-	readonly children?: readonly Decision[];
+	readonly children?: readonly CompilerDecision[];
 	// Window function specific
 	readonly partition?: readonly string[];
 	readonly orderBy?: readonly { column: string; direction?: 'ASC' | 'DESC' }[];
@@ -146,7 +167,10 @@ export interface Decision {
 	readonly filterWhere?: import('@pgsql/types').Node;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
 	readonly expressionIntent?: unknown;
+	// LIKE escape character
+	readonly escape?: string;
 }
+
 
 // ============================================================================
 // Handler Interfaces
@@ -169,7 +193,7 @@ export interface WhereHandler {
 	 * @returns PostgreSQL AST node for the condition
 	 */
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -180,7 +204,7 @@ export interface WhereHandler {
  * Dispatcher for recursive WHERE compilation.
  */
 export type WhereDispatcher = (
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 	state: CompilerState,
 ) => Node;
@@ -200,7 +224,7 @@ export interface ExpressionHandler {
 	 * @param state Mutable compiler state
 	 * @returns PostgreSQL AST node for the expression
 	 */
-	compile(decision: Decision, ctx: CompilerContext, state: CompilerState): Node;
+	compile(decision: CompilerDecision, ctx: CompilerContext, state: CompilerState): Node;
 }
 
 /**
@@ -219,7 +243,7 @@ export interface IncludeHandler {
 	 * @returns Object with modifications to apply
 	 */
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult;

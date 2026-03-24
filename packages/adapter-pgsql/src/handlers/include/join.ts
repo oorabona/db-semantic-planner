@@ -23,8 +23,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
@@ -71,7 +71,7 @@ export const joinIncludeHandler: IncludeHandler = {
 	strategy: 'join',
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): IncludeResult {

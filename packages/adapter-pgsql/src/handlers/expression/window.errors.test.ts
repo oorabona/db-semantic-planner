@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	firstValueHandler,
@@ -36,7 +36,7 @@ describe('lagHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lag' } as Decision;
+		const decision = { type: 'lag' } as CompilerDecision;
 		expect(() => lagHandler.compile(decision, ctx, state)).toThrow(
 			'LAG requires a column',
 		);
@@ -47,7 +47,7 @@ describe('lagHandler errors', () => {
 		const decision = {
 			type: 'lag',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => lagHandler.compile(decision, ctx, state)).toThrow(
 			'LAG requires a column',
 		);
@@ -63,7 +63,7 @@ describe('leadHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lead' } as Decision;
+		const decision = { type: 'lead' } as CompilerDecision;
 		expect(() => leadHandler.compile(decision, ctx, state)).toThrow(
 			'LEAD requires a column',
 		);
@@ -74,7 +74,7 @@ describe('leadHandler errors', () => {
 		const decision = {
 			type: 'lead',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => leadHandler.compile(decision, ctx, state)).toThrow(
 			'LEAD requires a column',
 		);
@@ -90,7 +90,7 @@ describe('firstValueHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'firstValue' } as Decision;
+		const decision = { type: 'firstValue' } as CompilerDecision;
 		expect(() => firstValueHandler.compile(decision, ctx, state)).toThrow(
 			'FIRST_VALUE requires a column',
 		);
@@ -101,7 +101,7 @@ describe('firstValueHandler errors', () => {
 		const decision = {
 			type: 'firstValue',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => firstValueHandler.compile(decision, ctx, state)).toThrow(
 			'FIRST_VALUE requires a column',
 		);
@@ -117,7 +117,7 @@ describe('lastValueHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'lastValue' } as Decision;
+		const decision = { type: 'lastValue' } as CompilerDecision;
 		expect(() => lastValueHandler.compile(decision, ctx, state)).toThrow(
 			'LAST_VALUE requires a column',
 		);
@@ -128,7 +128,7 @@ describe('lastValueHandler errors', () => {
 		const decision = {
 			type: 'lastValue',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => lastValueHandler.compile(decision, ctx, state)).toThrow(
 			'LAST_VALUE requires a column',
 		);
@@ -144,7 +144,7 @@ describe('genericWindowHandler errors', () => {
 
 	it('throws when function name is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'window' } as Decision;
+		const decision = { type: 'window' } as CompilerDecision;
 		expect(() => genericWindowHandler.compile(decision, ctx, state)).toThrow(
 			'Window function requires function name',
 		);
@@ -155,7 +155,7 @@ describe('genericWindowHandler errors', () => {
 		const decision = {
 			type: 'window',
 			function: '',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => genericWindowHandler.compile(decision, ctx, state)).toThrow(
 			'Window function requires function name',
 		);
