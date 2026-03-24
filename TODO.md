@@ -9,9 +9,8 @@
   - [x] ✅ 30 tests covering all 16 WHERE kinds including EXISTS/notExists/subquery/relationFilter/expression (2026-03-24)
   - [x] ✅ Phase 2: Remove all try-catch fallbacks from compileUpdate/compileDelete; fix 5 bugs (P1-1 mixed OR, P1-2 convertDottedFields, P2-3 subquery params, P2-4 existsWrap WHERE target, P2-5 range dataType); 10 regression tests in compile-where-regression.test.ts (2026-03-24)
   - [x] ✅ Phase 3: Delete convertWhereCondition/convertWhere, replace all callers with whereRaw bridge pattern; add whereRaw/havingRaw to whereDecisionTypes filter in adapter-compiler-select.ts to prevent double-compilation; 2905 adapter tests pass (2026-03-24)
-  - [ ] 🔧 [Adapter] Delete deprecated functions (convertWhereToDecisions, mapToHandlerDecision) — Priority: M
+  - [x] ✅ Delete deprecated functions (convertWhereToDecisions, mapToHandlerDecision) — already deleted (2026-03-24)
   - [ ] 🔧 [Adapter] Extract orderBy/groupBy/distinct into compile-clauses.ts — Priority: L
-  - [ ] 🔧 [Adapter] Remove toJoinIncludeDecision dependency on convertWhereToDecisions (1 remaining caller) — Priority: M
 
 - [x] ✅ **INCLUDE-WHERE-EXPR** [Adapter] Fix `op().eq()` expressions in `include({ where })` silently dropped — `convertWhereToDecisions()` in `plan-decision-extractor.ts` now handles `case 'expression'` (same as `convertWhereCondition`); 5 regression tests in `include-where-regex.test.ts` (2026-03-24)
 

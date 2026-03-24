@@ -29,6 +29,26 @@ import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
 
 // ============================================================================
+// Module-level constants
+// ============================================================================
+
+/** Operator name → SQL operator string. Shared by expression and subquery WHERE handlers. */
+const OP_MAP: Record<string, string> = {
+	eq: '=',
+	neq: '!=',
+	gt: '>',
+	gte: '>=',
+	lt: '<',
+	lte: '<=',
+	'=': '=',
+	'!=': '!=',
+	'>': '>',
+	'>=': '>=',
+	'<': '<',
+	'<=': '<=',
+};
+
+// ============================================================================
 // Public: WhereCompilerCtx
 // ============================================================================
 
@@ -321,20 +341,6 @@ export function compileWhereIntent(
 		ctx.paramState.parameters.push(intent.value);
 		const rightNode = createParamRef(idx);
 
-		const OP_MAP: Record<string, string> = {
-			eq: '=',
-			neq: '!=',
-			gt: '>',
-			gte: '>=',
-			lt: '<',
-			lte: '<=',
-			'=': '=',
-			'!=': '!=',
-			'>': '>',
-			'>=': '>=',
-			'<': '<',
-			'<=': '<=',
-		};
 		const sqlOp = OP_MAP[intent.operator] ?? '=';
 		return binaryExpr(sqlOp, leftNode, rightNode);
 	}
@@ -362,20 +368,6 @@ export function compileWhereIntent(
 		const sourceAlias = ctx.rootTable;
 		const leftOperand = columnRef(field, sourceAlias, undefined, ctx.naming);
 
-		const OP_MAP: Record<string, string> = {
-			eq: '=',
-			neq: '!=',
-			gt: '>',
-			gte: '>=',
-			lt: '<',
-			lte: '<=',
-			'=': '=',
-			'!=': '!=',
-			'>': '>',
-			'>=': '>=',
-			'<': '<',
-			'<=': '<=',
-		};
 		const sqlOp = OP_MAP[operator] ?? '=';
 
 		// Build: left OP (subquery) using SubLink with EXPR_SUBLINK

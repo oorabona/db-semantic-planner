@@ -334,11 +334,6 @@ export function compileUpdate(
 	// appended at positions ($N+1, …) — preserving the SET-before-WHERE ordering
 	// that PostgreSQL UPDATE requires.
 	// The pre-built WHERE Node is then injected into the returned UpdateStmt.
-	//
-	// FALLBACK: if compileWhereIntent throws (unsupported kind), fall back to the
-	// legacy whereIntentAsDecision path which passes WHERE as a Decision[] to the
-	// mutation compiler inside a single compileUpdateMutation call.
-
 	// PRIMARY PATH: compile SET params first (no WHERE) so WHERE params get
 	// correct $N positions. Then compile WHERE and inject into the UpdateStmt AST.
 	const configNoWhere: UpdateConfig = {
@@ -353,7 +348,13 @@ export function compileUpdate(
 
 	const ast = compileUpdateMutation(configNoWhere, ctx, state);
 
-	if (intent.where) {
+	// Resolve exists/notExists relation name → real table name before compiling.
+	// The mutation path bypasses the planner, so we must resolve targetTable here.
+	const resolvedWhere = intent.where
+		? resolveExistsIntent(intent.where, intent.table, deps)
+		: undefined;
+
+	if (resolvedWhere) {
 		const whereCtx: WhereCompilerCtx = {
 			rootTable: intent.table,
 			aliases: new Map(),
@@ -366,7 +367,7 @@ export function compileUpdate(
 		};
 
 		// Append WHERE params to state (they start after SET params).
-		const whereNode = compileWhereIntent(intent.where, whereCtx);
+		const whereNode = compileWhereIntent(resolvedWhere, whereCtx);
 		injectWhereClause(ast, 'UpdateStmt', whereNode);
 	}
 
