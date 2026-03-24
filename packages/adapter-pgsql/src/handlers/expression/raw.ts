@@ -15,7 +15,7 @@ import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -26,20 +26,9 @@ import type {
  * Only use for expressions that cannot be represented in the planner.
  */
 function buildRawExpression(sql: string): Node {
-	// Return as a raw SQL string wrapped in a TypeCast
-	// This tells the deparser to output the SQL as-is
-	return {
-		TypeCast: {
-			arg: {
-				A_Const: {
-					sval: { sval: sql },
-				},
-			},
-			typeName: {
-				names: [{ String: { sval: 'sql' } }],
-			},
-		},
-	};
+	// Custom RawSQL node — handled by our deparser as verbatim SQL passthrough.
+	// No WASM parser dependency — the deparser outputs the SQL string as-is.
+	return { RawSQL: { sql } } as unknown as Node;
 }
 
 /**
@@ -61,11 +50,15 @@ export const rawHandler: ExpressionHandler = {
 	types: ['raw', 'RAW', 'rawSql', 'rawExpression'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
-		const sql = decision.value;
+		// SQL may arrive via args[0] (from handleRawExpression / selectFunction path)
+		// or via value (legacy direct CompilerDecision construction).
+		const sql =
+			(Array.isArray(decision.args) ? decision.args[0] : undefined) ??
+			decision.value;
 
 		if (typeof sql !== 'string') {
 			throw new Error('Raw expression requires a string SQL value');
@@ -99,7 +92,7 @@ export const sqlFunctionHandler: ExpressionHandler = {
 	types: ['sqlFunction', 'fn', 'func'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		_ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -155,7 +148,7 @@ export const literalHandler: ExpressionHandler = {
 	types: ['literal', 'lit', 'const'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		_ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

@@ -67,6 +67,8 @@ export interface WhereLikeIntent {
 	readonly pattern: string;
 	/** Case-insensitive matching */
 	readonly caseInsensitive?: boolean;
+	/** Escape character for LIKE pattern (e.g. '\\' to escape _ and %) */
+	readonly escape?: string;
 }
 
 /**
@@ -170,6 +172,18 @@ export interface WhereExistsIntent {
 	 * When present, generates a recursive CTE instead of simple EXISTS.
 	 */
 	readonly recursive?: RecursiveExistsOptions;
+	/**
+	 * Optional JOIN declarations inside the EXISTS subquery.
+	 * Keys are relation names (used as aliases), values specify join type.
+	 * Enables filtering on joined tables inside the subquery.
+	 *
+	 * @example
+	 * exists('callers', {
+	 *   include: { callerFile: { join: 'inner' } },
+	 *   where: eq('callerFile.project_id', projectId)
+	 * })
+	 */
+	readonly include?: Readonly<Record<string, { join?: 'inner' | 'left' }>>;
 }
 
 /**
@@ -190,6 +204,18 @@ export interface WhereNotExistsIntent {
 	 * When present, generates a recursive CTE instead of simple NOT EXISTS.
 	 */
 	readonly recursive?: RecursiveExistsOptions;
+	/**
+	 * Optional JOIN declarations inside the NOT EXISTS subquery.
+	 * Keys are relation names (used as aliases), values specify join type.
+	 * Enables filtering on joined tables inside the subquery.
+	 *
+	 * @example
+	 * notExists('callers', {
+	 *   include: { callerFile: { join: 'inner' } },
+	 *   where: eq('callerFile.project_id', projectId)
+	 * })
+	 */
+	readonly include?: Readonly<Record<string, { join?: 'inner' | 'left' }>>;
 }
 
 /**

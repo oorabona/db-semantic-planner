@@ -281,3 +281,43 @@ export function sanitizeForDisplay(value: string): string {
 	// Replace control characters with placeholders
 	return value.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 100); // Truncate for display
 }
+
+
+/** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
+const SAFE_TYPE_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;
+
+/**
+ * Validate a raw SQL expression used in DDL contexts (defaults, policy USING/CHECK).
+ * Rejects injection vectors: semicolons, line-comment markers, block-comment markers.
+ *
+ * @security Called before any ModelIR-sourced string is interpolated into DDL.
+ * @param sql The raw SQL expression string to validate.
+ * @param context Human-readable context label for the error message.
+ * @throws Error if the expression contains forbidden characters.
+ */
+export function validateSqlExpression(sql: string, context: string): void {
+	if (/[;]|--|\/\*|\$\$|\\/.test(sql)) {
+		throw new Error(
+			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, $, \\). Value: "${sql}"`,
+		);
+	}
+}
+
+/**
+ * Validate a PostgreSQL type name coming from `originalDbType` (populated by introspection).
+ * Rejects strings that do not match the PostgreSQL type-name grammar to prevent injection.
+ *
+ * @security Called before any originalDbType value is interpolated into DDL column types.
+ * @param type The type name string to validate.
+ * @returns The original string (unchanged) when valid.
+ * @throws Error if the type name does not match the safe pattern.
+ */
+export function validateDbTypeName(type: string): string {
+	if (!SAFE_TYPE_PATTERN.test(type)) {
+		throw new Error(
+			`Unsafe database type name: "${type}". Must match PostgreSQL type name rules.`,
+		);
+	}
+	return type;
+}
+

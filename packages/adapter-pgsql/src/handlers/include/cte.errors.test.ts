@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { cteIncludeHandler } from './cte.js';
 
@@ -20,7 +20,7 @@ function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
 	} as CompilerContext;
 }
 
-function buildDecision(overrides: Record<string, unknown> = {}): Decision {
+function buildDecision(overrides: Record<string, unknown> = {}): CompilerDecision {
 	return {
 		type: 'includeStrategy',
 		relation: 'posts',
@@ -29,7 +29,7 @@ function buildDecision(overrides: Record<string, unknown> = {}): Decision {
 		targetColumn: 'user_id',
 		strategy: 'cte',
 		...overrides,
-	} as Decision;
+	} as CompilerDecision;
 }
 
 // ============================================================================

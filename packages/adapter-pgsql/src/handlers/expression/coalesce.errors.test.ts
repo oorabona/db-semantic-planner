@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	coalesceHandler,
@@ -34,7 +34,7 @@ describe('coalesceHandler errors', () => {
 
 	it('throws when no column, no args, no defaultValue', () => {
 		const state = createCompilerState();
-		const decision = { type: 'coalesce' } as Decision;
+		const decision = { type: 'coalesce' } as CompilerDecision;
 		expect(() => coalesceHandler.compile(decision, ctx, state)).toThrow(
 			'COALESCE requires at least one argument',
 		);
@@ -45,7 +45,7 @@ describe('coalesceHandler errors', () => {
 		const decision = {
 			type: 'coalesce',
 			args: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => coalesceHandler.compile(decision, ctx, state)).toThrow(
 			'COALESCE requires at least one argument',
 		);
@@ -53,7 +53,7 @@ describe('coalesceHandler errors', () => {
 
 	it('succeeds when only column is provided', () => {
 		const state = createCompilerState();
-		const decision = { type: 'coalesce', column: 'name' } as Decision;
+		const decision = { type: 'coalesce', column: 'name' } as CompilerDecision;
 		expect(() => coalesceHandler.compile(decision, ctx, state)).not.toThrow();
 	});
 
@@ -62,7 +62,7 @@ describe('coalesceHandler errors', () => {
 		const decision = {
 			type: 'coalesce',
 			value: 'fallback',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => coalesceHandler.compile(decision, ctx, state)).not.toThrow();
 	});
 
@@ -71,7 +71,7 @@ describe('coalesceHandler errors', () => {
 		const decision = {
 			type: 'coalesce',
 			args: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => coalesceHandler.compile(decision, ctx, state)).toThrow(
 			'COALESCE requires at least one argument',
 		);
@@ -87,7 +87,7 @@ describe('nullIfHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'nullIf', value: 'x' } as Decision;
+		const decision = { type: 'nullIf', value: 'x' } as CompilerDecision;
 		expect(() => nullIfHandler.compile(decision, ctx, state)).toThrow(
 			'NULLIF requires a column',
 		);
@@ -99,7 +99,7 @@ describe('nullIfHandler errors', () => {
 			type: 'nullIf',
 			column: '',
 			value: 'x',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => nullIfHandler.compile(decision, ctx, state)).toThrow(
 			'NULLIF requires a column',
 		);
@@ -107,7 +107,7 @@ describe('nullIfHandler errors', () => {
 
 	it('throws when value is undefined', () => {
 		const state = createCompilerState();
-		const decision = { type: 'nullIf', column: 'status' } as Decision;
+		const decision = { type: 'nullIf', column: 'status' } as CompilerDecision;
 		expect(() => nullIfHandler.compile(decision, ctx, state)).toThrow(
 			'NULLIF requires a comparison value',
 		);
@@ -115,7 +115,7 @@ describe('nullIfHandler errors', () => {
 
 	it('throws column error first when both column and value are missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'nullIf' } as Decision;
+		const decision = { type: 'nullIf' } as CompilerDecision;
 		expect(() => nullIfHandler.compile(decision, ctx, state)).toThrow(
 			'NULLIF requires a column',
 		);
@@ -127,7 +127,7 @@ describe('nullIfHandler errors', () => {
 			type: 'nullIf',
 			column: 'status',
 			value: null,
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => nullIfHandler.compile(decision, ctx, state)).not.toThrow();
 	});
 });
@@ -141,7 +141,7 @@ describe('greatestHandler errors', () => {
 
 	it('throws when args is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'greatest' } as Decision;
+		const decision = { type: 'greatest' } as CompilerDecision;
 		expect(() => greatestHandler.compile(decision, ctx, state)).toThrow(
 			'GREATEST requires at least one argument',
 		);
@@ -152,7 +152,7 @@ describe('greatestHandler errors', () => {
 		const decision = {
 			type: 'greatest',
 			args: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => greatestHandler.compile(decision, ctx, state)).toThrow(
 			'GREATEST requires at least one argument',
 		);
@@ -163,7 +163,7 @@ describe('greatestHandler errors', () => {
 		const decision = {
 			type: 'greatest',
 			args: 'not-an-array',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => greatestHandler.compile(decision, ctx, state)).toThrow(
 			'GREATEST requires at least one argument',
 		);
@@ -174,7 +174,7 @@ describe('greatestHandler errors', () => {
 		const decision = {
 			type: 'greatest',
 			args: null,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => greatestHandler.compile(decision, ctx, state)).toThrow(
 			'GREATEST requires at least one argument',
 		);
@@ -190,7 +190,7 @@ describe('leastHandler errors', () => {
 
 	it('throws when args is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'least' } as Decision;
+		const decision = { type: 'least' } as CompilerDecision;
 		expect(() => leastHandler.compile(decision, ctx, state)).toThrow(
 			'LEAST requires at least one argument',
 		);
@@ -201,7 +201,7 @@ describe('leastHandler errors', () => {
 		const decision = {
 			type: 'least',
 			args: [],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => leastHandler.compile(decision, ctx, state)).toThrow(
 			'LEAST requires at least one argument',
 		);
@@ -212,7 +212,7 @@ describe('leastHandler errors', () => {
 		const decision = {
 			type: 'least',
 			args: 42,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => leastHandler.compile(decision, ctx, state)).toThrow(
 			'LEAST requires at least one argument',
 		);
@@ -223,7 +223,7 @@ describe('leastHandler errors', () => {
 		const decision = {
 			type: 'least',
 			args: null,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => leastHandler.compile(decision, ctx, state)).toThrow(
 			'LEAST requires at least one argument',
 		);

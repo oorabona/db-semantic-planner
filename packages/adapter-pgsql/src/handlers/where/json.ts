@@ -7,7 +7,7 @@ import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { buildColumnRef, compileValue } from './utils.js';
@@ -19,7 +19,7 @@ export const jsonContainsHandler: WhereHandler = {
 	operators: ['jsonContains', 'jsonContainedBy'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -50,7 +50,7 @@ export const jsonExistsHandler: WhereHandler = {
 	operators: ['jsonExists'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -81,7 +81,7 @@ export const jsonComparisonHandler: WhereHandler = {
 	operators: ['jsonComparison'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

@@ -21,7 +21,7 @@ import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -34,7 +34,7 @@ type FilterMode = 'some' | 'none' | 'every' | 'is' | 'isNot';
 /**
  * Determine the filter mode from the decision
  */
-function getFilterMode(decision: Decision): FilterMode {
+function getFilterMode(decision: CompilerDecision): FilterMode {
 	const operator = decision.operator;
 	if (operator === 'some' || operator === 'exists') return 'some';
 	if (operator === 'none' || operator === 'notExists') return 'none';
@@ -50,7 +50,7 @@ function getFilterMode(decision: Decision): FilterMode {
  * more efficient for single-record relationships (belongsTo, hasOne)
  */
 function buildJoinFilter(
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
@@ -135,7 +135,7 @@ export const relationFilterHandler: WhereHandler = {
 	operators: ['relationFilter', 'relation', 'is', 'isNot'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -146,13 +146,13 @@ export const relationFilterHandler: WhereHandler = {
 		// These are registered separately and will be dispatched by the main dispatcher
 		if (mode === 'some' || mode === 'none' || mode === 'every') {
 			// Transform to EXISTS-style decision
-			const existsDecision: Decision = {
+			const existsCompilerDecision: CompilerDecision = {
 				...decision,
 				type: 'exists',
 				operator:
 					mode === 'some' ? 'exists' : mode === 'none' ? 'notExists' : 'every',
 			};
-			return dispatch(existsDecision, ctx, state);
+			return dispatch(existsCompilerDecision, ctx, state);
 		}
 
 		// For 'is' or 'isNot' - use JOIN-based filtering
@@ -179,17 +179,17 @@ export const hasRelationHandler: WhereHandler = {
 	operators: ['has', 'hasRelation'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
 	): Node {
-		const existsDecision: Decision = {
+		const existsCompilerDecision: CompilerDecision = {
 			...decision,
 			type: 'exists',
 			operator: 'exists',
 		};
-		return dispatch(existsDecision, ctx, state);
+		return dispatch(existsCompilerDecision, ctx, state);
 	},
 };
 
@@ -200,16 +200,16 @@ export const hasNoRelationHandler: WhereHandler = {
 	operators: ['hasNo', 'hasNoRelation'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
 	): Node {
-		const notExistsDecision: Decision = {
+		const notExistsCompilerDecision: CompilerDecision = {
 			...decision,
 			type: 'exists',
 			operator: 'notExists',
 		};
-		return dispatch(notExistsDecision, ctx, state);
+		return dispatch(notExistsCompilerDecision, ctx, state);
 	},
 };

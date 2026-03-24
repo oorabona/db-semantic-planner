@@ -9,6 +9,7 @@
  */
 
 import type { ModelIR, PlanReport } from '@dbsp/types';
+import { isSubqueryRef } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -172,6 +173,7 @@ export function mapComparisonOperator(op: string): string {
 		lte: '<=',
 		like: 'LIKE',
 		ilike: 'ILIKE',
+		isDistinctFrom: 'IS DISTINCT FROM',
 	};
 	return map[op] ?? '=';
 }
@@ -206,92 +208,8 @@ export function valueToNode(value: unknown): Node {
 /**
  * Convert a where clause AST (from intent) to PlanDecision[].
  * Handles comparison, and, or, not.
+ * @deprecated Use compileWhereIntent instead
  */
-export function convertWhereToDecisions(
-	where: unknown,
-	table: string,
-): PlanDecision[] {
-	if (!where || typeof where !== 'object') return [];
-	const w = where as Record<string, unknown>;
-
-	switch (w.kind) {
-		case 'comparison':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: w.operator as string,
-					value: w.value,
-					table,
-				},
-			];
-		case 'like':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'like',
-					value: w.pattern,
-					table,
-				},
-			];
-		case 'in':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'in',
-					value: w.values ?? w.subquery,
-					table,
-				},
-			];
-		case 'range':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: (w.operator as string) ?? 'between',
-					value: w.value,
-					table,
-				},
-			];
-		case 'null':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: w.operator as string,
-					value: null,
-					table,
-				},
-			];
-		case 'and': {
-			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
-			);
-			if (subDecisions.length === 0) return [];
-			if (subDecisions.length === 1) return subDecisions;
-			return [{ type: 'whereAnd', conditions: subDecisions }];
-		}
-		case 'or': {
-			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
-			);
-			if (subDecisions.length === 0) return [];
-			if (subDecisions.length === 1) return subDecisions;
-			return [{ type: 'whereOr', conditions: subDecisions }];
-		}
-		case 'not': {
-			const subDecisions = convertWhereToDecisions(w.condition, table);
-			if (subDecisions.length === 0) return [];
-			return [{ type: 'whereNot', conditions: subDecisions }];
-		}
-		default:
-			return [];
-	}
-}
 
 // ============================================================================
 // Decision Extractors
@@ -364,6 +282,108 @@ export function convertDottedFieldsToExists(
 /**
  * Extract EXISTS/NOT EXISTS subquery decisions from filter-strategy plan decisions.
  */
+
+/**
+ * Build nested WHERE conditions for EXISTS decisions from a where-intent object.
+ * Private equivalent of convertWhereToDecisions — extractExistsDecisions uses this
+ * directly so it does not depend on the deprecated convertWhereToDecisions export.
+ */
+function buildNestedConditions(where: unknown, table: string): PlanDecision[] {
+	if (!where || typeof where !== 'object') return [];
+	const w = where as Record<string, unknown>;
+
+	switch (w.kind) {
+		case 'comparison': {
+			const rawValue = w.value;
+			const resolvedValue = isSubqueryRef(rawValue)
+				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: (rawValue as { column: string }).column }
+				: rawValue;
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: w.operator as string,
+					value: resolvedValue,
+					table,
+				},
+			];
+		}
+		case 'like':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: 'like',
+					value: w.pattern,
+					table,
+				},
+			];
+		case 'in':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: 'in',
+					value: w.values ?? w.subquery,
+					table,
+				},
+			];
+		case 'range':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: (w.operator as string) ?? 'between',
+					value: w.value,
+					table,
+				},
+			];
+		case 'null':
+			return [
+				{
+					type: 'where',
+					column: w.field as string,
+					operator: w.operator as string,
+					value: null,
+					table,
+				},
+			];
+		case 'and': {
+			const conditions = w.conditions as unknown[];
+			const subDecisions = conditions.flatMap((c) => buildNestedConditions(c, table));
+			if (subDecisions.length === 0) return [];
+			if (subDecisions.length === 1) return subDecisions;
+			return [{ type: 'whereAnd', conditions: subDecisions }];
+		}
+		case 'or': {
+			const conditions = w.conditions as unknown[];
+			const subDecisions = conditions.flatMap((c) => buildNestedConditions(c, table));
+			if (subDecisions.length === 0) return [];
+			if (subDecisions.length === 1) return subDecisions;
+			return [{ type: 'whereOr', conditions: subDecisions }];
+		}
+		case 'not': {
+			const subDecisions = buildNestedConditions(w.condition, table);
+			if (subDecisions.length === 0) return [];
+			return [{ type: 'whereNot', conditions: subDecisions }];
+		}
+		case 'expression':
+			return [
+				{
+					type: 'where',
+					operator: 'expression',
+					expressionIntent: w.expr,
+					value: w.value,
+					subqueryOperator: w.operator as string,
+					table,
+				},
+			];
+		default:
+			return [];
+	}
+}
+
+
 export function extractExistsDecisions(
 	plan: PlanReport,
 	model?: ModelIR,
@@ -411,11 +431,13 @@ export function extractExistsDecisions(
 			);
 		});
 
-		// Build nested conditions with correct target table
+		// Build nested conditions with correct target table.
+		// Uses private buildNestedConditions so extractExistsDecisions does not
+		// depend on the deprecated convertWhereToDecisions export.
 		let conditions: PlanDecision[] | undefined;
 		if (matchingIntent?.where) {
 			// Convert nested where using the CORRECT target table
-			const nestedDecisions = convertWhereToDecisions(
+			const nestedDecisions = buildNestedConditions(
 				matchingIntent.where,
 				context.target,
 			);
@@ -449,6 +471,19 @@ export function extractExistsDecisions(
 			else if (mode === 'every') operator = 'every';
 		}
 
+		// Extract include declarations from the matching intent (JOIN inside subquery).
+		// Convert the intent's include map to a Decision[] for the EXISTS handler.
+		const includeIntent = (
+			matchingIntent as Record<string, unknown> | undefined
+		)?.include as Record<string, { join?: 'inner' | 'left' }> | undefined;
+		const includeDecisions: PlanDecision[] | undefined = includeIntent
+			? Object.entries(includeIntent).map(([rel, opts]) => ({
+					type: 'existsInclude',
+					relation: rel,
+					joinType: opts.join ?? 'inner',
+				}))
+			: undefined;
+
 		const decision: PlanDecision = {
 			type: 'where',
 			operator,
@@ -459,6 +494,8 @@ export function extractExistsDecisions(
 			...(d.choice === 'join' && { choice: 'join' }),
 			// Pass relation name for alias (self-referential tables)
 			...(context.relation && { relationName: context.relation }),
+			// Pass include declarations (JOIN inside the EXISTS subquery)
+			...(includeDecisions && { include: includeDecisions }),
 		};
 		results.push(decision);
 	}
@@ -624,7 +661,7 @@ function toJoinIncludeDecision(
 	// table's alias = relationName) to actually filter the root rows.
 	let conditions: PlanDecision[] | undefined;
 	if (includeIntent?.where) {
-		const converted = convertWhereToDecisions(
+		const converted = buildNestedConditions(
 			includeIntent.where,
 			relationName as string,
 		);

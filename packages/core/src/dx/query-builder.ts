@@ -1,6 +1,5 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
-import { ExpressionRef } from './expressions.js';
 import type { Adapter, Dump } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type {
@@ -17,13 +16,13 @@ import type {
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan } from '../planner.js';
-
 import {
 	AmbiguousRelationError,
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
 } from './errors.js';
+import { ExpressionRef } from './expressions.js';
 import {
 	and,
 	type DistinctField,
@@ -57,7 +56,14 @@ import {
 import { ResultHydrator } from './result-hydrator.js';
 import type { DefaultFilters } from './schema.js';
 import {
+	buildSetOperationIntent,
+	type QueryIntentSource,
+	type SetOperationBuilder,
+	SetOperationBuilderImpl,
+} from './set-operation-builder.js';
+import {
 	type AggregateOptions,
+	type AliasedExprColumn,
 	type ColumnSpec,
 	type CursorPaginatedResult,
 	type CursorPaginateOptions,
@@ -162,6 +168,22 @@ export class QueryBuilderImpl<TResult = unknown>
 	columns<K extends keyof TResult & string>(
 		columns: readonly K[],
 	): QueryBuilder<Pick<TResult, K>>;
+	// Overload: mixed strings + AliasedExprColumn → extends result type with aliased props
+	columns<
+		const T extends readonly (
+			| (keyof TResult & string)
+			| AliasedExprColumn<string>
+		)[],
+	>(
+		columns: T,
+	): QueryBuilder<
+		Pick<TResult, Extract<T[number], keyof TResult & string>> & {
+			[E in Extract<
+				T[number],
+				AliasedExprColumn<string>
+			> as E['__alias']]: E['__value'];
+		}
+	>;
 	// Overload: mixed columns (strings + expressions) → TResult
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
 	// Implementation
@@ -450,14 +472,16 @@ export class QueryBuilderImpl<TResult = unknown>
 			| ExpressionRef
 			| ExpressionSpec,
 		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 
-		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc')
+		// ExpressionRef form: orderBy(expr) or orderBy(expr, 'desc') or orderBy(expr, 'desc', { nulls: 'last' })
 		if (fieldOrRecordOrSpecs instanceof ExpressionRef) {
 			builder.orderByIntents.push({
 				expression: fieldOrRecordOrSpecs.intent,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}
@@ -465,17 +489,20 @@ export class QueryBuilderImpl<TResult = unknown>
 		// ExpressionSpec form: orderBy(relationColumn(...)) or other plain ExpressionSpec objects
 		if (isExpressionSpec(fieldOrRecordOrSpecs as ColumnSpec)) {
 			builder.orderByIntents.push({
-				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent }).intent,
+				expression: (fieldOrRecordOrSpecs as { intent: ExpressionIntent })
+					.intent,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}
 
-		// String form: orderBy('field') or orderBy('field', 'desc')
+		// String form: orderBy('field') or orderBy('field', 'desc') or orderBy('field', 'desc', { nulls: 'last' })
 		if (typeof fieldOrRecordOrSpecs === 'string') {
 			builder.orderByIntents.push({
 				field: fieldOrRecordOrSpecs,
 				direction: direction ?? 'asc',
+				...(options?.nulls !== undefined ? { nulls: options.nulls } : {}),
 			});
 			return builder;
 		}
@@ -516,6 +543,20 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult> {
 		const builder = this.clone();
+		// Detect ExpressionRef used as a standalone boolean WHERE predicate.
+		// op('!=', exprRef('a'), exprRef('b')) returns ExpressionRef which has __expr:true
+		// but no `kind` property, so isWhereIntent() returns false and objectToWhereIntent()
+		// would map `__expr: true` as a column field. Handle this before the WhereIntent check.
+		if (condition instanceof ExpressionRef) {
+			// Wrap the expression intent in a WhereExpressionIntent with no value/operator.
+			// The WHERE handler detects this and emits the expression node directly.
+			const whereExpr = {
+				kind: 'expression',
+				expr: condition.intent,
+			} as unknown as WhereIntent;
+			builder.whereIntents.push(whereExpr);
+			return builder;
+		}
 		// Convert object filter to WhereIntent if needed
 		const intent = isWhereIntent(condition)
 			? condition
@@ -1845,6 +1886,94 @@ export class QueryBuilderImpl<TResult = unknown>
 	 *   .all();
 	 * ```
 	 */
+	// --------------------------------------------------------------------------
+	// Set operations (UNION / INTERSECT / EXCEPT)
+	// --------------------------------------------------------------------------
+
+	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'union',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	unionAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'union',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	intersect(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'intersect',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	intersectAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'intersect',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	except(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'except',
+				false,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
+	exceptAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult> {
+		return new SetOperationBuilderImpl(
+			buildSetOperationIntent(
+				'except',
+				true,
+				this,
+				other as unknown as QueryIntentSource,
+			),
+			this.model,
+			this.adapter,
+			this.schemaName,
+		);
+	}
+
 	withoutDefaultFilters(): QueryBuilder<TResult> {
 		const builder = this.clone();
 		builder.skipDefaultFilters = true;

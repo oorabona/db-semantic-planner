@@ -18,7 +18,6 @@ import type {
 import type { PlanOptions, PlanReport } from '../planner.js';
 import type { ExpressionRef } from './expressions.js';
 import type { DistinctField } from './filters.js';
-import type { ExpressionSpec } from './types.js';
 import type { WhereFilter } from './object-filter.js';
 import type {
 	CursorPaginatedResult,
@@ -27,9 +26,12 @@ import type {
 	PaginateOptions,
 	StreamOptions,
 } from './pagination-types.js';
+import type { SetOperationBuilder } from './set-operation-builder.js';
 import type {
 	AggregateOptions,
+	AliasedExprColumn,
 	ColumnSpec,
+	ExpressionSpec,
 	IncludeOptionsWithRecursive,
 	OrderByRecord,
 	OrderBySpec,
@@ -130,6 +132,21 @@ export interface QueryBuilder<TResult = unknown> {
 	columns<K extends keyof TResult & string>(
 		columns: readonly K[],
 	): QueryBuilder<Pick<TResult, K>>;
+	columns<
+		const T extends readonly (
+			| (keyof TResult & string)
+			| AliasedExprColumn<string>
+		)[],
+	>(
+		columns: T,
+	): QueryBuilder<
+		Pick<TResult, Extract<T[number], keyof TResult & string>> & {
+			[E in Extract<
+				T[number],
+				AliasedExprColumn<string>
+			> as E['__alias']]: E['__value'];
+		}
+	>;
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
 
 	/**
@@ -417,11 +434,23 @@ export interface QueryBuilder<TResult = unknown> {
 	 *   .all();
 	 * ```
 	 */
-	orderBy(field: string, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(
+		field: string,
+		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
+	): QueryBuilder<TResult>;
 	orderBy(fields: OrderByRecord): QueryBuilder<TResult>;
 	orderBy(specs: readonly OrderBySpec[]): QueryBuilder<TResult>;
-	orderBy(expr: ExpressionRef, direction?: SortDirection): QueryBuilder<TResult>;
-	orderBy(expr: ExpressionSpec, direction?: SortDirection): QueryBuilder<TResult>;
+	orderBy(
+		expr: ExpressionRef,
+		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
+	): QueryBuilder<TResult>;
+	orderBy(
+		expr: ExpressionSpec,
+		direction?: SortDirection,
+		options?: { nulls?: import('./types.js').NullsPosition },
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Limit the number of results returned.
@@ -569,6 +598,88 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	withoutDefaultFilters(): QueryBuilder<TResult>;
+
+	/**
+	 * Combine with another query using UNION (deduplicates rows).
+	 *
+	 * Both queries must select compatible columns.
+	 *
+	 * @param other - The query to union with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('employees')
+	 *   .union(orm.select('contractors'))
+	 *   .all();
+	 * // SQL: (SELECT ...) UNION (SELECT ...)
+	 * ```
+	 */
+	union(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using UNION ALL (keeps duplicate rows).
+	 *
+	 * @param other - The query to union with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('employees')
+	 *   .unionAll(orm.select('contractors'))
+	 *   .all();
+	 * // SQL: (SELECT ...) UNION ALL (SELECT ...)
+	 * ```
+	 */
+	unionAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using INTERSECT (rows present in both).
+	 *
+	 * @param other - The query to intersect with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('active_users')
+	 *   .intersect(orm.select('verified_users'))
+	 *   .all();
+	 * // SQL: (SELECT ...) INTERSECT (SELECT ...)
+	 * ```
+	 */
+	intersect(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using INTERSECT ALL (rows present in both, with duplicates).
+	 *
+	 * @param other - The query to intersect with
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 */
+	intersectAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using EXCEPT (rows in this query but not in other).
+	 *
+	 * @param other - The query to subtract
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const result = await orm.select('all_users')
+	 *   .except(orm.select('banned_users'))
+	 *   .all();
+	 * // SQL: (SELECT ...) EXCEPT (SELECT ...)
+	 * ```
+	 */
+	except(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
+
+	/**
+	 * Combine with another query using EXCEPT ALL (rows in this query but not in other, with duplicates).
+	 *
+	 * @param other - The query to subtract
+	 * @returns A SetOperationBuilder for further chaining or execution
+	 */
+	exceptAll(other: QueryBuilder<TResult>): SetOperationBuilder<TResult>;
 
 	/**
 	 * Generate the execution plan for this query.

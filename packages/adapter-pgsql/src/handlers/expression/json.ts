@@ -8,7 +8,7 @@ import { columnRef } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 import { compileValue } from '../where/utils.js';
@@ -21,7 +21,7 @@ export const jsonExtractHandler: ExpressionHandler = {
 	types: ['jsonExtract'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -62,7 +62,7 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 	types: ['jsonPathExtract'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

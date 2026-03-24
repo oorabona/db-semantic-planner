@@ -9,7 +9,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { buildColumnRef } from './utils.js';
@@ -23,7 +23,7 @@ export const betweenHandler: WhereHandler = {
 	operators: ['between'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

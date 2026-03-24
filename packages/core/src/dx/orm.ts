@@ -21,6 +21,7 @@ import type {
 	Schema,
 	SchemaDefinition,
 } from './schema.js';
+import { createTablesProxy } from './table-ref-factory.js';
 import type { OrmInstance } from './types.js';
 
 // ============================================================================
@@ -266,6 +267,13 @@ export function createOrm<T extends SchemaDefinition>(
 		? getHookStore(hookManager.freeze())
 		: undefined;
 
+	// DX-040-SURFACE: Build tables proxy for type-safe table access
+	// Use schema's pre-built proxy if available, otherwise build from model
+	const tablesProxy: object =
+		schemaObj && 'tables' in schemaObj
+			? (schemaObj.tables as object)
+			: createTablesProxy(model, model.tables ? [...model.tables.keys()] : []);
+
 	// Create ORM instance with ModelIR
 	// Cast to InferDB<T> since createOrmInstance uses internal types
 	return createOrmInstance(
@@ -280,5 +288,7 @@ export function createOrm<T extends SchemaDefinition>(
 		defaultFilters,
 		frozenHookStore,
 		onHookError,
-	) as OrmInstance<InferDB<T>>;
+		undefined, // inTransaction
+		tablesProxy,
+	) as unknown as OrmInstance<InferDB<T>>;
 }

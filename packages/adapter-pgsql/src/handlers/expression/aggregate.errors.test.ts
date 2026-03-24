@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
 	avgHandler,
@@ -37,7 +37,7 @@ describe('countDistinctHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'countDistinct' } as Decision;
+		const decision = { type: 'countDistinct' } as CompilerDecision;
 		expect(() => countDistinctHandler.compile(decision, ctx, state)).toThrow(
 			'COUNT DISTINCT requires a column',
 		);
@@ -48,7 +48,7 @@ describe('countDistinctHandler errors', () => {
 		const decision = {
 			type: 'countDistinct',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => countDistinctHandler.compile(decision, ctx, state)).toThrow(
 			'COUNT DISTINCT requires a column',
 		);
@@ -64,7 +64,7 @@ describe('sumHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'sum' } as Decision;
+		const decision = { type: 'sum' } as CompilerDecision;
 		expect(() => sumHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate sum requires a column',
 		);
@@ -75,7 +75,7 @@ describe('sumHandler errors', () => {
 		const decision = {
 			type: 'sum',
 			column: undefined,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => sumHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate sum requires a column',
 		);
@@ -91,7 +91,7 @@ describe('avgHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'avg' } as Decision;
+		const decision = { type: 'avg' } as CompilerDecision;
 		expect(() => avgHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate avg requires a column',
 		);
@@ -107,7 +107,7 @@ describe('minHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'min' } as Decision;
+		const decision = { type: 'min' } as CompilerDecision;
 		expect(() => minHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate min requires a column',
 		);
@@ -123,7 +123,7 @@ describe('maxHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'max' } as Decision;
+		const decision = { type: 'max' } as CompilerDecision;
 		expect(() => maxHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate max requires a column',
 		);
@@ -139,7 +139,7 @@ describe('genericAggregateHandler errors', () => {
 
 	it('throws when function name is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'aggregate' } as Decision;
+		const decision = { type: 'aggregate' } as CompilerDecision;
 		expect(() => genericAggregateHandler.compile(decision, ctx, state)).toThrow(
 			'Generic aggregate requires function name',
 		);
@@ -150,7 +150,7 @@ describe('genericAggregateHandler errors', () => {
 		const decision = {
 			type: 'aggregate',
 			function: '',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		expect(() => genericAggregateHandler.compile(decision, ctx, state)).toThrow(
 			'Generic aggregate requires function name',
 		);
@@ -161,7 +161,7 @@ describe('genericAggregateHandler errors', () => {
 		const decision = {
 			type: 'aggregate',
 			function: 'string_agg',
-		} as Decision;
+		} as CompilerDecision;
 		expect(() => genericAggregateHandler.compile(decision, ctx, state)).toThrow(
 			'Aggregate string_agg requires a column',
 		);

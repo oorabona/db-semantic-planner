@@ -12,11 +12,11 @@ import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
 } from '../../assert-field.js';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import { columnRef, eqExpr, fkCorrelation, joinExpr, rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -68,7 +68,7 @@ function buildCorrelation(
  * WHERE targetAlias.fk = sourceAlias.pk [AND additional conditions]
  */
 function buildExistsSubquery(
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
@@ -137,8 +137,90 @@ function buildExistsSubquery(
 		};
 	}
 
-	// Build SELECT 1 FROM targetTable AS targetAlias WHERE ...
-	const fromClause = rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming);
+	// Build SELECT 1 FROM targetTable AS targetAlias [JOIN ...] WHERE ...
+	let fromNode: Node = rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming);
+
+	// Add JOIN clauses for each include entry.
+	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
+	// The relation is used as the join alias so dotted WHERE references (e.g. callerFile.project_id) resolve.
+	const includeCompilerDecisions = decision.include as
+		| readonly { relation?: string; joinType?: string }[]
+		| undefined;
+	if (includeCompilerDecisions && includeCompilerDecisions.length > 0) {
+		for (const inc of includeCompilerDecisions) {
+			const joinRelation = inc.relation;
+			if (!joinRelation) continue;
+
+			// Resolve the join target table and FK columns from ModelIR when available.
+			// The relation is on the subquery's table (targetTable), e.g. calls.callerFile.
+			let joinTargetTable: string = joinRelation;
+			let joinSourceCol: string | undefined;
+			let joinTargetCol: string | undefined;
+
+			const model = ctx.model;
+			if (model) {
+				const rel = model.getRelation(`${targetTable}.${joinRelation}`);
+				if (rel) {
+					joinTargetTable = rel.target;
+					if (rel.type === 'belongsTo') {
+						// FK is on the source side (targetTable.fkCol → joinTargetTable.id)
+						const fk =
+							typeof rel.foreignKey === 'string'
+								? rel.foreignKey
+								: Array.isArray(rel.foreignKey)
+									? rel.foreignKey[0]
+									: undefined;
+						joinSourceCol = fk;
+						joinTargetCol =
+							(ctx.defaultPkColumnName as string | undefined) ??
+							DEFAULT_PK_COLUMN;
+					} else {
+						// hasMany/hasOne: FK is on the target side (joinTargetTable.fkCol → targetTable.id)
+						const fk =
+							typeof rel.foreignKey === 'string'
+								? rel.foreignKey
+								: Array.isArray(rel.foreignKey)
+									? rel.foreignKey[0]
+									: undefined;
+						joinSourceCol =
+							(ctx.defaultPkColumnName as string | undefined) ??
+							DEFAULT_PK_COLUMN;
+						joinTargetCol = fk;
+					}
+				}
+			}
+
+			// Fall back to FK derivation convention when ModelIR didn't resolve columns.
+			if (!joinSourceCol) {
+				// Assume belongsTo: FK on targetTable = joinRelation + '_id'
+				joinSourceCol = (ctx.deriveFkColumnName ?? defaultFkDerivation)(
+					joinRelation,
+					(ctx.defaultPkColumnName as string | undefined) ?? DEFAULT_PK_COLUMN,
+				);
+				joinTargetCol =
+					(ctx.defaultPkColumnName as string | undefined) ?? DEFAULT_PK_COLUMN;
+			}
+
+			const joinAlias = joinRelation; // e.g. 'callerFile'
+			const joinQuals = fkCorrelation(
+				joinSourceCol,
+				targetAlias,
+				joinTargetCol ?? DEFAULT_PK_COLUMN,
+				joinAlias,
+				ctx.naming,
+			);
+
+			const joinType =
+				(inc.joinType as string | undefined) === 'left'
+					? 'JOIN_LEFT'
+					: 'JOIN_INNER';
+
+			const joinRangeVar = rangeVar(joinTargetTable, joinAlias, ctx.schema, ctx.naming);
+
+			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }
+			fromNode = joinExpr(joinType, fromNode, joinRangeVar, joinQuals);
+		}
+	}
 
 	const stmt: SelectStmt = {
 		targetList: [
@@ -148,7 +230,7 @@ function buildExistsSubquery(
 				},
 			},
 		],
-		fromClause: [fromClause],
+		fromClause: [fromNode],
 		whereClause,
 	};
 
@@ -164,7 +246,7 @@ export const existsHandler: WhereHandler = {
 	operators: ['exists', 'some'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -183,7 +265,7 @@ export const notExistsHandler: WhereHandler = {
 	operators: ['notExists', 'none'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -203,7 +285,7 @@ export const everyHandler: WhereHandler = {
 	operators: ['every'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -217,7 +299,7 @@ export const everyHandler: WhereHandler = {
 		}
 
 		// Wrap conditions in NOT
-		const invertedDecision: Decision = {
+		const invertedCompilerDecision: CompilerDecision = {
 			...decision,
 			conditions: [
 				{
@@ -229,7 +311,7 @@ export const everyHandler: WhereHandler = {
 		};
 
 		const subquery = buildExistsSubquery(
-			invertedDecision,
+			invertedCompilerDecision,
 			ctx,
 			state,
 			dispatch,

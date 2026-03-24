@@ -11,7 +11,7 @@ import { columnRef } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -24,7 +24,7 @@ export const columnHandler: ExpressionHandler = {
 	types: ['column', 'col', 'field'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -48,7 +48,7 @@ export const columnAliasHandler: ExpressionHandler = {
 	types: ['columnAlias', 'as', 'alias'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -86,7 +86,7 @@ export const starHandler: ExpressionHandler = {
 	types: ['star', '*', 'all'],
 
 	compile(
-		_decision: Decision,
+		_decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

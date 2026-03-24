@@ -472,9 +472,24 @@ orm.select('users').where(isNotNull('email'))
 | `inArray(field, values)` | `IN` | `inArray('id', [1, 2, 3])` |
 | `isNull(field)` | `IS NULL` | `isNull('deletedAt')` |
 | `isNotNull(field)` | `IS NOT NULL` | `isNotNull('email')` |
+| `isDistinctFrom(field, value)` | `IS DISTINCT FROM` | `isDistinctFrom('status', 'active')` |
 | `and(...conditions)` | `AND` | `and(eq('a', 1), gt('b', 2))` |
 | `or(...conditions)` | `OR` | `or(eq('x', 1), eq('x', 2))` |
 | `not(condition)` | `NOT` | `not(eq('deleted', true))` |
+
+### `isDistinctFrom()` — Null-safe Inequality
+
+Unlike `neq()`, returns `true` when one side is NULL and the other is not. Standard SQL (SQL:2003).
+
+```typescript
+import { isDistinctFrom } from '@dbsp/core';
+
+// Find rows where status changed (NULL-safe)
+const changed = await orm.select('users')
+  .where(isDistinctFrom('status', 'active'))
+  .all();
+// SQL: WHERE status IS DISTINCT FROM $1
+```
 
 ### Relation Filters
 
@@ -660,6 +675,68 @@ orm.select('products')
   ))
   .all()
 ```
+
+### `inSubquery()` — WHERE IN (Subquery)
+
+Filter rows where a column value exists in the result of a subquery.
+
+```typescript
+import { inSubquery, subquery, eq } from '@dbsp/core';
+
+// Users who have published posts
+const authors = await orm.select('users')
+  .where(inSubquery('id', subquery('posts').select('authorId').where(eq('published', true))))
+  .all();
+// SQL: WHERE id = ANY(SELECT author_id FROM posts WHERE published = $1)
+```
+
+### Scalar Subquery in SELECT — `.asExpr()`
+
+Use a subquery as a computed column in SELECT.
+
+```typescript
+import { subquery, eq } from '@dbsp/core';
+
+// Count posts per user as a computed column
+const users = await orm.select('users')
+  .columns([
+    'id',
+    'name',
+    subquery('posts').count().where(eq('authorId', outerRef('id'))).asExpr('post_count')
+  ])
+  .all();
+// SQL: SELECT id, name, (SELECT count(*) FROM posts WHERE author_id = users.id) AS post_count FROM users
+```
+
+### Set Operations
+
+Combine query results with UNION, INTERSECT, or EXCEPT. All variants support the `All` suffix (e.g., `.unionAll()`) to preserve duplicates.
+
+```typescript
+const q1 = orm.select('users').where(eq('role', 'admin'));
+const q2 = orm.select('users').where(eq('role', 'moderator'));
+
+// UNION (deduplicated)
+const staff = await q1.union(q2).all();
+
+// UNION ALL (with duplicates)
+const allStaff = await q1.unionAll(q2).all();
+
+// INTERSECT
+const both = await q1.intersect(q2).all();
+
+// EXCEPT
+const adminsOnly = await q1.except(q2).all();
+
+// Chaining
+const result = await q1.union(q2).except(q3).all();
+
+// Dump for SQL preview
+const dump = q1.union(q2).dump();
+console.log(dump.sql); // (SELECT ...) UNION (SELECT ...)
+```
+
+Returns a `SetOperationBuilder` with `.all()`, `.first()`, and `.dump()` methods.
 
 ---
 
@@ -1102,6 +1179,35 @@ const results = await orm.raw<{ count: number }>(
 ```
 
 > **Warning:** `raw()` bypasses the planner and type safety. Use only when the ORM API is insufficient.
+
+### PostgreSQL Built-in Helpers
+
+Available from `@dbsp/adapter-pgsql`:
+
+```typescript
+import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
+
+// Generate a series of values
+generateSeries(1, 100)       // generate_series(1, 100)
+generateSeries(0, 50, 5)     // generate_series(0, 50, 5) — with step
+
+// Get next sequence value
+nextval('order_id_seq')      // nextval('order_id_seq')
+```
+
+### Automatic Parameter Type Casting
+
+When the adapter has access to ModelIR column types (via `originalDbType` from introspection), it automatically adds explicit type casts to query parameters:
+
+```sql
+-- Without casting (ambiguous for nullable columns)
+WHERE enclosing_symbol_id = $1
+
+-- With casting (explicit, no type inference errors)
+WHERE enclosing_symbol_id = CAST($1 AS integer)
+```
+
+This is transparent — no code changes needed. The adapter resolves types from the schema and applies casts where needed.
 
 ## 9. Naming Conventions
 

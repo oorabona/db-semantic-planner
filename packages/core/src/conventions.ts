@@ -542,9 +542,23 @@ export function inferRelationsFromSchema(
 			const isSelfRef = fk.targetTable === tableName;
 			const hasManyName = isSelfRef
 				? getSelfRefInverseName(fk.inferredName)
-				: conventions.pluralize
-					? pluralize(singularize(tableName))
-					: tableName;
+				: (() => {
+						// When the FK has a custom alias (inferredName differs from the
+						// singularized target table name), use pluralize(inferredName) so
+						// that multiple FKs to the same table get distinct hasMany names.
+						// e.g. caller_id (inferredName='caller') → 'callers'
+						//      callee_id (inferredName='callee') → 'callees'
+						const hasCustomAlias =
+							fk.inferredName !== singularize(fk.targetTable);
+						if (hasCustomAlias) {
+							return conventions.pluralize
+								? pluralize(fk.inferredName)
+								: fk.inferredName;
+						}
+						return conventions.pluralize
+							? pluralize(singularize(tableName))
+							: tableName;
+					})();
 			const hasManyKey = `${fk.targetTable}.${hasManyName}`;
 			if (!(hasManyKey in result)) {
 				const rel: SchemaHasManyRelation = {

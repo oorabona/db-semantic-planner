@@ -224,9 +224,49 @@ orm.select('embeddings')
   never interpolated into the SQL string.
 - `literal()` is for constants only — never pass user input to `literal()`.
 
+## PostgreSQL Built-in Helpers
+
+Adapter-level helpers for common PostgreSQL functions, built on the same expression primitives:
+
+```typescript
+import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
+```
+
+### `generateSeries(start, stop, step?)`
+
+Generate a series of values (commonly used with CTE for batch operations):
+
+```typescript
+generateSeries(1, 100)       // → generate_series(1, 100)
+generateSeries(0, 50, 5)     // → generate_series(0, 50, 5)
+```
+
+### `nextval(sequenceName)`
+
+Get the next value from a PostgreSQL sequence:
+
+```typescript
+nextval('order_id_seq')      // → nextval('order_id_seq')
+```
+
+### `isDistinctFrom(field, value)`
+
+Null-safe inequality comparison (SQL:2003 standard). Unlike `neq()`, returns `true` when one side is NULL and the other is not:
+
+```typescript
+import { isDistinctFrom } from '@dbsp/core';
+
+orm.select('users').where(isDistinctFrom('status', 'active'))
+// SQL: WHERE status IS DISTINCT FROM $1
+```
+
+> Note: `isDistinctFrom` is a core filter (not an adapter extension) because `IS DISTINCT FROM` is standard SQL.
+
 ## Key Files
 
 - `packages/core/src/dx/expressions.ts` — `ExpressionRef`, `op`, `fn`, `ref`, `param`, `cast`, `literal`, `unary`, `namedArg`, `star`, `array`
+- `packages/core/src/dx/filters.ts` — `isDistinctFrom`, `inSubquery` and other filter helpers
 - `packages/adapter-pgsql/src/extensions/pgvector.ts` — pgvector helpers built on these primitives
 - `packages/adapter-pgsql/src/extensions/paradedb.ts` — ParadeDB helpers built on these primitives
+- `packages/adapter-pgsql/src/extensions/pgsql-builtins.ts` — `generateSeries`, `nextval`
 - `packages/adapter-pgsql/src/handlers/expression/` — compiler handlers for each expression kind

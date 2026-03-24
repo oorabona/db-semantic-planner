@@ -4,6 +4,46 @@
 
 ## In Progress
 
+- [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 2905 adapter tests pass (2026-03-24)
+  - [x] ✅ Wire compileWhereIntent as PRIMARY SELECT path + compileSubquery callback (2026-03-24)
+  - [x] ✅ 30 tests covering all 16 WHERE kinds including EXISTS/notExists/subquery/relationFilter/expression (2026-03-24)
+  - [x] ✅ Phase 2: Remove all try-catch fallbacks from compileUpdate/compileDelete; fix 5 bugs (P1-1 mixed OR, P1-2 convertDottedFields, P2-3 subquery params, P2-4 existsWrap WHERE target, P2-5 range dataType); 10 regression tests in compile-where-regression.test.ts (2026-03-24)
+  - [x] ✅ Phase 3: Delete convertWhereCondition/convertWhere, replace all callers with whereRaw bridge pattern; add whereRaw/havingRaw to whereDecisionTypes filter in adapter-compiler-select.ts to prevent double-compilation; 2905 adapter tests pass (2026-03-24)
+  - [x] ✅ Delete deprecated functions (convertWhereToDecisions, mapToHandlerDecision) — already deleted (2026-03-24)
+  - [ ] 🔧 [Adapter] Extract orderBy/groupBy/distinct into compile-clauses.ts — Priority: L
+
+- [x] ✅ **INCLUDE-WHERE-EXPR** [Adapter] Fix `op().eq()` expressions in `include({ where })` silently dropped — `convertWhereToDecisions()` in `plan-decision-extractor.ts` now handles `case 'expression'` (same as `convertWhereCondition`); 5 regression tests in `include-where-regex.test.ts` (2026-03-24)
+
+- [x] ✅ **OUTERREF-NOTEXISTS** [Adapter] Fix `outerRef('col')` in `notExists({ where: neq/eq(...) })` serialized as JSON parameter instead of column reference — `convertWhereToDecisions()` (SELECT/ORM path, plan-decision-extractor.ts) and `convertWhereCondition()` (mutation path, intent-to-decisions.ts) now detect `SubqueryRefIntent { kind: 'ref' }` and convert to `FieldRef { kind: 'fieldRef', scope: 'outer' }` before creating decision; `compileValueOrFieldRef` then routes to `columnRef()`; 3 regression tests in `outerref-in-notexists.test.ts` (2026-03-24)
+
+- [x] ✅ **NOTEXISTS-AND** [Adapter] Fix `notExists()` inside `and()` generating duplicate NOT EXISTS clauses — `stripExistsFromDecision()` replaces flat filter in `compileSelect` with recursive strip that removes exists/notExists from whereAnd/whereOr/whereNot containers too; 7 regression tests in `notexists-in-and.test.ts`, 2903 adapter + 2197 core tests pass (2026-03-24)
+
+- [x] ✅ **NOTEXISTS-INVERSE** [Core/Adapter] Fix `notExists('callee_calls')` resolving to wrong table — planner correctly uses `model.getRelation()` to resolve inverse hasMany relation name to real target table; test gap filled with 10 regression tests in `notexists-inverse-relation.test.ts` (2026-03-24)
+- [x] ✅ **GROUPBY-INCLUDE-JOIN** [Adapter] Fix `include(join) + groupBy()` — joined table hydration columns not in GROUP BY cause PostgreSQL error; `compileSelect` now strips `columns` from join `includeStrategy` when `hasGroupBy`; 5 regression tests in `groupby-include-join.test.ts` (2026-03-24)
+- [x] ✅ **NULLS-LAST-EXPR** [Core] Fix `orderBy(op(...), dir, { nulls: 'last' })` — ExpressionRef/ExpressionSpec branches in `orderBy()` now propagate `options.nulls`; added `options` param to TypeScript overloads in `query-builder-types.ts`; 6 regression tests in `orderby-expr-nulls.test.ts` (2026-03-24)
+- [x] ✅ **NOTEXISTS-JOIN** [Core/Adapter] Add `include` option to `exists()`/`notExists()` for JOIN inside subquery — `notExists('rel', { include: { alias: { join: 'inner' } }, where: ... })` generates `NOT EXISTS (SELECT 1 FROM target JOIN joined ON fk WHERE ...)` via both DELETE mutation path and SELECT ORM path; FK resolution from ModelIR; 9 tests in `notexists-join.test.ts`, 954 adapter unit tests pass, TSC clean (2026-03-23)
+
+- [x] ✅ **GROUPBY-REL** [Adapter] Fix `groupBy(['id', 'relation.col'])` with INNER JOIN — dotted column names in `groupBy` case of `compileSelect` now split on `.` to produce `columnRef(col, table)` instead of wrong `columnRef('rel.col', rootTable)`; 3 regression tests in `groupby-relation.test.ts` (2026-03-23)
+- [x] ✅ **FN-REF-DOT** [Adapter] Verify `fn('min', ref('rel.col'))` resolves JOIN alias — `ref` case in `compileExpressionIntent` already splits on `.`; no code change needed; 5 confirmation tests in `fn-relation-col.test.ts` using `exprRef()` (correct API alias for expression col refs) (2026-03-23)
+
+- [x] ✅ **ORM-TABLES-TYPE** [Core] Fix `orm.from(table).columns([...]).all()` type inference — added `RowToColumnRefs<TTable, TRow>` utility type in `orm-instance-types.ts`, updated `tables` from `TableRef<K, any, any>` to `TableRef<K, RowToColumnRefs<K, DB[K]>, any>`; zero runtime changes; 2 new type-level tests (SC-17, SC-18); 2184 core tests pass, TSC clean (2026-03-23)
+
+- [x] ✅ **DX-040-SURFACE** [Core] Add `orm.tables` + `orm.from(tableRef)` to OrmInstance — exposes pre-built tables proxy, from() extracts table name via TABLE_META and delegates to QueryBuilder; `select()` deprecated in type; `InferTables` exported from index; 10 tests, 2160 tests pass, TSC clean (2026-03-23)
+
+- [x] ✅ **LIKE-ESCAPE** [Core/Adapter] Add `escape` option to `like()` — `like('col', 'pat', { escape: '\\' })` → `WHERE col LIKE $1 ESCAPE $2`; modified WhereLikeIntent, filters.ts, intent-to-decisions, likeHandler, deparseAExpr, mapToHandlerDecision; 10 tests (2026-03-23)
+- [x] ✅ **NULLS-LAST** [Core] Add `orderBy('col', 'desc', { nulls: 'last' })` overload — threads through query-builder.ts (already supported in array/intent layer); 4 tests (2026-03-23)
+
+- [x] ✅ **REF-VS-REF** [Adapter/Core] Fix `op('!=', exprRef('a'), exprRef('b'))` producing `__expr != __expr` — added `instanceof ExpressionRef` detection in `query-builder.ts` `where()` + standalone boolean expression support in `custom-expression.ts`; 4 regression tests (2026-03-23)
+- [x] ✅ **WINDOW-FN-BARE** [Adapter] Fix `wCount().as('total')` (no partitionBy/orderBy) not emitting `OVER()` clause — set `frameOptions: 1034` in `buildWindowDef()` for empty window; 3 regression tests (2026-03-23)
+- [x] ✅ **NESTED-INSUBQUERY** [Adapter] Fix 2-level nested inSubquery compilation — `mapInSubqueryCondition` in compiler.ts recursively converts `in+subquery` PlanDecisions before `mapToHandlerDecision` strips the subquery field; 3 regression tests (2026-03-23)
+
+- [x] ✅ **CORE-SET-OPS** [Core] Add `.union()`, `.unionAll()`, `.intersect()`, `.except()` to QueryBuilder — 19 tests, typecheck clean (2026-03-21)
+- [x] ✅ **ADAPTER-PARAM-CAST** [Adapter] Explicit parameter type casting in WHERE/IN comparisons — emits CAST($N AS type) when originalDbType is set in ModelIR, 14 tests, no existing test regressions (2026-03-21)
+- [x] ✅ **SEC-DDL** [Adapter] Fix 5 DDL security findings: validateSqlExpression + validateDbTypeName in validate.ts; quoteIdentifier, formatDefaultValue, generateCreatePolicy hardened in ddl-generator.ts; mapColumnType and resolveColumnPgType validated; 26 security tests — 2811 tests pass, 0 new TS errors (2026-03-22)
+- [x] ✅ **BATCH-INSERT-NULLABLE-INT** [Adapter] Fix schema-driven int4[] inference for nullable integer columns in batch unnest inserts — remove RANGE_TYPES filter in getColumnTypes(), extend mapToPgBaseType() with ColumnType aliases, prefer originalDbType; 4 regression tests added (2026-03-22)
+- [x] ✅ **REF-IN-FILTER** [Adapter] Fix buildColumnRef() to split dotted column names — ref('alias.col') in filter(isNotNull()) now produces alias.col instead of root.alias.col; 5 regression tests added (2026-03-22)
+- [x] ✅ **DOUBLE-ALIAS** [Adapter] Fix duplicate JOIN aliases when include('def.file') + include('file') both resolve to alias 'file' — add usedJoinAliases Set in PlanCompiler, deduplicate with _N suffix before handler.compile(); 3 regression tests added (2026-03-22)
+
 - [ ] 🟡 **GUI-026** [GUI] Dirty tab confirmation + session persistence + app close guard — Priority: P1
   - [ ] GUI-026a: Confirm before closing dirty tab (call confirmUnsavedChanges)
   - [ ] GUI-026b: Confirm before closing app with dirty tabs (Tauri window close event)
@@ -17,12 +57,23 @@
 
 ## Bugs
 
+- [x] ✅ **BATCH-INSERT-NULLABLE-INT** [Adapter] `getColumnTypes()` filtered RANGE_TYPES only → nullable int columns got `text[]`. Fix: removed filter, all column types now in type map. 4 regression tests in `batch-insert-nullable-int.test.ts`. (2026-03-22)
+
+- [x] ✅ **REF-IN-FILTER** [Core] `buildColumnRef()` didn't split qualified names → `ref('alias.col')` produced 3-part name. Fix: split on `.` like expression handler. 5 regression tests in `ref-in-filter.test.ts`. (2026-03-22)
+- [x] ✅ **DOUBLE-ALIAS** [Core] Join aliases derived from leaf relation name only → collision. Fix: `usedJoinAliases` Set in PlanCompiler, suffix dedup `_1`. 3 regression tests in `double-alias.test.ts`. (2026-03-22)
+- [x] ✅ **RAW-IN-COLUMNS** [Core] rawHandler read `value` (undefined) instead of `args[0]` + WASM TypeCast hack. Fix: read `args[0]`, RawSQL deparser node (no WASM). 5 regression tests in `raw-in-columns.test.ts`. (2026-03-22)
+- [x] ✅ **INCLUDE-2HOP-FILE** [Core] `.include('symbol.file', {join})` 2-hop join — outer `symbol` wrapper got no explicit join → json_agg strategy → inner `file` join ON clause referenced `symbols` not in outer FROM. Fix: `parseDotNotationInclude` propagates `join` option to ALL intermediate wrappers. 4 regression tests in `include-2hop-file.test.ts`. (2026-03-22)
+- [x] ✅ **NESTED-INSUBQUERY** [Adapter] `mapToHandlerDecision()` dropped `subquery` field → nested inSubquery compiled with wrong handler. Fix: `mapInSubqueryCondition()` recursive method preserves subquery chain. 3 regression tests in `nested-insubquery.test.ts`. (2026-03-23)
+- [x] ✅ **DISTINCT-VECTOR** [Adapter] `.distinct()` with `.include()` — join include pushed all joined columns (incl. `vector(1024)`) into SELECT DISTINCT. Fix: `compileSelect` detects `intent.distinct===true` and clears `columns` from join includeStrategy decisions (keeps JOIN for filtering). 4 regression tests in `distinct-include.test.ts`. (2026-03-22)
+- [x] ✅ **GTE-IN-DELETE** [Core] `normalizeToDecision` for `kind:'in'` returned `values:` but `inHandler` reads `value:` → key mismatch silently discarded inArray values. Fix: `values:` → `value:`. 4 regression tests in `gte-in-delete.test.ts`. (2026-03-22)
+- [x] ✅ **INCLUDE-NULLABLE-FK** [Adapter] Param type casting via `resolveColumnPgType()` + `originalDbType` → `CAST($N AS type)`. Fix covers all WHERE comparisons. 14 regression tests in `param-type-cast.test.ts`. (2026-03-22)
 - [x] ✅ **INTRO-OIDVECTOR** [Adapter] `introspect()` opclass join cast `oidvector → int2[]` rejected by PG — fixed to `oidvector → oid[]` in index catalog query (2026-03-21)
 - [x] ✅ **INTRO-INDEXES** [Adapter] `introspect()` index catalog query had `$1` accidentally replaced with a JS `//` comment inside a template literal — PostgreSQL received the raw comment text as SQL, failing with `syntax error at or near "Indexes"`. Fixed: restored `WHERE n.nspname = $1`. Regression tests added. (2026-03-21)
 - [x] ✅ **FN-REF-ALIAS** [Core/Adapter] Investigated: `exprRef('col')` inside `fn()` already compiles to unqualified `col` (no root table prefix). Root cause confirmed: `case 'ref'` in `compileExpressionIntent` correctly emits `columnRef(col, undefined)`. 6 regression tests added in `fn-ref-alias.test.ts` locking the correct behavior. (2026-03-21)
 - [x] ✅ **REF-STAR** [Core] `star()` primitive added — `fn('count', star())` → `COUNT(*)`. `array(...items)` primitive added — `ARRAY[item1, item2, ...]`. Both exported from `@dbsp/core`. `booleanSearch()` updated to use `namedArg('should', array(...exprs))`. (2026-03-21)
 - [x] ✅ **FN-JSON-BUILD** [Adapter] Investigated: NOT a bug. `compileExpressionIntent` correctly compiles all arg counts for `customFn` via recursive map. Nested `fn()` works. Root cause of user confusion: bare string args in `fn()` become `ref()` (column refs) via implicit conversion — users must use `literal('name')` for string literal keys. 4 regression tests added in `custom.test.ts` documenting the correct pattern and the implicit conversion trap. (2026-03-21)
 - [x] ✅ **FN-FILTER** [Core/Adapter] Added `.filter(condition)` to `ExpressionRef` for aggregate FILTER clause support on `fn()` expressions. `CustomFnExpressionIntent` gets `filter?: WhereIntent`. FILTER compilation handled in `compiler.ts` `selectCustomExpression` branch (avoids circular deps). 9 new tests. (2026-03-21)
+- [x] ✅ **SUBQ-AS-EXPR** [Core/Adapter] Added `SubqueryExpression.asExpr(alias)` and `SubqueryBuilder.asExpr(alias)` — scalar subqueries usable as SELECT columns. `SubqueryExpressionIntent` (`kind: 'subquery'`) now handled in `compileExpressionIntent`, producing `SubLink { EXPR_SUBLINK }` AST. Inner compiler injected via `ctx.compileSubquery` callback in `selectCustomExpression` branch. Inner `$N` params renumbered by `paramOffset` to avoid collision with outer params. 9 new tests in `subquery-select.test.ts`. (2026-03-21)
 - [x] ✅ **WCOUNT-STAR** [Core] `wCount()` now accepts optional field — `wCount()` with no arg produces `COUNT(*) OVER(...)`, `wCount('id')` produces `COUNT("id") OVER(...)`. `WindowFunctionKind.aggregate.field` made optional, `exactOptionalPropertyTypes`-safe via conditional spread. 3 builder tests + 2 compiler SQL tests added. (2026-03-21)
 - [x] ✅ **RELATION-COL-RESULT** [Adapter] `relationColumn('file', 'path', 'file_path')` in `.columns([...])` with join strategy — user alias `file_path` was dropped. Root cause: `relationColumnsMap` stored only column names (not aliases), `mapToHandlerDecision` did not propagate `columnAliases`, and `joinIncludeHandler` used `relation.col` fallback unconditionally. Fixed: `RelationColumnEntry` preserves aliases, `columnAliases` field added to `PlanDecision`/`Decision`, propagated through `mapToHandlerDecision`, used in `joinIncludeHandler`. 5 new tests (3 unit + 2 integration). (2026-03-21)
 - [x] ✅ **ORDERBY-RELATION-COL** [Core/Adapter] `orderBy(relationColumn('callerFile', 'path'))` generated literal `"calls.__expr"` SQL. Two-part fix: (1) `orderBy()` in `QueryBuilderImpl` checked `instanceof ExpressionRef` but not plain `ExpressionSpec` — added `isExpressionSpec()` branch to produce `OrderByIntent.expression`. (2) `compileExpressionIntent` in `custom.ts` had no `'relationColumn'` case — added case that resolves alias from `state.aliases` (falls back to relation name, which is the SQL JOIN alias). `ExpressionRef` + `ExpressionSpec` overloads added to public `QueryBuilder` interface. 5 regression tests in `orderby-relation-col.test.ts`. (2026-03-21)
@@ -35,6 +86,23 @@
 - [x] ✅ **DELETE-NOTEXISTS-ALIAS** [Adapter] `orm.delete('embeddings').where(notExists('symbol')).returning(['id'])` — the generated SQL uses the relation alias `"symbol"` as table name instead of the actual table name `"symbols"`. PG error: `relation "symbol" does not exist`. The DELETE-NOT-EXISTS fix resolved the routing, but the table name resolution still uses the schema alias. Astix integration test: `orm-migration.spec.ts > deleteOrphanEmbeddings`. — Priority: P1 Fixed: `resolveExistsIntent()` in `compileDelete` uses `model.getRelation()` to map relation name to real table; `normalizeToDecision` reads `raw.targetTable` first. 4 regression tests in `delete-notexists-alias.test.ts` + `mutations.test.ts`. (2026-03-21)
 - [x] ✅ **ORDERBY-COMPUTED-EXPR** [Adapter] `orderBy(op('-', ref('end_line'), ref('start_line')), 'asc')` — computed arithmetic expressions in ORDER BY are not supported. `getSymbol` (line-based branch) needs `ORDER BY (end_line - start_line) ASC` to return the narrowest enclosing symbol. Current workaround: stays on orm.raw(). — Priority: P2 Verified: NOT a bug. `op()` with `exprRef()` args already handled by `compileExpressionIntent` (kind=op). Bug was caller using schema DSL `ref()` instead of `exprRef()`. 4 regression tests in `orderby-computed-expr.test.ts`. (2026-03-21)
 - [x] ✅ **INCLUDE-2HOP** [Adapter] `include('callee.file')` resolved FK on ROOT table instead of intermediate table. Fixed: `toJoinIncludeDecision` now propagates `sourceTable`; `mapToHandlerDecision` uses `pd.sourceTable ?? rootTable` for `deriveFkColumns`; `PlanCompiler` tracks `joinAliasMap` (targetTable→alias) so 2nd-hop `currentAlias` resolves to the intermediate alias (e.g., `callee`) not the root. 2 regression tests added. (2026-03-21)
+
+---
+
+## Feature Requests — from astix code-health migration (2026-03-23)
+
+> 67 `orm.raw()` calls remain. 11 in code-health.ts blocked by missing dbsp features.
+> Inventory: `astix/docs/orm-raw-inventory.md`
+
+| Feature | Priority | Unblocks | Description |
+|---------|----------|----------|-------------|
+| **AGG-JOINED-COL** | P1 | 4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls) | `count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING |
+| **NOTEXISTS-MULTI-JOIN** | P1 | 3 checks (deadCode, unusedExports, orphanFiles) | `notExists('relation', { where: ... })` with JOINs inside the subquery + outer-column references. Currently notExists only follows 1 FK with 1 WhereIntent. |
+| **CASE-INTENT** | P2 | 1 check (unusedDeps) | `caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns |
+| ~~**LIKE-ESCAPE**~~ | ~~P2~~ | ~~1 check (unusedVariables)~~ | ~~`like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses~~ ✅ Done 2026-03-23 |
+| ~~**NULLS-LAST-EXPR**~~ | ~~P2~~ | ~~1 check (complexFunctions)~~ | ~~`orderBy(op(...), 'asc', { nulls: 'last' })` — NULLS LAST on computed expression in ORDER BY~~ ✅ Done 2026-03-24 (Issue 10: `orderBy` ExpressionRef/ExpressionSpec branches now propagate `options.nulls`) |
+| ~~**REF-VS-REF**~~ | ~~P1~~ | ~~1 check (circularImports)~~ | ~~`op('!=', ref('col_a'), ref('col_b'))` — same-table column-to-column comparison in `.where()` compiles to `__expr != __expr` instead of `"col_a" != "col_b"`~~ ✅ Done 2026-03-23 |
+| **WINDOW-FN** | P2 | 1 check (unresolvedTypeBindings) + others | `wCount()` / `COUNT(*) OVER()` in SELECT columns — window functions not supported in `.columns()` builder |
 
 ---
 

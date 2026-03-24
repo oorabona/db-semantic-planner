@@ -25,6 +25,7 @@ import type {
 
 export type {
 	OrmInstance,
+	OrmInstanceInternal,
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
@@ -52,6 +53,25 @@ export type { QueryBuilder } from './query-builder-types.js';
 export interface ExpressionSpec {
 	readonly __expr: true;
 	readonly intent: ExpressionIntent;
+}
+
+/**
+ * An ExpressionSpec that carries its alias as a phantom type parameter.
+ * This allows .columns() to extend the result type with the aliased property.
+ *
+ * Created by relationColumn(relation, column, alias) when the alias is a
+ * string literal — TypeScript captures the exact string type, enabling
+ * .columns() to extend TResult with { [alias]: TValue }.
+ *
+ * @typeParam TAlias - The string literal type of the alias
+ * @typeParam TValue - The value type (defaults to unknown)
+ */
+export interface AliasedExprColumn<TAlias extends string, TValue = unknown>
+	extends ExpressionSpec {
+	/** @internal phantom brand — never set at runtime */
+	readonly __alias: TAlias;
+	/** @internal phantom brand — never set at runtime */
+	readonly __value: TValue;
 }
 
 /**

@@ -28,9 +28,9 @@ import type {
 	ComparisonOperator,
 	RecursiveExistsOptions,
 	WhereAndIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
-	WhereAnyIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -42,12 +42,16 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
+import type {
+	SubqueryBuilder,
+	SubqueryExpression,
+} from './subquery-builder.js';
 import {
 	type ColumnRef,
 	RELATION_META,
 	type RelationRef,
 } from './table-ref.js';
-import type { ExpressionSpec } from './types.js';
+import type { AliasedExprColumn, ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Type-Safe Column Reference Support (DX-040)
@@ -182,6 +186,18 @@ export const lt: ComparisonFilter = createComparisonFilter('lt');
  */
 export const lte: ComparisonFilter = createComparisonFilter('lte');
 
+/**
+ * Null-safe inequality: field IS DISTINCT FROM value
+ *
+ * Unlike neq(), returns true when one side is NULL and the other is not.
+ * Standard SQL (SQL:2003).
+ *
+ * @example isDistinctFrom('status', 'active') → status IS DISTINCT FROM 'active'
+ * @example isDistinctFrom(users.status, null) → status IS DISTINCT FROM NULL
+ */
+export const isDistinctFrom: ComparisonFilter =
+	createComparisonFilter('isDistinctFrom');
+
 // ============================================================================
 // String Operators
 // ============================================================================
@@ -210,17 +226,23 @@ export function like(
 export function like(
 	field: ColumnRef<string, string, string> | string,
 	pattern: string,
-	caseInsensitive?: boolean,
+	options?: boolean | { caseInsensitive?: boolean; escape?: string },
 ): WhereLikeIntent {
+	const caseInsensitive =
+		typeof options === 'boolean' ? options : options?.caseInsensitive;
+	const escape = typeof options === 'object' ? options.escape : undefined;
+
 	const intent: WhereLikeIntent = {
 		kind: 'like',
 		field: getColumnName(field),
 		pattern,
 	};
-	if (caseInsensitive !== undefined) {
-		return { ...intent, caseInsensitive };
+	const withCi =
+		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
+	if (escape !== undefined) {
+		return { ...withCi, escape };
 	}
-	return intent;
+	return withCi;
 }
 
 // ============================================================================
@@ -248,6 +270,34 @@ export function inArray(
 	return { kind: 'in', field: getColumnName(field), values };
 }
 
+/**
+ * IN subquery: field IN (SELECT ...)
+ *
+ * Creates a WHERE condition that checks if a field's value exists
+ * in the result set of a subquery.
+ *
+ * @example
+ * // Users who have posts
+ * orm.select('users').where(inSubquery('id',
+ *   subquery('posts').select('userId')
+ * )).all()
+ * // SQL: SELECT * FROM users WHERE id = ANY(SELECT user_id FROM posts)
+ */
+export function inSubquery(
+	field: ColumnRef<string, string, unknown> | string,
+	query: SubqueryBuilder | SubqueryExpression,
+): WhereInIntent {
+	const expr =
+		'build' in query
+			? (query as SubqueryBuilder).build()
+			: (query as SubqueryExpression);
+	return {
+		kind: 'in',
+		field: getColumnName(field),
+		values: [],
+		subquery: expr.toIntent(),
+	};
+}
 
 /**
  * Array membership filter using PostgreSQL ANY() operator.
@@ -437,7 +487,11 @@ export function not(condition: WhereIntent): WhereNotIntent {
  */
 export function exists(
 	relation: string,
-	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	options?: {
+		where?: WhereIntent;
+		recursive?: RecursiveExistsOptions;
+		include?: Record<string, { join?: 'inner' | 'left' }>;
+	},
 ): WhereExistsIntent {
 	const result: Mutable<WhereExistsIntent> = { kind: 'exists', relation };
 	if (options?.where !== undefined) {
@@ -445,6 +499,9 @@ export function exists(
 	}
 	if (options?.recursive !== undefined) {
 		result.recursive = options.recursive;
+	}
+	if (options?.include !== undefined) {
+		result.include = options.include;
 	}
 	return result;
 }
@@ -460,7 +517,11 @@ export function exists(
  */
 export function notExists(
 	relation: string,
-	options?: { where?: WhereIntent; recursive?: RecursiveExistsOptions },
+	options?: {
+		where?: WhereIntent;
+		recursive?: RecursiveExistsOptions;
+		include?: Record<string, { join?: 'inner' | 'left' }>;
+	},
 ): WhereNotExistsIntent {
 	const result: Mutable<WhereNotExistsIntent> = {
 		kind: 'notExists',
@@ -471,6 +532,9 @@ export function notExists(
 	}
 	if (options?.recursive !== undefined) {
 		result.recursive = options.recursive;
+	}
+	if (options?.include !== undefined) {
+		result.include = options.include;
 	}
 	return result;
 }
@@ -750,24 +814,24 @@ export function col(column: string, alias: string): ExpressionSpec {
  * ])
  * ```
  */
-export function relationColumn(
+export function relationColumn<A extends string>(
 	relation: string,
 	column: string,
-	as: string,
-): ExpressionSpec {
+	as: A,
+): AliasedExprColumn<A> {
 	if (!relation || relation.trim() === '') {
 		throw new Error('relationColumn() requires a non-empty relation path');
 	}
 	if (!column || column.trim() === '') {
 		throw new Error('relationColumn() requires a non-empty column name');
 	}
-	if (!as || as.trim() === '') {
+	if (!as || (as as string).trim() === '') {
 		throw new Error('relationColumn() requires a non-empty alias');
 	}
 	return {
 		__expr: true,
 		intent: { kind: 'relationColumn', relation, column, as },
-	};
+	} as unknown as AliasedExprColumn<A>;
 }
 
 // ============================================================================

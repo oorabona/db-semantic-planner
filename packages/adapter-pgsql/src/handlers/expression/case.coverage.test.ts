@@ -11,7 +11,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { identityNaming } from '../../naming-plugin.js';
-import type { CompilerContext, Decision } from '../types.js';
+import type { CompilerContext, CompilerDecision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { simpleCaseHandler } from './case.js';
 
@@ -38,7 +38,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 1 }, then: 'active' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result).toHaveProperty('CaseExpr');
 		expect(result.CaseExpr?.arg).toBeDefined(); // test expr present
@@ -54,7 +54,7 @@ describe('simpleCaseHandler', () => {
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 1 }, then: 'active' }],
 			value: 'unknown',
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result.CaseExpr?.args).toHaveLength(1);
 		expect(result.CaseExpr?.defresult).toBeDefined();
@@ -73,7 +73,7 @@ describe('simpleCaseHandler', () => {
 				// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 				{ when: { value: 3 }, then: 'pending' },
 			],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result.CaseExpr?.args).toHaveLength(3);
 	});
@@ -85,7 +85,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 'new' }, then: 'New Status' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain('new');
 	});
@@ -97,7 +97,7 @@ describe('simpleCaseHandler', () => {
 			column: 'code',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 404 }, then: 'Not Found' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(404);
 	});
@@ -109,7 +109,7 @@ describe('simpleCaseHandler', () => {
 			column: 'level',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 'high' }, then: 100 }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(100);
 	});
@@ -122,7 +122,7 @@ describe('simpleCaseHandler', () => {
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 'urgent' }, then: 1 }],
 			value: 99,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result.CaseExpr?.defresult).toBeDefined();
 		expect(state.parameters).toContain(99);
@@ -136,7 +136,7 @@ describe('simpleCaseHandler', () => {
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 1 }, then: 'active' }],
 			value: null,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result.CaseExpr?.defresult).toBeDefined();
 	});
@@ -148,7 +148,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { type: 'eq', value: 5 }, then: 'matched' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain(5);
 	});
@@ -160,7 +160,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: 'active', then: 'Active Status' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(state.parameters).toContain('active');
 	});
@@ -172,7 +172,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 1 }, then: 'active' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		const colRef = result.CaseExpr?.arg?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'test_table' } });
@@ -186,7 +186,7 @@ describe('simpleCaseHandler', () => {
 			column: 'status',
 			// biome-ignore lint/suspicious/noThenProperty: intentional CaseCondition shape
 			conditions: [{ when: { value: 1 }, then: 'active' }],
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctxWithAlias, state);
 		const colRef = result.CaseExpr?.arg?.ColumnRef;
 		expect(colRef?.fields).toContainEqual({ String: { sval: 'alias1' } });
@@ -206,7 +206,7 @@ describe('simpleCaseHandler', () => {
 				{ when: { value: 'C' }, then: 2.0 },
 			],
 			value: 0.0,
-		} as unknown as Decision;
+		} as unknown as CompilerDecision;
 		const result = simpleCaseHandler.compile(decision, ctx, state);
 		expect(result.CaseExpr?.args).toHaveLength(3);
 		expect(result.CaseExpr?.defresult).toBeDefined();

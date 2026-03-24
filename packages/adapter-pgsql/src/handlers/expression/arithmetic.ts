@@ -11,7 +11,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -43,7 +43,7 @@ export const arithmeticHandler: ExpressionHandler = {
 	types: ['arithmetic', 'math', 'calc'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

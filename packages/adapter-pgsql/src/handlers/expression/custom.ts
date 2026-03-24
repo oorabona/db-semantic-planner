@@ -15,6 +15,7 @@ import type {
 	NamedArgExpressionIntent,
 	ParamExpressionIntent,
 	RefExpressionIntent,
+	SubqueryExpressionIntent,
 	UnaryExpressionIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
@@ -31,7 +32,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -166,6 +167,32 @@ export function compileExpressionIntent(
 			return { A_ArrayExpr: { elements } } as unknown as Node;
 		}
 
+		case 'subquery': {
+			const sq = intent as SubqueryExpressionIntent;
+			if (!ctx.compileSubquery) {
+				throw new Error(
+					"compileExpressionIntent: 'subquery' expression kind requires ctx.compileSubquery to be set. " +
+						'Use asExpr() only in .columns() context, not in standalone expressions.',
+				);
+			}
+			const { ast: innerAst, parameters: innerParams } = ctx.compileSubquery(
+				sq.query,
+				state.paramIndex,
+			);
+			// Append inner parameters to outer state (shared array, appended in order)
+			for (const p of innerParams) {
+				state.parameters.push(p);
+			}
+			state.paramIndex += innerParams.length;
+			// Wrap the inner SelectStmt in a SubLink (scalar subquery expression)
+			return {
+				SubLink: {
+					subLinkType: 'EXPR_SUBLINK',
+					subselect: innerAst,
+				},
+			} as unknown as Node;
+		}
+
 		case 'relationColumn': {
 			// Produced by relationColumn(relation, column, as) — ORDER BY a joined relation's column.
 			// Alias lookup: state.aliases may be empty for expression-scoped states;
@@ -195,21 +222,6 @@ export function compileExpressionIntent(
 /**
  * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
  *
- * Uses require() for createWhereDispatcher and convertWhereCondition to avoid circular
- * dependencies (compiler.ts → custom.ts). The PlanDecision from convertWhereCondition
- * is structurally compatible with Decision for simple filter conditions.
- */
-/**
- * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
- *
- * Uses direct imports (not require()) — both are safe:
- * - handlers/index.ts does not import custom.ts (no circular dep)
- * - intent-to-decisions.ts imports PlanDecision from compiler.ts as `import type` only
- *   (type-only imports have no runtime circular dep in ESM)
- */
-/**
- * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
- *
  * Uses direct import for convertWhereCondition (safe: intent-to-decisions.ts only has
  * `import type` from compiler.ts, no runtime circular dep).
  *
@@ -229,7 +241,7 @@ export const customExpressionHandler: ExpressionHandler = {
 	],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
