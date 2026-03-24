@@ -22,7 +22,7 @@ import {
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -437,7 +437,7 @@ export const pseudoColumnHandler: ExpressionHandler = {
 	types: ['pseudoColumn', 'pseudo', 'hierarchy'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -500,7 +500,7 @@ export const singleHopPseudoHandler: ExpressionHandler = {
 	types: ['singleHopPseudo', 'parentPseudo', 'childPseudo'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
@@ -618,7 +618,7 @@ export const chainedPseudoHandler: ExpressionHandler = {
 	types: ['chainedPseudo', 'multiHopPseudo'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

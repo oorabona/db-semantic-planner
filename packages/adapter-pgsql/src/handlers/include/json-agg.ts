@@ -16,8 +16,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 	IncludeHandler,
 	IncludeResult,
 	ResTargetNode,
@@ -30,7 +30,7 @@ import { deriveFkColumns } from './shared.js';
  * Each depth level uses a unique alias (__t0__, __t1__, etc.) to avoid conflicts.
  */
 function compileJsonAggRecursive(
-	decision: Decision,
+	decision: CompilerDecision,
 	parentAlias: string,
 	depth: number,
 	ctx: CompilerContext,
@@ -132,7 +132,7 @@ export const jsonAggIncludeHandler: IncludeHandler = {
 	strategy: 'json_agg',
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {

@@ -9,7 +9,7 @@ import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { isRangeValue } from '../types.js';
@@ -31,7 +31,7 @@ export const rangeHandler: WhereHandler = {
 	operators: ['contains', 'containedBy', 'overlaps'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

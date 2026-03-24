@@ -6,6 +6,7 @@
  */
 
 import { InvalidOperationError, isSqlRaw } from '@dbsp/core';
+import type { Node } from '@pgsql/types';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -23,11 +24,13 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
+import { buildSubqueryFromIntent, compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
 	createCompilerState,
-	type Decision,
+	type CompilerState,
+	type CompilerDecision,
 } from './handlers/index.js';
 import {
 	type BatchUpdateConfig,
@@ -57,8 +60,8 @@ import {
  * The WHERE dispatcher's `normalizeToDecision` handles the actual
  * `kind`/`field` → `type`/`column`/`operator` conversion at runtime.
  */
-function whereIntentAsDecision(where: WhereIntent): Decision {
-	return where as never as Decision;
+function whereIntentAsDecision(where: WhereIntent): CompilerDecision {
+	return where as never as CompilerDecision;
 }
 
 /**
@@ -261,6 +264,24 @@ export function compileInsertFrom(
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Inject a pre-built WHERE Node into an UpdateStmt or DeleteStmt AST node.
+ * Centralises the unsafe cast to a single location.
+ */
+function injectWhereClause(
+	ast: Node,
+	stmtKey: 'UpdateStmt' | 'DeleteStmt',
+	whereNode: Node,
+): void {
+	(ast as { [K in typeof stmtKey]: Record<string, unknown> })[stmtKey][
+		'whereClause'
+	] = whereNode;
+}
+
+// ============================================================================
 // compileUpdate
 // ============================================================================
 
@@ -274,30 +295,62 @@ export function compileUpdate(
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	const schemaName = deps.schemaName ?? options?.schemaName;
+	const resolvedModel = options?.model ?? deps.model;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
+		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
-	const state = createCompilerState();
+	const state: CompilerState = createCompilerState();
 
 	const setColumns = Object.keys(intent.set ?? {});
 	const columnTypes = getColumnTypes(intent.table, setColumns, deps);
 
-	const config: UpdateConfig = {
+	// PRIMARY PATH: call compileUpdateMutation with empty WHERE first so SET
+	// parameters are assigned their correct positions ($1, $2, …) in state.
+	// Then call compileWhereIntent with the same state so WHERE parameters are
+	// appended at positions ($N+1, …) — preserving the SET-before-WHERE ordering
+	// that PostgreSQL UPDATE requires.
+	// The pre-built WHERE Node is then injected into the returned UpdateStmt.
+	//
+	// FALLBACK: if compileWhereIntent throws (unsupported kind), fall back to the
+	// legacy whereIntentAsDecision path which passes WHERE as a Decision[] to the
+	// mutation compiler inside a single compileUpdateMutation call.
+
+	// PRIMARY PATH: compile SET params first (no WHERE) so WHERE params get
+	// correct $N positions. Then compile WHERE and inject into the UpdateStmt AST.
+	const configNoWhere: UpdateConfig = {
 		table: intent.table,
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
 			column,
 			value,
 		})),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
 	};
 
-	const ast = compileUpdateMutation(config, ctx, state);
+	const ast = compileUpdateMutation(configNoWhere, ctx, state);
+
+	if (intent.where) {
+		const whereCtx: WhereCompilerCtx = {
+			rootTable: intent.table,
+			aliases: new Map(),
+			paramState: state,
+			naming: deps.naming,
+			...(schemaName !== undefined && { schemaName }),
+			...(resolvedModel !== undefined && { model: resolvedModel }),
+			compileSubquery: (sqIntent, offset) =>
+				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
+		};
+
+		// Append WHERE params to state (they start after SET params).
+		const whereNode = compileWhereIntent(intent.where, whereCtx);
+		injectWhereClause(ast, 'UpdateStmt', whereNode);
+	}
+
 	const sql = deparseQuoted(ast);
 
 	return {
@@ -417,7 +470,7 @@ export function compileDelete(
 		maxRecursiveDepth: 100,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
-	const state = createCompilerState();
+	const state: CompilerState = createCompilerState();
 
 	// Resolve exists/notExists relation name → real table name before compiling.
 	// The mutation path bypasses the planner, so we must resolve targetTable here.
@@ -425,13 +478,32 @@ export function compileDelete(
 		? resolveExistsIntent(intent.where, intent.table, deps)
 		: undefined;
 
+	// PRIMARY PATH: compile WHERE via compileWhereIntent using the shared state.
+	// Parameters from the WHERE clause are pushed directly into state.parameters
+	// (DELETE has no SET params, so WHERE params are always at positions $1, $2, …).
+	// The resulting Node is injected into the DeleteStmt AST post-construction.
 	const config: DeleteConfig = {
 		table: intent.table,
-		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
 
-	const ast = compileDeleteMutation(config, ctx, state);
+	const ast: Node = compileDeleteMutation(config, ctx, state);
+
+	if (resolvedWhere) {
+		const whereCtx: WhereCompilerCtx = {
+			rootTable: intent.table,
+			aliases: new Map(),
+			paramState: state,
+			naming: deps.naming,
+			...(schemaName !== undefined && { schemaName }),
+			...(resolvedModel !== undefined && { model: resolvedModel }),
+			compileSubquery: (sqIntent, offset) =>
+				buildSubqueryFromIntent(sqIntent, offset, deps.naming),
+		};
+		const whereNode = compileWhereIntent(resolvedWhere, whereCtx);
+		injectWhereClause(ast, 'DeleteStmt', whereNode);
+	}
+
 	const sql = deparseQuoted(ast);
 
 	return {

@@ -12,7 +12,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -32,7 +32,7 @@ function buildValueNode(
 
 	// If it's a decision with type 'column'
 	if (typeof value === 'object' && value !== null && 'type' in value) {
-		const decision = value as Decision;
+		const decision = value as CompilerDecision;
 		if (decision.type === 'column' && decision.column) {
 			const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 			return columnRef(decision.column, tableAlias, undefined, ctx.naming);
@@ -55,7 +55,7 @@ export const coalesceHandler: ExpressionHandler = {
 	types: ['coalesce', 'COALESCE', 'ifNull', 'nvl'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -106,7 +106,7 @@ export const nullIfHandler: ExpressionHandler = {
 	types: ['nullIf', 'NULLIF'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -145,7 +145,7 @@ export const greatestHandler: ExpressionHandler = {
 	types: ['greatest', 'GREATEST'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -175,7 +175,7 @@ export const leastHandler: ExpressionHandler = {
 	types: ['least', 'LEAST'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

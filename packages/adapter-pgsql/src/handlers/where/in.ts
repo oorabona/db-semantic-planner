@@ -10,7 +10,7 @@ import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
@@ -73,7 +73,7 @@ export const inHandler: WhereHandler = {
 	operators: [COLLECTION_OPERATORS.IN, COLLECTION_OPERATORS.NOT_IN],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

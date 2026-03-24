@@ -9,7 +9,7 @@ import { ilikeExpr, likeExpr } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereHandler,
 } from '../types.js';
 import { PATTERN_OPERATORS } from '../types.js';
@@ -27,7 +27,7 @@ export const likeHandler: WhereHandler = {
 	operators: [PATTERN_OPERATORS.LIKE, PATTERN_OPERATORS.ILIKE],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {

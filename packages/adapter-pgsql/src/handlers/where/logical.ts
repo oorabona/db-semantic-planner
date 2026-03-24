@@ -14,7 +14,7 @@ import {
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -27,7 +27,7 @@ export const andHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.AND],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -64,7 +64,7 @@ export const orHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.OR],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -103,7 +103,7 @@ export const notHandler: WhereHandler = {
 	operators: [LOGICAL_OPERATORS.NOT],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,

@@ -48,6 +48,7 @@ import {
 } from './handlers/index.js';
 import type {
 	CompilerContext as HandlerCompilerContext,
+	CompilerDecision,
 	CompilerState as HandlerCompilerState,
 	Decision as HandlerDecision,
 	JoinExprNode,
@@ -74,6 +75,7 @@ import { createParamRef } from './param-ref.js';
  * mapper avoids `as unknown as` double casts by doing the conversion
  * field-by-field, including recursive children/conditions.
  */
+/** @deprecated Use enrichForCompile instead. */
 function mapToHandlerDecision(
 	pd: PlanDecision,
 	rootTable: string,
@@ -136,6 +138,22 @@ function mapToHandlerDecision(
 		escape: pd.escape,
 	} as HandlerDecision;
 }
+
+
+/**
+ * Enriches PlanDecision for handler consumption.
+ * Currently delegates to mapToHandlerDecision (will be replaced with thin enrichment in a later refactor block).
+ */
+function enrichForCompile(
+	pd: PlanDecision,
+	rootTable: string,
+	defaultPk: string,
+	deriveFk: FkColumnDerivation,
+): CompilerDecision {
+	// Delegate to mapToHandlerDecision for now (same logic)
+	return mapToHandlerDecision(pd, rootTable, defaultPk, deriveFk);
+}
+
 
 /**
  * Compile an optional filterCondition (PlanDecision) to an AST Node.
@@ -546,7 +564,7 @@ export class PlanCompiler {
 
 		// Bridge PlanDecision -> handler Decision via explicit mapper
 		// (mapper handles subquery → json_agg mapping internally)
-		const handlerDecision = mapToHandlerDecision(
+		const handlerDecision = enrichForCompile(
 			decision,
 			plan.rootTable,
 			this.defaultPk,

@@ -14,7 +14,7 @@ import { compileExpressionIntent } from '../expression/custom.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -45,7 +45,7 @@ export const customExpressionWhereHandler: WhereHandler = {
 	operators: ['expression'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		_dispatch: WhereDispatcher,

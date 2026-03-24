@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 5139 tests pass (2026-03-24)
+  - [x] ✅ Wire compileWhereIntent as PRIMARY SELECT path + compileSubquery callback (2026-03-24)
+  - [x] ✅ 30 tests covering all 16 WHERE kinds including EXISTS/notExists/subquery/relationFilter/expression (2026-03-24)
+  - [x] ✅ Phase 2: Remove all try-catch fallbacks from compileUpdate/compileDelete; fix 5 bugs (P1-1 mixed OR, P1-2 convertDottedFields, P2-3 subquery params, P2-4 existsWrap WHERE target, P2-5 range dataType); 10 regression tests in compile-where-regression.test.ts; 2952 adapter tests pass (2026-03-24)
+  - [ ] 🔧 [Adapter] Delete deprecated functions (convertWhereCondition, convertWhereToDecisions, mapToHandlerDecision) — Priority: M
+  - [ ] 🔧 [Adapter] Extract orderBy/groupBy/distinct into compile-clauses.ts — Priority: L
+  - [ ] 🔧 [Adapter] Remove toJoinIncludeDecision dependency on convertWhereToDecisions (1 remaining caller) — Priority: M
+
 - [x] ✅ **INCLUDE-WHERE-EXPR** [Adapter] Fix `op().eq()` expressions in `include({ where })` silently dropped — `convertWhereToDecisions()` in `plan-decision-extractor.ts` now handles `case 'expression'` (same as `convertWhereCondition`); 5 regression tests in `include-where-regex.test.ts` (2026-03-24)
 
 - [x] ✅ **OUTERREF-NOTEXISTS** [Adapter] Fix `outerRef('col')` in `notExists({ where: neq/eq(...) })` serialized as JSON parameter instead of column reference — `convertWhereToDecisions()` (SELECT/ORM path, plan-decision-extractor.ts) and `convertWhereCondition()` (mutation path, intent-to-decisions.ts) now detect `SubqueryRefIntent { kind: 'ref' }` and convert to `FieldRef { kind: 'fieldRef', scope: 'outer' }` before creating decision; `compileValueOrFieldRef` then routes to `columnRef()`; 3 regression tests in `outerref-in-notexists.test.ts` (2026-03-24)

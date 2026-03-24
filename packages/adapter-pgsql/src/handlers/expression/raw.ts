@@ -15,7 +15,7 @@ import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 
@@ -50,12 +50,12 @@ export const rawHandler: ExpressionHandler = {
 	types: ['raw', 'RAW', 'rawSql', 'rawExpression'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {
 		// SQL may arrive via args[0] (from handleRawExpression / selectFunction path)
-		// or via value (legacy direct Decision construction).
+		// or via value (legacy direct CompilerDecision construction).
 		const sql =
 			(Array.isArray(decision.args) ? decision.args[0] : undefined) ??
 			decision.value;
@@ -92,7 +92,7 @@ export const sqlFunctionHandler: ExpressionHandler = {
 	types: ['sqlFunction', 'fn', 'func'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		_ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -148,7 +148,7 @@ export const literalHandler: ExpressionHandler = {
 	types: ['literal', 'lit', 'const'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		_ctx: CompilerContext,
 		_state: CompilerState,
 	): Node {

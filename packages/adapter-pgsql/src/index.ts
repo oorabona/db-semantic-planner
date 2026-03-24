@@ -75,7 +75,9 @@ export {
 // Handler Registry — types only (implementation details remain in ./handlers/index.js)
 export type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
+	/** @deprecated Use CompilerDecision instead */
 	Decision,
 	ExpressionHandler,
 	IncludeHandler,

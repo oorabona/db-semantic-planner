@@ -16,7 +16,7 @@ import { columnRef, eqExpr, fkCorrelation, joinExpr, rangeVar } from '../../ast-
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
@@ -68,7 +68,7 @@ function buildCorrelation(
  * WHERE targetAlias.fk = sourceAlias.pk [AND additional conditions]
  */
 function buildExistsSubquery(
-	decision: Decision,
+	decision: CompilerDecision,
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
@@ -143,11 +143,11 @@ function buildExistsSubquery(
 	// Add JOIN clauses for each include entry.
 	// Each include entry in decision.include has shape: { type:'existsInclude', relation, joinType }
 	// The relation is used as the join alias so dotted WHERE references (e.g. callerFile.project_id) resolve.
-	const includeDecisions = decision.include as
+	const includeCompilerDecisions = decision.include as
 		| readonly { relation?: string; joinType?: string }[]
 		| undefined;
-	if (includeDecisions && includeDecisions.length > 0) {
-		for (const inc of includeDecisions) {
+	if (includeCompilerDecisions && includeCompilerDecisions.length > 0) {
+		for (const inc of includeCompilerDecisions) {
 			const joinRelation = inc.relation;
 			if (!joinRelation) continue;
 
@@ -246,7 +246,7 @@ export const existsHandler: WhereHandler = {
 	operators: ['exists', 'some'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -265,7 +265,7 @@ export const notExistsHandler: WhereHandler = {
 	operators: ['notExists', 'none'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -285,7 +285,7 @@ export const everyHandler: WhereHandler = {
 	operators: ['every'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 		dispatch: WhereDispatcher,
@@ -299,7 +299,7 @@ export const everyHandler: WhereHandler = {
 		}
 
 		// Wrap conditions in NOT
-		const invertedDecision: Decision = {
+		const invertedCompilerDecision: CompilerDecision = {
 			...decision,
 			conditions: [
 				{
@@ -311,7 +311,7 @@ export const everyHandler: WhereHandler = {
 		};
 
 		const subquery = buildExistsSubquery(
-			invertedDecision,
+			invertedCompilerDecision,
 			ctx,
 			state,
 			dispatch,

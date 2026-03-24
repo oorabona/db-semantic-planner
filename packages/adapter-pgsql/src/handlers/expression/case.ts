@@ -12,7 +12,7 @@ import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
-	Decision,
+	CompilerDecision,
 	ExpressionHandler,
 } from '../types.js';
 import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
@@ -21,7 +21,7 @@ import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
  * Case condition structure
  */
 interface CaseCondition {
-	when: Decision;
+	when: CompilerDecision;
 	then: unknown;
 }
 
@@ -39,12 +39,12 @@ export const caseHandler: ExpressionHandler = {
 	types: ['case', 'CASE', 'caseWhen'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
-		// CASE decisions carry { when: Decision; then: unknown } tuples in `conditions`,
-		// which is structurally different from the base Decision[]. The planner
+		// CASE decisions carry { when: CompilerDecision; then: unknown } tuples in `conditions`,
+		// which is structurally different from the base CompilerDecision[]. The planner
 		// guarantees this shape at runtime for expressionType === 'case'.
 		const conditions = decision.conditions as
 			| readonly CaseCondition[]
@@ -99,7 +99,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 	types: ['simpleCase', 'simpleCaseWhen'],
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
@@ -122,11 +122,11 @@ export const simpleCaseHandler: ExpressionHandler = {
 		const testExpr = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		const args: Node[] = conditions.map((cond) => {
-			// Build the comparison value — `when` may be a Decision with .value
+			// Build the comparison value — `when` may be a CompilerDecision with .value
 			// or a primitive; extract the raw value for parameterization.
 			const whenParamNumber = ++state.paramIndex;
-			const whenDecision = cond.when as Decision & { value?: unknown };
-			state.parameters.push(whenDecision.value ?? cond.when);
+			const whenCompilerDecision = cond.when as CompilerDecision & { value?: unknown };
+			state.parameters.push(whenCompilerDecision.value ?? cond.when);
 			const whenExpr = createParamRef(whenParamNumber);
 
 			// Build the THEN result

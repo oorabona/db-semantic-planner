@@ -24,6 +24,8 @@ import { describe, expect, it } from 'vitest';
 
 const deps: AdapterCompilerDeps = {
 	naming: identityNaming,
+	schemaName: undefined,
+	model: undefined,
 	defaultPk: DEFAULT_PK_COLUMN,
 	deriveFk: defaultFkDerivation,
 };

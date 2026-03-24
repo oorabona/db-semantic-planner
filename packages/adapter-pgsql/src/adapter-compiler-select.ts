@@ -14,12 +14,17 @@ import type {
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import type { Node } from '@pgsql/types';
 import {
 	type CompilerOptions,
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+import { buildSubqueryFromIntent, compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
+import { andExpr } from './ast-helpers.js';
+import { deparseQuoted } from './deparse.js';
+import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	convertDottedFieldsToExists,
@@ -395,9 +400,70 @@ export function compileSelect<T = unknown>(
 			}
 		}
 
+		// -----------------------------------------------------------------------
+		// PRIMARY PATH: compileWhereIntent is now the canonical WHERE/HAVING path.
+		//
+		// Strategy (Option B):
+		//   1. Strip WHERE/HAVING decisions from allDecisions before compilePlan.
+		//      compilePlan generates SELECT columns, JOINs, ORDER BY, GROUP BY,
+		//      LIMIT, OFFSET params — but NOT WHERE/HAVING params.
+		//   2. After compilePlan, seed a shared CompilerState from result.parameters
+		//      so that $N indices from compileWhereIntent continue from the correct
+		//      offset (e.g. if compilePlan used $1..$3, WHERE params start at $4).
+		//   3. Inject the resulting AST nodes into result.ast.SelectStmt and
+		//      re-deparse to produce the final SQL.
+		//
+		// The `compileSubquery` callback throws for SubqueryExpressionIntent inside
+		// WHERE — this is not used by any of the 16 standard WHERE kinds (comparison,
+		// like, in, any, null, range, and, or, not, exists, notExists, expression,
+		// jsonContains, jsonExists, subquery, relationFilter). It remains a throw
+		// only for the rare SubqueryExpression-inside-WHERE edge case which was
+		// never supported by the decision path either.
+		// -----------------------------------------------------------------------
+
+		// -----------------------------------------------------------------------
+		// Filter WHERE/HAVING decisions from compilePlan — they will be compiled
+		// separately via compileWhereIntent below.
+		//
+		// IMPORTANT: existsDecisions (from extractExistsDecisions) have
+		// type='where' but carry RESOLVED target table names from the planner.
+		// They must NOT be filtered — compilePlan must still process them so
+		// that EXISTS/NOT EXISTS subqueries use the correct table names.
+		//
+		// Only filter where/whereAnd/whereOr/whereNot/having decisions that
+		// originated from deduplicatedDecisions (i.e. from intentToDecisions).
+		// -----------------------------------------------------------------------
+		const whereDecisionTypes = new Set([
+			'where',
+			'whereAnd',
+			'whereOr',
+			'whereNot',
+			'having',
+		]);
+		const nonWhereDecisions = [
+			...deduplicatedDecisions.filter((d) => {
+				if (!whereDecisionTypes.has(d.type)) return true;
+				// P1-2 fix: keep type:'where' decisions with operator:'exists' or
+				// operator:'notExists' — these were added by convertDottedFieldsToExists
+				// and must reach compilePlan to generate the EXISTS subquery SQL.
+				// Plain comparison / logical decisions from intentToDecisions are
+				// compiled separately by compileWhereIntent and must be filtered out
+				// to avoid duplicates.
+				if (
+					d.type === 'where' &&
+					(d.operator === 'exists' || d.operator === 'notExists')
+				) {
+					return true;
+				}
+				return false;
+			}),
+			...existsDecisions,          // keep — already resolved by planner
+			...enrichedUnifiedDecisions, // keep — include strategies (JOINs, json_agg, etc.)
+		];
+
 		simplifiedPlan = {
 			rootTable: plan.rootTable,
-			decisions: allDecisions,
+			decisions: nonWhereDecisions,
 			...(schemaName ? { schema: schemaName } : {}),
 			...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
 			...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
@@ -415,9 +481,132 @@ export function compileSelect<T = unknown>(
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
 
+	// For the legacy/test path (no plan.intent), compilePlan handles everything.
+	if (!plan.intent) {
+		return {
+			sql: result.sql,
+			parameters: result.parameters,
+		};
+	}
+
+	// -----------------------------------------------------------------------
+	// Inject WHERE / HAVING via compileWhereIntent (primary path).
+	//
+	// Build a CompilerState seeded from the parameters compilePlan already
+	// produced so that $N indices for WHERE params are contiguous.
+	// result.parameters is readonly — cast to mutable for sharing.
+	// -----------------------------------------------------------------------
+	const sharedParams = result.parameters as unknown[];
+	const sharedState = {
+		...createCompilerState(),
+		parameters: sharedParams,
+		paramIndex: sharedParams.length,
+	};
+
+	const makeWhereCtx = (): WhereCompilerCtx => ({
+		rootTable: plan.rootTable,
+		aliases: new Map(),
+		paramState: sharedState,
+		naming: deps.naming,
+		...(schemaName && { schemaName }),
+		...(resolvedModelForCompiler != null && { model: resolvedModelForCompiler }),
+		compileSubquery: (intent, offset) =>
+			buildSubqueryFromIntent(intent, offset, deps.naming),
+	});
+
+	// Resolve the SelectStmt node for WHERE/HAVING injection.
+	// result.ast is a { SelectStmt: ... } Node.
+	//
+	// P2-4 fix: when existsWrap is active, the outer SelectStmt is a bare wrapper:
+	//   SELECT EXISTS(SELECT 1 FROM t WHERE ...) AS "exists"
+	// The inner SelectStmt (with the actual FROM clause) is:
+	//   result.ast.SelectStmt.targetList[0].ResTarget.val.SubLink.subselect.SelectStmt
+	// WHERE/HAVING must be injected into the INNER SelectStmt, not the outer wrapper
+	// (which has no FROM clause and would produce invalid SQL).
+	const selectNode = result.ast as { SelectStmt?: Record<string, unknown> };
+	const outerStmt = selectNode.SelectStmt as Record<string, unknown> | undefined;
+
+	let stmtTarget: Record<string, unknown> | undefined;
+	if (plan.intent.existsWrap && outerStmt) {
+		// Navigate: outer.targetList[0].ResTarget.val.SubLink.subselect.SelectStmt
+		const outerTargetList = outerStmt['targetList'] as Array<{ ResTarget?: { val?: { SubLink?: { subselect?: { SelectStmt?: Record<string, unknown> } } } } }> | undefined;
+		const innerSelectStmt = outerTargetList?.[0]?.ResTarget?.val?.SubLink?.subselect?.SelectStmt;
+		stmtTarget = innerSelectStmt ?? outerStmt;
+	} else {
+		stmtTarget = outerStmt;
+	}
+
+	// -----------------------------------------------------------------------
+	// stripExistsFromIntent: extract only non-exists/notExists/relationFilter
+	// conditions from the intent tree so that compileWhereIntent doesn't
+	// duplicate the EXISTS nodes that compilePlan already produced.
+	// Returns null if the entire intent is existence-related.
+	// -----------------------------------------------------------------------
+	function stripExistsFromIntent(
+		intent: import('@dbsp/types').WhereIntent,
+	): import('@dbsp/types').WhereIntent | null {
+		const k = intent.kind;
+		if (k === 'exists' || k === 'notExists' || k === 'relationFilter') {
+			return null;
+		}
+		if (k === 'and') {
+			const kept = intent.conditions
+				.map(stripExistsFromIntent)
+				.filter((c): c is import('@dbsp/types').WhereIntent => c !== null);
+			if (kept.length === 0) return null;
+			if (kept.length === 1) return kept[0]!;
+			return { kind: 'and', conditions: kept };
+		}
+		if (k === 'or') {
+			// OR: strip exists branches, keep non-exists branches.
+			// Example: or(eq('status','active'), exists('posts')) → eq('status','active')
+			// exists() branches are handled by compilePlan (via existsDecisions) separately.
+			// Only return null when ALL branches are exists-type (nothing left to compile).
+			const kept = intent.conditions
+				.map(stripExistsFromIntent)
+				.filter((c): c is import('@dbsp/types').WhereIntent => c !== null);
+			if (kept.length === 0) return null;
+			if (kept.length === 1) return kept[0]!;
+			return { kind: 'or', conditions: kept };
+		}
+		if (k === 'not') {
+			const inner = stripExistsFromIntent(intent.condition);
+			if (inner === null) return null;
+			return { kind: 'not', condition: inner };
+		}
+		return intent;
+	}
+
+	let didInject = false;
+	if (stmtTarget) {
+		if (plan.intent.where) {
+			// Compile only non-exists conditions — compilePlan already handled exists
+			// via existsDecisions (resolved target tables from the planner).
+			const nonExistsWhere = stripExistsFromIntent(plan.intent.where);
+			if (nonExistsWhere !== null) {
+				const whereNode: Node = compileWhereIntent(nonExistsWhere, makeWhereCtx());
+				// AND with existing whereClause (EXISTS nodes from compilePlan).
+				const existing = stmtTarget['whereClause'] as Node | undefined;
+				stmtTarget['whereClause'] = existing
+					? andExpr(existing, whereNode)
+					: whereNode;
+				didInject = true;
+			}
+		}
+		if (plan.intent.having) {
+			// HAVING has no exists/notExists — compile directly.
+			const havingNode: Node = compileWhereIntent(plan.intent.having, makeWhereCtx());
+			stmtTarget['havingClause'] = havingNode;
+			didInject = true;
+		}
+	}
+
+	// Re-deparse only when we injected something new.
+	const finalSql = didInject ? deparseQuoted(result.ast) : result.sql;
+
 	return {
-		sql: result.sql,
-		parameters: result.parameters,
+		sql: finalSql,
+		parameters: sharedParams,
 	};
 }
 

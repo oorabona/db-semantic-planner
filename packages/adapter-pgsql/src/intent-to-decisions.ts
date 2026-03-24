@@ -96,6 +96,7 @@ export function intentToDecisions(
 /**
  * Apply a filter condition to a decision if a filter intent is present.
  */
+/** @deprecated Use compileWhereIntent instead */
 function applyFilterCondition(
 	decision: Mutable<PlanDecision>,
 	filter: WhereIntent | undefined,
@@ -195,6 +196,7 @@ function convertSelect(
  * Convert a WhereIntent (kind-discriminated union) into PlanDecisions.
  * WhereIntent uses 'kind' as the discriminator field.
  */
+/** @deprecated Use compileWhereIntent instead */
 function convertWhere(where: WhereIntent, rootTable: string): PlanDecision[] {
 	const decision = convertWhereCondition(where, rootTable);
 	return decision ? [decision] : [];
@@ -240,6 +242,7 @@ interface FlatWhereFields {
 	readonly expr?: unknown;
 }
 
+/** @deprecated Use compileWhereIntent instead */
 export function convertWhereCondition(
 	condition: WhereIntent,
 	rootTable: string,

@@ -21,8 +21,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
+	CompilerDecision,
 	CompilerState,
-	Decision,
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
@@ -57,7 +57,7 @@ function buildCteSelect(
 	targetTable: string,
 	innerAlias: string,
 	columns: readonly string[] | undefined,
-	whereConditions: readonly Decision[] | undefined,
+	whereConditions: readonly CompilerDecision[] | undefined,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): Node {
@@ -174,7 +174,7 @@ export const cteIncludeHandler: IncludeHandler = {
 	strategy: 'cte',
 
 	compile(
-		decision: Decision,
+		decision: CompilerDecision,
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {
