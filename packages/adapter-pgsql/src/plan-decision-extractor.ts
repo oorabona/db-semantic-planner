@@ -296,7 +296,11 @@ function buildNestedConditions(where: unknown, table: string): PlanDecision[] {
 		case 'comparison': {
 			const rawValue = w.value;
 			const resolvedValue = isSubqueryRef(rawValue)
-				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: (rawValue as { column: string }).column }
+				? {
+						kind: 'fieldRef' as const,
+						scope: 'outer' as const,
+						column: (rawValue as { column: string }).column,
+					}
 				: rawValue;
 			return [
 				{
@@ -350,14 +354,18 @@ function buildNestedConditions(where: unknown, table: string): PlanDecision[] {
 			];
 		case 'and': {
 			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) => buildNestedConditions(c, table));
+			const subDecisions = conditions.flatMap((c) =>
+				buildNestedConditions(c, table),
+			);
 			if (subDecisions.length === 0) return [];
 			if (subDecisions.length === 1) return subDecisions;
 			return [{ type: 'whereAnd', conditions: subDecisions }];
 		}
 		case 'or': {
 			const conditions = w.conditions as unknown[];
-			const subDecisions = conditions.flatMap((c) => buildNestedConditions(c, table));
+			const subDecisions = conditions.flatMap((c) =>
+				buildNestedConditions(c, table),
+			);
 			if (subDecisions.length === 0) return [];
 			if (subDecisions.length === 1) return subDecisions;
 			return [{ type: 'whereOr', conditions: subDecisions }];
@@ -382,7 +390,6 @@ function buildNestedConditions(where: unknown, table: string): PlanDecision[] {
 			return [];
 	}
 }
-
 
 export function extractExistsDecisions(
 	plan: PlanReport,

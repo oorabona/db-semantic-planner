@@ -57,7 +57,10 @@ describe('columnAliasHandler errors', () => {
 
 	it('throws when column is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'columnAlias', alias: 'user_name' } as CompilerDecision;
+		const decision = {
+			type: 'columnAlias',
+			alias: 'user_name',
+		} as CompilerDecision;
 		expect(() => columnAliasHandler.compile(decision, ctx, state)).toThrow(
 			'Column alias handler requires column',
 		);

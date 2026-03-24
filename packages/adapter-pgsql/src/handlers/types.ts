@@ -171,7 +171,6 @@ export interface CompilerDecision {
 	readonly escape?: string;
 }
 
-
 // ============================================================================
 // Handler Interfaces
 // ============================================================================
@@ -224,7 +223,11 @@ export interface ExpressionHandler {
 	 * @param state Mutable compiler state
 	 * @returns PostgreSQL AST node for the expression
 	 */
-	compile(decision: CompilerDecision, ctx: CompilerContext, state: CompilerState): Node;
+	compile(
+		decision: CompilerDecision,
+		ctx: CompilerContext,
+		state: CompilerState,
+	): Node;
 }
 
 /**

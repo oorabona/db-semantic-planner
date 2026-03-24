@@ -14,8 +14,8 @@ import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';

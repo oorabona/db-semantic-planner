@@ -8,8 +8,8 @@ import type { Node } from '@pgsql/types';
 import { ilikeExpr, likeExpr } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { PATTERN_OPERATORS } from '../types.js';

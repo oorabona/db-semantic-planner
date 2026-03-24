@@ -20,8 +20,8 @@ import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
 import type { NamingPlugin } from './naming-plugin.js';
@@ -142,7 +142,11 @@ export function buildSubqueryFromIntent(
 		| undefined;
 
 	let targetList: SelectStmt['targetList'];
-	if (select?.type === 'aggregate' && select.aggregates && select.aggregates.length > 0) {
+	if (
+		select?.type === 'aggregate' &&
+		select.aggregates &&
+		select.aggregates.length > 0
+	) {
 		// Build a ResTarget for EACH aggregate so multi-aggregate subqueries compile correctly.
 		targetList = select.aggregates.map((agg) => {
 			let aggNode: Node;
@@ -165,7 +169,13 @@ export function buildSubqueryFromIntent(
 			return { ResTarget: { val: aggNode } };
 		});
 	} else if (select?.fields?.[0]) {
-		targetList = [{ ResTarget: { val: columnRef(select.fields[0], innerAlias, undefined, naming) } }];
+		targetList = [
+			{
+				ResTarget: {
+					val: columnRef(select.fields[0], innerAlias, undefined, naming),
+				},
+			},
+		];
 	} else {
 		targetList = [{ ResTarget: { val: { A_Const: { ival: { ival: 1 } } } } }];
 	}
@@ -351,10 +361,11 @@ export function compileWhereIntent(
 	// We handle it directly using the compileSubquery callback.
 	if (intent.kind === 'subquery') {
 		const { field, operator, subquery } = intent;
-		const { sql: subqueryNode, paramCount, parameters: innerParams } = ctx.compileSubquery(
-			subquery,
-			ctx.paramState.paramIndex,
-		);
+		const {
+			sql: subqueryNode,
+			paramCount,
+			parameters: innerParams,
+		} = ctx.compileSubquery(subquery, ctx.paramState.paramIndex);
 		// P2-3 fix: propagate inner subquery parameters to the outer state so
 		// they are included in the final parameter array sent to PostgreSQL.
 		// `parameters` is optional for backward-compat with pre-existing test stubs.
@@ -398,7 +409,8 @@ export function compileWhereIntent(
 		// mode:'some'  → EXISTS        (at least one matches)
 		// mode:'none'  → NOT EXISTS    (none match)
 		// mode:'every' → NOT EXISTS WHERE NOT condition  (all match)
-		const existsKind = rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
+		const existsKind =
+			rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
 		const innerWhere: WhereIntent =
 			rf.mode === 'every'
 				? ({ kind: 'not', condition: rf.where } as WhereIntent)
@@ -407,10 +419,17 @@ export function compileWhereIntent(
 		// `relation` is a relation name (e.g. 'author'), not a table name (e.g. 'users').
 		// The exists handler falls back to `decision.relation` when `targetTable` is absent,
 		// which would generate EXISTS (SELECT 1 FROM "author" ...) — wrong.
-		const resolvedRelation = ctx.model?.getRelation(`${ctx.rootTable}.${relation}`);
+		const resolvedRelation = ctx.model?.getRelation(
+			`${ctx.rootTable}.${relation}`,
+		);
 		const targetTable = resolvedRelation?.target ?? relation;
 		return compileWhereIntent(
-			{ kind: existsKind, relation, targetTable, where: innerWhere } as unknown as WhereIntent,
+			{
+				kind: existsKind,
+				relation,
+				targetTable,
+				where: innerWhere,
+			} as unknown as WhereIntent,
 			ctx,
 		);
 	}
@@ -419,5 +438,9 @@ export function compileWhereIntent(
 	// createWhereDispatcher calls normalizeToDecision internally, which handles:
 	// comparison, like, in, any, null, and, or, not, exists, notExists,
 	// jsonContains, jsonExists — plus pass-through for expression/subquery/etc.
-	return dispatcher(intent as unknown as CompilerDecision, handlerCtx, ctx.paramState);
+	return dispatcher(
+		intent as unknown as CompilerDecision,
+		handlerCtx,
+		ctx.paramState,
+	);
 }

@@ -23,7 +23,9 @@ function makeCtx(rootTable: string, currentAlias?: string): CompilerContext {
 	} as CompilerContext;
 }
 
-function buildDecision(overrides: Partial<CompilerDecision> = {}): CompilerDecision {
+function buildDecision(
+	overrides: Partial<CompilerDecision> = {},
+): CompilerDecision {
 	return {
 		type: 'selectJsonAgg',
 		relation: 'posts',

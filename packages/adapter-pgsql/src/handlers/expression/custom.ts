@@ -31,8 +31,8 @@ import {
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 

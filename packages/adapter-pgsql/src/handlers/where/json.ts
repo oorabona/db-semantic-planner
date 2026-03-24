@@ -6,8 +6,8 @@
 import type { Node } from '@pgsql/types';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { buildColumnRef, compileValue } from './utils.js';

@@ -541,7 +541,7 @@ function generateCreatePolicy(
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
 	const toClause =
 		policy.roles && policy.roles.length > 0
-			? ` TO ${policy.roles.map(r => quoteIdentifier(r)).join(', ')}`
+			? ` TO ${policy.roles.map((r) => quoteIdentifier(r)).join(', ')}`
 			: '';
 	if (policy.using) {
 		validateSqlExpression(policy.using, 'policy USING expression');

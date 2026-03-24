@@ -6,10 +6,10 @@ import { deparseSync } from 'pgsql-deparser';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
 	type CompilerContext,
+	type CompilerDecision,
 	clearHandlers,
 	createCompilerState,
 	createWhereDispatcher,
-	type CompilerDecision,
 } from '../handlers/index.js';
 import {
 	registerAllWhereHandlers,

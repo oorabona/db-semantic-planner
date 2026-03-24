@@ -13,8 +13,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';

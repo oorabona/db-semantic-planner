@@ -12,8 +12,8 @@ import type { Node, ResTarget } from '@pgsql/types';
 import { columnRef, columnRefStar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 

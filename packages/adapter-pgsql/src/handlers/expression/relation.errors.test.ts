@@ -52,7 +52,10 @@ describe('relationColumnHandler errors', () => {
 
 	it('throws when relation is missing', () => {
 		const state = createCompilerState();
-		const decision = { type: 'relationColumn', column: 'name' } as CompilerDecision;
+		const decision = {
+			type: 'relationColumn',
+			column: 'name',
+		} as CompilerDecision;
 		expect(() => relationColumnHandler.compile(decision, ctx, state)).toThrow(
 			'Relation column handler requires relation name',
 		);

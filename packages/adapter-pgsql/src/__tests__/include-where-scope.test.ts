@@ -10,13 +10,13 @@
  * compileSelect() loop folds those conditions into the root WHERE clause.
  */
 
-import { normalizeSQL } from '../ast-helpers.js';
-import { compileSelect } from '../adapter-compiler-select.js';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { identityNaming } from '../naming-plugin.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import type { PlanReport } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
+import { compileSelect } from '../adapter-compiler-select.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
+import { normalizeSQL } from '../ast-helpers.js';
+import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -30,7 +30,10 @@ const deps: AdapterCompilerDeps = {
 	deriveFk: defaultFkDerivation,
 };
 
-function compile(plan: PlanReport): { sql: string; parameters: readonly unknown[] } {
+function compile(plan: PlanReport): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
 	return compileSelect(plan, undefined, deps);
 }
 

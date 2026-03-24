@@ -53,7 +53,10 @@ describe('rawHandler errors', () => {
 
 	it('throws when value is an object', () => {
 		const state = createCompilerState();
-		const decision = { type: 'raw', value: { sql: 'SELECT 1' } } as CompilerDecision;
+		const decision = {
+			type: 'raw',
+			value: { sql: 'SELECT 1' },
+		} as CompilerDecision;
 		expect(() => rawHandler.compile(decision, ctx, state)).toThrow(
 			'Raw expression requires a string SQL value',
 		);
@@ -233,14 +236,20 @@ describe('literalHandler edge cases', () => {
 
 	it('produces ival for integer', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: 42 } as unknown as CompilerDecision;
+		const decision = {
+			type: 'literal',
+			value: 42,
+		} as unknown as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { ival: { ival: 42 } } });
 	});
 
 	it('produces fval for float', () => {
 		const state = createCompilerState();
-		const decision = { type: 'literal', value: 3.14 } as unknown as CompilerDecision;
+		const decision = {
+			type: 'literal',
+			value: 3.14,
+		} as unknown as CompilerDecision;
 		const result = literalHandler.compile(decision, ctx, state);
 		expect(result).toEqual({ A_Const: { fval: { fval: '3.14' } } });
 	});

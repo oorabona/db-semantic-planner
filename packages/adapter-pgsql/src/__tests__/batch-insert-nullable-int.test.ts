@@ -1,4 +1,3 @@
-
 /**
  * BATCH-INSERT-NULLABLE-INT: Schema-driven array type inference for nullable integer columns.
  *

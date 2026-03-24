@@ -10,8 +10,8 @@ import type { Node } from '@pgsql/types';
 import { columnRef, funcCall } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 

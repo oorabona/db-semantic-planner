@@ -16,8 +16,8 @@ import type {
 import { columnRef, integerNode, rangeVar, sortBy } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';

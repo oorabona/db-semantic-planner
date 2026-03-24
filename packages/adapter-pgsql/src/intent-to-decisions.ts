@@ -71,7 +71,10 @@ export function convertSelectIntent(
 					decisions,
 					applyFilterCondition,
 					(condition: import('@dbsp/types').WhereIntent, _table: string) =>
-						({ type: 'whereRaw', expressionIntent: condition }) as import('./compiler.js').PlanDecision,
+						({
+							type: 'whereRaw',
+							expressionIntent: condition,
+						}) as import('./compiler.js').PlanDecision,
 				);
 			}
 			// else: unknown kind (e.g., pseudoColumn) — intentional no-op
@@ -168,7 +171,10 @@ export function buildClauseDecisions(
 	return decisions;
 }
 
-function buildOrderByDecision(order: OrderByIntent, rootTable: string): PlanDecision {
+function buildOrderByDecision(
+	order: OrderByIntent,
+	rootTable: string,
+): PlanDecision {
 	const direction: 'ASC' | 'DESC' = order.direction === 'desc' ? 'DESC' : 'ASC';
 
 	const nulls: 'FIRST' | 'LAST' | undefined = order.nulls
@@ -215,4 +221,3 @@ function applyFilterCondition(
 		};
 	}
 }
-

@@ -15,8 +15,8 @@ import {
 } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	WhereHandler,
 } from '../types.js';
 import { COMPARISON_OPERATORS } from '../types.js';

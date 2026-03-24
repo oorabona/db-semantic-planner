@@ -7,8 +7,8 @@ import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
-	CompilerState,
 	CompilerDecision,
+	CompilerState,
 	ExpressionHandler,
 } from '../types.js';
 import { compileValue } from '../where/utils.js';
