@@ -6,7 +6,13 @@
  */
 
 import type { Node } from '@pgsql/types';
-import { columnRef, nullConstNode } from '../../ast-helpers.js';
+import {
+	booleanConstNode,
+	columnRef,
+	floatNode,
+	integerNode,
+	nullConstNode,
+} from '../../ast-helpers.js';
 import type { NamingPlugin } from '../../naming-plugin.js';
 import { createParamRef } from '../../param-ref.js';
 import type { CompilerState } from '../types.js';
@@ -22,7 +28,7 @@ type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
  * Resolve a CASE THEN/ELSE value to an AST node.
  *
  * Handles ExpressionIntent objects (column, literal, arithmetic, nested case)
- * and plain scalars (string → column ref, number/boolean → param).
+ * and plain scalars (string → column ref, number/boolean → literal or param).
  */
 export function resolveCaseValue(
 	value: unknown,
@@ -51,6 +57,11 @@ export function resolveCaseValue(
 		case 'literal':
 			if (expr.value === null || expr.value === undefined)
 				return nullConstNode();
+			if (typeof expr.value === 'boolean') return booleanConstNode(expr.value as boolean);
+			if (typeof expr.value === 'number') {
+				if (Number.isInteger(expr.value)) return integerNode(expr.value as number);
+				return floatNode(String(expr.value));
+			}
 			{
 				const idx = ++state.paramIndex;
 				state.parameters.push(expr.value);

@@ -30,6 +30,12 @@ export {
 	TableNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
+// CASE WHEN expression builder (FR-6)
+export {
+	CaseBuilder,
+	caseWhen,
+	type CaseValue,
+} from './case-when-builder.js';
 // Expression primitives (EXT-001)
 export {
 	array,

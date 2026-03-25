@@ -10,10 +10,23 @@
   "pending_validation": null,
   "continuous": true,
   "uses_subagents": true,
-  "model_routing": {"implement": "sonnet", "review": "opus", "explore": "haiku", "test": "haiku"},
+  "model_routing": {
+    "implement": "sonnet",
+    "review": "opus",
+    "explore": "haiku",
+    "test": "haiku"
+  },
   "decisions_file": "docs/decisions.md",
-  "memories": ["MEMORY.md", "active.md"],
-  "tokens_start": {"haiku": 1545392187, "sonnet": 4559682516, "opus": 16738012996},
+  "memories": [
+    "MEMORY.md",
+    "active.md"
+  ],
+  "tokens_start": {
+    "haiku": 1545392187,
+    "sonnet": 4559682516,
+    "opus": 16738012996
+  },
   "started_at": "2026-03-25T03:54:50+01:00",
-  "updated_at": "2026-03-25T04:22:26+01:00"
+  "updated_at": "2026-03-25T04:22:26+01:00",
+  "compaction_count": 2
 }

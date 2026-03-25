@@ -23,8 +23,17 @@ import {
 	orExpr,
 	rangeVar,
 } from './ast-helpers.js';
-import { compileExpressionIntent } from './handlers/expression/custom.js';
+import {
+	compileExpressionIntent,
+	registerWhereDispatcherFactory,
+} from './handlers/expression/custom.js';
 import { createWhereDispatcher } from './handlers/index.js';
+
+// Register createWhereDispatcher with the expression compiler so that CASE expressions
+// in compileExpressionIntent can compile their WHEN conditions. This module is the
+// natural bridge: it imports both custom.ts and handlers/index.ts.
+// Called once at module-load time (safe: no circular calls, just stores the factory ref).
+registerWhereDispatcherFactory(createWhereDispatcher);
 import type {
 	CompilerContext,
 	CompilerState,

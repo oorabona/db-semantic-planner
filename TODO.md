@@ -104,7 +104,7 @@
 |---------|----------|----------|-------------|
 | **AGG-JOINED-COL** | P1 | 4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls) | `count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING |
 | **NOTEXISTS-MULTI-JOIN** | P1 | 3 checks (deadCode, unusedExports, orphanFiles) | `notExists('relation', { where: ... })` with JOINs inside the subquery + outer-column references. Currently notExists only follows 1 FK with 1 WhereIntent. |
-| **CASE-INTENT** | P2 | 1 check (unusedDeps) | `caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns |
+| ~~**CASE-INTENT**~~ | ~~P2~~ | ~~1 check (unusedDeps)~~ | ~~`caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns~~ ✅ Done 2026-03-25 (FR-6: `caseWhen()` builder + `CaseExpressionIntent` compiler support in `.columns()` and `.orderBy()`) |
 | ~~**LIKE-ESCAPE**~~ | ~~P2~~ | ~~1 check (unusedVariables)~~ | ~~`like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses~~ ✅ Done 2026-03-23 |
 | ~~**NULLS-LAST-EXPR**~~ | ~~P2~~ | ~~1 check (complexFunctions)~~ | ~~`orderBy(op(...), 'asc', { nulls: 'last' })` — NULLS LAST on computed expression in ORDER BY~~ ✅ Done 2026-03-24 (Issue 10: `orderBy` ExpressionRef/ExpressionSpec branches now propagate `options.nulls`) |
 | ~~**REF-VS-REF**~~ | ~~P1~~ | ~~1 check (circularImports)~~ | ~~`op('!=', ref('col_a'), ref('col_b'))` — same-table column-to-column comparison in `.where()` compiles to `__expr != __expr` instead of `"col_a" != "col_b"`~~ ✅ Done 2026-03-23 |
