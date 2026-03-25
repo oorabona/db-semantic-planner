@@ -89,6 +89,8 @@ function makeDDLAdapter() {
 		{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
 	];
 	const listIndexes = vi.fn().mockResolvedValue(fakeIndexRows);
+	const indexExists = vi.fn().mockResolvedValue(true);
+	const storageSize = vi.fn().mockResolvedValue(4096);
 
 	const adapter = {
 		executeDDL,
@@ -99,6 +101,8 @@ function makeDDLAdapter() {
 		generateCreateIndex,
 		generateDropIndex,
 		listIndexes,
+		indexExists,
+		storageSize,
 		compile: vi.fn(),
 		execute: vi.fn(),
 		executeOne: vi.fn(),
@@ -121,6 +125,8 @@ function makeDDLAdapter() {
 		generateCreateIndex,
 		generateDropIndex,
 		listIndexes,
+		indexExists,
+		storageSize,
 	};
 }
 
@@ -475,7 +481,10 @@ describe('orm.tables.X.indexes.drop()', () => {
 // -----------------------------------------------------------------------
 
 describe('orm.tables.X.indexes.list()', () => {
-	type IndexProxy = { list: () => Promise<unknown> };
+	type IndexProxy = {
+		list(options?: { namePattern?: string }): Promise<unknown>;
+		exists(name: string): Promise<boolean>;
+	};
 	function getIndexes(
 		adapter: Adapter<unknown> | undefined,
 		schemaName?: string,
@@ -491,7 +500,7 @@ describe('orm.tables.X.indexes.list()', () => {
 	it('delegates to adapter.listIndexes', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		const result = await getIndexes(adapter).list();
-		expect(listIndexes).toHaveBeenCalledWith('users', undefined);
+		expect(listIndexes).toHaveBeenCalledWith('users', undefined, undefined);
 		expect(result).toEqual([
 			{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
 		]);
@@ -500,12 +509,70 @@ describe('orm.tables.X.indexes.list()', () => {
 	it('passes schema to adapter.listIndexes', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		await getIndexes(adapter, 'tenant_42').list();
-		expect(listIndexes).toHaveBeenCalledWith('users', 'tenant_42');
+		expect(listIndexes).toHaveBeenCalledWith('users', 'tenant_42', undefined);
+	});
+
+	it('passes namePattern option to adapter.listIndexes', async () => {
+		const { adapter, listIndexes } = makeDDLAdapter();
+		await getIndexes(adapter).list({ namePattern: 'idx_vec%' });
+		expect(listIndexes).toHaveBeenCalledWith('users', undefined, { namePattern: 'idx_vec%' });
+	});
+
+	it('passes schema and namePattern together', async () => {
+		const { adapter, listIndexes } = makeDDLAdapter();
+		await getIndexes(adapter, 'myschema').list({ namePattern: 'idx_%' });
+		expect(listIndexes).toHaveBeenCalledWith('users', 'myschema', { namePattern: 'idx_%' });
 	});
 
 	it('throws when no adapter', async () => {
 		await expect(getIndexes(undefined).list()).rejects.toThrow(
 			'indexes.list() requires an adapter',
+		);
+	});
+});
+
+// -----------------------------------------------------------------------
+// indexes.exists
+// -----------------------------------------------------------------------
+
+describe('orm.tables.X.indexes.exists()', () => {
+	type IndexProxy = { exists(name: string): Promise<boolean> };
+	function getIndexes(
+		adapter: Adapter<unknown> | undefined,
+		schemaName?: string,
+	): IndexProxy {
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			schemaName,
+		) as Record<string, Record<string, unknown>>;
+		return proxy['users']['indexes'] as IndexProxy;
+	}
+
+	it('delegates to adapter.indexExists with correct args', async () => {
+		const { adapter, indexExists } = makeDDLAdapter();
+		const result = await getIndexes(adapter).exists('idx_users_email');
+		expect(indexExists).toHaveBeenCalledWith('idx_users_email', 'users', undefined);
+		expect(result).toBe(true);
+	});
+
+	it('passes schema to adapter.indexExists', async () => {
+		const { adapter, indexExists } = makeDDLAdapter();
+		await getIndexes(adapter, 'tenant_42').exists('idx_foo');
+		expect(indexExists).toHaveBeenCalledWith('idx_foo', 'users', 'tenant_42');
+	});
+
+	it('throws when no adapter', async () => {
+		await expect(getIndexes(undefined).exists('idx_foo')).rejects.toThrow(
+			'indexes.exists() requires an adapter',
+		);
+	});
+
+	it('throws when adapter does not implement indexExists', async () => {
+		const { adapter } = makeDDLAdapter();
+		delete (adapter as Record<string, unknown>).indexExists;
+		await expect(getIndexes(adapter).exists('idx_foo')).rejects.toThrow(
+			'indexes.exists() requires an adapter that implements indexExists()',
 		);
 	});
 });
@@ -541,6 +608,52 @@ describe('orm.ddl.dropIndex()', () => {
 		);
 		await expect(orm.ddl.dropIndex('idx_foo')).rejects.toThrow(
 			'executeDDL() requires an adapter',
+		);
+	});
+});
+
+// -----------------------------------------------------------------------
+// storageSize
+// -----------------------------------------------------------------------
+
+describe('orm.tables.X.storageSize()', () => {
+	type TableDDLProxy = { storageSize(): Promise<number> };
+	function getTable(
+		adapter: Adapter<unknown> | undefined,
+		schemaName?: string,
+	): TableDDLProxy {
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			schemaName,
+		) as Record<string, Record<string, unknown>>;
+		return proxy['users'] as unknown as TableDDLProxy;
+	}
+
+	it('delegates to adapter.storageSize with correct args', async () => {
+		const { adapter, storageSize } = makeDDLAdapter();
+		const result = await getTable(adapter).storageSize();
+		expect(storageSize).toHaveBeenCalledWith('users', undefined);
+		expect(result).toBe(4096);
+	});
+
+	it('passes schema to adapter.storageSize', async () => {
+		const { adapter, storageSize } = makeDDLAdapter();
+		await getTable(adapter, 'tenant_42').storageSize();
+		expect(storageSize).toHaveBeenCalledWith('users', 'tenant_42');
+	});
+
+	it('throws when no adapter', async () => {
+		await expect(getTable(undefined).storageSize()).rejects.toThrow(
+			'storageSize() requires an adapter',
+		);
+	});
+
+	it('throws when adapter does not implement storageSize', async () => {
+		const { adapter } = makeDDLAdapter();
+		delete (adapter as Record<string, unknown>).storageSize;
+		await expect(getTable(adapter).storageSize()).rejects.toThrow(
+			'storageSize() requires an adapter that implements storageSize()',
 		);
 	});
 });

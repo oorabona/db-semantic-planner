@@ -744,20 +744,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @param table - Table name
 	 * @param schema - Schema name (defaults to adapter schema or 'public')
 	 */
-	async listIndexes(table: string, schema?: string): Promise<IndexInfo[]> {
+	async listIndexes(
+		table: string,
+		schema?: string,
+		options?: { namePattern?: string },
+	): Promise<IndexInfo[]> {
 		const executor = this.requireConnection();
 		const schemaName = schema ?? this.schemaName ?? 'public';
+		const params: unknown[] = [table, schemaName];
+		let sql =
+			'SELECT indexname, indexdef FROM pg_indexes WHERE tablename = $1 AND schemaname = $2';
+		if (options?.namePattern) {
+			sql += ' AND indexname LIKE $3';
+			params.push(options.namePattern);
+		}
+		sql += ' ORDER BY indexname';
 		const result = await executor.query<{
 			indexname: string;
 			indexdef: string;
-		}>(
-			`SELECT indexname, indexdef
-			 FROM pg_indexes
-			 WHERE tablename = $1
-			   AND schemaname = $2
-			 ORDER BY indexname`,
-			[table, schemaName],
-		);
+		}>(sql, params);
 		return result.rows.map((row) => {
 			const def = row.indexdef;
 			const unique = /\bCREATE UNIQUE INDEX\b/i.test(def);
@@ -765,6 +770,55 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const method = methodMatch?.[1] ?? 'btree';
 			return { name: row.indexname, definition: def, unique, method };
 		});
+	}
+
+	/**
+	 * Check whether an index with the given name exists on a table.
+	 *
+	 * @param name - Index name
+	 * @param table - Table name
+	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 */
+	async indexExists(
+		name: string,
+		table: string,
+		schema?: string,
+	): Promise<boolean> {
+		const executor = this.requireConnection();
+		const schemaName = schema ?? this.schemaName ?? 'public';
+		const result = await executor.query<{ exists: boolean }>(
+			'SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = $1 AND tablename = $2 AND schemaname = $3) AS exists',
+			[name, table, schemaName],
+		);
+		return result.rows[0]?.exists ?? false;
+	}
+
+	/**
+	 * Return the total storage size of a table in bytes.
+	 *
+	 * @param table - Table name
+	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 */
+	/**
+	 * Return the total storage size of a table in bytes (includes indexes and TOAST).
+	 *
+	 * The table name is a SQL identifier — it is double-quoted, not parameterized,
+	 * because PostgreSQL does not allow parameterized table names in FROM clauses.
+	 *
+	 * @param table - Table name
+	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 */
+	async storageSize(table: string, schema?: string): Promise<number> {
+		const executor = this.requireConnection();
+		const schemaName = schema ?? this.schemaName ?? 'public';
+		// Build a double-quoted, schema-qualified identifier string.
+		// Double any embedded double-quotes to prevent injection.
+		const qualified = `"${schemaName.replace(/"/g, '""')}"."${table.replace(/"/g, '""')}"`;
+		const result = await executor.query<{ size: string }>(
+			`SELECT pg_total_relation_size($1::regclass)::bigint AS size`,
+			[qualified],
+		);
+		return Number(result.rows[0]?.size ?? 0);
 	}
 
 	/**

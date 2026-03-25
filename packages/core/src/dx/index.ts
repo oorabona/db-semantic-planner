@@ -316,6 +316,7 @@ export type {
 	IndexColumnDef,
 	IndexInfo,
 	IndexMethod,
+	ListIndexOptions,
 	TableDDL,
 	TableIndexes,
 	TruncateOptions,

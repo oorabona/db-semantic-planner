@@ -18,6 +18,8 @@ export type {
 	VacuumOptions,
 } from '@dbsp/types';
 
+// ListIndexOptions is defined locally (not in @dbsp/types) — see below
+
 import type {
 	AlterColumnOptions,
 	CreateIndexOptions,
@@ -27,10 +29,17 @@ import type {
 	VacuumOptions,
 } from '@dbsp/types';
 
+export type ListIndexOptions = {
+	/** Filter indexes by name pattern (supports SQL LIKE wildcards: %, _). */
+	namePattern?: string;
+};
+
 export type TableIndexes = {
 	create(options: CreateIndexOptions): Promise<void>;
 	drop(name: string, options?: DropIndexOptions): Promise<void>;
-	list(): Promise<IndexInfo[]>;
+	list(options?: ListIndexOptions): Promise<IndexInfo[]>;
+	/** Check whether an index with the given name exists on this table. */
+	exists(name: string): Promise<boolean>;
 };
 
 export type TableDDL = {
@@ -38,4 +47,6 @@ export type TableDDL = {
 	vacuum(options?: VacuumOptions): Promise<void>;
 	alterColumn(column: string, options: AlterColumnOptions): Promise<void>;
 	indexes: TableIndexes;
+	/** Return the total storage size of the table (in bytes). Requires a live adapter connection. */
+	storageSize(): Promise<number>;
 };

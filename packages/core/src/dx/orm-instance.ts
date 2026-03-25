@@ -226,7 +226,7 @@ function buildTableDDL(
 				await a.executeDDL!(sql);
 			},
 
-			async list(): Promise<IndexInfo[]> {
+			async list(options?: { namePattern?: string }): Promise<IndexInfo[]> {
 				if (!adapter) {
 					throw new InvalidOperationError(
 						'indexes.list',
@@ -234,7 +234,7 @@ function buildTableDDL(
 					);
 				}
 				if (adapter.listIndexes) {
-					return adapter.listIndexes(tableName, schemaName);
+					return adapter.listIndexes(tableName, schemaName, options);
 				}
 				// Fallback for adapters without listIndexes: use executeRaw if available
 				const sql =
@@ -262,6 +262,38 @@ function buildTableDDL(
 				if (adapter.executeDDL) await adapter.executeDDL(sql);
 				return [];
 			},
+
+			async exists(name: string): Promise<boolean> {
+				if (!adapter) {
+					throw new InvalidOperationError(
+						'indexes.exists',
+						'indexes.exists() requires an adapter.',
+					);
+				}
+				if (!adapter.indexExists) {
+					throw new InvalidOperationError(
+						'indexes.exists',
+						'indexes.exists() requires an adapter that implements indexExists().',
+					);
+				}
+				return adapter.indexExists(name, tableName, schemaName);
+			},
+		},
+
+		async storageSize(): Promise<number> {
+			if (!adapter) {
+				throw new InvalidOperationError(
+					'storageSize',
+					'storageSize() requires an adapter.',
+				);
+			}
+			if (!adapter.storageSize) {
+				throw new InvalidOperationError(
+					'storageSize',
+					'storageSize() requires an adapter that implements storageSize().',
+				);
+			}
+			return adapter.storageSize(tableName, schemaName);
 		},
 	};
 }

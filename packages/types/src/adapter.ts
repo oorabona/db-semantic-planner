@@ -555,9 +555,24 @@ export interface TableDDLGeneratorAdapter {
 	generateDropIndex?(name: string, options?: DropIndexOptions): string;
 
 	/**
-	 * List all indexes on a table.
+	 * List all indexes on a table, with optional name pattern filter.
 	 */
-	listIndexes?(table: string, schema?: string): Promise<IndexInfo[]>;
+	listIndexes?(
+		table: string,
+		schema?: string,
+		options?: { namePattern?: string },
+	): Promise<IndexInfo[]>;
+
+	/**
+	 * Check whether an index with the given name exists on a table.
+	 */
+	indexExists?(name: string, table: string, schema?: string): Promise<boolean>;
+
+	/**
+	 * Return the total storage size of a table in bytes.
+	 * Requires a live pool connection — compile-only adapters must throw.
+	 */
+	storageSize?(table: string, schema?: string): Promise<number>;
 }
 
 /**
