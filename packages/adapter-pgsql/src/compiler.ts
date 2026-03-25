@@ -36,7 +36,10 @@ import {
 } from './ast-helpers.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
-import { compileExpressionIntent } from './handlers/expression/custom.js';
+import {
+	compileExpressionIntent,
+	registerWhereDispatcherFactory,
+} from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
@@ -46,6 +49,11 @@ import {
 	getExpressionHandler,
 	getIncludeHandler,
 } from './handlers/index.js';
+
+// Register createWhereDispatcher with compileExpressionIntent so CASE expressions
+// can compile their WHEN conditions. compiler.ts is the bridge: it imports both
+// compileExpressionIntent (from custom.ts) and createWhereDispatcher (from handlers/index.ts).
+registerWhereDispatcherFactory(createWhereDispatcher);
 import type {
 	CompilerContext as HandlerCompilerContext,
 	CompilerState as HandlerCompilerState,
