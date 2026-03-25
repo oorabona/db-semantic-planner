@@ -239,6 +239,29 @@ export function compileSelect<T = unknown>(
 			}
 		}
 
+		// EXPLICIT-COLUMNS: When the user calls .columns([...]) (select type
+		// 'expressions'), join includes must NOT contribute their auto-hydration
+		// columns to the SELECT. The user has declared exactly what they want;
+		// adding full relation columns (e.g. "rel.id", "rel.name", ...) would
+		// produce an unexpected nested object in results (hydrateJoinIncludes
+		// groups any "rel." prefixed keys into rel: {...}).
+		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
+		// Explicitly requested columns (via relationColumn()) are re-injected
+		// below via relationColumnsMap — or compiled directly as selectRelationColumn
+		// decisions when the relation alias doesn't match the includeStrategy
+		// relationName (e.g. camelCase alias vs snake_case relation name).
+		const hasExplicitColumns =
+			plan.intent?.select &&
+			'type' in plan.intent.select &&
+			plan.intent.select.type === 'expressions';
+		if (hasExplicitColumns) {
+			for (const d of enrichedUnifiedDecisions) {
+				if (d.type === 'includeStrategy' && d.choice === 'join') {
+					(d as Mutable<PlanDecision>).columns = [];
+				}
+			}
+		}
+
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
 		// Include handlers (json_agg, lateral, CTE, join) already compile the
