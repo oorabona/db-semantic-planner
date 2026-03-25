@@ -25,6 +25,7 @@
  */
 
 import type {
+	AggOrderByArg,
 	ArrayExpressionIntent,
 	CastExpressionIntent,
 	CustomFnExpressionIntent,
@@ -62,8 +63,19 @@ const TYPE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\[\])?$/;
  * Use `ref()` / `param()` explicitly for ambiguous cases (e.g., a string that is a value,
  * not a column name → use `literal()` instead).
  */
+/**
+ * Accepted input types for op() and fn() arguments.
+ * - `ExpressionRef` → used as-is
+ * - `string` → implicitly converted to ref() (column reference)
+ * - `number | boolean | readonly unknown[]` → implicitly converted to param() (bound value)
+ * - `AggOrderByArg` → ORDER BY entry inside an aggregate (fn() only)
+ *
+ * Use `ref()` / `param()` explicitly for ambiguous cases (e.g., a string that is a value,
+ * not a column name → use `literal()` instead).
+ */
 export type ExprInput =
 	| ExpressionRef
+	| AggOrderByArg
 	| string
 	| number
 	| boolean
@@ -247,15 +259,39 @@ export function op(
  * @example fn('paradedb.score', ref('id')) → paradedb.score("id")
  * @throws Error if name fails validation (injection guard)
  */
+/**
+ * Custom function call — name(args...).
+ * Supports schema-qualified names (e.g., 'paradedb.score', 'ST_Distance').
+ * Implicit conversions: string → ref(), number/boolean/array → param().
+ *
+ * Pass `aggOrderBy('col', 'asc')` args to add ORDER BY inside aggregates:
+ * `fn('array_agg', ref('name'), aggOrderBy('path'))` → array_agg("name" ORDER BY "path" ASC)
+ *
+ * @example fn('now') → now()
+ * @example fn('paradedb.score', ref('id')) → paradedb.score("id")
+ * @example fn('array_agg', ref('name'), aggOrderBy('path')) → array_agg("name" ORDER BY "path" ASC)
+ * @throws Error if name fails validation (injection guard)
+ */
 export function fn(name: string, ...args: ExprInput[]): ExpressionRef {
 	if (!name || !FUNCTION_NAME_PATTERN.test(name)) {
 		throw new Error(`Invalid function name: ${name}`);
 	}
-	return new ExpressionRef({
+	const regularArgs: ExpressionIntent[] = [];
+	const orderByArgs: AggOrderByArg[] = [];
+	for (const arg of args) {
+		if (isAggOrderByArg(arg)) {
+			orderByArgs.push(arg);
+		} else {
+			regularArgs.push(toExpressionIntent(arg));
+		}
+	}
+	const intent: CustomFnExpressionIntent = {
 		kind: 'customFn',
 		name,
-		args: args.map(toExpressionIntent),
-	} satisfies CustomFnExpressionIntent);
+		args: regularArgs,
+		...(orderByArgs.length > 0 ? { aggOrderBy: orderByArgs } : {}),
+	};
+	return new ExpressionRef(intent);
 }
 
 /**
@@ -333,4 +369,68 @@ export function array(...items: ExprInput[]): ExpressionRef {
 		kind: 'array',
 		elements: items.map(toExpressionIntent),
 	} satisfies ArrayExpressionIntent);
+}
+
+// ============================================================================
+// Aggregate ORDER BY helpers (FR-9)
+// ============================================================================
+
+/**
+ * Type guard for AggOrderByArg — distinguishes aggregate ORDER BY markers
+ * from regular ExprInput values inside fn() argument lists.
+ */
+function isAggOrderByArg(input: ExprInput): input is AggOrderByArg {
+	return (
+		typeof input === 'object' &&
+		input !== null &&
+		!Array.isArray(input) &&
+		!(input instanceof ExpressionRef) &&
+		'__aggOrderBy' in input &&
+		(input as AggOrderByArg).__aggOrderBy === true
+	);
+}
+
+/**
+ * Creates an ORDER BY marker for use as an argument to `fn()`.
+ * When passed to `fn()`, the compiler places it in the aggregate's
+ * ORDER BY clause instead of in the regular argument list.
+ *
+ * @example fn('array_agg', ref('name'), aggOrderBy('path')) → array_agg("name" ORDER BY "path" ASC)
+ * @example fn('array_agg', ref('name'), aggOrderBy('path', 'desc')) → array_agg("name" ORDER BY "path" DESC)
+ */
+export function aggOrderBy(
+	field: string,
+	direction: 'asc' | 'desc' = 'asc',
+): AggOrderByArg {
+	return { __aggOrderBy: true, field, direction };
+}
+
+/**
+ * Shorthand for `fn('array_agg', col, ...orderByArgs)`.
+ *
+ * @example arrayAgg(ref('name')) → array_agg("name")
+ * @example arrayAgg(ref('name'), aggOrderBy('path')) → array_agg("name" ORDER BY "path" ASC)
+ * @example arrayAgg('name', aggOrderBy('path', 'desc')) → array_agg("name" ORDER BY "path" DESC)
+ */
+export function arrayAgg(
+	col: ExpressionRef | string,
+	...rest: AggOrderByArg[]
+): ExpressionRef {
+	const colExpr = typeof col === 'string' ? ref(col) : col;
+	return fn('array_agg', colExpr, ...rest);
+}
+
+/**
+ * Shorthand for `fn('string_agg', col, separator, ...orderByArgs)`.
+ *
+ * @example stringAgg(ref('name'), literal(',')) → string_agg("name", ',')
+ * @example stringAgg(ref('name'), literal(','), aggOrderBy('name')) → string_agg("name", ',' ORDER BY "name" ASC)
+ */
+export function stringAgg(
+	col: ExpressionRef | string,
+	separator: ExpressionRef,
+	...rest: AggOrderByArg[]
+): ExpressionRef {
+	const colExpr = typeof col === 'string' ? ref(col) : col;
+	return fn('string_agg', colExpr, separator, ...rest);
 }

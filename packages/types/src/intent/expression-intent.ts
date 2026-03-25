@@ -292,6 +292,14 @@ export interface CustomOpExpressionIntent {
 }
 
 /** Custom function call (e.g., paradedb.score) */
+/** Represents a single ORDER BY entry inside an aggregate function. */
+export interface AggOrderByArg {
+	/** Discriminator to distinguish from regular expression args. */
+	readonly __aggOrderBy: true;
+	readonly field: string;
+	readonly direction: 'asc' | 'desc';
+}
+
 export interface CustomFnExpressionIntent {
 	readonly kind: 'customFn';
 	readonly name: string;
@@ -299,6 +307,8 @@ export interface CustomFnExpressionIntent {
 	readonly as?: string;
 	/** FILTER (WHERE ...) clause for conditional aggregation */
 	readonly filter?: WhereIntent | undefined;
+	/** ORDER BY clause for ordered aggregates (e.g. array_agg(x ORDER BY y)) */
+	readonly aggOrderBy?: readonly AggOrderByArg[] | undefined;
 }
 
 /** Column reference in custom expressions */

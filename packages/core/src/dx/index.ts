@@ -38,7 +38,9 @@ export {
 } from './case-when-builder.js';
 // Expression primitives (EXT-001)
 export {
+	aggOrderBy,
 	array,
+	arrayAgg,
 	cast,
 	ExpressionRef,
 	type ExprInput,
@@ -49,6 +51,7 @@ export {
 	param,
 	ref as exprRef,
 	star,
+	stringAgg,
 	unary,
 } from './expressions.js';
 // Filter Helpers (Drizzle-like)

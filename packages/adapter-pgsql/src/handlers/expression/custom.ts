@@ -6,6 +6,7 @@
  */
 
 import type {
+	AggOrderByArg,
 	ArrayExpressionIntent,
 	CastExpressionIntent,
 	CustomFnExpressionIntent,
@@ -26,6 +27,7 @@ import {
 	funcCall,
 	integerNode,
 	nullConstNode,
+	sortBy,
 	typeCast,
 } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
@@ -103,9 +105,22 @@ export function compileExpressionIntent(
 			const argNodes = i.args.map((arg) =>
 				compileExpressionIntent(arg, ctx, state),
 			);
+			// Compile aggOrderBy entries into SortBy nodes for agg_order.
+			const orderByNodes =
+				i.aggOrderBy && i.aggOrderBy.length > 0
+					? i.aggOrderBy.map((ob: AggOrderByArg) => {
+							const colNode = columnRef(ob.field, undefined, undefined, ctx.naming);
+							return sortBy(
+								colNode,
+								ob.direction === 'desc' ? 'DESC' : 'ASC',
+							);
+						})
+					: undefined;
 			// Note: FILTER (WHERE ...) on customFn is applied at the compiler level
 			// (selectCustomExpression branch in compiler.ts) to avoid circular deps.
-			return funcCall(nameParts, argNodes);
+			return funcCall(nameParts, argNodes, {
+				...(orderByNodes ? { orderBy: orderByNodes } : {}),
+			});
 		}
 
 		case 'ref': {
