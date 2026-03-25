@@ -1,4 +1,3 @@
-
 /**
  * REF-VS-REF regression test.
  *
@@ -51,7 +50,9 @@ describe('REF-VS-REF: op() with two exprRef() operands compiles correctly', () =
 		// Both column refs should resolve to actual column names, not '__expr'
 		expect(sql).not.toContain('__expr');
 		// file_id and resolved_file_id should appear in the SQL
-		expect(sql).toMatch(/file_id.*!=.*resolved_file_id|resolved_file_id.*!=.*file_id/);
+		expect(sql).toMatch(
+			/file_id.*!=.*resolved_file_id|resolved_file_id.*!=.*file_id/,
+		);
 		// No parameters are needed for a column-to-column comparison
 		expect(dump.params).toHaveLength(0);
 	});
@@ -60,7 +61,11 @@ describe('REF-VS-REF: op() with two exprRef() operands compiles correctly', () =
 		const orm = buildOrm();
 		const dump = orm
 			.select('imports')
-			.columns([op('!=', exprRef('file_id'), exprRef('resolved_file_id')).as('is_different')])
+			.columns([
+				op('!=', exprRef('file_id'), exprRef('resolved_file_id')).as(
+					'is_different',
+				),
+			])
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
@@ -77,7 +82,13 @@ describe('REF-VS-REF: op() with two exprRef() operands compiles correctly', () =
 		const orm = buildOrm();
 		const dump = orm
 			.select('imports')
-			.columns([op('!=', exprRef('imports.file_id'), exprRef('imports.resolved_file_id')).as('diff')])
+			.columns([
+				op(
+					'!=',
+					exprRef('imports.file_id'),
+					exprRef('imports.resolved_file_id'),
+				).as('diff'),
+			])
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
@@ -94,7 +105,9 @@ describe('REF-VS-REF: op() with two exprRef() operands compiles correctly', () =
 		const orm = buildOrm();
 		const dump = orm
 			.select('imports')
-			.columns([op('+', exprRef('end_line'), exprRef('start_line')).as('line_sum')])
+			.columns([
+				op('+', exprRef('end_line'), exprRef('start_line')).as('line_sum'),
+			])
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);

@@ -8,12 +8,12 @@
  * and resolves the alias via snakeToCamel(rel.name) === alias as a fallback.
  */
 
-import { describe, expect, it } from 'vitest';
-import { compileSelect } from '../adapter-compiler-select.js';
-import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
-import { identityNaming } from '../naming-plugin.js';
-import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
 import type { ModelIR, PlanReport } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
+import type { AdapterCompilerDeps } from '../adapter-compiler-deps.js';
+import { compileSelect } from '../adapter-compiler-select.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../assert-field.js';
+import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
 // Mock model: variable_defs with enclosing_symbol (FK: enclosing_symbol_id -> symbols)
@@ -62,7 +62,10 @@ const deps: AdapterCompilerDeps = {
 	model: mockModel,
 };
 
-function compile(plan: PlanReport): { sql: string; parameters: readonly unknown[] } {
+function compile(plan: PlanReport): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
 	return compileSelect(plan, undefined, deps);
 }
 
@@ -222,8 +225,12 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 	it('does not produce a full hydration object alongside symbol_name (synthesized join)', () => {
 		const { sql } = compile(buildExplicitColumnsPlan());
 		// No "id" column from relation should appear with the dotted alias convention
-		expect(sql).not.toMatch(/"enclosing_symbol"\."id"\s+AS\s+"enclosing_symbol\.id"/i);
-		expect(sql).not.toMatch(/"enclosingSymbol"\."id"\s+AS\s+"enclosingSymbol\.id"/i);
+		expect(sql).not.toMatch(
+			/"enclosing_symbol"\."id"\s+AS\s+"enclosing_symbol\.id"/i,
+		);
+		expect(sql).not.toMatch(
+			/"enclosingSymbol"\."id"\s+AS\s+"enclosingSymbol\.id"/i,
+		);
 	});
 
 	it('works with INNER JOIN too (JOIN_INNER renders as bare JOIN in pgsql deparser)', () => {
@@ -236,7 +243,9 @@ describe('Issue 16: include with explicit .columns() — hydration suppression',
 	});
 
 	it('does not emit hydration columns when planner emitted a snake_case relation decision', () => {
-		const { sql } = compile(buildExplicitColumnsPlan({ hasPlannerDecision: true }));
+		const { sql } = compile(
+			buildExplicitColumnsPlan({ hasPlannerDecision: true }),
+		);
 		// Still JOINs
 		expect(sql).toMatch(/JOIN/i);
 		// No dotted hydration aliases

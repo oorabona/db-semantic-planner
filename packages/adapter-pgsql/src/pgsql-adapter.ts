@@ -7,6 +7,12 @@
  * @module pgsql-adapter
  */
 
+import type {
+	AlterColumnOptions,
+	CreateIndexOptions,
+	DropIndexOptions,
+	IndexInfo,
+} from '@dbsp/core';
 import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
 import type {
 	Adapter,
@@ -63,6 +69,15 @@ import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
 } from './ddl/index.js';
+import {
+	generateCreateIndexSQL,
+	generateDropIndexSQL,
+} from './ddl/index-operations.js';
+import {
+	generateAlterColumnSQL,
+	generateTruncateSQL,
+	generateVacuumSQL,
+} from './ddl/table-operations.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
@@ -696,6 +711,120 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...overrideOptions,
 		};
 		return generateDDLStatements(schema, options);
+	}
+
+	/**
+	 * Execute a DDL statement directly (e.g. TRUNCATE, VACUUM, ALTER TABLE, CREATE INDEX).
+	 *
+	 * @throws Error if called on a compile-only adapter (no pool)
+	 * @since DDL-TABLE-001
+	 */
+	async executeDDL(sql: string): Promise<void> {
+		if (!this.pool) {
+			throw new Error('Cannot execute DDL on compile-only adapter');
+		}
+		await this.pool.query(sql);
+	}
+
+	/**
+	 * Whether this adapter instance is scoped inside a transaction.
+	 * Guards unsafe DDL operations (VACUUM, CREATE INDEX CONCURRENTLY).
+	 *
+	 * @since DDL-TABLE-001
+	 */
+	get inTransaction(): boolean {
+		return this.client !== undefined;
+	}
+
+	/**
+	 * List all indexes on a table by querying pg_indexes.
+	 *
+	 * @param table - Table name
+	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 */
+	async listIndexes(table: string, schema?: string): Promise<IndexInfo[]> {
+		const executor = this.requireConnection();
+		const schemaName = schema ?? this.schemaName ?? 'public';
+		const result = await executor.query<{
+			indexname: string;
+			indexdef: string;
+		}>(
+			`SELECT indexname, indexdef
+			 FROM pg_indexes
+			 WHERE tablename = $1
+			   AND schemaname = $2
+			 ORDER BY indexname`,
+			[table, schemaName],
+		);
+		return result.rows.map((row) => {
+			const def = row.indexdef;
+			const unique = /\bCREATE UNIQUE INDEX\b/i.test(def);
+			const methodMatch = /\bUSING\s+(\w+)/i.exec(def);
+			const method = methodMatch?.[1] ?? 'btree';
+			return { name: row.indexname, definition: def, unique, method };
+		});
+	}
+
+	/**
+	 * Generate SQL for TRUNCATE (used by the TableDDL proxy).
+	 * @internal
+	 */
+	generateTruncate(
+		table: string,
+		schema?: string,
+		options?: { cascade?: boolean; restartIdentity?: boolean },
+	): string {
+		return generateTruncateSQL(table, schema ?? this.schemaName, options);
+	}
+
+	/**
+	 * Generate SQL for VACUUM (used by the TableDDL proxy).
+	 * @internal
+	 */
+	generateVacuum(
+		table: string,
+		schema?: string,
+		options?: { full?: boolean; analyze?: boolean },
+	): string {
+		return generateVacuumSQL(table, schema ?? this.schemaName, options);
+	}
+
+	/**
+	 * Generate SQL for ALTER COLUMN (used by the TableDDL proxy).
+	 * @internal
+	 */
+	generateAlterColumn(
+		table: string,
+		column: string,
+		options: AlterColumnOptions,
+		schema?: string,
+	): string {
+		return generateAlterColumnSQL(
+			table,
+			column,
+			options,
+			schema ?? this.schemaName,
+		);
+	}
+
+	/**
+	 * Generate SQL for CREATE INDEX (used by the TableDDL proxy).
+	 * @internal
+	 */
+	generateCreateIndex(
+		table: string,
+		options: CreateIndexOptions,
+		schema?: string,
+	): string {
+		return generateCreateIndexSQL(table, options, schema ?? this.schemaName);
+	}
+
+	/**
+	 * Generate SQL for DROP INDEX (used by the TableDDL proxy).
+	 * @internal
+	 */
+	generateDropIndex(name: string, options?: DropIndexOptions): string {
+		return generateDropIndexSQL(name, options);
 	}
 
 	// =========================================================================

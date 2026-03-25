@@ -1,4 +1,3 @@
-
 /**
  * WINDOW-FN-BARE regression test.
  *

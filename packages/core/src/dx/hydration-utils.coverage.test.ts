@@ -62,12 +62,19 @@ describe('hydrateJsonAggIncludes', () => {
 	});
 
 	it('skips rows that are null', () => {
-		const results: Array<Record<string, unknown> | null> = [null, { id: 1, posts_json: '[]' }];
+		const results: Array<Record<string, unknown> | null> = [
+			null,
+			{ id: 1, posts_json: '[]' },
+		];
 		const report = makePlanReport([
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -81,7 +88,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -94,7 +105,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -110,7 +125,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -123,7 +142,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author', includeAlias: 'author', relationType: 'belongsTo' },
+				context: {
+					relation: 'author',
+					includeAlias: 'author',
+					relationType: 'belongsTo',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -137,7 +160,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -150,7 +177,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -163,7 +194,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author', includeAlias: 'author', relationType: 'hasOne' },
+				context: {
+					relation: 'author',
+					includeAlias: 'author',
+					relationType: 'hasOne',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -176,7 +211,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -189,7 +228,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author', includeAlias: 'author', relationType: 'belongsTo' },
+				context: {
+					relation: 'author',
+					includeAlias: 'author',
+					relationType: 'belongsTo',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -202,7 +245,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'score', includeAlias: 'score', relationType: 'hasMany' },
+				context: {
+					relation: 'score',
+					includeAlias: 'score',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -215,7 +262,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author', includeAlias: 'author', relationType: 'belongsTo' },
+				context: {
+					relation: 'author',
+					includeAlias: 'author',
+					relationType: 'belongsTo',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -228,7 +279,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author', includeAlias: 'author', relationType: 'hasOne' },
+				context: {
+					relation: 'author',
+					includeAlias: 'author',
+					relationType: 'hasOne',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -241,7 +296,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'author_posts', includeAlias: 'author_posts', relationType: 'hasMany' },
+				context: {
+					relation: 'author_posts',
+					includeAlias: 'author_posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -256,7 +315,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'user_posts', includeAlias: 'articles', relationType: 'hasMany' },
+				context: {
+					relation: 'user_posts',
+					includeAlias: 'articles',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -282,7 +345,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'tags', includeAlias: 'tags', relationType: 'hasMany' },
+				context: {
+					relation: 'tags',
+					includeAlias: 'tags',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -302,12 +369,20 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'profile', includeAlias: 'profile', relationType: 'hasOne' },
+				context: {
+					relation: 'profile',
+					includeAlias: 'profile',
+					relationType: 'hasOne',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -324,7 +399,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'posts', includeAlias: 'posts', relationType: 'hasMany' },
+				context: {
+					relation: 'posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);
@@ -337,7 +416,11 @@ describe('hydrateJsonAggIncludes', () => {
 			{
 				type: 'include-strategy',
 				choice: 'json_agg',
-				context: { relation: 'comments', includeAlias: 'comments', relationType: 'hasMany' },
+				context: {
+					relation: 'comments',
+					includeAlias: 'comments',
+					relationType: 'hasMany',
+				},
 			},
 		]);
 		hydrateJsonAggIncludes(results, report);

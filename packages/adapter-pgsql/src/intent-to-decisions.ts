@@ -254,7 +254,11 @@ export function convertWhereCondition(
 			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
 			const rawValue = cond.value;
 			const resolvedValue = isSubqueryRef(rawValue)
-				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: rawValue.column }
+				? {
+						kind: 'fieldRef' as const,
+						scope: 'outer' as const,
+						column: rawValue.column,
+					}
 				: rawValue;
 			const result: Mutable<PlanDecision> = {
 				type: 'where',

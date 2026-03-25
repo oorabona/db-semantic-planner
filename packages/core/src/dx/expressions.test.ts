@@ -499,7 +499,9 @@ describe('namedArg()', () => {
 
 describe('star()', () => {
 	it('should create StarExpressionIntent', () => {
-		expect(star().intent).toEqual({ kind: 'star' } satisfies StarExpressionIntent);
+		expect(star().intent).toEqual({
+			kind: 'star',
+		} satisfies StarExpressionIntent);
 	});
 
 	it('should return an ExpressionRef', () => {
@@ -516,7 +518,9 @@ describe('star()', () => {
 		expect(intent.kind).toBe('customFn');
 		expect(intent.name).toBe('count');
 		expect(intent.args).toHaveLength(1);
-		expect(intent.args[0]).toEqual({ kind: 'star' } satisfies StarExpressionIntent);
+		expect(intent.args[0]).toEqual({
+			kind: 'star',
+		} satisfies StarExpressionIntent);
 	});
 });
 

@@ -14,10 +14,15 @@
  * ```
  */
 
-import type { Adapter, CompiledQuery, CteQueryIntent, UnnestCteIntent } from '@dbsp/types';
+import type {
+	Adapter,
+	CompiledQuery,
+	CteQueryIntent,
+	UnnestCteIntent,
+} from '@dbsp/types';
 import { InvalidOperationError } from './errors.js';
+import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
-import { QueryBuilderImpl } from './query-builder.js';
 
 // ============================================================================
 // CteBuilder

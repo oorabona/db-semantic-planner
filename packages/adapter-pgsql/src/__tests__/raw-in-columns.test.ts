@@ -1,4 +1,3 @@
-
 /**
  * RAW-IN-COLUMNS regression test.
  *

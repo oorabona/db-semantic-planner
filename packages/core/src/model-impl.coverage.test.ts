@@ -1,21 +1,16 @@
 // @ts-nocheck — coverage test: runtime assertions on AST nodes
 import { describe, expect, it } from 'vitest';
-import type { RelationIR, TableIR } from './model-ir.js';
 import { ModelIRImpl } from './model-impl.js';
+import type { RelationIR, TableIR } from './model-ir.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeTable(
-	name: string,
-	overrides?: Partial<TableIR>,
-): TableIR {
+function makeTable(name: string, overrides?: Partial<TableIR>): TableIR {
 	return {
 		name,
-		columns: [
-			{ name: 'id', type: 'integer', nullable: false },
-		],
+		columns: [{ name: 'id', type: 'integer', nullable: false }],
 		primaryKey: 'id',
 		foreignKeys: [],
 		indexes: [],
@@ -43,10 +38,7 @@ function makeRelation(
 	};
 }
 
-function buildModel(
-	tables: TableIR[],
-	relations: RelationIR[],
-): ModelIRImpl {
+function buildModel(tables: TableIR[], relations: RelationIR[]): ModelIRImpl {
 	const tableMap = new Map(tables.map((t) => [t.name, t]));
 	const relMap = new Map(relations.map((r) => [`${r.source}.${r.name}`, r]));
 	return new ModelIRImpl(tableMap, relMap);
@@ -58,20 +50,14 @@ function buildModel(
 
 describe('ModelIRImpl.getRelationsFrom', () => {
 	it('returns empty array for non-existent source table', () => {
-		const model = buildModel(
-			[makeTable('users')],
-			[],
-		);
+		const model = buildModel([makeTable('users')], []);
 		expect(model.getRelationsFrom('nonexistent')).toEqual([]);
 	});
 });
 
 describe('ModelIRImpl.getRelationsTo', () => {
 	it('returns empty array for non-existent target table', () => {
-		const model = buildModel(
-			[makeTable('users')],
-			[],
-		);
+		const model = buildModel([makeTable('users')], []);
 		expect(model.getRelationsTo('nonexistent')).toEqual([]);
 	});
 });
@@ -82,10 +68,7 @@ describe('ModelIRImpl.getRelationsTo', () => {
 
 describe('ModelIRImpl.isAmbiguous', () => {
 	it('returns non-ambiguous with empty options for 0 matching relations', () => {
-		const model = buildModel(
-			[makeTable('users'), makeTable('posts')],
-			[],
-		);
+		const model = buildModel([makeTable('users'), makeTable('posts')], []);
 		const result = model.isAmbiguous('users', 'posts');
 		expect(result).toEqual({ ambiguous: false, options: [] });
 	});
@@ -123,10 +106,12 @@ describe('ModelIRImpl validation — primary key', () => {
 	it('throws when PK column is not in columns (string PK)', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('users', {
-					columns: [{ name: 'id', type: 'integer', nullable: false }],
-					primaryKey: 'missing_col',
-				})],
+				[
+					makeTable('users', {
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'missing_col',
+					}),
+				],
 				[],
 			),
 		).toThrow(/primary key column "missing_col" not found in columns/);
@@ -135,13 +120,15 @@ describe('ModelIRImpl validation — primary key', () => {
 	it('throws when any PK column is not in columns (array PK)', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('user_roles', {
-					columns: [
-						{ name: 'user_id', type: 'integer', nullable: false },
-						{ name: 'role_id', type: 'integer', nullable: false },
-					],
-					primaryKey: ['user_id', 'missing_col'],
-				})],
+				[
+					makeTable('user_roles', {
+						columns: [
+							{ name: 'user_id', type: 'integer', nullable: false },
+							{ name: 'role_id', type: 'integer', nullable: false },
+						],
+						primaryKey: ['user_id', 'missing_col'],
+					}),
+				],
 				[],
 			),
 		).toThrow(/primary key column "missing_col" not found in columns/);
@@ -150,10 +137,12 @@ describe('ModelIRImpl validation — primary key', () => {
 	it('accepts string PK when column exists', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('users', {
-					columns: [{ name: 'id', type: 'integer', nullable: false }],
-					primaryKey: 'id',
-				})],
+				[
+					makeTable('users', {
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+					}),
+				],
 				[],
 			),
 		).not.toThrow();
@@ -162,13 +151,15 @@ describe('ModelIRImpl validation — primary key', () => {
 	it('accepts array PK when all columns exist (composite key)', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('user_roles', {
-					columns: [
-						{ name: 'user_id', type: 'integer', nullable: false },
-						{ name: 'role_id', type: 'integer', nullable: false },
-					],
-					primaryKey: ['user_id', 'role_id'],
-				})],
+				[
+					makeTable('user_roles', {
+						columns: [
+							{ name: 'user_id', type: 'integer', nullable: false },
+							{ name: 'role_id', type: 'integer', nullable: false },
+						],
+						primaryKey: ['user_id', 'role_id'],
+					}),
+				],
 				[],
 			),
 		).not.toThrow();
@@ -177,13 +168,15 @@ describe('ModelIRImpl validation — primary key', () => {
 	it('skips PK validation when primaryKey is undefined', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('junction', {
-					columns: [
-						{ name: 'a_id', type: 'integer', nullable: false },
-						{ name: 'b_id', type: 'integer', nullable: false },
-					],
-					primaryKey: undefined,
-				})],
+				[
+					makeTable('junction', {
+						columns: [
+							{ name: 'a_id', type: 'integer', nullable: false },
+							{ name: 'b_id', type: 'integer', nullable: false },
+						],
+						primaryKey: undefined,
+					}),
+				],
 				[],
 			),
 		).not.toThrow();
@@ -198,15 +191,20 @@ describe('ModelIRImpl validation — foreign keys', () => {
 	it('throws when FK references a non-existent table', () => {
 		expect(() =>
 			buildModel(
-				[makeTable('posts', {
-					columns: [
-						{ name: 'id', type: 'integer', nullable: false },
-						{ name: 'author_id', type: 'integer', nullable: false },
-					],
-					foreignKeys: [
-						{ columns: ['author_id'], references: { table: 'ghost_table', columns: ['id'] } },
-					],
-				})],
+				[
+					makeTable('posts', {
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'author_id', type: 'integer', nullable: false },
+						],
+						foreignKeys: [
+							{
+								columns: ['author_id'],
+								references: { table: 'ghost_table', columns: ['id'] },
+							},
+						],
+					}),
+				],
 				[],
 			),
 		).toThrow(/FK referencing non-existent table "ghost_table"/);
@@ -261,7 +259,11 @@ describe('ModelIRImpl — circular relation detection', () => {
 		expect(() =>
 			buildModel(
 				[makeTable('categories')],
-				[makeRelation('parent', 'categories', 'categories', { type: 'belongsTo' })],
+				[
+					makeRelation('parent', 'categories', 'categories', {
+						type: 'belongsTo',
+					}),
+				],
 			),
 		).not.toThrow();
 	});
@@ -270,10 +272,7 @@ describe('ModelIRImpl — circular relation detection', () => {
 		expect(() =>
 			buildModel(
 				[makeTable('a'), makeTable('b')],
-				[
-					makeRelation('toB', 'a', 'b'),
-					makeRelation('toA', 'b', 'a'),
-				],
+				[makeRelation('toB', 'a', 'b'), makeRelation('toA', 'b', 'a')],
 			),
 		).not.toThrow();
 	});

@@ -1,4 +1,3 @@
-
 /**
  * DISTINCT-VECTOR regression test.
  *
@@ -66,12 +65,14 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 		// Must NOT select symbol columns (especially not the vector column)
 		// Without fix: "SELECT DISTINCT ..., symbol.id AS "symbol.id", symbol.name AS "symbol.name", symbol.embedding AS "symbol.embedding""
-		expect(sql, 'Should NOT include symbol.id in SELECT DISTINCT').not.toContain(
-			'"symbol.id"',
-		);
-		expect(sql, 'Should NOT include symbol.embedding in SELECT DISTINCT').not.toContain(
-			'symbol.embedding',
-		);
+		expect(
+			sql,
+			'Should NOT include symbol.id in SELECT DISTINCT',
+		).not.toContain('"symbol.id"');
+		expect(
+			sql,
+			'Should NOT include symbol.embedding in SELECT DISTINCT',
+		).not.toContain('symbol.embedding');
 	});
 
 	it('.distinct().include("symbol", {join:"inner"}).columns(["id", "symbol_id"]) selects only explicit columns', () => {
@@ -96,9 +97,10 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 		expect(sql, 'Should select symbol_id').toContain('symbol_id');
 
 		// Must NOT select symbol.embedding (the vector column that breaks DISTINCT)
-		expect(sql, 'Should NOT include vector column in SELECT DISTINCT').not.toContain(
-			'embedding',
-		);
+		expect(
+			sql,
+			'Should NOT include vector column in SELECT DISTINCT',
+		).not.toContain('embedding');
 	});
 
 	it('regression guard: without .distinct(), join include still adds symbol.* to SELECT', () => {
@@ -124,11 +126,7 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 	it('regression guard: .distinct() without join include keeps DISTINCT behavior', () => {
 		const orm = buildOrm();
-		const dump = orm
-			.select('symbol_parents')
-			.distinct()
-			.columns(['id'])
-			.dump();
+		const dump = orm.select('symbol_parents').distinct().columns(['id']).dump();
 
 		const sql = normalizeSQL(dump.sql);
 

@@ -964,8 +964,7 @@ function processInclude(
 	// (only relevant when strategy is 'join')
 	const explicitJoinType: 'inner' | 'left' | undefined =
 		includeStrategy === 'join'
-			? include.join ??
-				determineJoinType(relation, opts, !!include.where)
+			? (include.join ?? determineJoinType(relation, opts, !!include.where))
 			: undefined;
 
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');

@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import type {
 	DialectCapabilities,
 	EnumIR,
@@ -8,6 +7,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { UnsupportedFeatureError } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { ModelIRImpl } from '../model-impl.js';
 import { negotiateFeatures } from './negotiate-features.js';
@@ -76,10 +76,11 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('SC-04: warning mode (default)', () => {
 		it('should emit a warning for an unsupported enum type', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ enums: new Map([['status', { name: 'status', values: ['active', 'inactive'] }]]) },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([
+					['status', { name: 'status', values: ['active', 'inactive'] }],
+				]),
+			});
 			const caps = noDDLCaps();
 
 			// Act
@@ -96,10 +97,9 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 		it('should default to warning behavior when behavior param is omitted', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ extensions: ['pgvector'] },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				extensions: ['pgvector'],
+			});
 			const caps = noDDLCaps();
 
 			// Act
@@ -118,22 +118,22 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('SC-05: error mode (fail-fast)', () => {
 		it('should throw UnsupportedFeatureError on first unsupported feature', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ enums: new Map([['status', { name: 'status', values: ['active'] }]]) },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['active'] }]]),
+			});
 			const caps = noDDLCaps();
 
 			// Act & Assert
-			expect(() => negotiateFeatures(model, caps, 'error')).toThrow(UnsupportedFeatureError);
+			expect(() => negotiateFeatures(model, caps, 'error')).toThrow(
+				UnsupportedFeatureError,
+			);
 		});
 
 		it('should include feature, adapter, and element in the thrown error', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]) },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
+			});
 			const caps = noDDLCaps();
 
 			// Act & Assert
@@ -154,14 +154,11 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('SC-06: ignore mode (silent)', () => {
 		it('should produce no warnings and no errors', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{
-					enums: new Map([['status', { name: 'status', values: ['a'] }]]),
-					sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
-					extensions: ['pgvector'],
-				},
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+				sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
+				extensions: ['pgvector'],
+			});
 			const caps = noDDLCaps();
 
 			// Act
@@ -179,14 +176,11 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('SC-07: warning mode collects ALL unsupported features', () => {
 		it('should collect warnings for enum, sequence, and extension simultaneously', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{
-					enums: new Map([['status', { name: 'status', values: ['a'] }]]),
-					sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
-					extensions: ['pgvector'],
-				},
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+				sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
+				extensions: ['pgvector'],
+			});
 			const caps = noDDLCaps();
 
 			// Act
@@ -194,7 +188,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert — 3 features unsupported → 3 warnings
 			expect(result.warnings).toHaveLength(3);
-			const features = result.warnings.map(w => w.feature);
+			const features = result.warnings.map((w) => w.feature);
 			expect(features).toContain('enum');
 			expect(features).toContain('sequence');
 			expect(features).toContain('extension');
@@ -208,17 +202,18 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('SC-08: all features supported (PostgreSQL)', () => {
 		it('should produce zero warnings for schema-level DDL features', () => {
 			// Arrange — schema with enum, sequence, extension
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{
-					enums: new Map([['status', { name: 'status', values: ['a'] }]]),
-					sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
-					extensions: ['pgcrypto'],
-				},
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+				sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
+				extensions: ['pgcrypto'],
+			});
 
 			// Act
-			const result = negotiateFeatures(model, POSTGRESQL_CAPABILITIES, 'warning');
+			const result = negotiateFeatures(
+				model,
+				POSTGRESQL_CAPABILITIES,
+				'warning',
+			);
 
 			// Assert
 			expect(result.warnings).toHaveLength(0);
@@ -232,10 +227,9 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('FeatureBehaviorConfig: per-feature overrides', () => {
 		it('should throw for a feature with override=error even when default is warning', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ enums: new Map([['status', { name: 'status', values: ['a'] }]]) },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+			});
 			const caps = noDDLCaps();
 			const config: FeatureBehaviorConfig = {
 				default: 'warning',
@@ -243,18 +237,17 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			};
 
 			// Act & Assert
-			expect(() => negotiateFeatures(model, caps, config)).toThrow(UnsupportedFeatureError);
+			expect(() => negotiateFeatures(model, caps, config)).toThrow(
+				UnsupportedFeatureError,
+			);
 		});
 
 		it('should ignore a feature set to ignore even when default is warning', () => {
 			// Arrange — enum: ignore, extension: warning (default)
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{
-					enums: new Map([['status', { name: 'status', values: ['a'] }]]),
-					extensions: ['pgvector'],
-				},
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+				extensions: ['pgvector'],
+			});
 			const caps = noDDLCaps();
 			const config: FeatureBehaviorConfig = {
 				default: 'warning',
@@ -271,13 +264,10 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 		it('should warn for all features when override has no match for the feature', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{
-					enums: new Map([['status', { name: 'status', values: ['a'] }]]),
-					sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
-				},
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+				sequences: new Map([['seq1', { name: 'seq1' } satisfies SequenceIR]]),
+			});
 			const caps = noDDLCaps();
 			const config: FeatureBehaviorConfig = {
 				default: 'warning',
@@ -301,7 +291,9 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			// Arrange
 			const table: TableIR = {
 				name: 'users',
-				columns: [{ name: 'id', type: 'number', nullable: false, identity: 'always' }],
+				columns: [
+					{ name: 'id', type: 'number', nullable: false, identity: 'always' },
+				],
 				foreignKeys: [],
 				indexes: [],
 			};
@@ -321,7 +313,14 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			// Arrange
 			const table: TableIR = {
 				name: 'users',
-				columns: [{ name: 'name', type: 'string', nullable: false, collation: 'en_US.utf8' }],
+				columns: [
+					{
+						name: 'name',
+						type: 'string',
+						nullable: false,
+						collation: 'en_US.utf8',
+					},
+				],
 				foreignKeys: [],
 				indexes: [],
 			};
@@ -341,7 +340,14 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			// Arrange
 			const table: TableIR = {
 				name: 'users',
-				columns: [{ name: 'id', type: 'number', nullable: false, comment: 'Primary key' }],
+				columns: [
+					{
+						name: 'id',
+						type: 'number',
+						nullable: false,
+						comment: 'Primary key',
+					},
+				],
 				foreignKeys: [],
 				indexes: [],
 			};
@@ -478,7 +484,12 @@ describe('negotiateFeatures (CAPS-003)', () => {
 				name: 'users',
 				columns: [
 					{ name: 'id', type: 'number', nullable: false, identity: 'always' },
-					{ name: 'name', type: 'string', nullable: false, collation: 'en_US.utf8' },
+					{
+						name: 'name',
+						type: 'string',
+						nullable: false,
+						collation: 'en_US.utf8',
+					},
 				],
 				foreignKeys: [],
 				indexes: [
@@ -494,7 +505,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert — identity, collation, indexMethod, partialIndex = 4 warnings
 			expect(result.warnings).toHaveLength(4);
-			const features = result.warnings.map(w => w.feature);
+			const features = result.warnings.map((w) => w.feature);
 			expect(features).toContain('identity');
 			expect(features).toContain('collation');
 			expect(features).toContain('indexMethod');
@@ -510,7 +521,9 @@ describe('negotiateFeatures (CAPS-003)', () => {
 				columns: [{ name: 'amount', type: 'number', nullable: false }],
 				foreignKeys: [],
 				indexes: [],
-				checkConstraints: [{ name: 'chk_positive_amount', expression: 'amount > 0' }],
+				checkConstraints: [
+					{ name: 'chk_positive_amount', expression: 'amount > 0' },
+				],
 			};
 			const model = makeModel(new Map([['orders', table]]));
 			const caps = noDDLCaps();
@@ -537,17 +550,21 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const postsTable: TableIR = {
 				name: 'posts',
 				columns: [{ name: 'user_id', type: 'number', nullable: false }],
-				foreignKeys: [{
-					columns: ['user_id'],
-					references: { table: 'users', columns: ['id'] },
-					onUpdate: 'CASCADE',
-				}],
+				foreignKeys: [
+					{
+						columns: ['user_id'],
+						references: { table: 'users', columns: ['id'] },
+						onUpdate: 'CASCADE',
+					},
+				],
 				indexes: [],
 			};
-			const model = makeModel(new Map([
-				['users', usersTable],
-				['posts', postsTable],
-			]));
+			const model = makeModel(
+				new Map([
+					['users', usersTable],
+					['posts', postsTable],
+				]),
+			);
 			const caps = noDDLCaps();
 
 			// Act
@@ -570,17 +587,21 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const postsTable: TableIR = {
 				name: 'posts',
 				columns: [{ name: 'user_id', type: 'number', nullable: false }],
-				foreignKeys: [{
-					columns: ['user_id'],
-					references: { table: 'users', columns: ['id'] },
-					onUpdate: 'NO ACTION',
-				}],
+				foreignKeys: [
+					{
+						columns: ['user_id'],
+						references: { table: 'users', columns: ['id'] },
+						onUpdate: 'NO ACTION',
+					},
+				],
 				indexes: [],
 			};
-			const model = makeModel(new Map([
-				['users', usersTable],
-				['posts', postsTable],
-			]));
+			const model = makeModel(
+				new Map([
+					['users', usersTable],
+					['posts', postsTable],
+				]),
+			);
 			const caps = noDDLCaps();
 
 			// Act
@@ -601,17 +622,21 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const postsTable: TableIR = {
 				name: 'posts',
 				columns: [{ name: 'user_id', type: 'number', nullable: false }],
-				foreignKeys: [{
-					columns: ['user_id'],
-					references: { table: 'users', columns: ['id'] },
-					deferred: true,
-				}],
+				foreignKeys: [
+					{
+						columns: ['user_id'],
+						references: { table: 'users', columns: ['id'] },
+						deferred: true,
+					},
+				],
 				indexes: [],
 			};
-			const model = makeModel(new Map([
-				['users', usersTable],
-				['posts', postsTable],
-			]));
+			const model = makeModel(
+				new Map([
+					['users', usersTable],
+					['posts', postsTable],
+				]),
+			);
 			const caps = noDDLCaps();
 
 			// Act
@@ -649,10 +674,9 @@ describe('negotiateFeatures (CAPS-003)', () => {
 	describe('no modifications to ModelIR (INV-06)', () => {
 		it('should not mutate the model object', () => {
 			// Arrange
-			const model = makeModel(
-				new Map([['users', MINIMAL_TABLE]]),
-				{ enums: new Map([['status', { name: 'status', values: ['a'] }]]) },
-			);
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]), {
+				enums: new Map([['status', { name: 'status', values: ['a'] }]]),
+			});
 			const caps = noDDLCaps();
 			const enumsBefore = model.enums?.size;
 

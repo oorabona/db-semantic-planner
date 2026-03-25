@@ -1,4 +1,3 @@
-
 /**
  * Issue 10: orderBy() with ExpressionSpec and nulls option
  *
@@ -9,7 +8,7 @@
  * propagate the options.nulls field, so NULLS LAST/FIRST was silently dropped.
  */
 
-import { createOrm, op, exprRef, fn, schema } from '@dbsp/core';
+import { createOrm, exprRef, fn, op, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -41,11 +40,9 @@ describe('orderBy() ExpressionSpec with nulls option', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.orderBy(
-				op('-', exprRef('end_line'), exprRef('start_line')),
-				'desc',
-				{ nulls: 'last' },
-			)
+			.orderBy(op('-', exprRef('end_line'), exprRef('start_line')), 'desc', {
+				nulls: 'last',
+			})
 			.dump();
 
 		expect(dump.sql).toContain('DESC');
@@ -56,11 +53,9 @@ describe('orderBy() ExpressionSpec with nulls option', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.orderBy(
-				op('-', exprRef('end_line'), exprRef('start_line')),
-				'asc',
-				{ nulls: 'first' },
-			)
+			.orderBy(op('-', exprRef('end_line'), exprRef('start_line')), 'asc', {
+				nulls: 'first',
+			})
 			.dump();
 
 		expect(dump.sql).toContain('ASC');
@@ -106,11 +101,9 @@ describe('orderBy() ExpressionSpec with nulls option', () => {
 		const orm = buildOrm();
 		const dump = orm
 			.select('symbols')
-			.orderBy(
-				op('-', exprRef('end_line'), exprRef('start_line')),
-				'desc',
-				{ nulls: 'last' },
-			)
+			.orderBy(op('-', exprRef('end_line'), exprRef('start_line')), 'desc', {
+				nulls: 'last',
+			})
 			.dump();
 
 		// NULLS LAST must follow the ORDER BY expression

@@ -478,6 +478,22 @@ export interface Adapter<DB = unknown>
 	 * @since ARCH-006
 	 */
 	readonly dbCasing: DbCasing;
+
+	/**
+	 * Execute a DDL statement directly (e.g. TRUNCATE, VACUUM, ALTER TABLE, CREATE INDEX).
+	 * Optional — compile-only adapters do not implement this.
+	 *
+	 * @since DDL-TABLE-001
+	 */
+	executeDDL?(sql: string): Promise<void>;
+
+	/**
+	 * Whether this adapter instance is scoped inside a transaction.
+	 * Used by table DDL methods to guard against unsafe operations (e.g. VACUUM).
+	 *
+	 * @since DDL-TABLE-001
+	 */
+	readonly inTransaction?: boolean;
 }
 
 // ============================================================================

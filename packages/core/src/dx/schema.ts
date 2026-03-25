@@ -629,7 +629,13 @@ export function schemaToModelIR(
 			)
 		: undefined;
 
-	return new ModelIRImpl(tableMap, relationMap, undefined, extensions, sequenceMap);
+	return new ModelIRImpl(
+		tableMap,
+		relationMap,
+		undefined,
+		extensions,
+		sequenceMap,
+	);
 }
 
 // ============================================================================
@@ -918,7 +924,9 @@ function buildTables(
 					type: def.type,
 					nullable: def.nullable ?? false,
 				};
-				if (def.dbType?.trim()) { col.originalDbType = def.dbType.trim(); }
+				if (def.dbType?.trim()) {
+					col.originalDbType = def.dbType.trim();
+				}
 				if (def.unique) {
 					col.unique = def.unique;
 				}
@@ -1009,7 +1017,10 @@ function buildTables(
 			// CHECK constraints
 			if (tableConstraints.checkConstraints) {
 				for (const chk of tableConstraints.checkConstraints) {
-					checkConstraints.push({ name: chk.name, expression: `CHECK (${chk.expression})` });
+					checkConstraints.push({
+						name: chk.name,
+						expression: `CHECK (${chk.expression})`,
+					});
 				}
 			}
 

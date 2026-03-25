@@ -1,19 +1,17 @@
-import type { Adapter } from '../adapter.js';
-import type { ModelIR } from '../model-ir.js';
-import type { PlanOptions } from '../planner.js';
 import type {
 	FeatureBehaviorConfig,
 	UnsupportedFeatureBehavior,
 } from '@dbsp/types';
-
-import { negotiateFeatures } from './negotiate-features.js';
-
+import type { Adapter } from '../adapter.js';
+import type { ModelIR } from '../model-ir.js';
+import type { PlanOptions } from '../planner.js';
 import { NamingConventionMismatchError } from './errors.js';
 import {
 	getHookStore,
 	type HookErrorHandler,
 	type HookManager,
 } from './hooks.js';
+import { negotiateFeatures } from './negotiate-features.js';
 import { createOrmInstance } from './orm-instance.js';
 import type {
 	DefaultFilters,
@@ -140,7 +138,9 @@ export interface SimplifiedOrmOptions<
 	 * Use 'error' for strict environments, 'ignore' to suppress.
 	 * Pass FeatureBehaviorConfig for per-feature overrides.
 	 */
-	readonly unsupportedFeatures?: UnsupportedFeatureBehavior | FeatureBehaviorConfig;
+	readonly unsupportedFeatures?:
+		| UnsupportedFeatureBehavior
+		| FeatureBehaviorConfig;
 }
 
 /**

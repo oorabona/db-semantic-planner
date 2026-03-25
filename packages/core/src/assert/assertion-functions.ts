@@ -377,10 +377,7 @@ function createRowCountAssertion(
 	compare: RowCountComparator,
 	messageTemplate: (expected: number, actual: number) => string,
 ) {
-	return (
-		result: AssertionQueryResult,
-		expected: number,
-	): AssertionOutcome => {
+	return (result: AssertionQueryResult, expected: number): AssertionOutcome => {
 		const rowCount = result.rowCount ?? 0;
 		const passed = compare(rowCount, expected);
 		return {
