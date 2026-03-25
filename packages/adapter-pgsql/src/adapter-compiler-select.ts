@@ -26,6 +26,7 @@ import {
 	deriveForeignKey,
 	extractAllIncludeDecisions,
 	extractExistsDecisions,
+	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 
 // ============================================================================
@@ -135,10 +136,33 @@ export function compileSelect<T = unknown>(
 			deps.deriveFk,
 		);
 
+		// Synthesize join decisions for intent-based includes the planner couldn't resolve
+		// (e.g. camelCase alias 'enclosingSymbol' for model relation 'enclosing_symbol').
+		const coveredByPlanner = new Set(
+			unifiedIncludeDecisions
+				.filter((d) => d.type === 'includeStrategy')
+				.map((d) => d.relationName as string)
+				.filter(Boolean),
+		);
+		const synthesizedModel = options?.model ?? deps.model;
+		const synthesizedJoins = synthesizedModel
+			? synthesizeMissingJoinDecisions(
+					plan,
+					coveredByPlanner,
+					synthesizedModel,
+					deps.defaultPk,
+					deps.deriveFk,
+			  )
+			: [];
+		const allUnifiedIncludeDecisions =
+			synthesizedJoins.length > 0
+				? [...unifiedIncludeDecisions, ...synthesizedJoins]
+				: unifiedIncludeDecisions;
+
 		// Propagate filter conditions from EXISTS to matching include decisions
 		// When a relation is both filtered and included, the filter should appear
 		// in both the EXISTS subquery AND the include subquery
-		const enrichedUnifiedDecisions = unifiedIncludeDecisions.map((jd) => {
+		const enrichedUnifiedDecisions = allUnifiedIncludeDecisions.map((jd) => {
 			if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
 			const matchingExists = existsDecisions.find(
