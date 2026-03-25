@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **ISSUE-15** [Adapter] Fix `include('enclosingSymbol', { join: 'left' })` missing LEFT JOIN when planner could not resolve camelCase alias to snake_case model relation (`enclosing_symbol`) — added `synthesizeMissingJoinDecisions()` in `plan-decision-extractor.ts` that scans `getRelationsFrom(sourceTable)` and matches via `snakeToCamel(rel.name) === alias`; wired into `compileSelect()` in `adapter-compiler-select.ts` after `extractAllIncludeDecisions`; 7 unit tests in `plan-decision-extractor.coverage.test.ts`, 3 integration tests in `include-camelcase-alias.test.ts`; 2983 adapter tests pass (2026-03-25)
+
 - [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 2905 adapter tests pass (2026-03-24)
   - [x] ✅ Wire compileWhereIntent as PRIMARY SELECT path + compileSubquery callback (2026-03-24)
   - [x] ✅ 30 tests covering all 16 WHERE kinds including EXISTS/notExists/subquery/relationFilter/expression (2026-03-24)

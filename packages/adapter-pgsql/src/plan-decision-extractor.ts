@@ -693,6 +693,110 @@ function toJoinIncludeDecision(
 	};
 }
 
+
+// ============================================================================
+// Relation alias resolution: snake_case ⇔ camelCase
+// ============================================================================
+
+/**
+ * Convert a snake_case identifier to camelCase.
+ * e.g. 'enclosing_symbol' → 'enclosingSymbol'
+ */
+function snakeToCamel(s: string): string {
+	return s.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+}
+
+/**
+ * Synthesize join includeStrategy decisions for intent-based includes that the planner
+ * failed to emit decisions for (e.g. when the include alias is camelCase but the model
+ * relation is snake_case: `include('enclosingSymbol')` while model has `enclosing_symbol`).
+ *
+ * This is an adapter-level fallback: when the planner's `disambiguateRelation` cannot
+ * match the camelCase alias to a registered relation, no `include-strategy` decision is
+ * emitted. The adapter detects the gap and synthesizes the join decision directly from
+ * the model by scanning `getRelationsFrom(sourceTable)` and matching
+ * `snakeToCamel(rel.name) === alias`.
+ *
+ * Only synthesizes decisions for `{ join: 'inner' | 'left' }` includes that are not
+ * already covered by an existing includeStrategy decision.
+ */
+export function synthesizeMissingJoinDecisions(
+	plan: PlanReport,
+	coveredRelations: ReadonlySet<string>,
+	model: ModelIR,
+	defaultPk: string = DEFAULT_PK_COLUMN,
+	deriveFk: FkColumnDerivation = defaultFkDerivation,
+): SimplifiedPlanReport['decisions'] {
+	const includes = plan.intent?.include as
+		| Array<{
+				relation: string;
+				join?: 'inner' | 'left';
+				select?: { type: string; fields?: readonly string[] };
+				where?: unknown;
+		  }>
+		| undefined;
+
+	if (!includes || includes.length === 0) return [];
+
+	const sourceTable = plan.rootTable;
+	const relationsFromSource = model.getRelationsFrom(sourceTable);
+
+	const synthesized: SimplifiedPlanReport['decisions'] = [];
+
+	for (const inc of includes) {
+		const alias = inc.relation;
+
+		// Only synthesize for explicit join: 'inner'|'left' includes
+		if (inc.join !== 'inner' && inc.join !== 'left') continue;
+
+		// Already covered by a planner-emitted decision
+		if (coveredRelations.has(alias)) continue;
+
+		// Try to find the relation in the model by:
+		// 1. Direct name match (alias === rel.name)
+		// 2. camelCase conversion (snakeToCamel(rel.name) === alias)
+		const rel = relationsFromSource.find(
+			(r) => r.name === alias || snakeToCamel(r.name) === alias,
+		);
+		if (!rel) continue;
+
+		// Derive FK from RelationIR
+		const rawFk = rel.foreignKey
+			? (Array.isArray(rel.foreignKey) ? rel.foreignKey[0] : rel.foreignKey)
+			: deriveFk(rel.type === 'belongsTo' ? rel.target : sourceTable, defaultPk);
+
+		// Build column list (PK always included for NULL-detection)
+		let columns: string[] = [defaultPk];
+		if (inc.select?.type === 'fields' && inc.select.fields) {
+			const extraFields = inc.select.fields.filter((f) => f !== defaultPk);
+			columns = [defaultPk, ...extraFields];
+		}
+
+		// Build WHERE conditions from include intent
+		let conditions: PlanDecision[] | undefined;
+		if (inc.where) {
+			const converted = convertWhereToDecisions(inc.where, alias);
+			if (converted.length > 0) conditions = converted;
+		}
+
+		synthesized.push({
+			type: 'includeStrategy',
+			choice: 'join',
+			relationName: alias,
+			targetTable: rel.target,
+			sourceTable,
+			relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne' | undefined,
+			foreignKey: Array.isArray(rawFk) ? rawFk[0] : rawFk,
+			parentKey: defaultPk,
+			columns,
+			joinType: inc.join,
+			...(conditions && { conditions }),
+		});
+	}
+
+	return synthesized;
+}
+
 /**
  * Build tree structure from flat include decisions using intentPath.
  * Groups children under their parents for nested json_agg / lateral compilation.

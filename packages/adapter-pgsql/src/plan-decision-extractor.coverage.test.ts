@@ -17,6 +17,7 @@ import {
 	mapComparisonOperator,
 	resolveIncludeAlias,
 	resolveRelation,
+	synthesizeMissingJoinDecisions,
 	valueToNode,
 } from './plan-decision-extractor.js';
 
@@ -1189,4 +1190,154 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(result[0].conditions[0].conditions).toHaveLength(2);
 		});
 	});
+
+	describe('synthesizeMissingJoinDecisions — Issue 15 camelCase alias regression', () => {
+		// Mock model: variable_defs has enclosing_symbol_id -> 'enclosing_symbol' relation
+		const mockModel = {
+			getRelationsFrom: (table: string) => {
+				if (table === 'variable_defs') {
+					return [
+						{
+							name: 'enclosing_symbol',
+							type: 'belongsTo',
+							target: 'symbols',
+							foreignKey: 'enclosing_symbol_id',
+							cardinality: 'one',
+							optionality: 'optional',
+							includeStrategy: 'join',
+							filterStrategy: 'exists',
+							joinDefault: 'left',
+						},
+						{
+							name: 'file',
+							type: 'belongsTo',
+							target: 'files',
+							foreignKey: 'file_id',
+							cardinality: 'one',
+							optionality: 'required',
+							includeStrategy: 'join',
+							filterStrategy: 'exists',
+							joinDefault: 'inner',
+						},
+					];
+				}
+				return [];
+			},
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsTo: () => [],
+			relations: [],
+		};
+
+		it('synthesizes LEFT JOIN for camelCase alias matching snake_case relation', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					include: [{ relation: 'enclosingSymbol', join: 'left' }],
+				},
+				// No include-strategy decision — planner couldn't resolve camelCase alias
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(1);
+			const d = result[0];
+			expect(d.type).toBe('includeStrategy');
+			expect(d.choice).toBe('join');
+			expect(d.relationName).toBe('enclosingSymbol');
+			expect(d.targetTable).toBe('symbols');
+			expect(d.joinType).toBe('left');
+			expect(d.foreignKey).toBe('enclosing_symbol_id');
+			expect(d.relationType).toBe('belongsTo');
+		});
+
+		it('synthesizes INNER JOIN for explicit join: inner', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					include: [{ relation: 'enclosingSymbol', join: 'inner' }],
+				},
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result[0].joinType).toBe('inner');
+		});
+
+		it('does not synthesize when relation already covered by planner', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					include: [{ relation: 'enclosingSymbol', join: 'left' }],
+				},
+				decisions: [],
+			};
+			// Simulate already covered by planner
+			const covered = new Set<string>(['enclosingSymbol']);
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(0);
+		});
+
+		it('does not synthesize for includes without explicit join:', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					// No join: property — auto strategy, not a forced join
+					include: [{ relation: 'enclosingSymbol' }],
+				},
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(0);
+		});
+
+		it('resolves direct name match (alias === relation name)', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					// 'file' matches directly without camelCase conversion
+					include: [{ relation: 'file', join: 'inner' }],
+				},
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(1);
+			expect(result[0].targetTable).toBe('files');
+			expect(result[0].joinType).toBe('inner');
+		});
+
+		it('returns empty when no model relations match the alias', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {
+					include: [{ relation: 'unknownRelation', join: 'left' }],
+				},
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(0);
+		});
+
+		it('returns empty when no includes in intent', () => {
+			const plan = {
+				rootTable: 'variable_defs',
+				intent: {},
+				decisions: [],
+			};
+			const covered = new Set<string>();
+			const result = synthesizeMissingJoinDecisions(plan, covered, mockModel);
+
+			expect(result).toHaveLength(0);
+		});
+	});
+
 });
