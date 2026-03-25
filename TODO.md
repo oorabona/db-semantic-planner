@@ -50,6 +50,8 @@
 - [x] ✅ **REF-IN-FILTER** [Adapter] Fix buildColumnRef() to split dotted column names — ref('alias.col') in filter(isNotNull()) now produces alias.col instead of root.alias.col; 5 regression tests added (2026-03-22)
 - [x] ✅ **DOUBLE-ALIAS** [Adapter] Fix duplicate JOIN aliases when include('def.file') + include('file') both resolve to alias 'file' — add usedJoinAliases Set in PlanCompiler, deduplicate with _N suffix before handler.compile(); 3 regression tests added (2026-03-22)
 
+- [x] ✅ **FR-10 Block 2** [Adapter] Compile JoinIntent[] → SQL JOIN clauses — relation mode (FK auto-resolved from ModelIR, belongsTo + hasMany directions), table mode (explicit ON via WhereIntent with outerTable alias resolution), multiple chained joins via from[0] larg-chaining; fixed multi-join bug (from[0] overwrite), fixed self-join alias (outerTable=tableAlias in WhereCompilerCtx); 7 tests in join-api.test.ts, 3083 adapter tests pass, TSC+lint clean (2026-03-25)
+
 - [ ] 🟡 **GUI-026** [GUI] Dirty tab confirmation + session persistence + app close guard — Priority: P1
   - [ ] GUI-026a: Confirm before closing dirty tab (call confirmUnsavedChanges)
   - [ ] GUI-026b: Confirm before closing app with dirty tabs (Tauri window close event)

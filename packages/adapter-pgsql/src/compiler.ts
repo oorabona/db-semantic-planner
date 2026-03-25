@@ -249,6 +249,11 @@ export interface PlanDecision {
 	readonly escape?: string;
 	// Include declarations (JOIN inside EXISTS subquery)
 	readonly include?: readonly PlanDecision[];
+	// Pre-compiled right-side AST node for table-mode JoinIntent (explicit ON condition).
+	// When set, the 'join' case in compileSelect uses joinRarg + joinOnNode to build
+	// the JoinExpr wrapping from[0] as larg — enabling correct multi-join chaining.
+	readonly joinRarg?: unknown;
+	readonly joinOnNode?: unknown;
 }
 
 /**
@@ -1261,11 +1266,21 @@ export class PlanCompiler {
 					break;
 
 				case 'join': {
-					const joinExpr = this.compileJoin(decision, plan);
-					if (from.length === 1) {
-						from[0] = joinExpr;
+					// Always replace from[0] with a new JoinExpr wrapping the previous
+					// from[0] as larg — this chains multiple .join() calls correctly:
+					//   first:  from[0] = join(rangeVar(root), rarg1, on1)
+					//   second: from[0] = join(prev_join, rarg2, on2)
+					if (decision.joinRarg !== undefined && decision.joinOnNode !== undefined) {
+						// Table mode: pre-compiled rarg + ON node; larg = from[0]
+						const jRarg = decision.joinRarg as Node;
+						const jOn = decision.joinOnNode as Node;
+						from[0] =
+							decision.joinType === 'left'
+								? leftJoin(from[0] as Node, jRarg, jOn)
+								: innerJoin(from[0] as Node, jRarg, jOn);
 					} else {
-						from.push(joinExpr);
+						// Relation mode: FK-based join, pass from[0] as larg
+						from[0] = this.compileJoin(decision, plan, from[0] as Node);
 					}
 					break;
 				}
@@ -1682,13 +1697,16 @@ export class PlanCompiler {
 	private compileJoin(
 		decision: PlanDecision,
 		plan: SimplifiedPlanReport,
+		larg?: Node,
 	): Node {
-		const baseTable = rangeVar(
-			plan.rootTable,
-			undefined,
-			plan.schema ?? this.schema,
-			this.naming,
-		);
+		const baseTable =
+			larg ??
+			rangeVar(
+				plan.rootTable,
+				undefined,
+				plan.schema ?? this.schema,
+				this.naming,
+			);
 		const targetTable = rangeVar(
 			decision.targetTable ?? '',
 			decision.alias,

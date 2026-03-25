@@ -7,6 +7,7 @@ import type {
 	ColumnExpressionIntent,
 	ExpressionIntent,
 	IncludeIntent,
+	JoinIntent,
 	OrderByIntent,
 	QueryIntent,
 	SelectAggregateIntent,
@@ -114,6 +115,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	private distinctOnColumns: string[] = [];
 	private skipDefaultFilters = false;
 	private lockIntent: import('@dbsp/types').LockIntent | undefined = undefined;
+	private joinIntents: JoinIntent[] = [];
 
 	constructor(
 		model: ModelIR,
@@ -562,6 +564,28 @@ export class QueryBuilderImpl<TResult = unknown>
 			? condition
 			: objectToWhereIntent(condition as WhereFilter<Record<string, unknown>>);
 		builder.whereIntents.push(intent);
+		return builder;
+	}
+
+	join(
+		relationOrTable: string,
+		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
+	): QueryBuilder<TResult> {
+		const builder = this.clone();
+		const type = opts?.type ?? 'inner';
+		const joinIntent: JoinIntent = opts?.on
+			? {
+					table: relationOrTable,
+					on: opts.on,
+					type,
+					...(opts.as !== undefined && { alias: opts.as }),
+				}
+			: {
+					relation: relationOrTable,
+					type,
+					...(opts?.as !== undefined && { alias: opts.as }),
+				};
+		builder.joinIntents.push(joinIntent);
 		return builder;
 	}
 
@@ -1538,6 +1562,11 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.lock = this.lockIntent;
 		}
 
+		// JOIN clauses (FR-10)
+		if (this.joinIntents.length > 0) {
+			intent.joins = [...this.joinIntents];
+		}
+
 		return intent as QueryIntent;
 	}
 
@@ -1870,6 +1899,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			? { ...this.planOptionsOverride }
 			: undefined;
 		builder.lockIntent = this.lockIntent;
+		builder.joinIntents.push(...this.joinIntents);
 		return builder;
 	}
 
