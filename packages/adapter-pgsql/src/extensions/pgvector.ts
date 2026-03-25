@@ -12,6 +12,7 @@ import {
 	cast,
 	type ExpressionRef,
 	exprRef,
+	fn,
 	literal,
 	op,
 	param,
@@ -71,3 +72,19 @@ export function l2Distance(column: string, vector: number[]): ExpressionRef {
 export function innerProduct(column: string, vector: number[]): ExpressionRef {
 	return op('<#>', exprRef(column), cast(param(vector), 'vector'));
 }
+
+
+/**
+ * Get the number of dimensions of a vector column: vector_dims(col)
+ *
+ * Returns an integer — the dimension count of the stored vector.
+ * Useful for sanity-checking that embeddings match the expected model dimension.
+ *
+ * @example
+ * orm.from(embeddings).columns([vectorDims('vector').as('dim')]).first()
+ * // → SELECT vector_dims("t0"."vector") AS "dim" FROM "embeddings" AS "t0"
+ */
+export function vectorDims(column: string): ExpressionRef {
+	return fn('vector_dims', exprRef(column));
+}
+

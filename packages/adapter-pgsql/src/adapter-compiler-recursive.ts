@@ -12,6 +12,8 @@ import type {
 	CteQueryIntent,
 	ModelIR,
 	PlanReport,
+	QueryIntent,
+	RawCteIntent,
 	RecursivePlanReport,
 	UnnestCteIntent,
 } from '@dbsp/types';
@@ -265,16 +267,32 @@ export function compileCteQuery(
 	const schemaName = deps.schemaName ?? options?.schemaName;
 	const state = createCompilerState();
 
-	// 1. Build CTE nodes and accumulate CTE parameters
-	const cteNodes: Node[] = intent.ctes.map((cte) => {
-		if (cte.kind !== 'unnestCte') {
+	// All parameters accumulated from all CTEs (in declaration order)
+	const allCteParams: unknown[] = [];
+
+	// 1. Build CTE SQL fragments, accumulating parameters
+	const cteSqlFragments: string[] = [];
+	let isRecursive = false;
+
+	for (const cte of intent.ctes) {
+		if (cte.kind === 'unnestCte') {
+			// Unnest-backed CTE: builds an AST node, deparses it
+			const node = buildUnnestCte(cte, state, deps);
+			allCteParams.push(...state.parameters.slice(allCteParams.length));
+			cteSqlFragments.push(deparseQuoted(node));
+		} else if (cte.kind === 'rawCte') {
+			// Raw WITH RECURSIVE CTE: compile base + step independently
+			isRecursive = true;
+			const { sql: cteSql, params: cteParams } = buildRawCte(cte, schemaName, deps);
+			allCteParams.push(...cteParams);
+			cteSqlFragments.push(cteSql);
+		} else {
 			const kind = (cte as { kind: string }).kind;
 			throw new Error(
 				`PgsqlAdapter.compileCteQuery: Unsupported CTE kind '${kind}'`,
 			);
 		}
-		return buildUnnestCte(cte, state, deps);
-	});
+	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
 	const outerCompileOptions: CompileOptions =
@@ -297,8 +315,8 @@ export function compileCteQuery(
 		deps,
 	);
 
-	// 3. Renumber outer SQL parameters to follow CTE parameters
-	const cteParamCount = state.parameters.length;
+	// 3. Renumber outer SQL parameters to follow all CTE parameters
+	const cteParamCount = allCteParams.length;
 	const renumberedOuterSql =
 		cteParamCount > 0
 			? outerCompiled.sql.replace(
@@ -307,18 +325,18 @@ export function compileCteQuery(
 				)
 			: outerCompiled.sql;
 
-	// 4. Deparse CTE nodes to SQL fragments
-	const cteSqlParts = cteNodes.map((n) => deparseQuoted(n));
-	const withClause = cteSqlParts.join(', ');
+	// 4. Build WITH [RECURSIVE] clause
+	const withClause = cteSqlFragments.join(', ');
+	const withKeyword = isRecursive ? 'WITH RECURSIVE' : 'WITH';
 
 	const sql =
 		withClause.length > 0
-			? `WITH ${withClause} ${renumberedOuterSql}`
+			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
 			: renumberedOuterSql;
 
 	return {
 		sql,
-		parameters: [...state.parameters, ...outerCompiled.parameters],
+		parameters: [...allCteParams, ...outerCompiled.parameters],
 	};
 }
 
@@ -398,6 +416,69 @@ function buildUnnestCte(
 		},
 	};
 }
+
+
+/**
+ * Build a "name AS (base UNION [ALL] step)" SQL fragment for a raw recursive CTE.
+ *
+ * Strategy:
+ *   1. Compile base QueryIntent independently → base SQL + base params
+ *   2. Compile step QueryIntent independently → step SQL + step params ($1-relative)
+ *   3. Renumber step params to follow base params
+ *   4. Return: `"name" AS (baseSql UNION [ALL] renumberedStepSql)` + all params
+ *
+ * The outer query params are renumbered separately by compileCteQuery().
+ */
+function buildRawCte(
+	cte: RawCteIntent,
+	schemaName: string | undefined,
+	deps: AdapterCompilerDeps,
+): { sql: string; params: readonly unknown[] } {
+	const compileOptions: CompileOptions = schemaName !== undefined ? { schemaName } : {};
+
+	// Compile base (anchor) query
+	const basePlanReport: PlanReport = {
+		rootTable: cte.base.from,
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: cte.base as QueryIntent,
+		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+	};
+	const baseCompiled = compileSelect(basePlanReport, compileOptions, deps);
+
+	// Compile step (recursive) query
+	const stepPlanReport: PlanReport = {
+		rootTable: cte.step.from,
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: cte.step as QueryIntent,
+		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+	};
+	const stepCompiled = compileSelect(stepPlanReport, compileOptions, deps);
+
+	// Renumber step params to follow base params
+	const baseParamCount = baseCompiled.parameters.length;
+	const renumberedStepSql =
+		baseParamCount > 0
+			? stepCompiled.sql.replace(
+					/\$([0-9]+)/g,
+					(_: string, n: string) => `$${parseInt(n, 10) + baseParamCount}`,
+				)
+			: stepCompiled.sql;
+
+	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
+	const cteName = `"${cte.name.replace(/"/g, '""')}"`;
+	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${renumberedStepSql})`;
+
+	return {
+		sql: cteSql,
+		params: [...baseCompiled.parameters, ...stepCompiled.parameters],
+	};
+}
+
+
 
 // ============================================================================
 // buildRecursiveAnchorWhere (internal)

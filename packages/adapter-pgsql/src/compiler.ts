@@ -254,6 +254,10 @@ export interface PlanDecision {
 	// the JoinExpr wrapping from[0] as larg — enabling correct multi-join chaining.
 	readonly joinRarg?: unknown;
 	readonly joinOnNode?: unknown;
+	// Parameters for BatchValues joins (unnest() source).
+	// When set, these are spliced into this.state.parameters BEFORE other query params.
+	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
+	readonly batchValuesParams?: readonly unknown[];
 }
 
 /**
@@ -267,6 +271,13 @@ export interface SimplifiedPlanReport {
 	readonly existsWrap?: boolean;
 	/** Row-level lock (FOR UPDATE/SHARE/etc.) */
 	readonly lock?: import('@dbsp/types').LockIntent;
+	/**
+	 * When present, the FROM clause is replaced by a pre-compiled RangeFunction node
+	 * (e.g. unnest() AS alias) instead of the root table rangeVar.
+	 * `batchValuesFromParams` holds the parameter arrays to splice into state first.
+	 */
+	readonly batchValuesFromNode?: unknown;
+	readonly batchValuesFromParams?: readonly unknown[];
 }
 
 /**
@@ -1207,13 +1218,22 @@ export class PlanCompiler {
 
 	private compileSelect(plan: SimplifiedPlanReport): Node {
 		const targetList: Node[] = [];
+		// BatchValues FROM: replace rangeVar with pre-built RangeFunction (unnest)
+		if (plan.batchValuesFromNode && plan.batchValuesFromParams) {
+			for (const p of plan.batchValuesFromParams) {
+				this.state.parameters.push(p);
+			}
+			this.state.paramIndex = this.state.parameters.length;
+		}
 		const from: Node[] = [
-			rangeVar(
-				plan.rootTable,
-				undefined,
-				plan.schema ?? this.schema,
-				this.naming,
-			),
+			plan.batchValuesFromNode
+				? (plan.batchValuesFromNode as Node)
+				: rangeVar(
+						plan.rootTable,
+						undefined,
+						plan.schema ?? this.schema,
+						this.naming,
+				  ),
 		];
 		let where: Node | undefined;
 		const orderBy: Node[] = [];
@@ -1271,7 +1291,15 @@ export class PlanCompiler {
 					//   first:  from[0] = join(rangeVar(root), rarg1, on1)
 					//   second: from[0] = join(prev_join, rarg2, on2)
 					if (decision.joinRarg !== undefined && decision.joinOnNode !== undefined) {
-						// Table mode: pre-compiled rarg + ON node; larg = from[0]
+						// Table/BatchValues mode: pre-compiled rarg + ON node; larg = from[0]
+						// BatchValues: splice batch params into state BEFORE other query params
+						// so that $1, $2, ... in the RangeFunction align with parameters[0], [1], ...
+						if (decision.batchValuesParams) {
+							for (const p of decision.batchValuesParams) {
+								this.state.parameters.push(p);
+							}
+							this.state.paramIndex = this.state.parameters.length;
+						}
 						const jRarg = decision.joinRarg as Node;
 						const jOn = decision.joinOnNode as Node;
 						from[0] =

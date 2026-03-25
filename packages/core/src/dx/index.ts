@@ -11,6 +11,13 @@ export {
 	type CteDump,
 	CteQueryBuilder,
 } from './cte-builder.js';
+// Raw CTE Builder — WITH RECURSIVE (FR-8)
+export {
+	type RecursiveDump,
+	type RecursiveOptions,
+	RawCteQueryBuilder,
+	createRawCteBuilder,
+} from './raw-cte-builder.js';
 // Errors
 export {
 	AmbiguousRelationError,
@@ -36,6 +43,13 @@ export {
 	caseWhen,
 	type CaseValue,
 } from './case-when-builder.js';
+// Full-Text Search Helpers (FR-5)
+export {
+	fullTextSearch,
+	type FullTextSearchField,
+	type FullTextSearchOptions,
+	textScore,
+} from './full-text-search.js';
 // Expression primitives (EXT-001)
 export {
 	aggOrderBy,
@@ -175,6 +189,13 @@ export {
 	setLogger,
 	silentLogger,
 } from './logger.js';
+// BatchValues (FR-3)
+export {
+	type BatchValuesOptions,
+	type BatchValuesRef,
+	batchValues,
+	isBatchValuesRef,
+} from './batch-values.js';
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,

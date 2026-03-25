@@ -17,4 +17,5 @@ export {
 	innerProduct,
 	l2Distance,
 	rawDistance,
+	vectorDims,
 } from './pgvector.js';

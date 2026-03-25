@@ -560,6 +560,17 @@ export interface QueryBuilder<TResult = unknown> {
 		relationOrTable: string,
 		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
 	): QueryBuilder<TResult>;
+	/**
+	 * Join a BatchValuesRef (unnest-backed virtual table) with an explicit ON condition.
+	 *
+	 * @param batchRef - A BatchValuesRef created via `orm.batchValues(...)`
+	 * @param opts - Must include `on` condition; optionally `type` and `as`
+	 * @returns A new QueryBuilder with the batch join appended
+	 */
+	join(
+		batchRef: import('./batch-values.js').BatchValuesRef,
+		opts: { type?: 'inner' | 'left'; on: WhereIntent; as?: string },
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Override the ORM-level strict mode for this query.

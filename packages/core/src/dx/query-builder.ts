@@ -24,6 +24,8 @@ import {
 	NotFoundError,
 } from './errors.js';
 import { ExpressionRef } from './expressions.js';
+import { isBatchValuesRef } from './batch-values.js';
+import type { BatchValuesRef } from './batch-values.js';
 import {
 	and,
 	type DistinctField,
@@ -116,6 +118,8 @@ export class QueryBuilderImpl<TResult = unknown>
 	private skipDefaultFilters = false;
 	private lockIntent: import('@dbsp/types').LockIntent | undefined = undefined;
 	private joinIntents: JoinIntent[] = [];
+	/** When set, FROM clause is a BatchValues unnest() source, not a table */
+	batchValuesSource?: import('@dbsp/types').BatchValuesJoinPayload;
 
 	constructor(
 		model: ModelIR,
@@ -568,24 +572,49 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	join(
-		relationOrTable: string,
+		relationOrTableOrBatch: string | BatchValuesRef,
 		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
 		const type = opts?.type ?? 'inner';
-		const joinIntent: JoinIntent = opts?.on
-			? {
-					table: relationOrTable,
-					on: opts.on,
-					type,
-					...(opts.as !== undefined && { alias: opts.as }),
-				}
-			: {
-					relation: relationOrTable,
-					type,
-					...(opts?.as !== undefined && { alias: opts.as }),
-				};
-		builder.joinIntents.push(joinIntent);
+
+		if (isBatchValuesRef(relationOrTableOrBatch)) {
+			const bv = relationOrTableOrBatch;
+			if (!opts?.on) {
+				throw new Error(
+					'join(batchValuesRef): an `on` condition is required for BatchValues joins',
+				);
+			}
+			const joinIntent: JoinIntent = {
+				batchValues: {
+					data: bv.data,
+					columns: bv.columns,
+					types: bv.types,
+					alias: bv.alias,
+					ordinality: bv.ordinality,
+				},
+				on: opts.on,
+				type,
+				...(opts.as !== undefined
+					? { alias: opts.as }
+					: { alias: bv.alias }),
+			};
+			builder.joinIntents.push(joinIntent);
+		} else {
+			const joinIntent: JoinIntent = opts?.on
+				? {
+						table: relationOrTableOrBatch,
+						on: opts.on,
+						type,
+						...(opts.as !== undefined && { alias: opts.as }),
+					}
+				: {
+						relation: relationOrTableOrBatch,
+						type,
+						...(opts?.as !== undefined && { alias: opts.as }),
+					};
+			builder.joinIntents.push(joinIntent);
+		}
 		return builder;
 	}
 
@@ -1567,6 +1596,11 @@ export class QueryBuilderImpl<TResult = unknown>
 			intent.joins = [...this.joinIntents];
 		}
 
+		// BatchValues as primary FROM source
+		if (this.batchValuesSource) {
+			intent.batchValuesSource = this.batchValuesSource;
+		}
+
 		return intent as QueryIntent;
 	}
 
@@ -1900,6 +1934,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			: undefined;
 		builder.lockIntent = this.lockIntent;
 		builder.joinIntents.push(...this.joinIntents);
+		if (this.batchValuesSource) {
+			builder.batchValuesSource = this.batchValuesSource;
+		}
 		return builder;
 	}
 

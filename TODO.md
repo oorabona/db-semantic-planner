@@ -4,6 +4,14 @@
 
 ## In Progress
 
+- [x] ✅ **FR-3** [Core/Adapter] `orm.batchValues()` — unnest()-backed virtual data source. `BatchValuesRef` factory in `batch-values.ts`, `JoinIntent` third variant + `QueryIntent.batchValuesSource` in types, planner bypass for virtual tables, `buildBatchValuesRangeFn()` helper in adapter, `batchValuesFromNode/batchValuesFromParams` in `SimplifiedPlanReport`, `batchValuesParams` in `PlanDecision`. 5 tests in `batch-values.test.ts`. All 135 adapter + 65 core test files pass. (2026-03-25)
+
+- [x] ✅ **FR-8** [Core/Adapter] orm.recursive() — WITH RECURSIVE CTE via explicit base/step QueryBuilder instances. New `RawCteIntent` type, `RawCteQueryBuilder` class, `createRawCteBuilder()` factory, `orm.recursive(name, { base, step, maxDepth?, unionAll? })` on OrmInstance. Adapter handles `rawCte` kind in `compileCteQuery` with correct param renumbering. 11 tests in `raw-cte.test.ts`. All 65+134 test files pass. (2026-03-25)
+
+- [x] ✅ **FR-5** [Core] fullTextSearch() + textScore() high-level ParadeDB BM25 helpers — pure core primitives, no adapter changes needed; exports `fullTextSearch({ query, fields, tableAlias? })` + `textScore(keyField?)` from `@dbsp/core`; 16 tests in `full-text-search.test.ts`; all 2245 core + 3114 adapter tests pass (2026-03-25)
+
+- [x] ✅ **FR-4** [Adapter] Vector search gaps: `vectorDims(col)` helper, cosineDistance verified end-to-end (SELECT/WHERE/ORDER BY), self-join find-duplicates pattern; 15 new tests in `vector-search.test.ts` (2026-03-25)
+
 - [x] ✅ **FR-1** [Core/Adapter] DDL helpers — table-scoped API: truncate, vacuum, alterColumn, indexes.create/drop/list/exists, storageSize, orm.ddl.dropIndex. Zero SQL in core, delegated to adapter. Transaction safety guards. 91 new tests. (2026-03-25)
 - [x] ✅ **FR-2** [Core/Adapter] Catalog helpers — indexes.exists(), indexes.list({ namePattern }), storageSize(). Parameterized queries, adapter-delegated. 17 new tests. (2026-03-25)
 - [x] ✅ **FR-6** [Core/Adapter] caseWhen() expression builder — CASE WHEN in .columns() + .orderBy(). Fix case-value.ts numeric literal inlining. Unblocks DISTINCT ON + CASE ORDER BY. (2026-03-25)
