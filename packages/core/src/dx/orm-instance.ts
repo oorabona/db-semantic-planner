@@ -42,18 +42,10 @@ import type {
  * Quote a PostgreSQL identifier (table/schema/column name).
  * Simple double-quoting — no validation, validation is caller's responsibility.
  */
-function quoteIdent(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
-}
 
 /**
  * Build the qualified table reference string for DDL statements.
  */
-function qualifiedTable(tableName: string, schemaName?: string): string {
-	return schemaName
-		? `${quoteIdent(schemaName)}.${quoteIdent(tableName)}`
-		: quoteIdent(tableName);
-}
 
 /**
  * Build the DDL methods object for a specific table.
@@ -63,7 +55,7 @@ function buildTableDDL(
 	schemaName: string | undefined,
 	adapter: Adapter<unknown> | undefined,
 ): TableDDL {
-	function requireDDL(): (sql: string) => Promise<void> {
+	function requireAdapter(): Adapter<unknown> {
 		if (!adapter?.executeDDL) {
 			throw new InvalidOperationError(
 				'table DDL',
@@ -71,119 +63,167 @@ function buildTableDDL(
 					'Pass an adapter with executeDDL when creating the ORM.',
 			);
 		}
-		return adapter.executeDDL.bind(adapter);
+		return adapter;
 	}
-
-	const table = qualifiedTable(tableName, schemaName);
 
 	return {
 		async truncate(options?: TruncateOptions): Promise<void> {
-			const exec = requireDDL();
-			let sql = `TRUNCATE ${table}`;
-			if (options?.restartIdentity) sql += ' RESTART IDENTITY';
-			if (options?.cascade) sql += ' CASCADE';
-			await exec(sql);
+			const a = requireAdapter();
+			const sql = a.generateTruncate
+				? a.generateTruncate(tableName, schemaName, options)
+				: (() => {
+						// Fallback: generate inline (compile-only adapters without generate*)
+						const tbl = schemaName
+							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
+							: `"${tableName.replace(/"/g, '""')}"`;
+						const parts = [`TRUNCATE ${tbl}`];
+						if (options?.restartIdentity) parts.push('RESTART IDENTITY');
+						if (options?.cascade) parts.push('CASCADE');
+						return parts.join(' ');
+					})();
+			await a.executeDDL!(sql);
 		},
 
 		async vacuum(options?: VacuumOptions): Promise<void> {
-			const exec = requireDDL();
-			const modifiers: string[] = [];
-			if (options?.full) modifiers.push('FULL');
-			if (options?.analyze) modifiers.push('ANALYZE');
-			const mod = modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
-			const sql = `VACUUM ${mod}${table}`;
-			await exec(sql);
+			const a = requireAdapter();
+			if (a.inTransaction) {
+				throw new InvalidOperationError(
+					'vacuum',
+					'VACUUM cannot run inside a transaction block',
+				);
+			}
+			const sql = a.generateVacuum
+				? a.generateVacuum(tableName, schemaName, options)
+				: (() => {
+						const modifiers: string[] = [];
+						if (options?.full) modifiers.push('FULL');
+						if (options?.analyze) modifiers.push('ANALYZE');
+						const mod =
+							modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
+						const tbl = schemaName
+							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
+							: `"${tableName.replace(/"/g, '""')}"`;
+						return `VACUUM ${mod}${tbl}`;
+					})();
+			await a.executeDDL!(sql);
 		},
 
 		async alterColumn(
 			column: string,
 			options: AlterColumnOptions,
 		): Promise<void> {
-			const exec = requireDDL();
-			const col = quoteIdent(column);
-			const clauses: string[] = [];
-
-			if (options.type !== undefined) {
-				let clause = `ALTER COLUMN ${col} TYPE ${options.type}`;
-				if (options.using !== undefined) {
-					clause += ` USING ${options.using}`;
-				}
-				clauses.push(clause);
-			}
-			if (options.setNotNull === true) {
-				clauses.push(`ALTER COLUMN ${col} SET NOT NULL`);
-			} else if (options.setNotNull === false) {
-				clauses.push(`ALTER COLUMN ${col} DROP NOT NULL`);
-			}
-			if (options.dropDefault === true) {
-				clauses.push(`ALTER COLUMN ${col} DROP DEFAULT`);
-			} else if (options.setDefault !== undefined) {
-				clauses.push(`ALTER COLUMN ${col} SET DEFAULT ${options.setDefault}`);
-			}
-
-			if (clauses.length === 0) {
-				throw new InvalidOperationError(
-					'alterColumn',
-					'At least one alteration option must be specified.',
-				);
-			}
-
-			const sql = `ALTER TABLE ${table} ${clauses.join(', ')}`;
-			await exec(sql);
+			const a = requireAdapter();
+			const sql = a.generateAlterColumn
+				? a.generateAlterColumn(tableName, column, options, schemaName)
+				: (() => {
+						const tbl = schemaName
+							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
+							: `"${tableName.replace(/"/g, '""')}"`;
+						const col = `"${column.replace(/"/g, '""')}"`;
+						const clauses: string[] = [];
+						if (options.type !== undefined) {
+							let clause = `ALTER COLUMN ${col} TYPE ${options.type}`;
+							if (options.using !== undefined) {
+								clause += ` USING ${options.using}`;
+							}
+							clauses.push(clause);
+						}
+						if (options.setNotNull === true) {
+							clauses.push(`ALTER COLUMN ${col} SET NOT NULL`);
+						} else if (options.setNotNull === false) {
+							clauses.push(`ALTER COLUMN ${col} DROP NOT NULL`);
+						}
+						if (options.dropDefault === true) {
+							clauses.push(`ALTER COLUMN ${col} DROP DEFAULT`);
+						} else if (options.setDefault !== undefined) {
+							clauses.push(`ALTER COLUMN ${col} SET DEFAULT ${options.setDefault}`);
+						}
+						if (clauses.length === 0) {
+							throw new InvalidOperationError(
+								'alterColumn',
+								'At least one alteration option must be specified.',
+							);
+						}
+						return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
+					})();
+			await a.executeDDL!(sql);
 		},
 
 		indexes: {
 			async create(opts: CreateIndexOptions): Promise<void> {
-				const exec = requireDDL();
-				const parts: string[] = ['CREATE'];
-				if (opts.unique) parts.push('UNIQUE');
-				parts.push('INDEX');
-				if (opts.concurrently) parts.push('CONCURRENTLY');
-				if (opts.ifNotExists) parts.push('IF NOT EXISTS');
-				parts.push(quoteIdent(opts.name));
-				parts.push('ON');
-				parts.push(table);
-				if (opts.method) parts.push(`USING ${opts.method}`);
-
-				const colDefs = opts.columns.map((col) => {
-					if (typeof col === 'string') {
-						const quotedCol = quoteIdent(col);
-						const op =
-							opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
-						return `${quotedCol}${op}`;
-					}
-					const op = col.opclass != null ? ` ${col.opclass}` : '';
-					return `(${col.expression})${op}`;
-				});
-				parts.push(`(${colDefs.join(', ')})`);
-
-				if (opts.include && opts.include.length > 0) {
-					parts.push(`INCLUDE (${opts.include.map(quoteIdent).join(', ')})`);
+				const a = requireAdapter();
+				if (opts.concurrently && a.inTransaction) {
+					throw new InvalidOperationError(
+						'createIndex',
+						'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
+					);
 				}
-				if (opts.with && Object.keys(opts.with).length > 0) {
-					const withClauses = Object.entries(opts.with)
-						.map(([k, v]) => `${k} = ${v}`)
-						.join(', ');
-					parts.push(`WITH (${withClauses})`);
-				}
-				if (opts.where) parts.push(`WHERE ${opts.where}`);
-
-				await exec(parts.join(' '));
+				const sql = a.generateCreateIndex
+					? a.generateCreateIndex(tableName, opts, schemaName)
+					: (() => {
+							const tbl = schemaName
+								? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
+								: `"${tableName.replace(/"/g, '""')}"`;
+							const parts: string[] = ['CREATE'];
+							if (opts.unique) parts.push('UNIQUE');
+							parts.push('INDEX');
+							if (opts.concurrently) parts.push('CONCURRENTLY');
+							if (opts.ifNotExists) parts.push('IF NOT EXISTS');
+							parts.push(`"${opts.name.replace(/"/g, '""')}"`);
+							parts.push('ON');
+							parts.push(tbl);
+							if (opts.method) parts.push(`USING ${opts.method}`);
+							const colDefs = opts.columns.map((col) => {
+								if (typeof col === 'string') {
+									const quotedCol = `"${col.replace(/"/g, '""')}"`;
+									const op = opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
+									return `${quotedCol}${op}`;
+								}
+								const op = col.opclass != null ? ` ${col.opclass}` : '';
+								return `(${col.expression})${op}`;
+							});
+							parts.push(`(${colDefs.join(', ')})`);
+							if (opts.include && opts.include.length > 0) {
+								parts.push(
+									`INCLUDE (${opts.include.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ')})`,
+								);
+							}
+							if (opts.with && Object.keys(opts.with).length > 0) {
+								const withClauses = Object.entries(opts.with)
+									.map(([k, v]) => `${k} = ${v}`)
+									.join(', ');
+								parts.push(`WITH (${withClauses})`);
+							}
+							if (opts.where) parts.push(`WHERE ${opts.where}`);
+							return parts.join(' ');
+						})();
+				await a.executeDDL!(sql);
 			},
 
 			async drop(name: string, options?: DropIndexOptions): Promise<void> {
-				const exec = requireDDL();
-				const parts: string[] = ['DROP INDEX'];
-				if (options?.concurrently) parts.push('CONCURRENTLY');
-				if (options?.ifExists) parts.push('IF EXISTS');
-				const schema = options?.schema ?? schemaName;
-				parts.push(
-					schema
-						? `${quoteIdent(schema)}.${quoteIdent(name)}`
-						: quoteIdent(name),
-				);
-				if (options?.cascade) parts.push('CASCADE');
-				await exec(parts.join(' '));
+				const a = requireAdapter();
+				if (options?.concurrently && a.inTransaction) {
+					throw new InvalidOperationError(
+						'dropIndex',
+						'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
+					);
+				}
+				const sql = a.generateDropIndex
+					? a.generateDropIndex(name, options)
+					: (() => {
+							const parts: string[] = ['DROP INDEX'];
+							if (options?.concurrently) parts.push('CONCURRENTLY');
+							if (options?.ifExists) parts.push('IF EXISTS');
+							const sc = options?.schema ?? schemaName;
+							parts.push(
+								sc
+									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`
+									: `"${name.replace(/"/g, '""')}"`,
+							);
+							if (options?.cascade) parts.push('CASCADE');
+							return parts.join(' ');
+						})();
+				await a.executeDDL!(sql);
 			},
 
 			async list(): Promise<IndexInfo[]> {
@@ -193,7 +233,10 @@ function buildTableDDL(
 						'indexes.list() requires an adapter.',
 					);
 				}
-				// pg_indexes provides index metadata — query is read-only but uses the DDL channel
+				if (adapter.listIndexes) {
+					return adapter.listIndexes(tableName, schemaName);
+				}
+				// Fallback for adapters without listIndexes: use executeRaw if available
 				const sql =
 					`SELECT indexname AS name, indexdef AS definition, ` +
 					`(SELECT indisunique FROM pg_index WHERE indexrelid = (SELECT oid FROM pg_class WHERE relname = indexname)) AS unique, ` +
@@ -216,7 +259,7 @@ function buildTableDDL(
 					return rows as IndexInfo[];
 				}
 				// Fallback: use executeDDL (adapter must handle SELECT)
-				await requireDDL()(sql);
+				if (adapter.executeDDL) await adapter.executeDDL(sql);
 				return [];
 			},
 		},
@@ -653,6 +696,43 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 		withCte(name: string): CteBuilder {
 			return new CteBuilder(name, adapter, schemaName);
+		},
+
+		// =====================================================================
+		// Global DDL Shortcuts (F-005)
+		// =====================================================================
+
+		ddl: {
+			/**
+			 * Drop an index by name (not table-scoped).
+			 *
+			 * @param name - Index name to drop
+			 * @param options - Optional DROP INDEX options
+			 */
+			async dropIndex(name: string, options?: DropIndexOptions): Promise<void> {
+				if (!adapter?.executeDDL) {
+					throw new InvalidOperationError(
+						'ddl.dropIndex',
+						'executeDDL() requires an adapter that supports DDL execution.',
+					);
+				}
+				const sql = adapter.generateDropIndex
+					? adapter.generateDropIndex(name, options)
+					: (() => {
+							const parts: string[] = ['DROP INDEX'];
+							if (options?.concurrently) parts.push('CONCURRENTLY');
+							if (options?.ifExists) parts.push('IF EXISTS');
+							const sc = options?.schema ?? schemaName;
+							parts.push(
+								sc
+									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`
+									: `"${name.replace(/"/g, '""')}"`,
+							);
+							if (options?.cascade) parts.push('CASCADE');
+							return parts.join(' ');
+						})();
+				await adapter.executeDDL(sql);
+			},
 		},
 	};
 }

@@ -4,6 +4,7 @@
 
 ## In Progress
 
+<<<<<<< Updated upstream
 - [x] ✅ **ISSUE-15** [Adapter] Fix `include('enclosingSymbol', { join: 'left' })` missing LEFT JOIN when planner could not resolve camelCase alias to snake_case model relation (`enclosing_symbol`) — added `synthesizeMissingJoinDecisions()` in `plan-decision-extractor.ts` that scans `getRelationsFrom(sourceTable)` and matches via `snakeToCamel(rel.name) === alias`; wired into `compileSelect()` in `adapter-compiler-select.ts` after `extractAllIncludeDecisions`; 7 unit tests in `plan-decision-extractor.coverage.test.ts`, 3 integration tests in `include-camelcase-alias.test.ts`; 2983 adapter tests pass (2026-03-25)
 
 - [x] ✅ **PIPE-001** [Adapter] Pipeline simplification: unify WHERE paths + eliminate Decision type — compileWhereIntent primary for SELECT+mutations, CompilerDecision replaces Decision, 30 WHERE tests, 2905 adapter tests pass (2026-03-24)
@@ -45,6 +46,9 @@
 - [x] ✅ **BATCH-INSERT-NULLABLE-INT** [Adapter] Fix schema-driven int4[] inference for nullable integer columns in batch unnest inserts — remove RANGE_TYPES filter in getColumnTypes(), extend mapToPgBaseType() with ColumnType aliases, prefer originalDbType; 4 regression tests added (2026-03-22)
 - [x] ✅ **REF-IN-FILTER** [Adapter] Fix buildColumnRef() to split dotted column names — ref('alias.col') in filter(isNotNull()) now produces alias.col instead of root.alias.col; 5 regression tests added (2026-03-22)
 - [x] ✅ **DOUBLE-ALIAS** [Adapter] Fix duplicate JOIN aliases when include('def.file') + include('file') both resolve to alias 'file' — add usedJoinAliases Set in PlanCompiler, deduplicate with _N suffix before handler.compile(); 3 regression tests added (2026-03-22)
+=======
+- [x] ✅ [adapter] Fix all lint violations in adapter-pgsql src/ (useLiteralKeys, useTemplate, useParseIntRadix, noUnusedFunctionParameters, noUnusedImports, noThenProperty) (2026-03-20)
+>>>>>>> Stashed changes
 
 - [ ] 🟡 **GUI-026** [GUI] Dirty tab confirmation + session persistence + app close guard — Priority: P1
   - [ ] GUI-026a: Confirm before closing dirty tab (call confirmUnsavedChanges)

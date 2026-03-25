@@ -1,23 +1,104 @@
 /**
  * Unit tests for table-scoped DDL methods (DDL-TABLE-001)
  *
- * Tests the wrapTablesProxyWithDDL helper and DDL method SQL generation.
+ * Tests the wrapTablesProxyWithDDL helper and DDL adapter delegation.
+ * After F-001 refactor: core delegates SQL generation to adapter.generate*() methods.
+ * Exact SQL strings are tested in ddl-table-ops.test.ts (adapter tests).
+ *
  * Pure unit tests — no database connection required.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter } from '../adapter.js';
-import { wrapTablesProxyWithDDL } from './orm-instance.js';
+import { createOrmInstance, wrapTablesProxyWithDDL } from './orm-instance.js';
 
 // -----------------------------------------------------------------------
-// Minimal mock adapter with executeDDL spy
+// Minimal mock adapter with executeDDL + generate* spies
 // -----------------------------------------------------------------------
 function makeDDLAdapter() {
 	const executeDDL = vi.fn().mockResolvedValue(undefined);
 	const executeRaw = vi.fn().mockResolvedValue([]);
+	// generate* mocks return recognisable sentinel strings so tests can assert
+	// both that the right method was called with the right args and that
+	// executeDDL received the generated SQL.
+	const generateTruncate = vi.fn(
+		(table: string, schema?: string, options?: Record<string, unknown>) => {
+			const parts = [schema ? `${schema}.${table}` : table];
+			if (options?.restartIdentity) parts.push('RESTART IDENTITY');
+			if (options?.cascade) parts.push('CASCADE');
+			return `TRUNCATE ${parts[0]}${parts.length > 1 ? ' ' + parts.slice(1).join(' ') : ''}`;
+		},
+	);
+	const generateVacuum = vi.fn(
+		(table: string, _schema?: string, options?: Record<string, unknown>) => {
+			const mods: string[] = [];
+			if (options?.full) mods.push('FULL');
+			if (options?.analyze) mods.push('ANALYZE');
+			const mod = mods.length > 0 ? ` ${mods.join(' ')}` : '';
+			return `VACUUM${mod} ${table}`;
+		},
+	);
+	const generateAlterColumn = vi.fn(
+		(table: string, column: string, options: Record<string, unknown>, schema?: string) => {
+			const tbl = schema ? `${schema}.${table}` : table;
+			const clauses: string[] = [];
+			if (options.type !== undefined)
+				clauses.push(`ALTER COLUMN ${column} TYPE ${options.type}`);
+			if (options.setNotNull === true)
+				clauses.push(`ALTER COLUMN ${column} SET NOT NULL`);
+			if (options.setNotNull === false)
+				clauses.push(`ALTER COLUMN ${column} DROP NOT NULL`);
+			if (options.dropDefault === true)
+				clauses.push(`ALTER COLUMN ${column} DROP DEFAULT`);
+			if (options.setDefault !== undefined)
+				clauses.push(`ALTER COLUMN ${column} SET DEFAULT ${options.setDefault}`);
+			if (clauses.length === 0)
+				throw new Error('At least one alteration option must be specified');
+			return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
+		},
+	);
+	const generateCreateIndex = vi.fn(
+		(table: string, options: Record<string, unknown>, schema?: string) => {
+			const tbl = schema ? `${schema}.${table}` : table;
+			const parts: string[] = ['CREATE'];
+			if (options.unique) parts.push('UNIQUE');
+			parts.push('INDEX');
+			if (options.concurrently) parts.push('CONCURRENTLY');
+			if (options.ifNotExists) parts.push('IF NOT EXISTS');
+			parts.push(String(options.name));
+			parts.push('ON');
+			parts.push(tbl);
+			if (options.method) parts.push(`USING ${options.method}`);
+			const cols = (options.columns as string[]).join(', ');
+			parts.push(`(${cols})`);
+			return parts.join(' ');
+		},
+	);
+	const generateDropIndex = vi.fn(
+		(name: string, options?: Record<string, unknown>) => {
+			const parts: string[] = ['DROP INDEX'];
+			if (options?.concurrently) parts.push('CONCURRENTLY');
+			if (options?.ifExists) parts.push('IF EXISTS');
+			const sc = options?.schema as string | undefined;
+			parts.push(sc ? `${sc}.${name}` : name);
+			if (options?.cascade) parts.push('CASCADE');
+			return parts.join(' ');
+		},
+	);
+	const fakeIndexRows = [
+		{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
+	];
+	const listIndexes = vi.fn().mockResolvedValue(fakeIndexRows);
+
 	const adapter = {
 		executeDDL,
 		executeRaw,
+		generateTruncate,
+		generateVacuum,
+		generateAlterColumn,
+		generateCreateIndex,
+		generateDropIndex,
+		listIndexes,
 		compile: vi.fn(),
 		execute: vi.fn(),
 		executeOne: vi.fn(),
@@ -30,7 +111,17 @@ function makeDDLAdapter() {
 		generateDDL: vi.fn(),
 		dbCasing: 'snake_case' as const,
 	} as unknown as Adapter<unknown>;
-	return { adapter, executeDDL, executeRaw };
+	return {
+		adapter,
+		executeDDL,
+		executeRaw,
+		generateTruncate,
+		generateVacuum,
+		generateAlterColumn,
+		generateCreateIndex,
+		generateDropIndex,
+		listIndexes,
+	};
 }
 
 // -----------------------------------------------------------------------
@@ -90,19 +181,22 @@ describe('wrapTablesProxyWithDDL', () => {
 describe('orm.tables.X.truncate()', () => {
 	type TableProxy = Record<string, Record<string, unknown>>;
 
-	it('generates TRUNCATE "users"', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('delegates to adapter.generateTruncate and calls executeDDL with result', async () => {
+		const { adapter, executeDDL, generateTruncate } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
 			undefined,
 		) as TableProxy;
 		await (proxy['users']['truncate'] as () => Promise<void>)();
-		expect(executeDDL).toHaveBeenCalledWith('TRUNCATE "users"');
+		expect(generateTruncate).toHaveBeenCalledWith('users', undefined, undefined);
+		expect(executeDDL).toHaveBeenCalledWith(
+			expect.stringContaining('TRUNCATE'),
+		);
 	});
 
-	it('appends RESTART IDENTITY CASCADE', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('passes options to adapter.generateTruncate', async () => {
+		const { adapter, generateTruncate } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
@@ -112,20 +206,22 @@ describe('orm.tables.X.truncate()', () => {
 			cascade: true,
 			restartIdentity: true,
 		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'TRUNCATE "users" RESTART IDENTITY CASCADE',
+		expect(generateTruncate).toHaveBeenCalledWith(
+			'users',
+			undefined,
+			{ cascade: true, restartIdentity: true },
 		);
 	});
 
-	it('uses schema-qualified table', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('passes schema to adapter.generateTruncate', async () => {
+		const { adapter, generateTruncate } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
 			'tenant_42',
 		) as TableProxy;
 		await (proxy['users']['truncate'] as () => Promise<void>)();
-		expect(executeDDL).toHaveBeenCalledWith('TRUNCATE "tenant_42"."users"');
+		expect(generateTruncate).toHaveBeenCalledWith('users', 'tenant_42', undefined);
 	});
 
 	it('throws when adapter has no executeDDL', async () => {
@@ -147,19 +243,20 @@ describe('orm.tables.X.truncate()', () => {
 describe('orm.tables.X.vacuum()', () => {
 	type TableProxy = Record<string, Record<string, unknown>>;
 
-	it('generates plain VACUUM "logs"', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('delegates to adapter.generateVacuum and calls executeDDL', async () => {
+		const { adapter, executeDDL, generateVacuum } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ logs: {} },
 			adapter,
 			undefined,
 		) as TableProxy;
 		await (proxy['logs']['vacuum'] as () => Promise<void>)();
-		expect(executeDDL).toHaveBeenCalledWith('VACUUM "logs"');
+		expect(generateVacuum).toHaveBeenCalledWith('logs', undefined, undefined);
+		expect(executeDDL).toHaveBeenCalledWith(expect.stringContaining('VACUUM'));
 	});
 
-	it('generates VACUUM (FULL, ANALYZE)', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('passes options to adapter.generateVacuum', async () => {
+		const { adapter, generateVacuum } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ logs: {} },
 			adapter,
@@ -169,20 +266,24 @@ describe('orm.tables.X.vacuum()', () => {
 			full: true,
 			analyze: true,
 		});
-		expect(executeDDL).toHaveBeenCalledWith('VACUUM (FULL, ANALYZE) "logs"');
+		expect(generateVacuum).toHaveBeenCalledWith(
+			'logs',
+			undefined,
+			{ full: true, analyze: true },
+		);
 	});
 
-	it('generates VACUUM (FULL) when only full=true', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('throws when inTransaction=true', async () => {
+		const { adapter } = makeDDLAdapter();
+		(adapter as Record<string, unknown>).inTransaction = true;
 		const proxy = wrapTablesProxyWithDDL(
 			{ logs: {} },
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['logs']['vacuum'] as (o: unknown) => Promise<void>)({
-			full: true,
-		});
-		expect(executeDDL).toHaveBeenCalledWith('VACUUM (FULL) "logs"');
+		await expect(
+			(proxy['logs']['vacuum'] as () => Promise<void>)(),
+		).rejects.toThrow('VACUUM cannot run inside a transaction block');
 	});
 });
 
@@ -194,8 +295,8 @@ describe('orm.tables.X.alterColumn()', () => {
 	type TableProxy = Record<string, Record<string, unknown>>;
 	type AlterFn = (col: string, opts: unknown) => Promise<void>;
 
-	it('generates ALTER COLUMN ... TYPE', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('delegates to adapter.generateAlterColumn and calls executeDDL', async () => {
+		const { adapter, executeDDL, generateAlterColumn } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
@@ -204,84 +305,32 @@ describe('orm.tables.X.alterColumn()', () => {
 		await (proxy['users']['alterColumn'] as AlterFn)('email', {
 			type: 'VARCHAR(255)',
 		});
+		expect(generateAlterColumn).toHaveBeenCalledWith(
+			'users',
+			'email',
+			{ type: 'VARCHAR(255)' },
+			undefined,
+		);
 		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "email" TYPE VARCHAR(255)',
+			expect.stringContaining('ALTER TABLE'),
 		);
 	});
 
-	it('generates TYPE ... USING ...', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('passes schema to adapter.generateAlterColumn', async () => {
+		const { adapter, generateAlterColumn } = makeDDLAdapter();
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
-			undefined,
-		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('score', {
-			type: 'integer',
-			using: 'score::integer',
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "score" TYPE integer USING score::integer',
-		);
-	});
-
-	it('generates SET NOT NULL', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		const proxy = wrapTablesProxyWithDDL(
-			{ users: {} },
-			adapter,
-			undefined,
+			'myschema',
 		) as TableProxy;
 		await (proxy['users']['alterColumn'] as AlterFn)('email', {
 			setNotNull: true,
 		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "email" SET NOT NULL',
-		);
-	});
-
-	it('generates DROP NOT NULL', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		const proxy = wrapTablesProxyWithDDL(
-			{ users: {} },
-			adapter,
-			undefined,
-		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('email', {
-			setNotNull: false,
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "email" DROP NOT NULL',
-		);
-	});
-
-	it('generates DROP DEFAULT', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		const proxy = wrapTablesProxyWithDDL(
-			{ users: {} },
-			adapter,
-			undefined,
-		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('created_at', {
-			dropDefault: true,
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "created_at" DROP DEFAULT',
-		);
-	});
-
-	it('generates SET DEFAULT', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		const proxy = wrapTablesProxyWithDDL(
-			{ users: {} },
-			adapter,
-			undefined,
-		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('active', {
-			setDefault: 'true',
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'ALTER TABLE "users" ALTER COLUMN "active" SET DEFAULT true',
+		expect(generateAlterColumn).toHaveBeenCalledWith(
+			'users',
+			'email',
+			{ setNotNull: true },
+			'myschema',
 		);
 	});
 
@@ -304,85 +353,74 @@ describe('orm.tables.X.alterColumn()', () => {
 
 describe('orm.tables.X.indexes.create()', () => {
 	type IndexProxy = Record<string, (o: unknown) => Promise<void>>;
-	function getIndexes(adapter: Adapter<unknown>, schema?: string): IndexProxy {
+	function getIndexes(
+		adapter: Adapter<unknown>,
+		schema?: string,
+	): { proxy: IndexProxy; result: ReturnType<typeof makeDDLAdapter> } {
+		// Re-use same adapter instance so we can access spies
+		const result = { adapter } as unknown as ReturnType<typeof makeDDLAdapter>;
 		const proxy = wrapTablesProxyWithDDL(
 			{ users: {} },
 			adapter,
 			schema,
 		) as Record<string, Record<string, unknown>>;
-		return proxy['users']['indexes'] as IndexProxy;
+		return { proxy: proxy['users']['indexes'] as IndexProxy, result };
 	}
 
-	it('generates CREATE INDEX', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).create({
+	it('delegates to adapter.generateCreateIndex and calls executeDDL', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as Record<string, Record<string, Record<string, unknown>>>;
+		await (idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
 			name: 'idx_users_email',
 			columns: ['email'],
 		});
+		expect(generateCreateIndex).toHaveBeenCalledWith(
+			'users',
+			{ name: 'idx_users_email', columns: ['email'] },
+			undefined,
+		);
 		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE INDEX "idx_users_email" ON "users" ("email")',
+			expect.stringContaining('CREATE INDEX'),
 		);
 	});
 
-	it('generates CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).create({
-			name: 'idx_users_email',
-			columns: ['email'],
-			unique: true,
-			concurrently: true,
-			ifNotExists: true,
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS "idx_users_email" ON "users" ("email")',
-		);
-	});
-
-	it('generates CREATE INDEX USING gin', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).create({
-			name: 'idx_fts',
-			columns: ['name'],
-			method: 'gin',
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE INDEX "idx_fts" ON "users" USING gin ("name")',
-		);
-	});
-
-	it('generates expression column index', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).create({
-			name: 'idx_lower_email',
-			columns: [{ expression: 'lower(email)' }],
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE INDEX "idx_lower_email" ON "users" ((lower(email)))',
-		);
-	});
-
-	it('generates INCLUDE + WHERE clause', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).create({
-			name: 'idx_users_active',
-			columns: ['email'],
-			include: ['id', 'name'],
-			where: 'active = true',
-		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE INDEX "idx_users_active" ON "users" ("email") INCLUDE ("id", "name") WHERE active = true',
-		);
-	});
-
-	it('uses schema-qualified table', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter, 'public').create({
+	it('passes schema to adapter.generateCreateIndex', async () => {
+		const { adapter, generateCreateIndex } = makeDDLAdapter();
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			'public',
+		) as Record<string, Record<string, Record<string, unknown>>>;
+		await (idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
 			name: 'idx_x',
 			columns: ['id'],
 		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'CREATE INDEX "idx_x" ON "public"."users" ("id")',
+		expect(generateCreateIndex).toHaveBeenCalledWith(
+			'users',
+			{ name: 'idx_x', columns: ['id'] },
+			'public',
 		);
+	});
+
+	it('throws when CONCURRENTLY inside transaction', async () => {
+		const { adapter } = makeDDLAdapter();
+		(adapter as Record<string, unknown>).inTransaction = true;
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as Record<string, Record<string, Record<string, unknown>>>;
+		await expect(
+			(idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
+				name: 'idx_x',
+				columns: ['id'],
+				concurrently: true,
+			}),
+		).rejects.toThrow('CREATE INDEX CONCURRENTLY cannot run inside a transaction');
 	});
 });
 
@@ -401,30 +439,34 @@ describe('orm.tables.X.indexes.drop()', () => {
 		return proxy['users']['indexes'] as IndexProxy;
 	}
 
-	it('generates DROP INDEX "idx_name"', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('delegates to adapter.generateDropIndex and calls executeDDL', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
 		await getIndexes(adapter).drop('idx_users_email');
-		expect(executeDDL).toHaveBeenCalledWith('DROP INDEX "idx_users_email"');
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', undefined);
+		expect(executeDDL).toHaveBeenCalledWith(
+			expect.stringContaining('DROP INDEX'),
+		);
 	});
 
-	it('generates DROP INDEX CONCURRENTLY IF EXISTS ... CASCADE', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
+	it('passes options to adapter.generateDropIndex', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
 		await getIndexes(adapter).drop('idx_users_email', {
 			concurrently: true,
 			ifExists: true,
 			cascade: true,
 		});
-		expect(executeDDL).toHaveBeenCalledWith(
-			'DROP INDEX CONCURRENTLY IF EXISTS "idx_users_email" CASCADE',
+		expect(generateDropIndex).toHaveBeenCalledWith(
+			'idx_users_email',
+			{ concurrently: true, ifExists: true, cascade: true },
 		);
 	});
 
-	it('uses explicit schema option', async () => {
-		const { adapter, executeDDL } = makeDDLAdapter();
-		await getIndexes(adapter).drop('idx_users_email', { schema: 'public' });
-		expect(executeDDL).toHaveBeenCalledWith(
-			'DROP INDEX "public"."idx_users_email"',
-		);
+	it('throws when CONCURRENTLY inside transaction', async () => {
+		const { adapter } = makeDDLAdapter();
+		(adapter as Record<string, unknown>).inTransaction = true;
+		await expect(
+			getIndexes(adapter).drop('idx_users_email', { concurrently: true }),
+		).rejects.toThrow('DROP INDEX CONCURRENTLY cannot run inside a transaction');
 	});
 });
 
@@ -446,25 +488,59 @@ describe('orm.tables.X.indexes.list()', () => {
 		return proxy['users']['indexes'] as IndexProxy;
 	}
 
-	it('returns rows from executeRaw', async () => {
-		const { adapter, executeRaw } = makeDDLAdapter();
-		const fakeRows = [
-			{
-				name: 'idx_a',
-				definition: 'CREATE INDEX ...',
-				unique: false,
-				method: 'btree',
-			},
-		];
-		executeRaw.mockResolvedValue(fakeRows);
+	it('delegates to adapter.listIndexes', async () => {
+		const { adapter, listIndexes } = makeDDLAdapter();
 		const result = await getIndexes(adapter).list();
-		expect(result).toEqual(fakeRows);
-		expect(executeRaw).toHaveBeenCalled();
+		expect(listIndexes).toHaveBeenCalledWith('users', undefined);
+		expect(result).toEqual([
+			{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
+		]);
+	});
+
+	it('passes schema to adapter.listIndexes', async () => {
+		const { adapter, listIndexes } = makeDDLAdapter();
+		await getIndexes(adapter, 'tenant_42').list();
+		expect(listIndexes).toHaveBeenCalledWith('users', 'tenant_42');
 	});
 
 	it('throws when no adapter', async () => {
 		await expect(getIndexes(undefined).list()).rejects.toThrow(
 			'indexes.list() requires an adapter',
+		);
+	});
+});
+
+// -----------------------------------------------------------------------
+// orm.ddl.dropIndex (F-005)
+// -----------------------------------------------------------------------
+
+describe('orm.ddl.dropIndex()', () => {
+	it('delegates to adapter.generateDropIndex and calls executeDDL', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			undefined,
+		);
+		await orm.ddl.dropIndex('idx_foo', { ifExists: true });
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', { ifExists: true });
+		expect(executeDDL).toHaveBeenCalledWith(
+			expect.stringContaining('DROP INDEX'),
+		);
+	});
+
+	it('throws when adapter has no executeDDL', async () => {
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			undefined,
+			undefined,
+		);
+		await expect(orm.ddl.dropIndex('idx_foo')).rejects.toThrow(
+			'executeDDL() requires an adapter',
 		);
 	});
 });

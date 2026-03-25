@@ -12,6 +12,7 @@ import type {
 	DropIndexOptions,
 	IndexColumnDef,
 } from '@dbsp/core';
+import { InvalidIdentifierError } from '../validate.js';
 
 // Accepted index methods (validated at runtime)
 const VALID_INDEX_METHODS = new Set([
@@ -114,10 +115,20 @@ export function generateCreateIndexSQL(
 		parts.push(`INCLUDE (${includeCols})`);
 	}
 
-	// WITH storage parameters
+	// WITH storage parameters — validate keys to prevent injection
 	if (options.with && Object.keys(options.with).length > 0) {
+		const validStorageParam = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 		const withParams = Object.entries(options.with)
-			.map(([k, v]) => `${k} = ${v}`)
+			.map(([k, v]) => {
+				if (!validStorageParam.test(k)) {
+					throw new InvalidIdentifierError(
+						k,
+						'storage parameter',
+						'contains invalid characters (only letters, digits, and underscore allowed)',
+					);
+				}
+				return `${k} = ${v}`;
+			})
 			.join(', ');
 		parts.push(`WITH (${withParams})`);
 	}
