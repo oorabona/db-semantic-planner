@@ -425,6 +425,141 @@ export interface RawSqlAdapter extends BaseAdapter {
 	): Promise<T[]>;
 }
 
+// ============================================================================
+// Table DDL Operation Types (DDL-TABLE-001)
+// Defined here so adapter.ts can reference them without importing from @dbsp/core.
+// ============================================================================
+
+/**
+ * PostgreSQL index access method.
+ */
+export type IndexMethod =
+	| 'btree'
+	| 'hash'
+	| 'gist'
+	| 'gin'
+	| 'brin'
+	| 'hnsw'
+	| 'ivfflat'
+	| 'bm25';
+
+/** A column reference in an index: either a column name or an expression. */
+export type IndexColumnDef =
+	| string
+	| {
+			expression: string;
+			opclass?: string;
+	  };
+
+/** Options for CREATE INDEX. */
+export type CreateIndexOptions = {
+	name: string;
+	columns: IndexColumnDef[];
+	method?: IndexMethod;
+	opclass?: Record<string, string>;
+	include?: string[];
+	with?: Record<string, unknown>;
+	where?: string;
+	unique?: boolean;
+	ifNotExists?: boolean;
+	concurrently?: boolean;
+};
+
+/** Options for DROP INDEX. */
+export type DropIndexOptions = {
+	ifExists?: boolean;
+	cascade?: boolean;
+	concurrently?: boolean;
+	schema?: string;
+};
+
+/** Options for VACUUM. */
+export type VacuumOptions = {
+	full?: boolean;
+	analyze?: boolean;
+};
+
+/** Options for TRUNCATE. */
+export type TruncateOptions = {
+	cascade?: boolean;
+	restartIdentity?: boolean;
+};
+
+/** Options for ALTER COLUMN. */
+export type AlterColumnOptions = {
+	type?: string;
+	using?: string;
+	setNotNull?: boolean;
+	setDefault?: unknown;
+	dropDefault?: boolean;
+};
+
+/** Index metadata returned by listIndexes(). */
+export type IndexInfo = {
+	name: string;
+	definition: string;
+	unique: boolean;
+	method: string;
+};
+
+// ============================================================================
+// Table DDL Generator Adapter (DDL-TABLE-001)
+// ============================================================================
+
+/**
+ * Optional mixin for adapters that can generate table-scoped DDL SQL strings.
+ * When present on an adapter, buildTableDDL in core delegates SQL generation
+ * to these methods instead of generating SQL inline.
+ */
+export interface TableDDLGeneratorAdapter {
+	/**
+	 * Generate SQL for TRUNCATE TABLE.
+	 */
+	generateTruncate?(
+		table: string,
+		schema?: string,
+		options?: TruncateOptions,
+	): string;
+
+	/**
+	 * Generate SQL for VACUUM.
+	 */
+	generateVacuum?(
+		table: string,
+		schema?: string,
+		options?: VacuumOptions,
+	): string;
+
+	/**
+	 * Generate SQL for ALTER TABLE ... ALTER COLUMN.
+	 */
+	generateAlterColumn?(
+		table: string,
+		column: string,
+		options: AlterColumnOptions,
+		schema?: string,
+	): string;
+
+	/**
+	 * Generate SQL for CREATE INDEX.
+	 */
+	generateCreateIndex?(
+		table: string,
+		options: CreateIndexOptions,
+		schema?: string,
+	): string;
+
+	/**
+	 * Generate SQL for DROP INDEX.
+	 */
+	generateDropIndex?(name: string, options?: DropIndexOptions): string;
+
+	/**
+	 * List all indexes on a table.
+	 */
+	listIndexes?(table: string, schema?: string): Promise<IndexInfo[]>;
+}
+
 /**
  * DDL-generating adapter - can generate DDL (CREATE TABLE statements) from a schema.
  */
@@ -471,7 +606,8 @@ export interface Adapter<DB = unknown>
 		IntrospectingAdapter,
 		TransactionalAdapter<DB>,
 		RawSqlAdapter,
-		DDLGeneratingAdapter {
+		DDLGeneratingAdapter,
+		TableDDLGeneratorAdapter {
 	/**
 	 * Naming convention used by this adapter.
 	 *

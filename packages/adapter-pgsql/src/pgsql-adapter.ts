@@ -12,6 +12,8 @@ import type {
 	CreateIndexOptions,
 	DropIndexOptions,
 	IndexInfo,
+	TruncateOptions,
+	VacuumOptions,
 } from '@dbsp/core';
 import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
 import type {
@@ -766,32 +768,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Generate SQL for TRUNCATE (used by the TableDDL proxy).
-	 * @internal
+	 * Generate SQL for TRUNCATE TABLE.
+	 * Implements TableDDLGeneratorAdapter.generateTruncate.
 	 */
 	generateTruncate(
 		table: string,
 		schema?: string,
-		options?: { cascade?: boolean; restartIdentity?: boolean },
+		options?: TruncateOptions,
 	): string {
 		return generateTruncateSQL(table, schema ?? this.schemaName, options);
 	}
 
 	/**
-	 * Generate SQL for VACUUM (used by the TableDDL proxy).
-	 * @internal
+	 * Generate SQL for VACUUM.
+	 * Implements TableDDLGeneratorAdapter.generateVacuum.
 	 */
 	generateVacuum(
 		table: string,
 		schema?: string,
-		options?: { full?: boolean; analyze?: boolean },
+		options?: VacuumOptions,
 	): string {
 		return generateVacuumSQL(table, schema ?? this.schemaName, options);
 	}
 
 	/**
-	 * Generate SQL for ALTER COLUMN (used by the TableDDL proxy).
-	 * @internal
+	 * Generate SQL for ALTER TABLE ... ALTER COLUMN.
+	 * Implements TableDDLGeneratorAdapter.generateAlterColumn.
 	 */
 	generateAlterColumn(
 		table: string,
@@ -808,8 +810,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Generate SQL for CREATE INDEX (used by the TableDDL proxy).
-	 * @internal
+	 * Generate SQL for CREATE INDEX.
+	 * Implements TableDDLGeneratorAdapter.generateCreateIndex.
 	 */
 	generateCreateIndex(
 		table: string,
@@ -820,8 +822,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Generate SQL for DROP INDEX (used by the TableDDL proxy).
-	 * @internal
+	 * Generate SQL for DROP INDEX.
+	 * Implements TableDDLGeneratorAdapter.generateDropIndex.
 	 */
 	generateDropIndex(name: string, options?: DropIndexOptions): string {
 		return generateDropIndexSQL(name, options);

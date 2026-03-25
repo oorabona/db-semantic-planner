@@ -23,6 +23,7 @@ import type { NqlTag } from './nql.js';
 import type { QueryBuilder } from './query-builder-types.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
 import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
+import type { DropIndexOptions } from './table-ddl-types.js';
 import type { ListHierarchyOptions, RelationHints } from './types.js';
 
 /**
@@ -537,6 +538,25 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @returns A CteBuilder for constructing the CTE
 	 */
 	withCte(name: string): CteBuilder;
+
+	// =========================================================================
+	// Global DDL Shortcuts (F-005)
+	// =========================================================================
+
+	/**
+	 * Global DDL operations not scoped to a specific table.
+	 *
+	 * @since DDL-TABLE-001 / F-005
+	 */
+	readonly ddl: {
+		/**
+		 * Drop an index by name (schema-aware, not table-scoped).
+		 *
+		 * @param name - Index name to drop
+		 * @param options - Optional DROP INDEX options (concurrently, ifExists, cascade, schema)
+		 */
+		dropIndex(name: string, options?: DropIndexOptions): Promise<void>;
+	};
 }
 
 /**

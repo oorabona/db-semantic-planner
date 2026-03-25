@@ -1,70 +1,31 @@
 /**
  * Type definitions for table-scoped DDL operations.
  *
+ * Primitive option types (TruncateOptions, VacuumOptions, etc.) are defined in
+ * @dbsp/types and re-exported here for backward compatibility.
+ *
  * @since DDL-TABLE-001
  */
 
-export type IndexMethod =
-	| 'btree'
-	| 'hash'
-	| 'gist'
-	| 'gin'
-	| 'brin'
-	| 'hnsw'
-	| 'ivfflat'
-	| 'bm25';
+export type {
+	AlterColumnOptions,
+	CreateIndexOptions,
+	DropIndexOptions,
+	IndexColumnDef,
+	IndexInfo,
+	IndexMethod,
+	TruncateOptions,
+	VacuumOptions,
+} from '@dbsp/types';
 
-export type IndexColumnDef =
-	| string
-	| {
-			expression: string;
-			opclass?: string;
-	  };
-
-export type CreateIndexOptions = {
-	name: string;
-	columns: IndexColumnDef[];
-	method?: IndexMethod;
-	opclass?: Record<string, string>;
-	include?: string[];
-	with?: Record<string, unknown>;
-	where?: string;
-	unique?: boolean;
-	ifNotExists?: boolean;
-	concurrently?: boolean;
-};
-
-export type DropIndexOptions = {
-	ifExists?: boolean;
-	cascade?: boolean;
-	concurrently?: boolean;
-	schema?: string;
-};
-
-export type VacuumOptions = {
-	full?: boolean;
-	analyze?: boolean;
-};
-
-export type TruncateOptions = {
-	cascade?: boolean;
-	restartIdentity?: boolean;
-};
-
-export type AlterColumnOptions = {
-	type?: string;
-	using?: string;
-	setNotNull?: boolean;
-	setDefault?: unknown;
-	dropDefault?: boolean;
-};
-
-export type IndexInfo = {
-	name: string;
-	definition: string;
-	unique: boolean;
-	method: string;
-};
+import type {
+	AlterColumnOptions,
+	CreateIndexOptions,
+	DropIndexOptions,
+	IndexInfo,
+	TruncateOptions,
+	VacuumOptions,
+} from '@dbsp/types';
 
 export type TableIndexes = {
 	create(options: CreateIndexOptions): Promise<void>;
