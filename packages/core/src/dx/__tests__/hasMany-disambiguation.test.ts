@@ -16,9 +16,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_CONVENTIONS, inferRelationsFromSchema } from '../../conventions.js';
-import type { SchemaTablesDefinition } from '../../schema-dsl-types.js';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
+import {
+	DEFAULT_CONVENTIONS,
+	inferRelationsFromSchema,
+} from '../../conventions.js';
+import type { SchemaTablesDefinition } from '../../schema-dsl-types.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
 
@@ -141,7 +144,10 @@ describe('hasMany disambiguation — schema() DSL path', () => {
 	it('include("caller_calls") compiles and SQL uses caller_id', () => {
 		const orm = buildOrm(callGraphSchema);
 		const { symbols } = callGraphSchema.tables;
-		const { sql } = orm.from(symbols).include('caller_calls', { join: 'left' }).dump();
+		const { sql } = orm
+			.from(symbols)
+			.include('caller_calls', { join: 'left' })
+			.dump();
 		expect(sql).toContain('caller_id');
 		expect(sql).not.toContain('callee_id');
 	});
@@ -149,7 +155,10 @@ describe('hasMany disambiguation — schema() DSL path', () => {
 	it('include("callee_calls") compiles and SQL uses callee_id', () => {
 		const orm = buildOrm(callGraphSchema);
 		const { symbols } = callGraphSchema.tables;
-		const { sql } = orm.from(symbols).include('callee_calls', { join: 'left' }).dump();
+		const { sql } = orm
+			.from(symbols)
+			.include('callee_calls', { join: 'left' })
+			.dump();
 		expect(sql).toContain('callee_id');
 		expect(sql).not.toContain('caller_id');
 	});

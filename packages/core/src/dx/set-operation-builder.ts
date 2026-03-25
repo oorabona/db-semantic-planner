@@ -1,4 +1,3 @@
-
 /**
  * @fileoverview SetOperationBuilder — fluent API for UNION / INTERSECT / EXCEPT.
  *
@@ -10,11 +9,15 @@
  */
 
 import type { Adapter, Dump } from '../adapter.js';
+import type {
+	QueryIntent,
+	SetOperationIntent,
+	SetOperationType,
+} from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
-import type { QueryIntent, SetOperationIntent, SetOperationType } from '../intent-ast.js';
 import type { PlanReport } from '../planner.js';
-import type { QueryBuilder } from './types.js';
 import { ExecutionError } from './errors.js';
+import type { QueryBuilder } from './types.js';
 
 // ============================================================================
 // Public interface
@@ -160,7 +163,10 @@ export class SetOperationBuilderImpl<TResult = unknown>
 			warnings: [],
 		} as unknown as PlanReport;
 		const dumpResult = adapter.createDump(planPlaceholder, compiled);
-		if (dumpResult.meta?.schema === undefined && this.schemaName !== undefined) {
+		if (
+			dumpResult.meta?.schema === undefined &&
+			this.schemaName !== undefined
+		) {
 			return {
 				...dumpResult,
 				meta: { ...dumpResult.meta, schema: this.schemaName },

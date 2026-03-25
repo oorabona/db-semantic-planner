@@ -15,13 +15,20 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
-import { andExpr, binaryExpr, columnRef, notExpr, orExpr, rangeVar } from './ast-helpers.js';
+import {
+	andExpr,
+	binaryExpr,
+	columnRef,
+	notExpr,
+	orExpr,
+	rangeVar,
+} from './ast-helpers.js';
 import { compileExpressionIntent } from './handlers/expression/custom.js';
 import { createWhereDispatcher } from './handlers/index.js';
 import type {
 	CompilerContext,
-	Decision,
 	CompilerState,
+	Decision,
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
 import type { NamingPlugin } from './naming-plugin.js';
@@ -447,7 +454,14 @@ export function compileWhereIntent(
 		const nodes = andIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty AND = tautology; use a truthy constant
-			return { TypeCast: { arg: { Integer: { ival: 1 } }, typeName: { TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 } } } } as unknown as Node;
+			return {
+				TypeCast: {
+					arg: { Integer: { ival: 1 } },
+					typeName: {
+						TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
+					},
+				},
+			} as unknown as Node;
 		}
 		if (nodes.length === 1) return nodes[0]!;
 		return andExpr(...nodes);
@@ -457,7 +471,14 @@ export function compileWhereIntent(
 		const nodes = orIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty OR = contradiction; use a falsy constant
-			return { TypeCast: { arg: { Integer: { ival: 0 } }, typeName: { TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 } } } } as unknown as Node;
+			return {
+				TypeCast: {
+					arg: { Integer: { ival: 0 } },
+					typeName: {
+						TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
+					},
+				},
+			} as unknown as Node;
 		}
 		if (nodes.length === 1) return nodes[0]!;
 		return orExpr(...nodes);
@@ -477,11 +498,10 @@ export function compileWhereIntent(
 	// confuse their dispatch.
 	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
 	const bridged = needsColumn
-		? { ...intent, column: (intent as unknown as Record<string, unknown>).field } as unknown as Decision
-		: intent as unknown as Decision;
-	return dispatcher(
-		bridged,
-		handlerCtx,
-		ctx.paramState,
-	);
+		? ({
+				...intent,
+				column: (intent as unknown as Record<string, unknown>).field,
+			} as unknown as Decision)
+		: (intent as unknown as Decision);
+	return dispatcher(bridged, handlerCtx, ctx.paramState);
 }

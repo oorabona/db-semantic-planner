@@ -1339,5 +1339,4 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(result).toHaveLength(0);
 		});
 	});
-
 });

@@ -222,7 +222,11 @@ export function convertWhereToDecisions(
 			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
 			const rawValue = w.value;
 			const resolvedValue = isSubqueryRef(rawValue)
-				? { kind: 'fieldRef' as const, scope: 'outer' as const, column: (rawValue as { column: string }).column }
+				? {
+						kind: 'fieldRef' as const,
+						scope: 'outer' as const,
+						column: (rawValue as { column: string }).column,
+					}
 				: rawValue;
 			return [
 				{
@@ -693,7 +697,6 @@ function toJoinIncludeDecision(
 	};
 }
 
-
 // ============================================================================
 // Relation alias resolution: snake_case ⇔ camelCase
 // ============================================================================
@@ -762,8 +765,13 @@ export function synthesizeMissingJoinDecisions(
 
 		// Derive FK from RelationIR
 		const rawFk = rel.foreignKey
-			? (Array.isArray(rel.foreignKey) ? rel.foreignKey[0] : rel.foreignKey)
-			: deriveFk(rel.type === 'belongsTo' ? rel.target : sourceTable, defaultPk);
+			? Array.isArray(rel.foreignKey)
+				? rel.foreignKey[0]
+				: rel.foreignKey
+			: deriveFk(
+					rel.type === 'belongsTo' ? rel.target : sourceTable,
+					defaultPk,
+				);
 
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
@@ -785,7 +793,9 @@ export function synthesizeMissingJoinDecisions(
 			relationName: alias,
 			targetTable: rel.target,
 			sourceTable,
-			...(rel.type && { relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne' }),
+			...(rel.type && {
+				relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne',
+			}),
 			foreignKey: Array.isArray(rawFk) ? rawFk[0] : rawFk,
 			parentKey: defaultPk,
 			columns,

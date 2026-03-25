@@ -44,10 +44,11 @@ import {
  * Returns null when the decision itself should be removed.
  * Containers (whereAnd/whereOr/whereNot) that become empty after stripping are also removed.
  */
-function stripExistsFromDecision(
-	d: PlanDecision,
-): PlanDecision | null {
-	if (d.type === 'where' && (d.operator === 'exists' || d.operator === 'notExists')) {
+function stripExistsFromDecision(d: PlanDecision): PlanDecision | null {
+	if (
+		d.type === 'where' &&
+		(d.operator === 'exists' || d.operator === 'notExists')
+	) {
 		return null;
 	}
 	if (
@@ -152,7 +153,7 @@ export function compileSelect<T = unknown>(
 					synthesizedModel,
 					deps.defaultPk,
 					deps.deriveFk,
-			  )
+				)
 			: [];
 		const allUnifiedIncludeDecisions =
 			synthesizedJoins.length > 0
@@ -229,8 +230,7 @@ export function compileSelect<T = unknown>(
 		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
 		// Explicitly requested columns (via relationColumn()) are still preserved —
 		// the caller is responsible for including them in groupBy().
-		const hasGroupBy =
-			plan.intent?.groupBy && plan.intent.groupBy.length > 0;
+		const hasGroupBy = plan.intent?.groupBy && plan.intent.groupBy.length > 0;
 		if (hasGroupBy) {
 			for (const d of enrichedUnifiedDecisions) {
 				if (d.type === 'includeStrategy' && d.choice === 'join') {
@@ -327,7 +327,9 @@ export function compileSelect<T = unknown>(
 								existing.push({ col, ...(alias !== undefined && { alias }) });
 							}
 						} else {
-							relationColumnsMap.set(mapKey, [{ col, ...(alias !== undefined && { alias }) }]);
+							relationColumnsMap.set(mapKey, [
+								{ col, ...(alias !== undefined && { alias }) },
+							]);
 						}
 					}
 				}

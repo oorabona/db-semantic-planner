@@ -4,7 +4,9 @@ import { subquery } from '../subquery-builder.js';
 
 describe('inSubquery', () => {
 	it('creates WhereInIntent with empty values and subquery field', () => {
-		const sub = subquery('posts').select('userId').where(eq('status', 'published'));
+		const sub = subquery('posts')
+			.select('userId')
+			.where(eq('status', 'published'));
 		const result = inSubquery('id', sub);
 
 		expect(result.kind).toBe('in');

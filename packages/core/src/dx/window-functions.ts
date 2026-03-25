@@ -38,8 +38,8 @@ type WindowFunctionKind =
 	| { type: 'ranking'; fn: 'row_number' | 'rank' | 'dense_rank' }
 	| {
 			type: 'aggregate';
-		fn: 'sum' | 'avg' | 'count' | 'min' | 'max';
-		field?: string;
+			fn: 'sum' | 'avg' | 'count' | 'min' | 'max';
+			field?: string;
 	  }
 	| { type: 'offset'; fn: 'lag' | 'lead'; field: string };
 

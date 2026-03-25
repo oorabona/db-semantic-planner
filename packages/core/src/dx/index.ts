@@ -308,6 +308,19 @@ export {
 	TABLE_META,
 	type TableMetaKey,
 } from './symbols.js';
+// DDL-TABLE-001: Table-scoped DDL types
+export type {
+	AlterColumnOptions,
+	CreateIndexOptions,
+	DropIndexOptions,
+	IndexColumnDef,
+	IndexInfo,
+	IndexMethod,
+	TableDDL,
+	TableIndexes,
+	TruncateOptions,
+	VacuumOptions,
+} from './table-ddl-types.js';
 export {
 	// Types
 	type AliasedColumn,

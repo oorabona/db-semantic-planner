@@ -321,4 +321,3 @@ export type InferTables<TSchema extends SchemaDefinition> = {
 		? BuildTableRef<TName, TSchema[TName], TSchema>
 		: never;
 };
-

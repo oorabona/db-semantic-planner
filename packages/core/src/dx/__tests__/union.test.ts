@@ -1,4 +1,3 @@
-
 /**
  * Tests for QueryBuilder set operations: union / unionAll / intersect / except
  *
@@ -77,13 +76,17 @@ describe('QueryBuilder set operations — intent shape', () => {
 	});
 
 	it('intersect() produces setOperation intent with op=intersect, all=false', () => {
-		const builder = orm.select('employees').intersect(orm.select('contractors'));
+		const builder = orm
+			.select('employees')
+			.intersect(orm.select('contractors'));
 		expect(builder.intent.op).toBe('intersect');
 		expect(builder.intent.all).toBe(false);
 	});
 
 	it('intersectAll() produces setOperation intent with op=intersect, all=true', () => {
-		const builder = orm.select('employees').intersectAll(orm.select('contractors'));
+		const builder = orm
+			.select('employees')
+			.intersectAll(orm.select('contractors'));
 		expect(builder.intent.op).toBe('intersect');
 		expect(builder.intent.all).toBe(true);
 	});
@@ -95,7 +98,9 @@ describe('QueryBuilder set operations — intent shape', () => {
 	});
 
 	it('exceptAll() produces setOperation intent with op=except, all=true', () => {
-		const builder = orm.select('employees').exceptAll(orm.select('contractors'));
+		const builder = orm
+			.select('employees')
+			.exceptAll(orm.select('contractors'));
 		expect(builder.intent.op).toBe('except');
 		expect(builder.intent.all).toBe(true);
 	});
@@ -153,7 +158,10 @@ describe('QueryBuilder set operations — chaining', () => {
 			kind: 'setOperation',
 			op: 'union',
 		});
-		expect(step2.intent.right).toMatchObject({ type: 'select', from: 'departments' });
+		expect(step2.intent.right).toMatchObject({
+			type: 'select',
+			from: 'departments',
+		});
 	});
 });
 

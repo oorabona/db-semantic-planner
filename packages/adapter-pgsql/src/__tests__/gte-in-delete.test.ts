@@ -1,4 +1,3 @@
-
 /**
  * GTE-IN-DELETE regression test.
  *
@@ -96,10 +95,7 @@ describe('GTE-IN-DELETE: and(inArray(), eq(), gte()) in DELETE WHERE', () => {
 		const { sql, parameters } = adapter.compileDelete({
 			type: 'delete',
 			table: 'embeddings',
-			where: and(
-				inArray('id', [5, 6]),
-				gte('created_at', '2024-06-01'),
-			),
+			where: and(inArray('id', [5, 6]), gte('created_at', '2024-06-01')),
 		});
 
 		const normalized = normalizeSQL(sql);

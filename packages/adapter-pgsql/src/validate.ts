@@ -282,9 +282,9 @@ export function sanitizeForDisplay(value: string): string {
 	return value.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 100); // Truncate for display
 }
 
-
 /** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
-const SAFE_TYPE_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;
+const SAFE_TYPE_PATTERN =
+	/^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;
 
 /**
  * Validate a raw SQL expression used in DDL contexts (defaults, policy USING/CHECK).
@@ -320,4 +320,3 @@ export function validateDbTypeName(type: string): string {
 	}
 	return type;
 }
-

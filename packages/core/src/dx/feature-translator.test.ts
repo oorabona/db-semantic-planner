@@ -1,4 +1,3 @@
-import { describe, expect, it } from 'vitest';
 import type {
 	DDLFeatureElementMap,
 	DialectCapabilities,
@@ -8,6 +7,7 @@ import type {
 	SequenceIR,
 	TranslationContext,
 } from '@dbsp/types';
+import { describe, expect, it } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 
 describe('FeatureTranslator interface (CAPS-005)', () => {
@@ -23,7 +23,10 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			// Arrange
 			const mockEnumTranslator: FeatureTranslator<'enum'> = {
 				feature: 'enum',
-				translate(element: DDLFeatureElementMap['enum'], _context: TranslationContext): string[] | null {
+				translate(
+					element: DDLFeatureElementMap['enum'],
+					_context: TranslationContext,
+				): string[] | null {
 					const values = element.values.map((v) => `'${v}'`).join(', ');
 					return [`CREATE TYPE "${element.name}" AS ENUM (${values})`];
 				},
@@ -50,7 +53,10 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			// Arrange
 			const skipTranslator: FeatureTranslator<'sequence'> = {
 				feature: 'sequence',
-				translate(_element: DDLFeatureElementMap['sequence'], _context: TranslationContext): string[] | null {
+				translate(
+					_element: DDLFeatureElementMap['sequence'],
+					_context: TranslationContext,
+				): string[] | null {
 					return null; // fall through — skip this feature
 				},
 			};
@@ -75,7 +81,10 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			// Arrange — index translator receives IndexIR, not EnumIR
 			const indexMethodTranslator: FeatureTranslator<'indexMethod'> = {
 				feature: 'indexMethod',
-				translate(element: DDLFeatureElementMap['indexMethod'], _context: TranslationContext): string[] | null {
+				translate(
+					element: DDLFeatureElementMap['indexMethod'],
+					_context: TranslationContext,
+				): string[] | null {
 					if (!element.method || element.method === 'btree') return null;
 					const cols = element.columns.join(', ');
 					return [`CREATE INDEX USING ${element.method} ON (${cols})`];
@@ -99,11 +108,18 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			// Arrange
 			const commentTranslator: FeatureTranslator<'comment'> = {
 				feature: 'comment',
-				translate(element: DDLFeatureElementMap['comment'], _context: TranslationContext): string[] | null {
+				translate(
+					element: DDLFeatureElementMap['comment'],
+					_context: TranslationContext,
+				): string[] | null {
 					if (element.target === 'table') {
-						return [`COMMENT ON TABLE "${element.name}" IS '${element.comment}'`];
+						return [
+							`COMMENT ON TABLE "${element.name}" IS '${element.comment}'`,
+						];
 					}
-					return [`COMMENT ON COLUMN "${element.name}" IS '${element.comment}'`];
+					return [
+						`COMMENT ON COLUMN "${element.name}" IS '${element.comment}'`,
+					];
 				},
 			};
 
@@ -117,7 +133,9 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			const result = commentTranslator.translate(commentElement, pgContext);
 
 			// Assert
-			expect(result).toEqual(["COMMENT ON TABLE \"users\" IS 'Main users table'"]);
+			expect(result).toEqual([
+				'COMMENT ON TABLE "users" IS \'Main users table\'',
+			]);
 		});
 	});
 
@@ -127,7 +145,10 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 			// Arrange — translator checks capabilities before translating
 			const conditionalTranslator: FeatureTranslator<'enum'> = {
 				feature: 'enum',
-				translate(element: DDLFeatureElementMap['enum'], context: TranslationContext): string[] | null {
+				translate(
+					element: DDLFeatureElementMap['enum'],
+					context: TranslationContext,
+				): string[] | null {
 					if (context.dialectCapabilities.supportsDDLEnumTypes) {
 						return [`CREATE TYPE "${element.name}" AS ENUM ()`];
 					}
@@ -148,7 +169,10 @@ describe('FeatureTranslator interface (CAPS-005)', () => {
 					supportsDDLEnumTypes: undefined,
 				} as DialectCapabilities,
 			};
-			const limitedResult = conditionalTranslator.translate(enumIR, limitedContext);
+			const limitedResult = conditionalTranslator.translate(
+				enumIR,
+				limitedContext,
+			);
 
 			// Assert
 			expect(pgResult).toEqual(['CREATE TYPE "role" AS ENUM ()']);

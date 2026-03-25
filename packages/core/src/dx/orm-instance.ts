@@ -2,7 +2,7 @@ import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
-
+import { CteBuilder } from './cte-builder.js';
 import { InvalidOperationError } from './errors.js';
 import { eq } from './filters.js';
 import {
@@ -16,11 +16,19 @@ import {
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
-import { CteBuilder } from './cte-builder.js';
 import { createNqlTag, type NqlTag } from './nql.js';
 import { QueryBuilderImpl } from './query-builder.js';
 import type { DefaultFilters } from './schema.js';
 import { TABLE_META } from './symbols.js';
+import type {
+	AlterColumnOptions,
+	CreateIndexOptions,
+	DropIndexOptions,
+	IndexInfo,
+	TableDDL,
+	TruncateOptions,
+	VacuumOptions,
+} from './table-ddl-types.js';
 import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
 	ListHierarchyOptions,
@@ -29,6 +37,229 @@ import type {
 	QueryBuilder,
 	RelationHints,
 } from './types.js';
+
+/**
+ * Quote a PostgreSQL identifier (table/schema/column name).
+ * Simple double-quoting — no validation, validation is caller's responsibility.
+ */
+function quoteIdent(name: string): string {
+	return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Build the qualified table reference string for DDL statements.
+ */
+function qualifiedTable(tableName: string, schemaName?: string): string {
+	return schemaName
+		? `${quoteIdent(schemaName)}.${quoteIdent(tableName)}`
+		: quoteIdent(tableName);
+}
+
+/**
+ * Build the DDL methods object for a specific table.
+ */
+function buildTableDDL(
+	tableName: string,
+	schemaName: string | undefined,
+	adapter: Adapter<unknown> | undefined,
+): TableDDL {
+	function requireDDL(): (sql: string) => Promise<void> {
+		if (!adapter?.executeDDL) {
+			throw new InvalidOperationError(
+				'table DDL',
+				'executeDDL() requires an adapter that supports DDL execution. ' +
+					'Pass an adapter with executeDDL when creating the ORM.',
+			);
+		}
+		return adapter.executeDDL.bind(adapter);
+	}
+
+	const table = qualifiedTable(tableName, schemaName);
+
+	return {
+		async truncate(options?: TruncateOptions): Promise<void> {
+			const exec = requireDDL();
+			let sql = `TRUNCATE ${table}`;
+			if (options?.restartIdentity) sql += ' RESTART IDENTITY';
+			if (options?.cascade) sql += ' CASCADE';
+			await exec(sql);
+		},
+
+		async vacuum(options?: VacuumOptions): Promise<void> {
+			const exec = requireDDL();
+			const modifiers: string[] = [];
+			if (options?.full) modifiers.push('FULL');
+			if (options?.analyze) modifiers.push('ANALYZE');
+			const mod = modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
+			const sql = `VACUUM ${mod}${table}`;
+			await exec(sql);
+		},
+
+		async alterColumn(
+			column: string,
+			options: AlterColumnOptions,
+		): Promise<void> {
+			const exec = requireDDL();
+			const col = quoteIdent(column);
+			const clauses: string[] = [];
+
+			if (options.type !== undefined) {
+				let clause = `ALTER COLUMN ${col} TYPE ${options.type}`;
+				if (options.using !== undefined) {
+					clause += ` USING ${options.using}`;
+				}
+				clauses.push(clause);
+			}
+			if (options.setNotNull === true) {
+				clauses.push(`ALTER COLUMN ${col} SET NOT NULL`);
+			} else if (options.setNotNull === false) {
+				clauses.push(`ALTER COLUMN ${col} DROP NOT NULL`);
+			}
+			if (options.dropDefault === true) {
+				clauses.push(`ALTER COLUMN ${col} DROP DEFAULT`);
+			} else if (options.setDefault !== undefined) {
+				clauses.push(`ALTER COLUMN ${col} SET DEFAULT ${options.setDefault}`);
+			}
+
+			if (clauses.length === 0) {
+				throw new InvalidOperationError(
+					'alterColumn',
+					'At least one alteration option must be specified.',
+				);
+			}
+
+			const sql = `ALTER TABLE ${table} ${clauses.join(', ')}`;
+			await exec(sql);
+		},
+
+		indexes: {
+			async create(opts: CreateIndexOptions): Promise<void> {
+				const exec = requireDDL();
+				const parts: string[] = ['CREATE'];
+				if (opts.unique) parts.push('UNIQUE');
+				parts.push('INDEX');
+				if (opts.concurrently) parts.push('CONCURRENTLY');
+				if (opts.ifNotExists) parts.push('IF NOT EXISTS');
+				parts.push(quoteIdent(opts.name));
+				parts.push('ON');
+				parts.push(table);
+				if (opts.method) parts.push(`USING ${opts.method}`);
+
+				const colDefs = opts.columns.map((col) => {
+					if (typeof col === 'string') {
+						const quotedCol = quoteIdent(col);
+						const op =
+							opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
+						return `${quotedCol}${op}`;
+					}
+					const op = col.opclass != null ? ` ${col.opclass}` : '';
+					return `(${col.expression})${op}`;
+				});
+				parts.push(`(${colDefs.join(', ')})`);
+
+				if (opts.include && opts.include.length > 0) {
+					parts.push(`INCLUDE (${opts.include.map(quoteIdent).join(', ')})`);
+				}
+				if (opts.with && Object.keys(opts.with).length > 0) {
+					const withClauses = Object.entries(opts.with)
+						.map(([k, v]) => `${k} = ${v}`)
+						.join(', ');
+					parts.push(`WITH (${withClauses})`);
+				}
+				if (opts.where) parts.push(`WHERE ${opts.where}`);
+
+				await exec(parts.join(' '));
+			},
+
+			async drop(name: string, options?: DropIndexOptions): Promise<void> {
+				const exec = requireDDL();
+				const parts: string[] = ['DROP INDEX'];
+				if (options?.concurrently) parts.push('CONCURRENTLY');
+				if (options?.ifExists) parts.push('IF EXISTS');
+				const schema = options?.schema ?? schemaName;
+				parts.push(
+					schema
+						? `${quoteIdent(schema)}.${quoteIdent(name)}`
+						: quoteIdent(name),
+				);
+				if (options?.cascade) parts.push('CASCADE');
+				await exec(parts.join(' '));
+			},
+
+			async list(): Promise<IndexInfo[]> {
+				if (!adapter) {
+					throw new InvalidOperationError(
+						'indexes.list',
+						'indexes.list() requires an adapter.',
+					);
+				}
+				// pg_indexes provides index metadata — query is read-only but uses the DDL channel
+				const sql =
+					`SELECT indexname AS name, indexdef AS definition, ` +
+					`(SELECT indisunique FROM pg_index WHERE indexrelid = (SELECT oid FROM pg_class WHERE relname = indexname)) AS unique, ` +
+					`CASE WHEN indexdef LIKE '%USING %' THEN split_part(indexdef, 'USING ', 2) ELSE 'btree' END AS method ` +
+					`FROM pg_indexes WHERE tablename = '${tableName.replace(/'/g, "''")}' ` +
+					(schemaName
+						? `AND schemaname = '${schemaName.replace(/'/g, "''")}' `
+						: '') +
+					`ORDER BY indexname`;
+				if (
+					'executeRaw' in adapter &&
+					typeof adapter.executeRaw === 'function'
+				) {
+					const rows = await (
+						adapter.executeRaw as (
+							sql: string,
+							params: unknown[],
+						) => Promise<unknown[]>
+					)(sql, []);
+					return rows as IndexInfo[];
+				}
+				// Fallback: use executeDDL (adapter must handle SELECT)
+				await requireDDL()(sql);
+				return [];
+			},
+		},
+	};
+}
+
+/**
+ * Wrap a tables proxy (from createTablesProxy or schema.tables) with DDL methods.
+ * The returned proxy intercepts property access on each table name and augments
+ * the returned TableRef object with a `TableDDL` mixin.
+ */
+export function wrapTablesProxyWithDDL(
+	tablesProxy: object,
+	adapter: Adapter<unknown> | undefined,
+	schemaName: string | undefined,
+): object {
+	// Cache augmented table objects to preserve referential equality
+	const cache = new Map<string, object>();
+
+	return new Proxy(tablesProxy, {
+		get(target, prop, receiver) {
+			// Pass through Symbol and non-string properties unchanged
+			if (typeof prop !== 'string') {
+				return Reflect.get(target, prop, receiver);
+			}
+
+			if (cache.has(prop)) {
+				return cache.get(prop);
+			}
+
+			const tableRef = Reflect.get(target, prop, receiver);
+			if (tableRef === undefined || tableRef === null) {
+				return tableRef;
+			}
+
+			// Augment the TableRef with DDL methods
+			const ddl = buildTableDDL(prop, schemaName, adapter);
+			const augmented = Object.assign(Object.create(null), tableRef, ddl);
+			cache.set(prop, augmented);
+			return augmented;
+		},
+	});
+}
 
 /**
  * Internal factory for creating ORM instances.
@@ -70,10 +301,17 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		inTransaction,
 	} as const;
 
+	// Wrap the tables proxy to augment each table access with DDL methods
+	const tablesDDLProxy = wrapTablesProxyWithDDL(
+		tablesProxy ?? {},
+		adapter as Adapter<unknown> | undefined,
+		schemaName,
+	);
+
 	return {
 		strictMode,
 		nql,
-		tables: (tablesProxy ?? {}) as OrmInstance<DB>['tables'],
+		tables: tablesDDLProxy as OrmInstance<DB>['tables'],
 		from<TTable extends TableRef<any, any, any>>(
 			table: TTable,
 		): QueryBuilder<InferTableRow<TTable>> {

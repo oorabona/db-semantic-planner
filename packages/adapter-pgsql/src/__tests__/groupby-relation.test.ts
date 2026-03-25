@@ -1,4 +1,3 @@
-
 /**
  * @module groupby-relation.test
  * Regression tests for GROUP BY with relation (JOIN) columns.
@@ -55,7 +54,9 @@ describe('GROUP BY with relation (JOIN) columns', () => {
 		expect(sql).toMatch(/symbols\.id/);
 		// Join relation column in GROUP BY: must use the relation alias, not root table
 		// The dot-split fix produces columnRef('path', 'file') → "file".path or file.path
-		expect(sql).toMatch(/GROUP BY.*symbols\.id.*file\.path|GROUP BY.*file\.path/);
+		expect(sql).toMatch(
+			/GROUP BY.*symbols\.id.*file\.path|GROUP BY.*file\.path/,
+		);
 		// Must NOT produce the wrong form where "file.path" appears as a column of symbols
 		expect(sql).not.toMatch(/symbols\."file\.path"/);
 		expect(sql).not.toMatch(/"symbols"\."file\.path"/);

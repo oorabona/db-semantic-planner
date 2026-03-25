@@ -849,7 +849,9 @@ export class PlanCompiler {
 						// (same options: naming, schema, defaultPk, deriveFk)
 						const innerCompiler = new PlanCompiler({
 							naming: outerThis.naming,
-							...(outerThis.schema !== undefined && { schema: outerThis.schema }),
+							...(outerThis.schema !== undefined && {
+								schema: outerThis.schema,
+							}),
 							defaultPkColumnName: outerThis.defaultPk,
 							deriveFkColumnName: outerThis.deriveFk,
 						});

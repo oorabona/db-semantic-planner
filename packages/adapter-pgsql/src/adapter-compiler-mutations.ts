@@ -86,7 +86,8 @@ function resolveExistsRelation(
 	const targetTable = rel.target;
 	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
 	if (rel.type === 'belongsTo') {
-		const fk = typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		const fk =
+			typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
 		return {
 			targetTable,
 			...(fk !== undefined && { sourceColumn: fk }),
@@ -117,8 +118,12 @@ function resolveExistsIntent(
 	return {
 		...w,
 		targetTable: resolved.targetTable,
-		...(resolved.sourceColumn !== undefined && { sourceColumn: resolved.sourceColumn }),
-		...(resolved.targetColumn !== undefined && { targetColumn: resolved.targetColumn }),
+		...(resolved.sourceColumn !== undefined && {
+			sourceColumn: resolved.sourceColumn,
+		}),
+		...(resolved.targetColumn !== undefined && {
+			targetColumn: resolved.targetColumn,
+		}),
 	} as unknown as WhereIntent;
 }
 

@@ -121,11 +121,8 @@ export const joinIncludeHandler: IncludeHandler = {
 				targets.push(starTarget(targetAlias, ctx.naming));
 			} else {
 				for (const col of columns) {
-					const outputAlias =
-						columnAliases?.[col] ?? `${relation}.${col}`;
-					targets.push(
-						columnTarget(col, outputAlias, targetAlias, ctx.naming),
-					);
+					const outputAlias = columnAliases?.[col] ?? `${relation}.${col}`;
+					targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
 				}
 			}
 		}

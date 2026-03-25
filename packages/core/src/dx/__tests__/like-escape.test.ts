@@ -1,4 +1,3 @@
-
 import { describe, expect, it } from 'vitest';
 import { like } from '../filters.js';
 
@@ -29,7 +28,10 @@ describe('like() with escape option', () => {
 	});
 
 	it('object form sets both caseInsensitive and escape', () => {
-		const intent = like('name', '\\_foo%', { caseInsensitive: true, escape: '\\' });
+		const intent = like('name', '\\_foo%', {
+			caseInsensitive: true,
+			escape: '\\',
+		});
 		expect(intent.caseInsensitive).toBe(true);
 		expect(intent.escape).toBe('\\');
 	});

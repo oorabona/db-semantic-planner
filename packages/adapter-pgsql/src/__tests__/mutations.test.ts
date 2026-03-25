@@ -2,8 +2,8 @@
  * Mutation Compiler Tests
  */
 
-import type { Node } from '@pgsql/types';
 import { exists, notExists } from '@dbsp/core';
+import type { Node } from '@pgsql/types';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type {
 	CompilerContext,
@@ -25,8 +25,8 @@ import {
 	type UpdateConfig,
 	type UpsertConfig,
 } from '../mutations/index.js';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 import { CamelCaseNamingPlugin } from '../naming-plugin.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // Register WHERE handlers before tests
 beforeAll(() => {
@@ -693,18 +693,21 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 	it('uses ModelIR to resolve relation "symbol" -> table "symbols" in NOT EXISTS subquery', async () => {
 		// Build a minimal ModelIR with relation embeddings.symbol -> symbols table
 		const relations = new Map([
-			['embeddings.symbol', {
-				name: 'symbol',
-				type: 'belongsTo' as const,
-				source: 'embeddings',
-				target: 'symbols',
-				cardinality: 'many-to-one' as const,
-				optionality: 'optional' as const,
-				includeStrategy: 'auto' as const,
-				filterStrategy: 'auto' as const,
-				joinDefault: 'auto' as const,
-				foreignKeys: [],
-			}],
+			[
+				'embeddings.symbol',
+				{
+					name: 'symbol',
+					type: 'belongsTo' as const,
+					source: 'embeddings',
+					target: 'symbols',
+					cardinality: 'many-to-one' as const,
+					optionality: 'optional' as const,
+					includeStrategy: 'auto' as const,
+					filterStrategy: 'auto' as const,
+					joinDefault: 'auto' as const,
+					foreignKeys: [],
+				},
+			],
 		]);
 		const model = {
 			tables: new Map(),
@@ -716,7 +719,9 @@ describe('DELETE-NOTEXISTS-ALIAS: notExists() resolves relation to real table na
 			isAmbiguous: () => ({ ambiguous: false }),
 		} as unknown as import('@dbsp/types').ModelIR;
 
-		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import('../pgsql-adapter.js');
+		const { createPgsqlCompileOnlyAdapter: createAdapter } = await import(
+			'../pgsql-adapter.js'
+		);
 		const adapterWithModel = createAdapter({ model });
 
 		const intent = {

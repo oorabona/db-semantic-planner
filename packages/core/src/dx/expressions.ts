@@ -178,7 +178,10 @@ export class ExpressionRef {
  * @example ref('t.score') → "t"."score"
  */
 export function ref(column: string): ExpressionRef {
-	return new ExpressionRef({ kind: 'ref', column } satisfies RefExpressionIntent);
+	return new ExpressionRef({
+		kind: 'ref',
+		column,
+	} satisfies RefExpressionIntent);
 }
 
 /**
@@ -314,7 +317,6 @@ export function namedArg(name: string, value: ExprInput): ExpressionRef {
 	} satisfies NamedArgExpressionIntent);
 }
 
-
 /** SQL wildcard (*) — use in fn('count', star()) for COUNT(*) */
 export function star(): ExpressionRef {
 	return new ExpressionRef({ kind: 'star' } satisfies StarExpressionIntent);
@@ -332,4 +334,3 @@ export function array(...items: ExprInput[]): ExpressionRef {
 		elements: items.map(toExpressionIntent),
 	} satisfies ArrayExpressionIntent);
 }
-

@@ -15,7 +15,6 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { MutationIntent } from './hooks.js';
 import type { ModelIR } from '../model-ir.js';
 import {
 	ExecutionError,
@@ -26,6 +25,7 @@ import type {
 	HookErrorHandler,
 	HookStore,
 	MutationHookContext,
+	MutationIntent,
 	MutationOperation,
 } from './hooks.js';
 import {
@@ -323,9 +323,10 @@ abstract class MutationBuilderBase<
 	}
 
 	/** Extract cardinality and data from mutation intent */
-	private extractIntentData(
-		intent: TIntent,
-	): { cardinality: 'single' | 'bulk'; data: unknown } {
+	private extractIntentData(intent: TIntent): {
+		cardinality: 'single' | 'bulk';
+		data: unknown;
+	} {
 		if (intent.type === 'insert' || intent.type === 'upsert') {
 			const values = (intent as InsertIntent | UpsertIntent).values;
 			return {

@@ -8,21 +8,21 @@
  * @since R01
  */
 
-import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
+import type { CteBuilder } from './cte-builder.js';
 import type {
 	DeleteBuilder,
 	InsertBuilder,
 	UpdateBuilder,
 	UpsertBuilder,
 } from './mutation-builders.js';
-import type { CteBuilder } from './cte-builder.js';
 import type { NqlTag } from './nql.js';
 import type { QueryBuilder } from './query-builder-types.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
+import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { ListHierarchyOptions, RelationHints } from './types.js';
 
 /**
@@ -219,12 +219,13 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  * type MyOrm = OrmOf<{ users: { id: 'integer' } }>;  // uses InferDB directly
  * ```
  */
-export type OrmOf<S> =
-	S extends import('./schema.js').Schema<infer T extends import('./schema.js').SchemaDefinition>
-		? OrmInstance<import('./schema.js').InferDB<T>>
-		: S extends import('./schema.js').SchemaDefinition
-			? OrmInstance<import('./schema.js').InferDB<S>>
-			: never;
+export type OrmOf<S> = S extends import('./schema.js').Schema<
+	infer T extends import('./schema.js').SchemaDefinition
+>
+	? OrmInstance<import('./schema.js').InferDB<T>>
+	: S extends import('./schema.js').SchemaDefinition
+		? OrmInstance<import('./schema.js').InferDB<S>>
+		: never;
 
 /**
  * Convert a row type `{ col: Type }` to column refs `{ col: ColumnRef<Table, 'col', Type> }`
@@ -255,7 +256,9 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	readonly tables: { [K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any> };
+	readonly tables: {
+		[K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any>;
+	};
 
 	/**
 	 * Start a type-safe SELECT query from a TableRef.
@@ -291,9 +294,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	into<TTable extends TableRef<any, any, any>>(
-		table: TTable,
-	): InsertBuilder;
+	into<TTable extends TableRef<any, any, any>>(table: TTable): InsertBuilder;
 
 	/**
 	 * Start a type-safe UPDATE operation from a TableRef.
@@ -310,9 +311,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	modify<TTable extends TableRef<any, any, any>>(
-		table: TTable,
-	): UpdateBuilder;
+	modify<TTable extends TableRef<any, any, any>>(table: TTable): UpdateBuilder;
 
 	/**
 	 * Start a type-safe DELETE operation from a TableRef.
@@ -597,4 +596,3 @@ export interface OrmInstanceInternal<DB = Record<string, unknown>>
 	 */
 	upsert(table: string): UpsertBuilder;
 }
-

@@ -14,7 +14,16 @@
  * Named parameter syntax is supported via the NamedArgExpressionIntent (EXT-NAMED-PARAMS).
  */
 
-import { array, ExpressionRef, exprRef, fn, literal, namedArg, op, param } from '@dbsp/core';
+import {
+	array,
+	ExpressionRef,
+	exprRef,
+	fn,
+	literal,
+	namedArg,
+	op,
+	param,
+} from '@dbsp/core';
 
 /**
  * BM25 relevance score for a row.
