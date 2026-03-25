@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: types, core, adapter-pgsql
   type: spec
   story: FR-1
