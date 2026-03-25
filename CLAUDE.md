@@ -187,6 +187,22 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 - **Row-Level Security (RLS):** `rlsEnabled` + `policies[]` on TableIR — see `docs/guides/how-to-use-rls-policies.md`
 - Feature support is gated by `DialectCapabilities` flags (e.g. `supportsDDLRowLevelSecurity`)
 
+### Runtime DDL Helpers (`orm.tables.<name>`)
+
+| Method | Description |
+|--------|-------------|
+| `.truncate(options?)` | TRUNCATE TABLE — options: `{ cascade?, restartIdentity? }` |
+| `.vacuum(options?)` | VACUUM — options: `{ full?, analyze? }` |
+| `.storageSize()` | Returns total table size in bytes (`pg_total_relation_size`) |
+| `.alterColumn(col, options)` | ALTER COLUMN — options: `{ type?, using?, setNotNull?, setDefault?, dropDefault? }` |
+| `.indexes.create(options)` | CREATE INDEX — supports all methods: btree, gin, hnsw, bm25, etc. |
+| `.indexes.drop(name, options?)` | DROP INDEX — options: `{ ifExists?, cascade?, concurrently? }` |
+| `.indexes.list(options?)` | List indexes — options: `{ namePattern? }` → `IndexInfo[]` |
+| `.indexes.exists(name)` | Returns `boolean` — whether index exists on this table |
+| `orm.ddl.dropIndex(name, options?)` | Global shortcut — drop by name without a table reference |
+
+All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.md`.
+
 ## Query Features
 
 | Feature | API | Example |
@@ -201,7 +217,8 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 | IN subquery | `inSubquery('id', subquery('posts').select('userId'))` | WHERE id IN (SELECT ...) |
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
-| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md` | |
+| CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
+| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md` | |
 
 ## Observability
 
