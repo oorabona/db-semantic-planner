@@ -19,8 +19,37 @@ export interface UnnestCteIntent {
 /**
  * Full CTE query: one or more CTE definitions + an outer query.
  */
+
+
+/**
+ * CTE backed by explicit base and step QueryIntent instances (WITH RECURSIVE).
+ *
+ * Used by `orm.recursive(name, { base, step })` to build arbitrary
+ * WITH RECURSIVE queries from query builder instances.
+ *
+ * Generates:
+ *   WITH RECURSIVE "name" AS (
+ *     <base SELECT>
+ *     UNION ALL   -- or UNION when unionAll: false
+ *     <step SELECT> [WHERE depth_col < maxDepth]
+ *   )
+ */
+export interface RawCteIntent {
+	readonly kind: 'rawCte';
+	readonly name: string;
+	readonly base: QueryIntent;
+	readonly step: QueryIntent;
+	/** When true, use UNION ALL (default). When false, use UNION (deduplicates). */
+	readonly unionAll: boolean;
+	/** Optional depth guard: inject WHERE <depthColumn> < maxDepth in the recursive step. */
+	readonly maxDepth?: number;
+	/** Column name tracking depth in the step query, for maxDepth injection. */
+	readonly depthColumn?: string;
+}
+
+
 export interface CteQueryIntent {
 	readonly kind: 'cteQuery';
-	readonly ctes: readonly UnnestCteIntent[];
+	readonly ctes: readonly (UnnestCteIntent | RawCteIntent)[];
 	readonly query: QueryIntent;
 }

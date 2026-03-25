@@ -17,7 +17,9 @@ import type { Mutable } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
-import { rangeVar } from './ast-helpers.js';
+import { funcCall, rangeVar } from './ast-helpers.js';
+import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
+import { createTypeCastParamRef } from './param-ref.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -85,6 +87,67 @@ export function bridgeLegacyDecisions(
  *
  * The resulting decisions are appended to `allDecisions` before `compilePlan()`.
  */
+
+// ============================================================================
+// Batch Values RangeFunction builder (shared by JOIN and FROM cases)
+// ============================================================================
+
+type BatchValuesRangeFnResult = {
+	rangeFunction: Node;
+	params: unknown[];
+};
+
+/**
+ * Build a `unnest($1::type[], ...) AS alias(col1, col2 [, ord])` RangeFunction node
+ * from a BatchValuesJoinPayload.
+ *
+ * The returned `params` array contains the column data arrays in order; they must
+ * be spliced into CompilerState.parameters BEFORE other query params so that the
+ * $N refs in the AST node match the right positions.
+ *
+ * @param bv - The batch values payload (columns, data, types, alias, ordinality).
+ * @param startParamIndex - The 1-based index for the first ParamRef ($N).
+ *   Pass 1 when the batch params are first; pass current paramIndex+1 otherwise.
+ */
+function buildBatchValuesRangeFn(
+	bv: import('@dbsp/types').BatchValuesJoinPayload,
+	startParamIndex: number,
+	aliasOverride?: string,
+): BatchValuesRangeFnResult {
+	const params: unknown[] = [];
+	let paramIdx = startParamIndex - 1;
+	const effectiveAlias = aliasOverride ?? bv.alias;
+
+	const unnestArgs: Node[] = bv.columns.map((col, i) => {
+		const colArray: unknown[] = (bv.data[i] as unknown[]) ?? [];
+		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+		const colTypes: Record<string, string> = {};
+		if (bv.types[i]) colTypes[col] = bv.types[i] as string;
+		const pgArrayType = inferPgArrayType(col, colTypes, sampleValue);
+		const pgBaseType = stripArraySuffix(pgArrayType);
+
+		params.push(colArray);
+		paramIdx++;
+		return createTypeCastParamRef(paramIdx, pgBaseType, true);
+	});
+
+	const unnestCall = funcCall('unnest', unnestArgs);
+	const colnames = [
+		...bv.columns,
+		...(bv.ordinality ? ['ord'] : []),
+	].map((c) => ({ String: { sval: c } }));
+
+	const rangeFunction: Node = {
+		RangeFunction: {
+			functions: [{ List: { items: [unnestCall] } }],
+			ordinality: bv.ordinality,
+			alias: { aliasname: effectiveAlias, colnames },
+		},
+	};
+
+	return { rangeFunction, params };
+}
+
 function compileJoinIntents(
 	joins: readonly JoinIntent[],
 	rootTable: string,
@@ -145,6 +208,48 @@ function compileJoinIntents(
 				sourceColumn,
 				targetColumn,
 				joinType: intent.type,
+			});
+		} else if (intent.batchValues !== undefined) {
+			// ── BatchValues mode: unnest($N::type[], ...) AS alias(col1, col2) ──
+			// Compiles a batch-values join: the rarg is a RangeFunction wrapping
+			// unnest() instead of a plain RangeVar.
+			// Params are $1, $2, ... (1-indexed); compiler.ts splices them first.
+			const bv = intent.batchValues;
+			const alias = intent.alias ?? bv.alias;
+
+			const { rangeFunction, params: bvParams } = buildBatchValuesRangeFn(bv, 1, alias);
+
+			// Compile the ON condition.
+			// We use a minimal param state with paramIndex already advanced past bvParams
+			// so that any ON condition params (rare for batch joins) get correct indices.
+			const bvOnParamState = createCompilerState();
+			bvOnParamState.paramIndex = bvParams.length;
+
+			const bvCtx: WhereCompilerCtx = {
+				rootTable,
+				aliases: new Map<string, string>(),
+				paramState: bvOnParamState,
+				naming,
+				outerTable: alias,
+				...(schemaName !== undefined && { schemaName }),
+				...(model !== undefined && { model }),
+				compileSubquery: () => {
+					throw new Error('Subquery in BatchValues JOIN ON condition is not supported.');
+				},
+			};
+
+			const onNode: Node = compileWhereIntent(intent.on, bvCtx);
+
+			results.push({
+				type: 'join',
+				targetTable: alias,
+				alias,
+				joinType: intent.type,
+				joinRarg: rangeFunction,
+				joinOnNode: onNode,
+				// batchValuesParams are spliced into this.state.parameters BEFORE
+				// other params in compiler.ts, so $1/$2/... refs align correctly.
+				batchValuesParams: bvParams,
 			});
 		} else {
 			// ── Table mode: explicit ON condition ─────────────────────────────
@@ -584,12 +689,24 @@ export function compileSelect<T = unknown>(
 			}
 		}
 
+		// BatchValues FROM source: the FROM clause is an unnest() table function.
+		// Build the RangeFunction and record params separately so compiler.ts can
+		// inject them at the front of the parameter list.
+		const bvFromSource = plan.intent?.batchValuesSource;
+		const batchValuesFromFields = bvFromSource
+			? (() => {
+					const { rangeFunction, params } = buildBatchValuesRangeFn(bvFromSource, 1);
+					return { batchValuesFromNode: rangeFunction, batchValuesFromParams: params };
+				})()
+			: {};
+
 		simplifiedPlan = {
 			rootTable: plan.rootTable,
 			decisions: allDecisions,
 			...(schemaName ? { schema: schemaName } : {}),
 			...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
 			...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
+			...batchValuesFromFields,
 		};
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).

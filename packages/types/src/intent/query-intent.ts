@@ -13,6 +13,23 @@ import type { WhereIntent } from './where-intent.js';
 // ============================================================================
 
 /**
+ * BatchValues join payload — the data needed to compile an unnest() JOIN.
+ * Embedded inside JoinIntent when the user calls .join(batchValuesRef, ...).
+ */
+export type BatchValuesJoinPayload = {
+	/** Column-major data arrays: one array per column */
+	readonly data: readonly unknown[][];
+	/** Column names for the unnest alias clause */
+	readonly columns: readonly string[];
+	/** PostgreSQL type names for CAST ($1::type[]) */
+	readonly types: readonly string[];
+	/** SQL alias (carries over from BatchValuesRef.alias) */
+	readonly alias: string;
+	/** WITH ORDINALITY flag */
+	readonly ordinality: boolean;
+};
+
+/**
  * Join intent — represents a SQL JOIN clause on the root query.
  *
  * Two discrimination modes (based on `on` presence):
@@ -38,6 +55,7 @@ export type JoinIntent =
 			/** FK-based join — relation name resolved to table + FK automatically */
 			readonly relation: string;
 			readonly table?: never;
+			readonly batchValues?: never;
 			readonly on?: never;
 			readonly alias?: string;
 			readonly type: 'inner' | 'left';
@@ -46,6 +64,16 @@ export type JoinIntent =
 			/** Explicit table join — ON condition required */
 			readonly table: string;
 			readonly relation?: never;
+			readonly batchValues?: never;
+			readonly on: WhereIntent;
+			readonly alias?: string;
+			readonly type: 'inner' | 'left';
+	  }
+	| {
+			/** BatchValues join — unnest($N::type[],...) AS alias(...) with explicit ON */
+			readonly batchValues: BatchValuesJoinPayload;
+			readonly relation?: never;
+			readonly table?: never;
 			readonly on: WhereIntent;
 			readonly alias?: string;
 			readonly type: 'inner' | 'left';
@@ -126,6 +154,12 @@ export interface QueryIntent {
 	 * Two modes: relation-based (FK auto-resolved) or table-based (explicit ON condition).
 	 */
 	readonly joins?: readonly JoinIntent[];
+
+	/**
+	 * When present, the FROM clause is a BatchValues unnest() source instead of a table.
+	 * `from` still holds the alias string for column references.
+	 */
+	readonly batchValuesSource?: BatchValuesJoinPayload;
 }
 
 // ============================================================================

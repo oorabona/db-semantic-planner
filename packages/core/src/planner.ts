@@ -286,9 +286,12 @@ export function plan(
 		dialectCapabilities: options.dialectCapabilities as DialectCapabilities,
 	};
 
-	// Validate root table
-	const rootTable = model.getTable(intent.from);
-	if (!rootTable) {
+	// Validate root table — skip when the FROM is a BatchValues unnest() source
+	// (the alias is not a real table; schema validation would incorrectly fail)
+	const rootTable = intent.batchValuesSource
+		? null
+		: model.getTable(intent.from);
+	if (!intent.batchValuesSource && !rootTable) {
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 

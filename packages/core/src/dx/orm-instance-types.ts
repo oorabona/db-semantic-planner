@@ -13,6 +13,7 @@ import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { CteBuilder } from './cte-builder.js';
+import type { RawCteQueryBuilder, RecursiveOptions } from './raw-cte-builder.js';
 import type {
 	DeleteBuilder,
 	InsertBuilder,
@@ -25,6 +26,7 @@ import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
 import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { DropIndexOptions } from './table-ddl-types.js';
 import type { ListHierarchyOptions, RelationHints } from './types.js';
+import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 
 /**
  * Configuration options for creating an ORM instance.
@@ -279,6 +281,25 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	from<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): QueryBuilder<InferTableRow<TTable>>;
+
+	/**
+	 * Start a SELECT query from a BatchValuesRef source (unnest-backed virtual table).
+	 *
+	 * @param batchRef - A BatchValuesRef created via `orm.batchValues(...)`
+	 * @returns A QueryBuilder with the batch alias as the root table
+	 *
+	 * @example
+	 * ```typescript
+	 * const requested = orm.batchValues(
+	 *   [paths, names],
+	 *   ['path', 'name'],
+	 *   ['text', 'text'],
+	 *   { ordinality: true },
+	 * );
+	 * const rows = await orm.from(requested).orderBy('requested.ord').all();
+	 * ```
+	 */
+	from(batchRef: BatchValuesRef): QueryBuilder<Record<string, unknown>>;
 
 	/**
 	 * Start a type-safe INSERT operation from a TableRef.
@@ -538,6 +559,65 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @returns A CteBuilder for constructing the CTE
 	 */
 	withCte(name: string): CteBuilder;
+
+	/**
+	 * Build a WITH RECURSIVE CTE from explicit base and step query builders (FR-8).
+	 *
+	 * The base query provides the anchor (starting rows).
+	 * The step query references the CTE name as its FROM table and is joined
+	 * recursively until no new rows are produced or maxDepth is reached.
+	 *
+	 * Returns a RawCteQueryBuilder that can be further configured with
+	 * `.columns()`, `.where()`, `.orderBy()`, `.limit()` before execution.
+	 *
+	 * @param name - CTE name (used as the table in the recursive step and outer query)
+	 * @param options - { base, step, maxDepth?, depthColumn?, unionAll? }
+	 * @returns A RawCteQueryBuilder for the outer query configuration and execution
+	 *
+	 * @example
+	 * ```typescript
+	 * const chain = orm.recursive('parent_chain', {
+	 *   base: orm.select('symbols').where(eq('id', rootId)),
+	 *   step: orm.select('parent_chain'),
+	 *   maxDepth: 10,
+	 * });
+	 * const results = await chain.columns(['id', 'name', 'depth']).orderBy('depth').all();
+	 * ```
+	 */
+	recursive<TResult = unknown>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult>;
+
+	/**
+	 * Create a virtual batch data source backed by `unnest($1::type[], $2::type[], ...)`.
+	 *
+	 * Returns a BatchValuesRef that can be passed to:
+	 * - `.from(batchRef)` — use as the primary FROM source
+	 * - `.join(batchRef, { on: ... })` — join to an existing table
+	 * - `orm.modify(table).join(batchRef, { on: ... })` — batch UPDATE FROM
+	 *
+	 * @param data    Column-major arrays: `[idsArray, namesArray, ...]`
+	 * @param columns Column names: `['id', 'name', ...]`
+	 * @param types   PG type names for CAST: `['integer', 'text', ...]`
+	 * @param opts    Optional: alias (default 'batch') and ordinality flag
+	 *
+	 * @example
+	 * ```typescript
+	 * const batch = orm.batchValues(
+	 *   [[1, 2, 3], [10, 20, 30]],
+	 *   ['id', 'callee_id'],
+	 *   ['integer', 'integer'],
+	 * );
+	 * await orm.modify('calls')
+	 *   .join(batch, { on: eq('calls.id', ref('batch.id')) })
+	 *   .set({ callee_id: ref('batch.callee_id') })
+	 *   .execute();
+	 * ```
+	 */
+	batchValues(
+		data: readonly unknown[][],
+		columns: readonly string[],
+		types: readonly string[],
+		opts?: BatchValuesOptions,
+	): BatchValuesRef;
 
 	// =========================================================================
 	// Global DDL Shortcuts (F-005)

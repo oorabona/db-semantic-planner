@@ -2,7 +2,14 @@ import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
+import { batchValues } from './batch-values.js';
+import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import { CteBuilder } from './cte-builder.js';
+import {
+	createRawCteBuilder,
+	type RawCteQueryBuilder,
+	type RecursiveOptions,
+} from './raw-cte-builder.js';
 import { InvalidOperationError } from './errors.js';
 import { eq } from './filters.js';
 import {
@@ -388,9 +395,41 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		nql,
 		tables: tablesDDLProxy as OrmInstance<DB>['tables'],
 		from<TTable extends TableRef<any, any, any>>(
-			table: TTable,
-		): QueryBuilder<InferTableRow<TTable>> {
-			const tableName = table[TABLE_META];
+			table: TTable | BatchValuesRef,
+		): QueryBuilder<InferTableRow<TTable>> | QueryBuilder<Record<string, unknown>> {
+			// BatchValuesRef path
+			if (
+				typeof table === 'object' &&
+				table !== null &&
+				'__kind' in table &&
+				(table as unknown as BatchValuesRef).__kind === 'batchValues'
+			) {
+				const bv = table as unknown as BatchValuesRef;
+				const builder = new QueryBuilderImpl<Record<string, unknown>>(
+					model,
+					strictMode,
+					bv.alias,
+					relationHints,
+					adapter,
+					schemaName,
+					dialectCapabilities,
+					globalPlanOptions,
+					defaultFilters,
+					hookStore,
+					onHookError,
+					inTransaction,
+				);
+				builder.batchValuesSource = {
+					data: bv.data,
+					columns: bv.columns,
+					types: bv.types,
+					alias: bv.alias,
+					ordinality: bv.ordinality,
+				};
+				return builder;
+			}
+			const tableRef = table as TTable;
+			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
@@ -726,8 +765,24 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			return adapter.executeRaw<T>(sqlString, parameters);
 		},
 
+		batchValues(
+			data: readonly unknown[][],
+			columns: readonly string[],
+			types: readonly string[],
+			opts?: BatchValuesOptions,
+		): BatchValuesRef {
+			return batchValues(data, columns, types, opts);
+		},
+
 		withCte(name: string): CteBuilder {
 			return new CteBuilder(name, adapter, schemaName);
+		},
+
+		recursive<TResult = unknown>(
+			name: string,
+			options: RecursiveOptions,
+		): RawCteQueryBuilder<TResult> {
+			return createRawCteBuilder<TResult>(name, options, adapter, schemaName);
 		},
 
 		// =====================================================================
