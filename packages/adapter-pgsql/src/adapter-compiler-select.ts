@@ -9,17 +9,23 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
+	JoinIntent,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { defaultFkDerivation } from './assert-field.js';
+import { rangeVar } from './ast-helpers.js';
+import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
 	compilePlan,
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	convertDottedFieldsToExists,
@@ -68,6 +74,127 @@ export function bridgeLegacyDecisions(
 	decisions: readonly unknown[],
 ): SimplifiedPlanReport['decisions'] {
 	return decisions as SimplifiedPlanReport['decisions'];
+}
+
+/**
+ * Compile JoinIntent[] from a QueryIntent into PlanDecision[] of type 'join'.
+ *
+ * Two modes:
+ * - Relation mode (no `on`): FK auto-resolved from model, like `include` but flat (no hydration).
+ * - Table mode (`on` present): Explicit ON condition compiled via compileWhereIntent().
+ *
+ * The resulting decisions are appended to `allDecisions` before `compilePlan()`.
+ */
+function compileJoinIntents(
+	joins: readonly JoinIntent[],
+	rootTable: string,
+	schemaName: string | undefined,
+	deps: AdapterCompilerDeps,
+): PlanDecision[] {
+	if (joins.length === 0) return [];
+
+	const model = deps.model;
+	const naming = deps.naming;
+	const deriveFk = deps.deriveFk ?? defaultFkDerivation;
+	const defaultPk = deps.defaultPk;
+	const results: PlanDecision[] = [];
+
+	for (const intent of joins) {
+		if (intent.relation !== undefined) {
+			// ── Relation mode: resolve FK from model ──────────────────────────
+			// If no model available, we can't resolve the FK — skip with warning.
+			if (!model) {
+				throw new Error(
+					`join('${intent.relation}'): relation-mode join requires a model for FK resolution.`,
+				);
+			}
+
+			const relationsFromRoot = model.getRelationsFrom(rootTable);
+			const rel = relationsFromRoot.find(
+				(r) => r.name === intent.relation || r.name === intent.alias,
+			);
+
+			if (!rel) {
+				throw new Error(
+					`join('${intent.relation}'): relation not found on table '${rootTable}'. ` +
+						`Available: ${relationsFromRoot.map((r) => r.name).join(', ')}`,
+				);
+			}
+
+			// Derive FK direction from relation type
+			// - belongsTo: FK is on the source (root) table → sourceColumn=FK, targetColumn=PK
+			// - hasMany/hasOne: FK is on the target table → sourceColumn=PK, targetColumn=FK
+			const isBelongsTo = rel.type === 'belongsTo';
+			const rawFk = rel.foreignKey
+				? Array.isArray(rel.foreignKey)
+					? rel.foreignKey[0]!
+					: rel.foreignKey
+				: deriveFk(
+						isBelongsTo ? rootTable : rel.target,
+						defaultPk,
+					);
+
+			const sourceColumn = isBelongsTo ? rawFk : defaultPk;
+			const targetColumn = isBelongsTo ? defaultPk : rawFk;
+			const alias = intent.alias ?? intent.relation;
+
+			results.push({
+				type: 'join',
+				targetTable: rel.target,
+				alias,
+				sourceColumn,
+				targetColumn,
+				joinType: intent.type,
+			});
+		} else {
+			// ── Table mode: explicit ON condition ─────────────────────────────
+			// Compile the ON WhereIntent to an AST Node via compileWhereIntent.
+			// ON conditions for joins are typically column-to-column comparisons
+			// (no $N parameters), so a fresh param state is safe.
+			const paramState = createCompilerState();
+
+			const tableAlias = intent.alias ?? intent.table;
+
+			const ctx: WhereCompilerCtx = {
+				rootTable,
+				aliases: new Map<string, string>(),
+				paramState,
+				naming,
+				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the
+				// joined alias (e.g. 'e2' in self-join ON conditions).
+				outerTable: tableAlias,
+				...(schemaName !== undefined && { schemaName }),
+				...(model !== undefined && { model }),
+				compileSubquery: () => {
+					throw new Error(
+						'Subquery in JOIN ON condition is not supported.',
+					);
+				},
+			};
+
+			const onNode: Node = compileWhereIntent(intent.on, ctx);
+
+			// Store rarg + onNode separately — the 'join' case in compiler.ts wraps
+			// from[0] as larg so multiple .join() calls chain correctly.
+			const joinedRangeVar = rangeVar(
+				intent.table,
+				tableAlias,
+				schemaName,
+				naming,
+			);
+
+			results.push({
+				type: 'join',
+				targetTable: intent.table,
+				alias: tableAlias,
+				joinType: intent.type,
+				joinRarg: joinedRangeVar,
+				joinOnNode: onNode,
+			});
+		}
+	}
+
+	return results;
 }
 
 // ============================================================================
@@ -410,10 +537,23 @@ export function compileSelect<T = unknown>(
 					})
 				: decisions;
 
+		// Compile explicit JoinIntent[] from plan.intent.joins into 'join' decisions.
+		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
+		const joinIntentDecisions =
+			plan.intent?.joins && (plan.intent.joins as JoinIntent[]).length > 0
+				? compileJoinIntents(
+						plan.intent.joins as JoinIntent[],
+						plan.rootTable,
+						schemaName,
+						deps,
+					)
+				: [];
+
 		const allDecisions = [
 			...deduplicatedDecisions,
 			...existsDecisions,
 			...enrichedUnifiedDecisions,
+			...joinIntentDecisions,
 		];
 
 		// Enrich range operator decisions with dataType from model

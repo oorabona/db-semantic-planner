@@ -124,6 +124,8 @@ export type {
 	UpsertConflictTarget,
 	UpsertFromIntent,
 	UpsertIntent,
+	// Join (FR-10)
+	JoinIntent,
 	// Where (filters)
 	WhereAndIntent,
 	WhereAnyIntent,

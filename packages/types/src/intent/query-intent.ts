@@ -9,6 +9,49 @@ import type { SelectIntent } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
 
 // ============================================================================
+// Join Intent - Explicit SQL JOIN (non-hydrating, flat result)
+// ============================================================================
+
+/**
+ * Join intent — represents a SQL JOIN clause on the root query.
+ *
+ * Two discrimination modes (based on `on` presence):
+ * - **Relation mode** (`relation` set, no `on`): FK auto-resolved, like `include` but flat (no hydration).
+ * - **Table mode** (`table` set, `on` required): Explicit table name + ON condition. Required for self-joins.
+ *
+ * @example
+ * ```typescript
+ * // Relation mode — FK auto-resolved
+ * orm.from(calls).join('caller')
+ * orm.from(calls).join('callerFile', { type: 'left' })
+ *
+ * // Table mode — explicit ON condition
+ * orm.from(embeddings).join('embeddings', {
+ *   on: lt(ref('embeddings.id'), ref('e2.id')),
+ *   as: 'e2',
+ *   type: 'inner',
+ * })
+ * ```
+ */
+export type JoinIntent =
+	| {
+			/** FK-based join — relation name resolved to table + FK automatically */
+			readonly relation: string;
+			readonly table?: never;
+			readonly on?: never;
+			readonly alias?: string;
+			readonly type: 'inner' | 'left';
+	  }
+	| {
+			/** Explicit table join — ON condition required */
+			readonly table: string;
+			readonly relation?: never;
+			readonly on: WhereIntent;
+			readonly alias?: string;
+			readonly type: 'inner' | 'left';
+	  };
+
+// ============================================================================
 // Query Intent - Complete Query Definition
 // ============================================================================
 
@@ -76,6 +119,13 @@ export interface QueryIntent {
 	 * Only valid in SELECT context — incompatible with GROUP BY, set operations.
 	 */
 	readonly lock?: LockIntent;
+
+	/**
+	 * Explicit SQL JOIN clauses (non-hydrating, flat result).
+	 * Columns from joined tables appear in the flat result row.
+	 * Two modes: relation-based (FK auto-resolved) or table-based (explicit ON condition).
+	 */
+	readonly joins?: readonly JoinIntent[];
 }
 
 // ============================================================================

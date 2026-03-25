@@ -105,6 +105,12 @@ export type WhereCompilerCtx = {
 	 * When set, FieldRef with scope:'outer' resolves to this alias.
 	 */
 	readonly outerTable?: string;
+	/**
+	 * Override for the current alias (scope:'inner' FieldRef resolution).
+	 * Defaults to `rootTable` when not set.
+	 * Used for JOIN ON conditions where the alias differs from the root table.
+	 */
+	readonly currentAlias?: string;
 };
 
 // ============================================================================
@@ -115,7 +121,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 	return {
 		naming: ctx.naming,
 		rootTable: ctx.rootTable,
-		currentAlias: ctx.rootTable,
+		currentAlias: ctx.currentAlias ?? ctx.rootTable,
 		maxRecursiveDepth: 100,
 		...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
 		...(ctx.model !== undefined && { model: ctx.model }),

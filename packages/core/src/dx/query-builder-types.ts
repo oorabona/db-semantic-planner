@@ -11,6 +11,7 @@
 
 import type { Dump } from '../adapter.js';
 import type {
+	JoinIntent,
 	LockStrength,
 	LockWaitPolicy,
 	WhereIntent,
@@ -526,6 +527,39 @@ export interface QueryBuilder<TResult = unknown> {
 	 * ```
 	 */
 	where(condition: WhereIntent | WhereFilter<TResult>): QueryBuilder<TResult>;
+
+	/**
+	 * Add an explicit SQL JOIN clause to the query (non-hydrating, flat result).
+	 *
+	 * Two modes based on whether `opts.on` is provided:
+	 * - **Relation mode** (no `on`): FK auto-resolved from the model, like `include` but flat.
+	 * - **Table mode** (`on` required): Explicit table + ON condition. Use `as` for self-joins.
+	 *
+	 * @param relationOrTable - Relation name (FK mode) or table name (explicit mode)
+	 * @param opts - Optional join configuration
+	 * @param opts.type - Join type: `'inner'` (default) or `'left'`
+	 * @param opts.on - ON condition (required for table mode, absent for relation mode)
+	 * @param opts.as - Alias for the joined table (required for self-joins)
+	 * @returns A new QueryBuilder with the join appended
+	 *
+	 * @example
+	 * ```typescript
+	 * // Relation mode — FK auto-resolved
+	 * orm.from(calls).join('caller')
+	 * orm.from(calls).join('callerFile', { type: 'left' })
+	 *
+	 * // Table mode — explicit ON condition
+	 * orm.from(embeddings).join('embeddings', {
+	 *   on: lt(ref('embeddings.id'), ref('e2.id')),
+	 *   as: 'e2',
+	 *   type: 'inner',
+	 * })
+	 * ```
+	 */
+	join(
+		relationOrTable: string,
+		opts?: { type?: 'inner' | 'left'; on?: WhereIntent; as?: string },
+	): QueryBuilder<TResult>;
 
 	/**
 	 * Override the ORM-level strict mode for this query.
