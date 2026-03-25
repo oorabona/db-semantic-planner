@@ -741,7 +741,7 @@ export function synthesizeMissingJoinDecisions(
 	const sourceTable = plan.rootTable;
 	const relationsFromSource = model.getRelationsFrom(sourceTable);
 
-	const synthesized: SimplifiedPlanReport['decisions'] = [];
+	const synthesized: PlanDecision[] = [];
 
 	for (const inc of includes) {
 		const alias = inc.relation;
@@ -785,7 +785,7 @@ export function synthesizeMissingJoinDecisions(
 			relationName: alias,
 			targetTable: rel.target,
 			sourceTable,
-			relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne' | undefined,
+			...(rel.type && { relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne' }),
 			foreignKey: Array.isArray(rawFk) ? rawFk[0] : rawFk,
 			parentKey: defaultPk,
 			columns,
