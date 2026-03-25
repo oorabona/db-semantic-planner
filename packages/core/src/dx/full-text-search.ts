@@ -61,7 +61,7 @@ export type FullTextSearchOptions = {
  * )
  * ```
  *
- * The same query parameter ($N) is shared across all field parse() calls.
+ * The same query value is bound to separate $N parameters, one per field.
  *
  * @param options.query      - Query string (bound as a single parameter)
  * @param options.fields     - Fields to search with per-field boost weights
