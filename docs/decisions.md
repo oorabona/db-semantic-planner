@@ -4,6 +4,23 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## FR-1/2/3/4/5/6/8/9/10 — astix Feature Requests Phase 1+2 (2026-03-25)
+
+### Architecture
+- **Table-scoped DDL** (`orm.tables.X.truncate()`) — not flat (`orm.truncate('X')`) — DX via autocomplete
+- **Core delegates, adapter implements** — zero SQL in core for DDL (ARCH-001 compliance)
+- **Intent-as-argument** pattern for aggregates (`fn('array_agg', ref('col'), aggOrderBy('path'))`) — no options objects
+- **`.join()` vs `.include()`** — join=flat (no hydration), include=nested objects. String arg = FK auto, non-string = ON required
+- **RecursiveCTE** via `orm.recursive(name, { base, step })` — separate builder class, not on QueryBuilder
+- **fullTextSearch()** built on existing bm25 primitives — pure core, no adapter changes
+
+### Security
+- batchValues type names validated against `[a-zA-Z0-9_]` regex (prevents SQL injection via type param)
+- DDL where/using params documented as raw SQL escape hatches
+- Transaction safety guards for VACUUM + CONCURRENTLY
+
+---
+
 ## PIPE-001 — Pipeline Simplification (2026-03-24)
 
 ### Architecture

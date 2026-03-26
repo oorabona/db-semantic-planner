@@ -12,6 +12,9 @@
 
 - [x] ✅ **FR-4** [Adapter] Vector search gaps: `vectorDims(col)` helper, cosineDistance verified end-to-end (SELECT/WHERE/ORDER BY), self-join find-duplicates pattern; 15 new tests in `vector-search.test.ts` (2026-03-25)
 
+- [x] ✅ **FR-10** [Core/Adapter] .join() API — manual joins with explicit ON condition. JoinIntent discriminated union (relation/table mode), flat (no hydration). Compiles to standard JOIN ON. Self-join with alias. 17 tests. (2026-03-25)
+- [x] ✅ **FR-9** [Core/Adapter] aggOrderBy in fn() + arrayAgg/stringAgg helpers — intent-as-argument pattern for ORDER BY in aggregates. 20 tests. (2026-03-25)
+
 - [x] ✅ **FR-1** [Core/Adapter] DDL helpers — table-scoped API: truncate, vacuum, alterColumn, indexes.create/drop/list/exists, storageSize, orm.ddl.dropIndex. Zero SQL in core, delegated to adapter. Transaction safety guards. 91 new tests. (2026-03-25)
 - [x] ✅ **FR-2** [Core/Adapter] Catalog helpers — indexes.exists(), indexes.list({ namePattern }), storageSize(). Parameterized queries, adapter-delegated. 17 new tests. (2026-03-25)
 - [x] ✅ **FR-6** [Core/Adapter] caseWhen() expression builder — CASE WHEN in .columns() + .orderBy(). Fix case-value.ts numeric literal inlining. Unblocks DISTINCT ON + CASE ORDER BY. (2026-03-25)
@@ -104,6 +107,11 @@
 - [x] ✅ **INCLUDE-2HOP** [Adapter] `include('callee.file')` resolved FK on ROOT table instead of intermediate table. Fixed: `toJoinIncludeDecision` now propagates `sourceTable`; `mapToHandlerDecision` uses `pd.sourceTable ?? rootTable` for `deriveFkColumns`; `PlanCompiler` tracks `joinAliasMap` (targetTable→alias) so 2nd-hop `currentAlias` resolves to the intermediate alias (e.g., `callee`) not the root. 2 regression tests added. (2026-03-21)
 
 ---
+
+## Backlog — from /review (2026-03-25)
+
+- [ ] 🔧 [Adapter] FR-7: Table integrity check API (`table.checkIntegrity()`) — Priority: L
+- [ ] 🔧 [Adapter] PlanDecision.joinRarg/joinOnNode/batchValuesParams: use discriminated sub-types instead of Node|undefined — Priority: L
 
 ## Feature Requests — from astix code-health migration (2026-03-23)
 
