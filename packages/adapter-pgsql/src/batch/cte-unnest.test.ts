@@ -9,7 +9,7 @@
  *   SELECT ... FROM "outerTable" WHERE ...
  */
 
-import { createOrm, eq, InvalidOperationError } from '@dbsp/core';
+import { createOrm, eq, InvalidOperationError, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -272,5 +272,66 @@ describe('error cases', () => {
 			.dump();
 
 		expect(result.sql).toContain('single');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Gap 5: CTE outer query with JOINs
+// ---------------------------------------------------------------------------
+
+const joinSchema = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+		file_id: ref('files', { as: 'file', inverse: 'symbols' }),
+	},
+	files: {
+		id: { type: 'integer', primaryKey: true },
+		path: { type: 'text' },
+	},
+} as const);
+
+describe('Gap 5: CTE outer query with JOINs', () => {
+	it('CTE outer query with relation JOIN produces correct SQL', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: joinSchema.model,
+		});
+		const orm = createOrm({ model: joinSchema.model, adapter });
+
+		const result = (orm as any)
+			.withCte('lookups')
+			.fromUnnest({ file_id: [1, 2, 3] })
+			.query((orm as any).select('symbols').join('file'))
+			.dump();
+
+		// WITH clause present
+		expect(result.sql).toContain('WITH');
+		expect(result.sql).toContain('lookups');
+		// Outer query has a JOIN to files
+		expect(result.sql).toContain('files');
+		expect(result.sql).toMatch(/JOIN/i);
+		// CTE param is the first parameter
+		expect(result.params[0]).toEqual([1, 2, 3]);
+	});
+
+	it('CTE outer query WITH JOIN and WHERE produces correct SQL and param ordering', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: joinSchema.model,
+		});
+		const orm = createOrm({ model: joinSchema.model, adapter });
+
+		const result = (orm as any)
+			.withCte('batch')
+			.fromUnnest({ file_id: [10, 20] })
+			.query((orm as any).select('symbols').join('file').where(eq('id', 99)))
+			.dump();
+
+		// CTE array param
+		expect(result.params[0]).toEqual([10, 20]);
+		// WHERE param offset after CTE param
+		expect(result.params[1]).toBe(99);
+		// SQL has both the JOIN and the WHERE $2
+		expect(result.sql).toMatch(/JOIN/i);
+		expect(result.sql).toContain('$2');
 	});
 });

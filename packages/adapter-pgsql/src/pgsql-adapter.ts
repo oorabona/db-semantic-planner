@@ -31,6 +31,7 @@ import type {
 	DialectCapabilities,
 	Dump,
 	DumpMeta,
+	ExpressionIntent,
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
@@ -94,6 +95,12 @@ import {
 	createLeafCompileFn,
 } from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
+import { selectStmt } from './ast-helpers.js';
+import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
+import { deparseQuoted } from './deparse.js';
+import { compileExpressionIntent } from './handlers/expression/custom.js';
+import { createCompilerState } from './handlers/types.js';
+import { intentToDecisions } from './intent-to-decisions.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
@@ -296,6 +303,53 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			options,
 			this.compileDeps,
 		);
+	}
+
+	/**
+	 * Compile a FROM-less SELECT expression to SQL.
+	 *
+	 * Produces: SELECT <expr>
+	 * Example: SELECT nextval('my_seq')
+	 *
+	 * @param expr - ExpressionIntent to evaluate
+	 * @returns Compiled SQL and parameters
+	 */
+	compileSelectExpression(expr: ExpressionIntent): CompiledQuery {
+		const naming = this.naming;
+		const schemaName = this.schemaName;
+		const state = createCompilerState();
+		const ctx = {
+			naming,
+			...(schemaName !== undefined && { schema: schemaName }),
+			rootTable: '',
+			maxRecursiveDepth: 100,
+			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
+			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
+			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
+			// case 'selectCustomExpression').
+			compileSubquery(
+				query: import('@dbsp/types').QueryIntent,
+				paramOffset: number,
+			): { ast: import('@pgsql/types').Node; parameters: readonly unknown[] } {
+				const innerCompiler = new PlanCompiler({
+					naming,
+					...(schemaName !== undefined && { schema: schemaName }),
+				});
+				const innerPlan = {
+					rootTable: query.from,
+					decisions: intentToDecisions(query, query.from),
+				};
+				const innerResult = innerCompiler.compile(innerPlan);
+				const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
+				return { ast: renumbered, parameters: innerResult.parameters };
+			},
+		};
+		const node = compileExpressionIntent(expr, ctx, state);
+		const ast = selectStmt({
+			targetList: [{ ResTarget: { val: node } }],
+		});
+		const sql = deparseQuoted(ast);
+		return { sql, parameters: state.parameters };
 	}
 
 	/**

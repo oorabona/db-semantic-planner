@@ -8,11 +8,12 @@
  * Also covers parameter renumbering when the outer query already has params.
  */
 
-import { eq, outerRef, subquery } from '@dbsp/core';
+import { eq, literal, op, outerRef, subquery } from '@dbsp/core';
 import type { SubqueryExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { compilePlan, type SimplifiedPlanReport } from '../compiler.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Unit: SubqueryExpression.asExpr() API
@@ -215,5 +216,59 @@ describe('subquery parameter renumbering', () => {
 		expect(parameters).toHaveLength(2);
 		expect(parameters[0]).toBe('function');
 		expect(parameters[1]).toBe('active');
+	});
+});
+
+// ============================================================================
+// Gap 7: op() around SubqueryExpression.asExpr() — toExpressionIntent fix
+// ============================================================================
+
+describe('op() with SubqueryExpression.asExpr() as argument', () => {
+	it('uses subquery as left operand of a binary op', () => {
+		// SubqueryExpression.asExpr() returns a plain ExpressionSpec (not ExpressionRef instance).
+		// toExpressionIntent() must duck-type check __expr===true to handle it correctly.
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const subExpr = subquery('t').select('col').asExpr('x');
+		const expr = op('+', subExpr, literal(1)).as('next');
+
+		const { sql } = adapter.compileSelectExpression(expr.intent);
+
+		// (SELECT "t"."col" FROM "t") + 1 AS next
+		const normalized = normalizeSQL(sql);
+		expect(normalized).toContain('select');
+		expect(normalized).toContain('col');
+		expect(normalized).toContain('from t');
+		expect(normalized).toContain('+ 1');
+	});
+
+	it('toExpressionIntent does not treat ExpressionSpec as a param value', () => {
+		// If the bug is present, toExpressionIntent would wrap the ExpressionSpec
+		// object in { kind: 'param', value: exprSpec }, and the adapter would
+		// produce a placeholder like $1 instead of a subquery expression.
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const subExpr = subquery('t').select('col').asExpr('x');
+		const expr = op('+', subExpr, literal(1));
+
+		const { sql, parameters } = adapter.compileSelectExpression(expr.intent);
+
+		// Must produce no extra parameter for the subquery expression itself
+		expect(parameters).toHaveLength(0);
+		// Must embed the subquery inline, not a $N placeholder
+		const normalized = normalizeSQL(sql);
+		expect(normalized).not.toMatch(/\$\d/);
+		expect(normalized).toContain('select');
+	});
+
+	it('uses subquery as right operand of a binary op', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const subExpr = subquery('t').count().asExpr('cnt');
+		const expr = op('-', literal(100), subExpr).as('remaining');
+
+		const { sql } = adapter.compileSelectExpression(expr.intent);
+
+		const normalized = normalizeSQL(sql);
+		expect(normalized).toContain('100');
+		expect(normalized).toContain('count(*)');
+		expect(normalized).toContain('from t');
 	});
 });

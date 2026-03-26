@@ -1,0 +1,10 @@
+# Tauri generated schemas (huge JSON, no AST value)
+packages/gui/src-tauri/gen/
+packages/gui/src-tauri/target/
+
+# Lock files (no AST value)
+pnpm-lock.yaml
+Cargo.lock
+
+# Coverage test files (auto-generated, very large)
+*.coverage.test.ts

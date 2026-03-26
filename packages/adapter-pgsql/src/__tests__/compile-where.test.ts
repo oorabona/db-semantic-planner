@@ -7,6 +7,7 @@
 
 import type { QueryIntent, SelectIntent, WhereIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
+import { exprRef, fn } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import {
@@ -535,5 +536,163 @@ describe('compileWhereIntent', () => {
 			expect(sql).toContain('posts');
 			expect(params).toEqual([true]);
 		});
+	});
+
+	// -------------------------------------------------------------------------
+	// Gap 4: comparison with ExpressionRef value (eq('col', fn(...)))
+	// -------------------------------------------------------------------------
+	describe('comparison with ExpressionRef value', () => {
+		it('eq(col, fn(coalesce, exprRef(a), exprRef(b))) compiles col = coalesce(a, b)', () => {
+			// eq('call_line', fn('coalesce', exprRef('decl_line'), exprRef('def_line')))
+			// produces kind:'comparison' with value = ExpressionRef (has __expr:true)
+			const coalesceExpr = fn('coalesce', exprRef('decl_line'), exprRef('def_line'));
+			const intent: WhereIntent = {
+				kind: 'comparison',
+				field: 'call_line',
+				operator: 'eq',
+				value: coalesceExpr,
+			};
+			const { sql, params } = compile(intent);
+			// pgsql-deparser quotes function names; coalesce → "coalesce"
+			expect(sql).toBe('users.call_line = "coalesce"(decl_line, def_line)');
+			expect(params).toEqual([]);
+		});
+
+		it('neq(col, fn(coalesce, exprRef(a), exprRef(b))) compiles col != coalesce(a, b)', () => {
+			const coalesceExpr = fn('coalesce', exprRef('decl_line'), exprRef('def_line'));
+			const intent: WhereIntent = {
+				kind: 'comparison',
+				field: 'call_line',
+				operator: 'neq',
+				value: coalesceExpr,
+			};
+			const { sql, params } = compile(intent);
+			// OP_MAP['neq'] = '!=' (deparser does not normalize != to <> for A_Expr nodes)
+			expect(sql).toBe('users.call_line != "coalesce"(decl_line, def_line)');
+			expect(params).toEqual([]);
+		});
+
+		it('gt(col, fn(...)) compiles col > fn(...)', () => {
+			const absExpr = fn('abs', exprRef('delta'));
+			const intent: WhereIntent = {
+				kind: 'comparison',
+				field: 'score',
+				operator: 'gt',
+				value: absExpr,
+			};
+			const { sql, params } = compile(intent);
+			expect(sql).toBe('users.score > abs(delta)');
+			expect(params).toEqual([]);
+		});
+
+		it('scalar comparison still emits $N param (regression guard)', () => {
+			const { sql, params } = compile({
+				kind: 'comparison',
+				field: 'status',
+				operator: 'eq',
+				value: 'active',
+			});
+			expect(sql).toBe('users.status = $1');
+			expect(params).toEqual(['active']);
+		});
+	});
+});
+
+
+describe('rawExists / rawNotExists', () => {
+	/**
+	 * Build a compile helper that provides a real compileSubquery callback.
+	 */
+	function compileWithSubquery(
+		intent: WhereIntent,
+	): { sql: string; params: unknown[] } {
+		const paramState = createCompilerState();
+		const ctx: WhereCompilerCtx = {
+			rootTable: 'symbols',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: (subIntent: QueryIntent, paramOffset: number) =>
+				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+		};
+		const node = compileWhereIntent(intent, ctx);
+		const sql = deparseSync([{ SelectStmt: { whereClause: node } }])
+			.replace(/^SELECT\s+WHERE\s+/i, '')
+			.trim();
+		return { sql, params: paramState.parameters };
+	}
+
+	it('rawExists compiles to EXISTS (SELECT 1 FROM ...)', () => {
+		const subIntent: QueryIntent = {
+			from: 'posts',
+			select: { fields: ['1'] } as SelectIntent,
+		};
+		const { sql, params } = compileWithSubquery({
+			kind: 'rawExists',
+			subquery: subIntent,
+		} as unknown as WhereIntent);
+		expect(sql).toMatch(/EXISTS\s*\(SELECT/i);
+		expect(sql).toContain('posts');
+		expect(params).toEqual([]);
+	});
+
+	it('rawNotExists compiles to NOT EXISTS (SELECT 1 FROM ...)', () => {
+		const subIntent: QueryIntent = {
+			from: 'posts',
+			select: { fields: ['1'] } as SelectIntent,
+		};
+		const { sql, params } = compileWithSubquery({
+			kind: 'rawNotExists',
+			subquery: subIntent,
+		} as unknown as WhereIntent);
+		// The deparser may render as "NOT (EXISTS (...))" or "NOT EXISTS (...)" --
+		// both are semantically identical; match NOT + EXISTS.
+		expect(sql).toMatch(/NOT\s+\(?EXISTS\s*\(SELECT/i);
+		expect(sql).toContain('posts');
+		expect(params).toEqual([]);
+	});
+
+	it('rawExists with inner WHERE propagates parameters', () => {
+		const subIntent: QueryIntent = {
+			from: 'posts',
+			select: { fields: ['id'] } as SelectIntent,
+			where: {
+				kind: 'comparison',
+				field: 'user_id',
+				operator: 'eq',
+				value: 42,
+			} as WhereIntent,
+		};
+		const { sql, params } = compileWithSubquery({
+			kind: 'rawExists',
+			subquery: subIntent,
+		} as unknown as WhereIntent);
+		expect(sql).toMatch(/EXISTS\s*\(SELECT/i);
+		expect(sql).toContain('posts');
+		expect(sql).toContain('$1');
+		expect(params).toEqual([42]);
+	});
+
+	it('rawNotExists with inner WHERE propagates parameters', () => {
+		const subIntent: QueryIntent = {
+			from: 'comments',
+			select: { fields: ['id'] } as SelectIntent,
+			where: {
+				kind: 'comparison',
+				field: 'post_id',
+				operator: 'eq',
+				value: 99,
+			} as WhereIntent,
+		};
+		const { sql, params } = compileWithSubquery({
+			kind: 'rawNotExists',
+			subquery: subIntent,
+		} as unknown as WhereIntent);
+		// The deparser may render as "NOT (EXISTS (...))" or "NOT EXISTS (...)" --
+		// both are semantically identical; match NOT + EXISTS.
+		expect(sql).toMatch(/NOT\s+\(?EXISTS\s*\(SELECT/i);
+		expect(sql).toContain('comments');
+		expect(sql).toContain('$1');
+		expect(params).toEqual([99]);
 	});
 });

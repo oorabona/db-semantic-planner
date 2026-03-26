@@ -27,6 +27,7 @@ import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { DropIndexOptions } from './table-ddl-types.js';
 import type { ListHierarchyOptions, RelationHints } from './types.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
+import type { ExpressionSpec } from './types.js';
 
 /**
  * Configuration options for creating an ORM instance.
@@ -242,6 +243,24 @@ export type OrmOf<S> = S extends import('./schema.js').Schema<
 type RowToColumnRefs<TTable extends string, TRow> = {
 	[K in keyof TRow & string]: ColumnRef<TTable, K, TRow[K]>;
 };
+
+/**
+ * Result of `orm.selectExpression()` — provides compiled SQL and execution.
+ */
+export interface SelectExpressionResult {
+	/** Compiled SQL string (e.g. `SELECT nextval('my_seq')`) */
+	readonly sql: string;
+	/** Bound parameters (if any) */
+	readonly parameters: readonly unknown[];
+	/**
+	 * Execute the expression against the database.
+	 * Requires the ORM to have an adapter with a pool.
+	 *
+	 * @typeParam T - Expected result row type
+	 * @returns Array of result rows (typically one row for scalar expressions)
+	 */
+	execute<T = unknown>(): Promise<T[]>;
+}
 
 export interface OrmInstance<DB = Record<string, unknown>> {
 	/**
@@ -618,6 +637,31 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 		types: readonly string[],
 		opts?: BatchValuesOptions,
 	): BatchValuesRef;
+
+	// =========================================================================
+	// FROM-less SELECT expression (Gap 6)
+	// =========================================================================
+
+	/**
+	 * Compile and optionally execute a FROM-less SELECT expression.
+	 *
+	 * Used for expressions that do not query a specific table,
+	 * such as sequence functions, date functions, or scalar computations.
+	 *
+	 * @param expr - An ExpressionSpec produced by fn(), op(), literal(), etc.
+	 * @returns An object with `sql`, `parameters`, and `execute()` method.
+	 *
+	 * @example
+	 * ```typescript
+	 * // Compile only (no DB connection needed)
+	 * const { sql } = orm.selectExpression(fn('nextval', literal('my_seq')));
+	 * // SQL: SELECT nextval('my_seq')
+	 *
+	 * // Execute (requires adapter with pool)
+	 * const [{ nextval }] = await orm.selectExpression(fn('nextval', literal('my_seq'))).execute();
+	 * ```
+	 */
+	selectExpression(expr: ExpressionSpec): SelectExpressionResult;
 
 	// =========================================================================
 	// Global DDL Shortcuts (F-005)

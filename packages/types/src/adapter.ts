@@ -12,6 +12,7 @@ import type {
 	BatchUpdateIntent,
 	CteQueryIntent,
 	DeleteIntent,
+	ExpressionIntent,
 	InsertFromIntent,
 	InsertIntent,
 	SelectIntent,
@@ -332,6 +333,9 @@ export interface CompilingAdapter extends BaseAdapter {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery;
+
+	/** Compile a FROM-less SELECT expression to SQL (e.g. SELECT nextval('seq')). */
+	compileSelectExpression(expr: ExpressionIntent): CompiledQuery;
 
 	/** Create a dump for observability. */
 	createDump(plan: PlanReport, query: CompiledQuery, meta?: DumpMeta): Dump;

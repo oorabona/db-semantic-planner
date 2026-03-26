@@ -4,6 +4,9 @@
 
 ## In Progress
 
+- [x] ✅ **Gap 6** [Core/Adapter] orm.selectExpression(expr) — FROM-less SELECT: added `selectExpression()` to OrmInstance + `compileSelectExpression()` to PgsqlAdapter + CompilingAdapter interface; `compileSubquery` wired in ctx for nested subquery support. 9 tests in select-expression.test.ts. (2026-03-26)
+- [x] ✅ **Gap 7** [Core] op() around SubqueryExpression.asExpr() — fixed `toExpressionIntent()` duck-type check for ExpressionSpec objects; `compileSelectExpression` wires compileSubquery for SubqueryExpressionIntent nested in op(). 3 new tests in subquery-select.test.ts. (2026-03-26)
+
 - [x] ✅ **FR-3** [Core/Adapter] `orm.batchValues()` — unnest()-backed virtual data source. `BatchValuesRef` factory in `batch-values.ts`, `JoinIntent` third variant + `QueryIntent.batchValuesSource` in types, planner bypass for virtual tables, `buildBatchValuesRangeFn()` helper in adapter, `batchValuesFromNode/batchValuesFromParams` in `SimplifiedPlanReport`, `batchValuesParams` in `PlanDecision`. 5 tests in `batch-values.test.ts`. All 135 adapter + 65 core test files pass. (2026-03-25)
 
 - [x] ✅ **FR-8** [Core/Adapter] orm.recursive() — WITH RECURSIVE CTE via explicit base/step QueryBuilder instances. New `RawCteIntent` type, `RawCteQueryBuilder` class, `createRawCteBuilder()` factory, `orm.recursive(name, { base, step, maxDepth?, unionAll? })` on OrmInstance. Adapter handles `rawCte` kind in `compileCteQuery` with correct param renumbering. 11 tests in `raw-cte.test.ts`. All 65+134 test files pass. (2026-03-25)

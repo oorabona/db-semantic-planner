@@ -268,9 +268,18 @@ function compileJoinIntents(
 
 			const tableAlias = intent.alias ?? intent.table;
 
+			// Pre-populate aliases so ref("rootTable.col") and similar expressions
+			// resolve the correct table qualifier when the alias differs from the
+			// base table name.
+			const tableAliasMap = new Map<string, string>();
+			tableAliasMap.set(rootTable, rootTable);
+			if (tableAlias !== rootTable) {
+				tableAliasMap.set(tableAlias, intent.table);
+			}
+
 			const ctx: WhereCompilerCtx = {
 				rootTable,
-				aliases: new Map<string, string>(),
+				aliases: tableAliasMap,
 				paramState,
 				naming,
 				// outerTable = tableAlias so FieldRef(scope:'outer') resolves to the

@@ -40,6 +40,7 @@ import type {
 	WhereExpressionIntent,
 	WhereIntent,
 } from '../intent-ast.js';
+import type { ExpressionSpec } from './types.js';
 
 // ============================================================================
 // Validation patterns
@@ -75,6 +76,7 @@ const TYPE_NAME_PATTERN = /^[a-zA-Z_][a-zA-Z0-9_ ]*(\[\])?$/;
  */
 export type ExprInput =
 	| ExpressionRef
+	| ExpressionSpec
 	| AggOrderByArg
 	| string
 	| number
@@ -87,6 +89,17 @@ export type ExprInput =
 
 function toExpressionIntent(input: ExprInput): ExpressionIntent {
 	if (input instanceof ExpressionRef) return input.intent;
+	// Handle ExpressionSpec duck-type (e.g. SubqueryExpression.asExpr() returns
+	// a plain { __expr: true, intent } object — not an ExpressionRef instance)
+	if (
+		typeof input === 'object' &&
+		input !== null &&
+		'__expr' in input &&
+		(input as { __expr: unknown }).__expr === true &&
+		'intent' in input
+	) {
+		return (input as { intent: ExpressionIntent }).intent;
+	}
 	if (typeof input === 'string') {
 		return { kind: 'ref', column: input } satisfies RefExpressionIntent;
 	}

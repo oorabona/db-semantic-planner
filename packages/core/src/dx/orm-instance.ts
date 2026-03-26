@@ -38,12 +38,14 @@ import type {
 } from './table-ddl-types.js';
 import type { InferTableRow, TableRef } from './table-ref.js';
 import type {
+	ExpressionSpec,
 	ListHierarchyOptions,
 	OrmInstance,
 	OrmInstanceInternal,
 	QueryBuilder,
 	RelationHints,
 } from './types.js';
+import type { SelectExpressionResult } from './orm-instance-types.js';
 
 /**
  * Quote a PostgreSQL identifier (table/schema/column name).
@@ -772,6 +774,23 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			opts?: BatchValuesOptions,
 		): BatchValuesRef {
 			return batchValues(data, columns, types, opts);
+		},
+
+		selectExpression(expr: ExpressionSpec): SelectExpressionResult {
+			if (!adapter) {
+				throw new Error(
+					'selectExpression() requires an adapter. ' +
+						'Pass an adapter when creating the ORM.',
+				);
+			}
+			const compiled = adapter.compileSelectExpression(expr.intent);
+			return {
+				sql: compiled.sql,
+				parameters: compiled.parameters,
+				execute<T = unknown>(): Promise<T[]> {
+					return adapter!.executeRaw<T>(compiled.sql, compiled.parameters);
+				},
+			};
 		},
 
 		withCte(name: string): CteBuilder {
