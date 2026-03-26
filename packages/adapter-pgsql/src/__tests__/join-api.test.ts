@@ -49,6 +49,8 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
+
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -168,5 +170,46 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		expect(sql).toMatch(/WHERE/i);
 		expect(sql).toMatch(/\$1/);
 		expect(dump.params).toEqual([42]);
+	});
+});
+
+
+describe('FR-10 Block 2: JOIN ON aliases pre-population', () => {
+	// Verifies Gap 3 fix: table-mode WhereCompilerCtx now pre-populates the
+	// aliases map so expressions that look up root-table or alias mappings
+	// work correctly when tableAlias differs from rootTable.
+
+	it('T9: table mode — aliases map populated (rootTable → rootTable entry)', () => {
+		const orm = buildOrm();
+		// ON embeddings.id = e2.id (equality, explicit qualifiers on both sides)
+		const onCond = {
+			kind: 'comparison',
+			field: 'embeddings.id',
+			operator: 'eq',
+			value: { kind: 'fieldRef', column: 'id', scope: 'outer' as const },
+		};
+		const dump = (orm as any)
+			.select('embeddings')
+			.join('embeddings', { on: onCond, as: 'e2', type: 'inner' })
+			.dump();
+		// Must produce qualified references on both sides of the ON condition
+		expect(ws(dump.sql)).toContain('embeddings.id = e2.id');
+	});
+
+	it('T10: table mode — alias=rootTable case (no alias entry needed)', () => {
+		const orm = buildOrm();
+		// ON embeddings.id = embeddings.id (degenerate self-join without alias)
+		const onCond = {
+			kind: 'comparison',
+			field: 'embeddings.id',
+			operator: 'eq',
+			value: { kind: 'fieldRef', column: 'id', scope: 'outer' as const },
+		};
+		const dump = (orm as any)
+			.select('embeddings')
+			.join('embeddings', { on: onCond, type: 'inner' })
+			.dump();
+		expect(ws(dump.sql)).toContain('JOIN embeddings');
+		expect(dump.params).toEqual([]);
 	});
 });

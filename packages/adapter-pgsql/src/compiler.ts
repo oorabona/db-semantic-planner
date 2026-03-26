@@ -302,7 +302,7 @@ export interface CompiledResult {
  * @param offset - Value to add to every ParamRef.number found
  * @returns A new node tree with renumbered ParamRefs (original is not mutated)
  */
-function renumberParamRefsInAst(node: unknown, offset: number): Node {
+export function renumberParamRefsInAst(node: unknown, offset: number): Node {
 	if (offset === 0) return node as Node;
 	return renumberNode(node, offset) as Node;
 }

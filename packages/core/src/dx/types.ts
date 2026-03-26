@@ -30,6 +30,7 @@ export type {
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
 	OrmOptionsWithSchema,
+	SelectExpressionResult,
 } from './orm-instance-types.js';
 export type {
 	CursorPaginatedResult,

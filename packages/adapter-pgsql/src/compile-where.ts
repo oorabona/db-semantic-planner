@@ -456,6 +456,29 @@ export function compileWhereIntent(
 		);
 	}
 
+	// `rawExists` / `rawNotExists` represent EXISTS / NOT EXISTS wrappers around
+	// a QueryIntent subquery (produced by exists() and notExists() in filters.ts).
+	// These kinds have no Decision equivalent — they must be compiled here
+	// using the compileSubquery callback, then wrapped in a SubLink node.
+	if (intent.kind === 'rawExists' || intent.kind === 'rawNotExists') {
+		const subIntent = (intent as unknown as { subquery: QueryIntent }).subquery;
+		const {
+			sql: subNode,
+			paramCount,
+			parameters: innerParams,
+		} = ctx.compileSubquery(subIntent, ctx.paramState.paramIndex);
+		if (innerParams) {
+			for (const p of innerParams) ctx.paramState.parameters.push(p);
+		}
+		ctx.paramState.paramIndex += paramCount;
+		const subLink = {
+			SubLink: { subLinkType: 'EXISTS_SUBLINK', subselect: subNode },
+		};
+		return intent.kind === 'rawNotExists'
+			? notExpr(subLink as unknown as Node)
+			: (subLink as unknown as Node);
+	}
+
 	// `and`, `or`, `not` contain nested WhereIntents. If we let them fall
 	// through to the dispatcher, each nested condition is processed via
 	// normalizeToDecision which hits `default` for `expression` kind
@@ -501,6 +524,40 @@ export function compileWhereIntent(
 	if (intent.kind === 'not') {
 		const notIntent = intent as { condition: WhereIntent };
 		return notExpr(compileWhereIntent(notIntent.condition, ctx));
+	}
+
+	// `comparison` with an ExpressionRef/ExpressionSpec value:
+	// eq('col', fn('coalesce', ref('a'), ref('b'))) produces kind:'comparison'
+	// where `value` is an ExpressionRef (has __expr:true, intent: ExpressionIntent).
+	// The generic dispatcher would call buildParamRef on it — wrong.
+	// Detect and compile both sides as expressions.
+	if (intent.kind === 'comparison') {
+		const cmpIntent = intent as unknown as {
+			field: string;
+			operator: string;
+			value: unknown;
+		};
+		const v = cmpIntent.value;
+		const isExprRef =
+			v !== null &&
+			typeof v === 'object' &&
+			(v as Record<string, unknown>).__expr === true;
+		if (isExprRef) {
+			const exprRef = v as { intent: ExpressionIntent };
+			const leftNode = columnRef(
+				cmpIntent.field,
+				ctx.rootTable,
+				undefined,
+				ctx.naming,
+			);
+			const rightNode = compileExpressionIntent(
+				exprRef.intent,
+				handlerCtx,
+				ctx.paramState,
+			);
+			const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
+			return binaryExpr(sqlOp, leftNode, rightNode);
+		}
 	}
 
 	// All other kinds: cast WhereIntent to Decision.
