@@ -601,6 +601,9 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 			if (Object.keys(this.setData).length > 0) {
 				Object.assign(intent, { scalarSet: this.setData });
 			}
+			if (this.whereIntent) {
+				Object.assign(intent, { where: this.whereIntent });
+			}
 			if (this.returningColumns && this.returningColumns.length > 0) {
 				Object.assign(intent, { returning: this.returningColumns });
 			}

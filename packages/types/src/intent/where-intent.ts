@@ -219,6 +219,35 @@ export interface WhereNotExistsIntent {
 }
 
 /**
+ * Raw EXISTS subquery filter using an arbitrary QueryIntent.
+ * Unlike WhereExistsIntent (which uses FK-resolved relation names),
+ * this wraps a fully-specified subquery for correlated EXISTS checks.
+ *
+ * @example
+ * // EXISTS (SELECT 1 FROM symbols WHERE symbols.id = calls.symbol_id AND ...)
+ * exists(subquery('symbols').where(eq('id', ref('calls.symbol_id'))))
+ */
+export interface WhereRawExistsIntent {
+	readonly kind: 'rawExists';
+	/** The subquery producing rows for the EXISTS check */
+	readonly subquery: QueryIntent;
+}
+
+/**
+ * Raw NOT EXISTS subquery filter using an arbitrary QueryIntent.
+ *
+ * @example
+ * // NOT EXISTS (SELECT 1 FROM symbols WHERE ...)
+ * notExists(subquery('symbols').where(...))
+ */
+export interface WhereRawNotExistsIntent {
+	readonly kind: 'rawNotExists';
+	/** The subquery producing rows for the NOT EXISTS check */
+	readonly subquery: QueryIntent;
+}
+
+
+/**
  * Relation filter: filter parent by conditions on related records
  * More flexible than exists - allows filtering by related record attributes
  *
@@ -348,6 +377,8 @@ export type WhereIntent =
 	| WhereNotIntent
 	| WhereExistsIntent
 	| WhereNotExistsIntent
+	| WhereRawExistsIntent
+	| WhereRawNotExistsIntent
 	| WhereRelationFilterIntent
 	| WhereSubqueryIntent
 	| WhereJsonContainsIntent

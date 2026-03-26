@@ -251,6 +251,9 @@ export interface BatchUpdateIntent {
 
 	/** Columns to return from updated rows (RETURNING clause) */
 	readonly returning?: readonly string[];
+
+	/** Optional WHERE guard applied in addition to match columns (e.g., AND EXISTS(...)) */
+	readonly where?: WhereIntent;
 }
 
 
