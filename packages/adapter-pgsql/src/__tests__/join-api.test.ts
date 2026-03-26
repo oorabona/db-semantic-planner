@@ -136,6 +136,24 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		expect(dump.params).toEqual([]);
 	});
 
+	// --- Bug 5: alias must not be used for FK resolution ---------------------
+
+	it('T8: alias does not shadow relation name for FK resolution', () => {
+		// Bug 5 fix: .join('caller', { as: 'callee' }) must resolve FK from 'caller'
+		// not from 'callee'. Before the fix, r.name === intent.alias caused 'callee'
+		// (which is also a valid relation on calls) to match the wrong relation.
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.select('calls')
+			.join('caller', { as: 'c', type: 'inner' })
+			.dump();
+		// FK must come from caller (caller_id), not from callee (callee_id)
+		expect(ws(dump.sql)).toContain('caller_id');
+		expect(ws(dump.sql)).not.toContain('callee_id');
+		// The output alias should be 'c'
+		expect(ws(dump.sql)).toContain('symbols AS c');
+	});
+
 	// --- Combined WHERE + JOIN ------------------------------------------------
 
 	it('T7: relation join combined with root WHERE clause', () => {

@@ -233,4 +233,62 @@ describe('FR-8: orm.recursive() — WITH RECURSIVE CTE', () => {
 
 		expect(() => builder.dump()).toThrow(/requires an adapter/);
 	});
+
+	it('T12: maxDepth injects WHERE "depth" < $N in step query (no prior step WHERE)', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('parent_id', 1)),
+				step: orm.select('chain'),
+				maxDepth: 10,
+				depthColumn: 'depth',
+			})
+			.dump();
+
+		// base: $1=1 (parent_id), maxDepth: $2=10
+		// step has no WHERE → depth guard becomes: WHERE "depth" < $2
+		expect(dump.params).toEqual([1, 10]);
+		expect(ws(dump.sql)).toEqual(
+			'WITH RECURSIVE "chain" AS (' +
+				'SELECT categories.* FROM categories WHERE categories.parent_id = $1' +
+				' UNION ALL ' +
+				'SELECT chain.* FROM chain WHERE "depth" < $2' +
+				') SELECT chain.* FROM chain',
+		);
+	});
+
+	it('T13: maxDepth AND-ed with existing step WHERE clause', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('parent_id', 1)),
+				step: orm.select('chain').where(eq('name', 'active')),
+				maxDepth: 5,
+				depthColumn: 'depth',
+			})
+			.dump();
+
+		// base: $1=1, step: $2='active', maxDepth: $3=5
+		// step already has WHERE → depth guard becomes: AND "depth" < $3
+		expect(dump.params).toEqual([1, 'active', 5]);
+		expect(ws(dump.sql)).toContain('WHERE chain.name = $2 AND "depth" < $3');
+	});
+
+	it('T14: maxDepth without depthColumn defaults to "depth"', () => {
+		const orm = buildOrm() as any;
+
+		const dump = orm
+			.recursive('chain', {
+				base: orm.select('categories').where(eq('parent_id', 2)),
+				step: orm.select('chain'),
+				maxDepth: 7,
+				// depthColumn not specified — should default to 'depth'
+			})
+			.dump();
+
+		expect(dump.params).toEqual([2, 7]);
+		expect(ws(dump.sql)).toContain('WHERE "depth" < $2');
+	});
 });

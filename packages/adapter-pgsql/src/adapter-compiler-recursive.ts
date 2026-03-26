@@ -315,7 +315,9 @@ export function compileCteQuery(
 		deps,
 	);
 
-	// 3. Renumber outer SQL parameters to follow all CTE parameters
+	// 3. Renumber outer SQL parameters to follow all CTE parameters.
+	// Safety: the deparser always emits user values as $N parameters, never as inline string
+	// literals — so the /\$([0-9]+)/ regex cannot match user data embedded in quoted strings.
 	const cteParamCount = allCteParams.length;
 	const renumberedOuterSql =
 		cteParamCount > 0
@@ -458,7 +460,11 @@ function buildRawCte(
 	};
 	const stepCompiled = compileSelect(stepPlanReport, compileOptions, deps);
 
-	// Renumber step params to follow base params
+	// Renumber step params to follow base params.
+	// Safety: the deparser always emits user values as $N parameters, never as inline string
+	// literals — so the /\$([0-9]+)/ regex cannot match user data embedded in quoted strings.
+	// This would only be a risk if the deparser inlined literals like 'Price: $10', which it
+	// does not do. The regex is therefore safe against the SQL it compiles from AST.
 	const baseParamCount = baseCompiled.parameters.length;
 	const renumberedStepSql =
 		baseParamCount > 0
@@ -468,13 +474,27 @@ function buildRawCte(
 				)
 			: stepCompiled.sql;
 
+	// Inject depth guard: WHERE "depthColumn" < $N (or AND-ed with existing WHERE)
+	const allParams: unknown[] = [...baseCompiled.parameters, ...stepCompiled.parameters];
+	let finalStepSql = renumberedStepSql;
+	if (cte.maxDepth !== undefined) {
+		const depthCol = `"${(cte.depthColumn ?? 'depth').replace(/"/g, '""')}"`;
+		const depthParamIndex = allParams.length + 1; // next $N
+		allParams.push(cte.maxDepth);
+		// Detect whether the step SQL already has a WHERE clause
+		const hasWhere = /\bWHERE\b/i.test(finalStepSql);
+		finalStepSql = hasWhere
+			? `${finalStepSql} AND ${depthCol} < $${depthParamIndex}`
+			: `${finalStepSql} WHERE ${depthCol} < $${depthParamIndex}`;
+	}
+
 	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
 	const cteName = `"${cte.name.replace(/"/g, '""')}"`;
-	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${renumberedStepSql})`;
+	const cteSql = `${cteName} AS (${baseCompiled.sql} ${setOp} ${finalStepSql})`;
 
 	return {
 		sql: cteSql,
-		params: [...baseCompiled.parameters, ...stepCompiled.parameters],
+		params: allParams,
 	};
 }
 

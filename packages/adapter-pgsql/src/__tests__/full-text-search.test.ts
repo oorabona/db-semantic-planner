@@ -209,17 +209,20 @@ describe('fullTextSearch', () => {
 		expect(result.parameters[0]).toBe('test');
 	});
 
-	it('defaults tableAlias to t0', () => {
+	it('tableAlias is required — the provided alias is used as LHS of @@@', () => {
+		// Bug 3 fix: tableAlias no longer defaults to 't0'.
+		// The root table in a standard query has no alias, so the caller must pass
+		// the actual table name (or explicit alias) for the @@@ operator.
 		const expr = fullTextSearch({
 			query: 'hello',
+			tableAlias: 'symbols',
 			fields: [{ name: 'name', boost: 1.0 }],
 		});
 		const intent = (expr as unknown as { intent: unknown }).intent;
-		// The intent op left side should be ref('t0')
 		const op = intent as { kind: string; left: { kind: string; column: string } };
 		expect(op.kind).toBe('customOp');
 		expect(op.left.kind).toBe('ref');
-		expect(op.left.column).toBe('t0');
+		expect(op.left.column).toBe('symbols');
 	});
 });
 
