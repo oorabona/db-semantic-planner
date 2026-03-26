@@ -365,6 +365,8 @@ export interface BatchUpdateConfig {
 	returning?: string[];
 	/** Column database types for type-cast emission */
 	columnTypes?: Record<string, string>;
+	/** Optional extra WHERE guard appended as AND after match conditions */
+	whereGuard?: Node;
 }
 
 /**
@@ -439,7 +441,7 @@ export function compileUnnestUpdate(
 		},
 	}));
 
-	const whereClause: Node =
+	const matchWhere: Node =
 		matchConditions.length === 1
 			? matchConditions[0]!
 			: {
@@ -448,6 +450,16 @@ export function compileUnnestUpdate(
 						args: matchConditions,
 					},
 				};
+
+	// Append optional whereGuard as AND <extra> after the batch match condition
+	const whereClause: Node = config.whereGuard
+		? {
+				BoolExpr: {
+					boolop: 'AND_EXPR',
+					args: [matchWhere, config.whereGuard],
+				},
+			}
+		: matchWhere;
 
 	// Build RETURNING clause if specified
 	const returningList = buildReturningList(config.returning, dbTable, ctx);

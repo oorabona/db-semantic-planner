@@ -20,6 +20,11 @@ import type {
 } from '@dbsp/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import {
+	buildSubqueryFromIntent,
+	compileWhereIntent,
+	type WhereCompilerCtx,
+} from './compile-where.js';
+import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
@@ -380,6 +385,23 @@ export function compileBatchUpdate(
 			}))
 		: undefined;
 
+	// Compile optional WHERE guard (e.g., AND EXISTS(...))
+	// The guard uses the shared `state` so $N numbering continues from unnest params.
+	let whereGuard: import('@pgsql/types').Node | undefined;
+	if (intent.where) {
+		const whereCtx: WhereCompilerCtx = {
+			rootTable: intent.table,
+			aliases: new Map<string, string>(),
+			paramState: state,
+			naming: deps.naming,
+			...(schemaName !== undefined && { schemaName }),
+			...(deps.model !== undefined && { model: deps.model }),
+			compileSubquery: (sqIntent, paramOffset) =>
+				buildSubqueryFromIntent(sqIntent, paramOffset, deps.naming, schemaName),
+		};
+		whereGuard = compileWhereIntent(intent.where, whereCtx);
+	}
+
 	const config: BatchUpdateConfig = {
 		table: intent.table,
 		matchColumns,
@@ -388,6 +410,7 @@ export function compileBatchUpdate(
 		...(scalarSet && { scalarSet }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
+		...(whereGuard !== undefined && { whereGuard }),
 	};
 
 	const ast = compileUnnestUpdateMutation(config, ctx, state);
