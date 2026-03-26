@@ -4,6 +4,17 @@ Decisions archived from workflow — newest first.
 
 ---
 
+## Gaps 1-7 — astix Integration Fixes (2026-03-26)
+
+- batchSet() WHERE guard: propagate whereIntent in BatchUpdateIntent, AND with match condition
+- rawExists/rawNotExists: new WhereIntent kinds for correlated EXISTS with arbitrary subquery
+- JOIN ON aliases: pre-populate WhereCompilerCtx aliases map for table-mode joins
+- ExpressionRef in eq() value: detect __expr duck-type, compile both sides as expressions
+- selectExpression(): FROM-less SELECT for scalar expressions (nextval, etc.)
+- op() + SubqueryExpression: toExpressionIntent duck-type fix for ExpressionSpec objects
+
+---
+
 ## FR-1/2/3/4/5/6/8/9/10 — astix Feature Requests Phase 1+2 (2026-03-25)
 
 ### Architecture
