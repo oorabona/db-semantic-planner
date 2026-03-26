@@ -173,9 +173,11 @@ function compileJoinIntents(
 			}
 
 			const relationsFromRoot = model.getRelationsFrom(rootTable);
-			const rel = relationsFromRoot.find(
-				(r) => r.name === intent.relation || r.name === intent.alias,
-			);
+			// Match only by relation name for FK resolution.
+			// The alias is only used for the output JOIN alias — using it for FK lookup
+			// would allow `.join('callee', { as: 'caller' })` to resolve against the
+			// wrong relation when 'caller' happens to be another relation name.
+			const rel = relationsFromRoot.find((r) => r.name === intent.relation);
 
 			if (!rel) {
 				throw new Error(
@@ -222,6 +224,7 @@ function compileJoinIntents(
 			// Compile the ON condition.
 			// We use a minimal param state with paramIndex already advanced past bvParams
 			// so that any ON condition params (rare for batch joins) get correct indices.
+			// The ON params start at bvParams.length + 1 (1-indexed).
 			const bvOnParamState = createCompilerState();
 			bvOnParamState.paramIndex = bvParams.length;
 
@@ -240,6 +243,11 @@ function compileJoinIntents(
 
 			const onNode: Node = compileWhereIntent(intent.on, bvCtx);
 
+			// Combine bv unnest params + any ON condition params into batchValuesParams.
+			// compiler.ts splices all of these BEFORE other query params so that $1/$2/...
+			// in the RangeFunction and ON condition align with parameters[0], [1], ...
+			const allBvParams: unknown[] = [...bvParams, ...bvOnParamState.parameters];
+
 			results.push({
 				type: 'join',
 				targetTable: alias,
@@ -249,7 +257,7 @@ function compileJoinIntents(
 				joinOnNode: onNode,
 				// batchValuesParams are spliced into this.state.parameters BEFORE
 				// other params in compiler.ts, so $1/$2/... refs align correctly.
-				batchValuesParams: bvParams,
+				batchValuesParams: allBvParams,
 			});
 		} else {
 			// ── Table mode: explicit ON condition ─────────────────────────────

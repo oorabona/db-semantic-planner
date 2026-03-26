@@ -252,8 +252,8 @@ export interface PlanDecision {
 	// Pre-compiled right-side AST node for table-mode JoinIntent (explicit ON condition).
 	// When set, the 'join' case in compileSelect uses joinRarg + joinOnNode to build
 	// the JoinExpr wrapping from[0] as larg — enabling correct multi-join chaining.
-	readonly joinRarg?: unknown;
-	readonly joinOnNode?: unknown;
+	readonly joinRarg?: Node;
+	readonly joinOnNode?: Node;
 	// Parameters for BatchValues joins (unnest() source).
 	// When set, these are spliced into this.state.parameters BEFORE other query params.
 	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
@@ -1300,8 +1300,9 @@ export class PlanCompiler {
 							}
 							this.state.paramIndex = this.state.parameters.length;
 						}
-						const jRarg = decision.joinRarg as Node;
-						const jOn = decision.joinOnNode as Node;
+						// joinRarg and joinOnNode are now typed as Node — no cast needed.
+						const jRarg = decision.joinRarg;
+						const jOn = decision.joinOnNode;
 						from[0] =
 							decision.joinType === 'left'
 								? leftJoin(from[0] as Node, jRarg, jOn)

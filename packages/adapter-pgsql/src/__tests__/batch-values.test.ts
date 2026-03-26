@@ -101,4 +101,36 @@ describe("FR-3: batchValues()", () => {
 		const batch = batchValues([[1]], ["id"], ["integer"]);
 		expect(batch.alias).toBe("batch");
 	});
+
+	it("T6: batchValues() rejects type names with SQL-injection characters", () => {
+		// Bug 1 fix: type names like 'int4); DROP TABLE x; --' must be rejected
+		expect(() =>
+			batchValues([[1]], ["id"], ["int4); DROP TABLE x; --"]),
+		).toThrow(/invalid type name/);
+	});
+
+	it("T7: batchValues() rejects type names with spaces", () => {
+		expect(() =>
+			batchValues([[1]], ["id"], ["character varying"]),
+		).toThrow(/invalid type name/);
+	});
+
+	it("T8: batchValues() accepts valid type names", () => {
+		// All of these must pass validation
+		expect(() =>
+			batchValues([[1]], ["id"], ["integer"]),
+		).not.toThrow();
+		expect(() =>
+			batchValues([[1]], ["id"], ["int4"]),
+		).not.toThrow();
+		expect(() =>
+			batchValues([["/a"]], ["path"], ["text"]),
+		).not.toThrow();
+		expect(() =>
+			batchValues([[true]], ["active"], ["bool"]),
+		).not.toThrow();
+		expect(() =>
+			batchValues([[1.5]], ["score"], ["float8"]),
+		).not.toThrow();
+	});
 });

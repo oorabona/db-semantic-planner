@@ -36,11 +36,15 @@ export type FullTextSearchOptions = {
 	/** Fields to search with per-field boost weights. */
 	readonly fields: readonly FullTextSearchField[];
 	/**
-	 * Table alias to qualify the left side of the @@@ operator.
-	 * Defaults to 't0' — the alias the ORM assigns to the root table in the full pipeline.
-	 * Override when using compilePlan directly or when the root alias differs.
+	 * Table name or alias to qualify the left side of the @@@ operator.
+	 * Must match the exact table name (or alias) as it appears in the FROM clause.
+	 * In the standard ORM pipeline the root table has no alias, so pass the root table name.
+	 *
+	 * @example
+	 * fullTextSearch({ query, fields, tableAlias: 'symbols' })
+	 * // → "symbols" @@@ paradedb.boolean(...)
 	 */
-	readonly tableAlias?: string;
+	readonly tableAlias: string;
 };
 
 // ============================================================================
@@ -65,7 +69,8 @@ export type FullTextSearchOptions = {
  *
  * @param options.query      - Query string (bound as a single parameter)
  * @param options.fields     - Fields to search with per-field boost weights
- * @param options.tableAlias - Root table alias (default: 't0')
+ * @param options.tableAlias - Table name or alias as it appears in the FROM clause (required).
+ *   In the standard ORM pipeline the root table has no alias — pass the root table name directly.
  * @returns ExpressionRef for use in .where()
  *
  * @example
@@ -74,6 +79,7 @@ export type FullTextSearchOptions = {
  *
  * .where(fullTextSearch({
  *   query: searchTerm,
+ *   tableAlias: 'symbols',
  *   fields: [
  *     { name: 'name', boost: 3.0 },
  *     { name: 'doc', boost: 1.0 },
@@ -84,7 +90,7 @@ export type FullTextSearchOptions = {
 export function fullTextSearch({
 	query,
 	fields,
-	tableAlias = 't0',
+	tableAlias,
 }: FullTextSearchOptions): ExpressionRef {
 	const queryParam = param(query);
 	const boostExprs = fields.map(({ name: fieldName, boost: weight }) =>

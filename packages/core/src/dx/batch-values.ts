@@ -94,6 +94,15 @@ export function batchValues(
 	if (columns.length === 0) {
 		throw new Error('batchValues: at least one column is required');
 	}
+	// Security: validate type names to prevent SQL injection via CAST($N AS type[]).
+	// Only allow identifier characters: letters, digits, underscore.
+	const invalidType = types.find((t) => !/^[a-zA-Z0-9_]+$/.test(t));
+	if (invalidType !== undefined) {
+		throw new Error(
+			`batchValues: invalid type name '${invalidType}'. ` +
+				'Type names must contain only letters, digits, and underscores.',
+		);
+	}
 	return {
 		__kind: 'batchValues',
 		data,
