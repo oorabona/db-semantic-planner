@@ -234,11 +234,11 @@
 
 ### MEDIUM — Design debt
 
-- [ ] 💡 **ARCH-007** [Core] Document result hydration design — brittle column aliasing (dot separator convention), row explosion risks, recursive include depth. Needs design doc before adding features. — Priority: M
+- [x] ✅ **ARCH-007** [Core] Result hydration design documented — `docs/guides/how-to-understand-result-hydration.md`: 6 strategies, column aliasing, row explosion, depth limits, anti-patterns. (2026-03-27)
 - [x] ✅ **ARCH-008** [Core] Add hook composition utilities (compose, pipe) + priority ordering — `hook-utils.ts`: composeBeforeQueryHooks/pipe, composeAfterQueryHooks/pipe, composeBeforeMutationHooks/pipe, composeAfterMutationHooks/pipe, composeOnErrorHooks/pipe, withPriority, sortByPriority. 26 tests. (2026-03-27)
 - [x] ✅ **ARCH-009** [Core] Schema versioning + diffing — already fully implemented: `schema_version` integer in `_dbsp_migrations`, `generateDownSQL()`, `parseMigrationFile()`, `rollbackCommand`, `statusCommand`. Documented in `docs/guides/how-to-use-schema-versioning.md`. (2026-03-27)
 - [ ] 💡 **ARCH-010** [GUI] IPC error handling — JSON over stdio can fail silently. Add retry logic, timeout management, message queue for out-of-order responses. — Priority: M
-- [ ] 💡 **ARCH-011** [Docs] Create PATTERNS.md — document Handler/Factory/Plugin/Strategy/Builder usage conventions. Inconsistent terminology confuses contributors. — Priority: M
+- [x] ✅ **ARCH-011** [Docs] PATTERNS.md — 8 patterns documented (Handler Dispatch, Fluent Builder, Visitor Dispatcher, Strategy, Ports & Adapters, 3-Layer AST, CompilerFns, MutationBuilderBase). (2026-03-27)
 
 ---
 
