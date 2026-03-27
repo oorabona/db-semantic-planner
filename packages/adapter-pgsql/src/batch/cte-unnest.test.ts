@@ -33,7 +33,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('WITH');
@@ -52,7 +52,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS int4[])');
@@ -68,7 +68,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.params[0]).toEqual([1, 2, 3]);
@@ -81,7 +81,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 			.withCte('lookups')
 			.fromUnnest({ id: [10, 20] })
 			.withIndex('idx')
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		// ordinality - 1 expression should appear
@@ -100,7 +100,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const result = orm
 			.withCte('lookups')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('WITH');
@@ -113,7 +113,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const result = orm
 			.withCte('lookups')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query(orm.select('symbols').where(eq('active', true)))
+			.query((orm as any).select('symbols').where(eq('active', true)))
 			.dump();
 
 		// $1 is the CTE array, $2 is the WHERE parameter
@@ -157,7 +157,7 @@ describe('SC-16: CTE without index (no WITH ORDINALITY)', () => {
 		const result = orm
 			.withCte('data')
 			.fromUnnest({ id: [1, 2], name: ['a', 'b'] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('unnest');
@@ -173,7 +173,7 @@ describe('SC-16: CTE without index (no WITH ORDINALITY)', () => {
 		const result = orm
 			.withCte('ids')
 			.fromUnnest({ id: [10, 20, 30] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('ids');
@@ -191,7 +191,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('nums')
 			.fromUnnest({ n: [1, 2, 3] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS int4[])');
@@ -202,7 +202,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('strs')
 			.fromUnnest({ s: ['a', 'b'] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS text[])');
@@ -213,7 +213,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('flags')
 			.fromUnnest({ flag: [true, false] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS bool[])');
@@ -224,7 +224,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('scores')
 			.fromUnnest({ score: [1.5, 2.7] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS float8[])');
@@ -238,7 +238,7 @@ describe('error cases', () => {
 	it('throws when calling query() without fromUnnest()', () => {
 		const orm = makeOrm();
 		expect(() => {
-			orm.withCte('data').query(orm.select('symbols'));
+			orm.withCte('data').query((orm as any).select('symbols'));
 		}).toThrow(InvalidOperationError);
 	});
 
@@ -255,7 +255,7 @@ describe('error cases', () => {
 		const result = orm
 			.withCte('empty')
 			.fromUnnest({ id: [], name: [] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('empty');
@@ -268,7 +268,7 @@ describe('error cases', () => {
 		const result = orm
 			.withCte('single')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query(orm.select('symbols'))
+			.query((orm as any).select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('single');
@@ -333,5 +333,50 @@ describe('Gap 5: CTE outer query with JOINs', () => {
 		// SQL has both the JOIN and the WHERE $2
 		expect(result.sql).toMatch(/JOIN/i);
 		expect(result.sql).toContain('$2');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Gap 1: batchSet().where() guard propagation
+// ---------------------------------------------------------------------------
+describe('Gap 1: batchSet().where() guard propagation', () => {
+	it('batchSet with .where() guard includes AND condition with correct param numbering', () => {
+		const orm = makeOrm();
+
+		// batchSet produces: UPDATE ... FROM unnest($1, $2) WHERE match condition
+		// .where() adds an extra AND guard — its param must be $3 (after the two unnest arrays)
+		const result = orm
+			.update('calls')
+			.batchSet('id', [{ id: 1, callee_id: 42 }])
+			.where(eq('kind', 'function'))
+			.dump();
+
+		// The unnest WHERE match is always present
+		expect(result.sql).toContain('calls.id = t.id');
+		// The .where() guard must appear joined with AND
+		expect(result.sql).toContain('AND');
+		// Guard param $1 is bound first; unnest arrays follow as $2 and $3
+		expect(result.sql).toContain('$1');
+		expect(result.sql).toContain('$2');
+		expect(result.sql).toContain('$3');
+		// Parameters: $1 = 'function' guard, $2 = id array, $3 = callee_id array
+		expect(result.parameters[0]).toBe('function');
+		expect(result.parameters[1]).toEqual([1]);
+		expect(result.parameters[2]).toEqual([42]);
+	});
+
+	it('batchSet().where() guard does not appear without .where() call', () => {
+		const orm = makeOrm();
+
+		const result = orm
+			.update('calls')
+			.batchSet('id', [{ id: 1, callee_id: 42 }])
+			.dump();
+
+		// Only the match condition — no AND guard
+		expect(result.sql).toContain('calls.id = t.id');
+		expect(result.parameters).toHaveLength(2);
+		// No $3
+		expect(result.sql).not.toContain('$3');
 	});
 });

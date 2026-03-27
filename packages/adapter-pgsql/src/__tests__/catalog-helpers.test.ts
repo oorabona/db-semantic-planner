@@ -41,9 +41,9 @@ describe("PgsqlAdapter.listIndexes()", () => {
 		expect(sql).not.toContain("LIKE");
 		expect(params).toEqual(["users", "public"]);
 		expect(result).toHaveLength(1);
-		expect(result[0].name).toBe("idx_users_email");
-		expect(result[0].unique).toBe(false);
-		expect(result[0].method).toBe("btree");
+		expect(result[0]!.name).toBe("idx_users_email");
+		expect(result[0]!.unique).toBe(false);
+		expect(result[0]!.method).toBe("btree");
 	});
 
 	it("adds LIKE $3 clause when namePattern is provided", async () => {
@@ -76,8 +76,8 @@ describe("PgsqlAdapter.listIndexes()", () => {
 		]);
 		const adapter = createPgsqlAdapter(pool);
 		const result = await adapter.listIndexes("users");
-		expect(result[0].unique).toBe(true);
-		expect(result[0].method).toBe("btree");
+		expect(result[0]!.unique).toBe(true);
+		expect(result[0]!.method).toBe("btree");
 	});
 });
 

@@ -29,7 +29,7 @@ const testSchema = schema({
 	symbols: {
 		id: { type: 'integer', primaryKey: true },
 		name: { type: 'text' },
-		embedding: { type: 'vector(1024)' },
+		embedding: { type: 'vector(1024)' as any },
 	},
 	symbol_parents: {
 		id: { type: 'integer', primaryKey: true },
@@ -49,7 +49,7 @@ function buildOrm() {
 describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector columns', () => {
 	it('.distinct().include("symbol", {join:"inner"}) does NOT add symbol.* to SELECT', () => {
 		const orm = buildOrm();
-		const dump = orm
+		const dump = (orm as any)
 			.select('symbol_parents')
 			.distinct()
 			.include('symbol', { join: 'inner' })
@@ -77,7 +77,7 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 	it('.distinct().include("symbol", {join:"inner"}).columns(["id", "symbol_id"]) selects only explicit columns', () => {
 		const orm = buildOrm();
-		const dump = orm
+		const dump = (orm as any)
 			.select('symbol_parents')
 			.distinct()
 			.columns(['id', 'symbol_id'])
@@ -105,7 +105,7 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 	it('regression guard: without .distinct(), join include still adds symbol.* to SELECT', () => {
 		const orm = buildOrm();
-		const dump = orm
+		const dump = (orm as any)
 			.select('symbol_parents')
 			.include('symbol', { join: 'inner' })
 			.dump();
@@ -126,7 +126,7 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 	it('regression guard: .distinct() without join include keeps DISTINCT behavior', () => {
 		const orm = buildOrm();
-		const dump = orm.select('symbol_parents').distinct().columns(['id']).dump();
+		const dump = (orm as any).select('symbol_parents').distinct().columns(['id']).dump();
 
 		const sql = normalizeSQL(dump.sql);
 

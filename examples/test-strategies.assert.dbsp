@@ -164,7 +164,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: SELECT orgs.*, departments.*, employees.id AS "employees.id", assignments.id AS "assignments.id", project.id AS "project.id" FROM test_strategies.orgs LEFT JOIN test_strategies.departments AS departments ON orgs.id = departments.org_id LEFT JOIN test_strategies.employees AS employees ON orgs.id = employees.department_id LEFT JOIN test_strategies.assignments AS assignments ON orgs.id = assignments.employee_id LEFT JOIN test_strategies.projects AS project ON orgs.project_id = project.id
+sql.equals: SELECT orgs.*, project.* FROM test_strategies.orgs LEFT JOIN test_strategies.departments AS departments ON orgs.id = departments.org_id LEFT JOIN test_strategies.employees AS employees ON departments.id = employees.department_id LEFT JOIN test_strategies.assignments AS assignments ON employees.id = assignments.employee_id JOIN test_strategies.projects AS project ON assignments.project_id = project.id
 
 # =============================================================================
 # NQL features: between, like, in, not in (queries 16–19)

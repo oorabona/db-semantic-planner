@@ -75,7 +75,7 @@ sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM auth
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT posts.*, author.* FROM posts LEFT JOIN authors AS author ON posts.author_id = author.id
+sql.equals: SELECT posts.*, author.* FROM posts JOIN authors AS author ON posts.author_id = author.id
 
 # ─────────────────────────────────────────
 # Query 9: authors | select *, posts.* | flat

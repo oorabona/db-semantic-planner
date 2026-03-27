@@ -450,7 +450,7 @@ describe('compileWhereIntent', () => {
 						{
 							RangeVar: {
 								relname: 'posts',
-								alias: { Alias: { aliasname: 'posts_sq' } },
+								alias: { aliasname: 'posts_sq' },
 								inh: true,
 								relpersistence: 'p',
 							},
@@ -624,8 +624,9 @@ describe('rawExists / rawNotExists', () => {
 
 	it('rawExists compiles to EXISTS (SELECT 1 FROM ...)', () => {
 		const subIntent: QueryIntent = {
+			type: 'select' as const,
 			from: 'posts',
-			select: { fields: ['1'] } as SelectIntent,
+			select: { type: 'fields' as const, fields: ['1'] } as SelectIntent,
 		};
 		const { sql, params } = compileWithSubquery({
 			kind: 'rawExists',
@@ -638,8 +639,9 @@ describe('rawExists / rawNotExists', () => {
 
 	it('rawNotExists compiles to NOT EXISTS (SELECT 1 FROM ...)', () => {
 		const subIntent: QueryIntent = {
+			type: 'select' as const,
 			from: 'posts',
-			select: { fields: ['1'] } as SelectIntent,
+			select: { type: 'fields' as const, fields: ['1'] } as SelectIntent,
 		};
 		const { sql, params } = compileWithSubquery({
 			kind: 'rawNotExists',
@@ -654,8 +656,9 @@ describe('rawExists / rawNotExists', () => {
 
 	it('rawExists with inner WHERE propagates parameters', () => {
 		const subIntent: QueryIntent = {
+			type: 'select' as const,
 			from: 'posts',
-			select: { fields: ['id'] } as SelectIntent,
+			select: { type: 'fields' as const, fields: ['id'] } as SelectIntent,
 			where: {
 				kind: 'comparison',
 				field: 'user_id',
@@ -675,8 +678,9 @@ describe('rawExists / rawNotExists', () => {
 
 	it('rawNotExists with inner WHERE propagates parameters', () => {
 		const subIntent: QueryIntent = {
+			type: 'select' as const,
 			from: 'comments',
-			select: { fields: ['id'] } as SelectIntent,
+			select: { type: 'fields' as const, fields: ['id'] } as SelectIntent,
 			where: {
 				kind: 'comparison',
 				field: 'post_id',

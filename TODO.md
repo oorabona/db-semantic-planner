@@ -113,6 +113,17 @@
 
 ---
 
+## Backlog — from /review (2026-03-26, Gaps 1-7)
+
+- [ ] 🐛 [Adapter] Flat include `| flat` uses INNER JOIN for belongsTo hops in multi-level chains — cascades to drop parent rows. All JOINs in flat include should be LEFT JOIN. Pre-existing. (Codex P1, /review F-008) — Priority: M
+- [ ] 🔧 [Adapter] `timestamp` reserved keyword not quoted as column name (`audit_log.timestamp` → should be `audit_log."timestamp"`). Pre-existing. (/review F-009) — Priority: M
+- [ ] 🔧 [Adapter] compile-where.ts: cast directly to named types (WhereRawExistsIntent, WhereComparisonIntent) instead of `as unknown as { ... }` structural casts (/review F-002, F-003) — Priority: L
+- [ ] 🔧 [Core] expressions.ts: add comment explaining ExpressionSpec vs ExpressionRef duck-type check ordering (/review F-004) — Priority: L
+- [ ] 💡 [Core] Add rawExists()/rawNotExists() DX helper functions for discoverability (/review F-005) — Priority: L
+- [ ] 🔧 [Adapter] Extract named type for compileSubquery callback signature to reduce inline import() expressions (/review F-006) — Priority: L
+- [ ] 🐛 [E2E] 5 pre-existing DB-level failures: pimdam.q2 CTE multilocale (2 tests), strategy-matrix subquery include (3 tests) — Priority: M
+- [ ] 🔧 [All] 680 TSC errors in test files (mostly deprecated orm.select() → orm.from() migration) — Priority: L
+
 ## Backlog — from /review (2026-03-25)
 
 - [ ] 🔧 [Adapter] FR-7: Table integrity check API (`table.checkIntegrity()`) — Priority: L

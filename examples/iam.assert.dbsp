@@ -240,7 +240,7 @@ db.rows.equals: 5
 # Uses nested json_agg subqueries with depth-based aliases (__t__, __t1__, __t2__, __t3__)
 --- query: 27
 success: true
-sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json))) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json))) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json))) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(jsonb_build_object('role_id', __t__.role_id) || jsonb_build_object('role', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('rolePermissions', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('permission', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM iam_example.permissions AS __t3__ WHERE __t3__.id = __t2__.permission_id), '[]'::json))) FROM iam_example.role_permissions AS __t2__ WHERE __t2__.role_id = __t1__.id), '[]'::json))) FROM iam_example.roles AS __t1__ WHERE __t1__.id = __t__.role_id), '[]'::json))) FROM iam_example.user_roles AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS "userRoles_json" FROM iam_example.users WHERE users.active = $1
 params.equals: [true]
 db.rows.equals: 5
 
@@ -252,7 +252,7 @@ db.rows.equals: 5
 # Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-sql.equals: SELECT users.*, user_roles.*, role.id AS "role.id", role_permissions.id AS "rolePermissions.id", permission.id AS "permission.id" FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id LEFT JOIN iam_example.roles AS role ON users.role_id = role.id LEFT JOIN iam_example.role_permissions AS role_permissions ON users.id = role_permissions.role_id LEFT JOIN iam_example.permissions AS permission ON users.permission_id = permission.id WHERE users.active = $1
+sql.equals: SELECT users.*, user_roles.role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id JOIN iam_example.roles AS role ON user_roles.role_id = role.id LEFT JOIN iam_example.role_permissions AS role_permissions ON role.id = role_permissions.role_id JOIN iam_example.permissions AS permission ON role_permissions.permission_id = permission.id WHERE users.active = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
@@ -260,7 +260,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 29
 success: true
-sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log."timestamp" FROM iam_example.audit_log WHERE audit_log.action = $1
+sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log.timestamp FROM iam_example.audit_log WHERE audit_log.action = $1
 params.equals: ["login"]
 db.rows.equals: 4
 
