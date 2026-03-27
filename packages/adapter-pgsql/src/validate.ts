@@ -100,6 +100,7 @@ const SQL_RESERVED_KEYWORDS = new Set([
 	'some',
 	'symmetric',
 	'table',
+	'timestamp',
 	'tablesample',
 	'then',
 	'to',

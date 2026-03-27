@@ -269,6 +269,7 @@ const PG_RESERVED = new Set([
 	'symmetric',
 	'system_user',
 	'table',
+	'timestamp',
 	'tablesample',
 	'then',
 	'to',
