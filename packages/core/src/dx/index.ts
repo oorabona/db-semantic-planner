@@ -136,6 +136,23 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
+// ARCH-008: Hook composition utilities
+export {
+	type HookPriority,
+	type PrioritizedHook,
+	withPriority,
+	sortByPriority,
+	composeBeforeQueryHooks,
+	pipeBeforeQueryHooks,
+	composeAfterQueryHooks,
+	pipeAfterQueryHooks,
+	composeBeforeMutationHooks,
+	pipeBeforeMutationHooks,
+	composeAfterMutationHooks,
+	pipeAfterMutationHooks,
+	composeOnErrorHooks,
+	pipeOnErrorHooks,
+} from './hook-utils.js';
 // E17b: Query/Mutation Hooks
 export {
 	type AfterMutationHook,

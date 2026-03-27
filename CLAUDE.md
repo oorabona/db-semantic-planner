@@ -219,7 +219,7 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
-| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md` | |
+| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md`, `docs/guides/how-to-use-schema-versioning.md` | |
 
 ## Observability
 
