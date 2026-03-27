@@ -297,6 +297,21 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
+	/**
+	 * Start building a SELECT query from a table name (string-based API).
+	 *
+	 * @deprecated Use `orm.from(orm.tables.<table>)` for type-safe queries.
+	 * String-based select is kept for backward compatibility and test convenience.
+	 *
+	 * @typeParam K - Table name (inferred from DB keys when typed)
+	 * @typeParam TResult - Override result type (defaults to DB[K])
+	 * @param from - The root table name to select from
+	 * @returns A QueryBuilder for constructing the select
+	 */
+	select<K extends keyof DB & string, TResult = DB[K]>(
+		from: K,
+	): QueryBuilder<TResult>;
+
 	from<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): QueryBuilder<InferTableRow<TTable>>;

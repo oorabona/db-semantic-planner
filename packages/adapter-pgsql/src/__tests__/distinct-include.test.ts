@@ -126,7 +126,7 @@ describe('DISTINCT-VECTOR: DISTINCT with join include does not leak vector colum
 
 	it('regression guard: .distinct() without join include keeps DISTINCT behavior', () => {
 		const orm = buildOrm();
-		const dump = (orm as any).select('symbol_parents').distinct().columns(['id']).dump();
+		const dump = orm.select('symbol_parents').distinct().columns(['id']).dump();
 
 		const sql = normalizeSQL(dump.sql);
 

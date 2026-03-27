@@ -112,7 +112,7 @@ describe('3. op() expression in WHERE with gte', () => {
 	it('compiles column arithmetic expression without binding refs as params', () => {
 		const orm = buildOrm();
 		const lineCount = op('-', 'end_line', 'start_line');
-		const dump = (orm as any).select('symbols').where(lineCount.gte(50)).dump();
+		const dump = orm.select('symbols').where(lineCount.gte(50)).dump();
 		expect(ws(dump.sql)).toEqual(
 			'SELECT symbols.* FROM symbols WHERE (end_line - start_line) >= $1',
 		);
