@@ -11,7 +11,24 @@ import type { ColumnValidatorSchema } from './types.js';
  * When no schema is provided, validation is skipped (backward compat).
  */
 export class ColumnValidator {
+	private knownCteTables: Set<string> = new Set();
+
 	constructor(private readonly schema: ColumnValidatorSchema) {}
+
+	/**
+	 * Register CTE names so validateTable() skips validation for them.
+	 * CTE names are not physical tables in the schema, but are valid FROM targets.
+	 */
+	addKnownCteTables(names: Iterable<string>): void {
+		for (const name of names) {
+			this.knownCteTables.add(name);
+		}
+	}
+
+	/** Clear all registered CTE table names (used between compilations). */
+	clearKnownCteTables(): void {
+		this.knownCteTables.clear();
+	}
 
 	/**
 	 * Convert camelCase to snake_case for column name matching.
@@ -53,6 +70,8 @@ export class ColumnValidator {
 	}
 
 	validateTable(table: string): void {
+		// CTE names are valid table references even though they are not in the schema
+		if (this.knownCteTables.has(table)) return;
 		const tableInfo = this.schema.getTable(table);
 		if (!tableInfo) {
 			throw new NqlSemanticException(

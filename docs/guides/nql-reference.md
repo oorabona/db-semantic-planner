@@ -17,6 +17,7 @@
 - [JSONB Operators](#jsonb-operators)
 - [Subqueries](#subqueries)
 - [Set Operations](#set-operations)
+- [Common Table Expressions (WITH)](#common-table-expressions-with)
 - [Hierarchy (Recursive CTE)](#hierarchy-recursive-cte)
 - [Range Types](#range-types)
 - [Mutations](#mutations)
@@ -1251,6 +1252,47 @@ UNION ALL
 - `UNION` deduplicates; `UNION ALL` keeps all rows (faster for large result sets)
 
 ---
+---
+
+## Common Table Expressions (WITH)
+
+The `with` keyword defines named subqueries (CTEs) that can be referenced in the main query.
+
+```
+with name as (query) mainQuery
+```
+
+### Single CTE
+
+```nql
+with active_products as (products | where active = true | select id, name)
+active_products | select *
+```
+
+### Multiple CTEs
+
+```nql
+with
+  active_users as (users | where active = true),
+  recent_orders as (orders | where createdAt > '2026-01-01')
+recent_orders | where userId in (active_users | select id)
+```
+
+### CTE with pipe clauses
+
+CTE bodies support all standard pipe clauses: `where`, `select`, `order by`, `limit`, `offset`:
+
+```nql
+with top5 as (users | where active = true | order by score desc | limit 5)
+top5 | select name, score
+```
+
+### Notes
+
+- CTE names are reserved: they act as table references in the outer query
+- Duplicate CTE names are a semantic error
+- Set operations (`| union`, `| intersect`, `| except`) inside CTE bodies are not supported in v1
+- `with` is now a **reserved keyword** — identifiers named `with` require quoting
 
 ## Hierarchy (Recursive CTE)
 

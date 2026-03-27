@@ -12,6 +12,7 @@
 export type {
 	AggregateFunction,
 	ComparisonOperator,
+	CteQueryIntent,
 	DeleteIntent,
 	ExpressionIntent,
 	IncludeIntent,
@@ -22,6 +23,7 @@ export type {
 	OrderByIntent,
 	PseudoColumnTraversal,
 	QueryIntent,
+	SimpleCteIntent,
 	RangeOperator,
 	SelectAllIntent,
 	SelectFieldsIntent,
@@ -60,10 +62,12 @@ import type {
 	NqlQuery,
 	NqlSelectClause,
 	NqlStatement,
+	NqlWithQuery,
 } from '../parser/ast.js';
 
 // Domain modules
 import { ColumnValidator } from './column-validator.js';
+import { compileWithQuery } from './compile-cte.js';
 import { compileExpression } from './compile-expression.js';
 import {
 	compileMutationPipeline,
@@ -190,6 +194,9 @@ export class NqlCompiler {
 		stmt: NqlStatement,
 		bindings?: Map<string, QueryIntent>,
 	): CompileResult {
+		if (stmt.type === 'withQuery') {
+			return compileWithQuery(stmt as NqlWithQuery, this.ctx, this.fns);
+		}
 		if (stmt.type === 'query') {
 			const result = compileQuery(stmt, this.ctx, this.fns, bindings);
 			if ('kind' in result && result.kind === 'setOperation') {

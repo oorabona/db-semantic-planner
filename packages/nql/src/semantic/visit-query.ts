@@ -17,6 +17,7 @@ import type {
 	NqlSelectItem,
 	NqlSetClause,
 	NqlStatement,
+	NqlWithQuery,
 } from '../parser/ast.js';
 import type { CstContext, VisitFn } from './helpers.js';
 import {
@@ -38,9 +39,10 @@ export function visitProgram(ctx: CstContext, visit: VisitFn): NqlProgram {
 }
 
 export function visitStatement(ctx: CstContext, visit: VisitFn): NqlStatement {
+	if (ctx.withQuery) return visit(asCstNode(ctx.withQuery[0]!));
 	if (ctx.query) return visit(asCstNode(ctx.query[0]!));
 	if (ctx.mutationPipeline) return visit(asCstNode(ctx.mutationPipeline[0]!));
-	/* v8 ignore next — defensive: parser guarantees query or mutationPipeline -- @preserve */
+	/* v8 ignore next — defensive: parser guarantees withQuery, query, or mutationPipeline -- @preserve */
 	unreachable('Invalid statement');
 }
 

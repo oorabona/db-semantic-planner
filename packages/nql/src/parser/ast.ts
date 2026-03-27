@@ -18,7 +18,23 @@ export interface NqlProgram {
 	statements: NqlStatement[];
 }
 
-export type NqlStatement = NqlQuery | NqlMutationPipeline;
+export type NqlStatement = NqlQuery | NqlMutationPipeline | NqlWithQuery;
+
+// ============================================================
+// WITH / CTE SYNTAX
+// ============================================================
+
+export interface NqlCteItem {
+	type: 'cteItem';
+	name: string;
+	query: NqlQuery;
+}
+
+export interface NqlWithQuery {
+	type: 'withQuery';
+	ctes: NqlCteItem[];
+	query: NqlQuery;
+}
 
 // ============================================================
 // QUERIES

@@ -15,6 +15,7 @@ import type {
 	QueryIntent,
 	RawCteIntent,
 	RecursivePlanReport,
+	SimpleCteIntent,
 	UnnestCteIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
@@ -286,6 +287,31 @@ export function compileCteQuery(
 			const { sql: cteSql, params: cteParams } = buildRawCte(cte, schemaName, deps);
 			allCteParams.push(...cteParams);
 			cteSqlFragments.push(cteSql);
+		} else if (cte.kind === 'simpleCte') {
+			// Simple named subquery CTE: compile inner query, wrap in ctename AS (...)
+			const innerCte = cte as SimpleCteIntent;
+			const innerPlanReport: PlanReport = {
+				rootTable: innerCte.query.from,
+				decisions: [],
+				warnings: [],
+				ctes: [],
+				intent: innerCte.query,
+				metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+			};
+			const innerCompileOptions: CompileOptions =
+				schemaName !== undefined ? { schemaName } : {};
+			const innerCompiled = compileSelect(innerPlanReport, innerCompileOptions, deps);
+			// Renumber inner params to follow all previously accumulated CTE params
+			const currentParamOffset = allCteParams.length;
+			const renumberedInnerSql =
+				currentParamOffset > 0
+					? innerCompiled.sql.replace(
+							/\$([0-9]+)/g,
+							(_: string, n: string) => `$${parseInt(n, 10) + currentParamOffset}`,
+						)
+					: innerCompiled.sql;
+			allCteParams.push(...innerCompiled.parameters);
+			cteSqlFragments.push(`"${innerCte.name}" AS (${renumberedInnerSql})`);
 		} else {
 			const kind = (cte as { kind: string }).kind;
 			throw new Error(

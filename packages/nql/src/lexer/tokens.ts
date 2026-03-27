@@ -21,6 +21,7 @@ export const LineComment = createToken({
 // ============================================================
 
 // Query keywords
+export const With = createToken({ name: 'With', pattern: /with\b/i });
 export const Select = createToken({ name: 'Select', pattern: /select\b/i });
 export const Where = createToken({ name: 'Where', pattern: /where\b/i });
 export const Flat = createToken({ name: 'Flat', pattern: /flat\b/i });
@@ -304,6 +305,7 @@ export const allTokens = [
 	// - Insert/Into BEFORE In
 	// - Ascendant/Descendant BEFORE Asc/Desc
 	// - Asc BEFORE As
+	With, // Must come before Where (no prefix conflict) and before Identifier
 	Select,
 	Where,
 	Flat,

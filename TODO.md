@@ -140,7 +140,7 @@
 
 | Feature | Priority | Unblocks | Description |
 |---------|----------|----------|-------------|
-| **AGG-JOINED-COL** | P1 | 4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls) | `count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING |
+| ~~**AGG-JOINED-COL**~~ | ~~P1~~ | ~~4 checks (highCoupling, godFunctions, largeFiles, unresolvedCalls)~~ | ~~`count(ref('joinedRelation.id'))` / `min(ref('joinedRelation.path'))` — aggregate functions on columns from JOINed tables, usable in SELECT + HAVING~~ ✅ Done 2026-03-27 (`buildAggregate()` splits dotted column refs; 6 tests in `agg-joined-col.test.ts`) |
 | **NOTEXISTS-MULTI-JOIN** | P1 | 3 checks (deadCode, unusedExports, orphanFiles) | `notExists('relation', { where: ... })` with JOINs inside the subquery + outer-column references. Currently notExists only follows 1 FK with 1 WhereIntent. |
 | ~~**CASE-INTENT**~~ | ~~P2~~ | ~~1 check (unusedDeps)~~ | ~~`caseWhen(condition, thenExpr).else(elseExpr)` — conditional expressions in SELECT columns~~ ✅ Done 2026-03-25 (FR-6: `caseWhen()` builder + `CaseExpressionIntent` compiler support in `.columns()` and `.orderBy()`) |
 | ~~**LIKE-ESCAPE**~~ | ~~P2~~ | ~~1 check (unusedVariables)~~ | ~~`like('col', pattern, { escape: '\\' })` — escape character for LIKE WHERE clauses~~ ✅ Done 2026-03-23 |
@@ -187,7 +187,7 @@
 - [ ] 💡 **DDL-DOMAINS** [Adapter] Custom domain types — CREATE DOMAIN with constraints. — Priority: L (from /llm Copilot DDL-COMPLETE)
 (DDL-OPCLASS-INTRO, DDL-ENUM-DEPCHECK, DDL-SEQ-DRY archived → docs/historic/done-2026-03.md)
 (CAPS-VERSION, UPSERT-RAW, EDGE-001, EDGE-002 archived → docs/historic/done-2026-03.md)
-- [ ] 💡 **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — deferred from BATCH-001. — Priority: P1 (from /adversarial 2026-03-18)
+- [x] ✅ **NQL-WITH** [NQL] WITH ... AS (...) non-recursive CTE syntax in NQL parser — implemented lexer+parser+visitor+compiler+adapter+tests (2026-03-27)
 (BATCH-DRY-001/002, BATCH-FIX-001/002, JOIN-TYPE, EDGE-FLOAT, EXT-001, EXT-002, EXT-NAMED-PARAMS archived → docs/historic/done-2026-03.md)
 
 ---
