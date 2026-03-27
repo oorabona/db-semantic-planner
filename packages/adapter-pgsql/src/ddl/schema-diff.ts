@@ -728,9 +728,23 @@ function compareIndexes(
 		}
 	}
 
-	// Indexes in DB but not in schema → drop (skip auto-FK indexes — they are auto-managed)
+	// Auto-unique index keys: col.unique=true generates an implicit UNIQUE index in the DB,
+	// but this does not appear in ModelIR's indexes[] array.  These are auto-managed and must
+	// never trigger a drop_index diff.
+	const autoUniqueIndexKeys = new Set(
+		schema.columns
+			.filter((col) => col.unique === true)
+			.map((col) =>
+				indexKey({
+					columns: [col.name],
+					unique: true,
+				}),
+			),
+	);
+
+	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	for (const [key, idx] of dbIdxMap) {
-		if (!schemaIdxMap.has(key) && !autoFkIndexKeys.has(key)) {
+		if (!schemaIdxMap.has(key) && !autoFkIndexKeys.has(key) && !autoUniqueIndexKeys.has(key)) {
 			changes.push({
 				kind: 'drop_index',
 				table: schema.name,
