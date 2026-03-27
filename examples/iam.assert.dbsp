@@ -260,7 +260,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 29
 success: true
-sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log.timestamp FROM iam_example.audit_log WHERE audit_log.action = $1
+sql.equals: SELECT audit_log.user_id, audit_log.resource, audit_log."timestamp" FROM iam_example.audit_log WHERE audit_log.action = $1
 params.equals: ["login"]
 db.rows.equals: 4
 
