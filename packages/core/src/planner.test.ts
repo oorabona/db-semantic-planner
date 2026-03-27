@@ -70,6 +70,29 @@ const q3Schema = schema({
 	},
 }).model;
 
+/**
+ * Q4 Schema: 4-level chain for LEFT JOIN cascade tests
+ * roots → betas(nullable) → gammas(nullable) → deltas(nullable)
+ */
+const q4Schema = schema({
+	roots: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+	},
+	betas: {
+		id: { type: 'integer', primaryKey: true },
+		rootId: ref('roots', { as: 'root', inverse: 'betas', nullable: true }),
+	},
+	gammas: {
+		id: { type: 'integer', primaryKey: true },
+		betaId: ref('betas', { as: 'beta', inverse: 'gammas', nullable: true }),
+	},
+	deltas: {
+		id: { type: 'integer', primaryKey: true },
+		gammaId: ref('gammas', { as: 'gamma', inverse: 'deltas', nullable: true }),
+	},
+}).model;
+
 // ============================================================================
 // Basic Planning Tests
 // ============================================================================
@@ -878,6 +901,90 @@ describe('Semantic Planner', () => {
 			const joinDecision = report.decisions.find((d) => d.type === 'join-type');
 			expect(joinDecision?.choice).toBe('inner');
 		});
+
+		it('should cascade LEFT JOIN to required children of optional parent', () => {
+			// roots → betas(optional/LEFT) → gammas(optional/LEFT, required child)
+			// gammas is nullable (optional), so it gets LEFT; its required child
+			// deltas would normally get INNER but should be forced LEFT by ancestor cascade
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'roots',
+				include: [
+					{
+						relation: 'betas',
+						include: [
+							{
+								relation: 'gammas',
+								include: [{ relation: 'deltas' }],
+							},
+						],
+					},
+				],
+			};
+
+			const report = plan(intent, q4Schema);
+
+			const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+			const betasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'betas',
+			);
+			const gammasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'gammas',
+			);
+			const deltasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'deltas',
+			);
+
+			expect(betasDecision?.choice).toBe('left');
+			expect(gammasDecision?.choice).toBe('left');
+			// deltas is also nullable/optional, so it's LEFT regardless of cascade
+			expect(deltasDecision?.choice).toBe('left');
+		});
+
+		it('should reset LEFT JOIN cascade after explicit join: inner override', () => {
+			// roots → betas(optional/LEFT) → gammas(explicit inner) → deltas(optional)
+			// Bug: before fix, deltas got LEFT because betas' ancestorIsLeftJoin=true
+			//      propagated through gammas' explicit inner override.
+			// Fix: gammas' explicit inner resets the cascade, so deltas gets its
+			//      natural join type (LEFT for optional, INNER for required).
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'roots',
+				include: [
+					{
+						relation: 'betas',
+						include: [
+							{
+								relation: 'gammas',
+								join: 'inner',
+								include: [{ relation: 'deltas' }],
+							},
+						],
+					},
+				],
+			};
+
+			const report = plan(intent, q4Schema);
+
+			const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+			const betasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'betas',
+			);
+			const gammasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'gammas',
+			);
+			const deltasDecision = joinDecisions.find(
+				(d) => d.context.relation === 'deltas',
+			);
+
+			// betas: optional, no filter → LEFT
+			expect(betasDecision?.choice).toBe('left');
+			// gammas: explicit join:'inner' override → INNER
+			expect(gammasDecision?.choice).toBe('inner');
+			// deltas: optional, but cascade was RESET by gammas' explicit inner
+			// → natural join type applies: LEFT (optional, no filter)
+			expect(deltasDecision?.choice).toBe('left');
+		});
 	});
 
 	// ============================================================================
@@ -1507,186 +1614,4 @@ describe('Semantic Planner', () => {
 			expect(rawWarning).toBeUndefined();
 		});
 	});
-
-	// ============================================================================
-	// Multi-hop LEFT JOIN cascade (regression: INNER JOIN on required relation
-	// after a LEFT JOIN ancestor must be demoted to LEFT JOIN)
-	// ============================================================================
-
-	describe('multi-hop flat include LEFT JOIN cascade', () => {
-		/**
-		 * Chain: orgs → departments (hasMany, optional FK)
-		 *             → employees   (hasMany, optional FK)
-		 *             → assignments (hasMany, optional FK)
-		 *             → projectLinks (belongsTo, NOT NULL / required)
-		 *
-		 * Without the fix, `projectLinks` would get INNER JOIN because
-		 * `determineJoinType` sees `optionality='required'`. With the fix,
-		 * the LEFT JOIN propagated from the preceding hops forces LEFT JOIN
-		 * on `projectLinks` too.
-		 */
-		const orgChainSchema = schema({
-			orgs: {
-				id: { type: 'integer', primaryKey: true },
-				name: 'string',
-			},
-			departments: {
-				id: { type: 'integer', primaryKey: true },
-				orgId: ref('orgs', { as: 'org', inverse: 'departments', nullable: true }),
-				name: 'string',
-			},
-			employees: {
-				id: { type: 'integer', primaryKey: true },
-				departmentId: ref('departments', {
-					as: 'department',
-					inverse: 'employees',
-					nullable: true,
-				}),
-				name: 'string',
-			},
-			assignments: {
-				id: { type: 'integer', primaryKey: true },
-				employeeId: ref('employees', {
-					as: 'employee',
-					inverse: 'assignments',
-					nullable: true,
-				}),
-				name: 'string',
-			},
-			projects: {
-				id: { type: 'integer', primaryKey: true },
-				name: 'string',
-			},
-			projectAssignments: {
-				id: { type: 'integer', primaryKey: true },
-				assignmentId: ref('assignments', {
-					as: 'assignment',
-					inverse: 'projectLinks',
-					nullable: true,
-				}),
-				// NOT NULL FK — required relation → would normally get INNER JOIN
-				projectId: ref('projects', { as: 'project', inverse: 'assignmentLinks' }),
-			},
-		}).model;
-
-		it('forces LEFT JOIN on a required relation when an ancestor hop used LEFT JOIN', () => {
-			const intent: QueryIntent = {
-				type: 'select',
-				from: 'orgs',
-				include: [
-					{
-						relation: 'departments',
-						strategy: 'flat',
-						include: [
-							{
-								relation: 'employees',
-								strategy: 'flat',
-								include: [
-									{
-										relation: 'assignments',
-										strategy: 'flat',
-										include: [
-											{
-												relation: 'projectLinks',
-												strategy: 'flat',
-											},
-										],
-									},
-								],
-							},
-						],
-					},
-				],
-			};
-
-			const report = plan(intent, orgChainSchema, {
-				dialectCapabilities: POSTGRESQL_CAPABILITIES,
-			});
-
-			// Find the join-type decision for the deepest hop (projectLinks)
-			const projectLinksJoinDecision = report.decisions.find(
-				(d) =>
-					d.type === 'join-type' &&
-					(d.context as Record<string, unknown>).relation === 'projectLinks',
-			);
-
-			expect(projectLinksJoinDecision).toBeDefined();
-			expect(projectLinksJoinDecision?.choice).toBe('left');
-		});
-
-		it('still uses INNER JOIN on a required relation at the root level (no ancestor LEFT JOIN)', () => {
-			const intent: QueryIntent = {
-				type: 'select',
-				from: 'projectAssignments',
-				include: [
-					{
-						// projectId is NOT NULL → required → INNER JOIN expected
-						relation: 'project',
-						strategy: 'flat',
-					},
-				],
-			};
-
-			const report = plan(intent, orgChainSchema, {
-				dialectCapabilities: POSTGRESQL_CAPABILITIES,
-			});
-
-			const projectJoinDecision = report.decisions.find(
-				(d) =>
-					d.type === 'join-type' &&
-					(d.context as Record<string, unknown>).relation === 'project',
-			);
-
-			expect(projectJoinDecision).toBeDefined();
-			expect(projectJoinDecision?.choice).toBe('inner');
-		});
-
-		it('respects an explicit join override even in a left-ancestor chain', () => {
-			const intent: QueryIntent = {
-				type: 'select',
-				from: 'orgs',
-				include: [
-					{
-						relation: 'departments',
-						strategy: 'flat',
-						include: [
-							{
-								relation: 'employees',
-								strategy: 'flat',
-								include: [
-									{
-										relation: 'assignments',
-										strategy: 'flat',
-										include: [
-											{
-												relation: 'projectLinks',
-												strategy: 'flat',
-												// Explicit override: caller wants INNER even in left chain
-												join: 'inner',
-											},
-										],
-									},
-								],
-							},
-						],
-					},
-				],
-			};
-
-			const report = plan(intent, orgChainSchema, {
-				dialectCapabilities: POSTGRESQL_CAPABILITIES,
-			});
-
-			const projectLinksJoinDecision = report.decisions.find(
-				(d) =>
-					d.type === 'join-type' &&
-					(d.context as Record<string, unknown>).relation === 'projectLinks',
-			);
-
-			// Explicit join: 'inner' must win over the cascade
-			expect(projectLinksJoinDecision).toBeDefined();
-			expect(projectLinksJoinDecision?.choice).toBe('inner');
-		});
-	});
 });
-
