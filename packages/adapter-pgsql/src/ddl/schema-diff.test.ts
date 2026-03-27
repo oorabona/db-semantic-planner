@@ -690,6 +690,102 @@ describe('compareSchemata', () => {
 				expect(diff.changes).toHaveLength(0);
 			});
 		});
+
+		describe('implicit unique index suppression', () => {
+			it('should not emit drop_index for col.unique=true implicit index', () => {
+				// Schema: column with unique: true (no explicit index in indexes[])
+				// DB: introspection adds the implicit unique index to indexes[]
+				// Expected: no drop_index emitted — the index is auto-managed
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+						indexes: [{ name: 'users_email_key', columns: ['email'], unique: true }],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
+
+			it('should still emit drop_index for explicit non-auto unique indexes', () => {
+				// A unique index NOT backed by col.unique=true should still be dropped
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(1);
+				expect(diff.changes[0]!.kind).toBe('drop_index');
+			});
+
+			it('should suppress drop_index for multiple unique columns', () => {
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({ name: 'email', type: 'string', unique: true }),
+							makeCol({ name: 'username', type: 'string', unique: true }),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({ name: 'email', type: 'string', unique: true }),
+							makeCol({ name: 'username', type: 'string', unique: true }),
+						],
+						indexes: [
+							{ name: 'users_email_key', columns: ['email'], unique: true },
+							{ name: 'users_username_key', columns: ['username'], unique: true },
+						],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
+
+			it('should not suppress explicit index on a unique col when col.unique differs', () => {
+				// Explicit index in schema.indexes[] overrides the auto-unique suppression
+				const schemaIdx: IndexIR = { name: 'idx_email_custom', columns: ['email'], unique: true };
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+						indexes: [schemaIdx],
+					}),
+				]);
+
+				// Explicit index matches DB index → no diff
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
+		});
 	});
 
 	describe('complex scenarios', () => {
