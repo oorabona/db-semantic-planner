@@ -224,7 +224,7 @@
 ### MEDIUM — Code health findings (2026-03-14)
 
 - [ ] 🐛 **ARCH-CH1** [GUI] `packages/gui/src/lib/log-utils.ts` is orphan — no incoming imports or calls. Verify if dead code and remove. — Priority: M
-- [ ] 💡 **ARCH-CH2** [Adapter] 450 dead_code findings — mostly expression handlers (`countHandler`, `sumHandler`...) flagged because they're consumed via dynamic dispatch (`handlers[type]`). Investigate: are they truly dead, or is this an astix false positive from unresolved computed property access? — Priority: M
+- [x] ✅ **ARCH-CH2** [Adapter] 450 dead_code findings — **100% false positives** from 6 astix detection gaps (Map dispatch, barrel re-exports, import type, nullish coalescing calls, dynamic lookups, cross-package). 0 true dead code. 6 improvements filed in astix/TODO.md. (2026-03-27)
 - [ ] 💡 **ARCH-CH3** [Core] 4 circular import cycles detected:
   - `handlers/index.ts` ↔ `handlers/where/index.ts` (barrel re-exports)
   - `column-validator.ts` ↔ `types.ts` (mutual type deps)
