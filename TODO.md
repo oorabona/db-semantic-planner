@@ -116,15 +116,16 @@
 ## Backlog — from /review + /code-health (2026-03-27)
 
 - [x] ✅ [Core] Flat include LEFT JOIN cascade + reset after explicit override. (Codex P1+P2, 2026-03-27)
-- [ ] 🐛 [Adapter] `timestamp` reserved keyword not quoted as column name. Pre-existing. — Priority: M
-- [ ] 🔧 [Adapter] `timestamp` reserved keyword not quoted as column name (`audit_log.timestamp` → should be `audit_log."timestamp"`). Pre-existing. (/review F-009) — Priority: M
-- [ ] 🔧 [Adapter] compile-where.ts: cast directly to named types (WhereRawExistsIntent, WhereComparisonIntent) instead of `as unknown as { ... }` structural casts (/review F-002, F-003) — Priority: L
-- [ ] 🔧 [Core] expressions.ts: add comment explaining ExpressionSpec vs ExpressionRef duck-type check ordering (/review F-004) — Priority: L
-- [ ] 💡 [Core] Add rawExists()/rawNotExists() DX helper functions for discoverability (/review F-005) — Priority: L
-- [ ] 🔧 [Adapter] Extract named type for compileSubquery callback signature to reduce inline import() expressions (/review F-006) — Priority: L
-- [ ] 🐛 [E2E] 5 pre-existing DB-level failures: pimdam.q2 CTE multilocale (2 tests), strategy-matrix subquery include (3 tests) — Priority: M
-- [ ] 🔧 [Core] 14-file circular import cycle in core/dx/ — break via type extraction — Priority: M
-- [ ] 🔧 [Core/Adapter] Extract shared test utils (makeCtx, createTestSchema) duplicated across 5+ files — Priority: M
+- [x] ✅ [Adapter] `timestamp` reserved keyword now quoted. (2026-03-27)
+- [x] ✅ [Adapter] compile-where.ts: named type casts replace structural casts. (2026-03-27)
+- [x] ✅ [Core] rawExists()/rawNotExists() DX helpers added. 9 tests. (2026-03-27)
+- [x] ✅ [E2E] 5 DB failures fixed: EXISTS param dedup + IN() parentheses. (2026-03-27)
+- [x] ✅ [Adapter] compareSchemata false drop_index for implicit unique indexes. (2026-03-27)
+- [x] ✅ [Core/Adapter] Shared makeCtx test utility extracted (8 files deduplicated). (2026-03-27)
+- [-] ⏭️ [Core] 14-file circular import in core/dx/ — type-only closures, no runtime impact. Deferred.
+- [-] ⏭️ [Core] EXT-PARAM-DEDUP — correctness-safe, intentional deferral. Stays in backlog.
+- [ ] 🔧 [Core] expressions.ts: add comment explaining ExpressionSpec vs ExpressionRef duck-type check ordering — Priority: L
+- [ ] 🔧 [Adapter] Extract named type for compileSubquery callback signature — Priority: L
 - [ ] 🔧 [Core] Extract requireAdapter() from cte-builder + raw-cte-builder into builder-utils — Priority: L
 - [ ] 🔧 [All] 680 TSC errors in test files (orm.select() → orm.from() migration) — Priority: L
 
