@@ -409,6 +409,7 @@ export function extractExistsDecisions(
 	}
 
 	// Find all exists intents from the plan's where clause
+	// Clone the array so we can consume (splice) matches without mutating the plan.
 	const existsIntents = plan.intent?.where
 		? findExistsIntents(plan.intent.where)
 		: [];
@@ -424,7 +425,9 @@ export function extractExistsDecisions(
 		// Find the matching intent to get nested conditions
 		// Match by relation name or target table (planner may normalize relation names)
 		// Note: relationFilter intents from NQL have relation as string[] (e.g., ['posts'])
-		const matchingIntent = existsIntents.find((i) => {
+		// We consume (splice) each matched intent so that duplicate exists() on the same
+		// relation each get their own unique intent — prevents param duplication.
+		const matchIdx = existsIntents.findIndex((i) => {
 			const rel =
 				Array.isArray(i.relation) && i.relation.length > 0
 					? i.relation[0]
@@ -437,6 +440,8 @@ export function extractExistsDecisions(
 				rel === context.includeAlias
 			);
 		});
+		const matchingIntent = matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
+		if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
 
 		// Build nested conditions with correct target table
 		let conditions: PlanDecision[] | undefined;
