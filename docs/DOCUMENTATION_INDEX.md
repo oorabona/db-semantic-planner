@@ -32,6 +32,7 @@ packages/gui            → Desktop Database Explorer (Tauri v2 + React + ShadCN
 | Category | Document | Status |
 |----------|----------|--------|
 | Project | [CLAUDE.md](../CLAUDE.md) | canonical |
+| Architecture | [**Architectural Patterns**](PATTERNS.md) | canonical |
 | Project | [Main Backlog](../TODO.md) | active |
 | Project | [**Feature Comparison**](COMPARISON.md) | canonical |
 | Project | [MCP Server Brief](briefs/mcp-server.md) | ready |
