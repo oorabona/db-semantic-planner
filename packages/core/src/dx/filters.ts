@@ -36,10 +36,13 @@ import type {
 	WhereLikeIntent,
 	WhereNotExistsIntent,
 	WhereNotIntent,
+	WhereRawExistsIntent,
+	WhereRawNotExistsIntent,
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRangeIntent,
 	WhereRelationFilterIntent,
+	QueryIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import type {
@@ -537,6 +540,56 @@ export function notExists(
 		result.include = options.include;
 	}
 	return result;
+}
+
+/**
+ * EXISTS with an arbitrary subquery (not FK-resolved).
+ *
+ * Use when the subquery does not follow a declared schema relation.
+ * Accepts a SubqueryBuilder (must have `.build()`) or any builder
+ * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
+ *
+ * @param subquery - A SubqueryBuilder or any object with buildIntent()
+ *
+ * @example
+ * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_id = users.id)
+ * rawExists(subquery('audit_log').select('id').where(eq('entityId', outerRef('id'))))
+ *
+ * @example
+ * // EXISTS with a full query builder
+ * rawExists(orm.select('sessions').where(and(eq('userId', outerRef('id')), gt('expiresAt', new Date()))))
+ */
+export function rawExists(
+	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
+): WhereRawExistsIntent {
+	const intent =
+		'buildIntent' in sq
+			? (sq as { buildIntent(): QueryIntent }).buildIntent()
+			: (sq as SubqueryBuilder).build().toIntent();
+	return { kind: 'rawExists', subquery: intent };
+}
+
+/**
+ * NOT EXISTS with an arbitrary subquery (not FK-resolved).
+ *
+ * Use when the subquery does not follow a declared schema relation.
+ * Accepts a SubqueryBuilder (must have `.build()`) or any builder
+ * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
+ *
+ * @param subquery - A SubqueryBuilder or any object with buildIntent()
+ *
+ * @example
+ * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.user_id = users.id)
+ * rawNotExists(subquery('bans').select('id').where(eq('userId', outerRef('id'))))
+ */
+export function rawNotExists(
+	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
+): WhereRawNotExistsIntent {
+	const intent =
+		'buildIntent' in sq
+			? (sq as { buildIntent(): QueryIntent }).buildIntent()
+			: (sq as SubqueryBuilder).build().toIntent();
+	return { kind: 'rawNotExists', subquery: intent };
 }
 
 // ============================================================================

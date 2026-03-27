@@ -6,7 +6,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { identityNaming } from '../../naming-plugin.js';
 import type { CompilerContext, Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import {
@@ -15,15 +14,8 @@ import {
 	leastHandler,
 	nullIfHandler,
 } from './coalesce.js';
+import { makeCtx } from '../../__tests__/helpers/test-context.js';
 
-function makeCtx(overrides: Partial<CompilerContext> = {}): CompilerContext {
-	return {
-		naming: identityNaming,
-		rootTable: 'test_table',
-		maxRecursiveDepth: 100,
-		...overrides,
-	} as CompilerContext;
-}
 
 // ============================================================================
 // coalesceHandler errors
