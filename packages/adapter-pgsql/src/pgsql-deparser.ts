@@ -510,7 +510,10 @@ function deparseAExpr(node: A_Expr): string {
 	if (kind === 'AEXPR_IN') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const right = node.rexpr ? deparse(node.rexpr) : '';
-		return op === '<>' ? `${left} NOT IN ${right}` : `${left} IN ${right}`;
+		// Wrap List in parentheses for proper IN (...) syntax
+		const rightWrapped =
+			node.rexpr && 'List' in node.rexpr ? `(${right})` : right;
+		return op === '<>' ? `${left} NOT IN ${rightWrapped}` : `${left} IN ${rightWrapped}`;
 	}
 
 	if (kind === 'AEXPR_NULLIF') {
