@@ -153,23 +153,48 @@ function buildExistsSubquery(
 		| readonly { relation?: string; joinType?: string }[]
 		| undefined;
 	if (includeDecisions && includeDecisions.length > 0) {
+		// Track alias → realTableName for multi-hop FK resolution.
+		// When the 2nd+ include is a relation on an intermediate joined table
+		// (not the root targetTable), we find the correct FK by scanning
+		// previously joined tables first, then falling back to root.
+		const joinedTables = new Map<string, string>(); // alias → realTableName
+
 		for (const inc of includeDecisions) {
 			const joinRelation = inc.relation;
 			if (!joinRelation) continue;
 
 			// Resolve the join target table and FK columns from ModelIR when available.
-			// The relation is on the subquery's table (targetTable), e.g. calls.callerFile.
 			let joinTargetTable: string = joinRelation;
 			let joinSourceCol: string | undefined;
 			let joinTargetCol: string | undefined;
+			// sourceAliasForJoin: alias to use on the LEFT side of the JOIN ON.
+			// Defaults to the root EXISTS alias; overridden when FK is found on an
+			// intermediate table (multi-hop).
+			let sourceAliasForJoin: string = targetAlias;
 
 			const model = ctx.model;
 			if (model) {
-				const rel = model.getRelation(`${targetTable}.${joinRelation}`);
+				let rel = null;
+
+				// 1. Try each previously joined table (in insertion order).
+				for (const [prevAlias, prevRealTable] of joinedTables) {
+					rel = model.getRelation(`${prevRealTable}.${joinRelation}`);
+					if (rel) {
+						sourceAliasForJoin = prevAlias;
+						break;
+					}
+				}
+
+				// 2. Fallback: root target table.
+				if (!rel) {
+					rel = model.getRelation(`${targetTable}.${joinRelation}`);
+					// sourceAliasForJoin stays as targetAlias (root EXISTS alias)
+				}
+
 				if (rel) {
 					joinTargetTable = rel.target;
 					if (rel.type === 'belongsTo') {
-						// FK is on the source side (targetTable.fkCol → joinTargetTable.id)
+						// FK is on the source side (sourceTable.fkCol → joinTargetTable.id)
 						const fk =
 							typeof rel.foreignKey === 'string'
 								? rel.foreignKey
@@ -181,7 +206,7 @@ function buildExistsSubquery(
 							(ctx.defaultPkColumnName as string | undefined) ??
 							DEFAULT_PK_COLUMN;
 					} else {
-						// hasMany/hasOne: FK is on the target side (joinTargetTable.fkCol → targetTable.id)
+						// hasMany/hasOne: FK is on the target side (joinTargetTable.fkCol → sourceTable.id)
 						const fk =
 							typeof rel.foreignKey === 'string'
 								? rel.foreignKey
@@ -198,7 +223,7 @@ function buildExistsSubquery(
 
 			// Fall back to FK derivation convention when ModelIR didn't resolve columns.
 			if (!joinSourceCol) {
-				// Assume belongsTo: FK on targetTable = joinRelation + '_id'
+				// Assume belongsTo: FK on source table = joinRelation + '_id'
 				joinSourceCol = (ctx.deriveFkColumnName ?? defaultFkDerivation)(
 					joinRelation,
 					(ctx.defaultPkColumnName as string | undefined) ?? DEFAULT_PK_COLUMN,
@@ -210,7 +235,7 @@ function buildExistsSubquery(
 			const joinAlias = joinRelation; // e.g. 'callerFile'
 			const joinQuals = fkCorrelation(
 				joinSourceCol,
-				targetAlias,
+				sourceAliasForJoin, // resolved source alias (root or intermediate)
 				joinTargetCol ?? DEFAULT_PK_COLUMN,
 				joinAlias,
 				ctx.naming,
@@ -230,6 +255,9 @@ function buildExistsSubquery(
 
 			// Wrap current fromNode with the new join: JoinExpr { larg: fromNode, rarg: joinRangeVar }
 			fromNode = joinExpr(joinType, fromNode, joinRangeVar, joinQuals);
+
+			// Track this join for subsequent iterations (multi-hop resolution).
+			joinedTables.set(joinAlias, joinTargetTable);
 		}
 	}
 
