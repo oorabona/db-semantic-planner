@@ -260,6 +260,67 @@ export interface PlanDecision {
 	readonly batchValuesParams?: readonly unknown[];
 }
 
+// ============================================================================
+// PlanDecision sub-types (discriminated sub-interfaces + type guards)
+// ============================================================================
+
+/**
+ * Any decision of type 'join'.
+ * Narrows `type` to the literal 'join' for safe switch exhaustion.
+ */
+export interface JoinDecision extends PlanDecision {
+	readonly type: 'join';
+}
+
+/**
+ * A 'join' decision that carries pre-compiled PostgreSQL AST nodes.
+ * Used by both table-mode and BatchValues-mode joins when the ON condition
+ * has been compiled ahead of time in adapter-compiler-select.ts.
+ *
+ * The `joinRarg` is the right-hand RangeVar/RangeFunction; `joinOnNode` is
+ * the A_Expr tree for the ON clause.
+ */
+export interface PrecompiledJoinDecision extends JoinDecision {
+	readonly joinRarg: Node;
+	readonly joinOnNode: Node;
+}
+
+/**
+ * A pre-compiled 'join' decision backed by a BatchValues unnest() source.
+ * `batchValuesParams` must be spliced into compiler state BEFORE other query
+ * parameters so that $1/$2/… ParamRefs in the RangeFunction align correctly.
+ */
+export interface BatchValuesJoinDecision extends PrecompiledJoinDecision {
+	readonly batchValuesParams: readonly unknown[];
+}
+
+/** Narrows a PlanDecision to JoinDecision (type === 'join'). */
+export function isJoinDecision(d: PlanDecision): d is JoinDecision {
+	return d.type === 'join';
+}
+
+/**
+ * Narrows a PlanDecision to PrecompiledJoinDecision.
+ * True when the join carries pre-compiled `joinRarg` + `joinOnNode` AST nodes
+ * (table mode or BatchValues mode).
+ */
+export function isPrecompiledJoinDecision(
+	d: PlanDecision,
+): d is PrecompiledJoinDecision {
+	return d.type === 'join' && d.joinRarg !== undefined && d.joinOnNode !== undefined;
+}
+
+/**
+ * Narrows a PlanDecision to BatchValuesJoinDecision.
+ * True when the join is a BatchValues unnest() join and carries pre-spliced
+ * parameter arrays in `batchValuesParams`.
+ */
+export function isBatchValuesJoinDecision(
+	d: PlanDecision,
+): d is BatchValuesJoinDecision {
+	return isPrecompiledJoinDecision(d) && d.batchValuesParams !== undefined;
+}
+
 /**
  * Simplified PlanReport for the spike
  */
@@ -1290,17 +1351,17 @@ export class PlanCompiler {
 					// from[0] as larg — this chains multiple .join() calls correctly:
 					//   first:  from[0] = join(rangeVar(root), rarg1, on1)
 					//   second: from[0] = join(prev_join, rarg2, on2)
-					if (decision.joinRarg !== undefined && decision.joinOnNode !== undefined) {
+					if (isPrecompiledJoinDecision(decision)) {
 						// Table/BatchValues mode: pre-compiled rarg + ON node; larg = from[0]
 						// BatchValues: splice batch params into state BEFORE other query params
 						// so that $1, $2, ... in the RangeFunction align with parameters[0], [1], ...
-						if (decision.batchValuesParams) {
+						if (isBatchValuesJoinDecision(decision)) {
 							for (const p of decision.batchValuesParams) {
 								this.state.parameters.push(p);
 							}
 							this.state.paramIndex = this.state.parameters.length;
 						}
-						// joinRarg and joinOnNode are now typed as Node — no cast needed.
+						// decision is PrecompiledJoinDecision — joinRarg + joinOnNode are non-optional.
 						const jRarg = decision.joinRarg;
 						const jOn = decision.joinOnNode;
 						from[0] =

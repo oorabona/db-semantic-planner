@@ -104,6 +104,13 @@ import { intentToDecisions } from './intent-to-decisions.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
+// Internal types
+// ============================================================================
+
+type CompileSubqueryResult = { ast: import('@pgsql/types').Node; parameters: readonly unknown[] };
+type CompileSubqueryFn = (query: import('@dbsp/types').QueryIntent, paramOffset: number) => CompileSubqueryResult;
+
+// ============================================================================
 // Options
 // ============================================================================
 
@@ -327,10 +334,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
 			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
 			// case 'selectCustomExpression').
-			compileSubquery(
-				query: import('@dbsp/types').QueryIntent,
-				paramOffset: number,
-			): { ast: import('@pgsql/types').Node; parameters: readonly unknown[] } {
+			compileSubquery(query: import('@dbsp/types').QueryIntent, paramOffset: number): CompileSubqueryResult {
 				const innerCompiler = new PlanCompiler({
 					naming,
 					...(schemaName !== undefined && { schema: schemaName }),

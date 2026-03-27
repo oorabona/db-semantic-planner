@@ -28,6 +28,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { InvalidOperationError } from './errors.js';
+import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
 
@@ -155,13 +156,7 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	}
 
 	private requireAdapter(): Adapter {
-		if (!this.adapter) {
-			throw new InvalidOperationError(
-				'recursive',
-				'This operation requires an adapter — pass an adapter when creating the ORM',
-			);
-		}
-		return this.adapter;
+		return requireAdapterUtil(this.adapter, 'recursive');
 	}
 
 	/**
