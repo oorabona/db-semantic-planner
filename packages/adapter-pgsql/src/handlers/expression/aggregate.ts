@@ -41,7 +41,15 @@ function buildAggregate(
 	}
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;
-	const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+	let colRef: Node;
+	if (column.includes('.')) {
+		const dotIdx = column.indexOf('.');
+		const table = column.slice(0, dotIdx);
+		const col = column.slice(dotIdx + 1);
+		colRef = columnRef(col, table, undefined, ctx.naming);
+	} else {
+		colRef = columnRef(column, tableAlias, undefined, ctx.naming);
+	}
 
 	return funcCall(funcName, [colRef], {
 		distinct,
