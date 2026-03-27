@@ -51,8 +51,6 @@ function compileWhereExpr(expr: ExprRef): {
 				type: 'where',
 				operator: 'expression',
 				expressionIntent: (expr as unknown as { intent: unknown }).intent,
-				value: undefined,
-				subqueryOperator: undefined,
 			},
 		],
 	};
@@ -256,8 +254,6 @@ describe('fullTextSearch + textScore combined', () => {
 					type: 'where',
 					operator: 'expression',
 					expressionIntent: (whereExpr as unknown as { intent: unknown }).intent,
-					value: undefined,
-					subqueryOperator: undefined,
 				},
 				{
 					type: 'orderBy',
@@ -306,8 +302,6 @@ describe('fullTextSearch + textScore combined', () => {
 					type: 'where',
 					operator: 'expression',
 					expressionIntent: (whereExpr as unknown as { intent: unknown }).intent,
-					value: undefined,
-					subqueryOperator: undefined,
 				},
 				{
 					type: 'orderBy',

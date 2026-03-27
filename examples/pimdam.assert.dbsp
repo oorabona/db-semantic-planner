@@ -226,7 +226,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT products.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = products.category_id), '[]'::json) AS category_json FROM ch6_pimdam.products WHERE (products.active = $1 AND products.deleted_at IS NULL) AND products.category_id = $2
+sql.equals: SELECT products.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = products.category_id), '[]'::json) AS category_json FROM ch6_pimdam.products WHERE products.active = $1 AND products.deleted_at IS NULL AND products.category_id = $2
 params.equals: [true,7]
 db.rows.equals: 4
 db.output:

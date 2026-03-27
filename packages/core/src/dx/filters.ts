@@ -216,12 +216,12 @@ export const isDistinctFrom: ComparisonFilter =
 export function like<T extends string, C extends string>(
 	field: ColumnRef<T, C, string>,
 	pattern: string,
-	caseInsensitive?: boolean,
+	options?: boolean | { caseInsensitive?: boolean; escape?: string },
 ): WhereLikeIntent;
 export function like(
 	field: string,
 	pattern: string,
-	caseInsensitive?: boolean,
+	options?: boolean | { caseInsensitive?: boolean; escape?: string },
 ): WhereLikeIntent;
 export function like(
 	field: ColumnRef<string, string, string> | string,
