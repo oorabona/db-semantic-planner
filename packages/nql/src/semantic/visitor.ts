@@ -102,6 +102,12 @@ import {
 	visitTableRef,
 	visitWhereClause,
 } from './visit-query.js';
+// CTE / WITH clause
+import {
+	visitCteItem,
+	visitCteList,
+	visitWithQuery,
+} from './visit-cte.js';
 
 const BaseCstVisitor = nqlParser.getBaseCstVisitorConstructor();
 
@@ -368,6 +374,17 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 	assignment(ctx: CstContext) {
 		return visitAssignment(ctx, this.v);
+	}
+
+	// -- CTE / WITH --
+	withQuery(ctx: CstContext) {
+		return visitWithQuery(ctx, this.v);
+	}
+	cteList(ctx: CstContext) {
+		return visitCteList(ctx, this.v);
+	}
+	cteItem(ctx: CstContext) {
+		return visitCteItem(ctx, this.v);
 	}
 }
 

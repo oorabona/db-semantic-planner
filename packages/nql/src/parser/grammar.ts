@@ -103,6 +103,7 @@ import {
 	Values,
 	When,
 	Where,
+	With,
 } from '../lexer/tokens.js';
 
 /**
@@ -147,13 +148,49 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * statement = query | mutation_pipeline ;
+	 * statement = withQuery | query | mutation_pipeline ;
+	 * withQuery is tried first via GATE to avoid ambiguity with 'with' as identifier.
 	 */
 	private statement = this.RULE('statement', () => {
 		this.OR([
+			{
+				GATE: () => this.LA(1).tokenType === With,
+				ALT: () => this.SUBRULE(this.withQuery),
+			},
 			{ ALT: () => this.SUBRULE(this.mutationPipeline) },
 			{ ALT: () => this.SUBRULE(this.query) },
 		]);
+	});
+
+	/**
+	 * withQuery = "with" cteList query ;
+	 */
+	public withQuery = this.RULE('withQuery', () => {
+		this.CONSUME(With);
+		this.SUBRULE(this.cteList);
+		this.SUBRULE(this.query);
+	});
+
+	/**
+	 * cteList = cteItem { "," cteItem } ;
+	 */
+	private cteList = this.RULE('cteList', () => {
+		this.SUBRULE(this.cteItem);
+		this.MANY(() => {
+			this.CONSUME(Comma);
+			this.SUBRULE2(this.cteItem);
+		});
+	});
+
+	/**
+	 * cteItem = Identifier "as" "(" query ")" ;
+	 */
+	private cteItem = this.RULE('cteItem', () => {
+		this.CONSUME(Identifier);
+		this.CONSUME(As);
+		this.CONSUME(LParen);
+		this.SUBRULE(this.query);
+		this.CONSUME(RParen);
 	});
 
 	// ============================================================

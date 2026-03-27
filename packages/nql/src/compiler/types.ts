@@ -4,6 +4,7 @@
  */
 
 import type {
+	CteQueryIntent,
 	MutationIntent,
 	QueryIntent,
 	SetOperationIntent,
@@ -14,6 +15,8 @@ import type { ColumnValidator } from './column-validator.js';
 
 export interface CompileResult {
 	readonly query?: QueryIntent;
+	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
+	readonly cteQuery?: CteQueryIntent;
 	readonly mutation?: MutationIntent;
 	readonly returning?: readonly string[];
 	/** Named bindings from `| bind X` clauses (CTE source queries) */
