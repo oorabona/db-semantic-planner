@@ -19,8 +19,14 @@ export {
 	type CompilerOptions,
 	compilePlan,
 	PlanCompiler,
+	type BatchValuesJoinDecision,
+	type JoinDecision,
+	type PrecompiledJoinDecision,
 	type PlanDecision,
 	type SimplifiedPlanReport,
+	isBatchValuesJoinDecision,
+	isJoinDecision,
+	isPrecompiledJoinDecision,
 } from './compiler.js';
 // DDL Generation
 export {

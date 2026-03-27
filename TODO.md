@@ -124,15 +124,15 @@
 - [x] ✅ [Core/Adapter] Shared makeCtx test utility extracted (8 files deduplicated). (2026-03-27)
 - [-] ⏭️ [Core] 14-file circular import in core/dx/ — type-only closures, no runtime impact. Deferred.
 - [-] ⏭️ [Core] EXT-PARAM-DEDUP — correctness-safe, intentional deferral. Stays in backlog.
-- [ ] 🔧 [Core] expressions.ts: add comment explaining ExpressionSpec vs ExpressionRef duck-type check ordering — Priority: L
-- [ ] 🔧 [Adapter] Extract named type for compileSubquery callback signature — Priority: L
-- [ ] 🔧 [Core] Extract requireAdapter() from cte-builder + raw-cte-builder into builder-utils — Priority: L
-- [ ] 🔧 [All] 680 TSC errors in test files (orm.select() → orm.from() migration) — Priority: L
+- [x] ✅ [Core] expressions.ts: comment explaining ExpressionSpec vs ExpressionRef duck-type check ordering added. (2026-03-27)
+- [x] ✅ [Adapter] CompileSubqueryResult + CompileSubqueryFn named types extracted in pgsql-adapter.ts. (2026-03-27)
+- [x] ✅ [Core] requireAdapter() extracted into builder-utils.ts, imported by cte-builder + raw-cte-builder. (2026-03-27)
+- [x] ✅ [All] 680 TSC errors fixed — select() re-exposed on OrmInstance type. (2026-03-27)
 
 ## Backlog — from /review (2026-03-25)
 
 - [ ] 🔧 [Adapter] FR-7: Table integrity check API (`table.checkIntegrity()`) — Priority: L
-- [ ] 🔧 [Adapter] PlanDecision.joinRarg/joinOnNode/batchValuesParams: use discriminated sub-types instead of Node|undefined — Priority: L
+- [x] ✅ [Adapter] PlanDecision.joinRarg/joinOnNode/batchValuesParams: discriminated sub-types — JoinDecision, PrecompiledJoinDecision, BatchValuesJoinDecision interfaces + 3 type guards (isJoinDecision, isPrecompiledJoinDecision, isBatchValuesJoinDecision) in compiler.ts. 16 new tests in plan-decision-type-guards.test.ts. (2026-03-27)
 
 ## Feature Requests — from astix code-health migration (2026-03-23)
 

@@ -88,9 +88,11 @@ export type ExprInput =
 // ============================================================================
 
 function toExpressionIntent(input: ExprInput): ExpressionIntent {
+	// ExpressionRef check first — fastest path for the common case.
 	if (input instanceof ExpressionRef) return input.intent;
-	// Handle ExpressionSpec duck-type (e.g. SubqueryExpression.asExpr() returns
-	// a plain { __expr: true, intent } object — not an ExpressionRef instance)
+	// Duck-type check AFTER instanceof: SubqueryExpression.asExpr() returns a plain
+	// { __expr: true, intent } object (not an ExpressionRef instance), so instanceof
+	// would miss it. Order matters: instanceof must come first.
 	if (
 		typeof input === 'object' &&
 		input !== null &&
