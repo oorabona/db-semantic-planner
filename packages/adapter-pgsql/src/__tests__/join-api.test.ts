@@ -60,7 +60,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 
 	it('T1: relation mode — INNER JOIN (default) via FK (calls.caller_id → symbols)', () => {
 		const orm = buildOrm();
-		const dump = (orm as any).select('calls').join('caller').dump();
+		const dump = orm.select('calls').join('caller').dump();
 		expect(ws(dump.sql)).toEqual(
 			'SELECT calls.* FROM (calls JOIN symbols AS caller ON caller_id = caller.id) caller',
 		);
@@ -81,7 +81,7 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 
 	it('T3: relation mode — belongsTo join (symbols.file_id → files)', () => {
 		const orm = buildOrm();
-		const dump = (orm as any).select('symbols').join('file').dump();
+		const dump = orm.select('symbols').join('file').dump();
 		expect(ws(dump.sql)).toEqual(
 			'SELECT symbols.* FROM (symbols JOIN files AS file ON file_id = file.id) file',
 		);

@@ -33,7 +33,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('WITH');
@@ -52,7 +52,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS int4[])');
@@ -68,7 +68,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 				parent_name: ['Foo', 'Bar', 'Baz'],
 			})
 			.withIndex('idx')
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.params[0]).toEqual([1, 2, 3]);
@@ -81,7 +81,7 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 			.withCte('lookups')
 			.fromUnnest({ id: [10, 20] })
 			.withIndex('idx')
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		// ordinality - 1 expression should appear
@@ -100,7 +100,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const result = orm
 			.withCte('lookups')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('WITH');
@@ -113,7 +113,7 @@ describe('SC-15: CTE joined with outer query', () => {
 		const result = orm
 			.withCte('lookups')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query((orm as any).select('symbols').where(eq('active', true)))
+			.query(orm.select('symbols').where(eq('active', true)))
 			.dump();
 
 		// $1 is the CTE array, $2 is the WHERE parameter
@@ -157,7 +157,7 @@ describe('SC-16: CTE without index (no WITH ORDINALITY)', () => {
 		const result = orm
 			.withCte('data')
 			.fromUnnest({ id: [1, 2], name: ['a', 'b'] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('unnest');
@@ -173,7 +173,7 @@ describe('SC-16: CTE without index (no WITH ORDINALITY)', () => {
 		const result = orm
 			.withCte('ids')
 			.fromUnnest({ id: [10, 20, 30] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('ids');
@@ -191,7 +191,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('nums')
 			.fromUnnest({ n: [1, 2, 3] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS int4[])');
@@ -202,7 +202,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('strs')
 			.fromUnnest({ s: ['a', 'b'] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS text[])');
@@ -213,7 +213,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('flags')
 			.fromUnnest({ flag: [true, false] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS bool[])');
@@ -224,7 +224,7 @@ describe('type inference in CTE columns', () => {
 		const result = orm
 			.withCte('scores')
 			.fromUnnest({ score: [1.5, 2.7] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('CAST($1 AS float8[])');
@@ -238,7 +238,7 @@ describe('error cases', () => {
 	it('throws when calling query() without fromUnnest()', () => {
 		const orm = makeOrm();
 		expect(() => {
-			orm.withCte('data').query((orm as any).select('symbols'));
+			orm.withCte('data').query(orm.select('symbols'));
 		}).toThrow(InvalidOperationError);
 	});
 
@@ -255,7 +255,7 @@ describe('error cases', () => {
 		const result = orm
 			.withCte('empty')
 			.fromUnnest({ id: [], name: [] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('empty');
@@ -268,7 +268,7 @@ describe('error cases', () => {
 		const result = orm
 			.withCte('single')
 			.fromUnnest({ id: [1, 2, 3] })
-			.query((orm as any).select('symbols'))
+			.query(orm.select('symbols'))
 			.dump();
 
 		expect(result.sql).toContain('single');
@@ -301,7 +301,7 @@ describe('Gap 5: CTE outer query with JOINs', () => {
 		const result = (orm as any)
 			.withCte('lookups')
 			.fromUnnest({ file_id: [1, 2, 3] })
-			.query((orm as any).select('symbols').join('file'))
+			.query(orm.select('symbols').join('file'))
 			.dump();
 
 		// WITH clause present
@@ -323,7 +323,7 @@ describe('Gap 5: CTE outer query with JOINs', () => {
 		const result = (orm as any)
 			.withCte('batch')
 			.fromUnnest({ file_id: [10, 20] })
-			.query((orm as any).select('symbols').join('file').where(eq('id', 99)))
+			.query(orm.select('symbols').join('file').where(eq('id', 99)))
 			.dump();
 
 		// CTE array param

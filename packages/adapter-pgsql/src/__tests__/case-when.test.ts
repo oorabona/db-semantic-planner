@@ -40,7 +40,7 @@ describe('1. caseWhen() in orderBy() — file affinity pattern', () => {
 	it('produces CASE WHEN col = $1 THEN 0 ELSE 1 END in ORDER BY ASC', () => {
 		const orm = buildOrm();
 		const aff = caseWhen(eq('file_id', 42), literal(0)).else(literal(1));
-		const dump = (orm as any).select('symbols').columns(['name']).orderBy(aff).dump();
+		const dump = orm.select('symbols').columns(['name']).orderBy(aff).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name FROM symbols ORDER BY CASE WHEN symbols.file_id = $1 THEN 0 ELSE 1 END ASC'),
 		);
@@ -49,7 +49,7 @@ describe('1. caseWhen() in orderBy() — file affinity pattern', () => {
 	it('preserves DESC direction', () => {
 		const orm = buildOrm();
 		const aff = caseWhen(eq('file_id', 7), literal(0)).else(literal(1));
-		const dump = (orm as any).select('symbols').columns(['name']).orderBy(aff, 'desc').dump();
+		const dump = orm.select('symbols').columns(['name']).orderBy(aff, 'desc').dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name FROM symbols ORDER BY CASE WHEN symbols.file_id = $1 THEN 0 ELSE 1 END DESC'),
 		);
@@ -61,7 +61,7 @@ describe('2. caseWhen() in columns() with .as()', () => {
 	it('produces CASE WHEN active = $1 THEN $2 ELSE $3 END AS status', () => {
 		const orm = buildOrm();
 		const status = caseWhen(eq('active', true), literal('active')).else(literal('inactive')).as('status');
-		const dump = (orm as any).select('symbols').columns(['name', status]).dump();
+		const dump = orm.select('symbols').columns(['name', status]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name, CASE WHEN symbols.active = $1 THEN $2 ELSE $3 END AS status FROM symbols'),
 		);
@@ -77,7 +77,7 @@ describe('3. Multi-branch caseWhen() with 3 WHEN clauses', () => {
 			.when(gte('score', 50), literal('C'))
 			.else(literal('D'))
 			.as('grade');
-		const dump = (orm as any).select('symbols').columns(['name', grade]).dump();
+		const dump = orm.select('symbols').columns(['name', grade]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name, CASE WHEN symbols.score >= $1 THEN $2 WHEN symbols.score >= $3 THEN $4 WHEN symbols.score >= $5 THEN $6 ELSE $7 END AS grade FROM symbols'),
 		);
@@ -94,7 +94,7 @@ describe('4. caseWhen() with numeric literal THEN/ELSE', () => {
 			.when(eq('kind', 'class'), literal(2))
 			.else(literal(3))
 			.as('priority');
-		const dump = (orm as any).select('symbols').columns(['name', priority]).dump();
+		const dump = orm.select('symbols').columns(['name', priority]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN 1 WHEN symbols.kind = $2 THEN 2 ELSE 3 END AS priority FROM symbols'),
 		);
@@ -106,7 +106,7 @@ describe('5. caseWhen() without ELSE via toExpr()', () => {
 	it('produces CASE WHEN ... END without ELSE clause', () => {
 		const orm = buildOrm();
 		const label = caseWhen(eq('active', true), literal('yes')).toExpr().as('label');
-		const dump = (orm as any).select('symbols').columns(['name', label]).dump();
+		const dump = orm.select('symbols').columns(['name', label]).dump();
 		expect(ws(dump.sql)).toEqual(
 			ws('SELECT symbols.name, CASE WHEN symbols.active = $1 THEN $2 END AS label FROM symbols'),
 		);
@@ -119,8 +119,8 @@ describe('6. CaseBuilder immutability', () => {
 		const base = caseWhen(eq('score', 100), literal('perfect'));
 		const extended = base.when(gte('score', 50), literal('pass'));
 		const orm = buildOrm();
-		const d1 = (orm as any).select('symbols').columns([base.else(literal('fail')).as('r1')]).dump();
-		const d2 = (orm as any).select('symbols').columns([extended.else(literal('fail')).as('r2')]).dump();
+		const d1 = orm.select('symbols').columns([base.else(literal('fail')).as('r1')]).dump();
+		const d2 = orm.select('symbols').columns([extended.else(literal('fail')).as('r2')]).dump();
 		expect(d1.sql.split('WHEN').length - 1).toBe(1);
 		expect(d2.sql.split('WHEN').length - 1).toBe(2);
 	});
