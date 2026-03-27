@@ -886,7 +886,7 @@ function processInclude(
 	opts: Required<PlanOptions>,
 	intentPath: string,
 	depth: number,
-	ancestorIsLeftJoin: boolean = false,
+	ancestorIsLeftJoin = false,
 ): void {
 	state.relationsAnalyzed++;
 
@@ -966,12 +966,15 @@ function processInclude(
 
 	// Pre-compute join type for include-strategy decision embedding
 	// (only relevant when strategy is 'join')
+	// When an ancestor used LEFT JOIN (optional relation), cascade LEFT to preserve
+	// parent rows — even for relations that would normally be INNER (required).
+	// An explicit join: 'inner' override on THIS hop resets the cascade for children.
+	const autoJoinType = determineJoinType(relation, opts, !!include.where);
+	const cascadedJoinType: 'inner' | 'left' =
+		ancestorIsLeftJoin && include.join === undefined ? 'left' : autoJoinType;
 	const explicitJoinType: 'inner' | 'left' | undefined =
 		includeStrategy === 'join'
-			? (include.join ??
-				(ancestorIsLeftJoin
-					? 'left'
-					: determineJoinType(relation, opts, !!include.where)))
+			? (include.join ?? cascadedJoinType)
 			: undefined;
 
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
@@ -1070,6 +1073,12 @@ function processInclude(
 
 	// Process nested includes
 	if (include.include) {
+		// Propagate LEFT JOIN cascade to children based on THIS hop's actual join type.
+		// - If this hop emits LEFT JOIN → children inherit the cascade
+		// - If this hop emits INNER JOIN (explicit or auto) → cascade resets
+		// When strategy is not 'join' (json_agg, lateral, cte), explicitJoinType is
+		// undefined → false → no cascade (non-join strategies don't affect the chain).
+		const nextAncestorIsLeftJoin = explicitJoinType === 'left';
 		for (let i = 0; i < include.include.length; i++) {
 			const nestedInc = include.include[i];
 			if (nestedInc) {
@@ -1081,7 +1090,7 @@ function processInclude(
 					opts,
 					`${intentPath}.include[${i}]`,
 					depth + 1,
-					ancestorIsLeftJoin || explicitJoinType === 'left',
+					nextAncestorIsLeftJoin,
 				);
 			}
 		}
