@@ -309,3 +309,49 @@ describe('10. nested and(or(eq, neq), not(isNull))', () => {
 		);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 11. Regression: two exists() on same relation produce distinct params
+// ---------------------------------------------------------------------------
+
+describe('11. two exists() on same relation — distinct params (no duplication)', () => {
+	// Bug: extractExistsDecisions used .find() which always returned the FIRST
+	// matching intent for both filter-strategy decisions when relation names matched.
+	// Fix: switch to .findIndex() + .splice() to consume each intent once.
+	it('and(exists(callee_calls, {where}), exists(callee_calls, {where})) — both params present', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.select('symbols')
+			.where(
+				and(
+					exists('callee_calls', { where: eq('caller_id', 1) }),
+					exists('callee_calls', { where: eq('caller_id', 2) }),
+				),
+			)
+			.dump();
+
+		// Both params must appear — not [1, 1] (the bug) or [2, 2]
+		expect(dump.params).toContain(1);
+		expect(dump.params).toContain(2);
+		expect(dump.params).toHaveLength(2);
+
+		// Two separate EXISTS subqueries must appear in the SQL
+		const matches = ws(dump.sql).match(/EXISTS/g);
+		expect(matches).toHaveLength(2);
+	});
+
+	it('param order: first exists gets param 1, second gets param 2', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.select('symbols')
+			.where(
+				and(
+					exists('callee_calls', { where: eq('caller_id', 10) }),
+					exists('callee_calls', { where: eq('caller_id', 20) }),
+				),
+			)
+			.dump();
+
+		expect(dump.params).toEqual([10, 20]);
+	});
+});
