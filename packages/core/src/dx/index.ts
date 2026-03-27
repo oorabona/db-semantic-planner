@@ -112,6 +112,8 @@ export {
 	not,
 	notExists,
 	or,
+	rawExists,
+	rawNotExists,
 	type RangeValue,
 	// Range (PostgreSQL)
 	rangeContainedBy,

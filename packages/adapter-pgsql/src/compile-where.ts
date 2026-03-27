@@ -12,6 +12,14 @@ import type {
 	ExpressionIntent,
 	ModelIR,
 	QueryIntent,
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereLikeIntent,
+	WhereNotIntent,
+	WhereOrIntent,
+	WhereRawExistsIntent,
+	WhereRawNotExistsIntent,
+	WhereRelationFilterIntent,
 	WhereIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
@@ -329,14 +337,9 @@ export function compileWhereIntent(
 	// directly here when escape is present to preserve LIKE $1 ESCAPE $2 semantics.
 	if (
 		intent.kind === 'like' &&
-		(intent as { escape?: unknown }).escape !== undefined
+		(intent as WhereLikeIntent).escape !== undefined
 	) {
-		const likeIntent = intent as {
-			field: string;
-			pattern: unknown;
-			caseInsensitive?: boolean;
-			escape: unknown;
-		};
+		const likeIntent = intent as WhereLikeIntent;
 		const operator = likeIntent.caseInsensitive ? 'ilike' : 'like';
 		return dispatcher(
 			{
@@ -417,11 +420,7 @@ export function compileWhereIntent(
 	// causing the dispatcher to use the fallback '=' handler — wrong.
 	// We convert to exists/notExists and recurse.
 	if (intent.kind === 'relationFilter') {
-		const rf = intent as {
-			relation: string | readonly string[];
-			where: WhereIntent;
-			mode: 'some' | 'every' | 'none';
-		};
+		const rf = intent as WhereRelationFilterIntent;
 		// Use the first element if relation is an array (multi-hop not supported here)
 		const relation = Array.isArray(rf.relation)
 			? (rf.relation[0] as string)
@@ -461,7 +460,7 @@ export function compileWhereIntent(
 	// These kinds have no Decision equivalent — they must be compiled here
 	// using the compileSubquery callback, then wrapped in a SubLink node.
 	if (intent.kind === 'rawExists' || intent.kind === 'rawNotExists') {
-		const subIntent = (intent as unknown as { subquery: QueryIntent }).subquery;
+		const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent).subquery;
 		const {
 			sql: subNode,
 			paramCount,
@@ -488,7 +487,7 @@ export function compileWhereIntent(
 	// Fix: handle and/or/not recursively via compileWhereIntent so every nested
 	// condition gets proper dispatch (including expression, subquery, etc.).
 	if (intent.kind === 'and') {
-		const andIntent = intent as unknown as { conditions: WhereIntent[] };
+		const andIntent = intent as WhereAndIntent;
 		const nodes = andIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty AND = tautology; use a truthy constant
@@ -505,7 +504,7 @@ export function compileWhereIntent(
 		return andExpr(...nodes);
 	}
 	if (intent.kind === 'or') {
-		const orIntent = intent as unknown as { conditions: WhereIntent[] };
+		const orIntent = intent as WhereOrIntent;
 		const nodes = orIntent.conditions.map((c) => compileWhereIntent(c, ctx));
 		if (nodes.length === 0) {
 			// Empty OR = contradiction; use a falsy constant
@@ -522,7 +521,7 @@ export function compileWhereIntent(
 		return orExpr(...nodes);
 	}
 	if (intent.kind === 'not') {
-		const notIntent = intent as { condition: WhereIntent };
+		const notIntent = intent as WhereNotIntent;
 		return notExpr(compileWhereIntent(notIntent.condition, ctx));
 	}
 
@@ -532,11 +531,7 @@ export function compileWhereIntent(
 	// The generic dispatcher would call buildParamRef on it — wrong.
 	// Detect and compile both sides as expressions.
 	if (intent.kind === 'comparison') {
-		const cmpIntent = intent as unknown as {
-			field: string;
-			operator: string;
-			value: unknown;
-		};
+		const cmpIntent = intent as WhereComparisonIntent;
 		const v = cmpIntent.value;
 		const isExprRef =
 			v !== null &&
