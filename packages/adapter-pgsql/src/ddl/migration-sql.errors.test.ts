@@ -10,7 +10,7 @@
  * - Destructive filtering edge cases
  */
 
-import type { ColumnIR, ForeignKeyIR, IndexIR, TableIR } from '@dbsp/types';
+import type { ColumnIR, ForeignKeyIR, IndexIR, PolicyIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateMigrationSQL } from './migration-sql.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
@@ -1173,5 +1173,112 @@ describe('generateMigrationSQL — error paths & edge cases', () => {
 			);
 			expect(sql[0]).toContain('ALTER TABLE "tenant_5"."posts" ADD CONSTRAINT');
 		});
+	});
+});
+
+// ============================================================================
+// RLS Policy SQL Injection Prevention (SEC-DDL)
+// ============================================================================
+
+describe('create_policy SQL injection prevention', () => {
+	it('rejects semicolon in USING expression', () => {
+		const policy: PolicyIR = {
+			name: 'bad',
+			using: 'true; DROP TABLE users',
+		};
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			),
+		).toThrow('Unsafe SQL expression in USING expression');
+	});
+
+	it('rejects -- comment in USING expression', () => {
+		const policy: PolicyIR = {
+			name: 'bad',
+			using: '1=1 -- ignore rest',
+		};
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			),
+		).toThrow('Unsafe SQL expression in USING expression');
+	});
+
+	it('rejects /* comment in WITH CHECK expression', () => {
+		const policy: PolicyIR = {
+			name: 'bad',
+			withCheck: '/* injected */ true',
+		};
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			),
+		).toThrow('Unsafe SQL expression in WITH CHECK expression');
+	});
+
+	it('rejects backslash in WITH CHECK expression', () => {
+		const policy: PolicyIR = {
+			name: 'bad',
+			withCheck: 'owner_id = 1\; DROP TABLE users',
+		};
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			),
+		).toThrow('Unsafe SQL expression in WITH CHECK expression');
+	});
+
+	it('accepts safe expressions without throwing', () => {
+		const policy: PolicyIR = {
+			name: 'safe',
+			using: 'owner_id = current_user_id()',
+			withCheck: 'tenant_id = get_tenant_id()',
+		};
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_policy',
+						table: 'documents',
+						destructive: false,
+						details: '',
+						meta: { policy },
+					},
+				]),
+			),
+		).not.toThrow();
 	});
 });

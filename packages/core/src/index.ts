@@ -392,6 +392,7 @@ export type {
 export {
 	// Functions
 	assertTypeSupported,
+	createDialectCapabilities,
 	// Constants
 	DUCKDB_CAPABILITIES,
 	extendDialect,

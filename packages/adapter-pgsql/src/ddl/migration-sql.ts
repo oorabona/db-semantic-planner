@@ -20,6 +20,7 @@ import type {
 } from '@dbsp/types';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
+import { validateSqlExpression } from '../validate.js';
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -70,6 +71,8 @@ function buildPolicySQL(
 		policy.roles && policy.roles.length > 0
 			? ` TO ${policy.roles.map((r) => q(r)).join(', ')}`
 			: '';
+	if (policy.using) validateSqlExpression(policy.using, 'USING expression');
+	if (policy.withCheck) validateSqlExpression(policy.withCheck, 'WITH CHECK expression');
 	const usingClause = policy.using ? ` USING (${policy.using})` : '';
 	const withCheckClause = policy.withCheck
 		? ` WITH CHECK (${policy.withCheck})`
