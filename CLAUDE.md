@@ -212,13 +212,14 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | ParadeDB | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
 | PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
+| Manual JOIN | `.join(rel)` / `.join(table, { on, as, type })` — flat, non-hydrating | `orm.select('calls').join('caller')` / `.join('t', { on: eq(...), as: 'alias' })` |
 | DISTINCT ON | `.distinctOn('col1', 'col2')` | PostgreSQL DISTINCT ON |
 | Set operations | `.union()`, `.unionAll()`, `.intersect()`, `.except()` | `q1.union(q2).all()` |
 | IN subquery | `inSubquery('id', subquery('posts').select('userId'))` | WHERE id IN (SELECT ...) |
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
-| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md` | |
+| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md` | |
 
 ## Observability
 
