@@ -886,6 +886,7 @@ function processInclude(
 	opts: Required<PlanOptions>,
 	intentPath: string,
 	depth: number,
+	ancestorIsLeftJoin: boolean = false,
 ): void {
 	state.relationsAnalyzed++;
 
@@ -967,7 +968,10 @@ function processInclude(
 	// (only relevant when strategy is 'join')
 	const explicitJoinType: 'inner' | 'left' | undefined =
 		includeStrategy === 'join'
-			? (include.join ?? determineJoinType(relation, opts, !!include.where))
+			? (include.join ??
+				(ancestorIsLeftJoin
+					? 'left'
+					: determineJoinType(relation, opts, !!include.where)))
 			: undefined;
 
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
@@ -1077,6 +1081,7 @@ function processInclude(
 					opts,
 					`${intentPath}.include[${i}]`,
 					depth + 1,
+					ancestorIsLeftJoin || explicitJoinType === 'left',
 				);
 			}
 		}

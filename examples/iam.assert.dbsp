@@ -252,7 +252,7 @@ db.rows.equals: 5
 # Same as query 27 but with | flat — forces JOIN strategy instead of nested json_agg
 --- query: 28
 success: true
-sql.equals: SELECT users.*, user_roles.role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id JOIN iam_example.roles AS role ON user_roles.role_id = role.id LEFT JOIN iam_example.role_permissions AS role_permissions ON role.id = role_permissions.role_id JOIN iam_example.permissions AS permission ON role_permissions.permission_id = permission.id WHERE users.active = $1
+sql.equals: SELECT users.*, user_roles.role_id AS "userRoles.roleId", permission.* FROM iam_example.users LEFT JOIN iam_example.user_roles AS user_roles ON users.id = user_roles.user_id LEFT JOIN iam_example.roles AS role ON user_roles.role_id = role.id LEFT JOIN iam_example.role_permissions AS role_permissions ON role.id = role_permissions.role_id LEFT JOIN iam_example.permissions AS permission ON role_permissions.permission_id = permission.id WHERE users.active = $1
 params.equals: [true]
 
 # ─────────────────────────────────────────
