@@ -320,6 +320,276 @@ function compileJoinIntents(
 }
 
 // ============================================================================
+// Phase helpers — extracted from compileSelect for CC reduction
+// ============================================================================
+
+/**
+ * Propagate filter conditions from EXISTS decisions to matching includeStrategy decisions.
+ * When a relation is both filtered (EXISTS) and included, the filter appears in both
+ * the EXISTS subquery AND the include subquery.
+ */
+function propagateExistsConditions(
+	includeDecisions: PlanDecision[],
+	existsDecisions: PlanDecision[],
+): PlanDecision[] {
+	return includeDecisions.map((jd) => {
+		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
+
+		const matchingExists = existsDecisions.find(
+			(ed) =>
+				ed.type === 'where' &&
+				(ed.operator === 'exists' || ed.operator === 'notExists') &&
+				(ed.relationName === jd.relationName ||
+					ed.targetTable === jd.targetTable) &&
+				ed.conditions &&
+				(ed.conditions as PlanDecision[]).length > 0,
+		);
+
+		if (matchingExists?.conditions) {
+			return { ...jd, conditions: matchingExists.conditions };
+		}
+		return jd;
+	});
+}
+
+/**
+ * Strip auto-selected columns from join includeStrategy decisions when the query
+ * uses aggregation, DISTINCT, GROUP BY, or explicit column selection.
+ *
+ * In all four cases the JOIN itself is kept (for filtering / INNER JOIN semantics)
+ * but its auto-hydration columns would produce invalid SQL — they are cleared.
+ * Explicitly requested columns (via relationColumn()) are re-injected later by
+ * injectAndValidateRelationColumns().
+ *
+ * Mutates `decisions` in place (same pattern as the original code).
+ */
+function stripJoinColumnsForAggregation(
+	decisions: PlanDecision[],
+	intent: NonNullable<PlanReport['intent']>,
+): void {
+	// INCLUDE-COUNT: aggregate-only query (COUNT(*), no GROUP BY fields)
+	const isAggregateOnly =
+		intent.select &&
+		'type' in intent.select &&
+		intent.select.type === 'aggregate' &&
+		!(
+			'fields' in intent.select &&
+			(intent.select as { fields?: unknown }).fields
+		);
+
+	// DISTINCT-VECTOR: SELECT DISTINCT — vector cols have no equality operator
+	const isDistinct = intent.distinct === true;
+
+	// GROUP-BY-JOIN: GROUP BY — non-aggregate cols must appear in GROUP BY
+	const hasGroupBy = intent.groupBy && intent.groupBy.length > 0;
+
+	// EXPLICIT-COLUMNS: .columns([...]) — user declared exactly what they want
+	const hasExplicitColumns =
+		intent.select &&
+		'type' in intent.select &&
+		intent.select.type === 'expressions';
+
+	if (isAggregateOnly || isDistinct || hasGroupBy || hasExplicitColumns) {
+		for (const d of decisions) {
+			if (d.type === 'includeStrategy' && d.choice === 'join') {
+				(d as Mutable<PlanDecision>).columns = [];
+			}
+		}
+	}
+}
+
+type RelationColumnEntry = { col: string; alias?: string };
+
+/**
+ * Collect specific columns per relation from selectRelationColumn decisions.
+ *
+ * Key: full relation path (e.g. 'callee' for 1-hop, 'callee.file' for 2-hop).
+ * This lets relationColumn('callee.file', 'path', 'fp') target the leaf
+ * includeStrategy decision rather than the 1st-hop one.
+ */
+function buildRelationColumnsMap(
+	decisions: PlanDecision[],
+	includedRelations: Set<string>,
+): Map<string, RelationColumnEntry[]> {
+	const map = new Map<string, RelationColumnEntry[]>();
+
+	for (const d of decisions) {
+		if (!(d.type === 'selectRelationColumn' && d.relation && d.column)) continue;
+
+		const col = d.column as string;
+		const alias = d.alias as string | undefined;
+		const fullRelation = d.relation as string;
+		const rootRelation = fullRelation.split('.')[0] ?? '';
+		if (!includedRelations.has(rootRelation)) continue;
+
+		// Use full path as map key so 'callee.file' is stored separately
+		// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
+		const mapKey = fullRelation;
+		if (col === '*') {
+			// Wildcard: select all columns from relation (no aliases)
+			map.set(mapKey, [{ col: '*' }]);
+			continue;
+		}
+		const existing = map.get(mapKey);
+		if (existing) {
+			if (existing.length === 1 && existing[0]?.col === '*') continue; // wildcard already set
+			if (!existing.some((e) => e.col === col)) {
+				existing.push({ col, ...(alias !== undefined && { alias }) });
+			}
+		} else {
+			map.set(mapKey, [{ col, ...(alias !== undefined && { alias }) }]);
+		}
+	}
+
+	return map;
+}
+
+/**
+ * Find the map key for a given includeStrategy relationName.
+ * Exact match first (1-hop); then suffix match '.relationName' (2-hop+).
+ */
+function findRelationMapKey(
+	map: Map<string, RelationColumnEntry[]>,
+	relationName: string,
+): string | undefined {
+	if (map.has(relationName)) return relationName;
+	const suffix = `.${relationName}`;
+	for (const key of map.keys()) {
+		if (key.endsWith(suffix)) return key;
+	}
+	return undefined;
+}
+
+/**
+ * Inject user-specified columns from relationColumnsMap into matching
+ * includeStrategy decisions, then validate them against the model schema.
+ */
+function injectAndValidateRelationColumns(
+	enrichedUnifiedDecisions: PlanDecision[],
+	relationColumnsMap: Map<string, RelationColumnEntry[]>,
+	model: import('@dbsp/types').ModelIR | undefined,
+): void {
+	if (relationColumnsMap.size === 0) return;
+
+	// Inject collected columns and aliases into matching includeStrategy decisions
+	for (const d of enrichedUnifiedDecisions) {
+		if (d.type === 'includeStrategy' && d.relationName) {
+			const mapKey = findRelationMapKey(
+				relationColumnsMap,
+				d.relationName as string,
+			);
+			const entries = mapKey ? relationColumnsMap.get(mapKey) : undefined;
+			if (entries) {
+				const mut = d as Mutable<PlanDecision>;
+				// columns: plain string array (preserves existing contract)
+				mut.columns = entries.map((e) => e.col);
+				// columnAliases: map col -> user alias (only non-trivial aliases)
+				const aliasMap: Record<string, string> = {};
+				for (const { col, alias } of entries) {
+					if (alias) aliasMap[col] = alias;
+				}
+				if (Object.keys(aliasMap).length > 0) {
+					mut.columnAliases = aliasMap;
+				}
+			}
+		}
+	}
+
+	// Validate injected columns exist in target table schema
+	if (!model) return;
+	for (const d of enrichedUnifiedDecisions) {
+		if (
+			d.type === 'includeStrategy' &&
+			d.columns &&
+			d.targetTable &&
+			!(
+				(d.columns as string[]).length === 1 &&
+				(d.columns as string[])[0] === '*'
+			)
+		) {
+			const targetTable = model.getTable(d.targetTable as string);
+			if (targetTable) {
+				const validColumnNames = new Set(
+					targetTable.columns.map((c) => c.name),
+				);
+				const invalid = (d.columns as string[]).filter(
+					(c) => !validColumnNames.has(c),
+				);
+				if (invalid.length > 0) {
+					throw new Error(
+						`Unknown column(s) ${invalid.map((c) => `'${c}'`).join(', ')} ` +
+							`in relation '${d.relationName}' (table '${d.targetTable}'). ` +
+							`Available: ${[...validColumnNames].join(', ')}`,
+					);
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Enrich range operator decisions with `dataType` from the model.
+ * PostgreSQL requires explicit type casts for range parameters (contains/containedBy/overlaps).
+ * Mutates `allDecisions` in place.
+ */
+function enrichRangeDecisions(
+	allDecisions: PlanDecision[],
+	model: import('@dbsp/types').ModelIR | undefined,
+	rootTable: string,
+): void {
+	if (!model) return;
+	for (let i = 0; i < allDecisions.length; i++) {
+		const d = allDecisions[i];
+		if (
+			d &&
+			d.type === 'where' &&
+			(d.operator === 'contains' ||
+				d.operator === 'containedBy' ||
+				d.operator === 'overlaps')
+		) {
+			const tableName = d.table || rootTable;
+			const table = model.getTable(tableName);
+			if (table) {
+				const col = table.columns.find((c) => c.name === d.column);
+				if (col?.type.endsWith('range')) {
+					allDecisions[i] = { ...d, dataType: col.type } as typeof d;
+				}
+			}
+		}
+	}
+}
+
+/**
+ * Assemble the SimplifiedPlanReport from the compiled decisions and plan metadata.
+ * Handles BatchValues FROM source construction and optional fields (existsWrap, lock, schema).
+ */
+function buildSimplifiedPlanReport(
+	plan: PlanReport,
+	allDecisions: PlanDecision[],
+	schemaName: string | undefined,
+): SimplifiedPlanReport {
+	// BatchValues FROM source: the FROM clause is an unnest() table function.
+	// Build the RangeFunction and record params separately so compiler.ts can
+	// inject them at the front of the parameter list.
+	const bvFromSource = plan.intent?.batchValuesSource;
+	const batchValuesFromFields = bvFromSource
+		? (() => {
+				const { rangeFunction, params } = buildBatchValuesRangeFn(bvFromSource, 1);
+				return { batchValuesFromNode: rangeFunction, batchValuesFromParams: params };
+			})()
+		: {};
+
+	return {
+		rootTable: plan.rootTable,
+		decisions: allDecisions,
+		...(schemaName ? { schema: schemaName } : {}),
+		...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
+		...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
+		...batchValuesFromFields,
+	};
+}
+
+// ============================================================================
 // compile (SELECT)
 // ============================================================================
 
@@ -409,107 +679,18 @@ export function compileSelect<T = unknown>(
 				? [...unifiedIncludeDecisions, ...synthesizedJoins]
 				: unifiedIncludeDecisions;
 
-		// Propagate filter conditions from EXISTS to matching include decisions
-		// When a relation is both filtered and included, the filter should appear
-		// in both the EXISTS subquery AND the include subquery
-		const enrichedUnifiedDecisions = allUnifiedIncludeDecisions.map((jd) => {
-			if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
+		// Propagate filter conditions from EXISTS to matching include decisions.
+		// When a relation is both filtered and included, the filter appears in both
+		// the EXISTS subquery AND the include subquery.
+		const enrichedUnifiedDecisions = propagateExistsConditions(
+			allUnifiedIncludeDecisions,
+			existsDecisions,
+		);
 
-			const matchingExists = existsDecisions.find(
-				(ed) =>
-					ed.type === 'where' &&
-					(ed.operator === 'exists' || ed.operator === 'notExists') &&
-					(ed.relationName === jd.relationName ||
-						ed.targetTable === jd.targetTable) &&
-					ed.conditions &&
-					(ed.conditions as PlanDecision[]).length > 0,
-			);
-
-			if (matchingExists?.conditions) {
-				return { ...jd, conditions: matchingExists.conditions };
-			}
-			return jd;
-		});
-
-		// INCLUDE-COUNT: When the query is aggregate-only (no GROUP BY fields),
-		// join includes must not contribute SELECT columns — only the JOIN itself
-		// is needed (for filtering). Strip `columns` from join includeStrategy
-		// decisions so the join handler emits only the JoinExpr, not ResTargets.
-		// Without this fix, mixing COUNT(*) with a join include produces invalid SQL:
-		//   SELECT COUNT(*), "file"."id" AS "file.id" FROM ... -- PG rejects this
-		const isAggregateOnly =
-			plan.intent?.select &&
-			'type' in plan.intent.select &&
-			plan.intent.select.type === 'aggregate' &&
-			!(
-				'fields' in plan.intent.select &&
-				(plan.intent.select as { fields?: unknown }).fields
-			);
-		if (isAggregateOnly) {
-			for (const d of enrichedUnifiedDecisions) {
-				if (d.type === 'includeStrategy' && d.choice === 'join') {
-					(d as Mutable<PlanDecision>).columns = [];
-				}
-			}
-		}
-
-		// DISTINCT-VECTOR: When SELECT DISTINCT is active, join includes must NOT
-		// contribute their full column list to the SELECT. PostgreSQL requires all
-		// expressions in the SELECT list to be comparable for DISTINCT; vector-type
-		// columns have no equality operator and cause "ERROR: could not identify an
-		// equality operator for type vector".
-		// Keep the JOIN (for filtering) but strip the auto-selected columns.
-		// Explicitly requested columns (via relationColumn()) are still injected
-		// below via relationColumnsMap — they are the caller's responsibility to
-		// make DISTINCT-safe.
-		const isDistinct = plan.intent?.distinct === true;
-		if (isDistinct) {
-			for (const d of enrichedUnifiedDecisions) {
-				if (d.type === 'includeStrategy' && d.choice === 'join') {
-					(d as Mutable<PlanDecision>).columns = [];
-				}
-			}
-		}
-
-		// GROUP-BY-JOIN: When GROUP BY is active, join includes must NOT contribute
-		// their hydration columns to the SELECT. PostgreSQL requires all non-aggregate
-		// expressions in the SELECT list to appear in the GROUP BY clause; auto-selected
-		// join columns (e.g. "file"."id" AS "file.id") are not in GROUP BY and cause
-		// "ERROR: column must appear in the GROUP BY clause".
-		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
-		// Explicitly requested columns (via relationColumn()) are still preserved —
-		// the caller is responsible for including them in groupBy().
-		const hasGroupBy = plan.intent?.groupBy && plan.intent.groupBy.length > 0;
-		if (hasGroupBy) {
-			for (const d of enrichedUnifiedDecisions) {
-				if (d.type === 'includeStrategy' && d.choice === 'join') {
-					(d as Mutable<PlanDecision>).columns = [];
-				}
-			}
-		}
-
-		// EXPLICIT-COLUMNS: When the user calls .columns([...]) (select type
-		// 'expressions'), join includes must NOT contribute their auto-hydration
-		// columns to the SELECT. The user has declared exactly what they want;
-		// adding full relation columns (e.g. "rel.id", "rel.name", ...) would
-		// produce an unexpected nested object in results (hydrateJoinIncludes
-		// groups any "rel." prefixed keys into rel: {...}).
-		// Keep the JOIN (for filtering/inner join semantics) but strip auto-columns.
-		// Explicitly requested columns (via relationColumn()) are re-injected
-		// below via relationColumnsMap — or compiled directly as selectRelationColumn
-		// decisions when the relation alias doesn't match the includeStrategy
-		// relationName (e.g. camelCase alias vs snake_case relation name).
-		const hasExplicitColumns =
-			plan.intent?.select &&
-			'type' in plan.intent.select &&
-			plan.intent.select.type === 'expressions';
-		if (hasExplicitColumns) {
-			for (const d of enrichedUnifiedDecisions) {
-				if (d.type === 'includeStrategy' && d.choice === 'join') {
-					(d as Mutable<PlanDecision>).columns = [];
-				}
-			}
-		}
+		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
+		// GROUP BY, or explicit column selection is active. Keeps the JOIN for
+		// filtering/inner join semantics but prevents invalid SELECT column lists.
+		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, plan.intent);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
@@ -525,122 +706,18 @@ export function compileSelect<T = unknown>(
 				.filter(Boolean),
 		);
 
-		// Collect specific columns per relation from selectRelationColumn
-		// decisions that will be deduplicated. This preserves column info
-		// (including user-supplied aliases) that would otherwise be lost
-		// when selectRelationColumn decisions are removed.
-		//
-		// Key: full relation path (e.g. 'callee' for 1-hop, 'callee.file' for
-		// 2-hop). This lets relationColumn('callee.file', 'path', 'fp') target
-		// the leaf includeStrategy decision (relationName='file') rather than
-		// the 1st-hop one (relationName='callee').
-		type RelationColumnEntry = { col: string; alias?: string };
-		const relationColumnsMap = new Map<string, RelationColumnEntry[]>();
-
-		/**
-		 * Find the relationColumnsMap key for a given includeStrategy relationName.
-		 * Exact match first (1-hop); then suffix match '.relationName' (2-hop+).
-		 */
-		function findRelationMapKey(relationName: string): string | undefined {
-			if (relationColumnsMap.has(relationName)) return relationName;
-			const suffix = `.${relationName}`;
-			for (const key of relationColumnsMap.keys()) {
-				if (key.endsWith(suffix)) return key;
-			}
-			return undefined;
-		}
-
 		if (includedRelations.size > 0) {
-			for (const d of decisions) {
-				if (d.type === 'selectRelationColumn' && d.relation && d.column) {
-					const col = d.column as string;
-					const alias = d.alias as string | undefined;
-					const fullRelation = d.relation as string;
-					const rootRelation = fullRelation.split('.')[0] ?? '';
-					if (includedRelations.has(rootRelation)) {
-						// Use full path as map key so 'callee.file' is stored separately
-						// from 'callee' — avoids injecting 2-hop columns into 1-hop includes.
-						const mapKey = fullRelation;
-						if (col === '*') {
-							// Wildcard: select all columns from relation (no aliases)
-							relationColumnsMap.set(mapKey, [{ col: '*' }]);
-							continue;
-						}
-						const existing = relationColumnsMap.get(mapKey);
-						if (existing) {
-							if (existing.length === 1 && existing[0]?.col === '*') {
-								// Wildcard already set — skip
-								continue;
-							}
-							if (!existing.some((e) => e.col === col)) {
-								existing.push({ col, ...(alias !== undefined && { alias }) });
-							}
-						} else {
-							relationColumnsMap.set(mapKey, [
-								{ col, ...(alias !== undefined && { alias }) },
-							]);
-						}
-					}
-				}
-			}
-
-			// Inject collected columns and aliases into matching includeStrategy decisions
-			if (relationColumnsMap.size > 0) {
-				for (const d of enrichedUnifiedDecisions) {
-					if (d.type === 'includeStrategy' && d.relationName) {
-						const mapKey = findRelationMapKey(d.relationName as string);
-						const entries = mapKey ? relationColumnsMap.get(mapKey) : undefined;
-						if (entries) {
-							const mut = d as Mutable<PlanDecision>;
-							// columns: plain string array (preserves existing contract)
-							mut.columns = entries.map((e) => e.col);
-							// columnAliases: map col -> user alias (only non-trivial aliases)
-							const aliasMap: Record<string, string> = {};
-							for (const { col, alias } of entries) {
-								if (alias) aliasMap[col] = alias;
-							}
-							if (Object.keys(aliasMap).length > 0) {
-								mut.columnAliases = aliasMap;
-							}
-						}
-					}
-				}
-			}
-
-			// Validate injected columns exist in target table schema
-			const validationModel = options?.model ?? deps.model;
-			if (validationModel && relationColumnsMap.size > 0) {
-				for (const d of enrichedUnifiedDecisions) {
-					if (
-						d.type === 'includeStrategy' &&
-						d.columns &&
-						d.targetTable &&
-						!(
-							(d.columns as string[]).length === 1 &&
-							(d.columns as string[])[0] === '*'
-						)
-					) {
-						const targetTable = validationModel.getTable(
-							d.targetTable as string,
-						);
-						if (targetTable) {
-							const validColumnNames = new Set(
-								targetTable.columns.map((c) => c.name),
-							);
-							const invalid = (d.columns as string[]).filter(
-								(c) => !validColumnNames.has(c),
-							);
-							if (invalid.length > 0) {
-								throw new Error(
-									`Unknown column(s) ${invalid.map((c) => `'${c}'`).join(', ')} ` +
-										`in relation '${d.relationName}' (table '${d.targetTable}'). ` +
-										`Available: ${[...validColumnNames].join(', ')}`,
-								);
-							}
-						}
-					}
-				}
-			}
+			// Collect specific columns from selectRelationColumn decisions and inject
+			// them into matching includeStrategy decisions, then validate against schema.
+			const relationColumnsMap = buildRelationColumnsMap(
+				decisions,
+				includedRelations,
+			);
+			injectAndValidateRelationColumns(
+				enrichedUnifiedDecisions,
+				relationColumnsMap,
+				options?.model ?? deps.model,
+			);
 		}
 
 		const deduplicatedDecisions =
@@ -680,51 +757,9 @@ export function compileSelect<T = unknown>(
 
 		// Enrich range operator decisions with dataType from model
 		// (PostgreSQL requires explicit type casts for range parameters)
-		const model = options?.model;
-		if (model) {
-			for (let i = 0; i < allDecisions.length; i++) {
-				const d = allDecisions[i];
-				if (
-					d &&
-					d.type === 'where' &&
-					(d.operator === 'contains' ||
-						d.operator === 'containedBy' ||
-						d.operator === 'overlaps')
-				) {
-					const tableName = d.table || plan.rootTable;
-					const table = model.getTable(tableName);
-					if (table) {
-						const col = table.columns.find((c) => c.name === d.column);
-						if (col?.type.endsWith('range')) {
-							allDecisions[i] = {
-								...d,
-								dataType: col.type,
-							} as typeof d;
-						}
-					}
-				}
-			}
-		}
+		enrichRangeDecisions(allDecisions, options?.model, plan.rootTable);
 
-		// BatchValues FROM source: the FROM clause is an unnest() table function.
-		// Build the RangeFunction and record params separately so compiler.ts can
-		// inject them at the front of the parameter list.
-		const bvFromSource = plan.intent?.batchValuesSource;
-		const batchValuesFromFields = bvFromSource
-			? (() => {
-					const { rangeFunction, params } = buildBatchValuesRangeFn(bvFromSource, 1);
-					return { batchValuesFromNode: rangeFunction, batchValuesFromParams: params };
-				})()
-			: {};
-
-		simplifiedPlan = {
-			rootTable: plan.rootTable,
-			decisions: allDecisions,
-			...(schemaName ? { schema: schemaName } : {}),
-			...(plan.intent?.existsWrap ? { existsWrap: true } : {}),
-			...(plan.intent?.lock ? { lock: plan.intent.lock } : {}),
-			...batchValuesFromFields,
-		};
+		simplifiedPlan = buildSimplifiedPlanReport(plan, allDecisions, schemaName);
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).
 		// Tests supply adapter-format PlanDecisions inside a core PlanReport,
@@ -744,14 +779,6 @@ export function compileSelect<T = unknown>(
 	};
 }
 
-// ============================================================================
-// compileWithIncludes
-// ============================================================================
-
-/**
- * Compile a plan with includes, returning subquery include metadata (DX-033).
- * Extracted body of PgsqlAdapter.compileWithIncludes().
- */
 export function compileWithIncludes<T = unknown>(
 	plan: PlanReport,
 	options: CompileOptions | undefined,
