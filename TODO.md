@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **REFACTOR** [Adapter] `compileSelect` CC reduction — extracted 6 phase helpers (`propagateExistsConditions`, `stripJoinColumnsForAggregation`, `buildRelationColumnsMap`, `findRelationMapKey`, `injectAndValidateRelationColumns`, `enrichRangeDecisions`, `buildSimplifiedPlanReport`) from 416-line function; new body is 181 lines; all 3204 adapter tests pass. (2026-03-30)
+
 - [x] ✅ **Gaps 1-7** [Core/Adapter] 7 astix integration gaps: batchSet()+where guard, rawExists/rawNotExists compilation, JOIN ON alias map, ExpressionRef in ON, CTE+JOINs verified, orm.selectExpression(), op()+SubqueryExpression. 25 new tests. (2026-03-26)
 
 - [x] ✅ **Gap 6** [Core/Adapter] orm.selectExpression(expr) — FROM-less SELECT: added `selectExpression()` to OrmInstance + `compileSelectExpression()` to PgsqlAdapter + CompilingAdapter interface; `compileSubquery` wired in ctx for nested subquery support. 9 tests in select-expression.test.ts. (2026-03-26)
