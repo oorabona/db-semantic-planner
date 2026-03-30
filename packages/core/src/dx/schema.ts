@@ -849,6 +849,240 @@ function deriveInverseRelation(
 // ============================================================================
 
 /**
+ * Returns the ColumnType of the primary key in the target table definition.
+ * Falls back to 'uuid' if the target is not found or has no explicit PK.
+ */
+function getTargetPkType(
+	definition: SchemaDefinition,
+	target: string,
+): ColumnType {
+	const targetDef = definition[target];
+	if (!targetDef) return 'uuid';
+
+	for (const [, colDef] of Object.entries(targetDef)) {
+		if (isRef(colDef)) continue;
+		const def = normalizeColumnDef(colDef);
+		if (def.primaryKey) return def.type;
+	}
+
+	if ('id' in targetDef) {
+		const idDef = targetDef.id;
+		if (idDef && !isRef(idDef)) return normalizeColumnDef(idDef).type;
+	}
+	return 'uuid';
+}
+
+/**
+ * Builds a FK column + ForeignKeyIR pair from a ref definition.
+ */
+function buildRefColumn(
+	columnName: string,
+	columnDef: RefDefinition,
+	definition: SchemaDefinition,
+): { col: ColumnIR; fk: ForeignKeyIR } {
+	const targetPkType = getTargetPkType(definition, columnDef.target);
+	const col: Mutable<ColumnIR> = {
+		name: columnName,
+		type: targetPkType,
+		nullable: columnDef.options.nullable ?? false,
+	};
+	if (columnDef.options.unique) col.unique = true;
+
+	const fk: Mutable<ForeignKeyIR> = {
+		columns: [columnName],
+		references: { table: columnDef.target, columns: ['id'] },
+	};
+	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
+
+	return { col: col as ColumnIR, fk: fk as ForeignKeyIR };
+}
+
+/**
+ * Builds a regular ColumnIR from a normalized column definition.
+ */
+function buildRegularColumn(
+	columnName: string,
+	columnDef: ColumnDef,
+): { col: ColumnIR; isPk: boolean } {
+	const def = normalizeColumnDef(columnDef);
+	const col: Mutable<ColumnIR> = {
+		name: columnName,
+		type: def.type,
+		nullable: def.nullable ?? false,
+	};
+	if (def.dbType?.trim()) col.originalDbType = def.dbType.trim();
+	if (def.unique) col.unique = def.unique;
+	if (def.autoIncrement) col.autoIncrement = def.autoIncrement;
+	if (def.default !== undefined) col.default = def.default;
+	return { col: col as ColumnIR, isPk: def.primaryKey ?? false };
+}
+
+/**
+ * Builds columns, foreign keys, and explicit primary key list for a table.
+ */
+function buildColumnsForTable(
+	_tableName: string,
+	tableDef: TableDef,
+	definition: SchemaDefinition,
+): { columns: ColumnIR[]; foreignKeys: ForeignKeyIR[]; primaryKey: string[] } {
+	const columns: ColumnIR[] = [];
+	const foreignKeys: ForeignKeyIR[] = [];
+	const primaryKey: string[] = [];
+
+	for (const [columnName, columnDef] of Object.entries(tableDef)) {
+		if (isRef(columnDef)) {
+			const { col, fk } = buildRefColumn(columnName, columnDef, definition);
+			columns.push(col);
+			foreignKeys.push(fk);
+		} else {
+			const { col, isPk } = buildRegularColumn(columnName, columnDef);
+			columns.push(col);
+			if (isPk) primaryKey.push(columnName);
+		}
+	}
+	return { columns, foreignKeys, primaryKey };
+}
+
+/**
+ * Infers the final primary key from explicit list, FK columns, or 'id' fallback.
+ * Strategy: explicit > composite FK > 'id' column > omit.
+ */
+function inferPrimaryKey(
+	primaryKey: string[],
+	foreignKeys: ForeignKeyIR[],
+	columns: ColumnIR[],
+): string | readonly string[] | undefined {
+	if (primaryKey.length > 0) {
+		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
+	}
+	const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
+	if (fkColumns.length > 0) {
+		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
+	}
+	return columns.some((c) => c.name === 'id') ? 'id' : undefined;
+}
+
+/**
+ * Builds pseudo-columns for self-referential FKs with roles.
+ */
+function buildPseudoColumns(
+	tableName: string,
+	refsByTable: Map<string, CollectedRef[]>,
+	finalPk: string | readonly string[] | undefined,
+): PseudoColumnMetadata[] {
+	const pseudoColumns: PseudoColumnMetadata[] = [];
+	const refs = refsByTable.get(tableName) ?? [];
+	const pkColumn =
+		typeof finalPk === 'string' ? finalPk : (finalPk?.[0] ?? 'id');
+
+	for (const ref of refs) {
+		if (ref.options.roles && ref.target === tableName) {
+			pseudoColumns.push(
+				createPseudoColumnMetadata(
+					tableName,
+					ref.columnName,
+					pkColumn,
+					ref.options.roles.parent,
+					ref.options.roles.children,
+				),
+			);
+		}
+	}
+	return pseudoColumns;
+}
+
+/**
+ * Builds IndexIR entries from column-level `index: true` declarations.
+ */
+function buildColumnIndexes(
+	tableName: string,
+	tableDef: TableDef,
+): IndexIR[] {
+	const indexes: IndexIR[] = [];
+	for (const [columnName, columnDef] of Object.entries(tableDef)) {
+		if (isRef(columnDef)) continue;
+		const def = normalizeColumnDef(columnDef);
+		if (def.index) {
+			indexes.push({
+				name: `idx_${tableName}_${columnName}`,
+				columns: [columnName],
+				unique: false,
+			});
+		}
+	}
+	return indexes;
+}
+
+/**
+ * Processes table-level constraints (indexes, CHECK constraints, composite FKs).
+ */
+function buildTableConstraints(
+	tableName: string,
+	constraints: SchemaConstraints | undefined,
+): {
+	extraIndexes: IndexIR[];
+	checkConstraints: CheckConstraintIR[];
+	extraForeignKeys: ForeignKeyIR[];
+} {
+	const extraIndexes: IndexIR[] = [];
+	const checkConstraints: CheckConstraintIR[] = [];
+	const extraForeignKeys: ForeignKeyIR[] = [];
+
+	const tableConstraints = constraints?.[tableName];
+	if (!tableConstraints) {
+		return { extraIndexes, checkConstraints, extraForeignKeys };
+	}
+
+	if (tableConstraints.indexes) {
+		for (const idx of tableConstraints.indexes) {
+			const indexIR: Mutable<IndexIR> = {
+				name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
+				columns: idx.columns,
+				unique: idx.unique ?? false,
+			};
+			if (idx.method) indexIR.method = idx.method;
+			if (idx.where) indexIR.where = idx.where;
+			if (idx.opclass) indexIR.opclass = idx.opclass;
+			if (idx.with) indexIR.with = idx.with;
+			extraIndexes.push(indexIR as IndexIR);
+		}
+	}
+
+	if (tableConstraints.checkConstraints) {
+		for (const chk of tableConstraints.checkConstraints) {
+			checkConstraints.push({
+				name: chk.name,
+				expression: `CHECK (${chk.expression})`,
+			});
+		}
+	}
+
+	if (tableConstraints.foreignKeys) {
+		for (const fkRef of tableConstraints.foreignKeys) {
+			if (!fkRef.options.columns?.length) {
+				throw new SchemaValidationError(
+					`Composite FK on "${tableName}" → "${fkRef.target}" requires 'columns' option`,
+					tableName,
+				);
+			}
+			const fk: Mutable<ForeignKeyIR> = {
+				columns: [...fkRef.options.columns],
+				references: {
+					table: fkRef.target,
+					columns: fkRef.options.references
+						? [...fkRef.options.references]
+						: ['id'],
+				},
+			};
+			if (fkRef.options.onDelete) fk.onDelete = fkRef.options.onDelete;
+			extraForeignKeys.push(fk as ForeignKeyIR);
+		}
+	}
+
+	return { extraIndexes, checkConstraints, extraForeignKeys };
+}
+
+/**
  * Builds TableIR objects from schema definition.
  */
 function buildTables(
@@ -861,201 +1095,25 @@ function buildTables(
 
 	for (const tableName of tableNames) {
 		const tableDef = definition[tableName];
-		if (!tableDef) continue; // Should not happen, but TypeScript needs this
+		if (!tableDef) continue;
 
-		const columns: ColumnIR[] = [];
-		const foreignKeys: ForeignKeyIR[] = [];
-		const primaryKey: string[] = [];
-
-		// Find target table's PK type for ref columns
-		const getTargetPkType = (target: string): ColumnType => {
-			const targetDef = definition[target];
-			if (!targetDef) return 'uuid'; // Fallback
-
-			// Find the primary key column
-			for (const [, colDef] of Object.entries(targetDef)) {
-				if (isRef(colDef)) continue;
-				const def = normalizeColumnDef(colDef);
-				if (def.primaryKey) {
-					return def.type;
-				}
-			}
-			// Default: first 'id' column or uuid
-			if ('id' in targetDef) {
-				const idDef = targetDef.id;
-				if (idDef && !isRef(idDef)) {
-					return normalizeColumnDef(idDef).type;
-				}
-			}
-			return 'uuid'; // Fallback
-		};
-
-		for (const [columnName, columnDef] of Object.entries(tableDef)) {
-			if (isRef(columnDef)) {
-				// FK column - type derived from target's PK
-				const targetPkType = getTargetPkType(columnDef.target);
-
-				const col: Mutable<ColumnIR> = {
-					name: columnName,
-					type: targetPkType,
-					nullable: columnDef.options.nullable ?? false,
-				};
-				if (columnDef.options.unique) {
-					col.unique = true;
-				}
-				columns.push(col as ColumnIR);
-
-				const fk: Mutable<ForeignKeyIR> = {
-					columns: [columnName],
-					references: {
-						table: columnDef.target,
-						columns: ['id'], // Convention: FK targets 'id'
-					},
-				};
-				if (columnDef.options.onDelete) {
-					fk.onDelete = columnDef.options.onDelete;
-				}
-				foreignKeys.push(fk as ForeignKeyIR);
-			} else {
-				// Regular column
-				const def = normalizeColumnDef(columnDef);
-				const col: Mutable<ColumnIR> = {
-					name: columnName,
-					type: def.type,
-					nullable: def.nullable ?? false,
-				};
-				if (def.dbType?.trim()) {
-					col.originalDbType = def.dbType.trim();
-				}
-				if (def.unique) {
-					col.unique = def.unique;
-				}
-				if (def.autoIncrement) {
-					col.autoIncrement = def.autoIncrement;
-				}
-				if (def.default !== undefined) {
-					col.default = def.default;
-				}
-				columns.push(col as ColumnIR);
-
-				if (def.primaryKey) {
-					primaryKey.push(columnName);
-				}
-			}
-		}
-
-		// Determine PK: explicit > composite FK > 'id' column > omit
-		let finalPk: string | readonly string[] | undefined;
-		if (primaryKey.length > 0) {
-			finalPk =
-				primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
-		} else {
-			// No explicit PK — infer from FK columns or 'id'
-			const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
-			if (fkColumns.length > 0) {
-				finalPk = fkColumns.length === 1 ? fkColumns[0] : fkColumns;
-			} else {
-				const hasId = columns.some((c) => c.name === 'id');
-				finalPk = hasId ? 'id' : undefined;
-			}
-		}
-
-		// Generate pseudo-columns for self-referential FKs
-		const pseudoColumns: PseudoColumnMetadata[] = [];
-		const refs = refsByTable.get(tableName) || [];
-		for (const ref of refs) {
-			if (ref.options.roles && ref.target === tableName) {
-				// Self-referential with roles - generate pseudo-column
-				const pkColumn =
-					typeof finalPk === 'string' ? finalPk : (finalPk?.[0] ?? 'id');
-				pseudoColumns.push(
-					createPseudoColumnMetadata(
-						tableName,
-						ref.columnName,
-						pkColumn,
-						ref.options.roles.parent,
-						ref.options.roles.children,
-					),
-				);
-			}
-		}
-
-		// Build indexes from column-level index: true declarations
-		const indexes: IndexIR[] = [];
-		for (const [columnName, columnDef] of Object.entries(tableDef)) {
-			if (isRef(columnDef)) continue;
-			const def = normalizeColumnDef(columnDef);
-			if (def.index) {
-				indexes.push({
-					name: `idx_${tableName}_${columnName}`,
-					columns: [columnName],
-					unique: false,
-				});
-			}
-		}
-
-		// Process table-level constraints (2nd arg to schema())
-		const tableConstraints = constraints?.[tableName];
-		const checkConstraints: CheckConstraintIR[] = [];
-		if (tableConstraints) {
-			// Indexes (simple, composite, partial, GIN, HNSW, BM25, etc.)
-			if (tableConstraints.indexes) {
-				for (const idx of tableConstraints.indexes) {
-					const indexIR: Mutable<IndexIR> = {
-						name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
-						columns: idx.columns,
-						unique: idx.unique ?? false,
-					};
-					if (idx.method) indexIR.method = idx.method;
-					if (idx.where) indexIR.where = idx.where;
-					if (idx.opclass) indexIR.opclass = idx.opclass;
-					if (idx.with) indexIR.with = idx.with;
-					indexes.push(indexIR as IndexIR);
-				}
-			}
-
-			// CHECK constraints
-			if (tableConstraints.checkConstraints) {
-				for (const chk of tableConstraints.checkConstraints) {
-					checkConstraints.push({
-						name: chk.name,
-						expression: `CHECK (${chk.expression})`,
-					});
-				}
-			}
-
-			// Composite foreign keys
-			if (tableConstraints.foreignKeys) {
-				for (const fkRef of tableConstraints.foreignKeys) {
-					if (!fkRef.options.columns?.length) {
-						throw new SchemaValidationError(
-							`Composite FK on "${tableName}" → "${fkRef.target}" requires 'columns' option`,
-							tableName,
-						);
-					}
-					const fk: Mutable<ForeignKeyIR> = {
-						columns: [...fkRef.options.columns],
-						references: {
-							table: fkRef.target,
-							columns: fkRef.options.references
-								? [...fkRef.options.references]
-								: ['id'],
-						},
-					};
-					if (fkRef.options.onDelete) {
-						fk.onDelete = fkRef.options.onDelete;
-					}
-					foreignKeys.push(fk as ForeignKeyIR);
-				}
-			}
-		}
+		const { columns, foreignKeys, primaryKey } = buildColumnsForTable(
+			tableName,
+			tableDef,
+			definition,
+		);
+		const finalPk = inferPrimaryKey(primaryKey, foreignKeys, columns);
+		const pseudoColumns = buildPseudoColumns(tableName, refsByTable, finalPk);
+		const columnIndexes = buildColumnIndexes(tableName, tableDef);
+		const { extraIndexes, checkConstraints, extraForeignKeys } =
+			buildTableConstraints(tableName, constraints);
 
 		const table: TableIR = {
 			name: tableName,
 			columns,
 			...(finalPk !== undefined ? { primaryKey: finalPk } : {}),
-			foreignKeys,
-			indexes,
+			foreignKeys: [...foreignKeys, ...extraForeignKeys],
+			indexes: [...columnIndexes, ...extraIndexes],
 			...(checkConstraints.length > 0 ? { checkConstraints } : {}),
 			...(pseudoColumns.length > 0 ? { pseudoColumns } : {}),
 		};
