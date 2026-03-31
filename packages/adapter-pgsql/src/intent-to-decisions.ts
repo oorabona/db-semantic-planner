@@ -5,12 +5,7 @@
  * This bridges the gap between the planner output and SQL compilation.
  */
 
-import type {
-	OrderByIntent,
-	QueryIntent,
-	SelectIntent,
-	WhereIntent,
-} from '@dbsp/types';
+import type { OrderByIntent, QueryIntent, SelectIntent, WhereIntent } from '@dbsp/types';
 import { isSubqueryRef } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
@@ -28,10 +23,7 @@ import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
  * @param rootTable - The root table name (from plan.rootTable)
  * @returns Array of decisions the compiler can process
  */
-export function intentToDecisions(
-	intent: QueryIntent,
-	rootTable: string,
-): PlanDecision[] {
+export function intentToDecisions(intent: QueryIntent, rootTable: string): PlanDecision[] {
 	const decisions: PlanDecision[] = [];
 
 	// 1. SELECT clause
@@ -107,10 +99,7 @@ function applyFilterCondition(
 	}
 }
 
-function convertSelect(
-	select: SelectIntent,
-	rootTable: string,
-): PlanDecision[] {
+function convertSelect(select: SelectIntent, rootTable: string): PlanDecision[] {
 	// Handle different SelectIntent types using discriminator
 	const selectType = 'type' in select ? select.type : undefined;
 
@@ -137,13 +126,7 @@ function convertSelect(
 			const expr = exprUnknown as Record<string, unknown>;
 			const handler = EXPRESSION_HANDLERS[expr.kind as string];
 			if (handler) {
-				handler(
-					expr,
-					rootTable,
-					decisions,
-					applyFilterCondition,
-					convertWhereCondition,
-				);
+				handler(expr, rootTable, decisions, applyFilterCondition, convertWhereCondition);
 			}
 			// else: unknown kind (e.g., pseudoColumn) — intentional no-op
 		}
@@ -166,10 +149,7 @@ function convertSelect(
 		for (const agg of select.aggregates) {
 			const aggDecision: Mutable<PlanDecision> = {
 				type: 'selectFunction',
-				function:
-					agg.function === 'count' && agg.field === '*'
-						? 'count'
-						: agg.function,
+				function: agg.function === 'count' && agg.field === '*' ? 'count' : agg.function,
 				column: agg.field ?? '*',
 				table: rootTable,
 			};
@@ -245,10 +225,7 @@ interface FlatWhereFields {
 // ============================================================================
 
 /** Handle kind: 'comparison' — field OP value */
-function convertComparison(
-	cond: FlatWhereFields,
-	rootTable: string,
-): PlanDecision {
+function convertComparison(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	const rawValue = cond.value;
 	// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef so that
 	// compileValueOrFieldRef() treats it as a column reference, not a parameter.
@@ -287,22 +264,50 @@ function convertLike(cond: FlatWhereFields, rootTable: string): PlanDecision {
 /** Handle kind: 'in' — field IN (values) or field IN (subquery) */
 function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	const rawSubquery = cond.subquery;
-	const result: Mutable<PlanDecision> = {
+
+	// When a subquery is present, build the inSubquery Decision shape directly.
+	// We cannot rely on normalizeToDecision's `case 'in'` branch because that
+	// function short-circuits via early-return when `column` is already set.
+	if (rawSubquery) {
+		const selectField = rawSubquery.select;
+		const selectColumn: string =
+			selectField && 'fields' in selectField && Array.isArray(selectField.fields)
+				? (selectField.fields[0] ?? '*')
+				: '*';
+		const subConditions = rawSubquery.where
+			? (() => {
+					const converted = convertWhereCondition(rawSubquery.where!, rawSubquery.from);
+					return converted ? [converted] : [];
+				})()
+			: [];
+		// Propagate limit and orderBy from QueryIntent (e.g. from NQL `| limit N | order by col`)
+		const rawLimit = rawSubquery.limit;
+		const rawOrderBy = rawSubquery.orderBy as readonly { field: string; direction?: string }[] | undefined;
+		return {
+			type: 'where',
+			column: cond.field as string,
+			operator: cond.not ? 'notInSubquery' : 'inSubquery',
+			targetTable: rawSubquery.from,
+			selectColumn,
+			conditions: subConditions,
+			table: rootTable,
+			...(rawLimit != null && { limit: rawLimit }),
+			...(rawOrderBy && {
+				orderBy: rawOrderBy.map((o) => ({
+					column: o.field,
+					direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+				})),
+			}),
+		} as unknown as PlanDecision;
+	}
+
+	return {
 		type: 'where',
 		column: cond.field as string,
 		operator: cond.not ? 'notIn' : 'in',
-		value: rawSubquery ? undefined : cond.values,
+		value: cond.values,
 		table: rootTable,
 	};
-	if (rawSubquery) {
-		const convertedSubquery: Record<string, unknown> = { ...rawSubquery };
-		if (rawSubquery.where) {
-			const innerWhere = convertWhereCondition(rawSubquery.where, rawSubquery.from);
-			if (innerWhere) convertedSubquery.where = innerWhere;
-		}
-		result.subquery = convertedSubquery as NonNullable<PlanDecision['subquery']>;
-	}
-	return result;
 }
 
 /** Handle kind: 'null' — IS NULL / IS NOT NULL */
@@ -316,26 +321,25 @@ function convertNull(cond: FlatWhereFields, rootTable: string): PlanDecision {
 }
 
 /** Handle kind: 'range' — BETWEEN, gte/lte/gt/lt, or PG range operators (@>, <@, &&) */
-function convertRange(
-	cond: FlatWhereFields,
-	rootTable: string,
-): PlanDecision | null {
+function convertRange(cond: FlatWhereFields, rootTable: string): PlanDecision | null {
 	const rangeOperator = cond.operator as string | undefined;
 	const col = cond.field as string;
 
 	// PostgreSQL range type operators: @>, <@, &&
-	if (
-		rangeOperator === 'contains' ||
-		rangeOperator === 'containedBy' ||
-		rangeOperator === 'overlaps'
-	) {
+	if (rangeOperator === 'contains' || rangeOperator === 'containedBy' || rangeOperator === 'overlaps') {
 		return { type: 'where', column: col, operator: rangeOperator, value: cond.value, table: rootTable };
 	}
 
 	// NQL BETWEEN: { operator: 'between', value: { lower, upper } }
 	if (rangeOperator === 'between') {
 		const rangeVal = cond.value as RangeValue;
-		return { type: 'where', column: col, operator: 'between', value: [rangeVal.lower, rangeVal.upper], table: rootTable };
+		return {
+			type: 'where',
+			column: col,
+			operator: 'between',
+			value: [rangeVal.lower, rangeVal.upper],
+			table: rootTable,
+		};
 	}
 
 	// Numeric bounds — convert to BETWEEN or single-side comparison
@@ -373,24 +377,16 @@ function convertLogicalGroup(
 }
 
 /** Handle kind: 'not' — NOT (condition) */
-function convertNot(
-	cond: FlatWhereFields,
-	rootTable: string,
-): PlanDecision | null {
+function convertNot(cond: FlatWhereFields, rootTable: string): PlanDecision | null {
 	const subDecision = convertWhereCondition(cond.condition as WhereIntent, rootTable);
 	if (!subDecision) return null;
 	return { type: 'whereNot', conditions: [subDecision] };
 }
 
 /** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS */
-function convertExistsLike(
-	cond: FlatWhereFields,
-	operator: 'exists' | 'notExists',
-): PlanDecision {
+function convertExistsLike(cond: FlatWhereFields, operator: 'exists' | 'notExists'): PlanDecision {
 	const targetTable = cond.relation as string;
-	const subDecisions: PlanDecision[] = cond.where
-		? convertWhere(cond.where as WhereIntent, targetTable)
-		: [];
+	const subDecisions: PlanDecision[] = cond.where ? convertWhere(cond.where as WhereIntent, targetTable) : [];
 	const base: PlanDecision = { type: 'where', operator, targetTable };
 	return subDecisions.length > 0 ? { ...base, conditions: subDecisions } : base;
 }
@@ -410,7 +406,10 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	if (select) {
 		if ('type' in select && select.type === 'aggregate') {
 			const agg = select.aggregates?.[0];
-			if (agg) { aggregate = agg.function; selectColumn = agg.field ?? '*'; }
+			if (agg) {
+				aggregate = agg.function;
+				selectColumn = agg.field ?? '*';
+			}
 		} else if ('fields' in select && select.fields?.length) {
 			selectColumn = select.fields[0]!;
 		}
@@ -439,10 +438,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 // Main dispatcher — routes each WhereIntent.kind to its dedicated handler
 // ============================================================================
 
-export function convertWhereCondition(
-	condition: WhereIntent,
-	rootTable: string,
-): PlanDecision | null {
+export function convertWhereCondition(condition: WhereIntent, rootTable: string): PlanDecision | null {
 	const cond = condition as FlatWhereFields;
 
 	switch (cond.kind) {
@@ -519,11 +515,7 @@ function convertOrderBy(order: OrderByIntent, rootTable: string): PlanDecision {
 	const direction: 'ASC' | 'DESC' = order.direction === 'desc' ? 'DESC' : 'ASC';
 
 	// Convert lowercase nulls to uppercase if present
-	const nulls: 'FIRST' | 'LAST' | undefined = order.nulls
-		? order.nulls === 'first'
-			? 'FIRST'
-			: 'LAST'
-		: undefined;
+	const nulls: 'FIRST' | 'LAST' | undefined = order.nulls ? (order.nulls === 'first' ? 'FIRST' : 'LAST') : undefined;
 
 	// Expression-based ORDER BY (e.g. rawDistance('vector', qv))
 	if (order.expression) {
