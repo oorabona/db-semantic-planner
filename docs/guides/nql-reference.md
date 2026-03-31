@@ -1265,8 +1265,8 @@ with name as (query) mainQuery
 ### Single CTE
 
 ```nql
-with active_products as (products | where active = true | select id, name)
-active_products | select *
+with active_users as (users | where active = true | select id, username)
+active_users | select *
 ```
 
 ### Multiple CTEs
@@ -1274,8 +1274,8 @@ active_products | select *
 ```nql
 with
   active_users as (users | where active = true),
-  recent_orders as (orders | where createdAt > '2026-01-01')
-recent_orders | where userId in (active_users | select id)
+  granted_roles as (userRoles | where grantedAt > '2026-01-01')
+granted_roles | where userId in (active_users | select id)
 ```
 
 ### CTE with pipe clauses
@@ -1283,8 +1283,8 @@ recent_orders | where userId in (active_users | select id)
 CTE bodies support all standard pipe clauses: `where`, `select`, `order by`, `limit`, `offset`:
 
 ```nql
-with top5 as (users | where active = true | order by score desc | limit 5)
-top5 | select name, score
+with recent_users as (users | where active = true | order by createdAt desc | limit 5)
+recent_users | select username, createdAt
 ```
 
 ### Notes
