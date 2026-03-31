@@ -75,13 +75,8 @@ function ws(sql: string): string {
 describe('1. lte() compiles to WHERE col <= $1', () => {
 	it('produces exact SQL with single parameter', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.select('symbols')
-			.where(lte('start_line', 10))
-			.dump();
-		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.start_line <= $1',
-		);
+		const dump = (orm as any).select('symbols').where(lte('start_line', 10)).dump();
+		expect(ws(dump.sql)).toEqual('SELECT symbols.* FROM symbols WHERE symbols.start_line <= $1');
 		expect(dump.params).toEqual([10]);
 	});
 });
@@ -113,9 +108,7 @@ describe('3. op() expression in WHERE with gte', () => {
 		const orm = buildOrm();
 		const lineCount = op('-', 'end_line', 'start_line');
 		const dump = orm.select('symbols').where(lineCount.gte(50)).dump();
-		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE (end_line - start_line) >= $1',
-		);
+		expect(ws(dump.sql)).toEqual('SELECT symbols.* FROM symbols WHERE (end_line - start_line) >= $1');
 		expect(dump.params).toEqual([50]);
 	});
 });
@@ -159,10 +152,7 @@ describe('5. notExists with inner where', () => {
 
 	it('produces NOT EXISTS with no inner WHERE (plain notExists)', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.select('symbols')
-			.where(notExists('callee_calls'))
-			.dump();
+		const dump = (orm as any).select('symbols').where(notExists('callee_calls')).dump();
 		expect(ws(dump.sql)).toEqual(
 			'SELECT symbols.* FROM symbols WHERE NOT (EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0.callee_id))',
 		);
@@ -176,10 +166,7 @@ describe('5. notExists with inner where', () => {
 describe('6. DELETE with eq WHERE', () => {
 	it('produces DELETE FROM ... WHERE col = $1', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.delete('symbols')
-			.where(eq('kind', 'unused'))
-			.dump();
+		const dump = (orm as any).delete('symbols').where(eq('kind', 'unused')).dump();
 		expect(ws(dump.sql)).toEqual('DELETE FROM symbols WHERE symbols.kind = $1');
 		expect(dump.parameters).toEqual(['unused']);
 	});
@@ -196,9 +183,7 @@ describe('7. DELETE with and(inArray, gte)', () => {
 			.delete('symbols')
 			.where(and(inArray('kind', ['fn', 'class']), gte('complexity', 10)))
 			.dump();
-		expect(ws(dump.sql)).toEqual(
-			'DELETE FROM symbols WHERE symbols.kind = ANY ($1) AND symbols.complexity >= $2',
-		);
+		expect(ws(dump.sql)).toEqual('DELETE FROM symbols WHERE symbols.kind = ANY ($1) AND symbols.complexity >= $2');
 		expect(dump.parameters).toEqual([['fn', 'class'], 10]);
 	});
 });
@@ -210,14 +195,8 @@ describe('7. DELETE with and(inArray, gte)', () => {
 describe('8. UPDATE with eq WHERE', () => {
 	it('produces UPDATE SET ... WHERE using compileWhereIntent', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.update('symbols')
-			.set({ exported: false })
-			.where(eq('kind', 'private'))
-			.dump();
-		expect(ws(dump.sql)).toEqual(
-			'UPDATE symbols SET exported = $1 WHERE symbols.kind = $2',
-		);
+		const dump = (orm as any).update('symbols').set({ exported: false }).where(eq('kind', 'private')).dump();
+		expect(ws(dump.sql)).toEqual('UPDATE symbols SET exported = $1 WHERE symbols.kind = $2');
 		expect(dump.parameters).toEqual([false, 'private']);
 	});
 
@@ -246,21 +225,14 @@ describe('9. like with escape character', () => {
 			.select('symbols')
 			.where(like('name', '\\_test%', { escape: '\\' }))
 			.dump();
-		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.name LIKE $1 ESCAPE $2',
-		);
+		expect(ws(dump.sql)).toEqual('SELECT symbols.* FROM symbols WHERE symbols.name LIKE $1 ESCAPE $2');
 		expect(dump.params).toEqual(['\\_test%', '\\']);
 	});
 
 	it('like without escape has no ESCAPE clause', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.select('symbols')
-			.where(like('name', '%test%'))
-			.dump();
-		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.name LIKE $1',
-		);
+		const dump = (orm as any).select('symbols').where(like('name', '%test%')).dump();
+		expect(ws(dump.sql)).toEqual('SELECT symbols.* FROM symbols WHERE symbols.name LIKE $1');
 		expect(dump.params).toEqual(['%test%']);
 	});
 });
@@ -274,17 +246,12 @@ describe('10. nested and(or(eq, neq), not(isNull))', () => {
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('symbols')
-			.where(
-				and(
-					or(eq('kind', 'function'), neq('kind', 'variable')),
-					not(isNull('name')),
-				),
-			)
+			.where(and(or(eq('kind', 'function'), neq('kind', 'variable')), not(isNull('name'))))
 			.dump();
-		// pgsql-deparser serializes OR without parentheses; the AST is preserved.
-		// This exact output is the regression anchor.
+		// The OR sub-expression must be parenthesized when it is the left operand of AND,
+		// otherwise PostgreSQL would parse "A OR B AND C" as "A OR (B AND C)" — wrong precedence.
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.kind = $1 OR symbols.kind <> $2 AND NOT (symbols.name IS NULL)',
+			'SELECT symbols.* FROM symbols WHERE (symbols.kind = $1 OR symbols.kind <> $2) AND NOT (symbols.name IS NULL)',
 		);
 		expect(dump.params).toEqual(['function', 'variable']);
 	});
@@ -292,21 +259,11 @@ describe('10. nested and(or(eq, neq), not(isNull))', () => {
 	it('isNull and isNotNull produce correct IS NULL / IS NOT NULL', () => {
 		const orm = buildOrm();
 
-		const dumpNull = (orm as any)
-			.select('symbols')
-			.where(isNull('name'))
-			.dump();
-		expect(ws(dumpNull.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.name IS NULL',
-		);
+		const dumpNull = (orm as any).select('symbols').where(isNull('name')).dump();
+		expect(ws(dumpNull.sql)).toEqual('SELECT symbols.* FROM symbols WHERE symbols.name IS NULL');
 
-		const dumpNotNull = (orm as any)
-			.select('symbols')
-			.where(isNotNull('name'))
-			.dump();
-		expect(ws(dumpNotNull.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.name IS NOT NULL',
-		);
+		const dumpNotNull = (orm as any).select('symbols').where(isNotNull('name')).dump();
+		expect(ws(dumpNotNull.sql)).toEqual('SELECT symbols.* FROM symbols WHERE symbols.name IS NOT NULL');
 	});
 });
 

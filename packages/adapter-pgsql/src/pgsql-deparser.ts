@@ -453,10 +453,8 @@ function deparseAExpr(node: A_Expr): string {
 		// expressions to guarantee correct SQL semantics.
 		const leftRaw = node.lexpr ? deparse(node.lexpr) : '';
 		const rightRaw = node.rexpr ? deparse(node.rexpr) : '';
-		const left =
-			node.lexpr && 'A_Expr' in node.lexpr ? `(${leftRaw})` : leftRaw;
-		const right =
-			node.rexpr && 'A_Expr' in node.rexpr ? `(${rightRaw})` : rightRaw;
+		const left = node.lexpr && 'A_Expr' in node.lexpr ? `(${leftRaw})` : leftRaw;
+		const right = node.rexpr && 'A_Expr' in node.rexpr ? `(${rightRaw})` : rightRaw;
 		if (!left) {
 			return `${op} ${right}`;
 		}
@@ -489,11 +487,8 @@ function deparseAExpr(node: A_Expr): string {
 	if (kind === 'AEXPR_LIKE') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const right = node.rexpr ? deparse(node.rexpr) : '';
-		const base =
-			op === '!~~' ? `${left} NOT LIKE ${right}` : `${left} LIKE ${right}`;
-		const escape = (node as unknown as Record<string, unknown>).escape as
-			| import('@pgsql/types').Node
-			| undefined;
+		const base = op === '!~~' ? `${left} NOT LIKE ${right}` : `${left} LIKE ${right}`;
+		const escape = (node as unknown as Record<string, unknown>).escape as import('@pgsql/types').Node | undefined;
 		if (escape) {
 			return `${base} ESCAPE ${deparse(escape)}`;
 		}
@@ -503,17 +498,14 @@ function deparseAExpr(node: A_Expr): string {
 	if (kind === 'AEXPR_ILIKE') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const right = node.rexpr ? deparse(node.rexpr) : '';
-		return op === '!~~*'
-			? `${left} NOT ILIKE ${right}`
-			: `${left} ILIKE ${right}`;
+		return op === '!~~*' ? `${left} NOT ILIKE ${right}` : `${left} ILIKE ${right}`;
 	}
 
 	if (kind === 'AEXPR_IN') {
 		const left = node.lexpr ? deparse(node.lexpr) : '';
 		const right = node.rexpr ? deparse(node.rexpr) : '';
 		// Wrap List in parentheses for proper IN (...) syntax
-		const rightWrapped =
-			node.rexpr && 'List' in node.rexpr ? `(${right})` : right;
+		const rightWrapped = node.rexpr && 'List' in node.rexpr ? `(${right})` : right;
 		return op === '<>' ? `${left} NOT IN ${rightWrapped}` : `${left} IN ${rightWrapped}`;
 	}
 
@@ -543,7 +535,18 @@ function deparseBoolExpr(node: BoolExpr): string {
 	}
 
 	const sep = node.boolop === 'AND_EXPR' ? ' AND ' : ' OR ';
-	const parts = args.map(nodeToStr);
+	const parts = args.map((arg) => {
+		// When building AND, wrap OR children in parens to enforce precedence.
+		// Without this, "A OR B AND C" would be emitted instead of "(A OR B) AND C".
+		if (
+			node.boolop === 'AND_EXPR' &&
+			'BoolExpr' in arg &&
+			(arg as { BoolExpr: { boolop: string } }).BoolExpr.boolop === 'OR_EXPR'
+		) {
+			return `(${nodeToStr(arg)})`;
+		}
+		return nodeToStr(arg);
+	});
 	return parts.join(sep);
 }
 
@@ -562,9 +565,7 @@ function deparseFuncCall(node: FuncCall): string {
 	});
 	const name = nameParts.join('.');
 
-	const overClause = node.over
-		? ` OVER (${deparseWindowDef(node.over as WindowDef)})`
-		: '';
+	const overClause = node.over ? ` OVER (${deparseWindowDef(node.over as WindowDef)})` : '';
 
 	let argStr: string;
 	if (node.agg_star) {
@@ -602,9 +603,7 @@ function deparseCoalesceExpr(node: CoalesceExpr): string {
 function deparseNullIfExpr(node: { args?: Node[] }): string {
 	const args = node.args ?? [];
 	if (args.length !== 2) {
-		throw new Error(
-			`NullIfExpr requires exactly 2 arguments, got ${args.length}`,
-		);
+		throw new Error(`NullIfExpr requires exactly 2 arguments, got ${args.length}`);
 	}
 	return `NULLIF(${deparse(args[0]!)}, ${deparse(args[1]!)})`;
 }
@@ -733,9 +732,7 @@ const JOIN_TYPE_MAP: Record<string, string> = {
 
 function deparseJoinExpr(node: JoinExpr): string {
 	const left = node.larg ? deparse(node.larg) : '';
-	const joinType = node.jointype
-		? (JOIN_TYPE_MAP[node.jointype] ?? 'JOIN')
-		: 'JOIN';
+	const joinType = node.jointype ? (JOIN_TYPE_MAP[node.jointype] ?? 'JOIN') : 'JOIN';
 	const right = node.rarg ? deparse(node.rarg) : '';
 
 	let result = `${left} ${joinType} ${right}`;
@@ -841,9 +838,7 @@ function deparseWindowDef(node: WindowDef): string {
 	const parts: string[] = [];
 
 	if (node.partitionClause && node.partitionClause.length > 0) {
-		parts.push(
-			`PARTITION BY ${node.partitionClause.map(nodeToStr).join(', ')}`,
-		);
+		parts.push(`PARTITION BY ${node.partitionClause.map(nodeToStr).join(', ')}`);
 	}
 
 	if (node.orderClause && node.orderClause.length > 0) {
@@ -1100,9 +1095,7 @@ function deparseUpdateStmt(node: UpdateStmt): string {
 	}
 
 	const setItems = (node.targetList ?? []).map((t) => {
-		const rt = (t as Record<string, unknown>).ResTarget as
-			| ResTarget
-			| undefined;
+		const rt = (t as Record<string, unknown>).ResTarget as ResTarget | undefined;
 		const name = rt?.name ?? '';
 		const val = rt?.val ? deparse(rt.val) : '';
 		return `${quoteIdent(name)} = ${val}`;
@@ -1137,8 +1130,7 @@ function deparseDeleteStmt(node: DeleteStmt): string {
 		parts.push(deparseRangeVar(node.relation));
 	}
 
-	const usingClause = (node as unknown as Record<string, unknown>)
-		.usingClause as Node[] | undefined;
+	const usingClause = (node as unknown as Record<string, unknown>).usingClause as Node[] | undefined;
 	if (usingClause && usingClause.length > 0) {
 		parts.push(`USING ${usingClause.map(nodeToStr).join(', ')}`);
 	}
@@ -1170,9 +1162,7 @@ function deparseOnConflictClause(node: OnConflictClause): string {
 		parts.push('DO NOTHING');
 	} else if (node.action === 'ONCONFLICT_UPDATE') {
 		const setItems = (node.targetList ?? []).map((t) => {
-			const rt = (t as Record<string, unknown>).ResTarget as
-				| ResTarget
-				| undefined;
+			const rt = (t as Record<string, unknown>).ResTarget as ResTarget | undefined;
 			const name = rt?.name ?? '';
 			const val = rt?.val ? deparse(rt.val) : '';
 			return `${quoteIdent(name)} = ${val}`;
@@ -1198,9 +1188,7 @@ function deparseInferClause(node: InferClause): string {
 	const indexElems = node.indexElems ?? [];
 	if (indexElems.length > 0) {
 		const cols = indexElems.map((e) => {
-			const ie = (e as Record<string, unknown>).IndexElem as
-				| IndexElem
-				| undefined;
+			const ie = (e as Record<string, unknown>).IndexElem as IndexElem | undefined;
 			return ie ? deparseIndexElem(ie) : deparse(e);
 		});
 		return `(${cols.join(', ')})`;
@@ -1235,9 +1223,7 @@ function deparseRangeFunction(node: Record<string, unknown>): string {
 	const funcParts = functions.map((f) => {
 		const fRec = f as Record<string, unknown>;
 		if ('List' in fRec) {
-			const items = (fRec.List as Record<string, unknown>).items as
-				| Node[]
-				| undefined;
+			const items = (fRec.List as Record<string, unknown>).items as Node[] | undefined;
 			// First item is the function call, rest are def elements
 			const funcNode = items?.[0];
 			return funcNode ? deparse(funcNode) : '';
@@ -1313,9 +1299,7 @@ const WAIT_POLICY_MAP: Record<string, string> = {
 function deparseLockingClause(node: LockingClause): string {
 	const parts: string[] = [];
 
-	const strength = node.strength
-		? (LOCK_STRENGTH_MAP[node.strength] ?? '')
-		: '';
+	const strength = node.strength ? (LOCK_STRENGTH_MAP[node.strength] ?? '') : '';
 	if (strength) parts.push(strength);
 
 	const lockedRels = node.lockedRels ?? [];
@@ -1324,9 +1308,7 @@ function deparseLockingClause(node: LockingClause): string {
 		parts.push(`OF ${tables}`);
 	}
 
-	const waitPolicy = node.waitPolicy
-		? (WAIT_POLICY_MAP[node.waitPolicy] ?? '')
-		: '';
+	const waitPolicy = node.waitPolicy ? (WAIT_POLICY_MAP[node.waitPolicy] ?? '') : '';
 	if (waitPolicy) parts.push(waitPolicy);
 
 	return parts.join(' ');
@@ -1366,9 +1348,7 @@ function deparseDefElem(node: DefElem): string {
 		const argRec = arg as Record<string, unknown>;
 		const argKey = Object.keys(argRec)[0]!;
 		if (argKey === 'String') {
-			const sval = String(
-				(argRec[argKey] as Record<string, unknown>).sval ?? '',
-			);
+			const sval = String((argRec[argKey] as Record<string, unknown>).sval ?? '');
 			return `${name} ${sval.toUpperCase()}`;
 		}
 		return `${name} ${deparse(arg)}`;

@@ -12,6 +12,7 @@ import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import {
+	andExpr,
 	binaryExpr,
 	boolExpr,
 	booleanConstNode,
@@ -33,6 +34,7 @@ import {
 	lteExpr,
 	neExpr,
 	nullConstNode,
+	orExpr,
 	rangeVar,
 	resTarget,
 	selectStmt,
@@ -276,19 +278,12 @@ describe('BoolExpr', () => {
 
 	it('OR', () => {
 		compare(
-			boolExpr('OR_EXPR', [
-				eqExpr(columnRef('a'), createParamRef(1)),
-				eqExpr(columnRef('b'), createParamRef(2)),
-			]),
+			boolExpr('OR_EXPR', [eqExpr(columnRef('a'), createParamRef(1)), eqExpr(columnRef('b'), createParamRef(2))]),
 		);
 	});
 
 	it('NOT', () => {
-		compare(
-			boolExpr('NOT_EXPR', [
-				eqExpr(columnRef('active'), booleanConstNode(true)),
-			]),
-		);
+		compare(boolExpr('NOT_EXPR', [eqExpr(columnRef('active'), booleanConstNode(true))]));
 	});
 });
 
@@ -369,12 +364,7 @@ describe('FuncCall', () => {
 	});
 
 	it('jsonb_build_object(key, val)', () => {
-		compare(
-			funcCall('jsonb_build_object', [
-				{ A_Const: { sval: { sval: 'id' } } },
-				columnRef('id'),
-			]),
-		);
+		compare(funcCall('jsonb_build_object', [{ A_Const: { sval: { sval: 'id' } } }, columnRef('id')]));
 	});
 });
 
@@ -590,10 +580,7 @@ describe('SelectStmt', () => {
 	it('SELECT with GROUP BY and HAVING', () => {
 		compare(
 			selectStmt({
-				targetList: [
-					resTarget(columnRef('category')),
-					resTarget(funcCall('count', [], { star: true }), 'total'),
-				],
+				targetList: [resTarget(columnRef('category')), resTarget(funcCall('count', [], { star: true }), 'total')],
 				from: [rangeVar('products')],
 				groupBy: [columnRef('category')],
 				having: gtExpr(funcCall('count', [], { star: true }), integerNode(5)),
@@ -808,10 +795,7 @@ describe('OnConflictClause', () => {
 			values: [[createParamRef(1)]],
 		});
 		// Manually attach onConflict
-		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<
-			string,
-			unknown
-		>;
+		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<string, unknown>;
 		insertInner.onConflictClause = {
 			action: 'ONCONFLICT_NOTHING',
 		};
@@ -824,10 +808,7 @@ describe('OnConflictClause', () => {
 			columns: ['id', 'name'],
 			values: [[createParamRef(1), createParamRef(2)]],
 		});
-		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<
-			string,
-			unknown
-		>;
+		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<string, unknown>;
 		insertInner.onConflictClause = {
 			action: 'ONCONFLICT_UPDATE',
 			infer: {
@@ -947,5 +928,45 @@ describe('NamedArgExpr', () => {
 		expect(result).toContain("field => 'name'");
 		expect(result).toContain('query_string => $1');
 		expect(result).toContain('paradedb.parse');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Operator precedence: OR inside AND must be parenthesized
+// ---------------------------------------------------------------------------
+
+describe('BoolExpr operator precedence', () => {
+	it('OR child of AND is parenthesized', () => {
+		// (a = $1 OR b = $2) AND c = $3
+		const orNode = orExpr(eqExpr(columnRef('a'), createParamRef(1)), eqExpr(columnRef('b'), createParamRef(2)));
+		const andNode = andExpr(orNode, eqExpr(columnRef('c'), createParamRef(3)));
+
+		const result = deparse(andNode);
+
+		// The OR clause must be wrapped in parens to preserve precedence
+		expect(result).toMatch(/^\(.*\) AND/);
+		expect(result).toContain('(a = $1 OR b = $2)');
+		expect(result).toContain('AND c = $3');
+	});
+
+	it('plain AND without OR children needs no extra parens', () => {
+		const andNode = andExpr(eqExpr(columnRef('a'), createParamRef(1)), eqExpr(columnRef('b'), createParamRef(2)));
+		const result = deparse(andNode);
+		expect(result).toBe('a = $1 AND b = $2');
+	});
+
+	it('plain OR needs no parens', () => {
+		const orNode = orExpr(eqExpr(columnRef('a'), createParamRef(1)), eqExpr(columnRef('b'), createParamRef(2)));
+		const result = deparse(orNode);
+		expect(result).toBe('a = $1 OR b = $2');
+	});
+
+	it('AND child of OR does not need extra parens (AND binds tighter)', () => {
+		// a = $1 AND b = $2 is already correct when child of OR — no extra parens needed
+		const andChild = andExpr(eqExpr(columnRef('a'), createParamRef(1)), eqExpr(columnRef('b'), createParamRef(2)));
+		const orNode = orExpr(andChild, eqExpr(columnRef('c'), createParamRef(3)));
+		const result = deparse(orNode);
+		// AND child of OR must NOT be wrapped in extra parens (AND already binds tighter)
+		expect(result).toBe('a = $1 AND b = $2 OR c = $3');
 	});
 });

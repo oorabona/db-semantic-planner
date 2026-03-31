@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **REFACTOR** [Adapter] `introspect` CC reduction (CC 102, 581 lines → 53-line orchestrator) — extracted 11 helpers: `queryAllCatalogs`, `buildPartitionMap`, `buildCheckMap`, `buildIndexMap`, `buildColumnMap`, `buildPKMap`, `buildFKMap`, `buildEnumMap`, `buildCommentMaps`, `buildRLSMaps`, `buildTableIR`, `buildSequenceMap`; `inferRelations`+`detectHierarchies` updated to use `FKEntry`; 3204 adapter tests pass. (2026-03-31)
+
 - [x] ✅ **REFACTOR** [Adapter] `compileSelect` CC reduction — extracted 6 phase helpers (`propagateExistsConditions`, `stripJoinColumnsForAggregation`, `buildRelationColumnsMap`, `findRelationMapKey`, `injectAndValidateRelationColumns`, `enrichRangeDecisions`, `buildSimplifiedPlanReport`) from 416-line function; new body is 181 lines; all 3204 adapter tests pass. (2026-03-30)
 
 - [x] ✅ **Gaps 1-7** [Core/Adapter] 7 astix integration gaps: batchSet()+where guard, rawExists/rawNotExists compilation, JOIN ON alias map, ExpressionRef in ON, CTE+JOINs verified, orm.selectExpression(), op()+SubqueryExpression. 25 new tests. (2026-03-26)
@@ -418,6 +420,10 @@
 (All items verified as false positives 2026-02-06: A-26 NqlLimitError doesn't exist / NqlWarning is active; #21 is in use; #29 no factory found; CLI plan summary embedded)
 
 ---
+
+## Bugs
+
+- [ ] 🐛 [Core/Adapter] `or(eq(), inSubquery())` returns empty results when used with `.include().where()` query pattern — `inSubquery('caller_id', subquery('symbols').select('id').where(eq('parent_id', symbolId)))` compiles to correct SQL but returns 0 rows when combined with `or()` in a query that also has `.include('callee', { join: 'left' })`. Workaround: two-step approach (fetch child IDs first, then `any('caller_id', allIds)`). Discovered by astix CALLGRAPH-OBJ-METHODS (2026-03-31). Priority: H
 
 ## Blocked / Deferred
 
