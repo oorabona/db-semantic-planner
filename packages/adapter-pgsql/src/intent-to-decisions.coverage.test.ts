@@ -60,9 +60,7 @@ describe('intentToDecisions - coverage', () => {
 				from: 'users',
 				select: {
 					type: 'expressions' as const,
-					columns: [
-						{ kind: 'columnAlias', column: 'name', alias: 'user_name' },
-					],
+					columns: [{ kind: 'columnAlias', column: 'name', alias: 'user_name' }],
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
@@ -280,9 +278,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const caseDecision = decisions.find(
-				(d) => d.type === 'selectExpression' && d.expressionType === 'case',
-			);
+			const caseDecision = decisions.find((d) => d.type === 'selectExpression' && d.expressionType === 'case');
 			expect(caseDecision).toBeDefined();
 			expect(caseDecision?.alias).toBe('category');
 			expect(caseDecision?.value).toEqual({ value: 'minor' });
@@ -320,9 +316,7 @@ describe('intentToDecisions - coverage', () => {
 				from: 'orders',
 				select: {
 					type: 'expressions' as const,
-					columns: [
-						{ kind: 'relationColumn', relation: 'user', as: 'user_data' },
-					],
+					columns: [{ kind: 'relationColumn', relation: 'user', as: 'user_data' }],
 				},
 			};
 			const decisions = intentToDecisions(intent, 'orders');
@@ -444,9 +438,7 @@ describe('intentToDecisions - coverage', () => {
 				select: {
 					type: 'aggregate' as const,
 					fields: ['user_id', 'product_id'],
-					aggregates: [
-						{ function: 'sum' as const, field: 'quantity', as: 'total_qty' },
-					],
+					aggregates: [{ function: 'sum' as const, field: 'quantity', as: 'total_qty' }],
 				},
 			};
 			const decisions = intentToDecisions(intent, 'orders');
@@ -591,8 +583,11 @@ describe('intentToDecisions - coverage', () => {
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			const whereDecision = decisions.find((d) => d.type === 'where');
-			expect(whereDecision?.subquery).toBeDefined();
-			expect(whereDecision?.subquery?.where).toBeDefined();
+			// convertIn now emits operator:'inSubquery' + targetTable/selectColumn/conditions
+			expect(whereDecision?.operator).toBe('inSubquery');
+			expect(whereDecision?.targetTable).toBe('active_users');
+			// inner WHERE is converted and placed in conditions[]
+			expect(whereDecision?.conditions).toHaveLength(1);
 		});
 
 		it('converts NULL check isNull', () => {
@@ -909,9 +904,7 @@ describe('intentToDecisions - coverage', () => {
 				where: { kind: 'notExists' as const, relation: 'posts' },
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const notExistsDecision = decisions.find(
-				(d) => d.operator === 'notExists',
-			);
+			const notExistsDecision = decisions.find((d) => d.operator === 'notExists');
 			expect(notExistsDecision?.targetTable).toBe('posts');
 		});
 
@@ -931,9 +924,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const notExistsDecision = decisions.find(
-				(d) => d.operator === 'notExists',
-			);
+			const notExistsDecision = decisions.find((d) => d.operator === 'notExists');
 			expect(notExistsDecision?.conditions).toHaveLength(1);
 		});
 
@@ -1415,8 +1406,11 @@ describe('intentToDecisions - coverage', () => {
 			};
 			const decisions = intentToDecisions(intent, 'users');
 			const whereDecision = decisions.find((d) => d.type === 'where');
-			expect(whereDecision?.subquery).toBeDefined();
-			expect(whereDecision?.subquery?.where).toBeUndefined();
+			// convertIn now emits operator:'inSubquery' + targetTable/selectColumn/conditions
+			expect(whereDecision?.operator).toBe('inSubquery');
+			expect(whereDecision?.targetTable).toBe('active_users');
+			// no inner WHERE → empty conditions
+			expect(whereDecision?.conditions).toHaveLength(0);
 		});
 	});
 
@@ -1463,9 +1457,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const selectDecision = decisions.find(
-				(d) => d.type === 'select' && d.column === 'email',
-			);
+			const selectDecision = decisions.find((d) => d.type === 'select' && d.column === 'email');
 			expect(selectDecision).toBeDefined();
 			expect(selectDecision?.alias).toBeUndefined();
 		});
@@ -1520,9 +1512,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const d = decisions.find(
-				(d) => d.type === 'selectFunction' && d.function === 'count',
-			);
+			const d = decisions.find((d) => d.type === 'selectFunction' && d.function === 'count');
 			expect(d).toBeDefined();
 			expect(d?.alias).toBe('cnt');
 		});
@@ -1575,9 +1565,7 @@ describe('intentToDecisions - coverage', () => {
 				},
 			};
 			const decisions = intentToDecisions(intent, 'users');
-			const caseDecision = decisions.find(
-				(d) => d.type === 'selectExpression' && d.expressionType === 'case',
-			);
+			const caseDecision = decisions.find((d) => d.type === 'selectExpression' && d.expressionType === 'case');
 			expect(caseDecision).toBeDefined();
 			expect(caseDecision?.value).toBeUndefined();
 			expect(caseDecision?.alias).toBeUndefined();
