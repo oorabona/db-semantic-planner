@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **BRANCH-COV** [Core] Branch coverage tests for assert/ modules — created `assertion-parser.test.ts` (65 tests), `assertion-functions.test.ts` (99 tests), `assertion-runner.test.ts` (39 tests); added duck-type + filter() edge cases to `expressions.test.ts` (+8 tests, 84 total); added zero-hooks edge cases to `hook-utils.test.ts` (+8 tests, 34 total). All 2691 core tests pass. (2026-04-01)
+
 - [x] ✅ **BRANCH-COV** [Core] Branch coverage tests for planner.ts + query-builder.ts — created `planner-branch-coverage.test.ts` (41 tests: determineJoinType, depth/circular detection, disambiguation, UnsupportedStrategyError, flat strategy, LEFT JOIN cascade, extractCTEs, plan() edge cases) and `query-builder-branch.test.ts` (53 tests: buildIntent, orderBy, where, cursorPaginate, paginate). All 2472 core tests pass. (2026-03-31)
 
 - [x] ✅ **REFACTOR** [Adapter] `introspect` CC reduction (CC 102, 581 lines → 53-line orchestrator) — extracted 11 helpers: `queryAllCatalogs`, `buildPartitionMap`, `buildCheckMap`, `buildIndexMap`, `buildColumnMap`, `buildPKMap`, `buildFKMap`, `buildEnumMap`, `buildCommentMaps`, `buildRLSMaps`, `buildTableIR`, `buildSequenceMap`; `inferRelations`+`detectHierarchies` updated to use `FKEntry`; 3204 adapter tests pass. (2026-03-31)

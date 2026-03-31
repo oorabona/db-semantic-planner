@@ -1,14 +1,4 @@
 import { describe, expect, it, vi } from 'vitest';
-import type {
-	AfterMutationHook,
-	AfterQueryHook,
-	BeforeMutationHook,
-	BeforeQueryHook,
-	ErrorHookContext,
-	MutationHookContext,
-	OnErrorHook,
-	QueryHookContext,
-} from './hooks.js';
 import {
 	composeAfterMutationHooks,
 	composeAfterQueryHooks,
@@ -23,6 +13,16 @@ import {
 	sortByPriority,
 	withPriority,
 } from './hook-utils.js';
+import type {
+	AfterMutationHook,
+	AfterQueryHook,
+	BeforeMutationHook,
+	BeforeQueryHook,
+	ErrorHookContext,
+	MutationHookContext,
+	OnErrorHook,
+	QueryHookContext,
+} from './hooks.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -38,9 +38,7 @@ function makeQueryCtx(overrides?: Partial<QueryHookContext>): QueryHookContext {
 	};
 }
 
-function makeMutationCtx<T = unknown>(
-	overrides?: Partial<MutationHookContext<T>>,
-): MutationHookContext<T> {
+function makeMutationCtx<T = unknown>(overrides?: Partial<MutationHookContext<T>>): MutationHookContext<T> {
 	return {
 		table: 'users',
 		operation: 'insert',
@@ -95,10 +93,7 @@ describe('sortByPriority', () => {
 		const first: BeforeQueryHook = vi.fn().mockImplementation(() => undefined);
 		const second: BeforeQueryHook = vi.fn().mockImplementation(() => undefined);
 
-		const sorted = sortByPriority([
-			withPriority(first, 'normal'),
-			withPriority(second, 'normal'),
-		]);
+		const sorted = sortByPriority([withPriority(first, 'normal'), withPriority(second, 'normal')]);
 
 		expect(sorted[0]).toBe(first);
 		expect(sorted[1]).toBe(second);
@@ -146,8 +141,7 @@ describe('pipeBeforeQueryHooks', () => {
 	});
 
 	it('handles async hooks', async () => {
-		const h1: BeforeQueryHook = async (ctx) =>
-			Promise.resolve({ ...ctx, correlationId: 'async' });
+		const h1: BeforeQueryHook = async (ctx) => Promise.resolve({ ...ctx, correlationId: 'async' });
 		const piped = pipeBeforeQueryHooks(h1);
 		const result = await piped(makeQueryCtx());
 		expect(result?.correlationId).toBe('async');
@@ -259,8 +253,14 @@ describe('pipeBeforeMutationHooks', () => {
 describe('composeBeforeMutationHooks', () => {
 	it('runs right-to-left', async () => {
 		const order: string[] = [];
-		const h1: BeforeMutationHook = (ctx) => { order.push('h1'); return ctx; };
-		const h2: BeforeMutationHook = (ctx) => { order.push('h2'); return ctx; };
+		const h1: BeforeMutationHook = (ctx) => {
+			order.push('h1');
+			return ctx;
+		};
+		const h2: BeforeMutationHook = (ctx) => {
+			order.push('h2');
+			return ctx;
+		};
 		const composed = composeBeforeMutationHooks(h1, h2);
 		await composed(makeMutationCtx());
 		expect(order).toEqual(['h2', 'h1']);
@@ -300,8 +300,14 @@ describe('pipeAfterMutationHooks', () => {
 describe('composeAfterMutationHooks', () => {
 	it('runs right-to-left', async () => {
 		const order: string[] = [];
-		const h1: AfterMutationHook = (_ctx, r) => { order.push('h1'); return r; };
-		const h2: AfterMutationHook = (_ctx, r) => { order.push('h2'); return r; };
+		const h1: AfterMutationHook = (_ctx, r) => {
+			order.push('h1');
+			return r;
+		};
+		const h2: AfterMutationHook = (_ctx, r) => {
+			order.push('h2');
+			return r;
+		};
 		const composed = composeAfterMutationHooks(h1, h2);
 		await composed(makeMutationCtx(), []);
 		expect(order).toEqual(['h2', 'h1']);
@@ -349,8 +355,14 @@ describe('pipeOnErrorHooks', () => {
 describe('composeOnErrorHooks', () => {
 	it('runs right-to-left', async () => {
 		const order: string[] = [];
-		const h1: OnErrorHook = (ctx) => { order.push('h1'); return ctx.error; };
-		const h2: OnErrorHook = (ctx) => { order.push('h2'); return ctx.error; };
+		const h1: OnErrorHook = (ctx) => {
+			order.push('h1');
+			return ctx.error;
+		};
+		const h2: OnErrorHook = (ctx) => {
+			order.push('h2');
+			return ctx.error;
+		};
 		const composed = composeOnErrorHooks(h1, h2);
 		await composed(makeErrorCtx());
 		expect(order).toEqual(['h2', 'h1']);
@@ -384,5 +396,65 @@ describe('edge cases', () => {
 		const original = [...hooks];
 		sortByPriority(hooks);
 		expect(hooks).toEqual(original);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Edge cases — zero hooks for all pipe/compose variants
+// ---------------------------------------------------------------------------
+
+describe('zero-hooks edge cases', () => {
+	it('pipeAfterQueryHooks with zero hooks returns the original result', async () => {
+		const piped = pipeAfterQueryHooks();
+		const result = await piped(makeQueryCtx(), 'original');
+		expect(result).toBe('original');
+	});
+
+	it('composeAfterQueryHooks with zero hooks returns the original result', async () => {
+		const composed = composeAfterQueryHooks();
+		const result = await composed(makeQueryCtx(), 'original');
+		expect(result).toBe('original');
+	});
+
+	it('pipeBeforeMutationHooks with zero hooks returns the original context', async () => {
+		const piped = pipeBeforeMutationHooks();
+		const ctx = makeMutationCtx({ correlationId: 'unchanged' });
+		const result = await piped(ctx);
+		expect(result?.correlationId).toBe('unchanged');
+	});
+
+	it('composeBeforeMutationHooks with zero hooks returns the original context', async () => {
+		const composed = composeBeforeMutationHooks();
+		const ctx = makeMutationCtx({ correlationId: 'unchanged' });
+		const result = await composed(ctx);
+		expect(result?.correlationId).toBe('unchanged');
+	});
+
+	it('pipeAfterMutationHooks with zero hooks returns the original rows', async () => {
+		const piped = pipeAfterMutationHooks();
+		const rows = [1, 2, 3];
+		const result = await piped(makeMutationCtx(), rows);
+		expect(result).toEqual([1, 2, 3]);
+	});
+
+	it('composeAfterMutationHooks with zero hooks returns the original rows', async () => {
+		const composed = composeAfterMutationHooks();
+		const rows = ['a', 'b'];
+		const result = await composed(makeMutationCtx(), rows);
+		expect(result).toEqual(['a', 'b']);
+	});
+
+	it('pipeOnErrorHooks with zero hooks returns the original error', async () => {
+		const piped = pipeOnErrorHooks();
+		const ctx = makeErrorCtx({ error: new Error('zero-pipe') });
+		const result = await piped(ctx);
+		expect(result?.message).toBe('zero-pipe');
+	});
+
+	it('composeOnErrorHooks with zero hooks returns the original error', async () => {
+		const composed = composeOnErrorHooks();
+		const ctx = makeErrorCtx({ error: new Error('zero-compose') });
+		const result = await composed(ctx);
+		expect(result?.message).toBe('zero-compose');
 	});
 });
