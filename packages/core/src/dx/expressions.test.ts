@@ -12,19 +12,7 @@ import type {
 	UnaryExpressionIntent,
 	WhereExpressionIntent,
 } from '../intent-ast.js';
-import {
-	array,
-	cast,
-	ExpressionRef,
-	fn,
-	literal,
-	namedArg,
-	op,
-	param,
-	ref,
-	star,
-	unary,
-} from './expressions.js';
+import { array, cast, ExpressionRef, fn, literal, namedArg, op, param, ref, star, unary } from './expressions.js';
 
 describe('Expression Primitives', () => {
 	describe('ref()', () => {
@@ -97,15 +85,11 @@ describe('Expression Primitives', () => {
 
 		it('should accept types with spaces (double precision)', () => {
 			const c = cast(ref('val'), 'double precision');
-			expect((c.intent as CastExpressionIntent).typeName).toBe(
-				'double precision',
-			);
+			expect((c.intent as CastExpressionIntent).typeName).toBe('double precision');
 		});
 
 		it('should throw on invalid type name — SQL injection attempt', () => {
-			expect(() => cast(param(1), "'); DROP TABLE users; --")).toThrow(
-				'Invalid type',
-			);
+			expect(() => cast(param(1), "'); DROP TABLE users; --")).toThrow('Invalid type');
 		});
 
 		it('should throw on empty type name', () => {
@@ -113,9 +97,7 @@ describe('Expression Primitives', () => {
 		});
 
 		it('should throw on type with semicolon', () => {
-			expect(() => cast(param(1), 'vector; DROP TABLE')).toThrow(
-				'Invalid type',
-			);
+			expect(() => cast(param(1), 'vector; DROP TABLE')).toThrow('Invalid type');
 		});
 	});
 
@@ -166,15 +148,11 @@ describe('Expression Primitives', () => {
 		});
 
 		it('should throw on SQL injection in operator', () => {
-			expect(() => op("'; DROP TABLE users; --", ref('a'), ref('b'))).toThrow(
-				'Invalid operator',
-			);
+			expect(() => op("'; DROP TABLE users; --", ref('a'), ref('b'))).toThrow('Invalid operator');
 		});
 
 		it('should throw on operator with spaces', () => {
-			expect(() => op('IS NOT', ref('a'), ref('b'))).toThrow(
-				'Invalid operator',
-			);
+			expect(() => op('IS NOT', ref('a'), ref('b'))).toThrow('Invalid operator');
 		});
 
 		it('should support standard arithmetic operators', () => {
@@ -311,17 +289,13 @@ describe('Expression Primitives', () => {
 			const aliased = r.as('my_alias');
 			expect(aliased).not.toBe(r); // new instance
 			expect(aliased).toBeInstanceOf(ExpressionRef);
-			expect((aliased.intent as RefExpressionIntent & { as?: string }).as).toBe(
-				'my_alias',
-			);
+			expect((aliased.intent as RefExpressionIntent & { as?: string }).as).toBe('my_alias');
 		});
 
 		it('.as() should not mutate original', () => {
 			const r = ref('col');
 			r.as('alias');
-			expect(
-				(r.intent as RefExpressionIntent & { as?: string }).as,
-			).toBeUndefined();
+			expect((r.intent as RefExpressionIntent & { as?: string }).as).toBeUndefined();
 		});
 
 		it('.eq() should return WhereExpressionIntent', () => {
@@ -375,11 +349,7 @@ describe('Expression Primitives', () => {
 	describe('nested expressions', () => {
 		it('should build cosine similarity expression tree (1 - dist)', () => {
 			// 1 - (vector <=> $1::vector)
-			const expr = op(
-				'-',
-				literal(1),
-				op('<=>', ref('vector'), cast(param([0.1, 0.2]), 'vector')),
-			);
+			const expr = op('-', literal(1), op('<=>', ref('vector'), cast(param([0.1, 0.2]), 'vector')));
 			expect(expr.intent.kind).toBe('customOp');
 			const intent = expr.intent as CustomOpExpressionIntent;
 			expect(intent.operator).toBe('-');
@@ -392,9 +362,7 @@ describe('Expression Primitives', () => {
 			expect(innerOp.right.kind).toBe('cast');
 			const castIntent = innerOp.right as CastExpressionIntent;
 			expect(castIntent.typeName).toBe('vector');
-			expect((castIntent.expr as ParamExpressionIntent).value).toEqual([
-				0.1, 0.2,
-			]);
+			expect((castIntent.expr as ParamExpressionIntent).value).toEqual([0.1, 0.2]);
 		});
 
 		it('should support col-vs-col expression (no params)', () => {
@@ -427,27 +395,21 @@ describe('namedArg()', () => {
 	});
 
 	it('returns an ExpressionRef', () => {
-		expect(namedArg('query_string', param('hello'))).toBeInstanceOf(
-			ExpressionRef,
-		);
+		expect(namedArg('query_string', param('hello'))).toBeInstanceOf(ExpressionRef);
 	});
 
 	it('wraps a literal value — intent.value is LiteralExpressionIntent', () => {
 		const expr = namedArg('field', literal('my_column'));
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('literal');
-		expect((intent.value as { kind: string; value: unknown }).value).toBe(
-			'my_column',
-		);
+		expect((intent.value as { kind: string; value: unknown }).value).toBe('my_column');
 	});
 
 	it('wraps a param value — intent.value is ParamExpressionIntent', () => {
 		const expr = namedArg('query_string', param('search term'));
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('param');
-		expect((intent.value as { kind: string; value: unknown }).value).toBe(
-			'search term',
-		);
+		expect((intent.value as { kind: string; value: unknown }).value).toBe('search term');
 	});
 
 	it('accepts an ExpressionRef as value (unwraps .intent)', () => {
@@ -461,17 +423,11 @@ describe('namedArg()', () => {
 		const expr = namedArg('field', 'my_column');
 		const intent = expr.intent as NamedArgExpressionIntent;
 		expect(intent.value.kind).toBe('ref');
-		expect((intent.value as { kind: string; column: string }).column).toBe(
-			'my_column',
-		);
+		expect((intent.value as { kind: string; column: string }).column).toBe('my_column');
 	});
 
 	it('can be used as fn() argument — composes correctly', () => {
-		const expr = fn(
-			'paradedb.parse',
-			namedArg('field', literal('name')),
-			namedArg('query_string', param('hello')),
-		);
+		const expr = fn('paradedb.parse', namedArg('field', literal('name')), namedArg('query_string', param('hello')));
 		const intent = expr.intent as CustomFnExpressionIntent;
 		expect(intent.kind).toBe('customFn');
 		expect(intent.name).toBe('paradedb.parse');
@@ -481,15 +437,11 @@ describe('namedArg()', () => {
 	});
 
 	it('throws on invalid name (injection guard)', () => {
-		expect(() => namedArg("'; DROP TABLE--", literal(1))).toThrow(
-			"namedArg: invalid argument name: '; DROP TABLE--",
-		);
+		expect(() => namedArg("'; DROP TABLE--", literal(1))).toThrow("namedArg: invalid argument name: '; DROP TABLE--");
 	});
 
 	it('throws on empty name', () => {
-		expect(() => namedArg('', literal(1))).toThrow(
-			'namedArg: invalid argument name: ',
-		);
+		expect(() => namedArg('', literal(1))).toThrow('namedArg: invalid argument name: ');
 	});
 });
 
@@ -578,5 +530,84 @@ describe('array()', () => {
 		const intent = expr.intent as CustomFnExpressionIntent;
 		expect(intent.name).toBe('unnest');
 		expect(intent.args[0]?.kind).toBe('array');
+	});
+});
+
+// ============================================================================
+// toExpressionIntent — duck-type path (plain {__expr: true, intent} objects)
+// ============================================================================
+
+describe('toExpressionIntent duck-type path', () => {
+	it('should handle a plain {__expr: true, intent} object as op() left operand', () => {
+		// Simulates SubqueryExpression.asExpr() which returns plain {__expr: true, intent}
+		// not an ExpressionRef instance — triggers the duck-type branch in toExpressionIntent
+		const plainExprSpec = {
+			__expr: true as const,
+			intent: { kind: 'ref' as const, column: 'subq_col' },
+		};
+		const result = op('=', plainExprSpec as unknown as ExpressionRef, ref('x'));
+		const intent = result.intent as import('../intent-ast.js').CustomOpExpressionIntent;
+		expect(intent.left).toEqual({ kind: 'ref', column: 'subq_col' });
+	});
+
+	it('should handle a plain {__expr: true, intent} object as op() right operand', () => {
+		const plainExprSpec = {
+			__expr: true as const,
+			intent: { kind: 'param' as const, value: 42 },
+		};
+		const result = op('=', ref('id'), plainExprSpec as unknown as ExpressionRef);
+		const intent = result.intent as import('../intent-ast.js').CustomOpExpressionIntent;
+		expect(intent.right).toEqual({ kind: 'param', value: 42 });
+	});
+
+	it('should handle a plain {__expr: true, intent} object as fn() argument', () => {
+		const plainExprSpec = {
+			__expr: true as const,
+			intent: { kind: 'literal' as const, value: 99 },
+		};
+		const result = fn('abs', plainExprSpec as unknown as ExpressionRef);
+		const intent = result.intent as import('../intent-ast.js').CustomFnExpressionIntent;
+		expect(intent.args[0]).toEqual({ kind: 'literal', value: 99 });
+	});
+
+	it('should fall back to param intent when input is a number (non-string primitive)', () => {
+		// Triggers the final fallback: return { kind: 'param', value: input }
+		const result = op('=', ref('score'), 99 as unknown as ExpressionRef);
+		const intent = result.intent as import('../intent-ast.js').CustomOpExpressionIntent;
+		expect(intent.right).toEqual({ kind: 'param', value: 99 });
+	});
+});
+
+// ============================================================================
+// ExpressionRef.filter() — error path when called on non-customFn expression
+// ============================================================================
+
+describe('ExpressionRef.filter() on non-customFn', () => {
+	it('should throw when called on a ref expression', () => {
+		const r = ref('col');
+		expect(() => r.filter({} as unknown as Parameters<typeof r.filter>[0])).toThrow(
+			"filter() can only be used on function expressions created with fn(). Got kind: 'ref'",
+		);
+	});
+
+	it('should throw when called on a param expression', () => {
+		const p = param(1);
+		expect(() => p.filter({} as unknown as Parameters<typeof p.filter>[0])).toThrow(
+			"filter() can only be used on function expressions created with fn(). Got kind: 'param'",
+		);
+	});
+
+	it('should throw when called on a cast expression', () => {
+		const c = cast(param(1), 'int');
+		expect(() => c.filter({} as unknown as Parameters<typeof c.filter>[0])).toThrow(
+			"filter() can only be used on function expressions created with fn(). Got kind: 'cast'",
+		);
+	});
+
+	it('should throw when called on an op expression', () => {
+		const o = op('=', ref('a'), ref('b'));
+		expect(() => o.filter({} as unknown as Parameters<typeof o.filter>[0])).toThrow(
+			"filter() can only be used on function expressions created with fn(). Got kind: 'customOp'",
+		);
 	});
 });
