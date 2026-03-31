@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **BRANCH-COV** [Adapter] pgsql-adapter.ts mock branch coverage — created `pgsql-adapter-mock.test.ts` (33 tests): transaction BEGIN/COMMIT/ROLLBACK paths, client reuse, stream() all branches, execute() row transformation (camelCase), executeRaw error, getPoolInstance, indexExists false branch, withSchema pool inheritance, compileWithIncludes, executeDDL success/error, listIndexes/storageSize schema fallbacks. 3745 adapter tests pass. (2026-03-31)
+
 - [x] ✅ **BRANCH-COV** [Core] Branch coverage tests for assert/ modules — created `assertion-parser.test.ts` (65 tests), `assertion-functions.test.ts` (99 tests), `assertion-runner.test.ts` (39 tests); added duck-type + filter() edge cases to `expressions.test.ts` (+8 tests, 84 total); added zero-hooks edge cases to `hook-utils.test.ts` (+8 tests, 34 total). All 2691 core tests pass. (2026-04-01)
 
 - [x] ✅ **BRANCH-COV** [Core] Branch coverage tests for planner.ts + query-builder.ts — created `planner-branch-coverage.test.ts` (41 tests: determineJoinType, depth/circular detection, disambiguation, UnsupportedStrategyError, flat strategy, LEFT JOIN cascade, extractCTEs, plan() edge cases) and `query-builder-branch.test.ts` (53 tests: buildIntent, orderBy, where, cursorPaginate, paginate). All 2472 core tests pass. (2026-03-31)
