@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   scope: nql
   type: specification
   target_project: /mnt/wsl/shared/dev/db-semantic-planner
