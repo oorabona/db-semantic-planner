@@ -2,29 +2,18 @@ import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
-import { batchValues } from './batch-values.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
+import { batchValues } from './batch-values.js';
 import { CteBuilder } from './cte-builder.js';
-import {
-	createRawCteBuilder,
-	type RawCteQueryBuilder,
-	type RecursiveOptions,
-} from './raw-cte-builder.js';
 import { InvalidOperationError } from './errors.js';
 import { eq } from './filters.js';
-import {
-	extractRecursiveField,
-	findSelfRefRelation,
-} from './hierarchy-helpers.js';
+import { extractRecursiveField, findSelfRefRelation } from './hierarchy-helpers.js';
 import type { HookErrorHandler, HookStore } from './hooks.js';
-import {
-	DeleteBuilder,
-	InsertBuilder,
-	UpdateBuilder,
-	UpsertBuilder,
-} from './mutation-builders.js';
+import { DeleteBuilder, InsertBuilder, UpdateBuilder, UpsertBuilder } from './mutation-builders.js';
 import { createNqlTag, type NqlTag } from './nql.js';
+import type { SelectExpressionResult } from './orm-instance-types.js';
 import { QueryBuilderImpl } from './query-builder.js';
+import { createRawCteBuilder, type RawCteQueryBuilder, type RecursiveOptions } from './raw-cte-builder.js';
 import type { DefaultFilters } from './schema.js';
 import { TABLE_META } from './symbols.js';
 import type {
@@ -45,7 +34,6 @@ import type {
 	QueryBuilder,
 	RelationHints,
 } from './types.js';
-import type { SelectExpressionResult } from './orm-instance-types.js';
 
 /**
  * Quote a PostgreSQL identifier (table/schema/column name).
@@ -55,6 +43,202 @@ import type { SelectExpressionResult } from './orm-instance-types.js';
 /**
  * Build the qualified table reference string for DDL statements.
  */
+
+/**
+ * Build the DDL methods object for a specific table.
+ */
+// ─── DDL SQL generation helpers ──────────────────────────────────────────────
+
+/** Double-quote a PostgreSQL identifier. */
+function quoteIdent(name: string): string {
+	return `"${name.replace(/"/g, '""')}"`;
+}
+
+/** Build a qualified `"schema"."table"` or `"table"` reference. */
+function buildQualifiedTable(tableName: string, schemaName: string | undefined): string {
+	return schemaName ? `${quoteIdent(schemaName)}.${quoteIdent(tableName)}` : quoteIdent(tableName);
+}
+
+function generateTruncateSQL(
+	tableName: string,
+	schemaName: string | undefined,
+	options: TruncateOptions | undefined,
+): string {
+	const parts = [`TRUNCATE ${buildQualifiedTable(tableName, schemaName)}`];
+	if (options?.restartIdentity) parts.push('RESTART IDENTITY');
+	if (options?.cascade) parts.push('CASCADE');
+	return parts.join(' ');
+}
+
+function generateVacuumSQL(
+	tableName: string,
+	schemaName: string | undefined,
+	options: VacuumOptions | undefined,
+): string {
+	const modifiers: string[] = [];
+	if (options?.full) modifiers.push('FULL');
+	if (options?.analyze) modifiers.push('ANALYZE');
+	const mod = modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
+	return `VACUUM ${mod}${buildQualifiedTable(tableName, schemaName)}`;
+}
+
+function generateAlterColumnSQL(
+	tableName: string,
+	column: string,
+	schemaName: string | undefined,
+	options: AlterColumnOptions,
+): string {
+	const tbl = buildQualifiedTable(tableName, schemaName);
+	const col = quoteIdent(column);
+	const clauses: string[] = [];
+
+	if (options.type !== undefined) {
+		let clause = `ALTER COLUMN ${col} TYPE ${options.type}`;
+		if (options.using !== undefined) {
+			clause += ` USING ${options.using}`;
+		}
+		clauses.push(clause);
+	}
+	if (options.setNotNull === true) {
+		clauses.push(`ALTER COLUMN ${col} SET NOT NULL`);
+	} else if (options.setNotNull === false) {
+		clauses.push(`ALTER COLUMN ${col} DROP NOT NULL`);
+	}
+	if (options.dropDefault === true) {
+		clauses.push(`ALTER COLUMN ${col} DROP DEFAULT`);
+	} else if (options.setDefault !== undefined) {
+		clauses.push(`ALTER COLUMN ${col} SET DEFAULT ${options.setDefault}`);
+	}
+	if (clauses.length === 0) {
+		throw new InvalidOperationError('alterColumn', 'At least one alteration option must be specified.');
+	}
+	return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
+}
+
+function generateCreateIndexSQL(tableName: string, schemaName: string | undefined, opts: CreateIndexOptions): string {
+	const tbl = buildQualifiedTable(tableName, schemaName);
+	const parts: string[] = ['CREATE'];
+	if (opts.unique) parts.push('UNIQUE');
+	parts.push('INDEX');
+	if (opts.concurrently) parts.push('CONCURRENTLY');
+	if (opts.ifNotExists) parts.push('IF NOT EXISTS');
+	parts.push(quoteIdent(opts.name));
+	parts.push('ON');
+	parts.push(tbl);
+	if (opts.method) parts.push(`USING ${opts.method}`);
+
+	const colDefs = opts.columns.map((col) => {
+		if (typeof col === 'string') {
+			const quotedCol = quoteIdent(col);
+			const op = opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
+			return `${quotedCol}${op}`;
+		}
+		const op = col.opclass != null ? ` ${col.opclass}` : '';
+		return `(${col.expression})${op}`;
+	});
+	parts.push(`(${colDefs.join(', ')})`);
+
+	if (opts.include && opts.include.length > 0) {
+		parts.push(`INCLUDE (${opts.include.map((c) => quoteIdent(c)).join(', ')})`);
+	}
+	if (opts.with && Object.keys(opts.with).length > 0) {
+		const withClauses = Object.entries(opts.with)
+			.map(([k, v]) => `${k} = ${v}`)
+			.join(', ');
+		parts.push(`WITH (${withClauses})`);
+	}
+	if (opts.where) parts.push(`WHERE ${opts.where}`);
+	return parts.join(' ');
+}
+
+function generateDropIndexSQL(
+	name: string,
+	schemaName: string | undefined,
+	options: DropIndexOptions | undefined,
+): string {
+	const parts: string[] = ['DROP INDEX'];
+	if (options?.concurrently) parts.push('CONCURRENTLY');
+	if (options?.ifExists) parts.push('IF EXISTS');
+	const sc = options?.schema ?? schemaName;
+	parts.push(sc ? `${quoteIdent(sc)}.${quoteIdent(name)}` : quoteIdent(name));
+	if (options?.cascade) parts.push('CASCADE');
+	return parts.join(' ');
+}
+
+// ─── indexes sub-API builder ──────────────────────────────────────────────────
+
+function buildIndexAPI(
+	tableName: string,
+	schemaName: string | undefined,
+	adapter: Adapter<unknown> | undefined,
+	requireAdapter: () => Adapter<unknown>,
+): TableDDL['indexes'] {
+	return {
+		async create(opts: CreateIndexOptions): Promise<void> {
+			const a = requireAdapter();
+			if (opts.concurrently && a.inTransaction) {
+				throw new InvalidOperationError(
+					'createIndex',
+					'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
+				);
+			}
+			const sql = a.generateCreateIndex
+				? a.generateCreateIndex(tableName, opts, schemaName)
+				: generateCreateIndexSQL(tableName, schemaName, opts);
+			await a.executeDDL!(sql);
+		},
+
+		async drop(name: string, options?: DropIndexOptions): Promise<void> {
+			const a = requireAdapter();
+			if (options?.concurrently && a.inTransaction) {
+				throw new InvalidOperationError('dropIndex', 'DROP INDEX CONCURRENTLY cannot run inside a transaction block');
+			}
+			const sql = a.generateDropIndex
+				? a.generateDropIndex(name, options)
+				: generateDropIndexSQL(name, schemaName, options);
+			await a.executeDDL!(sql);
+		},
+
+		async list(options?: { namePattern?: string }): Promise<IndexInfo[]> {
+			if (!adapter) {
+				throw new InvalidOperationError('indexes.list', 'indexes.list() requires an adapter.');
+			}
+			if (adapter.listIndexes) {
+				return adapter.listIndexes(tableName, schemaName, options);
+			}
+			// Fallback for adapters without listIndexes: use executeRaw if available
+			const sql =
+				`SELECT indexname AS name, indexdef AS definition, ` +
+				`(SELECT indisunique FROM pg_index WHERE indexrelid = (SELECT oid FROM pg_class WHERE relname = indexname)) AS unique, ` +
+				`CASE WHEN indexdef LIKE '%USING %' THEN split_part(indexdef, 'USING ', 2) ELSE 'btree' END AS method ` +
+				`FROM pg_indexes WHERE tablename = '${tableName.replace(/'/g, "''")}' ` +
+				(schemaName ? `AND schemaname = '${schemaName.replace(/'/g, "''")}' ` : '') +
+				`ORDER BY indexname`;
+			if ('executeRaw' in adapter && typeof adapter.executeRaw === 'function') {
+				const rows = await (adapter.executeRaw as (sql: string, params: unknown[]) => Promise<unknown[]>)(sql, []);
+				return rows as IndexInfo[];
+			}
+			// Fallback: use executeDDL (adapter must handle SELECT)
+			if (adapter.executeDDL) await adapter.executeDDL(sql);
+			return [];
+		},
+
+		async exists(name: string): Promise<boolean> {
+			if (!adapter) {
+				throw new InvalidOperationError('indexes.exists', 'indexes.exists() requires an adapter.');
+			}
+			if (!adapter.indexExists) {
+				throw new InvalidOperationError(
+					'indexes.exists',
+					'indexes.exists() requires an adapter that implements indexExists().',
+				);
+			}
+			return adapter.indexExists(name, tableName, schemaName);
+		},
+	};
+}
+
+// ─── Public assembler ─────────────────────────────────────────────────────────
 
 /**
  * Build the DDL methods object for a specific table.
@@ -80,221 +264,34 @@ function buildTableDDL(
 			const a = requireAdapter();
 			const sql = a.generateTruncate
 				? a.generateTruncate(tableName, schemaName, options)
-				: (() => {
-						// Fallback: generate inline (compile-only adapters without generate*)
-						const tbl = schemaName
-							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
-							: `"${tableName.replace(/"/g, '""')}"`;
-						const parts = [`TRUNCATE ${tbl}`];
-						if (options?.restartIdentity) parts.push('RESTART IDENTITY');
-						if (options?.cascade) parts.push('CASCADE');
-						return parts.join(' ');
-					})();
+				: generateTruncateSQL(tableName, schemaName, options);
 			await a.executeDDL!(sql);
 		},
 
 		async vacuum(options?: VacuumOptions): Promise<void> {
 			const a = requireAdapter();
 			if (a.inTransaction) {
-				throw new InvalidOperationError(
-					'vacuum',
-					'VACUUM cannot run inside a transaction block',
-				);
+				throw new InvalidOperationError('vacuum', 'VACUUM cannot run inside a transaction block');
 			}
 			const sql = a.generateVacuum
 				? a.generateVacuum(tableName, schemaName, options)
-				: (() => {
-						const modifiers: string[] = [];
-						if (options?.full) modifiers.push('FULL');
-						if (options?.analyze) modifiers.push('ANALYZE');
-						const mod =
-							modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
-						const tbl = schemaName
-							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
-							: `"${tableName.replace(/"/g, '""')}"`;
-						return `VACUUM ${mod}${tbl}`;
-					})();
+				: generateVacuumSQL(tableName, schemaName, options);
 			await a.executeDDL!(sql);
 		},
 
-		async alterColumn(
-			column: string,
-			options: AlterColumnOptions,
-		): Promise<void> {
+		async alterColumn(column: string, options: AlterColumnOptions): Promise<void> {
 			const a = requireAdapter();
 			const sql = a.generateAlterColumn
 				? a.generateAlterColumn(tableName, column, options, schemaName)
-				: (() => {
-						const tbl = schemaName
-							? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
-							: `"${tableName.replace(/"/g, '""')}"`;
-						const col = `"${column.replace(/"/g, '""')}"`;
-						const clauses: string[] = [];
-						if (options.type !== undefined) {
-							let clause = `ALTER COLUMN ${col} TYPE ${options.type}`;
-							if (options.using !== undefined) {
-								clause += ` USING ${options.using}`;
-							}
-							clauses.push(clause);
-						}
-						if (options.setNotNull === true) {
-							clauses.push(`ALTER COLUMN ${col} SET NOT NULL`);
-						} else if (options.setNotNull === false) {
-							clauses.push(`ALTER COLUMN ${col} DROP NOT NULL`);
-						}
-						if (options.dropDefault === true) {
-							clauses.push(`ALTER COLUMN ${col} DROP DEFAULT`);
-						} else if (options.setDefault !== undefined) {
-							clauses.push(`ALTER COLUMN ${col} SET DEFAULT ${options.setDefault}`);
-						}
-						if (clauses.length === 0) {
-							throw new InvalidOperationError(
-								'alterColumn',
-								'At least one alteration option must be specified.',
-							);
-						}
-						return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
-					})();
+				: generateAlterColumnSQL(tableName, column, schemaName, options);
 			await a.executeDDL!(sql);
 		},
 
-		indexes: {
-			async create(opts: CreateIndexOptions): Promise<void> {
-				const a = requireAdapter();
-				if (opts.concurrently && a.inTransaction) {
-					throw new InvalidOperationError(
-						'createIndex',
-						'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
-					);
-				}
-				const sql = a.generateCreateIndex
-					? a.generateCreateIndex(tableName, opts, schemaName)
-					: (() => {
-							const tbl = schemaName
-								? `"${schemaName.replace(/"/g, '""')}"."${tableName.replace(/"/g, '""')}"`
-								: `"${tableName.replace(/"/g, '""')}"`;
-							const parts: string[] = ['CREATE'];
-							if (opts.unique) parts.push('UNIQUE');
-							parts.push('INDEX');
-							if (opts.concurrently) parts.push('CONCURRENTLY');
-							if (opts.ifNotExists) parts.push('IF NOT EXISTS');
-							parts.push(`"${opts.name.replace(/"/g, '""')}"`);
-							parts.push('ON');
-							parts.push(tbl);
-							if (opts.method) parts.push(`USING ${opts.method}`);
-							const colDefs = opts.columns.map((col) => {
-								if (typeof col === 'string') {
-									const quotedCol = `"${col.replace(/"/g, '""')}"`;
-									const op = opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
-									return `${quotedCol}${op}`;
-								}
-								const op = col.opclass != null ? ` ${col.opclass}` : '';
-								return `(${col.expression})${op}`;
-							});
-							parts.push(`(${colDefs.join(', ')})`);
-							if (opts.include && opts.include.length > 0) {
-								parts.push(
-									`INCLUDE (${opts.include.map((c) => `"${c.replace(/"/g, '""')}"`).join(', ')})`,
-								);
-							}
-							if (opts.with && Object.keys(opts.with).length > 0) {
-								const withClauses = Object.entries(opts.with)
-									.map(([k, v]) => `${k} = ${v}`)
-									.join(', ');
-								parts.push(`WITH (${withClauses})`);
-							}
-							if (opts.where) parts.push(`WHERE ${opts.where}`);
-							return parts.join(' ');
-						})();
-				await a.executeDDL!(sql);
-			},
-
-			async drop(name: string, options?: DropIndexOptions): Promise<void> {
-				const a = requireAdapter();
-				if (options?.concurrently && a.inTransaction) {
-					throw new InvalidOperationError(
-						'dropIndex',
-						'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
-					);
-				}
-				const sql = a.generateDropIndex
-					? a.generateDropIndex(name, options)
-					: (() => {
-							const parts: string[] = ['DROP INDEX'];
-							if (options?.concurrently) parts.push('CONCURRENTLY');
-							if (options?.ifExists) parts.push('IF EXISTS');
-							const sc = options?.schema ?? schemaName;
-							parts.push(
-								sc
-									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`
-									: `"${name.replace(/"/g, '""')}"`,
-							);
-							if (options?.cascade) parts.push('CASCADE');
-							return parts.join(' ');
-						})();
-				await a.executeDDL!(sql);
-			},
-
-			async list(options?: { namePattern?: string }): Promise<IndexInfo[]> {
-				if (!adapter) {
-					throw new InvalidOperationError(
-						'indexes.list',
-						'indexes.list() requires an adapter.',
-					);
-				}
-				if (adapter.listIndexes) {
-					return adapter.listIndexes(tableName, schemaName, options);
-				}
-				// Fallback for adapters without listIndexes: use executeRaw if available
-				const sql =
-					`SELECT indexname AS name, indexdef AS definition, ` +
-					`(SELECT indisunique FROM pg_index WHERE indexrelid = (SELECT oid FROM pg_class WHERE relname = indexname)) AS unique, ` +
-					`CASE WHEN indexdef LIKE '%USING %' THEN split_part(indexdef, 'USING ', 2) ELSE 'btree' END AS method ` +
-					`FROM pg_indexes WHERE tablename = '${tableName.replace(/'/g, "''")}' ` +
-					(schemaName
-						? `AND schemaname = '${schemaName.replace(/'/g, "''")}' `
-						: '') +
-					`ORDER BY indexname`;
-				if (
-					'executeRaw' in adapter &&
-					typeof adapter.executeRaw === 'function'
-				) {
-					const rows = await (
-						adapter.executeRaw as (
-							sql: string,
-							params: unknown[],
-						) => Promise<unknown[]>
-					)(sql, []);
-					return rows as IndexInfo[];
-				}
-				// Fallback: use executeDDL (adapter must handle SELECT)
-				if (adapter.executeDDL) await adapter.executeDDL(sql);
-				return [];
-			},
-
-			async exists(name: string): Promise<boolean> {
-				if (!adapter) {
-					throw new InvalidOperationError(
-						'indexes.exists',
-						'indexes.exists() requires an adapter.',
-					);
-				}
-				if (!adapter.indexExists) {
-					throw new InvalidOperationError(
-						'indexes.exists',
-						'indexes.exists() requires an adapter that implements indexExists().',
-					);
-				}
-				return adapter.indexExists(name, tableName, schemaName);
-			},
-		},
+		indexes: buildIndexAPI(tableName, schemaName, adapter, requireAdapter),
 
 		async storageSize(): Promise<number> {
 			if (!adapter) {
-				throw new InvalidOperationError(
-					'storageSize',
-					'storageSize() requires an adapter.',
-				);
+				throw new InvalidOperationError('storageSize', 'storageSize() requires an adapter.');
 			}
 			if (!adapter.storageSize) {
 				throw new InvalidOperationError(
@@ -368,12 +365,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 ): OrmInstanceInternal<DB> {
 	// Create NQL template tag (DX-040)
 	// NQL compiler is now integrated directly - @dbsp/nql is imported in nql.ts
-	const nql: NqlTag = createNqlTag(
-		schemaDefinition,
-		model,
-		adapter as Adapter<unknown> | undefined,
-		schemaName,
-	);
+	const nql: NqlTag = createNqlTag(schemaDefinition, model, adapter as Adapter<unknown> | undefined, schemaName);
 
 	// Helper: build a MutationBuilder options object (shared across mutation methods)
 	const mutationOpts = {
@@ -386,11 +378,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	} as const;
 
 	// Wrap the tables proxy to augment each table access with DDL methods
-	const tablesDDLProxy = wrapTablesProxyWithDDL(
-		tablesProxy ?? {},
-		adapter as Adapter<unknown> | undefined,
-		schemaName,
-	);
+	const tablesDDLProxy = wrapTablesProxyWithDDL(tablesProxy ?? {}, adapter as Adapter<unknown> | undefined, schemaName);
 
 	return {
 		strictMode,
@@ -450,9 +438,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				inTransaction,
 			);
 		},
-		select<K extends keyof DB & string, TResult = DB[K]>(
-			from: K,
-		): QueryBuilder<TResult> {
+		select<K extends keyof DB & string, TResult = DB[K]>(from: K): QueryBuilder<TResult> {
 			return new QueryBuilderImpl<TResult>(
 				model,
 				strictMode,
@@ -512,10 +498,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			options: ListHierarchyOptions,
 		): Promise<TResult[]> {
 			if (!adapter) {
-				throw new Error(
-					'listAncestors() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
-				);
+				throw new Error('listAncestors() requires an adapter. ' + 'Pass an adapter when creating the ORM.');
 			}
 
 			// Find the self-referential relation that matches the parent direction
@@ -575,10 +558,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			options: ListHierarchyOptions,
 		): Promise<TResult[]> {
 			if (!adapter) {
-				throw new Error(
-					'listDescendants() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
-				);
+				throw new Error('listDescendants() requires an adapter. ' + 'Pass an adapter when creating the ORM.');
 			}
 
 			// Find the self-referential relation that matches the children direction
@@ -695,10 +675,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 		async transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
 			if (!adapter) {
-				throw new Error(
-					'transaction() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
-				);
+				throw new Error('transaction() requires an adapter. ' + 'Pass an adapter when creating the ORM.');
 			}
 
 			// Passthrough to adapter's transaction API
@@ -752,15 +729,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		 *
 		 * @see {@link https://owasp.org/www-community/attacks/SQL_Injection | OWASP SQL Injection}
 		 */
-		async raw<T = unknown>(
-			sqlString: string,
-			parameters: readonly unknown[] = [],
-		): Promise<T[]> {
+		async raw<T = unknown>(sqlString: string, parameters: readonly unknown[] = []): Promise<T[]> {
 			if (!adapter) {
-				throw new Error(
-					'raw() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
-				);
+				throw new Error('raw() requires an adapter. ' + 'Pass an adapter when creating the ORM.');
 			}
 
 			// Passthrough to adapter's executeRaw API
@@ -778,10 +749,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 		selectExpression(expr: ExpressionSpec): SelectExpressionResult {
 			if (!adapter) {
-				throw new Error(
-					'selectExpression() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
-				);
+				throw new Error('selectExpression() requires an adapter. ' + 'Pass an adapter when creating the ORM.');
 			}
 			const compiled = adapter.compileSelectExpression(expr.intent);
 			return {
@@ -797,10 +765,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			return new CteBuilder(name, adapter, schemaName);
 		},
 
-		recursive<TResult = unknown>(
-			name: string,
-			options: RecursiveOptions,
-		): RawCteQueryBuilder<TResult> {
+		recursive<TResult = unknown>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult> {
 			return createRawCteBuilder<TResult>(name, options, adapter, schemaName);
 		},
 
@@ -830,9 +795,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 							if (options?.ifExists) parts.push('IF EXISTS');
 							const sc = options?.schema ?? schemaName;
 							parts.push(
-								sc
-									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`
-									: `"${name.replace(/"/g, '""')}"`,
+								sc ? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"` : `"${name.replace(/"/g, '""')}"`,
 							);
 							if (options?.cascade) parts.push('CASCADE');
 							return parts.join(' ');
