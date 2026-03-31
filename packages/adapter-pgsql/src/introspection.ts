@@ -165,17 +165,49 @@ function parseExpressionsList(raw: string): readonly string[] {
  * const orm = createOrm({ model, adapter: createPgsqlAdapter(pool) });
  * ```
  */
-export async function introspect(
-	pool: Pool,
-	options?: IntrospectionOptions,
-): Promise<IntrospectedModelIR> {
-	const schema = options?.schema ?? 'public';
-	const warnings: string[] = [];
 
-	// All catalog queries are independent — run in parallel for performance.
-	// Order matches the coverage test mock sequence: columns, pks, fks, indexes,
-	// enums, comments, checks, partitions, extensions (no schema param), sequences,
-	// rls state, policies.
+// ============================================================================
+// Catalog query helpers
+// ============================================================================
+
+/** All raw results returned by a single parallel catalog fetch */
+interface CatalogResults {
+	columns: RawColumn[];
+	pks: RawPrimaryKey[];
+	fks: RawForeignKey[];
+	indexes: RawIndex[];
+	enums: Array<{ name: string; values: string[] }>;
+	comments: Array<{ table_name: string; column_name: string | null; comment: string }>;
+	checks: Array<{ name: string; expression: string; raw_table: string }>;
+	partitions: RawPartition[];
+	extensions: Array<{ name: string }>;
+	sequences: Array<{
+		name: string;
+		start_value: string;
+		increment_by: string;
+		min_value: string;
+		max_value: string;
+		cycle: boolean;
+	}>;
+	rls: Array<{ table_name: string; rls_enabled: boolean }>;
+	policies: Array<{
+		table_name: string;
+		policy_name: string;
+		cmd: string;
+		roles: string[];
+		permissive: boolean;
+		using_expr: string | null;
+		with_check_expr: string | null;
+	}>;
+}
+
+/**
+ * Run all 12 catalog queries in parallel.
+ * Order matches the coverage test mock sequence: columns, pks, fks, indexes,
+ * enums, comments, checks, partitions, extensions (no schema param), sequences,
+ * rls state, policies.
+ */
+async function queryAllCatalogs(pool: Pool, schema: string): Promise<CatalogResults> {
 	const [
 		columnsResult,
 		pksResult,
@@ -419,14 +451,31 @@ export async function introspect(
 		),
 	]);
 
-	// Build partition map by table name
-	const tablePartitions = new Map<string, PartitionIR>();
-	for (const row of partitionsResult.rows) {
-		const strategyMap: Record<string, 'RANGE' | 'LIST' | 'HASH'> = {
-			r: 'RANGE',
-			l: 'LIST',
-			h: 'HASH',
-		};
+	return {
+		columns: columnsResult.rows,
+		pks: pksResult.rows,
+		fks: fksResult.rows,
+		indexes: indexesResult.rows,
+		enums: enumsResult.rows,
+		comments: commentsResult.rows,
+		checks: checksResult.rows,
+		partitions: partitionsResult.rows,
+		extensions: extensionsResult.rows,
+		sequences: sequencesResult.rows,
+		rls: rlsResult.rows,
+		policies: policiesResult.rows,
+	};
+}
+
+/** Build a Map<tableName, PartitionIR> from raw partition rows. */
+function buildPartitionMap(rows: RawPartition[]): Map<string, PartitionIR> {
+	const strategyMap: Record<string, 'RANGE' | 'LIST' | 'HASH'> = {
+		r: 'RANGE',
+		l: 'LIST',
+		h: 'HASH',
+	};
+	const result = new Map<string, PartitionIR>();
+	for (const row of rows) {
 		const strategy = strategyMap[row.strategy];
 		if (!strategy) continue; // Unknown strategy — skip
 		const columns: string[] = Array.isArray(row.columns)
@@ -435,28 +484,33 @@ export async function introspect(
 					.replace(/^\{|}$/g, '')
 					.split(',')
 					.filter(Boolean);
-		tablePartitions.set(row.table_name, { strategy, columns });
+		result.set(row.table_name, { strategy, columns });
 	}
+	return result;
+}
 
-	// Group CHECK constraints by table (strip schema prefix if present)
-	const tableChecks = new Map<string, CheckConstraintIR[]>();
-	for (const ck of checksResult.rows) {
+/** Build a Map<tableName, CheckConstraintIR[]> from raw check rows. */
+function buildCheckMap(
+	rows: Array<{ name: string; expression: string; raw_table: string }>,
+): Map<string, CheckConstraintIR[]> {
+	const result = new Map<string, CheckConstraintIR[]>();
+	for (const ck of rows) {
 		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
-		const checkIR: CheckConstraintIR = {
-			name: ck.name,
-			expression: ck.expression,
-		};
-		const existing = tableChecks.get(tableName);
+		const checkIR: CheckConstraintIR = { name: ck.name, expression: ck.expression };
+		const existing = result.get(tableName);
 		if (existing) {
 			existing.push(checkIR);
 		} else {
-			tableChecks.set(tableName, [checkIR]);
+			result.set(tableName, [checkIR]);
 		}
 	}
+	return result;
+}
 
-	// Group indexes by table
-	const tableIndexes = new Map<string, IndexIR[]>();
-	for (const idx of indexesResult.rows) {
+/** Build a Map<tableName, IndexIR[]> from raw index rows. */
+function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
+	const result = new Map<string, IndexIR[]>();
+	for (const idx of rows) {
 		const columns: string[] = Array.isArray(idx.columns)
 			? idx.columns
 			: String(idx.columns)
@@ -483,80 +537,85 @@ export async function introspect(
 			// Only store method when it's not the default 'btree'
 			...(idx.method && idx.method !== 'btree' ? { method: idx.method } : {}),
 			...(idx.predicate ? { where: idx.predicate } : {}),
-			...(withParams && Object.keys(withParams).length > 0
-				? { with: withParams }
-				: {}),
+			...(withParams && Object.keys(withParams).length > 0 ? { with: withParams } : {}),
 			// INCLUDE columns (PG11+)
 			...(Array.isArray(idx.include_columns) && idx.include_columns.length > 0
 				? { include: idx.include_columns as readonly string[] }
 				: {}),
 			// Expression index entries — parse comma-separated pg_get_expr output
-			// e.g. "lower(email), (score * 2)" → ['lower(email)', '(score * 2)']
-			...(idx.expressions_text
-				? { expressions: parseExpressionsList(idx.expressions_text) }
-				: {}),
+			...(idx.expressions_text ? { expressions: parseExpressionsList(idx.expressions_text) } : {}),
 			// Per-column operator class overrides (non-default only)
 			...(Array.isArray(idx.opclass_cols) &&
 			idx.opclass_cols.length > 0 &&
 			Array.isArray(idx.opclass_names) &&
 			idx.opclass_names.length > 0
 				? {
-						opclass: Object.fromEntries(
-							idx.opclass_cols.map((col, i) => [col, idx.opclass_names![i]!]),
-						) as Record<string, string>,
+						opclass: Object.fromEntries(idx.opclass_cols.map((col, i) => [col, idx.opclass_names![i]!])) as Record<
+							string,
+							string
+						>,
 					}
 				: {}),
 		};
-		const existing = tableIndexes.get(idx.table_name);
+		const existing = result.get(idx.table_name);
 		if (existing) {
 			existing.push(indexIR);
 		} else {
-			tableIndexes.set(idx.table_name, [indexIR]);
+			result.set(idx.table_name, [indexIR]);
 		}
 	}
+	return result;
+}
 
-	// Group columns by table
-	const tableColumns = new Map<string, RawColumn[]>();
-	for (const col of columnsResult.rows) {
-		const existing = tableColumns.get(col.table_name);
+/** Build a Map<tableName, RawColumn[]> from raw column rows. */
+function buildColumnMap(rows: RawColumn[]): Map<string, RawColumn[]> {
+	const result = new Map<string, RawColumn[]>();
+	for (const col of rows) {
+		const existing = result.get(col.table_name);
 		if (existing) {
 			existing.push(col);
 		} else {
-			tableColumns.set(col.table_name, [col]);
+			result.set(col.table_name, [col]);
 		}
 	}
+	return result;
+}
 
-	// Group PKs by table
-	const tablePKs = new Map<string, string[]>();
-	for (const pk of pksResult.rows) {
-		const existing = tablePKs.get(pk.table_name);
+/** Build a Map<tableName, pkColumns[]> from raw PK rows. */
+function buildPKMap(rows: RawPrimaryKey[]): Map<string, string[]> {
+	const result = new Map<string, string[]>();
+	for (const pk of rows) {
+		const existing = result.get(pk.table_name);
 		if (existing) {
 			existing.push(pk.column_name);
 		} else {
-			tablePKs.set(pk.table_name, [pk.column_name]);
+			result.set(pk.table_name, [pk.column_name]);
 		}
 	}
+	return result;
+}
 
-	// Group FKs by constraint name (for composite FK support)
-	const fksByConstraint = new Map<
-		string,
-		{
-			source: string;
-			target: string;
-			cols: string[];
-			refs: string[];
-			deleteRule: string;
-			updateRule: string;
-			deferred: boolean;
-		}
-	>();
-	for (const fk of fksResult.rows) {
-		const existing = fksByConstraint.get(fk.constraint_name);
+/** FK entry used internally for relation/hierarchy inference. */
+interface FKEntry {
+	source: string;
+	target: string;
+	cols: string[];
+	refs: string[];
+	deleteRule: string;
+	updateRule: string;
+	deferred: boolean;
+}
+
+/** Build a Map<constraintName, FKEntry> from raw FK rows. */
+function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
+	const result = new Map<string, FKEntry>();
+	for (const fk of rows) {
+		const existing = result.get(fk.constraint_name);
 		if (existing) {
 			existing.cols.push(fk.source_column);
 			existing.refs.push(fk.target_column);
 		} else {
-			fksByConstraint.set(fk.constraint_name, {
+			result.set(fk.constraint_name, {
 				source: fk.source_table,
 				target: fk.target_table,
 				cols: [fk.source_column],
@@ -567,23 +626,32 @@ export async function introspect(
 			});
 		}
 	}
+	return result;
+}
 
-	// Build enum map
-	const enumMap = new Map<string, EnumIR>();
-	for (const row of enumsResult.rows) {
+/** Build a Map<enumName, EnumIR> from raw enum rows. */
+function buildEnumMap(rows: Array<{ name: string; values: string[] }>): Map<string, EnumIR> {
+	const result = new Map<string, EnumIR>();
+	for (const row of rows) {
 		const values: string[] = Array.isArray(row.values)
 			? row.values
 			: String(row.values)
 					.replace(/^\{|}$/g, '')
 					.split(',')
 					.filter(Boolean);
-		enumMap.set(row.name, { name: row.name, values });
+		result.set(row.name, { name: row.name, values });
 	}
+	return result;
+}
 
-	// Build comment maps: table comments (objsubid=0) and column comments (objsubid>0)
+/** Build table-level and column-level comment maps from raw pg_description rows. */
+function buildCommentMaps(rows: Array<{ table_name: string; column_name: string | null; comment: string }>): {
+	tableComments: Map<string, string>;
+	columnComments: Map<string, string>;
+} {
 	const tableComments = new Map<string, string>();
 	const columnComments = new Map<string, string>(); // key: "table.column"
-	for (const row of commentsResult.rows) {
+	for (const row of rows) {
 		if (row.column_name === null) {
 			// objsubid = 0 → table comment
 			tableComments.set(row.table_name, row.comment);
@@ -591,30 +659,41 @@ export async function introspect(
 			columnComments.set(`${row.table_name}.${row.column_name}`, row.comment);
 		}
 	}
+	return { tableComments, columnComments };
+}
 
-	// Build RLS enabled map by table name
+/** Build RLS enabled map and policies map from raw RLS rows. */
+function buildRLSMaps(
+	rlsRows: Array<{ table_name: string; rls_enabled: boolean }>,
+	policiesRows: Array<{
+		table_name: string;
+		policy_name: string;
+		cmd: string;
+		roles: string[];
+		permissive: boolean;
+		using_expr: string | null;
+		with_check_expr: string | null;
+	}>,
+): { tableRlsEnabled: Map<string, boolean>; tablePolicies: Map<string, PolicyIR[]> } {
 	const tableRlsEnabled = new Map<string, boolean>();
-	for (const row of rlsResult.rows) {
+	for (const row of rlsRows) {
 		tableRlsEnabled.set(row.table_name, row.rls_enabled);
 	}
 
-	// Build policies map by table name
 	const tablePolicies = new Map<string, PolicyIR[]>();
-	for (const row of policiesResult.rows) {
-		const cmdMap: Record<string, PolicyIR['command']> = {
-			r: 'SELECT',
-			a: 'INSERT',
-			w: 'UPDATE',
-			d: 'DELETE',
-			'*': 'ALL',
-		};
+	const cmdMap: Record<string, PolicyIR['command']> = {
+		r: 'SELECT',
+		a: 'INSERT',
+		w: 'UPDATE',
+		d: 'DELETE',
+		'*': 'ALL',
+	};
+	for (const row of policiesRows) {
 		const command = cmdMap[row.cmd] ?? 'ALL';
 		const policyIR: PolicyIR = {
 			name: row.policy_name,
 			command,
-			...(Array.isArray(row.roles) && row.roles.length > 0
-				? { roles: row.roles as readonly string[] }
-				: {}),
+			...(Array.isArray(row.roles) && row.roles.length > 0 ? { roles: row.roles as readonly string[] } : {}),
 			...(!row.permissive ? { permissive: false } : {}),
 			...(row.using_expr ? { using: row.using_expr } : {}),
 			...(row.with_check_expr ? { withCheck: row.with_check_expr } : {}),
@@ -626,96 +705,111 @@ export async function introspect(
 			tablePolicies.set(row.table_name, [policyIR]);
 		}
 	}
+	return { tableRlsEnabled, tablePolicies };
+}
 
-	// Apply include/exclude filters
-	let tableNames = Array.from(tableColumns.keys());
-	tableNames = filterTables(tableNames, options);
+/** Context bag passed to buildTableIR. */
+interface TableIRContext {
+	tableColumns: Map<string, RawColumn[]>;
+	tablePKs: Map<string, string[]>;
+	fksByConstraint: Map<string, FKEntry>;
+	tableIndexes: Map<string, IndexIR[]>;
+	tableChecks: Map<string, CheckConstraintIR[]>;
+	tableComments: Map<string, string>;
+	columnComments: Map<string, string>;
+	tablePartitions: Map<string, PartitionIR>;
+	tableRlsEnabled: Map<string, boolean>;
+	tablePolicies: Map<string, PolicyIR[]>;
+	tableNames: string[];
+	warnings: string[];
+}
 
-	// Build TableIR map
-	const tables = new Map<string, TableIR>();
-	for (const tableName of tableNames) {
-		const rawCols = tableColumns.get(tableName) ?? [];
-		const pkCols = tablePKs.get(tableName);
+/** Build a single TableIR from all pre-grouped maps. */
+function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
+	const rawCols = ctx.tableColumns.get(tableName) ?? [];
+	const pkCols = ctx.tablePKs.get(tableName);
 
-		const columns: ColumnIR[] = rawCols.map((col) => {
-			// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
-			const identity =
-				col.is_identity === 'YES' && col.identity_generation
-					? col.identity_generation === 'ALWAYS'
-						? ('always' as const)
-						: ('byDefault' as const)
-					: undefined;
+	const columns: ColumnIR[] = rawCols.map((col) => {
+		// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
+		const identity =
+			col.is_identity === 'YES' && col.identity_generation
+				? col.identity_generation === 'ALWAYS'
+					? ('always' as const)
+					: ('byDefault' as const)
+				: undefined;
 
-			// Collation: skip null and the PostgreSQL default collation name
-			const collation =
-				col.collation_name && col.collation_name !== 'default'
-					? col.collation_name
-					: undefined;
+		// Collation: skip null and the PostgreSQL default collation name
+		const collation = col.collation_name && col.collation_name !== 'default' ? col.collation_name : undefined;
 
-			const colComment =
-				columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+		const colComment = ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
 
-			return {
-				name: col.column_name,
-				type: mapPgType(col.data_type, col.udt_name),
-				nullable: col.is_nullable === 'YES',
-				...(col.column_default != null ? { default: col.column_default } : {}),
-				dbType: col.udt_name,
-				...(collation ? { collation } : {}),
-				...(identity ? { identity } : {}),
-				...(colComment ? { comment: colComment } : {}),
-			};
-		});
-
-		// Build FK list for this table
-		const foreignKeys: ForeignKeyIR[] = [];
-		for (const [, fk] of fksByConstraint) {
-			if (fk.source !== tableName) continue;
-			// Only include FK if target table is in our filtered set
-			if (!tableNames.includes(fk.target)) continue;
-			const onDelete = mapDeleteRule(fk.deleteRule);
-			const onUpdate = mapDeleteRule(fk.updateRule);
-			foreignKeys.push({
-				columns: fk.cols,
-				references: { table: fk.target, columns: fk.refs },
-				...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
-				...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
-				...(fk.deferred ? { deferred: true } : {}),
-			});
-		}
-
-		if (!pkCols) {
-			warnings.push(`Table "${tableName}" has no primary key`);
-		}
-
-		const checks = tableChecks.get(tableName);
-		const tableComment = tableComments.get(tableName);
-		const partitionConfig = tablePartitions.get(tableName);
-		const rlsEnabled = tableRlsEnabled.get(tableName) ?? false;
-		const policies = tablePolicies.get(tableName);
-		const table: TableIR = {
-			name: tableName,
-			columns,
-			...(pkCols
-				? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols }
-				: {}),
-			foreignKeys,
-			indexes: tableIndexes.get(tableName) ?? [],
-			...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
-			...(tableComment ? { comment: tableComment } : {}),
-			...(partitionConfig ? { partition: partitionConfig } : {}),
-			...(rlsEnabled ? { rlsEnabled: true } : {}),
-			...(policies && policies.length > 0 ? { policies } : {}),
+		return {
+			name: col.column_name,
+			type: mapPgType(col.data_type, col.udt_name),
+			nullable: col.is_nullable === 'YES',
+			...(col.column_default != null ? { default: col.column_default } : {}),
+			dbType: col.udt_name,
+			...(collation ? { collation } : {}),
+			...(identity ? { identity } : {}),
+			...(colComment ? { comment: colComment } : {}),
 		};
-		tables.set(tableName, table);
+	});
+
+	// Build FK list for this table
+	const foreignKeys: ForeignKeyIR[] = [];
+	for (const [, fk] of ctx.fksByConstraint) {
+		if (fk.source !== tableName) continue;
+		// Only include FK if target table is in our filtered set
+		if (!ctx.tableNames.includes(fk.target)) continue;
+		const onDelete = mapDeleteRule(fk.deleteRule);
+		const onUpdate = mapDeleteRule(fk.updateRule);
+		foreignKeys.push({
+			columns: fk.cols,
+			references: { table: fk.target, columns: fk.refs },
+			...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
+			...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
+			...(fk.deferred ? { deferred: true } : {}),
+		});
 	}
 
-	// Process extensions and sequences results (fetched in parallel above)
-	const extensions: string[] = extensionsResult.rows.map((r) => r.name);
+	if (!pkCols) {
+		ctx.warnings.push(`Table "${tableName}" has no primary key`);
+	}
 
-	const sequenceMap = new Map<string, SequenceIR>();
-	for (const row of sequencesResult.rows) {
-		sequenceMap.set(row.name, {
+	const checks = ctx.tableChecks.get(tableName);
+	const tableComment = ctx.tableComments.get(tableName);
+	const partitionConfig = ctx.tablePartitions.get(tableName);
+	const rlsEnabled = ctx.tableRlsEnabled.get(tableName) ?? false;
+	const policies = ctx.tablePolicies.get(tableName);
+
+	return {
+		name: tableName,
+		columns,
+		...(pkCols ? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols } : {}),
+		foreignKeys,
+		indexes: ctx.tableIndexes.get(tableName) ?? [],
+		...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
+		...(tableComment ? { comment: tableComment } : {}),
+		...(partitionConfig ? { partition: partitionConfig } : {}),
+		...(rlsEnabled ? { rlsEnabled: true } : {}),
+		...(policies && policies.length > 0 ? { policies } : {}),
+	};
+}
+
+/** Build a Map<seqName, SequenceIR> from raw sequence rows. */
+function buildSequenceMap(
+	rows: Array<{
+		name: string;
+		start_value: string;
+		increment_by: string;
+		min_value: string;
+		max_value: string;
+		cycle: boolean;
+	}>,
+): Map<string, SequenceIR> {
+	const result = new Map<string, SequenceIR>();
+	for (const row of rows) {
+		result.set(row.name, {
 			name: row.name,
 			startWith: Number(row.start_value),
 			incrementBy: Number(row.increment_by),
@@ -724,21 +818,55 @@ export async function introspect(
 			cycle: row.cycle,
 		});
 	}
+	return result;
+}
 
-	// Infer relations from foreign keys
+export async function introspect(pool: Pool, options?: IntrospectionOptions): Promise<IntrospectedModelIR> {
+	const schema = options?.schema ?? 'public';
+	const warnings: string[] = [];
+
+	const raw = await queryAllCatalogs(pool, schema);
+
+	const tablePartitions = buildPartitionMap(raw.partitions);
+	const tableChecks = buildCheckMap(raw.checks);
+	const tableIndexes = buildIndexMap(raw.indexes);
+	const tableColumns = buildColumnMap(raw.columns);
+	const tablePKs = buildPKMap(raw.pks);
+	const fksByConstraint = buildFKMap(raw.fks);
+	const enumMap = buildEnumMap(raw.enums);
+	const { tableComments, columnComments } = buildCommentMaps(raw.comments);
+	const { tableRlsEnabled, tablePolicies } = buildRLSMaps(raw.rls, raw.policies);
+
+	// Apply include/exclude filters
+	let tableNames = Array.from(tableColumns.keys());
+	tableNames = filterTables(tableNames, options);
+
+	// Build TableIR map
+	const tables = new Map<string, TableIR>();
+	for (const tableName of tableNames) {
+		const table = buildTableIR(tableName, {
+			tableColumns,
+			tablePKs,
+			fksByConstraint,
+			tableIndexes,
+			tableChecks,
+			tableComments,
+			columnComments,
+			tablePartitions,
+			tableRlsEnabled,
+			tablePolicies,
+			tableNames,
+			warnings,
+		});
+		tables.set(tableName, table);
+	}
+
+	const extensions: string[] = raw.extensions.map((r) => r.name);
+	const sequenceMap = buildSequenceMap(raw.sequences);
 	const relations = inferRelations(fksByConstraint, tableNames);
-
-	// Detect hierarchies
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
 
-	// Build ModelIR
-	const modelIR = new ModelIRImpl(
-		tables,
-		relations,
-		enumMap,
-		extensions,
-		sequenceMap,
-	);
+	const modelIR = new ModelIRImpl(tables, relations, enumMap, extensions, sequenceMap);
 
 	return Object.assign(modelIR, {
 		hierarchies,
@@ -755,19 +883,7 @@ export async function introspect(
  * Infer bidirectional relations from FK constraints.
  * Each FK produces: belongsTo (source → target) + hasMany (target → source).
  */
-function inferRelations(
-	fksByConstraint: Map<
-		string,
-		{
-			source: string;
-			target: string;
-			cols: string[];
-			refs: string[];
-			deleteRule: string;
-		}
-	>,
-	filteredTables: string[],
-): Map<string, RelationIR> {
+function inferRelations(fksByConstraint: Map<string, FKEntry>, filteredTables: string[]): Map<string, RelationIR> {
 	const relations = new Map<string, RelationIR>();
 	const filteredSet = new Set(filteredTables);
 
@@ -848,26 +964,14 @@ function deriveRelationName(fkColumn: string, _targetTable: string): string {
  */
 function detectHierarchies(
 	tables: Map<string, TableIR>,
-	fksByConstraint: Map<
-		string,
-		{
-			source: string;
-			target: string;
-			cols: string[];
-			refs: string[];
-			deleteRule: string;
-		}
-	>,
+	fksByConstraint: Map<string, FKEntry>,
 	filteredTables: string[],
 ): DetectedHierarchy[] {
 	const hierarchies: DetectedHierarchy[] = [];
 	const filteredSet = new Set(filteredTables);
 
 	// Track FKs by (source, target) for edge-table detection
-	const fksBySourceTarget = new Map<
-		string,
-		Array<{ cols: string[]; refs: string[] }>
-	>();
+	const fksBySourceTarget = new Map<string, Array<{ cols: string[]; refs: string[] }>>();
 
 	for (const [, fk] of fksByConstraint) {
 		if (!filteredSet.has(fk.source) || !filteredSet.has(fk.target)) continue;
@@ -876,8 +980,7 @@ function detectHierarchies(
 		if (fk.source === fk.target && fk.cols.length === 1) {
 			const table = tables.get(fk.source);
 			const pk = table?.primaryKey;
-			const nodeIdColumn =
-				typeof pk === 'string' ? pk : (pk?.[0] ?? DEFAULT_PK_COLUMN);
+			const nodeIdColumn = typeof pk === 'string' ? pk : (pk?.[0] ?? DEFAULT_PK_COLUMN);
 
 			hierarchies.push({
 				type: 'adjacency',
@@ -1011,22 +1114,15 @@ function mapDeleteRule(rule: string): OnDeleteAction {
  * Include is applied first, then exclude.
  * Patterns support * for wildcard matching.
  */
-function filterTables(
-	tableNames: string[],
-	options?: IntrospectionOptions,
-): string[] {
+function filterTables(tableNames: string[], options?: IntrospectionOptions): string[] {
 	let result = tableNames;
 
 	if (options?.include?.length) {
-		result = result.filter((name) =>
-			options.include!.some((pattern) => matchGlob(pattern, name)),
-		);
+		result = result.filter((name) => options.include!.some((pattern) => matchGlob(pattern, name)));
 	}
 
 	if (options?.exclude?.length) {
-		result = result.filter(
-			(name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)),
-		);
+		result = result.filter((name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)));
 	}
 
 	return result;
@@ -1035,8 +1131,6 @@ function filterTables(
 /** Simple glob matching (supports * wildcard) */
 function matchGlob(pattern: string, value: string): boolean {
 	if (!pattern.includes('*')) return pattern === value;
-	const regex = new RegExp(
-		`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
-	);
+	const regex = new RegExp(`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 	return regex.test(value);
 }
