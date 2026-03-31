@@ -64,9 +64,7 @@ export function withPriority<TFn>(hook: TFn, priority: HookPriority): Prioritize
  * @returns A new array of unwrapped hook functions in priority order.
  */
 export function sortByPriority<TFn>(hooks: readonly PrioritizedHook<TFn>[]): TFn[] {
-	return [...hooks]
-		.sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority])
-		.map((p) => p.hook);
+	return [...hooks].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]).map((p) => p.hook);
 }
 
 // ============================================================================
@@ -84,12 +82,10 @@ export function sortByPriority<TFn>(hooks: readonly PrioritizedHook<TFn>[]): TFn
  * // tracingHook runs first, then loggingHook
  * ```
  */
-export function composeBeforeQueryHooks(
-	...hooks: BeforeQueryHook[]
-): BeforeQueryHook {
+export function composeBeforeQueryHooks(...hooks: BeforeQueryHook[]): BeforeQueryHook {
 	// reverse so rightmost runs first
 	const ordered = [...hooks].reverse();
-	return async (ctx: QueryHookContext): Promise<QueryHookContext | undefined> => {
+	return async (ctx: QueryHookContext): Promise<QueryHookContext> => {
 		let current: QueryHookContext = ctx;
 		for (const hook of ordered) {
 			const result = await hook(current);
@@ -113,7 +109,7 @@ export function composeBeforeQueryHooks(
  * ```
  */
 export function pipeBeforeQueryHooks(...hooks: BeforeQueryHook[]): BeforeQueryHook {
-	return async (ctx: QueryHookContext): Promise<QueryHookContext | undefined> => {
+	return async (ctx: QueryHookContext): Promise<QueryHookContext> => {
 		let current: QueryHookContext = ctx;
 		for (const hook of hooks) {
 			const result = await hook(current);
@@ -136,7 +132,7 @@ export function pipeBeforeQueryHooks(...hooks: BeforeQueryHook[]): BeforeQueryHo
  */
 export function composeAfterQueryHooks(...hooks: AfterQueryHook[]): AfterQueryHook {
 	const ordered = [...hooks].reverse();
-	return async <R>(ctx: QueryHookContext, result: R): Promise<R | undefined> => {
+	return async <R>(ctx: QueryHookContext, result: R): Promise<R> => {
 		let current: R = result;
 		for (const hook of ordered) {
 			const next = await hook(ctx, current);
@@ -154,7 +150,7 @@ export function composeAfterQueryHooks(...hooks: AfterQueryHook[]): AfterQueryHo
  * If a hook returns `undefined`, the current result is passed unchanged.
  */
 export function pipeAfterQueryHooks(...hooks: AfterQueryHook[]): AfterQueryHook {
-	return async <R>(ctx: QueryHookContext, result: R): Promise<R | undefined> => {
+	return async <R>(ctx: QueryHookContext, result: R): Promise<R> => {
 		let current: R = result;
 		for (const hook of hooks) {
 			const next = await hook(ctx, current);
@@ -174,13 +170,9 @@ export function pipeAfterQueryHooks(...hooks: AfterQueryHook[]): AfterQueryHook 
  * Composes multiple {@link BeforeMutationHook}s into one (right-to-left execution).
  * If a hook returns `undefined`, the current context is passed unchanged.
  */
-export function composeBeforeMutationHooks(
-	...hooks: BeforeMutationHook[]
-): BeforeMutationHook {
+export function composeBeforeMutationHooks(...hooks: BeforeMutationHook[]): BeforeMutationHook {
 	const ordered = [...hooks].reverse();
-	return async <T>(
-		ctx: MutationHookContext<T>,
-	): Promise<MutationHookContext<T> | undefined> => {
+	return async <T>(ctx: MutationHookContext<T>): Promise<MutationHookContext<T>> => {
 		let current: MutationHookContext<T> = ctx;
 		for (const hook of ordered) {
 			const result = await hook(current);
@@ -197,9 +189,7 @@ export function composeBeforeMutationHooks(
  * If a hook returns `undefined`, the current context is passed unchanged.
  */
 export function pipeBeforeMutationHooks(...hooks: BeforeMutationHook[]): BeforeMutationHook {
-	return async <T>(
-		ctx: MutationHookContext<T>,
-	): Promise<MutationHookContext<T> | undefined> => {
+	return async <T>(ctx: MutationHookContext<T>): Promise<MutationHookContext<T>> => {
 		let current: MutationHookContext<T> = ctx;
 		for (const hook of hooks) {
 			const result = await hook(current);
@@ -221,7 +211,7 @@ export function pipeBeforeMutationHooks(...hooks: BeforeMutationHook[]): BeforeM
  */
 export function composeAfterMutationHooks(...hooks: AfterMutationHook[]): AfterMutationHook {
 	const ordered = [...hooks].reverse();
-	return async <T>(ctx: MutationHookContext<T>, result: T[]): Promise<T[] | undefined> => {
+	return async <T>(ctx: MutationHookContext<T>, result: T[]): Promise<T[]> => {
 		let current: T[] = result;
 		for (const hook of ordered) {
 			const next = await hook(ctx, current);
@@ -238,7 +228,7 @@ export function composeAfterMutationHooks(...hooks: AfterMutationHook[]): AfterM
  * If a hook returns `undefined`, the current rows are passed unchanged.
  */
 export function pipeAfterMutationHooks(...hooks: AfterMutationHook[]): AfterMutationHook {
-	return async <T>(ctx: MutationHookContext<T>, result: T[]): Promise<T[] | undefined> => {
+	return async <T>(ctx: MutationHookContext<T>, result: T[]): Promise<T[]> => {
 		let current: T[] = result;
 		for (const hook of hooks) {
 			const next = await hook(ctx, current);
