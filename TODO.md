@@ -4,6 +4,8 @@
 
 ## In Progress
 
+- [x] ✅ **BRANCH-COV** [Core] Branch coverage tests for planner.ts + query-builder.ts — created `planner-branch-coverage.test.ts` (41 tests: determineJoinType, depth/circular detection, disambiguation, UnsupportedStrategyError, flat strategy, LEFT JOIN cascade, extractCTEs, plan() edge cases) and `query-builder-branch.test.ts` (53 tests: buildIntent, orderBy, where, cursorPaginate, paginate). All 2472 core tests pass. (2026-03-31)
+
 - [x] ✅ **REFACTOR** [Adapter] `introspect` CC reduction (CC 102, 581 lines → 53-line orchestrator) — extracted 11 helpers: `queryAllCatalogs`, `buildPartitionMap`, `buildCheckMap`, `buildIndexMap`, `buildColumnMap`, `buildPKMap`, `buildFKMap`, `buildEnumMap`, `buildCommentMaps`, `buildRLSMaps`, `buildTableIR`, `buildSequenceMap`; `inferRelations`+`detectHierarchies` updated to use `FKEntry`; 3204 adapter tests pass. (2026-03-31)
 
 - [x] ✅ **REFACTOR** [Adapter] `compileSelect` CC reduction — extracted 6 phase helpers (`propagateExistsConditions`, `stripJoinColumnsForAggregation`, `buildRelationColumnsMap`, `findRelationMapKey`, `injectAndValidateRelationColumns`, `enrichRangeDecisions`, `buildSimplifiedPlanReport`) from 416-line function; new body is 181 lines; all 3204 adapter tests pass. (2026-03-30)
