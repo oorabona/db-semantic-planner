@@ -423,7 +423,7 @@
 
 ## Bugs
 
-- [ ] 🐛 [Core/Adapter] `or(eq(), inSubquery())` returns empty results when used with `.include().where()` query pattern — `inSubquery('caller_id', subquery('symbols').select('id').where(eq('parent_id', symbolId)))` compiles to correct SQL but returns 0 rows when combined with `or()` in a query that also has `.include('callee', { join: 'left' })`. Workaround: two-step approach (fetch child IDs first, then `any('caller_id', allIds)`). Discovered by astix CALLGRAPH-OBJ-METHODS (2026-03-31). Priority: H
+- [x] ✅ [Adapter] `or(eq(), inSubquery())` with `.include().where()` — SQL operator precedence bug. `deparseBoolExpr` now parenthesizes OR children inside AND. 4 regression tests. (2026-03-31)
 
 ## Blocked / Deferred
 
