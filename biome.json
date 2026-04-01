@@ -94,6 +94,17 @@
 			}
 		},
 		{
+			"includes": ["**/*.vue"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedVariables": "off",
+						"noUnusedImports": "off"
+					}
+				}
+			}
+		},
+		{
 			"includes": [
 				"packages/adapter-kysely/src/compiler/handlers/where/index.ts",
 				"packages/adapter-kysely/src/compiler/handlers/where/relation-filter.ts",
