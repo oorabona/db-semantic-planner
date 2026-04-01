@@ -1,4 +1,8 @@
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitepress';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
 	title: 'db-semantic-planner',
@@ -12,6 +16,7 @@ export default defineConfig({
 			{ text: 'Patterns', link: '/patterns' },
 			{ text: 'NQL', link: '/nql/' },
 			{ text: 'Comparison', link: '/comparison' },
+			{ text: 'Playground', link: '/playground' },
 		],
 		sidebar: {
 			'/guide/': [
@@ -88,6 +93,16 @@ export default defineConfig({
 		},
 		footer: {
 			message: 'Released under the MIT License.',
+		},
+	},
+	vite: {
+		resolve: {
+			alias: {
+				pg: path.resolve(__dirname, 'theme/pg-stub.ts'),
+			},
+		},
+		optimizeDeps: {
+			exclude: ['pg'],
 		},
 	},
 });
