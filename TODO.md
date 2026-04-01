@@ -430,6 +430,12 @@
 ## Bugs
 
 - [x] ✅ [Adapter] `or(eq(), inSubquery())` with `.include().where()` — SQL operator precedence bug. `deparseBoolExpr` now parenthesizes OR children inside AND. 4 regression tests. (2026-03-31)
+- [x] ✅ [Adapter] `inSubquery()` inside `or()` compiled to `ANY($N)` with `[null]` instead of `ANY(SELECT ...)`. Fix: `convertIn` emits `inSubquery` operator directly when subquery present. (2026-03-31)
+- [x] ✅ [Core] hook-utils.ts build errors — `Promise<X | undefined>` return types on 8 compose/pipe functions. Fixed to `Promise<X>`. (2026-03-31)
+- [x] ✅ [Core/Adapter] 7 god functions refactored: compileSelect 416→181, buildTables 213→37, convertWhereCondition 398→70, buildTableDDL 247→60, introspect 581→53, changeToUpSQL 311→99, compileSelect(compiler) 202→89. CC total 895→121 (-86%). (2026-03-31)
+- [x] ✅ [Core/Adapter] Branch coverage raised: core 75→93% (+18pp), adapter 84→88% (+4pp). 2183 tests added. (2026-03-31)
+- [x] ✅ [Adapter] RLS policy SQL injection — validateSqlExpression() on policy.using/withCheck. 5 security tests. (2026-03-31)
+- [x] ✅ [Core] createDialectCapabilities() exported in public API. (2026-03-31)
 
 ## Blocked / Deferred
 
