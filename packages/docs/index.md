@@ -10,7 +10,7 @@ hero:
       link: /guide/getting-started
     - theme: alt
       text: View on GitHub
-      link: https://github.com/nichochar/db-semantic-planner
+      link: https://github.com/oorabona/db-semantic-planner
   image:
     src: /logo.svg
     alt: dbsp

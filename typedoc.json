@@ -15,8 +15,8 @@
 	"excludeExternals": true,
 	"disableSources": false,
 	"navigationLinks": {
-		"Documentation": "https://github.com/your-org/db-semantic-planner/tree/main/docs",
-		"GitHub": "https://github.com/your-org/db-semantic-planner"
+		"Documentation": "https://github.com/oorabona/db-semantic-planner/tree/main/docs",
+		"GitHub": "https://github.com/oorabona/db-semantic-planner"
 	},
 	"sidebarLinks": {
 		"Quickstart": "./examples/QUICKSTART.md",

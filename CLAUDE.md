@@ -52,7 +52,7 @@ import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
 // Create ORM with adapter injection
 const orm = createOrm({
-  model: schema,
+  schema: db,
   adapter: createPgsqlAdapter(pgPool)
 });
 

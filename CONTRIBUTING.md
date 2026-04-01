@@ -32,7 +32,7 @@ git clone https://github.com/YOUR_USERNAME/db-semantic-planner.git
 cd db-semantic-planner
 
 # Add the upstream remote so you can pull future updates
-git remote add upstream https://github.com/your-org/db-semantic-planner.git
+git remote add upstream https://github.com/oorabona/db-semantic-planner.git
 ```
 
 ### Install dependencies and build
