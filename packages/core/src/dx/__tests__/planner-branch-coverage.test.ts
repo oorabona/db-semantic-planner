@@ -16,6 +16,7 @@
  *   ambiguousDecision in metadata
  */
 
+import type { RelationIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
@@ -24,6 +25,7 @@ import {
 	SQLITE_CAPABILITIES,
 } from '../../dialects/index.js';
 import type { QueryIntent } from '../../index.js';
+import { ModelIRImpl } from '../../model-impl.js';
 import { AmbiguousPlanError, plan } from '../../planner.js';
 import { ref, schema } from '../schema.js';
 
@@ -744,5 +746,91 @@ describe('planner: plan() top-level edge cases', () => {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
 		expect(report.metadata.relationsAnalyzed).toBe(2);
+	});
+});
+
+// ============================================================================
+// determineJoinType: relation.joinDefault !== 'auto' branch (L1392)
+// ============================================================================
+
+describe('planner: determineJoinType — relation.joinDefault hint (L1392)', () => {
+	// Build a ModelIRImpl with a relation that has joinDefault: 'inner'
+	// to exercise the `return relation.joinDefault` branch.
+	const usersTable: TableIR = {
+		name: 'users',
+		columns: [{ name: 'id', type: 'integer', nullable: false }],
+		primaryKey: 'id',
+		foreignKeys: [],
+		indexes: [],
+	};
+	const postsTable: TableIR = {
+		name: 'posts',
+		columns: [
+			{ name: 'id', type: 'integer', nullable: false },
+			{ name: 'authorId', type: 'integer', nullable: false },
+		],
+		primaryKey: 'id',
+		foreignKeys: [],
+		indexes: [],
+	};
+	const authorRelation: RelationIR = {
+		name: 'author',
+		type: 'belongsTo',
+		source: 'posts',
+		target: 'users',
+		foreignKey: 'authorId',
+		cardinality: 'one',
+		optionality: 'optional',
+		includeStrategy: 'auto',
+		filterStrategy: 'auto',
+		joinDefault: 'inner', // non-auto hint → L1392 branch
+	};
+	const modelWithJoinHint = new ModelIRImpl(
+		new Map([
+			['users', usersTable],
+			['posts', postsTable],
+		]),
+		new Map([['posts.author', authorRelation]]),
+	);
+
+	it('uses relation.joinDefault when not auto (joinDefault: inner)', () => {
+		// Force 'join' strategy so determineJoinType is called;
+		// no forceJoinType so the joinDefault hint is used.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			include: [{ relation: 'author', strategy: 'flat' }],
+		};
+		const report = plan(intent, modelWithJoinHint, {
+			dialectCapabilities: NO_STRATEGY_CAPS, // no json_agg/lateral → 'join'
+		});
+		const joinDecision = report.decisions.find((d) => d.type === 'join-type');
+		expect(joinDecision).toBeDefined();
+		expect(joinDecision?.choice).toBe('inner');
+	});
+});
+
+// ============================================================================
+// generateIncludeReasoning: case 'cte' branch (L1537)
+// ============================================================================
+
+describe('planner: generateIncludeReasoning — cte strategy (L1537)', () => {
+	it('produces CTE reasoning string for non-recursive cte include strategy', () => {
+		// defaultIncludeStrategy: 'cte' with a dialect that supports recursive CTE
+		// → determineIncludeStrategy returns 'cte' via validateStrategy
+		// → isRecursiveInclude=false (non-self-referential relation)
+		// → generateIncludeReasoning called with 'cte' → hits case 'cte':
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			include: [{ relation: 'author' }],
+		};
+		const report = plan(intent, simpleSchema, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			defaultIncludeStrategy: 'cte',
+		});
+		const stratDecision = report.decisions.find((d) => d.type === 'include-strategy');
+		expect(stratDecision?.choice).toBe('cte');
+		expect(stratDecision?.reasoning).toMatch(/CTE for recursive\/hierarchical traversal/i);
 	});
 });
