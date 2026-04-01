@@ -52,7 +52,7 @@
         </div>
 
         <div v-else-if="result" class="output-content">
-          <pre v-if="activeTab === 'SQL'"><code>{{ result.sql }}</code></pre>
+          <pre v-if="activeTab === 'SQL'"><code v-html="highlightSQL(result.sql)"></code></pre>
           <pre v-else-if="activeTab === 'Parameters'"><code>{{ formatParams(result.params) }}</code></pre>
           <pre v-else-if="activeTab === 'Plan'"><code>{{ formatPlan(result.plan) }}</code></pre>
         </div>
@@ -235,14 +235,28 @@ function formatParams(params: readonly unknown[]): string {
 function formatPlan(plan: unknown): string {
 	return JSON.stringify(plan, null, 2);
 }
+
+const SQL_KEYWORDS =
+	/\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|LATERAL|ON|AND|OR|NOT|IN|EXISTS|AS|ORDER\s+BY|GROUP\s+BY|HAVING|LIMIT|OFFSET|INSERT\s+INTO|VALUES|UPDATE|SET|DELETE|RETURNING|WITH|RECURSIVE|UNION|ALL|INTERSECT|EXCEPT|DISTINCT|ON|CASE|WHEN|THEN|ELSE|END|IS|NULL|TRUE|FALSE|ASC|DESC|BETWEEN|LIKE|ILIKE|CAST|OVER|PARTITION\s+BY|CONFLICT|DO|NOTHING|FETCH|FIRST|NEXT|ROWS|ONLY|FOR|SHARE|SKIP|LOCKED|NOWAIT)\b/g;
+
+function highlightSQL(sql: string): string {
+	const escaped = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	// Identifiers first (before keyword spans inject double quotes in class attrs)
+	return escaped
+		.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
+		.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
+		.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
+		.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>');
+}
 </script>
 
 <style scoped>
 .playground {
   margin: 1.5rem 0;
   border: 1px solid var(--vp-c-brand-soft);
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
   background: var(--vp-c-bg-soft);
 }
 
@@ -282,6 +296,7 @@ function formatPlan(plan: unknown): string {
   padding: 0.75rem 1rem;
   border-bottom: 1px solid var(--vp-c-divider);
   background: var(--vp-c-bg);
+  background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(34, 211, 238, 0.04) 100%);
 }
 
 .panel-label {
@@ -295,11 +310,17 @@ function formatPlan(plan: unknown): string {
   flex: 1;
   background: var(--vp-c-bg-soft);
   border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  padding: 0.25rem 0.5rem;
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
   font-size: 0.85rem;
+  font-family: var(--vp-font-family-mono);
   color: var(--vp-c-text-1);
   cursor: pointer;
+  transition: border-color 0.15s;
+}
+
+.example-select:hover {
+  border-color: var(--vp-c-brand-soft);
 }
 
 .example-select:focus {
@@ -312,13 +333,20 @@ function formatPlan(plan: unknown): string {
   resize: none;
   border: none;
   outline: none;
-  background: var(--vp-c-bg-soft);
+  background: transparent;
   color: var(--vp-c-text-1);
   font-family: var(--vp-font-family-mono);
-  font-size: 0.875rem;
-  line-height: 1.6;
-  padding: 1rem;
-  min-height: 160px;
+  font-size: 0.9rem;
+  line-height: 1.7;
+  padding: 1.25rem;
+  min-height: 180px;
+  letter-spacing: 0.02em;
+  caret-color: var(--vp-c-brand-1);
+  transition: box-shadow 0.2s;
+}
+
+.nql-textarea:focus {
+  box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.3);
 }
 
 .nql-textarea::placeholder {
@@ -335,28 +363,35 @@ function formatPlan(plan: unknown): string {
 }
 
 .compile-btn {
-  background: var(--vp-c-brand-1);
+  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
   color: #fff;
   border: none;
-  border-radius: 5px;
-  padding: 0.4rem 1.1rem;
+  border-radius: 6px;
+  padding: 0.5rem 1.4rem;
   font-size: 0.875rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s;
+  transition: all 0.2s;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
+  letter-spacing: 0.02em;
 }
 
 .compile-btn:hover {
-  background: var(--vp-c-brand-2);
+  background: linear-gradient(135deg, #818CF8 0%, #6366F1 100%);
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+  transform: translateY(-1px);
 }
 
 .compile-btn:active {
-  opacity: 0.85;
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
 }
 
 .hint {
-  font-size: 0.75rem;
+  font-size: 0.72rem;
   color: var(--vp-c-text-3);
+  font-family: var(--vp-font-family-mono);
+  opacity: 0.7;
 }
 
 /* ---------- Right panel ---------- */
@@ -368,29 +403,32 @@ function formatPlan(plan: unknown): string {
 
 .tabs {
   display: flex;
-  border-bottom: 1px solid var(--vp-c-divider);
+  gap: 2px;
+  padding: 0.5rem 0.75rem 0;
   background: var(--vp-c-bg);
 }
 
 .tab-btn {
-  padding: 0.55rem 1rem;
+  padding: 0.5rem 1rem;
   font-size: 0.8rem;
   font-weight: 600;
   background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--vp-c-text-2);
+  border-radius: 6px 6px 0 0;
+  color: var(--vp-c-text-3);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: all 0.2s;
 }
 
 .tab-btn:hover {
   color: var(--vp-c-text-1);
+  background: var(--vp-c-bg-soft);
 }
 
 .tab-btn.active {
   color: var(--vp-c-brand-1);
-  border-bottom-color: var(--vp-c-brand-1);
+  background: var(--vp-c-bg-soft);
+  border-bottom: 2px solid var(--vp-c-brand-1);
 }
 
 .output-content,
@@ -398,15 +436,22 @@ function formatPlan(plan: unknown): string {
 .output-placeholder {
   flex: 1;
   overflow: auto;
-  padding: 1rem;
+  padding: 1.25rem;
+  background: transparent;
+  animation: fadeIn 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .output-content pre,
 .output-error pre {
   margin: 0;
   font-family: var(--vp-font-family-mono);
-  font-size: 0.85rem;
-  line-height: 1.6;
+  font-size: 0.875rem;
+  line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;
 }
@@ -415,15 +460,31 @@ function formatPlan(plan: unknown): string {
   color: var(--vp-c-text-1);
 }
 
+/* SQL syntax highlighting */
+.output-content :deep(.sql-kw) {
+  color: #818CF8;
+  font-weight: 600;
+}
+
+.output-content :deep(.sql-param) {
+  color: #22D3EE;
+}
+
+.output-content :deep(.sql-ident) {
+  color: #A5F3FC;
+}
+
 .output-error pre {
-  color: var(--vp-c-danger-1, #f87171);
+  color: #F87171;
 }
 
 .output-placeholder {
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--vp-c-bg-soft);
   color: var(--vp-c-text-3);
   font-size: 0.875rem;
+  min-height: 200px;
 }
 </style>
