@@ -6,7 +6,12 @@
 
 import { loadModule } from 'pgsql-parser';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { assertRoundtrip, compareAST, compareSQLByAST, roundtripTest } from './ast-compare.js';
+import {
+	assertRoundtrip,
+	compareAST,
+	compareSQLByAST,
+	roundtripTest,
+} from './ast-compare.js';
 
 // Ensure the libpg-query WASM module is initialized before any test that
 // calls parseSync. Without this, CI workers may race and hit "WASM module
@@ -70,13 +75,17 @@ describe('compareAST — coverage', () => {
 	it('detects missing key in right object', () => {
 		const result = compareAST({ a: 1, b: 2 }, { a: 1 });
 		expect(result.equal).toBe(false);
-		expect(result.differences.some((d) => d.includes('missing in right'))).toBe(true);
+		expect(result.differences.some((d) => d.includes('missing in right'))).toBe(
+			true,
+		);
 	});
 
 	it('detects missing key in left object', () => {
 		const result = compareAST({ a: 1 }, { a: 1, b: 2 });
 		expect(result.equal).toBe(false);
-		expect(result.differences.some((d) => d.includes('missing in left'))).toBe(true);
+		expect(result.differences.some((d) => d.includes('missing in left'))).toBe(
+			true,
+		);
 	});
 
 	it('ignores location fields in objects', () => {
@@ -85,7 +94,10 @@ describe('compareAST — coverage', () => {
 	});
 
 	it('ignores stmt_len and stmt_location fields', () => {
-		const result = compareAST({ a: 1, stmt_len: 50, stmt_location: 0 }, { a: 1, stmt_len: 100, stmt_location: 5 });
+		const result = compareAST(
+			{ a: 1, stmt_len: 50, stmt_location: 0 },
+			{ a: 1, stmt_len: 100, stmt_location: 5 },
+		);
 		expect(result.equal).toBe(true);
 	});
 
@@ -130,7 +142,9 @@ describe('assertRoundtrip — coverage', () => {
 	});
 
 	it('succeeds for complex SELECT', () => {
-		expect(() => assertRoundtrip('SELECT id, name FROM users WHERE active = true')).not.toThrow();
+		expect(() =>
+			assertRoundtrip('SELECT id, name FROM users WHERE active = true'),
+		).not.toThrow();
 	});
 });
 

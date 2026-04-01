@@ -1,7 +1,14 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
 	"files": {
-		"includes": ["packages/**", "tests/**", "*.json", "*.md"]
+		"includes": [
+			"packages/**",
+			"tests/**",
+			"*.json",
+			"*.md",
+			"!!**/.vitepress/cache",
+			"!!**/.vitepress/dist"
+		]
 	},
 	"vcs": {
 		"enabled": true,
