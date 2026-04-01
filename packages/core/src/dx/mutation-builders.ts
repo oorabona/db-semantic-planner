@@ -25,7 +25,6 @@ import type {
 	HookErrorHandler,
 	HookStore,
 	MutationHookContext,
-	MutationIntent,
 	MutationOperation,
 } from './hooks.js';
 import {

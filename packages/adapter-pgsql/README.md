@@ -55,7 +55,7 @@ const { sql, parameters } = adapter.compile(planReport, { model, schemaName });
 
 ## Documentation
 
-- [Full documentation index](../../docs/DOCUMENTATION_INDEX.md)
+- [Guides](../../docs/guides/)
 - [DDL helpers guide](../../docs/guides/how-to-use-ddl-helpers.md)
 - [RLS policies guide](../../docs/guides/how-to-use-rls-policies.md)
 - [Schema versioning guide](../../docs/guides/how-to-use-schema-versioning.md)

@@ -1,5 +1,7 @@
 # How to Use Full-Text Search (ParadeDB BM25)
 
+`fullTextSearch()` and `textScore()` provide a high-level API for BM25 relevance search across one or more text columns, powered by the ParadeDB `pg_search` extension. Use this guide when you need to search user-supplied queries across multiple fields with per-field boost weights and rank results by relevance score.
+
 ## When
 
 Use `fullTextSearch()` and `textScore()` when you need BM25 relevance search across

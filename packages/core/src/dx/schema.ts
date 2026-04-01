@@ -30,7 +30,6 @@ import type {
 	PseudoColumnMetadata,
 	RelationIR,
 	RelationType,
-	SequenceIR,
 	TableIR,
 } from '../model-ir.js';
 import { createPseudoColumnMetadata } from '../model-ir.js';
@@ -994,10 +993,7 @@ function buildPseudoColumns(
 /**
  * Builds IndexIR entries from column-level `index: true` declarations.
  */
-function buildColumnIndexes(
-	tableName: string,
-	tableDef: TableDef,
-): IndexIR[] {
+function buildColumnIndexes(tableName: string, tableDef: TableDef): IndexIR[] {
 	const indexes: IndexIR[] = [];
 	for (const [columnName, columnDef] of Object.entries(tableDef)) {
 		if (isRef(columnDef)) continue;

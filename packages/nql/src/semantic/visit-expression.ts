@@ -9,11 +9,11 @@ import type { CstNode, IToken } from 'chevrotain';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type { NqlWarning } from '../errors/types.js';
 import type {
+	NqlAnyExpression,
 	NqlBetweenExpression,
 	NqlCaseExpression,
 	NqlExistsExpression,
 	NqlExpression,
-	NqlAnyExpression,
 	NqlInExpression,
 	NqlIsNullExpression,
 	NqlJsonAccessExpression,
@@ -209,15 +209,11 @@ function buildIn(
 	return { type: 'in', negated, expression: left, values };
 }
 
-
 /**
  * BATCH-001: Build NqlAnyExpression from an anySuffix CST node.
  * Handles: left = ANY(:paramName)
  */
-function buildAny(
-	left: NqlExpression,
-	suffixNode: CstNode,
-): NqlAnyExpression {
+function buildAny(left: NqlExpression, suffixNode: CstNode): NqlAnyExpression {
 	const suffixCtx = suffixNode.children as CstContext;
 	// NamedParam token image is ':paramName' — strip the leading ':'
 	const paramToken = suffixCtx.NamedParam?.[0];

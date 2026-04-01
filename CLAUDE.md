@@ -29,7 +29,7 @@ Semantic query planning for databases - an intent-first approach that transforms
 │  │  • Adapter interface  • createOrm()  • Query builders   │    │
 │  │  • Filter helpers     • Strict mode  • Schema scoping   │    │
 │  └─────────────────────────────────────────────────────────┘    │
-│  ⚠️  DB-AGNOSTIC: MUST NOT import adapter code                  │
+│  DB-AGNOSTIC: MUST NOT import adapter code                      │
 └──────────────────────────────┬──────────────────────────────────┘
                                │ implements Adapter
                                ▼
@@ -112,8 +112,8 @@ module.exports = {
 
 | Scope | Package | Description | Status |
 |-------|---------|-------------|--------|
-| `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | ✅ Complete |
-| `adapter` | `packages/adapter-pgsql` | SQL compiler, PgsqlAdapter, PostgreSQL-native | ✅ Complete |
+| `core` | `packages/core` | Schema, Query AST, Planner, DX layer, Adapter interface | Complete |
+| `adapter` | `packages/adapter-pgsql` | SQL compiler, PgsqlAdapter, PostgreSQL-native | Complete |
 
 ## Tech Stack
 
@@ -125,19 +125,6 @@ module.exports = {
 | Adapter | pg (PostgreSQL native) |
 | Testing | Vitest |
 | Build | tsup (ESM + CJS) |
-
-## Stack (for /generate-tests, /generate-docs)
-
-| Category | Value | Notes |
-|----------|-------|-------|
-| test_framework | vitest | |
-| test_pattern | *.test.ts | colocated with source |
-| assertion_style | expect | vitest built-in |
-| mock_style | vi.mock | vitest built-in |
-| doc_style | tsdoc | @param, @returns, @example |
-| package_manager | pnpm | |
-
-**Note:** Si cette section existe, /generate-tests et /generate-docs skip la détection auto.
 
 ## Adapter Rules (CRITICAL)
 
@@ -240,10 +227,11 @@ type Dump = {
 
 ## Documentation
 
-- **Index:** `docs/DOCUMENTATION_INDEX.md`
-- **Specs:** `docs/specs/` (implementation-ready specifications)
-- **Backlogs:** `TODO.md`, `TODO_CORE.md`, `TODO_ADAPTER.md`
-- **Scope indexes:** `docs/scopes/DOCS_<SCOPE>_INDEX.md`
+- **How-to guides:** `docs/guides/` — feature-specific walkthroughs (joins, CTEs, RLS, DDL helpers, etc.)
+- **Comparison:** `docs/COMPARISON.md` — how this project compares to other query builders and ORMs
+- **Patterns:** `docs/PATTERNS.md` — recommended query patterns and best practices
+- **Production:** `docs/PRODUCTION.md` — deployment, connection pooling, schema scoping for multi-tenancy
+- **CLI usage:** `docs/CLI_USAGE.md` — command-line interface reference
 
 ## Build Order
 
@@ -251,11 +239,27 @@ type Dump = {
 packages/core → packages/adapter-pgsql
 ```
 
-## Workflow
+## Getting Started
 
-1. Run `/next` to see prioritized tasks
-2. Run `/clarify <scope>` to detail requirements
-3. Run `/spec <story-id>` to create specifications
+Install dependencies and build all packages:
+
+```bash
+pnpm install
+pnpm -C packages/core build
+pnpm -C packages/adapter-pgsql build
+```
+
+Run tests:
+
+```bash
+pnpm test
+```
+
+Type-check:
+
+```bash
+pnpm tsc --noEmit
+```
 
 ## NFRs
 

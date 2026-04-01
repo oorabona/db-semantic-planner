@@ -1,28 +1,71 @@
 # db-semantic-planner
 
-Semantic query planning for databases. An intent-first approach that transforms declarative query intents into optimized SQL with full observability.
+[![npm](https://img.shields.io/npm/v/@dbsp/core)](https://www.npmjs.com/package/@dbsp/core)
+[![Tests](https://img.shields.io/badge/tests-7%2C700%2B-brightgreen)]()
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![TypeScript](https://img.shields.io/badge/TypeScript-strict-blue)]()
 
-## Features
+**The intent-first query planner for PostgreSQL.**
 
-- **Intent-first queries** - Describe what you want, not how to get it
-- **Semantic planning** - Automatic EXISTS vs JOIN decisions based on cardinality
-- **CTE extraction** - Common subqueries automatically optimized
-- **Multi-tenant** - Schema-per-tenant with `withSchema()` API
-- **Full observability** - Inspect plans, SQL, and parameters before execution
-- **Type-safe** - Full TypeScript support with strict types
-- **CLI tools** - Generate types, verify schemas, interactive REPL
+Declare *what* you want. The planner decides *how* to get it — then shows you *why*.
 
-## Installation
+---
 
-```bash
-# Core + PostgreSQL adapter
-pnpm add @dbsp/core @dbsp/adapter-pgsql
+## The Problem
 
-# CLI (optional, for code generation and REPL)
-pnpm add -D @dbsp/cli
+Most ORMs hide SQL behind abstractions that break the moment you need to debug a slow query or understand why N+1 is happening. Query builders give you SQL control but no relation handling. When something goes wrong, you're reading source code and guessing. What if the query layer could explain every decision it made?
+
+---
+
+## The Solution
+
+```typescript
+const result = await orm
+  .select('users')
+  .where(eq('active', true))
+  .include('posts')
+  .dump();
+
+// result.sql
+// → SELECT "u".*, COALESCE(...) AS "posts"
+//     FROM "users" "u"
+//     LEFT JOIN LATERAL (SELECT ... FROM "posts" WHERE "posts"."authorId" = "u"."id") ...
+
+// result.plan.decisions
+// → [{ type: 'include-strategy', choice: 'lateral-join',
+//      reason: 'to-many relation, optimal for N+1 prevention' }]
+
+// result.params → [true]
 ```
 
-## Quick Start
+The planner picks the right strategy (EXISTS, JOIN, lateral subquery) based on cardinality, then surfaces every decision via `dump()`. Nothing is hidden.
+
+---
+
+## Comparison
+
+| Feature | dbsp | Prisma | Drizzle | Kysely |
+|---------|:----:|:------:|:-------:|:------:|
+| Query plan inspection | Yes | No | No | No |
+| Decision transparency | Yes | No | No | No |
+| Auto N+1 prevention | Yes | Yes | Partial | No |
+| Include strategies | 3 (join, lateral, subquery) | 1 (findMany) | Partial | No |
+| Multi-tenant (schema-per-tenant) | Built-in | Manual | Manual | Manual |
+| Type-safe queries | Yes | Yes | Yes | Yes |
+| Zero codegen | Yes | No | Yes | Yes |
+| PostgreSQL extensions (pgvector, BM25) | Built-in helpers | Raw SQL | Raw SQL | Raw SQL |
+
+See [full comparison](docs/COMPARISON.md) with 16 tools.
+
+---
+
+## Getting Started
+
+### Install
+
+```bash
+pnpm add @dbsp/core @dbsp/adapter-pgsql
+```
 
 ### Define Your Schema
 
@@ -46,7 +89,7 @@ const db = schema({
 });
 ```
 
-### Create ORM and Query
+### Connect and Query
 
 ```typescript
 import { createOrm, eq } from '@dbsp/core';
@@ -60,326 +103,99 @@ const orm = createOrm({
   adapter: createPgsqlAdapter(pool),
 });
 
-// Type-safe queries
 const activeUsers = await orm
   .select('users')
-  .where(eq('email', 'user@example.com'))
-  .all();
-
-// With relations (auto-inferred from ref())
-const postsWithAuthors = await orm
-  .select('posts')
-  .where(eq('published', true))
-  .include('author')
+  .where(eq('active', true))
   .all();
 ```
 
----
-
-## CLI Usage
-
-The CLI provides tools for code generation, schema verification, and interactive exploration.
-
-### Installation
-
-```bash
-# As dev dependency (recommended)
-pnpm add -D @dbsp/cli
-
-# Or globally
-npm install -g @dbsp/cli
-```
-
-### Running the CLI
-
-```bash
-# Via npx (if installed as dependency)
-npx dbsp <command>
-
-# Via pnpm (in monorepo development)
-pnpm dbsp <command>
-
-# Via global install
-dbsp <command>
-```
-
-### Commands
-
-#### `dbsp generate manifest`
-
-Generate a JSON manifest of your schema (useful for tooling/MCP). Outputs JSON format.
-
-```bash
-dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
-```
-
-Generates `schema.json` in the output directory.
-
-#### `dbsp verify`
-
-Compare your schema against a real database for drift detection.
-
-```bash
-dbsp verify --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
-```
-
-Options:
-- `-s, --schema <path>` - Path to schema file
-- `-d, --db <url>` - Database connection URL (required)
-- `--schema-name <name>` - Database schema name (default: `public`)
-- `--json` - Output as JSON (for CI integration)
-
-Example output:
-```
-🔍 Verifying schema: dbsp.schema.ts
-   Database: postgres://user:***@localhost/mydb
-
-✅ Schema is valid - no drift detected
-
-Tables: 5 matched
-Columns: 23 matched
-```
-
-#### `dbsp repl`
-
-Interactive REPL for testing queries without a database connection.
-
-```bash
-# Basic REPL
-dbsp repl --schema ./dbsp.schema.ts
-```
-
-Options:
-- `-s, --schema <path>` - Path to schema file (auto-detected if not specified)
-
-##### REPL Features
-
-**Natural query syntax:**
-```
-> users
-> users where active = true
-> posts where authorId = 1 include author
-> users limit 10 offset 20
-```
-
-**Dot commands:**
-```
-> .help              # Show all commands
-> .tables            # List all tables
-> .schema users      # Show table schema
-> .relations posts   # Show table relations
-> .clear             # Clear screen
-> .exit              # Exit REPL (or .quit)
-```
-
-**Output:**
-- SQL query generated
-- Query plan with decisions
-- Parameter bindings
-
-**Features:**
-- Tab completion for tables, relations, columns, and operators
-- Command history (persisted to `~/.dbsp_history`)
-- Up/Down arrows to navigate history
-- Split view mode (toggle with `.split` command) for schema reference
-
----
-
-## Common Patterns
-
-### Include (Eager Loading)
-
-Load related data with the `.include()` method.
-
-#### Simple Include
+### Load Relations
 
 ```typescript
-// Load posts for users
+// Relations are inferred from ref() — no configuration needed
 const usersWithPosts = await orm
   .select('users')
   .include('posts')
-  .all();
-// Result: [{ id: 1, name: 'Alice', posts: [{ id: 1, title: '...' }, ...] }]
-```
-
-#### Nested Include (Dot Notation) - Recommended
-
-Use dot notation for deep includes. Options apply to the deepest level:
-
-```typescript
-// Load posts with their comments
-const users = await orm
-  .select('users')
-  .include('posts.comments')
-  .all();
-
-// Three levels deep
-const users = await orm
-  .select('users')
-  .include('posts.comments.author')
-  .all();
-
-// With options on the deepest relation
-const users = await orm
-  .select('users')
-  .include('posts.comments', { 
-    select: { type: 'fields', fields: ['text'] }
-  })
-  .all();
-
-// Disambiguate with 'via' (applies to deepest level)
-const users = await orm
-  .select('users')
-  .include('posts.author', { via: 'commentAuthor' })
-  .all();
-```
-
-#### Multiple Includes (Chaining)
-
-Chain multiple `.include()` calls:
-
-```typescript
-const users = await orm
-  .select('users')
-  .include('posts')
-  .include('profile')
   .include('posts.comments')
   .all();
 ```
 
-#### Recursive Includes (Hierarchies)
-
-For self-referential relations (trees/hierarchies):
+### Inspect Everything
 
 ```typescript
-// Traverse ancestors (up the tree)
-const categories = await orm
-  .select('categories')
-  .where(eq('id', 5))
-  .include('parent', {
-    recursive: true,
-    direction: 'ancestors'
-  })
-  .all();
+const dump = orm.select('users').where(eq('active', true)).dump();
 
-// Traverse descendants (down the tree) with flat output
-const categories = await orm
-  .select('categories')
-  .where(eq('id', 1))
-  .include('children', {
-    recursive: true,
-    direction: 'descendants',
-    flat: true,
-    maxDepth: 10
-  })
-  .all();
+console.log(dump.sql);     // SELECT "users".* FROM "users" WHERE "active" = $1
+console.log(dump.params);  // [true]
+console.log(dump.plan);    // { decisions: [...], warnings: [...] }
 ```
 
-#### Include Options Reference
-
-| Option | Description |
-|--------|-------------|
-| `via` | Disambiguate when multiple relations exist between tables |
-| `where` | Filter conditions on related records |
-| `select` | Select specific columns from related records |
-| `include` | Nested includes (alternative to dot notation) |
-| `recursive` | Enable recursive CTE traversal (hierarchies) |
-| `direction` | `'ancestors'` or `'descendants'` (required when recursive) |
-| `flat` | Output as flat array with depth field (default: nested objects) |
-| `maxDepth` | Maximum traversal depth (default: 100) |
+See the [Getting Started guide](docs/guides/getting-started.md) for the full walkthrough.
 
 ---
 
-## Multi-tenant Queries
+## Features
+
+**Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
-// Schema-per-tenant isolation
+orm.select('users').where(some('posts', eq('published', true))).all();
+// → WHERE EXISTS (SELECT 1 FROM "posts" WHERE ...)
+```
+
+**Full Observability** — Every query exposes its plan, SQL, and parameters via `dump()`. Works on selects, mutations, and subqueries.
+
+```typescript
+const { sql, params, plan } = orm.insert('users').values({ name: 'Alice' }).dump();
+```
+
+**Multi-tenant** — Schema-per-tenant isolation with `withSchema()`. All queries in the scoped context use the given schema.
+
+```typescript
 const tenantOrm = orm.withSchema('acme_corp');
-
-const users = await tenantOrm.select('users').all();
-// SQL: SELECT * FROM "acme_corp"."users"
+await tenantOrm.select('users').all();
+// → SELECT * FROM "acme_corp"."users"
 ```
 
----
-
-## Observability
-
-Every query provides full observability via `dump()`:
+**Expression Primitives** — Type-safe `op()`, `fn()`, `ref()`, `cast()` for complex PostgreSQL expressions without raw SQL.
 
 ```typescript
-const query = orm.select('users').where(eq('active', true));
-
-const dump = query.dump();
-console.log(dump.sql);      // SELECT * FROM "users" WHERE "active" = $1
-console.log(dump.params);   // [true]
-console.log(dump.plan);     // { decisions: [...], warnings: [...] }
+.orderBy(op('<=>', ref('embedding'), cast(param(queryVec), 'vector')))
 ```
 
----
-
-## Mutations
+**Recursive Queries** — Hierarchies via `include({ recursive: true })` with automatic CTE generation.
 
 ```typescript
-// Insert
-await orm.insert('users')
-  .values({ name: 'Alice', email: 'alice@example.com' })
-  .returning(['id', 'name'])
-  .execute();
-
-// Update
-await orm.update('users')
-  .set({ name: 'Alice Smith' })
-  .where(eq('id', 1))
-  .execute();
-
-// Delete
-await orm.delete('posts')
-  .where(eq('published', false))
-  .execute();
-
-// Upsert (insert or update on conflict)
-await orm.upsert('users')
-  .values({ name: 'Alice', email: 'alice@example.com' })
-  .onConflict(['email'])
-  .doUpdate()
-  .execute();
+orm.select('categories').where(eq('id', 5))
+  .include('parent', { recursive: true, direction: 'ancestors' })
+  .all();
 ```
 
-All mutations support `dump()` for SQL preview and `returning()` for PostgreSQL RETURNING.
+**Mutations** — Insert, update, delete, upsert with RETURNING support and full `dump()` observability.
 
-See [ORM API Guide](docs/guides/orm-api.md#5-mutations) for full mutation reference.
+```typescript
+await orm.upsert('users').values({ email: 'alice@example.com', name: 'Alice' })
+  .onConflict(['email']).doUpdate().execute();
+```
 
----
-
-## NQL (Natural Query Language)
-
-A pipe-based query language for the CLI/REPL and `.dbsp` files:
+**NQL** — Pipe-based query language for CLI/REPL exploration.
 
 ```
-# Basic query
 users | where active = true | select id, name | limit 10
-
-# Includes (nested JSON)
-authors | select *, posts.*
-
-# Aggregates
-orders | group by status | select status, count(*), sum(amount)
-
-# Window functions
-products | select name, rank() over (partition by category order by price) as priceRank
-
-# Mutations
-insert into users set name = 'Alice', email = 'alice@example.com'
-update users set active = false where lastLogin < '2024-01-01'
 ```
 
-Use in TypeScript via template literals:
+**DDL Management** — Schema introspection, diff, and migration generation against a live PostgreSQL instance.
+
+```bash
+dbsp verify --schema ./dbsp.schema.ts --db postgres://localhost/mydb
+```
+
+**pgvector + ParadeDB** — Built-in helpers for vector similarity search and full-text BM25. No raw SQL.
 
 ```typescript
-const results = await orm.nql<User[]>`users | where active = true`.all();
+import { cosineDistance } from '@dbsp/adapter-pgsql';
+orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).limit(10).all();
 ```
-
-See [NQL Reference](docs/guides/nql-reference.md) for complete syntax.
 
 ---
 
@@ -392,151 +208,67 @@ See [NQL Reference](docs/guides/nql-reference.md) for complete syntax.
 └──────────────────────────────┬──────────────────────────────────┘
                                │
 ┌──────────────────────────────┼──────────────────────────────────┐
-│                              ▼                                   │
-│  @dbsp/core                                                      │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │  │
-│  │  (Schema)   │→→│  (Query)    │→→│  (Plan + Decisions)     │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  DX Layer: schema(), createOrm(), eq(), ref(), etc.     │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│                              ▼                                  │
+│  @dbsp/core                                                     │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │  ModelIR    │  │  IntentAST  │  │  Semantic Planner       │ │
+│  │  (Schema)   │→→│  (Query)    │→→│  (Plan + Decisions)     │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  DX Layer: schema(), createOrm(), eq(), ref(), …        │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └──────────────────────────────┬──────────────────────────────────┘
                                │ implements Adapter
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  @dbsp/adapter-pgsql                                            │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │  SQL Compiler (PlanReport → PostgreSQL AST → SQL)       │    │
-│  │  PgsqlAdapter (pg Pool), CompileOnlyAdapter (no DB)     │    │
-│  └─────────────────────────────────────────────────────────┘    │
+│  ┌─────────────────────────────────────────────────────────┐   │
+│  │  SQL Compiler (PlanReport → PostgreSQL AST → SQL)       │   │
+│  │  PgsqlAdapter (pg Pool), CompileOnlyAdapter (no DB)     │   │
+│  └─────────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+The core package is database-agnostic. It only knows about schema shapes and query intents. The adapter translates plans into parameterized SQL using PostgreSQL's native expression AST — no raw string templates.
+
+---
 
 ## Packages
 
 | Package | Description |
 |---------|-------------|
-| `@dbsp/core` | Schema DSL, query intents, semantic planning, ORM API |
+| `@dbsp/core` | Schema DSL, query intents, semantic planner, ORM API |
 | `@dbsp/adapter-pgsql` | PostgreSQL-native SQL compilation + execution (pg Pool) |
-| `@dbsp/nql` | Natural Query Language parser |
-| `@dbsp/types` | Shared type definitions |
-| `@dbsp/cli` | CLI tools (generate, verify, repl) |
-| `@dbsp/mcp-server` | MCP Server for AI assistants |
-
-## API Reference
-
-### Core Package
-
-| Export | Description |
-|--------|-------------|
-| `schema()`, `ref()` | Define tables, columns, and relations |
-| `createOrm()` | Create an ORM instance with adapter |
-| `eq()`, `neq()`, `gt()`, `gte()`, `lt()`, `lte()` | Comparison filters |
-| `isDistinctFrom()` | Null-safe inequality (SQL:2003) |
-| `like()` | Pattern matching filter |
-| `isNull()`, `isNotNull()` | Null checks |
-| `inArray()`, `inSubquery()` | Array membership / IN (subquery) |
-| `and()`, `or()`, `not()` | Logical operators |
-| `exists()`, `notExists()` | Subquery existence checks |
-| `some()`, `every()`, `none()` | Relation quantifier filters |
-| `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | PostgreSQL range operators |
-| `count()`, `sum()`, `avg()`, `min()`, `max()` | Aggregate helpers (on QueryBuilder) |
-| `rowNumber()`, `rank()`, `denseRank()` | Window ranking functions |
-| `wSum()`, `wAvg()`, `wCount()`, `wMin()`, `wMax()` | Window aggregate functions |
-| `lag()`, `lead()` | Window offset functions |
-| `coalesce()`, `raw()`, `col()`, `distinct()` | Expression helpers |
-| `subquery()`, `outerRef()` | Correlated subquery builders (WHERE + SELECT via `.asExpr()`) |
-| `.union()`, `.intersect()`, `.except()` | Set operations (UNION, INTERSECT, EXCEPT) |
-| `Errors` | Error factory with type guards |
-
-See [ORM API Guide](docs/guides/orm-api.md) for complete API documentation.
-
-### Adapter Package
-
-| Export | Description |
-|--------|-------------|
-| `createPgsqlAdapter()` | Create adapter for pg Pool instance |
-| `createPgsqlCompileOnlyAdapter()` | Create compile-only adapter (no DB required) |
-| `cosineDistance()`, `l2Distance()`, `innerProduct()` | pgvector similarity operators |
-| `bm25Search()`, `score()`, `parse()`, `boost()` | ParadeDB full-text search |
-| `generateSeries()`, `nextval()` | PostgreSQL built-in helpers |
-
-## Planner Decisions
-
-The semantic planner automatically makes optimization decisions:
-
-| Decision | Options | Criteria |
-|----------|---------|----------|
-| `filter-strategy` | `exists`, `join` | Cardinality (to-many → EXISTS) |
-| `include-strategy` | `join`, `separate` | Cardinality and query complexity |
-| `cte-extraction` | extract, inline | Access count (≥2 → CTE) |
-
-## Examples
-
-Ready-to-use example schemas in the `examples/` directory:
-
-| File | Description | Complexity |
-|------|-------------|------------|
-| `minimal.schema.ts` | Users + Posts | Beginner |
-| `blog.schema.ts` | Authors, Posts, Comments, Tags | Intermediate |
-| `ecommerce.schema.ts` | Products, Categories, Orders | Advanced |
-
-**Quick test:**
-
-```bash
-# Start REPL with blog schema
-pnpm dbsp repl --schema ./examples/blog.schema.ts
-```
-
-See [NQL Reference](docs/guides/nql-reference.md) for detailed usage guide.
-
-### Guides
-
-| Guide | Description |
-|-------|-------------|
-| [ORM API Guide](docs/guides/orm-api.md) | Complete TypeScript API reference — schema, queries, mutations, pagination, errors |
-| [NQL Reference](docs/guides/nql-reference.md) | Pipe-based query language — syntax, operators, window functions, hierarchy |
-| [CLI Usage](docs/CLI_USAGE.md) | CLI commands — generate, verify, repl |
+| `@dbsp/types` | Shared type contracts (Adapter, ModelIR, IntentAST, PlanReport) |
+| `@dbsp/nql` | Natural Query Language parser (Chevrotain) |
+| `@dbsp/cli` | CLI tools: generate, verify, repl |
+| `@dbsp/mcp-server` | MCP server for AI assistant integration |
 
 ---
 
-## Development
+## Documentation
 
-```bash
-# Clone and install
-git clone https://github.com/your-org/db-semantic-planner
-cd db-semantic-planner
-pnpm install
+| Guide | Description |
+|-------|-------------|
+| [Getting Started](docs/guides/getting-started.md) | Full walkthrough from schema to first query |
+| [ORM API](docs/guides/orm-api.md) | Complete TypeScript API reference |
+| [NQL Reference](docs/guides/nql-reference.md) | Pipe-based query language syntax |
+| [CLI Usage](docs/CLI_USAGE.md) | generate, verify, repl commands |
+| [Joins Guide](docs/guides/how-to-use-joins.md) | Manual joins, LATERAL, DISTINCT ON |
+| [Expression Primitives](docs/guides/how-to-use-expression-primitives.md) | op(), fn(), ref(), cast() |
+| [DDL Helpers](docs/guides/how-to-use-ddl-helpers.md) | Schema diff and DDL generation |
+| [Full-text Search](docs/guides/how-to-use-full-text-search.md) | pgvector and ParadeDB BM25 |
+| [Recursive CTEs](docs/guides/how-to-use-recursive-cte.md) | Tree traversal with include() |
+| [Full comparison](docs/COMPARISON.md) | dbsp vs 16 query libraries |
 
-# Build all packages
-pnpm build
+---
 
-# Run tests
-pnpm test
+## Contributing
 
-# Run CLI in development
-pnpm dbsp repl --schema ./path/to/schema.ts
+Contributions are welcome. Please open an issue before submitting a large pull request so we can align on direction. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup instructions, coding conventions, and the PR process.
 
-# Type check
-pnpm typecheck
-
-# Lint
-pnpm lint
-```
-
-## Status
-
-**✅ v1.0 Ready** - 7,000+ tests passing across 7 packages
-
-- Core: Schema DSL, ModelIR, IntentAST, Semantic Planner, DX Layer (2,100+ tests)
-- Adapter: PostgreSQL-native SQL Compiler, Multi-tenant, DDL, Observability (2,800+ tests)
-- NQL: Natural Query Language parser (257 tests)
-- CLI: Generate, Verify, REPL (314 tests)
-- Types: Shared type contracts
-- GUI: Desktop explorer (Tauri v2 + React 19)
-- E2E: PostgreSQL integration via Testcontainers (333 tests)
+---
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).

@@ -15,7 +15,16 @@
  *   files:      id, project_id
  */
 
-import { any, createOrm, eq, inSubquery, or, ref, schema, subquery } from '@dbsp/core';
+import {
+	any,
+	createOrm,
+	eq,
+	inSubquery,
+	or,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -62,7 +71,14 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 					'symbol_id',
 					subquery('symbols')
 						.select('id')
-						.where(inSubquery('file_id', subquery('files').select('id').where(any('project_id', projectIds)))),
+						.where(
+							inSubquery(
+								'file_id',
+								subquery('files')
+									.select('id')
+									.where(any('project_id', projectIds)),
+							),
+						),
 				),
 			)
 			.dump();
@@ -74,13 +90,19 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 
 		// Outer subquery: symbol_id IN (SELECT id FROM symbols ...)
 		// PostgreSQL adapter emits "= ANY (SELECT ...)" which is equivalent to IN
-		expect(sql, 'Should contain outer IN subquery').toMatch(/symbol_id\s*=\s*any\s*\(\s*select/i);
+		expect(sql, 'Should contain outer IN subquery').toMatch(
+			/symbol_id\s*=\s*any\s*\(\s*select/i,
+		);
 
 		// Middle subquery: file_id IN (SELECT id FROM files ...)
-		expect(sql, 'Should contain middle IN subquery').toMatch(/file_id\s*=\s*any\s*\(\s*select/i);
+		expect(sql, 'Should contain middle IN subquery').toMatch(
+			/file_id\s*=\s*any\s*\(\s*select/i,
+		);
 
 		// Innermost: project_id = ANY($1)
-		expect(sql, 'Should contain ANY clause').toMatch(/project_id\s*=\s*any\s*\(/i);
+		expect(sql, 'Should contain ANY clause').toMatch(
+			/project_id\s*=\s*any\s*\(/i,
+		);
 
 		// Parameters: projectIds array bound as $1
 		expect(dump.params, 'Should have one parameter').toHaveLength(1);
@@ -99,7 +121,9 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 		const sql = normalizeSQL(dump.sql);
 
 		// PostgreSQL adapter emits "= ANY (SELECT ...)" which is equivalent to IN
-		expect(sql, '1-level: Should contain IN subquery').toMatch(/symbol_id\s*=\s*any\s*\(\s*select/i);
+		expect(sql, '1-level: Should contain IN subquery').toMatch(
+			/symbol_id\s*=\s*any\s*\(\s*select/i,
+		);
 		expect(sql, '1-level: Should select from symbols').toContain('symbols');
 	});
 
@@ -107,11 +131,17 @@ describe('NESTED-INSUBQUERY: 2-level nested inSubquery compiles correctly', () =
 		const orm = buildOrm();
 		const ids = [10, 20];
 
-		const dump = orm.select('files').columns(['id']).where(any('project_id', ids)).dump();
+		const dump = orm
+			.select('files')
+			.columns(['id'])
+			.where(any('project_id', ids))
+			.dump();
 
 		const sql = normalizeSQL(dump.sql);
 
-		expect(sql, 'Should produce = ANY(...)').toMatch(/project_id\s*=\s*any\s*\(/i);
+		expect(sql, 'Should produce = ANY(...)').toMatch(
+			/project_id\s*=\s*any\s*\(/i,
+		);
 		expect(dump.params[0], 'Should bind ids array').toEqual(ids);
 	});
 });
@@ -126,13 +156,23 @@ describe('INSUBQUERY-IN-OR: inSubquery inside or() compiles to ANY(SELECT ...)',
 
 		const dump = orm
 			.select('embeddings')
-			.where(or(eq('model', 'gpt4'), inSubquery('symbol_id', subquery('symbols').select('id').where(eq('file_id', 1)))))
+			.where(
+				or(
+					eq('model', 'gpt4'),
+					inSubquery(
+						'symbol_id',
+						subquery('symbols').select('id').where(eq('file_id', 1)),
+					),
+				),
+			)
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
 
 		// Must produce ANY(SELECT ...) — not ANY($N) with a null parameter
-		expect(sql, 'Should contain ANY (SELECT ...)').toMatch(/symbol_id\s*=\s*any\s*\(\s*select/i);
+		expect(sql, 'Should contain ANY (SELECT ...)').toMatch(
+			/symbol_id\s*=\s*any\s*\(\s*select/i,
+		);
 
 		// The subquery must reference the symbols table
 		expect(sql, 'Should select from symbols').toContain('symbols');
@@ -141,7 +181,9 @@ describe('INSUBQUERY-IN-OR: inSubquery inside or() compiles to ANY(SELECT ...)',
 		expect(dump.params, 'Should not contain null param').not.toContain(null);
 
 		// Two params: eq('model', 'gpt4') → $1, eq('file_id', 1) → $2
-		expect(dump.params, 'Should have params for both OR branches').toHaveLength(2);
+		expect(dump.params, 'Should have params for both OR branches').toHaveLength(
+			2,
+		);
 		expect(dump.params, 'Should contain the model value').toContain('gpt4');
 		expect(dump.params, 'Should contain the file_id value').toContain(1);
 	});
@@ -151,13 +193,20 @@ describe('INSUBQUERY-IN-OR: inSubquery inside or() compiles to ANY(SELECT ...)',
 
 		const dump = orm
 			.select('embeddings')
-			.where(or(eq('model', 'clip'), inSubquery('symbol_id', subquery('symbols').select('id'))))
+			.where(
+				or(
+					eq('model', 'clip'),
+					inSubquery('symbol_id', subquery('symbols').select('id')),
+				),
+			)
 			.dump();
 
 		const sql = normalizeSQL(dump.sql);
 
 		// No-condition subquery: ANY(SELECT id FROM symbols ...)
-		expect(sql, 'No-condition subquery should still use SELECT').toMatch(/symbol_id\s*=\s*any\s*\(\s*select/i);
+		expect(sql, 'No-condition subquery should still use SELECT').toMatch(
+			/symbol_id\s*=\s*any\s*\(\s*select/i,
+		);
 
 		expect(dump.params, 'Should not contain null').not.toContain(null);
 	});

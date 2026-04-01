@@ -5,14 +5,6 @@
  * Implementation lives in packages/core/src/assert/.
  */
 
-export {
-	ASSERTION_TYPES,
-	parseAssertionFile,
-	requiresDatabase,
-	resolveQueryIndex,
-	validateAssertionBlocks,
-} from '@dbsp/core';
-
 export type {
 	Assertion,
 	AssertionBlock,
@@ -20,4 +12,11 @@ export type {
 	ParseError,
 	ParseResult,
 	TableAssertionData,
+} from '@dbsp/core';
+export {
+	ASSERTION_TYPES,
+	parseAssertionFile,
+	requiresDatabase,
+	resolveQueryIndex,
+	validateAssertionBlocks,
 } from '@dbsp/core';

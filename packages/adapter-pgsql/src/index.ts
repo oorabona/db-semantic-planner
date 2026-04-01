@@ -15,18 +15,18 @@ export {
 export { normalizeSQL } from './ast-helpers.js';
 // Compiler
 export {
+	type BatchValuesJoinDecision,
 	type CompiledResult,
 	type CompilerOptions,
 	compilePlan,
-	PlanCompiler,
-	type BatchValuesJoinDecision,
-	type JoinDecision,
-	type PrecompiledJoinDecision,
-	type PlanDecision,
-	type SimplifiedPlanReport,
 	isBatchValuesJoinDecision,
 	isJoinDecision,
 	isPrecompiledJoinDecision,
+	type JoinDecision,
+	PlanCompiler,
+	type PlanDecision,
+	type PrecompiledJoinDecision,
+	type SimplifiedPlanReport,
 } from './compiler.js';
 // DDL Generation
 export {

@@ -18,8 +18,6 @@ import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, rangeVar } from './ast-helpers.js';
-import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
-import { createTypeCastParamRef } from './param-ref.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -27,8 +25,10 @@ import {
 	type PlanDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
+import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
+import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
@@ -132,10 +132,9 @@ function buildBatchValuesRangeFn(
 	});
 
 	const unnestCall = funcCall('unnest', unnestArgs);
-	const colnames = [
-		...bv.columns,
-		...(bv.ordinality ? ['ord'] : []),
-	].map((c) => ({ String: { sval: c } }));
+	const colnames = [...bv.columns, ...(bv.ordinality ? ['ord'] : [])].map(
+		(c) => ({ String: { sval: c } }),
+	);
 
 	const rangeFunction: Node = {
 		RangeFunction: {
@@ -194,10 +193,7 @@ function compileJoinIntents(
 				? Array.isArray(rel.foreignKey)
 					? rel.foreignKey[0]!
 					: rel.foreignKey
-				: deriveFk(
-						isBelongsTo ? rootTable : rel.target,
-						defaultPk,
-					);
+				: deriveFk(isBelongsTo ? rootTable : rel.target, defaultPk);
 
 			const sourceColumn = isBelongsTo ? rawFk : defaultPk;
 			const targetColumn = isBelongsTo ? defaultPk : rawFk;
@@ -219,7 +215,11 @@ function compileJoinIntents(
 			const bv = intent.batchValues;
 			const alias = intent.alias ?? bv.alias;
 
-			const { rangeFunction, params: bvParams } = buildBatchValuesRangeFn(bv, 1, alias);
+			const { rangeFunction, params: bvParams } = buildBatchValuesRangeFn(
+				bv,
+				1,
+				alias,
+			);
 
 			// Compile the ON condition.
 			// We use a minimal param state with paramIndex already advanced past bvParams
@@ -237,7 +237,9 @@ function compileJoinIntents(
 				...(schemaName !== undefined && { schemaName }),
 				...(model !== undefined && { model }),
 				compileSubquery: () => {
-					throw new Error('Subquery in BatchValues JOIN ON condition is not supported.');
+					throw new Error(
+						'Subquery in BatchValues JOIN ON condition is not supported.',
+					);
 				},
 			};
 
@@ -246,7 +248,10 @@ function compileJoinIntents(
 			// Combine bv unnest params + any ON condition params into batchValuesParams.
 			// compiler.ts splices all of these BEFORE other query params so that $1/$2/...
 			// in the RangeFunction and ON condition align with parameters[0], [1], ...
-			const allBvParams: unknown[] = [...bvParams, ...bvOnParamState.parameters];
+			const allBvParams: unknown[] = [
+				...bvParams,
+				...bvOnParamState.parameters,
+			];
 
 			results.push({
 				type: 'join',
@@ -288,9 +293,7 @@ function compileJoinIntents(
 				...(schemaName !== undefined && { schemaName }),
 				...(model !== undefined && { model }),
 				compileSubquery: () => {
-					throw new Error(
-						'Subquery in JOIN ON condition is not supported.',
-					);
+					throw new Error('Subquery in JOIN ON condition is not supported.');
 				},
 			};
 
@@ -329,8 +332,8 @@ function compileJoinIntents(
  * the EXISTS subquery AND the include subquery.
  */
 function propagateExistsConditions(
-	includeDecisions: PlanDecision[],
-	existsDecisions: PlanDecision[],
+	includeDecisions: readonly PlanDecision[],
+	existsDecisions: readonly PlanDecision[],
 ): PlanDecision[] {
 	return includeDecisions.map((jd) => {
 		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
@@ -414,7 +417,8 @@ function buildRelationColumnsMap(
 	const map = new Map<string, RelationColumnEntry[]>();
 
 	for (const d of decisions) {
-		if (!(d.type === 'selectRelationColumn' && d.relation && d.column)) continue;
+		if (!(d.type === 'selectRelationColumn' && d.relation && d.column))
+			continue;
 
 		const col = d.column as string;
 		const alias = d.alias as string | undefined;
@@ -574,8 +578,14 @@ function buildSimplifiedPlanReport(
 	const bvFromSource = plan.intent?.batchValuesSource;
 	const batchValuesFromFields = bvFromSource
 		? (() => {
-				const { rangeFunction, params } = buildBatchValuesRangeFn(bvFromSource, 1);
-				return { batchValuesFromNode: rangeFunction, batchValuesFromParams: params };
+				const { rangeFunction, params } = buildBatchValuesRangeFn(
+					bvFromSource,
+					1,
+				);
+				return {
+					batchValuesFromNode: rangeFunction,
+					batchValuesFromParams: params,
+				};
 			})()
 		: {};
 

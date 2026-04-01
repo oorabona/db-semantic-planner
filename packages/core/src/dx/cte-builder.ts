@@ -20,8 +20,8 @@ import type {
 	CteQueryIntent,
 	UnnestCteIntent,
 } from '@dbsp/types';
-import { InvalidOperationError } from './errors.js';
 import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
+import { InvalidOperationError } from './errors.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
 

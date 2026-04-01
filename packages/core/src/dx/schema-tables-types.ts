@@ -218,14 +218,15 @@ type BuildLocalRelation<
 	_TColName extends string,
 	TRef extends RefDefinition,
 	TSchema extends SchemaDefinition,
-> = GetRefTarget<TRef> extends keyof TSchema
-	? RelationRef<
-			GetRefTarget<TRef> & string,
-			InferRowType<TSchema[GetRefTarget<TRef>]> | null,
-			'belongsTo',
-			InferRowType<TSchema[GetRefTarget<TRef>]>
-		>
-	: never;
+> =
+	GetRefTarget<TRef> extends keyof TSchema
+		? RelationRef<
+				GetRefTarget<TRef> & string,
+				InferRowType<TSchema[GetRefTarget<TRef>]> | null,
+				'belongsTo',
+				InferRowType<TSchema[GetRefTarget<TRef>]>
+			>
+		: never;
 
 /**
  * Build local relations (belongsTo) for a table.

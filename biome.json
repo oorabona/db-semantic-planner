@@ -1,5 +1,5 @@
 {
-	"$schema": "https://biomejs.dev/schemas/2.3.11/schema.json",
+	"$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
 	"files": {
 		"includes": ["packages/**", "tests/**", "*.json", "*.md"]
 	},
@@ -24,6 +24,9 @@
 			"correctness": {
 				"noUnusedImports": "error",
 				"noUnusedVariables": "error"
+			},
+			"suspicious": {
+				"noExplicitAny": "warn"
 			},
 			"style": {
 				"noNonNullAssertion": "warn"

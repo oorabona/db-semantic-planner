@@ -2,13 +2,13 @@
 import { describe, expect, it } from 'vitest';
 import {
 	assertContains,
-	assertEquals,
 	assertDbColumnExists,
 	assertDbOutput,
 	assertDbRowsEquals,
 	assertDbRowsMax,
 	assertDbRowsMin,
 	assertDbValueEquals,
+	assertEquals,
 	assertIntentHasGroupBy,
 	assertIntentHasOrderBy,
 	assertIntentHasWhere,
@@ -171,10 +171,7 @@ describe('assertSQLTable', () => {
 	});
 
 	it('matches snake_case from camelCase', () => {
-		const r = assertSQLTable(
-			'SELECT * FROM "product_images"',
-			'productImages',
-		);
+		const r = assertSQLTable('SELECT * FROM "product_images"', 'productImages');
 		expect(r.passed).toBe(true);
 	});
 
@@ -184,10 +181,7 @@ describe('assertSQLTable', () => {
 	});
 
 	it('matches quoted snake_case', () => {
-		const r = assertSQLTable(
-			'SELECT * FROM "product_images"',
-			'productImages',
-		);
+		const r = assertSQLTable('SELECT * FROM "product_images"', 'productImages');
 		expect(r.passed).toBe(true);
 	});
 
@@ -377,11 +371,10 @@ describe('assertParamsLength', () => {
 
 describe('assertParamsType', () => {
 	it('passes with matching types', () => {
-		const r = assertParamsType(['hello', 42, true], [
-			'string',
-			'number',
-			'boolean',
-		]);
+		const r = assertParamsType(
+			['hello', 42, true],
+			['string', 'number', 'boolean'],
+		);
 		expect(r.passed).toBe(true);
 	});
 
@@ -415,12 +408,10 @@ describe('assertParamsType', () => {
 	});
 
 	it('handles mixed types correctly', () => {
-		const r = assertParamsType([null, [1], { a: 1 }, 'hello'], [
-			'null',
-			'array',
-			'object',
-			'string',
-		]);
+		const r = assertParamsType(
+			[null, [1], { a: 1 }, 'hello'],
+			['null', 'array', 'object', 'string'],
+		);
 		expect(r.passed).toBe(true);
 		expect(r.actual).toBeUndefined();
 	});
@@ -571,10 +562,7 @@ describe('assertDbColumnExists', () => {
 	});
 
 	it('passes with snake_case match from camelCase', () => {
-		const r = assertDbColumnExists(
-			{ columns: ['created_at'] },
-			'createdAt',
-		);
+		const r = assertDbColumnExists({ columns: ['created_at'] }, 'createdAt');
 		expect(r.passed).toBe(true);
 	});
 
@@ -647,10 +635,7 @@ describe('assertDbValueEquals', () => {
 	});
 
 	it('handles primitive spec (non-object) — defaults', () => {
-		const r = assertDbValueEquals(
-			{ rows: [{ '': 42 }] },
-			42,
-		);
+		const r = assertDbValueEquals({ rows: [{ '': 42 }] }, 42);
 		// primitive spec → { row: 0, column: '', value: 42 }
 		expect(r.type).toBe('db.value.equals');
 	});
@@ -663,10 +648,7 @@ describe('assertDbValueEquals', () => {
 	it('handles rowData being undefined', () => {
 		// rows array with sparse element
 		const rows = [undefined];
-		const r = assertDbValueEquals(
-			{ rows },
-			{ row: 0, column: 'id', value: 1 },
-		);
+		const r = assertDbValueEquals({ rows }, { row: 0, column: 'id', value: 1 });
 		expect(r.passed).toBe(false);
 		expect(r.message).toContain('Row 0 is empty');
 	});
@@ -795,10 +777,7 @@ describe('assertDbOutput', () => {
 	});
 
 	it('formats "(no rows)" when actual is empty and row count mismatches', () => {
-		const r = assertDbOutput(
-			{ rows: [] },
-			{ columns: ['id'], rows: [['1']] },
-		);
+		const r = assertDbOutput({ rows: [] }, { columns: ['id'], rows: [['1']] });
 		expect(r.passed).toBe(false);
 		expect(r.message).toContain('(no rows)');
 	});
@@ -854,7 +833,16 @@ describe('assertDbOutput', () => {
 describe('assertIntentType', () => {
 	it('passes when intent type matches', () => {
 		const r = assertIntentType(
-			{ intent: { type: 'query', table: 'users', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'users',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'query',
 		);
 		expect(r.passed).toBe(true);
@@ -862,7 +850,16 @@ describe('assertIntentType', () => {
 
 	it('fails when intent type mismatches', () => {
 		const r = assertIntentType(
-			{ intent: { type: 'insert', table: 'users', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'insert',
+					table: 'users',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'query',
 		);
 		expect(r.passed).toBe(false);
@@ -880,7 +877,16 @@ describe('assertIntentType', () => {
 describe('assertIntentTable', () => {
 	it('passes when table matches (case-insensitive)', () => {
 		const r = assertIntentTable(
-			{ intent: { type: 'query', table: 'Users', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'Users',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'users',
 		);
 		expect(r.passed).toBe(true);
@@ -888,7 +894,16 @@ describe('assertIntentTable', () => {
 
 	it('fails when table mismatches', () => {
 		const r = assertIntentTable(
-			{ intent: { type: 'query', table: 'posts', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'users',
 		);
 		expect(r.passed).toBe(false);
@@ -906,7 +921,16 @@ describe('assertIntentTable', () => {
 describe('assertIntentWith', () => {
 	it('passes when single relation present', () => {
 		const r = assertIntentWith(
-			{ intent: { type: 'query', table: 'posts', with: ['comments'], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: ['comments'],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'comments',
 		);
 		expect(r.passed).toBe(true);
@@ -914,7 +938,16 @@ describe('assertIntentWith', () => {
 
 	it('passes when all expected relations present', () => {
 		const r = assertIntentWith(
-			{ intent: { type: 'query', table: 'posts', with: ['comments', 'users'], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: ['comments', 'users'],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			['comments', 'users'],
 		);
 		expect(r.passed).toBe(true);
@@ -922,7 +955,16 @@ describe('assertIntentWith', () => {
 
 	it('passes with case-insensitive matching', () => {
 		const r = assertIntentWith(
-			{ intent: { type: 'query', table: 'posts', with: ['Comments'], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: ['Comments'],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'comments',
 		);
 		expect(r.passed).toBe(true);
@@ -930,7 +972,16 @@ describe('assertIntentWith', () => {
 
 	it('fails when relation missing', () => {
 		const r = assertIntentWith(
-			{ intent: { type: 'query', table: 'posts', with: ['comments'], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: ['comments'],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			['comments', 'users'],
 		);
 		expect(r.passed).toBe(false);
@@ -946,7 +997,16 @@ describe('assertIntentWith', () => {
 
 	it('handles empty with array (no relations)', () => {
 		const r = assertIntentWith(
-			{ intent: { type: 'query', table: 'posts', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'posts',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			'comments',
 		);
 		expect(r.passed).toBe(false);
@@ -956,7 +1016,16 @@ describe('assertIntentWith', () => {
 describe('assertIntentHasWhere', () => {
 	it('passes when hasWhere=true and expected=true', () => {
 		const r = assertIntentHasWhere(
-			{ intent: { type: 'query', table: 'users', with: [], hasWhere: true, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'users',
+					with: [],
+					hasWhere: true,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(true);
@@ -964,7 +1033,16 @@ describe('assertIntentHasWhere', () => {
 
 	it('passes when hasWhere=false and expected=false', () => {
 		const r = assertIntentHasWhere(
-			{ intent: { type: 'query', table: 'users', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'users',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			false,
 		);
 		expect(r.passed).toBe(true);
@@ -972,7 +1050,16 @@ describe('assertIntentHasWhere', () => {
 
 	it('fails on mismatch', () => {
 		const r = assertIntentHasWhere(
-			{ intent: { type: 'query', table: 'users', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'users',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(false);
@@ -997,7 +1084,16 @@ describe('assertIntentHasWhere', () => {
 describe('assertIntentHasGroupBy', () => {
 	it('passes when hasGroupBy matches', () => {
 		const r = assertIntentHasGroupBy(
-			{ intent: { type: 'query', table: 'u', with: [], hasWhere: false, hasGroupBy: true, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'u',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: true,
+					hasOrderBy: false,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(true);
@@ -1010,7 +1106,16 @@ describe('assertIntentHasGroupBy', () => {
 
 	it('fails on mismatch', () => {
 		const r = assertIntentHasGroupBy(
-			{ intent: { type: 'query', table: 'u', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'u',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(false);
@@ -1021,7 +1126,16 @@ describe('assertIntentHasGroupBy', () => {
 describe('assertIntentHasOrderBy', () => {
 	it('passes when hasOrderBy matches', () => {
 		const r = assertIntentHasOrderBy(
-			{ intent: { type: 'query', table: 'u', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: true } },
+			{
+				intent: {
+					type: 'query',
+					table: 'u',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: true,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(true);
@@ -1034,7 +1148,16 @@ describe('assertIntentHasOrderBy', () => {
 
 	it('fails on mismatch', () => {
 		const r = assertIntentHasOrderBy(
-			{ intent: { type: 'query', table: 'u', with: [], hasWhere: false, hasGroupBy: false, hasOrderBy: false } },
+			{
+				intent: {
+					type: 'query',
+					table: 'u',
+					with: [],
+					hasWhere: false,
+					hasGroupBy: false,
+					hasOrderBy: false,
+				},
+			},
 			true,
 		);
 		expect(r.passed).toBe(false);

@@ -157,22 +157,21 @@ describe('table-ref-factory coverage', () => {
 
 		it('should handle column access via Proxy', () => {
 			const ref = createRelationRef('posts', 'hasMany', model);
-			const column = (ref as unknown as Record<string, unknown>)['title'];
+			const column = (ref as unknown as Record<string, unknown>).title;
 			expect(column[TABLE_META]).toBe('posts');
 			expect(column[COLUMN_META]).toBe('title');
 		});
 
 		it('should handle nested relation access', () => {
 			const ref = createRelationRef('posts', 'hasMany', model);
-			const nested = (ref as unknown as Record<string, unknown>)['author'];
+			const nested = (ref as unknown as Record<string, unknown>).author;
 			expect(nested[BRAND]).toBe('RelationRef');
 		});
 
 		it('should return undefined for non-existent properties', () => {
 			const ref = createRelationRef('posts', 'hasMany', model);
-			const result = (ref as unknown as Record<string, unknown>)[
-				'nonExistentColumn'
-			];
+			const result = (ref as unknown as Record<string, unknown>)
+				.nonExistentColumn;
 			expect(result).toBeUndefined();
 		});
 
@@ -213,7 +212,7 @@ describe('table-ref-factory coverage', () => {
 		it('should handle inverse relations', () => {
 			const ref = createRelationRef('users', 'belongsTo', model);
 			// Access posts via inverse relation
-			const posts = (ref as unknown as Record<string, unknown>)['posts'];
+			const posts = (ref as unknown as Record<string, unknown>).posts;
 			expect(posts[BRAND]).toBe('RelationRef');
 		});
 	});
@@ -295,14 +294,14 @@ describe('table-ref-factory coverage', () => {
 
 		it('should handle column access', () => {
 			const ref = createTableRef('users', model);
-			const column = (ref as unknown as Record<string, unknown>)['email'];
+			const column = (ref as unknown as Record<string, unknown>).email;
 			expect(column[TABLE_META]).toBe('users');
 			expect(column[COLUMN_META]).toBe('email');
 		});
 
 		it('should handle relation access', () => {
 			const ref = createTableRef('posts', model);
-			const relation = (ref as unknown as Record<string, unknown>)['author'];
+			const relation = (ref as unknown as Record<string, unknown>).author;
 			expect(relation[BRAND]).toBe('RelationRef');
 		});
 
@@ -328,13 +327,13 @@ describe('table-ref-factory coverage', () => {
 			const ref = createTableRef('test', modelWithReserved);
 
 			// Accessing reserved word should work and warn
-			const column = (ref as unknown as Record<string, unknown>)['class'];
+			const column = (ref as unknown as Record<string, unknown>).class;
 			expect(column[COLUMN_META]).toBe('class');
 		});
 
 		it('should return undefined for non-existent properties', () => {
 			const ref = createTableRef('users', model);
-			const result = (ref as unknown as Record<string, unknown>)['nonExistent'];
+			const result = (ref as unknown as Record<string, unknown>).nonExistent;
 			expect(result).toBeUndefined();
 		});
 
@@ -374,7 +373,7 @@ describe('table-ref-factory coverage', () => {
 		it('should handle inverse relations', () => {
 			const ref = createTableRef('users', model);
 			// posts should be available as inverse relation
-			const posts = (ref as unknown as Record<string, unknown>)['posts'];
+			const posts = (ref as unknown as Record<string, unknown>).posts;
 			expect(posts[BRAND]).toBe('RelationRef');
 		});
 
@@ -422,7 +421,7 @@ describe('table-ref-factory coverage', () => {
 			const ref = createTableRef('categories', selfRefModel);
 
 			// Should have direct relation
-			const parent = (ref as unknown as Record<string, unknown>)['parent'];
+			const parent = (ref as unknown as Record<string, unknown>).parent;
 			expect(parent[BRAND]).toBe('RelationRef');
 		});
 	});
@@ -460,23 +459,21 @@ describe('table-ref-factory coverage', () => {
 
 		it('should return TableRef for valid table names', () => {
 			const proxy = createTablesProxy(model, ['users', 'posts']);
-			const users = (proxy as unknown as Record<string, unknown>)['users'];
+			const users = (proxy as unknown as Record<string, unknown>).users;
 			expect(users[BRAND]).toBe('TableRef');
 			expect(users[TABLE_META]).toBe('users');
 		});
 
 		it('should cache TableRef instances', () => {
 			const proxy = createTablesProxy(model, ['users', 'posts']);
-			const users1 = (proxy as unknown as Record<string, unknown>)['users'];
-			const users2 = (proxy as unknown as Record<string, unknown>)['users'];
+			const users1 = (proxy as unknown as Record<string, unknown>).users;
+			const users2 = (proxy as unknown as Record<string, unknown>).users;
 			expect(users1).toBe(users2); // Same instance
 		});
 
 		it('should return undefined for non-existent tables', () => {
 			const proxy = createTablesProxy(model, ['users', 'posts']);
-			const result = (proxy as unknown as Record<string, unknown>)[
-				'nonExistent'
-			];
+			const result = (proxy as unknown as Record<string, unknown>).nonExistent;
 			expect(result).toBeUndefined();
 		});
 

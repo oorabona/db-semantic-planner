@@ -26,7 +26,11 @@ import { anyHandler } from '../handlers/where/any.js';
 import { betweenHandler } from '../handlers/where/between.js';
 import { customExpressionWhereHandler } from '../handlers/where/custom-expression.js';
 import { registerAllWhereHandlers } from '../handlers/where/index.js';
-import { jsonComparisonHandler, jsonContainsHandler, jsonExistsHandler } from '../handlers/where/json.js';
+import {
+	jsonComparisonHandler,
+	jsonContainsHandler,
+	jsonExistsHandler,
+} from '../handlers/where/json.js';
 import { identityNaming } from '../naming-plugin.js';
 
 // ---------------------------------------------------------------------------
@@ -91,7 +95,10 @@ function makeState(): CompilerState {
  * Build a minimal ModelIR with one table and the given columns.
  * Matches the pattern used in compile-where-edge.test.ts.
  */
-function buildModel(tableName: string, columns: Array<{ name: string; type: string; nullable?: boolean }>): ModelIR {
+function buildModel(
+	tableName: string,
+	columns: Array<{ name: string; type: string; nullable?: boolean }>,
+): ModelIR {
 	const tableColumns = columns.map((c) => ({
 		name: c.name,
 		type: c.type,
@@ -129,7 +136,9 @@ function deparseNode(node: object): string {
 
 describe('compileWhereIntent — range: PG range types (tsrange, int4range, daterange)', () => {
 	it('emits CAST($1 AS tsrange) for overlaps when column type is tsrange', () => {
-		const model = buildModel('slots', [{ name: 'slot_window', type: 'tsrange' }]);
+		const model = buildModel('slots', [
+			{ name: 'slot_window', type: 'tsrange' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -145,7 +154,9 @@ describe('compileWhereIntent — range: PG range types (tsrange, int4range, date
 	});
 
 	it('emits CAST($1 AS int4range) for contains when column type is int4range', () => {
-		const model = buildModel('bands', [{ name: 'score_range', type: 'int4range' }]);
+		const model = buildModel('bands', [
+			{ name: 'score_range', type: 'int4range' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -160,7 +171,9 @@ describe('compileWhereIntent — range: PG range types (tsrange, int4range, date
 	});
 
 	it('emits CAST($1 AS daterange) for containedBy when column type is daterange', () => {
-		const model = buildModel('promos', [{ name: 'validity', type: 'daterange' }]);
+		const model = buildModel('promos', [
+			{ name: 'validity', type: 'daterange' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -177,7 +190,9 @@ describe('compileWhereIntent — range: PG range types (tsrange, int4range, date
 
 describe('compileWhereIntent — range: between always skips model lookup', () => {
 	it('emits BETWEEN without CAST even when model + range-type column present', () => {
-		const model = buildModel('bookings', [{ name: 'started_at', type: 'tsrange' }]);
+		const model = buildModel('bookings', [
+			{ name: 'started_at', type: 'tsrange' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -231,7 +246,9 @@ describe('compileWhereIntent — range: no model → plain $N, no CAST', () => {
 describe('compileWhereIntent — range: model present but table/column not found', () => {
 	it('emits no CAST when rootTable not found in model', () => {
 		// model has 'other_table', rootTable is 'items' -> getTable('items') -> undefined
-		const model = buildModel('other_table', [{ name: 'period', type: 'daterange' }]);
+		const model = buildModel('other_table', [
+			{ name: 'period', type: 'daterange' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -246,7 +263,9 @@ describe('compileWhereIntent — range: model present but table/column not found
 	});
 
 	it('emits no CAST when column not found in the table', () => {
-		const model = buildModel('items', [{ name: 'other_col', type: 'daterange' }]);
+		const model = buildModel('items', [
+			{ name: 'other_col', type: 'daterange' },
+		]);
 		const { sql, params } = compileIntent(
 			{
 				kind: 'range',
@@ -344,7 +363,12 @@ describe('anyHandler — branch coverage', () => {
 		const ctx = makeHandlerCtx();
 		const state = makeState();
 		expect(() =>
-			anyHandler.compile({ type: 'where', operator: 'any' } as Decision, ctx, state, createWhereDispatcher()),
+			anyHandler.compile(
+				{ type: 'where', operator: 'any' } as Decision,
+				ctx,
+				state,
+				createWhereDispatcher(),
+			),
 		).toThrow('ANY handler requires a column');
 	});
 
@@ -640,7 +664,11 @@ describe('jsonContainsHandler — branch coverage', () => {
 		const state = makeState();
 		expect(() =>
 			jsonContainsHandler.compile(
-				{ type: 'where', operator: 'jsonContains', value: { a: 1 } } as Decision,
+				{
+					type: 'where',
+					operator: 'jsonContains',
+					value: { a: 1 },
+				} as Decision,
 				ctx,
 				state,
 				createWhereDispatcher(),
@@ -693,7 +721,11 @@ describe('jsonExistsHandler — branch coverage', () => {
 		const state = makeState();
 		expect(() =>
 			jsonExistsHandler.compile(
-				{ type: 'where', operator: 'jsonExists', value: 'some_key' } as Decision,
+				{
+					type: 'where',
+					operator: 'jsonExists',
+					value: 'some_key',
+				} as Decision,
 				ctx,
 				state,
 				createWhereDispatcher(),
@@ -962,7 +994,9 @@ describe('customExpressionWhereHandler — branch coverage', () => {
 				state,
 				createWhereDispatcher(),
 			),
-		).toThrow('customExpressionWhereHandler: unsupported comparison operator: unsupported_op');
+		).toThrow(
+			'customExpressionWhereHandler: unsupported comparison operator: unsupported_op',
+		);
 	});
 
 	it('uses subqueryOperator over decision.operator for SQL op mapping', () => {
@@ -1062,7 +1096,10 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 			kind: 'and',
 			conditions: [],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const tc = (node as Record<string, unknown>).TypeCast as Record<string, unknown>;
+		const tc = (node as Record<string, unknown>).TypeCast as Record<
+			string,
+			unknown
+		>;
 		expect(tc).toBeDefined();
 		const arg = tc.arg as Record<string, unknown>;
 		const integer = arg.Integer as Record<string, unknown>;
@@ -1075,7 +1112,10 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 			kind: 'or',
 			conditions: [],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const tc = (node as Record<string, unknown>).TypeCast as Record<string, unknown>;
+		const tc = (node as Record<string, unknown>).TypeCast as Record<
+			string,
+			unknown
+		>;
 		expect(tc).toBeDefined();
 		const arg = tc.arg as Record<string, unknown>;
 		const integer = arg.Integer as Record<string, unknown>;
@@ -1086,7 +1126,9 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 	it('single-element AND unwraps to the child node directly', () => {
 		const { sql, params } = compileIntent({
 			kind: 'and',
-			conditions: [{ kind: 'comparison', field: 'id', operator: 'eq', value: 42 }],
+			conditions: [
+				{ kind: 'comparison', field: 'id', operator: 'eq', value: 42 },
+			],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
 		expect(sql).toEqual('items.id = $1');
 		expect(params).toEqual([42]);
@@ -1095,7 +1137,9 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 	it('single-element OR unwraps to the child node directly', () => {
 		const { sql, params } = compileIntent({
 			kind: 'or',
-			conditions: [{ kind: 'comparison', field: 'id', operator: 'eq', value: 7 }],
+			conditions: [
+				{ kind: 'comparison', field: 'id', operator: 'eq', value: 7 },
+			],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
 		expect(sql).toEqual('items.id = $1');
 		expect(params).toEqual([7]);
@@ -1106,11 +1150,19 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 		const { node, params } = compileNode({
 			kind: 'and',
 			conditions: [
-				{ kind: 'comparison', field: 'status', operator: 'eq', value: 'active' },
+				{
+					kind: 'comparison',
+					field: 'status',
+					operator: 'eq',
+					value: 'active',
+				},
 				{ kind: 'comparison', field: 'qty', operator: 'gt', value: 0 },
 			],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<string, unknown>;
+		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<
+			string,
+			unknown
+		>;
 		expect(boolExpr).toBeDefined();
 		expect(boolExpr.boolop).toBe('AND_EXPR');
 		expect(params).toEqual(['active', 0]);
@@ -1124,7 +1176,10 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 				{ kind: 'comparison', field: 'type', operator: 'eq', value: 'B' },
 			],
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<string, unknown>;
+		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<
+			string,
+			unknown
+		>;
 		expect(boolExpr).toBeDefined();
 		expect(boolExpr.boolop).toBe('OR_EXPR');
 		expect(params).toEqual(['A', 'B']);
@@ -1134,9 +1189,17 @@ describe('compileWhereIntent — and/or/not structural branches', () => {
 		// deparseSync renders "NOT (items.active = $1)" — test node kind + params
 		const { node, params } = compileNode({
 			kind: 'not',
-			condition: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+			condition: {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			},
 		} as unknown as Parameters<typeof compileWhereIntent>[0]);
-		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<string, unknown>;
+		const boolExpr = (node as Record<string, unknown>).BoolExpr as Record<
+			string,
+			unknown
+		>;
 		expect(boolExpr).toBeDefined();
 		expect(boolExpr.boolop).toBe('NOT_EXPR');
 		expect(params).toEqual([true]);

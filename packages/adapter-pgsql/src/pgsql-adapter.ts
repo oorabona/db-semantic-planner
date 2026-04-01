@@ -68,6 +68,8 @@ import {
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from './assert-field.js';
+import { selectStmt } from './ast-helpers.js';
+import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
 import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
@@ -81,6 +83,10 @@ import {
 	generateTruncateSQL,
 	generateVacuumSQL,
 } from './ddl/table-operations.js';
+import { deparseQuoted } from './deparse.js';
+import { compileExpressionIntent } from './handlers/expression/custom.js';
+import { createCompilerState } from './handlers/types.js';
+import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
@@ -95,21 +101,16 @@ import {
 	createLeafCompileFn,
 } from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
-import { selectStmt } from './ast-helpers.js';
-import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
-import { deparseQuoted } from './deparse.js';
-import { compileExpressionIntent } from './handlers/expression/custom.js';
-import { createCompilerState } from './handlers/types.js';
-import { intentToDecisions } from './intent-to-decisions.js';
 import { validateIdentifier } from './validate.js';
 
 // ============================================================================
 // Internal types
 // ============================================================================
 
-type CompileSubqueryResult = { ast: import('@pgsql/types').Node; parameters: readonly unknown[] };
-type CompileSubqueryFn = (query: import('@dbsp/types').QueryIntent, paramOffset: number) => CompileSubqueryResult;
-
+type CompileSubqueryResult = {
+	ast: import('@pgsql/types').Node;
+	parameters: readonly unknown[];
+};
 // ============================================================================
 // Options
 // ============================================================================
@@ -334,7 +335,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
 			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
 			// case 'selectCustomExpression').
-			compileSubquery(query: import('@dbsp/types').QueryIntent, paramOffset: number): CompileSubqueryResult {
+			compileSubquery(
+				query: import('@dbsp/types').QueryIntent,
+				paramOffset: number,
+			): CompileSubqueryResult {
 				const innerCompiler = new PlanCompiler({
 					naming,
 					...(schemaName !== undefined && { schema: schemaName }),

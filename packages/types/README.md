@@ -41,7 +41,7 @@ function inspect(report: PlanReport): void {
 
 ## Documentation
 
-See the [full documentation](../../docs/DOCUMENTATION_INDEX.md) for architecture details.
+See the [architecture overview](../../ARCHITECTURE.md) and [guides](../../docs/guides/) for details.
 
 ## License
 

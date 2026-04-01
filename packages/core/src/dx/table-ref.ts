@@ -40,12 +40,12 @@ import {
 
 // Re-export symbols for convenience
 export {
-	TABLE_META,
+	BRAND,
 	COLUMN_META,
+	hasSymbolMeta,
 	RELATION_META,
 	RELATION_PATH,
-	BRAND,
-	hasSymbolMeta,
+	TABLE_META,
 };
 
 /**

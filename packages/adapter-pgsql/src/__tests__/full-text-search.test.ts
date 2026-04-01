@@ -1,4 +1,3 @@
-
 /**
  * Full-Text Search Integration Tests (FR-5)
  *
@@ -116,7 +115,9 @@ describe('textScore', () => {
 		const result = compileOrderByExpr(expr, 'DESC');
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual('select * from symbols order by paradedb.score(id) desc');
+		expect(sql).toEqual(
+			'select * from symbols order by paradedb.score(id) desc',
+		);
 	});
 
 	it('can be used in ORDER BY (ASC)', () => {
@@ -124,7 +125,9 @@ describe('textScore', () => {
 		const result = compileOrderByExpr(expr, 'ASC');
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual('select * from symbols order by paradedb.score(id) asc');
+		expect(sql).toEqual(
+			'select * from symbols order by paradedb.score(id) asc',
+		);
 	});
 });
 
@@ -142,43 +145,73 @@ describe('fullTextSearch', () => {
 	];
 
 	it('produces the @@@ operator in WHERE', () => {
-		const expr = fullTextSearch({ query: 'hello', fields: FIELDS, tableAlias: 's' });
+		const expr = fullTextSearch({
+			query: 'hello',
+			fields: FIELDS,
+			tableAlias: 's',
+		});
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])",
+		);
 	});
 
 	it('uses paradedb.boolean with should => ARRAY[...] in WHERE', () => {
-		const expr = fullTextSearch({ query: 'hello', fields: FIELDS, tableAlias: 's' });
+		const expr = fullTextSearch({
+			query: 'hello',
+			fields: FIELDS,
+			tableAlias: 's',
+		});
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])",
+		);
 	});
 
 	it('includes all field names in WHERE SQL', () => {
-		const expr = fullTextSearch({ query: 'hello', fields: FIELDS, tableAlias: 's' });
+		const expr = fullTextSearch({
+			query: 'hello',
+			fields: FIELDS,
+			tableAlias: 's',
+		});
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])",
+		);
 	});
 
 	it('wraps each field in paradedb.boost and paradedb.parse', () => {
-		const expr = fullTextSearch({ query: 'hello', fields: FIELDS, tableAlias: 's' });
+		const expr = fullTextSearch({
+			query: 'hello',
+			fields: FIELDS,
+			tableAlias: 's',
+		});
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])",
+		);
 	});
 
 	it('uses the tableAlias on the left side of @@@', () => {
-		const expr = fullTextSearch({ query: 'test', fields: FIELDS, tableAlias: 's' });
+		const expr = fullTextSearch({
+			query: 'test',
+			fields: FIELDS,
+			tableAlias: 's',
+		});
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))])",
+		);
 	});
 
 	it('binds one shared parameter for all fields', () => {
@@ -202,7 +235,9 @@ describe('fullTextSearch', () => {
 		const result = compileWhereExpr(expr);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(1, paradedb.parse(field => 'name', query_string => $1))])");
+		expect(sql).toEqual(
+			"select * from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(1, paradedb.parse(field => 'name', query_string => $1))])",
+		);
 		expect(result.parameters).toHaveLength(1);
 		expect(result.parameters[0]).toBe('test');
 	});
@@ -217,7 +252,10 @@ describe('fullTextSearch', () => {
 			fields: [{ name: 'name', boost: 1.0 }],
 		});
 		const intent = (expr as unknown as { intent: unknown }).intent;
-		const op = intent as { kind: string; left: { kind: string; column: string } };
+		const op = intent as {
+			kind: string;
+			left: { kind: string; column: string };
+		};
 		expect(op.kind).toBe('customOp');
 		expect(op.left.kind).toBe('ref');
 		expect(op.left.column).toBe('symbols');
@@ -247,17 +285,20 @@ describe('fullTextSearch + textScore combined', () => {
 				{ type: 'select', column: '*' },
 				{
 					type: 'selectCustomExpression',
-					expressionIntent: (scoreExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (scoreExpr as unknown as { intent: unknown })
+						.intent,
 					alias: 'score',
 				},
 				{
 					type: 'where',
 					operator: 'expression',
-					expressionIntent: (whereExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (whereExpr as unknown as { intent: unknown })
+						.intent,
 				},
 				{
 					type: 'orderBy',
-					expressionIntent: (scoreExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (scoreExpr as unknown as { intent: unknown })
+						.intent,
 					direction: 'DESC',
 				},
 			],
@@ -266,7 +307,9 @@ describe('fullTextSearch + textScore combined', () => {
 		const result = compilePlan(plan);
 		const sql = normalizeSQL(result.sql);
 
-		expect(sql).toEqual("select *, paradedb.score(id) as score from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'doc', query_string => $2))]) order by paradedb.score(id) desc");
+		expect(sql).toEqual(
+			"select *, paradedb.score(id) as score from symbols where s @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'doc', query_string => $2))]) order by paradedb.score(id) desc",
+		);
 
 		// Parameter check: 2 fields → 2 param slots, both with the query value
 		expect(result.parameters).toHaveLength(2);
@@ -295,17 +338,20 @@ describe('fullTextSearch + textScore combined', () => {
 				{ type: 'select', column: '*' },
 				{
 					type: 'selectCustomExpression',
-					expressionIntent: (scoreExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (scoreExpr as unknown as { intent: unknown })
+						.intent,
 					alias: 'score',
 				},
 				{
 					type: 'where',
 					operator: 'expression',
-					expressionIntent: (whereExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (whereExpr as unknown as { intent: unknown })
+						.intent,
 				},
 				{
 					type: 'orderBy',
-					expressionIntent: (scoreExpr as unknown as { intent: unknown }).intent,
+					expressionIntent: (scoreExpr as unknown as { intent: unknown })
+						.intent,
 					direction: 'DESC',
 				},
 				{ type: 'limit', limit: 50 },
@@ -316,7 +362,9 @@ describe('fullTextSearch + textScore combined', () => {
 		const sql = normalizeSQL(result.sql);
 
 		// Full structure matches the FR-5 spec target SQL
-		expect(sql).toEqual("select *, paradedb.score(id) as score from symbols where t0 @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))]) order by paradedb.score(id) desc limit 50");
+		expect(sql).toEqual(
+			"select *, paradedb.score(id) as score from symbols where t0 @@@ paradedb.boolean(should => array[paradedb.boost(3, paradedb.parse(field => 'name_searchable', query_string => $1)), paradedb.boost(1, paradedb.parse(field => 'name', query_string => $2)), paradedb.boost(1.5, paradedb.parse(field => 'signature', query_string => $3)), paradedb.boost(1, paradedb.parse(field => 'doc_searchable', query_string => $4)), paradedb.boost(2, paradedb.parse(field => 'llm_description', query_string => $5))]) order by paradedb.score(id) desc limit 50",
+		);
 
 		// 5 fields → 5 parameters, all equal to the query string
 		expect(result.parameters).toHaveLength(5);

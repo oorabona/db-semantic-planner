@@ -25,12 +25,17 @@ import { createPgsqlAdapter, PgsqlAdapter } from '../pgsql-adapter.js';
 
 function makeClient(queryImpl?: () => Promise<QueryResult>): PoolClient {
 	return {
-		query: queryImpl ? vi.fn().mockImplementation(queryImpl) : vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+		query: queryImpl
+			? vi.fn().mockImplementation(queryImpl)
+			: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
 		release: vi.fn(),
 	} as unknown as PoolClient;
 }
 
-function makePool(poolQueryResult: { rows: unknown[] } = { rows: [] }, client?: PoolClient): Pool {
+function makePool(
+	poolQueryResult: { rows: unknown[] } = { rows: [] },
+	client?: PoolClient,
+): Pool {
 	const _client = client ?? makeClient();
 	return {
 		query: vi.fn().mockResolvedValue(poolQueryResult),
@@ -54,7 +59,9 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 
 		expect(result).toBe('ok');
 		expect(pool.connect).toHaveBeenCalledOnce();
-		const calls: string[] = (txClient.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string);
+		const calls: string[] = (
+			txClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0] as string);
 		expect(calls[0]).toBe('BEGIN');
 		expect(calls[calls.length - 1]).toBe('COMMIT');
 		expect(txClient.release).toHaveBeenCalledOnce();
@@ -119,7 +126,9 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 			}),
 		).rejects.toThrow('fn boom');
 
-		const calls: string[] = (txClient.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string);
+		const calls: string[] = (
+			txClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0] as string);
 		expect(calls).toContain('ROLLBACK');
 		expect(calls).not.toContain('COMMIT');
 		expect(txClient.release).toHaveBeenCalledOnce();
@@ -193,10 +202,14 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 
 	it('propagates pool.query rejection', async () => {
 		const pool = makePool();
-		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('syntax error'));
+		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error('syntax error'),
+		);
 		const adapter = createPgsqlAdapter(pool);
 
-		await expect(adapter.executeDDL('INVALID SQL')).rejects.toThrow('syntax error');
+		await expect(adapter.executeDDL('INVALID SQL')).rejects.toThrow(
+			'syntax error',
+		);
 	});
 });
 
@@ -250,10 +263,14 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 
 	it('propagates pool.query rejection', async () => {
 		const pool = makePool();
-		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('connection refused'));
+		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error('connection refused'),
+		);
 		const adapter = createPgsqlAdapter(pool);
 
-		await expect(adapter.execute({ sql: 'SELECT 1', parameters: [] })).rejects.toThrow('connection refused');
+		await expect(
+			adapter.execute({ sql: 'SELECT 1', parameters: [] }),
+		).rejects.toThrow('connection refused');
 	});
 });
 
@@ -264,10 +281,14 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 describe('PgsqlAdapter.executeRaw — error path', () => {
 	it('propagates pool.query rejection', async () => {
 		const pool = makePool();
-		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('raw query failed'));
+		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error('raw query failed'),
+		);
 		const adapter = createPgsqlAdapter(pool);
 
-		await expect(adapter.executeRaw('SELECT 1', [])).rejects.toThrow('raw query failed');
+		await expect(adapter.executeRaw('SELECT 1', [])).rejects.toThrow(
+			'raw query failed',
+		);
 	});
 });
 
@@ -447,7 +468,10 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		const collected: unknown[] = [];
-		for await (const row of adapter.stream({ sql: 'SELECT * FROM t', parameters: [] })) {
+		for await (const row of adapter.stream({
+			sql: 'SELECT * FROM t',
+			parameters: [],
+		})) {
 			collected.push(row);
 		}
 
@@ -455,7 +479,9 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		expect(pool.connect).toHaveBeenCalledOnce();
 		expect(streamClient.release).toHaveBeenCalledOnce();
 
-		const queryCalls: string[] = (streamClient.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string);
+		const queryCalls: string[] = (
+			streamClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0] as string);
 		expect(queryCalls[0]).toBe('BEGIN');
 		expect(queryCalls[queryCalls.length - 1]).toBe('COMMIT');
 	});
@@ -477,7 +503,9 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 
 		expect(streamClient.release).toHaveBeenCalledOnce();
 
-		const queryCalls: string[] = (streamClient.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string);
+		const queryCalls: string[] = (
+			streamClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0] as string);
 		expect(queryCalls).toContain('ROLLBACK');
 	});
 });

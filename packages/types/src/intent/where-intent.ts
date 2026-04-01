@@ -4,8 +4,8 @@
  */
 
 import type { RangeValue } from '../shared/utils.js';
-import type { ComparisonOperator, NullOperator } from './operators.js';
 import type { ExpressionIntent } from './expression-intent.js';
+import type { ComparisonOperator, NullOperator } from './operators.js';
 import type { QueryIntent } from './query-intent.js';
 import type { RecursiveExistsOptions } from './recursive-types.js';
 
@@ -81,7 +81,6 @@ export interface WhereInIntent {
 	/** Optional subquery producing the value set (when present, values is empty) */
 	readonly subquery?: QueryIntent;
 }
-
 
 /**
  * Array membership filter using PostgreSQL ANY() operator.
@@ -245,7 +244,6 @@ export interface WhereRawNotExistsIntent {
 	/** The subquery producing rows for the NOT EXISTS check */
 	readonly subquery: QueryIntent;
 }
-
 
 /**
  * Relation filter: filter parent by conditions on related records

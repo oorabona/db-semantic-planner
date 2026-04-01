@@ -256,7 +256,6 @@ export interface BatchUpdateIntent {
 	readonly where?: WhereIntent;
 }
 
-
 export type MutationIntent =
 	| InsertIntent
 	| InsertFromIntent

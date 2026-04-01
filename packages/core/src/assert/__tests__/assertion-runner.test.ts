@@ -7,7 +7,9 @@ import type { AssertionQueryResult, IntentSummary } from '../types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeResult(overrides: Partial<AssertionQueryResult> = {}): AssertionQueryResult {
+function makeResult(
+	overrides: Partial<AssertionQueryResult> = {},
+): AssertionQueryResult {
 	return {
 		query: 'SELECT 1',
 		success: true,
@@ -82,7 +84,11 @@ describe('runAssertions', () => {
 	describe('passing assertions', () => {
 		it('should count a passing assertion', () => {
 			const block = makeBlock(0, [{ type: 'success', value: true }]);
-			const summary = runAssertions([block], [makeResult({ success: true })], ['SELECT 1']);
+			const summary = runAssertions(
+				[block],
+				[makeResult({ success: true })],
+				['SELECT 1'],
+			);
 			expect(summary.passed).toBe(1);
 			expect(summary.failed).toBe(0);
 			expect(summary.total).toBe(1);
@@ -94,8 +100,14 @@ describe('runAssertions', () => {
 				{ type: 'params.length', value: 0 },
 			]);
 			const block2 = makeBlock(1, [{ type: 'success', value: false }]);
-			const results = [makeResult({ success: true }), makeResult({ success: false })];
-			const summary = runAssertions([block1, block2], results, ['SELECT 1', 'SELECT 2']);
+			const results = [
+				makeResult({ success: true }),
+				makeResult({ success: false }),
+			];
+			const summary = runAssertions([block1, block2], results, [
+				'SELECT 1',
+				'SELECT 2',
+			]);
 			expect(summary.passed).toBe(3);
 			expect(summary.failed).toBe(0);
 		});
@@ -104,7 +116,11 @@ describe('runAssertions', () => {
 	describe('failing assertions', () => {
 		it('should count a failing assertion', () => {
 			const block = makeBlock(0, [{ type: 'success', value: false }]);
-			const summary = runAssertions([block], [makeResult({ success: true })], ['SELECT 1']);
+			const summary = runAssertions(
+				[block],
+				[makeResult({ success: true })],
+				['SELECT 1'],
+			);
 			expect(summary.failed).toBe(1);
 			expect(summary.passed).toBe(0);
 		});
@@ -114,7 +130,11 @@ describe('runAssertions', () => {
 				{ type: 'success', value: true },
 				{ type: 'success', value: false }, // will fail
 			]);
-			const summary = runAssertions([block], [makeResult({ success: true })], ['SELECT 1']);
+			const summary = runAssertions(
+				[block],
+				[makeResult({ success: true })],
+				['SELECT 1'],
+			);
 			expect(summary.results[0]?.passed).toBe(false);
 		});
 
@@ -123,7 +143,11 @@ describe('runAssertions', () => {
 				{ type: 'success', value: true },
 				{ type: 'params.length', value: 0 },
 			]);
-			const summary = runAssertions([block], [makeResult({ success: true, params: [] })], ['SELECT 1']);
+			const summary = runAssertions(
+				[block],
+				[makeResult({ success: true, params: [] })],
+				['SELECT 1'],
+			);
 			expect(summary.results[0]?.passed).toBe(true);
 		});
 	});
@@ -131,7 +155,12 @@ describe('runAssertions', () => {
 	describe('skipped db.* assertions in dry-run mode (hasDb = false)', () => {
 		it('should skip db.success when hasDb = false', () => {
 			const block = makeBlock(0, [{ type: 'db.success', value: true }]);
-			const summary = runAssertions([block], [makeResult()], ['SELECT 1'], false);
+			const summary = runAssertions(
+				[block],
+				[makeResult()],
+				['SELECT 1'],
+				false,
+			);
 			expect(summary.skipped).toBe(1);
 			expect(summary.passed).toBe(0);
 			expect(summary.failed).toBe(0);
@@ -139,7 +168,12 @@ describe('runAssertions', () => {
 
 		it('should skip db.rows.equals when hasDb = false', () => {
 			const block = makeBlock(0, [{ type: 'db.rows.equals', value: 5 }]);
-			const summary = runAssertions([block], [makeResult()], ['SELECT 1'], false);
+			const summary = runAssertions(
+				[block],
+				[makeResult()],
+				['SELECT 1'],
+				false,
+			);
 			expect(summary.skipped).toBe(1);
 		});
 
@@ -161,7 +195,9 @@ describe('runAssertions', () => {
 		});
 
 		it('should fail output.equals when output differs', () => {
-			const block = makeBlock(0, [{ type: 'output.equals', value: 'expected output' }]);
+			const block = makeBlock(0, [
+				{ type: 'output.equals', value: 'expected output' },
+			]);
 			const result = makeResult({ output: 'different output' });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(false);
@@ -200,7 +236,9 @@ describe('runAssertions', () => {
 
 	describe('assertion types — params', () => {
 		it('should pass params.equals with matching params', () => {
-			const block = makeBlock(0, [{ type: 'params.equals', value: [1, 'foo'] }]);
+			const block = makeBlock(0, [
+				{ type: 'params.equals', value: [1, 'foo'] },
+			]);
 			const result = makeResult({ params: [1, 'foo'] });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
@@ -214,14 +252,18 @@ describe('runAssertions', () => {
 		});
 
 		it('should pass params.type with matching types', () => {
-			const block = makeBlock(0, [{ type: 'params.type', value: ['number', 'string'] }]);
+			const block = makeBlock(0, [
+				{ type: 'params.type', value: ['number', 'string'] },
+			]);
 			const result = makeResult({ params: [1, 'foo'] });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
 		});
 
 		it('should pass params.value for matching indexed param', () => {
-			const block = makeBlock(0, [{ type: 'params.value', value: { index: 1, value: 'bar' } }]);
+			const block = makeBlock(0, [
+				{ type: 'params.value', value: { index: 1, value: 'bar' } },
+			]);
 			const result = makeResult({ params: ['foo', 'bar'] });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
@@ -237,7 +279,9 @@ describe('runAssertions', () => {
 
 	describe('assertion types — plan', () => {
 		it('should pass plan.contains when output contains the plan fragment', () => {
-			const block = makeBlock(0, [{ type: 'plan.contains', value: 'index scan' }]);
+			const block = makeBlock(0, [
+				{ type: 'plan.contains', value: 'index scan' },
+			]);
 			const result = makeResult({ output: 'used index scan strategy' });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
@@ -246,7 +290,9 @@ describe('runAssertions', () => {
 
 	describe('assertion types — error', () => {
 		it('should pass error.contains when error message has the substring', () => {
-			const block = makeBlock(0, [{ type: 'error.contains', value: 'syntax error' }]);
+			const block = makeBlock(0, [
+				{ type: 'error.contains', value: 'syntax error' },
+			]);
 			const result = makeResult({ error: 'syntax error at position 5' });
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
@@ -284,7 +330,9 @@ describe('runAssertions', () => {
 
 		it('should pass intent.with for matching relations', () => {
 			const block = makeBlock(0, [{ type: 'intent.with', value: 'posts' }]);
-			const result = makeResult({ intent: makeIntent({ with: ['posts', 'comments'] }) });
+			const result = makeResult({
+				intent: makeIntent({ with: ['posts', 'comments'] }),
+			});
 			const summary = runAssertions([block], [result], ['SELECT 1']);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
 		});
@@ -314,7 +362,9 @@ describe('runAssertions', () => {
 		});
 
 		it('should pass db.column.exists when column is found', () => {
-			const block = makeBlock(0, [{ type: 'db.column.exists', value: 'email' }]);
+			const block = makeBlock(0, [
+				{ type: 'db.column.exists', value: 'email' },
+			]);
 			const result = makeResult({ columns: ['id', 'email'] });
 			const summary = runAssertions([block], [result], ['SELECT 1'], true);
 			expect(summary.results[0]?.assertions[0]?.passed).toBe(true);
@@ -344,7 +394,10 @@ describe('runAssertions', () => {
 				startLine: 1,
 				assertions: [{ type: 'success', value: true, line: 2 }],
 			};
-			const results = [makeResult({ query: 'SELECT 1' }), makeResult({ query: 'SELECT 2' })];
+			const results = [
+				makeResult({ query: 'SELECT 1' }),
+				makeResult({ query: 'SELECT 2' }),
+			];
 			const summary = runAssertions([block], results, ['SELECT 1', 'SELECT 2']);
 			expect(summary.results[0]?.queryIndex).toBe(1);
 			expect(summary.results[0]?.query).toBe('SELECT 2');
@@ -368,7 +421,12 @@ describe('runAssertions', () => {
 				{ type: 'success', value: true }, // passes
 				{ type: 'db.success', value: true }, // skipped (no db)
 			]);
-			const summary = runAssertions([block], [makeResult({ success: true })], ['SELECT 1'], false);
+			const summary = runAssertions(
+				[block],
+				[makeResult({ success: true })],
+				['SELECT 1'],
+				false,
+			);
 			expect(summary.total).toBe(2);
 			expect(summary.passed).toBe(1);
 			expect(summary.skipped).toBe(1);

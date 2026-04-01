@@ -100,17 +100,12 @@ function detectQuoteChar(lines: readonly string[]): string {
 /**
  * Detect separator by measuring field-count consistency across lines.
  */
-function detectSeparator(
-	lines: readonly string[],
-	quote: string,
-): string {
+function detectSeparator(lines: readonly string[], quote: string): string {
 	let bestSep = ',';
 	let bestScore = -1;
 
 	for (const sep of CANDIDATE_SEPARATORS) {
-		const counts = lines.map(
-			(line) => parseCsvLine(line, sep, quote).length,
-		);
+		const counts = lines.map((line) => parseCsvLine(line, sep, quote).length);
 		// Score: high if consistent count AND count > 1
 		const firstCount = counts[0]!;
 		if (firstCount <= 1) continue;
@@ -143,9 +138,7 @@ function detectHeader(
 
 	// If schema columns provided, check for match
 	if (schemaColumns && schemaColumns.length > 0) {
-		const schemaSet = new Set(
-			schemaColumns.map((c) => c.toLowerCase().trim()),
-		);
+		const schemaSet = new Set(schemaColumns.map((c) => c.toLowerCase().trim()));
 		const matchCount = firstRowFields.filter((f) =>
 			schemaSet.has(f.toLowerCase().trim()),
 		).length;

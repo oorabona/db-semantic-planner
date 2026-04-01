@@ -1,5 +1,7 @@
 # How to Use Row-Level Security Policies
 
+Row-Level Security (RLS) lets PostgreSQL enforce access control at the row level, so different database roles see only the rows they are allowed to see. Use this guide when you need multi-tenant isolation or per-role data filtering enforced at the database layer rather than in application code.
+
 ## When
 
 When you need multi-tenant isolation or row-level access control at the database level.

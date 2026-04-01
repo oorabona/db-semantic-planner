@@ -12,7 +12,9 @@ import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // Minimal schema for ORM integration tests (createOrm requires a schema)
-const minimalSchema = schema({ items: { id: { type: 'integer', primaryKey: true } } } as const);
+const minimalSchema = schema({
+	items: { id: { type: 'integer', primaryKey: true } },
+} as const);
 
 // ============================================================================
 // PgsqlAdapter.compileSelectExpression() — unit tests
@@ -87,7 +89,9 @@ describe('orm.selectExpression()', () => {
 
 		const result = orm.selectExpression(fn('nextval', literal('my_seq')));
 
-		expect(result.sql.replace(/\s+/g, ' ').trim()).toEqual("SELECT nextval('my_seq')");
+		expect(result.sql.replace(/\s+/g, ' ').trim()).toEqual(
+			"SELECT nextval('my_seq')",
+		);
 		expect(result.parameters).toEqual([]);
 	});
 
@@ -109,5 +113,4 @@ describe('orm.selectExpression()', () => {
 
 		expect(typeof result.execute).toBe('function');
 	});
-
 });

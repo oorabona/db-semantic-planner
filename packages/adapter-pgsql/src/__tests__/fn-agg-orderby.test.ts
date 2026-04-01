@@ -21,6 +21,7 @@ import {
 // exprRef is the correct alias for expressions.ref from @dbsp/core
 // ('ref' from @dbsp/core resolves to the schema ref(), not the expression ref())
 const ref = exprRef;
+
 import type { AggOrderByArg, CustomFnExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
@@ -69,7 +70,11 @@ describe('aggOrderBy() — intent structure', () => {
 
 	it('creates AggOrderByArg with desc direction', () => {
 		const ob = aggOrderBy('line', 'desc');
-		expect(ob).toEqual({ __aggOrderBy: true, field: 'line', direction: 'desc' });
+		expect(ob).toEqual({
+			__aggOrderBy: true,
+			field: 'line',
+			direction: 'desc',
+		});
 	});
 });
 
@@ -108,17 +113,31 @@ describe('fn() with aggOrderBy — intent building', () => {
 		const intent = getExprIntent(expr);
 		expect(intent.args).toHaveLength(1);
 		expect(intent.aggOrderBy).toHaveLength(2);
-		expect(intent.aggOrderBy![0]).toMatchObject({ field: 'path', direction: 'asc' });
-		expect(intent.aggOrderBy![1]).toMatchObject({ field: 'line', direction: 'desc' });
+		expect(intent.aggOrderBy![0]).toMatchObject({
+			field: 'path',
+			direction: 'asc',
+		});
+		expect(intent.aggOrderBy![1]).toMatchObject({
+			field: 'line',
+			direction: 'desc',
+		});
 	});
 
 	it('fn with aggOrderBy after separator arg (string_agg style)', () => {
-		const expr = fn('string_agg', ref('name'), literal(','), aggOrderBy('name'));
+		const expr = fn(
+			'string_agg',
+			ref('name'),
+			literal(','),
+			aggOrderBy('name'),
+		);
 		const intent = getExprIntent(expr);
 		// Both ref('name') and literal(',') are regular args
 		expect(intent.args).toHaveLength(2);
 		expect(intent.aggOrderBy).toHaveLength(1);
-		expect(intent.aggOrderBy![0]).toMatchObject({ field: 'name', direction: 'asc' });
+		expect(intent.aggOrderBy![0]).toMatchObject({
+			field: 'name',
+			direction: 'asc',
+		});
 	});
 });
 
@@ -151,14 +170,16 @@ describe('fn() with aggOrderBy — SQL output', () => {
 	});
 
 	it('fn("array_agg", ref("name"), aggOrderBy("path", "desc")) → array_agg(name ORDER BY path DESC)', () => {
-		const expr = fn('array_agg', ref('name'), aggOrderBy('path', 'desc')).as('names');
+		const expr = fn('array_agg', ref('name'), aggOrderBy('path', 'desc')).as(
+			'names',
+		);
 		const result = compilePlanFromExpr(expr, 'names');
 		const sql = normalizeSQL(result.sql);
 		expect(sql).toContain('array_agg(name order by path desc)');
 		expect(result.parameters).toEqual([]);
 	});
 
-	it("fn(\"string_agg\", ref(\"name\"), literal(\",\"), aggOrderBy(\"name\")) → string_agg(name, ', ' ORDER BY name ASC)", () => {
+	it('fn("string_agg", ref("name"), literal(","), aggOrderBy("name")) → string_agg(name, \', \' ORDER BY name ASC)', () => {
 		const expr = fn(
 			'string_agg',
 			ref('name'),
@@ -237,7 +258,7 @@ describe('arrayAgg() helper', () => {
 // ============================================================================
 
 describe('stringAgg() helper', () => {
-	it("stringAgg(ref(\"name\"), literal(\",\")) → string_agg(name, ', ') — no ORDER BY", () => {
+	it('stringAgg(ref("name"), literal(",")) → string_agg(name, \', \') — no ORDER BY', () => {
 		const expr = stringAgg(ref('name'), literal(',')).as('names');
 		const result = compilePlanFromExpr(expr, 'names');
 		const sql = normalizeSQL(result.sql);
@@ -246,7 +267,7 @@ describe('stringAgg() helper', () => {
 		expect(sql).not.toContain('order by');
 	});
 
-	it("stringAgg(ref(\"name\"), literal(\",\"), aggOrderBy(\"name\")) → string_agg(name, ', ' ORDER BY name ASC)", () => {
+	it('stringAgg(ref("name"), literal(","), aggOrderBy("name")) → string_agg(name, \', \' ORDER BY name ASC)', () => {
 		const expr = stringAgg(ref('name'), literal(','), aggOrderBy('name')).as(
 			'names',
 		);
@@ -256,7 +277,7 @@ describe('stringAgg() helper', () => {
 		expect(sql).toContain("string_agg(name, ', ' order by name asc)");
 	});
 
-	it('stringAgg with string shorthand for col → string_agg(name, \', \' ORDER BY name DESC)', () => {
+	it("stringAgg with string shorthand for col → string_agg(name, ', ' ORDER BY name DESC)", () => {
 		const expr = stringAgg('name', literal(','), aggOrderBy('name', 'desc')).as(
 			'names',
 		);

@@ -109,11 +109,13 @@ export function compileExpressionIntent(
 			const orderByNodes =
 				i.aggOrderBy && i.aggOrderBy.length > 0
 					? i.aggOrderBy.map((ob: AggOrderByArg) => {
-							const colNode = columnRef(ob.field, undefined, undefined, ctx.naming);
-							return sortBy(
-								colNode,
-								ob.direction === 'desc' ? 'DESC' : 'ASC',
+							const colNode = columnRef(
+								ob.field,
+								undefined,
+								undefined,
+								ctx.naming,
 							);
+							return sortBy(colNode, ob.direction === 'desc' ? 'DESC' : 'ASC');
 						})
 					: undefined;
 			// Note: FILTER (WHERE ...) on customFn is applied at the compiler level
@@ -274,7 +276,9 @@ export function compileExpressionIntent(
 					state,
 				);
 				const thenNode = compileExpressionIntent(branch.result, ctx, state);
-				return { CaseWhen: { expr: whenNode, result: thenNode } } as unknown as Node;
+				return {
+					CaseWhen: { expr: whenNode, result: thenNode },
+				} as unknown as Node;
 			});
 
 			let defresult: Node | undefined;

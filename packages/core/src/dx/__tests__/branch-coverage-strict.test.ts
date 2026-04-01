@@ -26,7 +26,19 @@ import type { Adapter, Dump } from '../../adapter.js';
 import type { QueryIntent } from '../../index.js';
 import { plan } from '../../planner.js';
 import { ref as exprRef } from '../expressions.js';
-import { and, distinct, eq, every, exists, inSubquery, none, not, notExists, or, some } from '../filters.js';
+import {
+	and,
+	distinct,
+	eq,
+	every,
+	exists,
+	inSubquery,
+	none,
+	not,
+	notExists,
+	or,
+	some,
+} from '../filters.js';
 import { createHookManager } from '../hooks.js';
 import { createOrm } from '../orm.js';
 import { createOrmInstance, wrapTablesProxyWithDDL } from '../orm-instance.js';
@@ -71,7 +83,10 @@ function makeAdapter(overrides: Partial<Adapter> = {}): Adapter {
 		})),
 		execute: vi.fn(() => Promise.resolve([])),
 		createDump: vi.fn(
-			(_plan: unknown, compiled: { sql: string; parameters: readonly unknown[] }) =>
+			(
+				_plan: unknown,
+				compiled: { sql: string; parameters: readonly unknown[] },
+			) =>
 				({
 					sql: compiled.sql,
 					params: compiled.parameters,
@@ -94,7 +109,11 @@ describe('createOrmInstance.from() BatchValuesRef path', () => {
 	it('should create QueryBuilderImpl when table is a BatchValuesRef', () => {
 		const adapter = makeAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });
-		const bv = orm.batchValues([[1], ['Alice']], ['id', 'name'], ['int4', 'text']);
+		const bv = orm.batchValues(
+			[[1], ['Alice']],
+			['id', 'name'],
+			['int4', 'text'],
+		);
 		const builder = orm.from(bv as unknown as Parameters<typeof orm.from>[0]);
 		expect(builder).toBeDefined();
 		const planResult = builder.plan();
@@ -106,7 +125,9 @@ describe('createOrmInstance.from() with TableRef missing TABLE_META', () => {
 	it('should throw when TableRef has no TABLE_META symbol', () => {
 		const adapter = makeAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });
-		const badRef = { someField: 'value' } as unknown as Parameters<typeof orm.from>[0];
+		const badRef = { someField: 'value' } as unknown as Parameters<
+			typeof orm.from
+		>[0];
 		expect(() => orm.from(badRef)).toThrow('missing TABLE_META');
 	});
 });
@@ -118,7 +139,13 @@ describe('createOrmInstance.from() with TableRef missing TABLE_META', () => {
 describe('createOrmInstance.withSchema without adapter', () => {
 	it('should not throw when called without adapter', () => {
 		// Call createOrmInstance directly since createOrm requires adapter
-		const orm = createOrmInstance(testSchema.model, false, {}, undefined, undefined);
+		const orm = createOrmInstance(
+			testSchema.model,
+			false,
+			{},
+			undefined,
+			undefined,
+		);
 		const scoped = orm.withSchema('my_schema');
 		expect(scoped).toBeDefined();
 	});
@@ -131,11 +158,19 @@ describe('createOrmInstance.withSchema without adapter', () => {
 describe('createOrmInstance.selectExpression without adapter', () => {
 	it('should throw when called without adapter', () => {
 		// Call createOrmInstance directly since createOrm requires adapter
-		const orm = createOrmInstance(testSchema.model, false, {}, undefined, undefined);
-		const expr = exprRef('id');
-		expect(() => (orm as unknown as { selectExpression(e: unknown): unknown }).selectExpression(expr)).toThrow(
-			'requires an adapter',
+		const orm = createOrmInstance(
+			testSchema.model,
+			false,
+			{},
+			undefined,
+			undefined,
 		);
+		const expr = exprRef('id');
+		expect(() =>
+			(
+				orm as unknown as { selectExpression(e: unknown): unknown }
+			).selectExpression(expr),
+		).toThrow('requires an adapter');
 	});
 });
 
@@ -171,37 +206,41 @@ describe('createOrmInstance typed mutation entry points with bad TableRef', () =
 describe('wrapTablesProxyWithDDL edge cases', () => {
 	it('should pass symbol property access through unchanged', () => {
 		const sym = Symbol('test');
-		const proxy = wrapTablesProxyWithDDL({ [sym]: 'symbol-value' } as object, undefined, undefined) as Record<
-			symbol,
-			unknown
-		>;
+		const proxy = wrapTablesProxyWithDDL(
+			{ [sym]: 'symbol-value' } as object,
+			undefined,
+			undefined,
+		) as Record<symbol, unknown>;
 		expect(proxy[sym]).toBe('symbol-value');
 	});
 
 	it('should return null when tableRef is null', () => {
-		const proxy = wrapTablesProxyWithDDL({ nullTable: null } as object, undefined, undefined) as Record<
-			string,
-			unknown
-		>;
-		expect(proxy['nullTable']).toBeNull();
+		const proxy = wrapTablesProxyWithDDL(
+			{ nullTable: null } as object,
+			undefined,
+			undefined,
+		) as Record<string, unknown>;
+		expect(proxy.nullTable).toBeNull();
 	});
 
 	it('should return undefined when tableRef is undefined', () => {
-		const proxy = wrapTablesProxyWithDDL({ missingTable: undefined } as object, undefined, undefined) as Record<
-			string,
-			unknown
-		>;
-		expect(proxy['missingTable']).toBeUndefined();
+		const proxy = wrapTablesProxyWithDDL(
+			{ missingTable: undefined } as object,
+			undefined,
+			undefined,
+		) as Record<string, unknown>;
+		expect(proxy.missingTable).toBeUndefined();
 	});
 
 	it('should return same cached reference on second access', () => {
 		const tableRef = { __tableRef: true };
-		const proxy = wrapTablesProxyWithDDL({ users: tableRef } as object, undefined, undefined) as Record<
-			string,
-			unknown
-		>;
-		const first = proxy['users'];
-		const second = proxy['users'];
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: tableRef } as object,
+			undefined,
+			undefined,
+		) as Record<string, unknown>;
+		const first = proxy.users;
+		const second = proxy.users;
 		expect(first).toBe(second);
 	});
 });
@@ -216,7 +255,9 @@ describe('QueryBuilderImpl.sum and avg with distinct', () => {
 
 	it('sum(distinct("id"), alias) → sets distinct=true in aggregate', () => {
 		const report = orm.select('users').sum(distinct('id'), 'total_id').plan();
-		const sel = report.intent.select as { aggregates?: Array<{ function: string; distinct?: boolean }> };
+		const sel = report.intent.select as {
+			aggregates?: Array<{ function: string; distinct?: boolean }>;
+		};
 		const agg = sel?.aggregates?.[0];
 		expect(agg?.function).toBe('sum');
 		expect(agg?.distinct).toBe(true);
@@ -224,7 +265,9 @@ describe('QueryBuilderImpl.sum and avg with distinct', () => {
 
 	it('avg(distinct("id"), alias) → sets distinct=true in aggregate', () => {
 		const report = orm.select('users').avg(distinct('id'), 'avg_id').plan();
-		const sel = report.intent.select as { aggregates?: Array<{ function: string; distinct?: boolean }> };
+		const sel = report.intent.select as {
+			aggregates?: Array<{ function: string; distinct?: boolean }>;
+		};
 		const agg = sel?.aggregates?.[0];
 		expect(agg?.function).toBe('avg');
 		expect(agg?.distinct).toBe(true);
@@ -255,15 +298,22 @@ describe('QueryBuilderImpl.count() edge cases', () => {
 
 	it('count() with no args → COUNT(*) — no field', () => {
 		const report = orm.select('users').count().plan();
-		const sel = report.intent.select as { aggregates?: Array<{ function: string; field?: string }> };
+		const sel = report.intent.select as {
+			aggregates?: Array<{ function: string; field?: string }>;
+		};
 		const agg = sel?.aggregates?.[0];
 		expect(agg?.function).toBe('count');
 		expect(agg?.field).toBeUndefined();
 	});
 
 	it('count({ field, as }) → AggregateOptions form sets both', () => {
-		const report = orm.select('users').count({ field: 'id', as: 'total' }).plan();
-		const sel = report.intent.select as { aggregates?: Array<{ field?: string; as?: string }> };
+		const report = orm
+			.select('users')
+			.count({ field: 'id', as: 'total' })
+			.plan();
+		const sel = report.intent.select as {
+			aggregates?: Array<{ field?: string; as?: string }>;
+		};
 		const agg = sel?.aggregates?.[0];
 		expect(agg?.field).toBe('id');
 		expect(agg?.as).toBe('total');
@@ -271,7 +321,9 @@ describe('QueryBuilderImpl.count() edge cases', () => {
 
 	it('count({}) with no field → no field in aggregate', () => {
 		const report = orm.select('users').count({}).plan();
-		const sel = report.intent.select as { aggregates?: Array<{ field?: string }> };
+		const sel = report.intent.select as {
+			aggregates?: Array<{ field?: string }>;
+		};
 		const agg = sel?.aggregates?.[0];
 		expect(agg?.field).toBeUndefined();
 	});
@@ -287,9 +339,16 @@ describe('QueryBuilderImpl.join() edge cases', () => {
 
 	it('join(table, { on, as, type: left }) → joinIntent has table+alias+type', () => {
 		const cond = eq('users.id', 1);
-		const report = orm.select('users').join('posts', { on: cond, as: 'p', type: 'left' }).plan();
+		const report = orm
+			.select('users')
+			.join('posts', { on: cond, as: 'p', type: 'left' })
+			.plan();
 		expect(report.intent.joins).toBeDefined();
-		const join = report.intent.joins?.[0] as { table?: string; alias?: string; type?: string };
+		const join = report.intent.joins?.[0] as {
+			table?: string;
+			alias?: string;
+			type?: string;
+		};
 		expect(join?.table).toBe('posts');
 		expect(join?.alias).toBe('p');
 		expect(join?.type).toBe('left');
@@ -303,14 +362,22 @@ describe('QueryBuilderImpl.join() edge cases', () => {
 	});
 
 	it('join(batchValuesRef, { on }) → batch join intent', () => {
-		const bv = orm.batchValues([[1], ['Alice']], ['id', 'name'], ['int4', 'text']);
+		const bv = orm.batchValues(
+			[[1], ['Alice']],
+			['id', 'name'],
+			['int4', 'text'],
+		);
 		const cond = eq('users.id', 1);
 		const report = orm.select('users').join(bv, { on: cond }).plan();
 		expect(report.intent.joins).toBeDefined();
 	});
 
 	it('join(batchValuesRef) without on → throws error', () => {
-		const bv = orm.batchValues([[1], ['Alice']], ['id', 'name'], ['int4', 'text']);
+		const bv = orm.batchValues(
+			[[1], ['Alice']],
+			['id', 'name'],
+			['int4', 'text'],
+		);
 		expect(() => orm.select('users').join(bv).plan()).toThrow(/on.*condition/i);
 	});
 });
@@ -352,7 +419,9 @@ describe('QueryBuilderImpl.getSimplePkColumn with array PK', () => {
 			},
 		});
 		const adapter = makeAdapter();
-		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute.mockResolvedValue([]);
+		(
+			adapter as unknown as { execute: ReturnType<typeof vi.fn> }
+		).execute.mockResolvedValue([]);
 		const orm = createOrm({ schema: schemaWithArrayPk, adapter });
 		const result = await orm.select('compositeTable').byIds([1, 2]);
 		expect(result).toEqual([]);
@@ -368,17 +437,23 @@ describe('QueryBuilderImpl.buildPkCondition', () => {
 	const orm = createOrm({ schema: testSchema, adapter });
 
 	it('byId({ id: 1 }) with single-entry object → returns matching row', async () => {
-		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute.mockResolvedValue([{ id: 1, name: 'Alice' }]);
+		(
+			adapter as unknown as { execute: ReturnType<typeof vi.fn> }
+		).execute.mockResolvedValue([{ id: 1, name: 'Alice' }]);
 		const result = await orm.select('users').byId({ id: 1 });
 		expect(result).toEqual({ id: 1, name: 'Alice' });
 	});
 
 	it('byId({}) with empty object → throws error', async () => {
-		await expect(orm.select('users').byId({} as Record<string, unknown>)).rejects.toThrow('empty');
+		await expect(
+			orm.select('users').byId({} as Record<string, unknown>),
+		).rejects.toThrow('empty');
 	});
 
 	it('byId with multi-field composite → builds AND condition without throwing', async () => {
-		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute.mockResolvedValue([]);
+		(
+			adapter as unknown as { execute: ReturnType<typeof vi.fn> }
+		).execute.mockResolvedValue([]);
 		const result = await orm.select('users').byId({ id: 1, name: 'Alice' });
 		expect(result).toBeUndefined();
 	});
@@ -396,10 +471,14 @@ describe('UpdateBuilder.batchSet coverage', () => {
 			parameters: [],
 		}));
 		const orm = createOrm({ schema: testSchema, adapter });
-		const builder = orm.update('users').batchSet('id', [{ id: 1, name: 'Alice' }]);
+		const builder = orm
+			.update('users')
+			.batchSet('id', [{ id: 1, name: 'Alice' }]);
 		const dump = builder.dump();
 		expect((dump.intent as { type: string }).type).toBe('batchUpdate');
-		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual(['id']);
+		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual([
+			'id',
+		]);
 	});
 
 	it('batchSet with array matchColumn → keeps as-is', () => {
@@ -409,9 +488,14 @@ describe('UpdateBuilder.batchSet coverage', () => {
 			parameters: [],
 		}));
 		const orm = createOrm({ schema: testSchema, adapter });
-		const builder = orm.update('users').batchSet(['id', 'email'], [{ id: 1, email: 'a@b.com', name: 'Alice' }]);
+		const builder = orm
+			.update('users')
+			.batchSet(['id', 'email'], [{ id: 1, email: 'a@b.com', name: 'Alice' }]);
 		const dump = builder.dump();
-		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual(['id', 'email']);
+		expect((dump.intent as { matchColumns: string[] }).matchColumns).toEqual([
+			'id',
+			'email',
+		]);
 	});
 
 	it('batchSet with empty data array → throws error', () => {
@@ -437,7 +521,9 @@ describe('UpdateBuilder.batchSet coverage', () => {
 			.set({ active: true })
 			.batchSet('id', [{ id: 1, name: 'Alice' }]);
 		const dump = builder.dump();
-		expect((dump.intent as { scalarSet?: Record<string, unknown> }).scalarSet).toEqual({
+		expect(
+			(dump.intent as { scalarSet?: Record<string, unknown> }).scalarSet,
+		).toEqual({
 			active: true,
 		});
 	});
@@ -515,7 +601,10 @@ describe('MutationBuilderBase.extractIntentData coverage', () => {
 
 	it('batchUpdate → hook sees cardinality=bulk', async () => {
 		const adapter = createMockAdapter();
-		adapter.compileBatchUpdate = vi.fn(() => ({ sql: 'UPDATE...', parameters: [] }));
+		adapter.compileBatchUpdate = vi.fn(() => ({
+			sql: 'UPDATE...',
+			parameters: [],
+		}));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		const hookCalled: string[] = [];
 		const hooks = createHookManager().beforeMutation((ctx) => {
@@ -548,7 +637,11 @@ describe('MutationBuilderBase.executeWithoutHooks with returning', () => {
 		}));
 		adapter.execute = executeMock;
 		const orm = createOrm({ schema: testSchema, adapter });
-		const result = await orm.insert('users').values({ name: 'Alice' }).returning(['id']).execute();
+		const result = await orm
+			.insert('users')
+			.values({ name: 'Alice' })
+			.returning(['id'])
+			.execute();
 		expect(result).toEqual([{ id: 42 }]);
 	});
 });
@@ -561,7 +654,10 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 	it('fires afterMutation hooks without returning columns', async () => {
 		const afterCalled: unknown[] = [];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT ...', parameters: [] }));
+		adapter.compileInsert = vi.fn(() => ({
+			sql: 'INSERT ...',
+			parameters: [],
+		}));
 		adapter.execute = vi.fn(() => Promise.resolve([]));
 		const hooks = createHookManager().afterMutation((ctx, results) => {
 			afterCalled.push({ table: ctx.table, count: results.length });
@@ -586,21 +682,30 @@ describe('MutationBuilderBase.executeWithHooks paths', () => {
 			return results;
 		});
 		const orm = createOrm({ schema: testSchema, adapter, hooks });
-		await orm.insert('users').values({ name: 'Alice' }).returning(['id']).execute();
+		await orm
+			.insert('users')
+			.values({ name: 'Alice' })
+			.returning(['id'])
+			.execute();
 		expect(afterCalled[0]).toEqual([{ id: 1 }]);
 	});
 
 	it('runs onError hooks when execute throws', async () => {
 		const errorCaptured: Error[] = [];
 		const adapter = createMockAdapter();
-		adapter.compileInsert = vi.fn(() => ({ sql: 'INSERT ...', parameters: [] }));
+		adapter.compileInsert = vi.fn(() => ({
+			sql: 'INSERT ...',
+			parameters: [],
+		}));
 		adapter.execute = vi.fn(() => Promise.reject(new Error('DB failure')));
 		const hooks = createHookManager().onError((ctx) => {
 			errorCaptured.push(ctx.error);
 			return ctx.error;
 		});
 		const orm = createOrm({ schema: testSchema, adapter, hooks });
-		await expect(orm.insert('users').values({ name: 'Alice' }).execute()).rejects.toThrow('DB failure');
+		await expect(
+			orm.insert('users').values({ name: 'Alice' }).execute(),
+		).rejects.toThrow('DB failure');
 		expect(errorCaptured).toHaveLength(1);
 	});
 });
@@ -627,7 +732,7 @@ describe('filters.ts: exists option branches', () => {
 	it('exists with include option → sets result.include', () => {
 		const result = exists('posts', { include: { author: { join: 'inner' } } });
 		expect(result.kind).toBe('exists');
-		expect((result.include as Record<string, unknown>)['author']).toBeDefined();
+		expect((result.include as Record<string, unknown>).author).toBeDefined();
 	});
 
 	it('exists with no options → no where/recursive/include', () => {
@@ -655,7 +760,9 @@ describe('filters.ts: notExists option branches', () => {
 	});
 
 	it('notExists with include option → sets result.include', () => {
-		const result = notExists('posts', { include: { author: { join: 'left' } } });
+		const result = notExists('posts', {
+			include: { author: { join: 'left' } },
+		});
 		expect(result.kind).toBe('notExists');
 		expect(result.include).toBeDefined();
 	});
@@ -701,7 +808,9 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'customers',
-			where: not(inSubquery('id', subquery('orders_opt').select(['customerId']))),
+			where: not(
+				inSubquery('id', subquery('orders_opt').select(['customerId'])),
+			),
 		};
 		const result = plan(intent, schemaForOptimize.model);
 		expect(result).toBeDefined();
@@ -712,7 +821,10 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'customers',
-			where: and(eq('name', 'Alice'), inSubquery('id', subquery('orders_opt').select(['customerId']))),
+			where: and(
+				eq('name', 'Alice'),
+				inSubquery('id', subquery('orders_opt').select(['customerId'])),
+			),
 		};
 		const result = plan(intent, schemaForOptimize.model);
 		expect(result).toBeDefined();
@@ -722,7 +834,10 @@ describe('planner.ts: optimizeInToExists edge cases', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'customers',
-			where: or(eq('name', 'Bob'), inSubquery('id', subquery('orders_opt').select(['customerId']))),
+			where: or(
+				eq('name', 'Bob'),
+				inSubquery('id', subquery('orders_opt').select(['customerId'])),
+			),
 		};
 		const result = plan(intent, schemaForOptimize.model);
 		expect(result).toBeDefined();
@@ -748,42 +863,60 @@ describe('planner.ts: processRelationFilter modes', () => {
 
 	it('every() → produces filter-strategy decision', () => {
 		// Access relation via parent table proxy (provides RELATION_META)
-		const postsRelation = (relSchema.tables.users as unknown as Record<string, unknown>)['posts'];
+		const postsRelation = (
+			relSchema.tables.users as unknown as Record<string, unknown>
+		).posts;
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			where: every(postsRelation as Parameters<typeof every>[0], (_rel) => eq('title', 'Hello')),
+			where: every(postsRelation as Parameters<typeof every>[0], (_rel) =>
+				eq('title', 'Hello'),
+			),
 		};
 		const result = plan(intent, relSchema.model);
 		expect(result).toBeDefined();
 		// processRelationFilter produces 'filter-strategy' decisions
-		const decisions = result.decisions.filter((d) => d.type === 'filter-strategy');
+		const decisions = result.decisions.filter(
+			(d) => d.type === 'filter-strategy',
+		);
 		expect(decisions.length).toBeGreaterThan(0);
 	});
 
 	it('some() → produces filter-strategy decision', () => {
-		const postsRelation = (relSchema.tables.users as unknown as Record<string, unknown>)['posts'];
+		const postsRelation = (
+			relSchema.tables.users as unknown as Record<string, unknown>
+		).posts;
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			where: some(postsRelation as Parameters<typeof some>[0], (_rel) => eq('title', 'World')),
+			where: some(postsRelation as Parameters<typeof some>[0], (_rel) =>
+				eq('title', 'World'),
+			),
 		};
 		const result = plan(intent, relSchema.model);
 		expect(result).toBeDefined();
-		const decisions = result.decisions.filter((d) => d.type === 'filter-strategy');
+		const decisions = result.decisions.filter(
+			(d) => d.type === 'filter-strategy',
+		);
 		expect(decisions.length).toBeGreaterThan(0);
 	});
 
 	it('none() → produces filter-strategy decision', () => {
-		const postsRelation = (relSchema.tables.users as unknown as Record<string, unknown>)['posts'];
+		const postsRelation = (
+			relSchema.tables.users as unknown as Record<string, unknown>
+		).posts;
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
-			where: none(postsRelation as Parameters<typeof none>[0], (_rel) => eq('title', 'Foo')),
+			where: none(postsRelation as Parameters<typeof none>[0], (_rel) =>
+				eq('title', 'Foo'),
+			),
 		};
 		const result = plan(intent, relSchema.model);
 		expect(result).toBeDefined();
-		const decisions = result.decisions.filter((d) => d.type === 'filter-strategy');
+		const decisions = result.decisions.filter(
+			(d) => d.type === 'filter-strategy',
+		);
 		expect(decisions.length).toBeGreaterThan(0);
 	});
 });
@@ -826,7 +959,10 @@ describe('QueryBuilderImpl applyDefaultFiltersToIntent', () => {
 			{ defaultFilters: { users: eq('active', true) } },
 		);
 		const orm = createOrm({ schema: schemaWithFilters, adapter });
-		const report = orm.from(schemaWithFilters.tables.users).where(eq('name', 'Alice')).plan();
+		const report = orm
+			.from(schemaWithFilters.tables.users)
+			.where(eq('name', 'Alice'))
+			.plan();
 		const w = report.intent.where as { kind?: string };
 		expect(w?.kind).toBe('and');
 	});
@@ -844,7 +980,10 @@ describe('QueryBuilderImpl.withPlanOptions merge', () => {
 			adapter,
 			planOptions: { enableCTEs: false },
 		});
-		const report = orm.select('users').withPlanOptions({ enableCTEs: true }).plan();
+		const report = orm
+			.select('users')
+			.withPlanOptions({ enableCTEs: true })
+			.plan();
 		expect(report).toBeDefined();
 	});
 });
@@ -1001,9 +1140,14 @@ describe('UpsertBuilder edge cases', () => {
 			parameters: [],
 		}));
 		const orm = createOrm({ schema: testSchema, adapter });
-		const builder = orm.upsert('users').values({ id: 1, name: 'Alice' }).onConflictConstraint('users_pkey').doNothing();
+		const builder = orm
+			.upsert('users')
+			.values({ id: 1, name: 'Alice' })
+			.onConflictConstraint('users_pkey')
+			.doNothing();
 		const dump = builder.dump();
-		const onConflict = (dump.intent as { onConflict?: Record<string, unknown> }).onConflict;
+		const onConflict = (dump.intent as { onConflict?: Record<string, unknown> })
+			.onConflict;
 		expect(onConflict?.constraint).toBe('users_pkey');
 	});
 
@@ -1014,7 +1158,11 @@ describe('UpsertBuilder edge cases', () => {
 			parameters: [],
 		}));
 		const orm = createOrm({ schema: testSchema, adapter });
-		const builder = orm.upsert('users').values({ id: 1, name: 'Alice' }).onConflict(['id']).doUpdate();
+		const builder = orm
+			.upsert('users')
+			.values({ id: 1, name: 'Alice' })
+			.onConflict(['id'])
+			.doUpdate();
 		const dump = builder.dump();
 		const action = (dump.intent as { action?: Record<string, unknown> }).action;
 		expect(action?.type).toBe('doUpdate');
@@ -1031,9 +1179,15 @@ describe('DeleteBuilder edge cases', () => {
 		const adapter = createMockAdapter();
 		adapter.compileDelete = vi.fn(() => ({ sql: 'DELETE...', parameters: [] }));
 		const orm = createOrm({ schema: testSchema, adapter });
-		const builder = orm.delete('users').where(eq('id', 1)).cascade(['posts', 'orders']);
+		const builder = orm
+			.delete('users')
+			.where(eq('id', 1))
+			.cascade(['posts', 'orders']);
 		const dump = builder.dump();
-		expect((dump.intent as { cascade?: unknown }).cascade).toEqual(['posts', 'orders']);
+		expect((dump.intent as { cascade?: unknown }).cascade).toEqual([
+			'posts',
+			'orders',
+		]);
 	});
 
 	it('cascade without args → intent has cascade=true', () => {

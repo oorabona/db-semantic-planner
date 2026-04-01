@@ -1,5 +1,7 @@
 # How to Use DDL Helpers
 
+The DDL helpers give you a type-safe API for table maintenance and index management operations directly from your ORM instance, without writing raw SQL. Use this guide when you need to truncate tables, create or drop indexes, alter columns, or check table storage size — especially in multi-tenant setups where schema scoping matters.
+
 ## When
 
 When you need to run DDL operations (TRUNCATE, VACUUM, CREATE/DROP INDEX, ALTER COLUMN) or check

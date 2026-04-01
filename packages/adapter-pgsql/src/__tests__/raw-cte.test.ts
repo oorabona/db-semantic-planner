@@ -1,4 +1,3 @@
-
 /**
  * FR-8: orm.recursive() — WITH RECURSIVE CTE via explicit base/step builders.
  *
@@ -6,8 +5,8 @@
  * No DB connection required.
  */
 
-import { describe, expect, it } from 'vitest';
 import { createOrm, createRawCteBuilder, eq, schema } from '@dbsp/core';
+import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------

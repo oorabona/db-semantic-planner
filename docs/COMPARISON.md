@@ -1,9 +1,6 @@
 # Feature Comparison: db-semantic-planner vs Node.js Database Tools
 
-> **Last updated:** 2026-01-11
-> **Status:** Living document — update as features ship
-
-This document compares db-semantic-planner with all major Node.js database tools and ORMs.
+This document compares db-semantic-planner with all major Node.js database tools and ORMs, covering query building, relations, observability, schema management, and database support.
 
 ## Tools Covered
 
@@ -70,7 +67,7 @@ This document compares db-semantic-planner with all major Node.js database tools
 | Aggregations | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ |
 | GROUP BY | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ✅ | ⚠️ |
 | Subqueries | ✅ | ✅ | ✅ | ✅ | ⚠️ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ |
-| UNION/INTERSECT | 🔜 | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ |
+| UNION/INTERSECT | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ⚠️ | ❌ | ⚠️ | ⚠️ | ⚠️ | ❌ | ⚠️ |
 | Raw SQL escape | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 ### Mutations
@@ -198,7 +195,7 @@ This document compares db-semantic-planner with all major Node.js database tools
 | **Relations as First-Class** | `.include('author')` just works, no manual JOINs |
 | **Multi-tenant Native** | `.withSchema('tenant_123')` is built-in, not bolted-on |
 | **Recursive Queries** | `.include({ recursive: true })` for trees/graphs — no raw SQL |
-| **Adapter-Agnostic** | Same API works with Kysely, Drizzle, native pg (planned) |
+| **Adapter-Agnostic** | Same query API regardless of the underlying adapter implementation |
 | **N+1 Prevention** | Planner automatically chooses optimal strategy |
 | **Window Functions** | First-class builder API, not raw SQL |
 | **EXPLAIN Integration** | Built-in query plan analysis |
@@ -279,13 +276,11 @@ This document compares db-semantic-planner with all major Node.js database tools
 
 Features currently in development or planned:
 
-| Feature | Ticket | Status |
-|---------|--------|--------|
-| Multi-dialect support (MySQL, SQLite) | CORE-004 | 🔜 Planned |
-| Native PostgreSQL adapter | ADAPTER-PGSQL-001 | 🔜 Planned |
-| Conformance test framework | DX-032 | 🔜 Planned |
-| UNION/INTERSECT queries | - | 📋 Backlog |
-| CLI REPL playground | DX-030 | 📋 Backlog |
+| Feature | Status |
+|---------|--------|
+| Multi-dialect support (MySQL, SQLite) | Planned |
+| Conformance test framework | Planned |
+| CLI REPL playground | Planned |
 
 ---
 

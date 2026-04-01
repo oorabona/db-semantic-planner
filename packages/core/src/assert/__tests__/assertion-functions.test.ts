@@ -28,7 +28,9 @@ import type { AssertionQueryResult, IntentSummary } from '../types.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeResult(overrides: Partial<AssertionQueryResult> = {}): AssertionQueryResult {
+function makeResult(
+	overrides: Partial<AssertionQueryResult> = {},
+): AssertionQueryResult {
 	return {
 		query: 'SELECT 1',
 		success: true,
@@ -257,17 +259,26 @@ describe('assertSQLColumn', () => {
 
 describe('assertSQLJoin', () => {
 	it('should pass when SQL contains a JOIN referencing the table', () => {
-		const out = assertSQLJoin('SELECT * FROM posts LEFT JOIN "comments" ON p.id = c.post_id', 'comments');
+		const out = assertSQLJoin(
+			'SELECT * FROM posts LEFT JOIN "comments" ON p.id = c.post_id',
+			'comments',
+		);
 		expect(out.passed).toBe(true);
 	});
 
 	it('should pass when SQL contains an INNER JOIN', () => {
-		const out = assertSQLJoin('SELECT * FROM t1 INNER JOIN "orders" ON t1.id = orders.user_id', 'orders');
+		const out = assertSQLJoin(
+			'SELECT * FROM t1 INNER JOIN "orders" ON t1.id = orders.user_id',
+			'orders',
+		);
 		expect(out.passed).toBe(true);
 	});
 
 	it('should pass when SQL uses a CTE that references the table name', () => {
-		const out = assertSQLJoin('WITH summary AS (SELECT id FROM summary_table) SELECT * FROM summary', 'summary');
+		const out = assertSQLJoin(
+			'WITH summary AS (SELECT id FROM summary_table) SELECT * FROM summary',
+			'summary',
+		);
 		expect(out.passed).toBe(true);
 	});
 
@@ -279,7 +290,10 @@ describe('assertSQLJoin', () => {
 	});
 
 	it('should return type sql.join', () => {
-		const out = assertSQLJoin('SELECT * FROM t LEFT JOIN "comments" ON 1=1', 'comments');
+		const out = assertSQLJoin(
+			'SELECT * FROM t LEFT JOIN "comments" ON 1=1',
+			'comments',
+		);
 		expect(out.type).toBe('sql.join');
 	});
 });
@@ -348,7 +362,10 @@ describe('assertParamsLength', () => {
 
 describe('assertParamsType', () => {
 	it('should pass when all types match', () => {
-		const out = assertParamsType([1, 'foo', true], ['number', 'string', 'boolean']);
+		const out = assertParamsType(
+			[1, 'foo', true],
+			['number', 'string', 'boolean'],
+		);
 		expect(out.passed).toBe(true);
 		expect(out.actual).toBeUndefined();
 	});
@@ -562,27 +579,43 @@ describe('assertDbOutput', () => {
 describe('assertDbValueEquals', () => {
 	it('should pass when value at specified row/column matches', () => {
 		const result = makeResult({ rows: [{ name: 'Alice' }] });
-		const out = assertDbValueEquals(result, { row: 0, column: 'name', value: 'Alice' });
+		const out = assertDbValueEquals(result, {
+			row: 0,
+			column: 'name',
+			value: 'Alice',
+		});
 		expect(out.passed).toBe(true);
 	});
 
 	it('should fail when value at row/column differs', () => {
 		const result = makeResult({ rows: [{ name: 'Alice' }] });
-		const out = assertDbValueEquals(result, { row: 0, column: 'name', value: 'Bob' });
+		const out = assertDbValueEquals(result, {
+			row: 0,
+			column: 'name',
+			value: 'Bob',
+		});
 		expect(out.passed).toBe(false);
 		expect(out.message).toMatch(/Value at \[0\]\["name"\]/);
 	});
 
 	it('should fail when row index is out of range', () => {
 		const result = makeResult({ rows: [{ name: 'Alice' }] });
-		const out = assertDbValueEquals(result, { row: 5, column: 'name', value: 'Alice' });
+		const out = assertDbValueEquals(result, {
+			row: 5,
+			column: 'name',
+			value: 'Alice',
+		});
 		expect(out.passed).toBe(false);
 		expect(out.message).toMatch(/No row at index 5/);
 	});
 
 	it('should fallback to snake_case column lookup', () => {
 		const result = makeResult({ rows: [{ user_name: 'Alice' }] });
-		const out = assertDbValueEquals(result, { row: 0, column: 'userName', value: 'Alice' });
+		const out = assertDbValueEquals(result, {
+			row: 0,
+			column: 'userName',
+			value: 'Alice',
+		});
 		expect(out.passed).toBe(true);
 	});
 
@@ -672,13 +705,17 @@ describe('assertIntentTable', () => {
 
 describe('assertIntentWith', () => {
 	it('should pass when all expected relations are present', () => {
-		const result = makeResult({ intent: makeIntent({ with: ['posts', 'comments'] }) });
+		const result = makeResult({
+			intent: makeIntent({ with: ['posts', 'comments'] }),
+		});
 		const out = assertIntentWith(result, 'posts');
 		expect(out.passed).toBe(true);
 	});
 
 	it('should pass with array of expected relations', () => {
-		const result = makeResult({ intent: makeIntent({ with: ['posts', 'comments'] }) });
+		const result = makeResult({
+			intent: makeIntent({ with: ['posts', 'comments'] }),
+		});
 		const out = assertIntentWith(result, ['posts', 'comments']);
 		expect(out.passed).toBe(true);
 	});

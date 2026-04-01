@@ -20,7 +20,6 @@ export interface UnnestCteIntent {
  * Full CTE query: one or more CTE definitions + an outer query.
  */
 
-
 /**
  * CTE backed by explicit base and step QueryIntent instances (WITH RECURSIVE).
  *
@@ -46,7 +45,6 @@ export interface RawCteIntent {
 	/** Column name tracking depth in the step query, for maxDepth injection. */
 	readonly depthColumn?: string;
 }
-
 
 /**
  * CTE backed by a standard NQL query (non-recursive, non-unnest).

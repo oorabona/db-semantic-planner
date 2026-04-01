@@ -30,7 +30,10 @@ describe('compileSelect — limit edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: undefined } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'limit',
+					limit: undefined,
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -47,7 +50,10 @@ describe('compileSelect — limit edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: {} } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'limit',
+					limit: {},
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -63,7 +69,10 @@ describe('compileSelect — limit edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: 'ten' } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'limit',
+					limit: 'ten',
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -79,7 +88,10 @@ describe('compileSelect — limit edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: { paramIndex: 1 } } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'limit',
+					limit: { paramIndex: 1 },
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -119,7 +131,10 @@ describe('compileSelect — offset edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'offset', offset: undefined } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'offset',
+					offset: undefined,
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -135,7 +150,10 @@ describe('compileSelect — offset edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'offset', offset: {} } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'offset',
+					offset: {},
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -151,7 +169,10 @@ describe('compileSelect — offset edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'offset', offset: 'twenty' } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'offset',
+					offset: 'twenty',
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -167,7 +188,10 @@ describe('compileSelect — offset edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'offset', offset: { paramIndex: 1 } } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'offset',
+					offset: { paramIndex: 1 },
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -218,7 +242,10 @@ describe('compileSelect — offset edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'limit', limit: null } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'limit',
+					limit: null,
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 				{ type: 'offset', offset: 5 },
 			],
 		};
@@ -259,7 +286,10 @@ describe('compileSelect — distinctOn edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'distinctOn', columns: undefined } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'distinctOn',
+					columns: undefined,
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 
@@ -275,7 +305,10 @@ describe('compileSelect — distinctOn edge cases', () => {
 			rootTable: 'users',
 			decisions: [
 				{ type: 'select', column: 'id' },
-				{ type: 'distinctOn', columns: null } as unknown as SimplifiedPlanReport['decisions'][number],
+				{
+					type: 'distinctOn',
+					columns: null,
+				} as unknown as SimplifiedPlanReport['decisions'][number],
 			],
 		};
 

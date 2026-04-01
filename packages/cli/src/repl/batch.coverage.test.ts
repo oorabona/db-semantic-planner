@@ -597,7 +597,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('throws when assertion file cannot be read', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockImplementation(() => {
 			throw new Error('ENOENT: no such file');
 		});
@@ -612,7 +612,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('throws when assertion file has non-Error thrown during read', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockImplementation(() => {
 			throw 'string error during read';
 		});
@@ -623,7 +623,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('throws when assertion file has parse errors', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('bad content');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [],
@@ -638,7 +638,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('throws when assertion validation finds errors', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue(
 			'---\nquery: 99\nassert:\n  success: true',
 		);
@@ -659,7 +659,7 @@ describe('executeBatch — coverage', () => {
 
 	it('collects events during query execution loop', async () => {
 		const submitCount = 0;
-		mockEngineInstance.on.mockImplementation((cb) => {
+		mockEngineInstance.on.mockImplementation((_cb) => {
 			// On first call (init), emit nothing.
 			// On subsequent calls (queries), we want to emit events when submit is called.
 			return vi.fn();
@@ -678,7 +678,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('calls engine.destroy() in finally block even on submit error', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockEngineInstance.submit.mockRejectedValue(new Error('submit failed'));
 
 		await expect(executeBatch(makeOptions())).rejects.toThrow('submit failed');
@@ -687,7 +687,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('tracks output mode changes from state-change events', async () => {
-		let queryCallback;
+		let queryCallback: ((event: unknown) => void) | undefined;
 		let callIndex = 0;
 		mockEngineInstance.on.mockImplementation((cb) => {
 			callIndex++;
@@ -714,7 +714,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('runs assertions when assertFile is provided and parses successfully', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('---\nquery: 1\nassert:\n  success: true');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [
@@ -743,7 +743,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('filters comments and blank queries from assertion executable results', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('---\nquery: 1');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -777,7 +777,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('passes hasDb=true when databaseUrl is set', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid content');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -808,7 +808,7 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('returns results without assertionSummary when no assertFile', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 
 		const result = await executeBatch(makeOptions());
 
@@ -822,16 +822,16 @@ describe('executeBatch — coverage', () => {
 // ---------------------------------------------------------------------------
 
 describe('runBatchMode — coverage', () => {
-	let consoleLogSpy;
-	let consoleErrorSpy;
-	let processExitSpy;
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+	let processExitSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockEngineInstance.init.mockResolvedValue(undefined);
 		mockEngineInstance.destroy.mockResolvedValue(undefined);
 		mockEngineInstance.submit.mockResolvedValue(undefined);
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockEngineInstance.getState.mockReturnValue({ outputMode: 'json' });
 		consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 		consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -848,7 +848,7 @@ describe('runBatchMode — coverage', () => {
 
 	it('outputs text format: success path', async () => {
 		// Make engine emit a query-result event when submit is called
-		let queryCallback;
+		let queryCallback: ((event: unknown) => void) | undefined;
 		let callIdx = 0;
 		mockEngineInstance.on.mockImplementation((cb) => {
 			callIdx++;
@@ -872,7 +872,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('outputs text format: error path (result.success=false)', async () => {
-		let queryCallback;
+		let queryCallback: ((event: unknown) => void) | undefined;
 		let callIdx = 0;
 		mockEngineInstance.on.mockImplementation((cb) => {
 			callIdx++;
@@ -898,7 +898,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('outputs text format: error without error field uses output', async () => {
-		let queryCallback;
+		let queryCallback: ((event: unknown) => void) | undefined;
 		let callIdx = 0;
 		mockEngineInstance.on.mockImplementation((cb) => {
 			callIdx++;
@@ -926,7 +926,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('outputs JSON format', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 
 		await runBatchMode(makeOptions({ format: 'json' }));
 
@@ -945,7 +945,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('JSON format includes assertions when present', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('---\nquery: 1');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -979,7 +979,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion results with passed assertions', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1011,7 +1011,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion results with failed assertions', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1058,7 +1058,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion results with skipped assertions', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1098,7 +1098,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion with failed actual=undefined (no actual line)', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1148,7 +1148,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion with non-string actual (JSON.stringify)', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1194,7 +1194,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: assertion with string actual (direct display)', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1239,7 +1239,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: long query truncated in heading', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1276,7 +1276,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('text format: summary line with skipped count', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1308,7 +1308,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('exits with code 1 when assertions have failures', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1338,7 +1338,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('does not exit when assertions all pass', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 		mockReadFileSync.mockReturnValue('valid');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -1361,7 +1361,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('exits with code 1 when queries have errors and no assertions', async () => {
-		let queryCallback;
+		let queryCallback: ((event: unknown) => void) | undefined;
 		let callIdx = 0;
 		mockEngineInstance.on.mockImplementation((cb) => {
 			callIdx++;
@@ -1387,7 +1387,7 @@ describe('runBatchMode — coverage', () => {
 	});
 
 	it('does not exit when all queries succeed and no assertions', async () => {
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 
 		await runBatchMode(makeOptions({ format: 'json' }));
 
@@ -1425,7 +1425,7 @@ describe('runBatchMode — coverage', () => {
 		// This is tricky - results[i] could be undefined if the array has holes
 		// The for loop has `if (!result) continue;` on line 331
 		// We can't easily create holes in normal usage, but we test the code path
-		mockEngineInstance.on.mockImplementation((cb) => vi.fn());
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
 
 		await runBatchMode(makeOptions({ format: 'text', queries: [] }));
 

@@ -15,7 +15,10 @@
 import type { RecursivePlanReport } from '@dbsp/types';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
-import { compileCteQuery, compileRecursive } from '../adapter-compiler-recursive.js';
+import {
+	compileCteQuery,
+	compileRecursive,
+} from '../adapter-compiler-recursive.js';
 import { requiredColumn } from '../assert-field.js';
 import { caseHandler, simpleCaseHandler } from '../handlers/expression/case.js';
 import { resolveCaseValue } from '../handlers/expression/case-value.js';
@@ -28,8 +31,16 @@ import {
 } from '../handlers/types.js';
 import { introspect } from '../introspection.js';
 import { preserveNaming } from '../naming-plugin.js';
-import { createPgsqlAdapter, createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
-import { appendPathColumn, buildJsonPathColumn, buildPathColumn, buildPathString } from '../recursive/path-tracking.js';
+import {
+	createPgsqlAdapter,
+	createPgsqlCompileOnlyAdapter,
+} from '../pgsql-adapter.js';
+import {
+	appendPathColumn,
+	buildJsonPathColumn,
+	buildPathColumn,
+	buildPathString,
+} from '../recursive/path-tracking.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -68,7 +79,9 @@ const defaultDeps = {
 describe('PgsqlAdapter constructor + compile-only mode', () => {
 	it('requireConnection throws when no pool given (compile-only adapter)', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		expect(() => adapter.getPoolInstance()).toThrow('PgsqlAdapter is in compile-only mode');
+		expect(() => adapter.getPoolInstance()).toThrow(
+			'PgsqlAdapter is in compile-only mode',
+		);
 	});
 
 	it('capabilities.supportsStreaming is false for compile-only adapter', () => {
@@ -98,28 +111,38 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 describe('PgsqlAdapter.execute error paths', () => {
 	it('execute throws when pool query rejects', async () => {
 		const pool = makePool();
-		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new Error('db error'));
+		(pool.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+			new Error('db error'),
+		);
 		const adapter = createPgsqlAdapter(pool);
-		await expect(adapter.execute({ sql: 'SELECT 1', parameters: [] })).rejects.toThrow('db error');
+		await expect(
+			adapter.execute({ sql: 'SELECT 1', parameters: [] }),
+		).rejects.toThrow('db error');
 	});
 
 	it('executeOne returns null when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
 		const adapter = createPgsqlAdapter(pool);
-		expect(await adapter.executeOne({ sql: 'SELECT 1', parameters: [] })).toBe(null);
+		expect(await adapter.executeOne({ sql: 'SELECT 1', parameters: [] })).toBe(
+			null,
+		);
 	});
 
 	it('executeOneOrThrow throws when no rows', async () => {
 		const pool = makePool([[]]); // empty rows
 		const adapter = createPgsqlAdapter(pool);
-		await expect(adapter.executeOneOrThrow({ sql: 'SELECT 1', parameters: [] })).rejects.toThrow('No results found');
+		await expect(
+			adapter.executeOneOrThrow({ sql: 'SELECT 1', parameters: [] }),
+		).rejects.toThrow('No results found');
 	});
 });
 
 describe('PgsqlAdapter.introspect', () => {
 	it('throws on compile-only adapter', async () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
-		await expect(adapter.introspect()).rejects.toThrow('Cannot introspect without a database connection');
+		await expect(adapter.introspect()).rejects.toThrow(
+			'Cannot introspect without a database connection',
+		);
 	});
 });
 
@@ -147,7 +170,9 @@ describe('PgsqlAdapter.transaction', () => {
 				throw new Error('fn error');
 			}),
 		).rejects.toThrow('fn error');
-		const calls = (connectClient.query as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0]);
+		const calls = (
+			connectClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0]);
 		expect(calls).toEqual(expect.arrayContaining(['ROLLBACK']));
 	});
 });
@@ -185,30 +210,52 @@ describe('PgsqlAdapter.createDump', () => {
 
 	it('includes schema in meta when schemaName is set', () => {
 		const adapter = createPgsqlAdapter(makePool(), { schemaName: 'myschema' });
-		const dump = adapter.createDump(basePlan as never, { sql: 'SELECT 1', parameters: [] });
+		const dump = adapter.createDump(basePlan as never, {
+			sql: 'SELECT 1',
+			parameters: [],
+		});
 		expect(dump.meta?.schema).toBe('myschema');
 	});
 
 	it('omits schema from meta when no schemaName', () => {
 		const adapter = createPgsqlAdapter(makePool());
-		const dump = adapter.createDump(basePlan as never, { sql: 'SELECT 1', parameters: [] });
+		const dump = adapter.createDump(basePlan as never, {
+			sql: 'SELECT 1',
+			parameters: [],
+		});
 		expect(dump.meta?.schema).toBeUndefined();
 	});
 });
 
 describe('PgsqlAdapter.listIndexes', () => {
 	it('passes namePattern as 3rd param', async () => {
-		const rows = [{ indexname: 'idx_foo', indexdef: 'CREATE INDEX idx_foo ON public.foo USING btree (id)' }];
+		const rows = [
+			{
+				indexname: 'idx_foo',
+				indexdef: 'CREATE INDEX idx_foo ON public.foo USING btree (id)',
+			},
+		];
 		const pool = makePool([rows]);
 		const adapter = createPgsqlAdapter(pool);
-		const result = await adapter.listIndexes('foo', 'public', { namePattern: 'idx_%' });
+		const result = await adapter.listIndexes('foo', 'public', {
+			namePattern: 'idx_%',
+		});
 		expect(result).toHaveLength(1);
 		expect(result[0]!.name).toBe('idx_foo');
-		expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual(['foo', 'public', 'idx_%']);
+		expect((pool.query as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual([
+			'foo',
+			'public',
+			'idx_%',
+		]);
 	});
 
 	it('detects unique index', async () => {
-		const rows = [{ indexname: 'u', indexdef: 'CREATE UNIQUE INDEX u ON t USING btree (email)' }];
+		const rows = [
+			{
+				indexname: 'u',
+				indexdef: 'CREATE UNIQUE INDEX u ON t USING btree (email)',
+			},
+		];
 		const pool = makePool([rows]);
 		const result = await createPgsqlAdapter(pool).listIndexes('t', 'public');
 		expect(result[0]!.unique).toBe(true);
@@ -216,7 +263,9 @@ describe('PgsqlAdapter.listIndexes', () => {
 	});
 
 	it('detects non-default index method (gin)', async () => {
-		const rows = [{ indexname: 'g', indexdef: 'CREATE INDEX g ON t USING gin (col)' }];
+		const rows = [
+			{ indexname: 'g', indexdef: 'CREATE INDEX g ON t USING gin (col)' },
+		];
 		const result = await createPgsqlAdapter(makePool([rows])).listIndexes('t');
 		expect(result[0]!.method).toBe('gin');
 		expect(result[0]!.unique).toBe(false);
@@ -231,11 +280,18 @@ describe('PgsqlAdapter.listIndexes', () => {
 
 describe('PgsqlAdapter.indexExists', () => {
 	it('returns true when exists', async () => {
-		expect(await createPgsqlAdapter(makePool([[{ exists: true }]])).indexExists('idx', 'tbl')).toBe(true);
+		expect(
+			await createPgsqlAdapter(makePool([[{ exists: true }]])).indexExists(
+				'idx',
+				'tbl',
+			),
+		).toBe(true);
 	});
 
 	it('returns false when no rows', async () => {
-		expect(await createPgsqlAdapter(makePool([[]])).indexExists('idx', 'tbl')).toBe(false);
+		expect(
+			await createPgsqlAdapter(makePool([[]])).indexExists('idx', 'tbl'),
+		).toBe(false);
 	});
 });
 
@@ -245,7 +301,12 @@ describe('PgsqlAdapter.storageSize', () => {
 	});
 
 	it('parses size string to number', async () => {
-		expect(await createPgsqlAdapter(makePool([[{ size: '8192' }]])).storageSize('tbl', 'schema')).toBe(8192);
+		expect(
+			await createPgsqlAdapter(makePool([[{ size: '8192' }]])).storageSize(
+				'tbl',
+				'schema',
+			),
+		).toBe(8192);
 	});
 
 	it('escapes embedded double-quotes in names', async () => {
@@ -303,7 +364,14 @@ function col(
 describe('introspection.filterTables', () => {
 	it('no filters — all tables returned', async () => {
 		const pool = makeIntrospectPool(
-			[col({ table_name: 'users', column_name: 'id', data_type: 'integer', udt_name: 'int4' })],
+			[
+				col({
+					table_name: 'users',
+					column_name: 'id',
+					data_type: 'integer',
+					udt_name: 'int4',
+				}),
+			],
 			{ pks: [{ table_name: 'users', column_names: ['id'] }] },
 		);
 		const model = await introspect(pool);
@@ -312,8 +380,18 @@ describe('introspection.filterTables', () => {
 
 	it('include filter — keeps only exact match', async () => {
 		const pool = makeIntrospectPool([
-			col({ table_name: 'users', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
-			col({ table_name: 'posts', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
+			col({
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
+			col({
+				table_name: 'posts',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
 		]);
 		const model = await introspect(pool, { include: ['users'] });
 		expect(Array.from(model.tables.keys())).toEqual(['users']);
@@ -321,8 +399,18 @@ describe('introspection.filterTables', () => {
 
 	it('exclude filter — removes matching tables', async () => {
 		const pool = makeIntrospectPool([
-			col({ table_name: 'users', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
-			col({ table_name: '_prisma_migrations', column_name: 'id', data_type: 'text', udt_name: 'text' }),
+			col({
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
+			col({
+				table_name: '_prisma_migrations',
+				column_name: 'id',
+				data_type: 'text',
+				udt_name: 'text',
+			}),
 		]);
 		const model = await introspect(pool, { exclude: ['_prisma*'] });
 		expect(Array.from(model.tables.keys())).toEqual(['users']);
@@ -330,17 +418,41 @@ describe('introspection.filterTables', () => {
 
 	it('include wildcard glob — matches multiple tables', async () => {
 		const pool = makeIntrospectPool([
-			col({ table_name: 'tenant_a', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
-			col({ table_name: 'tenant_b', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
-			col({ table_name: 'other', column_name: 'id', data_type: 'integer', udt_name: 'int4' }),
+			col({
+				table_name: 'tenant_a',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
+			col({
+				table_name: 'tenant_b',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
+			col({
+				table_name: 'other',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+			}),
 		]);
 		const model = await introspect(pool, { include: ['tenant_*'] });
-		expect(Array.from(model.tables.keys()).sort()).toEqual(['tenant_a', 'tenant_b']);
+		expect(Array.from(model.tables.keys()).sort()).toEqual([
+			'tenant_a',
+			'tenant_b',
+		]);
 	});
 
 	it('table without primary key — warning emitted', async () => {
 		const pool = makeIntrospectPool([
-			col({ table_name: 'no_pk', column_name: 'name', data_type: 'text', udt_name: 'text', is_nullable: 'YES' }),
+			col({
+				table_name: 'no_pk',
+				column_name: 'name',
+				data_type: 'text',
+				udt_name: 'text',
+				is_nullable: 'YES',
+			}),
 		]);
 		const model = await introspect(pool);
 		expect(model.warnings.some((w) => w.includes('no_pk'))).toBe(true);
@@ -350,10 +462,20 @@ describe('introspection.filterTables', () => {
 describe('introspection.buildTableIR — column branches', () => {
 	it('column with non-null default — default stored', async () => {
 		const pool = makeIntrospectPool(
-			[col({ table_name: 'tbl', column_name: 'score', data_type: 'integer', udt_name: 'int4', column_default: '0' })],
+			[
+				col({
+					table_name: 'tbl',
+					column_name: 'score',
+					data_type: 'integer',
+					udt_name: 'int4',
+					column_default: '0',
+				}),
+			],
 			{ pks: [{ table_name: 'tbl', column_names: ['score'] }] },
 		);
-		expect((await introspect(pool)).tables.get('tbl')?.columns[0]?.default).toBe('0');
+		expect(
+			(await introspect(pool)).tables.get('tbl')?.columns[0]?.default,
+		).toBe('0');
 	});
 
 	it('identity ALWAYS → "always"', async () => {
@@ -370,7 +492,9 @@ describe('introspection.buildTableIR — column branches', () => {
 			],
 			{ pks: [{ table_name: 'tbl', column_names: ['id'] }] },
 		);
-		expect((await introspect(pool)).tables.get('tbl')?.columns[0]?.identity).toBe('always');
+		expect(
+			(await introspect(pool)).tables.get('tbl')?.columns[0]?.identity,
+		).toBe('always');
 	});
 
 	it('identity BY DEFAULT → "byDefault"', async () => {
@@ -387,32 +511,60 @@ describe('introspection.buildTableIR — column branches', () => {
 			],
 			{ pks: [{ table_name: 'tbl', column_names: ['id'] }] },
 		);
-		expect((await introspect(pool)).tables.get('tbl')?.columns[0]?.identity).toBe('byDefault');
+		expect(
+			(await introspect(pool)).tables.get('tbl')?.columns[0]?.identity,
+		).toBe('byDefault');
 	});
 
 	it('collation != "default" — stored on column', async () => {
 		const pool = makeIntrospectPool(
-			[col({ table_name: 'tbl', column_name: 'name', data_type: 'text', udt_name: 'text', collation_name: 'en_US' })],
+			[
+				col({
+					table_name: 'tbl',
+					column_name: 'name',
+					data_type: 'text',
+					udt_name: 'text',
+					collation_name: 'en_US',
+				}),
+			],
 			{ pks: [{ table_name: 'tbl', column_names: ['name'] }] },
 		);
-		expect((await introspect(pool)).tables.get('tbl')?.columns[0]?.collation).toBe('en_US');
+		expect(
+			(await introspect(pool)).tables.get('tbl')?.columns[0]?.collation,
+		).toBe('en_US');
 	});
 
 	it('collation "default" — not stored', async () => {
 		const pool = makeIntrospectPool(
-			[col({ table_name: 'tbl', column_name: 'name', data_type: 'text', udt_name: 'text', collation_name: 'default' })],
+			[
+				col({
+					table_name: 'tbl',
+					column_name: 'name',
+					data_type: 'text',
+					udt_name: 'text',
+					collation_name: 'default',
+				}),
+			],
 			{ pks: [{ table_name: 'tbl', column_names: ['name'] }] },
 		);
-		expect((await introspect(pool)).tables.get('tbl')?.columns[0]?.collation).toBeUndefined();
+		expect(
+			(await introspect(pool)).tables.get('tbl')?.columns[0]?.collation,
+		).toBeUndefined();
 	});
 });
 
 describe('introspection.mapPgType — all branches', () => {
 	async function mapType(dataType: string, udtName: string): Promise<string> {
 		const pool = makeIntrospectPool([
-			col({ table_name: 'tbl', column_name: 'c', data_type: dataType, udt_name: udtName }),
+			col({
+				table_name: 'tbl',
+				column_name: 'c',
+				data_type: dataType,
+				udt_name: udtName,
+			}),
 		]);
-		return (await introspect(pool)).tables.get('tbl')!.columns[0]!.type as string;
+		return (await introspect(pool)).tables.get('tbl')!.columns[0]!
+			.type as string;
 	}
 
 	it('uuid udt → uuid', async () => {
@@ -491,10 +643,14 @@ describe('introspection.mapPgType — all branches', () => {
 		expect(await mapType('time with time zone', 'timetz')).toBe('time');
 	});
 	it('timestamp without time zone → timestamp', async () => {
-		expect(await mapType('timestamp without time zone', 'timestamp')).toBe('timestamp');
+		expect(await mapType('timestamp without time zone', 'timestamp')).toBe(
+			'timestamp',
+		);
 	});
 	it('timestamp with time zone → datetime', async () => {
-		expect(await mapType('timestamp with time zone', 'timestamptz')).toBe('datetime');
+		expect(await mapType('timestamp with time zone', 'timestamptz')).toBe(
+			'datetime',
+		);
 	});
 	it('unknown type → string fallback', async () => {
 		expect(await mapType('USER-DEFINED', 'custom_type')).toBe('string');
@@ -583,7 +739,9 @@ describe('isSelectWithFields', () => {
 
 describe('requiredColumn', () => {
 	it('throws without context', () => {
-		expect(() => requiredColumn(undefined, 'column')).toThrow("Missing required column 'column'");
+		expect(() => requiredColumn(undefined, 'column')).toThrow(
+			"Missing required column 'column'",
+		);
 	});
 	it('throws with context appended', () => {
 		expect(() => requiredColumn(undefined, 'fkCol', 'JOIN handler')).toThrow(
@@ -594,7 +752,9 @@ describe('requiredColumn', () => {
 		expect(requiredColumn('user_id', 'fkCol')).toBe('user_id');
 	});
 	it('throws for empty string', () => {
-		expect(() => requiredColumn('', 'col')).toThrow("Missing required column 'col'");
+		expect(() => requiredColumn('', 'col')).toThrow(
+			"Missing required column 'col'",
+		);
 	});
 });
 
@@ -604,19 +764,35 @@ describe('requiredColumn', () => {
 
 describe('resolveCaseValue', () => {
 	it('null → nullConstNode', () => {
-		expect(resolveCaseValue(null, 't', undefined, undefined, createCompilerState())).toMatchObject({
+		expect(
+			resolveCaseValue(null, 't', undefined, undefined, createCompilerState()),
+		).toMatchObject({
 			A_Const: { isnull: true },
 		});
 	});
 
 	it('undefined → nullConstNode', () => {
-		expect(resolveCaseValue(undefined, 't', undefined, undefined, createCompilerState())).toMatchObject({
+		expect(
+			resolveCaseValue(
+				undefined,
+				't',
+				undefined,
+				undefined,
+				createCompilerState(),
+			),
+		).toMatchObject({
 			A_Const: { isnull: true },
 		});
 	});
 
 	it('string → columnRef', () => {
-		const node = resolveCaseValue('myCol', 'tbl', undefined, undefined, createCompilerState()) as {
+		const node = resolveCaseValue(
+			'myCol',
+			'tbl',
+			undefined,
+			undefined,
+			createCompilerState(),
+		) as {
 			ColumnRef: { fields: { String: { sval: string } }[] };
 		};
 		expect(node.ColumnRef.fields[0]!.String.sval).toBe('tbl');
@@ -625,42 +801,78 @@ describe('resolveCaseValue', () => {
 
 	it('number (non-object) → ParamRef', () => {
 		const s = createCompilerState();
-		expect(resolveCaseValue(42, 't', undefined, undefined, s)).toMatchObject({ ParamRef: { number: 1 } });
+		expect(resolveCaseValue(42, 't', undefined, undefined, s)).toMatchObject({
+			ParamRef: { number: 1 },
+		});
 		expect(s.parameters).toEqual([42]);
 	});
 
 	it('boolean (non-object) → ParamRef', () => {
 		const s = createCompilerState();
-		expect(resolveCaseValue(true, 't', undefined, undefined, s)).toMatchObject({ ParamRef: { number: 1 } });
+		expect(resolveCaseValue(true, 't', undefined, undefined, s)).toMatchObject({
+			ParamRef: { number: 1 },
+		});
 	});
 
 	it('literal null → nullConstNode', () => {
 		expect(
-			resolveCaseValue({ kind: 'literal', value: null }, 't', undefined, undefined, createCompilerState()),
+			resolveCaseValue(
+				{ kind: 'literal', value: null },
+				't',
+				undefined,
+				undefined,
+				createCompilerState(),
+			),
 		).toMatchObject({ A_Const: { isnull: true } });
 	});
 
 	it('literal boolean → boolval node', () => {
 		expect(
-			resolveCaseValue({ kind: 'literal', value: true }, 't', undefined, undefined, createCompilerState()),
+			resolveCaseValue(
+				{ kind: 'literal', value: true },
+				't',
+				undefined,
+				undefined,
+				createCompilerState(),
+			),
 		).toMatchObject({ A_Const: { boolval: { boolval: true } } });
 	});
 
 	it('literal integer → Integer node', () => {
 		expect(
-			resolveCaseValue({ kind: 'literal', value: 5 }, 't', undefined, undefined, createCompilerState()),
+			resolveCaseValue(
+				{ kind: 'literal', value: 5 },
+				't',
+				undefined,
+				undefined,
+				createCompilerState(),
+			),
 		).toMatchObject({ Integer: { ival: 5 } });
 	});
 
 	it('literal float → Float node', () => {
 		expect(
-			resolveCaseValue({ kind: 'literal', value: 3.14 }, 't', undefined, undefined, createCompilerState()),
+			resolveCaseValue(
+				{ kind: 'literal', value: 3.14 },
+				't',
+				undefined,
+				undefined,
+				createCompilerState(),
+			),
 		).toMatchObject({ Float: { fval: '3.14' } });
 	});
 
 	it('literal string → ParamRef', () => {
 		const s = createCompilerState();
-		expect(resolveCaseValue({ kind: 'literal', value: 'active' }, 't', undefined, undefined, s)).toMatchObject({
+		expect(
+			resolveCaseValue(
+				{ kind: 'literal', value: 'active' },
+				't',
+				undefined,
+				undefined,
+				s,
+			),
+		).toMatchObject({
 			ParamRef: { number: 1 },
 		});
 		expect(s.parameters).toEqual(['active']);
@@ -680,19 +892,28 @@ describe('resolveCaseValue', () => {
 
 	it('arithmetic expression → A_Expr', () => {
 		const node = resolveCaseValue(
-			{ kind: 'arithmetic', operator: '+', left: { kind: 'literal', value: 1 }, right: { kind: 'literal', value: 2 } },
+			{
+				kind: 'arithmetic',
+				operator: '+',
+				left: { kind: 'literal', value: 1 },
+				right: { kind: 'literal', value: 2 },
+			},
 			't',
 			undefined,
 			undefined,
 			createCompilerState(),
 		);
-		expect(node).toMatchObject({ A_Expr: { kind: 'AEXPR_OP', name: [{ String: { sval: '+' } }] } });
+		expect(node).toMatchObject({
+			A_Expr: { kind: 'AEXPR_OP', name: [{ String: { sval: '+' } }] },
+		});
 	});
 
 	it('case without nestedCaseHandler → falls through to ParamRef', () => {
 		const s = createCompilerState();
 		const caseExpr = { kind: 'case', conditions: [] };
-		expect(resolveCaseValue(caseExpr, 't', undefined, undefined, s)).toMatchObject({ ParamRef: { number: 1 } });
+		expect(
+			resolveCaseValue(caseExpr, 't', undefined, undefined, s),
+		).toMatchObject({ ParamRef: { number: 1 } });
 		expect(s.parameters[0]).toBe(caseExpr);
 	});
 
@@ -701,14 +922,18 @@ describe('resolveCaseValue', () => {
 		const result = { A_Const: { isnull: true } };
 		const handler = vi.fn().mockReturnValue(result);
 		const caseExpr = { kind: 'case', conditions: [] };
-		expect(resolveCaseValue(caseExpr, 't', undefined, undefined, s, handler)).toBe(result);
+		expect(
+			resolveCaseValue(caseExpr, 't', undefined, undefined, s, handler),
+		).toBe(result);
 		expect(handler).toHaveBeenCalledWith(caseExpr);
 	});
 
 	it('unknown kind → default ParamRef', () => {
 		const s = createCompilerState();
 		const weird = { kind: 'unknown_expr' };
-		expect(resolveCaseValue(weird, 't', undefined, undefined, s)).toMatchObject({ ParamRef: { number: 1 } });
+		expect(resolveCaseValue(weird, 't', undefined, undefined, s)).toMatchObject(
+			{ ParamRef: { number: 1 } },
+		);
 		expect(s.parameters[0]).toBe(weird);
 	});
 });
@@ -718,12 +943,21 @@ describe('resolveCaseValue', () => {
 // ---------------------------------------------------------------------------
 
 describe('caseHandler.compile', () => {
-	const ctx = { naming: preserveNaming, rootTable: 'tbl', maxRecursiveDepth: 10 };
+	const ctx = {
+		naming: preserveNaming,
+		rootTable: 'tbl',
+		maxRecursiveDepth: 10,
+	};
 
 	it('throws when conditions is empty array', () => {
 		expect(() =>
 			caseHandler.compile(
-				{ type: 'case', conditions: [], column: undefined, value: undefined } as never,
+				{
+					type: 'case',
+					conditions: [],
+					column: undefined,
+					value: undefined,
+				} as never,
 				ctx as never,
 				createCompilerState(),
 			),
@@ -733,7 +967,12 @@ describe('caseHandler.compile', () => {
 	it('throws when conditions is undefined', () => {
 		expect(() =>
 			caseHandler.compile(
-				{ type: 'case', conditions: undefined, column: undefined, value: undefined } as never,
+				{
+					type: 'case',
+					conditions: undefined,
+					column: undefined,
+					value: undefined,
+				} as never,
 				ctx as never,
 				createCompilerState(),
 			),
@@ -746,7 +985,11 @@ describe('caseHandler.compile', () => {
 });
 
 describe('simpleCaseHandler.compile', () => {
-	const ctx = { naming: preserveNaming, rootTable: 'tbl', maxRecursiveDepth: 10 };
+	const ctx = {
+		naming: preserveNaming,
+		rootTable: 'tbl',
+		maxRecursiveDepth: 10,
+	};
 
 	it('throws when column is missing', () => {
 		expect(() =>
@@ -754,6 +997,7 @@ describe('simpleCaseHandler.compile', () => {
 				{
 					type: 'simpleCase',
 					column: undefined,
+					// biome-ignore lint/suspicious/noThenProperty: testing CASE expression data structure (not a Promise)
 					conditions: [{ when: { value: 1 }, then: 'x' }],
 					value: undefined,
 				} as never,
@@ -766,7 +1010,12 @@ describe('simpleCaseHandler.compile', () => {
 	it('throws when conditions is empty', () => {
 		expect(() =>
 			simpleCaseHandler.compile(
-				{ type: 'simpleCase', column: 'status', conditions: [], value: undefined } as never,
+				{
+					type: 'simpleCase',
+					column: 'status',
+					conditions: [],
+					value: undefined,
+				} as never,
 				ctx as never,
 				createCompilerState(),
 			),
@@ -778,13 +1027,15 @@ describe('simpleCaseHandler.compile', () => {
 			{
 				type: 'simpleCase',
 				column: 'status',
+				// biome-ignore lint/suspicious/noThenProperty: testing CASE expression data structure (not a Promise)
 				conditions: [{ when: { value: 'active' }, then: 'Active' }],
 				value: undefined,
 			} as never,
 			ctx as never,
 			createCompilerState(),
 		);
-		const ce = (node as { CaseExpr: { defresult?: unknown; arg: unknown } }).CaseExpr;
+		const ce = (node as { CaseExpr: { defresult?: unknown; arg: unknown } })
+			.CaseExpr;
 		expect(ce.defresult).toBeUndefined();
 		expect(ce.arg).toBeDefined();
 	});
@@ -794,13 +1045,16 @@ describe('simpleCaseHandler.compile', () => {
 			{
 				type: 'simpleCase',
 				column: 'status',
+				// biome-ignore lint/suspicious/noThenProperty: testing CASE expression data structure (not a Promise)
 				conditions: [{ when: { value: 'active' }, then: 'Active' }],
 				value: 'Unknown',
 			} as never,
 			ctx as never,
 			createCompilerState(),
 		);
-		expect((node as { CaseExpr: { defresult?: unknown } }).CaseExpr.defresult).toBeDefined();
+		expect(
+			(node as { CaseExpr: { defresult?: unknown } }).CaseExpr.defresult,
+		).toBeDefined();
 	});
 });
 
@@ -810,15 +1064,25 @@ describe('simpleCaseHandler.compile', () => {
 
 describe('buildPathColumn', () => {
 	it('ResTarget __path with ARRAY[pk::text]', () => {
-		const rt = (buildPathColumn('a', 'id') as { ResTarget: { name: string; val: unknown } }).ResTarget;
+		const rt = (
+			buildPathColumn('a', 'id') as {
+				ResTarget: { name: string; val: unknown };
+			}
+		).ResTarget;
 		expect(rt.name).toBe('__path');
-		expect(rt.val).toMatchObject({ A_ArrayExpr: { elements: expect.any(Array) } });
+		expect(rt.val).toMatchObject({
+			A_ArrayExpr: { elements: expect.any(Array) },
+		});
 	});
 });
 
 describe('appendPathColumn', () => {
 	it('ResTarget __path with || A_Expr', () => {
-		const rt = (appendPathColumn('cte', 'inner', 'id') as { ResTarget: { name: string; val: unknown } }).ResTarget;
+		const rt = (
+			appendPathColumn('cte', 'inner', 'id') as {
+				ResTarget: { name: string; val: unknown };
+			}
+		).ResTarget;
 		expect(rt.name).toBe('__path');
 		expect(rt.val).toMatchObject({ A_Expr: expect.any(Object) });
 	});
@@ -826,9 +1090,15 @@ describe('appendPathColumn', () => {
 
 describe('buildJsonPathColumn', () => {
 	it('ResTarget __json_path with json_agg', () => {
-		const rt = (buildJsonPathColumn('t', 'id') as { ResTarget: { name: string; val: unknown } }).ResTarget;
+		const rt = (
+			buildJsonPathColumn('t', 'id') as {
+				ResTarget: { name: string; val: unknown };
+			}
+		).ResTarget;
 		expect(rt.name).toBe('__json_path');
-		expect(rt.val).toMatchObject({ FuncCall: { funcname: [{ String: { sval: 'json_agg' } }] } });
+		expect(rt.val).toMatchObject({
+			FuncCall: { funcname: [{ String: { sval: 'json_agg' } }] },
+		});
 	});
 
 	it('uses custom depthColumn in ORDER BY', () => {
@@ -836,27 +1106,48 @@ describe('buildJsonPathColumn', () => {
 			buildJsonPathColumn('t', 'id', 'level') as {
 				ResTarget: {
 					val: {
-						FuncCall: { agg_order: { SortBy: { node: { ColumnRef: { fields: { String: { sval: string } }[] } } } }[] };
+						FuncCall: {
+							agg_order: {
+								SortBy: {
+									node: {
+										ColumnRef: { fields: { String: { sval: string } }[] };
+									};
+								};
+							}[];
+						};
 					};
 				};
 			}
 		).ResTarget;
-		expect(rt.val.FuncCall.agg_order[0]!.SortBy.node.ColumnRef.fields[1]!.String.sval).toBe('level');
+		expect(
+			rt.val.FuncCall.agg_order[0]!.SortBy.node.ColumnRef.fields[1]!.String
+				.sval,
+		).toBe('level');
 	});
 });
 
 describe('buildPathString', () => {
 	it('ResTarget __path_string with default separator /', () => {
-		const rt = (buildPathString('cte') as { ResTarget: { name: string; val: unknown } }).ResTarget;
+		const rt = (
+			buildPathString('cte') as { ResTarget: { name: string; val: unknown } }
+		).ResTarget;
 		expect(rt.name).toBe('__path_string');
-		const args = (rt.val as { FuncCall: { args: { A_Const: { sval: { sval: string } } }[] } }).FuncCall.args;
+		const args = (
+			rt.val as {
+				FuncCall: { args: { A_Const: { sval: { sval: string } } }[] };
+			}
+		).FuncCall.args;
 		expect(args[1]!.A_Const.sval.sval).toBe('/');
 	});
 
 	it('respects custom separator', () => {
 		const rt = (
 			buildPathString('cte', ' > ') as {
-				ResTarget: { val: { FuncCall: { args: { A_Const: { sval: { sval: string } } }[] } } };
+				ResTarget: {
+					val: {
+						FuncCall: { args: { A_Const: { sval: { sval: string } } }[] };
+					};
+				};
 			}
 		).ResTarget;
 		expect(rt.val.FuncCall.args[1]!.A_Const.sval.sval).toBe(' > ');
@@ -871,7 +1162,10 @@ describe('compileCteQuery — CTE kind branches', () => {
 	it('throws for unsupported CTE kind', () => {
 		expect(() =>
 			compileCteQuery(
-				{ ctes: [{ kind: 'unknownCte', name: 'x' }], query: { from: 'users', select: [] } } as never,
+				{
+					ctes: [{ kind: 'unknownCte', name: 'x' }],
+					query: { from: 'users', select: [] },
+				} as never,
 				undefined,
 				defaultDeps,
 			),
@@ -881,7 +1175,13 @@ describe('compileCteQuery — CTE kind branches', () => {
 	it('simpleCte — emits WITH "name" AS (...)', () => {
 		const r = compileCteQuery(
 			{
-				ctes: [{ kind: 'simpleCte', name: 'cte_users', query: { from: 'users', select: [] } }],
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'cte_users',
+						query: { from: 'users', select: [] },
+					},
+				],
 				query: { from: 'users', select: [] },
 			} as never,
 			undefined,
@@ -893,7 +1193,13 @@ describe('compileCteQuery — CTE kind branches', () => {
 	it('simpleCte — does NOT produce WITH RECURSIVE', () => {
 		const r = compileCteQuery(
 			{
-				ctes: [{ kind: 'simpleCte', name: 'sub', query: { from: 'users', select: [] } }],
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'sub',
+						query: { from: 'users', select: [] },
+					},
+				],
 				query: { from: 'users', select: [] },
 			} as never,
 			undefined,
@@ -967,7 +1273,11 @@ describe('compileCteQuery — CTE kind branches', () => {
 	});
 
 	it('empty CTE list — outer query emitted without WITH prefix', () => {
-		const r = compileCteQuery({ ctes: [], query: { from: 'users', select: [] } } as never, undefined, defaultDeps);
+		const r = compileCteQuery(
+			{ ctes: [], query: { from: 'users', select: [] } } as never,
+			undefined,
+			defaultDeps,
+		);
 		expect(r.sql).not.toMatch(/^WITH/);
 	});
 });
@@ -986,8 +1296,8 @@ describe('compileRecursive — unsupported traversal', () => {
 				start: { nodeIdExpr: { kind: 'column', name: 'id' }, select: [] },
 			},
 		} as never;
-		expect(() => compileRecursive(report, {} as never, undefined, defaultDeps)).toThrow(
-			"Unsupported traversal kind 'custom'",
-		);
+		expect(() =>
+			compileRecursive(report, {} as never, undefined, defaultDeps),
+		).toThrow("Unsupported traversal kind 'custom'");
 	});
 });

@@ -72,9 +72,9 @@ describe('executeDdl', () => {
 
 		const pool = createMockPool(client);
 
-		await expect(
-			executeDdl(pool as never, ['INVALID SQL']),
-		).rejects.toThrow('syntax error');
+		await expect(executeDdl(pool as never, ['INVALID SQL'])).rejects.toThrow(
+			'syntax error',
+		);
 
 		expect(client.query).toHaveBeenCalledWith('BEGIN');
 		expect(client.query).toHaveBeenCalledWith('ROLLBACK');

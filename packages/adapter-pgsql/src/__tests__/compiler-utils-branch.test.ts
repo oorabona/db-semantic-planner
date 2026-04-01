@@ -37,11 +37,15 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 	});
 
 	it('maps DATETIME → timestamptz[]', () => {
-		expect(inferPgArrayType('created_at', { created_at: 'datetime' })).toBe('timestamptz[]');
+		expect(inferPgArrayType('created_at', { created_at: 'datetime' })).toBe(
+			'timestamptz[]',
+		);
 	});
 
 	it('maps TIME → time[]', () => {
-		expect(inferPgArrayType('start_time', { start_time: 'time' })).toBe('time[]');
+		expect(inferPgArrayType('start_time', { start_time: 'time' })).toBe(
+			'time[]',
+		);
 	});
 
 	it('maps INTEGER → int4[]', () => {
@@ -89,7 +93,9 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 	});
 
 	it('maps DOUBLE PRECISION → float8[]', () => {
-		expect(inferPgArrayType('val', { val: 'DOUBLE PRECISION' })).toBe('float8[]');
+		expect(inferPgArrayType('val', { val: 'DOUBLE PRECISION' })).toBe(
+			'float8[]',
+		);
 	});
 
 	it('maps FLOAT8 → float8[]', () => {
@@ -121,7 +127,9 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 	});
 
 	it('maps CHARACTER VARYING → text[]', () => {
-		expect(inferPgArrayType('txt', { txt: 'CHARACTER VARYING' })).toBe('text[]');
+		expect(inferPgArrayType('txt', { txt: 'CHARACTER VARYING' })).toBe(
+			'text[]',
+		);
 	});
 
 	it('maps BOOLEAN → bool[]', () => {
@@ -153,7 +161,9 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 	});
 
 	it('maps TIMESTAMP WITH TIME ZONE → timestamptz[]', () => {
-		expect(inferPgArrayType('ts', { ts: 'TIMESTAMP WITH TIME ZONE' })).toBe('timestamptz[]');
+		expect(inferPgArrayType('ts', { ts: 'TIMESTAMP WITH TIME ZONE' })).toBe(
+			'timestamptz[]',
+		);
 	});
 
 	it('maps DATE → date[]', () => {
@@ -165,7 +175,9 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 	});
 
 	it('maps NUMERIC(10,2) — strips precision/scale → float8[]', () => {
-		expect(inferPgArrayType('amount', { amount: 'NUMERIC(10,2)' })).toBe('float8[]');
+		expect(inferPgArrayType('amount', { amount: 'NUMERIC(10,2)' })).toBe(
+			'float8[]',
+		);
 	});
 
 	it('passes through unknown type (custom, lowercased)', () => {
@@ -208,7 +220,9 @@ describe('inferPgArrayType: runtime fallback (no columnTypes)', () => {
 	});
 
 	it('object sample → jsonb[]', () => {
-		expect(inferPgArrayType('data', undefined, { key: 'value' })).toBe('jsonb[]');
+		expect(inferPgArrayType('data', undefined, { key: 'value' })).toBe(
+			'jsonb[]',
+		);
 	});
 
 	it('null sample → text[] fallback', () => {

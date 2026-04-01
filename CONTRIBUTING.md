@@ -1,202 +1,261 @@
 # Contributing to db-semantic-planner
 
-Thank you for considering contributing to db-semantic-planner! This document outlines the process for contributing to the project.
+Thank you for your interest in contributing! This guide covers everything you need to get started, from setting up the project locally to getting your pull request merged.
 
 ## Table of Contents
 
 - [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Project Structure](#project-structure)
-- [Making Changes](#making-changes)
+- [First-time setup](#first-time-setup)
+- [Project structure](#project-structure)
+- [Making changes](#making-changes)
 - [Testing](#testing)
-- [Code Style](#code-style)
-- [Pull Request Process](#pull-request-process)
+- [Code style](#code-style)
+- [Pull request process](#pull-request-process)
 
 ## Code of Conduct
 
-This project follows a standard code of conduct. Please be respectful and constructive in all interactions.
+This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). Please read it before participating. Be respectful and constructive in all interactions.
 
-## Getting Started
-
-1. Fork the repository
-2. Clone your fork: `git clone https://github.com/YOUR_USERNAME/db-semantic-planner.git`
-3. Add upstream remote: `git remote add upstream https://github.com/your-org/db-semantic-planner.git`
-
-## Development Setup
+## First-time setup
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 9+
-- Docker or Podman (for E2E tests)
+- Node.js 20 or later
+- pnpm 9 or later (`npm install -g pnpm`)
+- Docker or Podman (only required for E2E tests that run against a real PostgreSQL instance)
 
-### Installation
+### Fork and clone
 
 ```bash
-# Install dependencies
-pnpm install
+# Fork the repo on GitHub, then clone your fork
+git clone https://github.com/YOUR_USERNAME/db-semantic-planner.git
+cd db-semantic-planner
 
-# Build all packages
-pnpm build
-
-# Run tests
-pnpm test
+# Add the upstream remote so you can pull future updates
+git remote add upstream https://github.com/your-org/db-semantic-planner.git
 ```
 
-## Project Structure
+### Install dependencies and build
+
+```bash
+# Install all workspace dependencies
+pnpm install
+
+# Build packages in the correct order (core first, then adapter-pgsql)
+pnpm build
+```
+
+> **Why build first?** Unit tests import source directly and do not need a build. However, E2E tests and the CLI import from compiled `dist/` directories. Skipping the build causes "module has no exported member" errors in those cases.
+
+### Verify everything works
+
+```bash
+# Run unit tests across all packages
+pnpm test:unit
+
+# Run type checking
+pnpm typecheck
+
+# Run linter
+pnpm lint
+```
+
+## Project structure
 
 ```
 packages/
-  core/           → Schema DSL, DX layer, Planner (DB-agnostic)
-  adapter-kysely/ → SQL Compiler, Kysely Engine
-  cli/            → dbsp CLI (generate, verify, repl)
-  mcp-server/     → MCP Server for AI assistants
+  types/          Shared TypeScript contracts (Adapter, ModelIR, IntentAST, PlanReport)
+  core/           Schema DSL, query builders, planner — fully DB-agnostic
+  adapter-pgsql/  PostgreSQL adapter: SQL compiler + direct pg Pool execution
+  nql/            Natural query language parser (Chevrotain) -> IntentAST
+  cli/            dbsp CLI (generate, verify, repl)
+  mcp-server/     MCP server for editor integrations
+  gui/            Desktop GUI (Tauri + React)
 docs/
-  specs/          → Implementation specifications
-  plans/          → Design documents
-  adrs/           → Architecture Decision Records
+  guides/         How-to guides for specific features
+  specs/          Feature specifications
 ```
 
-### Architecture Rules (STRICT)
+### Architecture rule (strict)
 
-| Package | May Import | Must NOT Import |
-|---------|------------|-----------------|
-| `packages/core` | Nothing | `adapter-kysely` |
-| `packages/adapter-kysely` | `core` | - |
+`packages/core` must remain **DB-agnostic**. It may not import anything from `packages/adapter-pgsql` or any other adapter. The dependency flows one way:
 
-**Core must remain DB-agnostic.** Never add SQL or Kysely imports to core.
+```
+types  <--  core  <--  adapter-pgsql  <--  cli
+```
 
-## Making Changes
+If you are unsure whether a change belongs in `core` or `adapter-pgsql`, put the interface in `core` and the implementation in `adapter-pgsql`.
 
-### Branch Naming
+## Making changes
 
-- `feat/description` - New features
-- `fix/description` - Bug fixes
-- `refactor/description` - Code refactoring
-- `docs/description` - Documentation only
-- `test/description` - Test additions/fixes
+### Branching
 
-### Commit Messages
+Create a branch from `main` before making any changes:
+
+```bash
+git checkout -b feat/my-feature
+```
+
+Prefix conventions:
+
+| Prefix | When to use |
+|--------|-------------|
+| `feat/` | New feature |
+| `fix/` | Bug fix |
+| `refactor/` | Refactoring without behavior change |
+| `docs/` | Documentation only |
+| `test/` | Test additions or fixes |
+
+### Commit messages
 
 Follow [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-<type>(<scope>): <description>
+<type>(<scope>): <short description>
 
-[optional body]
+[optional body explaining why, not what]
 
-[optional footer]
+[optional footer: breaking changes, issue refs]
 ```
 
-**Types:** `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
+Types: `feat`, `fix`, `refactor`, `docs`, `test`, `chore`, `perf`
 
-**Scopes:** `core`, `adapter`, `cli`, `mcp-server`, `docs`, `e2e`
+Scopes: `core`, `adapter`, `cli`, `nql`, `mcp-server`, `gui`, `docs`, `e2e`
 
-**Examples:**
+Examples:
+
 ```
-feat(core): add recursive CTE support
+feat(core): add recursive CTE builder
 fix(adapter): handle NULL in COALESCE expressions
-refactor(core,adapter): clarify ambiguous function names
-docs(specs): add STREAMING-001 cursor support spec
+refactor(core): extract filter helpers to shared module
+docs(guides): add how-to guide for RLS policies
+test(adapter): add golden tests for DISTINCT ON queries
+```
+
+### Rebuilding after source changes
+
+Whenever you modify source files, rebuild the affected package before running E2E tests or the CLI:
+
+```bash
+# Modified packages/core/src/?
+pnpm -C packages/core build
+
+# Modified packages/adapter-pgsql/src/?
+pnpm -C packages/adapter-pgsql build
+
+# Modified both? Build in order:
+pnpm -C packages/core build && pnpm -C packages/adapter-pgsql build
 ```
 
 ## Testing
 
-### Running Tests
+### Running tests
 
 ```bash
-# All tests
-pnpm test
+# Unit tests only (fast, no database required)
+pnpm test:unit
 
-# Specific package
-pnpm --filter @dbsp/core test
-
-# E2E tests (requires Docker/Podman)
+# E2E tests (requires Docker or Podman — starts a real PostgreSQL container)
 pnpm test:e2e
 
-# Watch mode
-pnpm test -- --watch
+# Both (equivalent to pnpm test)
+pnpm test
+
+# Single package
+pnpm --filter @dbsp/core test
+
+# Watch mode during development
+pnpm --filter @dbsp/core test -- --watch
 ```
 
-### Test Requirements
+### E2E test prerequisites
 
-- **Unit tests:** Required for all new features
-- **Golden tests:** Required for query behavior changes
-- **E2E tests:** Required for new SQL generation patterns
+E2E tests use [Testcontainers](https://testcontainers.com/) to spin up a real PostgreSQL instance. You need Docker or Podman running. On WSL2 with Podman, set:
 
-### Test Locations
+```bash
+export TESTCONTAINERS_RYUK_DISABLED=true
+```
 
-| Package | Unit Tests | Integration Tests |
-|---------|------------|-------------------|
-| core | `packages/core/src/**/*.test.ts` | - |
-| adapter | `packages/adapter-kysely/src/**/*.test.ts` | `packages/adapter-kysely/e2e/` |
-| cli | `packages/cli/src/**/*.test.ts` | `packages/cli/e2e/` |
+### What tests to write
 
-## Code Style
+| Change type | Required tests |
+|-------------|----------------|
+| New query feature | Unit test in the relevant package + golden test for SQL output |
+| Bug fix | Regression test that fails before the fix and passes after |
+| New SQL generation pattern | E2E test against a real PostgreSQL instance |
+| Utility / helper function | Unit test for all branches |
+
+Test files live next to the source they cover (`*.test.ts`). Error-path tests go in a separate `*.errors.test.ts` file.
+
+### SQL assertions
+
+When asserting on generated SQL, always compare the **full SQL string**:
+
+```typescript
+// Correct — catches any unexpected change
+expect(result.sql).toEqual('SELECT "id", "name" FROM "users" WHERE "active" = $1');
+
+// Wrong — only checks a fragment, masks bugs
+expect(result.sql).toContain('"users"');
+```
+
+## Code style
 
 ### TypeScript
 
-- Strict mode enabled
-- Explicit return types for public APIs
-- No `any` without justification
-- Prefer `readonly` for immutable data
+- Strict mode is enabled; the compiler will reject unsafe patterns
+- Explicit return types for all public API functions
+- No `any` without a comment explaining why it is unavoidable
+- Prefer `readonly` for data that should not be mutated after creation
+- Use `type` for simple type aliases; use `interface` only when declaration merging is needed
 
-### Formatting
+### Formatting and linting
+
+The project uses [Biome](https://biomejs.dev/) for both formatting and linting.
 
 ```bash
-# Check formatting
-pnpm biome check
+# Check (no changes written)
+pnpm lint
 
-# Auto-fix
-pnpm biome check --write
+# Auto-fix everything
+pnpm lint:fix
 ```
 
-### Principles
+Biome is configured in `biome.json` at the project root. Do not bypass its rules with inline disables without a clear comment.
 
-- **SOLID:** Single responsibility, open/closed, etc.
-- **DRY:** Don't repeat yourself
-- **KISS:** Keep it simple
+### Adapter code rules
 
-### Adapter Code Rules
+The PostgreSQL adapter compiles the query plan AST into parameterized SQL. When contributing to `packages/adapter-pgsql`:
 
-**Never use raw SQL templates in adapter code.** Use Kysely's expression builder:
+- All user-supplied values must go through positional parameters (`$1`, `$2`, ...) — never interpolated into the SQL string
+- All identifiers (table names, column names, schema names) must be double-quoted
+- Do not build SQL by string concatenation; extend the AST compiler instead
 
-```typescript
-// DON'T
-sql`COALESCE(${col}, ${default})`
+## Pull request process
 
-// DO
-eb.fn('coalesce', [eb.ref(col), eb.lit(default)])
-```
+1. Make sure all checks pass locally before opening a PR:
 
-## Pull Request Process
+   ```bash
+   pnpm test:unit && pnpm lint && pnpm typecheck
+   ```
 
-1. **Update tests:** Add/update tests for your changes
-2. **Run CI locally:** `pnpm test && pnpm biome check`
-3. **Update docs:** If applicable, update relevant documentation
-4. **Create PR:** Use the PR template
-5. **Address feedback:** Respond to review comments
+2. Open the pull request against the `main` branch with a clear title and description. Explain **what** changed and **why**.
 
-### PR Checklist
+3. Fill in the PR checklist:
 
-- [ ] Tests added/updated and passing
-- [ ] Lint/format passes (`pnpm biome check`)
-- [ ] TypeScript compiles without errors
-- [ ] Documentation updated (if applicable)
-- [ ] CHANGELOG.md updated (for user-facing changes)
-- [ ] Commit messages follow convention
+   - [ ] Unit tests added or updated and passing
+   - [ ] `pnpm lint` passes with no errors
+   - [ ] `pnpm typecheck` passes with no errors
+   - [ ] Documentation updated if the change affects public API or behavior
+   - [ ] Commit messages follow the Conventional Commits convention
 
-### Review Process
+4. Respond to review comments. If you disagree with a suggestion, explain your reasoning — discussion is welcome.
 
-1. Automated checks must pass
-2. At least one maintainer approval required
-3. All conversations resolved
-4. Squash merge preferred for clean history
+5. Once approved, a maintainer will squash-merge your branch into `main`.
 
-## Questions?
+## Questions and discussions
 
-- Open an issue for bugs or feature requests
-- Start a discussion for questions or ideas
+- **Bug reports and feature requests:** Open an [issue](../../issues)
+- **Questions and ideas:** Start a [discussion](../../discussions)
 
 Thank you for contributing!

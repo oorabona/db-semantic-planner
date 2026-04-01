@@ -38,11 +38,17 @@ function makeQueryCtx(overrides?: Partial<QueryHookContext>): QueryHookContext {
 	};
 }
 
-function makeMutationCtx(overrides?: Partial<MutationHookContext>): MutationHookContext {
+function makeMutationCtx(
+	overrides?: Partial<MutationHookContext>,
+): MutationHookContext {
 	return {
 		table: 'users',
 		operation: 'insert',
-		intent: { type: 'insert', into: 'users', values: [] } as unknown as MutationIntent,
+		intent: {
+			type: 'insert',
+			into: 'users',
+			values: [],
+		} as unknown as MutationIntent,
 		cardinality: 'bulk',
 		...overrides,
 	};
@@ -91,7 +97,7 @@ describe('composeBeforeQueryHooks — undefined return path', () => {
 
 describe('composeAfterQueryHooks — undefined return path', () => {
 	it('preserves current result when hook returns undefined', async () => {
-		const h1: AfterQueryHook = (_ctx, r) => String(r) + '-h1';
+		const h1: AfterQueryHook = (_ctx, r) => `${String(r)}-h1`;
 		const h2: AfterQueryHook = () => undefined; // uncovered: result = undefined
 		// Compose: h2 runs first, h1 runs second
 		const composed = composeAfterQueryHooks(h1, h2);
@@ -118,7 +124,9 @@ describe('composeBeforeMutationHooks — undefined return path', () => {
 			return undefined; // uncovered path
 		};
 		const composed = composeBeforeMutationHooks(h1, h2);
-		const result = await composed(makeMutationCtx({ correlationId: 'mut-orig' }));
+		const result = await composed(
+			makeMutationCtx({ correlationId: 'mut-orig' }),
+		);
 		expect(visited).toEqual(['h2-undefined', 'h1:mut-orig']);
 		expect(result.correlationId).toBe('mut-orig');
 	});
@@ -130,7 +138,10 @@ describe('composeBeforeMutationHooks — undefined return path', () => {
 
 describe('composeAfterMutationHooks — undefined return path', () => {
 	it('preserves current rows when hook returns undefined', async () => {
-		const h1: AfterMutationHook = (_ctx, rows) => [...(rows as unknown[]), 'h1'];
+		const h1: AfterMutationHook = (_ctx, rows) => [
+			...(rows as unknown[]),
+			'h1',
+		];
 		const h2: AfterMutationHook = () => undefined; // uncovered path
 		// Compose: h2 runs first, h1 runs second
 		const composed = composeAfterMutationHooks(h1, h2);

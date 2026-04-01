@@ -56,7 +56,10 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 	}));
 	const executeSpy = vi.fn(() => Promise.resolve(executeResult));
 	const createDumpSpy = vi.fn(
-		(_plan: unknown, compiled: { sql: string; parameters: readonly unknown[] }) =>
+		(
+			_plan: unknown,
+			compiled: { sql: string; parameters: readonly unknown[] },
+		) =>
 			({
 				sql: compiled.sql,
 				params: compiled.parameters,
@@ -106,7 +109,12 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 	it('single where → intent.where is the single condition (not AND-wrapped)', () => {
 		const report = orm
 			.select('users')
-			.where({ kind: 'comparison', field: 'active', operator: 'eq', value: true })
+			.where({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			})
 			.plan();
 		expect(report.intent.where).toBeDefined();
 		expect((report.intent.where as { kind: string }).kind).toBe('comparison');
@@ -115,8 +123,18 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 	it('multiple where → intent.where is AND-wrapped', () => {
 		const report = orm
 			.select('users')
-			.where({ kind: 'comparison', field: 'active', operator: 'eq', value: true })
-			.where({ kind: 'comparison', field: 'name', operator: 'eq', value: 'Alice' })
+			.where({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			})
+			.where({
+				kind: 'comparison',
+				field: 'name',
+				operator: 'eq',
+				value: 'Alice',
+			})
 			.plan();
 		expect((report.intent.where as { kind: string }).kind).toBe('and');
 	});
@@ -131,7 +149,12 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 			.select('users')
 			.count('id')
 			.groupBy(['active'])
-			.having({ kind: 'comparison', field: 'active', operator: 'eq', value: true })
+			.having({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			})
 			.plan();
 		expect(report.intent.having).toBeDefined();
 		expect((report.intent.having as { kind: string }).kind).toBe('comparison');
@@ -142,7 +165,12 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 			.select('users')
 			.count('id')
 			.groupBy(['active'])
-			.having({ kind: 'comparison', field: 'active', operator: 'eq', value: true })
+			.having({
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			})
 			.having({ kind: 'comparison', field: 'name', operator: 'eq', value: 'x' })
 			.plan();
 		expect((report.intent.having as { kind: string }).kind).toBe('and');
@@ -169,13 +197,17 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 	});
 
 	it('lock + groupBy → throws InvalidOperationError', () => {
-		expect(() => orm.select('users').groupBy(['active']).lock('update').plan()).toThrow(InvalidOperationError);
+		expect(() =>
+			orm.select('users').groupBy(['active']).lock('update').plan(),
+		).toThrow(InvalidOperationError);
 	});
 
 	it('lock without groupBy → intent.lock is set', () => {
 		const report = orm.select('users').lock('update').plan();
 		expect(report.intent.lock).toBeDefined();
-		expect((report.intent.lock as { strength: string }).strength).toBe('update');
+		expect((report.intent.lock as { strength: string }).strength).toBe(
+			'update',
+		);
 	});
 
 	it('batchValuesSource → intent.batchValuesSource is set', () => {
@@ -196,8 +228,12 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 			columns: ['id'],
 			values: [],
 		};
-		const intent = (builder as unknown as { buildIntent: () => unknown }).buildIntent();
-		expect((intent as { batchValuesSource?: unknown }).batchValuesSource).toBeDefined();
+		const intent = (
+			builder as unknown as { buildIntent: () => unknown }
+		).buildIntent();
+		expect(
+			(intent as { batchValuesSource?: unknown }).batchValuesSource,
+		).toBeDefined();
 	});
 
 	it('no aggregates, with selectIntent → intent.select is from selectIntent', () => {
@@ -228,14 +264,20 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 	});
 
 	it('orderBy(ExpressionRef, "asc", { nulls: "last" }) → includes nulls', () => {
-		const report = orm.select('users').orderBy(exprRef('name'), 'asc', { nulls: 'last' }).plan();
+		const report = orm
+			.select('users')
+			.orderBy(exprRef('name'), 'asc', { nulls: 'last' })
+			.plan();
 		const ob = report.intent.orderBy?.[0] as { nulls?: string };
 		expect(ob?.nulls).toBe('last');
 	});
 
 	it('orderBy("field") → string form, asc by default', () => {
 		const report = orm.select('users').orderBy('name').plan();
-		const ob = report.intent.orderBy?.[0] as { field?: string; direction?: string };
+		const ob = report.intent.orderBy?.[0] as {
+			field?: string;
+			direction?: string;
+		};
 		expect(ob?.field).toBe('name');
 		expect(ob?.direction).toBe('asc');
 	});
@@ -247,7 +289,10 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 	});
 
 	it('orderBy("field", "asc", { nulls: "first" }) → nulls:first', () => {
-		const report = orm.select('users').orderBy('name', 'asc', { nulls: 'first' }).plan();
+		const report = orm
+			.select('users')
+			.orderBy('name', 'asc', { nulls: 'first' })
+			.plan();
 		const ob = report.intent.orderBy?.[0] as { nulls?: string };
 		expect(ob?.nulls).toBe('first');
 	});
@@ -261,8 +306,14 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 			])
 			.plan();
 		expect(report.intent.orderBy?.length).toBe(2);
-		const first = report.intent.orderBy?.[0] as { field?: string; direction?: string };
-		const second = report.intent.orderBy?.[1] as { field?: string; nulls?: string };
+		const first = report.intent.orderBy?.[0] as {
+			field?: string;
+			direction?: string;
+		};
+		const second = report.intent.orderBy?.[1] as {
+			field?: string;
+			nulls?: string;
+		};
 		expect(first?.field).toBe('name');
 		expect(first?.direction).toBe('desc');
 		expect(second?.field).toBe('id');
@@ -280,7 +331,10 @@ describe('QueryBuilderImpl.orderBy branches', () => {
 	});
 
 	it('orderBy(object record) → multiple intents from entries', () => {
-		const report = orm.select('users').orderBy({ name: 'desc', id: 'asc' }).plan();
+		const report = orm
+			.select('users')
+			.orderBy({ name: 'desc', id: 'asc' })
+			.plan();
 		expect(report.intent.orderBy?.length).toBe(2);
 	});
 
@@ -344,36 +398,46 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 	it('throws InvalidOperationError when limit < 1', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		await expect(o.select('users').orderBy('id').cursorPaginate({ limit: 0 })).rejects.toThrow(InvalidOperationError);
+		await expect(
+			o.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('throws when orderBy is missing', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		await expect(o.select('users').cursorPaginate({ limit: 5 })).rejects.toThrow(/orderBy clause/);
+		await expect(
+			o.select('users').cursorPaginate({ limit: 5 }),
+		).rejects.toThrow(/orderBy clause/);
 	});
 
 	it('throws InvalidOperationError for invalid cursor format', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		await expect(o.select('users').orderBy('id').cursorPaginate({ cursor: '!!!invalid!!!' })).rejects.toThrow(
-			InvalidOperationError,
-		);
+		await expect(
+			o
+				.select('users')
+				.orderBy('id')
+				.cursorPaginate({ cursor: '!!!invalid!!!' }),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('throws for valid base64 but non-JSON cursor', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
 		const badCursor = Buffer.from('not json').toString('base64');
-		await expect(o.select('users').orderBy('id').cursorPaginate({ cursor: badCursor })).rejects.toThrow(
-			InvalidOperationError,
-		);
+		await expect(
+			o.select('users').orderBy('id').cursorPaginate({ cursor: badCursor }),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('no cursor → hasNextPage=false, prevCursor=null when no data', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').orderBy('id').cursorPaginate({ limit: 5 });
+		const result = await o
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5 });
 		expect(result.hasNextPage).toBe(false);
 		expect(result.hasPrevPage).toBe(false);
 		expect(result.nextCursor).toBeNull();
@@ -382,10 +446,16 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 
 	it('forward: hasMore=true → nextCursor set, data trimmed to limit', async () => {
 		// Return limit+1 items to trigger hasMore=true
-		const rows = Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `u${i}` }));
+		const rows = Array.from({ length: 6 }, (_, i) => ({
+			id: i + 1,
+			name: `u${i}`,
+		}));
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').orderBy('id').cursorPaginate({ limit: 5 });
+		const result = await o
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5 });
 		expect(result.data.length).toBe(5);
 		expect(result.hasNextPage).toBe(true);
 		expect(result.nextCursor).not.toBeNull();
@@ -398,7 +468,10 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		];
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').orderBy('id').cursorPaginate({ limit: 5 });
+		const result = await o
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5 });
 		expect(result.hasNextPage).toBe(false);
 		expect(result.nextCursor).toBeNull();
 	});
@@ -408,16 +481,25 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 2 })).toString('base64');
-		const result = await o.select('users').orderBy('id').cursorPaginate({ limit: 5, cursor });
+		const result = await o
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5, cursor });
 		expect(result.hasPrevPage).toBe(true);
 	});
 
 	it('backward direction: hasPrevPage reflects hasMore', async () => {
-		const rows = Array.from({ length: 6 }, (_, i) => ({ id: i + 1, name: `u${i}` }));
+		const rows = Array.from({ length: 6 }, (_, i) => ({
+			id: i + 1,
+			name: `u${i}`,
+		}));
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 5 })).toString('base64');
-		const result = await o.select('users').orderBy('id').cursorPaginate({ limit: 5, direction: 'backward', cursor });
+		const result = await o
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5, direction: 'backward', cursor });
 		expect(result.hasPrevPage).toBe(true); // hasMore=true in backward direction
 	});
 
@@ -444,7 +526,10 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 3 })).toString('base64');
-		await o.select('users').orderBy('id', 'desc').cursorPaginate({ limit: 5, cursor });
+		await o
+			.select('users')
+			.orderBy('id', 'desc')
+			.cursorPaginate({ limit: 5, cursor });
 		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { operator?: string } };
 		};
@@ -457,7 +542,10 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		const cursor = Buffer.from(JSON.stringify({ id: 3 })).toString('base64');
-		await o.select('users').orderBy('id', 'asc').cursorPaginate({ limit: 5, direction: 'backward', cursor });
+		await o
+			.select('users')
+			.orderBy('id', 'asc')
+			.cursorPaginate({ limit: 5, direction: 'backward', cursor });
 		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { operator?: string } };
 		};
@@ -469,8 +557,14 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		const rows = [{ id: 2, name: 'u2' }];
 		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const cursor = Buffer.from(JSON.stringify({ id: 1, name: 'u1' })).toString('base64');
-		await o.select('users').orderBy('name').orderBy('id').cursorPaginate({ limit: 5, cursor });
+		const cursor = Buffer.from(JSON.stringify({ id: 1, name: 'u1' })).toString(
+			'base64',
+		);
+		await o
+			.select('users')
+			.orderBy('name')
+			.orderBy('id')
+			.cursorPaginate({ limit: 5, cursor });
 		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: { kind?: string } };
 		};
@@ -485,7 +579,9 @@ describe('QueryBuilderImpl.cursorPaginate branches', () => {
 		const { adapter, compileWithIncludesSpy } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
 		// Cursor with wrong field
-		const cursor = Buffer.from(JSON.stringify({ email: 'x@y.com' })).toString('base64');
+		const cursor = Buffer.from(JSON.stringify({ email: 'x@y.com' })).toString(
+			'base64',
+		);
 		await o.select('users').orderBy('id').cursorPaginate({ limit: 5, cursor });
 		const planReport = compileWithIncludesSpy.mock.calls[0]?.[0] as {
 			intent?: { where?: unknown };
@@ -503,20 +599,26 @@ describe('QueryBuilderImpl.paginate branches', () => {
 	it('throws InvalidOperationError when page < 1', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		await expect(o.select('users').paginate({ page: 0 })).rejects.toThrow(InvalidOperationError);
+		await expect(o.select('users').paginate({ page: 0 })).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('throws InvalidOperationError when perPage < 1', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		await expect(o.select('users').paginate({ page: 1, perPage: 0 })).rejects.toThrow(InvalidOperationError);
+		await expect(
+			o.select('users').paginate({ page: 1, perPage: 0 }),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('withCount=false → total and totalPages are undefined', async () => {
 		const rows = [{ id: 1, name: 'u1' }];
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').paginate({ page: 1, perPage: 10, withCount: false });
+		const result = await o
+			.select('users')
+			.paginate({ page: 1, perPage: 10, withCount: false });
 		expect(result.pagination.total).toBeUndefined();
 		expect(result.pagination.totalPages).toBeUndefined();
 	});
@@ -529,7 +631,9 @@ describe('QueryBuilderImpl.paginate branches', () => {
 		];
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').paginate({ page: 1, perPage: 2, withCount: false });
+		const result = await o
+			.select('users')
+			.paginate({ page: 1, perPage: 2, withCount: false });
 		expect(result.pagination.hasNextPage).toBe(true);
 	});
 
@@ -537,21 +641,27 @@ describe('QueryBuilderImpl.paginate branches', () => {
 		const rows = [{ id: 1, name: 'u1' }];
 		const { adapter } = createSpyAdapter(rows);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').paginate({ page: 1, perPage: 5, withCount: false });
+		const result = await o
+			.select('users')
+			.paginate({ page: 1, perPage: 5, withCount: false });
 		expect(result.pagination.hasNextPage).toBe(false);
 	});
 
 	it('page=1 → hasPrevPage=false', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').paginate({ page: 1, perPage: 10, withCount: false });
+		const result = await o
+			.select('users')
+			.paginate({ page: 1, perPage: 10, withCount: false });
 		expect(result.pagination.hasPrevPage).toBe(false);
 	});
 
 	it('page=2 → hasPrevPage=true', async () => {
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
-		const result = await o.select('users').paginate({ page: 2, perPage: 10, withCount: false });
+		const result = await o
+			.select('users')
+			.paginate({ page: 2, perPage: 10, withCount: false });
 		expect(result.pagination.hasPrevPage).toBe(true);
 	});
 
@@ -588,7 +698,10 @@ describe('QueryBuilderImpl.paginate branches', () => {
 				return Promise.resolve([{ _count: 50 }]);
 			}),
 			createDump: vi.fn(
-				(_plan: unknown, compiled: { sql: string; parameters: readonly unknown[] }) =>
+				(
+					_plan: unknown,
+					compiled: { sql: string; parameters: readonly unknown[] },
+				) =>
 					({
 						sql: compiled.sql,
 						params: compiled.parameters,

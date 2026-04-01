@@ -1,8 +1,8 @@
 # ORM API Guide
 
-Complete reference for the `@dbsp/core` TypeScript API. Progressive examples from basic queries to advanced features.
+This is the complete reference for the `@dbsp/core` TypeScript API. It covers schema definition, ORM setup, query building, mutations, and observability — with progressive examples from a minimal first query to advanced patterns like set operations, CTEs, and streaming. Use it as your primary reference when building applications with `@dbsp/core`.
 
-**Related guides:** [NQL Reference](./nql-reference.md) | [README](../../README.md) | [CLI Usage](../CLI_USAGE.md)
+**Related guides:** [NQL Reference](./nql-reference.md) | [README](../../README.md)
 
 ---
 

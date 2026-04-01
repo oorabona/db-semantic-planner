@@ -9,7 +9,6 @@ import {
 	assertResolvedSchemaToGeneratedSchema,
 	buildModelFromResolvedSchema,
 	buildModelFromSchema,
-	type GeneratedColumn,
 	type GeneratedSchema,
 	isGeneratedSchema,
 	isResolvedSchema,

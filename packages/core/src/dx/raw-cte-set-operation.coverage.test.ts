@@ -60,13 +60,20 @@ function makeCteAdapter(rows: unknown[] = []) {
 describe('RawCteQueryBuilder.dump()', () => {
 	it('compiles without schemaName (undefined compileOptions path)', () => {
 		const adapter = makeCteAdapter();
-		const builder = new RawCteQueryBuilder('tree', minimalRawCteIntent, adapter as never);
+		const builder = new RawCteQueryBuilder(
+			'tree',
+			minimalRawCteIntent,
+			adapter as never,
+		);
 
 		const dump = builder.dump();
 		expect(dump.sql).toBeTruthy();
 		expect(dump.intent.kind).toBe('cteQuery');
 		// compileOptions should be undefined when no schemaName
-		expect(adapter.compileCteQuery).toHaveBeenCalledWith(expect.objectContaining({ kind: 'cteQuery' }), undefined);
+		expect(adapter.compileCteQuery).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'cteQuery' }),
+			undefined,
+		);
 	});
 
 	it('compiles with schemaName (defined compileOptions path)', () => {
@@ -80,9 +87,12 @@ describe('RawCteQueryBuilder.dump()', () => {
 
 		const dump = builder.dump();
 		expect(dump.sql).toBeTruthy();
-		expect(adapter.compileCteQuery).toHaveBeenCalledWith(expect.objectContaining({ kind: 'cteQuery' }), {
-			schemaName: 'tenant_2',
-		});
+		expect(adapter.compileCteQuery).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: 'cteQuery' }),
+			{
+				schemaName: 'tenant_2',
+			},
+		);
 	});
 });
 
@@ -94,27 +104,45 @@ describe('RawCteQueryBuilder.all()', () => {
 	it('executes without schemaName', async () => {
 		const rows = [{ id: 1 }];
 		const adapter = makeCteAdapter(rows);
-		const builder = new RawCteQueryBuilder('tree', minimalRawCteIntent, adapter as never);
+		const builder = new RawCteQueryBuilder(
+			'tree',
+			minimalRawCteIntent,
+			adapter as never,
+		);
 
 		const result = await builder.all();
 		expect(result).toEqual(rows);
-		expect(adapter.compileCteQuery).toHaveBeenCalledWith(expect.any(Object), undefined);
+		expect(adapter.compileCteQuery).toHaveBeenCalledWith(
+			expect.any(Object),
+			undefined,
+		);
 	});
 
 	it('executes with schemaName', async () => {
 		const rows = [{ id: 2 }];
 		const adapter = makeCteAdapter(rows);
-		const builder = new RawCteQueryBuilder('tree', minimalRawCteIntent, adapter as never, 'ns');
+		const builder = new RawCteQueryBuilder(
+			'tree',
+			minimalRawCteIntent,
+			adapter as never,
+			'ns',
+		);
 
 		const result = await builder.all();
 		expect(result).toEqual(rows);
-		expect(adapter.compileCteQuery).toHaveBeenCalledWith(expect.any(Object), { schemaName: 'ns' });
+		expect(adapter.compileCteQuery).toHaveBeenCalledWith(expect.any(Object), {
+			schemaName: 'ns',
+		});
 	});
 
 	it('execute() is an alias for all()', async () => {
 		const rows = [{ id: 3 }];
 		const adapter = makeCteAdapter(rows);
-		const builder = new RawCteQueryBuilder('tree', minimalRawCteIntent, adapter as never);
+		const builder = new RawCteQueryBuilder(
+			'tree',
+			minimalRawCteIntent,
+			adapter as never,
+		);
 
 		const result = await builder.execute();
 		expect(result).toEqual(rows);
@@ -129,7 +157,10 @@ describe('SetOperationBuilderImpl.dump() — schemaName injection', () => {
 	it('injects schemaName into meta when schemaName set and meta.schema is undefined', () => {
 		// The true branch at L166: dumpResult.meta?.schema === undefined AND schemaName !== undefined
 		// → result has meta.schema = schemaName
-		const compiledQuery = { sql: 'SELECT * FROM "users" UNION SELECT * FROM "users"', parameters: [] };
+		const compiledQuery = {
+			sql: 'SELECT * FROM "users" UNION SELECT * FROM "users"',
+			parameters: [],
+		};
 		const dumpResult = {
 			sql: compiledQuery.sql,
 			params: compiledQuery.parameters,

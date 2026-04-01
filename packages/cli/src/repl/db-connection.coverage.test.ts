@@ -1,5 +1,5 @@
 // @ts-nocheck — coverage test: runtime assertions
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock pg before importing the module under test
 const mockQuery = vi.fn();
@@ -35,9 +35,9 @@ beforeEach(() => {
 describe('createDbConnection', () => {
 	describe('validation', () => {
 		it('rejects non-postgres URL', async () => {
-			await expect(
-				createDbConnection('mysql://localhost/db'),
-			).rejects.toThrow('Invalid connection URL');
+			await expect(createDbConnection('mysql://localhost/db')).rejects.toThrow(
+				'Invalid connection URL',
+			);
 		});
 
 		it('rejects arbitrary string', async () => {
@@ -53,9 +53,7 @@ describe('createDbConnection', () => {
 		});
 
 		it('accepts postgresql:// URL', async () => {
-			const conn = await createDbConnection(
-				'postgresql://localhost/testdb',
-			);
+			const conn = await createDbConnection('postgresql://localhost/testdb');
 			expect(conn).toBeDefined();
 		});
 	});

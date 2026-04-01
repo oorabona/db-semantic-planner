@@ -17,9 +17,9 @@ import { join } from 'node:path';
 import type { ModelIR, RelationIR, TableIR } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { LoadedSchema } from '../utils/schema-loader.js';
+import type { DbConnection } from './db-connection.js';
 import type { BatchState } from './dot-commands.js';
 import { processDotCommand } from './dot-commands.js';
-import type { DbConnection } from './db-connection.js';
 
 // ---------------------------------------------------------------------------
 // Mock schema with tables and relations
@@ -101,8 +101,16 @@ const mockModel: ModelIR = {
 
 const mockSchema: LoadedSchema = {
 	definition: {
-		users: { id: { type: 'integer' }, name: { type: 'text' }, email: { type: 'text' } },
-		posts: { id: { type: 'integer' }, title: { type: 'text' }, authorId: { type: 'integer' } },
+		users: {
+			id: { type: 'integer' },
+			name: { type: 'text' },
+			email: { type: 'text' },
+		},
+		posts: {
+			id: { type: 'integer' },
+			title: { type: 'text' },
+			authorId: { type: 'integer' },
+		},
 	},
 	model: mockModel,
 	tableNames: ['users', 'posts'],
@@ -112,7 +120,9 @@ const mockSchema: LoadedSchema = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createMockDbConnection(overrides?: Partial<DbConnection>): DbConnection {
+function createMockDbConnection(
+	overrides?: Partial<DbConnection>,
+): DbConnection {
 	return {
 		executeRaw: vi.fn().mockResolvedValue({
 			rows: [],
@@ -156,7 +166,11 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('.tables', () => {
 		it('lists all tables with count', async () => {
-			const result = await processDotCommand('.tables', mockSchema, createState());
+			const result = await processDotCommand(
+				'.tables',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Tables (2)');
 			expect(result.output).toContain('users');
 			expect(result.output).toContain('posts');
@@ -168,21 +182,33 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('.schema', () => {
 		it('shows schema summary without argument', async () => {
-			const result = await processDotCommand('.schema', mockSchema, createState());
+			const result = await processDotCommand(
+				'.schema',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Schema Summary');
 			expect(result.output).toContain('Tables: 2');
 			expect(result.output).toContain('Relations: 2');
 		});
 
 		it('shows table schema with argument', async () => {
-			const result = await processDotCommand('.schema users', mockSchema, createState());
+			const result = await processDotCommand(
+				'.schema users',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Table: users');
 			expect(result.output).toContain('id: integer');
 			expect(result.output).toContain('name: text');
 		});
 
 		it('shows NOT NULL annotation for non-nullable columns', async () => {
-			const result = await processDotCommand('.schema users', mockSchema, createState());
+			const result = await processDotCommand(
+				'.schema users',
+				mockSchema,
+				createState(),
+			);
 			// id is not nullable → should have (NOT NULL)
 			expect(result.output).toContain('id: integer (NOT NULL)');
 			// name is nullable → no (NOT NULL)
@@ -190,7 +216,11 @@ describe('processDotCommand — coverage', () => {
 		});
 
 		it('returns error for unknown table', async () => {
-			const result = await processDotCommand('.schema unknown_table', mockSchema, createState());
+			const result = await processDotCommand(
+				'.schema unknown_table',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Table not found: unknown_table');
 		});
 	});
@@ -200,21 +230,33 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('.relations', () => {
 		it('lists all relations without argument', async () => {
-			const result = await processDotCommand('.relations', mockSchema, createState());
+			const result = await processDotCommand(
+				'.relations',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Relations (2)');
 			expect(result.output).toContain('users.posts');
 			expect(result.output).toContain('hasMany');
 		});
 
 		it('filters relations for specific table (as target)', async () => {
-			const result = await processDotCommand('.relations posts', mockSchema, createState());
+			const result = await processDotCommand(
+				'.relations posts',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Relations for posts');
 			expect(result.output).toContain('users.posts');
 			expect(result.output).toContain('posts.author');
 		});
 
 		it('filters relations for specific table (as source)', async () => {
-			const result = await processDotCommand('.relations users', mockSchema, createState());
+			const result = await processDotCommand(
+				'.relations users',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Relations for users');
 			expect(result.output).toContain('users.posts');
 		});
@@ -222,7 +264,16 @@ describe('processDotCommand — coverage', () => {
 		it('returns message when no relations found for table', async () => {
 			// Create schema with no relations involving "orphan"
 			const orphanTables = new Map<string, TableIR>([
-				['orphan', { name: 'orphan', columns: [{ name: 'id', type: 'integer', nullable: false }], primaryKey: 'id', foreignKeys: [], indexes: [] }],
+				[
+					'orphan',
+					{
+						name: 'orphan',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
 			]);
 			const noRelModel: ModelIR = {
 				tables: orphanTables,
@@ -239,7 +290,11 @@ describe('processDotCommand — coverage', () => {
 				tableNames: ['orphan'],
 			};
 
-			const result = await processDotCommand('.relations orphan', noRelSchema, createState());
+			const result = await processDotCommand(
+				'.relations orphan',
+				noRelSchema,
+				createState(),
+			);
 			expect(result.output).toContain('No relations found for table: orphan');
 		});
 	});
@@ -297,13 +352,21 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('.natural / .sql mode switching', () => {
 		it('.natural switches to natural mode', async () => {
-			const result = await processDotCommand('.natural', mockSchema, createState({ mode: 'sql' }));
+			const result = await processDotCommand(
+				'.natural',
+				mockSchema,
+				createState({ mode: 'sql' }),
+			);
 			expect(result.output).toContain('natural query mode');
 			expect(result.stateChange?.mode).toBe('natural');
 		});
 
 		it('.sql switches to SQL mode', async () => {
-			const result = await processDotCommand('.sql', mockSchema, createState({ mode: 'natural' }));
+			const result = await processDotCommand(
+				'.sql',
+				mockSchema,
+				createState({ mode: 'natural' }),
+			);
 			expect(result.output).toContain('SQL mode');
 			expect(result.stateChange?.mode).toBe('sql');
 		});
@@ -314,12 +377,20 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('.exit / .quit', () => {
 		it('.exit returns Exiting message', async () => {
-			const result = await processDotCommand('.exit', mockSchema, createState());
+			const result = await processDotCommand(
+				'.exit',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toBe('Exiting...');
 		});
 
 		it('.quit returns Exiting message', async () => {
-			const result = await processDotCommand('.quit', mockSchema, createState());
+			const result = await processDotCommand(
+				'.quit',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toBe('Exiting...');
 		});
 	});
@@ -329,7 +400,11 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('unknown command', () => {
 		it('returns error for unknown dot command', async () => {
-			const result = await processDotCommand('.foobar', mockSchema, createState());
+			const result = await processDotCommand(
+				'.foobar',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Unknown command: .foobar');
 		});
 	});
@@ -364,7 +439,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db, schemaName: 'tenant_42' });
 
-			const result = await processDotCommand(`.import ${testSqlFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.import ${testSqlFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Imported');
 			expect(result.output).toContain('schema: tenant_42');
@@ -383,7 +462,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.import ${testSqlFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.import ${testSqlFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Import failed: relation does not exist');
 			expect(result.success).toBe(false);
@@ -410,7 +493,9 @@ describe('processDotCommand — coverage', () => {
 		it('returns error when rollbackTransaction throws', async () => {
 			const db = createMockDbConnection({
 				inTransaction: true,
-				rollbackTransaction: vi.fn().mockRejectedValue(new Error('connection lost')),
+				rollbackTransaction: vi
+					.fn()
+					.mockRejectedValue(new Error('connection lost')),
 			});
 			const state = createState({ dbConnection: db, inTransaction: true });
 			const result = await processDotCommand('.rollback', mockSchema, state);
@@ -452,14 +537,22 @@ describe('processDotCommand — coverage', () => {
 
 		it('returns error when no DB connection', async () => {
 			const state = createState();
-			const result = await processDotCommand('.load users data.csv', mockSchema, state);
+			const result = await processDotCommand(
+				'.load users data.csv',
+				mockSchema,
+				state,
+			);
 			expect(result.output).toContain('.load requires database connection');
 		});
 
 		it('returns error when file not found', async () => {
 			const db = createMockDbConnection();
 			const state = createState({ dbConnection: db });
-			const result = await processDotCommand('.load users /nonexistent/file.csv', mockSchema, state);
+			const result = await processDotCommand(
+				'.load users /nonexistent/file.csv',
+				mockSchema,
+				state,
+			);
 			expect(result.output).toContain('File not found');
 		});
 
@@ -468,13 +561,20 @@ describe('processDotCommand — coverage', () => {
 			writeFileSync(emptyFile, '');
 			const db = createMockDbConnection();
 			const state = createState({ dbConnection: db });
-			const result = await processDotCommand(`.load users ${emptyFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.load users ${emptyFile}`,
+				mockSchema,
+				state,
+			);
 			expect(result.output).toContain('empty');
 		});
 
 		it('loads CSV rows successfully', async () => {
 			const csvFile = join(testDir, 'users.csv');
-			writeFileSync(csvFile, 'id,name,email\n1,Alice,alice@test.com\n2,Bob,bob@test.com\n');
+			writeFileSync(
+				csvFile,
+				'id,name,email\n1,Alice,alice@test.com\n2,Bob,bob@test.com\n',
+			);
 			const mockExecuteRaw = vi.fn().mockResolvedValue({
 				rows: [],
 				columns: [],
@@ -484,7 +584,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.load users ${csvFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.load users ${csvFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Loaded 2 rows into users');
 			expect(result.success).toBe(true);
@@ -503,7 +607,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.load users ${csvFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.load users ${csvFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Insert failed');
 			expect(result.success).toBe(false);
@@ -530,11 +638,15 @@ describe('processDotCommand — coverage', () => {
 		it('handles parseCsvFile exception', async () => {
 			// A binary file should cause parsing to fail or produce unexpected results
 			const binFile = join(testDir, 'binary.csv');
-			writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02, 0xFF, 0xFE]));
+			writeFileSync(binFile, Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]));
 			const db = createMockDbConnection();
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.load users ${binFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.load users ${binFile}`,
+				mockSchema,
+				state,
+			);
 
 			// Should either fail or indicate empty/no matching columns
 			expect(result.output).toMatch(/empty|No matching columns|Load failed/i);
@@ -574,14 +686,22 @@ describe('processDotCommand — coverage', () => {
 
 		it('returns error when no DB connection', async () => {
 			const state = createState();
-			const result = await processDotCommand('.dump users out.csv', mockSchema, state);
+			const result = await processDotCommand(
+				'.dump users out.csv',
+				mockSchema,
+				state,
+			);
 			expect(result.output).toContain('.dump requires database connection');
 		});
 
 		it('returns error for unknown table', async () => {
 			const db = createMockDbConnection();
 			const state = createState({ dbConnection: db });
-			const result = await processDotCommand('.dump unknown_table out.csv', mockSchema, state);
+			const result = await processDotCommand(
+				'.dump unknown_table out.csv',
+				mockSchema,
+				state,
+			);
 			expect(result.output).toContain('Table not found: unknown_table');
 		});
 
@@ -596,7 +716,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.dump users ${outFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.dump users ${outFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Dumped 1 rows from users');
 			expect(result.success).toBe(true);
@@ -615,7 +739,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.dump users ${outFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.dump users ${outFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Query failed');
 			expect(result.success).toBe(false);
@@ -649,7 +777,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.dump users ${outFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.dump users ${outFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Dumped 1 rows');
 			expect(result.success).toBe(true);
@@ -657,11 +789,17 @@ describe('processDotCommand — coverage', () => {
 
 		it('returns error when executeRaw throws', async () => {
 			const outFile = join(testDir, 'dump-throw.csv');
-			const mockExecuteRaw = vi.fn().mockRejectedValue(new Error('connection timeout'));
+			const mockExecuteRaw = vi
+				.fn()
+				.mockRejectedValue(new Error('connection timeout'));
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.dump users ${outFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.dump users ${outFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Dump failed');
 			expect(result.output).toContain('connection timeout');
@@ -673,12 +811,20 @@ describe('processDotCommand — coverage', () => {
 	// -----------------------------------------------------------------------
 	describe('case insensitivity', () => {
 		it('.HELP (uppercase) is recognized', async () => {
-			const result = await processDotCommand('.HELP', mockSchema, createState());
+			const result = await processDotCommand(
+				'.HELP',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Available commands');
 		});
 
 		it('.Tables (mixed case) is recognized', async () => {
-			const result = await processDotCommand('.Tables', mockSchema, createState());
+			const result = await processDotCommand(
+				'.Tables',
+				mockSchema,
+				createState(),
+			);
 			expect(result.output).toContain('Tables (2)');
 		});
 	});
@@ -712,7 +858,11 @@ describe('processDotCommand — coverage', () => {
 			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
 			const state = createState({ dbConnection: db });
 
-			const result = await processDotCommand(`.load unknown_table ${csvFile}`, mockSchema, state);
+			const result = await processDotCommand(
+				`.load unknown_table ${csvFile}`,
+				mockSchema,
+				state,
+			);
 
 			expect(result.output).toContain('Loaded 1 rows into unknown_table');
 			const sql = mockExecuteRaw.mock.calls[0][0];

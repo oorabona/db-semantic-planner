@@ -284,7 +284,11 @@ export function compileCteQuery(
 		} else if (cte.kind === 'rawCte') {
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
-			const { sql: cteSql, params: cteParams } = buildRawCte(cte, schemaName, deps);
+			const { sql: cteSql, params: cteParams } = buildRawCte(
+				cte,
+				schemaName,
+				deps,
+			);
 			allCteParams.push(...cteParams);
 			cteSqlFragments.push(cteSql);
 		} else if (cte.kind === 'simpleCte') {
@@ -296,18 +300,27 @@ export function compileCteQuery(
 				warnings: [],
 				ctes: [],
 				intent: innerCte.query,
-				metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
 			};
 			const innerCompileOptions: CompileOptions =
 				schemaName !== undefined ? { schemaName } : {};
-			const innerCompiled = compileSelect(innerPlanReport, innerCompileOptions, deps);
+			const innerCompiled = compileSelect(
+				innerPlanReport,
+				innerCompileOptions,
+				deps,
+			);
 			// Renumber inner params to follow all previously accumulated CTE params
 			const currentParamOffset = allCteParams.length;
 			const renumberedInnerSql =
 				currentParamOffset > 0
 					? innerCompiled.sql.replace(
 							/\$([0-9]+)/g,
-							(_: string, n: string) => `$${parseInt(n, 10) + currentParamOffset}`,
+							(_: string, n: string) =>
+								`$${parseInt(n, 10) + currentParamOffset}`,
 						)
 					: innerCompiled.sql;
 			allCteParams.push(...innerCompiled.parameters);
@@ -445,7 +458,6 @@ function buildUnnestCte(
 	};
 }
 
-
 /**
  * Build a "name AS (base UNION [ALL] step)" SQL fragment for a raw recursive CTE.
  *
@@ -462,7 +474,8 @@ function buildRawCte(
 	schemaName: string | undefined,
 	deps: AdapterCompilerDeps,
 ): { sql: string; params: readonly unknown[] } {
-	const compileOptions: CompileOptions = schemaName !== undefined ? { schemaName } : {};
+	const compileOptions: CompileOptions =
+		schemaName !== undefined ? { schemaName } : {};
 
 	// Compile base (anchor) query
 	const basePlanReport: PlanReport = {
@@ -501,7 +514,10 @@ function buildRawCte(
 			: stepCompiled.sql;
 
 	// Inject depth guard: WHERE "depthColumn" < $N (or AND-ed with existing WHERE)
-	const allParams: unknown[] = [...baseCompiled.parameters, ...stepCompiled.parameters];
+	const allParams: unknown[] = [
+		...baseCompiled.parameters,
+		...stepCompiled.parameters,
+	];
 	let finalStepSql = renumberedStepSql;
 	if (cte.maxDepth !== undefined) {
 		const depthCol = `"${(cte.depthColumn ?? 'depth').replace(/"/g, '""')}"`;
@@ -523,8 +539,6 @@ function buildRawCte(
 		params: allParams,
 	};
 }
-
-
 
 // ============================================================================
 // buildRecursiveAnchorWhere (internal)

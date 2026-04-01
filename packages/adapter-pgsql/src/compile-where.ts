@@ -14,13 +14,13 @@ import type {
 	QueryIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
+	WhereIntent,
 	WhereLikeIntent,
 	WhereNotIntent,
 	WhereOrIntent,
 	WhereRawExistsIntent,
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
-	WhereIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
@@ -42,6 +42,7 @@ import { createWhereDispatcher } from './handlers/index.js';
 // natural bridge: it imports both custom.ts and handlers/index.ts.
 // Called once at module-load time (safe: no circular calls, just stores the factory ref).
 registerWhereDispatcherFactory(createWhereDispatcher);
+
 import type {
 	CompilerContext,
 	CompilerState,
@@ -460,7 +461,8 @@ export function compileWhereIntent(
 	// These kinds have no Decision equivalent — they must be compiled here
 	// using the compileSubquery callback, then wrapped in a SubLink node.
 	if (intent.kind === 'rawExists' || intent.kind === 'rawNotExists') {
-		const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent).subquery;
+		const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent)
+			.subquery;
 		const {
 			sql: subNode,
 			paramCount,

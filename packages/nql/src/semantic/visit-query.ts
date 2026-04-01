@@ -17,7 +17,6 @@ import type {
 	NqlSelectItem,
 	NqlSetClause,
 	NqlStatement,
-	NqlWithQuery,
 } from '../parser/ast.js';
 import type { CstContext, VisitFn } from './helpers.js';
 import {

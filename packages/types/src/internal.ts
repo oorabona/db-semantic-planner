@@ -8,7 +8,7 @@
  * @internal
  */
 
-// Re-export all public types for convenience
-export * from './index.js';
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
+// Re-export all public types for convenience
+export * from './index.js';

@@ -1,5 +1,7 @@
 # How to Use CASE Expressions
 
+The `caseWhen()` builder lets you add conditional logic directly in SELECT columns or ORDER BY clauses without writing raw SQL strings. Use it when you need label mapping, numeric bucketing, or status display logic that belongs in the query rather than in application code.
+
 ## When
 
 When you need conditional logic in SELECT columns (e.g. label mapping, status display, bucketing)

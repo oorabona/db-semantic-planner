@@ -12,7 +12,10 @@ import { InvalidOperationError } from './errors.js';
  * @param operationName - The public API operation name, used in the error message
  * @returns The validated adapter
  */
-export function requireAdapter(adapter: Adapter | undefined, operationName: string): Adapter {
+export function requireAdapter(
+	adapter: Adapter | undefined,
+	operationName: string,
+): Adapter {
 	if (!adapter) {
 		throw new InvalidOperationError(
 			operationName,

@@ -1,15 +1,6 @@
----
-doc-meta:
-  status: canonical
-  scope: cli
-  type: guide
-  created: 2026-02-12
-  updated: 2026-02-12
----
-
 # DDL Provisioning Guide
 
-Database schema management for db-semantic-planner — push, migrate, and verify commands.
+This guide explains how to manage your database schema lifecycle using the `dbsp` CLI. Use it when you need to push schema changes to a database, generate versioned migration files, or verify that a live database matches your schema definition.
 
 ## Overview
 

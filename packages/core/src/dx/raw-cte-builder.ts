@@ -1,4 +1,3 @@
-
 /**
  * Raw CTE builder — WITH RECURSIVE support via explicit base/step query builders (FR-8).
  *
@@ -27,7 +26,6 @@ import type {
 	SelectWithExpressionsIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { InvalidOperationError } from './errors.js';
 import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { QueryBuilder } from './query-builder-types.js';
@@ -165,8 +163,13 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	dump(): RecursiveDump {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName ? { schemaName: this.schemaName } : undefined;
-		const compiled: CompiledQuery = adapter.compileCteQuery(intent, compileOptions);
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled: CompiledQuery = adapter.compileCteQuery(
+			intent,
+			compileOptions,
+		);
 		return {
 			sql: compiled.sql,
 			params: compiled.parameters,
@@ -180,8 +183,13 @@ export class RawCteQueryBuilder<TResult = unknown> {
 	async all(): Promise<TResult[]> {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName ? { schemaName: this.schemaName } : undefined;
-		const compiled = adapter.compileCteQuery(intent, compileOptions) as CompiledQuery<TResult>;
+		const compileOptions = this.schemaName
+			? { schemaName: this.schemaName }
+			: undefined;
+		const compiled = adapter.compileCteQuery(
+			intent,
+			compileOptions,
+		) as CompiledQuery<TResult>;
 		return adapter.execute(compiled);
 	}
 
@@ -202,8 +210,12 @@ export function createRawCteBuilder<TResult = unknown>(
 	adapter?: Adapter,
 	schemaName?: string,
 ): RawCteQueryBuilder<TResult> {
-	const baseIntent = (options.base as unknown as QueryBuilderImpl<unknown>).buildIntent();
-	const stepIntent = (options.step as unknown as QueryBuilderImpl<unknown>).buildIntent();
+	const baseIntent = (
+		options.base as unknown as QueryBuilderImpl<unknown>
+	).buildIntent();
+	const stepIntent = (
+		options.step as unknown as QueryBuilderImpl<unknown>
+	).buildIntent();
 
 	const rawCteIntent: RawCteIntent = {
 		kind: 'rawCte',
@@ -212,8 +224,15 @@ export function createRawCteBuilder<TResult = unknown>(
 		step: stepIntent,
 		unionAll: options.unionAll ?? true,
 		...(options.maxDepth !== undefined && { maxDepth: options.maxDepth }),
-		...(options.depthColumn !== undefined && { depthColumn: options.depthColumn }),
+		...(options.depthColumn !== undefined && {
+			depthColumn: options.depthColumn,
+		}),
 	};
 
-	return new RawCteQueryBuilder<TResult>(cteName, rawCteIntent, adapter, schemaName);
+	return new RawCteQueryBuilder<TResult>(
+		cteName,
+		rawCteIntent,
+		adapter,
+		schemaName,
+	);
 }

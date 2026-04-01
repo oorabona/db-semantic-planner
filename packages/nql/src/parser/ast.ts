@@ -272,7 +272,6 @@ export interface NqlInExpression {
 	values: NqlExpression[] | NqlSubquery | NqlDateRangeLiteral;
 }
 
-
 /**
  * BATCH-001: ANY expression — col = ANY(:paramName)
  * Compiles to WhereAnyIntent with values resolved from named parameters.

@@ -26,6 +26,7 @@
 import type { Mutable } from '@dbsp/types/internal';
 import type {
 	ComparisonOperator,
+	QueryIntent,
 	RecursiveExistsOptions,
 	WhereAndIntent,
 	WhereAnyIntent,
@@ -36,13 +37,12 @@ import type {
 	WhereLikeIntent,
 	WhereNotExistsIntent,
 	WhereNotIntent,
-	WhereRawExistsIntent,
-	WhereRawNotExistsIntent,
 	WhereNullIntent,
 	WhereOrIntent,
 	WhereRangeIntent,
+	WhereRawExistsIntent,
+	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
-	QueryIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import type {
@@ -233,7 +233,7 @@ export function like(
 ): WhereLikeIntent {
 	const caseInsensitive =
 		typeof options === 'boolean' ? options : options?.caseInsensitive;
-	const escape = typeof options === 'object' ? options.escape : undefined;
+	const escapeChar = typeof options === 'object' ? options.escape : undefined;
 
 	const intent: WhereLikeIntent = {
 		kind: 'like',
@@ -242,8 +242,8 @@ export function like(
 	};
 	const withCi =
 		caseInsensitive !== undefined ? { ...intent, caseInsensitive } : intent;
-	if (escape !== undefined) {
-		return { ...withCi, escape };
+	if (escapeChar !== undefined) {
+		return { ...withCi, escape: escapeChar };
 	}
 	return withCi;
 }

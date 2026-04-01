@@ -26,7 +26,7 @@ function makeDDLAdapter() {
 			const parts = [schema ? `${schema}.${table}` : table];
 			if (options?.restartIdentity) parts.push('RESTART IDENTITY');
 			if (options?.cascade) parts.push('CASCADE');
-			return `TRUNCATE ${parts[0]}${parts.length > 1 ? ' ' + parts.slice(1).join(' ') : ''}`;
+			return `TRUNCATE ${parts[0]}${parts.length > 1 ? ` ${parts.slice(1).join(' ')}` : ''}`;
 		},
 	);
 	const generateVacuum = vi.fn(
@@ -39,7 +39,12 @@ function makeDDLAdapter() {
 		},
 	);
 	const generateAlterColumn = vi.fn(
-		(table: string, column: string, options: Record<string, unknown>, schema?: string) => {
+		(
+			table: string,
+			column: string,
+			options: Record<string, unknown>,
+			schema?: string,
+		) => {
 			const tbl = schema ? `${schema}.${table}` : table;
 			const clauses: string[] = [];
 			if (options.type !== undefined)
@@ -51,7 +56,9 @@ function makeDDLAdapter() {
 			if (options.dropDefault === true)
 				clauses.push(`ALTER COLUMN ${column} DROP DEFAULT`);
 			if (options.setDefault !== undefined)
-				clauses.push(`ALTER COLUMN ${column} SET DEFAULT ${options.setDefault}`);
+				clauses.push(
+					`ALTER COLUMN ${column} SET DEFAULT ${options.setDefault}`,
+				);
 			if (clauses.length === 0)
 				throw new Error('At least one alteration option must be specified');
 			return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
@@ -86,7 +93,12 @@ function makeDDLAdapter() {
 		},
 	);
 	const fakeIndexRows = [
-		{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
+		{
+			name: 'idx_a',
+			definition: 'CREATE INDEX ...',
+			unique: false,
+			method: 'btree',
+		},
 	];
 	const listIndexes = vi.fn().mockResolvedValue(fakeIndexRows);
 	const indexExists = vi.fn().mockResolvedValue(true);
@@ -141,7 +153,7 @@ describe('wrapTablesProxyWithDDL', () => {
 			string,
 			unknown
 		>;
-		expect(proxy['nonexistent']).toBeUndefined();
+		expect(proxy.nonexistent).toBeUndefined();
 	});
 
 	it('adds truncate/vacuum/alterColumn/indexes to each table', () => {
@@ -151,11 +163,11 @@ describe('wrapTablesProxyWithDDL', () => {
 			string,
 			Record<string, unknown>
 		>;
-		const users = proxy['users'];
-		expect(typeof users['truncate']).toBe('function');
-		expect(typeof users['vacuum']).toBe('function');
-		expect(typeof users['alterColumn']).toBe('function');
-		expect(typeof users['indexes']).toBe('object');
+		const users = proxy.users;
+		expect(typeof users.truncate).toBe('function');
+		expect(typeof users.vacuum).toBe('function');
+		expect(typeof users.alterColumn).toBe('function');
+		expect(typeof users.indexes).toBe('object');
 	});
 
 	it('returns same augmented object on repeated access (cache)', () => {
@@ -165,7 +177,7 @@ describe('wrapTablesProxyWithDDL', () => {
 			string,
 			unknown
 		>;
-		expect(proxy['users']).toBe(proxy['users']);
+		expect(proxy.users).toBe(proxy.users);
 	});
 
 	it('passes through Symbol properties from target', () => {
@@ -194,8 +206,12 @@ describe('orm.tables.X.truncate()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['users']['truncate'] as () => Promise<void>)();
-		expect(generateTruncate).toHaveBeenCalledWith('users', undefined, undefined);
+		await (proxy.users.truncate as () => Promise<void>)();
+		expect(generateTruncate).toHaveBeenCalledWith(
+			'users',
+			undefined,
+			undefined,
+		);
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('TRUNCATE'),
 		);
@@ -208,15 +224,14 @@ describe('orm.tables.X.truncate()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['users']['truncate'] as (o: unknown) => Promise<void>)({
+		await (proxy.users.truncate as (o: unknown) => Promise<void>)({
 			cascade: true,
 			restartIdentity: true,
 		});
-		expect(generateTruncate).toHaveBeenCalledWith(
-			'users',
-			undefined,
-			{ cascade: true, restartIdentity: true },
-		);
+		expect(generateTruncate).toHaveBeenCalledWith('users', undefined, {
+			cascade: true,
+			restartIdentity: true,
+		});
 	});
 
 	it('passes schema to adapter.generateTruncate', async () => {
@@ -226,8 +241,12 @@ describe('orm.tables.X.truncate()', () => {
 			adapter,
 			'tenant_42',
 		) as TableProxy;
-		await (proxy['users']['truncate'] as () => Promise<void>)();
-		expect(generateTruncate).toHaveBeenCalledWith('users', 'tenant_42', undefined);
+		await (proxy.users.truncate as () => Promise<void>)();
+		expect(generateTruncate).toHaveBeenCalledWith(
+			'users',
+			'tenant_42',
+			undefined,
+		);
 	});
 
 	it('throws when adapter has no executeDDL', async () => {
@@ -237,7 +256,7 @@ describe('orm.tables.X.truncate()', () => {
 			undefined,
 		) as TableProxy;
 		await expect(
-			(proxy['users']['truncate'] as () => Promise<void>)(),
+			(proxy.users.truncate as () => Promise<void>)(),
 		).rejects.toThrow('executeDDL() requires an adapter');
 	});
 });
@@ -256,7 +275,7 @@ describe('orm.tables.X.vacuum()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['logs']['vacuum'] as () => Promise<void>)();
+		await (proxy.logs.vacuum as () => Promise<void>)();
 		expect(generateVacuum).toHaveBeenCalledWith('logs', undefined, undefined);
 		expect(executeDDL).toHaveBeenCalledWith(expect.stringContaining('VACUUM'));
 	});
@@ -268,15 +287,14 @@ describe('orm.tables.X.vacuum()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['logs']['vacuum'] as (o: unknown) => Promise<void>)({
+		await (proxy.logs.vacuum as (o: unknown) => Promise<void>)({
 			full: true,
 			analyze: true,
 		});
-		expect(generateVacuum).toHaveBeenCalledWith(
-			'logs',
-			undefined,
-			{ full: true, analyze: true },
-		);
+		expect(generateVacuum).toHaveBeenCalledWith('logs', undefined, {
+			full: true,
+			analyze: true,
+		});
 	});
 
 	it('throws when inTransaction=true', async () => {
@@ -287,9 +305,9 @@ describe('orm.tables.X.vacuum()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await expect(
-			(proxy['logs']['vacuum'] as () => Promise<void>)(),
-		).rejects.toThrow('VACUUM cannot run inside a transaction block');
+		await expect((proxy.logs.vacuum as () => Promise<void>)()).rejects.toThrow(
+			'VACUUM cannot run inside a transaction block',
+		);
 	});
 });
 
@@ -308,7 +326,7 @@ describe('orm.tables.X.alterColumn()', () => {
 			adapter,
 			undefined,
 		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('email', {
+		await (proxy.users.alterColumn as AlterFn)('email', {
 			type: 'VARCHAR(255)',
 		});
 		expect(generateAlterColumn).toHaveBeenCalledWith(
@@ -329,7 +347,7 @@ describe('orm.tables.X.alterColumn()', () => {
 			adapter,
 			'myschema',
 		) as TableProxy;
-		await (proxy['users']['alterColumn'] as AlterFn)('email', {
+		await (proxy.users.alterColumn as AlterFn)('email', {
 			setNotNull: true,
 		});
 		expect(generateAlterColumn).toHaveBeenCalledWith(
@@ -348,7 +366,7 @@ describe('orm.tables.X.alterColumn()', () => {
 			undefined,
 		) as TableProxy;
 		await expect(
-			(proxy['users']['alterColumn'] as AlterFn)('email', {}),
+			(proxy.users.alterColumn as AlterFn)('email', {}),
 		).rejects.toThrow('At least one alteration option must be specified');
 	});
 });
@@ -370,7 +388,7 @@ describe('orm.tables.X.indexes.create()', () => {
 			adapter,
 			schema,
 		) as Record<string, Record<string, unknown>>;
-		return { proxy: proxy['users']['indexes'] as IndexProxy, result };
+		return { proxy: proxy.users.indexes as IndexProxy, result };
 	}
 
 	it('delegates to adapter.generateCreateIndex and calls executeDDL', async () => {
@@ -380,7 +398,7 @@ describe('orm.tables.X.indexes.create()', () => {
 			adapter,
 			undefined,
 		) as Record<string, Record<string, Record<string, unknown>>>;
-		await (idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
+		await (idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
 			name: 'idx_users_email',
 			columns: ['email'],
 		});
@@ -401,7 +419,7 @@ describe('orm.tables.X.indexes.create()', () => {
 			adapter,
 			'public',
 		) as Record<string, Record<string, Record<string, unknown>>>;
-		await (idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
+		await (idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
 			name: 'idx_x',
 			columns: ['id'],
 		});
@@ -421,12 +439,14 @@ describe('orm.tables.X.indexes.create()', () => {
 			undefined,
 		) as Record<string, Record<string, Record<string, unknown>>>;
 		await expect(
-			(idxProxy['users']['indexes']['create'] as (o: unknown) => Promise<void>)({
+			(idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
 				name: 'idx_x',
 				columns: ['id'],
 				concurrently: true,
 			}),
-		).rejects.toThrow('CREATE INDEX CONCURRENTLY cannot run inside a transaction');
+		).rejects.toThrow(
+			'CREATE INDEX CONCURRENTLY cannot run inside a transaction',
+		);
 	});
 });
 
@@ -442,13 +462,16 @@ describe('orm.tables.X.indexes.drop()', () => {
 			adapter,
 			undefined,
 		) as Record<string, Record<string, unknown>>;
-		return proxy['users']['indexes'] as IndexProxy;
+		return proxy.users.indexes as IndexProxy;
 	}
 
 	it('delegates to adapter.generateDropIndex and calls executeDDL', async () => {
 		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
 		await getIndexes(adapter).drop('idx_users_email');
-		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', undefined);
+		expect(generateDropIndex).toHaveBeenCalledWith(
+			'idx_users_email',
+			undefined,
+		);
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('DROP INDEX'),
 		);
@@ -461,10 +484,11 @@ describe('orm.tables.X.indexes.drop()', () => {
 			ifExists: true,
 			cascade: true,
 		});
-		expect(generateDropIndex).toHaveBeenCalledWith(
-			'idx_users_email',
-			{ concurrently: true, ifExists: true, cascade: true },
-		);
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', {
+			concurrently: true,
+			ifExists: true,
+			cascade: true,
+		});
 	});
 
 	it('throws when CONCURRENTLY inside transaction', async () => {
@@ -472,7 +496,9 @@ describe('orm.tables.X.indexes.drop()', () => {
 		(adapter as Record<string, unknown>).inTransaction = true;
 		await expect(
 			getIndexes(adapter).drop('idx_users_email', { concurrently: true }),
-		).rejects.toThrow('DROP INDEX CONCURRENTLY cannot run inside a transaction');
+		).rejects.toThrow(
+			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
+		);
 	});
 });
 
@@ -494,7 +520,7 @@ describe('orm.tables.X.indexes.list()', () => {
 			adapter,
 			schemaName,
 		) as Record<string, Record<string, unknown>>;
-		return proxy['users']['indexes'] as IndexProxy;
+		return proxy.users.indexes as IndexProxy;
 	}
 
 	it('delegates to adapter.listIndexes', async () => {
@@ -502,7 +528,12 @@ describe('orm.tables.X.indexes.list()', () => {
 		const result = await getIndexes(adapter).list();
 		expect(listIndexes).toHaveBeenCalledWith('users', undefined, undefined);
 		expect(result).toEqual([
-			{ name: 'idx_a', definition: 'CREATE INDEX ...', unique: false, method: 'btree' },
+			{
+				name: 'idx_a',
+				definition: 'CREATE INDEX ...',
+				unique: false,
+				method: 'btree',
+			},
 		]);
 	});
 
@@ -515,13 +546,17 @@ describe('orm.tables.X.indexes.list()', () => {
 	it('passes namePattern option to adapter.listIndexes', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		await getIndexes(adapter).list({ namePattern: 'idx_vec%' });
-		expect(listIndexes).toHaveBeenCalledWith('users', undefined, { namePattern: 'idx_vec%' });
+		expect(listIndexes).toHaveBeenCalledWith('users', undefined, {
+			namePattern: 'idx_vec%',
+		});
 	});
 
 	it('passes schema and namePattern together', async () => {
 		const { adapter, listIndexes } = makeDDLAdapter();
 		await getIndexes(adapter, 'myschema').list({ namePattern: 'idx_%' });
-		expect(listIndexes).toHaveBeenCalledWith('users', 'myschema', { namePattern: 'idx_%' });
+		expect(listIndexes).toHaveBeenCalledWith('users', 'myschema', {
+			namePattern: 'idx_%',
+		});
 	});
 
 	it('throws when no adapter', async () => {
@@ -546,13 +581,17 @@ describe('orm.tables.X.indexes.exists()', () => {
 			adapter,
 			schemaName,
 		) as Record<string, Record<string, unknown>>;
-		return proxy['users']['indexes'] as IndexProxy;
+		return proxy.users.indexes as IndexProxy;
 	}
 
 	it('delegates to adapter.indexExists with correct args', async () => {
 		const { adapter, indexExists } = makeDDLAdapter();
 		const result = await getIndexes(adapter).exists('idx_users_email');
-		expect(indexExists).toHaveBeenCalledWith('idx_users_email', 'users', undefined);
+		expect(indexExists).toHaveBeenCalledWith(
+			'idx_users_email',
+			'users',
+			undefined,
+		);
 		expect(result).toBe(true);
 	});
 
@@ -592,7 +631,9 @@ describe('orm.ddl.dropIndex()', () => {
 			undefined,
 		);
 		await orm.ddl.dropIndex('idx_foo', { ifExists: true });
-		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', { ifExists: true });
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', {
+			ifExists: true,
+		});
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('DROP INDEX'),
 		);
@@ -627,7 +668,7 @@ describe('orm.tables.X.storageSize()', () => {
 			adapter,
 			schemaName,
 		) as Record<string, Record<string, unknown>>;
-		return proxy['users'] as unknown as TableDDLProxy;
+		return proxy.users as unknown as TableDDLProxy;
 	}
 
 	it('delegates to adapter.storageSize with correct args', async () => {

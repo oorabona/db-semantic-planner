@@ -1,8 +1,14 @@
 # Architecture
 
-## Overview
+## Why this architecture?
 
-db-semantic-planner is an intent-first database query system. Users declare **what** to fetch, and the planner decides **how** — producing optimized, parameterized SQL with full observability into every decision.
+db-semantic-planner separates *intent* from *execution*. You declare what data you want; the planner decides how to fetch it efficiently and safely. This separation gives you three concrete benefits:
+
+- **Full observability** — every query exposes its planning decisions via `dump()`, so you can understand (and trust) what SQL was generated and why.
+- **Dialect portability** — the core planner is database-agnostic. Adapters implement dialect-specific SQL generation, so adding a new database backend does not touch the query planning logic.
+- **Predictable safety** — all values are parameterized, all identifiers are quoted, and schema scoping is enforced at the adapter boundary. There is no way to accidentally inject raw SQL through the normal API.
+
+## Overview
 
 ```
 User Code → IntentAST → Planner → PlanReport → Adapter → SQL + Parameters
@@ -203,7 +209,7 @@ The planner records for each decision:
 | E2E compile-only | `tests/e2e/example-assertions.test.ts` | Full pipeline: NQL → SQL (no database) |
 | E2E with DB | `tests/e2e/` (Testcontainers) | Full execution against PostgreSQL |
 
-**Example assertions** (`examples/*.assert.dbsp`) validate SQL output for each NQL query in the corresponding `.dbsp` file.
+Example assertions (`examples/*.assert.dbsp`) validate SQL output for each NQL query in the corresponding `.dbsp` file.
 
 ## NQL Grammar Coverage
 
@@ -227,3 +233,15 @@ The planner records for each decision:
 | Mutations (INSERT, UPDATE, DELETE) | Supported | With RETURNING |
 | Includes (.include) | Supported | Nested, recursive, filtered |
 | Pseudo-columns (parent, ancestor) | Supported | CTE/json_agg strategies |
+
+## Contributing to the Architecture
+
+If you want to contribute a new adapter, handler, or planner strategy, start with [CONTRIBUTING.md](./CONTRIBUTING.md). It covers the development setup, branch conventions, and the review process.
+
+Key places to start:
+
+- **New database adapter:** Implement the `Adapter` interface from `packages/core/src/dx/adapter.ts`, following the same structure as `packages/adapter-pgsql`.
+- **New expression handler:** Add a handler under `packages/adapter-pgsql/src/handlers/expression/` and register it in the dispatcher.
+- **New planner strategy:** Extend the strategy selection algorithm in `packages/core/src/planner/` and add the corresponding capability flag to `DialectCapabilities`.
+
+The architecture enforces a strict boundary: `packages/core` must never import from any adapter package. CI verifies this automatically.

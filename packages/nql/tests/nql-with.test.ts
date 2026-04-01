@@ -6,8 +6,8 @@
  */
 
 import type { CteQueryIntent, SimpleCteIntent } from '@dbsp/types';
-import { createPgsqlCompileOnlyAdapter } from '../../adapter-pgsql/src/pgsql-adapter.js';
 import { describe, expect, it } from 'vitest';
+import { createPgsqlCompileOnlyAdapter } from '../../adapter-pgsql/src/pgsql-adapter.js';
 import { compile } from '../src/index.js';
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,9 @@ function ws(sql: string): string {
 
 describe('NQL-WITH: SC-01 — Single CTE', () => {
 	it('produces CteQueryIntent with 1 SimpleCteIntent', () => {
-		const result = compileNql('with active as (users | where active = true) active | select *');
+		const result = compileNql(
+			'with active as (users | where active = true) active | select *',
+		);
 		expect(result.cteQuery).toBeDefined();
 		expect(result.query).toBeUndefined();
 

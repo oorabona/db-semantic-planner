@@ -9,13 +9,10 @@
  * empty model, empty warnings array, camelCase dbCasing option.
  */
 
-import { ref, schema } from '@dbsp/core';
 import type { ModelIR, TableIR } from '@dbsp/core';
+import { schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
-import {
-	generateSchemaFile,
-	type SchemaCodegenOptions,
-} from './schema-codegen.js';
+import { generateSchemaFile } from './schema-codegen.js';
 
 describe('generateSchemaFile — coverage', () => {
 	// -----------------------------------------------------------------------
@@ -70,8 +67,12 @@ describe('generateSchemaFile — coverage', () => {
 
 			const result = generateSchemaFile(model);
 
-			expect(result).toContain("orderId: { type: 'integer', primaryKey: true }");
-			expect(result).toContain("productId: { type: 'integer', primaryKey: true }");
+			expect(result).toContain(
+				"orderId: { type: 'integer', primaryKey: true }",
+			);
+			expect(result).toContain(
+				"productId: { type: 'integer', primaryKey: true }",
+			);
 			// quantity should be short form (not PK, not nullable)
 			expect(result).toContain("quantity: 'integer'");
 		});
@@ -255,7 +256,12 @@ describe('generateSchemaFile — coverage', () => {
 						name: 'profiles',
 						columns: [
 							{ name: 'id', type: 'integer', nullable: false },
-							{ name: 'userId', type: 'integer', nullable: false, unique: true },
+							{
+								name: 'userId',
+								type: 'integer',
+								nullable: false,
+								unique: true,
+							},
 						],
 						primaryKey: 'id',
 						foreignKeys: [
@@ -341,7 +347,12 @@ describe('generateSchemaFile — coverage', () => {
 						name: 'posts',
 						columns: [
 							{ name: 'id', type: 'integer', nullable: false },
-							{ name: 'authorId', type: 'integer', nullable: false, originalDbType: 'int4' },
+							{
+								name: 'authorId',
+								type: 'integer',
+								nullable: false,
+								originalDbType: 'int4',
+							},
 						],
 						primaryKey: 'id',
 						foreignKeys: [
@@ -382,7 +393,12 @@ describe('generateSchemaFile — coverage', () => {
 						name: 'users',
 						columns: [
 							{ name: 'id', type: 'integer', nullable: false },
-							{ name: 'name', type: 'string', nullable: false, originalDbType: 'varchar(255)' },
+							{
+								name: 'name',
+								type: 'string',
+								nullable: false,
+								originalDbType: 'varchar(255)',
+							},
 						],
 						primaryKey: 'id',
 						foreignKeys: [],
@@ -461,7 +477,9 @@ describe('generateSchemaFile — coverage', () => {
 			const result = generateSchemaFile(model, { dbCasing: 'camelCase' });
 
 			// camelCase dbCasing is not 'preserve', so it triggers the import and export
-			expect(result).toContain("import { createPgsqlAdapter } from '@dbsp/adapter-pgsql'");
+			expect(result).toContain(
+				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql'",
+			);
 			expect(result).toContain("export const dbCasing = 'camelCase' as const");
 			// Column names stay as-is (no conversion needed)
 			expect(result).toContain('firstName:');
@@ -487,7 +505,7 @@ describe('generateSchemaFile — coverage', () => {
 						primaryKey: 'id',
 						foreignKeys: [
 							{
-								columns: ['author_id'],  // snake_case from raw DB
+								columns: ['author_id'], // snake_case from raw DB
 								references: { table: 'users', columns: ['id'] },
 							},
 						],

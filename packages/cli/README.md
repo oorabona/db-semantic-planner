@@ -54,7 +54,7 @@ npx dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
 
 ## Documentation
 
-- [Full documentation index](../../docs/DOCUMENTATION_INDEX.md)
+- [Guides](../../docs/guides/)
 - [Schema versioning guide](../../docs/guides/how-to-use-schema-versioning.md)
 - [Batch values guide](../../docs/guides/how-to-use-batch-values.md)
 

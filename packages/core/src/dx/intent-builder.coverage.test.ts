@@ -14,7 +14,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { InvalidOperationError } from './errors.js';
-import { eq, gt, isNull as isNullFilter } from './filters.js';
+import { eq } from './filters.js';
 import {
 	IntentBuilder,
 	includeOptionsToIntent,

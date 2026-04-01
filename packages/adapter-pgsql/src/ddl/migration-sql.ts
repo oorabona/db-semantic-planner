@@ -45,21 +45,39 @@ function fkName(table: string, columns: readonly string[]): string {
 }
 
 /** Index name convention (custom name takes priority). */
-function idxName(table: string, columns: readonly string[], customName?: string): string {
+function idxName(
+	table: string,
+	columns: readonly string[],
+	customName?: string,
+): string {
 	return customName ?? `idx_${table}_${columns.join('_')}`;
 }
 
 /** Build a CREATE POLICY SQL statement from a PolicyIR. */
-function buildPolicySQL(tableName: string, policy: PolicyIR, schemaName?: string): string {
+function buildPolicySQL(
+	tableName: string,
+	policy: PolicyIR,
+	schemaName?: string,
+): string {
 	const policyName = q(policy.name);
 	const qt = qualifyTable(tableName, schemaName);
-	const forClause = policy.command && policy.command !== 'ALL' ? ` FOR ${policy.command}` : ' FOR ALL';
-	const asClause = policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
-	const toClause = policy.roles && policy.roles.length > 0 ? ` TO ${policy.roles.map((r) => q(r)).join(', ')}` : '';
+	const forClause =
+		policy.command && policy.command !== 'ALL'
+			? ` FOR ${policy.command}`
+			: ' FOR ALL';
+	const asClause =
+		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
+	const toClause =
+		policy.roles && policy.roles.length > 0
+			? ` TO ${policy.roles.map((r) => q(r)).join(', ')}`
+			: '';
 	if (policy.using) validateSqlExpression(policy.using, 'USING expression');
-	if (policy.withCheck) validateSqlExpression(policy.withCheck, 'WITH CHECK expression');
+	if (policy.withCheck)
+		validateSqlExpression(policy.withCheck, 'WITH CHECK expression');
 	const usingClause = policy.using ? ` USING (${policy.using})` : '';
-	const withCheckClause = policy.withCheck ? ` WITH CHECK (${policy.withCheck})` : '';
+	const withCheckClause = policy.withCheck
+		? ` WITH CHECK (${policy.withCheck})`
+		: '';
 	return `CREATE POLICY ${policyName} ON ${qt}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
 }
 
@@ -86,12 +104,16 @@ function buildPolicySQL(tableName: string, policy: PolicyIR, schemaName?: string
 export function buildSequenceClause(
 	verb: 'CREATE SEQUENCE' | 'ALTER SEQUENCE',
 	seqName: string,
-	seq: Pick<SequenceIR, 'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'>,
+	seq: Pick<
+		SequenceIR,
+		'startWith' | 'incrementBy' | 'minValue' | 'maxValue' | 'cycle'
+	>,
 	includeCycleNoCycle = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
 	if (seq.startWith !== undefined) parts.push(`START WITH ${seq.startWith}`);
-	if (seq.incrementBy !== undefined) parts.push(`INCREMENT BY ${seq.incrementBy}`);
+	if (seq.incrementBy !== undefined)
+		parts.push(`INCREMENT BY ${seq.incrementBy}`);
 	if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
 	if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
 	if (includeCycleNoCycle) {
@@ -182,17 +204,24 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
  * 14. ALTER ENUM ADD VALUE (must be last — has transaction visibility caveats in PG)
  * 15. COMMENT ON TABLE / COLUMN (very last)
  */
-export function generateMigrationSQL(diff: SchemaDiff, options?: MigrationSQLOptions): readonly string[] {
+export function generateMigrationSQL(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): readonly string[] {
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
 	// Filter out destructive changes if not included
-	const filteredChanges = includeDestructive ? diff.changes : diff.changes.filter((c) => !c.destructive);
+	const filteredChanges = includeDestructive
+		? diff.changes
+		: diff.changes.filter((c) => !c.destructive);
 
 	const caps = options?.dialectCapabilities;
 
 	// Filter out changes for unsupported DDL features
-	const changes = caps ? filteredChanges.filter((c) => isChangeSupported(c.kind, caps)) : filteredChanges;
+	const changes = caps
+		? filteredChanges.filter((c) => isChangeSupported(c.kind, caps))
+		: filteredChanges;
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
@@ -238,11 +267,17 @@ export function generateMigrationSQL(diff: SchemaDiff, options?: MigrationSQLOpt
 				const table = change.meta?.table as TableIR | undefined;
 				if (!table) continue;
 				const explicitIndexColumns = new Set(
-					table.indexes.flatMap((idx) => (idx.columns.length === 1 ? idx.columns : [])),
+					table.indexes.flatMap((idx) =>
+						idx.columns.length === 1 ? idx.columns : [],
+					),
 				);
 				for (const fk of table.foreignKeys) {
 					const fkCol = fk.columns[0];
-					if (fk.columns.length === 1 && fkCol && !explicitIndexColumns.has(fkCol)) {
+					if (
+						fk.columns.length === 1 &&
+						fkCol &&
+						!explicitIndexColumns.has(fkCol)
+					) {
 						const indexName = q(idxName(table.name, [fkCol]));
 						statements.push(
 							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${q(fkCol)});`,
@@ -329,12 +364,16 @@ function getPhase(kind: SchemaChange['kind']): number {
 // UP SQL Handlers (one function per change kind)
 // ============================================================================
 
-function upAddColumn(change: SchemaChange, schemaName?: string): string | undefined {
+function upAddColumn(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const col = change.meta?.column as ColumnIR | undefined;
 	if (!col) return undefined;
 	const typeName = mapColumnType(col);
 	const notNull = !col.nullable && !col.autoIncrement ? ' NOT NULL' : '';
-	const def = col.default !== undefined ? ` DEFAULT ${formatDefault(col.default)}` : '';
+	const def =
+		col.default !== undefined ? ` DEFAULT ${formatDefault(col.default)}` : '';
 	const unique = col.unique ? ' UNIQUE' : '';
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD COLUMN ${q(col.name)} ${typeName}${notNull}${def}${unique};`;
 }
@@ -345,13 +384,19 @@ function upAlterColumnType(change: SchemaChange, schemaName?: string): string {
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${toType};`;
 }
 
-function upAlterColumnNullable(change: SchemaChange, schemaName?: string): string {
+function upAlterColumnNullable(
+	change: SchemaChange,
+	schemaName?: string,
+): string {
 	const nullable = change.meta?.nullable as boolean;
 	const action = nullable ? 'DROP NOT NULL' : 'SET NOT NULL';
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} ${action};`;
 }
 
-function upAlterColumnDefault(change: SchemaChange, schemaName?: string): string {
+function upAlterColumnDefault(
+	change: SchemaChange,
+	schemaName?: string,
+): string {
 	const def = change.meta?.default;
 	if (def === undefined || def === null) {
 		return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} DROP DEFAULT;`;
@@ -365,14 +410,20 @@ function upAddPrimaryKey(change: SchemaChange, schemaName?: string): string {
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${q(pkName(change.table))} PRIMARY KEY (${pkCols});`;
 }
 
-function upDropForeignKey(change: SchemaChange, schemaName?: string): string | undefined {
+function upDropForeignKey(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
 	const constraintName = q(fkName(change.table, fk.columns));
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 }
 
-function upAlterForeignKey(change: SchemaChange, schemaName?: string): string | undefined {
+function upAlterForeignKey(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	// Drop + re-add with new onDelete
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
@@ -382,7 +433,10 @@ function upAlterForeignKey(change: SchemaChange, schemaName?: string): string | 
 	return `${drop}\n${add}`;
 }
 
-function upCreateIndex(change: SchemaChange, schemaName?: string): string | undefined {
+function upCreateIndex(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
 	const indexName = q(idxName(change.table, idx.columns, idx.name));
@@ -399,7 +453,10 @@ function upCreateIndex(change: SchemaChange, schemaName?: string): string | unde
 	];
 	const cols = colParts.join(', ');
 
-	const include = idx.include && idx.include.length > 0 ? ` INCLUDE (${idx.include.map(q).join(', ')})` : '';
+	const include =
+		idx.include && idx.include.length > 0
+			? ` INCLUDE (${idx.include.map(q).join(', ')})`
+			: '';
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
 			? ` WITH (${Object.entries(idx.with)
@@ -411,7 +468,10 @@ function upCreateIndex(change: SchemaChange, schemaName?: string): string | unde
 	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${withParams}${where};`;
 }
 
-function upDropIndex(change: SchemaChange, schemaName?: string): string | undefined {
+function upDropIndex(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
 	const indexName = q(idxName(change.table, idx.columns, idx.name));
@@ -419,7 +479,10 @@ function upDropIndex(change: SchemaChange, schemaName?: string): string | undefi
 	return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
 }
 
-function upAddCheckConstraint(change: SchemaChange, schemaName?: string): string | undefined {
+function upAddCheckConstraint(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
 	const notValid = check.notValid ? ' NOT VALID' : '';
@@ -435,48 +498,82 @@ function upAddCheckConstraint(change: SchemaChange, schemaName?: string): string
 	);
 }
 
-function upValidateConstraint(change: SchemaChange, schemaName?: string): string | undefined {
+function upValidateConstraint(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const fk = change.meta?.fk as ForeignKeyIR | undefined;
 	const check = change.meta?.check as CheckConstraintIR | undefined;
-	const constraintName = fk ? q(fkName(change.table, fk.columns)) : check ? q(check.name) : undefined;
+	const constraintName = fk
+		? q(fkName(change.table, fk.columns))
+		: check
+			? q(check.name)
+			: undefined;
 	if (!constraintName) return undefined;
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} VALIDATE CONSTRAINT ${constraintName};`;
 }
 
-function upCreateEnum(change: SchemaChange, schemaName?: string): string | undefined {
+function upCreateEnum(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
-	const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
-	const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+	const enumName = schemaName
+		? `${q(schemaName)}.${q(enumDef.name)}`
+		: q(enumDef.name);
+	const values = enumDef.values
+		.map((v) => `'${v.replace(/'/g, "''")}'`)
+		.join(', ');
 	return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 }
 
-function upAlterEnumAddValue(change: SchemaChange, schemaName?: string): string | undefined {
+function upAlterEnumAddValue(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const enumDef = change.meta?.enum as EnumIR;
 	const value = change.meta?.value as string;
 	const after = change.meta?.after as string | undefined;
 	if (!enumDef || !value) return undefined;
-	const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+	const enumName = schemaName
+		? `${q(schemaName)}.${q(enumDef.name)}`
+		: q(enumDef.name);
 	const escaped = value.replace(/'/g, "''");
 	const position = after ? ` AFTER '${after.replace(/'/g, "''")}'` : '';
 	return `ALTER TYPE ${enumName} ADD VALUE IF NOT EXISTS '${escaped}'${position};`;
 }
 
-function upDropEnum(change: SchemaChange, schemaName?: string): string | undefined {
+function upDropEnum(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
-	const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+	const enumName = schemaName
+		? `${q(schemaName)}.${q(enumDef.name)}`
+		: q(enumDef.name);
 	// Before dropping the type, cast any referencing columns to text
 	// to prevent "cannot drop type: still referenced" errors.
-	const refs = change.meta?.referencingColumns as Array<{ table: string; column: string }> | undefined;
+	const refs = change.meta?.referencingColumns as
+		| Array<{ table: string; column: string }>
+		| undefined;
 	const alterStatements =
 		refs && refs.length > 0
-			? refs.map((ref) => `ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${q(ref.column)} TYPE text;`)
+			? refs.map(
+					(ref) =>
+						`ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${q(ref.column)} TYPE text;`,
+				)
 			: [];
-	return [...alterStatements, `DROP TYPE IF EXISTS ${enumName} CASCADE;`].join('\n');
+	return [...alterStatements, `DROP TYPE IF EXISTS ${enumName} CASCADE;`].join(
+		'\n',
+	);
 }
 
-function upAlterColumnCollation(change: SchemaChange, schemaName?: string): string | undefined {
+function upAlterColumnCollation(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const col = change.meta?.column as ColumnIR;
 	if (!col) return undefined;
 	const collation = col.collation ? ` COLLATE "${col.collation}"` : '';
@@ -484,7 +581,10 @@ function upAlterColumnCollation(change: SchemaChange, schemaName?: string): stri
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${typeName}${collation};`;
 }
 
-function upAlterColumnIdentity(change: SchemaChange, schemaName?: string): string | undefined {
+function upAlterColumnIdentity(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	const col = change.meta?.column as ColumnIR;
 	const prevIdentity = change.meta?.previousIdentity as string | undefined;
 	if (!col) return undefined;
@@ -512,7 +612,10 @@ function upAddComment(change: SchemaChange, schemaName?: string): string {
 	return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS '${escaped}';`;
 }
 
-function upSequenceName(schemaName: string | undefined, seq: SequenceIR): string {
+function upSequenceName(
+	schemaName: string | undefined,
+	seq: SequenceIR,
+): string {
 	return schemaName ? `${q(schemaName)}.${q(seq.name)}` : q(seq.name);
 }
 
@@ -520,7 +623,10 @@ function upSequenceName(schemaName: string | undefined, seq: SequenceIR): string
 // SQL Generators per ChangeKind
 // ============================================================================
 
-function changeToUpSQL(change: SchemaChange, schemaName?: string): string | undefined {
+function changeToUpSQL(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	switch (change.kind) {
 		case 'create_table': {
 			const table = change.meta?.table as TableIR | undefined;
@@ -593,15 +699,30 @@ function changeToUpSQL(change: SchemaChange, schemaName?: string): string | unde
 		}
 		case 'create_sequence': {
 			const seq = change.meta?.sequence as SequenceIR;
-			return seq ? buildSequenceClause('CREATE SEQUENCE', upSequenceName(schemaName, seq), seq) : undefined;
+			return seq
+				? buildSequenceClause(
+						'CREATE SEQUENCE',
+						upSequenceName(schemaName, seq),
+						seq,
+					)
+				: undefined;
 		}
 		case 'alter_sequence': {
 			const seq = change.meta?.sequence as SequenceIR;
-			return seq ? buildSequenceClause('ALTER SEQUENCE', upSequenceName(schemaName, seq), seq, true) : undefined;
+			return seq
+				? buildSequenceClause(
+						'ALTER SEQUENCE',
+						upSequenceName(schemaName, seq),
+						seq,
+						true,
+					)
+				: undefined;
 		}
 		case 'drop_sequence': {
 			const seq = change.meta?.sequence as SequenceIR;
-			return seq ? `DROP SEQUENCE IF EXISTS ${upSequenceName(schemaName, seq)} CASCADE;` : undefined;
+			return seq
+				? `DROP SEQUENCE IF EXISTS ${upSequenceName(schemaName, seq)} CASCADE;`
+				: undefined;
 		}
 		case 'enable_rls':
 			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ENABLE ROW LEVEL SECURITY;`;
@@ -609,7 +730,9 @@ function changeToUpSQL(change: SchemaChange, schemaName?: string): string | unde
 			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DISABLE ROW LEVEL SECURITY;`;
 		case 'create_policy': {
 			const policy = change.meta?.policy as PolicyIR;
-			return policy ? buildPolicySQL(change.table, policy, schemaName) : undefined;
+			return policy
+				? buildPolicySQL(change.table, policy, schemaName)
+				: undefined;
 		}
 		case 'drop_policy': {
 			const policy = change.meta?.policy as PolicyIR;
@@ -624,7 +747,10 @@ function changeToUpSQL(change: SchemaChange, schemaName?: string): string | unde
 // DOWN SQL Generators per ChangeKind
 // ============================================================================
 
-function changeToDownSQL(change: SchemaChange, schemaName?: string): string | undefined {
+function changeToDownSQL(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
 	switch (change.kind) {
 		case 'create_table':
 			return `DROP TABLE IF EXISTS ${qualifyTable(change.table, schemaName)} CASCADE;`;
@@ -731,7 +857,9 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
 			// DOWN: drop the type that was created
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
 			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
 		}
 
@@ -739,8 +867,12 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
 			// DOWN: recreate the type that was dropped
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
-			const enumName = schemaName ? `${q(schemaName)}.${q(enumDef.name)}` : q(enumDef.name);
-			const values = enumDef.values.map((v) => `'${v.replace(/'/g, "''")}'`).join(', ');
+			const enumName = schemaName
+				? `${q(schemaName)}.${q(enumDef.name)}`
+				: q(enumDef.name);
+			const values = enumDef.values
+				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.join(', ');
 			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 		}
 
@@ -806,7 +938,9 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
 			// DOWN: drop the sequence that was created
 			const seq = change.meta?.sequence as SequenceIR;
 			if (!seq) return undefined;
-			const seqName = schemaName ? `${q(schemaName)}.${q(seq.name)}` : q(seq.name);
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
 			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
 		}
 
@@ -816,7 +950,9 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
 			if (!prevSeq) {
 				return `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`;
 			}
-			const seqName = schemaName ? `${q(schemaName)}.${q(prevSeq.name)}` : q(prevSeq.name);
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(prevSeq.name)}`
+				: q(prevSeq.name);
 			return buildSequenceClause('ALTER SEQUENCE', seqName, prevSeq, true);
 		}
 
@@ -824,7 +960,9 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
 			// DOWN: recreate the sequence that was dropped
 			const seq = change.meta?.sequence as SequenceIR;
 			if (!seq) return undefined;
-			const seqName = schemaName ? `${q(schemaName)}.${q(seq.name)}` : q(seq.name);
+			const seqName = schemaName
+				? `${q(schemaName)}.${q(seq.name)}`
+				: q(seq.name);
 			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
 		}
 
@@ -868,12 +1006,17 @@ function changeToDownSQL(change: SchemaChange, schemaName?: string): string | un
  *
  * Irreversible changes (drops that lose data) produce SQL WARNING comments.
  */
-export function generateDownSQL(diff: SchemaDiff, options?: MigrationSQLOptions): readonly string[] {
+export function generateDownSQL(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): readonly string[] {
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
 	// Filter out destructive changes if not included
-	const changes = includeDestructive ? diff.changes : diff.changes.filter((c) => !c.destructive);
+	const changes = includeDestructive
+		? diff.changes
+		: diff.changes.filter((c) => !c.destructive);
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
@@ -928,7 +1071,8 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	for (const col of table.columns) {
 		const parts: string[] = [q(col.name), mapColumnType(col)];
 		if (!col.nullable && !col.autoIncrement) parts.push('NOT NULL');
-		if (col.default !== undefined) parts.push(`DEFAULT ${formatDefault(col.default)}`);
+		if (col.default !== undefined)
+			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');
 		if (col.collation) parts.push(`COLLATE "${col.collation}"`);
 		if (col.identity) {
@@ -940,8 +1084,14 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 
 	// Primary key
 	if (table.primaryKey !== undefined) {
-		const pkCols = (Array.isArray(table.primaryKey) ? table.primaryKey : [table.primaryKey]).map(q).join(', ');
-		elements.push(`CONSTRAINT ${q(pkName(table.name))} PRIMARY KEY (${pkCols})`);
+		const pkCols = (
+			Array.isArray(table.primaryKey) ? table.primaryKey : [table.primaryKey]
+		)
+			.map(q)
+			.join(', ');
+		elements.push(
+			`CONSTRAINT ${q(pkName(table.name))} PRIMARY KEY (${pkCols})`,
+		);
 	}
 
 	const body = elements.map((el) => `  ${el}`).join(',\n');
@@ -954,15 +1104,23 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	return sql;
 }
 
-function generateAddFKSQL(tableName: string, fk: ForeignKeyIR, schemaName?: string): string {
+function generateAddFKSQL(
+	tableName: string,
+	fk: ForeignKeyIR,
+	schemaName?: string,
+): string {
 	const qualTable = qualifyTable(tableName, schemaName);
 	const constraintName = q(fkName(tableName, fk.columns));
 	const fkCols = fk.columns.map(q).join(', ');
 	// Referenced table must also be schema-qualified to resolve within the same schema
 	const refTable = qualifyTable(fk.references.table, schemaName);
 	const refCols = fk.references.columns.map(q).join(', ');
-	const onDelete = fk.onDelete ? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}` : '';
-	const onUpdate = fk.onUpdate ? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}` : '';
+	const onDelete = fk.onDelete
+		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
+		: '';
+	const onUpdate = fk.onUpdate
+		? ` ON UPDATE ${mapOnDeleteAction(fk.onUpdate)}`
+		: '';
 	const deferred = fk.deferred ? ' DEFERRABLE INITIALLY DEFERRED' : '';
 	const notValid = fk.notValid ? ' NOT VALID' : '';
 	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;

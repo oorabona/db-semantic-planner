@@ -11,7 +11,6 @@ import {
 	detectForeignKeys,
 	detectManyToMany,
 	getSelfRefInverseName,
-	IRREGULAR_PLURALS,
 	inferRelationsFromSchema,
 	pluralize,
 	singularize,

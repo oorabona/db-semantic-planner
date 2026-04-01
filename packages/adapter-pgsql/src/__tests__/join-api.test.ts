@@ -49,8 +49,6 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
-
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -172,7 +170,6 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		expect(dump.params).toEqual([42]);
 	});
 });
-
 
 describe('FR-10 Block 2: JOIN ON aliases pre-population', () => {
 	// Verifies Gap 3 fix: table-mode WhereCompilerCtx now pre-populates the

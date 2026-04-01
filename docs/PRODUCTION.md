@@ -30,9 +30,8 @@ This guide covers best practices for deploying db-semantic-planner in production
 Configure the connection pool based on your expected load:
 
 ```typescript
-import { Kysely, PostgresDialect } from 'kysely';
 import { Pool } from 'pg';
-import { createKyselyAdapter } from '@dbsp/adapter-kysely';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm } from '@dbsp/core';
 
 const pool = new Pool({
@@ -50,13 +49,9 @@ const pool = new Pool({
   statement_timeout: 30000,        // 30s query timeout
 });
 
-const db = new Kysely({
-  dialect: new PostgresDialect({ pool }),
-});
-
 const orm = createOrm({
   model: schema,
-  adapter: createKyselyAdapter(db),
+  adapter: createPgsqlAdapter(pool),
 });
 ```
 
@@ -275,7 +270,7 @@ function toErrorResponse(error: Error, requestId: string): ErrorResponse {
 Every query produces a `Dump` with plan, SQL, and parameters:
 
 ```typescript
-import { redactParams } from '@dbsp/adapter-kysely';
+import { redactParams } from '@dbsp/adapter-pgsql';
 
 // Get query dump without executing
 const dump = await orm.select('users')
@@ -336,15 +331,8 @@ const users = await orm.select('users')
 For large result sets, use streaming to avoid memory exhaustion:
 
 ```typescript
-import { streamQuery } from '@dbsp/adapter-kysely';
-
 // Stream 1M rows without loading all in memory
-const stream = await streamQuery(db, compiledQuery, {
-  chunkSize: 1000, // Rows per batch
-  onStart: (dump) => {
-    logger.info('Starting stream', { sql: dump.sql });
-  },
-});
+const stream = orm.select('users').stream();
 
 let count = 0;
 for await (const row of stream) {
@@ -360,31 +348,20 @@ for await (const row of stream) {
 
 ### Streaming Requirements
 
-| Dialect | Support | Requirements |
-|---------|---------|--------------|
-| PostgreSQL | Full | `pg-cursor` package |
-| MySQL | Partial | Connection flag |
-| SQLite | None | Use pagination |
+The PostgreSQL adapter supports cursor-based streaming via `pg-cursor`. For result sets too large to fit in memory, prefer streaming over loading all rows at once. If streaming is not available for your use case, fall back to offset pagination:
 
 ```typescript
-// Check streaming support
-import { supportsStreaming } from '@dbsp/adapter-kysely';
-
-if (supportsStreaming(db)) {
-  // Use streaming
-} else {
-  // Fall back to pagination
-  const pageSize = 1000;
-  let offset = 0;
-  while (true) {
-    const batch = await orm.select('users')
-      .limit(pageSize)
-      .offset(offset)
-      .all();
-    if (batch.length === 0) break;
-    await processBatch(batch);
-    offset += pageSize;
-  }
+// Offset pagination fallback
+const pageSize = 1000;
+let offset = 0;
+while (true) {
+  const batch = await orm.select('users')
+    .limit(pageSize)
+    .offset(offset)
+    .all();
+  if (batch.length === 0) break;
+  await processBatch(batch);
+  offset += pageSize;
 }
 ```
 
@@ -397,19 +374,19 @@ if (supportsStreaming(db)) {
 Use EXPLAIN to analyze query performance:
 
 ```typescript
-import { explain } from '@dbsp/adapter-kysely';
+// Compile the query first, then EXPLAIN via raw SQL
+const dump = await orm.select('users').where(eq('active', true)).dump();
 
-// Get query plan
-const explainResult = await explain(db, compiledQuery, {
-  analyze: true,  // Actually execute (use on replicas)
-  format: 'json', // Structured output
-});
+const explainResult = await pool.query(
+  `EXPLAIN (ANALYZE, FORMAT JSON) ${dump.sql}`,
+  dump.params,
+);
 
 // Check for issues
-const plan = explainResult.plan;
+const plan = JSON.stringify(explainResult.rows[0]);
 if (plan.includes('Seq Scan') && rowCount > 10000) {
   logger.warn('Sequential scan on large table', {
-    sql: explainResult.sql,
+    sql: dump.sql,
     suggestion: 'Consider adding an index',
   });
 }
@@ -534,8 +511,6 @@ function validateIncludeDepth(include: string[], maxDepth = 3): void {
 DBSP validates identifiers internally, but add defense in depth:
 
 ```typescript
-import { validateIdentifier } from '@dbsp/adapter-kysely';
-
 // Validate before reaching DBSP
 function sanitizeTableName(name: string): string {
   // Only allow alphanumeric and underscore
@@ -551,7 +526,7 @@ function sanitizeTableName(name: string): string {
 Never log sensitive data:
 
 ```typescript
-import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-kysely';
+import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
 
 const safeParams = redactParams(dump.params, {
   patterns: [
@@ -578,10 +553,7 @@ app.get('/health', async (req, res) => {
 
   try {
     // Simple query to verify connectivity
-    await db.selectFrom('pg_catalog.pg_tables')
-      .select('tablename')
-      .limit(1)
-      .execute();
+    await pool.query('SELECT 1');
     checks.database = true;
   } catch (error) {
     logger.error('Health check failed', { error });
@@ -603,7 +575,7 @@ app.get('/health/live', (req, res) => {
 // Readiness: Can it serve traffic?
 app.get('/health/ready', async (req, res) => {
   try {
-    await db.raw('SELECT 1');
+    await pool.query('SELECT 1');
     res.status(200).json({ status: 'ready' });
   } catch {
     res.status(503).json({ status: 'not ready' });
@@ -675,5 +647,3 @@ CREATE INDEX idx_categories_parent_id ON categories(parent_id);
 ## See Also
 
 - [CLI Usage Guide](./CLI_USAGE.md) - CLI commands and REPL
-- [QUICKSTART.md](../examples/QUICKSTART.md) - Getting started tutorial
-- [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) - Full documentation index
