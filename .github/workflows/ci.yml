@@ -1,0 +1,51 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C packages/types build
+      - run: pnpm -C packages/core build
+      - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/adapter-pgsql build
+      - run: pnpm exec biome check
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm -C packages/core test
+      - run: pnpm -C packages/adapter-pgsql test
+      - run: pnpm -C packages/nql test
+
+  e2e:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C packages/types build
+      - run: pnpm -C packages/core build
+      - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/adapter-pgsql build
+      - name: Run E2E tests
+        run: pnpm -C packages/adapter-pgsql test:e2e
+        env:
+          TESTCONTAINERS_RYUK_DISABLED: "true"
