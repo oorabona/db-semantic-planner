@@ -87,10 +87,11 @@ Column types map to TypeScript types:
 | Schema Type | TypeScript Type | Notes |
 |-------------|----------------|-------|
 | `'string'`, `'text'`, `'uuid'` | `string` | |
-| `'number'`, `'integer'`, `'decimal'` | `number` | |
+| `'integer'`, `'decimal'` | `number` | |
 | `'bigint'` | `bigint` | |
 | `'boolean'` | `boolean` | |
-| `'date'`, `'datetime'`, `'timestamp'` | `Date` | |
+| `'date'`, `'timestamp'` | `Date` | |
+| `'time'` | `string` | |
 | `'json'`, `'jsonb'` | `unknown` | |
 | `{ type: T, nullable: true }` | `T \| null` | |
 
@@ -145,23 +146,18 @@ const db = schema({
 | `'string'` | `VARCHAR` | `string` |
 | `'text'` | `TEXT` | `string` |
 | `'integer'` | `INTEGER` | `number` |
-| `'number'` | `NUMERIC` | `number` |
 | `'bigint'` | `BIGINT` | `bigint` |
 | `'decimal'` | `DECIMAL` | `number` |
 | `'boolean'` | `BOOLEAN` | `boolean` |
 | `'date'` | `DATE` | `Date` |
 | `'time'` | `TIME` | `string` |
-| `'datetime'` | `TIMESTAMP` | `Date` |
-| `'timestamp'` | `TIMESTAMP` | `Date` |
+| `'timestamp'` | `TIMESTAMP WITH TIME ZONE` | `Date` |
 | `'json'` | `JSON` | `unknown` |
 | `'jsonb'` | `JSONB` | `unknown` |
 | `'uuid'` | `UUID` | `string` |
 | `'daterange'` | `DATERANGE` | `[Date, Date]` |
-| `'tsrange'` | `TSRANGE` | `[Date, Date]` |
 | `'tstzrange'` | `TSTZRANGE` | `[Date, Date]` |
 | `'int4range'` | `INT4RANGE` | `[number, number]` |
-| `'int8range'` | `INT8RANGE` | `[number, number]` |
-| `'numrange'` | `NUMRANGE` | `[number, number]` |
 
 ### Column Options
 

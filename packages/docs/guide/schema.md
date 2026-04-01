@@ -17,12 +17,12 @@ const db = schema({
     name: 'string',
     email: 'string',
     active: 'boolean',
-    createdAt: 'datetime',
+    createdAt: 'timestamp',
   },
   posts: {
     id: 'uuid',
     title: 'string',
-    content: 'string?',   // nullable
+    content: { type: 'text', nullable: true },
     authorId: ref('users'), // foreign key -> users.id
     published: 'boolean',
   },
@@ -34,14 +34,19 @@ const db = schema({
 | Type | PostgreSQL | Notes |
 |------|------------|-------|
 | `'string'` | `text` | |
+| `'text'` | `text` | |
 | `'integer'` | `integer` | |
+| `'bigint'` | `bigint` | |
+| `'decimal'` | `decimal` | |
 | `'uuid'` | `uuid` | |
 | `'boolean'` | `boolean` | |
-| `'datetime'` | `timestamptz` | |
+| `'timestamp'` | `timestamptz` | |
 | `'date'` | `date` | |
-| `'json'` | `jsonb` | |
-| `'float'` | `double precision` | |
-| `'string?'` | `text` | Nullable (append `?`) |
+| `'time'` | `time` | |
+| `'json'` | `json` | |
+| `'jsonb'` | `jsonb` | |
+
+Use `{ type: 'text', nullable: true }` for nullable columns.
 
 ## Relations
 

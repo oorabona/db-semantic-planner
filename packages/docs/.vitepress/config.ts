@@ -80,7 +80,7 @@ export default defineConfig({
 		socialLinks: [
 			{
 				icon: 'github',
-				link: 'https://github.com/nichochar/db-semantic-planner',
+				link: 'https://github.com/oorabona/db-semantic-planner',
 			},
 		],
 		search: {
