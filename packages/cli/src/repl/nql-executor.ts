@@ -52,11 +52,13 @@ function extractIntentSummary(
 
 	if (compiled.setOperation) {
 		const setOp = compiled.setOperation;
+		// Narrow to QueryIntent (which has `from`/`where`) vs nested SetOperationIntent
+		const leftLeaf = 'from' in setOp.left ? setOp.left : null;
 		return {
 			type: 'setOperation',
-			table: setOp.left.from,
+			table: leftLeaf?.from ?? '',
 			with: [],
-			hasWhere: !!setOp.left.where,
+			hasWhere: leftLeaf != null ? !!leftLeaf.where : false,
 			hasGroupBy: false,
 			hasOrderBy: false,
 			ctes: [],

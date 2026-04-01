@@ -48,7 +48,13 @@ export type DriftType =
 	// Extensions & Sequences
 	| 'missing_extension'
 	| 'missing_sequence'
-	| 'sequence_mismatch';
+	| 'sequence_mismatch'
+	// Constraints
+	| 'constraint_validation_mismatch'
+	// Row-Level Security
+	| 'rls_enabled_mismatch'
+	| 'missing_policy_in_db'
+	| 'missing_policy_in_schema';
 
 export interface DriftIssue {
 	/** Issue severity */
@@ -137,6 +143,16 @@ const CHANGE_TO_DRIFT: Record<
 	create_sequence: { type: 'missing_sequence', severity: 'warning' },
 	alter_sequence: { type: 'sequence_mismatch', severity: 'warning' },
 	drop_sequence: { type: 'missing_sequence', severity: 'info' },
+	// Constraints
+	validate_constraint: {
+		type: 'constraint_validation_mismatch',
+		severity: 'warning',
+	},
+	// Row-Level Security
+	enable_rls: { type: 'rls_enabled_mismatch', severity: 'warning' },
+	disable_rls: { type: 'rls_enabled_mismatch', severity: 'warning' },
+	create_policy: { type: 'missing_policy_in_db', severity: 'warning' },
+	drop_policy: { type: 'missing_policy_in_schema', severity: 'warning' },
 };
 
 function changeToDriftIssue(change: SchemaChange): DriftIssue {
