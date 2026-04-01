@@ -2,6 +2,44 @@
 
 > Consolidated 2026-02-05 from BACKLOG*.md + audit findings + legacy TODOs
 
+## Publication v1.0.0 — Pre-release Checklist
+
+### Phase A: Doc Cleanup (delete internal, rewrite public)
+- [ ] 🔧 Delete docs/plans/ (60 internal specs — all implemented, canonical or deprecated)
+- [ ] 🔧 Delete docs/audit/ (internal audit reports)
+- [ ] 🔧 Delete docs/briefs/ (internal product briefs)
+- [ ] 🔧 Delete docs/historic/ (archived TODOs)
+- [ ] 🔧 Delete .claude/ skills, GOTCHAS (AI tooling, not public)
+- [ ] 🔧 Delete .claude-recovery.md, .workflow-state.json
+- [ ] 🔧 Clean TODO.md — remove internal backlog, keep only public roadmap
+- [ ] 🔧 Review docs/guides/ — rewrite intros for external audience ("why" before "how")
+- [ ] 🔧 Review ARCHITECTURE.md, CONTRIBUTING.md — ensure external-friendly tone
+
+### Phase B: README Rewrite (root + packages)
+- [ ] 🔧 Rewrite root README.md — eye candy, hero section, "why dbsp", 5-min quickstart, comparison table (vs Prisma/Drizzle/Kysely), animated demo/screenshots
+- [ ] 🔧 Add "Getting Started" progressive guide (install → first query → includes → mutations → DDL)
+- [ ] 🔧 Add migration guide stubs (from-prisma, from-drizzle, from-kysely)
+
+### Phase C: VitePress Documentation Site
+- [ ] 💡 Setup VitePress with custom theme — Palette: Deep Tech (indigo #6366F1 + cyan #22D3EE + slate #1E293B), dark mode first
+- [ ] 💡 Structure: Guide / API Reference / Patterns / NQL Reference
+- [ ] 💡 Hero page with tagline "the intent-first query planner" + animated code example
+- [ ] 💡 Migrate guides/ content to VitePress pages
+- [ ] 💡 Generate API reference via TypeDoc → VitePress integration
+- [ ] 💡 CSS animations: code blocks fade-in, SQL output slide, intent→plan→SQL pipeline visualization
+
+### Phase D: Playground
+- [ ] 💡 Monaco editor (NQL + SQL) — compile-only mode in browser
+- [ ] 💡 Pre-loaded examples: basic query, joins, CTE, mutations, window functions
+- [ ] 💡 Live SQL output panel + plan dump viewer
+- [ ] 💡 Embed in VitePress site or standalone page
+
+### Phase E: Git History + Release
+- [ ] 🔧 Squash/rebase or tag boundary — clean history for v1.0.0
+- [ ] 🔧 npm pack --dry-run for each package — verify content
+- [ ] 🔧 git tag v1.0.0 + push → CI publishes to npm
+- [ ] 🔧 Create GitHub Release with changelog
+
 ## In Progress
 
 - [x] ✅ **BRANCH-COV** [Adapter] pgsql-adapter.ts mock branch coverage — created `pgsql-adapter-mock.test.ts` (33 tests): transaction BEGIN/COMMIT/ROLLBACK paths, client reuse, stream() all branches, execute() row transformation (camelCase), executeRaw error, getPoolInstance, indexExists false branch, withSchema pool inheritance, compileWithIncludes, executeDDL success/error, listIndexes/storageSize schema fallbacks. 3745 adapter tests pass. (2026-03-31)
