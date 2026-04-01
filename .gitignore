@@ -55,6 +55,10 @@ temp/
 .idea/
 .vscode/
 
+# VitePress
+.vitepress/cache/
+.vitepress/dist/
+
 # AI tooling
 .claude/
 .serena/
