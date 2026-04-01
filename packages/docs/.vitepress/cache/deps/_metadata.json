@@ -1,0 +1,67 @@
+{
+  "hash": "2d41e3cd",
+  "configHash": "7550ee2e",
+  "lockfileHash": "90e7f6c9",
+  "browserHash": "ecf20681",
+  "optimized": {
+    "vue": {
+      "src": "../../../../../node_modules/.pnpm/vue@3.5.31_typescript@5.9.3/node_modules/vue/dist/vue.runtime.esm-bundler.js",
+      "file": "vue.js",
+      "fileHash": "0ff6dd96",
+      "needsInterop": false
+    },
+    "vitepress > @vue/devtools-api": {
+      "src": "../../../../../node_modules/.pnpm/@vue+devtools-api@7.7.9/node_modules/@vue/devtools-api/dist/index.js",
+      "file": "vitepress___@vue_devtools-api.js",
+      "fileHash": "3a01395b",
+      "needsInterop": false
+    },
+    "vitepress > @vueuse/core": {
+      "src": "../../../../../node_modules/.pnpm/@vueuse+core@12.8.2_typescript@5.9.3/node_modules/@vueuse/core/index.mjs",
+      "file": "vitepress___@vueuse_core.js",
+      "fileHash": "e3795ad3",
+      "needsInterop": false
+    },
+    "vitepress > @vueuse/integrations/useFocusTrap": {
+      "src": "../../../../../node_modules/.pnpm/@vueuse+integrations@12.8.2_change-case@5.4.4_focus-trap@7.8.0_typescript@5.9.3/node_modules/@vueuse/integrations/useFocusTrap.mjs",
+      "file": "vitepress___@vueuse_integrations_useFocusTrap.js",
+      "fileHash": "0d46b67a",
+      "needsInterop": false
+    },
+    "vitepress > mark.js/src/vanilla.js": {
+      "src": "../../../../../node_modules/.pnpm/mark.js@8.11.1/node_modules/mark.js/src/vanilla.js",
+      "file": "vitepress___mark__js_src_vanilla__js.js",
+      "fileHash": "d1f02a37",
+      "needsInterop": false
+    },
+    "vitepress > minisearch": {
+      "src": "../../../../../node_modules/.pnpm/minisearch@7.2.0/node_modules/minisearch/dist/es/index.js",
+      "file": "vitepress___minisearch.js",
+      "fileHash": "164dbdb1",
+      "needsInterop": false
+    },
+    "valibot": {
+      "src": "../../../../../node_modules/.pnpm/valibot@1.3.1_typescript@5.9.3/node_modules/valibot/dist/index.mjs",
+      "file": "valibot.js",
+      "fileHash": "d42373f0",
+      "needsInterop": false
+    },
+    "chevrotain": {
+      "src": "../../../../../node_modules/.pnpm/chevrotain@12.0.0/node_modules/chevrotain/lib/src/api.js",
+      "file": "chevrotain.js",
+      "fileHash": "536d70da",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-XVPDS6EU": {
+      "file": "chunk-XVPDS6EU.js"
+    },
+    "chunk-M6XTSPY5": {
+      "file": "chunk-M6XTSPY5.js"
+    },
+    "chunk-NOUFNU2O": {
+      "file": "chunk-NOUFNU2O.js"
+    }
+  }
+}

@@ -130,20 +130,12 @@ const error = ref<string | null>(null);
 // ORM initialisation (lazy — runs once on mount)
 // ---------------------------------------------------------------------------
 
-let nqlTag:
-	| ((
-			strings: TemplateStringsArray,
-			...values: unknown[]
-	  ) => { dump(): CompileResult })
-	| null = null;
+let nqlTag: ((strings: TemplateStringsArray, ...values: unknown[]) => { dump(): CompileResult }) | null = null;
 
 onMounted(async () => {
 	try {
 		// Dynamic imports keep the browser bundle lazy-loaded
-		const [coreModule, adapterModule] = await Promise.all([
-			import('@dbsp/core'),
-			import('@dbsp/adapter-pgsql'),
-		]);
+		const [coreModule, adapterModule] = await Promise.all([import('@dbsp/core'), import('@dbsp/adapter-pgsql')]);
 
 		const { schema, ref: dbRef, createOrm } = coreModule;
 		const { createPgsqlCompileOnlyAdapter } = adapterModule;
@@ -196,7 +188,7 @@ onMounted(async () => {
 // Actions
 // ---------------------------------------------------------------------------
 
-function _loadExample() {
+function loadExample() {
 	const ex = examples[selectedExampleIndex.value];
 	if (ex) {
 		nqlCode.value = ex.code;
@@ -205,13 +197,12 @@ function _loadExample() {
 	}
 }
 
-function _compile() {
+function compile() {
 	error.value = null;
 	result.value = null;
 
 	if (!nqlTag) {
-		error.value =
-			'Compiler not ready yet — please wait a moment and try again.';
+		error.value = 'Compiler not ready yet — please wait a moment and try again.';
 		return;
 	}
 
@@ -236,12 +227,12 @@ function _compile() {
 // Formatting helpers
 // ---------------------------------------------------------------------------
 
-function _formatParams(params: readonly unknown[]): string {
+function formatParams(params: readonly unknown[]): string {
 	if (params.length === 0) return '(no parameters)';
 	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
-function _formatPlan(plan: unknown): string {
+function formatPlan(plan: unknown): string {
 	return JSON.stringify(plan, null, 2);
 }
 </script>
