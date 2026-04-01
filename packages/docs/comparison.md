@@ -1,3 +1,7 @@
+---
+title: Feature Comparison
+---
+
 # Feature Comparison: db-semantic-planner vs Node.js Database Tools
 
 This document compares db-semantic-planner with all major Node.js database tools and ORMs, covering query building, relations, observability, schema management, and database support.
@@ -308,3 +312,4 @@ Features currently in development or planned:
 | Typegen | Type Generation from DB |
 | Intent | Intent/Semantic-based |
 | Hybrid | Query Builder + ORM features |
+

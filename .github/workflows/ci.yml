@@ -17,11 +17,11 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -C packages/types build
-      - run: pnpm -C packages/core build
       - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
       - run: pnpm -C packages/adapter-pgsql build
-      - run: pnpm exec biome check
-      - run: pnpm exec tsc --noEmit
+      - run: pnpm biome check
+      - run: pnpm typecheck
       - run: pnpm -C packages/core test
       - run: pnpm -C packages/adapter-pgsql test
       - run: pnpm -C packages/nql test
@@ -38,8 +38,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -C packages/types build
-      - run: pnpm -C packages/core build
       - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
       - run: pnpm -C packages/adapter-pgsql build
       - name: Run E2E tests
         run: pnpm -C packages/adapter-pgsql test:e2e

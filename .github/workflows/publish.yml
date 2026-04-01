@@ -19,8 +19,8 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - run: pnpm install --frozen-lockfile
       - run: pnpm -C packages/types build
-      - run: pnpm -C packages/core build
       - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
       - run: pnpm -C packages/adapter-pgsql build
       - run: pnpm -C packages/cli build
       - run: pnpm -C packages/mcp-server build
