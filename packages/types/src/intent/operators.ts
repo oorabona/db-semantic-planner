@@ -4,7 +4,14 @@
  */
 
 /** Comparison operators for scalar values */
-export type ComparisonOperator = 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'isDistinctFrom';
+export type ComparisonOperator =
+	| 'eq'
+	| 'neq'
+	| 'gt'
+	| 'gte'
+	| 'lt'
+	| 'lte'
+	| 'isDistinctFrom';
 
 /** String operators */
 export type StringOperator = 'like';

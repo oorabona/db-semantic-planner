@@ -5,7 +5,6 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { Adapter } from '../adapter.js';
 import { schema } from './schema.js';
 import { createMockAdapter } from './test-utils.js';
 import { createTypedOrm } from './typed-query-builder.js';

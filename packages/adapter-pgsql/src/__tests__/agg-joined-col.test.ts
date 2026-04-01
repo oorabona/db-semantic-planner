@@ -28,7 +28,10 @@ import {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-function compile(plan: SimplifiedPlanReport): { sql: string; parameters: readonly unknown[] } {
+function compile(plan: SimplifiedPlanReport): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
 	return compilePlan(plan);
 }
 
@@ -205,7 +208,8 @@ describe('SC-05: count(*) unchanged (regression guard)', () => {
 describe('SC-06: fn("count", ref("rel.col")) still works (invariant)', () => {
 	it('fn("count", exprRef("callee_calls.id")) emits count(callee_calls.id)', () => {
 		const expr = fn('count', exprRef('callee_calls.id'));
-		const intent = (expr as unknown as { intent: CustomFnExpressionIntent }).intent;
+		const intent = (expr as unknown as { intent: CustomFnExpressionIntent })
+			.intent;
 
 		const plan: SimplifiedPlanReport = {
 			rootTable: 'symbols',

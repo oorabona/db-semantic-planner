@@ -17,7 +17,9 @@ import {
 } from '../compiler.js';
 
 // Minimal mock Node for testing — compiler.ts types it as pgsql Node
-const mockNode = { RangeVar: { relname: 'test' } } as unknown as import('@pgsql/types').Node;
+const mockNode = {
+	RangeVar: { relname: 'test' },
+} as unknown as import('@pgsql/types').Node;
 
 describe('PlanDecision type guards', () => {
 	describe('isJoinDecision', () => {

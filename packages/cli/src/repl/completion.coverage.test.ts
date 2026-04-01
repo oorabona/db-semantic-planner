@@ -8,7 +8,13 @@
  * applyCompletion edge for empty words array, and "any" context fallback.
  */
 
-import type { ColumnType, ModelIR, RelationIR, RelationType, TableIR } from '@dbsp/core';
+import type {
+	ColumnType,
+	ModelIR,
+	RelationIR,
+	RelationType,
+	TableIR,
+} from '@dbsp/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 import {
@@ -24,8 +30,14 @@ import {
 // ---------------------------------------------------------------------------
 
 function createMockSchema(
-	tables: Record<string, Array<{ name: string; type: ColumnType; nullable?: boolean }>>,
-	relations: Record<string, { type: RelationType; source: string; target: string; foreignKey?: string }>,
+	tables: Record<
+		string,
+		Array<{ name: string; type: ColumnType; nullable?: boolean }>
+	>,
+	relations: Record<
+		string,
+		{ type: RelationType; source: string; target: string; foreignKey?: string }
+	>,
 ): LoadedSchema {
 	const tableMap = new Map<string, TableIR>();
 	for (const [tableName, columns] of Object.entries(tables)) {
@@ -50,7 +62,8 @@ function createMockSchema(
 			source: rel.source,
 			target: rel.target,
 			foreignKey: rel.foreignKey,
-			cardinality: rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
+			cardinality:
+				rel.type === 'hasMany' || rel.type === 'belongsToMany' ? 'many' : 'one',
 			optionality: 'optional',
 			includeStrategy: 'auto',
 			filterStrategy: 'auto',
@@ -63,8 +76,10 @@ function createMockSchema(
 		relations: relationMap,
 		getTable: (name) => tableMap.get(name),
 		getRelation: (name) => relationMap.get(name),
-		getRelationsFrom: (source) => Array.from(relationMap.values()).filter((r) => r.source === source),
-		getRelationsTo: (target) => Array.from(relationMap.values()).filter((r) => r.target === target),
+		getRelationsFrom: (source) =>
+			Array.from(relationMap.values()).filter((r) => r.source === source),
+		getRelationsTo: (target) =>
+			Array.from(relationMap.values()).filter((r) => r.target === target),
 		isAmbiguous: () => ({ ambiguous: false, options: [] }),
 	};
 
@@ -111,7 +126,9 @@ describe('CompletionProvider — coverage', () => {
 	describe('parseContext — "or" keyword triggers column suggestions', () => {
 		it('suggests columns after "or" keyword', () => {
 			const suggestions = provider.complete('users where name = "x" or ');
-			const columns = suggestions.filter((s) => s.type === 'column').map((s) => s.text);
+			const columns = suggestions
+				.filter((s) => s.type === 'column')
+				.map((s) => s.text);
 			expect(columns).toContain('name');
 			expect(columns).toContain('email');
 		});
@@ -150,7 +167,9 @@ describe('CompletionProvider — coverage', () => {
 
 		it('filters tables + keywords in "any" context by partial', () => {
 			const suggestions = provider.complete('nonexistent us');
-			const tables = suggestions.filter((s) => s.type === 'table').map((s) => s.text);
+			const tables = suggestions
+				.filter((s) => s.type === 'table')
+				.map((s) => s.text);
 			expect(tables).toContain('users');
 		});
 	});
@@ -158,14 +177,18 @@ describe('CompletionProvider — coverage', () => {
 	describe('parseContext — table context from first word', () => {
 		it('returns keyword context when first word is recognized table', () => {
 			const suggestions = provider.complete('users li');
-			const keywords = suggestions.filter((s) => s.type === 'keyword').map((s) => s.text);
+			const keywords = suggestions
+				.filter((s) => s.type === 'keyword')
+				.map((s) => s.text);
 			expect(keywords).toContain('limit');
 		});
 
 		it('includes table in context when first word is a table', () => {
 			// After "users" with space, table is set → keywords expected
 			const suggestions = provider.complete('users ');
-			const keywords = suggestions.filter((s) => s.type === 'keyword').map((s) => s.text);
+			const keywords = suggestions
+				.filter((s) => s.type === 'keyword')
+				.map((s) => s.text);
 			expect(keywords.length).toBeGreaterThan(0);
 		});
 	});
@@ -173,7 +196,9 @@ describe('CompletionProvider — coverage', () => {
 	describe('parseContext — no trailing space → partial from last word', () => {
 		it('completes partial word at end (no space)', () => {
 			const suggestions = provider.complete('us');
-			const tables = suggestions.filter((s) => s.type === 'table').map((s) => s.text);
+			const tables = suggestions
+				.filter((s) => s.type === 'table')
+				.map((s) => s.text);
 			expect(tables).toContain('users');
 			expect(tables).not.toContain('posts');
 		});
@@ -183,7 +208,9 @@ describe('CompletionProvider — coverage', () => {
 		it('matches via label.includes (not just text.startsWith)', () => {
 			// ".schema" label contains "schema", searching with "sch" should match via startsWith
 			const suggestions = provider.complete('.sch');
-			const commands = suggestions.filter((s) => s.type === 'command').map((s) => s.text);
+			const commands = suggestions
+				.filter((s) => s.type === 'command')
+				.map((s) => s.text);
 			expect(commands).toContain('.schema');
 		});
 	});
@@ -191,7 +218,9 @@ describe('CompletionProvider — coverage', () => {
 	describe('relation completions — falls back to all relations when no table-specific', () => {
 		it('returns global relations when table has none', () => {
 			const suggestions = provider.complete('posts with ');
-			const relations = suggestions.filter((s) => s.type === 'relation').map((s) => s.text);
+			const relations = suggestions
+				.filter((s) => s.type === 'relation')
+				.map((s) => s.text);
 			// userPosts is the only relation, not table-specific (no dot), so all fallback
 			expect(relations).toContain('userPosts');
 		});
@@ -279,7 +308,11 @@ describe('enhanceErrorWithSuggestion — coverage', () => {
 
 	it('returns original when column error has no close match', () => {
 		const error = 'Unknown column: xyzabc';
-		const result = enhanceErrorWithSuggestion(error, ['users'], ['name', 'email']);
+		const result = enhanceErrorWithSuggestion(
+			error,
+			['users'],
+			['name', 'email'],
+		);
 		expect(result).toBe(error);
 	});
 

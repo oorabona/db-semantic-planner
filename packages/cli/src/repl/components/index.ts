@@ -13,4 +13,3 @@ export {
 	PlanOutput,
 	SqlOutput,
 } from './OutputDisplay.js';
-

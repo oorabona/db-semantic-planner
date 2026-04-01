@@ -5,9 +5,9 @@
  * produces the same SQL as the existing decision-based path.
  */
 
+import { exprRef, fn } from '@dbsp/core';
 import type { QueryIntent, SelectIntent, WhereIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
-import { exprRef, fn } from '@dbsp/core';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
 import {
@@ -545,7 +545,11 @@ describe('compileWhereIntent', () => {
 		it('eq(col, fn(coalesce, exprRef(a), exprRef(b))) compiles col = coalesce(a, b)', () => {
 			// eq('call_line', fn('coalesce', exprRef('decl_line'), exprRef('def_line')))
 			// produces kind:'comparison' with value = ExpressionRef (has __expr:true)
-			const coalesceExpr = fn('coalesce', exprRef('decl_line'), exprRef('def_line'));
+			const coalesceExpr = fn(
+				'coalesce',
+				exprRef('decl_line'),
+				exprRef('def_line'),
+			);
 			const intent: WhereIntent = {
 				kind: 'comparison',
 				field: 'call_line',
@@ -559,7 +563,11 @@ describe('compileWhereIntent', () => {
 		});
 
 		it('neq(col, fn(coalesce, exprRef(a), exprRef(b))) compiles col != coalesce(a, b)', () => {
-			const coalesceExpr = fn('coalesce', exprRef('decl_line'), exprRef('def_line'));
+			const coalesceExpr = fn(
+				'coalesce',
+				exprRef('decl_line'),
+				exprRef('def_line'),
+			);
 			const intent: WhereIntent = {
 				kind: 'comparison',
 				field: 'call_line',
@@ -598,14 +606,14 @@ describe('compileWhereIntent', () => {
 	});
 });
 
-
 describe('rawExists / rawNotExists', () => {
 	/**
 	 * Build a compile helper that provides a real compileSubquery callback.
 	 */
-	function compileWithSubquery(
-		intent: WhereIntent,
-	): { sql: string; params: unknown[] } {
+	function compileWithSubquery(intent: WhereIntent): {
+		sql: string;
+		params: unknown[];
+	} {
 		const paramState = createCompilerState();
 		const ctx: WhereCompilerCtx = {
 			rootTable: 'symbols',

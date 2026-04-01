@@ -62,7 +62,9 @@ function compileIntentInternal(
 	const ctx = makeCtx(overrides);
 	const node = compileWhereIntent(intent, ctx);
 	// Embed in a minimal SelectStmt so we get a full SQL string to strip
-	const sql = deparse({ SelectStmt: { whereClause: node } } as unknown as import('@pgsql/types').Node)
+	const sql = deparse({
+		SelectStmt: { whereClause: node },
+	} as unknown as import('@pgsql/types').Node)
 		// deparse of SelectStmt returns "SELECT WHERE <expr>"
 		.replace(/^SELECT\s+WHERE\s+/i, '')
 		.trim();
@@ -70,7 +72,10 @@ function compileIntentInternal(
 }
 
 /** Build a minimal ModelIR with one table and the given columns. */
-function buildModel(tableName: string, columns: Array<{ name: string; type: string; nullable?: boolean }>): ModelIR {
+function buildModel(
+	tableName: string,
+	columns: Array<{ name: string; type: string; nullable?: boolean }>,
+): ModelIR {
 	const tableColumns = columns.map((c) => ({
 		name: c.name,
 		type: c.type,
@@ -102,7 +107,9 @@ function buildModel(tableName: string, columns: Array<{ name: string; type: stri
 
 describe('compileWhereIntent — range with model and range-type column', () => {
 	it('should emit CAST($1 AS daterange) for overlaps when column type is daterange', () => {
-		const model = buildModel('bookings', [{ name: 'period', type: 'daterange' }]);
+		const model = buildModel('bookings', [
+			{ name: 'period', type: 'daterange' },
+		]);
 
 		const { sql, params } = compileIntent(
 			{
@@ -125,7 +132,9 @@ describe('compileWhereIntent — range with model and range-type column', () => 
 	});
 
 	it('should emit CAST($1 AS tstzrange) for contains when column type is tstzrange', () => {
-		const model = buildModel('events', [{ name: 'scheduled', type: 'tstzrange' }]);
+		const model = buildModel('events', [
+			{ name: 'scheduled', type: 'tstzrange' },
+		]);
 
 		const { sql, params } = compileIntent(
 			{
@@ -144,7 +153,9 @@ describe('compileWhereIntent — range with model and range-type column', () => 
 	});
 
 	it('should emit CAST($1 AS int4range) for containedBy when column type is int4range', () => {
-		const model = buildModel('tiers', [{ name: 'qty_range', type: 'int4range' }]);
+		const model = buildModel('tiers', [
+			{ name: 'qty_range', type: 'int4range' },
+		]);
 
 		const { sql, params } = compileIntent(
 			{
@@ -203,7 +214,9 @@ describe('compileWhereIntent — range without model (ctx.model undefined)', () 
 describe('compileWhereIntent — range with model but table not found', () => {
 	it('should emit no CAST when getTable returns undefined for rootTable', () => {
 		// model.getTable('bookings') returns undefined → no rangeDataType
-		const emptyModel = buildModel('other_table', [{ name: 'period', type: 'daterange' }]);
+		const emptyModel = buildModel('other_table', [
+			{ name: 'period', type: 'daterange' },
+		]);
 
 		const { sql, params } = compileIntent(
 			{
@@ -430,7 +443,9 @@ describe('compileWhereIntent — single-element AND/OR unwraps to child', () => 
 	it('should return the child node itself (no BoolExpr wrapper) for AND with one condition', () => {
 		const sql = compileIntent({
 			kind: 'and',
-			conditions: [{ kind: 'comparison', field: 'id', operator: 'eq', value: 42 }],
+			conditions: [
+				{ kind: 'comparison', field: 'id', operator: 'eq', value: 42 },
+			],
 		});
 
 		// Must look like a plain equality — no AND keyword
@@ -442,7 +457,14 @@ describe('compileWhereIntent — single-element AND/OR unwraps to child', () => 
 	it('should return the child node itself (no BoolExpr wrapper) for OR with one condition', () => {
 		const sql = compileIntent({
 			kind: 'or',
-			conditions: [{ kind: 'comparison', field: 'status', operator: 'eq', value: 'active' }],
+			conditions: [
+				{
+					kind: 'comparison',
+					field: 'status',
+					operator: 'eq',
+					value: 'active',
+				},
+			],
 		});
 
 		expect(sql.sql).toBe('bookings.status = $1');
@@ -459,7 +481,12 @@ describe('compileWhereIntent — NOT wraps child expression', () => {
 	it('should emit NOT (...) around a comparison', () => {
 		const { sql, params } = compileIntent({
 			kind: 'not',
-			condition: { kind: 'comparison', field: 'active', operator: 'eq', value: true },
+			condition: {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			},
 		});
 
 		expect(sql).toContain('NOT');
@@ -490,7 +517,12 @@ describe('compileWhereIntent — multi-condition AND/OR', () => {
 		const { sql, params } = compileIntent({
 			kind: 'and',
 			conditions: [
-				{ kind: 'comparison', field: 'status', operator: 'eq', value: 'active' },
+				{
+					kind: 'comparison',
+					field: 'status',
+					operator: 'eq',
+					value: 'active',
+				},
 				{ kind: 'comparison', field: 'age', operator: 'gte', value: 18 },
 			],
 		});
@@ -510,7 +542,12 @@ describe('compileWhereIntent — multi-condition AND/OR', () => {
 			kind: 'or',
 			conditions: [
 				{ kind: 'comparison', field: 'role', operator: 'eq', value: 'admin' },
-				{ kind: 'comparison', field: 'role', operator: 'eq', value: 'moderator' },
+				{
+					kind: 'comparison',
+					field: 'role',
+					operator: 'eq',
+					value: 'moderator',
+				},
 			],
 		});
 

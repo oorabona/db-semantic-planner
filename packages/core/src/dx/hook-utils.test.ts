@@ -38,7 +38,9 @@ function makeQueryCtx(overrides?: Partial<QueryHookContext>): QueryHookContext {
 	};
 }
 
-function makeMutationCtx<T = unknown>(overrides?: Partial<MutationHookContext<T>>): MutationHookContext<T> {
+function makeMutationCtx<T = unknown>(
+	overrides?: Partial<MutationHookContext<T>>,
+): MutationHookContext<T> {
 	return {
 		table: 'users',
 		operation: 'insert',
@@ -93,7 +95,10 @@ describe('sortByPriority', () => {
 		const first: BeforeQueryHook = vi.fn().mockImplementation(() => undefined);
 		const second: BeforeQueryHook = vi.fn().mockImplementation(() => undefined);
 
-		const sorted = sortByPriority([withPriority(first, 'normal'), withPriority(second, 'normal')]);
+		const sorted = sortByPriority([
+			withPriority(first, 'normal'),
+			withPriority(second, 'normal'),
+		]);
 
 		expect(sorted[0]).toBe(first);
 		expect(sorted[1]).toBe(second);
@@ -141,7 +146,8 @@ describe('pipeBeforeQueryHooks', () => {
 	});
 
 	it('handles async hooks', async () => {
-		const h1: BeforeQueryHook = async (ctx) => Promise.resolve({ ...ctx, correlationId: 'async' });
+		const h1: BeforeQueryHook = async (ctx) =>
+			Promise.resolve({ ...ctx, correlationId: 'async' });
 		const piped = pipeBeforeQueryHooks(h1);
 		const result = await piped(makeQueryCtx());
 		expect(result?.correlationId).toBe('async');
@@ -165,7 +171,10 @@ describe('composeBeforeQueryHooks', () => {
 	});
 
 	it('threads context right-to-left', async () => {
-		const h1: BeforeQueryHook = (ctx) => ({ ...ctx, correlationId: `${ctx.correlationId}-h1` });
+		const h1: BeforeQueryHook = (ctx) => ({
+			...ctx,
+			correlationId: `${ctx.correlationId}-h1`,
+		});
 		const h2: BeforeQueryHook = (ctx) => ({ ...ctx, correlationId: 'h2' });
 		const composed = composeBeforeQueryHooks(h1, h2);
 		const result = await composed(makeQueryCtx());
@@ -182,11 +191,11 @@ describe('pipeAfterQueryHooks', () => {
 		const order: string[] = [];
 		const h1: AfterQueryHook = (_ctx, result: unknown) => {
 			order.push('h1');
-			return (result as string) + '-h1';
+			return `${result as string}-h1`;
 		};
 		const h2: AfterQueryHook = (_ctx, result: unknown) => {
 			order.push('h2');
-			return (result as string) + '-h2';
+			return `${result as string}-h2`;
 		};
 		const piped = pipeAfterQueryHooks(h1, h2);
 		const result = await piped(makeQueryCtx(), 'start');
@@ -195,7 +204,7 @@ describe('pipeAfterQueryHooks', () => {
 	});
 
 	it('passes result unchanged when hook returns undefined', async () => {
-		const h1: AfterQueryHook = (_ctx, r: unknown) => (r as string) + '-h1';
+		const h1: AfterQueryHook = (_ctx, r: unknown) => `${r as string}-h1`;
 		const h2: AfterQueryHook = () => undefined;
 		const piped = pipeAfterQueryHooks(h1, h2);
 		const result = await piped(makeQueryCtx(), 'x');
@@ -289,7 +298,8 @@ describe('pipeAfterMutationHooks', () => {
 	});
 
 	it('passes rows unchanged when hook returns undefined', async () => {
-		const h1: AfterMutationHook = (_ctx, rows: unknown[]) => [...rows, 'h1'] as unknown[];
+		const h1: AfterMutationHook = (_ctx, rows: unknown[]) =>
+			[...rows, 'h1'] as unknown[];
 		const h2: AfterMutationHook = () => undefined;
 		const piped = pipeAfterMutationHooks(h1, h2);
 		const result = await piped(makeMutationCtx(), []);

@@ -6,6 +6,7 @@
  * This file is a barrel re-export. Implementation split into intent/ subdirectory.
  */
 
+export * from './intent/cte-intent.js';
 export * from './intent/expression-intent.js';
 export * from './intent/include-intent.js';
 export * from './intent/lock-intent.js';
@@ -17,4 +18,3 @@ export * from './intent/recursive-types.js';
 export * from './intent/select-intent.js';
 export * from './intent/type-guards.js';
 export * from './intent/where-intent.js';
-export * from './intent/cte-intent.js';

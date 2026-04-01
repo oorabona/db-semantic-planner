@@ -20,7 +20,6 @@ import type { RelationIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
-	MYSQL_CAPABILITIES,
 	POSTGRESQL_CAPABILITIES,
 	SQLITE_CAPABILITIES,
 } from '../../dialects/index.js';
@@ -271,7 +270,9 @@ describe('planner: processInclude circular detection', () => {
 			],
 		};
 		const report = plan(intent, simpleSchema);
-		const circularWarning = report.warnings.find((w) => w.code === 'CIRCULAR_INCLUDE');
+		const circularWarning = report.warnings.find(
+			(w) => w.code === 'CIRCULAR_INCLUDE',
+		);
 		expect(circularWarning).toBeDefined();
 		expect(circularWarning?.code).toBe('CIRCULAR_INCLUDE');
 	});
@@ -289,7 +290,9 @@ describe('planner: processInclude unknown relation', () => {
 			include: [{ relation: 'nonExistentRelation' }],
 		};
 		const report = plan(intent, simpleSchema);
-		const warning = report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION');
+		const warning = report.warnings.find(
+			(w) => w.code === 'AMBIGUOUS_RELATION',
+		);
 		expect(warning).toBeDefined();
 		expect(warning?.message).toContain('nonExistentRelation');
 	});
@@ -301,7 +304,9 @@ describe('planner: processInclude unknown relation', () => {
 			include: [{ relation: 'ghosts' }],
 		};
 		const report = plan(intent, simpleSchema);
-		const includeDecision = report.decisions.find((d) => d.type === 'include-strategy');
+		const includeDecision = report.decisions.find(
+			(d) => d.type === 'include-strategy',
+		);
 		expect(includeDecision).toBeUndefined();
 	});
 });
@@ -320,10 +325,14 @@ describe('planner: processInclude via hint', () => {
 		const report = plan(intent, ambiguousSchema, {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		const ambiguous = report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION');
+		const ambiguous = report.warnings.find(
+			(w) => w.code === 'AMBIGUOUS_RELATION',
+		);
 		expect(ambiguous).toBeUndefined();
 		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && (d.context as Record<string, unknown>)?.relation === 'createdBy',
+			(d) =>
+				d.type === 'include-strategy' &&
+				(d.context as Record<string, unknown>)?.relation === 'createdBy',
 		);
 		expect(includeDecision).toBeDefined();
 	});
@@ -371,8 +380,12 @@ describe('planner: AmbiguousPlanError', () => {
 			disambiguate: { 'tasks.users': 'createdBy' },
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		expect(report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION')).toBeUndefined();
-		expect(report.decisions.find((d) => d.type === 'include-strategy')).toBeDefined();
+		expect(
+			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
+		).toBeUndefined();
+		expect(
+			report.decisions.find((d) => d.type === 'include-strategy'),
+		).toBeDefined();
 	});
 });
 
@@ -388,8 +401,12 @@ describe('planner: virtual ancestors/descendants relations', () => {
 			include: [{ relation: 'ancestors' }],
 		};
 		const report = plan(intent, selfRefSchema);
-		expect(report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION')).toBeUndefined();
-		expect(report.decisions.find((d) => d.type === 'include-strategy')).toBeDefined();
+		expect(
+			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
+		).toBeUndefined();
+		expect(
+			report.decisions.find((d) => d.type === 'include-strategy'),
+		).toBeDefined();
 	});
 
 	it('resolves "descendants" on self-referential table without AMBIGUOUS_RELATION warning', () => {
@@ -399,8 +416,12 @@ describe('planner: virtual ancestors/descendants relations', () => {
 			include: [{ relation: 'descendants' }],
 		};
 		const report = plan(intent, selfRefSchema);
-		expect(report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION')).toBeUndefined();
-		expect(report.decisions.find((d) => d.type === 'include-strategy')).toBeDefined();
+		expect(
+			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
+		).toBeUndefined();
+		expect(
+			report.decisions.find((d) => d.type === 'include-strategy'),
+		).toBeDefined();
 	});
 
 	it('emits AMBIGUOUS_RELATION for "ancestors" on non-self-referential table', () => {
@@ -410,7 +431,9 @@ describe('planner: virtual ancestors/descendants relations', () => {
 			include: [{ relation: 'ancestors' }],
 		};
 		const report = plan(intent, simpleSchema);
-		expect(report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION')).toBeDefined();
+		expect(
+			report.warnings.find((w) => w.code === 'AMBIGUOUS_RELATION'),
+		).toBeDefined();
 	});
 });
 
@@ -428,7 +451,9 @@ describe('planner: recursive flag on non-self-referential relation', () => {
 		const report = plan(intent, simpleSchema, {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		expect(report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE')).toBeDefined();
+		expect(
+			report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE'),
+		).toBeDefined();
 	});
 
 	it('no INVALID_RECURSIVE_INCLUDE on actual self-referential relation', () => {
@@ -438,7 +463,9 @@ describe('planner: recursive flag on non-self-referential relation', () => {
 			include: [{ relation: 'children', recursive: true }],
 		};
 		const report = plan(intent, selfRefSchema);
-		expect(report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE')).toBeUndefined();
+		expect(
+			report.warnings.find((w) => w.code === 'INVALID_RECURSIVE_INCLUDE'),
+		).toBeUndefined();
 	});
 });
 
@@ -454,7 +481,9 @@ describe('planner: CTE deduplication', () => {
 			include: [{ relation: 'children', recursive: true }],
 		};
 		const report = plan(intent, selfRefSchema);
-		const ctes = report.ctes.filter((c) => c.name.startsWith('cte_categories_'));
+		const ctes = report.ctes.filter((c) =>
+			c.name.startsWith('cte_categories_'),
+		);
 		const uniqueNames = new Set(ctes.map((c) => c.name));
 		expect(ctes.length).toBe(uniqueNames.size);
 	});
@@ -481,7 +510,9 @@ describe('planner: flat strategy with nested limit', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && (d.context as Record<string, unknown>)?.relation === 'posts',
+			(d) =>
+				d.type === 'include-strategy' &&
+				(d.context as Record<string, unknown>)?.relation === 'posts',
 		);
 		expect(includeDecision?.choice).toBe('lateral');
 	});
@@ -496,7 +527,9 @@ describe('planner: flat strategy with nested limit', () => {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
 		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && (d.context as Record<string, unknown>)?.relation === 'posts',
+			(d) =>
+				d.type === 'include-strategy' &&
+				(d.context as Record<string, unknown>)?.relation === 'posts',
 		);
 		expect(includeDecision?.choice).toBe('join');
 	});
@@ -513,7 +546,9 @@ describe('planner: flat strategy with nested limit', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy' && (d.context as Record<string, unknown>)?.relation === 'posts',
+			(d) =>
+				d.type === 'include-strategy' &&
+				(d.context as Record<string, unknown>)?.relation === 'posts',
 		);
 		expect(includeDecision?.choice).toBe('join');
 	});
@@ -538,7 +573,9 @@ describe('planner: LEFT JOIN ancestor cascade', () => {
 		const report = plan(intent, simpleSchema, {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+		const joinDecisions = report.decisions.filter(
+			(d) => d.type === 'join-type',
+		);
 		expect(joinDecisions.length).toBeGreaterThan(0);
 		for (const d of joinDecisions) {
 			expect(d.choice).toBe('left');
@@ -559,7 +596,9 @@ describe('planner: LEFT JOIN ancestor cascade', () => {
 		const report = plan(intent, simpleSchema, {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+		const joinDecisions = report.decisions.filter(
+			(d) => d.type === 'join-type',
+		);
 		expect(joinDecisions.find((d) => d.choice === 'inner')).toBeDefined();
 	});
 });
@@ -580,7 +619,9 @@ describe('planner: extractCTEs branches', () => {
 			cteThreshold: 1,
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		expect(report.decisions.filter((d) => d.type === 'cte-extraction').length).toBe(0);
+		expect(
+			report.decisions.filter((d) => d.type === 'cte-extraction').length,
+		).toBe(0);
 	});
 
 	it('skips CTE creation for relation already in ctes list (no duplicate)', () => {
@@ -605,7 +646,9 @@ describe('planner: extractCTEs branches', () => {
 			dialectCapabilities: SQLITE_CAPABILITIES,
 			enableCTEs: true,
 		});
-		const cteDecision = report.decisions.find((d) => d.type === 'cte-extraction');
+		const cteDecision = report.decisions.find(
+			(d) => d.type === 'cte-extraction',
+		);
 		expect(cteDecision).toBeDefined();
 		expect(cteDecision?.choice).toBe('cte_posts_author');
 	});
@@ -621,7 +664,9 @@ describe('planner: extractCTEs branches', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES, // json_agg → skip extraction
 			enableCTEs: true,
 		});
-		const cteDecision = report.decisions.find((d) => d.type === 'cte-extraction');
+		const cteDecision = report.decisions.find(
+			(d) => d.type === 'cte-extraction',
+		);
 		expect(cteDecision).toBeUndefined();
 	});
 });
@@ -679,7 +724,9 @@ describe('planner: UnsupportedStrategyError branches', () => {
 			from: 'users',
 			include: [{ relation: 'posts', strategy: 'auto' }],
 		};
-		expect(() => plan(intent, simpleSchema, { dialectCapabilities: SQLITE_CAPABILITIES })).not.toThrow();
+		expect(() =>
+			plan(intent, simpleSchema, { dialectCapabilities: SQLITE_CAPABILITIES }),
+		).not.toThrow();
 	});
 });
 
@@ -690,7 +737,9 @@ describe('planner: UnsupportedStrategyError branches', () => {
 describe('planner: plan() top-level edge cases', () => {
 	it('throws for unknown root table', () => {
 		const intent: QueryIntent = { type: 'select', from: 'nonexistent' };
-		expect(() => plan(intent, simpleSchema)).toThrow('Unknown table: nonexistent');
+		expect(() => plan(intent, simpleSchema)).toThrow(
+			'Unknown table: nonexistent',
+		);
 	});
 
 	it('skips root table validation when batchValuesSource set', () => {
@@ -727,7 +776,9 @@ describe('planner: plan() top-level edge cases', () => {
 			cteThreshold: 1,
 			dialectCapabilities: SQLITE_CAPABILITIES,
 		});
-		expect(report.decisions.filter((d) => d.type === 'cte-extraction').length).toBe(0);
+		expect(
+			report.decisions.filter((d) => d.type === 'cte-extraction').length,
+		).toBe(0);
 	});
 
 	it('metadata.planningTimeMs is a non-negative number', () => {
@@ -829,8 +880,12 @@ describe('planner: generateIncludeReasoning — cte strategy (L1537)', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 			defaultIncludeStrategy: 'cte',
 		});
-		const stratDecision = report.decisions.find((d) => d.type === 'include-strategy');
+		const stratDecision = report.decisions.find(
+			(d) => d.type === 'include-strategy',
+		);
 		expect(stratDecision?.choice).toBe('cte');
-		expect(stratDecision?.reasoning).toMatch(/CTE for recursive\/hierarchical traversal/i);
+		expect(stratDecision?.reasoning).toMatch(
+			/CTE for recursive\/hierarchical traversal/i,
+		);
 	});
 });

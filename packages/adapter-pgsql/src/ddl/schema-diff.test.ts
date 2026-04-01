@@ -706,7 +706,9 @@ describe('compareSchemata', () => {
 					makeTable({
 						name: 'users',
 						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
-						indexes: [{ name: 'users_email_key', columns: ['email'], unique: true }],
+						indexes: [
+							{ name: 'users_email_key', columns: ['email'], unique: true },
+						],
 					}),
 				]);
 
@@ -726,7 +728,9 @@ describe('compareSchemata', () => {
 					makeTable({
 						name: 'users',
 						columns: [makeCol({ name: 'email', type: 'string' })],
-						indexes: [{ name: 'idx_users_email', columns: ['email'], unique: true }],
+						indexes: [
+							{ name: 'idx_users_email', columns: ['email'], unique: true },
+						],
 					}),
 				]);
 
@@ -754,7 +758,11 @@ describe('compareSchemata', () => {
 						],
 						indexes: [
 							{ name: 'users_email_key', columns: ['email'], unique: true },
-							{ name: 'users_username_key', columns: ['username'], unique: true },
+							{
+								name: 'users_username_key',
+								columns: ['username'],
+								unique: true,
+							},
 						],
 					}),
 				]);
@@ -765,7 +773,11 @@ describe('compareSchemata', () => {
 
 			it('should not suppress explicit index on a unique col when col.unique differs', () => {
 				// Explicit index in schema.indexes[] overrides the auto-unique suppression
-				const schemaIdx: IndexIR = { name: 'idx_email_custom', columns: ['email'], unique: true };
+				const schemaIdx: IndexIR = {
+					name: 'idx_email_custom',
+					columns: ['email'],
+					unique: true,
+				};
 				const schema = makeModel([
 					makeTable({
 						name: 'users',

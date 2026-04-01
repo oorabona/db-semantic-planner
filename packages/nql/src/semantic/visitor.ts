@@ -13,6 +13,8 @@ import type { NqlWarning } from '../errors/types.js';
 import type { NqlProgram } from '../parser/ast.js';
 import { nqlParser } from '../parser/grammar.js';
 import type { CstContext, VisitFn } from './helpers.js';
+// CTE / WITH clause
+import { visitCteItem, visitCteList, visitWithQuery } from './visit-cte.js';
 // Boolean, comparison, arithmetic, case, path, relation filters
 import {
 	visitAddExpr,
@@ -102,12 +104,6 @@ import {
 	visitTableRef,
 	visitWhereClause,
 } from './visit-query.js';
-// CTE / WITH clause
-import {
-	visitCteItem,
-	visitCteList,
-	visitWithQuery,
-} from './visit-cte.js';
 
 const BaseCstVisitor = nqlParser.getBaseCstVisitorConstructor();
 
@@ -226,7 +222,6 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	inSuffix(_ctx: CstContext) {
 		return visitInSuffix();
 	}
-
 
 	// BATCH-001: stub — anySuffix is handled by visitPrimaryCond directly
 	anySuffix(_ctx: CstContext) {

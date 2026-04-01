@@ -129,7 +129,10 @@ describe('deparseBoolExpr — AND_EXPR edge cases', () => {
 
 	it('should NOT wrap an AND child in parens when nested inside AND', () => {
 		// AND wrapping another AND — no extra parens needed
-		const innerAnd = boolExprNode('AND_EXPR', [paramRefNode(1), paramRefNode(2)]);
+		const innerAnd = boolExprNode('AND_EXPR', [
+			paramRefNode(1),
+			paramRefNode(2),
+		]);
 		const outerAnd = boolExprNode('AND_EXPR', [innerAnd, paramRefNode(3)]);
 		const result = deparse(outerAnd);
 		// The inner AND has no special wrapping from the outer AND

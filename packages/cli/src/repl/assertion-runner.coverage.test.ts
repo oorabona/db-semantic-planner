@@ -74,9 +74,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({ output: 'Alice and Bob' })];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'db.output.contains', value: 'Alice', line: 2 },
-					],
+					assertions: [{ type: 'db.output.contains', value: 'Alice', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query'], true);
@@ -115,9 +113,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({})];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'totally.unknown' as any, value: 'x', line: 2 },
-					],
+					assertions: [{ type: 'totally.unknown' as any, value: 'x', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -164,9 +160,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({ intent })];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'intent.with', value: 'comments', line: 2 },
-					],
+					assertions: [{ type: 'intent.with', value: 'comments', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -188,9 +182,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({ intent })];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'intent.hasGroupBy', value: false, line: 2 },
-					],
+					assertions: [{ type: 'intent.hasGroupBy', value: false, line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -201,9 +193,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({ intent })];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'intent.hasOrderBy', value: true, line: 2 },
-					],
+					assertions: [{ type: 'intent.hasOrderBy', value: true, line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -243,9 +233,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({})];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'output.contains', value: 'test', line: 2 },
-					],
+					assertions: [{ type: 'output.contains', value: 'test', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -256,9 +244,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({})];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'sql.equals', value: 'SELECT 1', line: 2 },
-					],
+					assertions: [{ type: 'sql.equals', value: 'SELECT 1', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -280,9 +266,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({})];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'error.contains', value: 'something', line: 2 },
-					],
+					assertions: [{ type: 'error.contains', value: 'something', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -437,9 +421,7 @@ describe('assertion-runner coverage', () => {
 			];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'db.column.exists', value: 'name', line: 2 },
-					],
+					assertions: [{ type: 'db.column.exists', value: 'name', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query'], true);
@@ -476,9 +458,7 @@ describe('assertion-runner coverage', () => {
 			];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'sql.matches', value: 'FROM.*users', line: 2 },
-					],
+					assertions: [{ type: 'sql.matches', value: 'FROM.*users', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);
@@ -489,9 +469,7 @@ describe('assertion-runner coverage', () => {
 			const results = [createResult({ output: 'exact' })];
 			const blocks = [
 				createBlock({
-					assertions: [
-						{ type: 'output.equals', value: 'exact', line: 2 },
-					],
+					assertions: [{ type: 'output.equals', value: 'exact', line: 2 }],
 				}),
 			];
 			const summary = runAssertions(blocks, results, ['query']);

@@ -973,9 +973,7 @@ function processInclude(
 	const cascadedJoinType: 'inner' | 'left' =
 		ancestorIsLeftJoin && include.join === undefined ? 'left' : autoJoinType;
 	const explicitJoinType: 'inner' | 'left' | undefined =
-		includeStrategy === 'join'
-			? (include.join ?? cascadedJoinType)
-			: undefined;
+		includeStrategy === 'join' ? (include.join ?? cascadedJoinType) : undefined;
 
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 

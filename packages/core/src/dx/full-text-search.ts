@@ -1,4 +1,3 @@
-
 /**
  * @dbsp/core — Full-Text Search Helpers (FR-5)
  *
@@ -10,8 +9,8 @@
  * to either support the same SQL or receive a capability error at runtime.
  */
 
-import { array, fn, literal, namedArg, op, param, ref } from './expressions.js';
 import type { ExpressionRef } from './expressions.js';
+import { array, fn, literal, namedArg, op, param, ref } from './expressions.js';
 
 // ============================================================================
 // Types
@@ -104,7 +103,10 @@ export function fullTextSearch({
 			),
 		),
 	);
-	const booleanExpr = fn('paradedb.boolean', namedArg('should', array(...boostExprs)));
+	const booleanExpr = fn(
+		'paradedb.boolean',
+		namedArg('should', array(...boostExprs)),
+	);
 	return op('@@@', ref(tableAlias), booleanExpr);
 }
 

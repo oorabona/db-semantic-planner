@@ -1,13 +1,6 @@
----
-doc-meta:
-  status: canonical
-  scope: cli, adapter-pgsql
-  type: guide
-  created: 2026-03-27
-  updated: 2026-03-27
----
-
 # How to Use Schema Versioning
+
+This guide covers schema version tracking, rollback-capable migration files, and programmatic access to migration history. Use it when you need to know which schema version is running in each environment, generate migrations that can be automatically reversed, or build custom tooling on top of the migration infrastructure.
 
 ## When
 

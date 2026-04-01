@@ -70,10 +70,8 @@ export type SupportedColumnTypes<D extends DialectName> = D extends 'postgresql'
 					: CommonColumnType;
 
 /** Whether a column type is supported in a given dialect */
-export type IsTypeSupported<
-	T extends ColumnType,
-	D extends DialectName,
-> = T extends SupportedColumnTypes<D> ? true : false;
+export type IsTypeSupported<T extends ColumnType, D extends DialectName> =
+	T extends SupportedColumnTypes<D> ? true : false;
 
 // ============================================================================
 // Dialect Capabilities

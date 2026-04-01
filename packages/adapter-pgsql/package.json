@@ -52,8 +52,8 @@
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",
-		"pgsql-deparser": "17.17.2",
-		"pgsql-parser": "17.9.11",
+		"pgsql-deparser": "17.18.2",
+		"pgsql-parser": "17.9.14",
 		"tsup": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"

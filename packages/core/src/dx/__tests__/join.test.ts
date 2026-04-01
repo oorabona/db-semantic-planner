@@ -1,4 +1,3 @@
-
 /**
  * Tests for QueryBuilder.join() — FR-10 Block 1
  *
@@ -61,7 +60,9 @@ describe('QueryBuilder.join() — FR-10', () => {
 		});
 
 		it('respects left join type', () => {
-			const intent = getIntent(orm.select('calls').join('callerFile', { type: 'left' }));
+			const intent = getIntent(
+				orm.select('calls').join('callerFile', { type: 'left' }),
+			);
 			const join = intent.joins![0] as JoinIntent;
 			expect(join).toMatchObject({ relation: 'callerFile', type: 'left' });
 		});
@@ -69,7 +70,11 @@ describe('QueryBuilder.join() — FR-10', () => {
 		it('forwards alias when provided', () => {
 			const intent = getIntent(orm.select('calls').join('caller', { as: 'c' }));
 			const join = intent.joins![0] as JoinIntent;
-			expect(join).toMatchObject({ relation: 'caller', type: 'inner', alias: 'c' });
+			expect(join).toMatchObject({
+				relation: 'caller',
+				type: 'inner',
+				alias: 'c',
+			});
 		});
 
 		it('omits alias property when not provided', () => {
@@ -83,18 +88,27 @@ describe('QueryBuilder.join() — FR-10', () => {
 		it('produces JoinIntent with table + on fields', () => {
 			const onCondition = eq('embeddings.id', 42);
 			const intent = getIntent(
-				orm.select('embeddings').join('embeddings', { on: onCondition, as: 'e2' }),
+				orm
+					.select('embeddings')
+					.join('embeddings', { on: onCondition, as: 'e2' }),
 			);
 			expect(intent.joins).toHaveLength(1);
 			const join = intent.joins![0] as JoinIntent;
-			expect(join).toMatchObject({ table: 'embeddings', on: onCondition, alias: 'e2', type: 'inner' });
+			expect(join).toMatchObject({
+				table: 'embeddings',
+				on: onCondition,
+				alias: 'e2',
+				type: 'inner',
+			});
 			expect((join as { relation?: unknown }).relation).toBeUndefined();
 		});
 
 		it('respects left join type in table mode', () => {
 			const onCondition = eq('embeddings.id', 1);
 			const intent = getIntent(
-				orm.select('embeddings').join('embeddings', { on: onCondition, type: 'left', as: 'e2' }),
+				orm
+					.select('embeddings')
+					.join('embeddings', { on: onCondition, type: 'left', as: 'e2' }),
 			);
 			const join = intent.joins![0] as JoinIntent;
 			expect(join).toMatchObject({ table: 'embeddings', type: 'left' });
@@ -132,8 +146,12 @@ describe('QueryBuilder.join() — FR-10', () => {
 			expect(getIntent(base).joins).toHaveLength(1);
 			expect(getIntent(branch1).joins).toHaveLength(2);
 			expect(getIntent(branch2).joins).toHaveLength(2);
-			expect((getIntent(branch1).joins![1] as JoinIntent).relation).toBe('callee');
-			expect((getIntent(branch2).joins![1] as JoinIntent).relation).toBe('callerFile');
+			expect((getIntent(branch1).joins![1] as JoinIntent).relation).toBe(
+				'callee',
+			);
+			expect((getIntent(branch2).joins![1] as JoinIntent).relation).toBe(
+				'callerFile',
+			);
 		});
 	});
 

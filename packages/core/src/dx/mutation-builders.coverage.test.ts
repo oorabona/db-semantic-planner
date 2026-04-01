@@ -5,13 +5,6 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { Adapter, CompiledQuery, Dump } from '../adapter.js';
-import {
-	DeleteBuilder,
-	InsertBuilder,
-	UpdateBuilder,
-	UpsertBuilder,
-} from './mutation-builders.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
 import { createMockAdapter } from './test-utils.js';

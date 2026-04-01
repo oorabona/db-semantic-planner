@@ -26,7 +26,11 @@
 		},
 		{
 			"identifier": "fs:allow-mkdir",
-			"allow": [{ "path": "$APPCONFIG/**" }, { "path": "$HOME/**" }, { "path": "/mnt/**" }]
+			"allow": [
+				{ "path": "$APPCONFIG/**" },
+				{ "path": "$HOME/**" },
+				{ "path": "/mnt/**" }
+			]
 		},
 		{
 			"identifier": "fs:allow-rename",

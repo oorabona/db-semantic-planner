@@ -744,7 +744,11 @@ function compareIndexes(
 
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
 	for (const [key, idx] of dbIdxMap) {
-		if (!schemaIdxMap.has(key) && !autoFkIndexKeys.has(key) && !autoUniqueIndexKeys.has(key)) {
+		if (
+			!schemaIdxMap.has(key) &&
+			!autoFkIndexKeys.has(key) &&
+			!autoUniqueIndexKeys.has(key)
+		) {
 			changes.push({
 				kind: 'drop_index',
 				table: schema.name,

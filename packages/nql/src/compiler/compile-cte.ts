@@ -4,11 +4,7 @@
  * Compiles NQL WITH/CTE syntax to CteQueryIntent.
  */
 
-import type {
-	CteQueryIntent,
-	QueryIntent,
-	SimpleCteIntent,
-} from '@dbsp/types';
+import type { CteQueryIntent, QueryIntent, SimpleCteIntent } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type { NqlWithQuery } from '../parser/ast.js';
 import { compileQuery } from './compile-query.js';

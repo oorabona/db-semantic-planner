@@ -17,6 +17,8 @@ import type {
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions, PlanReport } from '../planner.js';
 import { AmbiguousPlanError, plan } from '../planner.js';
+import type { BatchValuesRef } from './batch-values.js';
+import { isBatchValuesRef } from './batch-values.js';
 import {
 	AmbiguousRelationError,
 	ExecutionError,
@@ -24,8 +26,6 @@ import {
 	NotFoundError,
 } from './errors.js';
 import { ExpressionRef } from './expressions.js';
-import { isBatchValuesRef } from './batch-values.js';
-import type { BatchValuesRef } from './batch-values.js';
 import {
 	and,
 	type DistinctField,
@@ -78,7 +78,6 @@ import {
 	type PaginatedResult,
 	type PaginateOptions,
 	type QueryBuilder,
-	type RecursiveIncludeOptions,
 	type RelationHints,
 	type SortDirection,
 	type StreamOptions,
@@ -595,9 +594,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				},
 				on: opts.on,
 				type,
-				...(opts.as !== undefined
-					? { alias: opts.as }
-					: { alias: bv.alias }),
+				...(opts.as !== undefined ? { alias: opts.as } : { alias: bv.alias }),
 			};
 			builder.joinIntents.push(joinIntent);
 		} else {

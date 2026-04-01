@@ -16,7 +16,9 @@ import type { AssertionQueryResult, IntentSummary } from '../types.js';
 // Helpers
 // ============================================================================
 
-function makeResult(overrides: Partial<AssertionQueryResult> = {}): AssertionQueryResult {
+function makeResult(
+	overrides: Partial<AssertionQueryResult> = {},
+): AssertionQueryResult {
 	return {
 		query: 'SELECT 1',
 		success: true,
@@ -27,7 +29,10 @@ function makeResult(overrides: Partial<AssertionQueryResult> = {}): AssertionQue
 	};
 }
 
-function makeBlock(queryIndex: number, assertions: Partial<Assertion>[]): AssertionBlock {
+function makeBlock(
+	queryIndex: number,
+	assertions: Partial<Assertion>[],
+): AssertionBlock {
 	return {
 		queryIndex,
 		startLine: 1,
@@ -52,7 +57,11 @@ function makeIntent(overrides: Partial<IntentSummary> = {}): IntentSummary {
 	};
 }
 
-function run(type: string, value: unknown, resultOverrides: Partial<AssertionQueryResult> = {}) {
+function run(
+	type: string,
+	value: unknown,
+	resultOverrides: Partial<AssertionQueryResult> = {},
+) {
 	const block = makeBlock(0, [{ type: type as Assertion['type'], value }]);
 	const results = [makeResult(resultOverrides)];
 	return runAssertions([block], results, ['SELECT 1'], true);
@@ -181,7 +190,8 @@ describe('sql.column branch', () => {
 
 describe('sql.join branch', () => {
 	it('passes when join table is present in sql', () => {
-		const sqlWithJoin = 'SELECT * FROM "users" JOIN "posts" ON "posts"."author_id" = "users"."id"';
+		const sqlWithJoin =
+			'SELECT * FROM "users" JOIN "posts" ON "posts"."author_id" = "users"."id"';
 		const summary = run('sql.join', 'posts', { sql: sqlWithJoin });
 		expect(summary.passed).toBe(1);
 		expect(summary.failed).toBe(0);
@@ -348,13 +358,17 @@ describe('db.value.equals branch', () => {
 
 describe('intent.table branch', () => {
 	it('passes when intent.table matches', () => {
-		const summary = run('intent.table', 'users', { intent: makeIntent({ table: 'users' }) });
+		const summary = run('intent.table', 'users', {
+			intent: makeIntent({ table: 'users' }),
+		});
 		expect(summary.passed).toBe(1);
 		expect(summary.failed).toBe(0);
 	});
 
 	it('fails when intent.table does not match', () => {
-		const summary = run('intent.table', 'posts', { intent: makeIntent({ table: 'users' }) });
+		const summary = run('intent.table', 'posts', {
+			intent: makeIntent({ table: 'users' }),
+		});
 		expect(summary.passed).toBe(0);
 		expect(summary.failed).toBe(1);
 	});
@@ -366,19 +380,25 @@ describe('intent.table branch', () => {
 
 describe('intent.hasGroupBy branch', () => {
 	it('passes when intent.hasGroupBy matches true', () => {
-		const summary = run('intent.hasGroupBy', true, { intent: makeIntent({ hasGroupBy: true }) });
+		const summary = run('intent.hasGroupBy', true, {
+			intent: makeIntent({ hasGroupBy: true }),
+		});
 		expect(summary.passed).toBe(1);
 		expect(summary.failed).toBe(0);
 	});
 
 	it('passes when intent.hasGroupBy matches false', () => {
-		const summary = run('intent.hasGroupBy', false, { intent: makeIntent({ hasGroupBy: false }) });
+		const summary = run('intent.hasGroupBy', false, {
+			intent: makeIntent({ hasGroupBy: false }),
+		});
 		expect(summary.passed).toBe(1);
 		expect(summary.failed).toBe(0);
 	});
 
 	it('fails when intent.hasGroupBy does not match', () => {
-		const summary = run('intent.hasGroupBy', true, { intent: makeIntent({ hasGroupBy: false }) });
+		const summary = run('intent.hasGroupBy', true, {
+			intent: makeIntent({ hasGroupBy: false }),
+		});
 		expect(summary.passed).toBe(0);
 		expect(summary.failed).toBe(1);
 	});
@@ -386,13 +406,17 @@ describe('intent.hasGroupBy branch', () => {
 
 describe('intent.hasOrderBy branch', () => {
 	it('passes when intent.hasOrderBy matches true', () => {
-		const summary = run('intent.hasOrderBy', true, { intent: makeIntent({ hasOrderBy: true }) });
+		const summary = run('intent.hasOrderBy', true, {
+			intent: makeIntent({ hasOrderBy: true }),
+		});
 		expect(summary.passed).toBe(1);
 		expect(summary.failed).toBe(0);
 	});
 
 	it('fails when intent.hasOrderBy does not match', () => {
-		const summary = run('intent.hasOrderBy', true, { intent: makeIntent({ hasOrderBy: false }) });
+		const summary = run('intent.hasOrderBy', true, {
+			intent: makeIntent({ hasOrderBy: false }),
+		});
 		expect(summary.passed).toBe(0);
 		expect(summary.failed).toBe(1);
 	});
@@ -404,7 +428,9 @@ describe('intent.hasOrderBy branch', () => {
 
 describe('runSingleAssertion default branch', () => {
 	it('returns failed outcome for unknown assertion type', () => {
-		const block = makeBlock(0, [{ type: 'unknown.type' as Assertion['type'], value: 'test' }]);
+		const block = makeBlock(0, [
+			{ type: 'unknown.type' as Assertion['type'], value: 'test' },
+		]);
 		const results = [makeResult()];
 		const summary = runAssertions([block], results, ['SELECT 1'], true);
 		expect(summary.failed).toBe(1);

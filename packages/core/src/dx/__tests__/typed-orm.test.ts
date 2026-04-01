@@ -41,7 +41,7 @@ describe('DX-040-SURFACE: orm.tables', () => {
 	});
 
 	it('SC-01: orm.tables shares tables with schema.tables', () => {
-		expect(orm.tables['users']).toBeDefined();
+		expect(orm.tables.users).toBeDefined();
 		expect(db.tables.users).toBeDefined();
 	});
 });

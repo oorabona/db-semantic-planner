@@ -10,7 +10,13 @@
  * - Destructive filtering edge cases
  */
 
-import type { ColumnIR, ForeignKeyIR, IndexIR, PolicyIR, TableIR } from '@dbsp/types';
+import type {
+	ColumnIR,
+	ForeignKeyIR,
+	IndexIR,
+	PolicyIR,
+	TableIR,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateMigrationSQL } from './migration-sql.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
@@ -1244,7 +1250,7 @@ describe('create_policy SQL injection prevention', () => {
 	it('rejects backslash in WITH CHECK expression', () => {
 		const policy: PolicyIR = {
 			name: 'bad',
-			withCheck: 'owner_id = 1\; DROP TABLE users',
+			withCheck: 'owner_id = 1; DROP TABLE users',
 		};
 		expect(() =>
 			generateMigrationSQL(

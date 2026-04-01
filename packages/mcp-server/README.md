@@ -52,7 +52,7 @@ DBSP_SCHEMA=./dbsp.schema.ts npx dbsp-mcp
 
 ## Documentation
 
-- [Full documentation index](../../docs/DOCUMENTATION_INDEX.md)
+- [Guides](../../docs/guides/)
 
 ## License
 

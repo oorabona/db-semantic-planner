@@ -354,7 +354,6 @@ describe('generateCreateIndexSQL', () => {
 			generateCreateIndexSQL('embeddings', {
 				name: 'idx_x',
 				columns: ['y'],
-				// biome-ignore lint/suspicious/noExplicitAny: testing invalid input
 				method: 'invalid' as any,
 			}),
 		).toThrow('Invalid index method');

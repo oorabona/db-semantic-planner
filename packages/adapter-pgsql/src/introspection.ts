@@ -177,7 +177,11 @@ interface CatalogResults {
 	fks: RawForeignKey[];
 	indexes: RawIndex[];
 	enums: Array<{ name: string; values: string[] }>;
-	comments: Array<{ table_name: string; column_name: string | null; comment: string }>;
+	comments: Array<{
+		table_name: string;
+		column_name: string | null;
+		comment: string;
+	}>;
 	checks: Array<{ name: string; expression: string; raw_table: string }>;
 	partitions: RawPartition[];
 	extensions: Array<{ name: string }>;
@@ -207,7 +211,10 @@ interface CatalogResults {
  * enums, comments, checks, partitions, extensions (no schema param), sequences,
  * rls state, policies.
  */
-async function queryAllCatalogs(pool: Pool, schema: string): Promise<CatalogResults> {
+async function queryAllCatalogs(
+	pool: Pool,
+	schema: string,
+): Promise<CatalogResults> {
 	const [
 		columnsResult,
 		pksResult,
@@ -496,7 +503,10 @@ function buildCheckMap(
 	const result = new Map<string, CheckConstraintIR[]>();
 	for (const ck of rows) {
 		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
-		const checkIR: CheckConstraintIR = { name: ck.name, expression: ck.expression };
+		const checkIR: CheckConstraintIR = {
+			name: ck.name,
+			expression: ck.expression,
+		};
 		const existing = result.get(tableName);
 		if (existing) {
 			existing.push(checkIR);
@@ -537,23 +547,26 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 			// Only store method when it's not the default 'btree'
 			...(idx.method && idx.method !== 'btree' ? { method: idx.method } : {}),
 			...(idx.predicate ? { where: idx.predicate } : {}),
-			...(withParams && Object.keys(withParams).length > 0 ? { with: withParams } : {}),
+			...(withParams && Object.keys(withParams).length > 0
+				? { with: withParams }
+				: {}),
 			// INCLUDE columns (PG11+)
 			...(Array.isArray(idx.include_columns) && idx.include_columns.length > 0
 				? { include: idx.include_columns as readonly string[] }
 				: {}),
 			// Expression index entries — parse comma-separated pg_get_expr output
-			...(idx.expressions_text ? { expressions: parseExpressionsList(idx.expressions_text) } : {}),
+			...(idx.expressions_text
+				? { expressions: parseExpressionsList(idx.expressions_text) }
+				: {}),
 			// Per-column operator class overrides (non-default only)
 			...(Array.isArray(idx.opclass_cols) &&
 			idx.opclass_cols.length > 0 &&
 			Array.isArray(idx.opclass_names) &&
 			idx.opclass_names.length > 0
 				? {
-						opclass: Object.fromEntries(idx.opclass_cols.map((col, i) => [col, idx.opclass_names![i]!])) as Record<
-							string,
-							string
-						>,
+						opclass: Object.fromEntries(
+							idx.opclass_cols.map((col, i) => [col, idx.opclass_names![i]!]),
+						) as Record<string, string>,
 					}
 				: {}),
 		};
@@ -630,7 +643,9 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 }
 
 /** Build a Map<enumName, EnumIR> from raw enum rows. */
-function buildEnumMap(rows: Array<{ name: string; values: string[] }>): Map<string, EnumIR> {
+function buildEnumMap(
+	rows: Array<{ name: string; values: string[] }>,
+): Map<string, EnumIR> {
 	const result = new Map<string, EnumIR>();
 	for (const row of rows) {
 		const values: string[] = Array.isArray(row.values)
@@ -645,7 +660,13 @@ function buildEnumMap(rows: Array<{ name: string; values: string[] }>): Map<stri
 }
 
 /** Build table-level and column-level comment maps from raw pg_description rows. */
-function buildCommentMaps(rows: Array<{ table_name: string; column_name: string | null; comment: string }>): {
+function buildCommentMaps(
+	rows: Array<{
+		table_name: string;
+		column_name: string | null;
+		comment: string;
+	}>,
+): {
 	tableComments: Map<string, string>;
 	columnComments: Map<string, string>;
 } {
@@ -674,7 +695,10 @@ function buildRLSMaps(
 		using_expr: string | null;
 		with_check_expr: string | null;
 	}>,
-): { tableRlsEnabled: Map<string, boolean>; tablePolicies: Map<string, PolicyIR[]> } {
+): {
+	tableRlsEnabled: Map<string, boolean>;
+	tablePolicies: Map<string, PolicyIR[]>;
+} {
 	const tableRlsEnabled = new Map<string, boolean>();
 	for (const row of rlsRows) {
 		tableRlsEnabled.set(row.table_name, row.rls_enabled);
@@ -693,7 +717,9 @@ function buildRLSMaps(
 		const policyIR: PolicyIR = {
 			name: row.policy_name,
 			command,
-			...(Array.isArray(row.roles) && row.roles.length > 0 ? { roles: row.roles as readonly string[] } : {}),
+			...(Array.isArray(row.roles) && row.roles.length > 0
+				? { roles: row.roles as readonly string[] }
+				: {}),
 			...(!row.permissive ? { permissive: false } : {}),
 			...(row.using_expr ? { using: row.using_expr } : {}),
 			...(row.with_check_expr ? { withCheck: row.with_check_expr } : {}),
@@ -739,9 +765,13 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 				: undefined;
 
 		// Collation: skip null and the PostgreSQL default collation name
-		const collation = col.collation_name && col.collation_name !== 'default' ? col.collation_name : undefined;
+		const collation =
+			col.collation_name && col.collation_name !== 'default'
+				? col.collation_name
+				: undefined;
 
-		const colComment = ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+		const colComment =
+			ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
 
 		return {
 			name: col.column_name,
@@ -785,7 +815,9 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	return {
 		name: tableName,
 		columns,
-		...(pkCols ? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols } : {}),
+		...(pkCols
+			? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols }
+			: {}),
 		foreignKeys,
 		indexes: ctx.tableIndexes.get(tableName) ?? [],
 		...(checks && checks.length > 0 ? { checkConstraints: checks } : {}),
@@ -821,7 +853,10 @@ function buildSequenceMap(
 	return result;
 }
 
-export async function introspect(pool: Pool, options?: IntrospectionOptions): Promise<IntrospectedModelIR> {
+export async function introspect(
+	pool: Pool,
+	options?: IntrospectionOptions,
+): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';
 	const warnings: string[] = [];
 
@@ -835,7 +870,10 @@ export async function introspect(pool: Pool, options?: IntrospectionOptions): Pr
 	const fksByConstraint = buildFKMap(raw.fks);
 	const enumMap = buildEnumMap(raw.enums);
 	const { tableComments, columnComments } = buildCommentMaps(raw.comments);
-	const { tableRlsEnabled, tablePolicies } = buildRLSMaps(raw.rls, raw.policies);
+	const { tableRlsEnabled, tablePolicies } = buildRLSMaps(
+		raw.rls,
+		raw.policies,
+	);
 
 	// Apply include/exclude filters
 	let tableNames = Array.from(tableColumns.keys());
@@ -866,7 +904,13 @@ export async function introspect(pool: Pool, options?: IntrospectionOptions): Pr
 	const relations = inferRelations(fksByConstraint, tableNames);
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
 
-	const modelIR = new ModelIRImpl(tables, relations, enumMap, extensions, sequenceMap);
+	const modelIR = new ModelIRImpl(
+		tables,
+		relations,
+		enumMap,
+		extensions,
+		sequenceMap,
+	);
 
 	return Object.assign(modelIR, {
 		hierarchies,
@@ -883,7 +927,10 @@ export async function introspect(pool: Pool, options?: IntrospectionOptions): Pr
  * Infer bidirectional relations from FK constraints.
  * Each FK produces: belongsTo (source → target) + hasMany (target → source).
  */
-function inferRelations(fksByConstraint: Map<string, FKEntry>, filteredTables: string[]): Map<string, RelationIR> {
+function inferRelations(
+	fksByConstraint: Map<string, FKEntry>,
+	filteredTables: string[],
+): Map<string, RelationIR> {
 	const relations = new Map<string, RelationIR>();
 	const filteredSet = new Set(filteredTables);
 
@@ -971,7 +1018,10 @@ function detectHierarchies(
 	const filteredSet = new Set(filteredTables);
 
 	// Track FKs by (source, target) for edge-table detection
-	const fksBySourceTarget = new Map<string, Array<{ cols: string[]; refs: string[] }>>();
+	const fksBySourceTarget = new Map<
+		string,
+		Array<{ cols: string[]; refs: string[] }>
+	>();
 
 	for (const [, fk] of fksByConstraint) {
 		if (!filteredSet.has(fk.source) || !filteredSet.has(fk.target)) continue;
@@ -980,7 +1030,8 @@ function detectHierarchies(
 		if (fk.source === fk.target && fk.cols.length === 1) {
 			const table = tables.get(fk.source);
 			const pk = table?.primaryKey;
-			const nodeIdColumn = typeof pk === 'string' ? pk : (pk?.[0] ?? DEFAULT_PK_COLUMN);
+			const nodeIdColumn =
+				typeof pk === 'string' ? pk : (pk?.[0] ?? DEFAULT_PK_COLUMN);
 
 			hierarchies.push({
 				type: 'adjacency',
@@ -1114,15 +1165,22 @@ function mapDeleteRule(rule: string): OnDeleteAction {
  * Include is applied first, then exclude.
  * Patterns support * for wildcard matching.
  */
-function filterTables(tableNames: string[], options?: IntrospectionOptions): string[] {
+function filterTables(
+	tableNames: string[],
+	options?: IntrospectionOptions,
+): string[] {
 	let result = tableNames;
 
 	if (options?.include?.length) {
-		result = result.filter((name) => options.include!.some((pattern) => matchGlob(pattern, name)));
+		result = result.filter((name) =>
+			options.include!.some((pattern) => matchGlob(pattern, name)),
+		);
 	}
 
 	if (options?.exclude?.length) {
-		result = result.filter((name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)));
+		result = result.filter(
+			(name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)),
+		);
 	}
 
 	return result;
@@ -1131,6 +1189,8 @@ function filterTables(tableNames: string[], options?: IntrospectionOptions): str
 /** Simple glob matching (supports * wildcard) */
 function matchGlob(pattern: string, value: string): boolean {
 	if (!pattern.includes('*')) return pattern === value;
-	const regex = new RegExp(`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
+	const regex = new RegExp(
+		`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
+	);
 	return regex.test(value);
 }

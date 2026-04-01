@@ -66,11 +66,8 @@ dbsp generate <target> [options]
 # Generate DDL for PostgreSQL
 dbsp generate ddl --schema ./schema.ts --drop
 
-# Generate DDL for MySQL with camelCase columns
-dbsp generate ddl --schema ./schema.ts --dialect mysql --casing camel
-
-# Generate Kysely types
-dbsp generate kysely --schema ./schema.ts -o ./src/db/types.ts
+# Generate DDL with custom schema name
+dbsp generate ddl --schema ./schema.ts --schema-name myapp
 
 # Generate JSON manifest
 dbsp generate manifest --schema ./schema.ts -o ./src/schema.json
@@ -359,8 +356,8 @@ The CLI looks for schema files in this order:
 # Verify schema in CI
 dbsp verify --schema ./schema.ts --db $DATABASE_URL
 
-# Generate types in CI
-dbsp generate kysely --schema ./schema.ts -o ./src/db/types.ts
+# Generate DDL manifest in CI
+dbsp generate manifest --schema ./schema.ts -o ./src/schema.json
 ```
 
 ### Testing
@@ -389,5 +386,4 @@ dbsp repl \
 
 ## See Also
 
-- [QUICKSTART.md](../examples/QUICKSTART.md) - Interactive tutorial with examples
-- [DOCUMENTATION_INDEX.md](./DOCUMENTATION_INDEX.md) - Full documentation index
+- [Production Deployment Guide](./PRODUCTION.md) - Connection pooling, observability, and security hardening

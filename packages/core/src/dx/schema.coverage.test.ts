@@ -1376,7 +1376,7 @@ describe('schema coverage', () => {
 
 		it('should pass options to adapter introspect', async () => {
 			const { getSchemaFromDb } = await import('./schema.js');
-			let capturedOptions;
+			let capturedOptions: unknown;
 
 			const adapter = {
 				introspect: async (opts) => {

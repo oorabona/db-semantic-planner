@@ -73,7 +73,6 @@ export function innerProduct(column: string, vector: number[]): ExpressionRef {
 	return op('<#>', exprRef(column), cast(param(vector), 'vector'));
 }
 
-
 /**
  * Get the number of dimensions of a vector column: vector_dims(col)
  *
@@ -87,4 +86,3 @@ export function innerProduct(column: string, vector: number[]): ExpressionRef {
 export function vectorDims(column: string): ExpressionRef {
 	return fn('vector_dims', exprRef(column));
 }
-

@@ -8,7 +8,7 @@
  * Also covers parameter renumbering when the outer query already has params.
  */
 
-import { eq, literal, op, outerRef, subquery } from '@dbsp/core';
+import { eq, literal, op, subquery } from '@dbsp/core';
 import type { SubqueryExpressionIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';

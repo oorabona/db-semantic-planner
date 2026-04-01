@@ -57,9 +57,11 @@ export function resolveCaseValue(
 		case 'literal':
 			if (expr.value === null || expr.value === undefined)
 				return nullConstNode();
-			if (typeof expr.value === 'boolean') return booleanConstNode(expr.value as boolean);
+			if (typeof expr.value === 'boolean')
+				return booleanConstNode(expr.value as boolean);
 			if (typeof expr.value === 'number') {
-				if (Number.isInteger(expr.value)) return integerNode(expr.value as number);
+				if (Number.isInteger(expr.value))
+					return integerNode(expr.value as number);
 				return floatNode(String(expr.value));
 			}
 			{

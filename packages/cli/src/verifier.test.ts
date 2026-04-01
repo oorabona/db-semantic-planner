@@ -2,8 +2,8 @@
  * Tests for Schema Verifier — Drift Detection via Comparison Engine
  */
 
-import type { ModelIR, TableIR } from '@dbsp/types';
 import { compareSchemata } from '@dbsp/adapter-pgsql';
+import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { formatVerifyResult, verifyFromDiff } from './verifier.js';
 
@@ -98,9 +98,7 @@ describe('verify (via compareSchemata)', () => {
 					'users',
 					makeTable({
 						name: 'users',
-						columns: [
-							{ name: 'id', type: 'uuid', nullable: false },
-						],
+						columns: [{ name: 'id', type: 'uuid', nullable: false }],
 						primaryKey: 'id',
 					}),
 				],
@@ -111,9 +109,7 @@ describe('verify (via compareSchemata)', () => {
 					'users',
 					makeTable({
 						name: 'users',
-						columns: [
-							{ name: 'id', type: 'uuid', nullable: false },
-						],
+						columns: [{ name: 'id', type: 'uuid', nullable: false }],
 						primaryKey: 'id',
 					}),
 				],
@@ -121,9 +117,7 @@ describe('verify (via compareSchemata)', () => {
 					'legacy_table',
 					makeTable({
 						name: 'legacy_table',
-						columns: [
-							{ name: 'id', type: 'integer', nullable: false },
-						],
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
 					}),
 				],
 			]);
@@ -484,9 +478,7 @@ describe('verify (via compareSchemata)', () => {
 					'users',
 					makeTable({
 						name: 'users',
-						columns: [
-							{ name: 'id', type: 'uuid', nullable: false },
-						],
+						columns: [{ name: 'id', type: 'uuid', nullable: false }],
 						primaryKey: 'id',
 						indexes: [],
 					}),
@@ -498,13 +490,9 @@ describe('verify (via compareSchemata)', () => {
 					'users',
 					makeTable({
 						name: 'users',
-						columns: [
-							{ name: 'id', type: 'uuid', nullable: false },
-						],
+						columns: [{ name: 'id', type: 'uuid', nullable: false }],
 						primaryKey: 'id',
-						indexes: [
-							{ name: 'idx_old', columns: ['id'], unique: false },
-						],
+						indexes: [{ name: 'idx_old', columns: ['id'], unique: false }],
 					}),
 				],
 			]);
@@ -657,7 +645,16 @@ describe('verify (via compareSchemata)', () => {
 describe('formatVerifyResult', () => {
 	it('should format valid result', () => {
 		const result = verifyFromDiff(
-			{ changes: [], hasDestructive: false, summary: { tables: { added: 0, dropped: 0 }, columns: { added: 0, dropped: 0, altered: 0 }, indexes: { added: 0, dropped: 0 }, constraints: { added: 0, dropped: 0, altered: 0 } } },
+			{
+				changes: [],
+				hasDestructive: false,
+				summary: {
+					tables: { added: 0, dropped: 0 },
+					columns: { added: 0, dropped: 0, altered: 0 },
+					indexes: { added: 0, dropped: 0 },
+					constraints: { added: 0, dropped: 0, altered: 0 },
+				},
+			},
 			['users', 'posts'],
 			['users', 'posts'],
 		);
@@ -675,9 +672,7 @@ describe('formatVerifyResult', () => {
 				['users', makeTable({ name: 'users' })],
 				['posts', makeTable({ name: 'posts' })],
 			]),
-			makeModel([
-				['users', makeTable({ name: 'users' })],
-			]),
+			makeModel([['users', makeTable({ name: 'users' })]]),
 		);
 		const result = verifyFromDiff(diff, ['users', 'posts'], ['users']);
 
@@ -689,9 +684,7 @@ describe('formatVerifyResult', () => {
 
 	it('should format result with warnings', () => {
 		const diff = compareSchemata(
-			makeModel([
-				['users', makeTable({ name: 'users' })],
-			]),
+			makeModel([['users', makeTable({ name: 'users' })]]),
 			makeModel([
 				['users', makeTable({ name: 'users' })],
 				['legacy', makeTable({ name: 'legacy' })],

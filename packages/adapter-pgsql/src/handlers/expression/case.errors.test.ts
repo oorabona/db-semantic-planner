@@ -6,11 +6,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import type { CompilerContext, Decision } from '../types.js';
+import { makeCtx } from '../../__tests__/helpers/test-context.js';
+import type { Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { caseHandler, simpleCaseHandler } from './case.js';
-import { makeCtx } from '../../__tests__/helpers/test-context.js';
-
 
 // ============================================================================
 // caseHandler errors

@@ -55,20 +55,8 @@ function compileLogical(
 			return {
 				kind: 'and',
 				conditions: [
-					compileExpression(
-						binary.left,
-						ctx,
-						fns,
-						aliasContext,
-						outerAliases,
-					),
-					compileExpression(
-						binary.right,
-						ctx,
-						fns,
-						aliasContext,
-						outerAliases,
-					),
+					compileExpression(binary.left, ctx, fns, aliasContext, outerAliases),
+					compileExpression(binary.right, ctx, fns, aliasContext, outerAliases),
 				],
 			};
 		}
@@ -76,28 +64,14 @@ function compileLogical(
 			return {
 				kind: 'or',
 				conditions: [
-					compileExpression(
-						binary.left,
-						ctx,
-						fns,
-						aliasContext,
-						outerAliases,
-					),
-					compileExpression(
-						binary.right,
-						ctx,
-						fns,
-						aliasContext,
-						outerAliases,
-					),
+					compileExpression(binary.left, ctx, fns, aliasContext, outerAliases),
+					compileExpression(binary.right, ctx, fns, aliasContext, outerAliases),
 				],
 			};
 		}
 		/* v8 ignore start — defensive: only and/or reach here; arithmetic is in SELECT context -- @preserve */
 		// Arithmetic binary → comparison context shouldn't reach here
-		throw new Error(
-			`Unsupported binary operator in WHERE: ${binary.operator}`,
-		);
+		throw new Error(`Unsupported binary operator in WHERE: ${binary.operator}`);
 		/* v8 ignore stop -- @preserve */
 	}
 
@@ -122,7 +96,7 @@ function compileLogical(
 function compileComparison(
 	expr: NqlExpression,
 	ctx: CompilerContext,
-	fns: CompilerFns,
+	_fns: CompilerFns,
 	aliasContext?: string,
 	outerAliases?: string[],
 ): WhereIntent {
@@ -217,12 +191,7 @@ function compileComparison(
 	}
 
 	const operator = mapComparisonOperator(comp.operator);
-	const value = resolveFilterValue(
-		comp.right,
-		ctx,
-		aliasContext,
-		outerAliases,
-	);
+	const value = resolveFilterValue(comp.right, ctx, aliasContext, outerAliases);
 
 	return {
 		kind: 'comparison',
@@ -235,7 +204,7 @@ function compileComparison(
 function compileRange(
 	expr: NqlExpression,
 	ctx: CompilerContext,
-	fns: CompilerFns,
+	_fns: CompilerFns,
 	aliasContext?: string,
 	outerAliases?: string[],
 ): WhereIntent {
@@ -243,9 +212,7 @@ function compileRange(
 	const field = expressionToField(rangeExpr.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!field) {
-		throw new Error(
-			'Left side of range operator must be a field reference',
-		);
+		throw new Error('Left side of range operator must be a field reference');
 	}
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, rangeExpr.left);
@@ -330,10 +297,7 @@ function compileMembership(
 	} else if ('type' in inExpr.values && inExpr.values.type === 'subquery') {
 		// Subquery is a full QueryIntent — contextual validation at adapter level
 		// Subqueries in IN clauses are always simple queries, never set operations
-		const subquery = fns.compileQuery(
-			inExpr.values.query,
-			ctx,
-		) as QueryIntent;
+		const subquery = fns.compileQuery(inExpr.values.query, ctx) as QueryIntent;
 
 		const result: WhereInIntent = {
 			kind: 'in',
@@ -347,16 +311,9 @@ function compileMembership(
 		}
 
 		return result;
-	} else if (
-		'type' in inExpr.values &&
-		inExpr.values.type === 'dateRange'
-	) {
+	} else if ('type' in inExpr.values && inExpr.values.type === 'dateRange') {
 		// Single date range: 'YYYY-Q1' → >= start AND < end (half-open)
-		return expandDateRangeList(
-			field,
-			[inExpr.values.value],
-			inExpr.negated,
-		);
+		return expandDateRangeList(field, [inExpr.values.value], inExpr.negated);
 	} else {
 		values = [];
 	}
@@ -377,7 +334,7 @@ function compileMembership(
 function compileBetween(
 	expr: NqlExpression,
 	ctx: CompilerContext,
-	fns: CompilerFns,
+	_fns: CompilerFns,
 	aliasContext?: string,
 	outerAliases?: string[],
 ): WhereIntent {
@@ -395,18 +352,8 @@ function compileBetween(
 		field,
 		operator: 'between',
 		value: {
-			lower: resolveFilterValue(
-				between.low,
-				ctx,
-				aliasContext,
-				outerAliases,
-			),
-			upper: resolveFilterValue(
-				between.high,
-				ctx,
-				aliasContext,
-				outerAliases,
-			),
+			lower: resolveFilterValue(between.low, ctx, aliasContext, outerAliases),
+			upper: resolveFilterValue(between.high, ctx, aliasContext, outerAliases),
 		},
 	};
 }
@@ -435,7 +382,7 @@ function compileNull(
 function compileJson(
 	expr: NqlExpression,
 	ctx: CompilerContext,
-	fns: CompilerFns,
+	_fns: CompilerFns,
 	aliasContext?: string,
 	outerAliases?: string[],
 ): WhereIntent {
@@ -500,9 +447,7 @@ function compileJson(
 	const jsonField = expressionToField(jsonComp.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!jsonField) {
-		throw new Error(
-			'Left side of JSON comparison must be a field reference',
-		);
+		throw new Error('Left side of JSON comparison must be a field reference');
 	}
 	/* v8 ignore stop -- @preserve */
 

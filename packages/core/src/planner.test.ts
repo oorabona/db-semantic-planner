@@ -924,7 +924,9 @@ describe('Semantic Planner', () => {
 
 			const report = plan(intent, q4Schema);
 
-			const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+			const joinDecisions = report.decisions.filter(
+				(d) => d.type === 'join-type',
+			);
 			const betasDecision = joinDecisions.find(
 				(d) => d.context.relation === 'betas',
 			);
@@ -966,7 +968,9 @@ describe('Semantic Planner', () => {
 
 			const report = plan(intent, q4Schema);
 
-			const joinDecisions = report.decisions.filter((d) => d.type === 'join-type');
+			const joinDecisions = report.decisions.filter(
+				(d) => d.type === 'join-type',
+			);
 			const betasDecision = joinDecisions.find(
 				(d) => d.context.relation === 'betas',
 			);

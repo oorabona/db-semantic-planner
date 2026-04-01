@@ -12,8 +12,8 @@ import type { Adapter } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
+import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import type { CteBuilder } from './cte-builder.js';
-import type { RawCteQueryBuilder, RecursiveOptions } from './raw-cte-builder.js';
 import type {
 	DeleteBuilder,
 	InsertBuilder,
@@ -22,12 +22,18 @@ import type {
 } from './mutation-builders.js';
 import type { NqlTag } from './nql.js';
 import type { QueryBuilder } from './query-builder-types.js';
+import type {
+	RawCteQueryBuilder,
+	RecursiveOptions,
+} from './raw-cte-builder.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
-import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type { DropIndexOptions } from './table-ddl-types.js';
-import type { ListHierarchyOptions, RelationHints } from './types.js';
-import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
-import type { ExpressionSpec } from './types.js';
+import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
+import type {
+	ExpressionSpec,
+	ListHierarchyOptions,
+	RelationHints,
+} from './types.js';
 
 /**
  * Configuration options for creating an ORM instance.
@@ -618,7 +624,10 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * const results = await chain.columns(['id', 'name', 'depth']).orderBy('depth').all();
 	 * ```
 	 */
-	recursive<TResult = unknown>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult>;
+	recursive<TResult = unknown>(
+		name: string,
+		options: RecursiveOptions,
+	): RawCteQueryBuilder<TResult>;
 
 	/**
 	 * Create a virtual batch data source backed by `unnest($1::type[], $2::type[], ...)`.

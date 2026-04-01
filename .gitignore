@@ -55,7 +55,6 @@ temp/
 .idea/
 .vscode/
 
-# Claude Code local settings
-.claude/settings.json
-.claude/commands
+# AI tooling
+.claude/
 .serena/

@@ -59,7 +59,7 @@ console.log(dump.plan);    // PlanReport with decisions + reasoning
 
 ## Documentation
 
-- [Full documentation index](../../docs/DOCUMENTATION_INDEX.md)
+- [Guides](../../docs/guides/)
 - [Expression primitives guide](../../docs/guides/how-to-use-expression-primitives.md)
 - [Joins guide](../../docs/guides/how-to-use-joins.md)
 - [DDL helpers guide](../../docs/guides/how-to-use-ddl-helpers.md)

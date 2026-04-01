@@ -13,7 +13,16 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { aggOrderBy, arrayAgg, fn, literal, namedArg, param, ref, stringAgg } from './expressions.js';
+import {
+	aggOrderBy,
+	arrayAgg,
+	fn,
+	literal,
+	namedArg,
+	param,
+	ref,
+	stringAgg,
+} from './expressions.js';
 import { eq } from './filters.js';
 
 // ============================================================================
@@ -53,7 +62,11 @@ describe('arrayAgg()', () => {
 	});
 
 	it('accepts multiple aggOrderBy args', () => {
-		const expr = arrayAgg(ref('name'), aggOrderBy('a'), aggOrderBy('b', 'desc'));
+		const expr = arrayAgg(
+			ref('name'),
+			aggOrderBy('a'),
+			aggOrderBy('b', 'desc'),
+		);
 		expect(expr.intent.aggOrderBy).toHaveLength(2);
 	});
 });
@@ -86,7 +99,12 @@ describe('stringAgg()', () => {
 	});
 
 	it('accepts multiple aggOrderBy args', () => {
-		const expr = stringAgg(ref('name'), literal(','), aggOrderBy('a'), aggOrderBy('b', 'desc'));
+		const expr = stringAgg(
+			ref('name'),
+			literal(','),
+			aggOrderBy('a'),
+			aggOrderBy('b', 'desc'),
+		);
 		expect(expr.intent.aggOrderBy).toHaveLength(2);
 	});
 });
@@ -180,10 +198,14 @@ describe('aggOrderBy()', () => {
 
 describe('namedArg() invalid name', () => {
 	it('throws for empty name', () => {
-		expect(() => namedArg('', literal('x'))).toThrow('namedArg: invalid argument name:');
+		expect(() => namedArg('', literal('x'))).toThrow(
+			'namedArg: invalid argument name:',
+		);
 	});
 
 	it('throws for name with spaces', () => {
-		expect(() => namedArg('bad name', literal('x'))).toThrow('namedArg: invalid argument name:');
+		expect(() => namedArg('bad name', literal('x'))).toThrow(
+			'namedArg: invalid argument name:',
+		);
 	});
 });

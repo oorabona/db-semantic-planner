@@ -518,6 +518,7 @@ describe('stream() coverage', () => {
 
 	it('should fire onError hook on stream error', async () => {
 		const adapter = createSpyAdapter([]);
+		// biome-ignore lint/correctness/useYield: async generator required for AsyncIterable mock; throws before yielding
 		adapter.stream = vi.fn(async function* () {
 			throw new Error('Stream error');
 		});
@@ -1116,7 +1117,7 @@ describe('Hook integration coverage', () => {
 		const adapter = createSpyAdapter([{ id: 1, name: 'Alice' }]);
 		const hookManager = createHookManager();
 
-		const afterSpy = vi.fn((ctx, result) => result);
+		const afterSpy = vi.fn((_ctx, result) => result);
 		hookManager.afterQuery(afterSpy);
 
 		const orm = createOrm({ adapter, schema: testSchema, hooks: hookManager });

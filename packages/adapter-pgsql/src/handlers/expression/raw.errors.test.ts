@@ -6,11 +6,10 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { CompilerContext, Decision } from '../types.js';
+import { makeCtx } from '../../__tests__/helpers/test-context.js';
+import type { Decision } from '../types.js';
 import { createCompilerState } from '../types.js';
 import { literalHandler, rawHandler, sqlFunctionHandler } from './raw.js';
-import { makeCtx } from '../../__tests__/helpers/test-context.js';
-
 
 // ============================================================================
 // rawHandler errors

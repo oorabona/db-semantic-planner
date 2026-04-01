@@ -1,6 +1,7 @@
 # NQL Reference
 
-> **Natural Query Language** — A pipe-based query language that compiles to SQL.
+NQL (Natural Query Language) is a pipe-based query language that compiles to parameterized SQL. It lets you express queries in a readable, composable syntax without writing SQL directly. Use this reference when you want to explore data interactively in the REPL, write query scripts in `.dbsp` files, or learn the full NQL syntax before embedding queries in your application via the TypeScript API.
+
 > Every example in this document is validated against a live PostgreSQL 17 database
 > using the schemas in `examples/`.
 

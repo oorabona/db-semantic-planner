@@ -80,6 +80,8 @@ export type {
 	IncludeIntent,
 	InsertFromIntent,
 	InsertIntent,
+	// Join (FR-10)
+	JoinIntent,
 	LiteralExpressionIntent,
 	LogicalOperator,
 	MutationIntent,
@@ -124,8 +126,6 @@ export type {
 	UpsertConflictTarget,
 	UpsertFromIntent,
 	UpsertIntent,
-	// Join (FR-10)
-	JoinIntent,
 	// Where (filters)
 	WhereAndIntent,
 	WhereAnyIntent,

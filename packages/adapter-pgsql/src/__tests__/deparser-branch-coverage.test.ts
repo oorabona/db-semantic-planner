@@ -26,11 +26,19 @@ function paramRef(number: number): Node {
 	return { ParamRef: { number } } as Node;
 }
 
-function aExpr(kind: string, op: string | string[], lexpr?: Node, rexpr?: unknown): Node {
+function aExpr(
+	kind: string,
+	op: string | string[],
+	lexpr?: Node,
+	rexpr?: unknown,
+): Node {
 	return {
 		A_Expr: {
 			kind,
-			name: typeof op === 'string' ? [{ String: { sval: op } }] : op.map((o) => ({ String: { sval: o } })),
+			name:
+				typeof op === 'string'
+					? [{ String: { sval: op } }]
+					: op.map((o) => ({ String: { sval: o } })),
 			lexpr,
 			rexpr,
 		},
@@ -68,7 +76,11 @@ function boolExpr(boolop: string, args: Node[]): Node {
 	return { BoolExpr: { boolop, args } } as Node;
 }
 
-function funcCall(name: string[], args?: Node[], extra?: Record<string, unknown>): Node {
+function funcCall(
+	name: string[],
+	args?: Node[],
+	extra?: Record<string, unknown>,
+): Node {
 	return {
 		FuncCall: {
 			funcname: name.map((n) => ({ String: { sval: n } })),
@@ -129,7 +141,9 @@ describe('deparse: top-level dispatch', () => {
 
 	it('throws on unknown node type', () => {
 		const node: Node = { UnknownNodeXYZ: {} } as unknown as Node;
-		expect(() => deparse(node)).toThrow('deparse: unsupported AST node type: UnknownNodeXYZ');
+		expect(() => deparse(node)).toThrow(
+			'deparse: unsupported AST node type: UnknownNodeXYZ',
+		);
 	});
 });
 
@@ -217,7 +231,11 @@ describe('deparseColumnRef', () => {
 	});
 
 	it('schema.table.column three-part reference', () => {
-		const node = columnRef([{ String: { sval: 'public' } }, { String: { sval: 'users' } }, { String: { sval: 'id' } }]);
+		const node = columnRef([
+			{ String: { sval: 'public' } },
+			{ String: { sval: 'users' } },
+			{ String: { sval: 'id' } },
+		]);
 		expect(deparse(node)).toBe('public.users.id');
 	});
 
@@ -273,7 +291,12 @@ describe('deparseAExpr: AEXPR_OP', () => {
 	});
 
 	it('parenthesizes nested A_Expr on the left', () => {
-		const inner = aExpr('AEXPR_OP', '+', aConst({ ival: 1 }), aConst({ ival: 2 }));
+		const inner = aExpr(
+			'AEXPR_OP',
+			'+',
+			aConst({ ival: 1 }),
+			aConst({ ival: 2 }),
+		);
 		const innerRaw = (inner as Record<string, unknown>).A_Expr as Node;
 		const left = { A_Expr: innerRaw } as Node;
 		const right = aConst({ ival: 3 });
@@ -282,7 +305,12 @@ describe('deparseAExpr: AEXPR_OP', () => {
 	});
 
 	it('parenthesizes nested A_Expr on the right', () => {
-		const inner = aExpr('AEXPR_OP', '+', aConst({ ival: 1 }), aConst({ ival: 2 }));
+		const inner = aExpr(
+			'AEXPR_OP',
+			'+',
+			aConst({ ival: 1 }),
+			aConst({ ival: 2 }),
+		);
 		const innerRaw = (inner as Record<string, unknown>).A_Expr as Node;
 		const right = { A_Expr: innerRaw } as Node;
 		const left = aConst({ ival: 5 });
@@ -294,7 +322,9 @@ describe('deparseAExpr: AEXPR_OP', () => {
 describe('deparseAExpr: AEXPR_OP_ANY', () => {
 	it('produces X op ANY (Y)', () => {
 		const left = columnRef([{ String: { sval: 'id' } }]);
-		const right = { A_ArrayExpr: { elements: [aConst({ ival: 1 }), aConst({ ival: 2 })] } } as Node;
+		const right = {
+			A_ArrayExpr: { elements: [aConst({ ival: 1 }), aConst({ ival: 2 })] },
+		} as Node;
 		const node = aExpr('AEXPR_OP_ANY', '=', left, right);
 		expect(deparse(node)).toBe('id = ANY (ARRAY[1, 2])');
 	});
@@ -366,7 +396,10 @@ describe('deparseAExpr: AEXPR_LIKE / AEXPR_ILIKE', () => {
 		const escapeNode = aConst({ sval: '\\' });
 		const baseNode = aExpr('AEXPR_LIKE', '~~', left, right);
 		// Inject escape into A_Expr inner
-		const inner = (baseNode as Record<string, unknown>).A_Expr as Record<string, unknown>;
+		const inner = (baseNode as Record<string, unknown>).A_Expr as Record<
+			string,
+			unknown
+		>;
 		inner.escape = escapeNode;
 		expect(deparse(baseNode)).toBe("path LIKE '50\\%%' ESCAPE '\\'");
 	});
@@ -390,7 +423,9 @@ describe('deparseAExpr: AEXPR_IN', () => {
 	it('IN with List rexpr', () => {
 		const left = columnRef([{ String: { sval: 'status' } }]);
 		const rexpr = {
-			List: { items: [aConst({ sval: 'active' }), aConst({ sval: 'pending' })] },
+			List: {
+				items: [aConst({ sval: 'active' }), aConst({ sval: 'pending' })],
+			},
 		};
 		const node = aExpr('AEXPR_IN', '=', left, rexpr);
 		expect(deparse(node)).toBe("status IN ('active', 'pending')");
@@ -475,7 +510,10 @@ describe('deparseTypeName', () => {
 	it('filters out pg_catalog prefix', () => {
 		const node: Node = {
 			TypeName: {
-				names: [{ String: { sval: 'pg_catalog' } }, { String: { sval: 'int4' } }],
+				names: [
+					{ String: { sval: 'pg_catalog' } },
+					{ String: { sval: 'int4' } },
+				],
 			},
 		} as Node;
 		expect(deparse(node)).toBe('int4');
@@ -594,8 +632,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_UNION',
 				all: false,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 UNION SELECT 2');
@@ -606,8 +648,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_UNION',
 				all: true,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 UNION ALL SELECT 2');
@@ -618,8 +664,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_INTERSECT',
 				all: false,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 INTERSECT SELECT 2');
@@ -630,8 +680,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_INTERSECT',
 				all: true,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 INTERSECT ALL SELECT 2');
@@ -642,8 +696,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_EXCEPT',
 				all: false,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 EXCEPT SELECT 2');
@@ -654,8 +712,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_EXCEPT',
 				all: true,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 EXCEPT ALL SELECT 2');
@@ -666,8 +728,12 @@ describe('deparseSelectStmt: set operations', () => {
 			SelectStmt: {
 				op: 'SETOP_CUSTOM',
 				all: false,
-				larg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }] },
-				rarg: { targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }] },
+				larg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 1 } } } }],
+				},
+				rarg: {
+					targetList: [{ ResTarget: { val: { A_Const: { ival: 2 } } } }],
+				},
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 SETOP_CUSTOM SELECT 2');
@@ -685,7 +751,9 @@ describe('deparseSelectStmt: VALUES clause', () => {
 	it('single-row VALUES', () => {
 		const node: Node = {
 			SelectStmt: {
-				valuesLists: [{ List: { items: [aConst({ ival: 1 }), aConst({ sval: 'a' })] } }],
+				valuesLists: [
+					{ List: { items: [aConst({ ival: 1 }), aConst({ sval: 'a' })] } },
+				],
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe("VALUES (1, 'a')");
@@ -694,7 +762,10 @@ describe('deparseSelectStmt: VALUES clause', () => {
 	it('multi-row VALUES', () => {
 		const node: Node = {
 			SelectStmt: {
-				valuesLists: [{ List: { items: [aConst({ ival: 1 })] } }, { List: { items: [aConst({ ival: 2 })] } }],
+				valuesLists: [
+					{ List: { items: [aConst({ ival: 1 })] } },
+					{ List: { items: [aConst({ ival: 2 })] } },
+				],
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('VALUES (1), (2)');
@@ -715,7 +786,9 @@ describe('deparseSelectStmt: DISTINCT variants', () => {
 		const node: Node = {
 			SelectStmt: {
 				distinctClause: [],
-				targetList: [{ ResTarget: { val: columnRef([{ String: { sval: 'id' } }]) } }],
+				targetList: [
+					{ ResTarget: { val: columnRef([{ String: { sval: 'id' } }]) } },
+				],
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT DISTINCT id');
@@ -725,7 +798,9 @@ describe('deparseSelectStmt: DISTINCT variants', () => {
 		const node: Node = {
 			SelectStmt: {
 				distinctClause: [columnRef([{ String: { sval: 'dept' } }])],
-				targetList: [{ ResTarget: { val: columnRef([{ String: { sval: 'id' } }]) } }],
+				targetList: [
+					{ ResTarget: { val: columnRef([{ String: { sval: 'id' } }]) } },
+				],
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT DISTINCT ON (dept) id');
@@ -737,7 +812,12 @@ describe('deparseSelectStmt: individual clauses', () => {
 		const node: Node = {
 			SelectStmt: {
 				targetList: [{ ResTarget: { val: aConst({ ival: 1 }) } }],
-				whereClause: aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'x' } }]), aConst({ ival: 5 })),
+				whereClause: aExpr(
+					'AEXPR_OP',
+					'=',
+					columnRef([{ String: { sval: 'x' } }]),
+					aConst({ ival: 5 }),
+				),
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 WHERE x = 5');
@@ -746,7 +826,9 @@ describe('deparseSelectStmt: individual clauses', () => {
 	it('GROUP BY clause', () => {
 		const node: Node = {
 			SelectStmt: {
-				targetList: [{ ResTarget: { val: columnRef([{ String: { sval: 'dept' } }]) } }],
+				targetList: [
+					{ ResTarget: { val: columnRef([{ String: { sval: 'dept' } }]) } },
+				],
 				fromClause: [rangeVar('employees')],
 				groupClause: [columnRef([{ String: { sval: 'dept' } }])],
 			},
@@ -759,7 +841,12 @@ describe('deparseSelectStmt: individual clauses', () => {
 			SelectStmt: {
 				targetList: [{ ResTarget: { val: aConst({ ival: 1 }) } }],
 				fromClause: [rangeVar('t')],
-				havingClause: aExpr('AEXPR_OP', '>', columnRef([{ String: { sval: 'cnt' } }]), aConst({ ival: 0 })),
+				havingClause: aExpr(
+					'AEXPR_OP',
+					'>',
+					columnRef([{ String: { sval: 'cnt' } }]),
+					aConst({ ival: 0 }),
+				),
 			},
 		} as unknown as Node;
 		expect(deparse(node)).toBe('SELECT 1 FROM t HAVING cnt > 0');
@@ -832,21 +919,46 @@ describe('deparseSelectStmt: individual clauses', () => {
 
 describe('deparseBoolExpr', () => {
 	it('NOT_EXPR wraps single arg', () => {
-		const arg = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'a' } }]), aConst({ ival: 1 }));
+		const arg = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'a' } }]),
+			aConst({ ival: 1 }),
+		);
 		const node = boolExpr('NOT_EXPR', [arg]);
 		expect(deparse(node)).toBe('NOT (a = 1)');
 	});
 
 	it('AND_EXPR joins with AND', () => {
-		const a = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'a' } }]), aConst({ ival: 1 }));
-		const b = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'b' } }]), aConst({ ival: 2 }));
+		const a = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'a' } }]),
+			aConst({ ival: 1 }),
+		);
+		const b = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'b' } }]),
+			aConst({ ival: 2 }),
+		);
 		const node = boolExpr('AND_EXPR', [a, b]);
 		expect(deparse(node)).toBe('a = 1 AND b = 2');
 	});
 
 	it('OR_EXPR joins with OR', () => {
-		const a = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'a' } }]), aConst({ ival: 1 }));
-		const b = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'b' } }]), aConst({ ival: 2 }));
+		const a = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'a' } }]),
+			aConst({ ival: 1 }),
+		);
+		const b = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'b' } }]),
+			aConst({ ival: 2 }),
+		);
 		const node = boolExpr('OR_EXPR', [a, b]);
 		expect(deparse(node)).toBe('a = 1 OR b = 2');
 	});
@@ -856,12 +968,27 @@ describe('deparseBoolExpr', () => {
 			BoolExpr: {
 				boolop: 'OR_EXPR',
 				args: [
-					aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'a' } }]), aConst({ ival: 1 })),
-					aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'b' } }]), aConst({ ival: 2 })),
+					aExpr(
+						'AEXPR_OP',
+						'=',
+						columnRef([{ String: { sval: 'a' } }]),
+						aConst({ ival: 1 }),
+					),
+					aExpr(
+						'AEXPR_OP',
+						'=',
+						columnRef([{ String: { sval: 'b' } }]),
+						aConst({ ival: 2 }),
+					),
 				],
 			},
 		} as Node;
-		const other = aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'c' } }]), aConst({ ival: 3 }));
+		const other = aExpr(
+			'AEXPR_OP',
+			'=',
+			columnRef([{ String: { sval: 'c' } }]),
+			aConst({ ival: 3 }),
+		);
 		const node = boolExpr('AND_EXPR', [orChild, other]);
 		expect(deparse(node)).toBe('(a = 1 OR b = 2) AND c = 3');
 	});
@@ -878,12 +1005,19 @@ describe('deparseFuncCall', () => {
 	});
 
 	it('simple function call with args', () => {
-		const node = funcCall(['lower'], [columnRef([{ String: { sval: 'name' } }])]);
+		const node = funcCall(
+			['lower'],
+			[columnRef([{ String: { sval: 'name' } }])],
+		);
 		expect(deparse(node)).toBe('lower(name)');
 	});
 
 	it('DISTINCT aggregate', () => {
-		const node = funcCall(['count'], [columnRef([{ String: { sval: 'id' } }])], { agg_distinct: true });
+		const node = funcCall(
+			['count'],
+			[columnRef([{ String: { sval: 'id' } }])],
+			{ agg_distinct: true },
+		);
 		expect(deparse(node)).toBe('count(DISTINCT id)');
 	});
 
@@ -916,7 +1050,10 @@ describe('deparseFuncCall', () => {
 	it('schema-qualified function name', () => {
 		const node: Node = {
 			FuncCall: {
-				funcname: [{ String: { sval: 'pg_catalog' } }, { String: { sval: 'now' } }],
+				funcname: [
+					{ String: { sval: 'pg_catalog' } },
+					{ String: { sval: 'now' } },
+				],
 			},
 		} as Node;
 		expect(deparse(node)).toBe('pg_catalog.now()');
@@ -974,28 +1111,36 @@ describe('deparseWindowDef', () => {
 		// NONDEFAULT | RANGE | BETWEEN | START_UNBOUNDED_PRECEDING | END_CURRENT_ROW
 		const frameOptions = 0x00001 | 0x00002 | 0x00010 | 0x00020 | 0x00400;
 		const node: Node = { WindowDef: { frameOptions } } as Node;
-		expect(deparse(node)).toBe('RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW');
+		expect(deparse(node)).toBe(
+			'RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW',
+		);
 	});
 
 	it('RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING', () => {
 		// NONDEFAULT | RANGE | BETWEEN | START_UNBOUNDED_PRECEDING | END_UNBOUNDED_FOLLOWING
 		const frameOptions = 0x00001 | 0x00002 | 0x00010 | 0x00020 | 0x00100;
 		const node: Node = { WindowDef: { frameOptions } } as Node;
-		expect(deparse(node)).toBe('RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING');
+		expect(deparse(node)).toBe(
+			'RANGE BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING',
+		);
 	});
 
 	it('RANGE BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING (end unbounded preceding)', () => {
 		// NONDEFAULT | RANGE | BETWEEN | START_CURRENT_ROW | END_UNBOUNDED_PRECEDING
 		const frameOptions = 0x00001 | 0x00002 | 0x00010 | 0x00200 | 0x00040;
 		const node: Node = { WindowDef: { frameOptions } } as Node;
-		expect(deparse(node)).toBe('RANGE BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING');
+		expect(deparse(node)).toBe(
+			'RANGE BETWEEN CURRENT ROW AND UNBOUNDED PRECEDING',
+		);
 	});
 
 	it('RANGE BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW (start unbounded following)', () => {
 		// NONDEFAULT | RANGE | BETWEEN | START_UNBOUNDED_FOLLOWING | END_CURRENT_ROW
 		const frameOptions = 0x00001 | 0x00002 | 0x00010 | 0x00080 | 0x00400;
 		const node: Node = { WindowDef: { frameOptions } } as Node;
-		expect(deparse(node)).toBe('RANGE BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW');
+		expect(deparse(node)).toBe(
+			'RANGE BETWEEN UNBOUNDED FOLLOWING AND CURRENT ROW',
+		);
 	});
 
 	it('frameOptions=0 produces no frame clause', () => {
@@ -1012,7 +1157,14 @@ describe('deparseWindowDef', () => {
 		const node: Node = {
 			WindowDef: {
 				partitionClause: [columnRef([{ String: { sval: 'dept' } }])],
-				orderClause: [{ SortBy: { node: columnRef([{ String: { sval: 'salary' } }]), sortby_dir: 'SORTBY_DESC' } }],
+				orderClause: [
+					{
+						SortBy: {
+							node: columnRef([{ String: { sval: 'salary' } }]),
+							sortby_dir: 'SORTBY_DESC',
+						},
+					},
+				],
 			},
 		} as Node;
 		expect(deparse(node)).toBe('PARTITION BY dept ORDER BY salary DESC');
@@ -1078,11 +1230,15 @@ describe('deparseJoinExpr', () => {
 			columnRef([{ String: { sval: 'a' } }, { String: { sval: 'id' } }]),
 			columnRef([{ String: { sval: 'b' } }, { String: { sval: 'a_id' } }]),
 		);
-		expect(deparse(joinExpr('JOIN_INNER', quals))).toBe('a JOIN b ON a.id = b.a_id');
+		expect(deparse(joinExpr('JOIN_INNER', quals))).toBe(
+			'a JOIN b ON a.id = b.a_id',
+		);
 	});
 
 	it('JOIN with outer alias wraps in parens', () => {
-		expect(deparse(joinExpr('JOIN_INNER', undefined, 'j'))).toBe('(a JOIN b) j');
+		expect(deparse(joinExpr('JOIN_INNER', undefined, 'j'))).toBe(
+			'(a JOIN b) j',
+		);
 	});
 });
 
@@ -1114,15 +1270,21 @@ describe('deparseSortBy', () => {
 	});
 
 	it('SORTBY_NULLS_FIRST', () => {
-		expect(deparse(sortBy(undefined, 'SORTBY_NULLS_FIRST'))).toBe('col NULLS FIRST');
+		expect(deparse(sortBy(undefined, 'SORTBY_NULLS_FIRST'))).toBe(
+			'col NULLS FIRST',
+		);
 	});
 
 	it('SORTBY_NULLS_LAST', () => {
-		expect(deparse(sortBy(undefined, 'SORTBY_NULLS_LAST'))).toBe('col NULLS LAST');
+		expect(deparse(sortBy(undefined, 'SORTBY_NULLS_LAST'))).toBe(
+			'col NULLS LAST',
+		);
 	});
 
 	it('DESC NULLS LAST', () => {
-		expect(deparse(sortBy('SORTBY_DESC', 'SORTBY_NULLS_LAST'))).toBe('col DESC NULLS LAST');
+		expect(deparse(sortBy('SORTBY_DESC', 'SORTBY_NULLS_LAST'))).toBe(
+			'col DESC NULLS LAST',
+		);
 	});
 
 	it('no node → empty prefix', () => {
@@ -1171,7 +1333,10 @@ describe('deparseCoalesceExpr', () => {
 	it('COALESCE with multiple args', () => {
 		const node: Node = {
 			CoalesceExpr: {
-				args: [columnRef([{ String: { sval: 'email' } }]), aConst({ sval: '' })],
+				args: [
+					columnRef([{ String: { sval: 'email' } }]),
+					aConst({ sval: '' }),
+				],
 			},
 		} as Node;
 		expect(deparse(node)).toBe("COALESCE(email, '')");
@@ -1201,12 +1366,16 @@ describe('deparseNullIfExpr', () => {
 		const node: Node = {
 			NullIfExpr: { args: [aConst({ ival: 1 })] },
 		} as Node;
-		expect(() => deparse(node)).toThrow('NullIfExpr requires exactly 2 arguments, got 1');
+		expect(() => deparse(node)).toThrow(
+			'NullIfExpr requires exactly 2 arguments, got 1',
+		);
 	});
 
 	it('throws for empty args', () => {
 		const node: Node = { NullIfExpr: { args: [] } } as Node;
-		expect(() => deparse(node)).toThrow('NullIfExpr requires exactly 2 arguments, got 0');
+		expect(() => deparse(node)).toThrow(
+			'NullIfExpr requires exactly 2 arguments, got 0',
+		);
 	});
 });
 
@@ -1259,7 +1428,12 @@ describe('deparseCaseExpr', () => {
 			CaseExpr: {
 				args: [
 					caseWhenNode(
-						aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'status' } }]), aConst({ sval: 'active' })),
+						aExpr(
+							'AEXPR_OP',
+							'=',
+							columnRef([{ String: { sval: 'status' } }]),
+							aConst({ sval: 'active' }),
+						),
 						aConst({ sval: 'yes' }),
 					),
 				],
@@ -1276,7 +1450,9 @@ describe('deparseCaseExpr', () => {
 				defresult: aConst({ sval: 'Other' }),
 			},
 		} as Node;
-		expect(deparse(node)).toBe("CASE status WHEN 'a' THEN 'Active' ELSE 'Other' END");
+		expect(deparse(node)).toBe(
+			"CASE status WHEN 'a' THEN 'Active' ELSE 'Other' END",
+		);
 	});
 
 	it('CASE with ELSE branch', () => {
@@ -1284,7 +1460,12 @@ describe('deparseCaseExpr', () => {
 			CaseExpr: {
 				args: [
 					caseWhenNode(
-						aExpr('AEXPR_OP', '=', columnRef([{ String: { sval: 'x' } }]), aConst({ ival: 1 })),
+						aExpr(
+							'AEXPR_OP',
+							'=',
+							columnRef([{ String: { sval: 'x' } }]),
+							aConst({ ival: 1 }),
+						),
 						aConst({ sval: 'one' }),
 					),
 				],
@@ -1349,7 +1530,11 @@ describe('deparseArrayExpr', () => {
 	it('ARRAY[...] with elements', () => {
 		const node: Node = {
 			A_ArrayExpr: {
-				elements: [aConst({ ival: 1 }), aConst({ ival: 2 }), aConst({ ival: 3 })],
+				elements: [
+					aConst({ ival: 1 }),
+					aConst({ ival: 2 }),
+					aConst({ ival: 3 }),
+				],
 			},
 		} as Node;
 		expect(deparse(node)).toBe('ARRAY[1, 2, 3]');
@@ -1424,7 +1609,9 @@ describe('deparseCommonTableExpr', () => {
 				},
 			},
 		} as unknown as Node;
-		expect(deparse(node)).toBe('tree AS (SELECT 1) CYCLE id SET is_cycle USING path');
+		expect(deparse(node)).toBe(
+			'tree AS (SELECT 1) CYCLE id SET is_cycle USING path',
+		);
 	});
 
 	it('CTE without ctequery uses empty parens', () => {
@@ -1446,7 +1633,12 @@ describe('deparseRangeFunction', () => {
 				functions: [
 					{
 						List: {
-							items: [funcCall(['generate_series'], [aConst({ ival: 1 }), aConst({ ival: 5 })])],
+							items: [
+								funcCall(
+									['generate_series'],
+									[aConst({ ival: 1 }), aConst({ ival: 5 })],
+								),
+							],
 						},
 					},
 				],
@@ -1461,7 +1653,12 @@ describe('deparseRangeFunction', () => {
 				functions: [
 					{
 						List: {
-							items: [funcCall(['unnest'], [columnRef([{ String: { sval: 'arr' } }])])],
+							items: [
+								funcCall(
+									['unnest'],
+									[columnRef([{ String: { sval: 'arr' } }])],
+								),
+							],
 						},
 					},
 				],
@@ -1477,7 +1674,12 @@ describe('deparseRangeFunction', () => {
 				functions: [
 					{
 						List: {
-							items: [funcCall(['generate_series'], [aConst({ ival: 1 }), aConst({ ival: 3 })])],
+							items: [
+								funcCall(
+									['generate_series'],
+									[aConst({ ival: 1 }), aConst({ ival: 3 })],
+								),
+							],
 						},
 					},
 				],
@@ -1493,7 +1695,12 @@ describe('deparseRangeFunction', () => {
 				functions: [
 					{
 						List: {
-							items: [funcCall(['unnest'], [columnRef([{ String: { sval: 'arr' } }])])],
+							items: [
+								funcCall(
+									['unnest'],
+									[columnRef([{ String: { sval: 'arr' } }])],
+								),
+							],
 						},
 					},
 				],

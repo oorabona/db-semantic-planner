@@ -32,7 +32,7 @@ function buildModel(
 		joinDefault: 'auto' as const,
 		...(foreignKey !== undefined && { foreignKey }),
 	};
-	const relations = new Map([[source + '.' + name, rel]]);
+	const relations = new Map([[`${source}.${name}`, rel]]);
 	return {
 		tables: new Map(),
 		relations,

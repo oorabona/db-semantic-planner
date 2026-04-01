@@ -5,19 +5,25 @@
 
 // Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
 export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
+// BatchValues (FR-3)
+export {
+	type BatchValuesOptions,
+	type BatchValuesRef,
+	batchValues,
+	isBatchValuesRef,
+} from './batch-values.js';
+// CASE WHEN expression builder (FR-6)
+export {
+	CaseBuilder,
+	type CaseValue,
+	caseWhen,
+} from './case-when-builder.js';
 // CTE Builder (BATCH-001 Block 5)
 export {
 	CteBuilder,
 	type CteDump,
 	CteQueryBuilder,
 } from './cte-builder.js';
-// Raw CTE Builder — WITH RECURSIVE (FR-8)
-export {
-	type RecursiveDump,
-	type RecursiveOptions,
-	RawCteQueryBuilder,
-	createRawCteBuilder,
-} from './raw-cte-builder.js';
 // Errors
 export {
 	AmbiguousRelationError,
@@ -37,19 +43,6 @@ export {
 	TableNotFoundError,
 	UnsafeOperationError,
 } from './errors.js';
-// CASE WHEN expression builder (FR-6)
-export {
-	CaseBuilder,
-	caseWhen,
-	type CaseValue,
-} from './case-when-builder.js';
-// Full-Text Search Helpers (FR-5)
-export {
-	fullTextSearch,
-	type FullTextSearchField,
-	type FullTextSearchOptions,
-	textScore,
-} from './full-text-search.js';
 // Expression primitives (EXT-001)
 export {
 	aggOrderBy,
@@ -112,8 +105,6 @@ export {
 	not,
 	notExists,
 	or,
-	rawExists,
-	rawNotExists,
 	type RangeValue,
 	// Range (PostgreSQL)
 	rangeContainedBy,
@@ -122,6 +113,8 @@ export {
 	rank,
 	// Raw SQL escape hatch
 	raw,
+	rawExists,
+	rawNotExists,
 	// Relation column (select from joined table)
 	relationColumn,
 	rowNumber,
@@ -136,22 +129,29 @@ export {
 	wMin,
 	wSum,
 } from './filters.js';
+// Full-Text Search Helpers (FR-5)
+export {
+	type FullTextSearchField,
+	type FullTextSearchOptions,
+	fullTextSearch,
+	textScore,
+} from './full-text-search.js';
 // ARCH-008: Hook composition utilities
 export {
+	composeAfterMutationHooks,
+	composeAfterQueryHooks,
+	composeBeforeMutationHooks,
+	composeBeforeQueryHooks,
+	composeOnErrorHooks,
 	type HookPriority,
 	type PrioritizedHook,
-	withPriority,
-	sortByPriority,
-	composeBeforeQueryHooks,
-	pipeBeforeQueryHooks,
-	composeAfterQueryHooks,
-	pipeAfterQueryHooks,
-	composeBeforeMutationHooks,
-	pipeBeforeMutationHooks,
-	composeAfterMutationHooks,
 	pipeAfterMutationHooks,
-	composeOnErrorHooks,
+	pipeAfterQueryHooks,
+	pipeBeforeMutationHooks,
+	pipeBeforeQueryHooks,
 	pipeOnErrorHooks,
+	sortByPriority,
+	withPriority,
 } from './hook-utils.js';
 // E17b: Query/Mutation Hooks
 export {
@@ -208,13 +208,6 @@ export {
 	setLogger,
 	silentLogger,
 } from './logger.js';
-// BatchValues (FR-3)
-export {
-	type BatchValuesOptions,
-	type BatchValuesRef,
-	batchValues,
-	isBatchValuesRef,
-} from './batch-values.js';
 // Mutation Builders (DX-010, DX-026)
 export {
 	DeleteBuilder,
@@ -246,6 +239,13 @@ export {
 	type SimplifiedOrmOptions,
 } from './orm.js';
 export type { OrmOf } from './orm-instance-types.js';
+// Raw CTE Builder — WITH RECURSIVE (FR-8)
+export {
+	createRawCteBuilder,
+	RawCteQueryBuilder,
+	type RecursiveDump,
+	type RecursiveOptions,
+} from './raw-cte-builder.js';
 // NOTE: RecursiveQueryBuilder is now internal-only (DX-022)
 // Use include({ recursive: true }) API instead
 // Type exports kept for edge-table support (internal use)

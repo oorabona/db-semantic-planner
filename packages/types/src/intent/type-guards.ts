@@ -40,9 +40,9 @@ import type {
 import type {
 	SubqueryRefIntent,
 	WhereAndIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereExistsIntent,
-	WhereAnyIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereLikeIntent,
@@ -136,7 +136,6 @@ export function isSubqueryRef(value: unknown): value is SubqueryRefIntent {
 export function isWhereIn(where: WhereIntent): where is WhereInIntent {
 	return where.kind === 'in';
 }
-
 
 /**
  * Check if a where intent is an any filter (= ANY($N::type[]))

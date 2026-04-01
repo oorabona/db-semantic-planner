@@ -1,5 +1,7 @@
 # How to Use Recursive CTEs
 
+`orm.recursive()` lets you traverse hierarchical or graph-shaped data stored in a relational table using a single SQL `WITH RECURSIVE` query. Use it instead of application-side loops or multiple round-trips when working with tree structures, ancestor/descendant walks, or graph reachability.
+
 ## When
 
 When you need to traverse hierarchical or graph-shaped data stored in a relational table:
@@ -177,7 +179,7 @@ console.log(params); // [7, 20]
 - `packages/core/src/dx/raw-cte-builder.ts` — `RawCteQueryBuilder` class and `RecursiveOptions` interface
 - `packages/core/src/dx/orm-instance.ts` — `recursive()` method on the ORM instance
 - `packages/core/src/dx/orm-instance-types.ts` — TypeScript signature and JSDoc for `recursive()`
-- `packages/types/src/intent/cte-intent.ts` — `RawCteIntent` AST node (internal)
+- `packages/types/src/intent/cte-intent.ts` — `RawCteIntent` AST node
 - `packages/adapter-pgsql/src/adapter-compiler-recursive.ts` — SQL compilation of `RawCteIntent` (`buildRawCte()`)
 - `packages/adapter-pgsql/src/__tests__/raw-cte.test.ts` — Full test suite (14 scenarios)
 

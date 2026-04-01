@@ -9,7 +9,6 @@
  * - branch 12[0]+12[1]: getHistory() singleton
  */
 
-import * as fs from 'node:fs';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('node:fs', () => ({

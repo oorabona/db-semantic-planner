@@ -11,7 +11,6 @@
 
 import type { Dump } from '../adapter.js';
 import type {
-	JoinIntent,
 	LockStrength,
 	LockWaitPolicy,
 	WhereIntent,

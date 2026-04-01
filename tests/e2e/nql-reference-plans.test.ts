@@ -22,7 +22,10 @@ import {
 import { compile } from '@dbsp/nql';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
-import { compileSetOperation, createLeafCompileFn } from '../../packages/adapter-pgsql/src/set-operation.js';
+import {
+	compileSetOperation,
+	createLeafCompileFn,
+} from '../../packages/adapter-pgsql/src/set-operation.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');
 const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
@@ -265,10 +268,14 @@ function splitNqlQueries(content: string): string[] {
 		if (!trimmed || trimmed.startsWith('#')) continue;
 
 		// Strip inline comments (SQL-style `-- ...` and NQL-style `# ...`)
-		const withoutComment = trimmed.replace(/\s+--\s.*$/, '').replace(/\s+#\s.*$/, '');
+		const withoutComment = trimmed
+			.replace(/\s+--\s.*$/, '')
+			.replace(/\s+#\s.*$/, '');
 
 		// Strip REPL mutation terminator `!` at end of line
-		const withoutTerminator = withoutComment.endsWith('!') ? withoutComment.slice(0, -1) : withoutComment;
+		const withoutTerminator = withoutComment.endsWith('!')
+			? withoutComment.slice(0, -1)
+			: withoutComment;
 
 		if (withoutTerminator) {
 			queries.push(withoutTerminator);
@@ -343,14 +350,19 @@ function compileQuery(
 ): CompileResult {
 	const compiled = compile(nql, schemaObj.model);
 	if (!compiled.success) {
-		throw new Error(`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`);
+		throw new Error(
+			`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
 	}
 
 	// Set operations produce ast.setOperation instead of ast.query
 	if (compiled.ast?.setOperation) {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		const leafCompileFn = createLeafCompileFn(adapter, schemaObj.model, plan);
-		const result = compileSetOperation(compiled.ast.setOperation, leafCompileFn);
+		const result = compileSetOperation(
+			compiled.ast.setOperation,
+			leafCompileFn,
+		);
 		return { sql: result.sql, params: result.parameters };
 	}
 
@@ -362,7 +374,9 @@ function compileQuery(
 	}
 
 	if (!compiled.ast?.query) {
-		throw new Error(`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`);
+		throw new Error(
+			`NQL parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
 	}
 
 	const planReport = plan(compiled.ast.query, schemaObj.model, {
@@ -385,7 +399,9 @@ function compileMutation(
 ): CompileResult {
 	const compiled = compile(nql, schemaObj.model);
 	if (!compiled.success || !compiled.ast?.mutation) {
-		throw new Error(`NQL mutation parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`);
+		throw new Error(
+			`NQL mutation parse failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
 	}
 
 	const mutation = compiled.ast.mutation;
@@ -410,16 +426,24 @@ function compileMutation(
 	}
 	// InsertFromIntent
 	if ((mutation as InsertFromIntent).type === 'insert_from') {
-		const result = adapter.compileInsertFrom(mutation as InsertFromIntent, options);
+		const result = adapter.compileInsertFrom(
+			mutation as InsertFromIntent,
+			options,
+		);
 		return { sql: result.sql, params: result.parameters };
 	}
 	// UpsertFromIntent
 	if ((mutation as { type: string }).type === 'upsert_from') {
-		const result = adapter.compileUpsertFrom(mutation as UpsertFromIntent, options);
+		const result = adapter.compileUpsertFrom(
+			mutation as UpsertFromIntent,
+			options,
+		);
 		return { sql: result.sql, params: result.parameters };
 	}
 
-	throw new Error(`Unhandled mutation type: ${(mutation as { type: string }).type}`);
+	throw new Error(
+		`Unhandled mutation type: ${(mutation as { type: string }).type}`,
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -457,7 +481,9 @@ describe('NQL Reference Guide — Plan Validation', () => {
 				it(label, () => {
 					expect(schema).toBeDefined();
 					const result =
-						block.type === 'mutation' ? compileMutation(block.nql, schema) : compileQuery(block.nql, schema);
+						block.type === 'mutation'
+							? compileMutation(block.nql, schema)
+							: compileQuery(block.nql, schema);
 
 					expect(result.sql).toBeTruthy();
 					expect(typeof result.sql).toBe('string');

@@ -70,7 +70,10 @@ export const In = createToken({ name: 'In', pattern: /in\b/i });
 // longer_alt: Identifier ensures ANY(identifier) isn't consumed as keyword when used as identifier
 export const Any = createToken({ name: 'Any', pattern: /ANY\b/i });
 // BATCH-001: Named parameter token — :paramName (used in ANY(:param))
-export const NamedParam = createToken({ name: 'NamedParam', pattern: /:[a-zA-Z_][a-zA-Z0-9_]*/ });
+export const NamedParam = createToken({
+	name: 'NamedParam',
+	pattern: /:[a-zA-Z_][a-zA-Z0-9_]*/,
+});
 export const Between = createToken({ name: 'Between', pattern: /between\b/i });
 export const Like = createToken({ name: 'Like', pattern: /like\b/i });
 

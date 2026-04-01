@@ -1,5 +1,7 @@
 # How to Use Extensions (pgvector + ParadeDB)
 
+This guide shows how to use the pgvector and ParadeDB extension helpers that ship with `@dbsp/adapter-pgsql`. Use it when you need vector similarity search (ANN/cosine/L2), BM25 full-text relevance ranking, or when you want to write your own extension wrappers on top of the expression primitive system.
+
 ## When
 
 Use extensions when you need PostgreSQL-native capabilities beyond standard SQL:

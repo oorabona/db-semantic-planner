@@ -39,7 +39,9 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should skip comment lines starting with #', () => {
-			const result = parseAssertionFile('# this is a comment\n# another comment');
+			const result = parseAssertionFile(
+				'# this is a comment\n# another comment',
+			);
 			expect(result.blocks).toEqual([]);
 			expect(result.errors).toEqual([]);
 		});
@@ -105,7 +107,9 @@ describe('parseAssertionFile', () => {
 		it('should error on unrecognized block header', () => {
 			// After a header error, currentBlock is null, so 'success: true' also
 			// triggers "assertion outside any block" — at least 1 error, first is header error
-			const result = parseAssertionFile('--- unknown: something\nsuccess: true');
+			const result = parseAssertionFile(
+				'--- unknown: something\nsuccess: true',
+			);
 			expect(result.errors.length).toBeGreaterThanOrEqual(1);
 			expect(result.errors[0]?.message).toMatch(/Invalid block header/);
 		});
@@ -189,7 +193,9 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should parse params.equals with JSON array', () => {
-			const result = parseAssertionFile('--- query: 0\nparams.equals: [1, "foo"]');
+			const result = parseAssertionFile(
+				'--- query: 0\nparams.equals: [1, "foo"]',
+			);
 			expect(result.errors).toEqual([]);
 			expect(result.blocks[0]?.assertions[0]?.value).toEqual([1, 'foo']);
 		});
@@ -201,7 +207,9 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should error when params.equals value is invalid JSON', () => {
-			const result = parseAssertionFile('--- query: 0\nparams.equals: not json');
+			const result = parseAssertionFile(
+				'--- query: 0\nparams.equals: not json',
+			);
 			expect(result.errors).toHaveLength(1);
 			expect(result.errors[0]?.message).toMatch(/Invalid JSON/);
 		});
@@ -231,7 +239,9 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should parse db.value.equals as string when invalid JSON', () => {
-			const result = parseAssertionFile('--- query: 0\ndb.value.equals: some text');
+			const result = parseAssertionFile(
+				'--- query: 0\ndb.value.equals: some text',
+			);
 			expect(result.errors).toEqual([]);
 			expect(result.blocks[0]?.assertions[0]?.value).toBe('some text');
 		});
@@ -243,7 +253,9 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should error on invalid regex for output.matches', () => {
-			const result = parseAssertionFile('--- query: 0\noutput.matches: [invalid(');
+			const result = parseAssertionFile(
+				'--- query: 0\noutput.matches: [invalid(',
+			);
 			expect(result.errors).toHaveLength(1);
 			expect(result.errors[0]?.message).toMatch(/Invalid regex pattern/);
 		});
@@ -267,7 +279,11 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should parse boolean assertions for all intent.has* types', () => {
-			for (const type of ['intent.hasWhere', 'intent.hasGroupBy', 'intent.hasOrderBy'] as const) {
+			for (const type of [
+				'intent.hasWhere',
+				'intent.hasGroupBy',
+				'intent.hasOrderBy',
+			] as const) {
 				const result = parseAssertionFile(`--- query: 0\n${type}: true`);
 				expect(result.errors).toEqual([]);
 				expect(result.blocks[0]?.assertions[0]?.value).toBe(true);
@@ -288,12 +304,21 @@ describe('parseAssertionFile', () => {
 
 	describe('db.output table block', () => {
 		it('should parse a db.output block with header and data rows', () => {
-			const content = ['--- query: 0', 'db.output:', '| id | name |', '|----|----- |', '| 1  | Alice |'].join('\n');
+			const content = [
+				'--- query: 0',
+				'db.output:',
+				'| id | name |',
+				'|----|----- |',
+				'| 1  | Alice |',
+			].join('\n');
 			const result = parseAssertionFile(content);
 			expect(result.errors).toEqual([]);
 			const assertion = result.blocks[0]?.assertions[0];
 			expect(assertion?.type).toBe('db.output');
-			const tableData = assertion?.value as { columns: string[]; rows: string[][] };
+			const tableData = assertion?.value as {
+				columns: string[];
+				rows: string[][];
+			};
 			expect(tableData.columns).toEqual(['id', 'name']);
 			expect(tableData.rows).toHaveLength(1);
 			expect(tableData.rows[0]).toEqual(['1', 'Alice']);
@@ -316,24 +341,42 @@ describe('parseAssertionFile', () => {
 		});
 
 		it('should stop collecting table rows at a non-pipe line', () => {
-			const content = ['--- query: 0', 'db.output:', '| id |', '| 1  |', '--- query: 1', 'success: true'].join('\n');
+			const content = [
+				'--- query: 0',
+				'db.output:',
+				'| id |',
+				'| 1  |',
+				'--- query: 1',
+				'success: true',
+			].join('\n');
 			const result = parseAssertionFile(content);
 			expect(result.errors).toEqual([]);
 			expect(result.blocks).toHaveLength(2);
 		});
 
 		it('should skip blank lines within a table block', () => {
-			const content = ['--- query: 0', 'db.output:', '| id |', '', '| 1  |'].join('\n');
+			const content = [
+				'--- query: 0',
+				'db.output:',
+				'| id |',
+				'',
+				'| 1  |',
+			].join('\n');
 			const result = parseAssertionFile(content);
 			expect(result.errors).toEqual([]);
-			const tableData = result.blocks[0]?.assertions[0]?.value as { columns: string[]; rows: string[][] };
+			const tableData = result.blocks[0]?.assertions[0]?.value as {
+				columns: string[];
+				rows: string[][];
+			};
 			expect(tableData.rows).toHaveLength(1);
 		});
 	});
 
 	describe('last block without trailing separator', () => {
 		it('should include the last block even without a trailing ---', () => {
-			const result = parseAssertionFile('--- query: 0\nsuccess: true\n--- query: 1\nparams.length: 0');
+			const result = parseAssertionFile(
+				'--- query: 0\nsuccess: true\n--- query: 1\nparams.length: 0',
+			);
 			expect(result.blocks).toHaveLength(2);
 		});
 	});
@@ -375,21 +418,39 @@ describe('requiresDatabase', () => {
 
 describe('validateAssertionBlocks', () => {
 	it('should return no errors when query index is in range', () => {
-		const block = makeBlock({ queryIndex: 0, assertions: [{ type: 'success', value: true, line: 1 }] });
-		const errors = validateAssertionBlocks([block], 2, ['SELECT 1', 'SELECT 2']);
+		const block = makeBlock({
+			queryIndex: 0,
+			assertions: [{ type: 'success', value: true, line: 1 }],
+		});
+		const errors = validateAssertionBlocks([block], 2, [
+			'SELECT 1',
+			'SELECT 2',
+		]);
 		expect(errors).toEqual([]);
 	});
 
 	it('should error when query index is out of bounds (too high)', () => {
-		const block = makeBlock({ queryIndex: 5, assertions: [{ type: 'success', value: true, line: 1 }] });
-		const errors = validateAssertionBlocks([block], 2, ['SELECT 1', 'SELECT 2']);
+		const block = makeBlock({
+			queryIndex: 5,
+			assertions: [{ type: 'success', value: true, line: 1 }],
+		});
+		const errors = validateAssertionBlocks([block], 2, [
+			'SELECT 1',
+			'SELECT 2',
+		]);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.message).toMatch(/out of bounds/);
 	});
 
 	it('should error when query index is negative', () => {
-		const block = makeBlock({ queryIndex: -1, assertions: [{ type: 'success', value: true, line: 1 }] });
-		const errors = validateAssertionBlocks([block], 2, ['SELECT 1', 'SELECT 2']);
+		const block = makeBlock({
+			queryIndex: -1,
+			assertions: [{ type: 'success', value: true, line: 1 }],
+		});
+		const errors = validateAssertionBlocks([block], 2, [
+			'SELECT 1',
+			'SELECT 2',
+		]);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.message).toMatch(/out of bounds/);
 	});
@@ -413,7 +474,10 @@ describe('validateAssertionBlocks', () => {
 			startLine: 1,
 			assertions: [{ type: 'success', value: true, line: 2 }],
 		});
-		const errors = validateAssertionBlocks([block], 2, ['SELECT 1', 'SELECT 1']);
+		const errors = validateAssertionBlocks([block], 2, [
+			'SELECT 1',
+			'SELECT 1',
+		]);
 		expect(errors).toHaveLength(1);
 		expect(errors[0]?.message).toMatch(/Ambiguous match/);
 	});

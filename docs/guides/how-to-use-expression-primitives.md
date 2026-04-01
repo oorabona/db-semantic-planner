@@ -1,5 +1,7 @@
 # How to Use Expression Primitives
 
+Expression primitives are the building blocks for any SQL construct that the built-in filter helpers do not cover — vector distance operators, extension functions, type casts, arithmetic, and named arguments. Use this guide when you need to compose custom SQL expressions in SELECT columns, WHERE clauses, or ORDER BY without dropping down to raw SQL strings.
+
 ## When
 
 Use expression primitives when you need PostgreSQL operators or functions not covered by the

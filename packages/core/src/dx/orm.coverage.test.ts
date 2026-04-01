@@ -5,7 +5,6 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { NamingConventionMismatchError } from './errors.js';
 import { isNull } from './filters.js';
 import { createHookManager } from './hooks.js';
 import { createOrm } from './orm.js';

@@ -1,5 +1,7 @@
 # How to Use Batch Values (Virtual Data Source)
 
+`batchValues()` lets you pass an in-memory array of records into a SQL query as a virtual table, without inserting them into the database first. This is useful for bulk updates, ordered lookups, and large IN-list alternatives that scale beyond what a plain parameter list supports.
+
 ## When
 
 When you need to pass an in-memory array of records into a query as a virtual table —

@@ -58,7 +58,7 @@ orders | group customerId | select customerId, sum(total) as revenue
 
 ## Documentation
 
-- [Full documentation index](../../docs/DOCUMENTATION_INDEX.md)
+- [Guides](../../docs/guides/)
 - [Full-text search guide](../../docs/guides/how-to-use-full-text-search.md)
 
 ## License
