@@ -1,6 +1,30 @@
 {
 	"name": "@dbsp/cli",
-	"version": "0.0.1",
+	"version": "1.0.0",
+	"description": "CLI tools for db-semantic-planner — REPL, schema generation, DDL provisioning",
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
+	"keywords": [
+		"cli",
+		"database",
+		"repl",
+		"schema",
+		"ddl",
+		"migrations",
+		"postgresql"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git",
+		"directory": "packages/cli"
+	},
+	"homepage": "https://github.com/oorabona/db-semantic-planner/tree/main/packages/cli",
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"bin": {
 		"dbsp": "./dist/index.js"
@@ -38,7 +62,7 @@
 		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
 		"@dbsp/nql": "workspace:*",
-		"@oclif/table": "^0.5.1",
+		"@oclif/table": "^0.5.3",
 		"commander": "catalog:",
 		"ink": "catalog:",
 		"react": "catalog:"

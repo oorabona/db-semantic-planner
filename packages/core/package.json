@@ -1,6 +1,30 @@
 {
 	"name": "@dbsp/core",
-	"version": "0.0.1",
+	"version": "1.0.0",
+	"description": "Intent-first semantic query planner for databases — declare WHAT to fetch, the planner decides HOW",
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
+	"keywords": [
+		"orm",
+		"query-planner",
+		"typescript",
+		"database",
+		"intent-based",
+		"type-safe",
+		"postgresql"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git",
+		"directory": "packages/core"
+	},
+	"homepage": "https://github.com/oorabona/db-semantic-planner/tree/main/packages/core",
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -20,14 +44,14 @@
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
-		"@dbsp/nql": "workspace:",
-		"@dbsp/types": "workspace:",
+		"@dbsp/nql": "workspace:^",
+		"@dbsp/types": "workspace:^",
 		"valibot": "catalog:"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
-		"typescript": "catalog:",
 		"tsup": "catalog:",
+		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}
 }
