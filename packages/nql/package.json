@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/nql",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"description": "NQL (Natural Query Language) - A human and LLM-friendly query language for databases",
 	"type": "module",
 	"main": "./dist/index.js",
@@ -25,16 +25,14 @@
 		"lint:fix": "biome check --write src tests"
 	},
 	"dependencies": {
-		"@dbsp/types": "workspace:",
+		"@dbsp/core": "workspace:^1.0.0",
+		"@dbsp/types": "workspace:^",
 		"chevrotain": "catalog:"
 	},
 	"devDependencies": {
 		"tsup": "catalog:",
 		"typescript": "catalog:",
 		"vitest": "catalog:"
-	},
-	"peerDependencies": {
-		"@dbsp/core": "workspace:*"
 	},
 	"keywords": [
 		"nql",
@@ -45,6 +43,18 @@
 		"natural-language",
 		"llm-friendly"
 	],
-	"author": "",
-	"license": "MIT"
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git",
+		"directory": "packages/nql"
+	},
+	"homepage": "https://github.com/oorabona/db-semantic-planner/tree/main/packages/nql",
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
 }

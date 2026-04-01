@@ -1,5 +1,6 @@
 {
 	"name": "db-semantic-planner",
+	"version": "1.0.0",
 	"private": true,
 	"type": "module",
 	"packageManager": "pnpm@9.15.4",
@@ -20,7 +21,8 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"lodash@>=4.0.0 <4.17.23": ">=4.17.23"
+			"lodash@>=4.0.0 <4.17.23": ">=4.17.23",
+			"dompurify": ">=3.3.2"
 		}
 	},
 	"devDependencies": {
@@ -31,9 +33,10 @@
 		"@testcontainers/postgresql": "catalog:",
 		"@types/node": "catalog:",
 		"@types/pg": "catalog:",
-		"@vitest/coverage-v8": "^4.0.18",
+		"@vitest/coverage-v8": "^4.1.2",
+		"monaco-editor": "^0.55.1",
 		"pg": "catalog:",
-		"testcontainers": "^11.11.0",
+		"testcontainers": "^11.13.0",
 		"tsx": "catalog:",
 		"typedoc": "catalog:",
 		"typescript": "catalog:",

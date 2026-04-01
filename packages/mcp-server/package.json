@@ -1,8 +1,30 @@
 {
 	"name": "@dbsp/mcp-server",
-	"version": "0.0.1",
-	"type": "module",
+	"version": "1.0.0",
 	"description": "MCP Server for db-semantic-planner - expose schema and query planning to AI tools",
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
+	"keywords": [
+		"mcp",
+		"model-context-protocol",
+		"ai",
+		"claude",
+		"database",
+		"query-planner"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git",
+		"directory": "packages/mcp-server"
+	},
+	"homepage": "https://github.com/oorabona/db-semantic-planner/tree/main/packages/mcp-server",
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"type": "module",
 	"bin": {
 		"dbsp-mcp": "./dist/index.js"
 	},

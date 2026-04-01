@@ -1,6 +1,30 @@
 {
 	"name": "@dbsp/adapter-pgsql",
-	"version": "0.0.1",
+	"version": "1.0.0",
+	"description": "PostgreSQL adapter for db-semantic-planner — compiles query intents to optimized parameterized SQL",
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
+	"keywords": [
+		"postgresql",
+		"postgres",
+		"sql",
+		"orm",
+		"adapter",
+		"parameterized-queries",
+		"database"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git",
+		"directory": "packages/adapter-pgsql"
+	},
+	"homepage": "https://github.com/oorabona/db-semantic-planner/tree/main/packages/adapter-pgsql",
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
 	"type": "module",
 	"main": "./dist/index.js",
 	"types": "./dist/index.d.ts",
@@ -21,7 +45,7 @@
 	},
 	"dependencies": {
 		"@dbsp/core": "workspace:*",
-		"@dbsp/types": "workspace:",
+		"@dbsp/types": "workspace:^",
 		"@pgsql/types": "17.6.2",
 		"pg": "catalog:"
 	},
@@ -30,8 +54,8 @@
 		"@types/pg": "catalog:",
 		"pgsql-deparser": "17.17.2",
 		"pgsql-parser": "17.9.11",
-		"typescript": "catalog:",
 		"tsup": "catalog:",
+		"typescript": "catalog:",
 		"vitest": "catalog:"
 	}
 }
