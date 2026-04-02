@@ -185,11 +185,11 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #1e293b 0%, #312e81 50%, #164e63 100%);
 }
 
-:global(:not(.dark)) .hero-bg-canvas {
+:global(.hero-bg-canvas) {
   opacity: 0.25;
 }
 
-:global(.dark) .hero-bg-canvas {
+:global(.dark .hero-bg-canvas) {
   opacity: 0.4;
 }
 </style>
