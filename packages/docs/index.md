@@ -34,3 +34,62 @@ features:
     title: PostgreSQL Extensions
     details: Built-in helpers for pgvector (cosine distance, L2, inner product) and ParadeDB (BM25 full-text search).
 ---
+
+<div class="landing-sections">
+
+<section class="landing-section see-it">
+
+## See it in action
+
+<TerminalDemo />
+
+</section>
+
+<section class="landing-section pipeline">
+
+## How it works
+
+<div class="pipeline-steps">
+  <div class="pipeline-step">
+    <div class="step-number">1</div>
+    <div class="step-content">
+      <h3>Declare intent</h3>
+      <p>Write what you need in TypeScript or NQL — tables, filters, relations, aggregations.</p>
+      <code class="step-code">orm.select('posts').where(eq('published', true)).include('author')</code>
+    </div>
+  </div>
+  <div class="pipeline-arrow">&rarr;</div>
+  <div class="pipeline-step">
+    <div class="step-number">2</div>
+    <div class="step-content">
+      <h3>Planner decides</h3>
+      <p>The semantic planner analyzes cardinality, chooses JOIN strategy, extracts CTEs, optimizes.</p>
+      <code class="step-code">include-strategy: lateral-join (to-one relation)</code>
+    </div>
+  </div>
+  <div class="pipeline-arrow">&rarr;</div>
+  <div class="pipeline-step">
+    <div class="step-number">3</div>
+    <div class="step-content">
+      <h3>Inspect everything</h3>
+      <p>Every decision is visible via dump() — SQL, parameters, plan reasoning. Debug before you execute.</p>
+      <code class="step-code">SELECT ... FROM "posts" LEFT JOIN LATERAL (...) WHERE $1</code>
+    </div>
+  </div>
+</div>
+
+</section>
+
+<section class="landing-section cta-section">
+
+## Ready to build?
+
+<div class="cta-buttons">
+  <a href="/guide/getting-started" class="cta-primary">Get Started</a>
+  <a href="/playground" class="cta-secondary">Try the Playground</a>
+  <a href="/demo" class="cta-secondary">Watch the Demo</a>
+</div>
+
+</section>
+
+</div>
