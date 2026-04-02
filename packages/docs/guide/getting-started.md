@@ -6,15 +6,44 @@ title: Getting Started
 
 `@dbsp/core` is an intent-first query planner for PostgreSQL: you declare what data you need, the planner decides how to fetch it, and every decision is inspectable. This guide takes you from installation to your first production-ready query in about 15 minutes.
 
+## Overview
+
+| Step | Topic | What you'll learn |
+|:----:|-------|-------------------|
+| 1 | [Install](#step-1-install) | Add packages to your project |
+| 2 | [Schema](#step-2-define-your-schema) | Define tables and relations |
+| 3 | [Connect](#step-3-connect-to-postgresql) | Create ORM instance |
+| 4 | [Query](#step-4-your-first-query) | Select, filter, type inference |
+| 5 | [Relations](#step-5-include-relations) | Include related data |
+| 6 | [Mutations](#step-6-mutations) | Insert, update, delete, upsert |
+| 7 | [Observe](#step-7-observability-with-dump) | Inspect SQL and plan decisions |
+| 8 | [Multi-tenant](#step-8-multi-tenant-queries) | Schema-per-tenant isolation |
+| 9 | [Paginate](#step-9-pagination) | Offset and cursor pagination |
+| 10 | [Next steps](#step-10-whats-next) | Advanced guides |
+
 ---
 
 ## Step 1: Install
 
-```bash
+::: code-group
+```bash [pnpm]
 pnpm add @dbsp/core @dbsp/adapter-pgsql pg
 ```
 
+```bash [npm]
+npm install @dbsp/core @dbsp/adapter-pgsql pg
+```
+
+```bash [yarn]
+yarn add @dbsp/core @dbsp/adapter-pgsql pg
+```
+:::
+
 `pg` is the PostgreSQL client — install it alongside the adapter.
+
+::: tip
+`pg` is a peer dependency — you need it to connect to PostgreSQL, but `@dbsp/core` works without it for compile-only mode.
+:::
 
 ---
 
@@ -84,6 +113,10 @@ const db = schema({
 
 `ref()` declares a foreign-key relation. The planner auto-infers `belongsTo` (N:1) and `hasMany` (1:N) directions from FK placement. `nullable: true` in a column definition makes the column optional — the TypeScript type becomes `T | null`.
 
+::: info Schema from database
+Already have a database? Use `dbsp introspect` to generate the schema from your existing tables. See the [CLI guide](/guide/production) for details.
+:::
+
 ---
 
 ## Step 3: Connect to PostgreSQL
@@ -101,6 +134,10 @@ const orm = createOrm({
 ```
 
 That is the full setup. `createOrm` returns a typed ORM instance where every table name and column is autocompleted from your schema.
+
+::: warning
+Never commit your `DATABASE_URL` to version control. Use environment variables or a `.env` file.
+:::
 
 ---
 
@@ -128,7 +165,16 @@ const user = await orm.select('users')
 
 Types flow automatically from the schema definition through every call in the chain. The return type of `.all()` is `Promise<Array<{ id: string; name: string; email: string; active: boolean; createdAt: Date }>>` — no manual type annotation needed.
 
+```typescript
+// TypeScript infers: User[]
+// where User = { id: string; name: string; email: string; active: boolean; createdAt: Date }
+```
+
 Common filter helpers: `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `inArray`, `isNull`, `isNotNull`, `and`, `or`, `not`.
+
+::: tip Try it
+Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`
+:::
 
 ---
 
@@ -160,6 +206,10 @@ const users = await orm.select('users')
 ```
 
 The planner selects the optimal fetch strategy (`json_agg`, lateral join, or separate query) based on the query shape. You do not choose the strategy — that is the planner's job.
+
+::: tip Try it
+Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`
+:::
 
 ---
 
@@ -195,7 +245,13 @@ await orm.upsert('users')
   .execute();
 ```
 
-`update()` and `delete()` require a `.where()` clause — omitting it throws `UnsafeOperationError`. Use `updateAll()` / `deleteAll()` when you explicitly intend to affect every row.
+::: danger Safety guard
+`orm.update()` and `orm.delete()` **require** a `.where()` clause. Calling `.execute()` without one throws an error. Use `orm.updateAll()` or `orm.deleteAll()` for intentional full-table operations.
+:::
+
+::: tip Try it
+Paste this NQL equivalent in the [Playground](/playground): `users | where active = true | select id, name`
+:::
 
 ---
 
@@ -229,6 +285,10 @@ console.log(dump.plan.warnings);
 ```
 
 `dump()` is safe to call in tests and logging pipelines — no database connection required.
+
+::: tip Compile-only mode
+You can use `createPgsqlCompileOnlyAdapter()` instead of `createPgsqlAdapter(pool)` to preview SQL without a database connection. Perfect for testing and development.
+:::
 
 ---
 
