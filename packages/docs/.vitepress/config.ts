@@ -105,6 +105,14 @@ export default withMermaid(
 			},
 			optimizeDeps: {
 				exclude: ['pg'],
+				include: [
+					'mermaid',
+					'dayjs',
+					'dayjs/plugin/duration',
+					'dayjs/plugin/isoWeek',
+					'dayjs/plugin/customParseFormat',
+					'dayjs/plugin/localizedFormat',
+				],
 			},
 		},
 	}),
