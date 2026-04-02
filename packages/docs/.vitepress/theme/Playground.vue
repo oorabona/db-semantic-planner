@@ -20,36 +20,41 @@
           placeholder="Define your schema..."
         />
       </div>
-      <div class="schema-diagram">
+      <div class="schema-output">
+        <div class="schema-tabs">
+          <button class="tab-btn" :class="{ active: schemaTab === 'diagram' }" @click="schemaTab = 'diagram'">Diagram</button>
+          <button class="tab-btn" :class="{ active: schemaTab === 'typescript' }" @click="schemaTab = 'typescript'">TypeScript</button>
+          <button v-if="schemaTab === 'typescript'" class="copy-btn" @click="copyTypeScript">{{ copied ? 'Copied' : 'Copy' }}</button>
+        </div>
+
         <div v-if="schemaError" class="diagram-error">
           <pre>{{ schemaError }}</pre>
         </div>
-        <div
-          v-else-if="mermaidSvg"
-          class="mermaid-viewport"
-          @wheel.prevent="onDiagramWheel"
-          @mousedown="onDiagramDragStart"
-          @mousemove="onDiagramDrag"
-          @mouseup="onDiagramDragEnd"
-          @mouseleave="onDiagramDragEnd"
-        >
-          <div class="mermaid-canvas" :style="diagramTransform" v-html="mermaidSvg" />
-          <div class="zoom-controls">
-            <button class="zoom-btn" @click="diagramZoom = Math.min(3, diagramZoom + 0.2)" title="Zoom in">+</button>
-            <button class="zoom-btn" @click="diagramZoom = Math.max(0.3, diagramZoom - 0.2)" title="Zoom out">-</button>
-            <button class="zoom-btn" @click="resetDiagramView" title="Reset view">R</button>
-          </div>
-        </div>
-        <div v-else class="diagram-placeholder">Rendering diagram...</div>
-      </div>
-    </div>
 
-    <div v-show="schemaOpen && !schemaError" class="generated-code">
-      <div class="generated-header">
-        <span class="generated-label">Generated TypeScript</span>
-        <button class="copy-btn" @click="copyTypeScript">{{ copied ? 'Copied' : 'Copy' }}</button>
+        <template v-else-if="schemaTab === 'diagram'">
+          <div
+            v-if="mermaidSvg"
+            class="mermaid-viewport"
+            @wheel.prevent="onDiagramWheel"
+            @mousedown="onDiagramDragStart"
+            @mousemove="onDiagramDrag"
+            @mouseup="onDiagramDragEnd"
+            @mouseleave="onDiagramDragEnd"
+          >
+            <div class="mermaid-canvas" :style="diagramTransform" v-html="mermaidSvg" />
+            <div class="zoom-controls">
+              <button class="zoom-btn" @click="diagramZoom = Math.min(3, diagramZoom + 0.2)" title="Zoom in">+</button>
+              <button class="zoom-btn" @click="diagramZoom = Math.max(0.3, diagramZoom - 0.2)" title="Zoom out">-</button>
+              <button class="zoom-btn" @click="resetDiagramView" title="Reset view">R</button>
+            </div>
+          </div>
+          <div v-else class="diagram-placeholder">Rendering diagram...</div>
+        </template>
+
+        <template v-else>
+          <pre class="generated-pre"><code v-html="highlightTS(generatedTs)"></code></pre>
+        </template>
       </div>
-      <pre class="generated-pre"><code v-html="highlightTS(generatedTs)"></code></pre>
     </div>
 
     <!-- Section 2: Query (always visible) -->
@@ -364,6 +369,7 @@ const tabs = ['SQL', 'Parameters', 'Plan'] as const;
 type Tab = (typeof tabs)[number];
 
 const schemaOpen = ref(true);
+const schemaTab = ref<'diagram' | 'typescript'>('diagram');
 const schemaDsl = ref(DEFAULT_SCHEMA_DSL);
 const schemaError = ref<string | null>(null);
 const mermaidSvg = ref<string>('');
@@ -842,10 +848,37 @@ async function copyTypeScript() {
 /* ============================================================
    Mermaid diagram
    ============================================================ */
-.schema-diagram {
-  position: relative;
+.schema-output {
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
   background: var(--vp-c-bg-alt, var(--vp-c-bg));
+}
+
+.schema-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0.4rem 0.75rem 0;
+  border-bottom: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+  align-items: center;
+}
+
+.schema-tabs .copy-btn {
+  margin-left: auto;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.schema-tabs .copy-btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
 }
 
 .mermaid-viewport {
@@ -1123,18 +1156,14 @@ async function copyTypeScript() {
   color: var(--vp-c-text-1);
 }
 
-.output-content :deep(.sql-kw) {
-  color: #818CF8;
-  font-weight: 600;
-}
+/* SQL highlighting — WCAG AA contrast for both modes */
+.dark .output-content :deep(.sql-kw) { color: #A5B4FC; font-weight: 600; }
+.dark .output-content :deep(.sql-param) { color: #67E8F9; }
+.dark .output-content :deep(.sql-ident) { color: #86EFAC; }
 
-.output-content :deep(.sql-param) {
-  color: #22D3EE;
-}
-
-.output-content :deep(.sql-ident) {
-  color: #A5F3FC;
-}
+.output-content :deep(.sql-kw) { color: #4338CA; font-weight: 600; }
+.output-content :deep(.sql-param) { color: #0E7490; }
+.output-content :deep(.sql-ident) { color: #15803D; }
 
 .output-error pre {
   color: #F87171;
@@ -1151,57 +1180,24 @@ async function copyTypeScript() {
 }
 
 /* ============================================================
-   Generated TypeScript section
+   Generated TypeScript (in schema-output tab)
    ============================================================ */
-.generated-code {
-  border-top: 1px solid var(--vp-c-divider);
-  max-height: 200px;
-  overflow: hidden;
-  transition: max-height 0.3s ease;
-}
-
-.generated-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 1rem;
-  background: var(--vp-c-bg);
-  border-bottom: 1px solid var(--vp-c-divider);
-}
-
-.generated-label {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--vp-c-text-2);
-}
-
-.copy-btn {
-  font-size: 0.75rem;
-  padding: 0.2rem 0.6rem;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-2);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.copy-btn:hover {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-}
-
 .generated-pre {
   margin: 0;
-  padding: 0.75rem 1rem;
+  padding: 1rem;
   font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
-  line-height: 1.6;
+  font-size: 0.82rem;
+  line-height: 1.65;
   overflow: auto;
-  max-height: 150px;
+  flex: 1;
 }
 
-.generated-pre :deep(.ts-kw) { color: #818CF8; font-weight: 600; }
-.generated-pre :deep(.ts-fn) { color: #22D3EE; }
-.generated-pre :deep(.ts-str) { color: #A5F3FC; }
+/* WCAG AA contrast — dark mode: light on dark, light mode: dark on light */
+.dark .generated-pre :deep(.ts-kw) { color: #A5B4FC; font-weight: 600; }
+.dark .generated-pre :deep(.ts-fn) { color: #67E8F9; }
+.dark .generated-pre :deep(.ts-str) { color: #86EFAC; }
+
+.generated-pre :deep(.ts-kw) { color: #4338CA; font-weight: 600; }
+.generated-pre :deep(.ts-fn) { color: #0E7490; }
+.generated-pre :deep(.ts-str) { color: #15803D; }
 </style>
