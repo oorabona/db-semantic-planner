@@ -24,9 +24,32 @@
         <div v-if="schemaError" class="diagram-error">
           <pre>{{ schemaError }}</pre>
         </div>
-        <div v-else-if="mermaidSvg" class="mermaid-container" v-html="mermaidSvg" />
+        <div
+          v-else-if="mermaidSvg"
+          class="mermaid-viewport"
+          @wheel.prevent="onDiagramWheel"
+          @mousedown="onDiagramDragStart"
+          @mousemove="onDiagramDrag"
+          @mouseup="onDiagramDragEnd"
+          @mouseleave="onDiagramDragEnd"
+        >
+          <div class="mermaid-canvas" :style="diagramTransform" v-html="mermaidSvg" />
+          <div class="zoom-controls">
+            <button class="zoom-btn" @click="diagramZoom = Math.min(3, diagramZoom + 0.2)" title="Zoom in">+</button>
+            <button class="zoom-btn" @click="diagramZoom = Math.max(0.3, diagramZoom - 0.2)" title="Zoom out">-</button>
+            <button class="zoom-btn" @click="resetDiagramView" title="Reset view">R</button>
+          </div>
+        </div>
         <div v-else class="diagram-placeholder">Rendering diagram...</div>
       </div>
+    </div>
+
+    <div v-show="schemaOpen && !schemaError" class="generated-code">
+      <div class="generated-header">
+        <span class="generated-label">Generated TypeScript</span>
+        <button class="copy-btn" @click="copyTypeScript">{{ copied ? 'Copied' : 'Copy' }}</button>
+      </div>
+      <pre class="generated-pre"><code v-html="highlightTS(generatedTs)"></code></pre>
     </div>
 
     <!-- Section 2: Query (always visible) -->
@@ -117,6 +140,10 @@ interface ParsedColumn {
 	pk?: boolean;
 	unique?: boolean;
 	ref?: string;
+	refNullable?: boolean;
+	refUnique?: boolean;
+	onDelete?: string;
+	defaultValue?: string;
 }
 
 interface ParsedTable {
@@ -217,28 +244,50 @@ function parseSchemaDsl(text: string): ParsedSchema {
 			if (nullable) typeRaw = typeRaw.slice(0, -1);
 			const modifiers = parts.slice(1);
 
+			// Parse default(value) modifier
+			const defaultMatch = rest.match(/\bdefault\(([^)]*)\)/);
+			const defaultValue = defaultMatch ? defaultMatch[1].trim() : undefined;
+
 			const col: ParsedColumn = {
 				name: colName,
 				type: typeRaw,
 				...(nullable ? { nullable: true } : {}),
 				...(modifiers.includes('pk') ? { pk: true } : {}),
 				...(modifiers.includes('unique') ? { unique: true } : {}),
+				...(defaultValue !== undefined ? { defaultValue } : {}),
 			};
 
 			if (typeRaw === '->') {
-				const targetTable = parts[1];
-				if (targetTable) {
+				// Syntax: colName: -> target[?] [cascade] [unique]
+				let targetRaw = parts[1] ?? '';
+				const refNullable = targetRaw.endsWith('?');
+				if (refNullable) targetRaw = targetRaw.slice(0, -1);
+				if (targetRaw) {
+					const refModifiers = parts.slice(2);
 					col.type = 'uuid';
-					col.ref = targetTable;
-					relations.push({ from: tableName, fromCol: colName, to: targetTable });
+					col.ref = targetRaw;
+					col.nullable = refNullable || col.nullable;
+					if (refNullable) col.refNullable = true;
+					if (refModifiers.includes('cascade')) col.onDelete = 'CASCADE';
+					if (refModifiers.includes('unique')) col.refUnique = true;
+					relations.push({ from: tableName, fromCol: colName, to: targetRaw });
 				}
 			} else {
 				const arrowIdx = modifiers.indexOf('->');
 				if (arrowIdx !== -1 && modifiers[arrowIdx + 1]) {
-					const targetTable = modifiers[arrowIdx + 1];
+					let targetRaw = modifiers[arrowIdx + 1];
+					const refNullable = targetRaw.endsWith('?');
+					if (refNullable) targetRaw = targetRaw.slice(0, -1);
+					const refModifiers = modifiers.slice(arrowIdx + 2);
 					col.type = 'uuid';
-					col.ref = targetTable;
-					relations.push({ from: tableName, fromCol: colName, to: targetTable });
+					col.ref = targetRaw;
+					if (refNullable) {
+						col.refNullable = true;
+						col.nullable = true;
+					}
+					if (refModifiers.includes('cascade')) col.onDelete = 'CASCADE';
+					if (refModifiers.includes('unique')) col.refUnique = true;
+					relations.push({ from: tableName, fromCol: colName, to: targetRaw });
 				}
 			}
 
@@ -320,6 +369,51 @@ const schemaError = ref<string | null>(null);
 const mermaidSvg = ref<string>('');
 const tableCount = ref(0);
 
+// Diagram pan/zoom state
+const diagramZoom = ref(1);
+const diagramPanX = ref(0);
+const diagramPanY = ref(0);
+let isDragging = false;
+let dragStartX = 0;
+let dragStartY = 0;
+let panStartX = 0;
+let panStartY = 0;
+
+const diagramTransform = computed(() => ({
+	transform: 'translate(' + diagramPanX.value + 'px, ' + diagramPanY.value + 'px) scale(' + diagramZoom.value + ')',
+	transformOrigin: 'center center',
+	cursor: isDragging ? 'grabbing' : 'grab',
+}));
+
+function onDiagramWheel(e: WheelEvent) {
+	const delta = e.deltaY > 0 ? -0.1 : 0.1;
+	diagramZoom.value = Math.max(0.3, Math.min(3, diagramZoom.value + delta));
+}
+
+function onDiagramDragStart(e: MouseEvent) {
+	isDragging = true;
+	dragStartX = e.clientX;
+	dragStartY = e.clientY;
+	panStartX = diagramPanX.value;
+	panStartY = diagramPanY.value;
+}
+
+function onDiagramDrag(e: MouseEvent) {
+	if (!isDragging) return;
+	diagramPanX.value = panStartX + (e.clientX - dragStartX);
+	diagramPanY.value = panStartY + (e.clientY - dragStartY);
+}
+
+function onDiagramDragEnd() {
+	isDragging = false;
+}
+
+function resetDiagramView() {
+	diagramZoom.value = 1;
+	diagramPanX.value = 0;
+	diagramPanY.value = 0;
+}
+
 const selectedExampleIndex = ref(0);
 const nqlCode = ref(ALL_EXAMPLES[0].code);
 const activeTab = ref<Tab>('SQL');
@@ -371,13 +465,18 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 		const colDefs: Record<string, unknown> = {};
 		for (const col of table.columns) {
 			if (col.ref) {
-				colDefs[col.name] = dbRef(col.ref);
-			} else if (col.pk) {
-				colDefs[col.name] = { type: col.type, primaryKey: true };
-			} else if (col.nullable) {
-				colDefs[col.name] = { type: col.type, nullable: true };
+				const refOpts: Record<string, unknown> = {};
+				if (col.refNullable) refOpts.nullable = true;
+				if (col.refUnique) refOpts.unique = true;
+				if (col.onDelete) refOpts.onDelete = col.onDelete;
+				colDefs[col.name] = Object.keys(refOpts).length > 0 ? dbRef(col.ref, refOpts) : dbRef(col.ref);
 			} else {
-				colDefs[col.name] = col.type;
+				const def: Record<string, unknown> = { type: col.type };
+				if (col.pk) def.primaryKey = true;
+				if (col.nullable) def.nullable = true;
+				if (col.unique) def.unique = true;
+				if (col.defaultValue) def.default = col.defaultValue;
+				colDefs[col.name] = Object.keys(def).length === 1 ? col.type : def;
 			}
 		}
 		tableDefs[table.name] = colDefs;
@@ -423,6 +522,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 	}
 
 	tableCount.value = parsed.tables.length;
+	generatedTs.value = generateTypeScript(parsed);
 
 	try {
 		const builtSchema = buildSchemaFromParsed(parsed);
@@ -549,6 +649,70 @@ function highlightSQL(sql: string): string {
 		.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
 		.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>');
 }
+
+// ---------------------------------------------------------------------------
+// TypeScript code generation
+// ---------------------------------------------------------------------------
+
+function generateTypeScript(parsed: ParsedSchema): string {
+	const lines: string[] = [];
+	lines.push("import { schema, ref } from '@dbsp/core';");
+	lines.push('');
+	lines.push('const db = schema({');
+
+	for (const table of parsed.tables) {
+		lines.push('  ' + table.name + ': {');
+		for (const col of table.columns) {
+			if (col.ref) {
+				const opts: string[] = [];
+				if (col.refNullable) opts.push('nullable: true');
+				if (col.refUnique) opts.push('unique: true');
+				if (col.onDelete) opts.push("onDelete: '" + col.onDelete + "'");
+				const refCall =
+					opts.length > 0 ? "ref('" + col.ref + "', { " + opts.join(', ') + ' })' : "ref('" + col.ref + "')";
+				lines.push('    ' + col.name + ': ' + refCall + ',');
+			} else {
+				const extras: string[] = [];
+				if (col.pk) extras.push('primaryKey: true');
+				if (col.nullable) extras.push('nullable: true');
+				if (col.unique) extras.push('unique: true');
+				if (col.defaultValue) extras.push("default: '" + col.defaultValue + "'");
+				if (extras.length > 0) {
+					lines.push('    ' + col.name + ": { type: '" + col.type + "', " + extras.join(', ') + ' },');
+				} else {
+					lines.push('    ' + col.name + ": '" + col.type + "',");
+				}
+			}
+		}
+		lines.push('  },');
+	}
+
+	lines.push('});');
+	return lines.join('\n');
+}
+
+function highlightTS(code: string): string {
+	const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	return escaped
+		.replace(/\b(import|from|const|true|false)\b/g, '<span class="ts-kw">$1</span>')
+		.replace(/(schema|ref|createOrm)\b/g, '<span class="ts-fn">$1</span>')
+		.replace(/('(?:[^'\\]|\\.)*')/g, '<span class="ts-str">$1</span>');
+}
+
+// ---------------------------------------------------------------------------
+// Generated TypeScript reactive state
+// ---------------------------------------------------------------------------
+
+const generatedTs = ref('');
+const copied = ref(false);
+
+async function copyTypeScript() {
+	await navigator.clipboard.writeText(generatedTs.value);
+	copied.value = true;
+	setTimeout(() => {
+		copied.value = false;
+	}, 2000);
+}
 </script>
 
 <style scoped>
@@ -623,14 +787,16 @@ function highlightSQL(sql: string): string {
 .schema-panels {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  min-height: 260px;
-  max-height: 420px;
+  height: 320px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--vp-c-divider);
 }
 
 @media (max-width: 768px) {
   .schema-panels {
     grid-template-columns: 1fr;
-    max-height: none;
+    height: auto;
+    max-height: 500px;
   }
 }
 
@@ -659,7 +825,8 @@ function highlightSQL(sql: string): string {
   font-size: 0.82rem;
   line-height: 1.65;
   padding: 1rem;
-  min-height: 220px;
+  min-height: 0;
+  height: 100%;
   caret-color: var(--vp-c-brand-1);
   overflow-y: auto;
 }
@@ -676,25 +843,62 @@ function highlightSQL(sql: string): string {
    Mermaid diagram
    ============================================================ */
 .schema-diagram {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: auto;
-  padding: 0.75rem;
+  position: relative;
+  overflow: hidden;
   background: var(--vp-c-bg-alt, var(--vp-c-bg));
 }
 
-.mermaid-container {
+.mermaid-viewport {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  position: relative;
+  user-select: none;
+}
+
+.mermaid-canvas {
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+  transition: transform 0.05s linear;
 }
 
-.mermaid-container :deep(svg) {
-  max-width: 100%;
+.mermaid-canvas :deep(svg) {
+  max-width: none;
   height: auto;
   display: block;
+}
+
+.zoom-controls {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+  opacity: 0.7;
+}
+
+.zoom-btn:hover {
+  opacity: 1;
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
 }
 
 .diagram-error {
@@ -945,4 +1149,59 @@ function highlightSQL(sql: string): string {
   font-size: 0.875rem;
   min-height: 200px;
 }
+
+/* ============================================================
+   Generated TypeScript section
+   ============================================================ */
+.generated-code {
+  border-top: 1px solid var(--vp-c-divider);
+  max-height: 200px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+
+.generated-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: var(--vp-c-bg);
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.generated-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--vp-c-text-2);
+}
+
+.copy-btn {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 4px;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.copy-btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.generated-pre {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.8rem;
+  line-height: 1.6;
+  overflow: auto;
+  max-height: 150px;
+}
+
+.generated-pre :deep(.ts-kw) { color: #818CF8; font-weight: 600; }
+.generated-pre :deep(.ts-fn) { color: #22D3EE; }
+.generated-pre :deep(.ts-str) { color: #A5F3FC; }
 </style>
