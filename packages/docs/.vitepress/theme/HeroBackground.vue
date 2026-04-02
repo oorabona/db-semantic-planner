@@ -182,7 +182,7 @@ onUnmounted(() => {
 }
 
 .hero-bg-canvas.no-webgl {
-  background: linear-gradient(135deg, #1e293b 0%, #312e81 50%, #164e63 100%);
+  background: linear-gradient(135deg, #1E293B 0%, #312E81 40%, #164E63 80%, #1E293B 100%);
 }
 
 :global(.hero-bg-canvas) {
@@ -191,5 +191,9 @@ onUnmounted(() => {
 
 :global(.dark .hero-bg-canvas) {
   opacity: 0.4;
+}
+
+:global(.hero-bg-canvas.no-webgl) {
+  opacity: 0.6;
 }
 </style>

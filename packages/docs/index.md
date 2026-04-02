@@ -15,22 +15,40 @@ hero:
     src: /logo.svg
     alt: dbsp
 features:
-  - icon: "\U0001F9E0"
+  - icon:
+      src: /icons/brain.svg
+      width: 24
+      height: 24
     title: Semantic Planning
     details: The planner chooses between EXISTS, JOIN, and lateral subqueries based on relation cardinality. You describe what, it decides how.
-  - icon: "\U0001F50D"
+  - icon:
+      src: /icons/search.svg
+      width: 24
+      height: 24
     title: Full Observability
     details: Every query exposes its plan, compiled SQL, and bound parameters via dump(). Debug before you execute.
-  - icon: "\U0001F512"
+  - icon:
+      src: /icons/shield.svg
+      width: 24
+      height: 24
     title: Multi-tenant Native
     details: Schema-per-tenant isolation with orm.withSchema(). Every query is automatically scoped — no manual prefixing.
-  - icon: "\U0001F680"
+  - icon:
+      src: /icons/rocket.svg
+      width: 24
+      height: 24
     title: Zero Overhead
     details: Direct pg Pool — no ORM layer, no codegen, no runtime dependencies. Tree-shakeable ESM.
-  - icon: "\U0001F504"
+  - icon:
+      src: /icons/refresh.svg
+      width: 24
+      height: 24
     title: Recursive Queries
     details: "Hierarchies via include({ recursive: true }) with automatic CTE generation. Trees and graphs without raw SQL."
-  - icon: "\u26A1"
+  - icon:
+      src: /icons/zap.svg
+      width: 24
+      height: 24
     title: PostgreSQL Extensions
     details: Built-in helpers for pgvector (cosine distance, L2, inner product) and ParadeDB (BM25 full-text search).
 ---
