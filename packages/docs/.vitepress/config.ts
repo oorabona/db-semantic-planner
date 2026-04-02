@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import robotsTxt from 'vite-plugin-robots-txt';
 import { defineConfig } from 'vitepress';
+import llmstxt from 'vitepress-plugin-llms';
 import { withMermaid } from 'vitepress-plugin-mermaid';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -9,6 +11,7 @@ export default withMermaid(
 	defineConfig({
 		title: 'db-semantic-planner',
 		description: 'The intent-first query planner for PostgreSQL',
+		lastUpdated: true,
 		sitemap: {
 			hostname: 'https://dbsp.dev',
 		},
@@ -120,6 +123,13 @@ export default withMermaid(
 			},
 		},
 		vite: {
+			plugins: [
+				...llmstxt({ domain: 'https://dbsp.dev' }),
+				robotsTxt({
+					policy: [{ userAgent: '*', allow: '/' }],
+					sitemap: 'https://dbsp.dev/sitemap.xml',
+				}),
+			],
 			resolve: {
 				alias: {
 					pg: path.resolve(__dirname, 'theme/pg-stub.ts'),
