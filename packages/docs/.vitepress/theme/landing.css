@@ -1,0 +1,220 @@
+/* ============================================================
+   Landing page custom sections
+   ============================================================ */
+
+.landing-sections {
+  max-width: 1152px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.landing-section {
+  padding: 4rem 0;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.landing-section h2 {
+  text-align: center;
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 2.5rem;
+  background: linear-gradient(135deg, var(--vp-c-brand-1) 0%, var(--vp-c-brand-3) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ---- Pipeline section ---- */
+
+.pipeline-steps {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  justify-content: center;
+}
+
+.pipeline-step {
+  flex: 1;
+  max-width: 300px;
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 12px;
+  padding: 1.5rem;
+  transition: all 0.3s ease;
+  animation: fadeSlideUp 0.6s ease both;
+}
+
+.pipeline-step:nth-child(1) { animation-delay: 0.1s; }
+.pipeline-step:nth-child(3) { animation-delay: 0.2s; }
+.pipeline-step:nth-child(5) { animation-delay: 0.3s; }
+
+.pipeline-step:hover {
+  border-color: var(--vp-c-brand-1);
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.15);
+}
+
+.step-number {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366F1, #4F46E5);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 0.875rem;
+  margin-bottom: 0.75rem;
+}
+
+.step-content h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  color: var(--vp-c-text-1);
+}
+
+.step-content p {
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+  line-height: 1.6;
+  margin-bottom: 0.75rem;
+}
+
+.step-code {
+  display: block;
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.78rem;
+  line-height: 1.5;
+  padding: 0.5rem 0.75rem;
+  background: var(--vp-c-bg);
+  border-radius: 6px;
+  color: var(--vp-c-brand-1);
+  word-break: break-all;
+}
+
+.pipeline-arrow {
+  display: flex;
+  align-items: center;
+  font-size: 1.5rem;
+  color: var(--vp-c-brand-1);
+  padding: 0 0.75rem;
+  opacity: 0.6;
+}
+
+@media (max-width: 768px) {
+  .pipeline-steps {
+    flex-direction: column;
+    align-items: center;
+  }
+  .pipeline-step {
+    max-width: 100%;
+  }
+  .pipeline-arrow {
+    transform: rotate(90deg);
+    padding: 0.5rem 0;
+  }
+}
+
+/* ---- Terminal in landing ---- */
+
+.see-it .terminal {
+  max-width: 680px;
+  margin: 0 auto;
+}
+
+/* ---- CTA section ---- */
+
+.cta-section {
+  text-align: center;
+  padding-bottom: 5rem;
+}
+
+.cta-buttons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.cta-primary {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
+  color: white;
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  transition: all 0.2s;
+  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+}
+
+.cta-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+}
+
+.cta-secondary {
+  display: inline-block;
+  padding: 0.75rem 2rem;
+  background: transparent;
+  color: var(--vp-c-brand-1);
+  border: 1px solid var(--vp-c-brand-1);
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 1rem;
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.cta-secondary:hover {
+  background: var(--vp-c-brand-soft);
+  transform: translateY(-2px);
+}
+
+/* ---- Feature cards animation (VitePress home) ---- */
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Animate the VitePress feature cards */
+.VPFeature {
+  animation: fadeSlideUp 0.5s ease both;
+}
+
+.VPFeature:nth-child(1) { animation-delay: 0.05s; }
+.VPFeature:nth-child(2) { animation-delay: 0.1s; }
+.VPFeature:nth-child(3) { animation-delay: 0.15s; }
+.VPFeature:nth-child(4) { animation-delay: 0.2s; }
+.VPFeature:nth-child(5) { animation-delay: 0.25s; }
+.VPFeature:nth-child(6) { animation-delay: 0.3s; }
+
+/* Hero title shimmer */
+.VPHero .name {
+  animation: fadeSlideUp 0.6s ease both;
+}
+
+.VPHero .text {
+  animation: fadeSlideUp 0.6s ease both;
+  animation-delay: 0.1s;
+}
+
+.VPHero .tagline {
+  animation: fadeSlideUp 0.6s ease both;
+  animation-delay: 0.2s;
+}
+
+.VPHero .actions {
+  animation: fadeSlideUp 0.6s ease both;
+  animation-delay: 0.3s;
+}
