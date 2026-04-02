@@ -218,24 +218,42 @@ const users = await tenantOrm
 
 <section class="landing-section pg-section">
 
-## Built for PostgreSQL
+## Adapter-agnostic core. PostgreSQL-native today.
 
-<div class="pg-features">
-  <div class="pg-badge">PostgreSQL 14+</div>
-  <div class="pg-badge">pgvector</div>
-  <div class="pg-badge">ParadeDB BM25</div>
-  <div class="pg-badge">Row-Level Security</div>
-  <div class="pg-badge">Advisory Locks</div>
-  <div class="pg-badge">JSONB</div>
-  <div class="pg-badge">Recursive CTEs</div>
-  <div class="pg-badge">LATERAL JOINs</div>
-  <div class="pg-badge">Window Functions</div>
-  <div class="pg-badge">DISTINCT ON</div>
-  <div class="pg-badge">FOR UPDATE / SKIP LOCKED</div>
-  <div class="pg-badge">Schema-per-tenant</div>
+<p class="pg-subtitle">The core planner, schema DSL, query builders, and NQL work independently of any database. Write once, swap adapters.</p>
+
+<div class="db-grid">
+  <div class="db-card db-active">
+    <div class="db-name">PostgreSQL</div>
+    <div class="db-status">v1.0 — Stable</div>
+    <div class="pg-features">
+      <span class="pg-badge">pgvector</span>
+      <span class="pg-badge">ParadeDB</span>
+      <span class="pg-badge">RLS</span>
+      <span class="pg-badge">LATERAL</span>
+      <span class="pg-badge">CTEs</span>
+      <span class="pg-badge">Window Fn</span>
+      <span class="pg-badge">DISTINCT ON</span>
+      <span class="pg-badge">Multi-tenant</span>
+    </div>
+  </div>
+  <div class="db-card db-planned">
+    <div class="db-name">SQLite</div>
+    <div class="db-status">Planned</div>
+  </div>
+  <div class="db-card db-planned">
+    <div class="db-name">DuckDB</div>
+    <div class="db-status">Planned</div>
+  </div>
+  <div class="db-card db-planned">
+    <div class="db-name">MySQL</div>
+    <div class="db-status">Planned</div>
+  </div>
 </div>
 
-<p class="pg-note">Every PostgreSQL feature is exposed through type-safe APIs — no raw SQL needed.</p>
+<div style="text-align: center; margin-top: 1.5rem;">
+  <a href="/roadmap" style="color: var(--vp-c-brand-1); font-size: 0.9rem;">See the roadmap →</a>
+</div>
 
 </section>
 
