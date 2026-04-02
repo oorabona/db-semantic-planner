@@ -138,30 +138,33 @@
   flex-wrap: wrap;
 }
 
+/* CTA colors: emerald primary for contrast against indigo palette (WCAG AA 4.5:1+) */
 .cta-primary {
   display: inline-block;
   padding: 0.75rem 2rem;
-  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-  color: white;
+  background: linear-gradient(135deg, #059669 0%, #047857 100%);
+  color: #FFFFFF;
   border-radius: 8px;
   font-weight: 600;
   font-size: 1rem;
   text-decoration: none;
   transition: all 0.2s;
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35);
 }
 
 .cta-primary:hover {
+  background: linear-gradient(135deg, #10B981 0%, #059669 100%);
+  color: #FFFFFF;
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+  box-shadow: 0 6px 20px rgba(5, 150, 105, 0.45);
 }
 
 .cta-secondary {
   display: inline-block;
   padding: 0.75rem 2rem;
   background: transparent;
-  color: var(--vp-c-brand-1);
-  border: 1px solid var(--vp-c-brand-1);
+  color: var(--vp-c-text-1);
+  border: 2px solid var(--vp-c-divider);
   border-radius: 8px;
   font-weight: 600;
   font-size: 1rem;
@@ -170,7 +173,8 @@
 }
 
 .cta-secondary:hover {
-  background: var(--vp-c-brand-soft);
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
   transform: translateY(-2px);
 }
 
@@ -199,6 +203,12 @@
 .VPFeature:nth-child(5) { animation-delay: 0.25s; }
 .VPFeature:nth-child(6) { animation-delay: 0.3s; }
 
+/* Hero shader background positioning */
+.VPHero {
+  position: relative;
+  overflow: hidden;
+}
+
 /* Hero title shimmer */
 .VPHero .name {
   animation: fadeSlideUp 0.6s ease both;
@@ -217,4 +227,21 @@
 .VPHero .actions {
   animation: fadeSlideUp 0.6s ease both;
   animation-delay: 0.3s;
+}
+
+/* ---- Reduced motion ---- */
+@media (prefers-reduced-motion: reduce) {
+  .pipeline-step,
+  .VPFeature,
+  .VPHero .name,
+  .VPHero .text,
+  .VPHero .tagline,
+  .VPHero .actions {
+    animation: none;
+  }
+  .pipeline-step:hover,
+  .cta-primary:hover,
+  .cta-secondary:hover {
+    transform: none;
+  }
 }
