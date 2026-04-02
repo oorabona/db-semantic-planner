@@ -181,19 +181,27 @@ onUnmounted(() => {
   display: block;
 }
 
-.hero-bg-canvas.no-webgl {
-  background: linear-gradient(135deg, #1E293B 0%, #312E81 40%, #164E63 80%, #1E293B 100%);
+/* Light mode fallback: very subtle, desaturated gradient */
+:global(.hero-bg-canvas.no-webgl) {
+  background: linear-gradient(135deg,
+    rgba(99, 102, 241, 0.06) 0%,
+    rgba(34, 211, 238, 0.04) 40%,
+    rgba(99, 102, 241, 0.03) 80%,
+    transparent 100%
+  );
+}
+
+:global(.dark .hero-bg-canvas.no-webgl) {
+  background: linear-gradient(135deg,
+    #1E293B 0%, #312E81 40%, #164E63 80%, #1E293B 100%
+  );
 }
 
 :global(.hero-bg-canvas) {
-  opacity: 0.25;
+  opacity: 0.3;
 }
 
 :global(.dark .hero-bg-canvas) {
-  opacity: 0.4;
-}
-
-:global(.hero-bg-canvas.no-webgl) {
-  opacity: 0.6;
+  opacity: 0.5;
 }
 </style>
