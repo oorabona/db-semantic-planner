@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 
 type Step = {
 	prompt: string;
@@ -123,12 +123,22 @@ function startStep(index: number) {
 		if (currentChar.value < step.command.length) {
 			line.command = step.command.slice(0, currentChar.value + 1);
 			currentChar.value++;
+			// Auto-scroll terminal body
+			nextTick(() => {
+				const el = document.querySelector('.terminal-body');
+				if (el) el.scrollTop = el.scrollHeight;
+			});
 			scheduleNext(typeNextChar, speed);
 		} else {
 			line.done = true;
 			scheduleNext(() => {
 				line.output = step.output;
 				stepIndex = index + 1;
+				// Auto-scroll terminal body
+				nextTick(() => {
+					const el = document.querySelector('.terminal-body');
+					if (el) el.scrollTop = el.scrollHeight;
+				});
 				scheduleNext(() => startStep(stepIndex), 1500);
 			}, 200);
 		}
@@ -239,8 +249,9 @@ function isParamLine(text: string): boolean {
 
 .terminal-body {
   padding: 1rem;
-  min-height: 300px;
-  color: #e2e8f0;
+  height: 280px;
+  overflow-y: auto;
+  color: #E2E8F0;
 }
 
 .terminal-line-group {
