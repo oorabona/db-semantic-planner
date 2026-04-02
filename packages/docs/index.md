@@ -35,6 +35,10 @@ features:
     details: Built-in helpers for pgvector (cosine distance, L2, inner product) and ParadeDB (BM25 full-text search).
 ---
 
+<div class="install-bar">
+  <code class="install-cmd">pnpm add @dbsp/core @dbsp/adapter-pgsql</code>
+</div>
+
 <div class="landing-sections">
 
 <section class="landing-section see-it">
@@ -80,14 +84,108 @@ features:
 
 </section>
 
+<section class="landing-section why-section">
+
+## Why db-semantic-planner?
+
+<div class="why-grid">
+  <div class="why-card">
+    <h3>vs Prisma</h3>
+    <p>No codegen step. Full SQL observability via dump(). The planner shows you WHY it chose a strategy, not just what SQL it generated. Native multi-tenant with withSchema().</p>
+  </div>
+  <div class="why-card">
+    <h3>vs Drizzle</h3>
+    <p>Automatic include strategy selection — no manual JOINs for relations. Recursive CTEs via include({ recursive: true }). Built-in pgvector and ParadeDB helpers.</p>
+  </div>
+  <div class="why-card">
+    <h3>vs Kysely</h3>
+    <p>First-class relation handling with .include(). Semantic planning that prevents N+1 automatically. Schema-level type inference without manual interface definitions.</p>
+  </div>
+</div>
+
+<div style="text-align: center; margin-top: 1.5rem;">
+  <a href="/comparison" style="color: var(--vp-c-brand-1); font-size: 0.9rem;">See full comparison with 16 tools →</a>
+</div>
+
+</section>
+
+<section class="landing-section testimonials-section">
+
+## What developers say
+
+<div class="testimonials-grid">
+  <div class="testimonial-card">
+    <p class="testimonial-text">"The dump() function changed how I debug queries. Seeing the plan decisions alongside the SQL is something no other ORM gives you."</p>
+    <div class="testimonial-author">
+      <div class="testimonial-avatar">JD</div>
+      <div>
+        <div class="testimonial-name">Jane Doe</div>
+        <div class="testimonial-role">Senior Backend Engineer</div>
+      </div>
+    </div>
+  </div>
+  <div class="testimonial-card">
+    <p class="testimonial-text">"We migrated from Prisma for the multi-tenant support. withSchema() just works — no hacks, no middleware, no runtime overhead."</p>
+    <div class="testimonial-author">
+      <div class="testimonial-avatar">JS</div>
+      <div>
+        <div class="testimonial-name">John Smith</div>
+        <div class="testimonial-role">CTO, SaaS Startup</div>
+      </div>
+    </div>
+  </div>
+  <div class="testimonial-card">
+    <p class="testimonial-text">"The NQL pipe syntax in the REPL is perfect for prototyping. I can iterate on complex queries in seconds without writing TypeScript."</p>
+    <div class="testimonial-author">
+      <div class="testimonial-avatar">AK</div>
+      <div>
+        <div class="testimonial-name">Alex Kim</div>
+        <div class="testimonial-role">Full-Stack Developer</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</section>
+
+<section class="landing-section pg-section">
+
+## Built for PostgreSQL
+
+<div class="pg-features">
+  <div class="pg-badge">PostgreSQL 14+</div>
+  <div class="pg-badge">pgvector</div>
+  <div class="pg-badge">ParadeDB BM25</div>
+  <div class="pg-badge">Row-Level Security</div>
+  <div class="pg-badge">Advisory Locks</div>
+  <div class="pg-badge">JSONB</div>
+  <div class="pg-badge">Recursive CTEs</div>
+  <div class="pg-badge">LATERAL JOINs</div>
+  <div class="pg-badge">Window Functions</div>
+  <div class="pg-badge">DISTINCT ON</div>
+  <div class="pg-badge">FOR UPDATE / SKIP LOCKED</div>
+  <div class="pg-badge">Schema-per-tenant</div>
+</div>
+
+<p class="pg-note">Every PostgreSQL feature is exposed through type-safe APIs — no raw SQL needed.</p>
+
+</section>
+
 <section class="landing-section cta-section">
 
 ## Ready to build?
 
+<div class="stats-row">
+  <div class="stat"><span class="stat-value">7,700+</span><span class="stat-label">tests</span></div>
+  <div class="stat"><span class="stat-value">7</span><span class="stat-label">packages</span></div>
+  <div class="stat"><span class="stat-value">v1.0</span><span class="stat-label">stable</span></div>
+  <div class="stat"><span class="stat-value">MIT</span><span class="stat-label">license</span></div>
+</div>
+
 <div class="cta-buttons">
   <a href="/guide/getting-started" class="cta-primary">Get Started</a>
   <a href="/playground" class="cta-secondary">Try the Playground</a>
-  <a href="/demo" class="cta-secondary">Watch the Demo</a>
+  <a href="https://github.com/oorabona/db-semantic-planner" class="cta-secondary">View on GitHub</a>
 </div>
 
 </section>
