@@ -20,6 +20,39 @@ pnpm add @dbsp/core @dbsp/adapter-pgsql pg
 
 ## Step 2: Define Your Schema
 
+All examples in this guide (and most other guides) use the same schema: a simple **blog application** with users, posts, and comments. Here is the entity-relationship diagram:
+
+```mermaid
+erDiagram
+    users {
+        uuid id PK
+        string name
+        string email UK
+        boolean active
+        timestamp createdAt
+    }
+    posts {
+        uuid id PK
+        string title
+        text content "nullable"
+        boolean published
+        uuid authorId FK
+        timestamp createdAt
+    }
+    comments {
+        uuid id PK
+        string text
+        uuid postId FK
+        uuid authorId FK
+        timestamp createdAt
+    }
+    users ||--o{ posts : "has many"
+    users ||--o{ comments : "has many"
+    posts ||--o{ comments : "has many"
+```
+
+In dbsp, you declare this schema in TypeScript:
+
 ```typescript
 import { schema, ref } from '@dbsp/core';
 
