@@ -106,18 +106,68 @@ features:
 
 ## Why db-semantic-planner?
 
-<div class="why-grid">
-  <div class="why-card">
+<div class="why-row">
+  <div class="why-text">
     <h3>vs Prisma</h3>
-    <p>No codegen step. Full SQL observability via dump(). The planner shows you WHY it chose a strategy, not just what SQL it generated. Native multi-tenant with withSchema().</p>
+    <p>No codegen step. Full SQL observability via dump(). The planner shows you <strong>why</strong> it chose a strategy, not just what SQL it generated. Native multi-tenant with withSchema().</p>
   </div>
-  <div class="why-card">
+  <div class="why-code">
+
+```typescript
+// See every decision the planner makes
+const dump = orm.select('posts')
+  .where(eq('published', true))
+  .include('author')
+  .dump();
+
+dump.plan.decisions
+// → [{ type: 'include-strategy',
+//      choice: 'lateral-join',
+//      reason: 'to-one relation' }]
+```
+
+  </div>
+</div>
+
+<div class="why-row reverse">
+  <div class="why-text">
     <h3>vs Drizzle</h3>
-    <p>Automatic include strategy selection — no manual JOINs for relations. Recursive CTEs via include({ recursive: true }). Built-in pgvector and ParadeDB helpers.</p>
+    <p>Automatic include strategy selection — no manual JOINs for relations. The planner picks lateral, subquery, or join based on cardinality. Built-in pgvector and ParadeDB helpers.</p>
   </div>
-  <div class="why-card">
+  <div class="why-code">
+
+```typescript
+// Relations just work — planner decides strategy
+const users = await orm
+  .select('users')
+  .include('posts.comments.author')
+  .all();
+
+// Nested 3-level include — zero manual JOINs
+// Result: users[].posts[].comments[].author
+```
+
+  </div>
+</div>
+
+<div class="why-row">
+  <div class="why-text">
     <h3>vs Kysely</h3>
-    <p>First-class relation handling with .include(). Semantic planning that prevents N+1 automatically. Schema-level type inference without manual interface definitions.</p>
+    <p>First-class relation handling with .include(). Schema-level type inference without manual interface definitions. Multi-tenant isolation built-in, not bolted on.</p>
+  </div>
+  <div class="why-code">
+
+```typescript
+// Multi-tenant in one line
+const tenantOrm = orm.withSchema('acme_corp');
+
+const users = await tenantOrm
+  .select('users')
+  .where(eq('active', true))
+  .all();
+// → SELECT * FROM "acme_corp"."users" WHERE ...
+```
+
   </div>
 </div>
 

@@ -243,24 +243,6 @@
 	animation-delay: 0.3s;
 }
 
-/* Hero shader background positioning */
-.VPHero {
-	position: relative;
-	overflow: hidden;
-}
-
-.VPHero::after {
-	content: "";
-	position: absolute;
-	bottom: 0;
-	left: 0;
-	right: 0;
-	height: 80px;
-	background: linear-gradient(to bottom, transparent, var(--vp-c-bg));
-	pointer-events: none;
-	z-index: 0;
-}
-
 /* Hero title shimmer */
 .VPHero .name {
 	animation: fadeSlideUp 0.6s ease both;
@@ -325,52 +307,55 @@
 	background: var(--vp-c-bg-soft);
 }
 
-/* ---- Why section ---- */
+/* ---- Why section — alternating rows ---- */
 
-.why-grid {
+.why-row {
 	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 1.25rem;
+	grid-template-columns: 1fr 1fr;
+	gap: 2rem;
+	align-items: center;
+	margin-bottom: 2.5rem;
+}
+
+.why-row.reverse {
+	direction: rtl;
+}
+
+.why-row.reverse > * {
+	direction: ltr;
 }
 
 @media (max-width: 768px) {
-	.why-grid {
+	.why-row,
+	.why-row.reverse {
 		grid-template-columns: 1fr;
+		direction: ltr;
 	}
 }
 
-.why-card {
-	background: var(--vp-c-bg);
-	border: 1px solid var(--vp-c-divider);
-	border-radius: 12px;
-	padding: 1.5rem;
-	transition: all 0.3s ease;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.dark .why-card {
-	background: var(--vp-c-bg-soft);
-	box-shadow: none;
-}
-
-.why-card:hover {
-	border-color: var(--vp-c-brand-1);
-	box-shadow: 0 4px 16px rgba(99, 102, 241, 0.1);
-	transform: translateY(-3px);
-}
-
-.why-card h3 {
-	font-size: 1rem;
+.why-text h3 {
+	font-size: 1.15rem;
 	font-weight: 700;
 	margin-bottom: 0.5rem;
 	color: var(--vp-c-brand-1);
 }
 
-.why-card p {
-	font-size: 0.875rem;
+.why-text p {
+	font-size: 0.9rem;
 	color: var(--vp-c-text-2);
-	line-height: 1.6;
+	line-height: 1.7;
 	margin: 0;
+}
+
+.why-code {
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+/* Override VitePress code block margins inside why-code */
+.why-code div[class*='language-'] {
+	margin: 0 !important;
+	border-radius: 8px !important;
 }
 
 /* ---- Testimonials ---- */
