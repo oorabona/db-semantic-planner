@@ -9,7 +9,26 @@ export default withMermaid(
 	defineConfig({
 		title: 'db-semantic-planner',
 		description: 'The intent-first query planner for PostgreSQL',
-		head: [['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }]],
+		sitemap: {
+			hostname: 'https://dbsp.dev',
+		},
+		head: [
+			['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+			['meta', { name: 'og:type', content: 'website' }],
+			['meta', { name: 'og:title', content: 'db-semantic-planner — The intent-first query planner' }],
+			[
+				'meta',
+				{
+					name: 'og:description',
+					content:
+						'Declare what you want. The planner decides how. Then shows you why. Type-safe, observable, PostgreSQL-native.',
+				},
+			],
+			['meta', { name: 'og:image', content: 'https://dbsp.dev/og-image.png' }],
+			['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+			['meta', { name: 'twitter:title', content: 'db-semantic-planner' }],
+			['meta', { name: 'twitter:description', content: 'The intent-first query planner for PostgreSQL' }],
+		],
 		themeConfig: {
 			logo: '/logo.svg',
 			nav: [
@@ -20,6 +39,7 @@ export default withMermaid(
 				{ text: 'NQL', link: '/nql/' },
 				{ text: 'Comparison', link: '/comparison' },
 				{ text: 'Playground', link: '/playground' },
+				{ text: 'Roadmap', link: '/roadmap' },
 			],
 			sidebar: {
 				'/guide/': [
@@ -96,6 +116,7 @@ export default withMermaid(
 			},
 			footer: {
 				message: 'Released under the MIT License.',
+				copyright: 'v1.0.0 — Adapter-agnostic core, PostgreSQL-native today.',
 			},
 		},
 		vite: {
