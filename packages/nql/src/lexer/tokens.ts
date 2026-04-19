@@ -104,7 +104,7 @@ export const RBracket = createToken({ name: 'RBracket', pattern: /\]/ });
 // Must come BEFORE NumberLiteral in allTokens to match date patterns first
 export const RangeValue = createToken({
 	name: 'RangeValue',
-	pattern: /-?\d+(?:[-:T]\d+)+/,
+	pattern: /(?:\d{4}(?:[-:T]\d{1,2})+|\d{2}:\d{2}(?::\d{2})?)/,
 });
 export const Is = createToken({ name: 'Is', pattern: /is\b/i });
 export const Exists = createToken({ name: 'Exists', pattern: /exists\b/i });

@@ -313,17 +313,17 @@ function buildMermaidCode(parsed: ParsedSchema): string {
 	const lines: string[] = ['erDiagram'];
 
 	for (const table of parsed.tables) {
-		lines.push('    ' + table.name + ' {');
+		lines.push(`    ${table.name} {`);
 		for (const col of table.columns) {
 			const type = col.type.replace(/[^a-zA-Z0-9_]/g, '_');
 			const suffix = col.pk ? ' PK' : col.unique ? ' UK' : '';
-			lines.push('        ' + type + ' ' + col.name + suffix);
+			lines.push(`        ${type} ${col.name}${suffix}`);
 		}
 		lines.push('    }');
 	}
 
 	for (const rel of parsed.relations) {
-		lines.push('    ' + rel.to + ' ||--o{ ' + rel.from + ' : ""');
+		lines.push(`    ${rel.to} ||--o{ ${rel.from} : ""`);
 	}
 
 	return lines.join('\n');
@@ -333,15 +333,26 @@ function buildMermaidCode(parsed: ParsedSchema): string {
 // NQL tag type
 // ---------------------------------------------------------------------------
 
-type NqlTag = (strings: TemplateStringsArray, ...values: unknown[]) => { dump(): CompileResult };
+type NqlTag = (
+	strings: TemplateStringsArray,
+	...values: unknown[]
+) => { dump(): CompileResult };
 
 // ---------------------------------------------------------------------------
 // All examples (filtered by available tables)
 // ---------------------------------------------------------------------------
 
 const ALL_EXAMPLES = [
-	{ name: 'Simple query', code: 'users | where active = true | select id, name', requires: ['users'] },
-	{ name: 'With relations', code: 'posts | where published = true | select title, author.*', requires: ['posts'] },
+	{
+		name: 'Simple query',
+		code: 'users | where active = true | select id, name',
+		requires: ['users'],
+	},
+	{
+		name: 'With relations',
+		code: 'posts | where published = true | select title, author.*',
+		requires: ['posts'],
+	},
 	{
 		name: 'Aggregation',
 		code: 'orders | group by status | select status, count(*), sum(amount)',
@@ -357,8 +368,16 @@ const ALL_EXAMPLES = [
 		code: 'products | select name, rank() over (partition by category order by price) as price_rank',
 		requires: ['products'],
 	},
-	{ name: 'Insert', code: "insert into users set name = 'Alice', email = 'alice@example.com'", requires: ['users'] },
-	{ name: 'Update', code: "update users set active = false where last_login < '2024-01-01'", requires: ['users'] },
+	{
+		name: 'Insert',
+		code: "insert into users set name = 'Alice', email = 'alice@example.com'",
+		requires: ['users'],
+	},
+	{
+		name: 'Update',
+		code: "update users set active = false where last_login < '2024-01-01'",
+		requires: ['users'],
+	},
 ];
 
 // ---------------------------------------------------------------------------
@@ -386,7 +405,14 @@ let panStartX = 0;
 let panStartY = 0;
 
 const diagramTransform = computed(() => ({
-	transform: 'translate(' + diagramPanX.value + 'px, ' + diagramPanY.value + 'px) scale(' + diagramZoom.value + ')',
+	transform:
+		'translate(' +
+		diagramPanX.value +
+		'px, ' +
+		diagramPanY.value +
+		'px) scale(' +
+		diagramZoom.value +
+		')',
 	transformOrigin: 'center center',
 	cursor: isDragging ? 'grabbing' : 'grab',
 }));
@@ -475,7 +501,10 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 				if (col.refNullable) refOpts.nullable = true;
 				if (col.refUnique) refOpts.unique = true;
 				if (col.onDelete) refOpts.onDelete = col.onDelete;
-				colDefs[col.name] = Object.keys(refOpts).length > 0 ? dbRef(col.ref, refOpts) : dbRef(col.ref);
+				colDefs[col.name] =
+					Object.keys(refOpts).length > 0
+						? dbRef(col.ref, refOpts)
+						: dbRef(col.ref);
 			} else {
 				const def: Record<string, unknown> = { type: col.type };
 				if (col.pk) def.primaryKey = true;
@@ -495,7 +524,7 @@ async function renderDiagram(parsed: ParsedSchema): Promise<void> {
 	if (!mermaidInstance) return;
 	try {
 		const code = buildMermaidCode(parsed);
-		const id = 'er-' + Date.now();
+		const id = `er-${Date.now()}`;
 		const { svg } = await mermaidInstance.render(id, code);
 		mermaidSvg.value = svg;
 	} catch {
@@ -538,7 +567,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		});
 		nqlTag = orm.nql as NqlTag;
 	} catch (e) {
-		schemaError.value = 'Schema error: ' + (e instanceof Error ? e.message : String(e));
+		schemaError.value = `Schema error: ${e instanceof Error ? e.message : String(e)}`;
 		nqlTag = null;
 	}
 
@@ -569,7 +598,7 @@ onMounted(async () => {
 
 		await rebuildOrm(schemaDsl.value);
 	} catch (e) {
-		error.value = 'Initialization error: ' + (e instanceof Error ? e.message : String(e));
+		error.value = `Initialization error: ${e instanceof Error ? e.message : String(e)}`;
 	}
 });
 
@@ -604,7 +633,7 @@ function compile(): void {
 
 	if (!nqlTag) {
 		error.value = schemaError.value
-			? 'Schema error: ' + schemaError.value
+			? `Schema error: ${schemaError.value}`
 			: 'Compiler not ready — please wait a moment and try again.';
 		return;
 	}
@@ -630,7 +659,7 @@ function compile(): void {
 
 function formatParams(params: readonly unknown[]): string {
 	if (params.length === 0) return '(no parameters)';
-	return params.map((p, i) => '$' + (i + 1) + ': ' + JSON.stringify(p)).join('\n');
+	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
 function formatPlan(plan: unknown): string {
@@ -648,12 +677,18 @@ const SQL_KEYWORDS = new RegExp(
 );
 
 function highlightSQL(sql: string): string {
-	const escaped = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-	return escaped
-		.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
-		.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
-		.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
-		.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>');
+	const escaped = sql
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
+	return (
+		escaped
+			.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
+			.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
+			.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: \x00 sentinel removal — matches the insertion two lines above
+			.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>')
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -667,26 +702,36 @@ function generateTypeScript(parsed: ParsedSchema): string {
 	lines.push('const db = schema({');
 
 	for (const table of parsed.tables) {
-		lines.push('  ' + table.name + ': {');
+		lines.push(`  ${table.name}: {`);
 		for (const col of table.columns) {
 			if (col.ref) {
 				const opts: string[] = [];
 				if (col.refNullable) opts.push('nullable: true');
 				if (col.refUnique) opts.push('unique: true');
-				if (col.onDelete) opts.push("onDelete: '" + col.onDelete + "'");
+				if (col.onDelete) opts.push(`onDelete: '${col.onDelete}'`);
 				const refCall =
-					opts.length > 0 ? "ref('" + col.ref + "', { " + opts.join(', ') + ' })' : "ref('" + col.ref + "')";
-				lines.push('    ' + col.name + ': ' + refCall + ',');
+					opts.length > 0
+						? `ref('${col.ref}', { ${opts.join(', ')} })`
+						: `ref('${col.ref}')`;
+				lines.push(`    ${col.name}: ${refCall},`);
 			} else {
 				const extras: string[] = [];
 				if (col.pk) extras.push('primaryKey: true');
 				if (col.nullable) extras.push('nullable: true');
 				if (col.unique) extras.push('unique: true');
-				if (col.defaultValue) extras.push("default: '" + col.defaultValue + "'");
+				if (col.defaultValue) extras.push(`default: '${col.defaultValue}'`);
 				if (extras.length > 0) {
-					lines.push('    ' + col.name + ": { type: '" + col.type + "', " + extras.join(', ') + ' },');
+					lines.push(
+						'    ' +
+							col.name +
+							": { type: '" +
+							col.type +
+							"', " +
+							extras.join(', ') +
+							' },',
+					);
 				} else {
-					lines.push('    ' + col.name + ": '" + col.type + "',");
+					lines.push(`    ${col.name}: '${col.type}',`);
 				}
 			}
 		}
@@ -698,9 +743,15 @@ function generateTypeScript(parsed: ParsedSchema): string {
 }
 
 function highlightTS(code: string): string {
-	const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	const escaped = code
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;');
 	return escaped
-		.replace(/\b(import|from|const|true|false)\b/g, '<span class="ts-kw">$1</span>')
+		.replace(
+			/\b(import|from|const|true|false)\b/g,
+			'<span class="ts-kw">$1</span>',
+		)
 		.replace(/(schema|ref|createOrm)\b/g, '<span class="ts-fn">$1</span>')
 		.replace(/('(?:[^'\\]|\\.)*')/g, '<span class="ts-str">$1</span>');
 }

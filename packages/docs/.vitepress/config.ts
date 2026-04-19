@@ -18,7 +18,13 @@ export default withMermaid(
 		head: [
 			['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
 			['meta', { name: 'og:type', content: 'website' }],
-			['meta', { name: 'og:title', content: 'db-semantic-planner — The intent-first query planner' }],
+			[
+				'meta',
+				{
+					name: 'og:title',
+					content: 'db-semantic-planner — The intent-first query planner',
+				},
+			],
 			[
 				'meta',
 				{
@@ -30,7 +36,13 @@ export default withMermaid(
 			['meta', { name: 'og:image', content: 'https://dbsp.dev/og-image.png' }],
 			['meta', { name: 'twitter:card', content: 'summary_large_image' }],
 			['meta', { name: 'twitter:title', content: 'db-semantic-planner' }],
-			['meta', { name: 'twitter:description', content: 'The intent-first query planner for PostgreSQL' }],
+			[
+				'meta',
+				{
+					name: 'twitter:description',
+					content: 'The intent-first query planner for PostgreSQL',
+				},
+			],
 		],
 		themeConfig: {
 			logo: '/logo.svg',
