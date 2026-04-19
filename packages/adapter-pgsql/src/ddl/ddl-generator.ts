@@ -18,7 +18,16 @@ import type {
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
-import { buildSequenceClause } from './migration-sql.js';
+import { generateCommentsPhase } from './phases/comments.js';
+import { generateConstraintsPhase } from './phases/constraints.js';
+import { generateDropStatementsPhase } from './phases/drop-statements.js';
+import { generateEnumTypesPhase } from './phases/enum-types.js';
+import { generateExtensionsPhase } from './phases/extensions.js';
+import { generateIndexesPhase } from './phases/indexes.js';
+import { generateRlsPhase } from './phases/rls.js';
+import { generateSequencesPhase } from './phases/sequences.js';
+import { generateTablesPhase } from './phases/tables.js';
+import type { PhaseContext } from './phases/types.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ============================================================================
@@ -62,7 +71,6 @@ export function generateDDL(
 	schema: ModelIR,
 	options: GenerateDDLOptions = {},
 ): string[] {
-	const statements: string[] = [];
 	const {
 		includeDropStatements = false,
 		schemaName,
@@ -71,178 +79,29 @@ export function generateDDL(
 		dialectCapabilities: caps,
 	} = options;
 
-	/**
-	 * Check whether a DDL feature is supported.
-	 *
-	 * - `undefined`: capability flag not set → feature is on by default (no caps = all features).
-	 * - `false`: capability explicitly disabled → feature is skipped.
-	 * - `true`: capability explicitly enabled → feature is included.
-	 */
-	const sup = (flag: boolean | undefined): boolean => !caps || flag === true;
-
-	// Get all tables
 	const tables = Array.from(schema.tables.values());
 
-	// ========================================================================
-	// PASS -1: CREATE EXTENSION (before everything)
-	// ========================================================================
-	if (schema.extensions && sup(caps?.supportsDDLExtensions)) {
-		for (const ext of schema.extensions) {
-			statements.push(`CREATE EXTENSION IF NOT EXISTS "${ext}";`);
-		}
-	}
+	const ctx: PhaseContext = {
+		schema,
+		tables,
+		schemaName,
+		naming,
+		caps,
+		fkAutoIndex,
+		includeDropStatements,
+	};
 
-	// ========================================================================
-	// PASS -0.5: CREATE SEQUENCE (before tables)
-	// ========================================================================
-	if (schema.sequences && sup(caps?.supportsDDLSequences)) {
-		for (const [, seq] of schema.sequences) {
-			const seqName = schemaName
-				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(seq.name)}`
-				: quoteIdentifier(seq.name);
-			statements.push(buildSequenceClause('CREATE SEQUENCE', seqName, seq));
-		}
-	}
-
-	// ========================================================================
-	// PASS 0: DROP statements (if requested)
-	// ========================================================================
-	if (includeDropStatements) {
-		// Reverse order + CASCADE to handle FK dependencies
-		for (const table of [...tables].reverse()) {
-			statements.push(generateDropTable(table.name, schemaName, naming));
-		}
-		statements.push(''); // Empty line separator
-	}
-
-	// ========================================================================
-	// PASS 0.5: CREATE TYPE for ENUM types (must be before CREATE TABLE)
-	// ========================================================================
-	if (schema.enums && sup(caps?.supportsDDLEnumTypes)) {
-		for (const [, enumDef] of schema.enums) {
-			const enumName = schemaName
-				? `${quoteIdentifier(naming.toDatabase(schemaName))}.${quoteIdentifier(enumDef.name)}`
-				: quoteIdentifier(enumDef.name);
-			const values = enumDef.values
-				.map((v) => `'${v.replace(/'/g, "''")}'`)
-				.join(', ');
-			statements.push(`CREATE TYPE ${enumName} AS ENUM (${values});`);
-		}
-	}
-
-	// ========================================================================
-	// PASS 1: CREATE TABLE statements (without FK constraints)
-	// ========================================================================
-	for (const table of tables) {
-		statements.push(generateCreateTable(table, schemaName, naming));
-	}
-
-	// ========================================================================
-	// PASS 2: ALTER TABLE ADD CONSTRAINT for foreign keys
-	// ========================================================================
-	for (const table of tables) {
-		for (const fk of table.foreignKeys) {
-			statements.push(
-				generateAlterTableAddFK(table.name, fk, schemaName, naming),
-			);
-		}
-	}
-
-	// ========================================================================
-	// PASS 2.5: ALTER TABLE ADD CHECK CONSTRAINT
-	// ========================================================================
-	if (sup(caps?.supportsDDLCheckConstraints)) {
-		for (const table of tables) {
-			for (const check of table.checkConstraints ?? []) {
-				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-				const constraintName = quoteIdentifier(check.name);
-				statements.push(
-					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
-				);
-			}
-		}
-	}
-
-	// ========================================================================
-	// PASS 3: CREATE INDEX statements
-	// ========================================================================
-	for (const table of tables) {
-		// Collect explicit index column names to avoid duplicates
-		const explicitIndexColumns = new Set(
-			table.indexes.flatMap((idx) =>
-				idx.columns.length === 1 ? idx.columns : [],
-			),
-		);
-
-		// Generate explicit indexes
-		for (const idx of table.indexes) {
-			statements.push(generateCreateIndex(table.name, idx, schemaName, naming));
-		}
-
-		// Auto-generate indexes for FK columns if fkAutoIndex is enabled
-		if (fkAutoIndex) {
-			for (const fk of table.foreignKeys) {
-				// Only auto-index single-column FKs that don't have explicit indexes
-				const fkCol = fk.columns[0];
-				if (
-					fk.columns.length === 1 &&
-					fkCol &&
-					!explicitIndexColumns.has(fkCol)
-				) {
-					const autoIdx: IndexIR = {
-						name: `idx_${table.name}_${fkCol}`,
-						columns: [fkCol],
-						unique: false,
-					};
-					statements.push(
-						generateCreateIndex(table.name, autoIdx, schemaName, naming),
-					);
-				}
-			}
-		}
-	}
-
-	// ========================================================================
-	// PASS 3.5: ENABLE ROW LEVEL SECURITY + CREATE POLICY
-	// ========================================================================
-	if (sup(caps?.supportsDDLRowLevelSecurity)) {
-		for (const table of tables) {
-			if (table.rlsEnabled) {
-				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-				statements.push(
-					`ALTER TABLE ${qualifiedTable} ENABLE ROW LEVEL SECURITY;`,
-				);
-			}
-			for (const policy of table.policies ?? []) {
-				statements.push(
-					generateCreatePolicy(table.name, policy, schemaName, naming),
-				);
-			}
-		}
-	}
-
-	// ========================================================================
-	// PASS 4: COMMENT ON TABLE / COLUMN
-	// ========================================================================
-	if (sup(caps?.supportsDDLComments))
-		for (const table of tables) {
-			if (table.comment) {
-				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-				statements.push(
-					`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
-				);
-			}
-			for (const col of table.columns) {
-				if (col.comment) {
-					const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-					statements.push(
-						`COMMENT ON COLUMN ${qualifiedTable}.${quoteIdentifier(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
-					);
-				}
-			}
-		}
-
-	return statements;
+	return [
+		...generateExtensionsPhase(ctx), // PASS -1: CREATE EXTENSION
+		...generateSequencesPhase(ctx), // PASS -0.5: CREATE SEQUENCE
+		...generateDropStatementsPhase(ctx), // PASS 0: DROP TABLE (optional)
+		...generateEnumTypesPhase(ctx), // PASS 0.5: CREATE TYPE ... AS ENUM
+		...generateTablesPhase(ctx), // PASS 1: CREATE TABLE
+		...generateConstraintsPhase(ctx), // PASS 2 + 2.5: FK + CHECK constraints
+		...generateIndexesPhase(ctx), // PASS 3: CREATE INDEX
+		...generateRlsPhase(ctx), // PASS 3.5: RLS + policies
+		...generateCommentsPhase(ctx), // PASS 4: COMMENT ON
+	];
 }
 
 // ============================================================================
@@ -285,7 +144,7 @@ function qualifyTable(
 // DROP TABLE
 // ============================================================================
 
-function generateDropTable(
+export function generateDropTable(
 	tableName: string,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
@@ -298,7 +157,7 @@ function generateDropTable(
 // CREATE TABLE
 // ============================================================================
 
-function generateCreateTable(
+export function generateCreateTable(
 	table: TableIR,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
@@ -436,7 +295,7 @@ function formatDefaultValue(value: unknown): string {
 // ALTER TABLE (Foreign Keys)
 // ============================================================================
 
-function generateAlterTableAddFK(
+export function generateAlterTableAddFK(
 	tableName: string,
 	fk: ForeignKeyIR,
 	schemaName: string | undefined,
@@ -475,7 +334,7 @@ function generateAlterTableAddFK(
 // CREATE INDEX
 // ============================================================================
 
-function generateCreateIndex(
+export function generateCreateIndex(
 	tableName: string,
 	idx: IndexIR,
 	schemaName: string | undefined,
@@ -525,7 +384,7 @@ function generateCreateIndex(
 /**
  * Generate a CREATE POLICY statement.
  */
-function generateCreatePolicy(
+export function generateCreatePolicy(
 	tableName: string,
 	policy: PolicyIR,
 	schemaName: string | undefined,

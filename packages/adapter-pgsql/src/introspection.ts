@@ -777,7 +777,12 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			name: col.column_name,
 			type: mapPgType(col.data_type, col.udt_name),
 			nullable: col.is_nullable === 'YES',
-			...(col.column_default != null ? { default: col.column_default } : {}),
+			// Wrap raw column_default string in { sql } so formatDefaultValue emits
+			// it verbatim (e.g. CURRENT_TIMESTAMP, nextval('seq'::regclass)) instead
+			// of quoting it as a string literal.
+			...(col.column_default != null
+				? { default: { sql: col.column_default } }
+				: {}),
 			originalDbType: col.udt_name,
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),

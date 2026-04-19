@@ -473,9 +473,10 @@ describe('introspection.buildTableIR — column branches', () => {
 			],
 			{ pks: [{ table_name: 'tbl', column_names: ['score'] }] },
 		);
+		// C5 fix: introspected defaults stored as { sql } for verbatim DDL emission
 		expect(
 			(await introspect(pool)).tables.get('tbl')?.columns[0]?.default,
-		).toBe('0');
+		).toStrictEqual({ sql: '0' });
 	});
 
 	it('identity ALWAYS → "always"', async () => {

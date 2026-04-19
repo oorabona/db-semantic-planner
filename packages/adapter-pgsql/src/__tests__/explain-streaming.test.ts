@@ -296,15 +296,16 @@ describe('Streaming (Cursor) Builder', () => {
 			expect(stmt.howMany).toBe(BigInt(100));
 		});
 
-		it('should build FETCH ALL with INT_MAX', () => {
+		it('should build FETCH FORWARD ALL (deparser LONG_MAX sentinel)', () => {
 			const result = buildFetch({
 				cursorName: 'my_cursor',
 				direction: 'forward_all',
 			});
 
 			const stmt = (result as any).FetchStmt;
-			// PostgreSQL represents FETCH ALL as FETCH FORWARD with INT_MAX
-			expect(stmt.howMany).toBe(BigInt(2147483647));
+			// pgsql-deparser emits "FETCH FORWARD ALL" when howMany === 9223372036854776000
+			// (Number, float64 ≈ INT64_MAX). BigInt values never trigger the ALL branch.
+			expect(stmt.howMany).toBe(9223372036854776000);
 		});
 	});
 
@@ -341,8 +342,9 @@ describe('Streaming (Cursor) Builder', () => {
 		it('buildFetchAll should fetch all rows', () => {
 			const result = buildFetchAll('cursor');
 			const stmt = (result as any).FetchStmt;
-			// PostgreSQL represents FETCH ALL as FETCH FORWARD with INT_MAX
-			expect(stmt.howMany).toBe(BigInt(2147483647));
+			// pgsql-deparser emits "FETCH FORWARD ALL" when howMany === 9223372036854776000
+			// (Number, float64 ≈ INT64_MAX). BigInt values never trigger the ALL branch.
+			expect(stmt.howMany).toBe(9223372036854776000);
 		});
 
 		it('buildFetchFirst should fetch first row', () => {

@@ -766,8 +766,10 @@ export function compileSelect<T = unknown>(
 		];
 
 		// Enrich range operator decisions with dataType from model
-		// (PostgreSQL requires explicit type casts for range parameters)
-		enrichRangeDecisions(allDecisions, options?.model, plan.rootTable);
+		// (PostgreSQL requires explicit type casts for range parameters).
+		// Use deps.model as fallback so ORM queries through deps also get enriched.
+		const rangeModel = options?.model ?? deps.model;
+		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
 
 		simplifiedPlan = buildSimplifiedPlanReport(plan, allDecisions, schemaName);
 	} else {
@@ -796,8 +798,13 @@ export function compileWithIncludes<T = unknown>(
 ): CompileResultWithIncludes<T> {
 	const main = compileSelect<T>(plan, options, deps);
 
-	// Extract subquery include info from planner decisions
-	// Decisions with choice === 'subquery' need separate execution
+	// Extract subquery include info from planner decisions.
+	// Decisions with choice === 'subquery' need separate execution:
+	// mapToHandlerDecision lowers them to json_agg at the SQL level so the main
+	// query compiles, but hydrateJsonAggIncludes only processes decisions whose
+	// planner choice is 'json_agg'. When the user sets defaultIncludeStrategy:
+	// 'subquery', planner decisions carry choice === 'subquery', so hydration
+	// must happen via the subquery path (separate query + hydrateIncludes).
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
 
 	for (const d of plan.decisions) {

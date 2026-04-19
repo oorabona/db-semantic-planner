@@ -724,7 +724,10 @@ describe('introspection — nullable and defaults', () => {
 			{ rows: [] },
 		);
 		const model = await introspect(pool);
-		expect(model.getTable('t')?.columns[0]?.default).toBe("'active'");
+		// C5 fix: introspected defaults stored as { sql } for verbatim DDL emission
+		expect(model.getTable('t')?.columns[0]?.default).toStrictEqual({
+			sql: "'active'",
+		});
 	});
 
 	it('omits default when column_default is null', async () => {

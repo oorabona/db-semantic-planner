@@ -202,7 +202,7 @@ describe('INCLUDE-WHERE-SCOPE-2HOP: 2-hop include WHERE compiled', () => {
 		const result = compile(plan);
 		const sql = normalizeSQL(result.sql);
 		expect(sql).toMatch(/join/i);
-		expect(sql).not.toMatch(/where/i);
+		expect(sql).not.toMatch(/\bwhere\b/i);
 		expect(result.parameters).toHaveLength(0);
 	});
 });

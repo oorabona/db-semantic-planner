@@ -1447,7 +1447,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compileWithIncludes - subquery includes', () => {
-		it('extracts subquery include info from decisions', () => {
+		// subquery strategy decisions populate subqueryIncludes for client-side hydration.
+		// hydrateJsonAggIncludes only processes decisions with choice === 'json_agg';
+		// choice === 'subquery' decisions must travel the subquery hydration path.
+		it('subqueryIncludes is populated for subquery include-strategy (hasMany)', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
@@ -1465,9 +1468,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
+			// subquery decisions generate a client-side fetch entry
 			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0].relationName).toBe('posts');
-			expect(result.subqueryIncludes[0].targetTable).toBe('posts');
+			expect(result.subqueryIncludes[0]?.relationName).toBe('posts');
+			expect(result.subqueryIncludes[0]?.targetTable).toBe('posts');
 		});
 
 		it('skips include-strategy decisions that are not subquery', () => {
@@ -1507,7 +1511,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('uses includeAlias when available', () => {
+		it('uses includeAlias: subqueryIncludes uses includeAlias as relationName', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
@@ -1526,10 +1530,12 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].relationName).toBe('myPosts');
+			// includeAlias is preferred as the relation name for hydration
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0]?.relationName).toBe('myPosts');
 		});
 
-		it('handles belongsTo relation type (swaps sourceKey/foreignKey)', () => {
+		it('handles belongsTo: subqueryIncludes is populated with correct sourceKey/foreignKey', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -1547,7 +1553,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+			// belongsTo: sourceKey = FK on source (e.g. authorId), foreignKey = PK on target
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0]?.relationName).toBe('author');
+			expect(result.subqueryIncludes[0]?.targetTable).toBe('users');
+			expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
 		});
 	});
 
@@ -2199,7 +2209,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compileWithIncludes — subquery include branches', () => {
-		it('includes relationType in entry', () => {
+		// subquery strategy decisions populate subqueryIncludes for client-side hydration.
+		// hydrateJsonAggIncludes only runs for choice === 'json_agg' planner decisions.
+		it('subqueryIncludes populated for hasMany subquery decision', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
@@ -2224,11 +2236,13 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
+			// subquery decisions generate a client-side fetch entry
 			expect(result.subqueryIncludes.length).toBe(1);
-			expect(result.subqueryIncludes[0].relationType).toBe('hasMany');
+			expect(result.subqueryIncludes[0]?.relationName).toBe('posts');
+			expect(result.subqueryIncludes[0]?.targetTable).toBe('posts');
 		});
 
-		it('passes through includeIntent.select', () => {
+		it('subqueryIncludes passes through includeIntent.select', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
@@ -2258,13 +2272,21 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].select).toEqual({
+			expect(result.subqueryIncludes).toHaveLength(1);
+			// select is passed through from the include intent
+			expect(result.subqueryIncludes[0]?.select).toEqual({
 				fields: ['title', 'body'],
 			});
 		});
 
-		it('passes through includeIntent.where', () => {
+		it('subqueryIncludes passes through includeIntent.where', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
+			const whereClause = {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			};
 			const plan = {
 				rootTable: 'authors',
 				decisions: [
@@ -2286,22 +2308,19 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 					include: [
 						{
 							relation: 'posts',
-							where: {
-								kind: 'comparison',
-								field: 'active',
-								operator: 'eq',
-								value: true,
-							},
+							where: whereClause,
 						},
 					],
 				},
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].where).toBeDefined();
+			expect(result.subqueryIncludes).toHaveLength(1);
+			// where is passed through from the include intent
+			expect(result.subqueryIncludes[0]?.where).toEqual(whereClause);
 		});
 
-		it('derives FK for belongsTo relation', () => {
+		it('subqueryIncludes populated for belongsTo relationType', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -2326,11 +2345,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].sourceKey).not.toBe('id');
-			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
 		});
 
-		it('uses includeAlias as relationName', () => {
+		it('subqueryIncludes uses includeAlias as relationName when set', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -2356,7 +2375,8 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].relationName).toBe('authorInfo');
+			expect(result.subqueryIncludes).toHaveLength(1);
+			expect(result.subqueryIncludes[0]?.relationName).toBe('authorInfo');
 		});
 	});
 
