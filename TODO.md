@@ -155,10 +155,11 @@ Branch: `fix/types-review-20260419`
 
 ### Follow-ups discovered during review (non-blocking)
 
-- [ ] 🔧 [types] `pgsql-adapter-mock.test.ts` asserts private fields via `as unknown as` — rewrite to observable-behavior (custom `deriveFkColumnName` appears in compiled SQL).
+- [x] ✅ [types] `pgsql-adapter-mock.test.ts` private-field anti-pattern replaced with observable behavior assertions (PR #46 round-1). (2026-04-19)
 - [ ] 🔧 [types] `createPgsqlCompileOnlyAdapter` returns `PgsqlAdapter<DB>` not `CompileOnlyAdapter` — users can't land on the tightened guarantee through the factory.
 - [ ] 🔧 [types] `DetectedHierarchy` (introspection.ts) and `HierarchyIR` (model-ir.ts) are structurally identical — alias one to the other to avoid drift.
 - [ ] 🔧 [types] Add E2E testcontainer test proving real introspection populates `originalDbType` and CAST emits on compiled SQL.
+- [ ] 🔧 [adapter-pgsql] Copilot-nits-PR-46: `pgsql-adapter-mock.test.ts` logger test in [P2-T5b] block uses non-tx stream cleanup path instead of genuine `transaction()` call — rename or move the test to honestly describe what it tests.
 
 ---
 
