@@ -814,3 +814,72 @@ describe('compile-expression: none() relation filter', () => {
 		expect(where.mode).toBe('every');
 	});
 });
+
+// ===========================================================================
+// P0-2: json_exists with identifier key (not string literal)
+// ===========================================================================
+
+describe('compile-expression: json_exists identifier key (P0-2)', () => {
+	it('json_exists with identifier key extracts field name as string', () => {
+		// Previously: resolveFilterValue returned an NqlPathExpression object
+		// which coerced to '[object Object]' via String(key).
+		// Fix: detect path expression and use expressionToField to extract name.
+		const where = getWhere(
+			compileNql('users | where json_exists(data, email)'),
+		) as WhereJsonExistsIntent;
+
+		expect(where.kind).toBe('jsonExists');
+		expect(where.key).toBe('email');
+	});
+
+	it('json_exists with string literal key still works', () => {
+		const where = getWhere(
+			compileNql("users | where json_exists(data, 'email')"),
+		) as WhereJsonExistsIntent;
+
+		expect(where.kind).toBe('jsonExists');
+		expect(where.key).toBe('email');
+	});
+});
+
+// ===========================================================================
+// P1-4: caseExpr in WHERE position must throw a clear error
+// ===========================================================================
+
+describe('compile-expression: caseExpr in WHERE (P1-4)', () => {
+	it('throws when bare CASE expression appears in WHERE (type case)', () => {
+		// CASE is only valid in SELECT. In WHERE position the compiler must
+		// throw a clear, actionable error message.
+		// A bare CASE (without comparison) reaches compileExpression as type 'case'.
+		expect(() =>
+			compileNql(
+				"users | where case when status = 'active' then true else false end",
+			),
+		).toThrow(/CASE in WHERE not supported/);
+	});
+});
+
+// ===========================================================================
+// P1-5: BETWEEN bounds must be literals, not path-expressions
+// ===========================================================================
+
+describe('compile-expression: BETWEEN literal bounds validation (P1-5)', () => {
+	it('BETWEEN with numeric literals compiles successfully', () => {
+		const where = getWhere(
+			compileNql('users | where age between 18 and 65'),
+		) as WhereRangeIntent;
+
+		expect(where.kind).toBe('range');
+		expect(where.operator).toBe('between');
+		expect(where.value).toEqual({ lower: 18, upper: 65 });
+	});
+
+	it('BETWEEN with string literals compiles successfully', () => {
+		const where = getWhere(
+			compileNql("users | where name between 'a' and 'z'"),
+		) as WhereRangeIntent;
+
+		expect(where.kind).toBe('range');
+		expect(where.value).toEqual({ lower: 'a', upper: 'z' });
+	});
+});

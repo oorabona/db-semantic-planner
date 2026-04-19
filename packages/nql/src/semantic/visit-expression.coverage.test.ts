@@ -1374,3 +1374,34 @@ describe('visit-expression R2: relation filter with alias', () => {
 		}
 	});
 });
+
+// ============================================================
+// P1-6: ctx.As guard in visitQuantifiedRelationFilter
+// ============================================================
+
+describe('visit-expression P1-6: some() with as alias', () => {
+	it('some(posts as p, condition) sets alias correctly', () => {
+		const ast = parseNql(
+			"users | where some(posts as p, p.featured = true and p.status = 'published')",
+		);
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'query') return;
+		const where = stmt.clauses.find((c) => c.type === 'where')!;
+		expect(where.condition.type).toBe('relationFilter');
+		if (where.condition.type === 'relationFilter') {
+			expect(where.condition.alias).toBe('p');
+			expect(where.condition.mode).toBe('some');
+		}
+	});
+
+	it('some(posts, condition) without as produces no alias', () => {
+		const ast = parseNql('users | where some(posts, total > 0)');
+		const stmt = ast.statements[0]!;
+		if (stmt.type !== 'query') return;
+		const where = stmt.clauses.find((c) => c.type === 'where')!;
+		expect(where.condition.type).toBe('relationFilter');
+		if (where.condition.type === 'relationFilter') {
+			expect(where.condition.alias).toBeUndefined();
+		}
+	});
+});

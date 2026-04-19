@@ -347,14 +347,41 @@ function compileBetween(
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, between.expression);
 
+	const lower = resolveFilterValue(
+		between.low,
+		ctx,
+		aliasContext,
+		outerAliases,
+	);
+	const upper = resolveFilterValue(
+		between.high,
+		ctx,
+		aliasContext,
+		outerAliases,
+	);
+
+	if (
+		lower !== null &&
+		typeof lower !== 'number' &&
+		typeof lower !== 'string' &&
+		!(lower instanceof Date)
+	) {
+		throw new Error('BETWEEN bounds must be literal');
+	}
+	if (
+		upper !== null &&
+		typeof upper !== 'number' &&
+		typeof upper !== 'string' &&
+		!(upper instanceof Date)
+	) {
+		throw new Error('BETWEEN bounds must be literal');
+	}
+
 	return {
 		kind: 'range',
 		field,
 		operator: 'between',
-		value: {
-			lower: resolveFilterValue(between.low, ctx, aliasContext, outerAliases),
-			upper: resolveFilterValue(between.high, ctx, aliasContext, outerAliases),
-		},
+		value: { lower, upper },
 	};
 }
 
@@ -426,12 +453,27 @@ function compileJson(
 				throw new Error(`${fn}() first argument must be a field reference`);
 			}
 			/* v8 ignore stop -- @preserve */
-			const key = resolveFilterValue(
-				expr.args[1]!,
-				ctx,
-				aliasContext,
-				outerAliases,
-			);
+			const keyArg = expr.args[1]!;
+			if (keyArg.type === 'path') {
+				// Identifier used as key (e.g. json_exists(data, email)) — treat as
+				// field name string, not a column reference. This mirrors the intention
+				// of json_exists(field, 'key') without requiring quotes.
+				const fieldName = expressionToField(keyArg, aliasContext);
+				if (!fieldName) {
+					throw new Error(
+						`${fn}() key must be a string literal or a simple identifier`,
+					);
+				}
+				return {
+					kind: 'jsonExists',
+					field: jsonField,
+					key: fieldName,
+				} satisfies WhereJsonExistsIntent;
+			}
+			const key = resolveFilterValue(keyArg, ctx, aliasContext, outerAliases);
+			if (key !== null && typeof key !== 'string') {
+				throw new Error('json_exists key must be a string literal');
+			}
 			return {
 				kind: 'jsonExists',
 				field: jsonField,
@@ -599,6 +641,11 @@ export function compileExpression(
 			return compileJson(expr, ctx, fns, aliasContext, outerAliases);
 		case 'relationFilter':
 			return compileRelationFilter(expr, ctx, fns, aliasContext, outerAliases);
+		case 'case':
+			throw new Error(
+				'CASE in WHERE not supported. ' +
+					'Use a computed column in SELECT or a relation filter instead.',
+			);
 		case 'exists':
 			throw new Error(
 				'EXISTS (subquery) is not supported in NQL. ' +

@@ -49,17 +49,17 @@
 
 Branch: `fix/nql-review-20260419`
 
-- [ ] **[P0] codex** `packages/nql/src/lexer/tokens.ts:105` — `RangeValue` regex `/-?\d+(?:[-:T]\d+)+/` greedily matches arithmetic subtraction without whitespace. `users | where id > 10-5` tokenizes as single `RangeValue:10-5`, then parse error. **Fix**: require ≥4-digit prefix `/\d{4}(?:[-:T]\d{1,2})+/` or add lookahead so plain integer subtraction is excluded. Test: `NqlLexer.tokenize('10-5')` should produce `[NumberLiteral, Minus, NumberLiteral]`.
+- [x] ✅ **[P0] codex** `packages/nql/src/lexer/tokens.ts:105` — `RangeValue` regex `/-?\d+(?:[-:T]\d+)+/` greedily matches arithmetic subtraction without whitespace. `users | where id > 10-5` tokenizes as single `RangeValue:10-5`, then parse error. **Fix**: require ≥4-digit prefix `/\d{4}(?:[-:T]\d{1,2})+/` or add lookahead so plain integer subtraction is excluded. Test: `NqlLexer.tokenize('10-5')` should produce `[NumberLiteral, Minus, NumberLiteral]`. (2026-04-19)
 
-- [ ] **[P0] codex** `packages/nql/src/compiler/compile-expression.ts:437` — `json_exists(data, email)` (identifier 2nd arg, not literal) → `String({type:'path',segments:['email']})` yields `'[object Object]'`, silent corruption. **Fix**: in `compileJson` after `resolveFilterValue` for the key arg, detect `NqlPathExpression` shape and extract via `expressionToField()`, or reject non-literal key with explicit error. Test: `compile('users | where json_exists(data, email)', schema)` should either succeed with `key: 'email'` or throw a clear error.
+- [x] ✅ **[P0] codex** `packages/nql/src/compiler/compile-expression.ts:437` — `json_exists(data, email)` (identifier 2nd arg, not literal) → `String({type:'path',segments:['email']})` yields `'[object Object]'`, silent corruption. **Fix**: in `compileJson` after `resolveFilterValue` for the key arg, detect `NqlPathExpression` shape and extract via `expressionToField()`, or reject non-literal key with explicit error. (2026-04-19)
 
-- [ ] **[P1] codex** `packages/nql/src/parser/grammar.ts:177` — `cteItem` rule consumes only `Identifier`, rejects `QuotedIdentifier`. `with "myQuery" as (users | select id) myQuery` fails. **Fix**: replace `this.CONSUME(Identifier)` with `this.SUBRULE(this.identSegment)` in cteItem.
+- [x] ✅ **[P1] codex** `packages/nql/src/parser/grammar.ts:177` — `cteItem` rule consumes only `Identifier`, rejects `QuotedIdentifier`. **Fix**: replace `this.CONSUME(Identifier)` with `this.SUBRULE(this.identSegment)` in cteItem + visit-cte.ts visitor. (2026-04-19)
 
-- [ ] **[P1] codex** `packages/nql/src/compiler/compile-expression.ts:603` — `caseExpr` not handled in WHERE position. Falls through to `compileComparison` → misleading `'Left side of comparison must be a field reference'` error. **Fix**: add `case 'caseExpr':` in switch, throw `'CASE in WHERE not supported. Use computed column in SELECT or relation filter.'`
+- [x] ✅ **[P1] codex** `packages/nql/src/compiler/compile-expression.ts:603` — `caseExpr` not handled in WHERE position. **Fix**: added `case 'case':` (actual AST tag) throwing clear error. (2026-04-19)
 
-- [ ] **[P1] codex** `packages/nql/src/compiler/compile-expression.ts:334` — `compileBetween` accepts path-expression bounds (e.g. `id between low and high`) silently producing `{lower:{$ref:'low'}, upper:{$ref:'high'}}` → adapter fails with non-scalar. **Fix**: validate that resolved lower/upper are scalars (number/string/Date), throw `'BETWEEN bounds must be literal'`.
+- [x] ✅ **[P1] codex** `packages/nql/src/compiler/compile-expression.ts:334` — `compileBetween` accepts path-expression bounds silently producing `{$ref}` objects. **Fix**: validate lower/upper are scalars (number/string/Date/null), throw `'BETWEEN bounds must be literal'`. (2026-04-19)
 
-- [ ] **[P1] codex** `packages/nql/src/semantic/visit-expression.ts:680` — `visitQuantifiedRelationFilter` aliased form (`some(posts as p, condition)`): no guard that `ctx.As` is present before treating `identSegment[0]` as alias vs column. Future grammar change could silently break. **Fix**: explicit `if (ctx.As) { /* treat as alias */ }`.
+- [x] ✅ **[P1] codex** `packages/nql/src/semantic/visit-expression.ts:680` — `visitQuantifiedRelationFilter` aliased form: no explicit `ctx.As` guard. **Fix**: explicit `ctx.As && ctx.identSegment` guard added. (2026-04-19)
 
 ---
 
