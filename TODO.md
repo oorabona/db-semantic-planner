@@ -63,9 +63,20 @@ Branch: `fix/nql-review-20260419`
 
 ---
 
-## @dbsp/adapter-pgsql — 14 findings (2 P0, 9 P1, 2 P2, + 1 dependency on types)
+## @dbsp/adapter-pgsql — 14 findings + 2 refactors (MERGED PR #47)
 
-Branch: `fix/adapter-pgsql-review-20260419`
+Branch: `fix/adapter-pgsql-review-20260419` — ✅ merged as `38f9594` (2026-04-19). 4 Copilot rounds, final hard-cap merge per senior directive. Full package cleanup bundled (14 review findings + 2 CC refactors + docs/cache polish + internal deparser extension + C3 regression fix + identifier validation restoration).
+
+### Follow-ups discovered during review rounds (not merged)
+
+- [ ] 🔧 [adapter-pgsql] Round-4 F-R4-1: `packages/adapter-pgsql/src/ddl/phases/extensions.ts:25` — extension names interpolated into double-quoted identifier without validateIdentifier — inject via quote termination possible. Apply same `quoteIdent` pattern as other phases. Priority: M
+- [ ] 🔧 [adapter-pgsql] Round-4 F-R4-2: `packages/adapter-pgsql/src/ddl/phases/constraints.ts:59` — `check.expression` interpolated raw into DDL — route through `validateSqlExpression` (same treatment as column defaults). Priority: M
+- [ ] 🔧 [adapter-pgsql] Senior F-S1: `{sql}` escape hatch typeof guard pending on `ddl/ddl-generator.ts:261` + `ddl/schema-diff.ts:516` (symmetry with migration-sql + table-operations). Priority: L
+- [ ] 🔧 [adapter-pgsql] Senior F-S2: hydrateIncludes leaves raw `{rel}_json` column in results when subquery strategy coerced via mapToHandlerDecision — strip after populating relationName. Priority: L
+- [ ] 🔧 [adapter-pgsql] Senior F-S3: `validateSqlExpression` accepts empty string → emits malformed `DEFAULT ` clause — reject empty/whitespace. Priority: L
+- [ ] 🔧 [adapter-pgsql] DRY: wire `qualifyTableIdent()` to replace 3 local `qualifyTable` implementations in phases/{comments,constraints,rls}.ts. Priority: L
+- [ ] 🔧 [adapter-pgsql] DRY: consolidate `ddl-generator.ts:quoteIdentifier` with `phases/utils.ts:quoteIdent` — single source of truth. Priority: L
+- [ ] 🔧 [adapter-pgsql] UX: `quoteIdent` context label currently hardcoded `'alias'` — pass `'table' | 'schema' | 'column'` for better attribution in InvalidIdentifierError messages. Priority: L
 
 ### P0 (runtime crashes / silent corruption)
 
