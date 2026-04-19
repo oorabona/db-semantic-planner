@@ -145,3 +145,33 @@ describe('SQL Injection Checks — migration-sql formatDefault({ sql }) via upAl
 		expect(alterColumnDefaultWith({ sql: 'gen_random_uuid()' })).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// formatDefault({ sql }) — typeof check (M-1 fix, round-2)
+// ---------------------------------------------------------------------------
+
+describe('formatDefault({ sql }) — typeof runtime guard', () => {
+	it('throws with clear message when { sql } value is not a string (e.g. number)', () => {
+		// Passing { sql: 42 } should fail the typeof check BEFORE validateSqlExpression.
+		// This prevents accidental coercion of non-string values into raw SQL.
+		expect(addColumnWithDefault({ sql: 42 as unknown as string })).toThrow(
+			/expected string, got number/,
+		);
+	});
+
+	it('throws when { sql } value is null', () => {
+		expect(addColumnWithDefault({ sql: null as unknown as string })).toThrow(
+			/expected string, got object/,
+		);
+	});
+
+	it('throws when { sql } value is an object', () => {
+		expect(addColumnWithDefault({ sql: {} as unknown as string })).toThrow(
+			/expected string, got object/,
+		);
+	});
+
+	it('accepts valid string { sql } without throwing', () => {
+		expect(addColumnWithDefault({ sql: 'gen_random_uuid()' })).not.toThrow();
+	});
+});

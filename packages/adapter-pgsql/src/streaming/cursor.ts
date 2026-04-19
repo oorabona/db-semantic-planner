@@ -156,7 +156,6 @@ export function buildFetch(options: FetchOptions): Node {
 	// TODO: file upstream issue against pgsql-deparser — FetchStmt.howMany comparison
 	// should use Number() conversion to support real BigInt ALL sentinels.
 	let direction: string;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let howMany: number | bigint;
 
 	switch (dir) {

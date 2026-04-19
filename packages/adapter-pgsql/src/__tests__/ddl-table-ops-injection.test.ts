@@ -14,6 +14,43 @@ describe('SQL Injection Checks (DDL-TABLE-001)', () => {
 	});
 });
 
+// ── typeof guard (symmetry with migration-sql M-1 fix, dcd7b15) ──────────────
+
+describe('table-operations formatDefault({ sql }) — typeof runtime guard (DDL-TABLE-003)', () => {
+	it('throws with clear message when { sql } value is not a string (number)', () => {
+		// Passing { sql: 42 } must fail the typeof check BEFORE validateSqlExpression.
+		expect(() =>
+			generateAlterColumnSQL('users', 'created_at', {
+				setDefault: { sql: 42 as unknown as string },
+			}),
+		).toThrow(/expected string, got number/);
+	});
+
+	it('throws when { sql } value is null', () => {
+		expect(() =>
+			generateAlterColumnSQL('users', 'created_at', {
+				setDefault: { sql: null as unknown as string },
+			}),
+		).toThrow(/expected string, got object/);
+	});
+
+	it('throws when { sql } value is an object', () => {
+		expect(() =>
+			generateAlterColumnSQL('users', 'created_at', {
+				setDefault: { sql: {} as unknown as string },
+			}),
+		).toThrow(/expected string, got object/);
+	});
+
+	it('accepts valid string { sql } without throwing', () => {
+		expect(() =>
+			generateAlterColumnSQL('users', 'created_at', {
+				setDefault: { sql: 'gen_random_uuid()' },
+			}),
+		).not.toThrow();
+	});
+});
+
 describe('SQL Injection Checks — setDefault { sql } escape hatch (DDL-TABLE-002)', () => {
 	it('throws on semicolon injection in setDefault sql escape hatch', () => {
 		expect(() =>

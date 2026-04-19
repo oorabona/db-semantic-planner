@@ -49,8 +49,13 @@ function formatDefault(value: unknown): string {
 	// { sql: string } escape hatch — emit verbatim (used by introspection-sourced defaults).
 	// Validated to reject injection vectors (semicolons, --, /*, $) before interpolation.
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		const rawSql = (value as Record<string, unknown>).sql as string;
-		validateSqlExpression(rawSql, 'formatDefault({ sql })');
+		const rawSql = (value as Record<string, unknown>).sql;
+		if (typeof rawSql !== 'string') {
+			throw new Error(
+				`formatDefault({ sql }): expected string, got ${typeof rawSql}`,
+			);
+		}
+		validateSqlExpression(rawSql, 'table-operations formatDefault({ sql })');
 		return rawSql;
 	}
 	if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;

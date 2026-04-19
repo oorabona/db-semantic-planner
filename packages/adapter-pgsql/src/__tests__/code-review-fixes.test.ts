@@ -175,10 +175,12 @@ describe('C1: Upsert conflictTarget.where partial-index', () => {
 });
 
 // ---------------------------------------------------------------------------
-// C3: compileWithIncludes — subqueryIncludes always empty
+// C3: compileWithIncludes — subquery strategy populates subqueryIncludes
+// (hydrateJsonAggIncludes only runs for choice === 'json_agg' decisions;
+//  choice === 'subquery' decisions must go through the subquery hydration path)
 // ---------------------------------------------------------------------------
-describe('C3: compileWithIncludes no double-fetch', () => {
-	it('subqueryIncludes is empty even when plan has subquery include-strategy', async () => {
+describe('C3: compileWithIncludes subquery strategy', () => {
+	it('subqueryIncludes is populated when plan has subquery include-strategy', async () => {
 		const { compileWithIncludes } = await import(
 			'../adapter-compiler-select.js'
 		);
@@ -206,7 +208,10 @@ describe('C3: compileWithIncludes no double-fetch', () => {
 		} as unknown as Parameters<typeof compileWithIncludes>[2];
 
 		const result = compileWithIncludes(plan, undefined, deps);
-		expect(result.subqueryIncludes).toHaveLength(0);
+		expect(result.subqueryIncludes).toHaveLength(1);
+		expect(result.subqueryIncludes[0]?.relationName).toBe('author');
+		expect(result.subqueryIncludes[0]?.targetTable).toBe('users');
+		expect(result.subqueryIncludes[0]?.relationType).toBe('belongsTo');
 	});
 });
 
@@ -355,5 +360,71 @@ describe('D1: validateSqlExpression $$ clarification', () => {
 		expect(() =>
 			validateSqlExpression("nextval('my_seq'::regclass)", 'default'),
 		).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// C1 (round-2): Internal deparser emits WHERE in ON CONFLICT partial-index
+// ---------------------------------------------------------------------------
+describe('C1 (round-2): internal deparser — partial-index ON CONFLICT WHERE', () => {
+	it('compileUpsert with conflictTarget.where emits WHERE through internal deparser', async () => {
+		const { deparse } = await import('../pgsql-deparser.js');
+		const ctx = makeCtx('users');
+		const state = makeState();
+
+		const config: UpsertConfig = {
+			table: 'users',
+			columns: ['email', 'name'],
+			conflictTarget: {
+				columns: ['email'],
+				where: [
+					{
+						type: 'where',
+						column: 'active',
+						operator: 'eq',
+						value: true,
+						table: 'users',
+					} as unknown as Decision,
+				],
+			},
+			conflictAction: 'nothing',
+		};
+
+		const clause = buildOnConflictClause(config, ctx, state);
+		const infer = (clause as unknown as Record<string, unknown>)
+			.infer as Record<string, unknown>;
+
+		// Verify the whereClause node exists on the infer object
+		expect(infer).toBeDefined();
+		expect(infer.whereClause).toBeDefined();
+
+		// Wrap in an InsertStmt so deparse() can process it
+		const node = {
+			InsertStmt: {
+				relation: { relname: 'users', inh: true },
+				selectStmt: {
+					SelectStmt: {
+						valuesLists: [
+							[
+								{ A_Const: { sval: { str: 'alice@example.com' } } },
+								{ A_Const: { sval: { str: 'Alice' } } },
+							],
+						],
+						op: 'SETOP_NONE',
+					},
+				},
+				cols: [
+					{ ResTarget: { name: 'email', indirection: [] } },
+					{ ResTarget: { name: 'name', indirection: [] } },
+				],
+				onConflictClause: clause,
+			},
+		} as unknown as Parameters<typeof deparse>[0];
+
+		const sql = deparse(node);
+		// The internal deparser must now emit WHERE inside ON CONFLICT (...)
+		expect(sql).toContain('ON CONFLICT');
+		expect(sql).toContain('WHERE');
+		expect(sql).toContain('active');
 	});
 });

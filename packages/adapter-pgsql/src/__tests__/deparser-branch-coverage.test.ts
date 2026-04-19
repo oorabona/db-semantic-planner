@@ -1750,3 +1750,123 @@ describe('deparseParamRef', () => {
 		expect(deparse(node)).toBe('$1');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// deparseFetchStmt — LONG_MAX sentinel → FORWARD ALL / BACKWARD ALL (fix #1)
+// ---------------------------------------------------------------------------
+
+describe('deparseFetchStmt — ALL sentinel', () => {
+	const ALL_SENTINEL = 9223372036854776000; // float64 ≈ INT64_MAX, same sentinel as external pgsql-deparser
+
+	it('emits FETCH FORWARD ALL for FETCH_FORWARD + sentinel', () => {
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_FORWARD',
+				howMany: ALL_SENTINEL as unknown as bigint,
+				portalname: 'c',
+				ismove: false,
+			},
+		};
+		// 'c' is a plain lowercase identifier — quoteIdent leaves it unquoted
+		expect(deparse(node)).toBe('FETCH FORWARD ALL FROM c');
+	});
+
+	it('emits FETCH BACKWARD ALL for FETCH_BACKWARD + sentinel', () => {
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_BACKWARD',
+				howMany: ALL_SENTINEL as unknown as bigint,
+				portalname: 'c',
+				ismove: false,
+			},
+		};
+		expect(deparse(node)).toBe('FETCH BACKWARD ALL FROM c');
+	});
+
+	it('emits FETCH FORWARD N for a real count (no ALL)', () => {
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_FORWARD',
+				howMany: BigInt(100),
+				portalname: 'c',
+				ismove: false,
+			},
+		};
+		expect(deparse(node)).toBe('FETCH FORWARD 100 FROM c');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// deparseInferClause — whereClause support for partial-index ON CONFLICT (fix #2)
+// ---------------------------------------------------------------------------
+
+describe('deparseInferClause — whereClause', () => {
+	it('emits ON CONFLICT (col) WHERE <expr> for partial-index conflict', () => {
+		const node: Node = {
+			InsertStmt: {
+				relation: { relname: 'users', inh: true },
+				selectStmt: {
+					SelectStmt: {
+						valuesLists: [
+							[
+								{ A_Const: { sval: { str: 'alice' } } },
+								{ A_Const: { boolval: { boolval: true } } },
+							],
+						],
+						op: 'SETOP_NONE',
+					},
+				},
+				cols: [
+					{ ResTarget: { name: 'name', indirection: [] } },
+					{ ResTarget: { name: 'active', indirection: [] } },
+				],
+				onConflictClause: {
+					action: 'ONCONFLICT_UPDATE',
+					infer: {
+						indexElems: [
+							{
+								IndexElem: {
+									name: 'name',
+									ordering: 'SORTBY_DEFAULT',
+									nulls_ordering: 'SORTBY_NULLS_DEFAULT',
+								},
+							},
+						],
+						whereClause: {
+							A_Expr: {
+								kind: 'AEXPR_OP',
+								name: [{ String: { sval: '=' } }],
+								lexpr: {
+									ColumnRef: { fields: [{ String: { sval: 'active' } }] },
+								},
+								rexpr: { A_Const: { boolval: { boolval: true } } },
+							},
+						},
+					},
+					targetList: [
+						{
+							ResTarget: {
+								name: 'name',
+								val: {
+									ColumnRef: {
+										fields: [
+											{ String: { sval: 'excluded' } },
+											{ String: { sval: 'name' } },
+										],
+									},
+								},
+								indirection: [],
+							},
+						},
+					],
+				},
+			},
+		};
+		const sql = deparse(node);
+		expect(sql).toContain('ON CONFLICT');
+		// 'name' is a plain lowercase identifier — quoteIdent leaves it unquoted
+		expect(sql).toContain('(name)');
+		expect(sql).toContain('WHERE');
+		expect(sql).toContain('active');
+	});
+});
