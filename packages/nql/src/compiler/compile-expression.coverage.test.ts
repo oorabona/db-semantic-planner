@@ -615,6 +615,12 @@ describe('compile-expression: BETWEEN', () => {
 		expect(where.field).toBe('created_at');
 		expect(where.operator).toBe('between');
 	});
+
+	it('throws when BETWEEN bounds are path-expressions instead of literals', () => {
+		expect(() =>
+			compileNql('users | where age between minAge and maxAge'),
+		).toThrow(/BETWEEN bounds must be literal/);
+	});
 });
 
 // ===========================================================================
@@ -840,6 +846,17 @@ describe('compile-expression: json_exists identifier key (P0-2)', () => {
 		expect(where.kind).toBe('jsonExists');
 		expect(where.key).toBe('email');
 	});
+
+	it('throws when json_exists key is a dotted path (multi-segment identifier)', () => {
+		// json_exists(data, profile.email) would silently produce key='profile.email'
+		// (a single dotted JSON key), which is semantically wrong.
+		// The compiler must reject dotted paths and require a string literal or single identifier.
+		expect(() =>
+			compileNql('users | where json_exists(data, profile.email)'),
+		).toThrow(
+			/key must be a string literal or a single identifier, not a dotted path/,
+		);
+	});
 });
 
 // ===========================================================================
@@ -856,30 +873,5 @@ describe('compile-expression: caseExpr in WHERE (P1-4)', () => {
 				"users | where case when status = 'active' then true else false end",
 			),
 		).toThrow(/CASE in WHERE not supported/);
-	});
-});
-
-// ===========================================================================
-// P1-5: BETWEEN bounds must be literals, not path-expressions
-// ===========================================================================
-
-describe('compile-expression: BETWEEN literal bounds validation (P1-5)', () => {
-	it('BETWEEN with numeric literals compiles successfully', () => {
-		const where = getWhere(
-			compileNql('users | where age between 18 and 65'),
-		) as WhereRangeIntent;
-
-		expect(where.kind).toBe('range');
-		expect(where.operator).toBe('between');
-		expect(where.value).toEqual({ lower: 18, upper: 65 });
-	});
-
-	it('BETWEEN with string literals compiles successfully', () => {
-		const where = getWhere(
-			compileNql("users | where name between 'a' and 'z'"),
-		) as WhereRangeIntent;
-
-		expect(where.kind).toBe('range');
-		expect(where.value).toEqual({ lower: 'a', upper: 'z' });
 	});
 });

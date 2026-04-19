@@ -24,6 +24,7 @@ import type {
 	NqlIsNullExpression,
 	NqlJsonAccessExpression,
 	NqlJsonComparisonExpression,
+	NqlPathExpression,
 	NqlRangeOpExpression,
 	NqlRelationFilterExpression,
 	NqlUnaryExpression,
@@ -458,10 +459,18 @@ function compileJson(
 				// Identifier used as key (e.g. json_exists(data, email)) — treat as
 				// field name string, not a column reference. This mirrors the intention
 				// of json_exists(field, 'key') without requiring quotes.
+				// Reject dotted paths: json_exists(data, profile.email) is ambiguous —
+				// "profile.email" would become a single JSON key string, not a path traversal.
+				if ((keyArg as NqlPathExpression).segments.length > 1) {
+					throw new Error(
+						`${fn}() key must be a string literal or a single identifier, not a dotted path`,
+					);
+				}
 				const fieldName = expressionToField(keyArg, aliasContext);
 				if (!fieldName) {
+					/* v8 ignore next — defensive: single-segment path always has a field name -- @preserve */
 					throw new Error(
-						`${fn}() key must be a string literal or a simple identifier`,
+						`${fn}() key must be a string literal or a single identifier`,
 					);
 				}
 				return {
