@@ -8,6 +8,7 @@
  */
 
 import { type PhaseContext, sup } from './types.js';
+import { quoteExtensionName } from './utils.js';
 
 /**
  * Generate CREATE EXTENSION statements for all extensions in the schema.
@@ -21,6 +22,6 @@ export function generateExtensionsPhase(ctx: PhaseContext): string[] {
 		return [];
 	}
 	return schema.extensions.map(
-		(ext) => `CREATE EXTENSION IF NOT EXISTS "${ext}";`,
+		(ext) => `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`,
 	);
 }

@@ -283,6 +283,115 @@ export function sanitizeForDisplay(value: string): string {
 	return value.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 100); // Truncate for display
 }
 
+/**
+ * Validate a PostgreSQL extension name for safe use in DDL statements.
+ *
+ * Extension names differ from regular SQL identifiers: they can contain
+ * hyphens and dots (e.g. `uuid-ossp`, `postgis-raster`, `pg_trgm`).
+ * However they must not contain injection vectors.
+ *
+ * Allowed: letters, digits, underscore, hyphen, dot (`[a-zA-Z0-9_\-.]+`)
+ * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted strings ($$), whitespace, NUL, backslash
+ *
+ * @param name The extension name to validate (e.g. `uuid-ossp`)
+ * @param context Human-readable context label for the error message
+ * @throws InvalidIdentifierError if the name fails validation
+ */
+export function validateExtensionName(
+	name: string,
+	context = 'extension',
+): void {
+	if (!name || name.length === 0) {
+		throw new InvalidIdentifierError(name, context, 'cannot be empty');
+	}
+
+	// PostgreSQL NAMEDATALEN - 1 = 63 character limit
+	if (name.length > 63) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			`exceeds maximum length of 63 characters (got ${name.length})`,
+		);
+	}
+
+	// Reject injection vectors before the character allowlist check
+	if (/[\x00-\x1f\x7f]/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains control characters',
+		);
+	}
+	if (/[\\]/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains backslash (forbidden in extension names)',
+		);
+	}
+	if (/"/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains double-quote (identifier injection risk)',
+		);
+	}
+	if (/'/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains single-quote (string injection risk)',
+		);
+	}
+	if (/;/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains semicolon (statement injection risk)',
+		);
+	}
+	if (/--/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains line-comment marker (--)',
+		);
+	}
+	if (/\/\*/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains block-comment opener (/*)',
+		);
+	}
+	if (/\*\//.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains block-comment closer (*/)',
+		);
+	}
+	if (/\$\$/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains dollar-quoting ($$)',
+		);
+	}
+	if (/\s/.test(name)) {
+		throw new InvalidIdentifierError(name, context, 'contains whitespace');
+	}
+
+	// Final allowlist: letters, digits, underscore, hyphen, dot
+	if (!/^[a-zA-Z0-9_\-.]+$/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains characters not allowed in extension names (only letters, digits, underscore, hyphen, and dot allowed)',
+		);
+	}
+}
+
 /** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
 const SAFE_TYPE_PATTERN =
 	/^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;

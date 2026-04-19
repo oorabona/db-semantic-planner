@@ -19,6 +19,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { validateSqlExpression } from '../validate.js';
+import { quoteExtensionName } from './phases/utils.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -486,6 +487,10 @@ function upAddCheckConstraint(
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
 	const notValid = check.notValid ? ' NOT VALID' : '';
+	validateSqlExpression(
+		check.expression,
+		'migration check constraint expression',
+	);
 	return (
 		'DO $$ BEGIN ALTER TABLE ' +
 		qualifyTable(change.table, schemaName) +
@@ -691,11 +696,13 @@ function changeToUpSQL(
 		}
 		case 'create_extension': {
 			const ext = change.meta?.extension as string;
-			return ext ? `CREATE EXTENSION IF NOT EXISTS "${ext}";` : undefined;
+			if (ext == null) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`;
 		}
 		case 'drop_extension': {
 			const ext = change.meta?.extension as string;
-			return ext ? `DROP EXTENSION IF EXISTS "${ext}" CASCADE;` : undefined;
+			if (ext == null) return undefined;
+			return `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`;
 		}
 		case 'create_sequence': {
 			const seq = change.meta?.sequence as SequenceIR;
@@ -842,6 +849,10 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return undefined;
+			validateSqlExpression(
+				check.expression,
+				'migration check constraint (down)',
+			);
 			return (
 				'DO $$ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +
@@ -923,15 +934,15 @@ function changeToDownSQL(
 		case 'create_extension': {
 			// DOWN: drop the extension that was created
 			const ext = change.meta?.extension as string;
-			if (!ext) return undefined;
-			return `DROP EXTENSION IF EXISTS "${ext}" CASCADE;`;
+			if (ext == null) return undefined;
+			return `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`;
 		}
 
 		case 'drop_extension': {
 			// DOWN: recreate the extension that was dropped
 			const ext = change.meta?.extension as string;
-			if (!ext) return undefined;
-			return `CREATE EXTENSION IF NOT EXISTS "${ext}";`;
+			if (ext == null) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`;
 		}
 
 		case 'create_sequence': {
