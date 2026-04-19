@@ -754,6 +754,47 @@ describe('SEC-005-migration: extension name injection via migration path (change
 		const sql = generateDownSQL(makeDropExtensionDiff('pgcrypto'));
 		expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 	});
+
+	// -- Empty-string regression (M-1 / M-2): empty '' must reach validateExtensionName ---
+
+	it('rejects empty string extension name in create_extension (UP) — throws via validateExtensionName', () => {
+		// Previously: truthy check `ext ?` would short-circuit on '' → undefined silently.
+		// Now: nullish check `ext == null` lets '' fall through to quoteExtensionName()
+		// which calls validateExtensionName() and throws InvalidIdentifierError.
+		expect(() => generateMigrationSQL(makeCreateExtensionDiff(''), {})).toThrow(
+			InvalidIdentifierError,
+		);
+		expect(() => generateMigrationSQL(makeCreateExtensionDiff(''), {})).toThrow(
+			/cannot be empty/,
+		);
+	});
+
+	it('rejects empty string extension name in drop_extension (UP) — throws via validateExtensionName', () => {
+		expect(() => generateMigrationSQL(makeDropExtensionDiff(''), {})).toThrow(
+			InvalidIdentifierError,
+		);
+		expect(() => generateMigrationSQL(makeDropExtensionDiff(''), {})).toThrow(
+			/cannot be empty/,
+		);
+	});
+
+	it('rejects empty string extension name in create_extension DOWN (reversal = DROP) — throws via validateExtensionName', () => {
+		expect(() => generateDownSQL(makeCreateExtensionDiff(''))).toThrow(
+			InvalidIdentifierError,
+		);
+		expect(() => generateDownSQL(makeCreateExtensionDiff(''))).toThrow(
+			/cannot be empty/,
+		);
+	});
+
+	it('rejects empty string extension name in drop_extension DOWN (reversal = CREATE) — throws via validateExtensionName', () => {
+		expect(() => generateDownSQL(makeDropExtensionDiff(''))).toThrow(
+			InvalidIdentifierError,
+		);
+		expect(() => generateDownSQL(makeDropExtensionDiff(''))).toThrow(
+			/cannot be empty/,
+		);
+	});
 });
 
 // ---------------------------------------------------------------------------

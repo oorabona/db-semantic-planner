@@ -19,6 +19,8 @@ import type { PhaseContext } from './types.js';
  * characters, injection vectors, or other forbidden patterns.
  *
  * @param name Raw identifier (table name, schema name, column name, …)
+ * @param type Identifier type used for error context; one of
+ *   `'table' | 'column' | 'schema' | 'alias'` — defaults to `'alias'`
  * @returns Double-quoted identifier safe for DDL emission
  */
 export function quoteIdent(

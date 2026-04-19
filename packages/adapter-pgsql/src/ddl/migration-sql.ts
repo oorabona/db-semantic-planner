@@ -696,15 +696,13 @@ function changeToUpSQL(
 		}
 		case 'create_extension': {
 			const ext = change.meta?.extension as string;
-			return ext
-				? `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`
-				: undefined;
+			if (ext == null) return undefined;
+			return `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`;
 		}
 		case 'drop_extension': {
 			const ext = change.meta?.extension as string;
-			return ext
-				? `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`
-				: undefined;
+			if (ext == null) return undefined;
+			return `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`;
 		}
 		case 'create_sequence': {
 			const seq = change.meta?.sequence as SequenceIR;
@@ -936,14 +934,14 @@ function changeToDownSQL(
 		case 'create_extension': {
 			// DOWN: drop the extension that was created
 			const ext = change.meta?.extension as string;
-			if (!ext) return undefined;
+			if (ext == null) return undefined;
 			return `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`;
 		}
 
 		case 'drop_extension': {
 			// DOWN: recreate the extension that was dropped
 			const ext = change.meta?.extension as string;
-			if (!ext) return undefined;
+			if (ext == null) return undefined;
 			return `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`;
 		}
 
