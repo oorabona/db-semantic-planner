@@ -291,7 +291,7 @@ export function sanitizeForDisplay(value: string): string {
  * However they must not contain injection vectors.
  *
  * Allowed: letters, digits, underscore, hyphen, dot (`[a-zA-Z0-9_\-.]+`)
- * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-dollar ($), whitespace, NUL, backslash
+ * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted strings ($$), whitespace, NUL, backslash
  *
  * @param name The extension name to validate (e.g. `uuid-ossp`)
  * @param context Human-readable context label for the error message

@@ -6,7 +6,8 @@
  *   SEC-002: generateCreatePolicy — USING/WITH CHECK injection
  *   SEC-003: mapColumnType — originalDbType injection (type-mapping)
  *   SEC-004: quoteIdentifier — missing validateIdentifier call
- *   SEC-005: resolveColumnPgType — originalDbType injection (where/utils)
+ *   SEC-005: validateExtensionName — extension name injection (generateDDL path)
+ *   SEC-005-migration: changeToUpSQL / changeToDownSQL — extension name injection (migration path, M-1)
  *   SEC-006: generateConstraintsPhase — check constraint expression injection (generateDDL path)
  *   SEC-006-migration: upAddCheckConstraint / changeToDownSQL — check constraint expression injection (migration path, F-001)
  *   SEC-007: formatDefaultValue — typeof guard on { sql } escape hatch
@@ -618,6 +619,126 @@ describe('SEC-005: extension name injection via generateExtensionsPhase', () => 
 		expect(() =>
 			generateDDL(model, { dialectCapabilities: buildCaps() }),
 		).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// SEC-005-migration: Extension name injection via changeToUpSQL / changeToDownSQL
+// ---------------------------------------------------------------------------
+
+describe('SEC-005-migration: extension name injection via migration path (changeToUpSQL / changeToDownSQL)', () => {
+	// Covers M-1: the migration SQL path (generateMigrationSQL / generateDownSQL)
+	// must validate extension names before emitting CREATE/DROP EXTENSION statements.
+
+	function makeCreateExtensionDiff(extension: string): SchemaDiff {
+		const change: SchemaChange = {
+			kind: 'create_extension',
+			table: '',
+			destructive: false,
+			details: '',
+			meta: { extension },
+		};
+		return {
+			changes: [change],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		};
+	}
+
+	function makeDropExtensionDiff(extension: string): SchemaDiff {
+		const change: SchemaChange = {
+			kind: 'drop_extension',
+			table: '',
+			destructive: true,
+			details: '',
+			meta: { extension },
+		};
+		return {
+			changes: [change],
+			hasDestructive: true,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		};
+	}
+
+	// -- UP: create_extension ------------------------------------------------
+
+	it('rejects malicious extension name in create_extension (UP)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeCreateExtensionDiff('pgcrypto"; DROP TABLE users --'),
+				{},
+			),
+		).toThrow(InvalidIdentifierError);
+	});
+
+	it('rejects extension name with semicolon in create_extension (UP)', () => {
+		expect(() =>
+			generateMigrationSQL(makeCreateExtensionDiff('evil; DROP'), {}),
+		).toThrow(InvalidIdentifierError);
+	});
+
+	it('allows legitimate extension name in create_extension (UP): uuid-ossp', () => {
+		const sql = generateMigrationSQL(makeCreateExtensionDiff('uuid-ossp'), {});
+		expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "uuid-ossp";');
+	});
+
+	it('allows legitimate extension name in create_extension (UP): pgcrypto', () => {
+		const sql = generateMigrationSQL(makeCreateExtensionDiff('pgcrypto'), {});
+		expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
+	});
+
+	// -- UP: drop_extension --------------------------------------------------
+
+	it('rejects malicious extension name in drop_extension (UP)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDropExtensionDiff('pgcrypto"; DROP TABLE users --'),
+				{},
+			),
+		).toThrow(InvalidIdentifierError);
+	});
+
+	it('allows legitimate extension name in drop_extension (UP): pgcrypto', () => {
+		const sql = generateMigrationSQL(makeDropExtensionDiff('pgcrypto'), {});
+		expect(sql).toContain('DROP EXTENSION IF EXISTS "pgcrypto" CASCADE;');
+	});
+
+	// -- DOWN: create_extension (reversal = DROP) ----------------------------
+
+	it('rejects malicious extension name in create_extension DOWN (reversal = DROP)', () => {
+		expect(() =>
+			generateDownSQL(
+				makeCreateExtensionDiff('pgcrypto"; DROP TABLE users --'),
+			),
+		).toThrow(InvalidIdentifierError);
+	});
+
+	it('allows legitimate extension name in create_extension DOWN: uuid-ossp', () => {
+		const sql = generateDownSQL(makeCreateExtensionDiff('uuid-ossp'));
+		expect(sql).toContain('DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;');
+	});
+
+	// -- DOWN: drop_extension (reversal = CREATE) ----------------------------
+
+	it('rejects malicious extension name in drop_extension DOWN (reversal = CREATE)', () => {
+		expect(() =>
+			generateDownSQL(makeDropExtensionDiff('pgcrypto"; DROP TABLE users --')),
+		).toThrow(InvalidIdentifierError);
+	});
+
+	it('allows legitimate extension name in drop_extension DOWN: pgcrypto', () => {
+		const sql = generateDownSQL(makeDropExtensionDiff('pgcrypto'));
+		expect(sql).toContain('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 	});
 });
 
