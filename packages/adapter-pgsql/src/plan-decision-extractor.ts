@@ -101,11 +101,19 @@ export function resolveIncludeAlias(context: {
  */
 function resolveIncludeByPath(
 	includes:
-		| Array<{ relation: string; limit?: number; include?: unknown[] }>
+		| Array<{
+				relation: string;
+				limit?: number;
+				select?: unknown;
+				where?: unknown;
+				include?: unknown[];
+		  }>
 		| undefined,
 	intentPath: string | undefined,
 	relationName: string,
-): { relation: string; limit?: number } | undefined {
+):
+	| { relation: string; limit?: number; select?: unknown; where?: unknown }
+	| undefined {
 	if (!includes) return undefined;
 
 	// Try intentPath-based traversal first
@@ -592,7 +600,13 @@ function toIncludeDecision(
 	// intentPath is e.g. "include[0]" or "include[0].include[0]" for nested
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
-			| Array<{ relation: string; limit?: number; include?: unknown[] }>
+			| Array<{
+					relation: string;
+					limit?: number;
+					select?: unknown;
+					where?: unknown;
+					include?: unknown[];
+			  }>
 			| undefined,
 		context.intentPath,
 		relationName,

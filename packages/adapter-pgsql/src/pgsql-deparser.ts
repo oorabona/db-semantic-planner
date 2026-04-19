@@ -1204,11 +1204,13 @@ function deparseOnConflictClause(node: OnConflictClause): string {
 // InferClause
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
 function deparseInferClause(node: InferClause): string {
 	if (node.conname) {
 		return `ON CONSTRAINT ${quoteIdent(node.conname)}`;
 	}
 	const indexElems = node.indexElems ?? [];
+	let result = '';
 	if (indexElems.length > 0) {
 		const cols = indexElems.map((e) => {
 			const ie = (e as Record<string, unknown>).IndexElem as
@@ -1216,9 +1218,15 @@ function deparseInferClause(node: InferClause): string {
 				| undefined;
 			return ie ? deparseIndexElem(ie) : deparse(e);
 		});
-		return `(${cols.join(', ')})`;
+		result = `(${cols.join(', ')})`;
 	}
-	return '';
+	// Partial-index predicate for ON CONFLICT: emit WHERE <expr> after the column list.
+	// e.g. ON CONFLICT (col) WHERE active = true DO UPDATE ...
+	if (node.whereClause) {
+		const where = deparse(node.whereClause as Node);
+		result = result ? `${result} WHERE ${where}` : `WHERE ${where}`;
+	}
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1462,11 +1470,41 @@ function deparseFetchStmt(node: FetchStmt): string {
 	const howMany = rec.howMany;
 	const portalname = String(rec.portalname ?? '');
 
+	// PostgreSQL uses LONG_MAX (9223372036854775807) as a sentinel for "ALL".
+	// The pgsql-deparser library stores this as the float64 approximation 9223372036854776000.
+	// Mirror the same sentinel check so the internal deparser matches the external one.
+	const isAll = howMany === 9223372036854776000;
+
 	const parts: string[] = ['FETCH'];
 	const dir = FETCH_DIR_MAP[direction] ?? direction;
-	const count = howMany !== undefined ? String(howMany) : '';
 
-	parts.push(`${dir} ${count}`);
+	switch (direction) {
+		case 'FETCH_FORWARD':
+			if (isAll) {
+				parts.push('FORWARD', 'ALL');
+			} else if (howMany !== undefined && howMany !== null) {
+				parts.push(`${dir} ${String(howMany)}`);
+			} else {
+				parts.push(dir);
+			}
+			break;
+		case 'FETCH_BACKWARD':
+			if (isAll) {
+				parts.push('BACKWARD', 'ALL');
+			} else if (howMany !== undefined && howMany !== null) {
+				parts.push(`${dir} ${String(howMany)}`);
+			} else {
+				parts.push(dir);
+			}
+			break;
+		default:
+			if (howMany !== undefined && howMany !== null) {
+				parts.push(`${dir} ${String(howMany)}`);
+			} else {
+				parts.push(dir);
+			}
+	}
+
 	parts.push(`FROM ${quoteIdent(portalname)}`);
 
 	return parts.join(' ');

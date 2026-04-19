@@ -115,6 +115,29 @@ function resolveExistsIntent(
 ): WhereIntent {
 	const w = where as unknown as Record<string, unknown>;
 	const kind = w.kind as string | undefined;
+
+	// Recursively walk and/or/not branches so nested exists/notExists are enriched
+	if (kind === 'and' || kind === 'or') {
+		const conditions = w.conditions as WhereIntent[] | undefined;
+		if (!conditions) return where;
+		const enriched = conditions.map((c) =>
+			resolveExistsIntent(c, sourceTable, deps),
+		);
+		const changed = enriched.some((c, i) => c !== conditions[i]);
+		return changed
+			? ({ ...w, conditions: enriched } as unknown as WhereIntent)
+			: where;
+	}
+	if (kind === 'not') {
+		const condition = w.condition as WhereIntent | undefined;
+		if (!condition) return where;
+		const enriched = resolveExistsIntent(condition, sourceTable, deps);
+		return enriched !== condition
+			? ({ ...w, condition: enriched } as unknown as WhereIntent)
+			: where;
+	}
+
+	// Only enrich exists/notExists at this level
 	if (kind !== 'exists' && kind !== 'notExists') return where;
 	const relation = w.relation as string;
 	const resolved = resolveExistsRelation(sourceTable, relation, deps.model);

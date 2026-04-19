@@ -9,7 +9,7 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { validateDbTypeName } from '../validate.js';
+import { validateDbTypeName, validateSqlExpression } from '../validate.js';
 
 function quoteIdentifier(name: string): string {
 	return `"${name.replace(/"/g, '""')}"`;
@@ -46,6 +46,18 @@ export function generateVacuumSQL(
 
 function formatDefault(value: unknown): string {
 	if (value === null) return 'NULL';
+	// { sql: string } escape hatch — emit verbatim (used by introspection-sourced defaults).
+	// Validated to reject injection vectors (semicolons, --, /*, $) before interpolation.
+	if (typeof value === 'object' && value !== null && 'sql' in value) {
+		const rawSql = (value as Record<string, unknown>).sql;
+		if (typeof rawSql !== 'string') {
+			throw new Error(
+				`formatDefault({ sql }): expected string, got ${typeof rawSql}`,
+			);
+		}
+		validateSqlExpression(rawSql, 'table-operations formatDefault({ sql })');
+		return rawSql;
+	}
 	if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
 	if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
 	return String(value);

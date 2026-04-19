@@ -451,8 +451,11 @@ describe('introspect', () => {
 		const result = await introspect(pool);
 
 		const table = result.tables.get('t')!;
-		expect(table.columns[0]!.default).toContain('nextval');
-		expect(table.columns[1]!.default).toBe('true');
+		// C5 fix: introspected defaults are stored as { sql } to be emitted verbatim by formatDefaultValue
+		expect((table.columns[0]!.default as { sql: string }).sql).toContain(
+			'nextval',
+		);
+		expect((table.columns[1]!.default as { sql: string }).sql).toBe('true');
 	});
 
 	it('should include introspectedAt timestamp', async () => {

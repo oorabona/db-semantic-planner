@@ -297,9 +297,11 @@ const SAFE_TYPE_PATTERN =
  * @throws Error if the expression contains forbidden characters.
  */
 export function validateSqlExpression(sql: string, context: string): void {
+	// Forbidden: semicolons (statement injection), line comments (--),
+	// block comment openers (/*), dollar-quoted strings ($$), backslashes.
 	if (/[;]|--|\/\*|\$\$|\\/.test(sql)) {
 		throw new Error(
-			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, $, \\). Value: "${sql}"`,
+			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, $$ (dollar-quoted strings), \\). Value: "${sql}"`,
 		);
 	}
 }

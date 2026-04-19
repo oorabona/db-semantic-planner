@@ -137,11 +137,26 @@ export function buildDeclareCursor(options: CursorOptions): Node {
 export function buildFetch(options: FetchOptions): Node {
 	const dir = options.direction ?? 'next';
 
-	// Calculate direction and howMany based on FetchDirection
-	// PostgreSQL handles "ALL" variants as FORWARD/BACKWARD with LONG_MAX (2147483647)
-	// FIRST/LAST are ABSOLUTE with howMany = 1/-1 respectively
+	// Calculate direction and howMany based on FetchDirection.
+	// PostgreSQL semantics: FETCH FORWARD ALL / FETCH BACKWARD ALL fetches all remaining rows.
+	//
+	// TYPE HONESTY NOTE: @pgsql/types declares FetchStmt.howMany as `bigint`, but the
+	// pgsql-deparser performs a strict Number identity check internally:
+	//   if (node.howMany === 9223372036854776000) → emits "ALL"
+	// A real BigInt (e.g. BigInt('9223372036854775807')) does NOT trigger this branch —
+	// the deparser emits the literal number string instead of "ALL". This was verified
+	// empirically: deparseSync({FetchStmt:{howMany:BigInt('9223372036854775807'),...}})
+	// → "FETCH FORWARD 9223372036854775807 c" (not "FETCH FORWARD ALL c").
+	//
+	// Therefore the ALL sentinel must be assigned as a Number. We use `number | bigint`
+	// to document that the variable holds either a real bigint (for counted fetches) or
+	// a Number sentinel (for ALL). The `as unknown as bigint` cast on the sentinel line
+	// satisfies the FetchStmt.howMany type while preserving the Number runtime value.
+	//
+	// TODO: file upstream issue against pgsql-deparser — FetchStmt.howMany comparison
+	// should use Number() conversion to support real BigInt ALL sentinels.
 	let direction: string;
-	let howMany: bigint;
+	let howMany: number | bigint;
 
 	switch (dir) {
 		case 'first':
@@ -153,12 +168,14 @@ export function buildFetch(options: FetchOptions): Node {
 			howMany = BigInt(-1);
 			break;
 		case 'forward_all':
+			// FETCH FORWARD ALL — deparser sentinel: Number 9223372036854776000 (float64 ≈ INT64_MAX)
 			direction = 'FETCH_FORWARD';
-			howMany = BigInt(2147483647); // INT_MAX = "all"
+			howMany = 9223372036854776000 as unknown as bigint;
 			break;
 		case 'backward_all':
+			// FETCH BACKWARD ALL — deparser sentinel: Number 9223372036854776000 (float64 ≈ INT64_MAX)
 			direction = 'FETCH_BACKWARD';
-			howMany = BigInt(2147483647); // INT_MAX = "all"
+			howMany = 9223372036854776000 as unknown as bigint;
 			break;
 		default:
 			direction = mapFetchDirection(dir);

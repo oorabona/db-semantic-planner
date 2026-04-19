@@ -18,6 +18,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from '../compiler-utils.js';
+import { createWhereDispatcher } from '../handlers/index.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -111,6 +112,22 @@ export function buildOnConflictClause(
 				},
 			})),
 		};
+
+		// Partial-index conflict: ON CONFLICT (col) WHERE predicate
+		if (config.conflictTarget.where && config.conflictTarget.where.length > 0) {
+			const dispatch = createWhereDispatcher();
+			const conditions = config.conflictTarget.where;
+			let whereClause: Node;
+			if (conditions.length === 1) {
+				whereClause = dispatch(conditions[0]!, ctx, state);
+			} else {
+				const nodes = conditions.map((c) => dispatch(c, ctx, state));
+				whereClause = {
+					BoolExpr: { boolop: 'AND_EXPR', args: nodes },
+				} as unknown as Node;
+			}
+			infer.whereClause = whereClause;
+		}
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
 		infer = {

@@ -254,6 +254,156 @@ describe('SEC-001: formatDefaultValue sql escape hatch injection', () => {
 });
 
 // ---------------------------------------------------------------------------
+// SEC-004 (phases): quoteIdent in phase modules validates before quoting
+// Regression guard: A1 refactor introduced local quoteId() helpers in 5 phase
+// modules that skipped validateIdentifier(). This test block ensures each
+// affected path now throws on invalid identifiers.
+// ---------------------------------------------------------------------------
+
+describe('SEC-004 (phases): identifier validation in DDL phase modules', () => {
+	// Caps that enable all DDL features including the ones with specific
+	// capability flag names used by each phase.
+	function buildFullCaps(): any {
+		return {
+			...buildCaps(),
+			// enum-types phase checks supportsDDLEnumTypes (not supportsDDLEnums)
+			supportsDDLEnumTypes: true,
+		};
+	}
+
+	it('enum-types phase: rejects enum name with invalid characters', async () => {
+		const { generateDDL } = await import('../ddl/ddl-generator.js');
+		// enumDef.name is what the phase passes to quoteId — must be in the value
+		const enumDef = { name: 'bad"enum', values: ['a', 'b'] };
+		const model: any = {
+			tables: new Map(),
+			enums: new Map([['bad_enum', enumDef]]),
+			sequences: new Map(),
+			extensions: [],
+			getTable: () => undefined,
+			getRelation: () => undefined,
+		};
+		expect(() =>
+			generateDDL(model, { dialectCapabilities: buildFullCaps() }),
+		).toThrow(/Invalid.*identifier/);
+	});
+
+	it('sequences phase: rejects sequence name with invalid characters', async () => {
+		const { generateDDL } = await import('../ddl/ddl-generator.js');
+		// seq.name is what the phase passes to quoteId — must be in the value object
+		const seqDef = { name: 'bad;seq', start: 1, increment: 1 };
+		const model: any = {
+			tables: new Map(),
+			enums: new Map(),
+			sequences: new Map([['seq1', seqDef]]),
+			extensions: [],
+			getTable: () => undefined,
+			getRelation: () => undefined,
+		};
+		expect(() =>
+			generateDDL(model, { dialectCapabilities: buildFullCaps() }),
+		).toThrow(/Invalid.*identifier/);
+	});
+
+	it('comments phase: rejects table name with invalid characters', async () => {
+		const { generateDDL } = await import('../ddl/ddl-generator.js');
+		// table.name reaches qualifyTable() in the comments phase when table.comment is set
+		const table: any = {
+			name: 'bad"table',
+			columns: [{ name: 'id', type: 'integer' }],
+			primaryKey: ['id'],
+			foreignKeys: [],
+			indexes: [],
+			policies: [],
+			rlsEnabled: false,
+			comment: 'has a comment',
+		};
+		const model: any = {
+			tables: new Map([['t1', table]]),
+			enums: new Map(),
+			sequences: new Map(),
+			extensions: [],
+			getTable: () => table,
+			getRelation: () => undefined,
+		};
+		expect(() =>
+			generateDDL(model, { dialectCapabilities: buildFullCaps() }),
+		).toThrow(/Invalid.*identifier/);
+	});
+
+	it('rls phase: rejects table name with control character reaching RLS', async () => {
+		const { generateDDL } = await import('../ddl/ddl-generator.js');
+		// table.name reaches qualifyTable() in the rls phase when rlsEnabled=true
+		const table: any = {
+			name: 'bad\x00table',
+			columns: [{ name: 'id', type: 'integer' }],
+			primaryKey: ['id'],
+			foreignKeys: [],
+			indexes: [],
+			policies: [
+				{ name: 'ok_policy', command: 'ALL', permissive: true, roles: [] },
+			],
+			rlsEnabled: true,
+		};
+		const model: any = {
+			tables: new Map([['t1', table]]),
+			enums: new Map(),
+			sequences: new Map(),
+			extensions: [],
+			getTable: () => table,
+			getRelation: () => undefined,
+		};
+		expect(() =>
+			generateDDL(model, { dialectCapabilities: buildFullCaps() }),
+		).toThrow(/Invalid.*identifier/);
+	});
+
+	it('constraints phase: rejects table name with invalid characters', async () => {
+		const { generateDDL } = await import('../ddl/ddl-generator.js');
+		// table.name reaches qualifyTable() in the constraints phase via generateAlterTableAddFK
+		const refTable: any = {
+			name: 'users',
+			columns: [{ name: 'id', type: 'integer' }],
+			primaryKey: ['id'],
+			foreignKeys: [],
+			indexes: [],
+			policies: [],
+			rlsEnabled: false,
+		};
+		const table: any = {
+			name: 'bad;table',
+			columns: [{ name: 'user_id', type: 'integer' }],
+			primaryKey: ['user_id'],
+			foreignKeys: [
+				{
+					columns: ['user_id'],
+					referencedTable: 'users',
+					referencedColumns: ['id'],
+					onDelete: 'CASCADE',
+				},
+			],
+			indexes: [],
+			policies: [],
+			rlsEnabled: false,
+		};
+		const model: any = {
+			tables: new Map([
+				['users', refTable],
+				['t2', table],
+			]),
+			enums: new Map(),
+			sequences: new Map(),
+			extensions: [],
+			getTable: (n: string) => model.tables.get(n),
+			getRelation: () => undefined,
+		};
+		expect(() =>
+			generateDDL(model, { dialectCapabilities: buildFullCaps() }),
+		).toThrow(/Invalid.*identifier/);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

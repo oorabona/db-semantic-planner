@@ -19,6 +19,7 @@ import {
 	rangeVar,
 	starTarget,
 } from '../../ast-helpers.js';
+import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -66,8 +67,6 @@ function buildCteSelect(
 	// Build WHERE if conditions exist
 	let whereClause: Node | undefined;
 	if (whereConditions && whereConditions.length > 0) {
-		// Import WHERE dispatcher
-		const { createWhereDispatcher } = require('../index.js');
 		const dispatch = createWhereDispatcher();
 
 		const subCtx: CompilerContext = {
