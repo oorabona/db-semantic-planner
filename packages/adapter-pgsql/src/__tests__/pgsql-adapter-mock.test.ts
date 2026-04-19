@@ -563,3 +563,71 @@ describe('PgsqlAdapter.storageSize — schema fallback', () => {
 		expect(call[1][0]).toBe('"public"."logs"');
 	});
 });
+
+// ============================================================================
+// [P2-T5]: withSchema / transaction preserve all config fields
+// ============================================================================
+
+describe('PgsqlAdapter [P2-T5]: withSchema preserves full config', () => {
+	it('preserves logger, defaultPkColumnName, and deriveFkColumnName after withSchema', () => {
+		const logger = { debug: vi.fn(), error: vi.fn() };
+		const customDerive = vi.fn(
+			(table: string, pk: string) => `${table}_${pk}_id`,
+		);
+		const pool = makePool();
+
+		const adapter = new PgsqlAdapter(pool, {
+			logger,
+			defaultPkColumnName: 'uid',
+			deriveFkColumnName: customDerive,
+			dbCasing: 'snake_case',
+		});
+
+		const scoped = adapter.withSchema('tenant_1') as PgsqlAdapter;
+		const scopedInternal = scoped as unknown as {
+			logger: typeof logger;
+			defaultPk: string;
+			deriveFk: typeof customDerive;
+		};
+
+		// Critical: scoped adapter must inherit all config fields
+		expect(scopedInternal.logger).toBe(logger);
+		expect(scopedInternal.defaultPk).toBe('uid');
+		expect(scopedInternal.deriveFk).toBe(customDerive);
+		expect(scoped.dbCasing).toBe('snake_case');
+	});
+
+	it('withSchema sets new schemaName while preserving other options', () => {
+		const pool = makePool();
+		const adapter = new PgsqlAdapter(pool, {
+			schemaName: 'public',
+			defaultPkColumnName: 'doc_id',
+		});
+
+		const scoped = adapter.withSchema('tenant_99') as PgsqlAdapter;
+		const scopedInternal = scoped as unknown as {
+			schemaName: string;
+			defaultPk: string;
+		};
+
+		expect(scopedInternal.schemaName).toBe('tenant_99');
+		expect(scopedInternal.defaultPk).toBe('doc_id');
+	});
+
+	it('deriveFkColumnName function reference is preserved across withSchema', () => {
+		const pool = makePool();
+		const customDerive = (table: string, pk: string) => `${table}_${pk}_fk`;
+		const adapter = new PgsqlAdapter(pool, {
+			deriveFkColumnName: customDerive,
+		});
+
+		const scoped = adapter.withSchema('schema_x') as PgsqlAdapter;
+		const scopedDerive = (
+			scoped as unknown as { deriveFk: (table: string, pk: string) => string }
+		).deriveFk;
+
+		// Same reference = same FK inference behavior in scoped adapter
+		expect(scopedDerive).toBe(customDerive);
+		expect(scopedDerive('orders', 'id')).toBe('orders_id_fk');
+	});
+});

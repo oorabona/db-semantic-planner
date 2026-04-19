@@ -40,7 +40,12 @@ export type ColumnType =
 // ============================================================================
 
 /** Foreign key delete behavior */
-export type OnDeleteAction = 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+export type OnDeleteAction =
+	| 'CASCADE'
+	| 'SET NULL'
+	| 'SET DEFAULT'
+	| 'RESTRICT'
+	| 'NO ACTION';
 
 // ============================================================================
 // Relation Types
@@ -529,4 +534,23 @@ export interface ModelIR {
 
 	/** Check if relation path is ambiguous (multiple relations to same target) */
 	isAmbiguous(sourceTable: string, targetTable: string): AmbiguityCheckResult;
+}
+
+/**
+ * Hierarchy pattern detected during database introspection.
+ * Describes adjacency-list or edge-table patterns on self-referencing tables.
+ */
+export interface HierarchyIR {
+	/** How the hierarchy is represented in the schema */
+	readonly type: 'adjacency' | 'edge-table';
+	/** Table that contains the nodes */
+	readonly nodeTable: string;
+	/** Edge table (for edge-table type only) */
+	readonly edgeTable?: string;
+	/** Column pointing to the parent node (adjacency) or source node (edge-table) */
+	readonly parentColumn: string;
+	/** Column pointing to the child node (edge-table type only) */
+	readonly childColumn?: string;
+	/** Column holding the node's own identifier */
+	readonly nodeIdColumn: string;
 }
