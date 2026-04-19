@@ -715,3 +715,118 @@ describe('introspect', () => {
 		expect(idx.opclass).toBeUndefined();
 	});
 });
+
+describe('introspect [P1-T2]: OnDeleteAction SET DEFAULT round-trip', () => {
+	it('preserves SET DEFAULT FK action through introspect → ForeignKeyIR', async () => {
+		const columns = [
+			{
+				table_name: 'orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'orders',
+				column_name: 'status_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'YES',
+				column_default: '1',
+			},
+			{
+				table_name: 'statuses',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'orders', column_name: 'id' },
+			{ table_name: 'statuses', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'orders_status_id_fkey',
+				source_table: 'orders',
+				source_column: 'status_id',
+				target_table: 'statuses',
+				target_column: 'id',
+				delete_rule: 'SET DEFAULT',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool);
+
+		const orders = result.tables.get('orders')!;
+		expect(orders).toBeDefined();
+		expect(orders.foreignKeys).toHaveLength(1);
+
+		const fk = orders.foreignKeys[0]!;
+		expect(fk.columns).toEqual(['status_id']);
+		expect(fk.references.table).toBe('statuses');
+		// The critical assertion: SET DEFAULT must round-trip correctly
+		expect(fk.onDelete).toBe('SET DEFAULT');
+	});
+
+	it('maps NO ACTION FK (default) and omits onDelete field', async () => {
+		const columns = [
+			{
+				table_name: 'posts',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'posts',
+				column_name: 'user_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'posts', column_name: 'id' },
+			{ table_name: 'users', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'posts_user_id_fkey',
+				source_table: 'posts',
+				source_column: 'user_id',
+				target_table: 'users',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool);
+
+		const posts = result.tables.get('posts')!;
+		const fk = posts.foreignKeys[0]!;
+		// buildTableIR omits onDelete when it is 'NO ACTION' (default)
+		expect(fk.onDelete).toBeUndefined();
+	});
+});

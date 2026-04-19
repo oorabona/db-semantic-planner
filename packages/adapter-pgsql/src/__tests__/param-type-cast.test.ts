@@ -313,3 +313,54 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		expect(parameters).toEqual([[1, 2, 3]]);
 	});
 });
+
+describe('PARAM-TYPE-CAST [P0-T1]: originalDbType from introspection flows to compiled SQL CAST', () => {
+	it('vector column — introspected originalDbType produces CAST($1 AS vector)', () => {
+		// Simulates: buildTableIR sets col.originalDbType = col.udt_name ('vector')
+		// A parameterized WHERE clause against that column should emit CAST
+		const { sql, parameters } = compileSelect(
+			'embeddings',
+			[
+				{
+					name: 'vec',
+					type: 'string',
+					nullable: false,
+					originalDbType: 'vector',
+				},
+			],
+			'vec',
+			'[0.1,0.2,0.3]',
+		);
+		expect(sql).toContain('CAST($1 AS vector)');
+		expect(parameters).toEqual(['[0.1,0.2,0.3]']);
+	});
+
+	it('jsonb column — introspected originalDbType produces CAST($1 AS jsonb)', () => {
+		const { sql, parameters } = compileSelect(
+			'events',
+			[
+				{
+					name: 'payload',
+					type: 'json',
+					nullable: true,
+					originalDbType: 'jsonb',
+				},
+			],
+			'payload',
+			'{"key":"val"}',
+		);
+		expect(sql).toContain('CAST($1 AS jsonb)');
+		expect(parameters).toEqual(['{"key":"val"}']);
+	});
+
+	it('without originalDbType (manually defined schema) — no CAST emitted', () => {
+		// Manually defined schemas omit originalDbType; no automatic CAST should be emitted
+		const { sql } = compileSelect(
+			'items',
+			[{ name: 'code', type: 'string', nullable: false }],
+			'code',
+			'ABC',
+		);
+		expect(sql).not.toContain('CAST');
+	});
+});

@@ -219,6 +219,26 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Shared compilation dependencies — built lazily from adapter fields.
 	 * Passed to compiler sub-modules instead of `this`.
 	 */
+
+	/**
+	 * Return a new PgsqlAdapterOptions that merges current config with overrides.
+	 * Ensures that all configuration fields (logger, defaultPkColumnName,
+	 * deriveFkColumnName, etc.) are propagated to scoped/transactional adapters.
+	 */
+	private cloneOptions(
+		overrides: Partial<PgsqlAdapterOptions>,
+	): PgsqlAdapterOptions {
+		return {
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
+			...(this.model !== undefined && { model: this.model }),
+			...(this.logger !== undefined && { logger: this.logger }),
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+			...overrides,
+		};
+	}
+
 	private get compileDeps(): AdapterCompilerDeps {
 		return {
 			naming: this.naming,
@@ -693,14 +713,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			await client.query('BEGIN');
 
-			// Create transaction-scoped adapter
-			const txOptions: PgsqlAdapterOptions = {
-				...(this.schemaName !== undefined && { schemaName: this.schemaName }),
-				...(this._dbCasing !== undefined && {
-					dbCasing: this._dbCasing,
-				}),
-				...(this.model !== undefined && { model: this.model }),
-			};
+			// Create transaction-scoped adapter preserving all configuration
+			const txOptions: PgsqlAdapterOptions = this.cloneOptions({});
 			const txAdapter = new PgsqlAdapter<DB>(client, txOptions);
 
 			const result = await fn(txAdapter);
@@ -722,14 +736,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Validate schema name
 		validateIdentifier(schemaName, 'schema');
 
-		// Create new adapter with schema scope
-		const options: PgsqlAdapterOptions = {
-			schemaName,
-			...(this._dbCasing !== undefined && {
-				dbCasing: this._dbCasing,
-			}),
-			...(this.model !== undefined && { model: this.model }),
-		};
+		// Create new adapter preserving all configuration, only overriding schemaName
+		const options: PgsqlAdapterOptions = this.cloneOptions({ schemaName });
 		return new PgsqlAdapter<DB>(this.client ?? this.pool ?? undefined, options);
 	}
 

@@ -778,7 +778,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			type: mapPgType(col.data_type, col.udt_name),
 			nullable: col.is_nullable === 'YES',
 			...(col.column_default != null ? { default: col.column_default } : {}),
-			dbType: col.udt_name,
+			originalDbType: col.udt_name,
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),
 			...(colComment ? { comment: colComment } : {}),
@@ -1153,6 +1153,8 @@ function mapDeleteRule(rule: string): OnDeleteAction {
 			return 'CASCADE';
 		case 'SET NULL':
 			return 'SET NULL';
+		case 'SET DEFAULT':
+			return 'SET DEFAULT';
 		case 'RESTRICT':
 			return 'RESTRICT';
 		default:

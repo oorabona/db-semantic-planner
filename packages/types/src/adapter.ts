@@ -27,6 +27,7 @@ import type {
 	ColumnIR,
 	EnumIR,
 	ForeignKeyIR,
+	HierarchyIR,
 	IndexIR,
 	ModelIR,
 	PartitionIR,
@@ -387,6 +388,8 @@ export interface IntrospectionResult extends ModelIR {
 	readonly introspectedAt: Date;
 	/** Warnings from introspection (e.g., unsupported types) */
 	readonly warnings?: readonly string[];
+	/** Hierarchy patterns detected during introspection (adjacency-list / edge-table) */
+	readonly hierarchies?: readonly HierarchyIR[];
 }
 
 /**
@@ -600,8 +603,20 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
 /**
  * Compile-only adapter - can only compile, not execute.
  * Useful for generating SQL without a database connection.
+ *
+ * Explicitly excludes execution interfaces so that type-checking catches
+ * misuse (e.g. calling execute() on a compile-only instance) at compile time.
  */
-export type CompileOnlyAdapter = CompilingAdapter;
+export type CompileOnlyAdapter = CompilingAdapter & {
+	readonly execute?: never;
+	readonly executeOne?: never;
+	readonly executeOneOrThrow?: never;
+	readonly stream?: never;
+	readonly introspect?: never;
+	readonly transaction?: never;
+	readonly executeRaw?: never;
+	readonly executeDDL?: never;
+};
 
 /**
  * Basic adapter - compile + execute, no streaming/transactions/introspection.
