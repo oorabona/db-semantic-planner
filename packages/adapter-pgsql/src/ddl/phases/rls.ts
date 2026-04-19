@@ -12,13 +12,7 @@
 
 import { generateCreatePolicy } from '../ddl-generator.js';
 import { type PhaseContext, sup } from './types.js';
-
-/**
- * Quote an identifier for use in DDL statements.
- */
-function quoteId(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
-}
+import { quoteIdent as quoteId } from './utils.js';
 
 /**
  * Qualify a table name with an optional schema prefix.

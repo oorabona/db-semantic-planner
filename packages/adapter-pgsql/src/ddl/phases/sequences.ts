@@ -9,14 +9,7 @@
 
 import { buildSequenceClause } from '../migration-sql.js';
 import { type PhaseContext, sup } from './types.js';
-
-/**
- * Quote an identifier for use in DDL statements.
- * Duplicated here to keep phases independent of ddl-generator internals.
- */
-function quoteId(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
-}
+import { quoteIdent as quoteId } from './utils.js';
 
 /**
  * Generate CREATE SEQUENCE statements for all sequences in the schema.

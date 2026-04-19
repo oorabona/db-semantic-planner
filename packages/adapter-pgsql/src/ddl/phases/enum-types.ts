@@ -8,13 +8,7 @@
  */
 
 import { type PhaseContext, sup } from './types.js';
-
-/**
- * Quote an identifier for use in DDL statements.
- */
-function quoteId(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
-}
+import { quoteIdent as quoteId } from './utils.js';
 
 /**
  * Generate CREATE TYPE ... AS ENUM statements for all enum types in the schema.
