@@ -183,10 +183,10 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * cteItem = Identifier "as" "(" query ")" ;
+	 * cteItem = identSegment "as" "(" query ")" ;
 	 */
 	private cteItem = this.RULE('cteItem', () => {
-		this.CONSUME(Identifier);
+		this.SUBRULE(this.identSegment);
 		this.CONSUME(As);
 		this.CONSUME(LParen);
 		this.SUBRULE(this.query);

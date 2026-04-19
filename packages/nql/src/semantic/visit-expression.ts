@@ -678,9 +678,10 @@ export function visitQuantifiedRelationFilter(
 	const relation = pathExpr.segments;
 
 	if (ctx.booleanExpr) {
-		const alias = ctx.identSegment
-			? visit(asCstNode(ctx.identSegment[0]!))
-			: undefined;
+		const alias =
+			ctx.As && ctx.identSegment
+				? visit(asCstNode(ctx.identSegment[0]!))
+				: undefined;
 		const condition = visit(asCstNode(ctx.booleanExpr[0]!));
 		return { type: 'relationFilter', relation, condition, mode, alias };
 	}

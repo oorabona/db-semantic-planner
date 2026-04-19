@@ -18,7 +18,11 @@
 	font-size: 1.75rem;
 	font-weight: 700;
 	margin-bottom: 2.5rem;
-	background: linear-gradient(135deg, var(--vp-c-brand-1) 0%, var(--vp-c-brand-3) 100%);
+	background: linear-gradient(
+		135deg,
+		var(--vp-c-brand-1) 0%,
+		var(--vp-c-brand-3) 100%
+	);
 	-webkit-background-clip: text;
 	-webkit-text-fill-color: transparent;
 	background-clip: text;
@@ -151,49 +155,80 @@
 }
 
 /* CTA colors: emerald primary for contrast against indigo palette (WCAG AA 4.5:1+) */
+/* !important required throughout: VitePress ships .VPButton styles that load after theme overrides */
 .cta-primary {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	display: inline-block !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	padding: 0.75rem 2rem !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	background: linear-gradient(135deg, #059669 0%, #047857 100%) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	color: #ffffff !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	border-radius: 8px !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-weight: 600 !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-size: 1rem !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	text-decoration: none !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	transition: all 0.2s !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	box-shadow: 0 4px 12px rgba(5, 150, 105, 0.35) !important;
 }
 
 .cta-primary:hover {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	color: #ffffff !important;
 	transform: translateY(-2px);
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	box-shadow: 0 6px 20px rgba(5, 150, 105, 0.45) !important;
 }
 
 .cta-secondary {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	display: inline-block !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	padding: 0.75rem 2rem !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	background: var(--vp-c-bg) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	color: var(--vp-c-text-1) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	border: 1px solid var(--vp-c-divider) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	border-radius: 8px !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-weight: 600 !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-size: 1rem !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	text-decoration: none !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	transition: all 0.2s !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04) !important;
 }
 
 .cta-secondary:hover {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	border-color: var(--vp-c-brand-1) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	color: var(--vp-c-brand-1) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	transform: translateY(-2px) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	box-shadow: 0 4px 12px rgba(99, 102, 241, 0.1) !important;
 }
 
 .dark .cta-secondary {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	background: var(--vp-c-bg-soft) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	box-shadow: none !important;
 }
 
@@ -214,12 +249,14 @@
 /* VitePress feature cards — light mode border fix */
 .VPFeature {
 	animation: fadeSlideUp 0.5s ease both;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress ships its own .VPFeature border that loads after theme — !important required */
 	border: 1px solid var(--vp-c-divider) !important;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 	transition: all 0.3s ease;
 }
 
 .VPFeature:hover {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress ships its own .VPFeature border that loads after theme — !important required */
 	border-color: var(--vp-c-brand-1) !important;
 	box-shadow: 0 4px 16px rgba(99, 102, 241, 0.1);
 }
@@ -353,8 +390,10 @@
 }
 
 /* Override VitePress code block margins inside why-code */
-.why-code div[class*='language-'] {
+.why-code div[class*="language-"] {
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress injects margin on code blocks — !important needed to suppress it inside why-code containers */
 	margin: 0 !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress injects margin on code blocks — !important needed to suppress it inside why-code containers */
 	border-radius: 8px !important;
 }
 
@@ -414,7 +453,9 @@
 	width: 40px;
 	height: 40px;
 	border-radius: 50%;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress resets background on child elements — !important preserves avatar gradient */
 	background: linear-gradient(135deg, #6366f1, #22d3ee) !important;
+	/* biome-ignore lint/complexity/noImportantStyles: VitePress resets color on child elements — !important preserves avatar text color */
 	color: #ffffff !important;
 	display: flex;
 	align-items: center;

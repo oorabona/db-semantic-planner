@@ -615,6 +615,12 @@ describe('compile-expression: BETWEEN', () => {
 		expect(where.field).toBe('created_at');
 		expect(where.operator).toBe('between');
 	});
+
+	it('throws when BETWEEN bounds are path-expressions instead of literals', () => {
+		expect(() =>
+			compileNql('users | where age between minAge and maxAge'),
+		).toThrow(/BETWEEN bounds must be literal/);
+	});
 });
 
 // ===========================================================================
@@ -812,5 +818,60 @@ describe('compile-expression: none() relation filter', () => {
 
 		expect(where.kind).toBe('relationFilter');
 		expect(where.mode).toBe('every');
+	});
+});
+
+// ===========================================================================
+// P0-2: json_exists with identifier key (not string literal)
+// ===========================================================================
+
+describe('compile-expression: json_exists identifier key (P0-2)', () => {
+	it('json_exists with identifier key extracts field name as string', () => {
+		// Previously: resolveFilterValue returned an NqlPathExpression object
+		// which coerced to '[object Object]' via String(key).
+		// Fix: detect path expression and use expressionToField to extract name.
+		const where = getWhere(
+			compileNql('users | where json_exists(data, email)'),
+		) as WhereJsonExistsIntent;
+
+		expect(where.kind).toBe('jsonExists');
+		expect(where.key).toBe('email');
+	});
+
+	it('json_exists with string literal key still works', () => {
+		const where = getWhere(
+			compileNql("users | where json_exists(data, 'email')"),
+		) as WhereJsonExistsIntent;
+
+		expect(where.kind).toBe('jsonExists');
+		expect(where.key).toBe('email');
+	});
+
+	it('throws when json_exists key is a dotted path (multi-segment identifier)', () => {
+		// json_exists(data, profile.email) would silently produce key='profile.email'
+		// (a single dotted JSON key), which is semantically wrong.
+		// The compiler must reject dotted paths and require a string literal or single identifier.
+		expect(() =>
+			compileNql('users | where json_exists(data, profile.email)'),
+		).toThrow(
+			/key must be a string literal or a single identifier, not a dotted path/,
+		);
+	});
+});
+
+// ===========================================================================
+// P1-4: caseExpr in WHERE position must throw a clear error
+// ===========================================================================
+
+describe('compile-expression: caseExpr in WHERE (P1-4)', () => {
+	it('throws when bare CASE expression appears in WHERE (type case)', () => {
+		// CASE is only valid in SELECT. In WHERE position the compiler must
+		// throw a clear, actionable error message.
+		// A bare CASE (without comparison) reaches compileExpression as type 'case'.
+		expect(() =>
+			compileNql(
+				"users | where case when status = 'active' then true else false end",
+			),
+		).toThrow(/CASE in WHERE not supported/);
 	});
 });
