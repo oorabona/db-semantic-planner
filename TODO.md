@@ -69,9 +69,10 @@ Branch: `fix/adapter-pgsql-review-20260419` — ✅ merged as `38f9594` (2026-04
 
 ### Follow-ups discovered during review rounds (not merged)
 
-- [ ] 🔧 [adapter-pgsql] Round-4 F-R4-1: `packages/adapter-pgsql/src/ddl/phases/extensions.ts:25` — extension names interpolated into double-quoted identifier without validateIdentifier — inject via quote termination possible. Apply same `quoteIdent` pattern as other phases. Priority: M
-- [ ] 🔧 [adapter-pgsql] Round-4 F-R4-2: `packages/adapter-pgsql/src/ddl/phases/constraints.ts:59` — `check.expression` interpolated raw into DDL — route through `validateSqlExpression` (same treatment as column defaults). Priority: M
-- [ ] 🔧 [adapter-pgsql] Senior F-S1: `{sql}` escape hatch typeof guard pending on `ddl/ddl-generator.ts:261` + `ddl/schema-diff.ts:516` (symmetry with migration-sql + table-operations). Priority: L
+- [x] ✅ [adapter-pgsql] Round-4 F-R4-1: extension names now validated via `validateExtensionName` across generateDDL + migration UP/DOWN (PR #48, 2026-04-19). NAMEDATALEN 63-char limit added.
+- [x] ✅ [adapter-pgsql] Round-4 F-R4-2: check constraint expressions now validated via `validateSqlExpression` across generateDDL + migration UP/DOWN (PR #48, 2026-04-19).
+- [x] ✅ [adapter-pgsql] Senior F-S1: typeof guards added to `{sql}` escape hatch in `ddl-generator.ts` + `schema-diff.ts` for full symmetry (PR #48, 2026-04-19).
+- [ ] 🔧 [adapter-pgsql] Copilot-nit PR #48 L-1 follow-up: 5 phase files (`sequences`, `enum-types`, `comments`, `rls`, `constraints`) + 6 local `qualifyTable` helpers — consolidate into shared helper in `phases/utils.ts` and propagate correct `quoteIdent` type labels (`'table'`/`'schema'`/`'column'`) to the 12 callsites. Priority: L
 - [ ] 🔧 [adapter-pgsql] Senior F-S2: hydrateIncludes leaves raw `{rel}_json` column in results when subquery strategy coerced via mapToHandlerDecision — strip after populating relationName. Priority: L
 - [ ] 🔧 [adapter-pgsql] Senior F-S3: `validateSqlExpression` accepts empty string → emits malformed `DEFAULT ` clause — reject empty/whitespace. Priority: L
 - [ ] 🔧 [adapter-pgsql] DRY: wire `qualifyTableIdent()` to replace 3 local `qualifyTable` implementations in phases/{comments,constraints,rls}.ts. Priority: L
