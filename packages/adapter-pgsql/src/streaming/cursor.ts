@@ -139,13 +139,25 @@ export function buildFetch(options: FetchOptions): Node {
 
 	// Calculate direction and howMany based on FetchDirection.
 	// PostgreSQL semantics: FETCH FORWARD ALL / FETCH BACKWARD ALL fetches all remaining rows.
-	// pgsql-deparser emits "FETCH FORWARD ALL" when howMany === 9223372036854776000 (Number).
-	// This is the float64 approximation of INT64_MAX used as the ALL sentinel in the deparser.
-	// Note: the @pgsql/types type declares howMany as bigint, but the deparser performs a
-	// strict === comparison against the Number literal 9223372036854776000 — BigInt values
-	// never match. We pass the Number cast to bigint to satisfy the type while enabling ALL.
+	//
+	// TYPE HONESTY NOTE: @pgsql/types declares FetchStmt.howMany as `bigint`, but the
+	// pgsql-deparser performs a strict Number identity check internally:
+	//   if (node.howMany === 9223372036854776000) → emits "ALL"
+	// A real BigInt (e.g. BigInt('9223372036854775807')) does NOT trigger this branch —
+	// the deparser emits the literal number string instead of "ALL". This was verified
+	// empirically: deparseSync({FetchStmt:{howMany:BigInt('9223372036854775807'),...}})
+	// → "FETCH FORWARD 9223372036854775807 c" (not "FETCH FORWARD ALL c").
+	//
+	// Therefore the ALL sentinel must be assigned as a Number. We use `number | bigint`
+	// to document that the variable holds either a real bigint (for counted fetches) or
+	// a Number sentinel (for ALL). The `as unknown as bigint` cast on the sentinel line
+	// satisfies the FetchStmt.howMany type while preserving the Number runtime value.
+	//
+	// TODO: file upstream issue against pgsql-deparser — FetchStmt.howMany comparison
+	// should use Number() conversion to support real BigInt ALL sentinels.
 	let direction: string;
-	let howMany: bigint;
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	let howMany: number | bigint;
 
 	switch (dir) {
 		case 'first':

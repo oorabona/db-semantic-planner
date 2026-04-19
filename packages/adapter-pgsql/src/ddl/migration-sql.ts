@@ -1128,7 +1128,9 @@ function generateAddFKSQL(
 
 function formatDefault(value: unknown): string {
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		return (value as Record<string, unknown>).sql as string;
+		const rawSql = (value as Record<string, unknown>).sql as string;
+		validateSqlExpression(rawSql, 'migration-sql formatDefault({ sql })');
+		return rawSql;
 	}
 	if (typeof value === 'string') {
 		if (value.endsWith('()')) return value;
