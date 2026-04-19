@@ -143,15 +143,22 @@ Branch: `fix/core-review-20260419`
 
 Branch: `fix/types-review-20260419`
 
-- [ ] **[P0]** `packages/types/src/model-ir.ts:186` — `ColumnIR` defines `originalDbType`, but `packages/adapter-pgsql/src/introspection.ts:781` emits `dbType`. Consumers in `adapter-compiler-mutations.ts:155` + `cli/generators/schema-codegen.ts:73` read `originalDbType` → introspected schemas silently lose param-type-casting metadata. **Fix**: pick one name (recommend `dbType`, drop `original`), update all 4 sites consistently. Test: introspect schema, verify `dbType` field is present and used in compiled SQL casts.
+- [x] ✅ **[P0]** `packages/types/src/model-ir.ts:186` — `originalDbType`/`dbType` mismatch. **Fix**: unified on `originalDbType` (existing project convention in MEMORY.md + 90+ refs); fixed introspection emitter + added `param-type-cast.test.ts` asserting CAST flow. (2026-04-19)
 
-- [ ] **[P1]** `packages/types/src/model-ir.ts:43` — `OnDeleteAction` omits `'SET DEFAULT'`. DDL emitters in `ddl/type-mapping.ts:89` already emit it, but introspection (`introspection.ts:1150`) maps unrecognized rules to `'NO ACTION'` → `SET DEFAULT` FK lost on round-trip. **Fix**: add `'SET DEFAULT'` to `OnDeleteAction` union; verify introspection mapping.
+- [x] ✅ **[P1]** `packages/types/src/model-ir.ts:43` — `OnDeleteAction` now includes `'SET DEFAULT'`, introspection `mapDeleteRule` handles it, round-trip test added. (2026-04-19)
 
-- [ ] **[P1]** `packages/types/src/adapter.ts:604` — `CompileOnlyAdapter` declared as only `CompilingAdapter`, but `createPgsqlCompileOnlyAdapter()` returns full `PgsqlAdapter<DB>`. Calls to execute/stream/introspect/transaction type-check on compile-only instances; capability probes (`core/src/adapter.ts:66, :91`) report support from method presence alone. **Fix**: tighten `CompileOnlyAdapter` type to exclude execution interfaces, or runtime-throw on those methods when `pool === undefined`.
+- [x] ✅ **[P1]** `packages/types/src/adapter.ts:604` — `CompileOnlyAdapter` tightened with `?: never` on execute/executeOne/executeOneOrThrow/stream/introspect/transaction/executeRaw/executeDDL. (2026-04-19)
 
-- [ ] **[P2]** `packages/types/src/adapter.ts:385` — `IntrospectionResult` missing `hierarchies` field. PG implementation returns them (`introspection.ts:59`), but `IntrospectingAdapter.introspect()` typed to narrower contract. **Fix**: add `hierarchies?: HierarchyIR[]` to `IntrospectionResult`.
+- [x] ✅ **[P2]** `packages/types/src/adapter.ts:385` — `HierarchyIR` added, `IntrospectionResult.hierarchies` field exposed. (2026-04-19)
 
-- [ ] **[P2]** `packages/adapter-pgsql/src/pgsql-adapter.ts:203` — `transaction()` (line 697) and `withSchema()` (line 726) only copy `schemaName`, `dbCasing`, `model` to scoped adapter. Drops `logger`, `defaultPkColumnName`, `deriveFkColumnName`. Scoped adapters silently change FK inference + lose logging. **Fix**: copy all constructor args to scoped instance.
+- [x] ✅ **[P2]** `packages/adapter-pgsql/src/pgsql-adapter.ts:203` — `cloneOptions` helper propagates logger/defaultPkColumnName/deriveFkColumnName to transaction/withSchema scoped instances. (2026-04-19)
+
+### Follow-ups discovered during review (non-blocking)
+
+- [ ] 🔧 [types] `pgsql-adapter-mock.test.ts` asserts private fields via `as unknown as` — rewrite to observable-behavior (custom `deriveFkColumnName` appears in compiled SQL).
+- [ ] 🔧 [types] `createPgsqlCompileOnlyAdapter` returns `PgsqlAdapter<DB>` not `CompileOnlyAdapter` — users can't land on the tightened guarantee through the factory.
+- [ ] 🔧 [types] `DetectedHierarchy` (introspection.ts) and `HierarchyIR` (model-ir.ts) are structurally identical — alias one to the other to avoid drift.
+- [ ] 🔧 [types] Add E2E testcontainer test proving real introspection populates `originalDbType` and CAST emits on compiled SQL.
 
 ---
 
