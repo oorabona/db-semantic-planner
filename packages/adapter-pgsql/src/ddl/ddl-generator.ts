@@ -258,9 +258,14 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 function formatDefaultValue(value: unknown): string {
 	// Handle SqlDefault object: { sql: 'now()' }
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		const sql = (value as Record<string, unknown>).sql as string;
-		validateSqlExpression(sql, 'column default');
-		return sql;
+		const rawSql = (value as Record<string, unknown>).sql;
+		if (typeof rawSql !== 'string') {
+			throw new Error(
+				`formatDefaultValue({ sql }): expected string, got ${typeof rawSql}`,
+			);
+		}
+		validateSqlExpression(rawSql, 'column default');
+		return rawSql;
 	}
 
 	// Handle function-like expressions (e.g., 'now()')
