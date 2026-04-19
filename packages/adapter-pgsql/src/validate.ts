@@ -305,6 +305,15 @@ export function validateExtensionName(
 		throw new InvalidIdentifierError(name, context, 'cannot be empty');
 	}
 
+	// PostgreSQL NAMEDATALEN - 1 = 63 character limit
+	if (name.length > 63) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			`exceeds maximum length of 63 characters (got ${name.length})`,
+		);
+	}
+
 	// Reject injection vectors before the character allowlist check
 	if (/[\x00-\x1f\x7f]/.test(name)) {
 		throw new InvalidIdentifierError(

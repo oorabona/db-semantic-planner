@@ -498,6 +498,20 @@ describe('SEC-005: extension name injection via generateExtensionsPhase', () => 
 		expect(() => validateExtensionName('')).toThrow(/cannot be empty/);
 	});
 
+	it('validateExtensionName: rejects name exceeding 63 characters (NAMEDATALEN limit)', () => {
+		const longName = 'a'.repeat(64);
+		expect(() => validateExtensionName(longName)).toThrow(
+			InvalidIdentifierError,
+		);
+		expect(() => validateExtensionName(longName)).toThrow(
+			/exceeds maximum length of 63/,
+		);
+	});
+
+	it('validateExtensionName: allows dotted extension name (foo.bar)', () => {
+		expect(() => validateExtensionName('foo.bar')).not.toThrow();
+	});
+
 	// ------------------------------------------------------------------
 	// Integration tests via generateDDL
 	// ------------------------------------------------------------------

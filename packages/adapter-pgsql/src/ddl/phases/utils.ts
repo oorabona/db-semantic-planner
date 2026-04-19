@@ -21,8 +21,11 @@ import type { PhaseContext } from './types.js';
  * @param name Raw identifier (table name, schema name, column name, …)
  * @returns Double-quoted identifier safe for DDL emission
  */
-export function quoteIdent(name: string): string {
-	validateIdentifier(name, 'alias');
+export function quoteIdent(
+	name: string,
+	type: 'table' | 'column' | 'schema' | 'alias' = 'alias',
+): string {
+	validateIdentifier(name, type);
 	return `"${name.replace(/"/g, '""')}"`;
 }
 
@@ -58,9 +61,9 @@ export function qualifyTableIdent(
 	schemaName: string | undefined,
 	naming: PhaseContext['naming'],
 ): string {
-	const table = quoteIdent(naming.toDatabase(tableName));
+	const table = quoteIdent(naming.toDatabase(tableName), 'table');
 	if (schemaName) {
-		return `${quoteIdent(naming.toDatabase(schemaName))}.${table}`;
+		return `${quoteIdent(naming.toDatabase(schemaName), 'schema')}.${table}`;
 	}
 	return table;
 }
