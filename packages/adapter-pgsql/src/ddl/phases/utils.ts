@@ -7,7 +7,7 @@
  * @module ddl/phases/utils
  */
 
-import { validateIdentifier } from '../../validate.js';
+import { validateExtensionName, validateIdentifier } from '../../validate.js';
 import type { PhaseContext } from './types.js';
 
 /**
@@ -24,6 +24,24 @@ import type { PhaseContext } from './types.js';
 export function quoteIdent(name: string): string {
 	validateIdentifier(name, 'alias');
 	return `"${name.replace(/"/g, '""')}"`;
+}
+
+/**
+ * Quote a PostgreSQL extension name for use in CREATE EXTENSION DDL statements.
+ *
+ * Extension names allow hyphens and dots (e.g. `uuid-ossp`, `postgis-raster`)
+ * which standard identifiers do not. This function calls `validateExtensionName()`
+ * for injection-safety, then wraps the name in double-quotes so PostgreSQL
+ * accepts hyphenated names without error.
+ *
+ * @security Always calls `validateExtensionName()` before quoting.
+ * @param name Raw extension name (e.g. `uuid-ossp`)
+ * @returns Double-quoted name safe for DDL emission (e.g. `"uuid-ossp"`)
+ */
+export function quoteExtensionName(name: string): string {
+	validateExtensionName(name, 'extension');
+	// No need to escape double-quotes inside — validateExtensionName rejects them.
+	return `"${name}"`;
 }
 
 /**

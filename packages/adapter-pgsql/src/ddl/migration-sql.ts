@@ -486,6 +486,10 @@ function upAddCheckConstraint(
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
 	const notValid = check.notValid ? ' NOT VALID' : '';
+	validateSqlExpression(
+		check.expression,
+		'migration check constraint expression',
+	);
 	return (
 		'DO $$ BEGIN ALTER TABLE ' +
 		qualifyTable(change.table, schemaName) +
@@ -842,6 +846,10 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return undefined;
+			validateSqlExpression(
+				check.expression,
+				'migration check constraint (down)',
+			);
 			return (
 				'DO $$ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +

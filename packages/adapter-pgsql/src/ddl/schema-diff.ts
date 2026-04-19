@@ -513,7 +513,13 @@ function normalizeDefault(value: unknown): string | undefined {
 
 	let str: string;
 	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		str = String((value as Record<string, unknown>).sql);
+		const rawSql = (value as Record<string, unknown>).sql;
+		if (typeof rawSql !== 'string') {
+			throw new Error(
+				`normalizeDefault({ sql }): expected string, got ${typeof rawSql}`,
+			);
+		}
+		str = rawSql;
 	} else {
 		str = String(value);
 	}
