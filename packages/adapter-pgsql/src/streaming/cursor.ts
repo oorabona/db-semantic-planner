@@ -137,9 +137,13 @@ export function buildDeclareCursor(options: CursorOptions): Node {
 export function buildFetch(options: FetchOptions): Node {
 	const dir = options.direction ?? 'next';
 
-	// Calculate direction and howMany based on FetchDirection
-	// PostgreSQL handles "ALL" variants as FORWARD/BACKWARD with LONG_MAX (2147483647)
-	// FIRST/LAST are ABSOLUTE with howMany = 1/-1 respectively
+	// Calculate direction and howMany based on FetchDirection.
+	// PostgreSQL semantics: FETCH FORWARD ALL / FETCH BACKWARD ALL fetches all remaining rows.
+	// pgsql-deparser emits "FETCH FORWARD ALL" when howMany === 9223372036854776000 (Number).
+	// This is the float64 approximation of INT64_MAX used as the ALL sentinel in the deparser.
+	// Note: the @pgsql/types type declares howMany as bigint, but the deparser performs a
+	// strict === comparison against the Number literal 9223372036854776000 — BigInt values
+	// never match. We pass the Number cast to bigint to satisfy the type while enabling ALL.
 	let direction: string;
 	let howMany: bigint;
 
@@ -153,12 +157,14 @@ export function buildFetch(options: FetchOptions): Node {
 			howMany = BigInt(-1);
 			break;
 		case 'forward_all':
+			// FETCH FORWARD ALL — deparser sentinel: Number 9223372036854776000 (float64 ≈ INT64_MAX)
 			direction = 'FETCH_FORWARD';
-			howMany = BigInt(2147483647); // INT_MAX = "all"
+			howMany = 9223372036854776000 as unknown as bigint;
 			break;
 		case 'backward_all':
+			// FETCH BACKWARD ALL — deparser sentinel: Number 9223372036854776000 (float64 ≈ INT64_MAX)
 			direction = 'FETCH_BACKWARD';
-			howMany = BigInt(2147483647); // INT_MAX = "all"
+			howMany = 9223372036854776000 as unknown as bigint;
 			break;
 		default:
 			direction = mapFetchDirection(dir);

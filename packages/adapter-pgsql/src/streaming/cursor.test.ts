@@ -69,13 +69,13 @@ describe('buildFetch', () => {
 
 	it('generates FETCH FORWARD ALL', () => {
 		const sql = deparse('forward_all');
-		// PostgreSQL handles ALL as FORWARD with INT_MAX
-		expect(sql).toBe('FETCH FORWARD 2147483647 test_cursor');
+		// pgsql-deparser emits FETCH FORWARD ALL when howMany === 9223372036854776000 (Number, float64 ≈ INT64_MAX)
+		expect(sql).toBe('FETCH FORWARD ALL test_cursor');
 	});
 
 	it('generates FETCH BACKWARD ALL', () => {
 		const sql = deparse('backward_all');
-		// PostgreSQL handles BACKWARD ALL as BACKWARD with INT_MAX
-		expect(sql).toBe('FETCH BACKWARD 2147483647 test_cursor');
+		// pgsql-deparser emits FETCH BACKWARD ALL when howMany === 9223372036854776000 (Number, float64 ≈ INT64_MAX)
+		expect(sql).toBe('FETCH BACKWARD ALL test_cursor');
 	});
 });

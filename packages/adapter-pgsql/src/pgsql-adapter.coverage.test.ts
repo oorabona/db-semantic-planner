@@ -1447,7 +1447,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compileWithIncludes - subquery includes', () => {
-		it('extracts subquery include info from decisions', () => {
+		// C3 fix: subquery strategy decisions are lowered to json_agg inline by
+		// mapToHandlerDecision inside compileSelect. subqueryIncludes is always
+		// empty — returning entries here would cause a double-fetch.
+		it('subqueryIncludes is always empty (no double-fetch)', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
@@ -1465,9 +1468,8 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes).toHaveLength(1);
-			expect(result.subqueryIncludes[0].relationName).toBe('posts');
-			expect(result.subqueryIncludes[0].targetTable).toBe('posts');
+			// subquery decisions are compiled inline as json_agg — no client-side fetch
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
 		it('skips include-strategy decisions that are not subquery', () => {
@@ -1507,7 +1509,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('uses includeAlias when available', () => {
+		it('uses includeAlias: subqueryIncludes is still empty (inline json_agg)', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'users',
@@ -1526,10 +1528,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].relationName).toBe('myPosts');
+			// json_agg is compiled inline — no client-side subquery entry
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('handles belongsTo relation type (swaps sourceKey/foreignKey)', () => {
+		it('handles belongsTo: subqueryIncludes is still empty (inline json_agg)', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -1547,7 +1550,8 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				],
 			} as any;
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+			// json_agg is compiled inline — no client-side subquery entry
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 	});
 
@@ -2199,7 +2203,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('compileWithIncludes — subquery include branches', () => {
-		it('includes relationType in entry', () => {
+		// C3 fix: subquery strategy decisions are lowered to json_agg inline.
+		// subqueryIncludes is always empty to prevent double-fetching.
+		it('subqueryIncludes always empty regardless of relationType', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
@@ -2224,11 +2230,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes.length).toBe(1);
-			expect(result.subqueryIncludes[0].relationType).toBe('hasMany');
+			// json_agg is embedded inline — no client-side fetch entry
+			expect(result.subqueryIncludes.length).toBe(0);
 		});
 
-		it('passes through includeIntent.select', () => {
+		it('subqueryIncludes empty even with includeIntent.select', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
@@ -2258,12 +2264,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].select).toEqual({
-				fields: ['title', 'body'],
-			});
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('passes through includeIntent.where', () => {
+		it('subqueryIncludes empty even with includeIntent.where', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'authors',
@@ -2298,10 +2302,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].where).toBeDefined();
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('derives FK for belongsTo relation', () => {
+		it('subqueryIncludes empty for belongsTo relationType', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -2326,11 +2330,10 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].sourceKey).not.toBe('id');
-			expect(result.subqueryIncludes[0].foreignKey).toBe('id');
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 
-		it('uses includeAlias as relationName', () => {
+		it('subqueryIncludes empty even when includeAlias is set', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -2356,7 +2359,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const result = adapter.compileWithIncludes(plan);
-			expect(result.subqueryIncludes[0].relationName).toBe('authorInfo');
+			expect(result.subqueryIncludes).toHaveLength(0);
 		});
 	});
 

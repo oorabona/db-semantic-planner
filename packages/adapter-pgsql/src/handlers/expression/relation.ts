@@ -76,8 +76,18 @@ export const relationColumnHandler: ExpressionHandler = {
 			throw new Error('Relation column handler requires column name');
 		}
 
-		// Look up the alias for this relation from state
-		const alias = state.aliases.get(relation) ?? relation;
+		// Look up the alias for this relation from state.
+		// For dotted paths like 'callee.file', split and resolve only the final
+		// segment — state.aliases keyed by the leaf relation name.
+		// A dotted path in state (unlikely) is also supported via direct lookup.
+		let alias: string;
+		if (relation.includes('.')) {
+			const segments = relation.split('.');
+			const leaf = segments[segments.length - 1]!;
+			alias = state.aliases.get(leaf) ?? state.aliases.get(relation) ?? leaf;
+		} else {
+			alias = state.aliases.get(relation) ?? relation;
+		}
 
 		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
 		if (column === '*') {

@@ -31,7 +31,6 @@ import { intentToDecisions } from './intent-to-decisions.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
-	deriveForeignKey,
 	extractAllIncludeDecisions,
 	extractExistsDecisions,
 	synthesizeMissingJoinDecisions,
@@ -766,8 +765,10 @@ export function compileSelect<T = unknown>(
 		];
 
 		// Enrich range operator decisions with dataType from model
-		// (PostgreSQL requires explicit type casts for range parameters)
-		enrichRangeDecisions(allDecisions, options?.model, plan.rootTable);
+		// (PostgreSQL requires explicit type casts for range parameters).
+		// Use deps.model as fallback so ORM queries through deps also get enriched.
+		const rangeModel = options?.model ?? deps.model;
+		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
 
 		simplifiedPlan = buildSimplifiedPlanReport(plan, allDecisions, schemaName);
 	} else {
@@ -796,68 +797,14 @@ export function compileWithIncludes<T = unknown>(
 ): CompileResultWithIncludes<T> {
 	const main = compileSelect<T>(plan, options, deps);
 
-	// Extract subquery include info from planner decisions
-	// Decisions with choice === 'subquery' need separate execution
+	// `choice === 'subquery'` planner decisions are lowered to json_agg by
+	// mapToHandlerDecision inside compileSelect — the related rows are already
+	// embedded in the compiled SQL as a json_agg correlated subquery.
+	// We must NOT surface them in subqueryIncludes, or the caller would fetch
+	// the same relation a second time (double-fetch / stale {rel}_json column).
+	// subqueryIncludes is intentionally empty for now; reserved for future
+	// truly-client-side fetch strategies that bypass the SQL layer entirely.
 	const subqueryIncludes: SubqueryIncludeInfo[] = [];
-
-	for (const d of plan.decisions) {
-		if (d.type !== 'include-strategy' || d.choice !== 'subquery') continue;
-
-		const ctx = d.context;
-		if (!ctx.target) continue;
-
-		const relationName = ctx.includeAlias ?? ctx.relation;
-		if (!relationName) continue;
-
-		// Derive FK using shared helper
-		const rawFk =
-			deriveForeignKey(ctx, deps.deriveFk, deps.defaultPk) ?? deps.defaultPk;
-		const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
-
-		// For subquery include, we need:
-		// - sourceKey: column on the parent result to extract IDs from
-		// - foreignKey: column on the target table to match via WHERE ... IN
-		//
-		// belongsTo (posts → author): FK=authorId is on source.
-		//   Extract authorId from parents → SELECT * FROM authors WHERE id IN (...)
-		//   sourceKey=authorId, foreignKey=id (target PK)
-		//
-		// hasMany (authors → posts): FK=authorId is on target.
-		//   Extract id from parents → SELECT * FROM posts WHERE author_id IN (...)
-		//   sourceKey=id, foreignKey=authorId (target FK)
-		const isBelongsTo = ctx.relationType === 'belongsTo';
-		const sourceKey = isBelongsTo ? fk : 'id';
-		const targetFk = isBelongsTo ? 'id' : fk;
-
-		// Find matching include intent for select/where passthrough
-		const includeIntent = (
-			plan.intent?.include as Array<Record<string, unknown>> | undefined
-		)?.find(
-			(i) => i.relation === relationName || i.relation === ctx.includeAlias,
-		);
-
-		const entry: Mutable<SubqueryIncludeInfo> = {
-			relationName,
-			targetTable: ctx.target,
-			foreignKey: targetFk,
-			sourceKey,
-			sourceTable: ctx.sourceTable ?? plan.rootTable,
-		};
-		if (typeof ctx.relationType === 'string') {
-			entry.relationType = ctx.relationType;
-		}
-		if (includeIntent?.select != null) {
-			entry.select = includeIntent.select as NonNullable<
-				SubqueryIncludeInfo['select']
-			>;
-		}
-		if (includeIntent?.where != null) {
-			entry.where = includeIntent.where as NonNullable<
-				SubqueryIncludeInfo['where']
-			>;
-		}
-		subqueryIncludes.push(entry);
-	}
 
 	return { main, subqueryIncludes };
 }

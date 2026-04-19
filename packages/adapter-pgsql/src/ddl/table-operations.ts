@@ -46,6 +46,10 @@ export function generateVacuumSQL(
 
 function formatDefault(value: unknown): string {
 	if (value === null) return 'NULL';
+	// { sql: string } escape hatch — emit verbatim (used by introspection-sourced defaults)
+	if (typeof value === 'object' && value !== null && 'sql' in value) {
+		return (value as Record<string, unknown>).sql as string;
+	}
 	if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
 	if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
 	return String(value);
