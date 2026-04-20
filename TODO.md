@@ -201,19 +201,19 @@ Branch: `fix/cli-review-20260419`
 
 ---
 
-## @dbsp/mcp-server — 5 findings (2 High, 3 Medium)
+## @dbsp/mcp-server — 5 findings (superseded by retro-audit PR #51, 2026-04-20)
 
-Branch: `fix/mcp-server-review-20260419`
+Branch: `fix/mcp-server-review-20260419` — superseded by retro-audit PR #51 (`b1c85cc`, 2026-04-20). 3 of 5 items addressed; 2 remain as feature TODOs (out of audit scope).
 
-- [ ] **[P0]** `packages/mcp-server/src/server.ts:55` — All `registerTool()` / `registerResource()` calls are TODO. `createMcpServer()` returns running server with ZERO dbsp tools/resources. MCP host initializes successfully but discovers empty capability surface. **Fix**: implement actual tool registrations (compile, dump, schema, etc.) per MCP protocol with input schemas and validators.
+- [ ] 💡 **[P0 → feature]** `packages/mcp-server/src/server.ts:55` — Server registers ZERO MCP tools (all TODOs). Audit PR #51 documented as scaffold (README pre-release banner + "Planned features"); tool implementation deferred as scope creep. **Next**: implement minimal `schema_info` tool first, then progressively add compile/dump/intent_validate per MCP protocol.
 
-- [ ] **[P1]** `packages/mcp-server/src/schema-loader.ts:178` — Loaded module cast to `ResolvedSchema` after `validateSchemaStructure()` (line 217) only checks `tables` and `relations` are objects. Missing fields (hints, conventions, indexes, defaultFilters) pass validation, defer to opaque MCP runtime errors. **Fix**: full structural validation against ResolvedSchema shape using valibot or manual checks.
+- [x] ✅ **[P1]** `packages/mcp-server/src/schema-loader.ts` — `validateResolvedSchema` covers tables/relations/hints/conventions/indexes (matches `ResolvedSchemaValidation` in `@dbsp/core`). `defaultFilters` intentionally gapped pending public export from core. (PR #51, 2026-04-20)
 
-- [ ] **[P1]** `packages/mcp-server/src/schema-loader.ts:165` — `index.ts:125` documents `--schema ./dbsp.schema.ts` but loader uses plain `import()`. Node rejects `.ts` with `Unknown file extension ".ts"`. Error recovery at line 193 only handles `Cannot find module` → falls through to generic `LOAD_FAILED`. **Fix**: detect `.ts` extension → use `tsx` loader or document `.js` only with build step.
+- [ ] 🔧 **[P1]** `packages/mcp-server/src/schema-loader.ts` — `.ts` file loader uses plain `import()`. README/printHelp document `tsx` peer dependency but loader doesn't programmatically attach it. Catch-block emits a clear "install tsx" message but doesn't auto-load. **Fix**: detect `.ts` extension → use tsx programmatic API.
 
-- [ ] **[P2]** `packages/mcp-server/src/schema-loader.ts:97` — `allowedRoots` enforced only when file exists, returns early for missing files at line 131. Callers can distinguish NOT_FOUND (outside allowlist + missing) from PATH_TRAVERSAL (outside + present) → leaks filesystem existence on network-exposed service. **Fix**: enforce `allowedRoots` BEFORE existence check, return same error for both.
+- [x] ✅ **[P2]** `packages/mcp-server/src/schema-loader.ts` — `allowedRoots` containment now applies to BOTH existent and non-existent paths via unified `isPathContained()` in new `path-validator.ts` module. Existence oracle closed. (PR #51, 2026-04-20)
 
-- [ ] **[P2]** `packages/mcp-server/src/index.ts:137` — `parseArgs()` runs outside main `try/catch`. Malformed invocations throw into outer `.catch()` at line 181, logged as `'[dbsp-mcp] Fatal error:'` with raw exception. Config mistakes look like crashes. **Fix**: wrap `parseArgs` in try/catch with friendly error message + usage hint.
+- [x] ✅ **[P2]** `packages/mcp-server/src/index.ts` — `parseArgs()` consumed inside `main()`'s try/catch with usage hint + exit 1. Empty `=` values rejected. Unknown flags rejected. POSIX `--` end-of-options supported. (PR #51, 2026-04-20)
 
 ---
 
@@ -260,3 +260,18 @@ Branch: `fix/mcp-server-review-20260419`
 - [ ] 🔧 [cli] `schema-codegen.ts` snake_case self-ref inference: `baseName = col.name.replace(/Id$/, '')` doesn't strip `_id` in snake_case mode, producing role names like `parent: 'parent_id'`. Use `/_?[iI]d$/`. Priority: L (generator quality)
 - [ ] 🔧 [cli] `schema-codegen.ts` FK `onDelete`/`onUpdate` values interpolated as `'${fkInfo.onDelete}'` without going through the local `singleQuoteEscape` helper. Pg enum values are safe today; inconsistency with column-default emission is the concern. Priority: L (consistency)
 - [ ] 🔧 [cli] `index.ts` Commander parse errors with `--json` in argv — verify help/version paths emit JSON too when `--json` is present, not plain text. May already work through the exitCode-0 detection; needs a specific test. Priority: L (JSON-mode coverage)
+
+---
+
+# Retro-audit 2026-04-20 mcp-server follow-ups (L — deferred from PR #51)
+
+> PR #51 merged as `b1c85cc` (2026-04-20). 22 audit findings (3 sonnet concerns + codex xhigh) + 23 Copilot/senior findings across 6 Copilot rounds (R3 + R5 escalated to user → STRUCTURAL fixes). Two new modules extracted: `path-validator.ts` (143 LoC, symlink-aware containment), `format-error.ts` (111 LoC, path sanitization). Tests 25 → 141 (+116, 5.6× increase). Items below are explicit deferrals.
+
+- [ ] 🔧 [mcp-server] Senior R6 F-001: `index.ts:251` uses `await import('node:path')` for `basename` (dynamic import) — replace with top-of-file `import { basename } from 'node:path';` Static-import policy consistency. Priority: L (style)
+- [ ] 🔧 [mcp-server] Senior R6 F-002: `format-error.ts` exports `sanitizeErrorMessage` as public API via `api.ts` re-export. Add `@stable` JSDoc tag + note "Placeholders (`<schema-file>`, `<schema-dir>`) and 500-char cap are part of the public contract — change requires major version bump." Priority: L (Hyrum-exposure documentation)
+- [ ] 🔧 [mcp-server] Senior R6 F-003: `format-error.ts:79` `sanitizeErrorMessage` uses literal-string `replaceAll` — add comment "MUST keep literal string semantics — switching to RegExp requires escaping `paths.resolved` and `paths.parent`" to prevent future refactor regression. Priority: L (defensive doc)
+- [ ] 🔧 [mcp-server] Copilot R6 single L: `schema-loader.ts:61` `canonicalRoots` JSDoc says "Empty array means cwd was used as the default root" but `validateAllowedRoots()` always returns `[process.cwd()]` (never empty). Update doc to reflect actual behavior. Priority: L (doc-code mismatch)
+- [ ] 🔧 [mcp-server] Senior R5 cosmetic L1: `schema-loader.test.ts:62-63` template-literal fixtures use double-tab indent on `indexes: {}`. biome-formatter would normalize; not blocking. Priority: L (cosmetic)
+- [ ] 🔧 [mcp-server] Senior R6 informational: `format-error.ts:107` truncation marker uses `'…'` (single character ellipsis). Tests assert `endsWith('…')` — this locks the wording. Acceptable but document in JSDoc that the marker is part of the contract. Priority: L
+- [ ] 💡 [mcp-server] FUTURE: implement at least one MCP tool (`schema_info` is the natural starting point) so the server transitions from "scaffold" to "functional pre-release". Then remove the README pre-release banner. Priority: feature (out of audit scope, in roadmap)
+- [ ] 🔧 [mcp-server] FUTURE: replace local `validateResolvedSchema` duck-check with `v.safeParse(ResolvedSchemaValidation, schema)` once `@dbsp/core` exports the validator publicly. Currently the local validator mirrors the valibot schema with a documented gap on `defaultFilters`. Priority: L (cross-package dependency)
