@@ -120,7 +120,7 @@ describe('validateSqlExpression', () => {
 	});
 
 	it('still rejects line-comment (--) after regex change (positive regression)', () => {
-		expect(() => validateSqlExpression("val -- injected", 'test')).toThrow(
+		expect(() => validateSqlExpression('val -- injected', 'test')).toThrow(
 			/Unsafe SQL expression/,
 		);
 	});
