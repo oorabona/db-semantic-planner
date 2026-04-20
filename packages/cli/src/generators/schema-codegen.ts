@@ -47,7 +47,7 @@ export interface SchemaCodegenOptions {
  * Rules:
  * - null/undefined → 'null'
  * - number | boolean → unquoted literal (String(value))
- * - string → JSON.stringify (handles ', ", \, \n, etc.)
+ * - string → singleQuoteEscape (escapes \, ', \n, \r, \t — produces single-quoted TS literal)
  * - { sql: '...' } shape → `{ sql: ${JSON.stringify(sqlExpr)} }`
  * - anything else → throws (unrecognized shape; prevents silent [object Object])
  */

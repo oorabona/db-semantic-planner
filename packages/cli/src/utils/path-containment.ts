@@ -14,7 +14,7 @@
  * startsWith" (2026-02-05).
  */
 
-import { relative, resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 /** Thrown when a path escapes the permitted base directory. */
 export class PathEscapeError extends Error {
@@ -61,16 +61,23 @@ export function validatePathInCwd(
 	// path (e.g. '/home/user/data/seed.sql') is unambiguous user intent and
 	// is allowed — the user typed it in full.
 	//
-	// We only enforce containment on relative paths. The check uses
+	// We only enforce containment on relative paths. Uses path.isAbsolute()
+	// (cross-platform: handles Windows drive-letter and UNC paths) instead of
+	// checking for a leading '/'. The containment check itself uses
 	// path.relative() instead of startsWith() to avoid the prefix-collision
-	// trap (/foo matches /foobar with startsWith).
+	// trap (/foo matches /foobar with startsWith). The '..' check is tightened
+	// to rel === '..' or rel starting with '../' / '..<sep>' to avoid false
+	// positives on legitimate paths like '..foo/file'.
 	//
 	// Reference: security-basics GOTCHAS.md §"Path containment bypass via
 	// startsWith" (2026-02-05).
-	const isRelative = !sanitised.startsWith('/');
+	const isRelative = !isAbsolute(sanitised);
 	if (isRelative) {
 		const rel = relative(base, resolved);
-		if (rel.startsWith('..')) {
+		// Use exact match for '..' or check for '..' followed by a separator
+		// to avoid false positives on paths like '..foo/file' (starts with '..'
+		// but is NOT a parent-directory traversal).
+		if (rel === '..' || rel.startsWith('../') || rel.startsWith(`..${sep}`)) {
 			throw new PathEscapeError(arg, resolved, base);
 		}
 	}

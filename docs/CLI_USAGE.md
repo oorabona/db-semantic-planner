@@ -159,7 +159,6 @@ dbsp migrate apply [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-d, --db <url>` | Database connection URL (required) | - |
-| `--schema-name <name>` | Database schema name | `public` |
 | `--dir <path>` | Migrations directory | `./migrations` |
 | `--dry-run` | Show pending migrations without applying | false |
 
@@ -174,7 +173,6 @@ dbsp migrate rollback [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-d, --db <url>` | Database connection URL (required) | - |
-| `--schema-name <name>` | Database schema name | `public` |
 | `--dir <path>` | Migrations directory | `./migrations` |
 | `--force` | Skip destructive-change confirmation | false |
 
@@ -189,8 +187,8 @@ dbsp migrate status [options]
 | Option | Description | Default |
 |--------|-------------|---------|
 | `-d, --db <url>` | Database connection URL (required) | - |
-| `--schema-name <name>` | Database schema name | `public` |
 | `--dir <path>` | Migrations directory | `./migrations` |
+| `--json` | Output as JSON | false |
 
 ### Examples
 
@@ -514,7 +512,7 @@ The CLI looks for schema files in this order:
 dbsp verify --schema ./schema.ts --db $DATABASE_URL
 
 # Generate DDL in CI
-dbsp generate ddl --schema ./schema.ts --db $DATABASE_URL
+dbsp generate ddl --schema ./schema.ts
 ```
 
 ### Testing

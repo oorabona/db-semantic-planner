@@ -288,7 +288,7 @@ const applyCommand = new Command('apply')
 						const version = await getNextSchemaVersion(
 							client as unknown as Pool,
 						);
-						const destructive = isDestructiveDown(parsed.upStatements);
+						const destructive = isDestructiveDown(parsed.downStatements);
 
 						// Atomic: DDL + record in ONE transaction on the lock-holding client
 						try {

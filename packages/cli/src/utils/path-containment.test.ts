@@ -70,6 +70,21 @@ describe('validatePathInCwd', () => {
 		});
 	});
 
+	describe('..foo false-positive prevention (M2 regression)', () => {
+		it('accepts a relative path starting with "..foo" (not a traversal)', () => {
+			// '..foo/file' starts with '..' but is NOT a parent-directory escape.
+			// path.relative('/app/workspace', '/app/workspace/..foo/file') === '..foo/file'
+			// which does NOT equal '..', '../', or '..<sep>' — must NOT be rejected.
+			expect(() => validatePathInCwd('..foo/file.csv', CWD)).not.toThrow();
+		});
+
+		it('still rejects genuine ../escape after ..foo fix', () => {
+			expect(() => validatePathInCwd('../etc/passwd', CWD)).toThrow(
+				PathEscapeError,
+			);
+		});
+	});
+
 	describe('NUL byte stripping', () => {
 		it('strips NUL bytes before path comparison', () => {
 			// NUL in the middle: 'seed.sql\0' → 'seed.sql' after strip → inside cwd

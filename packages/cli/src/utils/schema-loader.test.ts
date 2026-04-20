@@ -4,16 +4,24 @@
  * SEC-8: loadSchema must reject paths outside cwd to prevent path traversal.
  */
 
+import { dirname, join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SchemaLoadError } from './schema-loader.js';
 
 describe('loadSchema — path traversal protection (SEC-8)', () => {
 	it('rejects a schema path outside cwd', async () => {
 		const { loadSchema } = await import('./schema-loader.js');
-		// /tmp is always outside the project cwd during tests
+		// Use a sibling-of-cwd path — deterministically outside cwd regardless
+		// of where CI runs (avoids the '/tmp' assumption which can fail when cwd
+		// itself is under /tmp).
+		const outsidePath = join(
+			dirname(process.cwd()),
+			'outside-cwd-test-fixture',
+			'evil-schema.ts',
+		);
 		// The cwd check runs before existsSync, so the path-traversal error fires
 		// even if the file doesn't exist.
-		await expect(loadSchema('/tmp/evil-schema.ts')).rejects.toSatisfy(
+		await expect(loadSchema(outsidePath)).rejects.toSatisfy(
 			(e: unknown) =>
 				e instanceof SchemaLoadError &&
 				e.message.includes(

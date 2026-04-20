@@ -5,7 +5,7 @@
  * dbsp CLI - Schema-first code generation for db-semantic-planner.
  */
 
-import { Command } from 'commander';
+import { Command, CommanderError } from 'commander';
 import { generateCommand } from './commands/generate.js';
 import { introspectCommand } from './commands/introspect.js';
 import { migrateCommand } from './commands/migrate.js';
@@ -35,6 +35,11 @@ program.exitOverride();
 try {
 	program.parse();
 } catch (err) {
+	// Commander throws CommanderError for --help, --version, and parse errors.
+	// Exit 0 for informational outputs (help/version); only exit 1 for real errors.
+	if (err instanceof CommanderError && err.exitCode === 0) {
+		process.exit(0);
+	}
 	const message = err instanceof Error ? err.message : 'Command parse error';
 	if (process.argv.includes('--json')) {
 		console.log(JSON.stringify({ status: 'error', error: message }, null, 2));

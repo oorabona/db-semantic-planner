@@ -59,11 +59,29 @@ describe('redactDbUrl', () => {
 // ---------------------------------------------------------------------------
 
 describe('createDbConnection — error splitting (EH-5)', () => {
-	it('throws "pg is required" when pg import fails', async () => {
-		// We cannot reliably mock dynamic import across module boundaries in vitest
-		// without hoisting. Test the shape of the error message instead by verifying
-		// the function exists and the message prefix contract.
+	it('succeeds in creating a Pool when pg is importable (import path works)', async () => {
+		// Regression guard: createDbConnection must NOT throw "pg is required" when
+		// pg is importable. That message is only for when the dynamic import() itself
+		// fails (pg not installed). A successful import that then creates a Pool
+		// (even with a dummy URL) must NOT produce that sentinel message.
 		const { createDbConnection } = await import('./db-utils.js');
-		expect(typeof createDbConnection).toBe('function');
+		let caught: unknown;
+		try {
+			// pg is a dev dependency in the monorepo — import() succeeds.
+			// Pool construction with a dummy URL does NOT throw synchronously
+			// (pg validates connection strings lazily, only on connect()).
+			const result = await createDbConnection('postgresql://localhost/dummy');
+			// If we reach here, pg was importable and Pool was created — that's success.
+			expect(result).toHaveProperty('pool');
+			// Clean up the idle pool so vitest doesn't hang
+			await result.pool.end();
+		} catch (e) {
+			caught = e;
+		}
+		// If an error was thrown, it must NOT be the "pg is required" sentinel —
+		// that would mean the import-error path is misclassifying Pool errors.
+		if (caught !== undefined) {
+			expect((caught as Error).message).not.toContain('pg is required');
+		}
 	});
 });

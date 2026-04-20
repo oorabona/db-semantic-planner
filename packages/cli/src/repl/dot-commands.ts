@@ -146,13 +146,13 @@ function handleBooleanToggle(
 		}
 		return {
 			output: `✓ ${label}: ON`,
-			stateChange: { [key]: true },
+			stateChange: { [key]: true } as Partial<BatchState>,
 		};
 	}
 	if (arg === 'off') {
 		return {
 			output: `✓ ${label}: OFF`,
-			stateChange: { [key]: false },
+			stateChange: { [key]: false } as Partial<BatchState>,
 		};
 	}
 	// Toggle (no argument)
@@ -162,7 +162,7 @@ function handleBooleanToggle(
 	const newValue = !state[key];
 	return {
 		output: `✓ ${label}: ${newValue ? 'ON' : 'OFF'}`,
-		stateChange: { [key]: newValue },
+		stateChange: { [key]: newValue } as Partial<BatchState>,
 	};
 }
 
