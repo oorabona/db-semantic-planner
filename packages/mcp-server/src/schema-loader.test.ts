@@ -7,7 +7,16 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+	afterAll,
+	afterEach,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from 'vitest';
 import {
 	loadSchema,
 	SchemaLoadError,
@@ -531,7 +540,11 @@ describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
 			// Message must be capped at 500 chars
 			expect(msg.length).toBeLessThanOrEqual(500);
 		} finally {
-			try { uls(badPath); } catch { /* ignore */ }
+			try {
+				uls(badPath);
+			} catch {
+				/* ignore */
+			}
 		}
 	});
 
@@ -539,7 +552,10 @@ describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
 		// This file throws an Error whose message contains the parent directory
 		const badPath = join(allowedDir, 'bad-for-dirname-test.js');
 		const { writeFileSync: wfs, unlinkSync: uls } = await import('node:fs');
-		wfs(badPath, `throw new Error("Cannot load schema from directory: ${allowedDir}");`);
+		wfs(
+			badPath,
+			`throw new Error("Cannot load schema from directory: ${allowedDir}");`,
+		);
 		try {
 			await loadSchema({ schemaPath: badPath, allowedRoots: [testDir] });
 		} catch (err) {
@@ -551,7 +567,11 @@ describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
 				expect(msg).toMatch(/<schema-file>|<schema-dir>/);
 			}
 		} finally {
-			try { uls(badPath); } catch { /* ignore */ }
+			try {
+				uls(badPath);
+			} catch {
+				/* ignore */
+			}
 		}
 	});
 });
@@ -620,7 +640,9 @@ describe('M-E: warn-once semantics for missing allowedRoots', () => {
 	});
 
 	it('warning is emitted to stderr (not stdout)', () => {
-		const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+		const stderrSpy = vi
+			.spyOn(process.stderr, 'write')
+			.mockImplementation(() => true);
 		// Call without allowedRoots — this triggers the warn-once branch.
 		// Use a simple relative path that won't trigger PATH_TRAVERSAL.
 		validatePath('./nonexistent-schema.js');
@@ -633,7 +655,9 @@ describe('M-E: warn-once semantics for missing allowedRoots', () => {
 	});
 
 	it('warning is emitted exactly once across multiple calls', () => {
-		const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+		const stderrSpy = vi
+			.spyOn(process.stderr, 'write')
+			.mockImplementation(() => true);
 		// Call multiple times without allowedRoots — warning must appear exactly once
 		for (let i = 0; i < 3; i++) {
 			validatePath('./nonexistent-schema.js');
