@@ -4,7 +4,13 @@
  * Manages command history with persistence to ~/.dbsp_history
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readFileSync,
+	writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -29,6 +35,12 @@ export class CommandHistory {
 	private load(): void {
 		try {
 			if (existsSync(HISTORY_FILE)) {
+				// SEC-5: Tighten permissions on load (fire-and-forget)
+				try {
+					chmodSync(HISTORY_FILE, 0o600);
+				} catch {
+					// Best-effort — ignore if we can't chmod (e.g., read-only FS)
+				}
 				const content = readFileSync(HISTORY_FILE, 'utf-8');
 				this.history = content
 					.split('\n')
@@ -48,16 +60,24 @@ export class CommandHistory {
 			if (!existsSync(dir)) {
 				mkdirSync(dir, { recursive: true });
 			}
-			writeFileSync(HISTORY_FILE, this.history.join('\n'), 'utf-8');
+			// SEC-5: Write with mode 0600 (user-only read/write)
+			writeFileSync(HISTORY_FILE, this.history.join('\n'), {
+				encoding: 'utf-8',
+				mode: 0o600,
+			});
 		} catch {
 			// Ignore save errors
 		}
 	}
 
 	/**
-	 * Add a command to history
+	 * Add a command to history.
+	 *
+	 * @param command - Command string to record
+	 * @param persist - Whether to persist to disk (default: true). Pass false for
+	 *   batch-mode queries that should not be saved to ~/.dbsp_history (SEC-13).
 	 */
-	add(command: string): void {
+	add(command: string, persist = true): void {
 		const trimmed = command.trim();
 		if (!trimmed) return;
 
@@ -72,7 +92,9 @@ export class CommandHistory {
 		}
 
 		this.resetIndex();
-		this.save();
+		if (persist) {
+			this.save();
+		}
 	}
 
 	/**

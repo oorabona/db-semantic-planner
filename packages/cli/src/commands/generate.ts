@@ -137,20 +137,18 @@ export const generateCommand = new Command('generate')
 
 					case 'manifest':
 					case 'kysely':
-						console.error(
-							`❌ Target '${target}' has been removed in ARCH-005.`,
+						// EH-10: Throw instead of process.exit(1) inside try — outer catch handles exit
+						throw new Error(
+							`Target '${target}' has been removed in ARCH-005. ` +
+								`These generators required the legacy defineSchema() format. ` +
+								`Use 'ddl' target for SQL generation.`,
 						);
-						console.error(
-							`   These generators required the legacy defineSchema() format.`,
-						);
-						console.error(`   Use 'ddl' target for SQL generation.`);
-						process.exit(1);
-						break;
 
 					default:
-						console.error(`❌ Unknown target: ${target}`);
-						console.error(`   Available targets: ddl`);
-						process.exit(1);
+						// EH-10: Throw instead of process.exit(1) inside try — outer catch handles exit
+						throw new Error(
+							`Unknown target: ${target}. Available targets: ddl`,
+						);
 				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

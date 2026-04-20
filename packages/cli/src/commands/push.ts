@@ -71,9 +71,17 @@ export const pushCommand = new Command('push')
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});
 
-						// Filter out any statement that would DROP the migrations table
+						// SEC-7: Escape MIGRATIONS_TABLE before interpolating into RegExp
+						const escapedTable = MIGRATIONS_TABLE.replace(
+							/[.*+?^${}()|[\]\\]/g,
+							'\\$&',
+						);
+						// CC-11: Token-based check — match DROP TABLE ... "tableName" (no greedy .*
+						// across statement boundaries). The pattern anchors on the quoted table name
+						// appearing anywhere in the statement, which is safe for single-statement
+						// inputs (generateDDL returns one statement per array entry).
 						const migrationsPattern = new RegExp(
-							`DROP\\s+TABLE.*"${MIGRATIONS_TABLE}"`,
+							`DROP\\s+TABLE(?:\\s+IF\\s+EXISTS)?(?:\\s+"[^"]*"\\s*\\.)?\\s*"${escapedTable}"`,
 							'i',
 						);
 						const filtered = statements.filter(
@@ -88,7 +96,29 @@ export const pushCommand = new Command('push')
 								: {}),
 						});
 
-						if (!options.json && !options.dryRun) {
+						// CC-1: --drop --json must emit JSON to stdout on success
+						if (options.json) {
+							const droppedTables = statements
+								.filter((s) => /DROP\s+TABLE/i.test(s))
+								.filter((s) => !migrationsPattern.test(s))
+								.map((s) => {
+									const m = s.match(/"([^"]+)"\s*;?\s*$/);
+									return m ? m[1] : s;
+								})
+								.filter((t): t is string => t !== undefined);
+							console.log(
+								JSON.stringify(
+									{
+										status: options.dryRun ? 'dry-run' : 'dropped',
+										tables: droppedTables,
+										tablesDropped: droppedTables.length,
+										statementsExecuted: result.statementsExecuted,
+									},
+									null,
+									2,
+								),
+							);
+						} else if (!options.dryRun) {
 							console.log(
 								`\n✅ Push complete: ${result.statementsExecuted} statements executed`,
 							);
@@ -136,7 +166,8 @@ export const pushCommand = new Command('push')
 							} else {
 								console.log('✅ Database is up to date — nothing to push.');
 							}
-							process.exit(0);
+							// EH-14: return instead of process.exit(0) so pool.end() in finally runs
+							return;
 						}
 
 						outputResult(statements, options);
@@ -165,16 +196,20 @@ export const pushCommand = new Command('push')
 							);
 						}
 					}
-
-					process.exit(0);
+					// EH-14: return so finally runs pool.end() before the outer success path
 				} finally {
 					await pool.end();
 				}
 			} catch (error) {
-				if (error instanceof Error) {
-					console.error(`❌ Error: ${error.message}`);
+				const message =
+					error instanceof Error ? error.message : 'Unknown error occurred';
+				// CC-2+EH-7: If --json, error goes to stdout as JSON; otherwise stderr
+				if (options.json) {
+					console.log(
+						JSON.stringify({ status: 'error', error: message }, null, 2),
+					);
 				} else {
-					console.error('❌ Unknown error occurred');
+					console.error(`❌ Error: ${message}`);
 				}
 				process.exit(1);
 			}

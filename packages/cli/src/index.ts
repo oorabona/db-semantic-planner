@@ -28,4 +28,18 @@ program.addCommand(pushCommand);
 program.addCommand(replCommand);
 program.addCommand(verifyCommand);
 
-program.parse();
+// CC-15: Intercept Commander parse errors so --json commands receive a JSON
+// error object on stdout instead of a plain-text usage message.
+program.exitOverride();
+
+try {
+	program.parse();
+} catch (err) {
+	const message = err instanceof Error ? err.message : 'Command parse error';
+	if (process.argv.includes('--json')) {
+		console.log(JSON.stringify({ status: 'error', error: message }, null, 2));
+	} else {
+		console.error(`❌ ${message}`);
+	}
+	process.exit(1);
+}

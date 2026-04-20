@@ -12,7 +12,7 @@
  */
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelIR } from '@dbsp/core';
 
@@ -83,6 +83,16 @@ export function findSchemaFile(cwd: string): string | null {
  */
 export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 	const resolvedPath = resolve(schemaPath);
+
+	// SEC-8: Prevent path traversal — schema must be under cwd.
+	// This check runs before existsSync so traversal attempts are caught
+	// regardless of whether the file exists.
+	const cwd = resolve(process.cwd());
+	if (!resolvedPath.startsWith(cwd + sep)) {
+		throw new SchemaLoadError(
+			`Schema file must be inside the current working directory: ${resolvedPath}`,
+		);
+	}
 
 	if (!existsSync(resolvedPath)) {
 		throw new SchemaLoadError(`Schema file not found: ${resolvedPath}`);
