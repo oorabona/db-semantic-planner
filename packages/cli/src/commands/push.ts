@@ -102,7 +102,9 @@ export const pushCommand = new Command('push')
 								.filter((s) => /DROP\s+TABLE/i.test(s))
 								.filter((s) => !migrationsPattern.test(s))
 								.map((s) => {
-									const m = s.match(/"([^"]+)"\s*;?\s*$/);
+									// M6: handle CASCADE between last quoted identifier and semicolon
+									// e.g. DROP TABLE IF EXISTS "public"."users" CASCADE;
+									const m = s.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/i);
 									return m ? m[1] : s;
 								})
 								.filter((t): t is string => t !== undefined);

@@ -313,6 +313,27 @@ describe('createDbConnection', () => {
 			await conn.rollbackTransaction();
 		});
 
+		it('M4: releases client and nulls txClient when BEGIN fails', async () => {
+			// Regression: pool.connect() succeeds but txClient.query('BEGIN') throws.
+			// With max:1 pool, failure to release the client deadlocks all subsequent
+			// pool.connect() calls.
+			const conn = await createDbConnection('postgres://localhost/testdb');
+			mockClientQuery.mockRejectedValueOnce(new Error('BEGIN failed'));
+
+			await expect(conn.beginTransaction()).rejects.toThrow('BEGIN failed');
+
+			// Client must be released so the pool slot is available again
+			expect(mockRelease).toHaveBeenCalledTimes(1);
+			// txClient must be null so inTransaction is false
+			expect(conn.inTransaction).toBe(false);
+
+			// A subsequent beginTransaction() must succeed (no pool deadlock)
+			mockClientQuery.mockResolvedValueOnce({ rows: [] }); // BEGIN
+			await conn.beginTransaction();
+			expect(conn.inTransaction).toBe(true);
+			await conn.rollbackTransaction();
+		});
+
 		it('throws on commit without active transaction', async () => {
 			const conn = await createDbConnection('postgres://localhost/testdb');
 			await expect(conn.commitTransaction()).rejects.toThrow(

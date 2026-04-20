@@ -328,7 +328,7 @@ export async function executeBatch(
 }
 
 export async function runBatchMode(options: BatchModeOptions): Promise<void> {
-	const { queries, format } = options;
+	const { format } = options;
 
 	let execution: BatchExecutionResult;
 	try {
@@ -347,11 +347,11 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	const { results, assertionSummary } = execution;
 
 	// Output results in text format
+	// M-3: use result.query — results is no longer 1:1 with queries after
+	// continuation-line coalescing (CODEX-4). queries[i] would misalign labels.
 	if (format === 'text') {
-		for (let i = 0; i < results.length; i++) {
-			const result = results[i];
-			if (!result) continue;
-			console.log(`\n> ${queries[i]}`);
+		for (const result of results) {
+			console.log(`\n> ${result.query}`);
 			if (result.success) {
 				console.log(result.output);
 			} else {

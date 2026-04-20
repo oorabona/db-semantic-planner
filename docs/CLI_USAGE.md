@@ -281,20 +281,33 @@ Inside the REPL, use these commands:
 | `.schema <table>` | Show table columns and types |
 | `.relations <table>` | Show table relations |
 
-### Query Execution
+### Mode Toggles
 
 | Command | Description |
 |---------|-------------|
-| `.sql` | Switch input to raw SQL mode (vs NQL mode) |
-| `.exec` | Execute query on database (requires `--db`) |
+| `.natural` | Switch to natural query language (NQL) mode |
+| `.sql` | Switch to raw SQL mode |
+| `.exec [on\|off]` | Toggle or set execution mode (requires `--db`) |
+| `.explain [on\|off]` | Toggle EXPLAIN output for queries |
 | `.parse [on\|off]` | Toggle parse tree (AST) output |
+| `.output [json\|table\|csv]` | Set result output format (default: `json`) |
+
+### Transactions
+
+| Command | Description |
+|---------|-------------|
+| `.begin` | Start a transaction (BEGIN) — requires `--db` |
+| `.commit` | Commit the active transaction (COMMIT) |
+| `.rollback` | Rollback the active transaction (ROLLBACK) |
 
 ### Database Operations
 
 | Command | Description |
 |---------|-------------|
 | `.use <schema>` | Set PostgreSQL schema (e.g., `.use tenant_1`) |
-| `.import <file>` | Import and execute SQL file |
+| `.import <file>` | Import and execute a SQL file (requires `--db`) |
+| `.load <table> <file.csv>` | Import a CSV file into a table (requires `--db`) |
+| `.dump <table> <file.csv>` | Export a table to CSV (requires `--db`) |
 
 ---
 

@@ -81,8 +81,9 @@ export const verifyCommand = new Command('verify')
 						console.log(formatVerifyResult(result));
 					}
 
-					// Exit with error code if not valid
-					process.exit(result.valid ? 0 : 1);
+					// EH-14: set exit code; let finally run pool.end() before process exits
+					process.exitCode = result.valid ? 0 : 1;
+					return;
 				} finally {
 					// Close database connection
 					await pool.end();

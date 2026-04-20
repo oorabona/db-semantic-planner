@@ -110,3 +110,63 @@ describe('push — JSON error output (CC-2+EH-7)', () => {
 		expect(output.error).toBe(message);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// M6: --drop --json table-name extraction handles CASCADE and schema-qualified names
+// ---------------------------------------------------------------------------
+
+describe('push — drop table-name extraction with CASCADE (M6)', () => {
+	/**
+	 * Mirror of the extraction logic from push.ts.
+	 * The fix must correctly extract the table name (last quoted identifier before
+	 * optional CASCADE) from DROP TABLE statements that include:
+	 *  - schema-qualified names: "public"."users"
+	 *  - CASCADE keyword before semicolon
+	 *  - Both together
+	 */
+	function extractTableName(stmt: string): string {
+		const m = stmt.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/i);
+		return m ? m[1] : stmt;
+	}
+
+	it('extracts simple unqualified table name', () => {
+		expect(extractTableName('DROP TABLE IF EXISTS "users";')).toBe('users');
+	});
+
+	it('extracts table name from schema-qualified DROP TABLE', () => {
+		// Old regex `/"([^"]+)"\s*;?\s*$/` would capture 'users' correctly here,
+		// but only if there is no CASCADE. New regex must also handle it.
+		expect(extractTableName('DROP TABLE IF EXISTS "public"."users";')).toBe(
+			'users',
+		);
+	});
+
+	it('extracts table name from DROP TABLE with CASCADE', () => {
+		// Old regex failed here: CASCADE between last quote and semicolon
+		// broke the \s*;?\s*$ anchor match.
+		expect(extractTableName('DROP TABLE IF EXISTS "users" CASCADE;')).toBe(
+			'users',
+		);
+	});
+
+	it('extracts table name from schema-qualified DROP TABLE with CASCADE', () => {
+		// The fully-qualified + CASCADE form that triggered M6
+		expect(
+			extractTableName('DROP TABLE IF EXISTS "public"."users" CASCADE;'),
+		).toBe('users');
+	});
+
+	it('does NOT fall back to full DDL string on CASCADE form (regression guard)', () => {
+		const stmt = 'DROP TABLE IF EXISTS "public"."users" CASCADE;';
+		const result = extractTableName(stmt);
+		// Must be 'users', not the full DDL string
+		expect(result).not.toBe(stmt);
+		expect(result).toBe('users');
+	});
+
+	it('handles missing semicolon', () => {
+		expect(
+			extractTableName('DROP TABLE IF EXISTS "public"."orders" CASCADE'),
+		).toBe('orders');
+	});
+});

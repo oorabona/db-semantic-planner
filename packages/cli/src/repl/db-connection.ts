@@ -179,7 +179,14 @@ export async function createDbConnection(
 				);
 			}
 			txClient = await pool.connect();
-			await txClient.query('BEGIN');
+			try {
+				await txClient.query('BEGIN');
+			} catch (err) {
+				// M4: release client on BEGIN failure to avoid pool deadlock (max: 1)
+				txClient.release();
+				txClient = null;
+				throw err;
+			}
 		},
 
 		async commitTransaction(): Promise<void> {

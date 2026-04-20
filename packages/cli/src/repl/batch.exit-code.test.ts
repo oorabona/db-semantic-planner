@@ -15,7 +15,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-
 // ---------------------------------------------------------------------------
 // Shared mock infrastructure (mirrors batch.coverage.test.ts pattern)
 // ---------------------------------------------------------------------------
@@ -169,7 +168,10 @@ describe('[CODEX-6] exit code: assertions present + query failure → exit 1', (
 
 		try {
 			await runBatchMode(
-				makeOptions({ format: 'json', assertFile: '/path/to/file.assert.dbsp' }),
+				makeOptions({
+					format: 'json',
+					assertFile: '/path/to/file.assert.dbsp',
+				}),
 			);
 		} catch (e) {
 			expect(e.message).toBe('PROCESS_EXIT');
@@ -210,7 +212,10 @@ describe('[CODEX-6] exit code: assertions present + query failure → exit 1', (
 
 		try {
 			await runBatchMode(
-				makeOptions({ format: 'json', assertFile: '/path/to/file.assert.dbsp' }),
+				makeOptions({
+					format: 'json',
+					assertFile: '/path/to/file.assert.dbsp',
+				}),
 			);
 		} catch (e) {
 			expect(e.message).toBe('PROCESS_EXIT');
@@ -228,7 +233,10 @@ describe('[CODEX-6] exit code: assertions present + query failure → exit 1', (
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
-			storedCb?.({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
 		});
 
 		mockReadFileSync.mockReturnValue('valid');
@@ -262,7 +270,10 @@ describe('[CODEX-6] exit code: assertions present + query failure → exit 1', (
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
 			// Query compiles OK but DB execution fails
-			storedCb?.({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
 			storedCb?.({
 				type: 'execution-result',
 				result: {
@@ -302,16 +313,16 @@ describe('[EH-3] executeBatch is library-safe — no process.exit', () => {
 	});
 
 	it('throws an Error when init rejects — does not call process.exit', async () => {
-		const processExitSpy = vi
-			.spyOn(process, 'exit')
-			.mockImplementation(() => {
-				throw new Error('unexpected exit');
-			});
+		const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+			throw new Error('unexpected exit');
+		});
 
 		mockEngineInstance.init.mockRejectedValue(new Error('Init failed hard'));
 
 		// executeBatch should throw, not call process.exit
-		await expect(executeBatch(makeOptions())).rejects.toThrow('Init failed hard');
+		await expect(executeBatch(makeOptions())).rejects.toThrow(
+			'Init failed hard',
+		);
 
 		expect(processExitSpy).not.toHaveBeenCalled();
 		processExitSpy.mockRestore();
@@ -332,11 +343,9 @@ describe('[EH-3] executeBatch is library-safe — no process.exit', () => {
 	});
 
 	it('throws when DB connection fails — no process.exit', async () => {
-		const processExitSpy = vi
-			.spyOn(process, 'exit')
-			.mockImplementation(() => {
-				throw new Error('unexpected exit');
-			});
+		const processExitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {
+			throw new Error('unexpected exit');
+		});
 
 		// Emit init-error event
 		mockEngineInstance.on.mockImplementation((cb) => {
@@ -561,7 +570,9 @@ describe('[EH-11] --json mode: errors go to stdout as JSON', () => {
 	});
 
 	it('emits JSON error to stdout when executeBatch throws and format=json', async () => {
-		mockEngineInstance.init.mockRejectedValue(new Error('catastrophic failure'));
+		mockEngineInstance.init.mockRejectedValue(
+			new Error('catastrophic failure'),
+		);
 
 		try {
 			await runBatchMode(makeOptions({ format: 'json' }));
@@ -606,5 +617,80 @@ describe('[EH-11] --json mode: errors go to stdout as JSON', () => {
 		// stdout must NOT have a JSON error envelope
 		const logCalls = consoleLogSpy.mock.calls.flat().join(' ');
 		expect(logCalls).not.toContain('"status"');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M-class: M3 — text output labels use result.query, not queries[i]
+// ---------------------------------------------------------------------------
+
+describe('[M3] text output: labels use result.query (not queries array index)', () => {
+	let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+	let consoleErrorSpy: ReturnType<typeof vi.spyOn>;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockReplEngineCtorArgs.length = 0;
+		mockEngineInstance.init.mockResolvedValue(undefined);
+		mockEngineInstance.destroy.mockResolvedValue(undefined);
+		mockEngineInstance.getState.mockReturnValue({ outputMode: 'json' });
+		consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+		consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		consoleLogSpy.mockRestore();
+		consoleErrorSpy.mockRestore();
+	});
+
+	it('label shows result.query not queries[i] when continuation line precedes normal query', async () => {
+		// Regression for M3: queries = ['from users \\', 'where id = 1', 'from posts']
+		// After CODEX-4, the continuation line emits no events → results array has
+		// 2 entries (not 3). The old loop `queries[i]` at i=0 would label the first
+		// result with 'from users \\' instead of the actual coalesced query text
+		// stored in result.query.
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+
+		// Simulate: continuation line emits nothing; following lines emit their query text
+		mockEngineInstance.submit.mockImplementation(async (query: string) => {
+			if (query === 'from users \\') {
+				// no events — continuation accumulation
+			} else {
+				storedCb?.({
+					type: 'query-result',
+					result: { sql: 'SELECT 1', params: [] },
+				});
+			}
+		});
+
+		await runBatchMode(
+			makeOptions({
+				format: 'text',
+				queries: ['from users \\', 'where id = 1', 'from posts'],
+			}),
+		);
+
+		// Collect all log calls to find the output labels ("> <query>")
+		const logLines = consoleLogSpy.mock.calls.flat() as string[];
+		const labelLines = logLines.filter((l) => l.startsWith('\n> '));
+
+		// Must have exactly 2 labels (the 2 executable queries, not 3)
+		expect(labelLines).toHaveLength(2);
+
+		// Labels must reflect the actual query text from the result, not the
+		// queries array. result.query for these two results is 'where id = 1'
+		// and 'from posts' (as returned by mapEventsToBatchResult which receives
+		// the query param from the executeBatch loop).
+		expect(labelLines[0]).toBe('\n> where id = 1');
+		expect(labelLines[1]).toBe('\n> from posts');
+
+		// The continuation line text must NOT appear as a label
+		expect(labelLines.join(' ')).not.toContain('from users \\');
 	});
 });
