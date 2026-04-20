@@ -242,3 +242,21 @@ Branch: `fix/mcp-server-review-20260419`
 - [ ] 🔧 [adapter-pgsql] NAMEDATALEN byte-vs-char asymmetry: `validateIdentifier` uses `.length > 63` (char count); `quoteRoleName`/`validateCollationName` use `Buffer.byteLength(name, 'utf8') > 63` (byte count). In practice the ASCII-only regex makes them equivalent; documentation-wise the asymmetry is confusing. Priority: L
 - [ ] 🔧 [tests/e2e] `tests/e2e/originalDbType-cast.test.ts` `execDDL()` uses `pool.query()` which does not pin to a specific connection — `SET search_path TO X` and the `finally` reset may run on different pool connections. Wrap in `pool.connect()` + `client.query()` + `client.release()` for strict session affinity. Pre-existing pattern; latent issue. Priority: L
 - [ ] 🔧 [adapter-pgsql] M-5 `SchemaChange.meta` discriminated union: 56 `as ForeignKeyIR`/`as IndexIR`/`as ColumnIR` casts in `migration-sql.ts`. Full union per `change.kind` (~25 kinds) deferred with in-source disclosure at `migration-sql.ts` top-of-file. Priority: L (structural refactor)
+
+---
+
+# Retro-audit 2026-04-20 cli follow-ups (L — deferred from PR #50)
+
+> PR #50 merged as `44c9913` (2026-04-20). 60 audit findings (5 parallel sonnet + codex xhigh) + 12 Copilot findings + 5 senior findings addressed across 3 Copilot rounds. R3 was clean. Items below are explicit deferrals — not missed work.
+
+- [ ] 🔧 [cli] SC-1 `processDotCommand` god-switch in `packages/cli/src/repl/dot-commands.ts` — 444 lines, CC=113, mixes I/O + business logic + file ops across 18 case branches. Extract per-case private handlers, wire through a dispatch table. Priority: L (maintainability)
+- [ ] 🔧 [cli] SC-2 `repl-engine.ts` 261-line duplicate dispatcher (CC=91) — parallels the dot-commands god-switch for a second REPL engine surface. Same refactor shape. Priority: L
+- [ ] 🔧 [cli] SC-3 `handleTableConfig` CC=52 in `repl-engine.ts` — four copy-pasted validate/apply blocks. Model as option-map, loop once. Priority: L
+- [ ] 🔧 [cli] SC-4 `handleNql` 157 lines in `repl-engine.ts` — inline `QueryResult` construction mixed with execution-control. Extract `buildQueryResult()` + `shouldExecuteQuery()` pure helpers. Priority: L
+- [ ] 🔧 [cli/types] SC-8 `isValidSchema` duplicated in `packages/cli/src/utils/schema-loader.ts` and `packages/gui/src/sidecar/schema-loader.ts` with `similarity=1.0`. Move canonical version to `packages/types` so both packages depend on it. Priority: L (cross-package move)
+- [ ] 🔧 [cli] Narrow `schema-loader.ts` realpath catch-all to `err.code === 'ENOENT'` only — currently swallows EACCES/ELOOP/EPERM and falls through to existsSync, which may still return true on a symlink with exotic permissions. Priority: L (defense-in-depth, narrow window)
+- [ ] 🔧 [cli] `migrate.test.ts` destructive-flag regression test is a tautology — it calls `mockIsDestructiveDown(parsed.downStatements)` in the test body instead of exercising `applyCommand` end-to-end. Convert to an integration test via testcontainers with a destructive-DOWN fixture asserting the recorded `destructive=true` row. Priority: L (test quality)
+- [ ] 🔧 [cli] `repl/history.ts` `chmodSync` runs only on file LOAD (at next session), not after each `save()`. A history file created at 0644 by a prior tool retains that mode through the current session's saves until the next REPL start. Add `chmodSync(HISTORY_FILE, 0o600)` after every `writeFileSync` (best-effort). Priority: L (hygiene)
+- [ ] 🔧 [cli] `schema-codegen.ts` snake_case self-ref inference: `baseName = col.name.replace(/Id$/, '')` doesn't strip `_id` in snake_case mode, producing role names like `parent: 'parent_id'`. Use `/_?[iI]d$/`. Priority: L (generator quality)
+- [ ] 🔧 [cli] `schema-codegen.ts` FK `onDelete`/`onUpdate` values interpolated as `'${fkInfo.onDelete}'` without going through the local `singleQuoteEscape` helper. Pg enum values are safe today; inconsistency with column-default emission is the concern. Priority: L (consistency)
+- [ ] 🔧 [cli] `index.ts` Commander parse errors with `--json` in argv — verify help/version paths emit JSON too when `--json` is present, not plain text. May already work through the exitCode-0 detection; needs a specific test. Priority: L (JSON-mode coverage)
