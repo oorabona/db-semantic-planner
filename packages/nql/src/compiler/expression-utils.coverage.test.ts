@@ -7,6 +7,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
 	NqlBooleanLiteral,
@@ -422,15 +423,29 @@ describe('expressionToSql', () => {
 		expect(expressionToSql(expr)).toBe('not active');
 	});
 
-	it('falls back to String() for unknown expression type', () => {
+	it('throws NqlSemanticException for unknown expression type (L-7)', () => {
 		const expr = {
 			type: 'jsonAccess',
 			base: { type: 'path', segments: ['data'] },
 			path: ['key'],
 			mode: 'json',
 		} as NqlExpression;
-		// Default case in switch: returns String(expr) → "[object Object]"
-		expect(expressionToSql(expr)).toBe('[object Object]');
+		// L-7: the old default was String(expr) → '[object Object]' — now throws.
+		// This is a programming error (unrecognised expr type); the caller surfaces it.
+		// Assert typed exception contract: both the class and the error code must match.
+		let caught: unknown;
+		try {
+			expressionToSql(expr);
+		} catch (e) {
+			caught = e;
+		}
+		expect(caught).toBeInstanceOf(NqlSemanticException);
+		expect((caught as NqlSemanticException).code).toBe(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+		);
+		expect((caught as NqlSemanticException).message).toMatch(
+			/Cannot convert expression type 'jsonAccess' to SQL fragment/,
+		);
 	});
 });
 

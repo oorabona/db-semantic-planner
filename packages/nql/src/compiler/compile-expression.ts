@@ -14,6 +14,7 @@ import type {
 	WhereJsonExistsIntent,
 	WhereRangeIntent,
 } from '@dbsp/types';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlAnyExpression,
 	NqlBetweenExpression,
@@ -24,13 +25,13 @@ import type {
 	NqlIsNullExpression,
 	NqlJsonAccessExpression,
 	NqlJsonComparisonExpression,
-	NqlPathExpression,
 	NqlRangeOpExpression,
 	NqlRelationFilterExpression,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
 import { expandDateRange, isDateRangePattern } from './date-range-patterns.js';
 import {
+	coerceToStringKey,
 	expressionToField,
 	expressionToRangeValue,
 	mapComparisonOperator,
@@ -72,7 +73,10 @@ function compileLogical(
 		}
 		/* v8 ignore start — defensive: only and/or reach here; arithmetic is in SELECT context -- @preserve */
 		// Arithmetic binary → comparison context shouldn't reach here
-		throw new Error(`Unsupported binary operator in WHERE: ${binary.operator}`);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Unsupported binary operator in WHERE: ${binary.operator}`,
+		);
 		/* v8 ignore stop -- @preserve */
 	}
 
@@ -91,7 +95,10 @@ function compileLogical(
 		};
 	}
 	/* v8 ignore next — defensive: only 'not' unary reaches WHERE context -- @preserve */
-	throw new Error(`Unsupported unary operator: ${unary.operator}`);
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Unsupported unary operator: ${unary.operator}`,
+	);
 }
 
 function compileComparison(
@@ -109,7 +116,10 @@ function compileComparison(
 		const baseField = expressionToField(jsonLeft.base, aliasContext);
 		/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
 		if (!baseField) {
-			throw new Error('JSON access base must be a field reference');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'JSON access base must be a field reference',
+			);
 		}
 		/* v8 ignore stop -- @preserve */
 		const operator = mapComparisonOperator(comp.operator);
@@ -135,20 +145,27 @@ function compileComparison(
 		if (fn === 'json_extract' || fn === 'json_extract_text') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args for json_extract -- @preserve */
 			if (comp.left.args.length < 2) {
-				throw new Error(`${fn}() requires at least 2 arguments`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() requires at least 2 arguments`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
 			const baseField = expressionToField(comp.left.args[0]!, aliasContext);
 			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 			if (!baseField) {
-				throw new Error(`${fn}() first argument must be a field reference`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() first argument must be a field reference`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
+			// Each path argument after the first is a JSON key: must be a string literal
+			// or a single identifier. String(resolveFilterValue(...)) would silently emit
+			// '[object Object]' for path expressions — use coerceToStringKey instead.
 			const keys = comp.left.args
 				.slice(1)
-				.map((a) =>
-					String(resolveFilterValue(a, ctx, aliasContext, outerAliases)),
-				);
+				.map((a) => coerceToStringKey(a, `${fn}() path argument`));
 			const operator = mapComparisonOperator(comp.operator);
 			const value = resolveFilterValue(
 				comp.right,
@@ -170,24 +187,22 @@ function compileComparison(
 	const field = expressionToField(comp.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!field) {
-		throw new Error('Left side of comparison must be a field reference');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Left side of comparison must be a field reference',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 	// Validate WHERE column on current table context
 	validateWhereField(ctx, field, aliasContext, comp.left);
 
-	// Handle LIKE specially
+	// Handle LIKE specially: RHS must be a string literal (not a path expression).
+	// String(resolveFilterValue(...)) would silently yield '[object Object]' for path refs.
 	if (comp.operator === 'like') {
-		const pattern = resolveFilterValue(
-			comp.right,
-			ctx,
-			aliasContext,
-			outerAliases,
-		);
 		return {
 			kind: 'like',
 			field,
-			pattern: String(pattern),
+			pattern: coerceToStringKey(comp.right, 'LIKE pattern'),
 		};
 	}
 
@@ -213,7 +228,10 @@ function compileRange(
 	const field = expressionToField(rangeExpr.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!field) {
-		throw new Error('Left side of range operator must be a field reference');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Left side of range operator must be a field reference',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, rangeExpr.left);
@@ -230,7 +248,8 @@ function compileRange(
 			outerAliases,
 		);
 	} /* v8 ignore start — defensive: parser guarantees range or scalar -- @preserve */ else {
-		throw new Error(
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			'Range operator requires either a range literal or scalar value',
 		);
 	}
@@ -255,7 +274,10 @@ function compileMembership(
 		const field = expressionToField(anyExpr.column, aliasContext);
 		/* v8 ignore start — defensive: parser guarantees ANY LHS is a path expression -- @preserve */
 		if (!field) {
-			throw new Error('ANY expression must reference a field');
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				'ANY expression must reference a field',
+			);
 		}
 		/* v8 ignore stop -- @preserve */
 		validateWhereField(ctx, field, aliasContext, anyExpr.column);
@@ -271,7 +293,10 @@ function compileMembership(
 	const field = expressionToField(inExpr.expression, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees IN LHS is a path expression -- @preserve */
 	if (!field) {
-		throw new Error('IN expression must reference a field');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'IN expression must reference a field',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, inExpr.expression);
@@ -288,7 +313,8 @@ function compileMembership(
 		);
 		if (dateRangeValues.length > 0) {
 			if (dateRangeValues.length !== values.length) {
-				throw new Error(
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
 					'Cannot mix date range patterns with regular values in IN list. ' +
 						'Use all date ranges or all literals.',
 				);
@@ -343,7 +369,10 @@ function compileBetween(
 	const field = expressionToField(between.expression, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees BETWEEN LHS is a path -- @preserve */
 	if (!field) {
-		throw new Error('BETWEEN expression must reference a field');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'BETWEEN expression must reference a field',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, between.expression);
@@ -367,7 +396,13 @@ function compileBetween(
 		typeof lower !== 'string' &&
 		!(lower instanceof Date)
 	) {
-		throw new Error('BETWEEN bounds must be literal');
+		// L-6: actionable message — tell the user what the lower bound was
+		const got =
+			typeof lower === 'object' ? 'path reference' : JSON.stringify(lower);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`BETWEEN lower bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
+		);
 	}
 	if (
 		upper !== null &&
@@ -375,7 +410,13 @@ function compileBetween(
 		typeof upper !== 'string' &&
 		!(upper instanceof Date)
 	) {
-		throw new Error('BETWEEN bounds must be literal');
+		// L-6: actionable message — tell the user what the upper bound was
+		const got =
+			typeof upper === 'object' ? 'path reference' : JSON.stringify(upper);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`BETWEEN upper bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
+		);
 	}
 
 	return {
@@ -395,7 +436,10 @@ function compileNull(
 	const field = expressionToField(isNull.expression, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees IS NULL LHS is a path -- @preserve */
 	if (!field) {
-		throw new Error('IS NULL expression must reference a field');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'IS NULL expression must reference a field',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 	validateWhereField(ctx, field, aliasContext, isNull.expression);
@@ -420,13 +464,19 @@ function compileJson(
 		if (fn === 'json_contains' || fn === 'json_contained_by') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
 			if (expr.args.length < 2) {
-				throw new Error(`${fn}() requires 2 arguments: field and value`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() requires 2 arguments: field and value`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
 			const jsonField = expressionToField(expr.args[0]!, aliasContext);
 			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 			if (!jsonField) {
-				throw new Error(`${fn}() first argument must be a field reference`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() first argument must be a field reference`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
 			const jsonValue = resolveFilterValue(
@@ -445,52 +495,36 @@ function compileJson(
 		if (fn === 'json_exists') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
 			if (expr.args.length < 2) {
-				throw new Error(`${fn}() requires 2 arguments: field and key`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() requires 2 arguments: field and key`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
 			const jsonField = expressionToField(expr.args[0]!, aliasContext);
 			/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 			if (!jsonField) {
-				throw new Error(`${fn}() first argument must be a field reference`);
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`${fn}() first argument must be a field reference`,
+				);
 			}
 			/* v8 ignore stop -- @preserve */
-			const keyArg = expr.args[1]!;
-			if (keyArg.type === 'path') {
-				// Identifier used as key (e.g. json_exists(data, email)) — treat as
-				// field name string, not a column reference. This mirrors the intention
-				// of json_exists(field, 'key') without requiring quotes.
-				// Reject dotted paths: json_exists(data, profile.email) is ambiguous —
-				// "profile.email" would become a single JSON key string, not a path traversal.
-				if ((keyArg as NqlPathExpression).segments.length > 1) {
-					throw new Error(
-						`${fn}() key must be a string literal or a single identifier, not a dotted path`,
-					);
-				}
-				const fieldName = expressionToField(keyArg, aliasContext);
-				if (!fieldName) {
-					/* v8 ignore next — defensive: single-segment path always has a field name -- @preserve */
-					throw new Error(
-						`${fn}() key must be a string literal or a single identifier`,
-					);
-				}
-				return {
-					kind: 'jsonExists',
-					field: jsonField,
-					key: fieldName,
-				} satisfies WhereJsonExistsIntent;
-			}
-			const key = resolveFilterValue(keyArg, ctx, aliasContext, outerAliases);
-			if (key !== null && typeof key !== 'string') {
-				throw new Error('json_exists key must be a string literal');
-			}
+			// Route through coerceToStringKey: handles single-segment path identifiers
+			// (e.g. json_exists(data, email) → key='email') and rejects dotted paths
+			// and non-string values that would silently yield '[object Object]'.
+			const key = coerceToStringKey(expr.args[1]!, `${fn}() key`);
 			return {
 				kind: 'jsonExists',
 				field: jsonField,
-				key: String(key),
+				key,
 			} satisfies WhereJsonExistsIntent;
 		}
 		/* v8 ignore next — defensive: only json_* functions reach WHERE context -- @preserve */
-		throw new Error(`Unsupported function in WHERE context: ${fn}()`);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Unsupported function in WHERE context: ${fn}()`,
+		);
 	}
 
 	// jsonComparison
@@ -498,21 +532,21 @@ function compileJson(
 	const jsonField = expressionToField(jsonComp.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!jsonField) {
-		throw new Error('Left side of JSON comparison must be a field reference');
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			'Left side of JSON comparison must be a field reference',
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 
 	if (jsonComp.operator === '?') {
-		const key = resolveFilterValue(
-			jsonComp.right,
-			ctx,
-			aliasContext,
-			outerAliases,
-		);
+		// S-3: String(resolveFilterValue(...)) would silently yield '[object Object]'
+		// for path expressions — use coerceToStringKey to reject non-string RHS.
+		const key = coerceToStringKey(jsonComp.right, '? operator key');
 		return {
 			kind: 'jsonExists',
 			field: jsonField,
-			key: String(key),
+			key,
 		} satisfies WhereJsonExistsIntent;
 	}
 
@@ -651,12 +685,14 @@ export function compileExpression(
 		case 'relationFilter':
 			return compileRelationFilter(expr, ctx, fns, aliasContext, outerAliases);
 		case 'case':
-			throw new Error(
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
 				'CASE in WHERE not supported. ' +
 					'Use a computed column in SELECT or a relation filter instead.',
 			);
 		case 'exists':
-			throw new Error(
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
 				'EXISTS (subquery) is not supported in NQL. ' +
 					'Use relation filters instead:\n' +
 					'  orders | with customer | where customer.active = true\n' +
@@ -665,6 +701,9 @@ export function compileExpression(
 			);
 		/* v8 ignore next — defensive: all parser-produced expression types are handled above -- @preserve */
 		default:
-			throw new Error(`Unsupported expression type in WHERE: ${expr.type}`);
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Unsupported expression type in WHERE: ${expr.type}`,
+			);
 	}
 }

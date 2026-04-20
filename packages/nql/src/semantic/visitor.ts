@@ -80,18 +80,22 @@ import {
 	visitValuesTuple,
 } from './visit-mutation.js';
 // Query structure
+// Note: visitJoinSpec, visitParamList, visitParam are intentionally NOT imported here.
+// The grammar has no RULE for joinSpec/paramList/param, so the Chevrotain parser
+// never emits CST nodes for them — visitor methods would be permanently dead
+// dispatchers. The visit-query.ts helpers (visitJoinSpec etc.) are kept there
+// for legacy direct-call unit tests; they are eligible for deletion once those
+// tests migrate to grammar-driven inputs. Removed from the dispatcher class in
+// retro-audit-2026-04-19 (M-5).
 import {
 	visitFlatClause,
 	visitGroupClause,
-	visitJoinSpec,
 	visitLimitClause,
 	visitLockClause,
 	visitOffsetClause,
 	visitOrderClause,
 	visitOrderItem,
 	visitOrderList,
-	visitParam,
-	visitParamList,
 	visitProgram,
 	visitQuery,
 	visitQueryClause,
@@ -162,15 +166,6 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 	offsetClause(ctx: CstContext) {
 		return visitOffsetClause(ctx);
-	}
-	joinSpec(ctx: CstContext) {
-		return visitJoinSpec(ctx, this.v);
-	}
-	paramList(ctx: CstContext) {
-		return visitParamList(ctx, this.v);
-	}
-	param(ctx: CstContext) {
-		return visitParam(ctx, this.v);
 	}
 	selectList(ctx: CstContext) {
 		return visitSelectList(ctx, this.v);

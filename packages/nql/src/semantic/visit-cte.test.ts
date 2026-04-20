@@ -52,3 +52,43 @@ describe('NQL-WITH: SC-11 — QuotedIdentifier as CTE name', () => {
 		expect(cte.query.from).toBe('users');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// L-9: pseudo-column keywords as CTE names (parent, child)
+//
+// `parent` and `child` are NQL pseudo-column keywords (used in hierarchical
+// queries via identSegment). They are also valid identifiers in CTE names
+// because identSegment explicitly allows them. This is intentional — there
+// is no ambiguity: in `with parent as (...)` the parser sees the CTE header
+// context, not a pseudo-column position.
+// ---------------------------------------------------------------------------
+
+describe('NQL-WITH: L-9 — pseudo-column keywords as CTE names', () => {
+	it('parses "parent" as a CTE name without ambiguity', () => {
+		const result = compileNql(
+			'with parent as (users | select id) parent | select *',
+		);
+		expect(result.cteQuery).toBeDefined();
+		const cteQuery = result.cteQuery as CteQueryIntent;
+		expect(cteQuery.ctes).toHaveLength(1);
+
+		const cte = cteQuery.ctes[0] as SimpleCteIntent;
+		expect(cte.kind).toBe('simpleCte');
+		expect(cte.name).toBe('parent');
+		expect(cte.query.from).toBe('users');
+		// Main query selects from the CTE named "parent"
+		expect(cteQuery.query.from).toBe('parent');
+	});
+
+	it('parses "child" as a CTE name without ambiguity', () => {
+		const result = compileNql(
+			'with child as (orders | select id) child | select *',
+		);
+		expect(result.cteQuery).toBeDefined();
+		const cteQuery = result.cteQuery as CteQueryIntent;
+		const cte = cteQuery.ctes[0] as SimpleCteIntent;
+		expect(cte.kind).toBe('simpleCte');
+		expect(cte.name).toBe('child');
+		expect(cte.query.from).toBe('orders');
+	});
+});

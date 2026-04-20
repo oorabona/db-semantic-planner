@@ -87,7 +87,7 @@ import {
 	type CompileResult,
 	NqlCompiler,
 } from './compiler/index.js';
-import { NqlErrorCodes } from './errors/index.js';
+import { NqlErrorCodes, NqlSemanticException } from './errors/index.js';
 import type { NqlProgram } from './parser/ast.js';
 import { parseCst } from './parser/index.js';
 import { cstToAst } from './semantic/index.js';
@@ -178,11 +178,15 @@ export function compile(
 			warnings: parseResult.warnings,
 		};
 	} catch (err) {
+		const code =
+			err instanceof NqlSemanticException
+				? err.code
+				: NqlErrorCodes.SEM_UNREACHABLE;
 		return {
 			success: false,
 			errors: [
 				{
-					code: NqlErrorCodes.SEM_UNKNOWN_COLUMN,
+					code,
 					message: err instanceof Error ? err.message : String(err),
 				},
 			],
