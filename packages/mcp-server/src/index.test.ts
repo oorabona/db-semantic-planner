@@ -117,6 +117,37 @@ describe('parseArgs', () => {
 		});
 	});
 
+	describe('S1: POSIX end-of-options (--) wired correctly', () => {
+		it('should accept a hyphen-leading schema path after --', () => {
+			// '--schema -- -my.ts': '-my.ts' starts with '-' so flag-matching would
+			// normally reject it; after '--' it must be treated as a literal value.
+			const result = parseArgs(['--schema', '--', '-my.ts']);
+			expect(result.schemaPath).toBe('-my.ts');
+			expect(result.help).toBe(false);
+		});
+
+		it('should accept a hyphen-leading allowed-root after --', () => {
+			const result = parseArgs(['--allowed-root', '--', '-some-root']);
+			expect(result.allowedRoots).toEqual(['-some-root']);
+			expect(result.help).toBe(false);
+		});
+
+		it('should reject tokens after -- when no flag is pending', () => {
+			// '--' then '--schema /x.ts': no flag was pending, so '--schema' is an
+			// unexpected positional and must be rejected.
+			expect(() => parseArgs(['--', '--schema', '/x.ts'])).toThrow(
+				'Unknown argument: --schema',
+			);
+		});
+
+		it('should reject a bare -- with nothing following', () => {
+			// '--schema' followed by '--' with no subsequent value: missing path.
+			expect(() => parseArgs(['--schema', '--'])).toThrow(
+				'--schema requires a path argument',
+			);
+		});
+	});
+
 	describe('S3: parseArgs error propagation through main()', () => {
 		it('main() calls process.exit(1) and writes to stderr on parseArgs error', async () => {
 			// We need to import main — it is not exported, so we test the entry-point

@@ -92,9 +92,12 @@ describe('validatePath', () => {
 			expect(result.resolvedPath).toBe(resolve(process.cwd(), 'some/path.ts'));
 		});
 
-		it('should return absolute paths unchanged', () => {
-			const result = validatePath('/absolute/path.ts');
-			expect(result.resolvedPath).toBe('/absolute/path.ts');
+		it('should return absolute paths within allowed roots unchanged', () => {
+			// M1 fix: non-existent paths are now checked for containment too.
+			// Use a path inside testDir with an explicit allowedRoot so the check passes.
+			const absPath = join(testDir, 'nonexistent.ts');
+			const result = validatePath(absPath, [testDir]);
+			expect(result.resolvedPath).toBe(absPath);
 		});
 
 		it('should normalize existing paths with .. that stay within allowed root', () => {
@@ -163,6 +166,25 @@ describe('validatePath', () => {
 			// Use relative path for allowedRoot
 			const result = validatePath(schemaPath, [allowedDir]);
 			expect(result.resolvedPath).toBe(schemaPath);
+		});
+
+		it('should reject a non-existent path outside allowed roots (M1 fix)', () => {
+			// Before M1 fix, a non-existent path bypassed containment check and returned
+			// the resolved path — leaking that the path exists vs not-exists oracle.
+			const nonExistentOutside = join(outsideDir, 'ghost-schema.js');
+			expect(() => validatePath(nonExistentOutside, [allowedDir])).toThrow(
+				SchemaLoadError,
+			);
+			try {
+				validatePath(nonExistentOutside, [allowedDir]);
+			} catch (err) {
+				expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+				expect((err as SchemaLoadError).message).toContain(
+					'outside allowed directories',
+				);
+				// M3: message must not leak the resolved path
+				expect((err as SchemaLoadError).message).not.toContain(outsideDir);
+			}
 		});
 	});
 });
@@ -363,18 +385,6 @@ describe('C1 regression: TOCTOU symlink swap', () => {
 	});
 });
 
-describe('C2 regression: unknown CLI argument', () => {
-	it('parseArgs throws for unknown flag', () => {
-		// Import parseArgs from the module — it is not exported, so we test via main()
-		// by checking the error message propagation. Here we test the indirect behaviour:
-		// validatePath with an unknowable path is not the right test; we invoke parseArgs
-		// via the index module's behaviour.
-		// Since parseArgs is unexported, we verify via the compiled dist/index.js in e2e.
-		// This test documents the expected contract; see parseArgs-direct test file for unit.
-		expect(true).toBe(true); // placeholder — see index.test.ts
-	});
-});
-
 describe('C5 regression: schema structure validation', () => {
 	it('should reject an array as schema', async () => {
 		// Write a file that exports an array
@@ -466,14 +476,23 @@ describe('S-A: URL-encoded path traversal bypass', () => {
 		}
 	});
 
-	it('should reject malformed percent-encoding', () => {
-		// '%zz' is not valid URL encoding — must be rejected as PATH_TRAVERSAL
-		expect(() => validatePath('%zz/etc/passwd')).toThrow(SchemaLoadError);
-		try {
-			validatePath('%zz/etc/passwd');
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
-		}
+	it('should NOT reject malformed percent-encoding as PATH_TRAVERSAL (M2 fix)', () => {
+		// '100%dir/schema.ts' is a valid POSIX filename — malformed % sequences cannot
+		// be URL-encoded '..' so falling back to the raw input is safe.
+		// validatePath must not throw PATH_TRAVERSAL; it may throw NOT_FOUND (via loadSchema)
+		// or return a resolved path (file doesn't exist → containment check vs cwd).
+		expect(() => validatePath('%zz/path.ts')).not.toThrow();
+	});
+
+	it('should NOT throw PATH_TRAVERSAL for 100%dir style filename (M2)', () => {
+		// '100%dir' is a valid POSIX directory name — URIError from decodeURIComponent
+		// must not be surfaced as PATH_TRAVERSAL. The path will be in testDir.
+		const fakePath = join(testDir, '100%dir', 'schema.ts');
+		// File doesn't exist → NOT_FOUND via loadSchema; validatePath itself should not throw.
+		expect(() => validatePath(fakePath, [testDir])).not.toThrow();
+		const result = validatePath(fakePath, [testDir]);
+		// resolvedPath is the absolute path — should be identical since it was already absolute.
+		expect(result.resolvedPath).toBe(fakePath);
 	});
 
 	it('should reject literal backslash ".." form (..\\foo)', () => {

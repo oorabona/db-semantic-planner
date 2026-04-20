@@ -69,31 +69,59 @@ export function parseArgs(args: string[]): CliArgs {
 			continue;
 		}
 
-		// POSIX end-of-options marker: everything after '--' is a value, not a flag.
+		// POSIX end-of-options marker: after '--', treat remaining tokens as values.
 		if (!endOfOptions && arg === '--') {
 			endOfOptions = true;
 			continue;
+		}
+
+		// After '--' with no pending value flag, all remaining tokens are unexpected positionals.
+		if (endOfOptions) {
+			throw new Error(`Unknown argument: ${arg}`);
 		}
 
 		if (arg === '--help' || arg === '-h') {
 			result.help = true;
 		} else if (arg === '--schema' || arg === '-s') {
 			const nextArg = normalized[i + 1];
-			// Only reject if the next token is itself a known flag or missing.
-			// A value like '-my-file.ts' is a legitimate relative path (M-A).
-			if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
+			// Check if next token is '--' (POSIX end-of-options) — consume it
+			// and treat the token after it as the value.
+			if (nextArg === '--') {
+				// Consume '--' inline and take the token after it as the literal value.
+				i++; // skip '--'
+				const valueArg = normalized[i + 1];
+				if (valueArg === undefined) {
+					throw new Error('--schema requires a path argument');
+				}
+				result.schemaPath = valueArg;
+				i++; // skip value
+				endOfOptions = true;
+			} else if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
+				// Only reject if the next token is itself a known flag or missing.
+				// A value like '-my-file.ts' is a legitimate relative path (M-A).
 				throw new Error('--schema requires a path argument');
+			} else {
+				result.schemaPath = nextArg;
+				i++; // Skip next arg
 			}
-			result.schemaPath = nextArg;
-			i++; // Skip next arg
 		} else if (arg === '--allowed-root' || arg === '-r') {
 			const nextArg = normalized[i + 1];
-			if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
+			if (nextArg === '--') {
+				const valueArg = normalized[i + 2];
+				if (valueArg === undefined) {
+					throw new Error('--allowed-root requires a path argument');
+				}
+				result.allowedRoots = result.allowedRoots ?? [];
+				result.allowedRoots.push(valueArg);
+				i += 2; // skip '--' and value
+				endOfOptions = true;
+			} else if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
 				throw new Error('--allowed-root requires a path argument');
+			} else {
+				result.allowedRoots = result.allowedRoots ?? [];
+				result.allowedRoots.push(nextArg);
+				i++; // Skip next arg
 			}
-			result.allowedRoots = result.allowedRoots ?? [];
-			result.allowedRoots.push(nextArg);
-			i++; // Skip next arg
 		} else {
 			throw new Error(`Unknown argument: ${arg}`);
 		}

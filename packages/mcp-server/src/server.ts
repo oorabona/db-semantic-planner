@@ -29,7 +29,7 @@ export interface McpServerOptions {
 
 	/**
 	 * Server version.
-	 * @default '0.0.1'
+	 * @default — package version (from package.json)
 	 */
 	version?: string;
 }

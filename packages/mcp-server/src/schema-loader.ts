@@ -68,12 +68,13 @@ export class SchemaLoadError extends Error {
 }
 
 /**
- * Validates that a path is safe (no path traversal).
+ * Validates that a path is safe (no path traversal) and within the allowed roots.
  *
  * @param schemaPath - The path to validate
- * @param allowedRoots - Optional list of allowed root directories
- * @returns The resolved absolute path if valid
- * @throws SchemaLoadError if path traversal is detected
+ * @param allowedRoots - Optional list of allowed root directories (defaults to cwd)
+ * @returns `{ resolvedPath, canonicalRoots }` — the resolved absolute path and the
+ *   canonical roots used for containment checks
+ * @throws SchemaLoadError if path traversal or out-of-bounds access is detected
  */
 let _cwdWarnEmitted = false;
 
@@ -88,22 +89,22 @@ export function validatePath(
 ): ValidatePathResult {
 	// Decode URL-encoded characters ONCE before any check so that
 	// '%2e%2e/etc' is correctly caught by the '..' guard below.
-	// Malformed percent-sequences are treated as a traversal attempt.
+	// On URIError (malformed percent-sequence, e.g. '100%dir'), fall back to
+	// the raw input: a malformed sequence cannot be a URL-encoded '..' anyway,
+	// so it is safe to proceed with containment checks on the literal path.
 	let decodedPath: string;
 	try {
 		decodedPath = decodeURIComponent(schemaPath);
 	} catch {
-		throw new SchemaLoadError(
-			`Suspicious path pattern detected (malformed URL encoding): ${schemaPath}`,
-			'PATH_TRAVERSAL',
-		);
+		// Malformed percent-sequence — not a URL-encoded traversal; use raw input.
+		decodedPath = schemaPath;
 	}
 
 	// Also reject literal backslash-form '..' — unusual on POSIX but possible as
 	// a filename component and a canonical Windows traversal pattern.
 	if (decodedPath.includes('..\\') || decodedPath === '..') {
 		throw new SchemaLoadError(
-			`Suspicious path pattern detected: ${schemaPath}`,
+			`Suspicious path pattern detected`,
 			'PATH_TRAVERSAL',
 		);
 	}
@@ -188,9 +189,11 @@ export function validatePath(
 		});
 
 		if (!isWithinAllowedRoot) {
+			process.stderr.write(
+				`[dbsp-mcp] Path containment check failed against ${rootsToCheck.length} allowed root(s)\n`,
+			);
 			throw new SchemaLoadError(
-				`Schema path resolves outside allowed directories: ${realPath}. ` +
-					`Allowed roots: ${rootsToCheck.join(', ')}`,
+				`Schema path resolves outside allowed directories`,
 				'PATH_TRAVERSAL',
 			);
 		}
@@ -198,7 +201,31 @@ export function validatePath(
 		return { resolvedPath: realPath, canonicalRoots: rootsToCheck };
 	}
 
-	// File doesn't exist yet - just return resolved path for error handling
+	// File doesn't exist. Apply a best-effort containment check using the resolved
+	// absolute path's prefix (no realpath available since the file doesn't exist;
+	// symlink edge cases are absent for non-existent paths).
+	const isWithinAllowedRootNonExistent = rootsToCheck.some((root) => {
+		// Resolve root symlinks if the root itself exists; otherwise use normalized root.
+		const realRoot = existsSync(root) ? realpathSync(root) : root;
+		const relativePath = relative(realRoot, resolvedPath);
+		return (
+			relativePath !== '' &&
+			relativePath !== '..' &&
+			!relativePath.startsWith(`..${sep}`) &&
+			!isAbsolute(relativePath)
+		);
+	});
+
+	if (!isWithinAllowedRootNonExistent) {
+		process.stderr.write(
+			`[dbsp-mcp] Path containment check failed against ${rootsToCheck.length} allowed root(s)\n`,
+		);
+		throw new SchemaLoadError(
+			`Schema path resolves outside allowed directories`,
+			'PATH_TRAVERSAL',
+		);
+	}
+
 	return { resolvedPath, canonicalRoots: rootsToCheck };
 }
 
