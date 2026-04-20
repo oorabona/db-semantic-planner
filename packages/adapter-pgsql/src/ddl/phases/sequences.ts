@@ -25,8 +25,8 @@ export function generateSequencesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 	for (const [, seq] of schema.sequences) {
 		const seqName = schemaName
-			? `${quoteId(naming.toDatabase(schemaName))}.${quoteId(seq.name)}`
-			: quoteId(seq.name);
+			? `${quoteId(naming.toDatabase(schemaName), 'schema')}.${quoteId(seq.name, 'table')}`
+			: quoteId(seq.name, 'table');
 		statements.push(buildSequenceClause('CREATE SEQUENCE', seqName, seq));
 	}
 	return statements;

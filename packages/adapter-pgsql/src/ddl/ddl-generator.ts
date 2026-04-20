@@ -28,6 +28,12 @@ import { generateRlsPhase } from './phases/rls.js';
 import { generateSequencesPhase } from './phases/sequences.js';
 import { generateTablesPhase } from './phases/tables.js';
 import type { PhaseContext } from './phases/types.js';
+import {
+	formatSqlDefault,
+	quoteCollation,
+	quoteRoleName,
+	validateIndexMethod,
+} from './phases/utils.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ============================================================================
@@ -233,8 +239,11 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 	}
 
 	// COLLATE (must come after type)
+	// S-2: validate collation name before quoting — uses quoteCollation which
+	// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+	// that contain dots/hyphens rejected by the standard identifier validator.
 	if (col.collation) {
-		parts.push(`COLLATE "${col.collation}"`);
+		parts.push(`COLLATE ${quoteCollation(col.collation)}`);
 	}
 
 	// GENERATED AS IDENTITY
@@ -255,45 +264,11 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
  * @security The `{ sql: string }` escape hatch is validated via validateSqlExpression()
  * before interpolation to prevent injection of multi-statement or comment-bearing strings.
  */
+// M-6: formatDefaultValue is now a thin alias for the shared formatSqlDefault from phases/utils.
+// The duplicate implementations have been consolidated.
+// The doc-comment security note is on formatSqlDefault in packages/adapter-pgsql/src/ddl/phases/utils.ts.
 function formatDefaultValue(value: unknown): string {
-	// Handle SqlDefault object: { sql: 'now()' }
-	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		const rawSql = (value as Record<string, unknown>).sql;
-		if (typeof rawSql !== 'string') {
-			throw new Error(
-				`formatDefaultValue({ sql }): expected string, got ${typeof rawSql}`,
-			);
-		}
-		validateSqlExpression(rawSql, 'column default');
-		return rawSql;
-	}
-
-	// Handle function-like expressions (e.g., 'now()')
-	if (typeof value === 'string') {
-		if (value.endsWith('()')) {
-			return value;
-		}
-		// String literal - escape single quotes
-		return `'${value.replace(/'/g, "''")}'`;
-	}
-
-	// Number literals
-	if (typeof value === 'number') {
-		return String(value);
-	}
-
-	// Boolean literals
-	if (typeof value === 'boolean') {
-		return value ? 'true' : 'false';
-	}
-
-	// NULL
-	if (value === null) {
-		return 'NULL';
-	}
-
-	// Fallback: string representation
-	return `'${String(value)}'`;
+	return formatSqlDefault(value, 'ddl-generator default');
 }
 
 // ============================================================================
@@ -350,17 +325,22 @@ export function generateCreateIndex(
 	);
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	// S-2: validate index method against allowlist before interpolation into unquoted USING clause
+	if (idx.method) validateIndexMethod(idx.method, 'index method');
 	const method = idx.method ? ` USING ${idx.method}` : '';
 
-	// Build column list: expressions first (unquoted), then named columns with optional opclass
+	// Build column list: expressions first (validated), then named columns with optional opclass
+	// S-1: validate each expression and opclass before interpolation
 	const colParts: string[] = [];
 	if (idx.expressions && idx.expressions.length > 0) {
 		for (const expr of idx.expressions) {
+			validateSqlExpression(expr, 'index expression');
 			colParts.push(expr);
 		}
 	}
 	for (const col of idx.columns) {
 		const opclass = idx.opclass?.[col] ?? '';
+		if (opclass) validateIdentifier(opclass, 'alias');
 		colParts.push(
 			`${quoteIdentifier(naming.toDatabase(col))}${opclass ? ` ${opclass}` : ''}`,
 		);
@@ -371,12 +351,20 @@ export function generateCreateIndex(
 		idx.include && idx.include.length > 0
 			? ` INCLUDE (${idx.include.map((c) => quoteIdentifier(naming.toDatabase(c))).join(', ')})`
 			: '';
+
+	// S-1: validate WITH storage parameter keys before interpolation
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
 			? ` WITH (${Object.entries(idx.with)
-					.map(([k, v]) => `${k} = ${v}`)
+					.map(([k, v]) => {
+						validateIdentifier(k, 'alias');
+						return `${k} = ${v}`;
+					})
 					.join(', ')})`
 			: '';
+
+	// S-1: validate WHERE predicate expression before interpolation
+	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
 	const where = idx.where ? ` WHERE ${idx.where}` : '';
 
 	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${withParams}${where};`;
@@ -403,9 +391,11 @@ export function generateCreatePolicy(
 			: ' FOR ALL';
 	const asClause =
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
+	// M-4: role names use quoteRoleName() (allows spaces/hyphens, blocks injection vectors)
+	// rather than quoteIdentifier() (which only allows \w$ characters).
 	const toClause =
 		policy.roles && policy.roles.length > 0
-			? ` TO ${policy.roles.map((r) => quoteIdentifier(r)).join(', ')}`
+			? ` TO ${policy.roles.map((r) => quoteRoleName(r)).join(', ')}`
 			: '';
 	if (policy.using) {
 		validateSqlExpression(policy.using, 'policy USING expression');

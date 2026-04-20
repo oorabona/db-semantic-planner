@@ -8,7 +8,7 @@
  */
 
 import { type PhaseContext, sup } from './types.js';
-import { quoteIdent as quoteId } from './utils.js';
+import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
 
 /**
  * Generate CREATE TYPE ... AS ENUM statements for all enum types in the schema.
@@ -24,10 +24,14 @@ export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 	for (const [, enumDef] of schema.enums) {
 		const enumName = schemaName
-			? `${quoteId(naming.toDatabase(schemaName))}.${quoteId(enumDef.name)}`
-			: quoteId(enumDef.name);
+			? `${quoteId(naming.toDatabase(schemaName), 'schema')}.${quoteId(enumDef.name, 'table')}`
+			: quoteId(enumDef.name, 'table');
+		// M-3: validate each enum value against NUL/control-char injection before emission
 		const values = enumDef.values
-			.map((v) => `'${v.replace(/'/g, "''")}'`)
+			.map((v) => {
+				validateEnumLabel(v, 'enum value');
+				return `'${v.replace(/'/g, "''")}'`;
+			})
 			.join(', ');
 		statements.push(`CREATE TYPE ${enumName} AS ENUM (${values});`);
 	}

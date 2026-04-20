@@ -15,6 +15,7 @@ import type {
 	WindowIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { NqlErrorCodes } from '../errors/types.js';
 import { compile } from '../index.js';
 import type { CompileResult } from './index.js';
 
@@ -1058,5 +1059,72 @@ describe('compile-select: arithmetic with literal left', () => {
 		const r = compileNql('users | select 2 * salary');
 		const sel = r.query?.select as SelectWithExpressionsIntent;
 		expect(sel.columns[0]?.kind).toBe('arithmetic');
+	});
+});
+
+// ===========================================================================
+// M-1: SELECT-context String-coercion twin bug
+//
+// compileJsonFunction() previously called String(expressionToValue(a)) for
+// json_extract/json_extract_text/json_path/json_path_text path arguments.
+// expressionToValue() returns { $ref: 'field' } for bare identifiers, so
+// String({...}) → '[object Object]' ends up in the JSON path.
+//
+// The fix: coerceToStringKey() — same helper as the WHERE-context S-1/S-2/S-3
+// fixes — is now applied to all json_extract/json_path arg positions.
+//
+// Regression gate: these tests should FAIL without the fix. Pre-fix, the bug
+// was SILENT COERCION — compilation succeeded but produced path: ['[object Object]']
+// in the compiled AST instead of the intended key. Post-fix, compilation throws.
+// ===========================================================================
+
+function compileRawSelect(input: string) {
+	return compile(input, null);
+}
+
+describe('compile-select: M-1 — json function path args coercion (no [object Object])', () => {
+	it('json_extract with bare identifier arg treats it as string key (not [object Object])', () => {
+		// Without fix: String(expressionToValue(someKey)) → '[object Object]' in path.
+		// With fix: coerceToStringKey returns 'someKey' as the path segment.
+		const result = compileRawSelect(
+			'users | select json_extract(data, someKey) as v',
+		);
+		expect(result.success).toBe(true);
+		const sel = result.ast!.query?.select as SelectWithExpressionsIntent;
+		const col = sel.columns[0];
+		expect(col?.kind).toBe('jsonExtract');
+		// Must be ['someKey'], never ['[object Object]']
+		expect((col as unknown as { path: string[] }).path).toEqual(['someKey']);
+	});
+
+	it('json_extract with dotted path arg throws SEM_INVALID_SYNTAX', () => {
+		// Multi-segment paths are ambiguous as JSON keys — coerceToStringKey rejects them.
+		const result = compileRawSelect(
+			'users | select json_extract(data, a.b) as v',
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toMatch(/json_extract\(\) path argument/);
+	});
+
+	it('json_path with bare identifier arg treats it as string key (not [object Object])', () => {
+		// Same class as json_extract — json_path also called String(expressionToValue(a)).
+		const result = compileRawSelect(
+			'users | select json_path(data, someKey) as v',
+		);
+		expect(result.success).toBe(true);
+		const sel = result.ast!.query?.select as SelectWithExpressionsIntent;
+		const col = sel.columns[0];
+		expect(col?.kind).toBe('jsonPathExtract');
+		// Must contain 'someKey', never '[object Object]'
+		expect((col as unknown as { path: string }).path).toContain('someKey');
+	});
+
+	it('json_path with dotted path arg throws SEM_INVALID_SYNTAX', () => {
+		// Multi-segment paths rejected — same guard as json_extract.
+		const result = compileRawSelect('users | select json_path(data, a.b) as v');
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toMatch(/json_path\(\) path argument/);
 	});
 });

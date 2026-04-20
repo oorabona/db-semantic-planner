@@ -12,6 +12,7 @@ import type {
 	SelectIntent,
 	WindowFunction,
 } from '@dbsp/types';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBooleanLiteral,
 	NqlCaseExpression,
@@ -27,6 +28,7 @@ import type {
 	NqlWindowExpression,
 } from '../parser/ast.js';
 import {
+	coerceToStringKey,
 	expressionToField,
 	expressionToSql,
 	expressionToValue,
@@ -538,19 +540,30 @@ function compileJsonFunction(
 	if (!JSON_FUNCTION_NAMES.has(fn)) return null;
 
 	if (args.length < 2) {
-		throw new Error(`${fn}() requires at least 2 arguments: field and key`);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`${fn}() requires at least 2 arguments: field and key`,
+		);
 	}
 
 	const field = expressionToField(args[0]!);
 	/* v8 ignore start — defensive: first arg is always a field reference -- @preserve */
 	if (!field) {
-		throw new Error(`${fn}() first argument must be a field reference`);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`${fn}() first argument must be a field reference`,
+		);
 	}
 	/* v8 ignore stop -- @preserve */
 
 	if (fn === 'json_extract' || fn === 'json_extract_text') {
 		// json_extract(col, 'key') → JsonExtractIntent
-		const keys = args.slice(1).map((a) => String(expressionToValue(a)));
+		// M-1: String(expressionToValue(a)) → '[object Object]' for path expressions.
+		// coerceToStringKey prevents silent coercion: single-segment identifiers are
+		// treated as string keys; dotted paths and non-string args throw SEM_INVALID_SYNTAX.
+		const keys = args
+			.slice(1)
+			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
 		return {
 			kind: 'jsonExtract',
 			field,
@@ -563,7 +576,10 @@ function compileJsonFunction(
 	if (fn === 'json_path' || fn === 'json_path_text') {
 		// json_path(col, 'a', 'b') → JsonPathExtractIntent with array literal '{a,b}'
 		// Also supports pre-built literal: json_path(col, '{a,b}')
-		const keys = args.slice(1).map((a) => String(expressionToValue(a)));
+		// M-1: same coercion fix — reject path expressions and non-string args.
+		const keys = args
+			.slice(1)
+			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
 		const first = keys[0];
 		const pathStr =
 			keys.length === 1 && first?.startsWith('{') && first.endsWith('}')

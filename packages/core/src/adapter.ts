@@ -16,7 +16,6 @@ export type {
 	AliasIncludedColumnsMode,
 	AlterColumnOptions,
 	BaseAdapter,
-	BasicAdapter,
 	CompiledQuery,
 	CompileOnlyAdapter,
 	CompileOptions,

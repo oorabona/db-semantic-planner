@@ -13,22 +13,10 @@
 import { validateSqlExpression } from '../../validate.js';
 import { generateAlterTableAddFK } from '../ddl-generator.js';
 import { type PhaseContext, sup } from './types.js';
-import { quoteIdent as quoteId } from './utils.js';
-
-/**
- * Qualify a table name with an optional schema prefix.
- */
-function qualifyTable(
-	tableName: string,
-	schemaName: string | undefined,
-	naming: PhaseContext['naming'],
-): string {
-	const table = quoteId(naming.toDatabase(tableName));
-	if (schemaName) {
-		return `${quoteId(naming.toDatabase(schemaName))}.${table}`;
-	}
-	return table;
-}
+import {
+	qualifyTableIdent as qualifyTable,
+	quoteIdent as quoteId,
+} from './utils.js';
 
 /**
  * Generate ALTER TABLE ADD CONSTRAINT statements for foreign keys and check constraints.

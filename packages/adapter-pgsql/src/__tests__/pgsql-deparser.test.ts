@@ -1003,3 +1003,84 @@ describe('BoolExpr operator precedence', () => {
 		expect(result).toBe('a = $1 AND b = $2 OR c = $3');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// M-3: Oracle round-trip tests for FetchStmt, DeclareCursorStmt, InferClause.whereClause
+// ---------------------------------------------------------------------------
+
+describe('FetchStmt', () => {
+	// Note: deparseSync omits the optional FROM keyword; our internal deparser
+	// emits it for clarity (both are valid SQL). These tests verify our deparser
+	// produces correct SQL for all directional variants.
+	it('FETCH FORWARD ALL FROM cursor', () => {
+		// 9223372036854776000 is the float64 representation of LONG_MAX used as the "ALL" sentinel.
+		// The deparser emits the cursor name unquoted when it is a simple lowercase identifier.
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_FORWARD',
+				howMany: 9223372036854776000,
+				portalname: 'c',
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe('FETCH FORWARD ALL FROM c');
+	});
+
+	it('FETCH BACKWARD ALL FROM cursor', () => {
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_BACKWARD',
+				howMany: 9223372036854776000,
+				portalname: 'c',
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe('FETCH BACKWARD ALL FROM c');
+	});
+
+	it('FETCH FORWARD 5 FROM cursor', () => {
+		const node: Node = {
+			FetchStmt: {
+				direction: 'FETCH_FORWARD',
+				howMany: 5,
+				portalname: 'c',
+			},
+		} as unknown as Node;
+		expect(deparse(node)).toBe('FETCH FORWARD 5 FROM c');
+	});
+});
+
+describe('DeclareCursorStmt', () => {
+	it('DECLARE c CURSOR FOR SELECT 1', () => {
+		const node: Node = {
+			DeclareCursorStmt: {
+				portalname: 'c',
+				options: 0,
+				query: selectStmt({
+					columns: [integerNode(1)],
+				}),
+			},
+		} as unknown as Node;
+		compare(node);
+	});
+});
+
+describe('InferClause with whereClause', () => {
+	it('ON CONFLICT (a) WHERE a > 0 DO NOTHING', () => {
+		const node: Node = insertStmt({
+			table: 't',
+			columns: ['a'],
+			values: [[integerNode(1)]],
+		});
+		const insertInner = (node as Record<string, unknown>).InsertStmt as Record<
+			string,
+			unknown
+		>;
+		insertInner.onConflictClause = {
+			action: 'ONCONFLICT_NOTHING',
+			infer: {
+				indexElems: [{ IndexElem: { name: 'a' } }],
+				whereClause: gtExpr(columnRef('a'), integerNode(0)),
+			},
+		};
+		compare(node);
+	});
+});

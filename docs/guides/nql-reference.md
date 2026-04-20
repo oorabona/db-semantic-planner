@@ -1481,6 +1481,22 @@ WHERE price_tiers.quantity_range @> $1
 | `(a,b]` | Exclusive start, inclusive end |
 | `(a,b)` | Exclusive both ends |
 
+### Date Literals in Range Values
+
+Range bound values that look like dates or times are recognised by the NQL lexer as `RangeValue` tokens. The supported patterns are:
+
+| Format | Examples | Notes |
+|--------|----------|-------|
+| Full ISO date | `2024-01-15` | Preferred — always unambiguous |
+| ISO datetime | `2024-01-15T14:00` | Separates date and time with `T` |
+| ISO time | `14:00`, `14:00:30` | Time only (no date component) |
+
+> **MM-DD format not supported.** Bare month-day notation (`05-20`) is **not** a
+> recognised date literal in NQL range bounds. Use a full ISO date (`2024-05-20`)
+> instead. This format was removed to avoid ambiguity with numeric ranges that
+> happen to match the two-digit pattern. If you need `HH:MM`, that is supported as
+> a time-only literal.
+
 ---
 
 ## Mutations

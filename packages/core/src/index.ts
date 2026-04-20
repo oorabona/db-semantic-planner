@@ -333,7 +333,6 @@ export type {
 	// DX-104: Split interfaces (ISP compliance)
 	AliasIncludedColumnsMode,
 	BaseAdapter,
-	BasicAdapter,
 	CompiledQuery,
 	CompileOnlyAdapter,
 	CompileOptions,

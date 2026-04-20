@@ -18,22 +18,46 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { validateSqlExpression } from '../validate.js';
-import { quoteExtensionName } from './phases/utils.js';
+import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	formatSqlDefault,
+	quoteCollation,
+	quoteExtensionName,
+	quoteIdent,
+	quoteRoleName,
+	validateEnumLabel,
+	validateIndexMethod,
+} from './phases/utils.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-/** Double-quote a SQL identifier. */
-function q(name: string): string {
-	return `"${name}"`;
-}
+// NOTE: quoteIdent (imported from phases/utils) validates + double-quotes identifiers.
+// The former local q() had no validation (bare `"${name}"`). All callers now use quoteIdent.
+
+// =============================================================================
+// retro-audit M-5 (SchemaChange.meta discriminated union) — DEFERRED
+//
+// The ~56 `change.meta?.x as ForeignKeyIR / as IndexIR / as ColumnIR` casts
+// below remain untyped by design. A full discriminated union covering all ~25
+// ChangeKind values is too large in scope for this PR and was explicitly listed
+// as deferrable in the audit brief.
+//
+// Tracked in TODO.md: "[adapter-pgsql] M-5 SchemaChangeMeta discriminated union".
+//
+// Until that follow-up lands, every NEW SchemaChange producer MUST verify the
+// meta shape at the call site rather than relying on downstream casts.
+// =============================================================================
 
 /** Schema-qualify a table name: "schema"."table" or just "table". */
 function qualifyTable(table: string, schemaName?: string): string {
-	return schemaName ? `${q(schemaName)}.${q(table)}` : q(table);
+	return schemaName
+		? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(table, 'table')}`
+		: quoteIdent(table, 'table');
 }
+
+// validateEnumLabel is imported from './phases/utils.js' (shared with enum-types.ts)
 
 /** PK constraint name convention. */
 function pkName(table: string): string {
@@ -60,7 +84,7 @@ function buildPolicySQL(
 	policy: PolicyIR,
 	schemaName?: string,
 ): string {
-	const policyName = q(policy.name);
+	const policyName = quoteIdent(policy.name, 'alias');
 	const qt = qualifyTable(tableName, schemaName);
 	const forClause =
 		policy.command && policy.command !== 'ALL'
@@ -68,9 +92,11 @@ function buildPolicySQL(
 			: ' FOR ALL';
 	const asClause =
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
+	// M-4: role names use quoteRoleName() (allows spaces, blocks injection vectors)
+	// rather than quoteIdent() (which only allows \w$ characters).
 	const toClause =
 		policy.roles && policy.roles.length > 0
-			? ` TO ${policy.roles.map((r) => q(r)).join(', ')}`
+			? ` TO ${policy.roles.map((r) => quoteRoleName(r)).join(', ')}`
 			: '';
 	if (policy.using) validateSqlExpression(policy.using, 'USING expression');
 	if (policy.withCheck)
@@ -279,9 +305,9 @@ export function generateMigrationSQL(
 						fkCol &&
 						!explicitIndexColumns.has(fkCol)
 					) {
-						const indexName = q(idxName(table.name, [fkCol]));
+						const indexName = quoteIdent(idxName(table.name, [fkCol]), 'alias');
 						statements.push(
-							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${q(fkCol)});`,
+							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${quoteIdent(fkCol, 'alias')});`,
 						);
 					}
 				}
@@ -376,13 +402,13 @@ function upAddColumn(
 	const def =
 		col.default !== undefined ? ` DEFAULT ${formatDefault(col.default)}` : '';
 	const unique = col.unique ? ' UNIQUE' : '';
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD COLUMN ${q(col.name)} ${typeName}${notNull}${def}${unique};`;
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD COLUMN ${quoteIdent(col.name, 'alias')} ${typeName}${notNull}${def}${unique};`;
 }
 
 function upAlterColumnType(change: SchemaChange, schemaName?: string): string {
 	const col = change.meta?.column as ColumnIR | undefined;
 	const toType = col ? mapColumnType(col) : String(change.meta?.toType);
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${toType};`;
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${toType};`;
 }
 
 function upAlterColumnNullable(
@@ -391,7 +417,7 @@ function upAlterColumnNullable(
 ): string {
 	const nullable = change.meta?.nullable as boolean;
 	const action = nullable ? 'DROP NOT NULL' : 'SET NOT NULL';
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} ${action};`;
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} ${action};`;
 }
 
 function upAlterColumnDefault(
@@ -400,15 +426,15 @@ function upAlterColumnDefault(
 ): string {
 	const def = change.meta?.default;
 	if (def === undefined || def === null) {
-		return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} DROP DEFAULT;`;
+		return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} DROP DEFAULT;`;
 	}
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} SET DEFAULT ${formatDefault(def)};`;
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(def)};`;
 }
 
 function upAddPrimaryKey(change: SchemaChange, schemaName?: string): string {
 	const columns = change.meta?.columns as string[];
-	const pkCols = columns.map(q).join(', ');
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${q(pkName(change.table))} PRIMARY KEY (${pkCols});`;
+	const pkCols = columns.map((n) => quoteIdent(n, 'alias')).join(', ');
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(pkName(change.table), 'alias')} PRIMARY KEY (${pkCols});`;
 }
 
 function upDropForeignKey(
@@ -417,7 +443,7 @@ function upDropForeignKey(
 ): string | undefined {
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = q(fkName(change.table, fk.columns));
+	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 }
 
@@ -428,7 +454,7 @@ function upAlterForeignKey(
 	// Drop + re-add with new onDelete
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = q(fkName(change.table, fk.columns));
+	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
 	const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 	const add = generateAddFKSQL(change.table, fk, schemaName);
 	return `${drop}\n${add}`;
@@ -440,30 +466,48 @@ function upCreateIndex(
 ): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
-	const indexName = q(idxName(change.table, idx.columns, idx.name));
+	const indexName = quoteIdent(
+		idxName(change.table, idx.columns, idx.name),
+		'alias',
+	);
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	// S-1: validate index method against allowlist before interpolation into unquoted USING clause
+	if (idx.method) validateIndexMethod(idx.method, 'index method');
 	const method = idx.method ? ` USING ${idx.method}` : '';
 
-	// Build column list: expressions first (unquoted), then named columns with optional opclass
+	// Build column list: expressions first (validated), then named columns with optional opclass
+	// S-1: validate each expression and opclass before interpolation
 	const colParts: string[] = [
-		...(idx.expressions ?? []),
+		...(idx.expressions ?? []).map((expr) => {
+			validateSqlExpression(expr, 'index expression');
+			return expr;
+		}),
 		...idx.columns.map((col) => {
 			const opclass = idx.opclass?.[col] ?? '';
-			return `${q(col)}${opclass ? ` ${opclass}` : ''}`;
+			if (opclass) validateIdentifier(opclass, 'alias');
+			return `${quoteIdent(col, 'alias')}${opclass ? ` ${opclass}` : ''}`;
 		}),
 	];
 	const cols = colParts.join(', ');
 
 	const include =
 		idx.include && idx.include.length > 0
-			? ` INCLUDE (${idx.include.map(q).join(', ')})`
+			? ` INCLUDE (${idx.include.map((n) => quoteIdent(n, 'alias')).join(', ')})`
 			: '';
+
+	// S-1: validate WITH storage parameter keys (values are numeric literals from IR)
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
 			? ` WITH (${Object.entries(idx.with)
-					.map(([k, v]) => `${k} = ${v}`)
+					.map(([k, v]) => {
+						validateIdentifier(k, 'alias');
+						return `${k} = ${v}`;
+					})
 					.join(', ')})`
 			: '';
+
+	// S-1: validate WHERE predicate expression before interpolation
+	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
 	const where = idx.where ? ` WHERE ${idx.where}` : '';
 
 	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${withParams}${where};`;
@@ -475,8 +519,11 @@ function upDropIndex(
 ): string | undefined {
 	const idx = change.meta?.index as IndexIR;
 	if (!idx) return undefined;
-	const indexName = q(idxName(change.table, idx.columns, idx.name));
-	const schemaPrefix = schemaName ? `${q(schemaName)}.` : '';
+	const indexName = quoteIdent(
+		idxName(change.table, idx.columns, idx.name),
+		'alias',
+	);
+	const schemaPrefix = schemaName ? `${quoteIdent(schemaName, 'alias')}.` : '';
 	return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
 }
 
@@ -495,7 +542,7 @@ function upAddCheckConstraint(
 		'DO $$ BEGIN ALTER TABLE ' +
 		qualifyTable(change.table, schemaName) +
 		' ADD CONSTRAINT ' +
-		q(check.name) +
+		quoteIdent(check.name, 'alias') +
 		' ' +
 		check.expression +
 		notValid +
@@ -510,9 +557,9 @@ function upValidateConstraint(
 	const fk = change.meta?.fk as ForeignKeyIR | undefined;
 	const check = change.meta?.check as CheckConstraintIR | undefined;
 	const constraintName = fk
-		? q(fkName(change.table, fk.columns))
+		? quoteIdent(fkName(change.table, fk.columns), 'alias')
 		: check
-			? q(check.name)
+			? quoteIdent(check.name, 'alias')
 			: undefined;
 	if (!constraintName) return undefined;
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} VALIDATE CONSTRAINT ${constraintName};`;
@@ -525,10 +572,14 @@ function upCreateEnum(
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
 	const enumName = schemaName
-		? `${q(schemaName)}.${q(enumDef.name)}`
-		: q(enumDef.name);
+		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
+		: quoteIdent(enumDef.name, 'alias');
+	// M-2: validate each enum value against NUL/control-char injection before emission
 	const values = enumDef.values
-		.map((v) => `'${v.replace(/'/g, "''")}'`)
+		.map((v) => {
+			validateEnumLabel(v, 'enum value');
+			return `'${v.replace(/'/g, "''")}'`;
+		})
 		.join(', ');
 	return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 }
@@ -541,9 +592,12 @@ function upAlterEnumAddValue(
 	const value = change.meta?.value as string;
 	const after = change.meta?.after as string | undefined;
 	if (!enumDef || !value) return undefined;
+	// M-2: enum name validated via quoteIdent; enum labels validated against control-char injection
 	const enumName = schemaName
-		? `${q(schemaName)}.${q(enumDef.name)}`
-		: q(enumDef.name);
+		? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(enumDef.name, 'table')}`
+		: quoteIdent(enumDef.name, 'table');
+	validateEnumLabel(value, 'enum value');
+	if (after !== undefined) validateEnumLabel(after, 'enum AFTER position');
 	const escaped = value.replace(/'/g, "''");
 	const position = after ? ` AFTER '${after.replace(/'/g, "''")}'` : '';
 	return `ALTER TYPE ${enumName} ADD VALUE IF NOT EXISTS '${escaped}'${position};`;
@@ -556,8 +610,8 @@ function upDropEnum(
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
 	const enumName = schemaName
-		? `${q(schemaName)}.${q(enumDef.name)}`
-		: q(enumDef.name);
+		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
+		: quoteIdent(enumDef.name, 'alias');
 	// Before dropping the type, cast any referencing columns to text
 	// to prevent "cannot drop type: still referenced" errors.
 	const refs = change.meta?.referencingColumns as
@@ -567,7 +621,7 @@ function upDropEnum(
 		refs && refs.length > 0
 			? refs.map(
 					(ref) =>
-						`ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${q(ref.column)} TYPE text;`,
+						`ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${quoteIdent(ref.column, 'alias')} TYPE text;`,
 				)
 			: [];
 	return [...alterStatements, `DROP TYPE IF EXISTS ${enumName} CASCADE;`].join(
@@ -581,9 +635,14 @@ function upAlterColumnCollation(
 ): string | undefined {
 	const col = change.meta?.column as ColumnIR;
 	if (!col) return undefined;
-	const collation = col.collation ? ` COLLATE "${col.collation}"` : '';
+	// S-2: validate collation name before quoting — uses quoteCollation which
+	// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+	// that contain dots/hyphens rejected by the standard identifier validator.
+	const collation = col.collation
+		? ` COLLATE ${quoteCollation(col.collation)}`
+		: '';
 	const typeName = mapColumnType(col);
-	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${typeName}${collation};`;
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${typeName}${collation};`;
 }
 
 function upAlterColumnIdentity(
@@ -594,7 +653,7 @@ function upAlterColumnIdentity(
 	const prevIdentity = change.meta?.previousIdentity as string | undefined;
 	if (!col) return undefined;
 	const table = qualifyTable(change.table, schemaName);
-	const column = q(change.column!);
+	const column = quoteIdent(change.column!, 'alias');
 	if (!col.identity && prevIdentity) {
 		return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
 	}
@@ -614,14 +673,16 @@ function upAddComment(change: SchemaChange, schemaName?: string): string {
 	if (target === 'table') {
 		return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${escaped}';`;
 	}
-	return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS '${escaped}';`;
+	return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS '${escaped}';`;
 }
 
 function upSequenceName(
 	schemaName: string | undefined,
 	seq: SequenceIR,
 ): string {
-	return schemaName ? `${q(schemaName)}.${q(seq.name)}` : q(seq.name);
+	return schemaName
+		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(seq.name, 'alias')}`
+		: quoteIdent(seq.name, 'alias');
 }
 
 // ============================================================================
@@ -642,7 +703,7 @@ function changeToUpSQL(
 		case 'add_column':
 			return upAddColumn(change, schemaName);
 		case 'drop_column':
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${q(change.column!)} CASCADE;`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column!, 'alias')} CASCADE;`;
 		case 'alter_column_type':
 			return upAlterColumnType(change, schemaName);
 		case 'alter_column_nullable':
@@ -652,7 +713,7 @@ function changeToUpSQL(
 		case 'add_primary_key':
 			return upAddPrimaryKey(change, schemaName);
 		case 'drop_primary_key':
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(pkName(change.table))} CASCADE;`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`;
 		case 'add_foreign_key': {
 			const fk = change.meta?.fk as ForeignKeyIR;
 			return fk ? generateAddFKSQL(change.table, fk, schemaName) : undefined;
@@ -672,7 +733,7 @@ function changeToUpSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR;
 			return check
-				? `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`
+				? `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(check.name, 'alias')};`
 				: undefined;
 		}
 		case 'create_enum':
@@ -692,7 +753,7 @@ function changeToUpSQL(
 			if (target === 'table') {
 				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
 			}
-			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS NULL;`;
 		}
 		case 'create_extension': {
 			const ext = change.meta?.extension as string;
@@ -744,7 +805,7 @@ function changeToUpSQL(
 		case 'drop_policy': {
 			const policy = change.meta?.policy as PolicyIR;
 			return policy
-				? `DROP POLICY IF EXISTS ${q(policy.name)} ON ${qualifyTable(change.table, schemaName)};`
+				? `DROP POLICY IF EXISTS ${quoteIdent(policy.name, 'alias')} ON ${qualifyTable(change.table, schemaName)};`
 				: undefined;
 		}
 	}
@@ -766,7 +827,7 @@ function changeToDownSQL(
 			return `-- WARNING: Cannot reverse drop_table "${change.table}" -- table data was lost`;
 
 		case 'add_column':
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${q(change.column!)} CASCADE;`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column!, 'alias')} CASCADE;`;
 
 		case 'drop_column':
 			return `-- WARNING: Cannot reverse drop_column "${change.table}"."${change.column}" -- column data was lost`;
@@ -776,7 +837,7 @@ function changeToDownSQL(
 			if (!fromType) {
 				return `-- WARNING: Cannot reverse alter_column_type "${change.table}"."${change.column}" -- missing migration metadata`;
 			}
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} TYPE ${fromType};`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${fromType};`;
 		}
 
 		case 'alter_column_nullable': {
@@ -786,7 +847,7 @@ function changeToDownSQL(
 			}
 			// Reverse: restore old nullable state
 			const action = oldNullable ? 'DROP NOT NULL' : 'SET NOT NULL';
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} ${action};`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} ${action};`;
 		}
 
 		case 'alter_column_default': {
@@ -795,13 +856,13 @@ function changeToDownSQL(
 				return `-- WARNING: Cannot reverse alter_column_default "${change.table}"."${change.column}" -- missing migration metadata`;
 			}
 			if (oldDefault === null) {
-				return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} DROP DEFAULT;`;
+				return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} DROP DEFAULT;`;
 			}
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${q(change.column!)} SET DEFAULT ${formatDefault(oldDefault)};`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(oldDefault)};`;
 		}
 
 		case 'add_primary_key': {
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(pkName(change.table))} CASCADE;`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`;
 		}
 
 		case 'drop_primary_key':
@@ -810,7 +871,10 @@ function changeToDownSQL(
 		case 'add_foreign_key': {
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
 			if (!fk) return undefined;
-			const constraintName = q(fkName(change.table, fk.columns));
+			const constraintName = quoteIdent(
+				fkName(change.table, fk.columns),
+				'alias',
+			);
 			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName} CASCADE;`;
 		}
 
@@ -823,7 +887,10 @@ function changeToDownSQL(
 				return `-- WARNING: Cannot reverse alter_foreign_key "${change.table}" -- missing migration metadata`;
 			}
 			const fk = change.meta?.fk as ForeignKeyIR;
-			const constraintName = q(fkName(change.table, fk.columns));
+			const constraintName = quoteIdent(
+				fkName(change.table, fk.columns),
+				'alias',
+			);
 			const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 			const add = generateAddFKSQL(change.table, oldFk, schemaName);
 			return `${drop}\n${add}`;
@@ -832,8 +899,13 @@ function changeToDownSQL(
 		case 'create_index': {
 			const idx = change.meta?.index as IndexIR | undefined;
 			if (!idx) return undefined;
-			const indexName = q(idxName(change.table, idx.columns, idx.name));
-			const schemaPrefix = schemaName ? `${q(schemaName)}.` : '';
+			const indexName = quoteIdent(
+				idxName(change.table, idx.columns, idx.name),
+				'alias',
+			);
+			const schemaPrefix = schemaName
+				? `${quoteIdent(schemaName, 'alias')}.`
+				: '';
 			return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
 		}
 
@@ -843,7 +915,7 @@ function changeToDownSQL(
 		case 'add_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return undefined;
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${q(check.name)};`;
+			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(check.name, 'alias')};`;
 		}
 
 		case 'drop_check_constraint': {
@@ -857,7 +929,7 @@ function changeToDownSQL(
 				'DO $$ BEGIN ALTER TABLE ' +
 				qualifyTable(change.table, schemaName) +
 				' ADD CONSTRAINT ' +
-				q(check.name) +
+				quoteIdent(check.name, 'alias') +
 				' ' +
 				check.expression +
 				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
@@ -869,8 +941,8 @@ function changeToDownSQL(
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
 			const enumName = schemaName
-				? `${q(schemaName)}.${q(enumDef.name)}`
-				: q(enumDef.name);
+				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
+				: quoteIdent(enumDef.name, 'alias');
 			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
 		}
 
@@ -879,8 +951,8 @@ function changeToDownSQL(
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return undefined;
 			const enumName = schemaName
-				? `${q(schemaName)}.${q(enumDef.name)}`
-				: q(enumDef.name);
+				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
+				: quoteIdent(enumDef.name, 'alias');
 			const values = enumDef.values
 				.map((v) => `'${v.replace(/'/g, "''")}'`)
 				.join(', ');
@@ -901,7 +973,7 @@ function changeToDownSQL(
 			const prevIdentity = change.meta?.previousIdentity as string | undefined;
 			if (!col) return undefined;
 			const table = qualifyTable(change.table, schemaName);
-			const column = q(change.column!);
+			const column = quoteIdent(change.column!, 'alias');
 			// Reverse: restore previous identity state
 			if (prevIdentity && !col.identity) {
 				// Was identity, now not → re-add identity
@@ -923,7 +995,7 @@ function changeToDownSQL(
 			if (target === 'table') {
 				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
 			}
-			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${q(change.column!)} IS NULL;`;
+			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS NULL;`;
 		}
 
 		case 'drop_comment': {
@@ -950,8 +1022,8 @@ function changeToDownSQL(
 			const seq = change.meta?.sequence as SequenceIR;
 			if (!seq) return undefined;
 			const seqName = schemaName
-				? `${q(schemaName)}.${q(seq.name)}`
-				: q(seq.name);
+				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(seq.name, 'alias')}`
+				: quoteIdent(seq.name, 'alias');
 			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
 		}
 
@@ -962,8 +1034,8 @@ function changeToDownSQL(
 				return `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`;
 			}
 			const seqName = schemaName
-				? `${q(schemaName)}.${q(prevSeq.name)}`
-				: q(prevSeq.name);
+				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(prevSeq.name, 'alias')}`
+				: quoteIdent(prevSeq.name, 'alias');
 			return buildSequenceClause('ALTER SEQUENCE', seqName, prevSeq, true);
 		}
 
@@ -972,8 +1044,8 @@ function changeToDownSQL(
 			const seq = change.meta?.sequence as SequenceIR;
 			if (!seq) return undefined;
 			const seqName = schemaName
-				? `${q(schemaName)}.${q(seq.name)}`
-				: q(seq.name);
+				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(seq.name, 'alias')}`
+				: quoteIdent(seq.name, 'alias');
 			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
 		}
 
@@ -993,7 +1065,7 @@ function changeToDownSQL(
 			// DOWN: drop the policy that was created
 			const policy = change.meta?.policy as PolicyIR;
 			if (!policy) return undefined;
-			return `DROP POLICY IF EXISTS ${q(policy.name)} ON ${qualifyTable(change.table, schemaName)};`;
+			return `DROP POLICY IF EXISTS ${quoteIdent(policy.name, 'alias')} ON ${qualifyTable(change.table, schemaName)};`;
 		}
 
 		case 'drop_policy': {
@@ -1080,12 +1152,15 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 
 	// Columns
 	for (const col of table.columns) {
-		const parts: string[] = [q(col.name), mapColumnType(col)];
+		const parts: string[] = [quoteIdent(col.name, 'alias'), mapColumnType(col)];
 		if (!col.nullable && !col.autoIncrement) parts.push('NOT NULL');
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');
-		if (col.collation) parts.push(`COLLATE "${col.collation}"`);
+		// S-2: validate collation name before quoting — uses quoteCollation which
+		// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+		// that contain dots/hyphens rejected by the standard identifier validator.
+		if (col.collation) parts.push(`COLLATE ${quoteCollation(col.collation)}`);
 		if (col.identity) {
 			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
 			parts.push(`GENERATED ${gen} AS IDENTITY`);
@@ -1098,17 +1173,19 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 		const pkCols = (
 			Array.isArray(table.primaryKey) ? table.primaryKey : [table.primaryKey]
 		)
-			.map(q)
+			.map((n) => quoteIdent(n, 'alias'))
 			.join(', ');
 		elements.push(
-			`CONSTRAINT ${q(pkName(table.name))} PRIMARY KEY (${pkCols})`,
+			`CONSTRAINT ${quoteIdent(pkName(table.name), 'alias')} PRIMARY KEY (${pkCols})`,
 		);
 	}
 
 	const body = elements.map((el) => `  ${el}`).join(',\n');
 	let sql = `CREATE TABLE ${qualTable} (\n${body}\n)`;
 	if (table.partition) {
-		const partCols = table.partition.columns.map(q).join(', ');
+		const partCols = table.partition.columns
+			.map((n) => quoteIdent(n, 'alias'))
+			.join(', ');
 		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
 	}
 	sql += ';';
@@ -1121,11 +1198,13 @@ function generateAddFKSQL(
 	schemaName?: string,
 ): string {
 	const qualTable = qualifyTable(tableName, schemaName);
-	const constraintName = q(fkName(tableName, fk.columns));
-	const fkCols = fk.columns.map(q).join(', ');
+	const constraintName = quoteIdent(fkName(tableName, fk.columns), 'alias');
+	const fkCols = fk.columns.map((n) => quoteIdent(n, 'alias')).join(', ');
 	// Referenced table must also be schema-qualified to resolve within the same schema
 	const refTable = qualifyTable(fk.references.table, schemaName);
-	const refCols = fk.references.columns.map(q).join(', ');
+	const refCols = fk.references.columns
+		.map((n) => quoteIdent(n, 'alias'))
+		.join(', ');
 	const onDelete = fk.onDelete
 		? ` ON DELETE ${mapOnDeleteAction(fk.onDelete)}`
 		: '';
@@ -1137,23 +1216,9 @@ function generateAddFKSQL(
 	return `ALTER TABLE ${qualTable} ADD CONSTRAINT ${constraintName} FOREIGN KEY (${fkCols}) REFERENCES ${refTable} (${refCols})${onDelete}${onUpdate}${deferred}${notValid};`;
 }
 
+// M-6: formatDefault is now a thin alias for the shared formatSqlDefault from phases/utils.
+// The duplicate implementations in migration-sql.ts, table-operations.ts, and ddl-generator.ts
+// have been consolidated. See formatSqlDefault in packages/adapter-pgsql/src/ddl/phases/utils.ts.
 function formatDefault(value: unknown): string {
-	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		const rawSql = (value as Record<string, unknown>).sql;
-		if (typeof rawSql !== 'string') {
-			throw new Error(
-				`formatDefault({ sql }): expected string, got ${typeof rawSql}`,
-			);
-		}
-		validateSqlExpression(rawSql, 'migration-sql formatDefault({ sql })');
-		return rawSql;
-	}
-	if (typeof value === 'string') {
-		if (value.endsWith('()')) return value;
-		return `'${value.replace(/'/g, "''")}'`;
-	}
-	if (typeof value === 'number') return String(value);
-	if (typeof value === 'boolean') return value ? 'true' : 'false';
-	if (value === null) return 'NULL';
-	return `'${String(value)}'`;
+	return formatSqlDefault(value, 'migration-sql default');
 }
