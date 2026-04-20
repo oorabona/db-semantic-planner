@@ -15,6 +15,7 @@ import type {
 	WindowIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { NqlErrorCodes } from '../errors/types.js';
 import { compile } from '../index.js';
 import type { CompileResult } from './index.js';
 
@@ -1072,8 +1073,9 @@ describe('compile-select: arithmetic with literal left', () => {
 // The fix: coerceToStringKey() — same helper as the WHERE-context S-1/S-2/S-3
 // fixes — is now applied to all json_extract/json_path arg positions.
 //
-// Regression gate: these tests should FAIL without the fix (bare identifier
-// would silently produce path: ['[object Object]'] instead of throwing).
+// Regression gate: these tests should FAIL without the fix. Pre-fix, the bug
+// was SILENT COERCION — compilation succeeded but produced path: ['[object Object]']
+// in the compiled AST instead of the intended key. Post-fix, compilation throws.
 // ===========================================================================
 
 function compileRawSelect(input: string) {
@@ -1101,7 +1103,7 @@ describe('compile-select: M-1 — json function path args coercion (no [object O
 			'users | select json_extract(data, a.b) as v',
 		);
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.code).toBe('ERR-SEM-007'); // SEM_INVALID_SYNTAX
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
 		expect(result.errors[0]?.message).toMatch(/json_extract\(\) path argument/);
 	});
 
@@ -1122,7 +1124,7 @@ describe('compile-select: M-1 — json function path args coercion (no [object O
 		// Multi-segment paths rejected — same guard as json_extract.
 		const result = compileRawSelect('users | select json_path(data, a.b) as v');
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.code).toBe('ERR-SEM-007'); // SEM_INVALID_SYNTAX
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
 		expect(result.errors[0]?.message).toMatch(/json_path\(\) path argument/);
 	});
 });

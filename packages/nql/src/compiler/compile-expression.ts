@@ -196,7 +196,8 @@ function compileComparison(
 	// Validate WHERE column on current table context
 	validateWhereField(ctx, field, aliasContext, comp.left);
 
-	// Handle LIKE specially: RHS must be a string literal (not a path expression).
+	// Handle LIKE specially: RHS must be a string literal or single-segment identifier path.
+	// Dotted paths and expression nodes are rejected by coerceToStringKey().
 	// String(resolveFilterValue(...)) would silently yield '[object Object]' for path refs.
 	if (comp.operator === 'like') {
 		return {

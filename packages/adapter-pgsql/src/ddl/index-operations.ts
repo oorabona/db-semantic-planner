@@ -13,19 +13,7 @@ import type {
 	IndexColumnDef,
 } from '@dbsp/core';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
-import { quoteIdent } from './phases/utils.js';
-
-// Accepted index methods (validated at runtime)
-const VALID_INDEX_METHODS = new Set([
-	'btree',
-	'hash',
-	'gist',
-	'gin',
-	'brin',
-	'hnsw',
-	'ivfflat',
-	'bm25',
-]);
+import { quoteIdent, validateIndexMethod } from './phases/utils.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -83,13 +71,8 @@ export function generateCreateIndexSQL(
 	schema?: string,
 ): string {
 	// Validate method if provided
-	if (
-		options.method !== undefined &&
-		!VALID_INDEX_METHODS.has(options.method)
-	) {
-		throw new Error(
-			`Invalid index method: "${options.method}". Must be one of: ${[...VALID_INDEX_METHODS].join(', ')}`,
-		);
+	if (options.method !== undefined) {
+		validateIndexMethod(options.method, 'index method');
 	}
 
 	const parts: string[] = ['CREATE'];

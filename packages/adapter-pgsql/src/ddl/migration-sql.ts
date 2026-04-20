@@ -24,6 +24,8 @@ import {
 	quoteExtensionName,
 	quoteIdent,
 	quoteRoleName,
+	validateEnumLabel,
+	validateIndexMethod,
 } from './phases/utils.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
@@ -54,29 +56,7 @@ function qualifyTable(table: string, schemaName?: string): string {
 		: quoteIdent(table, 'table');
 }
 
-/**
- * Validate an enum label (single-quoted string value in ADD VALUE / AFTER).
- * Enum labels may be any printable string but must not contain NUL bytes or
- * control characters, which PostgreSQL silently truncates or rejects at the protocol level.
- *
- * @param value The enum label to validate
- * @param context Human-readable context label for error messages
- * @throws Error if the label contains forbidden characters
- */
-function validateEnumLabel(value: string, context = 'enum label'): void {
-	// Reject NUL bytes — PostgreSQL truncates strings at the first NUL silently
-	if (/\x00/.test(value)) {
-		throw new Error(
-			`Invalid ${context}: contains NUL byte (\\x00) which would be silently truncated by PostgreSQL`,
-		);
-	}
-	// Reject control characters that have no valid use in enum labels
-	if (/[\x01-\x1f\x7f]/.test(value)) {
-		throw new Error(
-			`Invalid ${context}: contains control characters (only printable characters allowed)`,
-		);
-	}
-}
+// validateEnumLabel is imported from './phases/utils.js' (shared with enum-types.ts)
 
 /** PK constraint name convention. */
 function pkName(table: string): string {
@@ -490,6 +470,8 @@ function upCreateIndex(
 		'alias',
 	);
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	// S-1: validate index method against allowlist before interpolation into unquoted USING clause
+	if (idx.method) validateIndexMethod(idx.method, 'index method');
 	const method = idx.method ? ` USING ${idx.method}` : '';
 
 	// Build column list: expressions first (validated), then named columns with optional opclass
@@ -591,8 +573,12 @@ function upCreateEnum(
 	const enumName = schemaName
 		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
 		: quoteIdent(enumDef.name, 'alias');
+	// M-2: validate each enum value against NUL/control-char injection before emission
 	const values = enumDef.values
-		.map((v) => `'${v.replace(/'/g, "''")}'`)
+		.map((v) => {
+			validateEnumLabel(v, 'enum value');
+			return `'${v.replace(/'/g, "''")}'`;
+		})
 		.join(', ');
 	return `CREATE TYPE ${enumName} AS ENUM (${values});`;
 }

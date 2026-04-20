@@ -14,6 +14,79 @@ import {
 } from '../../validate.js';
 import type { PhaseContext } from './types.js';
 
+// ---------------------------------------------------------------------------
+// Index method validation
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid PostgreSQL index access methods.
+ * Used by validateIndexMethod() to reject unknown / injection-bearing strings.
+ */
+export const VALID_INDEX_METHODS = new Set([
+	'btree',
+	'hash',
+	'gist',
+	'gin',
+	'brin',
+	'hnsw',
+	'ivfflat',
+	'bm25',
+]);
+
+/**
+ * Validate a PostgreSQL index access method (USING clause).
+ *
+ * Method names are emitted unquoted into DDL (`USING btree`, `USING hnsw`),
+ * so an allowlist is the only safe approach — regex-based checks cannot
+ * guard all injection vectors for unquoted keywords.
+ *
+ * @security Allowlist — rejects anything not in VALID_INDEX_METHODS.
+ * @param method Raw method name from IndexIR (e.g. `'btree'`, `'hnsw'`)
+ * @param context Human-readable context for error messages
+ * @throws Error when the method is not in the allowlist
+ */
+export function validateIndexMethod(
+	method: string,
+	context = 'index method',
+): void {
+	if (!VALID_INDEX_METHODS.has(method)) {
+		throw new Error(
+			`Invalid ${context}: "${method}". Must be one of: ${[...VALID_INDEX_METHODS].join(', ')}`,
+		);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Enum label validation (shared by migration-sql.ts and enum-types.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Validate an enum label (single-quoted string value in CREATE TYPE ... AS ENUM,
+ * ADD VALUE, or AFTER clause).
+ *
+ * Enum labels may be any printable string but must not contain NUL bytes or
+ * control characters, which PostgreSQL silently truncates or rejects at the
+ * protocol level.
+ *
+ * @param value The enum label to validate
+ * @param context Human-readable context label for error messages
+ * @throws Error if the label contains forbidden characters
+ */
+export function validateEnumLabel(value: string, context = 'enum label'): void {
+	// Reject NUL bytes — PostgreSQL truncates strings at the first NUL silently
+	if (/\x00/.test(value)) {
+		throw new Error(
+			`Invalid ${context}: contains NUL byte (\\x00) which would be silently truncated by PostgreSQL`,
+		);
+	}
+	// Reject control characters that have no valid use in enum labels
+	if (/[\x01-\x1f\x7f]/.test(value)) {
+		throw new Error(
+			`Invalid ${context}: contains control characters (only printable characters allowed)`,
+		);
+	}
+}
+
 /**
  * Quote a PostgreSQL identifier for use in DDL statements.
  *
@@ -60,8 +133,10 @@ export function quoteExtensionName(name: string): string {
  * identifiers (e.g. `"app admin"`, `"read-only"`), but must not contain
  * injection vectors such as semicolons, comment markers, or backslashes.
  *
- * @security Validates via validateSqlExpression() (blocks `;`, `--`, `/*`, `$`, `\`)
- * and rejects embedded double-quotes. Wraps the name in double-quotes for safe DDL emission.
+ * @security Validates via validateSqlExpression() (blocks `;`, `--`, `/*`, `$$`, `\`)
+ * and rejects embedded double-quotes, NUL bytes, control characters, and names
+ * exceeding PostgreSQL's NAMEDATALEN limit (63 bytes). Wraps the name in
+ * double-quotes for safe DDL emission.
  *
  * @param name Raw role name (e.g. `app admin`)
  * @returns Double-quoted role name safe for DDL emission (e.g. `"app admin"`)
@@ -74,6 +149,26 @@ export function quoteRoleName(name: string): string {
 	if (name.includes('"')) {
 		throw new Error(
 			`quoteRoleName: role name "${name}" must not contain double-quote characters`,
+		);
+	}
+	// Reject NUL bytes — PostgreSQL silently truncates at the first NUL
+	if (/\x00/.test(name)) {
+		throw new Error(
+			`quoteRoleName: role name contains NUL byte (\\x00) which would be silently truncated by PostgreSQL`,
+		);
+	}
+	// Reject other control characters (0x01-0x1F, 0x7F)
+	if (/[\x01-\x1f\x7f]/.test(name)) {
+		throw new Error(
+			`quoteRoleName: role name contains control characters (only printable characters allowed)`,
+		);
+	}
+	// Enforce PostgreSQL NAMEDATALEN: identifiers are truncated at 63 bytes.
+	// We count bytes (not JS chars) because PostgreSQL uses strlen() semantics.
+	const byteLength = Buffer.byteLength(name, 'utf8');
+	if (byteLength > 63) {
+		throw new Error(
+			`quoteRoleName: role name exceeds PostgreSQL NAMEDATALEN limit of 63 bytes (got ${byteLength} bytes): "${name}"`,
 		);
 	}
 	// Block injection vectors (semicolons, comments, dollar-quotes, backslash)
@@ -108,7 +203,8 @@ export function qualifyTableIdent(
  * Handles the following value types:
  * - `null` → `NULL`
  * - `{ sql: string }` → raw SQL expression (validated via validateSqlExpression)
- * - `string` → quoted literal or bare function call (e.g. `'now()'`)
+ * - `string` ending with `()` → emitted unquoted as a bare function call (e.g. `now()`)
+ * - `string` (other) → single-quoted literal with `'` escaped as `''` (e.g. `'hello''world'`)
  * - `number` → numeric literal
  * - `boolean` → `true` / `false`
  * - other → single-quoted string representation

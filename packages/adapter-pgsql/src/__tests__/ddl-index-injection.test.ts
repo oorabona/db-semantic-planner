@@ -407,3 +407,176 @@ describe('S-2 migration-sql upAlterColumnCollation — COLLATE injection', () =>
 		).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// S-1/S-2: idx.method injection — upCreateIndex (migration-sql) + generateCreateIndex (ddl-generator)
+// ---------------------------------------------------------------------------
+
+describe('S-1 migration-sql upCreateIndex — idx.method injection (allowlist)', () => {
+	it('allows standard index methods: btree, hash, gin, gist, brin', () => {
+		for (const method of ['btree', 'hash', 'gin', 'gist', 'brin'] as const) {
+			expect(() =>
+				generateMigrationSQL(makeDiff([makeCreateIndexChange({ method })])),
+			).not.toThrow();
+		}
+	});
+
+	it('allows hnsw and bm25 (extension methods)', () => {
+		for (const method of ['hnsw', 'bm25'] as const) {
+			expect(() =>
+				generateMigrationSQL(makeDiff([makeCreateIndexChange({ method })])),
+			).not.toThrow();
+		}
+	});
+
+	it('rejects injection via idx.method: semicolon', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([
+					makeCreateIndexChange({ method: 'btree); DROP TABLE users --' }),
+				]),
+			),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects injection via idx.method: NUL byte', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeCreateIndexChange({ method: 'btree\x00' })]),
+			),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects unknown method string', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeCreateIndexChange({ method: 'spgist_unknown' })]),
+			),
+		).toThrow(/Invalid index method/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// S-3: index-operations.ts (generateCreateIndexSQL) — idx.method injection
+// ---------------------------------------------------------------------------
+
+describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (allowlist)', () => {
+	it('allows standard index methods: btree, hash, gin, gist, brin', () => {
+		for (const method of ['btree', 'hash', 'gin', 'gist', 'brin'] as const) {
+			expect(() =>
+				generateCreateIndexSQL('users', {
+					name: 'idx_test',
+					columns: ['id'],
+					method,
+				}),
+			).not.toThrow();
+		}
+	});
+
+	it('allows hnsw and bm25 (extension methods)', () => {
+		for (const method of ['hnsw', 'bm25'] as const) {
+			expect(() =>
+				generateCreateIndexSQL('users', {
+					name: 'idx_test',
+					columns: ['id'],
+					method,
+				}),
+			).not.toThrow();
+		}
+	});
+
+	it('rejects injection via idx.method: semicolon + DROP', () => {
+		expect(() =>
+			generateCreateIndexSQL('users', {
+				name: 'idx_test',
+				columns: ['id'],
+				method: 'btree); DROP TABLE users --',
+			}),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects injection via idx.method: NUL byte', () => {
+		expect(() =>
+			generateCreateIndexSQL('users', {
+				name: 'idx_test',
+				columns: ['id'],
+				method: 'btree\x00',
+			}),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects unknown method string', () => {
+		expect(() =>
+			generateCreateIndexSQL('users', {
+				name: 'idx_test',
+				columns: ['id'],
+				method: 'spgist_unknown',
+			}),
+		).toThrow(/Invalid index method/);
+	});
+});
+
+describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowlist)', () => {
+	it('allows standard index methods: btree, hash, gin, gist, brin', () => {
+		for (const method of ['btree', 'hash', 'gin', 'gist', 'brin'] as const) {
+			expect(() =>
+				generateCreateIndex(
+					'users',
+					{ name: 'idx_test', columns: ['id'], method },
+					undefined,
+					identityNaming,
+				),
+			).not.toThrow();
+		}
+	});
+
+	it('allows hnsw and bm25 (extension methods)', () => {
+		for (const method of ['hnsw', 'bm25'] as const) {
+			expect(() =>
+				generateCreateIndex(
+					'users',
+					{ name: 'idx_test', columns: ['id'], method },
+					undefined,
+					identityNaming,
+				),
+			).not.toThrow();
+		}
+	});
+
+	it('rejects injection via idx.method: semicolon + DROP', () => {
+		expect(() =>
+			generateCreateIndex(
+				'users',
+				{
+					name: 'idx_test',
+					columns: ['id'],
+					method: 'btree); DROP TABLE users --',
+				},
+				undefined,
+				identityNaming,
+			),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects injection via idx.method: NUL byte', () => {
+		expect(() =>
+			generateCreateIndex(
+				'users',
+				{ name: 'idx_test', columns: ['id'], method: 'btree\x00' },
+				undefined,
+				identityNaming,
+			),
+		).toThrow(/Invalid index method/);
+	});
+
+	it('rejects unknown method string', () => {
+		expect(() =>
+			generateCreateIndex(
+				'users',
+				{ name: 'idx_test', columns: ['id'], method: 'spgist_unknown' },
+				undefined,
+				identityNaming,
+			),
+		).toThrow(/Invalid index method/);
+	});
+});

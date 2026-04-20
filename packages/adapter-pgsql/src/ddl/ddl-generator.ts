@@ -28,7 +28,11 @@ import { generateRlsPhase } from './phases/rls.js';
 import { generateSequencesPhase } from './phases/sequences.js';
 import { generateTablesPhase } from './phases/tables.js';
 import type { PhaseContext } from './phases/types.js';
-import { formatSqlDefault, quoteRoleName } from './phases/utils.js';
+import {
+	formatSqlDefault,
+	quoteRoleName,
+	validateIndexMethod,
+} from './phases/utils.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ============================================================================
@@ -318,6 +322,8 @@ export function generateCreateIndex(
 	);
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
 	const unique = idx.unique ? 'UNIQUE ' : '';
+	// S-2: validate index method against allowlist before interpolation into unquoted USING clause
+	if (idx.method) validateIndexMethod(idx.method, 'index method');
 	const method = idx.method ? ` USING ${idx.method}` : '';
 
 	// Build column list: expressions first (validated), then named columns with optional opclass

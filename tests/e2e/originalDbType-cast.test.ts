@@ -58,13 +58,18 @@ async function execDDL(schema: string, ddl: string): Promise<void> {
 	const pool = await getTestPool();
 	await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
 	await pool.query(`SET search_path TO "${schema}"`);
-	for (const stmt of ddl
-		.split(';')
-		.map((s) => s.trim())
-		.filter(Boolean)) {
-		await pool.query(stmt);
+	try {
+		for (const stmt of ddl
+			.split(';')
+			.map((s) => s.trim())
+			.filter(Boolean)) {
+			await pool.query(stmt);
+		}
+	} finally {
+		// L-1: always reset search_path even if a DDL statement throws,
+		// so subsequent tests run in the expected `public` schema context.
+		await pool.query(`SET search_path TO public`);
 	}
-	await pool.query(`SET search_path TO public`);
 }
 
 // ==============================================================================
