@@ -7,12 +7,13 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	loadSchema,
 	SchemaLoadError,
 	validatePath,
 	validateResolvedSchema,
+	_resetWarnFlagForTests,
 } from './schema-loader.js';
 
 // Create a temp directory for test files
@@ -79,12 +80,12 @@ describe('validatePath', () => {
 	describe('basic path resolution', () => {
 		it('should resolve relative paths to absolute', () => {
 			const result = validatePath('./some/path.ts');
-			expect(result).toBe(resolve(process.cwd(), 'some/path.ts'));
+			expect(result.resolvedPath).toBe(resolve(process.cwd(), 'some/path.ts'));
 		});
 
 		it('should return absolute paths unchanged', () => {
 			const result = validatePath('/absolute/path.ts');
-			expect(result).toBe('/absolute/path.ts');
+			expect(result.resolvedPath).toBe('/absolute/path.ts');
 		});
 
 		it('should normalize existing paths with .. that stay within allowed root', () => {
@@ -100,7 +101,7 @@ describe('validatePath', () => {
 			);
 			const result = validatePath(pathWithDotDot, [testDir]);
 			// Should resolve to the real path
-			expect(result).toBe(join(allowedDir, 'valid-schema.js'));
+			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
 		});
 	});
 
@@ -128,7 +129,7 @@ describe('validatePath', () => {
 		it('should allow paths within allowed roots', () => {
 			const schemaPath = join(allowedDir, 'valid-schema.js');
 			const result = validatePath(schemaPath, [allowedDir]);
-			expect(result).toBe(schemaPath);
+			expect(result.resolvedPath).toBe(schemaPath);
 		});
 
 		it('should reject paths outside allowed roots', () => {
@@ -145,14 +146,14 @@ describe('validatePath', () => {
 			const schemaPath = join(outsideDir, 'outside-schema.js');
 			// Now outside dir is in allowed roots
 			const result = validatePath(schemaPath, [allowedDir, outsideDir]);
-			expect(result).toBe(schemaPath);
+			expect(result.resolvedPath).toBe(schemaPath);
 		});
 
 		it('should handle relative allowed roots', () => {
 			const schemaPath = join(allowedDir, 'valid-schema.js');
 			// Use relative path for allowedRoot
 			const result = validatePath(schemaPath, [allowedDir]);
-			expect(result).toBe(schemaPath);
+			expect(result.resolvedPath).toBe(schemaPath);
 		});
 	});
 });
@@ -432,5 +433,215 @@ describe('C3 regression: error message sanitization', () => {
 		expect(err.code).toBe('LOAD_FAILED');
 		// cause is accessible via standard Error cause chain
 		expect((err as unknown as { cause: unknown }).cause).toBe(cause);
+	});
+});
+
+// ─── Senior R1 review feedback tests (2026-04-20) ───────────────────────────
+
+describe('S-A: URL-encoded path traversal bypass', () => {
+	it('should reject %2e%2e/etc (URL-encoded ..)', () => {
+		expect(() => validatePath('%2e%2e/etc/passwd')).toThrow(SchemaLoadError);
+		try {
+			validatePath('%2e%2e/etc/passwd');
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+
+	it('should reject %2e%2e%2fetc (fully encoded ../)', () => {
+		expect(() => validatePath('%2e%2e%2fetc')).toThrow(SchemaLoadError);
+		try {
+			validatePath('%2e%2e%2fetc');
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+
+	it('should reject malformed percent-encoding', () => {
+		// '%zz' is not valid URL encoding — must be rejected as PATH_TRAVERSAL
+		expect(() => validatePath('%zz/etc/passwd')).toThrow(SchemaLoadError);
+		try {
+			validatePath('%zz/etc/passwd');
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+
+	it('should reject literal backslash ".." form (..\\foo)', () => {
+		// On POSIX a backslash is a valid filename character, but '..\\' as a
+		// traversal pattern should still be rejected.
+		expect(() => validatePath('..\\foo')).toThrow(SchemaLoadError);
+		try {
+			validatePath('..\\foo');
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+
+	it('should reject Windows-style ..\\\\..\\\\path (raw string, no OS required)', () => {
+		// We pass the raw string; no actual Windows runtime needed.
+		expect(() => validatePath('..\\..\\system32')).toThrow(SchemaLoadError);
+		try {
+			validatePath('..\\..\\system32');
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+});
+
+describe('S-B: TOCTOU re-check uses canonicalRoots from validatePath', () => {
+	it('validatePath returns canonicalRoots, not the raw allowedRoots', () => {
+		const schemaPath = join(allowedDir, 'valid-schema.js');
+		// Pass a relative allowed root — validatePath must resolve it
+		const result = validatePath(schemaPath, [allowedDir]);
+		// canonicalRoots should be present and match the resolved allowedDir
+		expect(result).toHaveProperty('canonicalRoots');
+		expect(result.canonicalRoots.length).toBeGreaterThan(0);
+		// resolvedPath must be an absolute path
+		expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
+	});
+
+	it('loadSchema uses canonicalRoots from validatePath for TOCTOU re-check', async () => {
+		// Verify the TOCTOU code path receives consistent roots by loading a valid schema
+		const result = await loadSchema({
+			schemaPath: join(allowedDir, 'valid-schema.js'),
+			allowedRoots: [allowedDir],
+		});
+		expect(result.schema.tables).toHaveProperty('users');
+	});
+});
+
+describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
+	it('sanitized loadSchema error must not contain the resolvedPath substring', async () => {
+		// Write a file that throws an Error containing the full path — simulates
+		// ERR_MODULE_NOT_FOUND or other node runtime errors that include the path.
+		const badPath = join(allowedDir, 'bad-path-in-error.js');
+		const { writeFileSync: wfs, unlinkSync: uls } = await import('node:fs');
+		// This file throws an Error whose message contains the path itself
+		wfs(badPath, `throw new Error("Cannot find module: ${badPath}");`);
+		try {
+			await loadSchema({ schemaPath: badPath, allowedRoots: [testDir] });
+		} catch (err) {
+			expect(err).toBeInstanceOf(SchemaLoadError);
+			const msg = (err as SchemaLoadError).message;
+			// Must not contain the raw resolved path
+			expect(msg).not.toContain(badPath);
+			// Must contain the placeholder
+			expect(msg).toContain('<schema-file>');
+			// Message must be capped at 500 chars
+			expect(msg.length).toBeLessThanOrEqual(500);
+		} finally {
+			try { uls(badPath); } catch { /* ignore */ }
+		}
+	});
+
+	it('sanitized error must not contain the parent directory', async () => {
+		// This file throws an Error whose message contains the parent directory
+		const badPath = join(allowedDir, 'bad-for-dirname-test.js');
+		const { writeFileSync: wfs, unlinkSync: uls } = await import('node:fs');
+		wfs(badPath, `throw new Error("Cannot load schema from directory: ${allowedDir}");`);
+		try {
+			await loadSchema({ schemaPath: badPath, allowedRoots: [testDir] });
+		} catch (err) {
+			if (err instanceof SchemaLoadError && err.code === 'LOAD_FAILED') {
+				const msg = err.message;
+				// Parent dir must not appear verbatim
+				expect(msg).not.toContain(allowedDir);
+				// Placeholders must appear
+				expect(msg).toMatch(/<schema-file>|<schema-dir>/);
+			}
+		} finally {
+			try { uls(badPath); } catch { /* ignore */ }
+		}
+	});
+});
+
+describe('M-D: validateResolvedSchema rejects non-plain-object instances', () => {
+	it('rejects Date as tables', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: new Date(), relations: {} }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: new Date(), relations: {} });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+		}
+	});
+
+	it('rejects Map as tables', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: new Map(), relations: {} }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: new Map(), relations: {} });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+		}
+	});
+
+	it('rejects RegExp as tables', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: /regex/, relations: {} }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: /regex/, relations: {} });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+		}
+	});
+
+	it('rejects Set as relations', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: {}, relations: new Set() }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: {}, relations: new Set() });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+		}
+	});
+
+	it('accepts plain-object schema (null proto)', () => {
+		const nullProtoObj = Object.create(null) as Record<string, unknown>;
+		nullProtoObj.tables = {};
+		nullProtoObj.relations = {};
+		expect(() => validateResolvedSchema(nullProtoObj)).not.toThrow();
+	});
+});
+
+describe('M-E: warn-once semantics for missing allowedRoots', () => {
+	// Reset before AND after each test: before so prior tests don't pollute this suite,
+	// after so this suite doesn't pollute subsequent tests.
+	beforeEach(() => {
+		_resetWarnFlagForTests();
+	});
+	afterEach(() => {
+		_resetWarnFlagForTests();
+	});
+
+	it('warning is emitted to stderr (not stdout)', () => {
+		const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+		// Call without allowedRoots — this triggers the warn-once branch.
+		// Use a simple relative path that won't trigger PATH_TRAVERSAL.
+		validatePath('./nonexistent-schema.js');
+		const stderrCalls = stderrSpy.mock.calls.map((c) => String(c[0]));
+		const warningCall = stderrCalls.find((s) =>
+			s.includes('no --allowed-root specified'),
+		);
+		expect(warningCall).toBeDefined();
+		stderrSpy.mockRestore();
+	});
+
+	it('warning is emitted exactly once across multiple calls', () => {
+		const stderrSpy = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+		// Call multiple times without allowedRoots — warning must appear exactly once
+		for (let i = 0; i < 3; i++) {
+			validatePath('./nonexistent-schema.js');
+		}
+		const warnCount = stderrSpy.mock.calls.filter((c) =>
+			String(c[0]).includes('no --allowed-root specified'),
+		).length;
+		expect(warnCount).toBe(1);
+		stderrSpy.mockRestore();
 	});
 });

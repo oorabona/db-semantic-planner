@@ -77,21 +77,49 @@ export class SchemaLoadError extends Error {
  */
 let _cwdWarnEmitted = false;
 
+export type ValidatePathResult = {
+	resolvedPath: string;
+	canonicalRoots: string[];
+};
+
 export function validatePath(
 	schemaPath: string,
 	allowedRoots?: string[],
-): string {
-	// Normalize and resolve to absolute path
-	const normalizedPath = normalize(schemaPath);
+): ValidatePathResult {
+	// Decode URL-encoded characters ONCE before any check so that
+	// '%2e%2e/etc' is correctly caught by the '..' guard below.
+	// Malformed percent-sequences are treated as a traversal attempt.
+	let decodedPath: string;
+	try {
+		decodedPath = decodeURIComponent(schemaPath);
+	} catch {
+		throw new SchemaLoadError(
+			`Suspicious path pattern detected (malformed URL encoding): ${schemaPath}`,
+			'PATH_TRAVERSAL',
+		);
+	}
+
+	// Also reject literal backslash-form '..' — unusual on POSIX but possible as
+	// a filename component and a canonical Windows traversal pattern.
+	if (decodedPath.includes('..\\') || decodedPath === '..') {
+		throw new SchemaLoadError(
+			`Suspicious path pattern detected: ${schemaPath}`,
+			'PATH_TRAVERSAL',
+		);
+	}
+
+	// Normalize and resolve to absolute path (operating on the decoded string)
+	const normalizedPath = normalize(decodedPath);
 	const resolvedPath = isAbsolute(normalizedPath)
 		? normalizedPath
 		: resolve(process.cwd(), normalizedPath);
 
-	// Reject unconditionally if the original input contains '..' — regardless of whether
-	// the resolved path exists. A legitimate path like '..backup/schema.js' inside an
-	// allowed root is accepted below after containment re-check; the early exit here only
-	// fires when the relative escape (relativePath === '..' or starts with '../') fails.
-	if (schemaPath.includes('..')) {
+	// Reject unconditionally if the decoded input contains '..' — regardless of
+	// whether the resolved path exists. A legitimate path like '..backup/schema.js'
+	// inside an allowed root is accepted below after containment re-check; the early
+	// exit here only fires when the relative escape (relativePath === '..' or starts
+	// with '../') fails.
+	if (decodedPath.includes('..')) {
 		// Compute the relative path from cwd to detect actual escapes
 		const relFromCwd = relative(process.cwd(), resolvedPath);
 		if (
@@ -107,23 +135,28 @@ export function validatePath(
 	}
 
 	// Validate each allowedRoots entry: reject if it contains '..' post-normalize
-	// (prevents sneaking out via a crafted root path)
-	const effectiveRoots: string[] | undefined = allowedRoots?.map((root) => {
-		const normalizedRoot = normalize(root);
-		if (normalizedRoot.includes('..')) {
-			throw new SchemaLoadError(
-				`Invalid allowedRoot contains path traversal: ${root}`,
-				'PATH_TRAVERSAL',
-			);
-		}
-		return isAbsolute(normalizedRoot)
-			? normalizedRoot
-			: resolve(process.cwd(), normalizedRoot);
-	});
+	// (prevents sneaking out via a crafted root path).
+	// canonicalRoots are computed once here and reused by loadSchema to avoid
+	// independent re-resolution that could diverge if call order changes (S-B).
+	const canonicalRoots: string[] = allowedRoots
+		? allowedRoots.map((root) => {
+				const normalizedRoot = normalize(root);
+				if (normalizedRoot.includes('..')) {
+					throw new SchemaLoadError(
+						`Invalid allowedRoot contains path traversal: ${root}`,
+						'PATH_TRAVERSAL',
+					);
+				}
+				return isAbsolute(normalizedRoot)
+					? normalizedRoot
+					: resolve(process.cwd(), normalizedRoot);
+			})
+		: [];
 
-	// Default allowedRoots to [cwd] when not provided; warn ONCE per invocation
+	// Default allowedRoots to [cwd] when not provided; warn ONCE per process.
+	// Warn-once is intentional — repeated warnings would spam stdio-MCP transport's stderr.
 	let rootsToCheck: string[];
-	if (!effectiveRoots || effectiveRoots.length === 0) {
+	if (canonicalRoots.length === 0) {
 		if (!_cwdWarnEmitted) {
 			process.stderr.write(
 				'[dbsp-mcp] Warning: no --allowed-root specified, defaulting to cwd\n',
@@ -132,7 +165,7 @@ export function validatePath(
 		}
 		rootsToCheck = [process.cwd()];
 	} else {
-		rootsToCheck = effectiveRoots;
+		rootsToCheck = canonicalRoots;
 	}
 
 	// If file exists, resolve symlinks and verify the real path
@@ -162,11 +195,11 @@ export function validatePath(
 			);
 		}
 
-		return realPath;
+		return { resolvedPath: realPath, canonicalRoots: rootsToCheck };
 	}
 
 	// File doesn't exist yet - just return resolved path for error handling
-	return resolvedPath;
+	return { resolvedPath, canonicalRoots: rootsToCheck };
 }
 
 /**
@@ -186,8 +219,10 @@ export async function loadSchema(
 ): Promise<SchemaLoaderResult> {
 	const { schemaPath, allowedRoots } = options;
 
-	// Validate and resolve path with security checks
-	const resolvedPath = validatePath(schemaPath, allowedRoots);
+	// Validate and resolve path with security checks.
+	// validatePath also canonicalizes allowedRoots — reuse the result to avoid
+	// independent re-resolution that could diverge under refactoring (S-B guard).
+	const { resolvedPath, canonicalRoots } = validatePath(schemaPath, allowedRoots);
 
 	// Check if file exists
 	if (!existsSync(resolvedPath)) {
@@ -202,17 +237,10 @@ export async function loadSchema(
 		// re-check containment so a symlink swap between validatePath and import() is caught.
 		const canonicalPath = realpathSync(resolvedPath);
 
-		// Re-check containment: canonical path must still be within the same roots
-		// that validatePath already verified. If a symlink was swapped, it may now
-		// point outside the allowed root.
+		// Re-check containment using the SAME canonical roots that validatePath already
+		// computed — this ensures the two checks are always consistent (S-B).
 		const rootsToCheck: string[] =
-			allowedRoots && allowedRoots.length > 0
-				? allowedRoots.map((root) =>
-						isAbsolute(normalize(root))
-							? normalize(root)
-							: resolve(process.cwd(), root),
-					)
-				: [process.cwd()];
+			canonicalRoots.length > 0 ? canonicalRoots : [process.cwd()];
 
 		const stillWithin = rootsToCheck.some((root) => {
 			const realRoot = existsSync(root) ? realpathSync(root) : root;
@@ -259,8 +287,16 @@ export async function loadSchema(
 		}
 
 		const rawMessage = error instanceof Error ? error.message : String(error);
+
+		// Sanitize the error message: replace the resolved path and its parent directory
+		// with placeholders to prevent leaking file-system layout (M-C).
+		// Use replaceAll so that ERR_MODULE_NOT_FOUND (which includes the path twice) is
+		// fully sanitized. Also replace the parent directory to prevent user-identity leak.
+		const { dirname } = await import('node:path');
+		const parentDir = dirname(resolvedPath);
 		const message = rawMessage
-			.replace(resolvedPath, '<schema-file>')
+			.replaceAll(resolvedPath, '<schema-file>')
+			.replaceAll(parentDir, '<schema-dir>')
 			.slice(0, 500);
 
 		// Provide helpful error for TypeScript files
@@ -301,6 +337,24 @@ export async function loadSchema(
  * valibot validator — this gap is intentional (leave validation of that field for a
  * future public-export ticket).
  */
+
+/**
+ * Returns true only for plain objects (Object.prototype or null proto).
+ * Rejects Date, Map, Set, RegExp, Array, and other class instances that
+ * pass typeof === 'object' but are not valid schema field values (M-D).
+ */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+	if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
+	const proto = Object.getPrototypeOf(v) as unknown;
+	return proto === Object.prototype || proto === null;
+}
+
+/** @internal Test-only: reset the warn-once flag between test runs. */
+export function _resetWarnFlagForTests(): void {
+	_cwdWarnEmitted = false;
+}
+
+
 export function validateResolvedSchema(schema: unknown): void {
 	// Arrays are not valid schemas even though typeof [] === 'object'
 	if (Array.isArray(schema)) {
@@ -319,56 +373,39 @@ export function validateResolvedSchema(schema: unknown): void {
 
 	const obj = schema as Record<string, unknown>;
 
-	// Required field: tables must be a non-array object
-	if (
-		obj.tables === undefined ||
-		obj.tables === null ||
-		typeof obj.tables !== 'object' ||
-		Array.isArray(obj.tables)
-	) {
+	// Required field: tables must be a plain object (M-D: isPlainObject rejects
+	// Date, Map, Set, RegExp etc. that pass typeof === 'object')
+	if (!isPlainObject(obj.tables)) {
 		throw new SchemaLoadError(
-			`Invalid schema: 'tables' must be an object (got ${obj.tables === null ? 'null' : Array.isArray(obj.tables) ? 'array' : typeof obj.tables})`,
+			`Invalid schema: 'tables' must be a plain object (got ${obj.tables === null ? 'null' : Array.isArray(obj.tables) ? 'array' : typeof obj.tables === 'object' ? Object.prototype.toString.call(obj.tables) : typeof obj.tables})`,
 			'INVALID_SCHEMA',
 		);
 	}
 
-	// Required field: relations must be a non-array object
-	if (
-		obj.relations === undefined ||
-		obj.relations === null ||
-		typeof obj.relations !== 'object' ||
-		Array.isArray(obj.relations)
-	) {
+	// Required field: relations must be a plain object
+	if (!isPlainObject(obj.relations)) {
 		throw new SchemaLoadError(
-			`Invalid schema: 'relations' must be an object (got ${obj.relations === null ? 'null' : Array.isArray(obj.relations) ? 'array' : typeof obj.relations}). ` +
+			`Invalid schema: 'relations' must be a plain object (got ${obj.relations === null ? 'null' : Array.isArray(obj.relations) ? 'array' : typeof obj.relations === 'object' ? Object.prototype.toString.call(obj.relations) : typeof obj.relations}). ` +
 				`Did you forget to call defineSchema()?`,
 			'INVALID_SCHEMA',
 		);
 	}
 
-	// Required field: hints must be an object (may be empty {})
+	// Required field: hints must be a plain object (may be empty {})
 	if (obj.hints !== undefined) {
-		if (
-			obj.hints === null ||
-			typeof obj.hints !== 'object' ||
-			Array.isArray(obj.hints)
-		) {
+		if (!isPlainObject(obj.hints)) {
 			throw new SchemaLoadError(
-				`Invalid schema: 'hints' must be an object`,
+				`Invalid schema: 'hints' must be a plain object`,
 				'INVALID_SCHEMA',
 			);
 		}
 	}
 
-	// Required field: conventions must be an object when present
+	// Required field: conventions must be a plain object when present
 	if (obj.conventions !== undefined) {
-		if (
-			obj.conventions === null ||
-			typeof obj.conventions !== 'object' ||
-			Array.isArray(obj.conventions)
-		) {
+		if (!isPlainObject(obj.conventions)) {
 			throw new SchemaLoadError(
-				`Invalid schema: 'conventions' must be an object`,
+				`Invalid schema: 'conventions' must be a plain object`,
 				'INVALID_SCHEMA',
 			);
 		}

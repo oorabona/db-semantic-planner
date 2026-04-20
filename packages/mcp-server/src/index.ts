@@ -13,6 +13,8 @@
  * Cursor to understand database schemas and generate optimized queries.
  */
 
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { loadSchema, SchemaLoadError } from './schema-loader.js';
 import { startMcpServer } from './server.js';
 
@@ -52,6 +54,14 @@ export function parseArgs(args: string[]): CliArgs {
 		}
 	}
 
+	// The set of flags that consume the next argument as a value.
+	// Used to distinguish "missing value" from a legitimate hyphen-leading path (M-A).
+	const VALUE_FLAGS = new Set(['--schema', '-s', '--allowed-root', '-r']);
+	const KNOWN_FLAGS = new Set([...VALUE_FLAGS, '--help', '-h']);
+
+	// After '--' all remaining tokens are treated as positional values (POSIX convention).
+	let endOfOptions = false;
+
 	for (let i = 0; i < normalized.length; i++) {
 		const arg = normalized[i];
 
@@ -59,18 +69,26 @@ export function parseArgs(args: string[]): CliArgs {
 			continue;
 		}
 
+		// POSIX end-of-options marker: everything after '--' is a value, not a flag.
+		if (!endOfOptions && arg === '--') {
+			endOfOptions = true;
+			continue;
+		}
+
 		if (arg === '--help' || arg === '-h') {
 			result.help = true;
 		} else if (arg === '--schema' || arg === '-s') {
 			const nextArg = normalized[i + 1];
-			if (nextArg === undefined || nextArg.startsWith('-')) {
+			// Only reject if the next token is itself a known flag or missing.
+			// A value like '-my-file.ts' is a legitimate relative path (M-A).
+			if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
 				throw new Error('--schema requires a path argument');
 			}
 			result.schemaPath = nextArg;
 			i++; // Skip next arg
 		} else if (arg === '--allowed-root' || arg === '-r') {
 			const nextArg = normalized[i + 1];
-			if (nextArg === undefined || nextArg.startsWith('-')) {
+			if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
 				throw new Error('--allowed-root requires a path argument');
 			}
 			result.allowedRoots = result.allowedRoots ?? [];
@@ -204,15 +222,23 @@ async function main(): Promise<void> {
 }
 
 // Run main only when executed directly (not when imported by tests or other modules).
-// Compare the resolved path of this module against process.argv[1] (the entry script).
+// Use realpathSync on process.argv[1] to resolve pnpm shims and symlinks (M-B):
+// without this, the shim path (/…/node_modules/.bin/dbsp-mcp) never matches
+// import.meta.url which resolves to the real dist/index.js path.
 if (process.argv[1] !== undefined) {
-	const _thisFile = new URL(import.meta.url).pathname;
-	// tsx may pass the .ts source path; normalise both sides for comparison
-	const _mainFile = process.argv[1].replace(/\.[cm]?[jt]s$/, '');
-	if (_thisFile.replace(/\.[cm]?[jt]s$/, '') === _mainFile) {
-		main().catch((error) => {
-			console.error('[dbsp-mcp] Fatal error:', error);
-			process.exit(1);
-		});
+	try {
+		const thisFile = fileURLToPath(import.meta.url);
+		const entryFile = realpathSync(process.argv[1]);
+		// tsx may pass the .ts source path; normalise both sides for comparison
+		const thisBase = thisFile.replace(/\.[cm]?[jt]s$/, '');
+		const entryBase = entryFile.replace(/\.[cm]?[jt]s$/, '');
+		if (thisBase === entryBase) {
+			main().catch((error) => {
+				console.error('[dbsp-mcp] Fatal error:', error);
+				process.exit(1);
+			});
+		}
+	} catch {
+		// process.argv[1] may not exist (unusual setups, test runners) — skip silently.
 	}
 }
