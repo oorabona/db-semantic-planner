@@ -56,6 +56,34 @@ describe('parseArgs', () => {
 			]);
 			expect(result.allowedRoots).toEqual(['/safe', '/also-safe']);
 		});
+
+		it('should parse --verbose flag', () => {
+			const result = parseArgs(['--schema', './s.ts', '--verbose']);
+			expect(result.verbose).toBe(true);
+		});
+
+		it('should parse -v shorthand', () => {
+			const result = parseArgs(['--schema', './s.ts', '-v']);
+			expect(result.verbose).toBe(true);
+		});
+
+		it('should default verbose to undefined when not specified', () => {
+			const result = parseArgs(['--schema', './s.ts']);
+			expect(result.verbose).toBeUndefined();
+		});
+
+		it('should accept --verbose combined with other flags', () => {
+			const result = parseArgs([
+				'--schema',
+				'./s.ts',
+				'--allowed-root',
+				'/safe',
+				'--verbose',
+			]);
+			expect(result.verbose).toBe(true);
+			expect(result.schemaPath).toBe('./s.ts');
+			expect(result.allowedRoots).toEqual(['/safe']);
+		});
 	});
 
 	describe('C2 regression: unknown flag rejection', () => {
@@ -66,8 +94,8 @@ describe('parseArgs', () => {
 		});
 
 		it('should throw for any unrecognised flag', () => {
-			expect(() => parseArgs(['--verbose'])).toThrow(
-				'Unknown argument: --verbose',
+			expect(() => parseArgs(['--unknown-xyz'])).toThrow(
+				'Unknown argument: --unknown-xyz',
 			);
 		});
 

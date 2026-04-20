@@ -6,6 +6,11 @@
  */
 
 export {
+	formatLogPath,
+	sanitizeErrorMessage,
+	sanitizePath,
+} from './format-error.js';
+export {
 	hasParentSegment,
 	isPathContained,
 	realpathBestEffort,

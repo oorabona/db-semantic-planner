@@ -15,6 +15,7 @@
 
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { formatLogPath } from './format-error.js';
 import { loadSchema, SchemaLoadError } from './schema-loader.js';
 import { startMcpServer } from './server.js';
 
@@ -25,6 +26,7 @@ interface CliArgs {
 	schemaPath: string;
 	allowedRoots?: string[];
 	help: boolean;
+	verbose?: boolean;
 }
 
 /**
@@ -69,7 +71,13 @@ export function parseArgs(args: string[]): CliArgs {
 	// The set of flags that consume the next argument as a value.
 	// Used to distinguish "missing value" from a legitimate hyphen-leading path (M-A).
 	const VALUE_FLAGS = new Set(['--schema', '-s', '--allowed-root', '-r']);
-	const KNOWN_FLAGS = new Set([...VALUE_FLAGS, '--help', '-h']);
+	const KNOWN_FLAGS = new Set([
+		...VALUE_FLAGS,
+		'--help',
+		'-h',
+		'--verbose',
+		'-v',
+	]);
 
 	// POSIX-style end-of-options marker. We do NOT support positional args (this CLI
 	// has no positionals), so any token after a bare '--' is rejected as 'Unknown argument'.
@@ -97,6 +105,8 @@ export function parseArgs(args: string[]): CliArgs {
 
 		if (arg === '--help' || arg === '-h') {
 			result.help = true;
+		} else if (arg === '--verbose' || arg === '-v') {
+			result.verbose = true;
 		} else if (arg === '--schema' || arg === '-s') {
 			const nextArg = normalized[i + 1];
 			// Check if next token is '--' (POSIX end-of-options) — consume it
@@ -163,6 +173,8 @@ OPTIONS:
 
   -r, --allowed-root <path> Restrict schema loading to this directory (repeatable)
                             Security: prevents loading files outside allowed roots.
+
+  -v, --verbose             Show full file paths in log output (default: basename only)
 
   -h, --help                Show this help message
 
@@ -234,7 +246,8 @@ async function main(): Promise<void> {
 	}
 
 	try {
-		// Log basename only before load (avoid leaking absolute path pre-validation)
+		// Log basename only before load (path is user input, not yet security-checked).
+		// formatLogPath(p, verbose=false) always returns basename for pre-validation paths.
 		const { basename } = await import('node:path');
 		console.error(
 			`[dbsp-mcp] Loading schema from: ${basename(args.schemaPath)}`,
@@ -244,10 +257,18 @@ async function main(): Promise<void> {
 			schemaPath: args.schemaPath,
 			...(args.allowedRoots && { allowedRoots: args.allowedRoots }),
 		};
-		const { schema, resolvedPath } = await loadSchema(loaderOptions);
+		const { schema, resolvedPath, canonicalRoots } =
+			await loadSchema(loaderOptions);
 
-		// Log resolved (canonical) path after successful load
-		console.error(`[dbsp-mcp] Schema loaded from: ${resolvedPath}`);
+		// Post-load log: respect --verbose for full path; default to basename only.
+		console.error(
+			`[dbsp-mcp] Schema loaded from: ${formatLogPath(resolvedPath, args.verbose ?? false)}`,
+		);
+		// Log the number of allowed roots that were validated against (re-emits the
+		// diagnostic that validatePath's removed stderr write used to provide).
+		console.error(
+			`[dbsp-mcp] Schema validated against ${canonicalRoots.length} allowed root(s)`,
+		);
 
 		// Start MCP server
 		await startMcpServer({ schema });

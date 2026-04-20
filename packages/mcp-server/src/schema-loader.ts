@@ -13,9 +13,10 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, normalize, resolve } from 'node:path';
+import { dirname, isAbsolute, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ResolvedSchema } from '@dbsp/core';
+import { sanitizeErrorMessage, sanitizePath } from './format-error.js';
 import {
 	_resetWarnFlagForTests as _pvResetWarnFlag,
 	hasParentSegment,
@@ -53,6 +54,13 @@ export interface SchemaLoaderResult {
 	 * The resolved absolute path to the schema file.
 	 */
 	resolvedPath: string;
+
+	/**
+	 * The canonical allowed roots used during path validation.
+	 * Consumers can use this to log how many roots were checked without
+	 * re-running validation. Empty array means cwd was used as the default root.
+	 */
+	canonicalRoots: string[];
 }
 
 /**
@@ -128,7 +136,7 @@ export function validatePath(
 			: resolve(process.cwd(), normalizedEarly);
 		if (!isPathContained(canonicalRootsForEarlyCheck, resolvedEarly)) {
 			throw new SchemaLoadError(
-				`Suspicious path pattern detected: ${schemaPath}`,
+				`Suspicious path pattern detected`,
 				'PATH_TRAVERSAL',
 			);
 		}
@@ -155,11 +163,11 @@ export function validatePath(
 	//    paths (fixes M-R3g: symlinked root + non-existent file caused false positive).
 	//    This replaces the old split into two separate existsSync branches.
 	if (!isPathContained(canonicalRoots, resolvedPath)) {
-		process.stderr.write(
-			`[dbsp-mcp] Path containment check failed against ${canonicalRoots.length} allowed root(s)\n`,
-		);
 		throw new SchemaLoadError(
-			`Schema path resolves outside allowed directories`,
+			sanitizeErrorMessage(
+				`Schema path resolves outside allowed directories (checked against ${canonicalRoots.length} root(s))`,
+				{ resolved: resolvedPath },
+			),
 			'PATH_TRAVERSAL',
 		);
 	}
@@ -201,7 +209,7 @@ export async function loadSchema(
 	// Check if file exists
 	if (!existsSync(resolvedPath)) {
 		throw new SchemaLoadError(
-			`Schema file not found: ${resolvedPath}`,
+			`Schema file not found: ${sanitizePath(resolvedPath, 'basename')}`,
 			'NOT_FOUND',
 		);
 	}
@@ -245,6 +253,7 @@ export async function loadSchema(
 		return {
 			schema: schema as ResolvedSchema,
 			resolvedPath: canonicalPath,
+			canonicalRoots,
 		};
 	} catch (error) {
 		if (error instanceof SchemaLoadError) {
@@ -253,16 +262,13 @@ export async function loadSchema(
 
 		const rawMessage = error instanceof Error ? error.message : String(error);
 
-		// Sanitize the error message: replace the resolved path and its parent directory
-		// with placeholders to prevent leaking file-system layout (M-C).
-		// Use replaceAll so that ERR_MODULE_NOT_FOUND (which includes the path twice) is
-		// fully sanitized. Also replace the parent directory to prevent user-identity leak.
-		const { dirname } = await import('node:path');
-		const parentDir = dirname(resolvedPath);
-		const message = rawMessage
-			.replaceAll(resolvedPath, '<schema-file>')
-			.replaceAll(parentDir, '<schema-dir>')
-			.slice(0, 500);
+		// Sanitize the error message via the canonical helper (M-C + Copilot R5 structural).
+		// sanitizeErrorMessage replaces all occurrences of resolved path and parent dir,
+		// then caps the message length to prevent oversized error strings.
+		const message = sanitizeErrorMessage(rawMessage, {
+			resolved: resolvedPath,
+			parent: dirname(resolvedPath),
+		});
 
 		// Provide helpful error for TypeScript files
 		if (
