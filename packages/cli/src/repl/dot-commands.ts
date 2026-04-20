@@ -6,8 +6,15 @@
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { ModelIR } from '@dbsp/core';
+import {
+	InvalidIdentifierError,
+	validateIdentifier,
+} from '../utils/identifier-validation.js';
+import {
+	PathEscapeError,
+	validatePathInCwd,
+} from '../utils/path-containment.js';
 import type { LoadedSchema } from '../utils/schema-loader.js';
 import { formatCsv, parseCsvFile } from './csv.js';
 import type { DbConnection } from './db-connection.js';
@@ -110,6 +117,55 @@ function formatRelations(schema: LoadedSchema, tableName?: string): string {
  * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
  * @internal - Exported for testing
  */
+
+/**
+ * [SC-11] Shared helper for boolean-toggle dot-commands (.exec/.explain/.parse).
+ *
+ * Handles three argument forms:
+ *  - `"on"`  → force true  (for .exec: requires dbConnection)
+ *  - `"off"` → force false
+ *  - `""`    → toggle current value (for .exec: requires dbConnection)
+ *
+ * @param arg          - Cleaned argument string (already NUL-stripped)
+ * @param key          - The BatchState boolean key to change
+ * @param label        - Human-readable name used in output (e.g. "EXPLAIN mode")
+ * @param state        - Current BatchState
+ */
+function handleBooleanToggle(
+	arg: string,
+	key: 'execEnabled' | 'explainMode' | 'parseMode',
+	label: string,
+	state: BatchState,
+): { output: string; stateChange?: Partial<BatchState> } {
+	// execEnabled requires a live database connection
+	const requiresDb = key === 'execEnabled';
+
+	if (arg === 'on') {
+		if (requiresDb && !state.dbConnection) {
+			return { output: '❌ No database connection. Use --db option.' };
+		}
+		return {
+			output: `✓ ${label}: ON`,
+			stateChange: { [key]: true },
+		};
+	}
+	if (arg === 'off') {
+		return {
+			output: `✓ ${label}: OFF`,
+			stateChange: { [key]: false },
+		};
+	}
+	// Toggle (no argument)
+	if (requiresDb && !state.dbConnection) {
+		return { output: '❌ No database connection. Use --db option.' };
+	}
+	const newValue = !state[key];
+	return {
+		output: `✓ ${label}: ${newValue ? 'ON' : 'OFF'}`,
+		stateChange: { [key]: newValue },
+	};
+}
+
 export async function processDotCommand(
 	input: string,
 	schema: LoadedSchema,
@@ -122,7 +178,8 @@ export async function processDotCommand(
 }> {
 	const parts = input.split(/\s+/);
 	const command = (parts[0] ?? '').toLowerCase();
-	const arg = parts.slice(1).join(' ').trim();
+	// [SEC-M2] Strip NUL bytes from arg before any use
+	const arg = parts.slice(1).join(' ').trim().replace(/\0/g, '');
 
 	switch (command) {
 		case '.help':
@@ -135,6 +192,8 @@ export async function processDotCommand(
   .exec [on|off]    - Toggle or set execution mode (requires --db)
   .explain [on|off] - Toggle EXPLAIN output for queries
   .parse [on|off]   - Toggle parse tree (AST) output for queries
+  .natural          - Switch to natural query mode
+  .sql              - Switch to SQL mode
   .output [mode]    - Set output format (json|table|csv)
   .import <file>    - Execute SQL file (DDL, seed data)
   .load <table> <f> - Import CSV file into table
@@ -142,8 +201,6 @@ export async function processDotCommand(
   .begin            - Start a transaction
   .commit           - Commit the active transaction
   .rollback         - Rollback the active transaction
-  .natural          - Switch to natural query mode
-  .sql              - Switch to SQL mode
   .help             - Show this help`,
 			};
 
@@ -163,44 +220,30 @@ export async function processDotCommand(
 		case '.relations':
 			return { output: formatRelations(schema, arg || undefined) };
 
-		case '.use':
+		case '.use': {
 			if (!arg) {
 				return {
 					output: 'Cleared schema scope. Queries now use default schema.',
 					stateChange: { schemaName: undefined },
 				};
 			}
+			// [SEC-S1] Validate schema name at set-time to prevent injection
+			// via SET search_path TO "${schemaName}" in .import
+			try {
+				validateIdentifier(arg, 'schema');
+			} catch (err) {
+				const reason =
+					err instanceof InvalidIdentifierError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
+			}
 			return {
 				output: `Using schema: ${arg}`,
 				stateChange: { schemaName: arg },
 			};
-
-		case '.exec': {
-			if (arg === 'on') {
-				if (!state.dbConnection) {
-					return { output: '❌ No database connection. Use --db option.' };
-				}
-				return {
-					output: '✓ Execution mode: ON',
-					stateChange: { execEnabled: true },
-				};
-			}
-			if (arg === 'off') {
-				return {
-					output: '✓ Execution mode: OFF',
-					stateChange: { execEnabled: false },
-				};
-			}
-			// Toggle when no argument provided
-			if (!state.dbConnection) {
-				return { output: '❌ No database connection. Use --db option.' };
-			}
-			const newMode = !state.execEnabled;
-			return {
-				output: `✓ Execution mode: ${newMode ? 'ON' : 'OFF'}`,
-				stateChange: { execEnabled: newMode },
-			};
 		}
+
+		case '.exec':
+			return handleBooleanToggle(arg, 'execEnabled', 'Execution mode', state);
 
 		case '.natural':
 			return {
@@ -214,57 +257,17 @@ export async function processDotCommand(
 				stateChange: { mode: 'sql' },
 			};
 
-		case '.explain': {
-			// CLI-MUT: Toggle EXPLAIN mode (SC-15 to SC-17)
-			if (arg === 'on') {
-				return {
-					output: '✓ EXPLAIN mode: ON',
-					stateChange: { explainMode: true },
-				};
-			}
-			if (arg === 'off') {
-				return {
-					output: '✓ EXPLAIN mode: OFF',
-					stateChange: { explainMode: false },
-				};
-			}
-			// Toggle when no argument provided
-			const newMode = !state.explainMode;
-			return {
-				output: `✓ EXPLAIN mode: ${newMode ? 'ON' : 'OFF'}`,
-				stateChange: { explainMode: newMode },
-			};
-		}
+		case '.explain':
+			return handleBooleanToggle(arg, 'explainMode', 'EXPLAIN mode', state);
 
-		case '.parse': {
-			// CLI-NQL: Toggle parse tree (AST) output (SC-21 to SC-23)
-			if (arg === 'on') {
-				return {
-					output: '✓ Parse mode: ON - Queries will show parse tree (AST)',
-					stateChange: { parseMode: true },
-				};
-			}
-			if (arg === 'off') {
-				return {
-					output: '✓ Parse mode: OFF',
-					stateChange: { parseMode: false },
-				};
-			}
-			// Toggle when no argument provided
-			const newParseMode = !state.parseMode;
-			return {
-				output: `✓ Parse mode: ${newParseMode ? 'ON' : 'OFF'}`,
-				stateChange: { parseMode: newParseMode },
-			};
-		}
+		case '.parse':
+			return handleBooleanToggle(arg, 'parseMode', 'Parse mode', state);
 
 		case '.output': {
-			// NQL v2.1: Set output display format (json|table|csv)
 			const validModes = ['json', 'table', 'csv'] as const;
 			type OutputMode = (typeof validModes)[number];
 
 			if (!arg) {
-				// Show current mode
 				return {
 					output: `Current output mode: ${state.outputMode}`,
 				};
@@ -344,7 +347,6 @@ export async function processDotCommand(
 		}
 
 		case '.import': {
-			// Import and execute a SQL file
 			if (!arg) {
 				return { output: '❌ Usage: .import <file.sql>' };
 			}
@@ -353,7 +355,16 @@ export async function processDotCommand(
 				return { output: '❌ .import requires database connection (--db)' };
 			}
 
-			const resolvedPath = resolve(process.cwd(), arg);
+			// [SEC-M2] Path containment — rejects ../ escapes; NUL already stripped
+			let resolvedPath: string;
+			try {
+				resolvedPath = validatePathInCwd(arg);
+			} catch (err) {
+				const reason =
+					err instanceof PathEscapeError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
+			}
+
 			if (!existsSync(resolvedPath)) {
 				return { output: `❌ File not found: ${arg}` };
 			}
@@ -361,14 +372,14 @@ export async function processDotCommand(
 			try {
 				let sqlContent = readFileSync(resolvedPath, 'utf-8');
 
-				// If schema is set via .use, prefix with SET search_path
+				// [SEC-S1] schemaName is already validated at .use time —
+				// safe to interpolate here (double-quoted, no injection path)
 				if (state.schemaName) {
 					sqlContent = `SET search_path TO "${state.schemaName}", public;\n${sqlContent}`;
 				}
 
 				const result = await state.dbConnection.executeRaw(sqlContent, []);
 
-				// Check for execution errors (returned as result.error, not thrown)
 				if (result.error) {
 					return {
 						output: `❌ Import failed: ${result.error}`,
@@ -399,7 +410,6 @@ export async function processDotCommand(
 		}
 
 		case '.load': {
-			// E16: Bulk CSV import into a table
 			const loadParts = arg.split(/\s+/);
 			const tableName = loadParts[0];
 			const filePath = loadParts.slice(1).join(' ');
@@ -412,13 +422,31 @@ export async function processDotCommand(
 				return { output: '❌ .load requires database connection (--db)' };
 			}
 
+			// [SEC-S2] Validate table identifier before any SQL interpolation
+			try {
+				validateIdentifier(tableName, 'table');
+			} catch (err) {
+				const reason =
+					err instanceof InvalidIdentifierError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
+			}
+
 			// Check schema for column hints (optional — table may exist only in DB)
 			const loadTable = schema.model.tables.get(tableName);
 			const schemaColumns = loadTable
 				? loadTable.columns.map((c) => c.name)
 				: undefined;
 
-			const loadFilePath = resolve(process.cwd(), filePath);
+			// [SEC-M2] Path containment for file argument
+			let loadFilePath: string;
+			try {
+				loadFilePath = validatePathInCwd(filePath);
+			} catch (err) {
+				const reason =
+					err instanceof PathEscapeError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
+			}
+
 			if (!existsSync(loadFilePath)) {
 				return { output: `❌ File not found: ${filePath}` };
 			}
@@ -432,6 +460,20 @@ export async function processDotCommand(
 
 				// Use CSV columns, optionally filtered to schema columns
 				const csvColumns = [...csvData.format.columns];
+
+				// [SEC-S2] Validate every CSV column name before SQL interpolation
+				for (const col of csvColumns) {
+					try {
+						validateIdentifier(col, 'column');
+					} catch (err) {
+						const reason =
+							err instanceof InvalidIdentifierError ? err.message : String(err);
+						return {
+							output: `❌ CSV header contains invalid column: ${reason}`,
+						};
+					}
+				}
+
 				const validColumns = schemaColumns
 					? csvColumns.filter((c) => schemaColumns.includes(c))
 					: csvColumns;
@@ -490,7 +532,6 @@ export async function processDotCommand(
 		}
 
 		case '.dump': {
-			// E16e: Export table to CSV file
 			const dumpParts = arg.split(/\s+/);
 			const dumpTableName = dumpParts[0];
 			const dumpFilePath = dumpParts.slice(1).join(' ');
@@ -503,10 +544,29 @@ export async function processDotCommand(
 				return { output: '❌ .dump requires database connection (--db)' };
 			}
 
+			// [SEC-S2] Validate table identifier before any SQL interpolation
+			try {
+				validateIdentifier(dumpTableName, 'table');
+			} catch (err) {
+				const reason =
+					err instanceof InvalidIdentifierError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
+			}
+
 			// Verify table exists in schema
 			const dumpTable = schema.model.tables.get(dumpTableName);
 			if (!dumpTable) {
 				return { output: `❌ Table not found: ${dumpTableName}` };
+			}
+
+			// [SEC-M2] Path containment for output file
+			let resolvedDumpPath: string;
+			try {
+				resolvedDumpPath = validatePathInCwd(dumpFilePath);
+			} catch (err) {
+				const reason =
+					err instanceof PathEscapeError ? err.message : String(err);
+				return { output: `❌ ${reason}` };
 			}
 
 			try {
@@ -529,7 +589,6 @@ export async function processDotCommand(
 						: dumpTable.columns.map((c) => c.name);
 
 				const csv = formatCsv(result.rows, columns);
-				const resolvedDumpPath = resolve(process.cwd(), dumpFilePath);
 				writeFileSync(resolvedDumpPath, `${csv}\n`, 'utf-8');
 
 				return {
