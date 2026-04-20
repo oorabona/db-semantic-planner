@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/@dbsp/mcp-server.svg)](https://www.npmjs.com/package/@dbsp/mcp-server)
 [![license](https://img.shields.io/npm/l/@dbsp/mcp-server.svg)](LICENSE)
 
+> **Status: pre-release scaffold.** MCP tools (`schema_list_tables`, `query_plan`, `intent_validate`) are not yet implemented — see the "Planned features" section below. The server currently connects and loads schemas but exposes no tools.
+
 MCP (Model Context Protocol) server that exposes `@dbsp` schema and query planning capabilities to AI assistants such as Claude and Cursor.
 
 ## Installation
@@ -20,10 +22,11 @@ Add to your Claude Desktop or Cursor MCP configuration:
   "mcpServers": {
     "dbsp": {
       "command": "node",
-      "args": ["./node_modules/@dbsp/mcp-server/dist/index.js"],
-      "env": {
-        "DBSP_SCHEMA": "./dbsp.schema.ts"
-      }
+      "args": [
+        "./node_modules/@dbsp/mcp-server/dist/index.js",
+        "--schema",
+        "./dbsp.schema.ts"
+      ]
     }
   }
 }
@@ -32,15 +35,17 @@ Add to your Claude Desktop or Cursor MCP configuration:
 Or run directly:
 
 ```bash
-DBSP_SCHEMA=./dbsp.schema.ts npx dbsp-mcp
+npx dbsp-mcp --schema ./dbsp.schema.ts
 ```
 
-## Key features
+## Planned features
 
-- **Schema exposure** — Surfaces table names, column types, relations, and constraints to the AI context
-- **Query planning** — Accepts NQL or IntentAST and returns the compiled SQL + plan decisions
-- **Intent validation** — Validates AI-generated NQL queries against the schema before execution
-- **Observability** — Returns `dump()` output (plan + SQL + parameters) as structured MCP tool responses
+(not yet implemented)
+
+- **Schema exposure** — Surfaces table names, column types, relations, and constraints to the AI context (not yet implemented)
+- **Query planning** — Accepts NQL or IntentAST and returns the compiled SQL + plan decisions (not yet implemented)
+- **Intent validation** — Validates AI-generated NQL queries against the schema before execution (not yet implemented)
+- **Observability** — Returns `dump()` output (plan + SQL + parameters) as structured MCP tool responses (not yet implemented)
 - **Read-only by default** — No write operations exposed; safe for use in AI-assisted development workflows
 - **Zero DB connection required** — Works in compile-only mode; no live database needed for planning
 
