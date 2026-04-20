@@ -30,14 +30,18 @@ export function _resetWarnFlagForTests(): void {
 /**
  * Returns true if the path contains a `..` path segment (exact segment, not substring).
  *
+ * Splits on both POSIX (/) and Windows (\\) separators so traversal detection
+ * works regardless of runtime OS — important for paths supplied by external callers.
+ *
  * Examples:
  *   hasParentSegment('/var/..backup') → false  (`..backup` is not `..`)
  *   hasParentSegment('/var/../etc')   → true   (literal `..` segment)
  *   hasParentSegment('..')            → true
+ *   hasParentSegment('..\\foo')       → true   (Windows-style, detected on POSIX)
  */
 export function hasParentSegment(p: string): boolean {
 	if (p === '') return false;
-	return p.split(sep).some((seg) => seg === '..');
+	return p.split(/[\\/]/).some((seg) => seg === '..');
 }
 
 // ─── realpathBestEffort ─────────────────────────────────────────────────────

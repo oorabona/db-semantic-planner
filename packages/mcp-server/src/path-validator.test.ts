@@ -85,6 +85,17 @@ describe('hasParentSegment', () => {
 		// /..backup — the segment IS ..backup (not ..)
 		expect(hasParentSegment(`${sep}..backup`)).toBe(false);
 	});
+
+	it('M1: detects Windows-style ..\\foo traversal on POSIX runtime (cross-platform)', () => {
+		// On POSIX, path.sep === '/' so split('/') keeps '..\\foo' as one segment.
+		// The regex /[\\/]/ splits on both separators, correctly finding '..' as a segment.
+		expect(hasParentSegment('..\\foo')).toBe(true);
+	});
+
+	it('M1: detects Windows-style foo\\..\\bar traversal on POSIX runtime', () => {
+		// Middle '..' segment must be detected regardless of separator style.
+		expect(hasParentSegment('foo\\..\\bar')).toBe(true);
+	});
 });
 
 // ─── realpathBestEffort ─────────────────────────────────────────────────────

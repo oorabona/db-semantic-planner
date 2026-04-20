@@ -36,7 +36,7 @@ beforeAll(() => {
 	mkdirSync(outsideDir, { recursive: true });
 
 	// Create valid schema file in allowed dir.
-	// hints and conventions are required fields (M4/M5) — always present in defineSchema() output.
+	// hints, conventions, and indexes are required fields (M4/M5/M6) — always present in defineSchema() output.
 	writeFileSync(
 		join(allowedDir, 'valid-schema.js'),
 		`
@@ -44,7 +44,8 @@ beforeAll(() => {
 			tables: { users: { id: 'uuid', name: 'text' } },
 			relations: {},
 			hints: {},
-			conventions: {}
+			conventions: {},
+				indexes: {}
 		};
 	`,
 	);
@@ -57,7 +58,8 @@ beforeAll(() => {
 			tables: { secret: { id: 'uuid' } },
 			relations: {},
 			hints: {},
-			conventions: {}
+			conventions: {},
+				indexes: {}
 		};
 	`,
 	);
@@ -495,7 +497,7 @@ describe('C5 regression: schema structure validation', () => {
 	});
 
 	it('validateResolvedSchema accepts valid minimal schema', () => {
-		// hints and conventions are now REQUIRED (M4/M5 fix) — defineSchema() always
+		// hints, conventions, and indexes are now REQUIRED (M4/M5/M6 fix) — defineSchema() always
 		// populates them; a schema without them is not built via the public API.
 		expect(() =>
 			validateResolvedSchema({
@@ -503,6 +505,7 @@ describe('C5 regression: schema structure validation', () => {
 				relations: {},
 				hints: {},
 				conventions: {},
+				indexes: {},
 			}),
 		).not.toThrow();
 	});
@@ -529,6 +532,59 @@ describe('C5 regression: schema structure validation', () => {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
 			expect((err as SchemaLoadError).message).toContain(
 				"'conventions' is required",
+			);
+		}
+	});
+
+	it('validateResolvedSchema rejects missing indexes (M6)', () => {
+		// defineSchema() always populates indexes — a schema without it was not
+		// built via the public API and must be rejected before consumers access .indexes.<name>.
+		expect(() =>
+			validateResolvedSchema({
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {},
+			});
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+			expect((err as SchemaLoadError).message).toContain(
+				"'indexes' is required",
+			);
+		}
+	});
+
+	it('validateResolvedSchema rejects indexes as array (M6)', () => {
+		// indexes must be a plain object — an array (e.g. []) is not valid.
+		expect(() =>
+			validateResolvedSchema({
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {},
+				indexes: [] as unknown,
+			}),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {},
+				indexes: [] as unknown,
+			});
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+			expect((err as SchemaLoadError).message).toContain(
+				"'indexes' is required",
 			);
 		}
 	});
@@ -771,12 +827,13 @@ describe('M-D: validateResolvedSchema rejects non-plain-object instances', () =>
 	});
 
 	it('accepts plain-object schema (null proto)', () => {
-		// Null-proto objects must also have hints and conventions (M4/M5).
+		// Null-proto objects must also have hints, conventions, and indexes (M4/M5/M6).
 		const nullProtoObj = Object.create(null) as Record<string, unknown>;
 		nullProtoObj.tables = {};
 		nullProtoObj.relations = {};
 		nullProtoObj.hints = {};
 		nullProtoObj.conventions = {};
+		nullProtoObj.indexes = {};
 		expect(() => validateResolvedSchema(nullProtoObj)).not.toThrow();
 	});
 });

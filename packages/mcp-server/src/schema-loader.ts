@@ -372,4 +372,19 @@ export function validateResolvedSchema(schema: unknown): void {
 			'INVALID_SCHEMA',
 		);
 	}
+
+	// Required field: indexes must be a plain object.
+	// defineSchema() always populates this — missing means the schema was not
+	// built via the public API and is therefore invalid.
+	//
+	// Validates: tables, relations, hints, conventions, indexes (matches the
+	// ResolvedSchemaValidation valibot schema in @dbsp/core).
+	// Not validated (intentional gap until @dbsp/core exports its validator):
+	// 'defaultFilters' field.
+	if (!isPlainObject(obj.indexes)) {
+		throw new SchemaLoadError(
+			`Invalid schema: 'indexes' is required and must be a plain object (defineSchema() should populate this)`,
+			'INVALID_SCHEMA',
+		);
+	}
 }
