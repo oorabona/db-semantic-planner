@@ -124,10 +124,12 @@ export function expressionToSql(expr: NqlExpression): string {
 		}
 		// L-7: the old default was `return String(expr)` which silently emitted
 		// '[object Object]' for any unrecognised expression type. This is a
-		// programming error — throw instead so the caller surfaces the bug.
+		// programming error (unreachable code path) — SEM_UNREACHABLE is the
+		// correct code because a new expression type was added without a handler,
+		// not because the user provided invalid NQL syntax.
 		default:
 			throw new NqlSemanticException(
-				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				NqlErrorCodes.SEM_UNREACHABLE,
 				`Cannot convert expression type '${(expr as { type?: unknown }).type ?? 'unknown'}' to SQL fragment`,
 			);
 	}

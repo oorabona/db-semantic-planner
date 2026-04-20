@@ -8,6 +8,7 @@
  */
 
 import {
+	validateCollationName,
 	validateExtensionName,
 	validateIdentifier,
 	validateSqlExpression,
@@ -28,6 +29,7 @@ export const VALID_INDEX_METHODS = new Set([
 	'gist',
 	'gin',
 	'brin',
+	'spgist',
 	'hnsw',
 	'ivfflat',
 	'bm25',
@@ -123,6 +125,25 @@ export function quoteIdent(
 export function quoteExtensionName(name: string): string {
 	validateExtensionName(name, 'extension');
 	// No need to escape double-quotes inside — validateExtensionName rejects them.
+	return `"${name}"`;
+}
+
+/**
+ * Quote a PostgreSQL collation name for use in DDL statements
+ * (e.g. `COLLATE "en_US.utf8"`, `COLLATE "en-US-x-icu"`).
+ *
+ * Collation names differ from standard identifiers: they can contain dots
+ * and hyphens to represent OS locale strings and ICU locale identifiers.
+ * This function calls `validateCollationName()` for injection-safety, then
+ * wraps the name in double-quotes for safe DDL emission.
+ *
+ * @security Always calls `validateCollationName()` before quoting.
+ * @param name Raw collation name (e.g. `en_US.utf8`, `C.UTF-8`)
+ * @returns Double-quoted collation name safe for DDL emission (e.g. `"en_US.utf8"`)
+ */
+export function quoteCollation(name: string): string {
+	validateCollationName(name, 'collation');
+	// No need to escape double-quotes inside — validateCollationName rejects them.
 	return `"${name}"`;
 }
 
@@ -234,9 +255,12 @@ export function formatSqlDefault(
 		return rawSql;
 	}
 
-	// Function-like expressions (e.g. 'now()') — emit unquoted
+	// Function-like expressions (e.g. 'now()') — validate then emit unquoted
 	if (typeof value === 'string') {
-		if (value.endsWith('()')) return value;
+		if (value.endsWith('()')) {
+			validateSqlExpression(value, context);
+			return value;
+		}
 		return `'${value.replace(/'/g, "''")}'`;
 	}
 

@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from '../ddl/migration-sql.js';
 import { generateEnumTypesPhase } from '../ddl/phases/enum-types.js';
-import { quoteRoleName } from '../ddl/phases/utils.js';
+import { formatSqlDefault, quoteRoleName } from '../ddl/phases/utils.js';
 import type { SchemaChange, SchemaDiff } from '../ddl/schema-diff.js';
 import { identityNaming } from '../naming-plugin.js';
 import {
@@ -1372,6 +1372,46 @@ describe('M-3 generateEnumTypesPhase — enum label injection', () => {
 		expect(result).toHaveLength(1);
 		expect(result[0]).toMatch(
 			/CREATE TYPE "status" AS ENUM \('active', 'pending'\)/,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M-5: formatSqlDefault — bare function-call path injection defense
+// ---------------------------------------------------------------------------
+
+describe('formatSqlDefault — bare function-call path injection (M-5)', () => {
+	// Positive: legitimate PG default function calls must pass through unchanged
+	it('allows now()', () => {
+		expect(formatSqlDefault('now()')).toBe('now()');
+	});
+
+	it('allows CURRENT_TIMESTAMP()', () => {
+		expect(formatSqlDefault('CURRENT_TIMESTAMP()')).toBe('CURRENT_TIMESTAMP()');
+	});
+
+	it('allows uuid_generate_v4()', () => {
+		expect(formatSqlDefault('uuid_generate_v4()')).toBe('uuid_generate_v4()');
+	});
+
+	// Negative: injection attempts that end with `()` and thus trigger the
+	// bare-function-call branch must be rejected by validateSqlExpression.
+	it('throws on semicolon injection in bare function call (ends with ())', () => {
+		// Crafted to end with () so the endsWith('()') branch fires
+		expect(() => formatSqlDefault('now(); DROP TABLE users; --x()')).toThrow(
+			/forbidden characters/,
+		);
+	});
+
+	it('throws on line-comment injection in bare function call (ends with ())', () => {
+		expect(() => formatSqlDefault('now()-- injected()')).toThrow(
+			/forbidden characters/,
+		);
+	});
+
+	it('throws on block-comment injection in bare function call (ends with ())', () => {
+		expect(() => formatSqlDefault('now()/*injected*/()')).toThrow(
+			/forbidden characters/,
 		);
 	});
 });

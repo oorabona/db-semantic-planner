@@ -392,6 +392,145 @@ export function validateExtensionName(
 	}
 }
 
+/**
+ * Validate a PostgreSQL collation name for safe use in DDL statements.
+ *
+ * Collation names differ from regular SQL identifiers: they can contain
+ * hyphens and dots to represent locale strings (e.g. `en_US.utf8`,
+ * `en-US-x-icu`, `C.UTF-8`, `C`). They must not contain injection vectors.
+ *
+ * Allowed: letter or underscore start, then letters, digits, underscore,
+ *          hyphen, dot (`[a-zA-Z_][a-zA-Z0-9_.-]*`)
+ * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted
+ *            strings ($$), whitespace, NUL byte, backslash
+ *
+ * @param name    The collation name to validate (e.g. `en_US.utf8`)
+ * @param context Human-readable context label for the error message
+ * @throws InvalidIdentifierError if the name fails validation
+ */
+export function validateCollationName(
+	name: string,
+	context = 'collation',
+): void {
+	if (!name || name.length === 0) {
+		throw new InvalidIdentifierError(name, context, 'cannot be empty');
+	}
+
+	// PostgreSQL NAMEDATALEN - 1 = 63 byte limit
+	if (Buffer.byteLength(name, 'utf8') > 63) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			`exceeds maximum length of 63 bytes (got ${Buffer.byteLength(name, 'utf8')})`,
+		);
+	}
+
+	// Reject NUL bytes — PostgreSQL silently truncates at the first NUL
+	if (/\x00/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains NUL byte (\\x00) which would be silently truncated by PostgreSQL',
+		);
+	}
+
+	// Reject other control characters (0x01-0x1F, 0x7F)
+	if (/[\x01-\x1f\x7f]/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains control characters (only printable characters allowed)',
+		);
+	}
+
+	// Reject backslash
+	if (/[\\]/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains backslash (forbidden in collation names)',
+		);
+	}
+
+	// Reject embedded double-quotes — not valid inside a collation name
+	if (/"/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains double-quote (identifier injection risk)',
+		);
+	}
+
+	// Reject single-quotes
+	if (/'/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains single-quote (string injection risk)',
+		);
+	}
+
+	// Reject semicolons
+	if (/;/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains semicolon (statement injection risk)',
+		);
+	}
+
+	// Reject line-comment marker
+	if (/--/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains line-comment marker (--)',
+		);
+	}
+
+	// Reject block-comment opener
+	if (/\/\*/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains block-comment opener (/*)',
+		);
+	}
+
+	// Reject block-comment closer
+	if (/\*\//.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains block-comment closer (*/)',
+		);
+	}
+
+	// Reject dollar-quoting
+	if (/\$\$/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains dollar-quoting ($$)',
+		);
+	}
+
+	// Reject whitespace
+	if (/\s/.test(name)) {
+		throw new InvalidIdentifierError(name, context, 'contains whitespace');
+	}
+
+	// Final allowlist: must start with letter or underscore, then allow
+	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8)
+	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*$/.test(name)) {
+		throw new InvalidIdentifierError(
+			name,
+			context,
+			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed after the initial letter/underscore)',
+		);
+	}
+}
+
 /** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
 const SAFE_TYPE_PATTERN =
 	/^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;

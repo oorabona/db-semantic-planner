@@ -406,6 +406,69 @@ describe('S-2 migration-sql upAlterColumnCollation — COLLATE injection', () =>
 			generateMigrationSQL(makeDiff([makeAlterColumnCollationChange('C')])),
 		).not.toThrow();
 	});
+
+	// Regression gate (M-1): real PG locale strings with dots/hyphens must be accepted
+	it('allows en_US (basic locale — regression gate)', () => {
+		expect(() =>
+			generateMigrationSQL(makeDiff([makeAlterColumnCollationChange('en_US')])),
+		).not.toThrow();
+	});
+
+	it('allows en_US.utf8 (locale with dot)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en_US.utf8')]),
+			),
+		).not.toThrow();
+	});
+
+	it('allows en-US-x-icu (ICU locale with hyphens)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en-US-x-icu')]),
+			),
+		).not.toThrow();
+	});
+
+	it('allows C.UTF-8 (POSIX locale with dot and hyphen)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('C.UTF-8')]),
+			),
+		).not.toThrow();
+	});
+
+	it('throws on injection: embedded double-quote', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en_US"; DROP TABLE x; --')]),
+			),
+		).toThrow(/Invalid.*identifier/i);
+	});
+
+	it('throws on NUL byte in collation name', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en_US\x00')]),
+			),
+		).toThrow(/Invalid.*identifier/i);
+	});
+
+	it('throws on block-comment opener in collation name', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en_US/*')]),
+			),
+		).toThrow(/Invalid.*identifier/i);
+	});
+
+	it('throws on block-comment closer in collation name', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeAlterColumnCollationChange('en_US*/')]),
+			),
+		).toThrow(/Invalid.*identifier/i);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -419,6 +482,14 @@ describe('S-1 migration-sql upCreateIndex — idx.method injection (allowlist)',
 				generateMigrationSQL(makeDiff([makeCreateIndexChange({ method })])),
 			).not.toThrow();
 		}
+	});
+
+	it('allows spgist (M-4: SP-GiST core access method)', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeDiff([makeCreateIndexChange({ method: 'spgist' })]),
+			),
+		).not.toThrow();
 	});
 
 	it('allows hnsw and bm25 (extension methods)', () => {
@@ -471,6 +542,16 @@ describe('S-3 index-operations generateCreateIndexSQL — idx.method injection (
 				}),
 			).not.toThrow();
 		}
+	});
+
+	it('allows spgist (M-4: SP-GiST core access method)', () => {
+		expect(() =>
+			generateCreateIndexSQL('users', {
+				name: 'idx_test',
+				columns: ['id'],
+				method: 'spgist',
+			}),
+		).not.toThrow();
 	});
 
 	it('allows hnsw and bm25 (extension methods)', () => {
@@ -528,6 +609,17 @@ describe('S-2 ddl-generator generateCreateIndex — idx.method injection (allowl
 				),
 			).not.toThrow();
 		}
+	});
+
+	it('allows spgist (M-4: SP-GiST core access method)', () => {
+		expect(() =>
+			generateCreateIndex(
+				'users',
+				{ name: 'idx_test', columns: ['id'], method: 'spgist' },
+				undefined,
+				identityNaming,
+			),
+		).not.toThrow();
 	});
 
 	it('allows hnsw and bm25 (extension methods)', () => {

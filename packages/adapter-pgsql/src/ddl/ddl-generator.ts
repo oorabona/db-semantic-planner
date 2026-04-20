@@ -30,6 +30,7 @@ import { generateTablesPhase } from './phases/tables.js';
 import type { PhaseContext } from './phases/types.js';
 import {
 	formatSqlDefault,
+	quoteCollation,
 	quoteRoleName,
 	validateIndexMethod,
 } from './phases/utils.js';
@@ -238,9 +239,11 @@ function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
 	}
 
 	// COLLATE (must come after type)
-	// S-2: validate collation name before quoting — prevents identifier injection
+	// S-2: validate collation name before quoting — uses quoteCollation which
+	// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+	// that contain dots/hyphens rejected by the standard identifier validator.
 	if (col.collation) {
-		parts.push(`COLLATE ${quoteIdentifier(col.collation)}`);
+		parts.push(`COLLATE ${quoteCollation(col.collation)}`);
 	}
 
 	// GENERATED AS IDENTITY

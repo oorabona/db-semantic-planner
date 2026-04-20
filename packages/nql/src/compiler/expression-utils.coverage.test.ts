@@ -440,8 +440,10 @@ describe('expressionToSql', () => {
 			caught = e;
 		}
 		expect(caught).toBeInstanceOf(NqlSemanticException);
+		// L-1 (R3): unknown expression type is a programming error (SEM_UNREACHABLE),
+		// not a user syntax error (SEM_INVALID_SYNTAX).
 		expect((caught as NqlSemanticException).code).toBe(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			NqlErrorCodes.SEM_UNREACHABLE,
 		);
 		expect((caught as NqlSemanticException).message).toMatch(
 			/Cannot convert expression type 'jsonAccess' to SQL fragment/,

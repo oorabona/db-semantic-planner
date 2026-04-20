@@ -21,6 +21,7 @@ import type {
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
 import {
 	formatSqlDefault,
+	quoteCollation,
 	quoteExtensionName,
 	quoteIdent,
 	quoteRoleName,
@@ -634,9 +635,11 @@ function upAlterColumnCollation(
 ): string | undefined {
 	const col = change.meta?.column as ColumnIR;
 	if (!col) return undefined;
-	// S-2: validate collation name before quoting — prevents identifier injection
+	// S-2: validate collation name before quoting — uses quoteCollation which
+	// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+	// that contain dots/hyphens rejected by the standard identifier validator.
 	const collation = col.collation
-		? ` COLLATE ${quoteIdent(col.collation, 'alias')}`
+		? ` COLLATE ${quoteCollation(col.collation)}`
 		: '';
 	const typeName = mapColumnType(col);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${typeName}${collation};`;
@@ -1154,9 +1157,10 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);
 		if (col.unique) parts.push('UNIQUE');
-		// S-2: validate collation name before quoting — prevents identifier injection
-		if (col.collation)
-			parts.push(`COLLATE ${quoteIdent(col.collation, 'alias')}`);
+		// S-2: validate collation name before quoting — uses quoteCollation which
+		// accepts locale strings like `en_US.utf8`, `en-US-x-icu`, `C.UTF-8`
+		// that contain dots/hyphens rejected by the standard identifier validator.
+		if (col.collation) parts.push(`COLLATE ${quoteCollation(col.collation)}`);
 		if (col.identity) {
 			const gen = col.identity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
 			parts.push(`GENERATED ${gen} AS IDENTITY`);
