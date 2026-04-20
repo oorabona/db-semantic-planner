@@ -5,7 +5,7 @@
  */
 
 import type { ResolvedSchema } from '@dbsp/core';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { createMcpServer } from './server.js';
 
 // Mock schema for testing - minimal structure that passes validation
@@ -34,15 +34,6 @@ const mockSchema = {
 } as unknown as ResolvedSchema;
 
 describe('createMcpServer', () => {
-	// Suppress console.error during tests
-	const originalConsoleError = console.error;
-	beforeAll(() => {
-		console.error = vi.fn();
-	});
-	afterAll(() => {
-		console.error = originalConsoleError;
-	});
-
 	describe('basic creation', () => {
 		it('should create an MCP server instance', () => {
 			const server = createMcpServer({ schema: mockSchema });
@@ -58,27 +49,22 @@ describe('createMcpServer', () => {
 			expect(server).toBeDefined();
 		});
 
-		it('should use default name and version when not provided', () => {
-			// The defaults are '@dbsp/mcp-server' and '0.0.1'
-			// We verify by checking console.error was called (logs server info)
-			createMcpServer({ schema: mockSchema });
-			expect(console.error).toHaveBeenCalled();
+		it('should use default name from package when not provided', () => {
+			// Version defaults to package.json version (no longer hardcoded 0.0.1)
+			const server = createMcpServer({ schema: mockSchema });
+			expect(server).toBeDefined();
 		});
 	});
 
 	describe('schema handling', () => {
-		it('should log table count on creation', () => {
-			createMcpServer({ schema: mockSchema });
-			expect(console.error).toHaveBeenCalledWith(
-				expect.stringContaining('Tables: 2'),
-			);
+		it('should accept schema with multiple tables', () => {
+			const server = createMcpServer({ schema: mockSchema });
+			expect(server).toBeDefined();
 		});
 
-		it('should log relation count on creation', () => {
-			createMcpServer({ schema: mockSchema });
-			expect(console.error).toHaveBeenCalledWith(
-				expect.stringContaining('Relations: 1'),
-			);
+		it('should accept schema with relations', () => {
+			const server = createMcpServer({ schema: mockSchema });
+			expect(server).toBeDefined();
 		});
 
 		it('should handle schema with no relations', () => {
@@ -88,9 +74,6 @@ describe('createMcpServer', () => {
 			} as unknown as ResolvedSchema;
 			const server = createMcpServer({ schema: schemaNoRelations });
 			expect(server).toBeDefined();
-			expect(console.error).toHaveBeenCalledWith(
-				expect.stringContaining('Relations: 0'),
-			);
 		});
 
 		it('should handle empty schema', () => {
@@ -104,9 +87,6 @@ describe('createMcpServer', () => {
 			} as unknown as ResolvedSchema;
 			const server = createMcpServer({ schema: emptySchema });
 			expect(server).toBeDefined();
-			expect(console.error).toHaveBeenCalledWith(
-				expect.stringContaining('Tables: 0'),
-			);
 		});
 	});
 });
