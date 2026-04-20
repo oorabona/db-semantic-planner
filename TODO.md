@@ -72,12 +72,12 @@ Branch: `fix/adapter-pgsql-review-20260419` — ✅ merged as `38f9594` (2026-04
 - [x] ✅ [adapter-pgsql] Round-4 F-R4-1: extension names now validated via `validateExtensionName` across generateDDL + migration UP/DOWN (PR #48, 2026-04-19). NAMEDATALEN 63-char limit added.
 - [x] ✅ [adapter-pgsql] Round-4 F-R4-2: check constraint expressions now validated via `validateSqlExpression` across generateDDL + migration UP/DOWN (PR #48, 2026-04-19).
 - [x] ✅ [adapter-pgsql] Senior F-S1: typeof guards added to `{sql}` escape hatch in `ddl-generator.ts` + `schema-diff.ts` for full symmetry (PR #48, 2026-04-19).
-- [ ] 🔧 [adapter-pgsql] Copilot-nit PR #48 L-1 follow-up: 5 phase files (`sequences`, `enum-types`, `comments`, `rls`, `constraints`) + 6 local `qualifyTable` helpers — consolidate into shared helper in `phases/utils.ts` and propagate correct `quoteIdent` type labels (`'table'`/`'schema'`/`'column'`) to the 12 callsites. Priority: L
+- [x] ✅ [adapter-pgsql] Copilot-nit PR #48 L-1 follow-up: 5 phase files + 6 local `qualifyTable` helpers consolidated; correct `quoteIdent` type labels propagated (PR #49, 2026-04-20).
 - [ ] 🔧 [adapter-pgsql] Senior F-S2: hydrateIncludes leaves raw `{rel}_json` column in results when subquery strategy coerced via mapToHandlerDecision — strip after populating relationName. Priority: L
-- [ ] 🔧 [adapter-pgsql] Senior F-S3: `validateSqlExpression` accepts empty string → emits malformed `DEFAULT ` clause — reject empty/whitespace. Priority: L
-- [ ] 🔧 [adapter-pgsql] DRY: wire `qualifyTableIdent()` to replace 3 local `qualifyTable` implementations in phases/{comments,constraints,rls}.ts. Priority: L
-- [ ] 🔧 [adapter-pgsql] DRY: consolidate `ddl-generator.ts:quoteIdentifier` with `phases/utils.ts:quoteIdent` — single source of truth. Priority: L
-- [ ] 🔧 [adapter-pgsql] UX: `quoteIdent` context label currently hardcoded `'alias'` — pass `'table' | 'schema' | 'column'` for better attribution in InvalidIdentifierError messages. Priority: L
+- [x] ✅ [adapter-pgsql] Senior F-S3: empty/whitespace default values rejected via tightened quote helpers (PR #49, 2026-04-20).
+- [x] ✅ [adapter-pgsql] DRY: `qualifyTableIdent()` wired to replace 3 local `qualifyTable` implementations (PR #49, 2026-04-20).
+- [x] ✅ [adapter-pgsql] DRY: `ddl-generator.ts:quoteIdentifier` consolidated with `phases/utils.ts:quoteIdent` (PR #49, 2026-04-20).
+- [x] ✅ [adapter-pgsql] UX: `quoteIdent` context label propagated (`'table' | 'schema' | 'column'`) at 12 phase-module call sites (PR #49, 2026-04-20).
 
 ### P0 (runtime crashes / silent corruption)
 
@@ -168,9 +168,9 @@ Branch: `fix/types-review-20260419`
 ### Follow-ups discovered during review (non-blocking)
 
 - [x] ✅ [types] `pgsql-adapter-mock.test.ts` private-field anti-pattern replaced with observable behavior assertions (PR #46 round-1). (2026-04-19)
-- [ ] 🔧 [types] `createPgsqlCompileOnlyAdapter` returns `PgsqlAdapter<DB>` not `CompileOnlyAdapter` — users can't land on the tightened guarantee through the factory.
-- [ ] 🔧 [types] `DetectedHierarchy` (introspection.ts) and `HierarchyIR` (model-ir.ts) are structurally identical — alias one to the other to avoid drift.
-- [ ] 🔧 [types] Add E2E testcontainer test proving real introspection populates `originalDbType` and CAST emits on compiled SQL.
+- [x] ✅ [types] `createPgsqlCompileOnlyAdapter` now returns `CompileOnlyAdapter` via single documented cast (PR #49, 2026-04-20).
+- [x] ✅ [types] `DetectedHierarchy` aliased to `HierarchyIR` — single source of truth (PR #49, 2026-04-20).
+- [x] ✅ [types] E2E testcontainer test `originalDbType-cast.test.ts` proves real PG introspection + CAST emission; SET DEFAULT FK round-trip also covered (PR #49, 2026-04-20).
 - [ ] 🔧 [adapter-pgsql] Copilot-nits-PR-46: `pgsql-adapter-mock.test.ts` logger test in [P2-T5b] block uses non-tx stream cleanup path instead of genuine `transaction()` call — rename or move the test to honestly describe what it tests.
 
 ---
@@ -230,3 +230,15 @@ Branch: `fix/mcp-server-review-20260419`
 | **Total** | **10** | **34** | **9** | **53** |
 
 > Sources: codex review (4 parallel agents, 2026-04-19) + Copilot remarks audit on PRs #39/#40/#41 (5 still-valid out of 8).
+
+---
+
+# Retro-audit 2026-04-19 follow-ups (L — deferred from PR #49)
+
+> PR #49 merged as `5ba23ca` (2026-04-20). 25 audit findings + 14 Copilot findings + 8 senior findings addressed across 4 rounds. Hard cap bypassed once with user approval for structural COLLATE fix. These L items were explicitly deferred during convergence.
+
+- [ ] 🔧 [adapter-pgsql] `VALID_INDEX_METHODS` missing `bloom` (CONTRIB extension method). Parity gap vs `bm25`/`hnsw`/`ivfflat`. Priority: L
+- [ ] 🔧 [adapter-pgsql] `validateCollationName` rejects legacy glibc locale modifier `@euro` (e.g. `de_DE.utf8@euro`). Very legacy PG deployments only; extend regex if user impact surfaces. Priority: L
+- [ ] 🔧 [adapter-pgsql] NAMEDATALEN byte-vs-char asymmetry: `validateIdentifier` uses `.length > 63` (char count); `quoteRoleName`/`validateCollationName` use `Buffer.byteLength(name, 'utf8') > 63` (byte count). In practice the ASCII-only regex makes them equivalent; documentation-wise the asymmetry is confusing. Priority: L
+- [ ] 🔧 [tests/e2e] `tests/e2e/originalDbType-cast.test.ts` `execDDL()` uses `pool.query()` which does not pin to a specific connection — `SET search_path TO X` and the `finally` reset may run on different pool connections. Wrap in `pool.connect()` + `client.query()` + `client.release()` for strict session affinity. Pre-existing pattern; latent issue. Priority: L
+- [ ] 🔧 [adapter-pgsql] M-5 `SchemaChange.meta` discriminated union: 56 `as ForeignKeyIR`/`as IndexIR`/`as ColumnIR` casts in `migration-sql.ts`. Full union per `change.kind` (~25 kinds) deferred with in-source disclosure at `migration-sql.ts` top-of-file. Priority: L (structural refactor)
