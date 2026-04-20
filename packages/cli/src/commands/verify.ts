@@ -81,17 +81,23 @@ export const verifyCommand = new Command('verify')
 						console.log(formatVerifyResult(result));
 					}
 
-					// Exit with error code if not valid
-					process.exit(result.valid ? 0 : 1);
+					// EH-14: set exit code; let finally run pool.end() before process exits
+					process.exitCode = result.valid ? 0 : 1;
+					return;
 				} finally {
 					// Close database connection
 					await pool.end();
 				}
 			} catch (error) {
-				if (error instanceof Error) {
-					console.error(`❌ Error: ${error.message}`);
+				const message =
+					error instanceof Error ? error.message : 'Unknown error occurred';
+				// CC-2+EH-7: If --json, error goes to stdout as JSON; otherwise stderr
+				if (options.json) {
+					console.log(
+						JSON.stringify({ status: 'error', error: message }, null, 2),
+					);
 				} else {
-					console.error('❌ Unknown error occurred');
+					console.error(`❌ Error: ${message}`);
 				}
 				process.exit(1);
 			}

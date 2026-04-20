@@ -209,11 +209,9 @@ export async function executeBatch(
 	await engine.init();
 	unsubInit();
 
-	// Check for DB connection failure during init
-	const initError = initEvents.find(
-		(e) => e.type === 'error' && e.message.includes('Connection failed'),
-	);
-	if (initError?.type === 'error') {
+	// Check for DB connection failure during init (typed event check)
+	const initError = initEvents.find((e) => e.type === 'init-error');
+	if (initError) {
 		await engine.destroy();
 		throw new Error(`Database connection failed: ${initError.message}`);
 	}
@@ -265,7 +263,11 @@ export async function executeBatch(
 
 	try {
 		for (const query of queries) {
-			// Collect events for this query
+			// M-2 (CODEX-4): Coalesce continuation lines before submit.
+			// engine.submit() accumulates lines ending with '\' internally and emits
+			// no events until the full statement is submitted. We track whether any
+			// events were emitted to skip the synthetic success result for
+			// continuation lines.
 			const events: EngineEvent[] = [];
 			const unsub = engine.on((e) => {
 				events.push(e);
@@ -278,8 +280,21 @@ export async function executeBatch(
 			await engine.submit(query);
 			unsub();
 
+			// If no events were emitted, this was a continuation line (backslash
+			// continuation accumulation inside the engine) — do not add a result.
+			if (events.length === 0) {
+				continue;
+			}
+
 			// Map events → BatchResult
-			results.push(mapEventsToBatchResult(query, events, outputMode));
+			const result = mapEventsToBatchResult(query, events, outputMode);
+			results.push(result);
+
+			// M-2 (CODEX-5): '.exit'/'.quit' inside batch terminates the run.
+			// The exit event is emitted for .exit/.quit dot commands.
+			if (events.some((e) => e.type === 'exit')) {
+				break;
+			}
 		}
 	} finally {
 		await engine.destroy();
@@ -292,11 +307,13 @@ export async function executeBatch(
 		const hasDb = !!databaseUrl;
 		const executableResults: BatchResult[] = [];
 		const executableQueries: string[] = [];
-		for (let i = 0; i < results.length; i++) {
-			const q = queries[i]?.trim() ?? '';
+		// Results no longer map 1:1 with queries (continuation lines are skipped),
+		// so filter by result.query directly rather than by queries[i] index.
+		for (const result of results) {
+			const q = result.query.trim();
 			if (q.length > 0 && !q.startsWith('#')) {
-				executableResults.push(results[i]!);
-				executableQueries.push(queries[i]!);
+				executableResults.push(result);
+				executableQueries.push(result.query);
 			}
 		}
 		assertionSummary = runAssertions(
@@ -311,25 +328,30 @@ export async function executeBatch(
 }
 
 export async function runBatchMode(options: BatchModeOptions): Promise<void> {
-	const { queries, format } = options;
+	const { format } = options;
 
 	let execution: BatchExecutionResult;
 	try {
 		execution = await executeBatch(options);
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		console.error(`❌ ${message}`);
+		// EH-11: In JSON mode, errors go to stdout as JSON (not plain text to stderr)
+		if (format === 'json') {
+			console.log(JSON.stringify({ error: message, status: 'error' }));
+		} else {
+			console.error(`❌ ${message}`);
+		}
 		process.exit(1);
 	}
 
 	const { results, assertionSummary } = execution;
 
 	// Output results in text format
+	// M-3: use result.query — results is no longer 1:1 with queries after
+	// continuation-line coalescing (CODEX-4). queries[i] would misalign labels.
 	if (format === 'text') {
-		for (let i = 0; i < results.length; i++) {
-			const result = results[i];
-			if (!result) continue;
-			console.log(`\n> ${queries[i]}`);
+		for (const result of results) {
+			console.log(`\n> ${result.query}`);
 			if (result.success) {
 				console.log(result.output);
 			} else {
@@ -400,17 +422,16 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 		console.log(JSON.stringify(output, null, 2));
 	}
 
-	// Exit with error code:
-	// - If assertions provided: exit 1 only if any assertion failed
-	// - If no assertions: exit 1 if any query failed
-	if (assertionSummary) {
-		if (assertionSummary.failed > 0) {
-			process.exit(1);
-		}
-	} else {
-		const hasErrors = results.some((r) => !r.success);
-		if (hasErrors) {
-			process.exit(1);
-		}
+	// CODEX-6: Exit code considers BOTH query failures AND assertion failures.
+	// When assertions are present, exit 1 if any query failed OR any assertion failed.
+	// When no assertions, exit 1 if any query failed.
+	const hasFailedQueries = results.some(
+		(r) => !r.success || r.dbSuccess === false,
+	);
+	const failed =
+		hasFailedQueries ||
+		(assertionSummary !== undefined && assertionSummary.failed > 0);
+	if (failed) {
+		process.exit(1);
 	}
 }

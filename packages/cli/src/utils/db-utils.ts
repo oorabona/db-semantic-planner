@@ -14,19 +14,20 @@
  * @throws Error if pg is not installed
  */
 export async function createDbConnection(connectionUrl: string) {
+	let pg: typeof import('pg').default;
 	try {
-		const { default: pg } = await import('pg');
-
-		const pool = new pg.Pool({
-			connectionString: connectionUrl,
-		});
-
-		return { pool };
-	} catch (_error) {
+		const mod = await import('pg');
+		pg = mod.default;
+	} catch {
 		throw new Error(
 			'pg is required for this command. Install it with: pnpm add pg',
 		);
 	}
+
+	const pool = new pg.Pool({
+		connectionString: connectionUrl,
+	});
+	return { pool };
 }
 
 /**
@@ -40,5 +41,14 @@ export async function createDbConnection(connectionUrl: string) {
  * // => 'postgres://user:***@localhost/mydb'
  */
 export function redactDbUrl(url: string): string {
-	return url.replace(/:[^:@]+@/, ':***@');
+	try {
+		const u = new URL(url);
+		if (u.password) {
+			u.password = '***';
+		}
+		return u.toString();
+	} catch {
+		// Fall back to regex for non-standard or malformed URLs
+		return url.replace(/:[^:@]+@/, ':***@');
+	}
 }

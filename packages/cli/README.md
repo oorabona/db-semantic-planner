@@ -27,8 +27,8 @@ npx dbsp verify --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/my
 # Push schema changes to the database
 npx dbsp push --schema ./dbsp.schema.ts --db postgres://user:pass@localhost/mydb
 
-# Generate JSON manifest for tooling / MCP integration
-npx dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
+# Generate DDL SQL for provisioning
+npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 ```
 
 ## Commands
@@ -39,17 +39,18 @@ npx dbsp generate manifest --schema ./dbsp.schema.ts --output ./generated
 | `dbsp verify` | Compare schema against live database; exit code 1 on drift |
 | `dbsp push` | Apply schema changes (DDL provisioning) with advisory lock |
 | `dbsp migrate` | Generate and apply UP/DOWN migration files |
-| `dbsp generate manifest` | Export schema as JSON for external tooling |
-| `dbsp batch` | Execute a file of NQL or SQL statements and report results |
+| `dbsp generate ddl` | Generate SQL CREATE TABLE statements for provisioning |
+| `dbsp introspect` | Generate schema.ts from database introspection |
 
 ## Key features
 
 - **REPL with completion** — Tab-complete table names, columns, NQL keywords, and relation paths
 - **Query history** — Persistent history across sessions
+- **Batch mode** — Use `repl --eval` for single queries or `repl --input` for batch files
 - **DDL provisioning** — `push` computes schema diff and applies the minimum required DDL
 - **Destructive-change safety** — Warns before dropping columns or tables; `--force` required
 - **Drift detection** — `verify` compares live introspection against declared schema
-- **Batch execution** — Run assertion files for integration testing (`--dry-run` supported)
+- **Migration tracking** — `migrate` generates UP/DOWN migration files with advisory locks
 - **JSON output** — `--json` flag on most commands for CI pipeline integration
 
 ## Documentation

@@ -334,7 +334,7 @@ describe('ReplEngine — coverage', () => {
 			expect(events).toHaveLength(0);
 		});
 
-		it('emits error when connection fails', async () => {
+		it('emits init-error (typed) when connection fails', async () => {
 			mockCreateDbConnection.mockRejectedValueOnce(new Error('ECONNREFUSED'));
 
 			const engine = createEngine({ databaseUrl: 'postgres://localhost/bad' });
@@ -345,13 +345,29 @@ describe('ReplEngine — coverage', () => {
 			expect(engine.getState().connected).toBe(false);
 			const err = events.find(
 				(e) =>
-					e.type === 'error' &&
+					e.type === 'init-error' &&
 					e.message.includes('Connection failed: ECONNREFUSED'),
 			);
 			expect(err).toBeDefined();
 		});
 
-		it('emits error with string error when connection fails with non-Error', async () => {
+		it('emits state-change after connection failure (EH-9)', async () => {
+			mockCreateDbConnection.mockRejectedValueOnce(new Error('ECONNREFUSED'));
+
+			const engine = createEngine({ databaseUrl: 'postgres://localhost/bad' });
+			const events = collectEvents(engine);
+
+			await engine.init();
+
+			// emitStateChange() must be called in the catch block so consumers
+			// see connected: false via a state-change event, not just an init-error.
+			const stateChange = events.find(
+				(e) => e.type === 'state-change' && e.state.connected === false,
+			);
+			expect(stateChange).toBeDefined();
+		});
+
+		it('emits init-error with string error when connection fails with non-Error', async () => {
 			mockCreateDbConnection.mockRejectedValueOnce('string error');
 
 			const engine = createEngine({ databaseUrl: 'postgres://localhost/bad' });
@@ -360,7 +376,7 @@ describe('ReplEngine — coverage', () => {
 			await engine.init();
 
 			const err = events.find(
-				(e) => e.type === 'error' && e.message.includes('string error'),
+				(e) => e.type === 'init-error' && e.message.includes('string error'),
 			);
 			expect(err).toBeDefined();
 		});
@@ -970,6 +986,40 @@ describe('ReplEngine — coverage', () => {
 				expect(qr.result.plan?.strategy).toBe('RAW_SQL');
 			}
 		});
+
+		it('EH-1: emits query-result with error on executeRaw failure — session continues', async () => {
+			// Regression: handleRawSql had no try/catch; DB errors caused unhandled rejection.
+			const engine = createEngine({ databaseUrl: 'postgres://localhost/test' });
+			await engine.init();
+			await engine.submit('.exec on');
+			await engine.submit('.sql');
+
+			mockConnection.executeRaw.mockRejectedValueOnce(
+				new Error('column "x" does not exist'),
+			);
+
+			const events = collectEvents(engine);
+			await engine.submit('SELECT x FROM users');
+
+			// Must not throw — session continues.
+			// The first query-result carries the SQL preview (before execution attempt).
+			// The second query-result carries the error from the failed executeRaw.
+			const queryResults = findEvents(events, 'query-result');
+			expect(queryResults.length).toBeGreaterThanOrEqual(1);
+
+			const errorResult = queryResults.find(
+				(e) =>
+					e.type === 'query-result' &&
+					e.result.error?.includes('column "x" does not exist'),
+			);
+			expect(errorResult).toBeDefined();
+			expect(findEvent(events, 'execution-result')).toBeUndefined();
+
+			// Session continues: subsequent queries still work.
+			const after = collectEvents(engine);
+			await engine.submit('SELECT 1');
+			expect(findEvent(after, 'query-result')).toBeDefined();
+		});
 	});
 
 	// =========================================================================
@@ -1084,6 +1134,83 @@ describe('ReplEngine — coverage', () => {
 			if (qr?.type === 'query-result') {
 				expect(qr.result.error).toBeDefined();
 				expect(qr.result.sql).toBe('');
+			}
+		});
+	});
+
+	// =========================================================================
+	// NQL — bang suffix (mutation dry-run vs execute) + CC-4 regression
+	// =========================================================================
+
+	describe('NQL bang suffix', () => {
+		it('strips ! suffix and passes NQL without it to compiler', async () => {
+			// Verifies handleNql strips '!' before calling compileNqlToSql.
+			const engine = createEngine();
+			mockCompileNqlToSql.mockResolvedValueOnce({
+				sql: 'UPDATE "users" SET "status" = $1',
+				params: ['active'],
+				intentType: 'update',
+				intent: { type: 'update', table: 'users' },
+				planReport: {
+					rootTable: 'users',
+					decisions: [],
+					warnings: [],
+					ctes: [],
+					metadata: {
+						planningTimeMs: 1,
+						relationsAnalyzed: 0,
+						isAmbiguous: false,
+					},
+				},
+			});
+
+			await engine.submit("users | update set status = 'active'!");
+
+			// Compiler must be called WITHOUT the trailing '!'
+			expect(mockCompileNqlToSql).toHaveBeenCalledWith(
+				"users | update set status = 'active'",
+				expect.anything(),
+				expect.anything(),
+			);
+		});
+
+		it('CC-4 regression: mutation ending with quoted value + ! is NOT dry-run', async () => {
+			// Regression for isInsideStringLiteral off-by-one: a closing quote at
+			// length-2 (penultimate char, right before '!') must correctly end the string
+			// so hasBangSuffix=true and the mutation is executed, not silently dropped.
+			const engine = createEngine({ databaseUrl: 'postgres://localhost/test' });
+			await engine.init();
+			await engine.submit('.exec on');
+			mockCompileNqlToSql.mockResolvedValueOnce({
+				sql: 'UPDATE "users" SET "status" = $1',
+				params: ['active'],
+				intentType: 'update',
+				intent: { type: 'update', table: 'users' },
+				planReport: {
+					rootTable: 'users',
+					decisions: [],
+					warnings: [],
+					ctes: [],
+					metadata: {
+						planningTimeMs: 1,
+						relationsAnalyzed: 0,
+						isAmbiguous: false,
+					},
+				},
+			});
+			mockConnection.executeRaw.mockClear();
+
+			const events = collectEvents(engine);
+			await engine.submit("users | update set status = 'active'!");
+
+			// The mutation must execute — not be treated as dry-run.
+			// If isInsideStringLiteral had an off-by-one, hasBangSuffix would be false
+			// → isDryRun=true → executeRaw would NOT be called.
+			expect(mockConnection.executeRaw).toHaveBeenCalled();
+			const qr = findEvent(events, 'query-result');
+			expect(qr).toBeDefined();
+			if (qr?.type === 'query-result') {
+				expect(qr.result.plan?.strategy).not.toContain('DRY-RUN');
 			}
 		});
 	});
@@ -1303,5 +1430,20 @@ describe('isInsideStringLiteral — edge cases', () => {
 	it('returns true when last char is inside deeply nested escaped quotes', () => {
 		// 'a''b — opens with ', escaped '' keeps us in string, b is still inside
 		expect(isInsideStringLiteral("'a''b")).toBe(true);
+	});
+
+	// CC-4 regression: mutations ending with 'val'! must NOT be treated as dry-run.
+	// The closing quote is at length-2 (penultimate char); loop must correctly toggle
+	// inString to false before returning, so hasBangSuffix=true in handleNql.
+	it("CC-4 regression: 'val'! returns false (closing quote at length-2)", () => {
+		// Minimal: 'v'! — the closing ' is the penultimate char, ! is at length-1.
+		expect(isInsideStringLiteral("'v'!")).toBe(false);
+	});
+
+	it('CC-4 regression: NQL update with quoted value followed by ! is not inside string', () => {
+		// Full NQL mutation input as passed to isInsideStringLiteral
+		expect(isInsideStringLiteral("users | update set status = 'active'!")).toBe(
+			false,
+		);
 	});
 });

@@ -83,6 +83,24 @@ export async function createDbConnection(
 	let txClient: pg.PoolClient | null = null;
 
 	/**
+	 * Execute COMMIT or ROLLBACK on the active transaction client, then release it.
+	 * Extracted to avoid structural clone between commitTransaction and rollbackTransaction (SC-7).
+	 */
+	async function runTransactionControl(
+		sql: 'COMMIT' | 'ROLLBACK',
+	): Promise<void> {
+		if (!txClient) {
+			throw new Error('No active transaction. Use .begin first.');
+		}
+		try {
+			await txClient.query(sql);
+		} finally {
+			txClient.release();
+			txClient = null;
+		}
+	}
+
+	/**
 	 * Execute a query on the active target (transaction client or pool).
 	 */
 	async function executeRaw(
@@ -161,31 +179,22 @@ export async function createDbConnection(
 				);
 			}
 			txClient = await pool.connect();
-			await txClient.query('BEGIN');
+			try {
+				await txClient.query('BEGIN');
+			} catch (err) {
+				// M4: release client on BEGIN failure to avoid pool deadlock (max: 1)
+				txClient.release();
+				txClient = null;
+				throw err;
+			}
 		},
 
 		async commitTransaction(): Promise<void> {
-			if (!txClient) {
-				throw new Error('No active transaction. Use .begin first.');
-			}
-			try {
-				await txClient.query('COMMIT');
-			} finally {
-				txClient.release();
-				txClient = null;
-			}
+			return runTransactionControl('COMMIT');
 		},
 
 		async rollbackTransaction(): Promise<void> {
-			if (!txClient) {
-				throw new Error('No active transaction. Use .begin first.');
-			}
-			try {
-				await txClient.query('ROLLBACK');
-			} finally {
-				txClient.release();
-				txClient = null;
-			}
+			return runTransactionControl('ROLLBACK');
 		},
 
 		get inTransaction(): boolean {

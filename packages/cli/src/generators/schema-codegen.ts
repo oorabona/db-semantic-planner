@@ -38,6 +38,55 @@ export interface SchemaCodegenOptions {
 }
 
 /**
+ * Serialize a column default value to valid TypeScript source code.
+ *
+ * CODEX-11/CODEX-14: String(value) produced "[object Object]" for SQL-expression
+ * defaults like { sql: 'now()' }, and single-quote wrapping without escape broke
+ * strings containing quotes, backslashes, or newlines.
+ *
+ * Rules:
+ * - null/undefined → 'null'
+ * - number | boolean → unquoted literal (String(value))
+ * - string → singleQuoteEscape (escapes \, ', \n, \r, \t — produces single-quoted TS literal)
+ * - { sql: '...' } shape → `{ sql: ${JSON.stringify(sqlExpr)} }`
+ * - anything else → throws (unrecognized shape; prevents silent [object Object])
+ */
+
+/**
+ * Wrap a string value in single quotes for TypeScript source output,
+ * escaping any single quotes and backslashes contained in the value.
+ *
+ * Examples:
+ *   'hello'       → "'hello'"
+ *   "O'Brien"     → "'O\\'Brien'"
+ *   'C:\\Users'   → "'C:\\\\Users'"
+ */
+function singleQuoteEscape(s: string): string {
+	return `'${s
+		.replace(/\\/g, '\\\\')
+		.replace(/'/g, "\\'")
+		.replace(/\n/g, '\\n')
+		.replace(/\r/g, '\\r')
+		.replace(/\t/g, '\\t')}'`;
+}
+
+function emitDefault(d: unknown): string {
+	if (d === null || d === undefined) return 'null';
+	if (typeof d === 'number' || typeof d === 'boolean') return String(d);
+	if (typeof d === 'string') return singleQuoteEscape(d);
+	if (
+		typeof d === 'object' &&
+		'sql' in d &&
+		typeof (d as { sql: unknown }).sql === 'string'
+	) {
+		return `{ sql: ${singleQuoteEscape((d as { sql: string }).sql)} }`;
+	}
+	throw new Error(
+		`[schema-codegen] Unrecognized default shape: ${JSON.stringify(d)}`,
+	);
+}
+
+/**
  * Generate column definition object code.
  */
 function generateColumnCode(
@@ -50,14 +99,16 @@ function generateColumnCode(
 				nullable?: boolean;
 				unique?: boolean;
 				onDelete?: string;
+				onUpdate?: string;
 				isSelfRef?: boolean;
 		  }
 		| undefined,
 	options: SchemaCodegenOptions,
 ): string {
-	// ARCH-005: FK columns become ref() calls
+	// CODEX-13: FK + PK overlap — a column can be both FK and PK (e.g. shared-PK 1:1).
+	// We must preserve isPrimaryKey even when fkInfo is present.
 	if (fkInfo) {
-		return generateRefCode(column, fkInfo, options);
+		return generateRefCode(column, fkInfo, isPrimaryKey, options);
 	}
 
 	// Check if we can use short form (just 'type' string)
@@ -89,11 +140,7 @@ function generateColumnCode(
 	}
 
 	if (column.default !== undefined) {
-		const defaultStr =
-			typeof column.default === 'string'
-				? `'${column.default}'`
-				: String(column.default);
-		props.push(`default: ${defaultStr}`);
+		props.push(`default: ${emitDefault(column.default)}`);
 	}
 
 	if (column.unique) {
@@ -121,11 +168,18 @@ function generateRefCode(
 		nullable?: boolean;
 		unique?: boolean;
 		onDelete?: string;
+		onUpdate?: string;
 		isSelfRef?: boolean;
 	},
+	isPrimaryKey: boolean,
 	options: SchemaCodegenOptions,
 ): string {
 	const refOptions: string[] = [];
+
+	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
+	if (isPrimaryKey) {
+		refOptions.push('isPrimaryKey: true');
+	}
 
 	// Nullable FK
 	if (fkInfo.nullable || column.nullable) {
@@ -140,6 +194,11 @@ function generateRefCode(
 	// onDelete action
 	if (fkInfo.onDelete && fkInfo.onDelete !== 'NO ACTION') {
 		refOptions.push(`onDelete: '${fkInfo.onDelete}'`);
+	}
+
+	// CODEX-12: onUpdate action
+	if (fkInfo.onUpdate && fkInfo.onUpdate !== 'NO ACTION') {
+		refOptions.push(`onUpdate: '${fkInfo.onUpdate}'`);
 	}
 
 	// Self-referential FK needs roles
@@ -188,6 +247,7 @@ function generateTableCode(
 			nullable?: boolean;
 			unique?: boolean;
 			onDelete?: string;
+			onUpdate?: string;
 			isSelfRef?: boolean;
 		}
 	>();
@@ -214,6 +274,7 @@ function generateTableCode(
 				nullable?: boolean;
 				unique?: boolean;
 				onDelete?: string;
+				onUpdate?: string;
 				isSelfRef?: boolean;
 			} = {
 				table: fk.references.table,
@@ -238,6 +299,11 @@ function generateTableCode(
 			// Include onDelete if not the default
 			if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
 				entry.onDelete = fk.onDelete;
+			}
+
+			// CODEX-12: Include onUpdate if not the default
+			if (fk.onUpdate && fk.onUpdate !== 'NO ACTION') {
+				entry.onUpdate = fk.onUpdate;
 			}
 
 			// Store under both snake_case and camelCase keys so fkMap.get(col.name) works
