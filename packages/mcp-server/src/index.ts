@@ -28,14 +28,32 @@ interface CliArgs {
 /**
  * Parse command line arguments.
  */
-function parseArgs(args: string[]): CliArgs {
+export function parseArgs(args: string[]): CliArgs {
 	const result: CliArgs = {
 		schemaPath: '',
 		help: false,
 	};
 
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
+	// Normalize --foo=bar form → ['--foo', 'bar'] before main loop
+	const normalized: string[] = [];
+	for (const arg of args) {
+		if (arg.startsWith('--') && arg.includes('=')) {
+			const eqIdx = arg.indexOf('=');
+			normalized.push(arg.slice(0, eqIdx), arg.slice(eqIdx + 1));
+		} else if (
+			arg.startsWith('-') &&
+			!arg.startsWith('--') &&
+			arg.includes('=')
+		) {
+			const eqIdx = arg.indexOf('=');
+			normalized.push(arg.slice(0, eqIdx), arg.slice(eqIdx + 1));
+		} else {
+			normalized.push(arg);
+		}
+	}
+
+	for (let i = 0; i < normalized.length; i++) {
+		const arg = normalized[i];
 
 		if (arg === undefined) {
 			continue;
@@ -44,27 +62,22 @@ function parseArgs(args: string[]): CliArgs {
 		if (arg === '--help' || arg === '-h') {
 			result.help = true;
 		} else if (arg === '--schema' || arg === '-s') {
-			const nextArg = args[i + 1];
+			const nextArg = normalized[i + 1];
 			if (nextArg === undefined || nextArg.startsWith('-')) {
 				throw new Error('--schema requires a path argument');
 			}
 			result.schemaPath = nextArg;
 			i++; // Skip next arg
 		} else if (arg === '--allowed-root' || arg === '-r') {
-			const nextArg = args[i + 1];
+			const nextArg = normalized[i + 1];
 			if (nextArg === undefined || nextArg.startsWith('-')) {
 				throw new Error('--allowed-root requires a path argument');
 			}
 			result.allowedRoots = result.allowedRoots ?? [];
 			result.allowedRoots.push(nextArg);
 			i++; // Skip next arg
-		} else if (arg.startsWith('--schema=')) {
-			result.schemaPath = arg.slice('--schema='.length);
-		} else if (arg.startsWith('-s=')) {
-			result.schemaPath = arg.slice('-s='.length);
-		} else if (arg.startsWith('--allowed-root=')) {
-			result.allowedRoots = result.allowedRoots ?? [];
-			result.allowedRoots.push(arg.slice('--allowed-root='.length));
+		} else {
+			throw new Error(`Unknown argument: ${arg}`);
 		}
 	}
 
@@ -134,7 +147,16 @@ MCP CONFIGURATION:
  * Main entry point.
  */
 async function main(): Promise<void> {
-	const args = parseArgs(process.argv.slice(2));
+	let args: CliArgs;
+	try {
+		args = parseArgs(process.argv.slice(2));
+	} catch (err) {
+		const msg = err instanceof Error ? err.message : String(err);
+		console.error(`Error: ${msg}`);
+		console.error('');
+		console.error('Run "dbsp-mcp --help" for usage information.');
+		process.exit(1);
+	}
 
 	if (args.help) {
 		printHelp();
@@ -151,8 +173,11 @@ async function main(): Promise<void> {
 	}
 
 	try {
-		// Load and validate schema
-		console.error(`[dbsp-mcp] Loading schema from: ${args.schemaPath}`);
+		// Log basename only before load (avoid leaking absolute path pre-validation)
+		const { basename } = await import('node:path');
+		console.error(
+			`[dbsp-mcp] Loading schema from: ${basename(args.schemaPath)}`,
+		);
 
 		const loaderOptions = {
 			schemaPath: args.schemaPath,
@@ -160,6 +185,7 @@ async function main(): Promise<void> {
 		};
 		const { schema, resolvedPath } = await loadSchema(loaderOptions);
 
+		// Log resolved (canonical) path after successful load
 		console.error(`[dbsp-mcp] Schema loaded from: ${resolvedPath}`);
 
 		// Start MCP server
@@ -177,8 +203,16 @@ async function main(): Promise<void> {
 	}
 }
 
-// Run main
-main().catch((error) => {
-	console.error('[dbsp-mcp] Fatal error:', error);
-	process.exit(1);
-});
+// Run main only when executed directly (not when imported by tests or other modules).
+// Compare the resolved path of this module against process.argv[1] (the entry script).
+if (process.argv[1] !== undefined) {
+	const _thisFile = new URL(import.meta.url).pathname;
+	// tsx may pass the .ts source path; normalise both sides for comparison
+	const _mainFile = process.argv[1].replace(/\.[cm]?[jt]s$/, '');
+	if (_thisFile.replace(/\.[cm]?[jt]s$/, '') === _mainFile) {
+		main().catch((error) => {
+			console.error('[dbsp-mcp] Fatal error:', error);
+			process.exit(1);
+		});
+	}
+}
