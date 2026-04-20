@@ -493,15 +493,16 @@ const {
 	};
 });
 
-vi.mock('./engine/repl-engine.js', () => {
-	// Use a class so `new ReplEngine(config)` works as a constructor
+vi.mock('./engine/repl-engine.js', async (importOriginal) => {
+	// Preserve module exports and only replace ReplEngine
+	const original = await importOriginal();
 	class MockReplEngine {
 		constructor(...args) {
 			mockReplEngineCtorArgs.push(args);
 			Object.assign(this, mockEngineInstance);
 		}
 	}
-	return { ReplEngine: MockReplEngine };
+	return { ...original, ReplEngine: MockReplEngine };
 });
 
 vi.mock('node:fs', () => ({
@@ -583,9 +584,11 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('detects connection failure during init and throws', async () => {
+		// The init-error event type is emitted by repl-engine.ts init()
+		// to distinguish init errors from other error events.
 		mockEngineInstance.on.mockImplementation((cb) => {
 			// Simulate connection error event during init
-			cb({ type: 'error', message: 'Connection failed: ECONNREFUSED' });
+			cb({ type: 'init-error', message: 'Connection failed: ECONNREFUSED' });
 			return vi.fn();
 		});
 
@@ -658,15 +661,26 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('collects events during query execution loop', async () => {
-		const submitCount = 0;
-		mockEngineInstance.on.mockImplementation((_cb) => {
-			// On first call (init), emit nothing.
-			// On subsequent calls (queries), we want to emit events when submit is called.
+		// When submit emits events, the result is recorded.
+		// When submit emits nothing (continuation coalescing), the result is skipped.
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) {
+				// For query-iteration calls, store cb so submit can fire events
+				storedCb = cb;
+			}
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
-			// We can't easily trigger cb from submit since on() returns unsubscribe.
-			// The test verifies results.length matches queries.length.
+			// Emit a query-result event so the result is not skipped
+			if (storedCb) {
+				storedCb({
+					type: 'query-result',
+					result: { sql: 'SELECT 1', params: [] },
+				});
+			}
 		});
 
 		const result = await executeBatch(
@@ -698,11 +712,19 @@ describe('executeBatch — coverage', () => {
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async (query) => {
-			if (queryCallback && query === '.output table') {
-				queryCallback({
-					type: 'state-change',
-					state: { outputMode: 'table' },
-				});
+			if (queryCallback) {
+				if (query === '.output table') {
+					queryCallback({
+						type: 'state-change',
+						state: { outputMode: 'table' },
+					});
+				} else {
+					// Emit a query-result so the result is not skipped (M-2: continuation fix)
+					queryCallback({
+						type: 'query-result',
+						result: { sql: 'SELECT 1', params: [] },
+					});
+				}
 			}
 		});
 
@@ -710,11 +732,24 @@ describe('executeBatch — coverage', () => {
 			makeOptions({ queries: ['.output table', 'from users'] }),
 		);
 
+		// Both queries emit at least one event — 2 results expected
 		expect(result.results).toHaveLength(2);
 	});
 
 	it('runs assertions when assertFile is provided and parses successfully', async () => {
-		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+		mockEngineInstance.submit.mockImplementation(async () => {
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
+		});
 		mockReadFileSync.mockReturnValue('---\nquery: 1\nassert:\n  success: true');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [
@@ -743,7 +778,25 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('filters comments and blank queries from assertion executable results', async () => {
-		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
+		// For 'from users', emit a query-result event.
+		// For '# comment' and '', the engine emits no events (handled internally).
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+		mockEngineInstance.submit.mockImplementation(async (q) => {
+			const trimmed = q?.trim() ?? '';
+			// Only emit an event for non-comment, non-blank queries
+			if (storedCb && trimmed.length > 0 && !trimmed.startsWith('#')) {
+				storedCb({
+					type: 'query-result',
+					result: { sql: 'SELECT 1', params: [] },
+				});
+			}
+		});
 		mockReadFileSync.mockReturnValue('---\nquery: 1');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -758,7 +811,7 @@ describe('executeBatch — coverage', () => {
 			results: [],
 		});
 
-		const result = await executeBatch(
+		await executeBatch(
 			makeOptions({
 				queries: ['# comment', 'from users', ''],
 				assertFile: '/path/to/file.assert.dbsp',
@@ -777,7 +830,19 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('passes hasDb=true when databaseUrl is set', async () => {
-		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+		mockEngineInstance.submit.mockImplementation(async () => {
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
+		});
 		mockReadFileSync.mockReturnValue('valid content');
 		mockParseAssertionFile.mockReturnValue({
 			blocks: [{ queryIndex: 0, assertions: [] }],
@@ -808,7 +873,20 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('returns results without assertionSummary when no assertFile', async () => {
-		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
+		// Emit an event so the result is recorded (continuation coalescing skips empty)
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+		mockEngineInstance.submit.mockImplementation(async () => {
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
+		});
 
 		const result = await executeBatch(makeOptions());
 

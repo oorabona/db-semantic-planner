@@ -11,8 +11,8 @@
  * See ARCH-004 for analysis of this intentional duplication.
  */
 
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, realpathSync } from 'node:fs';
+import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ModelIR } from '@dbsp/core';
 
@@ -83,6 +83,35 @@ export function findSchemaFile(cwd: string): string | null {
  */
 export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 	const resolvedPath = resolve(schemaPath);
+
+	// SEC-8: Prevent path traversal — schema must be under cwd.
+	// This check runs before existsSync so traversal attempts are caught
+	// regardless of whether the file exists.
+	const cwd = resolve(process.cwd());
+	if (!resolvedPath.startsWith(cwd + sep)) {
+		throw new SchemaLoadError(
+			`Schema file must be inside the current working directory: ${resolvedPath}`,
+		);
+	}
+
+	// SEC-8b: Symlink bypass — a symlink inside cwd can point outside cwd.
+	// Resolve symlinks and re-check containment. Use try/catch because
+	// realpathSync throws ENOENT for non-existent paths; fall through to the
+	// existsSync check below in that case (non-existent file still blocked).
+	try {
+		const realPath = realpathSync(resolvedPath);
+		const realCwd = realpathSync(cwd);
+		if (!realPath.startsWith(realCwd + sep)) {
+			throw new SchemaLoadError(
+				`Schema file must be inside the current working directory: ${resolvedPath}`,
+			);
+		}
+	} catch (e) {
+		if (e instanceof SchemaLoadError) {
+			throw e;
+		}
+		// ENOENT or similar — file doesn't exist; let existsSync handle it below.
+	}
 
 	if (!existsSync(resolvedPath)) {
 		throw new SchemaLoadError(`Schema file not found: ${resolvedPath}`);

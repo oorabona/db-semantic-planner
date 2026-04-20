@@ -141,7 +141,21 @@ export const replCommand = new Command('repl')
 				}
 
 				if (options.input) {
-					const content = readFileSync(options.input, 'utf-8');
+					// EH-2: Map ENOENT to a friendly error instead of raw stack trace
+					let content: string;
+					try {
+						content = readFileSync(options.input, 'utf-8');
+					} catch (err) {
+						const isNotFound =
+							err instanceof Error &&
+							'code' in err &&
+							(err as NodeJS.ErrnoException).code === 'ENOENT';
+						throw new Error(
+							isNotFound
+								? `Input file not found: ${options.input}`
+								: `Failed to read input file: ${err instanceof Error ? err.message : String(err)}`,
+						);
+					}
 					queries.push(...content.split('\n'));
 				}
 

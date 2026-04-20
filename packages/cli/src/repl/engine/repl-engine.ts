@@ -122,8 +122,13 @@ export class ReplEngine {
 			});
 			this.emitStateChange();
 		} catch (error) {
+			this.state.connected = false;
 			const message = error instanceof Error ? error.message : String(error);
-			this.emit({ type: 'error', message: `Connection failed: ${message}` });
+			this.emit({
+				type: 'init-error',
+				message: `Connection failed: ${message}`,
+			});
+			this.emitStateChange();
 		}
 	}
 
@@ -642,12 +647,20 @@ export class ReplEngine {
 
 		// Execute if in exec mode and connected
 		if (this.state.execMode && this.state.connected && this.dbConnection) {
-			const execResult = await this.dbConnection.executeRaw(content, []);
-			this.emit({
-				type: 'execution-result',
-				result: execResult,
-				query: queryResult,
-			});
+			try {
+				const execResult = await this.dbConnection.executeRaw(content, []);
+				this.emit({
+					type: 'execution-result',
+					result: execResult,
+					query: queryResult,
+				});
+			} catch (err) {
+				const message = err instanceof Error ? err.message : String(err);
+				this.emit({
+					type: 'query-result',
+					result: { sql: content, params: [], error: message },
+				});
+			}
 		}
 	}
 
