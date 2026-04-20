@@ -4,9 +4,13 @@
  * Exposes schema and query planning capabilities to AI tools via MCP protocol.
  */
 
+import { createRequire } from 'node:module';
 import type { ResolvedSchema } from '@dbsp/core';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+
+const _require = createRequire(import.meta.url);
+const _pkg = _require('../package.json') as { version: string };
 
 /**
  * Options for creating the MCP server.
@@ -25,7 +29,7 @@ export interface McpServerOptions {
 
 	/**
 	 * Server version.
-	 * @default '0.0.1'
+	 * @default — package version (from package.json)
 	 */
 	version?: string;
 }
@@ -40,17 +44,15 @@ export interface McpServerOptions {
  * @returns Configured McpServer instance (not yet connected)
  */
 export function createMcpServer(options: McpServerOptions): McpServer {
-	const { schema, name = '@dbsp/mcp-server', version = '0.0.1' } = options;
+	const { schema, name = '@dbsp/mcp-server', version = _pkg.version } = options;
 
 	const server = new McpServer({
 		name,
 		version,
 	});
 
-	// Store schema in closure for tools/resources to access
-	const serverContext = {
-		schema,
-	};
+	// Schema is available in closure for future tool/resource registrations
+	void schema;
 
 	// TODO: MCP-003 - Register schema_list_tables tool
 	// TODO: MCP-004 - Register schema_get_relations tool
@@ -60,15 +62,6 @@ export function createMcpServer(options: McpServerOptions): McpServer {
 	// TODO: MCP-007 - Register schema://manifest resource
 	// TODO: MCP-007a - Register schema://intent-schema resource
 	// TODO: MCP-007b - Register schema://cookbook resource
-
-	// Log server info for debugging (to stderr to not interfere with stdio transport)
-	console.error(`[dbsp-mcp] Server created with schema containing:`);
-	console.error(
-		`  - Tables: ${Object.keys(serverContext.schema.tables).length}`,
-	);
-	console.error(
-		`  - Relations: ${Object.keys(serverContext.schema.relations).length}`,
-	);
 
 	return server;
 }
