@@ -18,11 +18,11 @@ import {
 	vi,
 } from 'vitest';
 import {
+	_resetWarnFlagForTests,
 	loadSchema,
 	SchemaLoadError,
 	validatePath,
 	validateResolvedSchema,
-	_resetWarnFlagForTests,
 } from './schema-loader.js';
 
 // Create a temp directory for test files

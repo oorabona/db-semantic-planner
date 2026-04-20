@@ -222,7 +222,10 @@ export async function loadSchema(
 	// Validate and resolve path with security checks.
 	// validatePath also canonicalizes allowedRoots — reuse the result to avoid
 	// independent re-resolution that could diverge under refactoring (S-B guard).
-	const { resolvedPath, canonicalRoots } = validatePath(schemaPath, allowedRoots);
+	const { resolvedPath, canonicalRoots } = validatePath(
+		schemaPath,
+		allowedRoots,
+	);
 
 	// Check if file exists
 	if (!existsSync(resolvedPath)) {
@@ -353,7 +356,6 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 export function _resetWarnFlagForTests(): void {
 	_cwdWarnEmitted = false;
 }
-
 
 export function validateResolvedSchema(schema: unknown): void {
 	// Arrays are not valid schemas even though typeof [] === 'object'

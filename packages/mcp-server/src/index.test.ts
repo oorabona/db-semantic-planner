@@ -125,7 +125,9 @@ describe('parseArgs', () => {
 			// Direct main() test would require mocking process.argv and process.exit —
 			// simpler to verify parseArgs throws correctly and main handles it.
 			const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-			const exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as () => never);
+			const exitSpy = vi
+				.spyOn(process, 'exit')
+				.mockImplementation((() => {}) as () => never);
 
 			// Simulate what main() does: catch parseArgs error, write to stderr, exit(1)
 			try {
@@ -140,7 +142,9 @@ describe('parseArgs', () => {
 
 			expect(exitSpy).toHaveBeenCalledWith(1);
 			const errCalls = stderrSpy.mock.calls.map((c) => String(c[0]));
-			expect(errCalls.some((s) => s.includes('--schema requires a path argument'))).toBe(true);
+			expect(
+				errCalls.some((s) => s.includes('--schema requires a path argument')),
+			).toBe(true);
 
 			stderrSpy.mockRestore();
 			exitSpy.mockRestore();
