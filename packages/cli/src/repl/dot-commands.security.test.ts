@@ -9,7 +9,7 @@
  *  [CC-13]  .help lists .natural and .sql
  */
 
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ModelIR, TableIR } from '@dbsp/core';
@@ -148,7 +148,10 @@ describe('[SEC-S1] .use schema name validation', () => {
 		);
 		// After NUL strip arg is '' → .use with no arg = clear schema (valid)
 		// This is an acceptable outcome: NUL was stripped, intent is treated as clear
-		expect(result.stateChange?.schemaName === undefined || result.output.includes('❌')).toBe(true);
+		expect(
+			result.stateChange?.schemaName === undefined ||
+				result.output.includes('❌'),
+		).toBe(true);
 	});
 
 	it('accepts valid schema name', async () => {
@@ -180,7 +183,8 @@ describe('[SEC-S1] .use schema name validation', () => {
 		expect(result.output).toMatch(/✅ Imported/);
 
 		// Verify executeRaw was called WITHOUT a SET search_path line
-		const callArg = (db.executeRaw as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
+		const callArg = (db.executeRaw as ReturnType<typeof vi.fn>).mock
+			.calls[0][0] as string;
 		expect(callArg).not.toContain('SET search_path');
 	});
 });
@@ -203,7 +207,9 @@ describe('[SEC-S2] .load table name validation', () => {
 		expect(result.output).toContain('❌');
 		expect(result.output).toContain('Invalid table identifier');
 		// executeRaw must NOT have been called
-		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(
+			0,
+		);
 	});
 
 	it('rejects table name with semicolon', async () => {
@@ -217,7 +223,9 @@ describe('[SEC-S2] .load table name validation', () => {
 			createState({ dbConnection: db }),
 		);
 		expect(result.output).toContain('❌');
-		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(
+			0,
+		);
 	});
 });
 
@@ -231,7 +239,9 @@ describe('[SEC-S2] .dump table name validation', () => {
 		);
 		expect(result.output).toContain('❌');
 		expect(result.output).toContain('Invalid table identifier');
-		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(
+			0,
+		);
 	});
 });
 
@@ -249,7 +259,9 @@ describe('[SEC-S2] CSV column name validation in .load', () => {
 		);
 		expect(result.output).toContain('❌');
 		// db must NOT be called with injected SQL
-		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(0);
+		expect((db.executeRaw as ReturnType<typeof vi.fn>).mock.calls).toHaveLength(
+			0,
+		);
 	});
 });
 
@@ -342,7 +354,11 @@ describe('[SEC-M2] .dump path containment', () => {
 
 describe('[SC-11] handleBooleanToggle — .exec', () => {
 	it('.exec on without db → error', async () => {
-		const result = await processDotCommand('.exec on', mockSchema, createState());
+		const result = await processDotCommand(
+			'.exec on',
+			mockSchema,
+			createState(),
+		);
 		expect(result.output).toContain('❌');
 		expect(result.stateChange).toBeUndefined();
 	});

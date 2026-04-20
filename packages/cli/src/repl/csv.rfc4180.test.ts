@@ -54,7 +54,7 @@ describe('RFC 4180 multiline quoted fields', () => {
 		const data = await parseCsvFile(path);
 
 		expect(data.rows).toHaveLength(1);
-		expect(data.rows[0]!['notes']).toBe(originalValue);
+		expect(data.rows[0]!.notes).toBe(originalValue);
 	});
 
 	it('round-trips multiple multiline fields', async () => {
@@ -68,9 +68,9 @@ describe('RFC 4180 multiline quoted fields', () => {
 		const data = await parseCsvFile(path);
 
 		expect(data.rows).toHaveLength(3);
-		expect(data.rows[0]!['content']).toBe('line A\nline B');
-		expect(data.rows[1]!['content']).toBe('plain');
-		expect(data.rows[2]!['content']).toBe('first\nsecond\nthird');
+		expect(data.rows[0]!.content).toBe('line A\nline B');
+		expect(data.rows[1]!.content).toBe('plain');
+		expect(data.rows[2]!.content).toBe('first\nsecond\nthird');
 	});
 
 	it('handles CRLF line endings', async () => {
@@ -104,13 +104,17 @@ describe('field count validation', () => {
 	it('throws CsvParseError when a row has too many fields', async () => {
 		const path = createTempCsv('a,b,c\n1,2,3,4\n');
 		await expect(parseCsvFile(path)).rejects.toThrow(CsvParseError);
-		await expect(parseCsvFile(path)).rejects.toThrow(/expected 3 fields, got 4/);
+		await expect(parseCsvFile(path)).rejects.toThrow(
+			/expected 3 fields, got 4/,
+		);
 	});
 
 	it('throws CsvParseError when a row has too few fields', async () => {
 		const path = createTempCsv('a,b,c\n1,2\n');
 		await expect(parseCsvFile(path)).rejects.toThrow(CsvParseError);
-		await expect(parseCsvFile(path)).rejects.toThrow(/expected 3 fields, got 2/);
+		await expect(parseCsvFile(path)).rejects.toThrow(
+			/expected 3 fields, got 2/,
+		);
 	});
 
 	it('error message includes the physical line number', async () => {
@@ -170,13 +174,17 @@ describe('unterminated quoted field', () => {
 	it('throws CsvParseError when file ends inside a quoted field (with newline)', async () => {
 		const path = createTempCsv('col\n"hello\n');
 		await expect(parseCsvFile(path)).rejects.toThrow(CsvParseError);
-		await expect(parseCsvFile(path)).rejects.toThrow(/unterminated quoted field/);
+		await expect(parseCsvFile(path)).rejects.toThrow(
+			/unterminated quoted field/,
+		);
 	});
 
 	it('throws CsvParseError for file ending with open quote (no trailing newline)', async () => {
 		const path = createTempCsv('col\n"open');
 		await expect(parseCsvFile(path)).rejects.toThrow(CsvParseError);
-		await expect(parseCsvFile(path)).rejects.toThrow(/unterminated quoted field/);
+		await expect(parseCsvFile(path)).rejects.toThrow(
+			/unterminated quoted field/,
+		);
 	});
 
 	it('error is an instance of CsvParseError', async () => {
@@ -224,7 +232,7 @@ describe('escapeCsvField \\r handling', () => {
 		const dumpedCsv = formatCsv([{ col: originalValue }], ['col']);
 		const path = createTempCsv(dumpedCsv);
 		const data = await parseCsvFile(path);
-		expect(data.rows[0]!['col']).toBe(originalValue);
+		expect(data.rows[0]!.col).toBe(originalValue);
 	});
 });
 

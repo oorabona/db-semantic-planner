@@ -676,7 +676,10 @@ describe('executeBatch — coverage', () => {
 		mockEngineInstance.submit.mockImplementation(async () => {
 			// Emit a query-result event so the result is not skipped
 			if (storedCb) {
-				storedCb({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+				storedCb({
+					type: 'query-result',
+					result: { sql: 'SELECT 1', params: [] },
+				});
 			}
 		});
 
@@ -742,7 +745,10 @@ describe('executeBatch — coverage', () => {
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
-			storedCb?.({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
 		});
 		mockReadFileSync.mockReturnValue('---\nquery: 1\nassert:\n  success: true');
 		mockParseAssertionFile.mockReturnValue({
@@ -785,7 +791,10 @@ describe('executeBatch — coverage', () => {
 			const trimmed = q?.trim() ?? '';
 			// Only emit an event for non-comment, non-blank queries
 			if (storedCb && trimmed.length > 0 && !trimmed.startsWith('#')) {
-				storedCb({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+				storedCb({
+					type: 'query-result',
+					result: { sql: 'SELECT 1', params: [] },
+				});
 			}
 		});
 		mockReadFileSync.mockReturnValue('---\nquery: 1');
@@ -829,7 +838,10 @@ describe('executeBatch — coverage', () => {
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
-			storedCb?.({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
 		});
 		mockReadFileSync.mockReturnValue('valid content');
 		mockParseAssertionFile.mockReturnValue({
@@ -870,7 +882,10 @@ describe('executeBatch — coverage', () => {
 			return vi.fn();
 		});
 		mockEngineInstance.submit.mockImplementation(async () => {
-			storedCb?.({ type: 'query-result', result: { sql: 'SELECT 1', params: [] } });
+			storedCb?.({
+				type: 'query-result',
+				result: { sql: 'SELECT 1', params: [] },
+			});
 		});
 
 		const result = await executeBatch(makeOptions());
