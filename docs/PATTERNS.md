@@ -299,8 +299,6 @@ BaseAdapter
        └─ Adapter<DB>    ← full capability union
 ```
 
-`BasicAdapter = CompilingAdapter & ExecutingAdapter` — minimum viable for most use cases.
-
 Injection:
 
 ```typescript
