@@ -148,13 +148,11 @@ describe('parseArgs', () => {
 		});
 	});
 
-	describe('S3: parseArgs error propagation through main()', () => {
+	describe('S3: parseArgs error shape (consumed by main)', () => {
+		// We re-implement main()'s try/catch around parseArgs because main() runs at module
+		// load and is hard to test in isolation. These tests verify parseArgs throws a shape
+		// that main()'s catch will format correctly.
 		it('main() calls process.exit(1) and writes to stderr on parseArgs error', async () => {
-			// We need to import main — it is not exported, so we test the entry-point
-			// behaviour by calling parseArgs directly with a missing value and verifying
-			// the error is the right type/message, which main() would relay to stderr.
-			// Direct main() test would require mocking process.argv and process.exit —
-			// simpler to verify parseArgs throws correctly and main handles it.
 			const stderrSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 			const exitSpy = vi
 				.spyOn(process, 'exit')
@@ -179,6 +177,26 @@ describe('parseArgs', () => {
 
 			stderrSpy.mockRestore();
 			exitSpy.mockRestore();
+		});
+	});
+
+	describe('M-R3h regression: empty = value must be rejected immediately', () => {
+		it('should throw for --schema= (empty value via = form)', () => {
+			expect(() => parseArgs(['--schema='])).toThrow(
+				'--schema requires a non-empty path argument',
+			);
+		});
+
+		it('should throw for -s= (short form with empty = value)', () => {
+			expect(() => parseArgs(['-s='])).toThrow(
+				'-s requires a non-empty path argument',
+			);
+		});
+
+		it('should throw for --allowed-root= (empty value via = form)', () => {
+			expect(() =>
+				parseArgs(['--schema', './x.ts', '--allowed-root=']),
+			).toThrow('--allowed-root requires a non-empty path argument');
 		});
 	});
 });

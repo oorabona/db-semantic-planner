@@ -13,9 +13,15 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, normalize, relative, resolve, sep } from 'node:path';
+import { isAbsolute, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type { ResolvedSchema } from '@dbsp/core';
+import {
+	_resetWarnFlagForTests as _pvResetWarnFlag,
+	hasParentSegment,
+	isPathContained,
+	validateAllowedRoots,
+} from './path-validator.js';
 
 /**
  * Options for schema loading with security constraints.
@@ -67,6 +73,11 @@ export class SchemaLoadError extends Error {
 	}
 }
 
+export type ValidatePathResult = {
+	resolvedPath: string;
+	canonicalRoots: string[];
+};
+
 /**
  * Validates that a path is safe (no path traversal) and within the allowed roots.
  *
@@ -76,22 +87,14 @@ export class SchemaLoadError extends Error {
  *   canonical roots used for containment checks
  * @throws SchemaLoadError if path traversal or out-of-bounds access is detected
  */
-let _cwdWarnEmitted = false;
-
-export type ValidatePathResult = {
-	resolvedPath: string;
-	canonicalRoots: string[];
-};
-
 export function validatePath(
 	schemaPath: string,
 	allowedRoots?: string[],
 ): ValidatePathResult {
-	// Decode URL-encoded characters ONCE before any check so that
-	// '%2e%2e/etc' is correctly caught by the '..' guard below.
-	// On URIError (malformed percent-sequence, e.g. '100%dir'), fall back to
-	// the raw input: a malformed sequence cannot be a URL-encoded '..' anyway,
-	// so it is safe to proceed with containment checks on the literal path.
+	// 1. Decode URL-encoded characters ONCE before any check so that
+	//    '%2e%2e/etc' is correctly caught by the '..' guard below.
+	//    On URIError (malformed percent-sequence, e.g. '100%dir'), fall back to
+	//    the raw input: a malformed sequence cannot be a URL-encoded '..' anyway.
 	let decodedPath: string;
 	try {
 		decodedPath = decodeURIComponent(schemaPath);
@@ -100,8 +103,9 @@ export function validatePath(
 		decodedPath = schemaPath;
 	}
 
-	// Also reject literal backslash-form '..' — unusual on POSIX but possible as
-	// a filename component and a canonical Windows traversal pattern.
+	// 2a. Backslash-form '..' — Windows traversal pattern. Reject unconditionally:
+	//     on POSIX, backslash is a literal char so '..\\foo' cannot be a legitimate
+	//     POSIX path that should be allowed through any root check.
 	if (decodedPath.includes('..\\') || decodedPath === '..') {
 		throw new SchemaLoadError(
 			`Suspicious path pattern detected`,
@@ -109,123 +113,50 @@ export function validatePath(
 		);
 	}
 
-	// Normalize and resolve to absolute path (operating on the decoded string)
-	const normalizedPath = normalize(decodedPath);
-	const resolvedPath = isAbsolute(normalizedPath)
-		? normalizedPath
-		: resolve(process.cwd(), normalizedPath);
-
-	// Validate each allowedRoots entry: reject if it contains '..' post-normalize
-	// (prevents sneaking out via a crafted root path).
-	// canonicalRoots are computed once here and reused by loadSchema to avoid
-	// independent re-resolution that could diverge if call order changes (S-B).
-	// NOTE: canonicalRoots is computed BEFORE the '..' early-exit so that
-	// allowedRoots-covered paths (e.g. '/tmp/a/../b') aren't falsely rejected.
-	const canonicalRoots: string[] = allowedRoots
-		? allowedRoots.map((root) => {
-				const normalizedRoot = normalize(root);
-				if (normalizedRoot.includes('..')) {
-					throw new SchemaLoadError(
-						`Invalid allowedRoot contains path traversal: ${root}`,
-						'PATH_TRAVERSAL',
-					);
-				}
-				return isAbsolute(normalizedRoot)
-					? normalizedRoot
-					: resolve(process.cwd(), normalizedRoot);
-			})
-		: [];
-
-	// Default allowedRoots to [cwd] when not provided; warn ONCE per process.
-	// Warn-once is intentional — repeated warnings would spam stdio-MCP transport's stderr.
-	let rootsToCheck: string[];
-	if (canonicalRoots.length === 0) {
-		if (!_cwdWarnEmitted) {
-			process.stderr.write(
-				'[dbsp-mcp] Warning: no --allowed-root specified, defaulting to cwd\n',
-			);
-			_cwdWarnEmitted = true;
-		}
-		rootsToCheck = [process.cwd()];
-	} else {
-		rootsToCheck = canonicalRoots;
-	}
-
-	// Reject if the decoded input contains '..' — regardless of whether the resolved
-	// path exists. We check against rootsToCheck (not hardcoded cwd) so that an
-	// allowedRoot-covered path like '/tmp/a/../b/schema.js' (resolves to '/tmp/b/…')
-	// is accepted when allowedRoots includes '/tmp'.
-	//
-	// A legitimate path like '..backup/schema.js' inside an allowed root is accepted
-	// below after containment re-check; the early exit here only fires when ALL roots
-	// reject the resolved path.
-	if (decodedPath.includes('..')) {
-		const isWithinARoot = rootsToCheck.some((root) => {
-			const relFromRoot = relative(root, resolvedPath);
-			return (
-				relFromRoot !== '..' &&
-				!relFromRoot.startsWith(`..${sep}`) &&
-				!isAbsolute(relFromRoot)
-			);
-		});
-		if (!isWithinARoot) {
+	// 2b. POSIX '..' segment — uses segment-based detection (hasParentSegment) so that
+	//     legitimate POSIX names like '/var/..backup' are NOT rejected (M-R3e/f fix).
+	//     A '..' that STILL resolves within an allowed root is legitimate
+	//     (e.g. '/tmp/a/../b/schema.js' with allowedRoot='/tmp').
+	if (hasParentSegment(decodedPath)) {
+		const canonicalRootsForEarlyCheck = validateAllowedRoots(
+			allowedRoots,
+			SchemaLoadError,
+		);
+		const normalizedEarly = normalize(decodedPath);
+		const resolvedEarly = isAbsolute(normalizedEarly)
+			? normalizedEarly
+			: resolve(process.cwd(), normalizedEarly);
+		if (!isPathContained(canonicalRootsForEarlyCheck, resolvedEarly)) {
 			throw new SchemaLoadError(
 				`Suspicious path pattern detected: ${schemaPath}`,
 				'PATH_TRAVERSAL',
 			);
 		}
+		// Path has '..' but resolves within allowed roots — return early with resolved path.
+		return {
+			resolvedPath: existsSync(resolvedEarly)
+				? realpathSync(resolvedEarly)
+				: resolvedEarly,
+			canonicalRoots: canonicalRootsForEarlyCheck,
+		};
 	}
 
-	// If file exists, resolve symlinks and verify the real path
-	if (existsSync(resolvedPath)) {
-		const realPath = realpathSync(resolvedPath);
+	// 3. Canonicalize roots — handles default-to-cwd warn-once and segment-based
+	//    '..' rejection (fixes M-R3e/f: substring check falsely rejected /var/..backup).
+	const canonicalRoots = validateAllowedRoots(allowedRoots, SchemaLoadError);
 
-		const isWithinAllowedRoot = rootsToCheck.some((root) => {
-			// Resolve symlinks for root as well
-			const realRoot = existsSync(root) ? realpathSync(root) : root;
-			// Use path.relative to check containment (secure against path traversal)
-			const relativePath = relative(realRoot, realPath);
-			// Path is within root if relative path doesn't start with '..' and isn't absolute.
-			// relativePath === '' means schemaPath IS the root itself — excluded (not a file in the root).
-			return (
-				relativePath !== '' &&
-				relativePath !== '..' &&
-				!relativePath.startsWith(`..${sep}`) &&
-				!isAbsolute(relativePath)
-			);
-		});
+	// 4. Normalize and resolve the user path to an absolute form.
+	const normalizedPath = normalize(decodedPath);
+	const resolvedPath = isAbsolute(normalizedPath)
+		? normalizedPath
+		: resolve(process.cwd(), normalizedPath);
 
-		if (!isWithinAllowedRoot) {
-			process.stderr.write(
-				`[dbsp-mcp] Path containment check failed against ${rootsToCheck.length} allowed root(s)\n`,
-			);
-			throw new SchemaLoadError(
-				`Schema path resolves outside allowed directories`,
-				'PATH_TRAVERSAL',
-			);
-		}
-
-		return { resolvedPath: realPath, canonicalRoots: rootsToCheck };
-	}
-
-	// File doesn't exist. Apply a best-effort containment check using the resolved
-	// absolute path's prefix (no realpath available since the file doesn't exist;
-	// symlink edge cases are absent for non-existent paths).
-	const isWithinAllowedRootNonExistent = rootsToCheck.some((root) => {
-		// Resolve root symlinks if the root itself exists; otherwise use normalized root.
-		const realRoot = existsSync(root) ? realpathSync(root) : root;
-		const relativePath = relative(realRoot, resolvedPath);
-		return (
-			relativePath !== '' &&
-			relativePath !== '..' &&
-			!relativePath.startsWith(`..${sep}`) &&
-			!isAbsolute(relativePath)
-		);
-	});
-
-	if (!isWithinAllowedRootNonExistent) {
+	// 5. Unified containment check — symlink-aware for both existing and non-existent
+	//    paths (fixes M-R3g: symlinked root + non-existent file caused false positive).
+	//    This replaces the old split into two separate existsSync branches.
+	if (!isPathContained(canonicalRoots, resolvedPath)) {
 		process.stderr.write(
-			`[dbsp-mcp] Path containment check failed against ${rootsToCheck.length} allowed root(s)\n`,
+			`[dbsp-mcp] Path containment check failed against ${canonicalRoots.length} allowed root(s)\n`,
 		);
 		throw new SchemaLoadError(
 			`Schema path resolves outside allowed directories`,
@@ -233,7 +164,13 @@ export function validatePath(
 		);
 	}
 
-	return { resolvedPath, canonicalRoots: rootsToCheck };
+	// 6. Return the canonical resolved path for downstream.
+	//    For existing files: use realpathSync (resolves all symlinks for TOCTOU defence).
+	//    For non-existent: return the lexically resolved path (no realpath possible).
+	const finalResolved = existsSync(resolvedPath)
+		? realpathSync(resolvedPath)
+		: resolvedPath;
+	return { resolvedPath: finalResolved, canonicalRoots };
 }
 
 /**
@@ -279,16 +216,7 @@ export async function loadSchema(
 		const rootsToCheck: string[] =
 			canonicalRoots.length > 0 ? canonicalRoots : [process.cwd()];
 
-		const stillWithin = rootsToCheck.some((root) => {
-			const realRoot = existsSync(root) ? realpathSync(root) : root;
-			const rel = relative(realRoot, canonicalPath);
-			return (
-				rel !== '' &&
-				rel !== '..' &&
-				!rel.startsWith(`..${sep}`) &&
-				!isAbsolute(rel)
-			);
-		});
+		const stillWithin = isPathContained(rootsToCheck, canonicalPath);
 
 		if (!stillWithin) {
 			throw new SchemaLoadError(
@@ -360,9 +288,6 @@ export async function loadSchema(
 }
 
 /**
- * Validate that the loaded object has the expected schema structure.
- */
-/**
  * Validate that the loaded object has the expected ResolvedSchema structure.
  *
  * This performs a structural duck-type check mirroring the valibot validator at
@@ -388,7 +313,8 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
 
 /** @internal Test-only: reset the warn-once flag between test runs. */
 export function _resetWarnFlagForTests(): void {
-	_cwdWarnEmitted = false;
+	// Delegate to path-validator where the flag now lives.
+	_pvResetWarnFlag();
 }
 
 export function validateResolvedSchema(schema: unknown): void {

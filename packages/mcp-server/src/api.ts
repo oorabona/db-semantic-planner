@@ -5,6 +5,12 @@
  * programmatically without launching a subprocess.
  */
 
+export {
+	hasParentSegment,
+	isPathContained,
+	realpathBestEffort,
+	validateAllowedRoots,
+} from './path-validator.js';
 export type {
 	SchemaLoaderOptions,
 	SchemaLoaderResult,

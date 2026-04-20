@@ -36,19 +36,31 @@ export function parseArgs(args: string[]): CliArgs {
 		help: false,
 	};
 
-	// Normalize --foo=bar form → ['--foo', 'bar'] before main loop
+	// Normalize --foo=bar form → ['--foo', 'bar'] before main loop.
+	// Detect empty value (--schema=) immediately — the sliced value would be ''
+	// which silently passes as schemaPath='' and triggers a misleading "required" error.
 	const normalized: string[] = [];
 	for (const arg of args) {
 		if (arg.startsWith('--') && arg.includes('=')) {
 			const eqIdx = arg.indexOf('=');
-			normalized.push(arg.slice(0, eqIdx), arg.slice(eqIdx + 1));
+			const flag = arg.slice(0, eqIdx);
+			const value = arg.slice(eqIdx + 1);
+			if (value === '' && (flag === '--schema' || flag === '--allowed-root')) {
+				throw new Error(`${flag} requires a non-empty path argument`);
+			}
+			normalized.push(flag, value);
 		} else if (
 			arg.startsWith('-') &&
 			!arg.startsWith('--') &&
 			arg.includes('=')
 		) {
 			const eqIdx = arg.indexOf('=');
-			normalized.push(arg.slice(0, eqIdx), arg.slice(eqIdx + 1));
+			const flag = arg.slice(0, eqIdx);
+			const value = arg.slice(eqIdx + 1);
+			if (value === '' && (flag === '-s' || flag === '-r')) {
+				throw new Error(`${flag} requires a non-empty path argument`);
+			}
+			normalized.push(flag, value);
 		} else {
 			normalized.push(arg);
 		}
@@ -59,7 +71,10 @@ export function parseArgs(args: string[]): CliArgs {
 	const VALUE_FLAGS = new Set(['--schema', '-s', '--allowed-root', '-r']);
 	const KNOWN_FLAGS = new Set([...VALUE_FLAGS, '--help', '-h']);
 
-	// After '--' all remaining tokens are treated as positional values (POSIX convention).
+	// POSIX-style end-of-options marker. We do NOT support positional args (this CLI
+	// has no positionals), so any token after a bare '--' is rejected as 'Unknown argument'.
+	// The '--' marker only escapes a value that starts with '-' when consumed inline by
+	// --schema/--allowed-root (e.g. '--schema -- -my.ts' assigns '-my.ts' to schemaPath).
 	let endOfOptions = false;
 
 	for (let i = 0; i < normalized.length; i++) {
