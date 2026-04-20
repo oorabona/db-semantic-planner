@@ -5,6 +5,7 @@
  */
 
 import type { ComparisonOperator, FieldRef } from '@dbsp/types';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
 	NqlExpression,
@@ -121,8 +122,16 @@ export function expressionToSql(expr: NqlExpression): string {
 			const unary = expr as NqlUnaryExpression;
 			return `${unary.operator} ${expressionToSql(unary.operand)}`;
 		}
+		// L-7: the old default was `return String(expr)` which silently emitted
+		// '[object Object]' for any unrecognised expression type. This is a
+		// programming error (unreachable code path) — SEM_UNREACHABLE is the
+		// correct code because a new expression type was added without a handler,
+		// not because the user provided invalid NQL syntax.
 		default:
-			return String(expr);
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_UNREACHABLE,
+				`Cannot convert expression type '${(expr as { type?: unknown }).type ?? 'unknown'}' to SQL fragment`,
+			);
 	}
 }
 
@@ -290,4 +299,49 @@ export function validateWhereField(
 	if (ctx.currentFromTable && !field.includes('.')) {
 		ctx.validator.validateColumn(ctx.currentFromTable, field);
 	}
+}
+
+/**
+ * Coerce an NQL expression to a string key for use in JSON paths, LIKE patterns,
+ * and similar positions that require a string literal.
+ *
+ * Dispatch rules:
+ *   - string literal → use `.value` directly
+ *   - single-segment path → treat the identifier name as the key (prevents `String({$ref:...})` → `'[object Object]'`)
+ *   - multi-segment dotted path → throw SEM_INVALID_SYNTAX (ambiguous — caller cannot know which segment to use)
+ *   - anything else → throw SEM_INVALID_SYNTAX
+ *
+ * @param expr - The NQL expression to coerce.
+ * @param contextLabel - Human-readable label for the position (e.g. `"LIKE pattern"`, `"json_extract() path argument"`) used in error messages.
+ */
+export function coerceToStringKey(
+	expr: NqlExpression,
+	contextLabel: string,
+): string {
+	if (expr.type === 'path') {
+		const segments = (expr as NqlPathExpression).segments;
+		if (segments.length > 1) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`${contextLabel} must be a string literal or a single identifier, not a dotted path`,
+			);
+		}
+		// Single-segment path: treat the identifier as the string key value.
+		const key = expressionToField(expr);
+		/* v8 ignore next — defensive: single-segment path always resolves to non-null */
+		if (!key) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`${contextLabel} must be a string literal or a single identifier`,
+			);
+		}
+		return key;
+	}
+	if (expr.type === 'string') {
+		return (expr as { type: 'string'; value: string }).value;
+	}
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`${contextLabel} must be a string literal`,
+	);
 }

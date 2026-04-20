@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { NqlErrorCodes } from './errors/types.js';
 import { compile, parse } from './index.js';
 
 // ============================================================================
@@ -134,7 +135,7 @@ describe('compile()', () => {
 	it('returns error for unknown column with schema', () => {
 		const result = compile("users | where nonexistent = 'test'", validSchema);
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.code).toBe('ERR-SEM-001');
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_UNKNOWN_COLUMN);
 	});
 
 	it('handles schema without getTable (not ColumnValidatorSchema)', () => {

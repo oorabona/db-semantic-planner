@@ -12,31 +12,24 @@ import type {
 	DropIndexOptions,
 	IndexColumnDef,
 } from '@dbsp/core';
-import { InvalidIdentifierError } from '../validate.js';
-
-// Accepted index methods (validated at runtime)
-const VALID_INDEX_METHODS = new Set([
-	'btree',
-	'hash',
-	'gist',
-	'gin',
-	'brin',
-	'hnsw',
-	'ivfflat',
-	'bm25',
-]);
+import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import { quoteIdent, validateIndexMethod } from './phases/utils.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
+// S-2: Use quoteIdent from phases/utils (validates + double-quotes) instead of the former
+// local quoteIdentifier (which had no validation). qualifyTable wraps quoteIdent for schema-qualifying.
+
 function quoteIdentifier(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
+	return quoteIdent(name, 'alias');
 }
 
 function qualifyTable(table: string, schema?: string): string {
-	const quotedTable = quoteIdentifier(table);
-	return schema ? `${quoteIdentifier(schema)}.${quotedTable}` : quotedTable;
+	return schema
+		? `${quoteIdent(schema, 'schema')}.${quoteIdent(table, 'table')}`
+		: quoteIdent(table, 'table');
 }
 
 // ---------------------------------------------------------------------------
@@ -69,7 +62,8 @@ function qualifyTable(table: string, schema?: string): string {
  * @param schema - Optional schema name for the table
  *
  * @security index name and column names are identifier-quoted.
- * `where` and expression columns are raw SQL escape hatches — caller responsibility.
+ * `where` (S-1) and expression columns (S-1) are validated via validateSqlExpression()
+ * before interpolation. WITH parameter keys are validated via validateIdentifier().
  */
 export function generateCreateIndexSQL(
 	table: string,
@@ -77,13 +71,8 @@ export function generateCreateIndexSQL(
 	schema?: string,
 ): string {
 	// Validate method if provided
-	if (
-		options.method !== undefined &&
-		!VALID_INDEX_METHODS.has(options.method)
-	) {
-		throw new Error(
-			`Invalid index method: "${options.method}". Must be one of: ${[...VALID_INDEX_METHODS].join(', ')}`,
-		);
+	if (options.method !== undefined) {
+		validateIndexMethod(options.method, 'index method');
 	}
 
 	const parts: string[] = ['CREATE'];
@@ -115,26 +104,20 @@ export function generateCreateIndexSQL(
 		parts.push(`INCLUDE (${includeCols})`);
 	}
 
-	// WITH storage parameters — validate keys to prevent injection
+	// WITH storage parameters — S-1: validate keys via validateIdentifier (consistent with other paths)
 	if (options.with && Object.keys(options.with).length > 0) {
-		const validStorageParam = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
 		const withParams = Object.entries(options.with)
 			.map(([k, v]) => {
-				if (!validStorageParam.test(k)) {
-					throw new InvalidIdentifierError(
-						k,
-						'storage parameter',
-						'contains invalid characters (only letters, digits, and underscore allowed)',
-					);
-				}
+				validateIdentifier(k, 'alias');
 				return `${k} = ${v}`;
 			})
 			.join(', ');
 		parts.push(`WITH (${withParams})`);
 	}
 
-	// WHERE partial index predicate
+	// WHERE partial index predicate — S-1: validate before interpolation
 	if (options.where) {
+		validateSqlExpression(options.where, 'index WHERE predicate');
 		parts.push(`WHERE ${options.where}`);
 	}
 
@@ -154,10 +137,15 @@ function buildColumnPart(
 		// Named column — quote it, then append opclass from the map if present
 		const quoted = quoteIdentifier(col);
 		const opclass = opclassMap?.[col];
+		// S-1: validate opclass name before interpolation
+		if (opclass) validateIdentifier(opclass, 'alias');
 		return opclass ? `${quoted} ${opclass}` : quoted;
 	}
-	// Expression column — unquoted raw SQL
+	// Expression column — validate expression before interpolation (S-1)
+	validateSqlExpression(col.expression, 'index expression');
 	const opclass = col.opclass;
+	// S-1: validate expression opclass name before interpolation
+	if (opclass) validateIdentifier(opclass, 'alias');
 	return opclass ? `${col.expression} ${opclass}` : col.expression;
 }
 

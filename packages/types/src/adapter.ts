@@ -601,28 +601,27 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
 // ============================================================================
 
 /**
- * Compile-only adapter - can only compile, not execute.
- * Useful for generating SQL without a database connection.
+ * Compile-only adapter - can compile SQL and generate DDL, but cannot execute
+ * queries or stream results. Useful for tooling, CLI, and testing without a
+ * live database connection.
+ *
+ * Includes DDLGeneratingAdapter because DDL generation is purely compile-time
+ * (no DB connection required — same rationale as SQL compilation).
  *
  * Explicitly excludes execution interfaces so that type-checking catches
  * misuse (e.g. calling execute() on a compile-only instance) at compile time.
  */
-export type CompileOnlyAdapter = CompilingAdapter & {
-	readonly execute?: never;
-	readonly executeOne?: never;
-	readonly executeOneOrThrow?: never;
-	readonly stream?: never;
-	readonly introspect?: never;
-	readonly transaction?: never;
-	readonly executeRaw?: never;
-	readonly executeDDL?: never;
-};
-
-/**
- * Basic adapter - compile + execute, no streaming/transactions/introspection.
- * Minimum viable adapter for most use cases.
- */
-export type BasicAdapter = CompilingAdapter & ExecutingAdapter;
+export type CompileOnlyAdapter = CompilingAdapter &
+	DDLGeneratingAdapter & {
+		readonly execute?: never;
+		readonly executeOne?: never;
+		readonly executeOneOrThrow?: never;
+		readonly stream?: never;
+		readonly introspect?: never;
+		readonly transaction?: never;
+		readonly executeRaw?: never;
+		readonly executeDDL?: never;
+	};
 
 // ============================================================================
 // Full Adapter Interface

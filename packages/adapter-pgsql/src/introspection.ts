@@ -18,6 +18,7 @@ import type {
 	ColumnType,
 	EnumIR,
 	ForeignKeyIR,
+	HierarchyIR,
 	IndexIR,
 	ModelIR,
 	OnDeleteAction,
@@ -46,14 +47,12 @@ export interface IntrospectionOptions {
 }
 
 /** Hierarchy pattern detected during introspection */
-export interface DetectedHierarchy {
-	readonly type: 'adjacency' | 'edge-table';
-	readonly nodeTable: string;
-	readonly edgeTable?: string;
-	readonly parentColumn: string;
-	readonly childColumn?: string;
-	readonly nodeIdColumn: string;
-}
+/**
+ * Hierarchy pattern detected during introspection.
+ * Alias of {@link HierarchyIR} from \@dbsp/types — kept here for
+ * public-API backwards compatibility (re-exported from \@dbsp/adapter-pgsql).
+ */
+export type DetectedHierarchy = HierarchyIR;
 
 /** Extended ModelIR with hierarchy metadata */
 export interface IntrospectedModelIR extends ModelIR {

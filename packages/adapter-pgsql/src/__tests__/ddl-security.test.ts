@@ -15,7 +15,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from '../ddl/migration-sql.js';
+import { generateEnumTypesPhase } from '../ddl/phases/enum-types.js';
+import { formatSqlDefault, quoteRoleName } from '../ddl/phases/utils.js';
 import type { SchemaChange, SchemaDiff } from '../ddl/schema-diff.js';
+import { identityNaming } from '../naming-plugin.js';
 import {
 	InvalidIdentifierError,
 	validateDbTypeName,
@@ -95,6 +98,33 @@ describe('validateSqlExpression', () => {
 	it('rejects expressions containing a backslash (escape sequence)', () => {
 		expect(() => validateSqlExpression('value\\n', 'test')).toThrow(
 			/forbidden characters/,
+		);
+	});
+
+	// M-1 regression: block-comment closer must be rejected (defense-in-depth —
+	// a partial payload that closes an enclosing comment could inject SQL).
+	it('rejects expressions containing a block-comment closer (*/)', () => {
+		expect(() => validateSqlExpression('1 */ 2', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	// Positive regression: confirm existing vectors still rejected after regex change.
+	it('still rejects semicolons after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression('now(); DROP TABLE t', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	it('still rejects block-comment opener (/\\*) after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression('now() /* comment', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	it('still rejects line-comment (--) after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression('val -- injected', 'test')).toThrow(
+			/Unsafe SQL expression/,
 		);
 	});
 });
@@ -1205,3 +1235,183 @@ function buildCaps(): any {
 		supportsUpsert: true,
 	};
 }
+
+// ---------------------------------------------------------------------------
+// M-1: quoteRoleName — NUL bytes, control chars, NAMEDATALEN (63 bytes)
+// ---------------------------------------------------------------------------
+
+describe('M-1 quoteRoleName — defense-in-depth (NUL, control chars, NAMEDATALEN)', () => {
+	it('accepts a normal role name', () => {
+		expect(quoteRoleName('app admin')).toBe('"app admin"');
+	});
+
+	it('rejects a role name containing a NUL byte', () => {
+		expect(() => quoteRoleName('app\x00admin')).toThrow(/NUL byte/);
+	});
+
+	it('rejects a role name containing a control character (0x01)', () => {
+		expect(() => quoteRoleName('app\x01admin')).toThrow(/control characters/);
+	});
+
+	it('rejects a role name containing DEL (0x7F)', () => {
+		expect(() => quoteRoleName('role\x7f')).toThrow(/control characters/);
+	});
+
+	it('rejects a role name exceeding 63 bytes (NAMEDATALEN)', () => {
+		// 64 ASCII chars — each is 1 byte in UTF-8
+		const longName = 'a'.repeat(64);
+		expect(() => quoteRoleName(longName)).toThrow(/NAMEDATALEN/);
+	});
+
+	it('accepts a role name of exactly 63 bytes', () => {
+		const exactName = 'a'.repeat(63);
+		expect(() => quoteRoleName(exactName)).not.toThrow();
+	});
+
+	it('counts bytes not chars: rejects multibyte role name > 63 bytes', () => {
+		// Each '€' is 3 bytes in UTF-8; 22 × 3 = 66 bytes > 63
+		const multibyteOverlimit = '€'.repeat(22);
+		expect(() => quoteRoleName(multibyteOverlimit)).toThrow(/NAMEDATALEN/);
+	});
+
+	it('counts bytes not chars: accepts multibyte role name ≤ 63 bytes', () => {
+		// 21 × 3 = 63 bytes exactly
+		const multibyteExact = '€'.repeat(21);
+		expect(() => quoteRoleName(multibyteExact)).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M-2: upCreateEnum — enum label NUL/control-char injection (migration-sql path)
+// ---------------------------------------------------------------------------
+
+describe('M-2 migration-sql upCreateEnum — enum label injection', () => {
+	function makeCreateEnumDiff(values: string[]): SchemaDiff {
+		return {
+			changes: [
+				{
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: {
+						enum: { name: 'status', values },
+					},
+				},
+			],
+			hasDestructive: false,
+			summary: {
+				tables: { added: 0, dropped: 0 },
+				columns: { added: 0, dropped: 0, altered: 0 },
+				indexes: { added: 0, dropped: 0 },
+				constraints: { added: 0, dropped: 0, altered: 0 },
+			},
+		};
+	}
+
+	it('accepts valid enum values', () => {
+		expect(() =>
+			generateMigrationSQL(
+				makeCreateEnumDiff(['active', 'inactive', 'pending']),
+			),
+		).not.toThrow();
+	});
+
+	it('rejects enum value containing NUL byte', () => {
+		expect(() =>
+			generateMigrationSQL(makeCreateEnumDiff(['active', 'bad\x00value'])),
+		).toThrow(/NUL byte/);
+	});
+
+	it('rejects enum value containing control character (0x01)', () => {
+		expect(() =>
+			generateMigrationSQL(makeCreateEnumDiff(['bad\x01value'])),
+		).toThrow(/control characters/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M-3: generateEnumTypesPhase — enum label NUL/control-char injection (DDL phase path)
+// ---------------------------------------------------------------------------
+
+describe('M-3 generateEnumTypesPhase — enum label injection', () => {
+	function makePhaseCtx(values: string[]): any {
+		return {
+			schema: {
+				enums: new Map([['status', { name: 'status', values }]]),
+			},
+			schemaName: undefined,
+			naming: identityNaming,
+			caps: {
+				supportsDDLEnumTypes: true,
+				supportsDDL: true,
+			},
+		};
+	}
+
+	it('accepts valid enum values', () => {
+		expect(() =>
+			generateEnumTypesPhase(makePhaseCtx(['active', 'inactive', 'pending'])),
+		).not.toThrow();
+	});
+
+	it('rejects enum value containing NUL byte', () => {
+		expect(() =>
+			generateEnumTypesPhase(makePhaseCtx(['active', 'bad\x00value'])),
+		).toThrow(/NUL byte/);
+	});
+
+	it('rejects enum value containing control character (0x01)', () => {
+		expect(() =>
+			generateEnumTypesPhase(makePhaseCtx(['bad\x01value'])),
+		).toThrow(/control characters/);
+	});
+
+	it('generates correct SQL for valid enum (sanity check)', () => {
+		const result = generateEnumTypesPhase(makePhaseCtx(['active', 'pending']));
+		expect(result).toHaveLength(1);
+		expect(result[0]).toMatch(
+			/CREATE TYPE "status" AS ENUM \('active', 'pending'\)/,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// M-5: formatSqlDefault — bare function-call path injection defense
+// ---------------------------------------------------------------------------
+
+describe('formatSqlDefault — bare function-call path injection (M-5)', () => {
+	// Positive: legitimate PG default function calls must pass through unchanged
+	it('allows now()', () => {
+		expect(formatSqlDefault('now()')).toBe('now()');
+	});
+
+	it('allows CURRENT_TIMESTAMP()', () => {
+		expect(formatSqlDefault('CURRENT_TIMESTAMP()')).toBe('CURRENT_TIMESTAMP()');
+	});
+
+	it('allows uuid_generate_v4()', () => {
+		expect(formatSqlDefault('uuid_generate_v4()')).toBe('uuid_generate_v4()');
+	});
+
+	// Negative: injection attempts that end with `()` and thus trigger the
+	// bare-function-call branch must be rejected by validateSqlExpression.
+	it('throws on semicolon injection in bare function call (ends with ())', () => {
+		// Crafted to end with () so the endsWith('()') branch fires
+		expect(() => formatSqlDefault('now(); DROP TABLE users; --x()')).toThrow(
+			/forbidden characters/,
+		);
+	});
+
+	it('throws on line-comment injection in bare function call (ends with ())', () => {
+		expect(() => formatSqlDefault('now()-- injected()')).toThrow(
+			/forbidden characters/,
+		);
+	});
+
+	it('throws on block-comment injection in bare function call (ends with ())', () => {
+		expect(() => formatSqlDefault('now()/*injected*/()')).toThrow(
+			/forbidden characters/,
+		);
+	});
+});

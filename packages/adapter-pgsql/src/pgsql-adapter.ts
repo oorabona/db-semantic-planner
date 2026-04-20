@@ -23,6 +23,7 @@ import type {
 	AdapterStreamOptions,
 	BatchUpdateIntent,
 	CompiledQuery,
+	CompileOnlyAdapter,
 	CompileOptions,
 	CompileResultWithIncludes,
 	CteQueryIntent,
@@ -1016,6 +1017,14 @@ export function createPgsqlAdapter<DB = unknown>(
  */
 export function createPgsqlCompileOnlyAdapter<DB = unknown>(
 	options?: PgsqlAdapterOptions,
-): PgsqlAdapter<DB> {
-	return new PgsqlAdapter<DB>(undefined, options);
+): CompileOnlyAdapter {
+	// The `unknown` intermediate cast is required because TypeScript treats
+	// `?: never` properties as non-overlapping with the concrete methods on
+	// PgsqlAdapter<DB>. CompileOnlyAdapter uses `?: never` to exclude execution
+	// methods at compile time; at runtime those methods throw ExecutionError
+	// when no Pool is provided. The cast is intentional and safe.
+	return new PgsqlAdapter<DB>(
+		undefined,
+		options,
+	) as unknown as CompileOnlyAdapter;
 }

@@ -23,6 +23,7 @@ import type {
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { NqlErrorCodes } from '../errors/types.js';
 import { compile } from '../index.js';
 import type { CompileResult } from './index.js';
 
@@ -616,10 +617,11 @@ describe('compile-expression: BETWEEN', () => {
 		expect(where.operator).toBe('between');
 	});
 
-	it('throws when BETWEEN bounds are path-expressions instead of literals', () => {
+	it('throws when BETWEEN bounds are path-expressions instead of literals (L-6 actionable message)', () => {
+		// L-6: message now names which bound failed and what type was rejected.
 		expect(() =>
 			compileNql('users | where age between minAge and maxAge'),
-		).toThrow(/BETWEEN bounds must be literal/);
+		).toThrow(/BETWEEN lower bound must be a literal number, string, or date/);
 	});
 });
 
@@ -873,5 +875,143 @@ describe('compile-expression: caseExpr in WHERE (P1-4)', () => {
 				"users | where case when status = 'active' then true else false end",
 			),
 		).toThrow(/CASE in WHERE not supported/);
+	});
+});
+
+// ===========================================================================
+// Observable Success: String-coercion class (S-1, S-2, S-3)
+// and error code preservation (M-4).
+//
+// The original bug: String(resolveFilterValue(...)) emitted '[object Object]'
+// when the RHS was a path expression (resolveFilterValue returns {$ref:...}
+// for bare fields, or FieldRef for alias-context paths — both non-string).
+//
+// The fix: coerceToStringKey() dispatches on expression type:
+//   - string literal → use value directly
+//   - single-segment path → use the field name as the string key
+//   - multi-segment dotted path → throw SEM_INVALID_SYNTAX (ambiguous)
+//   - anything else → throw SEM_INVALID_SYNTAX
+//
+// Tests verify:
+//   - Single-segment bare paths are treated as string keys (no '[object Object]')
+//   - Dotted paths (multi-segment) throw SEM_INVALID_SYNTAX
+//   - M-4: compile() catch-all preserves the typed error code
+// ===========================================================================
+
+/**
+ * Like compileNql() but returns the raw ParseResult instead of throwing on error.
+ * Use when the test needs to inspect `result.success`, `result.errors[0].code`, etc.
+ * (compileNql throws on failure and is unsuitable for negative/error-path tests.)
+ */
+function compileRaw(input: string) {
+	return compile(input, null);
+}
+
+describe('compile-expression: S-1 — LIKE pattern coercion (no [object Object])', () => {
+	it('LIKE with bare identifier treats it as pattern string (not [object Object])', () => {
+		// Before fix: String(resolveFilterValue(...)) → '[object Object]' in pattern.
+		// After fix: coerceToStringKey returns the field name as the pattern string.
+		const result = getWhere(
+			compileNql('users | where name like otherName'),
+		) as import('@dbsp/types').WhereLikeIntent;
+		expect(result.kind).toBe('like');
+		expect(result.field).toBe('name');
+		// Must be 'otherName', never '[object Object]'
+		expect(result.pattern).toBe('otherName');
+		expect(result.pattern).not.toBe('[object Object]');
+	});
+
+	it('LIKE with dotted path throws SEM_INVALID_SYNTAX', () => {
+		// Multi-segment paths are ambiguous as LIKE patterns — reject them.
+		const result = compileRaw('users | where name like a.b');
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toMatch(
+			/LIKE pattern must be a string literal/,
+		);
+	});
+
+	it('LIKE with string literal still works (regression)', () => {
+		const result = getWhere(compileNql("users | where name like '%alice%'"));
+		expect(result).toMatchObject({
+			kind: 'like',
+			field: 'name',
+			pattern: '%alice%',
+		});
+	});
+});
+
+describe('compile-expression: S-2 — json_extract path arg coercion (no [object Object])', () => {
+	it('json_extract with bare identifier treats it as key string (not [object Object])', () => {
+		// Before fix: String(resolveFilterValue(a, ...)) → '[object Object]' as JSON key.
+		// After fix: coerceToStringKey returns the field name as the key string.
+		const result = getWhere(
+			compileNql("users | where json_extract(data, someKey) = 'x'"),
+		) as WhereComparisonIntent;
+		expect(result.kind).toBe('comparison');
+		// Must be ['someKey'], never ['[object Object]']
+		expect(result.jsonPath).toEqual(['someKey']);
+	});
+
+	it('json_extract with dotted path arg throws SEM_INVALID_SYNTAX', () => {
+		// Multi-segment paths are ambiguous as JSON keys — reject them.
+		const result = compileRaw("users | where json_extract(data, a.b) = 'x'");
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toMatch(/json_extract\(\) path argument/);
+	});
+
+	it('json_extract with string literal key still works (regression)', () => {
+		const result = getWhere(
+			compileNql("users | where json_extract(data, 'key') = 'x'"),
+		) as WhereComparisonIntent;
+		expect(result.kind).toBe('comparison');
+		expect(result.jsonPath).toEqual(['key']);
+	});
+});
+
+describe('compile-expression: S-3 — ? operator key coercion (no [object Object])', () => {
+	it('? with bare identifier treats it as key string (not [object Object])', () => {
+		// Before fix: String(resolveFilterValue(...)) → '[object Object]' as key.
+		// After fix: coerceToStringKey returns the field name as the key string.
+		const result = getWhere(
+			compileNql('users | where data ? otherKey'),
+		) as WhereJsonExistsIntent;
+		expect(result.kind).toBe('jsonExists');
+		// Must be 'otherKey', never '[object Object]'
+		expect(result.key).toBe('otherKey');
+		expect(result.key).not.toBe('[object Object]');
+	});
+
+	it('? with dotted path throws SEM_INVALID_SYNTAX', () => {
+		// Multi-segment paths are ambiguous as JSON keys — reject them.
+		const result = compileRaw('users | where data ? a.b');
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toMatch(/\? operator key/);
+	});
+
+	it('? with string literal key still works (regression)', () => {
+		const result = getWhere(
+			compileNql("users | where data ? 'email'"),
+		) as WhereJsonExistsIntent;
+		expect(result.kind).toBe('jsonExists');
+		expect(result.key).toBe('email');
+	});
+});
+
+describe('compile-expression: M-4 — error code preserved through compile() catch-all', () => {
+	it('compile() preserves SEM_INVALID_SYNTAX code from NqlSemanticException', () => {
+		// Trigger a dotted-path LIKE (which throws SEM_INVALID_SYNTAX) through compile().
+		// Verifies the catch-all in index.ts preserves the typed code rather than
+		// overwriting to SEM_UNKNOWN_COLUMN (that was the M-4 bug).
+		// NOTE: This test validates M-4(b) behaviour. The fix in index.ts checks
+		// `err instanceof NqlSemanticException` and uses `err.code` when true.
+		const result = compileRaw('users | where name like a.b');
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		// Must be SEM_INVALID_SYNTAX — NOT SEM_UNKNOWN_COLUMN (that was the M-4 bug)
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.code).not.toBe(NqlErrorCodes.SEM_UNKNOWN_COLUMN);
 	});
 });
