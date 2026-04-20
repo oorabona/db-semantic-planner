@@ -20,7 +20,9 @@ export class InvalidIdentifierError extends Error {
 		public readonly identifierType: string,
 		reason: string,
 	) {
-		super(`Invalid ${identifierType} identifier "${value}": ${reason}`);
+		super(
+			`Invalid ${identifierType} identifier ${JSON.stringify(value)}: ${reason}`,
+		);
 		this.name = 'InvalidIdentifierError';
 	}
 }

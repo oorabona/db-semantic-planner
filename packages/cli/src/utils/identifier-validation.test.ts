@@ -159,4 +159,51 @@ describe('validateIdentifier', () => {
 			expect((err as InvalidIdentifierError).message).toContain('column');
 		});
 	});
+
+	describe('error message escaping (control character regression)', () => {
+		it('escapes newline in error message', () => {
+			let err: unknown;
+			try {
+				validateIdentifier('foo\nbar', 'table');
+			} catch (e) {
+				err = e;
+			}
+			expect(err).toBeInstanceOf(InvalidIdentifierError);
+			const message = (err as InvalidIdentifierError).message;
+			// Message should NOT contain a literal newline character
+			expect(message.includes('\n')).toBe(false);
+			// Message should contain escaped form (JSON.stringify produces "foo\\nbar")
+			expect(message).toContain('"foo\\nbar"');
+		});
+
+		it('escapes NUL byte in error message', () => {
+			let err: unknown;
+			try {
+				validateIdentifier('foo\x00bar', 'column');
+			} catch (e) {
+				err = e;
+			}
+			expect(err).toBeInstanceOf(InvalidIdentifierError);
+			const message = (err as InvalidIdentifierError).message;
+			// Message should NOT contain a literal NUL byte
+			expect(message.includes('\x00')).toBe(false);
+			// Message should contain escaped form
+			expect(message).toContain('"foo\\u0000bar"');
+		});
+
+		it('escapes tab in error message', () => {
+			let err: unknown;
+			try {
+				validateIdentifier('foo\tbar', 'schema');
+			} catch (e) {
+				err = e;
+			}
+			expect(err).toBeInstanceOf(InvalidIdentifierError);
+			const message = (err as InvalidIdentifierError).message;
+			// Message should NOT contain a literal tab character
+			expect(message.includes('\t')).toBe(false);
+			// Message should contain escaped form
+			expect(message).toContain('"foo\\tbar"');
+		});
+	});
 });
