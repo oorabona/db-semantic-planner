@@ -14,7 +14,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INIT_ERROR_PREFIX } from './engine/repl-engine.js';
+
 
 // ---------------------------------------------------------------------------
 // Shared mock infrastructure (mirrors batch.coverage.test.ts pattern)
@@ -338,11 +338,11 @@ describe('[EH-3] executeBatch is library-safe — no process.exit', () => {
 				throw new Error('unexpected exit');
 			});
 
-		// Emit init-error event with sentinel prefix
+		// Emit init-error event
 		mockEngineInstance.on.mockImplementation((cb) => {
 			cb({
-				type: 'error',
-				message: `${INIT_ERROR_PREFIX} Connection failed: ECONNREFUSED`,
+				type: 'init-error',
+				message: 'Connection failed: ECONNREFUSED',
 			});
 			return vi.fn();
 		});
@@ -519,15 +519,11 @@ describe('[CC-5+EH-6] init-error detection uses sentinel prefix, not substring',
 		mockEngineInstance.getState.mockReturnValue({ outputMode: 'json' });
 	});
 
-	it('INIT_ERROR_PREFIX is exported from repl-engine as "INIT_ERROR:"', () => {
-		expect(INIT_ERROR_PREFIX).toBe('INIT_ERROR:');
-	});
-
-	it('detects init failure via sentinel prefix', async () => {
+	it('detects init failure via init-error event', async () => {
 		mockEngineInstance.on.mockImplementation((cb) => {
 			cb({
-				type: 'error',
-				message: `${INIT_ERROR_PREFIX} Connection failed: ECONNREFUSED`,
+				type: 'init-error',
+				message: 'Connection failed: ECONNREFUSED',
 			});
 			return vi.fn();
 		});
@@ -535,35 +531,6 @@ describe('[CC-5+EH-6] init-error detection uses sentinel prefix, not substring',
 		await expect(
 			executeBatch(makeOptions({ databaseUrl: 'postgres://localhost/bad' })),
 		).rejects.toThrow('Database connection failed');
-	});
-
-	it('does NOT treat a generic error without sentinel as init-error', async () => {
-		// Error during init that does NOT have the sentinel prefix
-		// should be treated as a regular event, not a connection failure.
-		let callIdx = 0;
-		let storedCb: ((event: unknown) => void) | undefined;
-		mockEngineInstance.on.mockImplementation((cb) => {
-			callIdx++;
-			if (callIdx === 1) {
-				// First call = init subscription: emit a non-sentinel error
-				cb({ type: 'error', message: 'Connection failed: unrelated warning' });
-			}
-			storedCb = cb;
-			return vi.fn();
-		});
-		mockEngineInstance.submit.mockImplementation(async () => {
-			storedCb?.({
-				type: 'query-result',
-				result: { sql: 'SELECT 1', params: [] },
-			});
-		});
-
-		// Should NOT throw — non-sentinel error is not treated as init failure
-		const result = await executeBatch(
-			makeOptions({ databaseUrl: 'postgres://localhost/ok' }),
-		);
-
-		expect(result.results).toHaveLength(1);
 	});
 });
 

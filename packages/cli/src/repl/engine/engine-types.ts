@@ -42,6 +42,11 @@ export type EngineEvent =
 	| { type: 'execution-result'; result: ExecutionResult; query: QueryResult }
 	| { type: 'info'; message: string }
 	| { type: 'error'; message: string }
+	/**
+	 * Emitted by init() when the database connection fails.
+	 * Callers can match on `type === 'init-error'` without string inspection.
+	 */
+	| { type: 'init-error'; message: string }
 	| { type: 'clear' }
 	| { type: 'exit' }
 	| { type: 'state-change'; state: EngineState }

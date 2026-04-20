@@ -13,7 +13,7 @@ import {
 } from './assertion-parser.js';
 import { type AssertionSummary, runAssertions } from './assertion-runner.js';
 import type { EngineEvent } from './engine/engine-types.js';
-import { INIT_ERROR_PREFIX, ReplEngine } from './engine/repl-engine.js';
+import { ReplEngine } from './engine/repl-engine.js';
 import { formatOutput } from './output-formatter.js';
 
 export interface BatchModeOptions {
@@ -209,11 +209,9 @@ export async function executeBatch(
 	await engine.init();
 	unsubInit();
 
-	// Check for DB connection failure during init (M-3/CC-5+EH-6: typed sentinel check)
-	const initError = initEvents.find(
-		(e) => e.type === 'error' && e.message.startsWith(INIT_ERROR_PREFIX),
-	);
-	if (initError?.type === 'error') {
+	// Check for DB connection failure during init (typed event check)
+	const initError = initEvents.find((e) => e.type === 'init-error');
+	if (initError) {
 		await engine.destroy();
 		throw new Error(`Database connection failed: ${initError.message}`);
 	}

@@ -494,7 +494,7 @@ const {
 });
 
 vi.mock('./engine/repl-engine.js', async (importOriginal) => {
-	// Preserve module exports (INIT_ERROR_PREFIX, etc.) and only replace ReplEngine
+	// Preserve module exports and only replace ReplEngine
 	const original = await importOriginal();
 	class MockReplEngine {
 		constructor(...args) {
@@ -584,11 +584,11 @@ describe('executeBatch — coverage', () => {
 	});
 
 	it('detects connection failure during init and throws', async () => {
-		// The sentinel prefix INIT_ERROR_PREFIX is prepended by repl-engine.ts init()
-		// to distinguish init errors from other error events without string matching.
+		// The init-error event type is emitted by repl-engine.ts init()
+		// to distinguish init errors from other error events.
 		mockEngineInstance.on.mockImplementation((cb) => {
-			// Simulate connection error event during init (with sentinel prefix)
-			cb({ type: 'error', message: 'INIT_ERROR: Connection failed: ECONNREFUSED' });
+			// Simulate connection error event during init
+			cb({ type: 'init-error', message: 'Connection failed: ECONNREFUSED' });
 			return vi.fn();
 		});
 
