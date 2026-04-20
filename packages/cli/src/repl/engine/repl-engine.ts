@@ -38,6 +38,15 @@ import type {
 } from './engine-types.js';
 
 /**
+ * Sentinel prefix used in 'error' events emitted during engine.init() for
+ * DB connection failures. Allows callers to detect init failures by type
+ * without relying on message substring matching.
+ *
+ * @internal Exported so batch.ts can check for it without fragile string matching.
+ */
+export const INIT_ERROR_PREFIX = 'INIT_ERROR:' as const;
+
+/**
  * Dialect → available include strategies mapping.
  * Compact version of the STRATEGY_INFO/DIALECT_INFO from the old index.tsx.
  */
@@ -123,7 +132,10 @@ export class ReplEngine {
 			this.emitStateChange();
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
-			this.emit({ type: 'error', message: `Connection failed: ${message}` });
+			this.emit({
+				type: 'error',
+				message: `${INIT_ERROR_PREFIX} Connection failed: ${message}`,
+			});
 		}
 	}
 
