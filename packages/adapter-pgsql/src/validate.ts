@@ -407,10 +407,12 @@ const SAFE_TYPE_PATTERN =
  */
 export function validateSqlExpression(sql: string, context: string): void {
 	// Forbidden: semicolons (statement injection), line comments (--),
-	// block comment openers (/*), dollar-quoted strings ($$), backslashes.
-	if (/[;]|--|\/\*|\$\$|\\/.test(sql)) {
+	// block comment openers (/*), block comment closers (*/) — defense-in-depth
+	// so a partial payload cannot close an enclosing comment to inject SQL —
+	// dollar-quoted strings ($$), backslashes.
+	if (/[;]|--|\/\*|\*\/|\$\$|\\/.test(sql)) {
 		throw new Error(
-			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, $$ (dollar-quoted strings), \\). Value: "${sql}"`,
+			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, */, $$ (dollar-quoted strings), \\). Value: "${sql}"`,
 		);
 	}
 }

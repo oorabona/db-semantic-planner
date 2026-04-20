@@ -56,8 +56,12 @@ describe('generateTruncateSQL', () => {
 		).toEqual('TRUNCATE "tenant_42"."embeddings" CASCADE');
 	});
 
-	it('quotes identifiers with embedded double-quotes', () => {
-		expect(generateTruncateSQL('my"table')).toEqual('TRUNCATE "my""table"');
+	it('rejects identifiers with embedded double-quotes (security: validateIdentifier)', () => {
+		// S-2: validateIdentifier now rejects double-quotes in identifiers to prevent injection.
+		// PostgreSQL table names with embedded double-quotes are rejected at the API boundary.
+		expect(() => generateTruncateSQL('my"table')).toThrow(
+			/Invalid.*identifier/i,
+		);
 	});
 });
 
@@ -399,7 +403,10 @@ describe('generateDropIndexSQL', () => {
 		).toEqual('DROP INDEX IF EXISTS "tenant_42"."idx_name"');
 	});
 
-	it('quotes index name with embedded double-quotes', () => {
-		expect(generateDropIndexSQL('my"index')).toEqual('DROP INDEX "my""index"');
+	it('rejects index names with embedded double-quotes (security: validateIdentifier)', () => {
+		// S-2: validateIdentifier now rejects double-quotes in identifiers to prevent injection.
+		expect(() => generateDropIndexSQL('my"index')).toThrow(
+			/Invalid.*identifier/i,
+		);
 	});
 });

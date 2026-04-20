@@ -24,8 +24,8 @@ export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
 	const statements: string[] = [];
 	for (const [, enumDef] of schema.enums) {
 		const enumName = schemaName
-			? `${quoteId(naming.toDatabase(schemaName))}.${quoteId(enumDef.name)}`
-			: quoteId(enumDef.name);
+			? `${quoteId(naming.toDatabase(schemaName), 'schema')}.${quoteId(enumDef.name, 'table')}`
+			: quoteId(enumDef.name, 'table');
 		const values = enumDef.values
 			.map((v) => `'${v.replace(/'/g, "''")}'`)
 			.join(', ');

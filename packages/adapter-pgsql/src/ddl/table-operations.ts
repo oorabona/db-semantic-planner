@@ -9,15 +9,19 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { validateDbTypeName, validateSqlExpression } from '../validate.js';
+import { validateDbTypeName } from '../validate.js';
+import { formatSqlDefault, quoteIdent } from './phases/utils.js';
 
+// S-2: quoteIdentifier now delegates to quoteIdent (validates + double-quotes).
+// The former local helper was bare `"${name}"` with no validation.
 function quoteIdentifier(name: string): string {
-	return `"${name.replace(/"/g, '""')}"`;
+	return quoteIdent(name, 'alias');
 }
 
 function qualifyTable(table: string, schema?: string): string {
-	const quotedTable = quoteIdentifier(table);
-	return schema ? `${quoteIdentifier(schema)}.${quotedTable}` : quotedTable;
+	return schema
+		? `${quoteIdent(schema, 'schema')}.${quoteIdent(table, 'table')}`
+		: quoteIdent(table, 'table');
 }
 
 export function generateTruncateSQL(
@@ -44,23 +48,10 @@ export function generateVacuumSQL(
 	return `VACUUM${modifier} ${quoteIdentifier(table)}`;
 }
 
+// M-6: formatDefault is now a thin alias for the shared formatSqlDefault from phases/utils.
+// The duplicate implementations have been consolidated.
 function formatDefault(value: unknown): string {
-	if (value === null) return 'NULL';
-	// { sql: string } escape hatch — emit verbatim (used by introspection-sourced defaults).
-	// Validated to reject injection vectors (semicolons, --, /*, $) before interpolation.
-	if (typeof value === 'object' && value !== null && 'sql' in value) {
-		const rawSql = (value as Record<string, unknown>).sql;
-		if (typeof rawSql !== 'string') {
-			throw new Error(
-				`formatDefault({ sql }): expected string, got ${typeof rawSql}`,
-			);
-		}
-		validateSqlExpression(rawSql, 'table-operations formatDefault({ sql })');
-		return rawSql;
-	}
-	if (typeof value === 'string') return `'${value.replace(/'/g, "''")}'`;
-	if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
-	return String(value);
+	return formatSqlDefault(value, 'table-operations default');
 }
 
 export function generateAlterColumnSQL(

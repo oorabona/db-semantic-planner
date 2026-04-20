@@ -97,6 +97,33 @@ describe('validateSqlExpression', () => {
 			/forbidden characters/,
 		);
 	});
+
+	// M-1 regression: block-comment closer must be rejected (defense-in-depth —
+	// a partial payload that closes an enclosing comment could inject SQL).
+	it('rejects expressions containing a block-comment closer (*/)', () => {
+		expect(() => validateSqlExpression('1 */ 2', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	// Positive regression: confirm existing vectors still rejected after regex change.
+	it('still rejects semicolons after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression('now(); DROP TABLE t', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	it('still rejects block-comment opener (/\\*) after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression('now() /* comment', 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
+
+	it('still rejects line-comment (--) after regex change (positive regression)', () => {
+		expect(() => validateSqlExpression("val -- injected", 'test')).toThrow(
+			/Unsafe SQL expression/,
+		);
+	});
 });
 
 describe('validateDbTypeName', () => {

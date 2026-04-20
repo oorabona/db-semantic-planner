@@ -10,7 +10,7 @@ describe('SQL Injection Checks (DDL-TABLE-001)', () => {
 				columns: ['id'],
 				with: { 'fillfactor = 10; DROP TABLE users; --': 1 },
 			}),
-		).toThrow(/Invalid storage parameter identifier/);
+		).toThrow(/Invalid.*identifier/i);
 	});
 });
 
