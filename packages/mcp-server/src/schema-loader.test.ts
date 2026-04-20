@@ -35,24 +35,29 @@ beforeAll(() => {
 	mkdirSync(allowedDir, { recursive: true });
 	mkdirSync(outsideDir, { recursive: true });
 
-	// Create valid schema file in allowed dir
+	// Create valid schema file in allowed dir.
+	// hints and conventions are required fields (M4/M5) — always present in defineSchema() output.
 	writeFileSync(
 		join(allowedDir, 'valid-schema.js'),
 		`
 		module.exports.schema = {
 			tables: { users: { id: 'uuid', name: 'text' } },
-			relations: {}
+			relations: {},
+			hints: {},
+			conventions: {}
 		};
 	`,
 	);
 
-	// Create schema file in outside dir (for path traversal tests)
+	// Create schema file in outside dir (for path traversal tests — content never validated).
 	writeFileSync(
 		join(outsideDir, 'outside-schema.js'),
 		`
 		module.exports.schema = {
 			tables: { secret: { id: 'uuid' } },
-			relations: {}
+			relations: {},
+			hints: {},
+			conventions: {}
 		};
 	`,
 	);
@@ -101,18 +106,14 @@ describe('validatePath', () => {
 		});
 
 		it('should normalize existing paths with .. that stay within allowed root', () => {
-			// Use an existing file with .. in the path - allowedDir/../allowed should resolve
-			// to the same directory, so it IS within testDir. We must pass allowedRoots
-			// so containment is checked against testDir (not cwd which is outside /tmp).
-			const pathWithDotDot = join(
-				testDir,
-				'allowed',
-				'..',
-				'allowed',
-				'valid-schema.js',
-			);
+			// Use a raw template literal so the '..' segment is preserved in the string
+			// passed to validatePath (path.join would normalize it away before validatePath
+			// sees it, defeating the test's intent of exercising the includes('..') guard).
+			// allowedDir/../allowed resolves to allowedDir itself, which is inside testDir.
+			const pathWithDotDot = `${testDir}/allowed/../allowed/valid-schema.js`;
 			const result = validatePath(pathWithDotDot, [testDir]);
-			// Should resolve to the real path
+			// Should resolve to the real path (includes('..') early-exit must NOT fire
+			// because testDir covers the resolved destination)
 			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
 		});
 	});
@@ -316,22 +317,35 @@ describe('SchemaLoadError', () => {
 import { symlinkSync, unlinkSync } from 'node:fs';
 
 describe('C1 regression: path traversal to existing file', () => {
-	it('should reject a path with .. that resolves to an existing file', () => {
-		// The existing-file branch must NOT bypass the traversal check.
-		// Construct a path using '..' that resolves to an existing file on disk.
-		const pathWithEscape = join(
-			allowedDir,
-			'..',
-			'outside',
-			'outside-schema.js',
-		);
-		// This path contains '..' and resolves OUTSIDE allowedDir — must be rejected
-		// when allowedRoots is set to allowedDir.
+	it('should reject a path with .. that resolves to an existing file (raw .. in input)', () => {
+		// Use a raw template literal so the '..' segment is preserved in the string
+		// passed to validatePath — path.join would normalize it away before validatePath
+		// sees it, which would mean only the post-resolution containment guard fires
+		// (not the includes('..') guard this test intends to exercise).
+		// The path resolves OUTSIDE allowedDir → both the '..' guard and the
+		// post-resolution containment check should reject it.
+		const pathWithEscape = `${allowedDir}/../outside/outside-schema.js`;
+		// This path contains '..' in the raw input AND resolves outside allowedDir.
 		expect(() => validatePath(pathWithEscape, [allowedDir])).toThrow(
 			SchemaLoadError,
 		);
 		try {
 			validatePath(pathWithEscape, [allowedDir]);
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+
+	it('should reject a normalized path that resolves outside allowedRoots (no .. in input)', () => {
+		// This test exercises the POST-RESOLUTION containment guard alone (no '..' in input).
+		// The path is already normalized — only the containment check at the existsSync
+		// branch can catch it. This is the companion to the test above.
+		const outsidePath = join(outsideDir, 'outside-schema.js');
+		expect(() => validatePath(outsidePath, [allowedDir])).toThrow(
+			SchemaLoadError,
+		);
+		try {
+			validatePath(outsidePath, [allowedDir]);
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
 		}
@@ -385,6 +399,42 @@ describe('C1 regression: TOCTOU symlink swap', () => {
 	});
 });
 
+describe('M3 regression: raw .. path resolving inside allowedRoots is not rejected', () => {
+	it('should NOT throw when raw .. input resolves inside an explicit allowedRoot', () => {
+		// Before M3 fix: validatePath checked relative(cwd, resolvedPath) in the '..'
+		// early-exit branch. A path like '/tmp/a/../b/schema.js' with allowedRoots=['/tmp']
+		// resolves to '/tmp/b/schema.js' (inside /tmp) but the old check compared against
+		// cwd, causing a false PATH_TRAVERSAL throw.
+		// After fix: the early-exit checks against rootsToCheck, so the allowedRoot covers it.
+		const subDir = join(testDir, 'subdir');
+		const targetFile = join(subDir, 'sub-schema.js');
+		if (!existsSync(subDir)) {
+			mkdirSync(subDir, { recursive: true });
+		}
+		writeFileSync(targetFile, '');
+
+		// Raw path with literal '..' that resolves to targetFile (inside testDir).
+		const rawDotDotPath = `${allowedDir}/../subdir/sub-schema.js`;
+		// testDir covers the resolved destination — must NOT throw.
+		expect(() => validatePath(rawDotDotPath, [testDir])).not.toThrow();
+		const result = validatePath(rawDotDotPath, [testDir]);
+		expect(result.resolvedPath).toBe(targetFile);
+	});
+
+	it('should still throw PATH_TRAVERSAL when raw .. resolves outside ALL allowedRoots', () => {
+		// When '..' resolves outside every declared root, PATH_TRAVERSAL is still raised.
+		const escapePath = `${allowedDir}/../outside/outside-schema.js`;
+		expect(() => validatePath(escapePath, [allowedDir])).toThrow(
+			SchemaLoadError,
+		);
+		try {
+			validatePath(escapePath, [allowedDir]);
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('PATH_TRAVERSAL');
+		}
+	});
+});
+
 describe('C5 regression: schema structure validation', () => {
 	it('should reject an array as schema', async () => {
 		// Write a file that exports an array
@@ -420,27 +470,67 @@ describe('C5 regression: schema structure validation', () => {
 	});
 
 	it('validateResolvedSchema rejects missing tables', () => {
-		expect(() => validateResolvedSchema({ relations: {} })).toThrow(
-			SchemaLoadError,
-		);
+		// hints/conventions present so the test isolates the tables check.
+		expect(() =>
+			validateResolvedSchema({ relations: {}, hints: {}, conventions: {} }),
+		).toThrow(SchemaLoadError);
 	});
 
 	it('validateResolvedSchema rejects missing relations', () => {
-		expect(() => validateResolvedSchema({ tables: {} })).toThrow(
-			SchemaLoadError,
-		);
+		// hints/conventions present so the test isolates the relations check.
+		expect(() =>
+			validateResolvedSchema({ tables: {}, hints: {}, conventions: {} }),
+		).toThrow(SchemaLoadError);
 	});
 
 	it('validateResolvedSchema rejects tables as array', () => {
 		expect(() =>
-			validateResolvedSchema({ tables: [] as unknown, relations: {} }),
+			validateResolvedSchema({
+				tables: [] as unknown,
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
 		).toThrow(SchemaLoadError);
 	});
 
 	it('validateResolvedSchema accepts valid minimal schema', () => {
+		// hints and conventions are now REQUIRED (M4/M5 fix) — defineSchema() always
+		// populates them; a schema without them is not built via the public API.
 		expect(() =>
-			validateResolvedSchema({ tables: {}, relations: {} }),
+			validateResolvedSchema({
+				tables: {},
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
 		).not.toThrow();
+	});
+
+	it('validateResolvedSchema rejects missing hints (M4)', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: {}, relations: {}, conventions: {} }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: {}, relations: {}, conventions: {} });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+			expect((err as SchemaLoadError).message).toContain("'hints' is required");
+		}
+	});
+
+	it('validateResolvedSchema rejects missing conventions (M5)', () => {
+		expect(() =>
+			validateResolvedSchema({ tables: {}, relations: {}, hints: {} }),
+		).toThrow(SchemaLoadError);
+		try {
+			validateResolvedSchema({ tables: {}, relations: {}, hints: {} });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+			expect((err as SchemaLoadError).message).toContain(
+				"'conventions' is required",
+			);
+		}
 	});
 });
 
@@ -598,10 +688,20 @@ describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
 describe('M-D: validateResolvedSchema rejects non-plain-object instances', () => {
 	it('rejects Date as tables', () => {
 		expect(() =>
-			validateResolvedSchema({ tables: new Date(), relations: {} }),
+			validateResolvedSchema({
+				tables: new Date(),
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
 		).toThrow(SchemaLoadError);
 		try {
-			validateResolvedSchema({ tables: new Date(), relations: {} });
+			validateResolvedSchema({
+				tables: new Date(),
+				relations: {},
+				hints: {},
+				conventions: {},
+			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
 		}
@@ -609,10 +709,20 @@ describe('M-D: validateResolvedSchema rejects non-plain-object instances', () =>
 
 	it('rejects Map as tables', () => {
 		expect(() =>
-			validateResolvedSchema({ tables: new Map(), relations: {} }),
+			validateResolvedSchema({
+				tables: new Map(),
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
 		).toThrow(SchemaLoadError);
 		try {
-			validateResolvedSchema({ tables: new Map(), relations: {} });
+			validateResolvedSchema({
+				tables: new Map(),
+				relations: {},
+				hints: {},
+				conventions: {},
+			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
 		}
@@ -620,10 +730,20 @@ describe('M-D: validateResolvedSchema rejects non-plain-object instances', () =>
 
 	it('rejects RegExp as tables', () => {
 		expect(() =>
-			validateResolvedSchema({ tables: /regex/, relations: {} }),
+			validateResolvedSchema({
+				tables: /regex/,
+				relations: {},
+				hints: {},
+				conventions: {},
+			}),
 		).toThrow(SchemaLoadError);
 		try {
-			validateResolvedSchema({ tables: /regex/, relations: {} });
+			validateResolvedSchema({
+				tables: /regex/,
+				relations: {},
+				hints: {},
+				conventions: {},
+			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
 		}
@@ -631,19 +751,32 @@ describe('M-D: validateResolvedSchema rejects non-plain-object instances', () =>
 
 	it('rejects Set as relations', () => {
 		expect(() =>
-			validateResolvedSchema({ tables: {}, relations: new Set() }),
+			validateResolvedSchema({
+				tables: {},
+				relations: new Set(),
+				hints: {},
+				conventions: {},
+			}),
 		).toThrow(SchemaLoadError);
 		try {
-			validateResolvedSchema({ tables: {}, relations: new Set() });
+			validateResolvedSchema({
+				tables: {},
+				relations: new Set(),
+				hints: {},
+				conventions: {},
+			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
 		}
 	});
 
 	it('accepts plain-object schema (null proto)', () => {
+		// Null-proto objects must also have hints and conventions (M4/M5).
 		const nullProtoObj = Object.create(null) as Record<string, unknown>;
 		nullProtoObj.tables = {};
 		nullProtoObj.relations = {};
+		nullProtoObj.hints = {};
+		nullProtoObj.conventions = {};
 		expect(() => validateResolvedSchema(nullProtoObj)).not.toThrow();
 	});
 });

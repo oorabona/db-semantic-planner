@@ -115,30 +115,12 @@ export function validatePath(
 		? normalizedPath
 		: resolve(process.cwd(), normalizedPath);
 
-	// Reject unconditionally if the decoded input contains '..' — regardless of
-	// whether the resolved path exists. A legitimate path like '..backup/schema.js'
-	// inside an allowed root is accepted below after containment re-check; the early
-	// exit here only fires when the relative escape (relativePath === '..' or starts
-	// with '../') fails.
-	if (decodedPath.includes('..')) {
-		// Compute the relative path from cwd to detect actual escapes
-		const relFromCwd = relative(process.cwd(), resolvedPath);
-		if (
-			relFromCwd === '..' ||
-			relFromCwd.startsWith(`..${sep}`) ||
-			isAbsolute(relFromCwd)
-		) {
-			throw new SchemaLoadError(
-				`Suspicious path pattern detected: ${schemaPath}`,
-				'PATH_TRAVERSAL',
-			);
-		}
-	}
-
 	// Validate each allowedRoots entry: reject if it contains '..' post-normalize
 	// (prevents sneaking out via a crafted root path).
 	// canonicalRoots are computed once here and reused by loadSchema to avoid
 	// independent re-resolution that could diverge if call order changes (S-B).
+	// NOTE: canonicalRoots is computed BEFORE the '..' early-exit so that
+	// allowedRoots-covered paths (e.g. '/tmp/a/../b') aren't falsely rejected.
 	const canonicalRoots: string[] = allowedRoots
 		? allowedRoots.map((root) => {
 				const normalizedRoot = normalize(root);
@@ -167,6 +149,31 @@ export function validatePath(
 		rootsToCheck = [process.cwd()];
 	} else {
 		rootsToCheck = canonicalRoots;
+	}
+
+	// Reject if the decoded input contains '..' — regardless of whether the resolved
+	// path exists. We check against rootsToCheck (not hardcoded cwd) so that an
+	// allowedRoot-covered path like '/tmp/a/../b/schema.js' (resolves to '/tmp/b/…')
+	// is accepted when allowedRoots includes '/tmp'.
+	//
+	// A legitimate path like '..backup/schema.js' inside an allowed root is accepted
+	// below after containment re-check; the early exit here only fires when ALL roots
+	// reject the resolved path.
+	if (decodedPath.includes('..')) {
+		const isWithinARoot = rootsToCheck.some((root) => {
+			const relFromRoot = relative(root, resolvedPath);
+			return (
+				relFromRoot !== '..' &&
+				!relFromRoot.startsWith(`..${sep}`) &&
+				!isAbsolute(relFromRoot)
+			);
+		});
+		if (!isWithinARoot) {
+			throw new SchemaLoadError(
+				`Suspicious path pattern detected: ${schemaPath}`,
+				'PATH_TRAVERSAL',
+			);
+		}
 	}
 
 	// If file exists, resolve symlinks and verify the real path
@@ -420,23 +427,23 @@ export function validateResolvedSchema(schema: unknown): void {
 		);
 	}
 
-	// Required field: hints must be a plain object (may be empty {})
-	if (obj.hints !== undefined) {
-		if (!isPlainObject(obj.hints)) {
-			throw new SchemaLoadError(
-				`Invalid schema: 'hints' must be a plain object`,
-				'INVALID_SCHEMA',
-			);
-		}
+	// Required field: hints must be a plain object (may be empty {}).
+	// defineSchema() always populates this — missing means the schema was not
+	// built via the public API and is therefore invalid.
+	if (!isPlainObject(obj.hints)) {
+		throw new SchemaLoadError(
+			`Invalid schema: 'hints' is required and must be a plain object (defineSchema() should populate this)`,
+			'INVALID_SCHEMA',
+		);
 	}
 
-	// Required field: conventions must be a plain object when present
-	if (obj.conventions !== undefined) {
-		if (!isPlainObject(obj.conventions)) {
-			throw new SchemaLoadError(
-				`Invalid schema: 'conventions' must be a plain object`,
-				'INVALID_SCHEMA',
-			);
-		}
+	// Required field: conventions must be a plain object.
+	// defineSchema() always populates this — missing means the schema was not
+	// built via the public API and is therefore invalid.
+	if (!isPlainObject(obj.conventions)) {
+		throw new SchemaLoadError(
+			`Invalid schema: 'conventions' is required and must be a plain object (defineSchema() should populate this)`,
+			'INVALID_SCHEMA',
+		);
 	}
 }
