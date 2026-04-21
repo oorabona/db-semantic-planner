@@ -1918,8 +1918,12 @@ export class QueryBuilderImpl<TResult = unknown>
 			);
 		}
 
-		// Lenient mode: use first relation and add warning
-		const firstRelation = error.options[0];
+		// Lenient mode: deterministic tie-break — sort alphabetically so that
+		// schema definition order does not influence which relation is chosen.
+		// This ensures stable query results across schema refactoring.
+		// FIND-015: picking options[0] without sorting is non-deterministic.
+		const sortedOptions = error.options.slice().sort();
+		const firstRelation = sortedOptions[0];
 		if (!firstRelation) {
 			throw error; // Safety: should never happen
 		}
@@ -1929,20 +1933,23 @@ export class QueryBuilderImpl<TResult = unknown>
 			...basePlanOptions,
 			disambiguate: {
 				...basePlanOptions.disambiguate,
-				[disambiguateKey]: firstRelation,
+				[disambiguateKey]: firstRelation, // alphabetically-first (see sortedOptions)
 			},
 		};
 
 		// Re-plan with disambiguation
 		const result = plan(intent, this.model, planOptions);
 
-		// Add warning about automatic disambiguation
+		// Add warning about automatic disambiguation.
+		// The chosen relation is the alphabetically-first name (deterministic
+		// tie-break), not insertion order, so schema refactoring cannot silently
+		// change query results.
 		const warning = {
 			code: 'AMBIGUOUS_RELATION' as const,
 			message:
 				`Ambiguous relation to '${error.targetTable}' from '${error.sourceTable}' ` +
-				`was automatically resolved to '${firstRelation}'. ` +
-				`Available options: ${error.options.join(', ')}.`,
+				`was automatically resolved to '${firstRelation}' (alphabetical tie-break). ` +
+				`Available options: ${sortedOptions.join(', ')}.`,
 			suggestion: `Use { via: '${firstRelation}' } or another option to make this explicit.`,
 		};
 

@@ -20,6 +20,7 @@ import type {
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
+import { InvalidOperationError } from './dx/errors.js';
 import {
 	getNodeIdAlias,
 	type IncludeIntent,
@@ -568,6 +569,40 @@ function generateBidirectionalReasoning(
  * while IN materializes the full set. The rewrite is valid when the subquery
  * selects a FK column that references the outer table's PK.
  */
+
+/**
+ * Check whether the FK column resolved by a WHERE EXISTS rewrite is provably
+ * non-nullable in the ModelIR.
+ *
+ * Used to guard NOT(IN-subquery) → NOT EXISTS rewrites: SQL's three-valued logic
+ * means `x NOT IN (SELECT y ...)` returns UNKNOWN (not TRUE) when y can be NULL,
+ * so it excludes the row.  NOT EXISTS does not have this behavior — it returns
+ * TRUE when the subquery is empty.  The rewrite is only semantically equivalent
+ * when the FK column is NOT NULL.
+ *
+ * Returns `false` (conservative) when the relation or column cannot be resolved.
+ */
+function isSubquerySelectedColumnNonNullable(
+	existsIntent: { relation: string },
+	sourceTable: string,
+	model: ModelIR,
+): boolean {
+	const rel = model.getRelation(`${sourceTable}.${existsIntent.relation}`);
+	if (!rel) return false;
+
+	const fk =
+		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+	if (!fk) return false;
+
+	const targetTableIR = model.getTable(rel.target);
+	if (!targetTableIR) return false;
+
+	const column = targetTableIR.columns.find((c) => c.name === fk);
+	if (!column) return false;
+
+	return !column.nullable;
+}
+
 function optimizeInToExists(
 	where: WhereIntent,
 	sourceTable: string,
@@ -658,7 +693,22 @@ function optimizeInToExists(
 			);
 			if (optimized === notWhere.condition) return where;
 			// NOT(EXISTS) → notExists (direct, no wrapper)
+			// Guard: only convert when the FK column is provably non-nullable.
+			// SQL's three-valued logic means NOT IN returns UNKNOWN (excludes row)
+			// when the subquery can produce NULLs, whereas NOT EXISTS always
+			// returns TRUE for an empty subquery.  The rewrite is only valid when
+			// the selected column is NOT NULL.
 			if (optimized.kind === 'exists') {
+				if (
+					!isSubquerySelectedColumnNonNullable(
+						optimized as { relation: string },
+						sourceTable,
+						model,
+					)
+				) {
+					// Column is nullable or unknown — preserve NOT(IN) semantics
+					return where;
+				}
 				return {
 					...optimized,
 					kind: 'notExists',
@@ -941,12 +991,31 @@ function processInclude(
 		relation.source === relation.target;
 
 	// Determine include strategy
-	// Priority: 1) recursive → cte, 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
+	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
 	let includeStrategy: ResolvedIncludeStrategy;
 	if (isRecursiveInclude) {
+		// FIND-013: Guard recursive → cte against dialect capability.
+		// selectSmartStrategy handles the general case, but processInclude has
+		// an early-exit path that forces 'cte' before reaching it.  A dialect
+		// that declared supportsRecursiveCTE=false must not silently receive an
+		// invalid plan.
+		if (opts.dialectCapabilities?.supportsRecursiveCTE === false) {
+			throw new UnsupportedStrategyError(
+				`Recursive includes require a dialect with supportsRecursiveCTE; ` +
+					`current dialect (${opts.dialectCapabilities.name}) declared it unsupported.`,
+			);
+		}
 		includeStrategy = 'cte';
 	} else if (include.join !== undefined) {
 		// Explicit join type forces the 'join' strategy (inner or left JOIN)
+		if (include.limit != null) {
+			throw new InvalidOperationError(
+				'include',
+				`include.limit cannot be applied with the 'join' strategy because join ` +
+					`cannot enforce per-parent-row limits. ` +
+					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
+			);
+		}
 		includeStrategy = 'join';
 	} else if (include.strategy === 'flat') {
 		// NQL v2.1: flat = exclude nested output (json_agg), planner picks best flat strategy
@@ -962,6 +1031,19 @@ function processInclude(
 		);
 	} else {
 		includeStrategy = determineIncludeStrategy(relation, opts);
+		// FIND-014: include.limit cannot be enforced by the join strategy (which
+		// performs a flat JOIN without per-parent-row limiting).  Silently
+		// dropping the limit produces unlimited children — incorrect behaviour.
+		// Callers must explicitly request 'flat' (→ lateral) or 'cte' to get
+		// per-parent limiting.
+		if (include.limit != null && includeStrategy === 'join') {
+			throw new InvalidOperationError(
+				'include',
+				`include.limit cannot be applied with the 'join' strategy because join ` +
+					`cannot enforce per-parent-row limits. ` +
+					`Use strategy: 'flat' (→ LATERAL) or strategy: 'cte' explicitly.`,
+			);
+		}
 	}
 
 	// Pre-compute join type for include-strategy decision embedding
