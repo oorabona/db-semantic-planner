@@ -173,10 +173,11 @@ describe('RelationNotFoundError', () => {
 			available: ['posts', 'profile'],
 		});
 
-		expect(error.message).toContain(
-			"Relation 'unknown' not found on table 'users'",
-		);
-		expect(error.message).toContain('Available relations: posts, profile');
+		// FIND-006: .message is generic (no info leakage); diagnostic detail in .available
+		expect(error.message).toBe('Relation not found');
+		expect(error.publicMessage).toBe('Relation not found');
+		expect(error.available).toContain('posts');
+		expect(error.available).toContain('profile');
 	});
 
 	it('provides fuzzy match suggestion for typos', () => {
@@ -186,8 +187,9 @@ describe('RelationNotFoundError', () => {
 			available: ['posts', 'profile', 'comments'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('comments');
-		expect(error.message).toContain("Did you mean 'comments'?");
+		expect(error.message).toBe('Relation not found');
 	});
 
 	it('provides suggestion for prefix match', () => {
@@ -197,8 +199,9 @@ describe('RelationNotFoundError', () => {
 			available: ['posts', 'profile', 'comments'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('posts');
-		expect(error.message).toContain("Did you mean 'posts'?");
+		expect(error.message).toBe('Relation not found');
 	});
 
 	it('handles no available relations gracefully', () => {
@@ -208,9 +211,10 @@ describe('RelationNotFoundError', () => {
 			available: [],
 		});
 
+		// FIND-006: .message is generic; no suggestion when none match
 		expect(error.suggestion).toBeUndefined();
-		expect(error.message).toContain('Available relations: (none defined)');
-		expect(error.message).not.toContain('Did you mean');
+		expect(error.message).toBe('Relation not found');
+		expect(error.available).toHaveLength(0);
 	});
 
 	it('has name set to RelationNotFoundError', () => {
@@ -252,8 +256,11 @@ describe('TableNotFoundError', () => {
 			available: ['users', 'posts'],
 		});
 
-		expect(error.message).toContain("Table 'unknown' not found in schema");
-		expect(error.message).toContain('Available tables: users, posts');
+		// FIND-006: .message is generic; diagnostic detail in .available
+		expect(error.message).toBe('Table not found');
+		expect(error.publicMessage).toBe('Table not found');
+		expect(error.available).toContain('users');
+		expect(error.available).toContain('posts');
 	});
 
 	it('provides fuzzy match suggestion for typos', () => {
@@ -262,8 +269,9 @@ describe('TableNotFoundError', () => {
 			available: ['users', 'posts', 'comments'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('users');
-		expect(error.message).toContain("Did you mean 'users'?");
+		expect(error.message).toBe('Table not found');
 	});
 
 	it('provides suggestion for prefix match', () => {
@@ -272,8 +280,9 @@ describe('TableNotFoundError', () => {
 			available: ['users', 'posts'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('users');
-		expect(error.message).toContain("Did you mean 'users'?");
+		expect(error.message).toBe('Table not found');
 	});
 
 	it('handles no available tables gracefully', () => {
@@ -282,9 +291,10 @@ describe('TableNotFoundError', () => {
 			available: [],
 		});
 
+		// FIND-006: .message is generic; no suggestion when none match
 		expect(error.suggestion).toBeUndefined();
-		expect(error.message).toContain('Available tables: (none defined)');
-		expect(error.message).not.toContain('Did you mean');
+		expect(error.message).toBe('Table not found');
+		expect(error.available).toHaveLength(0);
 	});
 
 	it('truncates long table lists', () => {
@@ -294,7 +304,10 @@ describe('TableNotFoundError', () => {
 			available: tables,
 		});
 
-		expect(error.message).toContain('(and 5 more)');
+		// FIND-006: truncation detail in .available length, not in .message
+		expect(error.available).toHaveLength(15);
+		// All tables accessible via .available; no truncation in .message
+		expect(tables.every((t) => error.available.includes(t))).toBe(true);
 	});
 
 	it('has name set to TableNotFoundError', () => {
@@ -337,10 +350,11 @@ describe('ColumnNotFoundError', () => {
 			available: ['id', 'email'],
 		});
 
-		expect(error.message).toContain(
-			"Column 'unknown' not found on table 'users'",
-		);
-		expect(error.message).toContain('Available columns: id, email');
+		// FIND-006: .message is generic; diagnostic detail in .available
+		expect(error.message).toBe('Column not found');
+		expect(error.publicMessage).toBe('Column not found');
+		expect(error.available).toContain('id');
+		expect(error.available).toContain('email');
 	});
 
 	it('provides fuzzy match suggestion for typos', () => {
@@ -350,8 +364,9 @@ describe('ColumnNotFoundError', () => {
 			available: ['id', 'email', 'name'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('email');
-		expect(error.message).toContain("Did you mean 'email'?");
+		expect(error.message).toBe('Column not found');
 	});
 
 	it('provides suggestion for prefix match', () => {
@@ -361,8 +376,9 @@ describe('ColumnNotFoundError', () => {
 			available: ['id', 'createdAt', 'updatedAt'],
 		});
 
+		// FIND-006: suggestion in .suggestion field, not in .message
 		expect(error.suggestion).toBe('createdAt');
-		expect(error.message).toContain("Did you mean 'createdAt'?");
+		expect(error.message).toBe('Column not found');
 	});
 
 	it('handles no available columns gracefully', () => {
@@ -372,9 +388,10 @@ describe('ColumnNotFoundError', () => {
 			available: [],
 		});
 
+		// FIND-006: .message is generic; no suggestion when none match
 		expect(error.suggestion).toBeUndefined();
-		expect(error.message).toContain('Available columns: (none defined)');
-		expect(error.message).not.toContain('Did you mean');
+		expect(error.message).toBe('Column not found');
+		expect(error.available).toHaveLength(0);
 	});
 
 	it('truncates long column lists', () => {
@@ -385,7 +402,9 @@ describe('ColumnNotFoundError', () => {
 			available: columns,
 		});
 
-		expect(error.message).toContain('(and 5 more)');
+		// FIND-006: all columns accessible via .available; no truncation in .message
+		expect(error.available).toHaveLength(20);
+		expect(columns.every((c) => error.available.includes(c))).toBe(true);
 	});
 
 	it('has name set to ColumnNotFoundError', () => {

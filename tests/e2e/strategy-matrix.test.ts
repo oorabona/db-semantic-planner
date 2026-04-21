@@ -72,7 +72,7 @@ describe('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'json_agg' (same as all relations)
-				const decision = getIncludeStrategyDecision(dump.plan, 'author');
+				const decision = getIncludeStrategyDecision(dump.plan!, 'author');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -133,7 +133,10 @@ describe('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: planner decides strategy: 'json_agg' (same as all relations)
-				const decision = getIncludeStrategyDecision(dump.plan, 'user_profiles');
+				const decision = getIncludeStrategyDecision(
+					dump.plan!,
+					'user_profiles',
+				);
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -166,7 +169,7 @@ describe('E2E-004: Strategy Matrix', () => {
 
 				// Then: planner decides strategy: 'json_agg'
 				// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+				const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 
@@ -191,8 +194,8 @@ describe('E2E-004: Strategy Matrix', () => {
 				console.log('[B1-DEBUG] SQL:', dump.sql.substring(0, 300));
 				console.log(
 					'[B1-DEBUG] plan decisions:',
-					dump.plan.decisions
-						.filter((d) => d.type === 'include-strategy')
+					dump
+						.plan!.decisions.filter((d) => d.type === 'include-strategy')
 						.map((d) => ({ type: d.type, choice: d.choice, ctx: d.context })),
 				);
 
@@ -248,7 +251,10 @@ describe('E2E-004: Strategy Matrix', () => {
 
 				// Then: strategy is json_agg
 				// ARCH-005: inverse relation from postId: ref('posts') → 'post_comments'
-				const decision = getIncludeStrategyDecision(dump.plan, 'post_comments');
+				const decision = getIncludeStrategyDecision(
+					dump.plan!,
+					'post_comments',
+				);
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('json_agg');
 			});
@@ -294,7 +300,7 @@ describe('E2E-004: Strategy Matrix', () => {
 				const dump = query.dump();
 
 				// Then: uses JOIN (not json_agg) due to explicit hint
-				const decision = getIncludeStrategyDecision(dump.plan, 'user_posts');
+				const decision = getIncludeStrategyDecision(dump.plan!, 'user_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('join');
 
@@ -323,7 +329,7 @@ describe('E2E-004: Strategy Matrix', () => {
 
 				// Then: uses subquery (not json_agg) due to planner option
 				// ARCH-005: inverse relation name is 'author_posts'
-				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+				const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('subquery');
 			});
@@ -595,12 +601,12 @@ describe('E2E-004: Strategy Matrix', () => {
 				const query = orm.withSchema(SCHEMA).select('authors').include('posts');
 
 				const dump = query.dump();
-				const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+				const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 				expect(decision).toBeDefined();
 				expect(decision?.choice).toBe('subquery');
 
 				// And: compileWithIncludes returns subquery metadata
-				const compiled = adapter.compileWithIncludes(dump.plan, {
+				const compiled = adapter.compileWithIncludes(dump.plan!, {
 					model: blogModel,
 					schemaName: SCHEMA,
 				});

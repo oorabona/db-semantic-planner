@@ -70,7 +70,7 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Then: Strategy should be json_agg (default for to-many on PostgreSQL)
 			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 			expect(decision?.choice).toBe('json_agg');
 		});
 
@@ -170,7 +170,7 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Then: Plan report should contain include-strategy decision
 			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 			expect(decision).toBeDefined();
 			expect(decision?.type).toBe('include-strategy');
 			expect(decision?.context?.relation).toBe('author_posts');
@@ -191,7 +191,7 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 
 			// Then: Decision should have a reasoning explaining the choice
 			// ARCH-005: inverse relation from authorId: ref('authors') → 'author_posts'
-			const decision = getIncludeStrategyDecision(dump.plan, 'author_posts');
+			const decision = getIncludeStrategyDecision(dump.plan!, 'author_posts');
 			expect(decision?.reasoning).toBeDefined();
 			expect(decision?.reasoning?.length).toBeGreaterThan(0);
 		});

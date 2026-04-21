@@ -1211,10 +1211,21 @@ describe('buildPkCondition coverage', () => {
 	});
 
 	it('should handle byId with composite PK object (multiple fields)', async () => {
-		const adapter = createSpyAdapter([{ id: 1, name: 'Alice' }]);
-		const orm = createOrm({ adapter, schema: testSchema });
+		// FIND-009: composite PK keys must match schema-defined PK columns.
+		// users table has only 'id' as PK; use a schema with a real composite PK.
+		const compositeSchema = schema({
+			order_items: {
+				orderId: { type: 'integer', primaryKey: true },
+				productId: { type: 'integer', primaryKey: true },
+				quantity: 'integer',
+			},
+		});
+		const adapter = createSpyAdapter([{ orderId: 1, productId: 42 }]);
+		const compositeOrm = createOrm({ adapter, schema: compositeSchema });
 
-		const result = await orm.select('users').byId({ id: 1, name: 'Alice' });
+		const result = await compositeOrm
+			.select('order_items')
+			.byId({ orderId: 1, productId: 42 });
 		expect(result).toBeDefined();
 	});
 
@@ -1340,18 +1351,20 @@ describe('paginate() validation coverage', () => {
 		const adapter = createSpyAdapter([]);
 		const orm = createOrm({ adapter, schema: testSchema });
 
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
 			orm.select('users').paginate({ page: 0, perPage: 10 }),
-		).rejects.toThrow('Page must be >= 1');
+		).rejects.toThrow('page must be a positive safe integer');
 	});
 
 	it('should throw on perPage < 1', async () => {
 		const adapter = createSpyAdapter([]);
 		const orm = createOrm({ adapter, schema: testSchema });
 
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
 			orm.select('users').paginate({ page: 1, perPage: 0 }),
-		).rejects.toThrow('perPage must be >= 1');
+		).rejects.toThrow('perPage must be a positive safe integer');
 	});
 
 	it('should use default perPage when no options', async () => {
@@ -1381,9 +1394,10 @@ describe('cursorPaginate() validation coverage', () => {
 		const adapter = createSpyAdapter([]);
 		const orm = createOrm({ adapter, schema: testSchema });
 
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
 			orm.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
-		).rejects.toThrow('limit must be >= 1');
+		).rejects.toThrow('limit must be a positive safe integer');
 	});
 
 	it('should throw when no orderBy', async () => {

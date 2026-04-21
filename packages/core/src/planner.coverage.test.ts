@@ -1330,7 +1330,10 @@ describe('planner coverage', () => {
 	// NEW: selectSmartStrategy — recursive without CTE support
 	// ==================================================================
 
-	it('should use subquery for recursive relation without CTE support', () => {
+	it('should throw UnsupportedStrategyError for recursive relation on dialect without CTE support', () => {
+		// FIND-013: Previously this silently produced a CTE plan even when the
+		// dialect declared supportsRecursiveCTE=false (wrong behaviour).
+		// Now it throws UnsupportedStrategyError to alert the caller.
 		const treeSchema = schema({
 			categories: {
 				id: { type: 'integer', primaryKey: true },
@@ -1348,20 +1351,16 @@ describe('planner coverage', () => {
 			include: [{ relation: 'children', recursive: true }],
 		};
 
-		const report = plan(intent, treeSchema, {
-			dialectCapabilities: {
-				name: 'MySQL',
-				supportsJsonAgg: false,
-				supportsLateralJoin: false,
-				supportsRecursiveCTE: false,
-			},
-		});
-
-		const includeDecision = report.decisions.find(
-			(d) => d.type === 'include-strategy',
-		);
-		// Recursive on self-ref → forced CTE regardless of dialect
-		expect(includeDecision?.choice).toBe('cte');
+		expect(() =>
+			plan(intent, treeSchema, {
+				dialectCapabilities: {
+					name: 'MySQL',
+					supportsJsonAgg: false,
+					supportsLateralJoin: false,
+					supportsRecursiveCTE: false,
+				},
+			}),
+		).toThrow(/recursive/i);
 	});
 
 	// ==================================================================

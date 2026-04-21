@@ -406,7 +406,7 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
 	 * ```
 	 */
 	returning<R = Record<string, unknown>>(
-		columns: readonly string[],
+		columns: readonly (keyof R & string)[],
 	): InsertBuilder<R[]> {
 		return new InsertBuilder<R[]>({
 			...this.baseOpts,
@@ -529,7 +529,7 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 	 * ```
 	 */
 	returning<R = Record<string, unknown>>(
-		columns: readonly string[],
+		columns: readonly (keyof R & string)[],
 	): UpdateBuilder<R[]> {
 		return new UpdateBuilder<R[]>({
 			...this.baseOpts,
@@ -726,7 +726,7 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
 	 * ```
 	 */
 	returning<R = Record<string, unknown>>(
-		columns: readonly string[],
+		columns: readonly (keyof R & string)[],
 	): DeleteBuilder<R[]> {
 		return new DeleteBuilder<R[]>({
 			...this.baseOpts,
@@ -920,7 +920,7 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 	 * Requires adapter support for RETURNING clause.
 	 */
 	returning<R = Record<string, unknown>>(
-		columns: readonly string[],
+		columns: readonly (keyof R & string)[],
 	): UpsertBuilder<R[]> {
 		return new UpsertBuilder<R[]>({
 			...this.baseOpts,

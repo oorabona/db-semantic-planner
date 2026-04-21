@@ -2,10 +2,19 @@
  * Transactions E2E Tests
  *
  * Tests transaction support: basic commit/rollback, nested, and schema-scoped.
+ *
+ * TODO (M-4): Migrate OrmInstanceInternal casts to tx.into(tx.tables.posts).
+ * Blocked: this test uses `createOrm({ model: blogModel })` with a raw ModelIR
+ * (not a typed `schema()`), so `tx` has type `OrmInstance<unknown>` and
+ * `tx.tables.posts` lacks static table types. Full migration requires either:
+ *   (a) switching to `createOrm({ schema: blogSchema })`, or
+ *   (b) accepting the weaker `InsertBuilder<unknown>` return type.
+ * Track in: follow-up issue for typed E2E test refactor.
  */
 
 import { createOrm } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { OrmInstanceInternal } from '../../packages/core/src/dx/orm-instance-types.js';
 import {
 	blogModel,
 	closeTestDb,
@@ -53,7 +62,7 @@ describe('Transactions', () => {
 
 			// Act
 			await scoped.transaction(async (tx) => {
-				await tx
+				await (tx as unknown as OrmInstanceInternal)
 					.insert('posts')
 					.values({
 						title: 'Tx Post',
@@ -81,7 +90,7 @@ describe('Transactions', () => {
 			// Act
 			await expect(
 				scoped.transaction(async (tx) => {
-					await tx
+					await (tx as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Rollback Post',
@@ -125,7 +134,7 @@ describe('Transactions', () => {
 
 			// Outer with nested inner
 			await scoped.transaction(async (outer) => {
-				await outer
+				await (outer as unknown as OrmInstanceInternal)
 					.insert('posts')
 					.values({
 						title: 'Outer Post',
@@ -136,7 +145,7 @@ describe('Transactions', () => {
 					.execute();
 
 				await outer.transaction(async (inner) => {
-					await inner
+					await (inner as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Inner Post',
@@ -163,7 +172,7 @@ describe('Transactions', () => {
 
 			await expect(
 				scoped.transaction(async (outer) => {
-					await outer
+					await (outer as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Will Rollback',
@@ -174,7 +183,7 @@ describe('Transactions', () => {
 						.execute();
 
 					await outer.transaction(async (inner) => {
-						await inner
+						await (inner as unknown as OrmInstanceInternal)
 							.insert('posts')
 							.values({
 								title: 'Inner Will Rollback',

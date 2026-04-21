@@ -45,11 +45,16 @@ export type GeneratedColumnType =
 	| 'date'
 	| 'timestamp'
 	| 'datetime'
+	| 'time'
 	| 'json'
+	| 'jsonb'
 	| 'uuid'
 	| 'daterange'
 	| 'tstzrange'
-	| 'int4range';
+	| 'int4range'
+	| 'tsrange'
+	| 'int8range'
+	| 'numrange';
 
 /**
  * Column definition in generated schema.
@@ -65,6 +70,8 @@ export interface GeneratedColumn {
 		readonly table: string;
 		readonly column?: string;
 		readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+		/** Create an index on this FK column (matches ColumnDefinitionSchema index field) */
+		readonly index?: boolean;
 		/** Role name for parent traversal in self-ref hierarchies (e.g., 'parent') */
 		readonly parentRole?: string;
 		/** Role name for child traversal in self-ref hierarchies (e.g., 'children') */
@@ -209,9 +216,20 @@ export type ColumnTypeToTS<T extends GeneratedColumnType> = T extends
 				? boolean
 				: T extends 'date' | 'timestamp' | 'datetime'
 					? Date
-					: T extends 'json'
-						? unknown
-						: never;
+					: T extends 'time'
+						? string
+						: T extends 'json' | 'jsonb'
+							? unknown
+							: // PostgreSQL range types — no native Range<T> in TS; represented as string (e.g., "[2020-01-01,2020-12-31)")
+								T extends
+										| 'daterange'
+										| 'tstzrange'
+										| 'int4range'
+										| 'tsrange'
+										| 'int8range'
+										| 'numrange'
+								? string
+								: never;
 
 /**
  * Infer the TypeScript row type from a GeneratedTable definition.
@@ -267,6 +285,10 @@ function generatedTypeToColumnType(genType: GeneratedColumnType): ColumnType {
 			return 'datetime';
 		case 'json':
 			return 'json';
+		case 'jsonb':
+			return 'jsonb';
+		case 'time':
+			return 'time';
 		case 'uuid':
 			return 'uuid';
 		case 'daterange':
@@ -275,6 +297,12 @@ function generatedTypeToColumnType(genType: GeneratedColumnType): ColumnType {
 			return 'tstzrange';
 		case 'int4range':
 			return 'int4range';
+		case 'tsrange':
+			return 'tsrange';
+		case 'int8range':
+			return 'int8range';
+		case 'numrange':
+			return 'numrange';
 	}
 }
 
@@ -488,17 +516,21 @@ function buildRelationIR(
 		joinDefault: 'auto' as JoinDefault,
 	};
 
-	// Add relation-specific fields
+	// Add relation-specific fields (including optional key overrides from generated relation).
+	// sourceKey (hasMany): column on source table that the FK on target references (overrides PK).
+	// targetKey (belongsTo): column on target table that the FK points to (overrides PK).
 	switch (genRelation.kind) {
 		case 'belongsTo':
 			return {
 				...baseRelation,
 				foreignKey: genRelation.foreignKey,
+				...(genRelation.targetKey ? { targetKey: genRelation.targetKey } : {}),
 			};
 		case 'hasMany':
 			return {
 				...baseRelation,
 				foreignKey: genRelation.foreignKey,
+				...(genRelation.sourceKey ? { sourceKey: genRelation.sourceKey } : {}),
 			};
 		case 'manyToMany':
 			return {
@@ -742,17 +774,57 @@ const SchemaColumnTypeSchema = v.picklist([
 	'daterange',
 	'tstzrange',
 	'int4range',
+	'tsrange',
+	'int8range',
+	'numrange',
 ]);
 
 /**
  * Foreign key reference schema
  */
+
+/**
+ * Prototype-pollution-safe string key validator.
+ *
+ * Rejects keys that would mutate the Object prototype chain when used as
+ * record keys. Used in all top-level record validators (tables, relations,
+ * hints) to prevent `{ "__proto__": {...} }` from poisoning downstream objects.
+ *
+ * The three dangerous keys are: `__proto__`, `constructor`, `prototype`.
+ */
+const PROTO_POLLUTION_KEYS = ['__proto__', 'constructor', 'prototype'] as const;
+
+/**
+ * Wraps a `v.record(v.string(), valueSchema)` with a pre-check that rejects
+ * prototype-pollution keys BEFORE Valibot iterates the record entries.
+ *
+ * Why not `v.record(safePipedStringKey, valueSchema)`?
+ * In Valibot v1, the key schema in `v.record` is only used for TS type inference;
+ * it does NOT run validation on keys at parse time. The outer `v.unknown()` +
+ * `v.check()` pipe runs on the raw input object before Valibot strips built-in
+ * prototype properties like `constructor`, ensuring `constructor` and `__proto__`
+ * (the latter only visible via JSON.parse) are caught.
+ */
+function safeRecord<TValue extends v.GenericSchema>(valueSchema: TValue) {
+	return v.pipe(
+		v.unknown(),
+		v.check((input) => {
+			if (typeof input !== 'object' || input === null) return true;
+			return !Object.keys(input).some((k) =>
+				(PROTO_POLLUTION_KEYS as readonly string[]).includes(k),
+			);
+		}, 'Schema keys must not include prototype-pollution names (__proto__, constructor, prototype)'),
+		v.record(v.string(), valueSchema),
+	);
+}
+
 const ForeignKeyReferenceSchema = v.object({
 	table: v.string(),
 	column: v.optional(v.string()),
 	onDelete: v.optional(
 		v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
 	),
+	index: v.optional(v.boolean()),
 	parentRole: v.optional(v.string()),
 	childRole: v.optional(v.string()),
 });
@@ -774,7 +846,7 @@ const ColumnDefinitionSchema = v.object({
 /**
  * Table definition schema - flat format (column name -> column def).
  */
-const FlatTableDefinitionSchema = v.record(v.string(), ColumnDefinitionSchema);
+const FlatTableDefinitionSchema = safeRecord(ColumnDefinitionSchema);
 
 /**
  * Table definition with config - supports composite primary keys.
@@ -805,7 +877,7 @@ const TableDefinitionSchema = v.union([
 /**
  * Tables definition schema
  */
-const TablesDefinitionSchema = v.record(v.string(), TableDefinitionSchema);
+const TablesDefinitionSchema = safeRecord(TableDefinitionSchema);
 
 /**
  * BelongsTo relation schema
@@ -860,10 +932,7 @@ const RelationDefinitionSchema = v.variant('kind', [
 /**
  * Relations definition schema
  */
-const RelationsDefinitionSchema = v.record(
-	v.string(),
-	RelationDefinitionSchema,
-);
+const RelationsDefinitionSchema = safeRecord(RelationDefinitionSchema);
 
 /**
  * Hint definition schema
@@ -876,7 +945,7 @@ const HintDefinitionSchema = v.object({
 /**
  * Hints definition schema
  */
-const HintsDefinitionSchema = v.record(v.string(), HintDefinitionSchema);
+const HintsDefinitionSchema = safeRecord(HintDefinitionSchema);
 
 /**
  * Conventions definition schema (resolved = all required)
@@ -900,10 +969,7 @@ const IndexDefinitionSchema = v.object({
 /**
  * Indexes definition schema - mapping table name to array of indexes
  */
-const IndexesDefinitionSchema = v.record(
-	v.string(),
-	v.array(IndexDefinitionSchema),
-);
+const IndexesDefinitionSchema = safeRecord(v.array(IndexDefinitionSchema));
 
 /**
  * Complete ResolvedSchema validation schema
@@ -954,19 +1020,23 @@ function mapSchemaColumnType(
 		case 'date':
 			return 'date';
 		case 'time':
-			// 'time' maps to 'timestamp' (closest match in GeneratedColumnType)
-			return 'timestamp';
+			return 'time';
 		case 'json':
 			return 'json';
 		case 'jsonb':
-			// 'jsonb' maps to 'json' (GeneratedColumnType doesn't distinguish)
-			return 'json';
+			return 'jsonb';
 		case 'daterange':
 			return 'daterange';
 		case 'tstzrange':
 			return 'tstzrange';
 		case 'int4range':
 			return 'int4range';
+		case 'tsrange':
+			return 'tsrange';
+		case 'int8range':
+			return 'int8range';
+		case 'numrange':
+			return 'numrange';
 	}
 }
 
@@ -995,13 +1065,22 @@ function convertColumn(
 		result.default = col.default as string;
 	}
 	if (col.references) {
-		const refs: { table: string; column?: string } = {
+		result.references = {
 			table: col.references.table,
+			...(col.references.column !== undefined
+				? { column: col.references.column }
+				: {}),
+			...(col.references.onDelete ? { onDelete: col.references.onDelete } : {}),
+			...(col.references.index !== undefined
+				? { index: col.references.index }
+				: {}),
+			...(col.references.parentRole
+				? { parentRole: col.references.parentRole }
+				: {}),
+			...(col.references.childRole
+				? { childRole: col.references.childRole }
+				: {}),
 		};
-		if (col.references.column !== undefined) {
-			refs.column = col.references.column;
-		}
-		result.references = refs;
 	}
 	return result as GeneratedColumn;
 }
@@ -1120,18 +1199,23 @@ export function resolvedSchemaToGeneratedSchema(
 	const validated = parseResult.output;
 
 	// Convert tables (handles both flat and with-config formats)
-	const tables: Record<string, GeneratedTable> = {};
+	// Use Object.create(null) for accumulators to prevent prototype-chain mutation
+	// even if a key somehow bypasses the safeStringKey Valibot check.
+	const tables = Object.create(null) as Record<string, GeneratedTable>;
 	for (const [tableName, tableDef] of Object.entries(validated.tables)) {
-		const convertedTable: Record<string, GeneratedColumn> = {};
+		const convertedTable = Object.create(null) as Record<
+			string,
+			GeneratedColumn
+		>;
 
-		// Check if this is the with-config format (has 'columns' property)
-		const isWithConfig =
-			tableDef !== null &&
-			typeof tableDef === 'object' &&
-			'columns' in tableDef &&
-			typeof tableDef.columns === 'object';
-
+		// Discriminate with-config vs flat format by checking for a primaryKey array.
+		// Using 'columns' as the discriminant is unsafe: a flat table could legitimately
+		// have a column named 'columns', causing it to be misread as with-config.
+		// TableDefWithConfigSchema requires `primaryKey: array(string())` which flat
+		// shorthand columns never have, so this is a reliable discriminant.
 		const tableObj = tableDef as Record<string, unknown>;
+		const isWithConfig = Array.isArray(tableObj.primaryKey);
+
 		const columns = isWithConfig
 			? (tableObj.columns as Record<string, unknown>)
 			: tableObj;
@@ -1145,13 +1229,13 @@ export function resolvedSchemaToGeneratedSchema(
 	}
 
 	// Convert relations
-	const relations: Record<string, GeneratedRelation> = {};
+	const relations = Object.create(null) as Record<string, GeneratedRelation>;
 	for (const [relName, relDef] of Object.entries(validated.relations)) {
 		relations[relName] = convertRelation(relDef);
 	}
 
 	// Convert hints
-	const hints: Record<string, GeneratedHint> = {};
+	const hints = Object.create(null) as Record<string, GeneratedHint>;
 	for (const [hintName, hintDef] of Object.entries(validated.hints)) {
 		hints[hintName] = convertHint(hintDef);
 	}

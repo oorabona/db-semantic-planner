@@ -231,7 +231,7 @@ export interface DumpMeta {
  * A dump contains the plan, compiled SQL, and parameters for observability.
  */
 export interface Dump {
-	readonly plan: PlanReport;
+	readonly plan?: PlanReport | undefined;
 	readonly sql: string;
 	readonly params: readonly unknown[];
 	readonly meta?: DumpMeta;

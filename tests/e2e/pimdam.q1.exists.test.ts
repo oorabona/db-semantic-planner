@@ -52,7 +52,7 @@ describe('Q1: Products with approved FR main image', () => {
 				.dump();
 
 			// Verify EXISTS strategy is chosen
-			expect(dump.plan.decisions).toContainEqual(
+			expect(dump.plan!.decisions).toContainEqual(
 				expect.objectContaining({
 					type: 'filter-strategy',
 					choice: 'exists',
@@ -231,7 +231,7 @@ describe('Q1: Products with approved FR main image', () => {
 					.dump();
 
 				// Verify JOIN strategy is chosen for belongsTo
-				const filterDecision = dump.plan.decisions.find(
+				const filterDecision = dump.plan!.decisions.find(
 					(d) => d.type === 'filter-strategy',
 				);
 				expect(filterDecision).toBeDefined();
@@ -277,7 +277,7 @@ describe('Q1: Products with approved FR main image', () => {
 					.dump();
 
 				// Verify EXISTS strategy is chosen for hasMany
-				const filterDecision = dump.plan.decisions.find(
+				const filterDecision = dump.plan!.decisions.find(
 					(d) => d.type === 'filter-strategy',
 				);
 				expect(filterDecision).toBeDefined();
