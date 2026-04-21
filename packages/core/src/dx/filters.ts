@@ -45,6 +45,7 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
+import { validateIdentifier } from './errors.js';
 import type {
 	SubqueryBuilder,
 	SubqueryExpression,
@@ -744,6 +745,11 @@ export function coalesce(
 	if (!as || as.trim() === '') {
 		throw new Error('coalesce() requires a non-empty alias');
 	}
+	// FIND-008: Validate all field names and the alias as SQL identifiers
+	for (const f of fields) {
+		validateIdentifier(f, 'column');
+	}
+	validateIdentifier(as, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'coalesce', fields, as },

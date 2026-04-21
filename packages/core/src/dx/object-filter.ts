@@ -29,6 +29,7 @@ import type {
 	WhereNullIntent,
 	WhereSubqueryIntent,
 } from '../intent-ast.js';
+import { InvalidOperationError } from './errors.js';
 import {
 	isSubqueryExpression,
 	type SubqueryExpression,
@@ -290,6 +291,18 @@ function convertOperatorObject(
 export function objectToWhereIntent(
 	filter: WhereFilter<Record<string, unknown>>,
 ): WhereIntent {
+	// FIND-005: Reject prototype-poisoning keys before any processing
+	const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+	for (const key of Object.keys(filter)) {
+		if (FORBIDDEN_KEYS.has(key)) {
+			throw new InvalidOperationError(
+				'where',
+				`Filter key not allowed: ${key}`,
+			);
+		}
+		if (!Object.hasOwn(filter, key)) continue;
+	}
+
 	const entries = Object.entries(filter);
 
 	if (entries.length === 0) {

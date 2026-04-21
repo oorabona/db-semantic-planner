@@ -24,6 +24,7 @@ import {
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
+	validateIdentifier,
 } from './errors.js';
 import { ExpressionRef } from './expressions.js';
 import {
@@ -535,12 +536,24 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	limit(count: number): QueryBuilder<TResult> {
+		if (!Number.isSafeInteger(count) || count < 0) {
+			throw new InvalidOperationError(
+				'limit',
+				'limit must be a non-negative safe integer',
+			);
+		}
 		const builder = this.clone();
 		builder.limitValue = count;
 		return builder;
 	}
 
 	offset(count: number): QueryBuilder<TResult> {
+		if (!Number.isSafeInteger(count) || count < 0) {
+			throw new InvalidOperationError(
+				'offset',
+				'offset must be a non-negative safe integer',
+			);
+		}
 		const builder = this.clone();
 		builder.offsetValue = count;
 		return builder;
@@ -598,6 +611,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			};
 			builder.joinIntents.push(joinIntent);
 		} else {
+			// FIND-011: Validate string table/relation argument
+			validateIdentifier(relationOrTableOrBatch, 'table');
 			const joinIntent: JoinIntent = opts?.on
 				? {
 						table: relationOrTableOrBatch,
@@ -816,10 +831,29 @@ export class QueryBuilderImpl<TResult = unknown>
 			// Simple PK - use schema-defined PK column
 			return eq(this.getSimplePkColumn(), value);
 		}
-		// Composite PK - build AND condition
+		// FIND-009: Validate composite PK keys against schema-defined primary key columns
+		const table = this.model.getTable(this.from);
+		if (!table) {
+			throw new InvalidOperationError('byId', 'Unknown table');
+		}
+		const rawPk = table.primaryKey ?? [];
+		const knownPkCols = new Set(
+			typeof rawPk === 'string' ? [rawPk] : rawPk,
+		);
+		// Composite PK - validate keys then build AND condition
 		const entries = Object.entries(value);
 		if (entries.length === 0) {
 			throw new Error('Composite primary key cannot be empty');
+		}
+		if (knownPkCols.size > 0) {
+			for (const key of Object.keys(value)) {
+				if (!knownPkCols.has(key)) {
+					throw new InvalidOperationError(
+						'byId',
+						`Unknown primary key column: ${key}`,
+					);
+				}
+			}
 		}
 		if (entries.length === 1) {
 			const entry = entries[0];
@@ -1159,14 +1193,17 @@ export class QueryBuilderImpl<TResult = unknown>
 		const withCount = options?.withCount ?? true;
 
 		// Validate inputs
-		if (page < 1) {
+		if (!Number.isSafeInteger(page) || page < 1) {
 			throw new InvalidOperationError(
 				'paginate',
-				'Page must be >= 1. Use page: 1 for the first page',
+				'page must be a positive safe integer. Use page: 1 for the first page',
 			);
 		}
-		if (perPage < 1) {
-			throw new InvalidOperationError('paginate', 'perPage must be >= 1');
+		if (!Number.isSafeInteger(perPage) || perPage < 1) {
+			throw new InvalidOperationError(
+				'paginate',
+				'perPage must be a positive safe integer',
+			);
 		}
 
 		// Calculate offset
@@ -1236,9 +1273,12 @@ export class QueryBuilderImpl<TResult = unknown>
 		const cursor = options?.cursor ?? null;
 		const direction = options?.direction ?? 'forward';
 
-		// Validate inputs
-		if (limit < 1) {
-			throw new InvalidOperationError('cursorPaginate', 'limit must be >= 1');
+		// FIND-021: Validate limit is a safe non-negative integer
+		if (!Number.isSafeInteger(limit) || limit < 1) {
+			throw new InvalidOperationError(
+				'cursorPaginate',
+				'limit must be a positive safe integer',
+			);
 		}
 
 		// Require orderBy for stable cursor pagination
@@ -1252,16 +1292,36 @@ export class QueryBuilderImpl<TResult = unknown>
 		// Decode cursor if provided
 		let cursorValues: Record<string, unknown> | null = null;
 		if (cursor) {
+			let parsed: unknown;
 			try {
-				cursorValues = JSON.parse(
-					Buffer.from(cursor, 'base64').toString('utf-8'),
-				);
+				parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
 			} catch {
 				throw new InvalidOperationError(
 					'cursorPaginate',
 					'Invalid cursor format. Use a cursor returned from a previous cursorPaginate() call',
 				);
 			}
+			// FIND-004: Validate cursor decodes to a plain object (not array/primitive)
+			if (
+				typeof parsed !== 'object' ||
+				parsed === null ||
+				Array.isArray(parsed)
+			) {
+				throw new InvalidOperationError(
+					'cursorPaginate',
+					'Invalid cursor: must decode to an object',
+				);
+			}
+			// Use Object.create(null)-safe iteration to avoid prototype pollution
+			const safeValues: Record<string, unknown> = Object.create(null);
+			for (const key of Object.keys(parsed)) {
+				if (Object.hasOwn(parsed as Record<string, unknown>, key)) {
+					(safeValues as Record<string, unknown>)[key] = (
+						parsed as Record<string, unknown>
+					)[key];
+				}
+			}
+			cursorValues = safeValues;
 		}
 
 		// Build cursor conditions based on orderBy fields

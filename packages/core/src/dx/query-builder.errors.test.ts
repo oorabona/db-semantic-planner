@@ -198,8 +198,9 @@ describe('paginate — error paths', () => {
 	});
 
 	it('should include "Page must be >= 1" in error message', async () => {
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(orm.select('users').paginate({ page: 0 })).rejects.toThrow(
-			/Page must be >= 1/,
+			/page must be a positive safe integer/,
 		);
 	});
 
@@ -216,9 +217,10 @@ describe('paginate — error paths', () => {
 	});
 
 	it('should include "perPage must be >= 1" in error message', async () => {
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
 			orm.select('users').paginate({ page: 1, perPage: 0 }),
-		).rejects.toThrow(/perPage must be >= 1/);
+		).rejects.toThrow(/perPage must be a positive safe integer/);
 	});
 
 	it('should throw when perPage is negative', async () => {
@@ -240,9 +242,10 @@ describe('cursorPaginate — error paths', () => {
 	});
 
 	it('should include "limit must be >= 1" in error message', async () => {
+		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
 			orm.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
-		).rejects.toThrow(/limit must be >= 1/);
+		).rejects.toThrow(/limit must be a positive safe integer/);
 	});
 
 	it('should throw when limit is negative', async () => {
