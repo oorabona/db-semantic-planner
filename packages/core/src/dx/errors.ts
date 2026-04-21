@@ -239,14 +239,14 @@ function levenshteinDistance(a: string, b: string): number {
  *
  * @example
  * ```typescript
- * throw new RelationNotFoundError({
+ * const err = new RelationNotFoundError({
  *   table: 'users',
  *   requested: 'comment',
  *   available: ['posts', 'profile', 'comments'],
  * });
- * // Error: Relation 'comment' not found on table 'users'.
- * // Available relations: posts, profile, comments
- * // Did you mean 'comments'?
+ * // err.message    === 'Relation not found'
+ * // err.available  === ['posts', 'profile', 'comments']
+ * // err.suggestion === 'comments'
  * ```
  */
 export class RelationNotFoundError extends Error {
@@ -272,28 +272,27 @@ export class RelationNotFoundError extends Error {
 	 */
 	readonly suggestion?: string;
 
+	/**
+	 * Public-safe message (no schema enumeration).
+	 */
+	readonly publicMessage: string;
+
 	constructor(opts: {
 		table: string;
 		requested: string;
 		available: readonly string[];
 	}) {
 		const suggestion = findClosestMatch(opts.requested, opts.available);
-		const availableList =
-			opts.available.length > 0 ? opts.available.join(', ') : '(none defined)';
 
-		let message =
-			`Relation '${opts.requested}' not found on table '${opts.table}'.\n` +
-			`Available relations: ${availableList}`;
+		// Generic message — does NOT embed available list to avoid info leakage
+		const genericMessage = 'Relation not found';
 
-		if (suggestion) {
-			message += `\n\nDid you mean '${suggestion}'?`;
-		}
-
-		super(message);
+		super(genericMessage);
 
 		this.table = opts.table;
 		this.requested = opts.requested;
 		this.available = opts.available;
+		this.publicMessage = genericMessage;
 		if (suggestion !== undefined) {
 			this.suggestion = suggestion;
 		}
@@ -342,6 +341,38 @@ export class InvalidOperationError extends Error {
  * // Throws UnsafeOperationError: WHERE clause required
  * ```
  */
+
+/**
+ * Validate that a string is a safe SQL identifier (table, column, schema, alias).
+ *
+ * Rules:
+ * 1. Must not be empty
+ * 2. Must not exceed 63 characters (PostgreSQL limit)
+ * 3. Must start with a letter or underscore
+ * 4. Must contain only alphanumeric, underscore, or dollar sign
+ *
+ * @param value - The identifier to validate
+ * @param type - Type label for error messages (e.g. 'schema', 'table', 'column')
+ * @throws InvalidOperationError if validation fails
+ */
+export function validateIdentifier(value: string, type: string): void {
+	if (!value || value.length === 0) {
+		throw new InvalidOperationError(type, `${type} name must not be empty`);
+	}
+	if (value.length > 63) {
+		throw new InvalidOperationError(
+			type,
+			`${type} name must not exceed 63 characters`,
+		);
+	}
+	if (!/^[a-zA-Z_][a-zA-Z0-9_$]{0,62}$/.test(value)) {
+		throw new InvalidOperationError(
+			type,
+			`${type} name contains invalid characters`,
+		);
+	}
+}
+
 export class UnsafeOperationError extends Error {
 	override readonly name = 'UnsafeOperationError' as const;
 
@@ -372,13 +403,13 @@ export class UnsafeOperationError extends Error {
  *
  * @example
  * ```typescript
- * throw new TableNotFoundError({
+ * const err = new TableNotFoundError({
  *   requested: 'usrs',
  *   available: ['users', 'posts', 'comments'],
  * });
- * // Error: Table 'usrs' not found in schema.
- * // Available tables: users, posts, comments
- * // Did you mean 'users'?
+ * // err.message    === 'Table not found'
+ * // err.available  === ['users', 'posts', 'comments']
+ * // err.suggestion === 'users'
  * ```
  */
 export class TableNotFoundError extends Error {
@@ -399,28 +430,22 @@ export class TableNotFoundError extends Error {
 	 */
 	readonly suggestion?: string;
 
+	/**
+	 * Public-safe message (no schema enumeration).
+	 */
+	readonly publicMessage: string;
+
 	constructor(opts: { requested: string; available: readonly string[] }) {
 		const suggestion = findClosestMatch(opts.requested, opts.available);
-		const availableList =
-			opts.available.length > 0
-				? opts.available.slice(0, 10).join(', ') +
-					(opts.available.length > 10
-						? ` (and ${opts.available.length - 10} more)`
-						: '')
-				: '(none defined)';
 
-		let message =
-			`Table '${opts.requested}' not found in schema.\n` +
-			`Available tables: ${availableList}`;
+		// Generic message — does NOT embed available list to avoid info leakage
+		const genericMessage = 'Table not found';
 
-		if (suggestion) {
-			message += `\n\nDid you mean '${suggestion}'?`;
-		}
-
-		super(message);
+		super(genericMessage);
 
 		this.requested = opts.requested;
 		this.available = opts.available;
+		this.publicMessage = genericMessage;
 		if (suggestion !== undefined) {
 			this.suggestion = suggestion;
 		}
@@ -437,14 +462,14 @@ export class TableNotFoundError extends Error {
  *
  * @example
  * ```typescript
- * throw new ColumnNotFoundError({
+ * const err = new ColumnNotFoundError({
  *   table: 'users',
  *   requested: 'emial',
  *   available: ['id', 'email', 'name', 'createdAt'],
  * });
- * // Error: Column 'emial' not found on table 'users'.
- * // Available columns: id, email, name, createdAt
- * // Did you mean 'email'?
+ * // err.message    === 'Column not found'
+ * // err.available  === ['id', 'email', 'name', 'createdAt']
+ * // err.suggestion === 'email'
  * ```
  */
 export class ColumnNotFoundError extends Error {
@@ -470,33 +495,27 @@ export class ColumnNotFoundError extends Error {
 	 */
 	readonly suggestion?: string;
 
+	/**
+	 * Public-safe message (no schema enumeration).
+	 */
+	readonly publicMessage: string;
+
 	constructor(opts: {
 		table: string;
 		requested: string;
 		available: readonly string[];
 	}) {
 		const suggestion = findClosestMatch(opts.requested, opts.available);
-		const availableList =
-			opts.available.length > 0
-				? opts.available.slice(0, 15).join(', ') +
-					(opts.available.length > 15
-						? ` (and ${opts.available.length - 15} more)`
-						: '')
-				: '(none defined)';
 
-		let message =
-			`Column '${opts.requested}' not found on table '${opts.table}'.\n` +
-			`Available columns: ${availableList}`;
+		// Generic message — does NOT embed available list to avoid info leakage
+		const genericMessage = 'Column not found';
 
-		if (suggestion) {
-			message += `\n\nDid you mean '${suggestion}'?`;
-		}
-
-		super(message);
+		super(genericMessage);
 
 		this.table = opts.table;
 		this.requested = opts.requested;
 		this.available = opts.available;
+		this.publicMessage = genericMessage;
 		if (suggestion !== undefined) {
 			this.suggestion = suggestion;
 		}

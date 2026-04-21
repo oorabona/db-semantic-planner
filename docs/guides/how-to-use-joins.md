@@ -65,6 +65,12 @@ FROM (calls JOIN symbols AS caller ON caller_id = caller.id) caller
 The FK column (`caller_id`) and target table (`symbols`) are resolved from the schema.
 The default join type is `INNER JOIN`.
 
+> **Why the parenthesized FROM with an outer alias?** The compiler wraps the join pair in
+> parentheses and re-aliases the result (`... caller`) so that outer clauses (WHERE, ORDER BY,
+> additional joins) can reference the join result as a named unit. This mirrors PostgreSQL's
+> associativity rules for chained joins and ensures column references remain unambiguous when
+> multiple joins are stacked (see Example 4).
+
 ### 2. Left join (keep root rows without a match)
 
 ```typescript

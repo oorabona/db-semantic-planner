@@ -5,7 +5,7 @@ import type { PlanOptions } from '../planner.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import { batchValues } from './batch-values.js';
 import { CteBuilder } from './cte-builder.js';
-import { InvalidOperationError } from './errors.js';
+import { InvalidOperationError, validateIdentifier } from './errors.js';
 import { eq } from './filters.js';
 import {
 	extractRecursiveField,
@@ -519,7 +519,8 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			);
 		},
 		withSchema(schemaName: string): OrmInstanceInternal<DB> {
-			// Validate schema name to prevent SQL injection
+			// Always validate schema name — even without an adapter — to prevent injection
+			validateIdentifier(schemaName, 'schema');
 			if (adapter) {
 				adapter.validateIdentifier(schemaName, 'schema');
 			}
@@ -568,17 +569,34 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				);
 			}
 
+			// FIND-001: Validate table against known tables before use in error messages
+			if (!model.getTable(table)) {
+				throw new InvalidOperationError('listAncestors', 'Table not found');
+			}
+
+			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion.
+			// Use isSafeInteger to reject fractional values (e.g. 1.5) that
+			// Number.isFinite would accept.
+			const MAX_RECURSION_DEPTH = 1000;
+			const rawMaxDepth = options.maxDepth ?? 100;
+			if (!Number.isSafeInteger(rawMaxDepth) || rawMaxDepth < 1) {
+				throw new InvalidOperationError(
+					'listAncestors',
+					'maxDepth must be a positive safe integer',
+				);
+			}
+			const safeMaxDepth = Math.min(rawMaxDepth, MAX_RECURSION_DEPTH);
+
 			// Find the self-referential relation that matches the parent direction
 			const selfRefRelation = findSelfRefRelation(model, table, 'ancestors');
 			if (!selfRefRelation) {
 				throw new InvalidOperationError(
 					'listAncestors',
-					`Table '${table}' has no self-referential belongsTo/hasOne relation for ancestor traversal`,
+					'Table has no self-referential belongsTo/hasOne relation for ancestor traversal',
 				);
 			}
 
 			const nodeIdCol = options.nodeId ?? 'id';
-			const maxDepth = options.maxDepth ?? 100;
 
 			const builder = new QueryBuilderImpl<TResult>(
 				model,
@@ -601,7 +619,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 					direction: 'ancestors',
 					flat: true,
 					omitSelf: true,
-					maxDepth,
+					maxDepth: safeMaxDepth,
 				})
 				.first();
 
@@ -631,17 +649,34 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				);
 			}
 
+			// FIND-001: Validate table against known tables before use in error messages
+			if (!model.getTable(table)) {
+				throw new InvalidOperationError('listDescendants', 'Table not found');
+			}
+
+			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion.
+			// Use isSafeInteger to reject fractional values (e.g. 1.5) that
+			// Number.isFinite would accept.
+			const MAX_RECURSION_DEPTH = 1000;
+			const rawMaxDepth = options.maxDepth ?? 100;
+			if (!Number.isSafeInteger(rawMaxDepth) || rawMaxDepth < 1) {
+				throw new InvalidOperationError(
+					'listDescendants',
+					'maxDepth must be a positive safe integer',
+				);
+			}
+			const safeMaxDepth = Math.min(rawMaxDepth, MAX_RECURSION_DEPTH);
+
 			// Find the self-referential relation that matches the children direction
 			const selfRefRelation = findSelfRefRelation(model, table, 'descendants');
 			if (!selfRefRelation) {
 				throw new InvalidOperationError(
 					'listDescendants',
-					`Table '${table}' has no self-referential hasMany relation for descendant traversal`,
+					'Table has no self-referential hasMany relation for descendant traversal',
 				);
 			}
 
 			const nodeIdCol = options.nodeId ?? 'id';
-			const maxDepth = options.maxDepth ?? 100;
 
 			const builder = new QueryBuilderImpl<TResult>(
 				model,
@@ -664,7 +699,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 					direction: 'descendants',
 					flat: true,
 					omitSelf: true,
-					maxDepth,
+					maxDepth: safeMaxDepth,
 				})
 				.first();
 
@@ -678,36 +713,56 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Extract table name from TableRef metadata and delegate to string methods
 		// =====================================================================
 
-		into(tableRef: TableRef<any, any, any>): InsertBuilder {
+		into<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): InsertBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new InsertBuilder({ table: tableName as string, ...mutationOpts });
+			return new InsertBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as InsertBuilder<InferTableRow<TTable>>;
 		},
 
-		modify(tableRef: TableRef<any, any, any>): UpdateBuilder {
+		modify<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): UpdateBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new UpdateBuilder({ table: tableName as string, ...mutationOpts });
+			return new UpdateBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as UpdateBuilder<InferTableRow<TTable>>;
 		},
 
-		removeFrom(tableRef: TableRef<any, any, any>): DeleteBuilder {
+		removeFrom<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): DeleteBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new DeleteBuilder({ table: tableName as string, ...mutationOpts });
+			return new DeleteBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as DeleteBuilder<InferTableRow<TTable>>;
 		},
 
-		upsertInto(tableRef: TableRef<any, any, any>): UpsertBuilder {
+		upsertInto<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): UpsertBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new UpsertBuilder({ table: tableName as string, ...mutationOpts });
+			return new UpsertBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as UpsertBuilder<InferTableRow<TTable>>;
 		},
 
 		// =====================================================================
@@ -715,27 +770,33 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// =====================================================================
 
 		insert(table: string): InsertBuilder {
+			validateIdentifier(table, 'table');
 			return new InsertBuilder({ table, ...mutationOpts });
 		},
 
 		update(table: string): UpdateBuilder {
+			validateIdentifier(table, 'table');
 			return new UpdateBuilder({ table, ...mutationOpts });
 		},
 
 		delete(table: string): DeleteBuilder {
+			validateIdentifier(table, 'table');
 			return new DeleteBuilder({ table, ...mutationOpts });
 		},
 
 		updateAll(table: string): UpdateBuilder {
+			validateIdentifier(table, 'table');
 			return new UpdateBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		deleteAll(table: string): DeleteBuilder {
+			validateIdentifier(table, 'table');
 			return new DeleteBuilder({ table, allowAll: true, ...mutationOpts });
 		},
 
 		// DX-026: Upsert support
 		upsert(table: string): UpsertBuilder {
+			validateIdentifier(table, 'table');
 			return new UpsertBuilder({ table, ...mutationOpts });
 		},
 
@@ -872,13 +933,18 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'executeDDL() requires an adapter that supports DDL execution.',
 					);
 				}
+				// FIND-003: Validate index name and optional schema before building SQL
+				validateIdentifier(name, 'index');
+				const sc = options?.schema ?? schemaName;
+				if (sc) {
+					validateIdentifier(sc, 'schema');
+				}
 				const sql = adapter.generateDropIndex
 					? adapter.generateDropIndex(name, options)
 					: (() => {
 							const parts: string[] = ['DROP INDEX'];
 							if (options?.concurrently) parts.push('CONCURRENTLY');
 							if (options?.ifExists) parts.push('IF EXISTS');
-							const sc = options?.schema ?? schemaName;
 							parts.push(
 								sc
 									? `"${sc.replace(/"/g, '""')}"."${name.replace(/"/g, '""')}"`

@@ -8,14 +8,13 @@
  * `adapter.compileSetOperation()` so that `@dbsp/core` remains DB-agnostic.
  */
 
-import type { Adapter, Dump } from '../adapter.js';
+import type { Adapter, Dump, DumpMeta } from '../adapter.js';
 import type {
 	QueryIntent,
 	SetOperationIntent,
 	SetOperationType,
 } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
-import type { PlanReport } from '../planner.js';
 import { ExecutionError } from './errors.js';
 import type { QueryBuilder } from './types.js';
 
@@ -157,22 +156,18 @@ export class SetOperationBuilderImpl<TResult = unknown>
 	dump(): Dump {
 		const adapter = this.requireAdapter();
 		const compiled = adapter.compileSetOperation(this.intent, this.model);
-		const planPlaceholder = {
-			rootTable: '',
-			decisions: [],
-			warnings: [],
-		} as unknown as PlanReport;
-		const dumpResult = adapter.createDump(planPlaceholder, compiled);
-		if (
-			dumpResult.meta?.schema === undefined &&
-			this.schemaName !== undefined
-		) {
-			return {
-				...dumpResult,
-				meta: { ...dumpResult.meta, schema: this.schemaName },
-			};
-		}
-		return dumpResult;
+		// Set operations bypass the semantic planner — no PlanReport is produced.
+		// compiledAt is always included so observability hooks that read
+		// dump.meta?.compiledAt receive a consistent shape regardless of query type.
+		const meta: DumpMeta = {
+			compiledAt: new Date(),
+			...(this.schemaName !== undefined ? { schema: this.schemaName } : {}),
+		};
+		return {
+			sql: compiled.sql,
+			params: compiled.parameters,
+			meta,
+		};
 	}
 
 	async all(): Promise<TResult[]> {

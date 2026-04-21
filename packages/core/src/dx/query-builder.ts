@@ -24,6 +24,7 @@ import {
 	ExecutionError,
 	InvalidOperationError,
 	NotFoundError,
+	validateIdentifier,
 } from './errors.js';
 import { ExpressionRef } from './expressions.js';
 import {
@@ -191,8 +192,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	>;
 	// Overload: mixed columns (strings + expressions) → TResult
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
-	// Implementation
-	columns(columns: readonly ColumnSpec[]): QueryBuilder<unknown> {
+	// Implementation — cast to TResult to match the most general overload signature.
+	// The overloads above refine the type; the implementation signature is intentionally
+	// broad to satisfy all three overloads (TypeScript requires an assignable
+	// implementation signature).
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<any> {
 		const builder = this.clone();
 
 		// Build columns array (direct ExpressionIntent format - NQL compatible)
@@ -223,7 +228,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			builder.selectIntent = { type: 'fields', fields };
 		}
 
-		return builder as QueryBuilder<unknown>;
+		// Cast is safe: the public overloads above guarantee the correct narrowed type.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		return builder as QueryBuilder<any>;
 	}
 
 	coalesce<K extends keyof TResult & string, Alias extends string>(
@@ -535,12 +542,24 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	limit(count: number): QueryBuilder<TResult> {
+		if (!Number.isSafeInteger(count) || count < 0) {
+			throw new InvalidOperationError(
+				'limit',
+				'limit must be a non-negative safe integer',
+			);
+		}
 		const builder = this.clone();
 		builder.limitValue = count;
 		return builder;
 	}
 
 	offset(count: number): QueryBuilder<TResult> {
+		if (!Number.isSafeInteger(count) || count < 0) {
+			throw new InvalidOperationError(
+				'offset',
+				'offset must be a non-negative safe integer',
+			);
+		}
 		const builder = this.clone();
 		builder.offsetValue = count;
 		return builder;
@@ -598,6 +617,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			};
 			builder.joinIntents.push(joinIntent);
 		} else {
+			// FIND-011: Validate string table/relation argument
+			validateIdentifier(relationOrTableOrBatch, 'table');
 			const joinIntent: JoinIntent = opts?.on
 				? {
 						table: relationOrTableOrBatch,
@@ -816,10 +837,27 @@ export class QueryBuilderImpl<TResult = unknown>
 			// Simple PK - use schema-defined PK column
 			return eq(this.getSimplePkColumn(), value);
 		}
-		// Composite PK - build AND condition
+		// FIND-009: Validate composite PK keys against schema-defined primary key columns
+		const table = this.model.getTable(this.from);
+		if (!table) {
+			throw new InvalidOperationError('byId', 'Unknown table');
+		}
+		const rawPk = table.primaryKey ?? [];
+		const knownPkCols = new Set(typeof rawPk === 'string' ? [rawPk] : rawPk);
+		// Composite PK - validate keys then build AND condition
 		const entries = Object.entries(value);
 		if (entries.length === 0) {
 			throw new Error('Composite primary key cannot be empty');
+		}
+		if (knownPkCols.size > 0) {
+			for (const key of Object.keys(value)) {
+				if (!knownPkCols.has(key)) {
+					throw new InvalidOperationError(
+						'byId',
+						`Unknown primary key column: ${key}`,
+					);
+				}
+			}
 		}
 		if (entries.length === 1) {
 			const entry = entries[0];
@@ -890,7 +928,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			...this.planOptionsOverride,
 		};
 
-		const planReport = plan(intentWithHints, this.model, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 
 		const compileOptions: {
 			schemaName?: string;
@@ -958,7 +999,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			}),
 			...this.planOptionsOverride,
 		};
-		const planReport = plan(intentWithHints, this.model, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 		const compileOptions: { schemaName?: string; model: ModelIR } = {
 			model: this.model,
 		};
@@ -1015,7 +1059,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			...this.planOptionsOverride,
 		};
 
-		const planReport = plan(intentWithHints, this.model, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 
 		const compileOptions: {
 			schemaName?: string;
@@ -1047,14 +1094,8 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	stream(options?: StreamOptions): AsyncIterableIterator<TResult> {
 		const adapter = this.getConfiguredAdapter();
-		const dumpResult = this.dump();
 
-		// Prepare compiled query for adapter
-		const compiled = {
-			sql: dumpResult.sql,
-			parameters: dumpResult.params as readonly unknown[],
-		};
-		// Only pass chunkSize to adapter, onStart is handled in wrapper
+		// Only pass chunkSize to adapter; onStart is handled in the wrapper
 		const adapterOptions =
 			options?.chunkSize !== undefined
 				? { chunkSize: options.chunkSize }
@@ -1066,11 +1107,21 @@ export class QueryBuilderImpl<TResult = unknown>
 		const table = this.from;
 		const schemaName = this.schemaName;
 		const txFlag = this.inTransaction;
-		const rawIntent = this.buildIntent(false);
 
-		// Create a lazy wrapper that defers onStart until first next() call
+		// Capture builder references needed inside the lazy iterator closure.
+		// These are captured once to avoid re-reading mutable builder state on
+		// every next() call (the builder could theoretically be modified between
+		// iterator creation and first consumption).
+		const self = this;
 		const onStartCallback = options?.onStart;
-		const capturedDump = dumpResult;
+
+		// FIND-017: dumpResult (planning + compilation) MUST happen AFTER
+		// beforeQuery hooks run, because hooks can modify the intent (e.g. inject
+		// a tenant WHERE clause).  Moving compilation inside the lazy iterator's
+		// first-next guard ensures hook changes are reflected in the executed SQL.
+		let compiledQuery: { sql: string; parameters: readonly unknown[] } | null =
+			null;
+		let capturedDump: Dump | null = null;
 		let adapterIterator: AsyncIterableIterator<TResult> | null = null;
 		let onStartCalled = false;
 		let hooksFired = false;
@@ -1080,42 +1131,105 @@ export class QueryBuilderImpl<TResult = unknown>
 				return this;
 			},
 			async next() {
-				// E17b: Fire beforeQuery on first iteration (lazy)
-				if (!hooksFired && hookStore && hasHooks(hookStore)) {
+				// E17b: Fire beforeQuery on first iteration (lazy), then compile with
+				// the hook-modified intent.
+				if (!hooksFired) {
 					hooksFired = true;
-					const ctx: QueryHookContext = {
-						table,
-						operation: 'select',
-						intent: rawIntent,
-						resultType: 'all',
-						isStreaming: true,
-						...(schemaName !== undefined && { schemaName }),
-						...(txFlag && { inTransaction: true }),
-					};
-					try {
-						await runBeforeQueryHooks(hookStore.beforeQuery, ctx, onHookError);
-					} catch (error) {
-						if (hookStore.onError.length > 0) {
-							throw await runOnErrorHooks(hookStore.onError, {
-								table,
-								operation: 'select',
-								error: error as Error,
-								intent: rawIntent,
-								phase: 'beforeQuery',
-							});
+
+					if (hookStore && hasHooks(hookStore)) {
+						// Build raw intent (without defaultFilters) — hooks see raw intent
+						const rawIntent = self.buildIntent(false);
+						const ctx: QueryHookContext = {
+							table,
+							operation: 'select',
+							intent: rawIntent,
+							resultType: 'all',
+							isStreaming: true,
+							...(schemaName !== undefined && { schemaName }),
+							...(txFlag && { inTransaction: true }),
+						};
+
+						let hookIntent = rawIntent;
+						try {
+							const afterHookCtx = await runBeforeQueryHooks(
+								hookStore.beforeQuery,
+								ctx,
+								onHookError,
+							);
+							hookIntent = afterHookCtx.intent;
+						} catch (error) {
+							if (hookStore.onError.length > 0) {
+								throw await runOnErrorHooks(hookStore.onError, {
+									table,
+									operation: 'select',
+									error: error as Error,
+									intent: rawIntent,
+									phase: 'beforeQuery',
+								});
+							}
+							throw error;
 						}
-						throw error;
+
+						// Apply defaultFilters AFTER hooks (INV-01: cannot be bypassed)
+						const intentAfterDefaults =
+							self.applyDefaultFiltersToIntent(hookIntent);
+						const intentWithHints =
+							self.applyRelationHints(intentAfterDefaults);
+						const planOptions: PlanOptions = {
+							...(self.dialectCapabilities && {
+								dialectCapabilities: self.dialectCapabilities,
+							}),
+							...self.planOptionsOverride,
+						};
+						const planReport = self.planWithAmbiguityHandling(
+							intentWithHints,
+							planOptions,
+						);
+						const compileOptions: { schemaName?: string; model: ModelIR } = {
+							model: self.model,
+						};
+						if (schemaName !== undefined) {
+							compileOptions.schemaName = schemaName;
+						}
+						const compiled = adapter.compile(planReport, compileOptions);
+						compiledQuery = compiled;
+						capturedDump = adapter.createDump(planReport, compiled);
+						if (
+							capturedDump.meta?.schema === undefined &&
+							schemaName !== undefined
+						) {
+							capturedDump = {
+								...capturedDump,
+								meta: { ...capturedDump.meta, schema: schemaName },
+							};
+						}
+					} else {
+						// No hooks: compute dump eagerly (same as original fast path)
+						const dumpResult = self.dump();
+						compiledQuery = {
+							sql: dumpResult.sql,
+							parameters: dumpResult.params as readonly unknown[],
+						};
+						capturedDump = dumpResult;
 					}
 				}
-				// Initialize adapter iterator lazily on first next() call
+
+				// Initialize adapter iterator lazily (compiledQuery is now set)
 				if (!adapterIterator) {
-					adapterIterator = adapter.stream<TResult>(compiled, adapterOptions);
+					// compiledQuery is guaranteed non-null: hooksFired is true at this
+					// point, meaning the block above has completed and set compiledQuery.
+					adapterIterator = adapter.stream<TResult>(
+						compiledQuery!,
+						adapterOptions,
+					);
 				}
+
 				// Call onStart only once, on first next() call
-				if (!onStartCalled && onStartCallback) {
+				if (!onStartCalled && onStartCallback && capturedDump) {
 					onStartCalled = true;
 					onStartCallback(capturedDump);
 				}
+
 				return adapterIterator.next();
 			},
 			async return(value?: TResult) {
@@ -1131,6 +1245,7 @@ export class QueryBuilderImpl<TResult = unknown>
 					hookStore.onError.length > 0 &&
 					error instanceof Error
 				) {
+					const rawIntent = self.buildIntent(false);
 					const finalError = await runOnErrorHooks(hookStore.onError, {
 						table,
 						operation: 'select',
@@ -1159,14 +1274,17 @@ export class QueryBuilderImpl<TResult = unknown>
 		const withCount = options?.withCount ?? true;
 
 		// Validate inputs
-		if (page < 1) {
+		if (!Number.isSafeInteger(page) || page < 1) {
 			throw new InvalidOperationError(
 				'paginate',
-				'Page must be >= 1. Use page: 1 for the first page',
+				'page must be a positive safe integer. Use page: 1 for the first page',
 			);
 		}
-		if (perPage < 1) {
-			throw new InvalidOperationError('paginate', 'perPage must be >= 1');
+		if (!Number.isSafeInteger(perPage) || perPage < 1) {
+			throw new InvalidOperationError(
+				'paginate',
+				'perPage must be a positive safe integer',
+			);
 		}
 
 		// Calculate offset
@@ -1185,25 +1303,72 @@ export class QueryBuilderImpl<TResult = unknown>
 		let totalPages: number | undefined;
 
 		if (withCount) {
-			// Execute count query (without limit/offset) - create fresh builder
-			const countBuilder = new QueryBuilderImpl<{ _count: number }>(
-				this.model,
-				this.strictMode,
-				this.from,
-				{ ...this.relationHints },
-				this.adapter,
-				this.schemaName,
-				this.dialectCapabilities,
-				this.planOptionsOverride,
-				this.defaultFilters,
-			);
-			// Copy where conditions but not limit/offset
-			countBuilder.whereIntents.push(...this.whereIntents);
-			countBuilder.skipDefaultFilters = this.skipDefaultFilters;
-			countBuilder.aggregates = [{ function: 'count', as: '_count' }];
+			// FIND-018 (M-1 fix): Build the count query correctly for all cases.
+			//
+			// Problem: with GROUP BY, a plain COUNT(*) returns one row per group —
+			// not a single scalar total. JOINs can similarly multiply rows.
+			// Fix: when groupBy or explicit joins are present, compile the base query
+			// as a subquery and wrap it with SELECT COUNT(*) FROM (...) _count_subq
+			// to always get a single scalar regardless of query shape.
+			//
+			// For simple queries (no groupBy, no joins), the direct COUNT(*) path
+			// is retained for efficiency.
+			const adapter = this.getConfiguredAdapter();
+			const compileOptions: { schemaName?: string; model: ModelIR } = {
+				model: this.model,
+			};
+			if (this.schemaName !== undefined) {
+				compileOptions.schemaName = this.schemaName;
+			}
 
-			const countResult = await countBuilder.all();
-			total = Number(countResult[0]?._count ?? 0);
+			const hasGroupBy = this.groupByFields.length > 0;
+			const hasJoins = this.joinIntents.length > 0;
+
+			if (hasGroupBy || hasJoins) {
+				// Subquery-wrap approach: compile the base query (no paging, no ordering,
+				// no includes) and wrap it with COUNT(*) to get the correct total.
+				const baseBuilder =
+					this.clone() as unknown as QueryBuilderImpl<TResult>;
+				baseBuilder.limitValue = undefined;
+				baseBuilder.offsetValue = undefined;
+				baseBuilder.orderByIntents.splice(0);
+				baseBuilder.includes.splice(0);
+				baseBuilder.recursiveIncludes.splice(0);
+				baseBuilder.aggregates.splice(0);
+				baseBuilder.selectIntent = undefined;
+
+				const basePlan = baseBuilder.plan();
+				const baseCompiled = adapter.compile(basePlan, compileOptions);
+
+				// Wrap the base SQL as a subquery to get the total row count.
+				const wrapSql = `SELECT COUNT(*) AS "_count" FROM (${baseCompiled.sql}) _count_subq`;
+				const wrapResult = (await adapter.execute({
+					sql: wrapSql,
+					parameters: baseCompiled.parameters,
+				})) as Array<{ _count: string | number }>;
+				total = Number(wrapResult[0]?._count ?? 0);
+			} else {
+				// Simple path: direct COUNT(*) query — correct for flat queries.
+				const countBuilder = this.clone() as unknown as QueryBuilderImpl<{
+					_count: number;
+				}>;
+				// Strip paging/ordering — irrelevant for counting
+				countBuilder.limitValue = undefined;
+				countBuilder.offsetValue = undefined;
+				countBuilder.orderByIntents.splice(0);
+				// Replace any custom select/aggregate with a single count aggregate
+				countBuilder.aggregates.splice(0, countBuilder.aggregates.length, {
+					function: 'count',
+					as: '_count',
+				});
+				// Clear includes — irrelevant for a count query
+				countBuilder.includes.splice(0);
+				countBuilder.recursiveIncludes.splice(0);
+				countBuilder.selectIntent = undefined;
+
+				const countResult = await countBuilder.all();
+				total = Number(countResult[0]?._count ?? 0);
+			}
 			totalPages = Math.ceil(total / perPage);
 		}
 
@@ -1236,9 +1401,12 @@ export class QueryBuilderImpl<TResult = unknown>
 		const cursor = options?.cursor ?? null;
 		const direction = options?.direction ?? 'forward';
 
-		// Validate inputs
-		if (limit < 1) {
-			throw new InvalidOperationError('cursorPaginate', 'limit must be >= 1');
+		// FIND-021: Validate limit is a safe non-negative integer
+		if (!Number.isSafeInteger(limit) || limit < 1) {
+			throw new InvalidOperationError(
+				'cursorPaginate',
+				'limit must be a positive safe integer',
+			);
 		}
 
 		// Require orderBy for stable cursor pagination
@@ -1252,16 +1420,36 @@ export class QueryBuilderImpl<TResult = unknown>
 		// Decode cursor if provided
 		let cursorValues: Record<string, unknown> | null = null;
 		if (cursor) {
+			let parsed: unknown;
 			try {
-				cursorValues = JSON.parse(
-					Buffer.from(cursor, 'base64').toString('utf-8'),
-				);
+				parsed = JSON.parse(Buffer.from(cursor, 'base64').toString('utf-8'));
 			} catch {
 				throw new InvalidOperationError(
 					'cursorPaginate',
 					'Invalid cursor format. Use a cursor returned from a previous cursorPaginate() call',
 				);
 			}
+			// FIND-004: Validate cursor decodes to a plain object (not array/primitive)
+			if (
+				typeof parsed !== 'object' ||
+				parsed === null ||
+				Array.isArray(parsed)
+			) {
+				throw new InvalidOperationError(
+					'cursorPaginate',
+					'Invalid cursor: must decode to an object',
+				);
+			}
+			// Use Object.create(null)-safe iteration to avoid prototype pollution
+			const safeValues: Record<string, unknown> = Object.create(null);
+			for (const key of Object.keys(parsed)) {
+				if (Object.hasOwn(parsed as Record<string, unknown>, key)) {
+					(safeValues as Record<string, unknown>)[key] = (
+						parsed as Record<string, unknown>
+					)[key];
+				}
+			}
+			cursorValues = safeValues;
 		}
 
 		// Build cursor conditions based on orderBy fields
@@ -1276,15 +1464,36 @@ export class QueryBuilderImpl<TResult = unknown>
 			}
 		}
 
+		// FIND-020: For backward pagination, invert every ORDER BY direction so the
+		// DB returns the rows immediately BEFORE the cursor (in reverse order).
+		// We then reverse the result slice to restore the original ordering for
+		// the caller.  Without this, backward direction only inverts the WHERE
+		// predicate but keeps ASC ordering — returning rows from the beginning of
+		// the table that happen to satisfy `id < cursor`, not the adjacent page.
+		if (direction === 'backward') {
+			paginatedBuilder.orderByIntents.splice(
+				0,
+				paginatedBuilder.orderByIntents.length,
+				...paginatedBuilder.orderByIntents.map((ob) => ({
+					...ob,
+					direction: (ob.direction === 'asc' ? 'desc' : 'asc') as SortDirection,
+				})),
+			);
+		}
+
 		// Fetch one extra to determine if there's a next page
 		paginatedBuilder.limitValue = limit + 1;
 
 		// Execute query
-		const results = await paginatedBuilder.all();
+		const rawResults = await paginatedBuilder.all();
 
 		// Determine if there are more items
-		const hasMore = results.length > limit;
-		const data = hasMore ? results.slice(0, limit) : results;
+		const hasMore = rawResults.length > limit;
+		const sliced = hasMore ? rawResults.slice(0, limit) : rawResults;
+
+		// For backward direction, reverse results to restore original ordering
+		// (rows were fetched in inverted order via the inverted ORDER BY above)
+		const data = direction === 'backward' ? sliced.slice().reverse() : sliced;
 
 		// Build cursors
 		const nextCursor =
@@ -1298,9 +1507,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		return {
 			data,
-			nextCursor: direction === 'forward' ? nextCursor : prevCursor,
+			nextCursor,
 			prevCursor:
-				direction === 'forward' ? (cursor ? prevCursor : null) : nextCursor,
+				direction === 'forward' ? (cursor ? prevCursor : null) : prevCursor,
 			hasNextPage: direction === 'forward' ? hasMore : cursor !== null,
 			hasPrevPage: direction === 'forward' ? cursor !== null : hasMore,
 		};
@@ -1309,17 +1518,35 @@ export class QueryBuilderImpl<TResult = unknown>
 	/**
 	 * Build cursor conditions for pagination.
 	 */
+	/**
+	 * Build cursor conditions for pagination.
+	 * FIND-019: expression-based orderBy (fn(), caseWhen()) has no .field — require
+	 * alias or return null so the caller skips the condition gracefully.
+	 */
 	private buildCursorConditions(
 		cursorValues: Record<string, unknown>,
 		direction: 'forward' | 'backward',
 	): WhereIntent | null {
+		/**
+		 * Resolve the cursor key for an orderBy entry.
+		 * Returns null for expression-based entries without an alias (FIND-019).
+		 */
+		const resolveCursorKey = (orderBy: OrderByIntent): string | null => {
+			if (typeof orderBy === 'string') return orderBy;
+			if (typeof orderBy.field === 'string') return orderBy.field;
+			// Expression-based: require explicit alias
+			const alias = (orderBy as { alias?: string }).alias;
+			return alias ?? null;
+		};
+
 		// For single orderBy field, simple comparison
 		if (this.orderByIntents.length === 1) {
 			const orderBy = this.orderByIntents[0];
 			if (!orderBy) return null;
 
-			const field =
-				typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
+			const field = resolveCursorKey(orderBy);
+			if (field === null) return null;
+
 			const sortDir =
 				typeof orderBy === 'string'
 					? 'asc'
@@ -1352,8 +1579,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				const orderBy = this.orderByIntents[j];
 				if (!orderBy) continue;
 
-				const field =
-					typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
+				const field = resolveCursorKey(orderBy);
+				if (field === null) continue; // skip expression-based without alias
+
 				const sortDir =
 					typeof orderBy === 'string'
 						? 'asc'
@@ -1408,14 +1636,38 @@ export class QueryBuilderImpl<TResult = unknown>
 	/**
 	 * Build cursor from a row using orderBy fields.
 	 */
+	/**
+	 * Build cursor from a row using orderBy fields.
+	 * FIND-019: expression-based orderBy entries (fn(), caseWhen(), etc.) have no
+	 * `.field` string.  Require an explicit alias or throw — using `undefined`
+	 * as a cursor key silently breaks the cursor encoding.
+	 */
 	private buildCursor(row: Record<string, unknown>): string {
 		const cursorData: Record<string, unknown> = {};
 
 		for (const orderBy of this.orderByIntents) {
 			if (!orderBy) continue;
-			const field =
-				typeof orderBy === 'string' ? orderBy : (orderBy.field as string);
-			cursorData[field] = row[field];
+			if (typeof orderBy === 'string') {
+				// String shorthand: e.g. .orderBy('id')
+				cursorData[orderBy] = row[orderBy];
+			} else {
+				const field = orderBy.field;
+				if (typeof field === 'string') {
+					// Normal column-based orderBy
+					cursorData[field] = row[field];
+				} else {
+					// Expression-based orderBy (fn(), caseWhen(), etc.): require alias
+					const alias = (orderBy as { alias?: string }).alias;
+					if (!alias) {
+						throw new InvalidOperationError(
+							'cursorPaginate',
+							'cursorPaginate requires orderBy entries with a string column name or an explicit alias. ' +
+								'Use .orderBy(fn(...).as("alias")) or .orderBy("column") to enable cursor-based pagination.',
+						);
+					}
+					cursorData[alias] = row[alias];
+				}
+			}
 		}
 
 		return Buffer.from(JSON.stringify(cursorData), 'utf-8').toString('base64');
@@ -1844,6 +2096,30 @@ export class QueryBuilderImpl<TResult = unknown>
 	/**
 	 * Handle ambiguity based on strict mode setting.
 	 */
+
+	/**
+	 * Thin wrapper around the planner that applies the same ambiguity-handling
+	 * logic as `plan()` (the builder method).  Used by exists/existsDump paths
+	 * which build their own planOptions and therefore cannot call `this.plan()`
+	 * directly (which would rebuild the intent from scratch).
+	 *
+	 * FIND-016: exists() / existsDump() called the raw planner function directly,
+	 * bypassing the ambiguity catch that lives in the builder's plan() wrapper.
+	 */
+	private planWithAmbiguityHandling(
+		intent: QueryIntent,
+		planOptions: PlanOptions,
+	): PlanReport {
+		try {
+			return plan(intent, this.model, planOptions);
+		} catch (error) {
+			if (error instanceof AmbiguousPlanError) {
+				return this.handleAmbiguity(error, intent, planOptions);
+			}
+			throw error;
+		}
+	}
+
 	private handleAmbiguity(
 		error: AmbiguousPlanError,
 		intent: QueryIntent,
@@ -1858,8 +2134,12 @@ export class QueryBuilderImpl<TResult = unknown>
 			);
 		}
 
-		// Lenient mode: use first relation and add warning
-		const firstRelation = error.options[0];
+		// Lenient mode: deterministic tie-break — sort alphabetically so that
+		// schema definition order does not influence which relation is chosen.
+		// This ensures stable query results across schema refactoring.
+		// FIND-015: picking options[0] without sorting is non-deterministic.
+		const sortedOptions = error.options.slice().sort();
+		const firstRelation = sortedOptions[0];
 		if (!firstRelation) {
 			throw error; // Safety: should never happen
 		}
@@ -1869,20 +2149,23 @@ export class QueryBuilderImpl<TResult = unknown>
 			...basePlanOptions,
 			disambiguate: {
 				...basePlanOptions.disambiguate,
-				[disambiguateKey]: firstRelation,
+				[disambiguateKey]: firstRelation, // alphabetically-first (see sortedOptions)
 			},
 		};
 
 		// Re-plan with disambiguation
 		const result = plan(intent, this.model, planOptions);
 
-		// Add warning about automatic disambiguation
+		// Add warning about automatic disambiguation.
+		// The chosen relation is the alphabetically-first name (deterministic
+		// tie-break), not insertion order, so schema refactoring cannot silently
+		// change query results.
 		const warning = {
 			code: 'AMBIGUOUS_RELATION' as const,
 			message:
 				`Ambiguous relation to '${error.targetTable}' from '${error.sourceTable}' ` +
-				`was automatically resolved to '${firstRelation}'. ` +
-				`Available options: ${error.options.join(', ')}.`,
+				`was automatically resolved to '${firstRelation}' (alphabetical tie-break). ` +
+				`Available options: ${sortedOptions.join(', ')}.`,
 			suggestion: `Use { via: '${firstRelation}' } or another option to make this explicit.`,
 		};
 

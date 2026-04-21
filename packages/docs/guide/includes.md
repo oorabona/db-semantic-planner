@@ -130,8 +130,8 @@ Inspect the chosen strategy at any time with `dump()`:
 
 ```typescript
 const dump = orm.select('users').include('posts').dump();
-console.log(dump.plan.decisions);
+console.log(dump.plan?.decisions);
 // [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
 ```
 
-If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan.warnings`.
+If the planner emits a performance warning (e.g., potential N+1), it appears in `dump.plan?.warnings`.

@@ -265,7 +265,7 @@ export interface SelectExpressionResult {
 	 * @typeParam T - Expected result row type
 	 * @returns Array of result rows (typically one row for scalar expressions)
 	 */
-	execute<T = unknown>(): Promise<T[]>;
+	execute<T = Record<string, unknown>>(): Promise<T[]>;
 }
 
 export interface OrmInstance<DB = Record<string, unknown>> {
@@ -285,6 +285,12 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * @since DX-040-SURFACE
 	 */
 	readonly tables: {
+		// TRelations is `any` because `DB` only encodes row types, not schema relations.
+		// To compute proper RelationRef types, the full schema definition would be needed.
+		// TODO(FIND-030): Thread a TSchema generic through OrmInstance to replace `any`
+		// with `RowToRelationRefs<K, DB, TSchema>` once the schema-tables-types
+		// infrastructure is wired through createOrm().
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
 		[K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any>;
 	};
 
@@ -356,7 +362,9 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	into<TTable extends TableRef<any, any, any>>(table: TTable): InsertBuilder;
+	into<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): InsertBuilder<InferTableRow<TTable>>;
 
 	/**
 	 * Start a type-safe UPDATE operation from a TableRef.
@@ -373,7 +381,9 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	modify<TTable extends TableRef<any, any, any>>(table: TTable): UpdateBuilder;
+	modify<TTable extends TableRef<any, any, any>>(
+		table: TTable,
+	): UpdateBuilder<InferTableRow<TTable>>;
 
 	/**
 	 * Start a type-safe DELETE operation from a TableRef.
@@ -392,7 +402,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 */
 	removeFrom<TTable extends TableRef<any, any, any>>(
 		table: TTable,
-	): DeleteBuilder;
+	): DeleteBuilder<InferTableRow<TTable>>;
 
 	/**
 	 * Start a type-safe UPSERT (INSERT ... ON CONFLICT) operation from a TableRef.
@@ -415,7 +425,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 */
 	upsertInto<TTable extends TableRef<any, any, any>>(
 		table: TTable,
-	): UpsertBuilder;
+	): UpsertBuilder<InferTableRow<TTable>>;
 
 	/**
 	 * The strict mode setting for this ORM instance.

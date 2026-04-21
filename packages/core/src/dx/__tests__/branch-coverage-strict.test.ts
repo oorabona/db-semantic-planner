@@ -451,10 +451,26 @@ describe('QueryBuilderImpl.buildPkCondition', () => {
 	});
 
 	it('byId with multi-field composite → builds AND condition without throwing', async () => {
+		// Composite PK: both tenantId and userId are declared as primaryKey in schema.
+		// FIND-009: buildPkCondition validates keys against schema-defined PK columns.
+		const compositeSchema = schema({
+			orders: {
+				tenantId: { type: 'integer', primaryKey: true },
+				orderId: { type: 'integer', primaryKey: true },
+				amount: 'number',
+			},
+		});
+		const compositeAdapter = makeAdapter();
 		(
-			adapter as unknown as { execute: ReturnType<typeof vi.fn> }
+			compositeAdapter as unknown as { execute: ReturnType<typeof vi.fn> }
 		).execute.mockResolvedValue([]);
-		const result = await orm.select('users').byId({ id: 1, name: 'Alice' });
+		const compositeOrm = createOrm({
+			schema: compositeSchema,
+			adapter: compositeAdapter,
+		});
+		const result = await compositeOrm
+			.select('orders')
+			.byId({ tenantId: 1, orderId: 42 });
 		expect(result).toBeUndefined();
 	});
 });

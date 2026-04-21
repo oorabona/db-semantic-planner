@@ -168,8 +168,10 @@ describe('TableNotFoundError (coverage)', () => {
 			available: tables,
 		});
 
-		expect(error.message).not.toContain('more)');
-		expect(error.message).toContain('table9');
+		// FIND-006: .message is generic — diagnostic detail in .available
+		expect(error.message).toBe('Table not found');
+		expect(error.available).toHaveLength(10);
+		expect(error.available).toContain('table9');
 	});
 
 	it('shows 10 tables + "(and N more)" when > 10', () => {
@@ -179,9 +181,10 @@ describe('TableNotFoundError (coverage)', () => {
 			available: tables,
 		});
 
-		expect(error.message).toContain('(and 2 more)');
-		// table10, table11 should not appear in the list
-		expect(error.message).not.toContain('table10');
+		// FIND-006: all tables in .available — no truncation in .message
+		expect(error.available).toHaveLength(12);
+		expect(error.available).toContain('table10');
+		expect(error.available).toContain('table11');
 	});
 
 	it('has no suggestion when target is very short and unrelated', () => {
@@ -210,8 +213,10 @@ describe('ColumnNotFoundError (coverage)', () => {
 			available: columns,
 		});
 
-		expect(error.message).not.toContain('more)');
-		expect(error.message).toContain('col14');
+		// FIND-006: .message is generic — diagnostic detail in .available
+		expect(error.message).toBe('Column not found');
+		expect(error.available).toHaveLength(15);
+		expect(error.available).toContain('col14');
 	});
 
 	it('shows 15 columns + "(and N more)" when > 15', () => {
@@ -222,8 +227,10 @@ describe('ColumnNotFoundError (coverage)', () => {
 			available: columns,
 		});
 
-		expect(error.message).toContain('(and 5 more)');
-		expect(error.message).not.toContain('col15');
+		// FIND-006: all columns in .available — no truncation in .message
+		expect(error.available).toHaveLength(20);
+		expect(error.available).toContain('col15');
+		expect(error.available).toContain('col19');
 	});
 
 	it('has no suggestion when target is very short and unrelated', () => {
