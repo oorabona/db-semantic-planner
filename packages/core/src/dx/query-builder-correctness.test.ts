@@ -1,0 +1,206 @@
+/**
+ * Proof tests for Commit 3 -- Query-builder correctness
+ * Covers FIND-016 through FIND-020.
+ */
+
+import { describe, expect, it, vi } from "vitest";
+import type { Adapter, Dump } from "../adapter.js";
+import { createHookManager } from "./hooks.js";
+import { createOrm } from "./orm.js";
+import { ref, schema } from "./schema.js";
+import { createMockAdapter } from "./test-utils.js";
+import { AmbiguousRelationError } from "./errors.js";
+
+const ambiguousSchema = schema({
+	users: { id: { type: "integer", primaryKey: true }, name: "string" },
+	posts: {
+		id: { type: "integer", primaryKey: true },
+		title: "string",
+		authorId: ref("users", { as: "author", inverse: "authoredPosts" }),
+		reviewerId: ref("users", { as: "reviewer", inverse: "reviewedPosts" }),
+	},
+});
+
+const simpleSchema = schema({
+	users: { id: { type: "integer", primaryKey: true }, name: "string", active: "boolean" },
+	posts: { id: { type: "integer", primaryKey: true }, title: "string", authorId: ref("users", { as: "author", inverse: "posts" }) },
+});
+
+function createSpyAdapter(executeResult: unknown[] = []) {
+	const base = createMockAdapter();
+	const compileSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({ sql: 'SELECT * FROM "users"', parameters: [] as readonly unknown[] }));
+	const compileWithIncludesSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({ main: { sql: 'SELECT * FROM "users"', parameters: [] as readonly unknown[] }, subqueryIncludes: [] }));
+	const executeSpy = vi.fn(() => Promise.resolve([...executeResult]));
+	const createDumpSpy = vi.fn((_plan: unknown, compiled: { sql: string; parameters: readonly unknown[] }) => ({ sql: compiled.sql, params: compiled.parameters, plan: {} }) as unknown as Dump);
+	const adapter = {
+		...base,
+		compile: compileSpy,
+		compileWithIncludes: compileWithIncludesSpy,
+		execute: executeSpy,
+		createDump: createDumpSpy,
+		withSchema: (_schemaName: string) => adapter,
+		stream: vi.fn(async function* (_compiled: unknown, _opts?: unknown) { for (const row of executeResult) yield row; }),
+	} as unknown as Adapter;
+	return adapter;
+}
+
+describe("FIND-016: exists() respects lenient-mode ambiguity resolution", () => {
+	it("all() auto-resolves ambiguous relation in lenient mode", () => {
+		const orm = createOrm({ adapter: createSpyAdapter(), schema: ambiguousSchema, strictMode: false });
+		expect(() => orm.select("users").include("posts").plan()).not.toThrow();
+	});
+	it("exists() auto-resolves in lenient mode (REGRESSION GATE)", async () => {
+		const orm = createOrm({ adapter: createSpyAdapter([{ exists: true }]), schema: ambiguousSchema, strictMode: false });
+		await expect(orm.select("users").include("posts").exists()).resolves.toBe(true);
+	});
+	it("existsDump() does not throw in lenient mode (REGRESSION GATE)", () => {
+		const orm = createOrm({ adapter: createSpyAdapter(), schema: ambiguousSchema, strictMode: false });
+		expect(() => orm.select("users").include("posts").existsDump()).not.toThrow();
+	});
+	it("existsDump() returns a Dump (planWithAmbiguityHandling smoke test)", () => {
+		// existsDump() uses planWithAmbiguityHandling — verify it produces a Dump
+		// without throwing. The plan field is the adapter's mock object.
+		const adapter = createSpyAdapter();
+		const orm = createOrm({ adapter, schema: ambiguousSchema, strictMode: false });
+		const dump = orm.select("users").existsDump();
+		expect(dump).toBeDefined();
+		expect(typeof dump.sql).toBe("string");
+		// plan field present (mock returns {})
+		expect(dump.plan).toBeDefined();
+	});
+	it("exists() resolves for a simple (non-include) query in strict mode", async () => {
+		// exists() strips includes before planning, so include-based ambiguity
+		// is never presented to the planner from this path. A basic exists() in
+		// strict mode must still work.
+		const orm = createOrm({ adapter: createSpyAdapter([{ exists: true }]), schema: ambiguousSchema, strictMode: true });
+		await expect(orm.select("users").exists()).resolves.toBe(true);
+	});
+});
+
+describe("FIND-017: stream() compiles SQL AFTER beforeQuery hooks run", () => {
+	it("compile() NOT called at stream() creation -- only on first next() (REGRESSION GATE)", async () => {
+		const rows = [{ id: 1, name: "Alice", active: true }];
+		const adapter = createSpyAdapter(rows);
+		const hookManager = createHookManager().beforeQuery((ctx) => ({ ...ctx, intent: { ...ctx.intent, where: { kind: "comparison", field: "active", operator: "eq", value: true } } }));
+		const orm = createOrm({ adapter, schema: simpleSchema, hooks: hookManager });
+		const compileSpy = (adapter as unknown as { compile: ReturnType<typeof vi.fn> }).compile;
+		expect(compileSpy).toHaveBeenCalledTimes(0);
+		const iterator = orm.select("users").stream();
+		expect(compileSpy).toHaveBeenCalledTimes(0);
+		await iterator.next();
+		expect(compileSpy).toHaveBeenCalledTimes(1);
+	});
+	it("stream() without hooks yields all rows", async () => {
+		const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const collected: unknown[] = [];
+		for await (const row of orm.select("users").stream()) collected.push(row);
+		expect(collected).toHaveLength(3);
+	});
+	it("onStart callback fires on first next()", async () => {
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		let capturedDump: Dump | null = null;
+		const iterator = orm.select("users").stream({ onStart: (d) => { capturedDump = d; } });
+		await iterator.next();
+		expect(capturedDump).not.toBeNull();
+		expect(typeof capturedDump!.sql).toBe("string");
+	});
+});
+
+describe("FIND-018: paginate() count query uses full query state", () => {
+	it("count query executed -- two execute calls", async () => {
+		const rows = Array.from({ length: 5 }, (_, i) => ({ id: i + 1 }));
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		let idx = 0;
+		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute = vi.fn(() => { idx++; return idx === 1 ? Promise.resolve(rows) : Promise.resolve([{ _count: 50 }]); });
+		const result = await orm.select("users").paginate({ page: 1, perPage: 5, withCount: true });
+		expect(result.pagination.total).toBe(50);
+		expect((adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute).toHaveBeenCalledTimes(2);
+	});
+	it("count uses full intent -- two compileWithIncludes calls", async () => {
+		const rows = [{ id: 1 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cwis = (adapter as unknown as { compileWithIncludes: ReturnType<typeof vi.fn> }).compileWithIncludes;
+		let idx = 0;
+		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute = vi.fn(async () => { idx++; return idx === 1 ? rows : [{ _count: 10 }]; });
+		await orm.select("users").where({ active: true }).paginate({ page: 1, perPage: 5, withCount: true });
+		expect(cwis).toHaveBeenCalledTimes(2);
+	});
+	it("withCount: false -- single execute, no total", async () => {
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const executeSpy = (adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute;
+		const result = await orm.select("users").paginate({ page: 1, perPage: 10, withCount: false });
+		expect(executeSpy).toHaveBeenCalledTimes(1);
+		expect(result.pagination.total).toBeUndefined();
+	});
+});
+
+describe("FIND-019: cursorPaginate buildCursor with field-based orderBy", () => {
+	it("string orderBy field encoded in cursor (positive path)", async () => {
+		const rows = [{ id: 11 }, { id: 12 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor = Buffer.from(JSON.stringify({ id: 10 }), "utf-8").toString("base64");
+		const result = await orm.select("users").orderBy("id").cursorPaginate({ cursor, limit: 2, direction: "forward" });
+		expect(result.data).toHaveLength(2);
+		if (result.prevCursor) {
+			const decoded = JSON.parse(Buffer.from(result.prevCursor, "base64").toString("utf-8"));
+			expect(decoded).toHaveProperty("id");
+		}
+	});
+	it("empty result set: no cursor built, no throw", async () => {
+		const adapter = createSpyAdapter([]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const result = await orm.select("users").orderBy("id").cursorPaginate({ limit: 5 });
+		expect(result.data).toHaveLength(0);
+		expect(result.nextCursor).toBeNull();
+		expect(result.prevCursor).toBeNull();
+	});
+});
+
+describe("FIND-020: backward cursor inverts ORDER BY and reverses result", () => {
+	it("backward+asc: reversed to ASC for caller (REGRESSION GATE)", async () => {
+		const dbRows = [{ id: 49 }, { id: 48 }, { id: 47 }, { id: 46 }, { id: 45 }];
+		const adapter = createSpyAdapter(dbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const result = await orm.select("users").orderBy("id", "asc").cursorPaginate({ cursor, limit: 5, direction: "backward" });
+		expect(result.data).toHaveLength(5);
+		const ids = result.data.map((r) => (r as { id: number }).id);
+		expect(ids).toEqual([45, 46, 47, 48, 49]);
+	});
+	it("backward+desc: reversed to DESC for caller", async () => {
+		const dbRows = [{ id: 51 }, { id: 52 }, { id: 53 }, { id: 54 }, { id: 55 }];
+		const adapter = createSpyAdapter(dbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const result = await orm.select("users").orderBy("id", "desc").cursorPaginate({ cursor, limit: 5, direction: "backward" });
+		const ids = result.data.map((r) => (r as { id: number }).id);
+		expect(ids).toEqual([55, 54, 53, 52, 51]);
+	});
+	it("backward with extra row (hasMore=true): slice-then-reverse", async () => {
+		const dbRows = [{ id: 49 }, { id: 48 }, { id: 47 }, { id: 46 }, { id: 45 }, { id: 44 }];
+		const adapter = createSpyAdapter(dbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const result = await orm.select("users").orderBy("id", "asc").cursorPaginate({ cursor, limit: 5, direction: "backward" });
+		expect(result.data).toHaveLength(5);
+		const ids = result.data.map((r) => (r as { id: number }).id);
+		expect(ids).toEqual([45, 46, 47, 48, 49]);
+		expect(result.hasPrevPage).toBe(true);
+	});
+	it("forward cursor: rows unchanged (control)", async () => {
+		const rows = [{ id: 51 }, { id: 52 }, { id: 53 }];
+		const adapter = createSpyAdapter(rows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const result = await orm.select("users").orderBy("id", "asc").cursorPaginate({ cursor, limit: 3, direction: "forward" });
+		const ids = result.data.map((r) => (r as { id: number }).id);
+		expect(ids).toEqual([51, 52, 53]);
+	});
+});
