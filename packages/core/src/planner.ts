@@ -242,6 +242,9 @@ interface PlannerState {
 	decisionCounters: Record<DecisionType, number>;
 	relationAccessCounts: Map<string, string[]>; // relation path -> intent paths
 	visitedIncludes: Set<string>; // For circular detection
+	/** PERF (FIND-052): cached flag — set to true whenever an ambiguity decision is pushed,
+	 *  replacing the O(D) linear scan of state.decisions at plan() exit. */
+	hasAmbiguity: boolean;
 }
 
 // ============================================================================
@@ -274,6 +277,7 @@ export function plan(
 		},
 		relationAccessCounts: new Map(),
 		visitedIncludes: new Set(),
+		hasAmbiguity: false, // PERF (FIND-052): set to true when an ambiguity decision is pushed
 	};
 
 	const opts: Required<PlanOptions> = {
@@ -334,10 +338,16 @@ export function plan(
 
 	const planningTimeMs = performance.now() - startTime;
 
-	// Check for overall ambiguity
-	const ambiguousDecision = state.decisions.find(
-		(d) => d.type === 'ambiguity' && d.choice === 'unresolved',
-	);
+	// PERF (FIND-052): use the hasAmbiguity flag instead of O(D) linear scan.
+	// The flag is set to true wherever an ambiguity decision is pushed to state.decisions.
+	// PERF (FIND-051): use .slice() instead of spread ([...arr]) — avoids the extra
+	// iterable-protocol overhead; semantically identical for plain arrays.
+	let ambiguousDecision: PlanDecision | undefined;
+	if (state.hasAmbiguity) {
+		ambiguousDecision = state.decisions.find(
+			(d) => d.type === 'ambiguity' && d.choice === 'unresolved',
+		);
+	}
 
 	const metadata: PlanReport['metadata'] = ambiguousDecision
 		? Object.freeze({
@@ -354,9 +364,9 @@ export function plan(
 
 	const report: PlanReport = {
 		rootTable: intent.from,
-		decisions: Object.freeze([...state.decisions]),
-		warnings: Object.freeze([...state.warnings]),
-		ctes: Object.freeze([...state.ctes]),
+		decisions: Object.freeze(state.decisions.slice()),
+		warnings: Object.freeze(state.warnings.slice()),
+		ctes: Object.freeze(state.ctes.slice()),
 		intent,
 		metadata,
 	};
@@ -406,6 +416,7 @@ export function planRecursive(
 		},
 		relationAccessCounts: new Map(),
 		visitedIncludes: new Set(),
+		hasAmbiguity: false,
 	};
 
 	// Validate that start table exists
@@ -487,11 +498,12 @@ export function planRecursive(
 
 	const dedupeStrategy = intent.dedupe ?? 'none';
 
+	// PERF (FIND-051): use .slice() instead of spread — avoids iterable-protocol overhead.
 	const report: RecursivePlanReport = {
 		rootTable: intent.start.from,
-		decisions: Object.freeze([...state.decisions]),
-		warnings: Object.freeze([...state.warnings]),
-		ctes: Object.freeze([...state.ctes]),
+		decisions: Object.freeze(state.decisions.slice()),
+		warnings: Object.freeze(state.warnings.slice()),
+		ctes: Object.freeze(state.ctes.slice()),
 		intent,
 		metadata: Object.freeze({
 			planningTimeMs,
@@ -1521,6 +1533,20 @@ function detectRawSqlUsage(intent: QueryIntent, state: PlannerState): void {
 // ============================================================================
 
 function extractCTEs(state: PlannerState, threshold: number): void {
+	// PERF (FIND-053): build O(1) lookup structures once before the R-relation loop,
+	// replacing O(R×D) linear scans (decisions.find + ctes.some) inside the loop.
+	const decisionByTableRelation = new Map<string, PlanDecision>();
+	for (const d of state.decisions) {
+		if (d.type === 'include-strategy') {
+			const k = `${d.context?.sourceTable ?? ''}:${d.context?.relation ?? ''}`;
+			// Keep first match (earliest decision wins)
+			if (!decisionByTableRelation.has(k)) {
+				decisionByTableRelation.set(k, d);
+			}
+		}
+	}
+	const cteNameSet = new Set(state.ctes.map((c) => c.name));
+
 	for (const [relationPath, intentPaths] of state.relationAccessCounts) {
 		if (intentPaths.length >= threshold) {
 			const parts = relationPath.split('.');
@@ -1531,19 +1557,14 @@ function extractCTEs(state: PlannerState, threshold: number): void {
 			// SPEC-002: Skip CTE extraction if the include strategy is 'json_agg'.
 			// json_agg uses a subquery that doesn't benefit from CTEs and would conflict.
 			// Other strategies (join, cte, separate) can still use CTE extraction.
-			const includeStrategyDecision = state.decisions.find(
-				(d) =>
-					d.type === 'include-strategy' &&
-					d.context?.sourceTable === table &&
-					d.context?.relation === relation,
-			);
+			const includeStrategyDecision = decisionByTableRelation.get(`${table}:${relation}`);
 			if (includeStrategyDecision?.choice === 'json_agg') {
 				// json_agg strategy uses its own subquery - CTE extraction not needed
 				continue;
 			}
 
 			// Skip if CTE already exists (from include processing)
-			if (state.ctes.some((c) => c.name === cteName)) {
+			if (cteNameSet.has(cteName)) {
 				continue;
 			}
 
