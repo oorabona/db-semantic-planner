@@ -574,13 +574,15 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				throw new InvalidOperationError('listAncestors', 'Table not found');
 			}
 
-			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion
+			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion.
+			// Use isSafeInteger to reject fractional values (e.g. 1.5) that
+			// Number.isFinite would accept.
 			const MAX_RECURSION_DEPTH = 1000;
 			const rawMaxDepth = options.maxDepth ?? 100;
-			if (!Number.isFinite(rawMaxDepth) || rawMaxDepth < 1) {
+			if (!Number.isSafeInteger(rawMaxDepth) || rawMaxDepth < 1) {
 				throw new InvalidOperationError(
 					'listAncestors',
-					'maxDepth must be a positive finite integer',
+					'maxDepth must be a positive safe integer',
 				);
 			}
 			const safeMaxDepth = Math.min(rawMaxDepth, MAX_RECURSION_DEPTH);
@@ -652,13 +654,15 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				throw new InvalidOperationError('listDescendants', 'Table not found');
 			}
 
-			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion
+			// FIND-007: Cap maxDepth to prevent infinite/excessive recursion.
+			// Use isSafeInteger to reject fractional values (e.g. 1.5) that
+			// Number.isFinite would accept.
 			const MAX_RECURSION_DEPTH = 1000;
 			const rawMaxDepth = options.maxDepth ?? 100;
-			if (!Number.isFinite(rawMaxDepth) || rawMaxDepth < 1) {
+			if (!Number.isSafeInteger(rawMaxDepth) || rawMaxDepth < 1) {
 				throw new InvalidOperationError(
 					'listDescendants',
-					'maxDepth must be a positive finite integer',
+					'maxDepth must be a positive safe integer',
 				);
 			}
 			const safeMaxDepth = Math.min(rawMaxDepth, MAX_RECURSION_DEPTH);

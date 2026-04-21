@@ -157,12 +157,16 @@ export class SetOperationBuilderImpl<TResult = unknown>
 		const adapter = this.requireAdapter();
 		const compiled = adapter.compileSetOperation(this.intent, this.model);
 		// Set operations bypass the semantic planner — no PlanReport is produced.
-		const optionalMeta: DumpMeta | undefined =
-			this.schemaName !== undefined ? { schema: this.schemaName } : undefined;
+		// compiledAt is always included so observability hooks that read
+		// dump.meta?.compiledAt receive a consistent shape regardless of query type.
+		const meta: DumpMeta = {
+			compiledAt: new Date(),
+			...(this.schemaName !== undefined ? { schema: this.schemaName } : {}),
+		};
 		return {
 			sql: compiled.sql,
 			params: compiled.parameters,
-			...(optionalMeta !== undefined ? { meta: optionalMeta } : {}),
+			meta,
 		};
 	}
 

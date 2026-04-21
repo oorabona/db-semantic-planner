@@ -277,10 +277,10 @@ console.log(dump.sql);
 console.log(dump.params);
 // [true]
 
-console.log(dump.plan!.decisions);
+console.log(dump.plan?.decisions);
 // [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
 
-console.log(dump.plan!.warnings);
+console.log(dump.plan?.warnings);
 // [] — empty means no performance concerns
 ```
 

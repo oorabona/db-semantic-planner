@@ -30,10 +30,10 @@ console.log(dump.sql);
 console.log(dump.params);
 // [true]
 
-console.log(dump.plan!.decisions);
+console.log(dump.plan?.decisions);
 // [{ type: 'include-strategy', relation: 'posts', choice: 'json_agg', reason: '...' }]
 
-console.log(dump.plan!.warnings);
+console.log(dump.plan?.warnings);
 // [] — empty means no performance concerns
 ```
 
@@ -52,6 +52,8 @@ type Dump = {
 };
 ```
 
+> **Note:** `plan` is omitted for set-operation dumps (UNION / INTERSECT / EXCEPT) because those queries bypass the semantic planner. Use `dump.plan?.decisions` or guard with `if (dump.plan)` when writing observability hooks that need to be generic across all query types.
+
 ---
 
 ## Plan Decisions
@@ -61,7 +63,7 @@ The `plan.decisions` array records every choice the planner made and why. Use it
 ```typescript
 const dump = orm.select('users').include('posts').dump();
 
-for (const decision of dump.plan!.decisions) {
+for (const decision of dump.plan?.decisions ?? []) {
   console.log(decision.type, decision.choice, decision.reason);
 }
 // include-strategy  json_agg  "simple 1:N with no filter on relation"
@@ -86,7 +88,7 @@ Common decision types:
 ```typescript
 const dump = orm.select('users').include('posts').include('posts.comments').dump();
 
-for (const w of dump.plan!.warnings) {
+for (const w of dump.plan?.warnings ?? []) {
   console.warn(w.type, w.message);
 }
 // performance  "Deep nesting may produce large intermediate result sets"

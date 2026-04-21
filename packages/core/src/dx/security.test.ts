@@ -286,6 +286,29 @@ describe('audit-commit-1 security', () => {
 		).rejects.toThrow(InvalidOperationError);
 	});
 
+	it('FIND-007: listAncestors rejects 1.5 as maxDepth (fractional)', async () => {
+		const adapter = createMockAdapter();
+		const orm = createOrm({ schema: testSchema, adapter });
+		// isSafeInteger rejects fractional values that isFinite would accept
+		await expect(
+			orm.listAncestors('categories', 1, {
+				parentId: 'parentId',
+				maxDepth: 1.5,
+			}),
+		).rejects.toThrow(InvalidOperationError);
+	});
+
+	it('FIND-007: listDescendants rejects 1.5 as maxDepth (fractional)', async () => {
+		const adapter = createMockAdapter();
+		const orm = createOrm({ schema: testSchema, adapter });
+		await expect(
+			orm.listDescendants('categories', 1, {
+				parentId: 'parentId',
+				maxDepth: 1.5,
+			}),
+		).rejects.toThrow(InvalidOperationError);
+	});
+
 	it('FIND-007: listAncestors accepts 50 as maxDepth (guard does not fire)', async () => {
 		const adapter = createMockAdapter();
 		const orm = createOrm({ schema: testSchema, adapter });

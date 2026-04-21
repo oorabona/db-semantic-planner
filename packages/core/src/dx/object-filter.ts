@@ -267,6 +267,11 @@ function convertOperatorObject(
 	return { kind: 'and', conditions } satisfies WhereAndIntent;
 }
 
+// Keys that must never appear in a filter object — they target prototype slots
+// and can poison object properties on older engines. Defined at module scope
+// so the Set is allocated once, not per call.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Convert an object filter to WhereIntent.
  *
@@ -291,8 +296,9 @@ function convertOperatorObject(
 export function objectToWhereIntent(
 	filter: WhereFilter<Record<string, unknown>>,
 ): WhereIntent {
-	// FIND-005: Reject prototype-poisoning keys before any processing
-	const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+	// FIND-005: Reject prototype-poisoning keys before any processing.
+	// Object.keys() already returns only own enumerable properties — the
+	// hasOwn check below was redundant and has been removed.
 	for (const key of Object.keys(filter)) {
 		if (FORBIDDEN_KEYS.has(key)) {
 			throw new InvalidOperationError(
@@ -300,7 +306,6 @@ export function objectToWhereIntent(
 				`Filter key not allowed: ${key}`,
 			);
 		}
-		if (!Object.hasOwn(filter, key)) continue;
 	}
 
 	const entries = Object.entries(filter);

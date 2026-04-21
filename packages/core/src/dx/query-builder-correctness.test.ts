@@ -5,7 +5,6 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, Dump } from '../adapter.js';
-import { AmbiguousRelationError } from './errors.js';
 import { createHookManager } from './hooks.js';
 import { createOrm } from './orm.js';
 import { ref, schema } from './schema.js';
@@ -234,6 +233,43 @@ describe('FIND-018: paginate() count query uses full query state', () => {
 			.paginate({ page: 1, perPage: 10, withCount: false });
 		expect(executeSpy).toHaveBeenCalledTimes(1);
 		expect(result.pagination.total).toBeUndefined();
+	});
+});
+
+describe('M-1 regression: paginate() count wraps GROUP BY as subquery', () => {
+	it('groupBy query: compile() called for base, execute() called with wrapped SQL', async () => {
+		// Setup: spy adapter that records execute() calls and their SQL
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		let executeCallCount = 0;
+		let countSql = '';
+		(adapter as unknown as { execute: ReturnType<typeof vi.fn> }).execute =
+			vi.fn(
+				async (compiled: { sql: string; parameters: readonly unknown[] }) => {
+					executeCallCount++;
+					if (executeCallCount === 1) {
+						// First call: the paginated data query
+						return [{ id: 1 }, { id: 2 }];
+					}
+					// Second call: the count query — should be the subquery-wrapped form
+					countSql = compiled.sql;
+					return [{ _count: 3 }]; // 3 distinct groups
+				},
+			);
+
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const result = await orm
+			.select('users')
+			.groupBy(['active'])
+			.paginate({ page: 1, perPage: 10, withCount: true });
+
+		// The count should be 3 (from the subquery-wrapped count), not the first group count
+		expect(result.pagination.total).toBe(3);
+		// The count SQL must wrap the base query as a subquery (not a plain GROUP BY count)
+		// Format: SELECT COUNT(*) AS "_count" FROM (base_sql) _count_subq
+		expect(countSql).toMatch(/^SELECT COUNT\(\*\) AS "_count" FROM \(/);
+		expect(countSql).toMatch(/\) _count_subq$/);
+		// execute() is called twice: once for data, once for wrapped count
+		expect(executeCallCount).toBe(2);
 	});
 });
 

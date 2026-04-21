@@ -1303,33 +1303,72 @@ export class QueryBuilderImpl<TResult = unknown>
 		let totalPages: number | undefined;
 
 		if (withCount) {
-			// FIND-018: Build the count from the FULL intent clone, stripping only
-			// limit, offset, and orderBy.  The original code copied only whereIntents,
-			// missing distinct, groupBy, having, joins, includes, and cursor scoping —
-			// causing wrong totals for queries using any of those features.
-			const countBuilder = this.clone() as unknown as QueryBuilderImpl<{
-				_count: number;
-			}>;
-			// Strip paging/ordering — irrelevant for counting
-			countBuilder.limitValue = undefined;
-			countBuilder.offsetValue = undefined;
-			countBuilder.orderByIntents.splice(0);
-			// Replace any custom select/aggregate with a single count aggregate
-			countBuilder.aggregates.splice(0, countBuilder.aggregates.length, {
-				function: 'count',
-				as: '_count',
-			});
-			// Clear includes — irrelevant for a count query and causes row-explosion
-			// when JOIN'd relations multiply rows (each join row would inflate count)
-			countBuilder.includes.splice(0);
-			countBuilder.recursiveIncludes.splice(0);
-			// Keep groupBy/distinct/joins/having: they constrain which rows are
-			// counted (a GROUP BY query counts per-group; caller receives the first
-			// row which is the number of distinct groups)
-			countBuilder.selectIntent = undefined;
+			// FIND-018 (M-1 fix): Build the count query correctly for all cases.
+			//
+			// Problem: with GROUP BY, a plain COUNT(*) returns one row per group —
+			// not a single scalar total. JOINs can similarly multiply rows.
+			// Fix: when groupBy or explicit joins are present, compile the base query
+			// as a subquery and wrap it with SELECT COUNT(*) FROM (...) _count_subq
+			// to always get a single scalar regardless of query shape.
+			//
+			// For simple queries (no groupBy, no joins), the direct COUNT(*) path
+			// is retained for efficiency.
+			const adapter = this.getConfiguredAdapter();
+			const compileOptions: { schemaName?: string; model: ModelIR } = {
+				model: this.model,
+			};
+			if (this.schemaName !== undefined) {
+				compileOptions.schemaName = this.schemaName;
+			}
 
-			const countResult = await countBuilder.all();
-			total = Number(countResult[0]?._count ?? 0);
+			const hasGroupBy = this.groupByFields.length > 0;
+			const hasJoins = this.joinIntents.length > 0;
+
+			if (hasGroupBy || hasJoins) {
+				// Subquery-wrap approach: compile the base query (no paging, no ordering,
+				// no includes) and wrap it with COUNT(*) to get the correct total.
+				const baseBuilder =
+					this.clone() as unknown as QueryBuilderImpl<TResult>;
+				baseBuilder.limitValue = undefined;
+				baseBuilder.offsetValue = undefined;
+				baseBuilder.orderByIntents.splice(0);
+				baseBuilder.includes.splice(0);
+				baseBuilder.recursiveIncludes.splice(0);
+				baseBuilder.aggregates.splice(0);
+				baseBuilder.selectIntent = undefined;
+
+				const basePlan = baseBuilder.plan();
+				const baseCompiled = adapter.compile(basePlan, compileOptions);
+
+				// Wrap the base SQL as a subquery to get the total row count.
+				const wrapSql = `SELECT COUNT(*) AS "_count" FROM (${baseCompiled.sql}) _count_subq`;
+				const wrapResult = (await adapter.execute({
+					sql: wrapSql,
+					parameters: baseCompiled.parameters,
+				})) as Array<{ _count: string | number }>;
+				total = Number(wrapResult[0]?._count ?? 0);
+			} else {
+				// Simple path: direct COUNT(*) query — correct for flat queries.
+				const countBuilder = this.clone() as unknown as QueryBuilderImpl<{
+					_count: number;
+				}>;
+				// Strip paging/ordering — irrelevant for counting
+				countBuilder.limitValue = undefined;
+				countBuilder.offsetValue = undefined;
+				countBuilder.orderByIntents.splice(0);
+				// Replace any custom select/aggregate with a single count aggregate
+				countBuilder.aggregates.splice(0, countBuilder.aggregates.length, {
+					function: 'count',
+					as: '_count',
+				});
+				// Clear includes — irrelevant for a count query
+				countBuilder.includes.splice(0);
+				countBuilder.recursiveIncludes.splice(0);
+				countBuilder.selectIntent = undefined;
+
+				const countResult = await countBuilder.all();
+				total = Number(countResult[0]?._count ?? 0);
+			}
 			totalPages = Math.ceil(total / perPage);
 		}
 

@@ -2,6 +2,14 @@
  * Transactions E2E Tests
  *
  * Tests transaction support: basic commit/rollback, nested, and schema-scoped.
+ *
+ * TODO (M-4): Migrate OrmInstanceInternal casts to tx.into(tx.tables.posts).
+ * Blocked: this test uses `createOrm({ model: blogModel })` with a raw ModelIR
+ * (not a typed `schema()`), so `tx` has type `OrmInstance<unknown>` and
+ * `tx.tables.posts` lacks static table types. Full migration requires either:
+ *   (a) switching to `createOrm({ schema: blogSchema })`, or
+ *   (b) accepting the weaker `InsertBuilder<unknown>` return type.
+ * Track in: follow-up issue for typed E2E test refactor.
  */
 
 import { createOrm } from '@dbsp/core';

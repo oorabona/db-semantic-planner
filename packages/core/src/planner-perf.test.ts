@@ -111,10 +111,15 @@ describe('plan() — frozen arrays via .slice() (FIND-051)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// FIND-052: hasAmbiguity flag replaces O(D) linear scan
+// FIND-052: isAmbiguous metadata flag on PlanReport
+// Note: the hasAmbiguity flag was removed during the senior-review fold-in.
+// No code path pushes a decision of type 'ambiguity' — the ambiguityDecisions
+// filter below always returns an empty array. These tests exist as regression
+// gates: if a future change introduces 'ambiguity' decisions or changes the
+// isAmbiguous metadata flag semantics, these tests will catch the regression.
 // ---------------------------------------------------------------------------
 
-describe('plan() — ambiguity detection via hasAmbiguity flag (FIND-052)', () => {
+describe('plan() — isAmbiguous metadata flag (FIND-052)', () => {
 	it('non-ambiguous query: isAmbiguous=false and no ambiguity decisions', () => {
 		const intent: QueryIntent = {
 			type: 'query',
