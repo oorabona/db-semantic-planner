@@ -67,8 +67,8 @@ describe('Q2: Products with approved FR AND EN images (CTE)', () => {
 			const dump = buildQ2Query(orm, 'acme').dump();
 
 			// CTE extraction should be triggered
-			expect(dump.plan.ctes).toBeDefined();
-			expect(dump.plan.ctes.length).toBeGreaterThanOrEqual(1);
+			expect(dump.plan!.ctes).toBeDefined();
+			expect(dump.plan!.ctes.length).toBeGreaterThanOrEqual(1);
 		});
 
 		it('should name CTE based on relation', async () => {
@@ -78,7 +78,7 @@ describe('Q2: Products with approved FR AND EN images (CTE)', () => {
 			const dump = buildQ2Query(orm, 'acme').dump();
 
 			// CTE should be named cte_product_images or similar
-			const cteNames = dump.plan.ctes.map((c) => c.name);
+			const cteNames = dump.plan!.ctes.map((c) => c.name);
 			expect(
 				cteNames.some(
 					(name) =>
@@ -122,7 +122,7 @@ describe('Q2: Products with approved FR AND EN images (CTE)', () => {
 			const dump = buildQ2Query(orm, 'acme').dump();
 
 			// Should have a decision about CTE extraction
-			expect(dump.plan.decisions).toContainEqual(
+			expect(dump.plan!.decisions).toContainEqual(
 				expect.objectContaining({
 					type: 'cte-extraction',
 				}),

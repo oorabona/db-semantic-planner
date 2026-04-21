@@ -334,7 +334,8 @@ export type { InferTables } from './schema-tables-types.js';
 // Set Operation Builder (UNION / INTERSECT / EXCEPT)
 export {
 	type SetOperationBuilder,
-	SetOperationBuilderImpl,
+	// SetOperationBuilderImpl is intentionally NOT exported — @internal implementation class.
+	// Consumers use the SetOperationBuilder interface returned by .union()/.intersect() etc.
 } from './set-operation-builder.js';
 // Subquery Builder (DX-012 Block 3)
 export {
@@ -407,7 +408,9 @@ export type {
 	OrderByRecord,
 	OrderBySpec,
 	OrmInstance,
-	OrmInstanceInternal,
+	// OrmInstanceInternal is intentionally NOT exported — @internal.
+	// Internal consumers cast via: `const internal = orm as OrmInstanceInternal<DB>`
+	// after importing OrmInstanceInternal directly from './dx/orm-instance-types.js'.
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,

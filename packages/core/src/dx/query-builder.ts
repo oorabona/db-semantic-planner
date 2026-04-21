@@ -192,8 +192,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	>;
 	// Overload: mixed columns (strings + expressions) → TResult
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<TResult>;
-	// Implementation
-	columns(columns: readonly ColumnSpec[]): QueryBuilder<unknown> {
+	// Implementation — cast to TResult to match the most general overload signature.
+	// The overloads above refine the type; the implementation signature is intentionally
+	// broad to satisfy all three overloads (TypeScript requires an assignable
+	// implementation signature).
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	columns(columns: readonly ColumnSpec[]): QueryBuilder<any> {
 		const builder = this.clone();
 
 		// Build columns array (direct ExpressionIntent format - NQL compatible)
@@ -224,7 +228,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			builder.selectIntent = { type: 'fields', fields };
 		}
 
-		return builder as QueryBuilder<unknown>;
+		// Cast is safe: the public overloads above guarantee the correct narrowed type.
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		return builder as QueryBuilder<any>;
 	}
 
 	coalesce<K extends keyof TResult & string, Alias extends string>(

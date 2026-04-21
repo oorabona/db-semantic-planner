@@ -5,6 +5,7 @@
  */
 
 import { createOrm } from '@dbsp/core';
+import type { OrmInstanceInternal } from '../../packages/core/src/dx/orm-instance-types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogModel,
@@ -53,7 +54,7 @@ describe('Transactions', () => {
 
 			// Act
 			await scoped.transaction(async (tx) => {
-				await tx
+				await (tx as unknown as OrmInstanceInternal)
 					.insert('posts')
 					.values({
 						title: 'Tx Post',
@@ -81,7 +82,7 @@ describe('Transactions', () => {
 			// Act
 			await expect(
 				scoped.transaction(async (tx) => {
-					await tx
+					await (tx as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Rollback Post',
@@ -125,7 +126,7 @@ describe('Transactions', () => {
 
 			// Outer with nested inner
 			await scoped.transaction(async (outer) => {
-				await outer
+				await (outer as unknown as OrmInstanceInternal)
 					.insert('posts')
 					.values({
 						title: 'Outer Post',
@@ -136,7 +137,7 @@ describe('Transactions', () => {
 					.execute();
 
 				await outer.transaction(async (inner) => {
-					await inner
+					await (inner as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Inner Post',
@@ -163,7 +164,7 @@ describe('Transactions', () => {
 
 			await expect(
 				scoped.transaction(async (outer) => {
-					await outer
+					await (outer as unknown as OrmInstanceInternal)
 						.insert('posts')
 						.values({
 							title: 'Will Rollback',
@@ -174,7 +175,7 @@ describe('Transactions', () => {
 						.execute();
 
 					await outer.transaction(async (inner) => {
-						await inner
+						await (inner as unknown as OrmInstanceInternal)
 							.insert('posts')
 							.values({
 								title: 'Inner Will Rollback',

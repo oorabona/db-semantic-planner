@@ -24,6 +24,7 @@ import {
 	UpsertBuilder,
 } from './mutation-builders.js';
 import { createOrm } from './orm.js';
+import type { OrmInstanceInternal } from './orm-instance-types.js';
 import { ref, schema } from './schema.js';
 import { createMockAdapter } from './test-utils.js';
 
@@ -45,7 +46,12 @@ const testSchema = schema({
 	},
 });
 
-const orm = createOrm({ adapter: createMockAdapter(), schema: testSchema });
+// Cast to OrmInstanceInternal to access string-based mutation methods used in error tests.
+// These are @internal APIs — external consumers use the typed entry points (into/modify/etc).
+const orm = createOrm({
+	adapter: createMockAdapter(),
+	schema: testSchema,
+}) as unknown as OrmInstanceInternal;
 
 /**
  * Helper to build base options without adapter (for requireAdapter tests).
@@ -306,7 +312,7 @@ describe('Mutation hook error chains', () => {
 
 		// Insert needs adapter.execute, which mock throws "Not implemented"
 		// But the hook fires before execute, so the hook error should propagate
-		const builder = ormWithHooks
+		const builder = (ormWithHooks as unknown as OrmInstanceInternal)
 			.insert('users')
 			.values({ name: 'Alice', email: 'alice@test.com', active: true });
 
@@ -324,7 +330,7 @@ describe('Mutation hook error chains', () => {
 			hooks: hookManager,
 		});
 
-		const builder = ormWithHooks
+		const builder = (ormWithHooks as unknown as OrmInstanceInternal)
 			.insert('users')
 			.values({ name: 'Alice', email: 'alice@test.com', active: true });
 

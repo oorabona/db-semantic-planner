@@ -709,36 +709,56 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Extract table name from TableRef metadata and delegate to string methods
 		// =====================================================================
 
-		into(tableRef: TableRef<any, any, any>): InsertBuilder {
+		into<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): InsertBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new InsertBuilder({ table: tableName as string, ...mutationOpts });
+			return new InsertBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as InsertBuilder<InferTableRow<TTable>>;
 		},
 
-		modify(tableRef: TableRef<any, any, any>): UpdateBuilder {
+		modify<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): UpdateBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new UpdateBuilder({ table: tableName as string, ...mutationOpts });
+			return new UpdateBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as UpdateBuilder<InferTableRow<TTable>>;
 		},
 
-		removeFrom(tableRef: TableRef<any, any, any>): DeleteBuilder {
+		removeFrom<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): DeleteBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new DeleteBuilder({ table: tableName as string, ...mutationOpts });
+			return new DeleteBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as DeleteBuilder<InferTableRow<TTable>>;
 		},
 
-		upsertInto(tableRef: TableRef<any, any, any>): UpsertBuilder {
+		upsertInto<TTable extends TableRef<any, any, any>>(
+			tableRef: TTable,
+		): UpsertBuilder<InferTableRow<TTable>> {
 			const tableName = tableRef[TABLE_META];
 			if (tableName === undefined) {
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
-			return new UpsertBuilder({ table: tableName as string, ...mutationOpts });
+			return new UpsertBuilder({
+				table: tableName as string,
+				...mutationOpts,
+			}) as UpsertBuilder<InferTableRow<TTable>>;
 		},
 
 		// =====================================================================
