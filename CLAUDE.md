@@ -145,11 +145,13 @@ The adapter compiles `PlanReport` into parameterized SQL strings using an intern
 For CLI/tooling that needs SQL compilation without a database connection:
 
 ```typescript
+import { createOrm, eq } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const adapter = createPgsqlCompileOnlyAdapter();
-const compiled = adapter.compile(planReport, { model, schemaName });
-// compiled.sql, compiled.parameters — no Pool needed
+const orm = createOrm({ schema: db, adapter });
+const { sql, params } = orm.select('users').where(eq('active', true)).dump();
+// sql, params — no Pool needed
 ```
 
 ## Schema Scoping API
@@ -183,7 +185,7 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 | `.storageSize()` | Returns total table size in bytes (`pg_total_relation_size`) |
 | `.alterColumn(col, options)` | ALTER COLUMN — options: `{ type?, using?, setNotNull?, setDefault?, dropDefault? }` |
 | `.indexes.create(options)` | CREATE INDEX — supports all methods: btree, gin, hnsw, bm25, etc. |
-| `.indexes.drop(name, options?)` | DROP INDEX — options: `{ ifExists?, cascade?, concurrently? }` |
+| `.indexes.drop(name, options?)` | DROP INDEX — options: `{ ifExists?, cascade?, concurrently?, schema? }` |
 | `.indexes.list(options?)` | List indexes — options: `{ namePattern? }` → `IndexInfo[]` |
 | `.indexes.exists(name)` | Returns `boolean` — whether index exists on this table |
 | `orm.ddl.dropIndex(name, options?)` | Global shortcut — drop by name without a table reference |
@@ -196,17 +198,18 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 |---------|-----|---------|
 | Expression primitives | `op()`, `fn()`, `ref()`, `param()`, `cast()`, `literal()`, `unary()`, `namedArg()` | `op('<=>', ref('vector'), cast(param(qv), 'vector'))` |
 | pgvector | `cosineDistance()`, `rawDistance()`, `l2Distance()`, `innerProduct()` | `cosineDistance('vector', qv).as('score')` |
-| ParadeDB | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
+| ParadeDB (low-level) | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
+| Full-text search | `fullTextSearch()`, `textScore()` | `fullTextSearch({ query, fields, tableAlias })` — preferred over `bm25Search`; see `docs/guides/how-to-use-full-text-search.md` |
 | PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
 | Manual JOIN | `.join(rel)` / `.join(table, { on, as, type })` — flat, non-hydrating | `orm.select('calls').join('caller')` / `.join('t', { on: eq(...), as: 'alias' })` |
 | DISTINCT ON | `.distinctOn('col1', 'col2')` | PostgreSQL DISTINCT ON |
 | Set operations | `.union()`, `.unionAll()`, `.intersect()`, `.except()` | `q1.union(q2).all()` |
-| IN subquery | `inSubquery('id', subquery('posts').select('userId'))` | WHERE id IN (SELECT ...) |
+| IN subquery (= ANY) | `inSubquery('id', subquery('posts').select('userId'))` | Compiled as `col = ANY (SELECT ...)` |
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
-| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md`, `docs/guides/how-to-use-schema-versioning.md` | |
+| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md`, `docs/guides/how-to-use-schema-versioning.md`, `docs/guides/how-to-understand-result-hydration.md` | |
 
 ## Observability
 

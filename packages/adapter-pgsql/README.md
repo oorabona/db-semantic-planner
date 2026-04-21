@@ -33,10 +33,13 @@ const rows = await orm.select('users').where(eq('active', true)).all();
 Compile SQL without a database connection — useful for CLI tooling, CI plan inspection, and testing:
 
 ```typescript
+import { createOrm, eq } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const adapter = createPgsqlCompileOnlyAdapter();
-const { sql, parameters } = adapter.compile(planReport, { model, schemaName });
+const orm = createOrm({ schema: db, adapter });
+const { sql, params } = orm.select('users').where(eq('active', true)).dump();
+// sql, params — no Pool needed
 ```
 
 ## Key features
