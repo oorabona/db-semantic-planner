@@ -222,12 +222,12 @@ export type ColumnTypeToTS<T extends GeneratedColumnType> = T extends
 							? unknown
 							: // PostgreSQL range types — no native Range<T> in TS; represented as string (e.g., "[2020-01-01,2020-12-31)")
 								T extends
-									| 'daterange'
-									| 'tstzrange'
-									| 'int4range'
-									| 'tsrange'
-									| 'int8range'
-									| 'numrange'
+										| 'daterange'
+										| 'tstzrange'
+										| 'int4range'
+										| 'tsrange'
+										| 'int8range'
+										| 'numrange'
 								? string
 								: never;
 
@@ -783,7 +783,6 @@ const SchemaColumnTypeSchema = v.picklist([
  * Foreign key reference schema
  */
 
-
 /**
  * Prototype-pollution-safe string key validator.
  *
@@ -809,19 +808,15 @@ const PROTO_POLLUTION_KEYS = ['__proto__', 'constructor', 'prototype'] as const;
 function safeRecord<TValue extends v.GenericSchema>(valueSchema: TValue) {
 	return v.pipe(
 		v.unknown(),
-		v.check(
-			(input) => {
-				if (typeof input !== 'object' || input === null) return true;
-				return !Object.keys(input).some((k) =>
-					(PROTO_POLLUTION_KEYS as readonly string[]).includes(k),
-				);
-			},
-			'Schema keys must not include prototype-pollution names (__proto__, constructor, prototype)',
-		),
+		v.check((input) => {
+			if (typeof input !== 'object' || input === null) return true;
+			return !Object.keys(input).some((k) =>
+				(PROTO_POLLUTION_KEYS as readonly string[]).includes(k),
+			);
+		}, 'Schema keys must not include prototype-pollution names (__proto__, constructor, prototype)'),
 		v.record(v.string(), valueSchema),
 	);
 }
-
 
 const ForeignKeyReferenceSchema = v.object({
 	table: v.string(),

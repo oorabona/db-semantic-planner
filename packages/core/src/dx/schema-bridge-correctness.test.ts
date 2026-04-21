@@ -7,8 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import {
 	buildModelFromSchema,
-	resolvedSchemaToGeneratedSchema,
 	type GeneratedSchema,
+	resolvedSchemaToGeneratedSchema,
 } from './schema-bridge.js';
 
 // ---------------------------------------------------------------------------
@@ -398,7 +398,9 @@ describe('FIND-026: sourceKey and targetKey threaded through buildRelationIR', (
 		const model = buildModelFromSchema(schema);
 		const relation = model.getRelation('posts.author');
 		expect(relation).toBeDefined();
-		expect((relation as unknown as Record<string, unknown>).targetKey).toBe('slug');
+		expect((relation as unknown as Record<string, unknown>).targetKey).toBe(
+			'slug',
+		);
 	});
 
 	it('should preserve sourceKey from hasMany relation in ModelIR', () => {
@@ -434,7 +436,9 @@ describe('FIND-026: sourceKey and targetKey threaded through buildRelationIR', (
 		const model = buildModelFromSchema(schema);
 		const relation = model.getRelation('users.posts');
 		expect(relation).toBeDefined();
-		expect((relation as unknown as Record<string, unknown>).sourceKey).toBe('userId');
+		expect((relation as unknown as Record<string, unknown>).sourceKey).toBe(
+			'userId',
+		);
 	});
 
 	it('should not set sourceKey/targetKey when not specified', () => {
@@ -493,7 +497,10 @@ describe('M-2: prototype-pollution keys rejected in column dict and indexes dict
 				fkAutoIndex: false,
 			},
 		};
-		const input = JSON.parse(JSON.stringify(baseInput)) as Record<string, unknown>;
+		const input = JSON.parse(JSON.stringify(baseInput)) as Record<
+			string,
+			unknown
+		>;
 
 		// Inject __proto__ as an own-property column key via JSON.parse
 		const tablesInput = input['tables'] as Record<string, unknown>;
@@ -528,7 +535,10 @@ describe('M-2: prototype-pollution keys rejected in column dict and indexes dict
 			},
 		};
 
-		const input = JSON.parse(JSON.stringify(baseInput)) as Record<string, unknown>;
+		const input = JSON.parse(JSON.stringify(baseInput)) as Record<
+			string,
+			unknown
+		>;
 		// indexes dict: map from table-name → IndexDefinition[]
 		// Inject __proto__ as a table-name key in the indexes dict
 		const indexesInput = JSON.parse(

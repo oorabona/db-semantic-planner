@@ -373,7 +373,6 @@ export function validateIdentifier(value: string, type: string): void {
 	}
 }
 
-
 export class UnsafeOperationError extends Error {
 	override readonly name = 'UnsafeOperationError' as const;
 

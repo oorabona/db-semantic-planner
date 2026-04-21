@@ -332,8 +332,8 @@ export {
 // DX-040-SURFACE: InferTables utility type for typed table refs
 export type { InferTables } from './schema-tables-types.js';
 // Set Operation Builder (UNION / INTERSECT / EXCEPT)
-export {
-	type SetOperationBuilder,
+export type {
+	SetOperationBuilder,
 	// SetOperationBuilderImpl is intentionally NOT exported — @internal implementation class.
 	// Consumers use the SetOperationBuilder interface returned by .union()/.intersect() etc.
 } from './set-operation-builder.js';

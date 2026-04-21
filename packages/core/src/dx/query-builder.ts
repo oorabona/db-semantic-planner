@@ -843,9 +843,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			throw new InvalidOperationError('byId', 'Unknown table');
 		}
 		const rawPk = table.primaryKey ?? [];
-		const knownPkCols = new Set(
-			typeof rawPk === 'string' ? [rawPk] : rawPk,
-		);
+		const knownPkCols = new Set(typeof rawPk === 'string' ? [rawPk] : rawPk);
 		// Composite PK - validate keys then build AND condition
 		const entries = Object.entries(value);
 		if (entries.length === 0) {
@@ -930,7 +928,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			...this.planOptionsOverride,
 		};
 
-		const planReport = this.planWithAmbiguityHandling(intentWithHints, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 
 		const compileOptions: {
 			schemaName?: string;
@@ -998,7 +999,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			}),
 			...this.planOptionsOverride,
 		};
-		const planReport = this.planWithAmbiguityHandling(intentWithHints, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 		const compileOptions: { schemaName?: string; model: ModelIR } = {
 			model: this.model,
 		};
@@ -1055,7 +1059,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			...this.planOptionsOverride,
 		};
 
-		const planReport = this.planWithAmbiguityHandling(intentWithHints, planOptions);
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 
 		const compileOptions: {
 			schemaName?: string;
@@ -1166,7 +1173,8 @@ export class QueryBuilderImpl<TResult = unknown>
 						// Apply defaultFilters AFTER hooks (INV-01: cannot be bypassed)
 						const intentAfterDefaults =
 							self.applyDefaultFiltersToIntent(hookIntent);
-						const intentWithHints = self.applyRelationHints(intentAfterDefaults);
+						const intentWithHints =
+							self.applyRelationHints(intentAfterDefaults);
 						const planOptions: PlanOptions = {
 							...(self.dialectCapabilities && {
 								dialectCapabilities: self.dialectCapabilities,
@@ -1484,9 +1492,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		 * Resolve the cursor key for an orderBy entry.
 		 * Returns null for expression-based entries without an alias (FIND-019).
 		 */
-		const resolveCursorKey = (
-			orderBy: OrderByIntent,
-		): string | null => {
+		const resolveCursorKey = (orderBy: OrderByIntent): string | null => {
 			if (typeof orderBy === 'string') return orderBy;
 			if (typeof orderBy.field === 'string') return orderBy.field;
 			// Expression-based: require explicit alias
@@ -2074,7 +2080,6 @@ export class QueryBuilderImpl<TResult = unknown>
 			throw error;
 		}
 	}
-
 
 	private handleAmbiguity(
 		error: AmbiguousPlanError,

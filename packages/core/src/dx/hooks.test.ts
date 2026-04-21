@@ -771,7 +771,10 @@ describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 			const orm = createOrm({ schema: testSchema, adapter, hooks });
 
 			// Act
-			await (orm as unknown as OrmInstanceInternal).insert('users').values({ name: 'John' }).execute();
+			await (orm as unknown as OrmInstanceInternal)
+				.insert('users')
+				.values({ name: 'John' })
+				.execute();
 
 			// Assert
 			expect(spy).toHaveBeenCalledOnce();
@@ -791,7 +794,10 @@ describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 			const rows = [{ name: 'Alice' }, { name: 'Bob' }];
 
 			// Act
-			await (orm as unknown as OrmInstanceInternal).insert('users').values(rows).execute();
+			await (orm as unknown as OrmInstanceInternal)
+				.insert('users')
+				.values(rows)
+				.execute();
 
 			// Assert
 			expect(spy).toHaveBeenCalledOnce();
@@ -815,7 +821,10 @@ describe('Mutation Hook Integration (SC-07 to SC-09)', () => {
 			const orm = createOrm({ schema: testSchema, adapter, hooks });
 
 			// Act
-			await (orm as unknown as OrmInstanceInternal).insert('users').values({ name: 'Alice' }).execute();
+			await (orm as unknown as OrmInstanceInternal)
+				.insert('users')
+				.values({ name: 'Alice' })
+				.execute();
 
 			// Assert — hook was called and context was modified
 			// The compile step uses the original intent (not the hook-modified ctx.data),
@@ -908,7 +917,10 @@ describe('Error Handling Integration (SC-10 to SC-12)', () => {
 
 			// Act & Assert
 			await expect(
-				(orm as unknown as OrmInstanceInternal).insert('users').values({ name: 'Alice' }).execute(),
+				(orm as unknown as OrmInstanceInternal)
+					.insert('users')
+					.values({ name: 'Alice' })
+					.execute(),
 			).rejects.toThrow('mutation hook failed');
 		});
 	});
@@ -1134,7 +1146,10 @@ describe('Security & Integration (SC-13 to SC-15)', () => {
 			const orm = createOrm({ schema: testSchema, adapter, hooks });
 
 			// Act
-			await (orm as unknown as OrmInstanceInternal).insert('users').values({ name: 'Alice' }).execute();
+			await (orm as unknown as OrmInstanceInternal)
+				.insert('users')
+				.values({ name: 'Alice' })
+				.execute();
 
 			// Assert
 			expect(receivedCtx).toBeDefined();
@@ -1189,7 +1204,10 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 			}));
 
 			// Act
-			await (orm as unknown as OrmInstanceInternal).insert('users').values(rows).execute();
+			await (orm as unknown as OrmInstanceInternal)
+				.insert('users')
+				.values(rows)
+				.execute();
 
 			// Assert — fires ONCE, not 100 times
 			expect(callCount.before).toBe(1);
@@ -1353,7 +1371,10 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 
 			// Act
 			await orm.transaction(async (tx) => {
-				await (tx as unknown as OrmInstanceInternal).insert('users').values({ name: 'Alice' }).execute();
+				await (tx as unknown as OrmInstanceInternal)
+					.insert('users')
+					.values({ name: 'Alice' })
+					.execute();
 			});
 
 			// Assert

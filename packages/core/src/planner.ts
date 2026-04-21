@@ -1547,7 +1547,9 @@ function extractCTEs(state: PlannerState, threshold: number): void {
 			// SPEC-002: Skip CTE extraction if the include strategy is 'json_agg'.
 			// json_agg uses a subquery that doesn't benefit from CTEs and would conflict.
 			// Other strategies (join, cte, separate) can still use CTE extraction.
-			const includeStrategyDecision = decisionByTableRelation.get(`${table}:${relation}`);
+			const includeStrategyDecision = decisionByTableRelation.get(
+				`${table}:${relation}`,
+			);
 			if (includeStrategyDecision?.choice === 'json_agg') {
 				// json_agg strategy uses its own subquery - CTE extraction not needed
 				continue;

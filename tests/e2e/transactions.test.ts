@@ -5,8 +5,8 @@
  */
 
 import { createOrm } from '@dbsp/core';
-import type { OrmInstanceInternal } from '../../packages/core/src/dx/orm-instance-types.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { OrmInstanceInternal } from '../../packages/core/src/dx/orm-instance-types.js';
 import {
 	blogModel,
 	closeTestDb,

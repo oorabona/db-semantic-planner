@@ -160,11 +160,17 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 		const intent: QueryIntent = {
 			type: 'query',
 			from: 'posts',
-			include: [{ relation: 'primaryCategory' }, { relation: 'secondaryCategory' }],
+			include: [
+				{ relation: 'primaryCategory' },
+				{ relation: 'secondaryCategory' },
+			],
 		};
 
 		// Enable CTEs with threshold=2 (default)
-		const report = plan(intent, cteSchema, { enableCTEs: true, cteThreshold: 2 });
+		const report = plan(intent, cteSchema, {
+			enableCTEs: true,
+			cteThreshold: 2,
+		});
 
 		// Decisions must include include-strategy entries for both relations
 		const incDecisions = report.decisions.filter(
@@ -185,7 +191,10 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 			include: [{ relation: 'primaryCategory' }],
 		};
 
-		const report = plan(intent, cteSchema, { enableCTEs: true, cteThreshold: 3 });
+		const report = plan(intent, cteSchema, {
+			enableCTEs: true,
+			cteThreshold: 3,
+		});
 
 		// No CTE extraction decision: only 1 access, threshold requires 3
 		const cteDecisions = report.decisions.filter(
@@ -199,7 +208,10 @@ describe('plan() — extractCTEs with pre-built Map+Set lookups (FIND-053)', () 
 		const intent: QueryIntent = {
 			type: 'query',
 			from: 'posts',
-			include: [{ relation: 'primaryCategory' }, { relation: 'secondaryCategory' }],
+			include: [
+				{ relation: 'primaryCategory' },
+				{ relation: 'secondaryCategory' },
+			],
 		};
 
 		const r1 = plan(intent, cteSchema, { enableCTEs: true, cteThreshold: 2 });
@@ -273,7 +285,9 @@ describe('plan() — golden regression: semantic output unchanged after perf fix
 
 		const types = report.decisions.map((d) => d.type);
 		// Must contain at least two include-strategy decisions
-		expect(types.filter((t) => t === 'include-strategy').length).toBeGreaterThanOrEqual(2);
+		expect(
+			types.filter((t) => t === 'include-strategy').length,
+		).toBeGreaterThanOrEqual(2);
 
 		// All decision arrays are frozen
 		expect(Object.isFrozen(report.decisions)).toBe(true);

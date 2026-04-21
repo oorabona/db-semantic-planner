@@ -24,7 +24,9 @@ function createMockAdapter(executeReturn: unknown[] = []) {
 	return {
 		capabilities: {},
 		compile: vi.fn(),
-		compileSubqueryInclude: vi.fn().mockReturnValue({ sql: 'SELECT 1', parameters: [] }),
+		compileSubqueryInclude: vi
+			.fn()
+			.mockReturnValue({ sql: 'SELECT 1', parameters: [] }),
 		execute: vi.fn().mockResolvedValue(executeReturn),
 		executeOne: vi.fn(),
 		executeOneOrThrow: vi.fn(),
@@ -34,7 +36,9 @@ function createMockAdapter(executeReturn: unknown[] = []) {
 		compileDelete: vi.fn(),
 		compileUpsert: vi.fn(),
 		compileUpsertFrom: vi.fn(),
-		compileRecursive: vi.fn().mockReturnValue({ sql: 'WITH RECURSIVE ...', parameters: [] }),
+		compileRecursive: vi
+			.fn()
+			.mockReturnValue({ sql: 'WITH RECURSIVE ...', parameters: [] }),
 		createDump: vi.fn(),
 		stream: vi.fn(),
 		introspect: vi.fn(),
@@ -234,8 +238,16 @@ describe('ResultHydrator — hydrateJoinIncludes (FIND-050)', () => {
 		}));
 
 		const report = makePlanReport([
-			{ type: 'include-strategy', choice: 'join', context: { relation: 'author' } },
-			{ type: 'include-strategy', choice: 'join', context: { relation: 'org' } },
+			{
+				type: 'include-strategy',
+				choice: 'join',
+				context: { relation: 'author' },
+			},
+			{
+				type: 'include-strategy',
+				choice: 'join',
+				context: { relation: 'org' },
+			},
 		]);
 
 		hydrator.hydrateJoinIncludes(rows, report);
@@ -269,7 +281,11 @@ describe('ResultHydrator — hydrateJoinIncludes (FIND-050)', () => {
 		];
 
 		const report = makePlanReport([
-			{ type: 'include-strategy', choice: 'join', context: { relation: 'author' } },
+			{
+				type: 'include-strategy',
+				choice: 'join',
+				context: { relation: 'author' },
+			},
 		]);
 
 		hydrator.hydrateJoinIncludes(rows, report);
@@ -285,7 +301,11 @@ describe('ResultHydrator — hydrateJoinIncludes (FIND-050)', () => {
 		const rows: any[] = [null, { id: 1, 'author.id': 5, 'author.name': 'bob' }];
 
 		const report = makePlanReport([
-			{ type: 'include-strategy', choice: 'join', context: { relation: 'author' } },
+			{
+				type: 'include-strategy',
+				choice: 'join',
+				context: { relation: 'author' },
+			},
 		]);
 
 		expect(() => hydrator.hydrateJoinIncludes(rows, report)).not.toThrow();
@@ -351,7 +371,12 @@ describe('ResultHydrator — composite key grouping via NUL separator (FIND-056)
 			{ userId: 1, orgId: 10, tag: 'go' },
 		];
 
-		await runCompositeKeyHydration(parents, children, ['userId', 'orgId'], ['userId', 'orgId']);
+		await runCompositeKeyHydration(
+			parents,
+			children,
+			['userId', 'orgId'],
+			['userId', 'orgId'],
+		);
 
 		expect(parents[0].tags).toHaveLength(2);
 		expect(parents[1].tags).toHaveLength(1);
@@ -407,7 +432,12 @@ describe('ResultHydrator — composite key grouping via NUL separator (FIND-056)
 			{ id1: 'αβγδ', id2: 'εζ', tag: 'greek-b' },
 		];
 
-		await runCompositeKeyHydration(parents, children, ['id1', 'id2'], ['id1', 'id2']);
+		await runCompositeKeyHydration(
+			parents,
+			children,
+			['id1', 'id2'],
+			['id1', 'id2'],
+		);
 
 		expect(parents[0].tags[0].tag).toBe('greek-a');
 		expect(parents[1].tags[0].tag).toBe('greek-b');
@@ -423,7 +453,12 @@ describe('ResultHydrator — composite key grouping via NUL separator (FIND-056)
 			{ userId: 7, orgId: 'globex', val: 'y' },
 		];
 
-		await runCompositeKeyHydration(parents, children, ['userId', 'orgId'], ['userId', 'orgId']);
+		await runCompositeKeyHydration(
+			parents,
+			children,
+			['userId', 'orgId'],
+			['userId', 'orgId'],
+		);
 
 		expect(parents[0].tags[0].val).toBe('x');
 		expect(parents[1].tags[0].val).toBe('y');

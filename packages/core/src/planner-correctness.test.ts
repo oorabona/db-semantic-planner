@@ -11,19 +11,19 @@
  * would cause it to fail.
  */
 
-import type { QueryIntent } from './index.js';
 import { describe, expect, it } from 'vitest';
 import {
 	createDialectCapabilities,
 	POSTGRESQL_CAPABILITIES,
 } from './dialects/index.js';
-import { plan, UnsupportedStrategyError } from './planner.js';
 import { InvalidOperationError } from './dx/errors.js';
-import { not, inSubquery } from './dx/filters.js';
+import { inSubquery, not } from './dx/filters.js';
+import { createOrm } from './dx/index.js';
 import { ref, schema } from './dx/schema.js';
 import { subquery } from './dx/subquery-builder.js';
-import { createOrm } from './dx/index.js';
 import { createMockAdapter } from './dx/test-utils.js';
+import type { QueryIntent } from './index.js';
+import { plan, UnsupportedStrategyError } from './planner.js';
 
 // ============================================================================
 // Dialect fixtures
@@ -249,7 +249,9 @@ describe('FIND-014: include.limit with join strategy throws InvalidOperationErro
 			from: 'users',
 			include: [{ relation: 'posts', join: 'inner', limit: 5 }],
 		};
-		expect(() => plan(intent, simpleSchema.model)).toThrow(InvalidOperationError);
+		expect(() => plan(intent, simpleSchema.model)).toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('include.limit with explicit join:left throws InvalidOperationError', () => {
@@ -258,7 +260,9 @@ describe('FIND-014: include.limit with join strategy throws InvalidOperationErro
 			from: 'users',
 			include: [{ relation: 'posts', join: 'left', limit: 3 }],
 		};
-		expect(() => plan(intent, simpleSchema.model)).toThrow(InvalidOperationError);
+		expect(() => plan(intent, simpleSchema.model)).toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('error message mentions join strategy and limit constraint', () => {
@@ -267,7 +271,9 @@ describe('FIND-014: include.limit with join strategy throws InvalidOperationErro
 			from: 'users',
 			include: [{ relation: 'posts', join: 'inner', limit: 5 }],
 		};
-		expect(() => plan(intent, simpleSchema.model)).toThrow(/join.*limit|limit.*join/i);
+		expect(() => plan(intent, simpleSchema.model)).toThrow(
+			/join.*limit|limit.*join/i,
+		);
 	});
 
 	it('include.limit with auto selection that falls back to join (no lateral/json_agg) throws', () => {
@@ -373,7 +379,9 @@ describe('FIND-015: Lenient ambiguity resolution is alphabetically deterministic
 		expect(warning).toBeDefined();
 		// authoredPosts < zebraPosts alphabetically → must be chosen
 		expect(warning?.message).toContain('authoredPosts');
-		expect(warning?.message).not.toMatch(/^.*zebra.*was automatically resolved/);
+		expect(warning?.message).not.toMatch(
+			/^.*zebra.*was automatically resolved/,
+		);
 	});
 
 	it('lenient mode picks same relation when definition order is reversed', () => {

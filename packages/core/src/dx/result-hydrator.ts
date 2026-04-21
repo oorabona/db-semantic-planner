@@ -131,7 +131,8 @@ export class ResultHydrator<TResult = unknown> {
 				// then flattens it; a double for-loop uses a single allocation.
 				const allChildren: Record<string, unknown>[] = [];
 				for (const arr of childrenByParentId.values()) {
-					for (const item of arr) allChildren.push(item as Record<string, unknown>);
+					for (const item of arr)
+						allChildren.push(item as Record<string, unknown>);
 				}
 				if (allChildren.length > 0) {
 					await this.hydrateIncludes(
@@ -174,7 +175,11 @@ export class ResultHydrator<TResult = unknown> {
 		// Assumption: all rows share the same projection (fixed SELECT list) — safe for
 		// SQL queries where the column set is determined at compile time.
 		// Guard: if a key from the cache is absent on a given row, it is silently skipped.
-		type JoinInfo = { relation: string; prefix: string; cachedKeys: string[] | null };
+		type JoinInfo = {
+			relation: string;
+			prefix: string;
+			cachedKeys: string[] | null;
+		};
 		const joinInfosWithCache: JoinInfo[] = joinInfos.map((info) => ({
 			...info,
 			cachedKeys: null,
