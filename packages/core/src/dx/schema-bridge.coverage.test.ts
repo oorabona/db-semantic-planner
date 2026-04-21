@@ -717,7 +717,7 @@ describe('schema-bridge coverage', () => {
 		it('should convert ResolvedSchema to GeneratedSchema', () => {
 			const resolvedSchema = {
 				tables: {
-					users: { id: { type: 'time' } }, // ResolvedSchema-only type
+					users: { id: { type: 'time' } }, // valid type in both resolved and generated
 				},
 				relations: {},
 				hints: {},
@@ -730,8 +730,8 @@ describe('schema-bridge coverage', () => {
 			};
 			const result = normalizeSchema(resolvedSchema);
 			expect(result).toBeDefined();
-			// time should be converted
-			expect(result.tables.users?.id?.type).not.toBe('time');
+			// time is preserved as-is (not downgraded to timestamp)
+			expect(result.tables.users?.id?.type).toBe('time');
 		});
 
 		it('should throw if ResolvedSchema conversion fails', () => {
@@ -780,9 +780,9 @@ describe('schema-bridge coverage', () => {
 			const result = resolvedSchemaToGeneratedSchema(resolvedSchema);
 			expect(result.success).toBe(true);
 			if (result.success) {
-				// time -> timestamp, jsonb -> json
-				expect(result.schema.tables.test?.col_time?.type).toBe('timestamp');
-				expect(result.schema.tables.test?.col_jsonb?.type).toBe('json');
+				// time and jsonb are preserved as-is (not downgraded)
+				expect(result.schema.tables.test?.col_time?.type).toBe('time');
+				expect(result.schema.tables.test?.col_jsonb?.type).toBe('jsonb');
 			}
 		});
 
@@ -1612,11 +1612,10 @@ describe('schema-bridge coverage', () => {
 				expect(result.schema.tables.allTypes?.g?.type).toBe('boolean');
 				expect(result.schema.tables.allTypes?.h?.type).toBe('timestamp');
 				expect(result.schema.tables.allTypes?.i?.type).toBe('date');
-				// time → timestamp
-				expect(result.schema.tables.allTypes?.j?.type).toBe('timestamp');
+				// time and jsonb are preserved as-is (not downgraded)
+				expect(result.schema.tables.allTypes?.j?.type).toBe('time');
 				expect(result.schema.tables.allTypes?.k?.type).toBe('json');
-				// jsonb → json
-				expect(result.schema.tables.allTypes?.l?.type).toBe('json');
+				expect(result.schema.tables.allTypes?.l?.type).toBe('jsonb');
 				expect(result.schema.tables.allTypes?.m?.type).toBe('daterange');
 				expect(result.schema.tables.allTypes?.n?.type).toBe('tstzrange');
 				expect(result.schema.tables.allTypes?.o?.type).toBe('int4range');

@@ -565,9 +565,9 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 
 			expect(result.success).toBe(true);
 			if (result.success) {
-				// 'time' maps to 'timestamp', 'jsonb' maps to 'json'
-				expect(result.schema.tables.test!.timeCol!.type).toBe('timestamp');
-				expect(result.schema.tables.test!.jsonbCol!.type).toBe('json');
+				// 'time' and 'jsonb' are preserved as-is (not downgraded)
+				expect(result.schema.tables.test!.timeCol!.type).toBe('time');
+				expect(result.schema.tables.test!.jsonbCol!.type).toBe('jsonb');
 			}
 		});
 
@@ -1013,9 +1013,9 @@ describe('normalizeSchema (DX-100)', () => {
 			},
 		};
 		const result = normalizeSchema(resolved);
-		// Should have been converted
-		expect(result.tables.events!.eventTime!.type).toBe('timestamp'); // time -> timestamp
-		expect(result.tables.events!.data!.type).toBe('json'); // jsonb -> json
+		// Should have been converted (time and jsonb are preserved as-is)
+		expect(result.tables.events!.eventTime!.type).toBe('time');
+		expect(result.tables.events!.data!.type).toBe('jsonb');
 	});
 
 	it('should throw for invalid schema structure', async () => {
