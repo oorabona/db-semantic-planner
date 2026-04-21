@@ -239,14 +239,14 @@ function levenshteinDistance(a: string, b: string): number {
  *
  * @example
  * ```typescript
- * throw new RelationNotFoundError({
+ * const err = new RelationNotFoundError({
  *   table: 'users',
  *   requested: 'comment',
  *   available: ['posts', 'profile', 'comments'],
  * });
- * // Error: Relation 'comment' not found on table 'users'.
- * // Available relations: posts, profile, comments
- * // Did you mean 'comments'?
+ * // err.message    === 'Relation not found'
+ * // err.available  === ['posts', 'profile', 'comments']
+ * // err.suggestion === 'comments'
  * ```
  */
 export class RelationNotFoundError extends Error {
@@ -404,13 +404,13 @@ export class UnsafeOperationError extends Error {
  *
  * @example
  * ```typescript
- * throw new TableNotFoundError({
+ * const err = new TableNotFoundError({
  *   requested: 'usrs',
  *   available: ['users', 'posts', 'comments'],
  * });
- * // Error: Table 'usrs' not found in schema.
- * // Available tables: users, posts, comments
- * // Did you mean 'users'?
+ * // err.message    === 'Table not found'
+ * // err.available  === ['users', 'posts', 'comments']
+ * // err.suggestion === 'users'
  * ```
  */
 export class TableNotFoundError extends Error {
@@ -463,14 +463,14 @@ export class TableNotFoundError extends Error {
  *
  * @example
  * ```typescript
- * throw new ColumnNotFoundError({
+ * const err = new ColumnNotFoundError({
  *   table: 'users',
  *   requested: 'emial',
  *   available: ['id', 'email', 'name', 'createdAt'],
  * });
- * // Error: Column 'emial' not found on table 'users'.
- * // Available columns: id, email, name, createdAt
- * // Did you mean 'email'?
+ * // err.message    === 'Column not found'
+ * // err.available  === ['id', 'email', 'name', 'createdAt']
+ * // err.suggestion === 'email'
  * ```
  */
 export class ColumnNotFoundError extends Error {

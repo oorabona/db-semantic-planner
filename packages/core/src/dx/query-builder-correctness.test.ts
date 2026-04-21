@@ -204,3 +204,74 @@ describe("FIND-020: backward cursor inverts ORDER BY and reverses result", () =>
 		expect(ids).toEqual([51, 52, 53]);
 	});
 });
+
+describe("M-1 regression: backward cursorPaginate returns correct nextCursor/prevCursor", () => {
+	it("backward page with hasMore=true: nextCursor encodes highest row, prevCursor encodes lowest row", async () => {
+		// ASC sort, cursor=50 (backward), limit=4.
+		// DB returns limit+1=5 rows (inverted ORDER BY DESC): [49,48,47,46,45].
+		// hasMore=true (5 > 4), sliced=[49,48,47,46], data (reversed)=[46,47,48,49].
+		// nextCursor MUST encode row 49 (highest/forward-most).
+		// prevCursor MUST encode row 46 (lowest/backward-most).
+		// The pre-fix bug had these two swapped.
+		const dbRows = [{ id: 49 }, { id: 48 }, { id: 47 }, { id: 46 }, { id: 45 }]; // 5 rows for limit=4
+		const adapter = createSpyAdapter(dbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor50 = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const result = await orm
+			.select("users")
+			.orderBy("id", "asc")
+			.cursorPaginate({ cursor: cursor50, limit: 4, direction: "backward" });
+
+		expect(result.data).toHaveLength(4);
+		expect(result.hasPrevPage).toBe(true);
+
+		// nextCursor must encode the highest id in data (49) — forward re-entry point
+		expect(result.nextCursor).not.toBeNull();
+		const nextDecoded = JSON.parse(Buffer.from(result.nextCursor!, "base64").toString("utf-8")) as { id: number };
+		expect(nextDecoded.id).toBe(49);
+
+		// prevCursor must encode the lowest id in data (46) — backward extension point
+		expect(result.prevCursor).not.toBeNull();
+		const prevDecoded = JSON.parse(Buffer.from(result.prevCursor!, "base64").toString("utf-8")) as { id: number };
+		expect(prevDecoded.id).toBe(46);
+	});
+
+	it("backward page with hasMore=true: nextCursor > prevCursor (no inversion)", async () => {
+		// Secondary regression gate: after the swap fix, nextCursor must always encode
+		// a value >= prevCursor for ASC sort. If they are swapped, nextDecoded.id < prevDecoded.id.
+		const dbRows = [{ id: 44 }, { id: 43 }, { id: 42 }, { id: 41 }, { id: 40 }]; // 5 rows for limit=4
+		const adapter = createSpyAdapter(dbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor45 = Buffer.from(JSON.stringify({ id: 45 }), "utf-8").toString("base64");
+		const result = await orm
+			.select("users")
+			.orderBy("id", "asc")
+			.cursorPaginate({ cursor: cursor45, limit: 4, direction: "backward" });
+
+		expect(result.nextCursor).not.toBeNull();
+		expect(result.prevCursor).not.toBeNull();
+		const nextId = (JSON.parse(Buffer.from(result.nextCursor!, "base64").toString("utf-8")) as { id: number }).id;
+		const prevId = (JSON.parse(Buffer.from(result.prevCursor!, "base64").toString("utf-8")) as { id: number }).id;
+		// For ASC sort, nextCursor (forward-most) must be >= prevCursor (backward-most)
+		expect(nextId).toBeGreaterThanOrEqual(prevId);
+	});
+
+	it("forward-then-backward round-trip: prevCursor from forward page encodes first row", async () => {
+		// Forward page: data=[51,52,53], hasMore=true (extra row 54 present)
+		const forwardDbRows = [{ id: 51 }, { id: 52 }, { id: 53 }, { id: 54 }]; // 4 rows for limit=3
+		const adapter = createSpyAdapter(forwardDbRows);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const cursor50 = Buffer.from(JSON.stringify({ id: 50 }), "utf-8").toString("base64");
+		const forwardResult = await orm
+			.select("users")
+			.orderBy("id", "asc")
+			.cursorPaginate({ cursor: cursor50, limit: 3, direction: "forward" });
+
+		// prevCursor should encode the first row of the forward page (51)
+		expect(forwardResult.prevCursor).not.toBeNull();
+		const prevDecoded = JSON.parse(
+			Buffer.from(forwardResult.prevCursor!, "base64").toString("utf-8"),
+		) as { id: number };
+		expect(prevDecoded.id).toBe(51);
+	});
+});

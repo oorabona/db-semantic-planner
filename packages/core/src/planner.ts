@@ -242,9 +242,6 @@ interface PlannerState {
 	decisionCounters: Record<DecisionType, number>;
 	relationAccessCounts: Map<string, string[]>; // relation path -> intent paths
 	visitedIncludes: Set<string>; // For circular detection
-	/** PERF (FIND-052): cached flag — set to true whenever an ambiguity decision is pushed,
-	 *  replacing the O(D) linear scan of state.decisions at plan() exit. */
-	hasAmbiguity: boolean;
 }
 
 // ============================================================================
@@ -277,7 +274,6 @@ export function plan(
 		},
 		relationAccessCounts: new Map(),
 		visitedIncludes: new Set(),
-		hasAmbiguity: false, // PERF (FIND-052): set to true when an ambiguity decision is pushed
 	};
 
 	const opts: Required<PlanOptions> = {
@@ -338,16 +334,11 @@ export function plan(
 
 	const planningTimeMs = performance.now() - startTime;
 
-	// PERF (FIND-052): use the hasAmbiguity flag instead of O(D) linear scan.
-	// The flag is set to true wherever an ambiguity decision is pushed to state.decisions.
 	// PERF (FIND-051): use .slice() instead of spread ([...arr]) — avoids the extra
 	// iterable-protocol overhead; semantically identical for plain arrays.
-	let ambiguousDecision: PlanDecision | undefined;
-	if (state.hasAmbiguity) {
-		ambiguousDecision = state.decisions.find(
-			(d) => d.type === 'ambiguity' && d.choice === 'unresolved',
-		);
-	}
+	const ambiguousDecision = state.decisions.find(
+		(d) => d.type === 'ambiguity' && d.choice === 'unresolved',
+	);
 
 	const metadata: PlanReport['metadata'] = ambiguousDecision
 		? Object.freeze({
@@ -416,7 +407,6 @@ export function planRecursive(
 		},
 		relationAccessCounts: new Map(),
 		visitedIncludes: new Set(),
-		hasAmbiguity: false,
 	};
 
 	// Validate that start table exists

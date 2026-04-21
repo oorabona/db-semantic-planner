@@ -472,3 +472,93 @@ describe('FIND-026: sourceKey and targetKey threaded through buildRelationIR', (
 		expect('targetKey' in relation).toBe(false);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// M-2 regression: safeRecord applied to column-dict and indexes-dict
+// ---------------------------------------------------------------------------
+
+describe('M-2: prototype-pollution keys rejected in column dict and indexes dict', () => {
+	it('column dict: __proto__ key injected via JSON.parse is rejected by Valibot', () => {
+		// JSON.parse with the string '{"__proto__": ...}' creates an object whose
+		// Object.keys() includes "__proto__" as an own-property — safeRecord must catch it
+		// before Valibot iterates entries and potentially writes into the prototype chain.
+		const baseInput = {
+			tables: { users: { id: { type: 'uuid', primaryKey: true } } },
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+				fkAutoIndex: false,
+			},
+		};
+		const input = JSON.parse(JSON.stringify(baseInput)) as Record<string, unknown>;
+
+		// Inject __proto__ as an own-property column key via JSON.parse
+		const tablesInput = input['tables'] as Record<string, unknown>;
+		const usersTable = JSON.parse(
+			'{"id": {"type": "uuid"}, "__proto__": {"type": "integer"}}',
+		) as Record<string, unknown>;
+		tablesInput['users'] = usersTable;
+
+		// Verify the injection produced a true own-property (not inherited)
+		expect(Object.keys(usersTable)).toContain('__proto__');
+
+		const result = resolvedSchemaToGeneratedSchema(input);
+		// The safeRecord wrapper must reject this input — success must be false
+		expect(result.success).toBe(false);
+	});
+
+	it('indexes dict: __proto__ key injected via JSON.parse is rejected by Valibot', () => {
+		// Inject __proto__ as an own-property index table-name key at the indexes level
+		const baseInput = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+				fkAutoIndex: false,
+			},
+		};
+
+		const input = JSON.parse(JSON.stringify(baseInput)) as Record<string, unknown>;
+		// indexes dict: map from table-name → IndexDefinition[]
+		// Inject __proto__ as a table-name key in the indexes dict
+		const indexesInput = JSON.parse(
+			'{"__proto__": [{"name": "idx_evil", "columns": ["id"], "method": "btree"}]}',
+		) as Record<string, unknown>;
+		input['indexes'] = indexesInput;
+
+		const result = resolvedSchemaToGeneratedSchema(input);
+		// safeRecord on IndexesDefinitionSchema must reject the __proto__ key
+		expect(result.success).toBe(false);
+	});
+
+	it('valid column dict with normal keys passes validation', () => {
+		// Control test: no pollution keys → must succeed
+		const result = resolvedSchemaToGeneratedSchema({
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					name: { type: 'text' },
+				},
+			},
+			relations: {},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+				fkAutoIndex: false,
+			},
+		});
+		expect(result.success).toBe(true);
+	});
+});

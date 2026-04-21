@@ -287,7 +287,7 @@ logger.info('Query executed', {
   params: redactParams(dump.params, {
     patterns: ['email', 'password', 'token', 'secret'],
   }),
-  plan: dump.plan.decisions,
+  plan: dump.plan!.decisions,
   correlationId: dump.meta?.correlationId,
 });
 ```

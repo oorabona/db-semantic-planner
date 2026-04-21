@@ -1460,9 +1460,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		return {
 			data,
-			nextCursor: direction === 'forward' ? nextCursor : prevCursor,
+			nextCursor,
 			prevCursor:
-				direction === 'forward' ? (cursor ? prevCursor : null) : nextCursor,
+				direction === 'forward' ? (cursor ? prevCursor : null) : prevCursor,
 			hasNextPage: direction === 'forward' ? hasMore : cursor !== null,
 			hasPrevPage: direction === 'forward' ? cursor !== null : hasMore,
 		};

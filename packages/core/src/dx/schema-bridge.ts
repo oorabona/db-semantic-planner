@@ -851,7 +851,7 @@ const ColumnDefinitionSchema = v.object({
 /**
  * Table definition schema - flat format (column name -> column def).
  */
-const FlatTableDefinitionSchema = v.record(v.string(), ColumnDefinitionSchema);
+const FlatTableDefinitionSchema = safeRecord(ColumnDefinitionSchema);
 
 /**
  * Table definition with config - supports composite primary keys.
@@ -974,10 +974,7 @@ const IndexDefinitionSchema = v.object({
 /**
  * Indexes definition schema - mapping table name to array of indexes
  */
-const IndexesDefinitionSchema = v.record(
-	v.string(),
-	v.array(IndexDefinitionSchema),
-);
+const IndexesDefinitionSchema = safeRecord(v.array(IndexDefinitionSchema));
 
 /**
  * Complete ResolvedSchema validation schema
