@@ -163,10 +163,16 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 		const client = await pool.connect();
 		try {
 			await client.query(`SET search_path TO "${S2_SCHEMA}"`);
-			await client.query(
-				`INSERT INTO items (fk_id) VALUES (1) ON CONFLICT DO NOTHING`,
-			);
-			await client.query(`SET search_path TO public`);
+			try {
+				await client.query(
+					`INSERT INTO items (fk_id) VALUES (1) ON CONFLICT DO NOTHING`,
+				);
+			} finally {
+				// Reset schema even if INSERT threw — otherwise the connection
+				// returns to the pool with the overridden search_path and
+				// leaks state into subsequent test acquirers.
+				await client.query(`SET search_path TO public`);
+			}
 		} finally {
 			client.release();
 		}
