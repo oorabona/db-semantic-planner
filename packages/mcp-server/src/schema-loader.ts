@@ -58,7 +58,8 @@ export interface SchemaLoaderResult {
 	/**
 	 * The canonical allowed roots used during path validation.
 	 * Consumers can use this to log how many roots were checked without
-	 * re-running validation. Empty array means cwd was used as the default root.
+	 * re-running validation. Always non-empty — falls back to [process.cwd()]
+	 * when no allowedRoots are provided (see validateAllowedRoots()).
 	 */
 	canonicalRoots: string[];
 }
