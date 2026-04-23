@@ -1637,8 +1637,15 @@ export class QueryBuilderImpl<TResult = unknown>
 	/** @internal — called by pagination-impl and stream-impl */
 	clone(): QueryBuilderImpl<TResult> {
 		const builder = new QueryBuilderImpl<TResult>(
-			// Pass a patched ctx with the current (potentially-mutated) planOptionsOverride
-			{ ...this.ctx, planOptionsOverride: this.planOptionsOverride },
+			// Shallow-clone planOptionsOverride into ctx so both ctx.planOptionsOverride
+			// and this.planOptionsOverride (set by the constructor from ctx) reference
+			// the same new object — no dual-state divergence.
+			{
+				...this.ctx,
+				...(this.planOptionsOverride !== undefined
+					? { planOptionsOverride: { ...this.planOptionsOverride } }
+					: {}),
+			},
 			this.from,
 			{ ...this.relationHints },
 		);
@@ -1658,9 +1665,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		builder.strictModeOverride = this.strictModeOverride;
 		builder.limitValue = this.limitValue;
 		builder.offsetValue = this.offsetValue;
-		builder.planOptionsOverride = this.planOptionsOverride
-			? { ...this.planOptionsOverride }
-			: undefined;
+		// planOptionsOverride already shallow-cloned via ctx spread above; no separate assignment needed.
 		builder.lockIntent = this.lockIntent;
 		builder.joinIntents.push(...this.joinIntents);
 		if (this.batchValuesSource) {

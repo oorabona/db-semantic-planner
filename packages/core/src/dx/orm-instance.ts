@@ -590,8 +590,12 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 			const nodeIdCol = options.nodeId ?? 'id';
 
+			// Hierarchy helpers historically did NOT propagate inTransaction. Preserve that behavior.
+			const { inTransaction: _ignored, ...hierarchyCtxBase } = queryCtx;
+			const hierarchyCtx: QueryBuilderContext = hierarchyCtxBase;
+
 			const builder = new QueryBuilderImpl<TResult>(
-				queryCtx,
+				hierarchyCtx,
 				table,
 				relationHints,
 			);
@@ -662,8 +666,12 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 
 			const nodeIdCol = options.nodeId ?? 'id';
 
+			// Hierarchy helpers historically did NOT propagate inTransaction. Preserve that behavior.
+			const { inTransaction: _ignored, ...hierarchyCtxBase } = queryCtx;
+			const hierarchyCtx: QueryBuilderContext = hierarchyCtxBase;
+
 			const builder = new QueryBuilderImpl<TResult>(
-				queryCtx,
+				hierarchyCtx,
 				table,
 				relationHints,
 			);
