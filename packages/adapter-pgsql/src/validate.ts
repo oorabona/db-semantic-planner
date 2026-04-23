@@ -140,6 +140,25 @@ export class InvalidIdentifierError extends Error {
 // Validation Functions
 // ============================================================================
 
+// ────────────────────────────────────────────────────────────────────
+// NAMEDATALEN and character-length bookkeeping
+//
+// PostgreSQL caps identifier/role/collation names at NAMEDATALEN-1 bytes
+// (63 bytes in the default build). Two length-check styles coexist in
+// this file for historical reasons:
+//
+//   • `validateIdentifier()` uses `name.length > 63` (UTF-16 code units
+//     as JavaScript counts them → effectively character count).
+//   • `quoteRoleName()` / `validateCollationName()` use
+//     `Buffer.byteLength(name, 'utf8') > 63` (actual byte count).
+//
+// Both variants sit *after* an ASCII-only allowlist regex that already
+// rejects any multi-byte character, so every accepted name has
+// `.length === Buffer.byteLength(name, 'utf8')` and the two checks are
+// equivalent in practice. The asymmetry is intentional and safe; do
+// not collapse either style without also widening the upstream regex.
+// ────────────────────────────────────────────────────────────────────
+
 /**
  * Validate that a string is a safe SQL identifier.
  *
@@ -400,11 +419,14 @@ export function validateExtensionName(
  * `en-US-x-icu`, `C.UTF-8`, `C`). They must not contain injection vectors.
  *
  * Allowed: letter or underscore start, then letters, digits, underscore,
- *          hyphen, dot (`[a-zA-Z_][a-zA-Z0-9_.-]*`)
+ *          hyphen, dot, and an optional trailing `@modifier` (1-4 alphanumeric
+ *          characters, e.g. `@euro`, `@latin9`).
+ *          Pattern: `[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?`
  * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted
- *            strings ($$), whitespace, NUL byte, backslash
+ *            strings ($), whitespace, NUL byte, backslash, bare `@` or
+ *            `@` with non-alphanumeric / too-long modifier
  *
- * @param name    The collation name to validate (e.g. `en_US.utf8`)
+ * @param name    The collation name to validate (e.g. `en_US.utf8`, `de_DE.utf8@euro`)
  * @param context Human-readable context label for the error message
  * @throws InvalidIdentifierError if the name fails validation
  */
@@ -521,12 +543,15 @@ export function validateCollationName(
 	}
 
 	// Final allowlist: must start with letter or underscore, then allow
-	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8)
-	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*$/.test(name)) {
+	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8).
+	// An optional trailing @modifier (1-4 alphanumeric chars) is also accepted,
+	// e.g. de_DE.utf8@euro, en_US.utf8@latin9. Bare @ or non-alphanumeric modifiers
+	// are rejected. Must match: [a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?
+	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?$/.test(name)) {
 		throw new InvalidIdentifierError(
 			name,
 			context,
-			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed after the initial letter/underscore)',
+			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed; optional @modifier must be 1-4 alphanumeric characters, e.g. @euro)',
 		);
 	}
 }

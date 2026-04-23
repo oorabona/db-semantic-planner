@@ -7,6 +7,7 @@ import {
 	InvalidIdentifierError,
 	isReservedKeyword,
 	sanitizeForDisplay,
+	validateCollationName,
 	validateIdentifier,
 	validateIdentifiers,
 	validateQualifiedIdentifier,
@@ -278,6 +279,38 @@ describe('Identifier Validation', () => {
 			expect(error.message).toBe(
 				'Invalid column identifier "bad-value": test reason',
 			);
+		});
+	});
+
+	describe('validateCollationName', () => {
+		it('accepts collation with @euro modifier', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@euro', 'collation'),
+			).not.toThrow();
+		});
+
+		it('accepts collation without modifier (no regression)', () => {
+			expect(() =>
+				validateCollationName('en_US.utf8', 'collation'),
+			).not.toThrow();
+		});
+
+		it('rejects bare @ with no modifier', () => {
+			expect(() => validateCollationName('de_DE.utf8@', 'collation')).toThrow(
+				InvalidIdentifierError,
+			);
+		});
+
+		it('rejects @modifier longer than 4 alphanumeric characters', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@toolongmod', 'collation'),
+			).toThrow(InvalidIdentifierError);
+		});
+
+		it('rejects @modifier containing non-alphanumeric characters', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@has-dash', 'collation'),
+			).toThrow(InvalidIdentifierError);
 		});
 	});
 });
