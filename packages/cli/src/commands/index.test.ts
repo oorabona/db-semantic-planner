@@ -1,17 +1,28 @@
 /**
- * Tests for CLI entry-point bootstrap — help/version output and --json flag interaction.
+ * Tests for Commander CLI parse — help/version exit behaviour.
  *
- * CC-15 design: Commander's --help and --version output is intentionally NOT
- * JSON-wrapped even when --json is also present. These are human-readable
- * informational outputs, not data responses. The --json flag only affects
- * error objects emitted on parse failures (exitCode !== 0).
+ * These tests verify that Commander throws CommanderError with the correct
+ * exit codes and error codes when --help, --version, or an unknown command is
+ * parsed. They do NOT test the real `main()` function in index.ts (which has
+ * top-level side effects and requires a spawn-based harness).
  *
- * This test recreates the same program setup as index.ts using exported command
- * objects, then verifies the documented behaviour.
+ * What IS covered here:
+ *   - Commander exits 0 for --help and --version (human-readable output, not errors)
+ *   - Commander exits 1 for an unknown command (real error path)
+ *   - These exit-code distinctions are what main() branches on to decide whether
+ *     to JSON-wrap the error.
+ *
+ * What is NOT covered here:
+ *   - The JSON-wrap decision logic in main() itself
+ *   - Real process.exit() calls
+ *
+ * TODO: A full entry-point integration test (real `main()` called with
+ * process.argv) would require a spawn-based harness — see TODO.md
+ * § "CLI integration test harness" for follow-up.
  */
 
 import { Command, CommanderError } from 'commander';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateCommand } from './generate.js';
 import { introspectCommand } from './introspect.js';
 import { migrateCommand } from './migrate.js';
@@ -22,13 +33,16 @@ import { verifyCommand } from './verify.js';
 /**
  * Build a fresh program instance matching index.ts setup.
  * Uses exitOverride() so Commander throws instead of calling process.exit.
+ * Uses configureOutput() to suppress stdout/stderr during parse (avoids
+ * noise in test output when --help or --version is triggered).
  */
 function buildProgram(): Command {
 	const p = new Command();
 	p.name('dbsp')
 		.description('Schema-first code generation for db-semantic-planner')
 		.version('0.0.1')
-		.exitOverride();
+		.exitOverride()
+		.configureOutput({ writeOut: () => {}, writeErr: () => {} });
 
 	for (const cmd of [
 		generateCommand,
@@ -43,7 +57,10 @@ function buildProgram(): Command {
 	return p;
 }
 
-describe('CLI entry-point — help/version with --json flag (CC-15)', () => {
+describe('Commander CLI parse — help/version exit behaviour (CC-15)', () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
 	it('--help throws CommanderError with exitCode 0 (informational, not JSON-wrapped)', () => {
 		const p = buildProgram();
 
@@ -77,10 +94,10 @@ describe('CLI entry-point — help/version with --json flag (CC-15)', () => {
 		expect(ce.code).toBe('commander.version');
 	});
 
-	it('--help --json still exits 0 — --json does not wrap help output as JSON', () => {
-		// Design intent: --help output is plain text regardless of --json.
-		// In index.ts the catch block calls process.exit(0) for exitCode 0,
-		// so the JSON error path is never reached for help/version.
+	it('--help positioned before unknown flags still exits 0 (Commander evaluates --help eagerly)', () => {
+		// Commander processes --help before unknown flags — the unknown --json
+		// flag is never reached. This verifies Commander's eager --help evaluation,
+		// NOT that main() ignores --json for help output (that requires a spawn harness).
 		const p = buildProgram();
 
 		let caughtErr: unknown;
@@ -93,11 +110,11 @@ describe('CLI entry-point — help/version with --json flag (CC-15)', () => {
 		expect(caughtErr).toBeInstanceOf(CommanderError);
 		const ce = caughtErr as CommanderError;
 		expect(ce.exitCode).toBe(0);
-		// Error code must be help-related, NOT a parse error (exitCode 1)
 		expect(ce.code).toBe('commander.helpDisplayed');
 	});
 
-	it('--version --json still exits 0 — --json does not wrap version output as JSON', () => {
+	it('--version positioned before unknown flags still exits 0 (Commander evaluates --version eagerly)', () => {
+		// Same eager-evaluation pattern as above, for --version.
 		const p = buildProgram();
 
 		let caughtErr: unknown;

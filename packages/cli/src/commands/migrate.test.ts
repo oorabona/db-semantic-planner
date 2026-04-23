@@ -347,11 +347,12 @@ describe('migrate rollback — reverse chronological order', () => {
 // recorded as destructive=true. If upStatements were passed instead, it would incorrectly
 // be recorded as destructive=false.
 //
-// Note: Full end-to-end coverage of applyCommand recording destructive=true in the
+// Note: These tests cover the isDestructiveDown function in isolation (boundary values).
+// Full end-to-end coverage of applyCommand recording destructive=true in the
 // _dbsp_migrations table requires a real PostgreSQL container (testcontainers).
 // TODO: add testcontainers integration test — see packages/cli/src/commands/migrate.integrity.test.ts
 // for the pattern to follow (applyCommand + pool lifecycle + _dbsp_migrations query).
-describe('migrate apply — destructive flag uses DOWN section (M4 regression)', () => {
+describe('isDestructiveDown — boundary value coverage (M4 regression context)', () => {
 	it('real isDestructiveDown returns true for DROP TABLE in DOWN, false for CREATE TABLE in UP', async () => {
 		// Use the REAL isDestructiveDown (not the mock) to verify the actual function contract.
 		// vi.importActual bypasses the vi.mock() at the top of this file for this one import.
@@ -367,8 +368,9 @@ describe('migrate apply — destructive flag uses DOWN section (M4 regression)',
 		expect(isDestructiveDown(downStatements)).toBe(true);
 		expect(isDestructiveDown(upStatements)).toBe(false);
 
-		// The two must differ — proves applyCommand passing downStatements (not upStatements)
-		// to isDestructiveDown is the correct fix for the M4 bug.
+		// The two results must differ — confirms the function correctly discriminates
+		// destructive (DROP TABLE in DOWN) from non-destructive (CREATE TABLE in UP).
+		// This is the invariant applyCommand relies on to set the destructive flag correctly.
 		expect(isDestructiveDown(downStatements)).not.toBe(
 			isDestructiveDown(upStatements),
 		);
@@ -393,10 +395,12 @@ describe('migrate apply — destructive flag uses DOWN section (M4 regression)',
 		expect(isDestructiveDown(downStatements)).toBe(false);
 	});
 
-	it('applyCommand invokes parseMigrationFile and isDestructiveDown once per migration', () => {
-		// This test verifies the mock call contract: applyCommand should parse
-		// the migration file and check destructiveness exactly once per file.
-		// (Structural/call-count assertion — no DB needed.)
+	it('isDestructiveDown receives downStatements, not upStatements (M4 bug direction check)', () => {
+		// This test exercises the mocks directly to assert argument direction:
+		// isDestructiveDown must be called with downStatements, never upStatements.
+		// NOTE: this does not call applyCommand — it documents the expected call
+		// contract that applyCommand must satisfy. A full wiring test requires
+		// testcontainers (see migrate.integrity.test.ts).
 		mockParseMigrationFile.mockReturnValue({
 			upStatements: ['CREATE TABLE "users" (id SERIAL PRIMARY KEY)'],
 			downStatements: ['DROP TABLE IF EXISTS "users" CASCADE'],
@@ -404,14 +408,13 @@ describe('migrate apply — destructive flag uses DOWN section (M4 regression)',
 		});
 		mockIsDestructiveDown.mockReturnValue(true);
 
-		// Simulate one migration being processed
 		const content = 'fake-migration-content';
 		const parsed = mockParseMigrationFile(content);
 		mockIsDestructiveDown(parsed.downStatements);
 
 		expect(mockParseMigrationFile).toHaveBeenCalledWith(content);
 		expect(mockIsDestructiveDown).toHaveBeenCalledWith(parsed.downStatements);
-		// Critical: NOT called with upStatements (the M4 pre-fix bug)
+		// The M4 bug passed upStatements instead — assert it is never called with upStatements
 		expect(mockIsDestructiveDown).not.toHaveBeenCalledWith(parsed.upStatements);
 	});
 });
