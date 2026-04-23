@@ -57,6 +57,7 @@ import {
 	objectToWhereIntent,
 	type WhereFilter,
 } from './object-filter.js';
+import type { QueryBuilderContext } from './query-builder-context.js';
 import { ResultHydrator } from './result-hydrator.js';
 import type { DefaultFilters } from './schema.js';
 import {
@@ -90,6 +91,7 @@ import {
 export class QueryBuilderImpl<TResult = unknown>
 	implements QueryBuilder<TResult>
 {
+	private readonly ctx: QueryBuilderContext;
 	private readonly model: ModelIR;
 	private readonly strictMode: boolean;
 	private readonly from: string;
@@ -122,31 +124,23 @@ export class QueryBuilderImpl<TResult = unknown>
 	batchValuesSource?: import('@dbsp/types').BatchValuesJoinPayload;
 
 	constructor(
-		model: ModelIR,
-		strictMode: boolean,
+		ctx: QueryBuilderContext,
 		from: string,
 		relationHints: RelationHints = {},
-		adapter?: Adapter,
-		schemaName?: string,
-		dialectCapabilities?: DialectCapabilities,
-		globalPlanOptions?: PlanOptions,
-		defaultFilters?: DefaultFilters,
-		hookStore?: HookStore,
-		onHookError?: HookErrorHandler,
-		inTransaction?: boolean,
 	) {
-		this.model = model;
-		this.strictMode = strictMode;
+		this.ctx = ctx;
+		this.model = ctx.model;
+		this.strictMode = ctx.strictMode;
 		this.from = from;
 		this.relationHints = relationHints;
-		this.adapter = adapter;
-		this.schemaName = schemaName;
-		this.dialectCapabilities = dialectCapabilities;
-		this.planOptionsOverride = globalPlanOptions;
-		this.defaultFilters = defaultFilters;
-		this.hookStore = hookStore;
-		this.onHookError = onHookError;
-		this.inTransaction = inTransaction;
+		this.adapter = ctx.adapter;
+		this.schemaName = ctx.schemaName;
+		this.dialectCapabilities = ctx.dialectCapabilities;
+		this.planOptionsOverride = ctx.planOptionsOverride;
+		this.defaultFilters = ctx.defaultFilters;
+		this.hookStore = ctx.hookStore;
+		this.onHookError = ctx.onHookError;
+		this.inTransaction = ctx.inTransaction;
 	}
 
 	include(
@@ -2180,18 +2174,10 @@ export class QueryBuilderImpl<TResult = unknown>
 	 */
 	private clone(): QueryBuilderImpl<TResult> {
 		const builder = new QueryBuilderImpl<TResult>(
-			this.model,
-			this.strictMode,
+			// Pass a patched ctx with the current (potentially-mutated) planOptionsOverride
+			{ ...this.ctx, planOptionsOverride: this.planOptionsOverride },
 			this.from,
 			{ ...this.relationHints },
-			this.adapter,
-			this.schemaName,
-			this.dialectCapabilities,
-			this.planOptionsOverride,
-			this.defaultFilters,
-			this.hookStore,
-			this.onHookError,
-			this.inTransaction,
 		);
 		// Clone array state
 		builder.includes.push(...this.includes);

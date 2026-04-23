@@ -21,6 +21,7 @@ import {
 import { createNqlTag, type NqlTag } from './nql.js';
 import type { SelectExpressionResult } from './orm-instance-types.js';
 import { QueryBuilderImpl } from './query-builder.js';
+import type { QueryBuilderContext } from './query-builder-context.js';
 import {
 	createRawCteBuilder,
 	type RawCteQueryBuilder,
@@ -433,6 +434,24 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		inTransaction,
 	} as const;
 
+	// Context bag for QueryBuilderImpl — eliminates the 12-param positional constructor
+	const queryCtx: QueryBuilderContext = {
+		model,
+		strictMode,
+		...(adapter !== undefined
+			? { adapter: adapter as unknown as import('../adapter.js').Adapter }
+			: {}),
+		...(schemaName !== undefined ? { schemaName } : {}),
+		...(dialectCapabilities !== undefined ? { dialectCapabilities } : {}),
+		...(globalPlanOptions !== undefined
+			? { planOptionsOverride: globalPlanOptions }
+			: {}),
+		...(defaultFilters !== undefined ? { defaultFilters } : {}),
+		...(hookStore !== undefined ? { hookStore } : {}),
+		...(onHookError !== undefined ? { onHookError } : {}),
+		...(inTransaction !== undefined ? { inTransaction } : {}),
+	};
+
 	// Wrap the tables proxy to augment each table access with DDL methods
 	const tablesDDLProxy = wrapTablesProxyWithDDL(
 		tablesProxy ?? {},
@@ -458,18 +477,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			) {
 				const bv = table as unknown as BatchValuesRef;
 				const builder = new QueryBuilderImpl<Record<string, unknown>>(
-					model,
-					strictMode,
+					queryCtx,
 					bv.alias,
 					relationHints,
-					adapter,
-					schemaName,
-					dialectCapabilities,
-					globalPlanOptions,
-					defaultFilters,
-					hookStore,
-					onHookError,
-					inTransaction,
 				);
 				builder.batchValuesSource = {
 					data: bv.data,
@@ -486,36 +496,18 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				throw new Error('Invalid TableRef: missing TABLE_META symbol');
 			}
 			return new QueryBuilderImpl<InferTableRow<TTable>>(
-				model,
-				strictMode,
+				queryCtx,
 				tableName as string,
 				relationHints,
-				adapter,
-				schemaName,
-				dialectCapabilities,
-				globalPlanOptions,
-				defaultFilters,
-				hookStore,
-				onHookError,
-				inTransaction,
 			);
 		},
 		select<K extends keyof DB & string, TResult = DB[K]>(
 			from: K,
 		): QueryBuilder<TResult> {
 			return new QueryBuilderImpl<TResult>(
-				model,
-				strictMode,
+				queryCtx,
 				from as string,
 				relationHints,
-				adapter,
-				schemaName,
-				dialectCapabilities,
-				globalPlanOptions,
-				defaultFilters,
-				hookStore,
-				onHookError,
-				inTransaction,
 			);
 		},
 		withSchema(schemaName: string): OrmInstanceInternal<DB> {
@@ -599,17 +591,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			const nodeIdCol = options.nodeId ?? 'id';
 
 			const builder = new QueryBuilderImpl<TResult>(
-				model,
-				strictMode,
+				queryCtx,
 				table,
 				relationHints,
-				adapter,
-				schemaName,
-				dialectCapabilities,
-				globalPlanOptions,
-				defaultFilters,
-				hookStore,
-				onHookError,
 			);
 
 			const result = await builder
@@ -679,17 +663,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			const nodeIdCol = options.nodeId ?? 'id';
 
 			const builder = new QueryBuilderImpl<TResult>(
-				model,
-				strictMode,
+				queryCtx,
 				table,
 				relationHints,
-				adapter,
-				schemaName,
-				dialectCapabilities,
-				globalPlanOptions,
-				defaultFilters,
-				hookStore,
-				onHookError,
 			);
 
 			const result = await builder
