@@ -21,7 +21,7 @@ import { ref, schema } from '@dbsp/core';
  * - posts.postId_comments (hasMany)
  * - comments.post (belongsTo)
  */
-const blogSchema = schema({
+export const blogSchema = schema({
 	authors: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',

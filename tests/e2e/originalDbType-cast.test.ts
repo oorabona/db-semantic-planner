@@ -22,6 +22,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	introspect,
 } from '@dbsp/adapter-pgsql';
+import type { Adapter } from '@dbsp/core';
 import { createOrm, eq } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeTestDb, dropSchema, getTestPool } from './testkit/index.js';
@@ -112,7 +113,12 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 		// Use compile-only adapter to inspect SQL without executing against DB.
 		// Pass model (IntrospectedModelIR extends ModelIR) directly — no schema() wrapper needed.
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const orm = createOrm({ model, adapter });
+		// CompileOnlyAdapter satisfies the compilation contract needed here;
+		// the cast bridges the exactOptionalPropertyTypes exclusion gap.
+		const orm = createOrm({
+			model,
+			adapter: adapter as unknown as Adapter<unknown>,
+		});
 
 		const dump = orm
 			.withSchema(S2_SCHEMA)
@@ -139,7 +145,11 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 		});
 
 		const adapter = createPgsqlCompileOnlyAdapter();
-		const orm = createOrm({ schema: manualSchema, adapter });
+		// Same cast as above — CompileOnlyAdapter satisfies the compile-time contract.
+		const orm = createOrm({
+			schema: manualSchema,
+			adapter: adapter as unknown as Adapter<unknown>,
+		});
 
 		const dump = orm.select('items').where(eq('fk_id', 42)).dump();
 

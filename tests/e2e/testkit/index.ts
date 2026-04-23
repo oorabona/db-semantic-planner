@@ -6,7 +6,7 @@
 
 // Blog
 export { createBlogSchema, dropBlogSchema } from './blog.ddl.js';
-export { blogModel } from './blog.model.js';
+export { blogModel, blogSchema } from './blog.model.js';
 export { seedBlogData } from './blog.seed.js';
 // Blog Extended (complex testing - M:N, hierarchies)
 export {

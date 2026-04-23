@@ -30,20 +30,27 @@ describe('AmbiguousRelationError', () => {
 		expect(error.name).toBe('AmbiguousRelationError');
 	});
 
-	it('generates actionable message with code examples', () => {
+	it('has generic .message and publicMessage for info-leak safety', () => {
 		const error = new AmbiguousRelationError('users', 'posts', [
 			'authoredPosts',
 			'reviewedPosts',
 		]);
 
-		expect(error.message).toContain(
-			"Ambiguous relation from 'users' to 'posts'",
-		);
-		expect(error.message).toContain('authoredPosts, reviewedPosts');
-		expect(error.message).toContain(
-			".include('posts', { via: 'authoredPosts' })",
-		);
-		expect(error.message).toContain('createOrm({ db, relationHints:');
+		// .message and .publicMessage are both the short generic form (no schema enumeration)
+		expect(error.message).toBe('Ambiguous relation');
+		expect(error.publicMessage).toBe('Ambiguous relation');
+	});
+
+	it('exposes structured fields for disambiguation guidance', () => {
+		const error = new AmbiguousRelationError('users', 'posts', [
+			'authoredPosts',
+			'reviewedPosts',
+		]);
+
+		// Callers use structured fields rather than parsing .message
+		expect(error.sourceTable).toBe('users');
+		expect(error.targetTable).toBe('posts');
+		expect(error.options).toEqual(['authoredPosts', 'reviewedPosts']);
 	});
 
 	it('works with instanceof check', () => {
@@ -68,8 +75,8 @@ describe('AmbiguousRelationError', () => {
 			'singleRelation',
 		]);
 
-		expect(error.message).toContain('Multiple relations found: singleRelation');
-		expect(error.message).toContain("{ via: 'singleRelation' }");
+		expect(error.message).toBe('Ambiguous relation');
+		expect(error.options).toEqual(['singleRelation']);
 	});
 });
 

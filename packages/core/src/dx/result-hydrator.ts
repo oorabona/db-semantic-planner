@@ -564,6 +564,14 @@ export class ResultHydrator<TResult = unknown> {
 	/**
 	 * Extract a key value from an object, handling composite keys.
 	 */
+	/**
+	 * Extract a key value from an object, handling composite keys.
+	 *
+	 * Fast path: NUL-byte separator for the common case of string/number PKs (~5× faster
+	 * than JSON.stringify). Fallback: if any serialized part contains a NUL byte (e.g. bytea
+	 * PKs stored as strings), two distinct keys could collide under the fast path — use
+	 * JSON.stringify in that case (slower but collision-safe for any value content).
+	 */
 	private extractKeyValue(
 		obj: Record<string, unknown>,
 		key: string | readonly string[],
@@ -577,12 +585,11 @@ export class ResultHydrator<TResult = unknown> {
 		if (values.some((v) => v === undefined || v === null)) {
 			return undefined;
 		}
-		// PERF (FIND-056): use NUL-byte separator instead of JSON.stringify — ~5× faster
-		// on hot paths (avoids serialization overhead for the common case of string/number PKs).
-		// Collision-safe for typical PK values (strings and numbers) because NUL bytes (\u0000)
-		// are not valid in SQL identifier values or typical PK strings.
-		// Trade-off: if a PK column value itself contains a NUL byte, two distinct composite
-		// keys could collide.  This is not a practical concern for database primary keys.
-		return values.map((v) => String(v)).join('\u0000');
+		const parts = values.map((v) => String(v));
+		if (parts.some((p) => p.includes(' '))) {
+			// Collision-safe fallback — slower but correct for any value content.
+			return JSON.stringify(values);
+		}
+		return parts.join(' ');
 	}
 }

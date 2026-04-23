@@ -329,6 +329,8 @@ function buildTableDDL(
 			column: string,
 			options: AlterColumnOptions,
 		): Promise<void> {
+			validateIdentifier(tableName, 'table');
+			validateIdentifier(column, 'column');
 			const a = requireAdapter();
 			const sql = a.generateAlterColumn
 				? a.generateAlterColumn(tableName, column, options, schemaName)
