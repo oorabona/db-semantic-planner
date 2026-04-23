@@ -51,3 +51,6 @@ describe('loadSchema — path traversal protection (SEC-8)', () => {
 		);
 	});
 });
+
+// L-4 ENOENT narrowing: tested in schema-loader.enoent.test.ts (requires
+// top-level vi.mock for ESM compatibility).
