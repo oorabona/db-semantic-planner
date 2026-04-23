@@ -1,4 +1,5 @@
 import type {
+	DDLFeature,
 	DialectCapabilities,
 	FeatureBehaviorConfig,
 	FeatureWarning,
@@ -20,12 +21,11 @@ export interface NegotiationResult {
 
 /** Resolve effective behavior for a specific feature */
 function resolveBehavior(
-	feature: string,
+	feature: DDLFeature,
 	config: UnsupportedFeatureBehavior | FeatureBehaviorConfig,
 ): UnsupportedFeatureBehavior {
 	if (typeof config === 'string') return config;
-	// biome-ignore lint/suspicious/noExplicitAny: DDLFeature key narrowing via string lookup
-	return (config.overrides as any)?.[feature] ?? config.default;
+	return config.overrides?.[feature] ?? config.default;
 }
 
 /**

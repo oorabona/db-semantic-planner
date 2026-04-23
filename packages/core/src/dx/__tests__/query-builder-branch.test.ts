@@ -213,15 +213,9 @@ describe('QueryBuilderImpl.buildIntent branches', () => {
 	it('batchValuesSource → intent.batchValuesSource is set', () => {
 		// Build a QueryBuilderImpl with batchValuesSource directly
 		const builder = new QueryBuilderImpl(
-			testSchema.model,
-			false,
+			{ model: testSchema.model, strictMode: false },
 			'users',
 			{},
-			undefined,
-			undefined,
-			undefined,
-			undefined,
-			undefined,
 		);
 		(builder as unknown as { batchValuesSource: unknown }).batchValuesSource = {
 			alias: 'users',
