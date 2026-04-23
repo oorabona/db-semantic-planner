@@ -193,19 +193,19 @@ function generateRefCode(
 
 	// onDelete action
 	if (fkInfo.onDelete && fkInfo.onDelete !== 'NO ACTION') {
-		refOptions.push(`onDelete: '${fkInfo.onDelete}'`);
+		refOptions.push(`onDelete: ${singleQuoteEscape(fkInfo.onDelete)}`);
 	}
 
 	// CODEX-12: onUpdate action
 	if (fkInfo.onUpdate && fkInfo.onUpdate !== 'NO ACTION') {
-		refOptions.push(`onUpdate: '${fkInfo.onUpdate}'`);
+		refOptions.push(`onUpdate: ${singleQuoteEscape(fkInfo.onUpdate)}`);
 	}
 
 	// Self-referential FK needs roles
 	if (fkInfo.isSelfRef) {
 		// Infer role names from column name
 		// e.g., 'parentId' → parent: 'parent', children: 'children'
-		const baseName = column.name.replace(/Id$/, '');
+		const baseName = column.name.replace(/_?[iI]d$/, '');
 		refOptions.push(
 			`roles: { parent: '${baseName}', children: '${baseName === 'parent' ? 'children' : `${baseName}s`}' }`,
 		);

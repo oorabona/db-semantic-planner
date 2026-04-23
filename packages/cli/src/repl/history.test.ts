@@ -12,6 +12,7 @@ vi.mock('node:fs', () => ({
 	readFileSync: vi.fn(() => ''),
 	writeFileSync: vi.fn(),
 	mkdirSync: vi.fn(),
+	chmodSync: vi.fn(),
 }));
 
 vi.mock('node:os', () => ({
@@ -172,6 +173,14 @@ describe('CommandHistory', () => {
 		it('should attempt to save on add()', () => {
 			history.add('test command');
 			expect(fs.writeFileSync).toHaveBeenCalled();
+		});
+
+		it('calls chmodSync after writeFileSync on save (L-3)', () => {
+			// chmodSync must be called after each write so a pre-existing file with
+			// broad permissions (e.g., 0644 created by another tool) is tightened to
+			// 0o600 on the same write operation, not only on next REPL startup.
+			history.add('secure command');
+			expect(fs.chmodSync).toHaveBeenCalled();
 		});
 
 		it('should load from file if exists', () => {

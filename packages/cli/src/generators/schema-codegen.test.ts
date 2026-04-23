@@ -283,6 +283,45 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain('parent:');
 			expect(result).toContain('children:');
 		});
+
+		it('infers role baseName from snake_case self-ref column (L-1)', () => {
+			// snake_case column like `parent_id` must strip `_id` suffix, not leave
+			// it: baseName should be 'parent', not 'parent_id'.
+			const model = schema({
+				nodes: {
+					id: { type: 'uuid', primaryKey: true },
+					parent_id: ref('nodes', {
+						nullable: true,
+						roles: { parent: 'parent', children: 'children' },
+					}),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// Role must be 'parent', NOT 'parent_id'
+			expect(result).toContain("parent: 'parent'");
+			expect(result).not.toContain("parent: 'parent_id'");
+		});
+
+		it('routes onDelete/onUpdate through singleQuoteEscape (L-2)', () => {
+			// Ensures fkInfo.onDelete and onUpdate are wrapped via singleQuoteEscape,
+			// not interpolated as bare template literals.
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					author_id: ref('users', { onDelete: 'CASCADE' }),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// onDelete must appear as a properly single-quoted string literal
+			expect(result).toContain("onDelete: 'CASCADE'");
+		});
 	});
 
 	describe('options', () => {

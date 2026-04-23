@@ -65,6 +65,14 @@ export class CommandHistory {
 				encoding: 'utf-8',
 				mode: 0o600,
 			});
+			// Best-effort: chmod after write in case the file pre-existed at a broader
+			// permission (e.g., created by another tool at 0644). May throw on
+			// non-POSIX filesystems.
+			try {
+				chmodSync(HISTORY_FILE, 0o600);
+			} catch {
+				// Best-effort: may throw on non-POSIX filesystems
+			}
 		} catch {
 			// Ignore save errors
 		}
