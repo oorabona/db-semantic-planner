@@ -261,8 +261,14 @@ describe('QueryBuilder set operations — SQL compilation', () => {
 describe('QueryBuilder set operations — no adapter errors', () => {
 	it('dump() throws ExecutionError when no adapter configured', () => {
 		const model = schemaToModelIR(testSchema.definition);
-		const builder = new QueryBuilderImpl(model, false, 'employees');
-		const otherBuilder = new QueryBuilderImpl(model, false, 'contractors');
+		const builder = new QueryBuilderImpl(
+			{ model, strictMode: false },
+			'employees',
+		);
+		const otherBuilder = new QueryBuilderImpl(
+			{ model, strictMode: false },
+			'contractors',
+		);
 		const setOpBuilder = builder.union(otherBuilder);
 
 		expect(() => setOpBuilder.dump()).toThrow(ExecutionError);
@@ -270,8 +276,14 @@ describe('QueryBuilder set operations — no adapter errors', () => {
 
 	it('all() throws ExecutionError when no adapter configured', async () => {
 		const model = schemaToModelIR(testSchema.definition);
-		const builder = new QueryBuilderImpl(model, false, 'employees');
-		const otherBuilder = new QueryBuilderImpl(model, false, 'contractors');
+		const builder = new QueryBuilderImpl(
+			{ model, strictMode: false },
+			'employees',
+		);
+		const otherBuilder = new QueryBuilderImpl(
+			{ model, strictMode: false },
+			'contractors',
+		);
 		const setOpBuilder = builder.union(otherBuilder);
 
 		await expect(setOpBuilder.all()).rejects.toThrow(ExecutionError);

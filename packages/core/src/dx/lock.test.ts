@@ -14,6 +14,7 @@ import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { InvalidOperationError } from './errors.js';
 import { createOrm } from './orm.js';
 import { QueryBuilderImpl } from './query-builder.js';
+import type { QueryBuilderContext } from './query-builder-context.js';
 import { ref, schema, schemaToModelIR } from './schema.js';
 import { createMockAdapter } from './test-utils.js';
 
@@ -43,20 +44,13 @@ const orm = createOrm({ schema: testSchema, adapter: createMockAdapter() });
 
 /** Build a QueryBuilderImpl with explicit inTransaction flag. */
 function makeBuilder(inTx: boolean) {
-	return new QueryBuilderImpl(
+	const ctx: QueryBuilderContext = {
 		model,
-		false,
-		'jobs',
-		{},
-		undefined,
-		undefined,
-		POSTGRESQL_CAPABILITIES,
-		undefined,
-		undefined,
-		undefined,
-		undefined,
-		inTx,
-	);
+		strictMode: false,
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		inTransaction: inTx,
+	};
+	return new QueryBuilderImpl(ctx, 'jobs', {});
 }
 
 // ============================================================================

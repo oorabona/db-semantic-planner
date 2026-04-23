@@ -10,7 +10,12 @@ import { UnsupportedFeatureError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { ModelIRImpl } from '../model-impl.js';
-import { negotiateFeatures } from './negotiate-features.js';
+import {
+	DEFAULT_FEATURE_CHECKERS,
+	type FeatureChecker,
+	type FeatureUsage,
+	negotiateFeatures,
+} from './negotiate-features.js';
 
 // ============================================================================
 // Test helpers
@@ -685,6 +690,111 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(model.enums?.size).toBe(enumsBefore);
+		});
+	});
+
+	// ============================================================================
+	// OCP-001: Registry extensibility — custom FeatureChecker integration
+	// ============================================================================
+
+	describe('OCP-001: custom FeatureChecker integrates via checkers param', () => {
+		it('should invoke a custom checker and emit a warning when detected', () => {
+			// Arrange: a custom checker that detects any table named "restricted"
+			const customChecker: FeatureChecker = {
+				capability: 'supportsSchemas', // unsupported in noDDLCaps()
+				feature: 'extension', // reuse an existing DDLFeature for the test
+				detectUsage(model): readonly FeatureUsage[] {
+					if (!model.tables) return [];
+					const hits: FeatureUsage[] = [];
+					for (const [tableName] of model.tables) {
+						if (tableName === 'restricted') {
+							hits.push({ table: tableName, detail: 'restricted table' });
+						}
+					}
+					return hits;
+				},
+			};
+			const restrictedTable: TableIR = {
+				name: 'restricted',
+				columns: [{ name: 'id', type: 'number', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const model = makeModel(new Map([['restricted', restrictedTable]]));
+			const caps = noDDLCaps();
+
+			// Act — inject only the custom checker (replaces DEFAULT_FEATURE_CHECKERS)
+			const result = negotiateFeatures(model, caps, 'warning', [customChecker]);
+
+			// Assert
+			expect(result.warnings).toHaveLength(1);
+			expect(result.warnings[0].element).toBe('restricted table');
+		});
+
+		it('should produce zero warnings if custom checker finds no usages', () => {
+			// Arrange: same custom checker, but table name does not match
+			const customChecker: FeatureChecker = {
+				capability: 'supportsSchemas',
+				feature: 'extension',
+				detectUsage(model): readonly FeatureUsage[] {
+					if (!model.tables) return [];
+					const hits: FeatureUsage[] = [];
+					for (const [tableName] of model.tables) {
+						if (tableName === 'restricted') {
+							hits.push({ table: tableName, detail: 'restricted table' });
+						}
+					}
+					return hits;
+				},
+			};
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]));
+			const caps = noDDLCaps();
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning', [customChecker]);
+
+			// Assert
+			expect(result.warnings).toHaveLength(0);
+		});
+
+		it('should skip custom checker when capability is supported', () => {
+			// Arrange: caps says supportsSchemas = true => checker is skipped entirely
+			const called: boolean[] = [];
+			const customChecker: FeatureChecker = {
+				capability: 'supportsSchemas',
+				feature: 'extension',
+				detectUsage(model): readonly FeatureUsage[] {
+					called.push(true);
+					return [{ detail: 'always-triggers' }];
+				},
+			};
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]));
+			const caps: DialectCapabilities = {
+				...noDDLCaps(),
+				supportsSchemas: true,
+			};
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning', [customChecker]);
+
+			// Assert: checker.detectUsage was never called
+			expect(called).toHaveLength(0);
+			expect(result.warnings).toHaveLength(0);
+		});
+
+		it('DEFAULT_FEATURE_CHECKERS should have exactly 15 entries (one per DDLFeature)', () => {
+			expect(DEFAULT_FEATURE_CHECKERS).toHaveLength(15);
+		});
+
+		it('every DEFAULT_FEATURE_CHECKER entry should have unique capability + feature pair', () => {
+			const capabilitySet = new Set(
+				DEFAULT_FEATURE_CHECKERS.map((c) => c.capability),
+			);
+			const featureSet = new Set(
+				DEFAULT_FEATURE_CHECKERS.map((c) => c.feature),
+			);
+			expect(capabilitySet.size).toBe(15);
+			expect(featureSet.size).toBe(15);
 		});
 	});
 });
