@@ -1390,14 +1390,14 @@ describe('paginate() validation coverage', () => {
 // ============================================================================
 
 describe('cursorPaginate() validation coverage', () => {
-	it('should throw on limit < 1', async () => {
+	it('should throw on negative limit', async () => {
+		// L-3: limit=0 is accepted (empty page); limit<0 still throws
 		const adapter = createSpyAdapter([]);
 		const orm = createOrm({ adapter, schema: testSchema });
 
-		// FIND-021: new message uses "positive safe integer" phrasing
 		await expect(
-			orm.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
-		).rejects.toThrow('limit must be a positive safe integer');
+			orm.select('users').orderBy('id').cursorPaginate({ limit: -1 }),
+		).rejects.toThrow('limit must be a non-negative safe integer');
 	});
 
 	it('should throw when no orderBy', async () => {

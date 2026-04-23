@@ -304,6 +304,28 @@ describe('FIND-019: cursorPaginate buildCursor with field-based orderBy', () => 
 		expect(result.nextCursor).toBeNull();
 		expect(result.prevCursor).toBeNull();
 	});
+	it('L-3: limit=0 returns empty page without throwing (hasNextPage=true when rows exist)', async () => {
+		// DB returns 1 row (limit+1 = 0+1 = 1) — the "extra" row proves there IS a next page.
+		// The caller gets data=[], hasNextPage=true.
+		const adapter = createSpyAdapter([{ id: 1 }]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const result = await orm
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 0 });
+		expect(result.data).toEqual([]);
+		expect(result.hasNextPage).toBe(true);
+	});
+	it('L-3: limit=0 with empty DB returns empty page with hasNextPage=false', async () => {
+		const adapter = createSpyAdapter([]);
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const result = await orm
+			.select('users')
+			.orderBy('id')
+			.cursorPaginate({ limit: 0 });
+		expect(result.data).toEqual([]);
+		expect(result.hasNextPage).toBe(false);
+	});
 });
 
 describe('FIND-020: backward cursor inverts ORDER BY and reverses result', () => {
