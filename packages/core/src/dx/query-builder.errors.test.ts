@@ -300,19 +300,28 @@ describe('cursorPaginate — error paths', () => {
 describe('getConfiguredAdapter — error paths', () => {
 	it('should throw ExecutionError when all() called without adapter', async () => {
 		// Construct a QueryBuilderImpl directly without adapter
-		const builder = new QueryBuilderImpl(testSchema.model, false, 'users');
+		const builder = new QueryBuilderImpl(
+			{ model: testSchema.model, strictMode: false },
+			'users',
+		);
 
 		await expect(builder.all()).rejects.toThrow(ExecutionError);
 	});
 
 	it('should include "Adapter not configured" in error message', async () => {
-		const builder = new QueryBuilderImpl(testSchema.model, false, 'users');
+		const builder = new QueryBuilderImpl(
+			{ model: testSchema.model, strictMode: false },
+			'users',
+		);
 
 		await expect(builder.all()).rejects.toThrow(/Adapter not configured/);
 	});
 
 	it('should throw ExecutionError on first() without adapter', async () => {
-		const builder = new QueryBuilderImpl(testSchema.model, false, 'users');
+		const builder = new QueryBuilderImpl(
+			{ model: testSchema.model, strictMode: false },
+			'users',
+		);
 
 		await expect(builder.first()).rejects.toThrow(ExecutionError);
 	});

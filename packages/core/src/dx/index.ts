@@ -61,6 +61,12 @@ export {
 	stringAgg,
 	unary,
 } from './expressions.js';
+// Feature negotiation (OCP-001: FeatureChecker registry)
+export {
+	DEFAULT_FEATURE_CHECKERS,
+	type FeatureChecker,
+	type FeatureUsage,
+} from './feature-checkers.js';
 // Filter Helpers (Drizzle-like)
 export {
 	// Logical
@@ -217,6 +223,10 @@ export {
 	// DX-026: Upsert support
 	UpsertBuilder,
 } from './mutation-builders.js';
+export {
+	type NegotiationResult,
+	negotiateFeatures,
+} from './negotiate-features.js';
 // NQL Template Literal API (DX-040 Block 8)
 export {
 	createNqlTag,
