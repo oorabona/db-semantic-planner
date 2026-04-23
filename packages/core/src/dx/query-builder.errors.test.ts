@@ -235,17 +235,27 @@ describe('paginate — error paths', () => {
 // ============================================================================
 
 describe('cursorPaginate — error paths', () => {
-	it('should throw InvalidOperationError when limit < 1', async () => {
+	it('should NOT throw when limit is 0 (empty page accepted)', async () => {
+		// L-3: limit=0 is now accepted — returns empty page, consistent with .limit(0).
+		// Use createSpyAdapter so execute() is implemented (createMockAdapter throws).
+		const adapter = createSpyAdapter([]);
+		const o = createOrm({ adapter, schema: testSchema });
 		await expect(
-			orm.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
+			o.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
+		).resolves.toBeDefined();
+	});
+
+	it('should throw InvalidOperationError when limit is negative', async () => {
+		await expect(
+			orm.select('users').orderBy('id').cursorPaginate({ limit: -1 }),
 		).rejects.toThrow(InvalidOperationError);
 	});
 
-	it('should include "limit must be >= 1" in error message', async () => {
-		// FIND-021: new message uses "positive safe integer" phrasing
+	it('should include "non-negative safe integer" in error message for negative limit', async () => {
+		// FIND-021: updated phrasing — limit=0 now valid, message reflects non-negative
 		await expect(
-			orm.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
-		).rejects.toThrow(/limit must be a positive safe integer/);
+			orm.select('users').orderBy('id').cursorPaginate({ limit: -1 }),
+		).rejects.toThrow(/limit must be a non-negative safe integer/);
 	});
 
 	it('should throw when limit is negative', async () => {

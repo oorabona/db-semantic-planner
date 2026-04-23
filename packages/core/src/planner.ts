@@ -1563,7 +1563,7 @@ function extractCTEs(state: PlannerState, threshold: number): void {
 			state.ctes.push({
 				name: cteName,
 				purpose: `${relation} relation accessed ${intentPaths.length} times`,
-				referencedBy: Object.freeze([...intentPaths]),
+				referencedBy: Object.freeze(intentPaths.slice()),
 				sourceIntent: relationPath,
 			});
 

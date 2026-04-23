@@ -186,37 +186,37 @@ function convertOperatorObject(
 	const conditions: WhereIntent[] = [];
 
 	// $eq
-	if (ops.$eq !== undefined) {
+	if (Object.hasOwn(ops, '$eq') && ops.$eq !== undefined) {
 		conditions.push(createComparisonIntent(field, 'eq', ops.$eq));
 	}
 
 	// $neq
-	if (ops.$neq !== undefined) {
+	if (Object.hasOwn(ops, '$neq') && ops.$neq !== undefined) {
 		conditions.push(createComparisonIntent(field, 'neq', ops.$neq));
 	}
 
 	// $gt
-	if (ops.$gt !== undefined) {
+	if (Object.hasOwn(ops, '$gt') && ops.$gt !== undefined) {
 		conditions.push(createComparisonIntent(field, 'gt', ops.$gt));
 	}
 
 	// $gte
-	if (ops.$gte !== undefined) {
+	if (Object.hasOwn(ops, '$gte') && ops.$gte !== undefined) {
 		conditions.push(createComparisonIntent(field, 'gte', ops.$gte));
 	}
 
 	// $lt
-	if (ops.$lt !== undefined) {
+	if (Object.hasOwn(ops, '$lt') && ops.$lt !== undefined) {
 		conditions.push(createComparisonIntent(field, 'lt', ops.$lt));
 	}
 
 	// $lte
-	if (ops.$lte !== undefined) {
+	if (Object.hasOwn(ops, '$lte') && ops.$lte !== undefined) {
 		conditions.push(createComparisonIntent(field, 'lte', ops.$lte));
 	}
 
 	// $in
-	if (ops.$in !== undefined) {
+	if (Object.hasOwn(ops, '$in') && ops.$in !== undefined) {
 		conditions.push({
 			kind: 'in',
 			field,
@@ -225,7 +225,7 @@ function convertOperatorObject(
 	}
 
 	// $like
-	if (ops.$like !== undefined) {
+	if (Object.hasOwn(ops, '$like') && ops.$like !== undefined) {
 		conditions.push({
 			kind: 'like',
 			field,
@@ -234,7 +234,7 @@ function convertOperatorObject(
 	}
 
 	// $ilike (case-insensitive)
-	if (ops.$ilike !== undefined) {
+	if (Object.hasOwn(ops, '$ilike') && ops.$ilike !== undefined) {
 		conditions.push({
 			kind: 'like',
 			field,
@@ -244,7 +244,7 @@ function convertOperatorObject(
 	}
 
 	// $notNull
-	if (ops.$notNull === true) {
+	if (Object.hasOwn(ops, '$notNull') && ops.$notNull === true) {
 		conditions.push({
 			kind: 'null',
 			field,

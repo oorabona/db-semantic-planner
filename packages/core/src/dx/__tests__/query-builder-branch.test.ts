@@ -389,11 +389,12 @@ describe('QueryBuilderImpl.where branches', () => {
 // ============================================================================
 
 describe('QueryBuilderImpl.cursorPaginate branches', () => {
-	it('throws InvalidOperationError when limit < 1', async () => {
+	it('throws InvalidOperationError when limit is negative', async () => {
+		// L-3: limit=0 is accepted (empty page); limit<0 still throws
 		const { adapter } = createSpyAdapter([]);
 		const o = createOrm({ adapter, schema: testSchema });
 		await expect(
-			o.select('users').orderBy('id').cursorPaginate({ limit: 0 }),
+			o.select('users').orderBy('id').cursorPaginate({ limit: -1 }),
 		).rejects.toThrow(InvalidOperationError);
 	});
 

@@ -315,11 +315,11 @@ export async function cursorPaginate<TResult>(
 	const cursor = options?.cursor ?? null;
 	const direction = options?.direction ?? 'forward';
 
-	// FIND-021: Validate limit is a safe non-negative integer
-	if (!Number.isSafeInteger(limit) || limit < 1) {
+	// FIND-021: Validate limit is a safe non-negative integer (0 is accepted — returns empty page)
+	if (!Number.isSafeInteger(limit) || limit < 0) {
 		throw new InvalidOperationError(
 			'cursorPaginate',
-			'limit must be a positive safe integer',
+			'limit must be a non-negative safe integer',
 		);
 	}
 
