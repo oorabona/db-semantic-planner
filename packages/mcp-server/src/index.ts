@@ -14,6 +14,7 @@
  */
 
 import { realpathSync } from 'node:fs';
+import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatLogPath } from './format-error.js';
 import { loadSchema, SchemaLoadError } from './schema-loader.js';
@@ -248,7 +249,6 @@ async function main(): Promise<void> {
 	try {
 		// Log basename only before load (path is user input, not yet security-checked).
 		// formatLogPath(p, verbose=false) always returns basename for pre-validation paths.
-		const { basename } = await import('node:path');
 		console.error(
 			`[dbsp-mcp] Loading schema from: ${basename(args.schemaPath)}`,
 		);

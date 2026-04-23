@@ -75,6 +75,10 @@ export function formatLogPath(p: string, verbose: boolean): string {
  * @param maxLength - Cap message at this many characters (default 500).
  *   Truncated messages end with '…' to indicate truncation.
  * @returns Sanitized, length-capped message string
+ *
+ * @stable The placeholder strings ('<schema-file>', '<schema-dir>') and the
+ *   500-character default cap are part of the public contract — callers and tests
+ *   assert on these exact values. Change them only with a semver-major bump.
  */
 export function sanitizeErrorMessage(
 	message: string,
@@ -85,6 +89,9 @@ export function sanitizeErrorMessage(
 
 	let sanitized = message;
 
+	// MUST keep literal-string semantics — switching to RegExp requires escaping
+	// paths.resolved and paths.parent (they contain separators like '/' or '\' that
+	// are special in RegExp). String.replaceAll with a string needle is safe here.
 	// Replace the resolved file path FIRST (may appear multiple times in a single
 	// Node.js error, e.g. ERR_MODULE_NOT_FOUND: 'Cannot find … <path> … <path>').
 	// Must come before parent replacement: parent is a prefix of resolved, so if
@@ -103,6 +110,8 @@ export function sanitizeErrorMessage(
 
 	// Cap length to prevent oversized error strings.
 	if (sanitized.length > maxLength) {
+		// The '…' (U+2026 HORIZONTAL ELLIPSIS) marker is part of the public contract —
+		// callers and tests assert on this exact character. Do not replace with '...' (3 chars).
 		// Leave room for the truncation marker (1 char).
 		return `${sanitized.slice(0, maxLength - 1)}…`;
 	}
