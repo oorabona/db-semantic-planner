@@ -1,4 +1,3 @@
-/* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 /**
  * Pagination implementation extracted from QueryBuilderImpl.
  *
@@ -124,7 +123,9 @@ export function buildCursorConditions<TResult>(
 
 		if (parts.length > 0) {
 			conditions.push(
-				parts.length === 1 ? parts[0]! : { kind: 'and', conditions: parts },
+				parts.length === 1
+					? (parts[0] as WhereIntent)
+					: { kind: 'and', conditions: parts },
 			);
 		}
 	}
@@ -154,7 +155,7 @@ export function buildCursor<TResult>(
 	builder: QueryBuilderImpl<TResult>,
 	row: Record<string, unknown>,
 ): string {
-	const cursorData: Record<string, unknown> = {};
+	const cursorData: Record<string, unknown> = Object.create(null);
 
 	for (const orderBy of builder.orderByIntents) {
 		if (!orderBy) continue;
@@ -240,8 +241,7 @@ export async function paginate<TResult>(
 		const hasJoins = builder.joinIntents.length > 0;
 
 		if (hasGroupBy || hasJoins) {
-			const baseBuilder =
-				builder.clone() as unknown as QueryBuilderImpl<TResult>;
+			const baseBuilder = builder.clone();
 			baseBuilder.limitValue = undefined;
 			baseBuilder.offsetValue = undefined;
 			baseBuilder.orderByIntents.splice(0);
