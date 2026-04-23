@@ -152,11 +152,18 @@ export class InvalidIdentifierError extends Error {
 //   • `quoteRoleName()` / `validateCollationName()` use
 //     `Buffer.byteLength(name, 'utf8') > 63` (actual byte count).
 //
-// Both variants sit *after* an ASCII-only allowlist regex that already
-// rejects any multi-byte character, so every accepted name has
-// `.length === Buffer.byteLength(name, 'utf8')` and the two checks are
-// equivalent in practice. The asymmetry is intentional and safe; do
-// not collapse either style without also widening the upstream regex.
+// Why the two styles coexist:
+//   • `validateIdentifier` and `validateCollationName` sit *after* an
+//     ASCII-only allowlist regex that rejects any multi-byte character,
+//     so every accepted name has `.length === Buffer.byteLength(...)`
+//     and the char-count form is equivalent to a byte-count form.
+//   • `quoteRoleName` deliberately does NOT gate on an ASCII allowlist
+//     (role names like `"utilisateur"` are legitimate); it rejects only
+//     `"`, NUL, and control chars, then counts *bytes* because role
+//     names can contain multi-byte UTF-8 and PostgreSQL truncates at
+//     the byte level (strlen semantics).
+// The asymmetry is intentional and safe. Do not collapse either style
+// without also widening/narrowing the upstream input-validation rules.
 // ────────────────────────────────────────────────────────────────────
 
 /**
@@ -549,9 +556,10 @@ export function validateCollationName(
 
 	// Final allowlist: must start with letter or underscore, then allow
 	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8).
-	// An optional trailing @modifier (1-4 alphanumeric chars) is also accepted,
-	// e.g. de_DE.utf8@euro, en_US.utf8@latin9. Bare @ or non-alphanumeric modifiers
-	// are rejected. Must match: [a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?
+	// An optional trailing @modifier (1-10 alphanumeric or hyphen chars) is also
+	// accepted, e.g. de_DE.utf8@euro, en_US.utf8@latin9, en_US@iso8859-15. Bare @,
+	// overlong modifiers, and non-[A-Za-z0-9-] characters inside the modifier are
+	// rejected. Must match: [a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?
 	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?$/.test(name)) {
 		throw new InvalidIdentifierError(
 			name,
