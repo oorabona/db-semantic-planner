@@ -110,7 +110,12 @@ export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 		if (e instanceof SchemaLoadError) {
 			throw e;
 		}
-		// ENOENT or similar — file doesn't exist; let existsSync handle it below.
+		// Re-throw non-ENOENT errors (EACCES, ELOOP, EPERM, EIO, etc.) so real
+		// filesystem problems are not silently swallowed. Only ENOENT is expected
+		// here — the file simply doesn't exist yet; existsSync below will handle it.
+		if ((e as NodeJS.ErrnoException).code !== 'ENOENT') {
+			throw e;
+		}
 	}
 
 	if (!existsSync(resolvedPath)) {
