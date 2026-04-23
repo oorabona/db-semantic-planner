@@ -438,9 +438,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 	const queryCtx: QueryBuilderContext = {
 		model,
 		strictMode,
-		...(adapter !== undefined
-			? { adapter: adapter as unknown as import('../adapter.js').Adapter }
-			: {}),
+		...(adapter !== undefined ? { adapter: adapter as Adapter<unknown> } : {}),
 		...(schemaName !== undefined ? { schemaName } : {}),
 		...(dialectCapabilities !== undefined ? { dialectCapabilities } : {}),
 		...(globalPlanOptions !== undefined
