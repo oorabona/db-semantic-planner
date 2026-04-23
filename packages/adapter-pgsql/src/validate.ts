@@ -419,14 +419,16 @@ export function validateExtensionName(
  * `en-US-x-icu`, `C.UTF-8`, `C`). They must not contain injection vectors.
  *
  * Allowed: letter or underscore start, then letters, digits, underscore,
- *          hyphen, dot, and an optional trailing `@modifier` (1-4 alphanumeric
- *          characters, e.g. `@euro`, `@latin9`).
- *          Pattern: `[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?`
- * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted
- *            strings ($), whitespace, NUL byte, backslash, bare `@` or
- *            `@` with non-alphanumeric / too-long modifier
+ *          hyphen, dot, and an optional trailing `@modifier` (1-10 characters
+ *          from `[A-Za-z0-9-]`, e.g. `@euro`, `@latin9`, `@iso8859-15`).
+ *          Modifier hyphens are allowed to cover codepage suffixes like
+ *          `iso8859-15`. Pattern: `[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?`
+ * Forbidden: any character outside [A-Za-z0-9_.-] and the optional
+ *            @modifier (including single-quote, double-quote, semicolon, --,
+ *            block-comment markers, dollar-quoting, whitespace, NUL byte,
+ *            backslash, bare @, or @modifier longer than 10 characters)
  *
- * @param name    The collation name to validate (e.g. `en_US.utf8`, `de_DE.utf8@euro`)
+ * @param name    The collation name to validate (e.g. en_US.utf8, de_DE.utf8@euro)
  * @param context Human-readable context label for the error message
  * @throws InvalidIdentifierError if the name fails validation
  */
@@ -438,7 +440,10 @@ export function validateCollationName(
 		throw new InvalidIdentifierError(name, context, 'cannot be empty');
 	}
 
-	// PostgreSQL NAMEDATALEN - 1 = 63 byte limit
+	// PostgreSQL NAMEDATALEN - 1 = 63 byte limit. For collation names the
+	// equivalence of .length and Buffer.byteLength() still holds because the
+	// accepted charset ([A-Za-z0-9_.-] plus the @modifier [A-Za-z0-9-]) is
+	// entirely ASCII — every character is a single byte in UTF-8.
 	if (Buffer.byteLength(name, 'utf8') > 63) {
 		throw new InvalidIdentifierError(
 			name,
@@ -547,11 +552,11 @@ export function validateCollationName(
 	// An optional trailing @modifier (1-4 alphanumeric chars) is also accepted,
 	// e.g. de_DE.utf8@euro, en_US.utf8@latin9. Bare @ or non-alphanumeric modifiers
 	// are rejected. Must match: [a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?
-	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9]{1,4})?$/.test(name)) {
+	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?$/.test(name)) {
 		throw new InvalidIdentifierError(
 			name,
 			context,
-			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed; optional @modifier must be 1-4 alphanumeric characters, e.g. @euro)',
+			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed; optional @modifier must be 1-10 alphanumeric/hyphen characters, e.g. @euro, @latin9, @iso8859-15)',
 		);
 	}
 }

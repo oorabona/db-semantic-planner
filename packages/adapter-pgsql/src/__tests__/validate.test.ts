@@ -301,15 +301,24 @@ describe('Identifier Validation', () => {
 			);
 		});
 
-		it('rejects @modifier longer than 4 alphanumeric characters', () => {
+		it('accepts multi-character glibc locale modifiers like @latin9 and @iso8859-15', () => {
 			expect(() =>
-				validateCollationName('de_DE.utf8@toolongmod', 'collation'),
+				validateCollationName('fr_FR@latin9', 'collation'),
+			).not.toThrow();
+			expect(() =>
+				validateCollationName('en_US@iso8859-15', 'collation'),
+			).not.toThrow();
+		});
+
+		it('rejects @modifier longer than 10 characters', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@abcdefghijklmnop', 'collation'),
 			).toThrow(InvalidIdentifierError);
 		});
 
-		it('rejects @modifier containing non-alphanumeric characters', () => {
+		it('rejects @modifier containing non-alphanumeric characters other than hyphen', () => {
 			expect(() =>
-				validateCollationName('de_DE.utf8@has-dash', 'collation'),
+				validateCollationName('de_DE.utf8@has_under', 'collation'),
 			).toThrow(InvalidIdentifierError);
 		});
 	});
