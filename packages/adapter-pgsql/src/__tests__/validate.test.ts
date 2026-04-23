@@ -7,6 +7,7 @@ import {
 	InvalidIdentifierError,
 	isReservedKeyword,
 	sanitizeForDisplay,
+	validateCollationName,
 	validateIdentifier,
 	validateIdentifiers,
 	validateQualifiedIdentifier,
@@ -278,6 +279,47 @@ describe('Identifier Validation', () => {
 			expect(error.message).toBe(
 				'Invalid column identifier "bad-value": test reason',
 			);
+		});
+	});
+
+	describe('validateCollationName', () => {
+		it('accepts collation with @euro modifier', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@euro', 'collation'),
+			).not.toThrow();
+		});
+
+		it('accepts collation without modifier (no regression)', () => {
+			expect(() =>
+				validateCollationName('en_US.utf8', 'collation'),
+			).not.toThrow();
+		});
+
+		it('rejects bare @ with no modifier', () => {
+			expect(() => validateCollationName('de_DE.utf8@', 'collation')).toThrow(
+				InvalidIdentifierError,
+			);
+		});
+
+		it('accepts multi-character glibc locale modifiers like @latin9 and @iso8859-15', () => {
+			expect(() =>
+				validateCollationName('fr_FR@latin9', 'collation'),
+			).not.toThrow();
+			expect(() =>
+				validateCollationName('en_US@iso8859-15', 'collation'),
+			).not.toThrow();
+		});
+
+		it('rejects @modifier longer than 10 characters', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@abcdefghijklmnop', 'collation'),
+			).toThrow(InvalidIdentifierError);
+		});
+
+		it('rejects @modifier containing non-alphanumeric characters other than hyphen', () => {
+			expect(() =>
+				validateCollationName('de_DE.utf8@has_under', 'collation'),
+			).toThrow(InvalidIdentifierError);
 		});
 	});
 });

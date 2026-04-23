@@ -33,6 +33,7 @@ export const VALID_INDEX_METHODS = new Set([
 	'hnsw',
 	'ivfflat',
 	'bm25',
+	'bloom',
 ]);
 
 /**

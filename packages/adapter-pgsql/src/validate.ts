@@ -140,6 +140,32 @@ export class InvalidIdentifierError extends Error {
 // Validation Functions
 // ============================================================================
 
+// ────────────────────────────────────────────────────────────────────
+// NAMEDATALEN and character-length bookkeeping
+//
+// PostgreSQL caps identifier/role/collation names at NAMEDATALEN-1 bytes
+// (63 bytes in the default build). Two length-check styles coexist in
+// this file for historical reasons:
+//
+//   • `validateIdentifier()` uses `name.length > 63` (UTF-16 code units
+//     as JavaScript counts them → effectively character count).
+//   • `quoteRoleName()` / `validateCollationName()` use
+//     `Buffer.byteLength(name, 'utf8') > 63` (actual byte count).
+//
+// Why the two styles coexist:
+//   • `validateIdentifier` and `validateCollationName` sit *after* an
+//     ASCII-only allowlist regex that rejects any multi-byte character,
+//     so every accepted name has `.length === Buffer.byteLength(...)`
+//     and the char-count form is equivalent to a byte-count form.
+//   • `quoteRoleName` deliberately does NOT gate on an ASCII allowlist
+//     (role names like `"utilisateur"` are legitimate); it rejects only
+//     `"`, NUL, and control chars, then counts *bytes* because role
+//     names can contain multi-byte UTF-8 and PostgreSQL truncates at
+//     the byte level (strlen semantics).
+// The asymmetry is intentional and safe. Do not collapse either style
+// without also widening/narrowing the upstream input-validation rules.
+// ────────────────────────────────────────────────────────────────────
+
 /**
  * Validate that a string is a safe SQL identifier.
  *
@@ -400,11 +426,16 @@ export function validateExtensionName(
  * `en-US-x-icu`, `C.UTF-8`, `C`). They must not contain injection vectors.
  *
  * Allowed: letter or underscore start, then letters, digits, underscore,
- *          hyphen, dot (`[a-zA-Z_][a-zA-Z0-9_.-]*`)
- * Forbidden: double-quote, single-quote, semicolon, --, /*, *\/, dollar-quoted
- *            strings ($$), whitespace, NUL byte, backslash
+ *          hyphen, dot, and an optional trailing `@modifier` (1-10 characters
+ *          from `[A-Za-z0-9-]`, e.g. `@euro`, `@latin9`, `@iso8859-15`).
+ *          Modifier hyphens are allowed to cover codepage suffixes like
+ *          `iso8859-15`. Pattern: `[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?`
+ * Forbidden: any character outside [A-Za-z0-9_.-] and the optional
+ *            @modifier (including single-quote, double-quote, semicolon, --,
+ *            block-comment markers, dollar-quoting, whitespace, NUL byte,
+ *            backslash, bare @, or @modifier longer than 10 characters)
  *
- * @param name    The collation name to validate (e.g. `en_US.utf8`)
+ * @param name    The collation name to validate (e.g. en_US.utf8, de_DE.utf8@euro)
  * @param context Human-readable context label for the error message
  * @throws InvalidIdentifierError if the name fails validation
  */
@@ -416,7 +447,10 @@ export function validateCollationName(
 		throw new InvalidIdentifierError(name, context, 'cannot be empty');
 	}
 
-	// PostgreSQL NAMEDATALEN - 1 = 63 byte limit
+	// PostgreSQL NAMEDATALEN - 1 = 63 byte limit. For collation names the
+	// equivalence of .length and Buffer.byteLength() still holds because the
+	// accepted charset ([A-Za-z0-9_.-] plus the @modifier [A-Za-z0-9-]) is
+	// entirely ASCII — every character is a single byte in UTF-8.
 	if (Buffer.byteLength(name, 'utf8') > 63) {
 		throw new InvalidIdentifierError(
 			name,
@@ -521,12 +555,16 @@ export function validateCollationName(
 	}
 
 	// Final allowlist: must start with letter or underscore, then allow
-	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8)
-	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*$/.test(name)) {
+	// letters, digits, underscore, hyphen, dot (covers en_US.utf8, en-US-x-icu, C.UTF-8).
+	// An optional trailing @modifier (1-10 alphanumeric or hyphen chars) is also
+	// accepted, e.g. de_DE.utf8@euro, en_US.utf8@latin9, en_US@iso8859-15. Bare @,
+	// overlong modifiers, and non-[A-Za-z0-9-] characters inside the modifier are
+	// rejected. Must match: [a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?
+	if (!/^[a-zA-Z_][a-zA-Z0-9_.-]*(?:@[A-Za-z0-9-]{1,10})?$/.test(name)) {
 		throw new InvalidIdentifierError(
 			name,
 			context,
-			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed after the initial letter/underscore)',
+			'contains characters not allowed in collation names (only letters, digits, underscore, hyphen, and dot allowed; optional @modifier must be 1-10 alphanumeric/hyphen characters, e.g. @euro, @latin9, @iso8859-15)',
 		);
 	}
 }
