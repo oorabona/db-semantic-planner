@@ -56,19 +56,27 @@ CREATE TABLE child (
 
 async function execDDL(schema: string, ddl: string): Promise<void> {
 	const pool = await getTestPool();
-	await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
-	await pool.query(`SET search_path TO "${schema}"`);
+	// Pin all statements to a single connection — `SET search_path` is session-
+	// local, so without pinning the DDL body and the finally-reset could run
+	// on different pool connections and leak state across tests.
+	const client = await pool.connect();
 	try {
-		for (const stmt of ddl
-			.split(';')
-			.map((s) => s.trim())
-			.filter(Boolean)) {
-			await pool.query(stmt);
+		await client.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+		await client.query(`SET search_path TO "${schema}"`);
+		try {
+			for (const stmt of ddl
+				.split(';')
+				.map((s) => s.trim())
+				.filter(Boolean)) {
+				await client.query(stmt);
+			}
+		} finally {
+			// L-1: always reset search_path even if a DDL statement throws,
+			// so subsequent tests run in the expected `public` schema context.
+			await client.query(`SET search_path TO public`);
 		}
 	} finally {
-		// L-1: always reset search_path even if a DDL statement throws,
-		// so subsequent tests run in the expected `public` schema context.
-		await pool.query(`SET search_path TO public`);
+		client.release();
 	}
 }
 
@@ -150,12 +158,24 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 
 	it('round-trip: execute query against real DB using introspected schema', async () => {
 		// Seed one row so the query executes successfully.
+		// Pin to a single client — SET search_path is session-local.
 		const pool = await getTestPool();
-		await pool.query(`SET search_path TO "${S2_SCHEMA}"`);
-		await pool.query(
-			`INSERT INTO items (fk_id) VALUES (1) ON CONFLICT DO NOTHING`,
-		);
-		await pool.query(`SET search_path TO public`);
+		const client = await pool.connect();
+		try {
+			await client.query(`SET search_path TO "${S2_SCHEMA}"`);
+			try {
+				await client.query(
+					`INSERT INTO items (fk_id) VALUES (1) ON CONFLICT DO NOTHING`,
+				);
+			} finally {
+				// Reset schema even if INSERT threw — otherwise the connection
+				// returns to the pool with the overridden search_path and
+				// leaks state into subsequent test acquirers.
+				await client.query(`SET search_path TO public`);
+			}
+		} finally {
+			client.release();
+		}
 
 		const model = await introspect(pool, { schema: S2_SCHEMA });
 		const adapter = createPgsqlAdapter(pool);
