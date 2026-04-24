@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import type { IntentSummary } from '@dbsp/core';
+import type { LoadedSchema } from '@dbsp/types';
 import {
 	parseAssertionFile,
 	validateAssertionBlocks,
@@ -18,7 +19,7 @@ import { formatOutput } from './output-formatter.js';
 
 export interface BatchModeOptions {
 	queries: string[];
-	schema: import('../utils/schema-loader.js').LoadedSchema;
+	schema: LoadedSchema;
 	schemaPath: string;
 	format: 'text' | 'json';
 	databaseUrl?: string;

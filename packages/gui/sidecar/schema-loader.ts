@@ -11,7 +11,9 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ModelIR } from '@dbsp/types';
+import { isValidSchema } from '@dbsp/types';
+
+export type { LoadedSchema } from '@dbsp/types';
 
 /**
  * Default schema file names to search for, in priority order.
@@ -31,32 +33,6 @@ export class SchemaLoadError extends Error {
 		super(message);
 		this.name = 'SchemaLoadError';
 	}
-}
-
-/**
- * ARCH-005: Schema type from schema() function.
- * Contains the definition, pre-computed ModelIR, and table names.
- */
-export interface LoadedSchema {
-	readonly definition: Record<string, unknown>;
-	readonly model: ModelIR;
-	readonly tableNames: string[];
-}
-
-/**
- * Type guard for ARCH-005 schema() output.
- */
-function isValidSchema(schema: unknown): schema is LoadedSchema {
-	return (
-		typeof schema === 'object' &&
-		schema !== null &&
-		'model' in schema &&
-		'definition' in schema &&
-		typeof (schema as LoadedSchema).model === 'object' &&
-		(schema as LoadedSchema).model !== null &&
-		'tables' in (schema as LoadedSchema).model &&
-		'relations' in (schema as LoadedSchema).model
-	);
 }
 
 /**

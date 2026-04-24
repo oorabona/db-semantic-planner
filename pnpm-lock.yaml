@@ -166,6 +166,9 @@ importers:
       '@dbsp/nql':
         specifier: workspace:*
         version: link:../nql
+      '@dbsp/types':
+        specifier: workspace:*
+        version: link:../types
       '@oclif/table':
         specifier: ^0.5.3
         version: 0.5.3
@@ -436,6 +439,9 @@ importers:
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.2(@types/node@25.5.0)(jsdom@29.0.1)(vite@8.0.3(@emnapi/core@1.9.1)(@emnapi/runtime@1.9.1)(@types/node@25.5.0)(esbuild@0.27.4)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.3))
 
 packages:
 
