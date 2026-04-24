@@ -594,7 +594,10 @@ export class ResultHydrator<TResult = unknown> {
 		const parts = values.map((v) => String(v));
 		if (parts.some((p) => p.includes(COMPOSITE_KEY_SEP))) {
 			// Collision-safe fallback — slower but correct for any value content.
-			return JSON.stringify(values);
+			// Stringify `parts` (already normalized to strings via String(v))
+			// rather than `values` because JSON.stringify throws on bigint,
+			// and composite PKs may legitimately contain bigint values.
+			return JSON.stringify(parts);
 		}
 		return parts.join(COMPOSITE_KEY_SEP);
 	}

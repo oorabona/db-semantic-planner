@@ -27,6 +27,15 @@ import { createOrm, eq } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeTestDb, dropSchema, getTestPool } from './testkit/index.js';
 
+// Compile-only adapter intentionally excludes execute/executeOne/executeMany
+// (typed as `?: never`), so it is not structurally assignable to
+// Adapter<unknown>. The tests below only exercise the compile path
+// (`dump()`), so we cast to Adapter<unknown> once here instead of
+// duplicating the cast at each createOrm() call site.
+function makeCompileOnlyAdapter(): Adapter<unknown> {
+	return createPgsqlCompileOnlyAdapter() as unknown as Adapter<unknown>;
+}
+
 // ─── S-2 schema ───────────────────────────────────────────────────────────────
 
 const S2_SCHEMA = 'originaldbtype_cast_test';
@@ -112,12 +121,9 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 
 		// Use compile-only adapter to inspect SQL without executing against DB.
 		// Pass model (IntrospectedModelIR extends ModelIR) directly — no schema() wrapper needed.
-		const adapter = createPgsqlCompileOnlyAdapter();
-		// CompileOnlyAdapter satisfies the compilation contract needed here;
-		// the cast bridges the exactOptionalPropertyTypes exclusion gap.
 		const orm = createOrm({
 			model,
-			adapter: adapter as unknown as Adapter<unknown>,
+			adapter: makeCompileOnlyAdapter(),
 		});
 
 		const dump = orm
@@ -144,11 +150,9 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 			},
 		});
 
-		const adapter = createPgsqlCompileOnlyAdapter();
-		// Same cast as above — CompileOnlyAdapter satisfies the compile-time contract.
 		const orm = createOrm({
 			schema: manualSchema,
-			adapter: adapter as unknown as Adapter<unknown>,
+			adapter: makeCompileOnlyAdapter(),
 		});
 
 		const dump = orm.select('items').where(eq('fk_id', 42)).dump();
