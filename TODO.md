@@ -240,7 +240,7 @@ Branch: `fix/mcp-server-review-20260419` — superseded by retro-audit PR #51 (`
 - [x] ✅ [adapter-pgsql] `VALID_INDEX_METHODS` now includes `bloom` (PR #54, `c513a54`)
 - [x] ✅ [adapter-pgsql] `validateCollationName` accepts `@euro`/`@latin9`/`@iso8859-15` modifiers (PR #54, `c513a54`)
 - [x] ✅ [adapter-pgsql] NAMEDATALEN asymmetry documented — commentary distinguishes `validateIdentifier`/`validateCollationName` (ASCII-only, equivalence holds) from `quoteRoleName` (accepts multibyte, byte count required) (PR #54, `c513a54`)
-- [ ] 🔧 [tests/e2e] `tests/e2e/originalDbType-cast.test.ts` `execDDL()` uses `pool.query()` which does not pin to a specific connection — `SET search_path TO X` and the `finally` reset may run on different pool connections. Wrap in `pool.connect()` + `client.query()` + `client.release()` for strict session affinity. Pre-existing pattern; latent issue. Priority: L
+- [x] ✅ [tests/e2e] `originalDbType-cast` execDDL now pins all statements to a single `pool.connect()` client (PR #60, `9c96f02`); seed block's `SET search_path` also nested in its own `finally` (R1 fold)
 - [ ] 🔧 [adapter-pgsql] M-5 `SchemaChange.meta` discriminated union: 56 `as ForeignKeyIR`/`as IndexIR`/`as ColumnIR` casts in `migration-sql.ts`. Full union per `change.kind` (~25 kinds) deferred with in-source disclosure at `migration-sql.ts` top-of-file. Priority: L (structural refactor)
 
 ---
@@ -255,11 +255,11 @@ Branch: `fix/mcp-server-review-20260419` — superseded by retro-audit PR #51 (`
 - [ ] 🔧 [cli] SC-4 `handleNql` 157 lines in `repl-engine.ts` — inline `QueryResult` construction mixed with execution-control. Extract `buildQueryResult()` + `shouldExecuteQuery()` pure helpers. Priority: L
 - [ ] 🔧 [cli/types] SC-8 `isValidSchema` duplicated in `packages/cli/src/utils/schema-loader.ts` and `packages/gui/src/sidecar/schema-loader.ts` with `similarity=1.0`. Move canonical version to `packages/types` so both packages depend on it. Priority: L (cross-package move)
 - [x] ✅ [cli] `schema-loader.ts` realpath re-throws everything except `ENOENT` — EACCES/ELOOP/EPERM no longer hidden (PR #57, `b8542bc`)
-- [ ] 🔧 [cli] `migrate.test.ts` destructive-flag regression test is a tautology — it calls `mockIsDestructiveDown(parsed.downStatements)` in the test body instead of exercising `applyCommand` end-to-end. Convert to an integration test via testcontainers with a destructive-DOWN fixture asserting the recorded `destructive=true` row. Priority: L (test quality)
+- [x] ✅ [cli] `migrate.test.ts` destructive-flag tautology replaced with 4 substantive assertions exercising real `isDestructiveDown` against DROP TABLE/CREATE TABLE/DROP COLUMN/DROP INDEX (PR #59, `7e29ad3`). Full testcontainers variant (assert `_dbsp_migrations.destructive=true`) deferred — TODO comment added in test file; see follow-up: **[cli] FUTURE: CLI integration test harness** (spawn binary, assert stdout/stderr + exit)
 - [x] ✅ [cli] `repl/history.ts` `chmodSync(…, 0o600)` now runs after every `save()` in try/catch (best-effort) (PR #57, `b8542bc`)
 - [x] ✅ [cli] `schema-codegen.ts` snake_case self-ref regex widened to `/_?[iI]d$/` — `parent_id` now yields role `parent` (PR #57, `b8542bc`)
 - [x] ✅ [cli] `schema-codegen.ts` FK `onDelete`/`onUpdate` routed through `singleQuoteEscape` (PR #57, `b8542bc`)
-- [ ] 🔧 [cli] `index.ts` Commander parse errors with `--json` in argv — verify help/version paths emit JSON too when `--json` is present, not plain text. May already work through the exitCode-0 detection; needs a specific test. Priority: L (JSON-mode coverage)
+- [x] ✅ [cli] `index.ts` `--json` help/version coverage documented via Commander exit-code tests (PR #59, `7e29ad3`). Real entry-point JSON-wrap coverage left as follow-up (requires spawn-based integration harness — TODO.md § "CLI integration test harness")
 
 ---
 
@@ -283,14 +283,14 @@ Branch: `fix/mcp-server-review-20260419` — superseded by retro-audit PR #51 (`
 > PR #52 merged as `3a0fad8` (2026-04-21). 104 raw audit findings (5 sonnet concerns + codex xhigh on 3 hotspots) → 102 deduped → 7 thematic bundles landed (4 S + 58 M). Senior review pre-PR caught 2 M (cursor swap, partial safeRecord) + 5 L folded in before open. Copilot rounds R1 (5 M + 5 L all fixed) → R2 (4 snapshot-lag false positives + 1 test-quality nit documented) → merge. Tests 2865 → 2984 (+119). Bundle 8 (SOLID structural refactor) deliberately deferred. Items below are explicit deferrals.
 
 - [x] ✅ [core] `planner.ts:1574` `Object.freeze` residual spread switched to `.slice()` (PR #56, `8bc2cef`)
-- [ ] 🔧 [core] Senior L-3 `packages/core/src/dx/orm-instance.ts` `alterColumn` DDL helper — relies only on `quoteIdent` for table/column identifier safety, does not route through `validateIdentifier`. Safe in practice (quoting prevents injection), inconsistent with commit claim "DDL helpers validate identifiers". Priority: L (consistency)
-- [ ] 🔧 [core] Senior L-6 `packages/core/src/dx/errors.ts` `AmbiguousRelationError` — message still embeds option list + table names, unlike the other NotFound errors which were split into generic `.message` + structured fields. Either apply the same treatment for API consistency or document the intentional exception. Priority: L (consistency)
-- [ ] 🔧 [core] Senior L-7 `packages/core/src/dx/result-hydrator.ts:575-581` — composite-key NUL separator has a theoretical collision if a PK string value contains a literal `\u0000` byte. Document as intentional trade-off (PG text columns reject NUL; bytea PKs could hit this edge) or fall back to JSON.stringify when any `String(v)` contains NUL. Priority: L (rare bytea-PK scenario)
-- [ ] 🔧 [core] Senior L-8 `packages/core/src/dx/query-builder.ts:1901-1910` — `paginate()` inside `executeWithHooks` inlines a try/catch instead of using the `planWithAmbiguityHandling` helper introduced in the same PR. 5th site of the same pattern; DRY miss. Priority: L (DRY)
+- [x] ✅ [core] `alterColumn` now routes `table` + `column` through `validateIdentifier` (PR #58, `abd77a5`)
+- [x] ✅ [core] `AmbiguousRelationError` adopts generic-message + structured-fields contract (sourceTable / targetTable / options) (PR #58, `abd77a5`)
+- [x] ✅ [core] `extractKeyValue` falls back to `JSON.stringify(parts)` (bigint-safe) when any composite-key value contains NUL; introduces named `COMPOSITE_KEY_SEP` constant (PR #58, `abd77a5`)
+- [x] ✅ [core] `paginate()` hook path routes through `planWithAmbiguityHandling` — inline try/catch removed (PR #58, `abd77a5`)
 - [x] ✅ [core] `cursorPaginate({ limit: 0 })` harmonized — returns empty page instead of throwing, matching `.limit(0)` (PR #56, `8bc2cef`)
 - [x] ✅ [core] `object-filter.ts` operator reads guarded by `Object.hasOwn` — prototype-walk injection blocked (PR #56, `8bc2cef`)
-- [ ] 🔧 [core/tests] Senior L-11 `tests/e2e/originalDbType-cast.test.ts` — 2 TS2739 errors on `CompileOnlyAdapter` missing `withSchema`. Not introduced by PR #52; masked on main by module-resolution errors. Fix: widen `CompileOnlyAdapter` type to intersect with `withSchema`-bearing interface, or narrow the test to not call `withSchema` on compile-only ORM. Priority: L (pre-existing, surfaced by build improvements)
-- [ ] 🔧 [tests/e2e] Copilot R2 test-quality nit `tests/e2e/transactions.test.ts` — uses `OrmInstanceInternal` deep-path cast instead of typed `tx.into(tx.tables.X)` API. Blocked by `blogModel` being raw `ModelIR` rather than typed `schema()`. Convert `blogModel` to typed `schema()` definition to unblock migration. Priority: L (test brittleness, documented in-file)
+- [x] ✅ [core/tests] `CompileOnlyAdapter` type widened with `dbCasing` + `withSchema()` — 2 pre-existing TS2739 errors in `originalDbType-cast.test.ts` resolved via casts factored into `makeCompileOnlyAdapter()` helper (PR #58, `abd77a5`)
+- [x] ✅ [tests/e2e] `transactions.test.ts` migrated to typed `blogSchema` + `tx.into(tx.tables.X)` API; `OrmInstanceInternal` deep-import cast removed (PR #58, `abd77a5`)
 - [x] ✅ [core] Bundle 8 SOLID — `QueryBuilderImpl` god-object refactor (PR #53, 2026-04-23, `c9fce38`). Extracted pagination + streaming to sibling modules (query-builder.ts 2339 → 1779 LoC). Remaining method body work (hook executor, more granular extraction) intentionally deferred — the 560-LoC reduction is the high-value first pass.
 - [x] ✅ [core] Bundle 8 SOLID — `createOrmInstance` 12-param constructor → `QueryBuilderContext` struct (PR #53, 2026-04-23). 6 construction sites collapsed, silent-reorder footgun removed.
 - [x] ✅ [core] Bundle 8 SOLID — `negotiateFeatures` OCP violation → `FeatureChecker[]` registry (PR #53, 2026-04-23). 131 → 30 LoC in the loop; DEFAULT_FEATURE_CHECKERS is Object.freeze'd; capability type narrowed to boolean-flag-only.
