@@ -126,11 +126,27 @@ Examples:
 
 ```
 feat(core): add recursive CTE builder
-fix(adapter): handle NULL in COALESCE expressions
+fix(adapter-pgsql): handle NULL in COALESCE expressions
 refactor(core): extract filter helpers to shared module
-docs(guides): add how-to guide for RLS policies
-test(adapter): add golden tests for DISTINCT ON queries
+docs(docs): add how-to guide for RLS policies
+test(adapter-pgsql): add golden tests for DISTINCT ON queries
 ```
+
+Commit messages are validated by a CI workflow (`commitlint`) on every
+pull request. Scope is **required** and must match one of:
+`types`, `nql`, `core`, `adapter-pgsql`, `cli`, `mcp-server`, `gui`, `docs`,
+`release`, `deps`, `deps-dev`, `ci`, `build`, `repo`.
+
+**Optional local hook** — if you want fast feedback at commit time instead
+of waiting for CI, install a client-side hook:
+
+```bash
+pnpm add -D -w @commitlint/cli @commitlint/config-conventional simple-git-hooks
+pnpm pkg set "simple-git-hooks.commit-msg"="pnpm exec commitlint --edit \$1"
+pnpm exec simple-git-hooks
+```
+
+This is purely optional — the CI enforcement is authoritative.
 
 ### Rebuilding after source changes
 

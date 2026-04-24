@@ -61,4 +61,19 @@ temp/
 
 # AI tooling
 .claude/
+.claude-recovery.md
 .serena/
+
+# Process / backlog artifacts (internal, never committed)
+TODO.md
+TODO_*.md
+BACKLOG_STUDY.md
+.workflow-state.json
+
+# Framework artifacts
+.next/
+
+# Tauri build artifacts
+packages/gui/src-tauri/target/
+packages/gui/src-tauri/gen/
+packages/gui/src-tauri/lcov.info
