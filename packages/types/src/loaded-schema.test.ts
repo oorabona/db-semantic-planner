@@ -15,12 +15,24 @@ describe('isValidSchema', () => {
 		expect(isValidSchema({})).toBe(false);
 	});
 
-	it('returns false when model is null', () => {
-		expect(isValidSchema({ model: null })).toBe(false);
+	it('returns false when model is null (isolated branch — definition + tableNames present)', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: null,
+				tableNames: [],
+			}),
+		).toBe(false);
 	});
 
-	it('returns false when model lacks tables/relations', () => {
-		expect(isValidSchema({ definition: {}, model: {} })).toBe(false);
+	it('returns false when model lacks tables/relations (isolated branch — definition + tableNames present)', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {},
+				tableNames: [],
+			}),
+		).toBe(false);
 	});
 
 	it('returns false when tableNames is missing', () => {

@@ -15,9 +15,10 @@ export interface LoadedSchema {
 }
 
 /**
- * Runtime type guard for `LoadedSchema` — verifies the object
- * has `definition`, `model`, `model.tables`, and `model.relations`.
- * Structural check only — does not validate inner values.
+ * Runtime type guard for `LoadedSchema` — verifies the object has
+ * `definition`, `model` (with nested `tables` + `relations`), and
+ * `tableNames` as an array. Structural check only — does not validate
+ * the inner values of any field.
  *
  * Type guard for ARCH-005 schema() output.
  */
