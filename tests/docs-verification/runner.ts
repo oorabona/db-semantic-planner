@@ -5,27 +5,26 @@
  * every public @dbsp API pre-imported, transpile on the fly via `tsx`-style
  * dynamic import, and report pass/fail.
  *
- * Strategy: write each block to a unique file under /tmp, then `await import()`
- * it. The filesystem indirection is cheap (~10ms) and gives us real parse
- * errors with accurate line numbers from the TS compiler.
- *
- * Failure modes surfaced:
- *   - Parse error (invalid TS syntax)       → test fails with compile error
- *   - Type error on import (API drift)       → test fails with module error
- *   - Runtime error (wrong method call)      → test fails with exception
+ * Strategy: write each block to a unique file inside the project tree, then
+ * `await import()` it. The filesystem indirection is cheap (~10ms) and gives
+ * us real parse errors with accurate line numbers from the TS compiler.
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 
-const TMP_ROOT = join(process.cwd(), 'tests/docs-verification/__generated__/.tmp');
+const TMP_ROOT = join(
+	process.cwd(),
+	'tests/docs-verification/__generated__/.tmp',
+);
 mkdirSync(TMP_ROOT, { recursive: true });
 
 const PREAMBLE = `
+// === Core DX surface ===
 import {
 \tschema,
 \tref,
+\touterRef,
 \tcreateOrm,
 \teq,
 \tneq,
@@ -53,31 +52,44 @@ import {
 \tunary,
 \tnamedArg,
 \tcaseWhen,
-\tcosineDistance,
-\trawDistance,
-\tl2Distance,
-\tinnerProduct,
-\tbm25Search,
-\tparse,
-\tboost,
-\tbooleanSearch,
-\tscore,
-\tfullTextSearch,
-\ttextScore,
-\tgenerateSeries,
-\tnextval,
 \tisDistinctFrom,
 \tinSubquery,
 \tsubquery,
+\tbatchValues,
+\tstar,
+\tarray,
+\tfullTextSearch,
+\ttextScore,
 } from '@dbsp/core';
-import { createPgsqlCompileOnlyAdapter, createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-// Mocked Pool avoids real DB connections in doctests
+
+// === PG-specific helpers (live in the adapter, not core) ===
+import {
+\tcreatePgsqlCompileOnlyAdapter,
+\tcreatePgsqlAdapter,
+\tbm25Search,
+\tbooleanSearch,
+\tboost,
+\tparse,
+\tscore,
+\tgenerateSeries,
+\tnextval,
+\tcosineDistance,
+\tinnerProduct,
+\tl2Distance,
+\trawDistance,
+\tvectorDims,
+} from '@dbsp/adapter-pgsql';
+
+// Mocked Pool avoids real DB connections in doctests.
+// biome-ignore lint/suspicious/noExplicitAny: stub
 class Pool { constructor(_: any) {} async query() { return { rows: [], rowCount: 0 }; } async connect() { return this; } async end() {} release() {} }
 
 // Deterministic fake env for blocks referencing process.env
 process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 
-// Default orm + schema that blocks can reference if they don't declare their own.
+// Default schema — rich enough to cover most doc scenarios without redeclaration.
+// Blocks that need exotic tables (embeddings, vector search, FTS index etc.)
+// can shadow \`db\` / \`orm\` with their own declarations.
 const __defaultDb = schema({
 \tusers: {
 \t\tid: 'uuid',
@@ -89,8 +101,27 @@ const __defaultDb = schema({
 \tposts: {
 \t\tid: 'uuid',
 \t\ttitle: 'string',
+\t\tcontent: { type: 'text', nullable: true },
 \t\tauthorId: ref('users'),
 \t\tpublished: 'boolean',
+\t\tcreatedAt: 'timestamp',
+\t\tsearchVector: { type: 'tsvector', nullable: true },
+\t},
+\tcomments: {
+\t\tid: 'uuid',
+\t\tpostId: ref('posts'),
+\t\tbody: 'string',
+\t},
+\tcategories: {
+\t\tid: 'uuid',
+\t\tname: 'string',
+\t\tparentId: { type: ref('categories'), nullable: true },
+\t},
+\tdocuments: {
+\t\tid: 'uuid',
+\t\ttitle: 'string',
+\t\tbody: 'text',
+\t\tembedding: { type: 'vector', nullable: true },
 \t},
 } as const);
 const __defaultOrm = createOrm({
@@ -111,6 +142,8 @@ const adapter: any = createPgsqlCompileOnlyAdapter();
 
 // Stub helpers many blocks reference
 const queryVec: number[] = [0.1, 0.2, 0.3];
+const query = 'example search query';
+const searchTerm = 'example';
 
 `;
 
