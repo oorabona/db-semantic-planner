@@ -408,9 +408,6 @@ importers:
 
   packages/nql:
     dependencies:
-      '@dbsp/core':
-        specifier: workspace:^
-        version: link:../core
       '@dbsp/types':
         specifier: workspace:^
         version: link:../types
