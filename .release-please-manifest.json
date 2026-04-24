@@ -1,0 +1,8 @@
+{
+  "packages/types": "1.0.0",
+  "packages/nql": "1.0.0",
+  "packages/core": "1.0.0",
+  "packages/adapter-pgsql": "1.0.0",
+  "packages/cli": "1.0.0",
+  "packages/mcp-server": "1.0.0"
+}
