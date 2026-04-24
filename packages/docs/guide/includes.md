@@ -24,7 +24,7 @@ The relation name maps to the `inverse` or `as` name defined in your schema's `r
 Chain as many levels as needed using dot notation:
 
 ```typescript
-// doctest: skip — illustrates relation/schema features not in default schema
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/.
 // Two levels deep
 const users = await orm.select('users').include('posts.comments').dump();
 // users[0].posts[0].comments — Comment[]
@@ -40,7 +40,6 @@ const users = await orm.select('users').include('posts.comments.author').dump();
 Call `.include()` multiple times on the same builder:
 
 ```typescript
-// doctest: skip — illustrates relation/schema features not in default schema
 const users = await orm.select('users')
   .include('posts')
   .include('profile')
@@ -57,7 +56,7 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// doctest: skip — illustrates relation/schema features not in default schema
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/.
 // Filter related records
 const users = await orm.select('users')
   .include('posts', { where: eq('published', true) })
@@ -95,7 +94,7 @@ const posts = await orm.select('posts')
 For self-referential tables (categories, org charts, threaded comments), use the `recursive` option. The planner generates a PostgreSQL `WITH RECURSIVE` CTE automatically.
 
 ```typescript
-// doctest: skip — illustrates relation/schema features not in default schema
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `categories` has already been declared ╭─[ tests/docs-verification/__generate
 // Ancestors: walk up the tree from node id=5
 const categories = await orm.select('categories')
   .where(eq('id', 5))

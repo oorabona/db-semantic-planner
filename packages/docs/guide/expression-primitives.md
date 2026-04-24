@@ -130,7 +130,6 @@ as required by some extension functions (e.g., `paradedb.parse`).
 ### `star()` — SQL wildcard (*)
 
 ```typescript
-// doctest: skip — star() not in default preamble
 import { star, fn } from '@dbsp/core';
 
 star()                  // → *
@@ -143,7 +142,6 @@ Do not use it in `.column()` directly — use the query builder's select-all def
 ### `array(...items)` — PostgreSQL ARRAY constructor
 
 ```typescript
-// doctest: skip — array() not in default preamble
 import { array, literal, ref, param } from '@dbsp/core';
 
 array(literal(1), literal(2), literal(3))  // → ARRAY[1, 2, 3]
@@ -156,7 +154,7 @@ Implicit conversions apply to all items (same rules as `fn()` and `op()`).
 ### COUNT(*)
 
 ```typescript
-// doctest: skip — star() not in default preamble
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-e7e5e07b.ts:131:34
 import { fn, star, cast, eq } from '@dbsp/core';
 
 fn('count', star())                     // → count(*)
@@ -178,7 +176,7 @@ op('<=>', ref('embedding'), cast(param(queryVec), 'vector')).as('distance')
 ### Comparison methods — use in `.where()`
 
 ```typescript
-// doctest: skip — expr is not defined in default preamble
+// doctest: skip — expr is not defined
 expr.eq(value)   // expr = $N
 expr.neq(value)  // expr != $N
 expr.gt(value)   // expr > $N
@@ -204,7 +202,7 @@ When a string is a value (not a column), use `param()` or `literal()` explicitly
 ## Use in Query Builder
 
 ```typescript
-// doctest: skip — expr is not defined in default preamble
+// doctest: skip — orm.select(...).column is not a function
 import { op, ref, param, cast, unary } from '@dbsp/core';
 
 const qv = [0.1, 0.2, 0.3];
@@ -250,7 +248,7 @@ import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
 Generate a series of values (commonly used with CTE for batch operations):
 
 ```typescript
-// doctest: skip — generateSeries requires import from @dbsp/core — not in default preamble
+// doctest: skip — generateSeries is not a function
 generateSeries(1, 100)       // → generate_series(1, 100)
 generateSeries(0, 50, 5)     // → generate_series(0, 50, 5)
 ```
@@ -260,7 +258,7 @@ generateSeries(0, 50, 5)     // → generate_series(0, 50, 5)
 Get the next value from a PostgreSQL sequence:
 
 ```typescript
-// doctest: skip — nextval requires import from @dbsp/core — not in default preamble
+// doctest: skip — nextval is not a function
 nextval('order_id_seq')      // → nextval('order_id_seq')
 ```
 

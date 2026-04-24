@@ -75,7 +75,7 @@ For cloud databases (RDS, Cloud SQL), check provider limits.
 ### Connection Monitoring
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — Cannot read properties of undefined (reading 'on')
 // Monitor pool health
 pool.on('connect', () => {
   console.log('Pool: connection acquired');
@@ -104,7 +104,7 @@ setInterval(() => {
 Set timeouts at multiple levels for defense in depth:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 // 1. Pool-level (PostgreSQL statement_timeout)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -152,7 +152,7 @@ const users = await queryWithTimeout(
 Use `withSchema()` for PostgreSQL schema isolation:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — app is not defined
 // Tenant middleware (Express example)
 app.use(async (req, res, next) => {
   const tenantId = extractTenantId(req); // From JWT, header, etc.
@@ -184,7 +184,6 @@ app.get('/api/users', async (req, res) => {
 3. Optionally verify tenant exists
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
 function extractTenantId(req: Request): string {
   // From JWT (preferred)
   const token = req.user as { tenantId?: string };
@@ -204,7 +203,7 @@ function extractTenantId(req: Request): string {
 DBSP provides typed errors with error codes for programmatic handling:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — Errors is not defined
 import { Errors, ErrorCode } from '@dbsp/core';
 
 try {
@@ -235,7 +234,6 @@ try {
 ### Error Response Structure
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
 // Standardized error response
 interface ErrorResponse {
   error: {
@@ -280,7 +278,7 @@ function toErrorResponse(error: Error, requestId: string): ErrorResponse {
 Every query produces a `Dump` with plan, SQL, and parameters:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — logger is not defined
 import { redactParams } from '@dbsp/adapter-pgsql';
 
 // Get query dump without executing
@@ -302,7 +300,7 @@ logger.info('Query executed', {
 ### Structured Logging
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
 // Configure correlation IDs
 const users = await orm.select('users')
   .option('correlationId', req.headers['x-request-id'])
@@ -343,7 +341,7 @@ const users = await orm.select('users')
 For large result sets, use streaming to avoid memory exhaustion:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 // Stream 1M rows without loading all in memory
 const stream = orm.select('users').stream();
 
@@ -364,7 +362,7 @@ for await (const row of stream) {
 The PostgreSQL adapter supports cursor-based streaming via `pg-cursor`. For result sets too large to fit in memory, prefer streaming over loading all rows at once. If streaming is not available for your use case, fall back to offset pagination:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 // Offset pagination fallback
 const pageSize = 1000;
 let offset = 0;
@@ -388,7 +386,7 @@ while (true) {
 Use EXPLAIN to analyze query performance:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — Cannot read properties of undefined (reading 'query')
 // Compile the query first, then EXPLAIN via raw SQL
 const dump = await orm.select('users').where(eq('active', true)).dump();
 
@@ -412,7 +410,6 @@ if (plan.includes('Seq Scan') && rowCount > 10000) {
 Establish baselines for common queries:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
 // On startup or scheduled
 async function measureBaselines() {
   const queries = [
@@ -439,7 +436,7 @@ Rate limiting is handled at the application layer (not by DBSP):
 ### Per-Tenant Rate Limiting
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — RateLimiter is not defined
 import { RateLimiter } from 'your-rate-limiter';
 
 const limiter = new RateLimiter({
@@ -471,7 +468,7 @@ async function rateLimitedQuery<T>(
 For complex queries, estimate cost before execution:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — tenant is not defined
 function estimateQueryCost(intent: SelectIntent): number {
   let cost = 1;
 
@@ -544,7 +541,7 @@ function sanitizeTableName(name: string): string {
 Never log sensitive data:
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — redactParams is not defined
 import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
 
 const safeParams = redactParams(dump.params, {
@@ -564,7 +561,7 @@ const safeParams = redactParams(dump.params, {
 ### Database Health Check
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — app is not defined
 app.get('/health', async (req, res) => {
   const checks = {
     database: false,
@@ -587,7 +584,7 @@ app.get('/health', async (req, res) => {
 ### Readiness vs Liveness
 
 ```typescript
-// doctest: skip — illustrates production application pattern, requires real runtime context
+// doctest: skip — app is not defined
 // Liveness: Is the process alive?
 app.get('/health/live', (req, res) => {
   res.status(200).json({ status: 'ok' });
@@ -626,7 +623,6 @@ For multiple related queries, batch them:
 
 ```typescript
 // Instead of N+1 queries (anti-pattern)
-// doctest: skip — illustrates N+1 anti-pattern with for-loop; .dump() returns Dump object, not array
 const users1 = orm.select('users').dump();
 for (const user of []) { // loop would iterate over actual user rows
   // user.posts = await orm.select('posts').where(eq('authorId', user.id)).all();

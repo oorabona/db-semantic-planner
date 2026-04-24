@@ -28,7 +28,7 @@ Both are accessible via `import { caseWhen } from '@dbsp/core'` — the public b
 ## API
 
 ```typescript
-// doctest: skip — type signature / fragment illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-2
 import { caseWhen, ref } from '@dbsp/core'
 
 caseWhen<T>()
@@ -84,7 +84,6 @@ FROM "orders"
 ### 2. Numeric bucketing
 
 ```typescript
-// doctest: skip — type signature / fragment illustration
 caseWhen<string>()
   .when('salary > 80000', 'senior')
   .when('salary > 50000', 'mid')
@@ -122,7 +121,6 @@ END AS "resolvedName"
 ### 4. Boolean flag column
 
 ```typescript
-// doctest: skip — type signature / fragment illustration
 caseWhen<number>()
   .when('score >= 90', 1)
   .else(0)
@@ -141,7 +139,6 @@ Numeric values are inlined directly (not parameterized — see Gotchas).
 ### 5. CASE in ORDER BY
 
 ```typescript
-// doctest: skip — fragment illustrating caseWhen with custom columns
 const query = orm.select('users')
   .columns(['id', 'title', 'priority'])
   .orderBy([
@@ -168,7 +165,6 @@ ORDER BY CASE WHEN priority = 'critical' THEN 1
 ### 6. DISTINCT ON + CASE pattern
 
 ```typescript
-// doctest: skip — fragment illustrating caseWhen with custom columns
 const query = orm.select('users')
   .distinctOn(['userId'])
   .columns([

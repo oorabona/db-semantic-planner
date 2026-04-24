@@ -17,7 +17,7 @@ respect `orm.withSchema()` for multi-tenant isolation.
 ### Table Maintenance
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-73f8bc21.ts:130:35
 // TRUNCATE TABLE — remove all rows
 orm.tables.users.truncate(options?)
 // options: { cascade?: boolean; restartIdentity?: boolean }
@@ -33,7 +33,7 @@ const bytes: number = await orm.tables.users.storageSize()
 ### Column Alteration
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-e
 orm.tables.users.alterColumn(column: string, options: AlterColumnOptions): Promise<void>
 
 // AlterColumnOptions:
@@ -49,7 +49,7 @@ orm.tables.users.alterColumn(column: string, options: AlterColumnOptions): Promi
 ### Index Management
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-b
 // Create an index
 orm.tables.users.indexes.create(options: CreateIndexOptions): Promise<void>
 
@@ -85,7 +85,7 @@ orm.tables.users.indexes.exists(name: string): Promise<boolean>
 ### Global Shortcuts
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-9
 // Drop an index when you don't have a table reference
 orm.ddl.dropIndex(name: string, options?: DropIndexOptions): Promise<void>
 ```
@@ -95,7 +95,6 @@ orm.ddl.dropIndex(name: string, options?: DropIndexOptions): Promise<void>
 All methods respect `orm.withSchema()`:
 
 ```typescript
-// doctest: skip — truncate() requires real adapter; compile-only adapter throws
 const tenantOrm = orm.withSchema('tenant_42')
 tenantOrm.tables.users.truncate()
 // SQL: TRUNCATE "tenant_42"."users"
@@ -106,7 +105,7 @@ tenantOrm.tables.users.truncate()
 ### 1. Truncate with cascade and identity reset
 
 ```typescript
-// doctest: skip — DDL helpers require real adapter and tables in schema
+// doctest: skip — Cannot read properties of undefined (reading 'truncate')
 // Clear orders and all dependent rows, reset auto-increment sequences
 orm.tables.orders.truncate({ cascade: true, restartIdentity: true })
 ```
@@ -119,7 +118,7 @@ TRUNCATE "orders" CASCADE RESTART IDENTITY
 ### 2. VACUUM FULL with ANALYZE
 
 ```typescript
-// doctest: skip — DDL helpers require real adapter and tables in schema
+// doctest: skip — Cannot read properties of undefined (reading 'vacuum')
 // Reclaim storage and update planner statistics (locks table)
 orm.tables.events.vacuum({ full: true, analyze: true })
 ```
@@ -132,7 +131,7 @@ VACUUM FULL ANALYZE "events"
 ### 3. HNSW vector index
 
 ```typescript
-// doctest: skip — DDL helpers require real adapter and tables in schema
+// doctest: skip — Cannot read properties of undefined (reading 'indexes')
 orm.tables.embeddings.indexes.create({
   name: 'idx_embeddings_vector_hnsw',
   columns: ['vector'],
@@ -153,7 +152,7 @@ CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
 ### 4. Expression index (partial)
 
 ```typescript
-// doctest: skip — DDL index helpers require real adapter
+// doctest: skip — Cannot execute DDL on compile-only adapter
 await orm.tables.users.indexes.create({
   name: 'idx_users_email_lower',
   columns: ['email'],
@@ -171,7 +170,7 @@ CREATE INDEX "idx_users_email_lower"
 ### 5. ALTER COLUMN type with USING
 
 ```typescript
-// doctest: skip — DDL helpers require real adapter and tables in schema
+// doctest: skip — Cannot read properties of undefined (reading 'alterColumn')
 // Convert a text column to integer, with explicit cast
 orm.tables.products.alterColumn('price_cents', {
   type: 'integer',
@@ -188,7 +187,7 @@ ALTER TABLE "products"
 ### 6. Index existence check before operation
 
 ```typescript
-// doctest: skip — DDL index helpers require real adapter
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 const exists = await orm.tables.users.indexes.exists('idx_users_email')
 if (!exists) {
   await orm.tables.users.indexes.create({
@@ -202,7 +201,7 @@ if (!exists) {
 ### 7. List indexes and check storage
 
 ```typescript
-// doctest: skip — DDL helpers require real adapter and tables in schema
+// doctest: skip — Cannot read properties of undefined (reading 'indexes')
 // List indexes matching a pattern
 const vecIndexes = await orm.tables.embeddings.indexes.list({
   namePattern: 'idx_embeddings_%',

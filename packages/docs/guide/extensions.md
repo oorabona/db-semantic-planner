@@ -30,7 +30,7 @@ imported from `@dbsp/adapter-pgsql`.
 ### Full Example
 
 ```typescript
-// doctest: skip — multi-line import stripped incorrectly and requires embeddings/symbols tables not in default schema
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-85f3c6c7.ts:133:1
 import {
   cosineDistance,
   rawDistance,
@@ -108,7 +108,7 @@ const db = schema(
 ### Full Example
 
 ```typescript
-// doctest: skip — score/bm25Search are from @dbsp/adapter-pgsql, not available in compile-only preamble
+// doctest: skip — score is not a function
 import { score, bm25Search } from '@dbsp/adapter-pgsql';
 
 const searchTerm = 'semantic query planner';

@@ -24,7 +24,7 @@ which is a single parameterized rangefunction — zero extra round-trips, no tem
 ### Standalone factory (import from `@dbsp/core`)
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-f
 import { batchValues } from '@dbsp/core'
 
 batchValues(
@@ -38,7 +38,7 @@ batchValues(
 ### ORM method (identical, attached to orm instance)
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-b9644a36.ts:129:58
 const batch = orm.batchValues(data, columns, types, opts?)
 ```
 
@@ -71,7 +71,7 @@ not statically typed because the schema is runtime-defined.
 Fetch the batch values as a standalone result set.
 
 ```typescript
-// doctest: skip — batchValues is not in the default preamble — import from @dbsp/core
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 import { batchValues } from '@dbsp/core'
 
 const batch = batchValues(
@@ -100,7 +100,7 @@ Parameters: `[['/src/a.ts', '/src/b.ts'], ['a.ts', 'b.ts']]`
 Filter rows in a real table against a set of in-memory values.
 
 ```typescript
-// doctest: skip — batchValues is not in the default preamble — import from @dbsp/core
+// doctest: skip — Unknown table: calls
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const batch = batchValues(
@@ -136,7 +136,7 @@ Parameters: `[[1, 2, 3], [10, 20, 30]]`
 Update multiple rows in one query using the batch as the source of new values.
 
 ```typescript
-// doctest: skip — batchValues is not in the default preamble — import from @dbsp/core
+// doctest: skip — Invalid TableRef: missing TABLE_META symbol
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const ids = [101, 102, 103]
@@ -173,7 +173,7 @@ Use `ordinality: true` to get a zero-indexed row number (`ord` column). Useful f
 preserving caller-defined ordering in a JOIN or SELECT.
 
 ```typescript
-// doctest: skip — batchValues is not in the default preamble — import from @dbsp/core
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 import { batchValues } from '@dbsp/core'
 
 const requestedPaths = ['/src/c.ts', '/src/a.ts', '/src/b.ts']
@@ -210,7 +210,7 @@ Use an inner join against a batch as a scalable alternative to `WHERE id IN (...
 large value sets.
 
 ```typescript
-// doctest: skip — batchValues is not in the default preamble — import from @dbsp/core
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const activeIds = [/* potentially thousands of ids */]

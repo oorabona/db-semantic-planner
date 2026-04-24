@@ -20,7 +20,7 @@ Use `orm.recursive()` instead of application-side loops or multiple round-trips.
 ## API
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-5
 orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult>
 ```
 
@@ -171,7 +171,6 @@ Note: `UNION ALL` is the default and is faster — it avoids the deduplication p
 Inspect the compiled SQL and parameters without running against the database:
 
 ```typescript
-// doctest: skip — illustrates recursive CTE API — requires extended schema with self-referential table
 const builder = orm.recursive('parent_chain', {
   base: orm.select('employees').where(eq('id', 7)),
   step: orm.select('parent_chain'),

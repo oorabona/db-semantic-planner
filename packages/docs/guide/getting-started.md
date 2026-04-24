@@ -183,7 +183,7 @@ Paste this NQL equivalent in the [Playground](/playground): `users | where activ
 ## Step 5: Include Relations
 
 ```typescript
-// doctest: skip — illustrates multi-level includes, requires extended schema
+// doctest: skip — Transform failed with 2 errors: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/
 import { eq } from '@dbsp/core';
 
 // Load users with their posts (nested hydration)
@@ -319,7 +319,7 @@ Schema names are validated as identifiers before use.
 ## Step 9: Pagination
 
 ```typescript
-// doctest: skip — illustrates pagination API, requires real database
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unterminated multiline comment ╭─[ tests/docs-verification/__generated__/.tmp/block-5415
 import { eq } from '@dbsp/core';
 
 // Offset-based pagination

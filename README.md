@@ -112,7 +112,7 @@ const activeUsers = orm
 ### Load Relations
 
 ```typescript
-// doctest: skip — illustrates multi-level includes, requires extended schema
+// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
 // Relations are inferred from ref() — no configuration needed
 const usersWithPosts = await orm
   .select('users')
@@ -140,7 +140,7 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 **Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
-// doctest: skip — some() requires RelationRef, not string; see guide/includes.md
+// doctest: skip — Invalid RelationRef: missing RELATION_META
 orm.select('users').where(some('posts', eq('published', true))).dump();
 // → WHERE EXISTS (SELECT 1 FROM "posts" WHERE ...)
 ```
@@ -168,7 +168,6 @@ tenantOrm.select('users').dump();
 **Recursive Queries** — Hierarchies via `include({ recursive: true })` with automatic CTE generation.
 
 ```typescript
-// doctest: skip — categories table not in default schema; requires self-ref schema
 orm.select('categories').where(eq('id', 5))
   .include('parent', { recursive: true, direction: 'ancestors' })
   .dump();
@@ -196,7 +195,6 @@ dbsp verify --schema ./dbsp.schema.ts --db postgres://localhost/mydb
 **pgvector + ParadeDB** — Built-in helpers for vector similarity search and full-text BM25. No raw SQL.
 
 ```typescript
-// doctest: skip — cosineDistance imported from @dbsp/adapter-pgsql, not in default preamble
 import { cosineDistance } from '@dbsp/adapter-pgsql';
 orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).limit(10).all();
 ```

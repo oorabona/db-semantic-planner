@@ -14,7 +14,7 @@ pnpm add @dbsp/types
 ## Usage
 
 ```typescript
-// doctest: skip — type annotation illustration, not executable
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-e4f3403c.ts:131:34
 import type { ModelIR, IntentAST, PlanReport, Adapter } from '@dbsp/types';
 
 // Type-check your adapter implementation

@@ -14,7 +14,7 @@ pnpm add @dbsp/nql
 ## Quick Start
 
 ```typescript
-// doctest: skip — compile() imported from @dbsp/nql, not in default preamble
+// doctest: skip — compile is not defined
 import { compile } from '@dbsp/nql';
 
 // Compile an NQL query to IntentAST

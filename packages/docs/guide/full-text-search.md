@@ -27,7 +27,7 @@ one or more text columns of a table, with optional per-field boost weights.
 Produces a `WHERE` filter using the ParadeDB `@@@` operator with per-field boost weights.
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-0321b556.ts:132:31
 import { fullTextSearch } from '@dbsp/core';
 
 fullTextSearch({
@@ -67,7 +67,7 @@ Each field gets its own `$N` parameter slot, all bound to the same query value.
 Produces `paradedb.score("keyField")` for use in `.columns()` and `.orderBy()`.
 
 ```typescript
-// doctest: skip — type signature / pseudo-code illustration
+// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-9de3e138.ts:130:20
 import { textScore } from '@dbsp/core';
 
 textScore(keyField?: string): ExpressionRef
@@ -90,7 +90,7 @@ Binds no parameters — the key field is a column reference, not a value.
 ### Basic Full-Text Search
 
 ```typescript
-// doctest: skip — illustrates fullTextSearch API, requires query variable
+// doctest: skip — Unknown table: articles
 import { fullTextSearch } from '@dbsp/core';
 
 const results = await orm
@@ -124,7 +124,7 @@ Boost makes matches in high-priority fields score higher than matches in
 lower-priority fields.
 
 ```typescript
-// doctest: skip — illustrates fullTextSearch API, requires query variable
+// doctest: skip — Unknown table: symbols
 import { fullTextSearch } from '@dbsp/core';
 
 const results = await orm
@@ -158,7 +158,7 @@ const results = await orm
 Use `textScore()` in both `.columns()` (to surface the score) and `.orderBy()` (to rank).
 
 ```typescript
-// doctest: skip — illustrates fullTextSearch API, requires query variable
+// doctest: skip — Unknown table: symbols
 import { fullTextSearch, textScore } from '@dbsp/core';
 
 const results = await orm
@@ -198,7 +198,7 @@ Chain `fullTextSearch()` alongside other filter helpers using `.where()`. Multip
 `.where()` calls are combined with `AND`.
 
 ```typescript
-// doctest: skip — illustrates fullTextSearch API, requires query variable
+// doctest: skip — Unknown table: articles
 import { fullTextSearch, eq } from '@dbsp/core';
 
 const results = await orm
