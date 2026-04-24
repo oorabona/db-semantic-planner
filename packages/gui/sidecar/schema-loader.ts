@@ -11,6 +11,7 @@
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import type { LoadedSchema } from '@dbsp/types';
 import { isValidSchema } from '@dbsp/types';
 
 export type { LoadedSchema } from '@dbsp/types';

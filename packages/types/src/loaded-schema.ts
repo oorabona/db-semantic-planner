@@ -22,14 +22,18 @@ export interface LoadedSchema {
  * Type guard for ARCH-005 schema() output.
  */
 export function isValidSchema(schema: unknown): schema is LoadedSchema {
-	return (
-		typeof schema === 'object' &&
-		schema !== null &&
-		'model' in schema &&
-		'definition' in schema &&
-		typeof (schema as LoadedSchema).model === 'object' &&
-		(schema as LoadedSchema).model !== null &&
-		'tables' in (schema as LoadedSchema).model &&
-		'relations' in (schema as LoadedSchema).model
-	);
+	if (
+		typeof schema !== 'object' ||
+		schema === null ||
+		!('model' in schema) ||
+		!('definition' in schema) ||
+		!('tableNames' in schema)
+	) {
+		return false;
+	}
+	const s = schema as LoadedSchema;
+	if (typeof s.model !== 'object' || s.model === null) return false;
+	if (!('tables' in s.model) || !('relations' in s.model)) return false;
+	if (!Array.isArray(s.tableNames)) return false;
+	return true;
 }

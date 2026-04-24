@@ -23,6 +23,25 @@ describe('isValidSchema', () => {
 		expect(isValidSchema({ definition: {}, model: {} })).toBe(false);
 	});
 
+	it('returns false when tableNames is missing', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: { tables: {}, relations: {} },
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when tableNames is not an array', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: { tables: {}, relations: {} },
+				tableNames: 'not-an-array',
+			}),
+		).toBe(false);
+	});
+
 	it('returns true for a valid schema shape', () => {
 		const valid = {
 			definition: {},
