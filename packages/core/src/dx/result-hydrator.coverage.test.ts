@@ -1886,7 +1886,7 @@ describe('ResultHydrator', () => {
 			expect(adapter.compileSubqueryInclude).toHaveBeenCalled();
 		});
 
-		it('handles composite key (string[]) via JSON.stringify', async () => {
+		it('handles composite key (string[]) via NUL-byte fast path', async () => {
 			const model = createMockModel();
 			const hydrator = new ResultHydrator(model as any, 'orders');
 			const childRows = [{ id: 1, a: 'x', b: 'y', label: 'match' }];
@@ -1908,9 +1908,53 @@ describe('ResultHydrator', () => {
 				makeHydrateOptions(model),
 			);
 
-			// Both keys present → JSON.stringify(['x','y']) used as map key
+			// Both keys present, no NUL bytes → fast-path NUL separator used as map key
 			expect(results[0].items).toEqual([
 				{ id: 1, a: 'x', b: 'y', label: 'match' },
+			]);
+		});
+
+		it('falls back to JSON.stringify when composite key value contains NUL byte', async () => {
+			// If a PK value contains a NUL byte (e.g. bytea stored as string),
+			// the fast-path NUL separator could produce a false collision.
+			// The fallback uses JSON.stringify to remain collision-safe.
+			// Use an explicit escape so the control character stays visible
+			// in diffs and survives editor normalization.
+			const NUL = '\0';
+			const model = createMockModel();
+			const hydrator = new ResultHydrator(model as any, 'orders');
+			// Two parent rows whose 'a' fields have embedded NUL bytes
+			const childRows = [
+				{ id: 1, a: `foo${NUL}bar`, b: 'y', label: 'match-1' },
+				{ id: 2, a: `foo`, b: `${NUL}bar_y`, label: 'match-2' },
+			];
+			const adapter = createMockAdapter(childRows);
+			const results = [
+				{ a: `foo${NUL}bar`, b: 'y' },
+				{ a: `foo`, b: `${NUL}bar_y` },
+			];
+
+			await hydrator.hydrateIncludes(
+				results,
+				[
+					{
+						relationName: 'items',
+						targetTable: 'items',
+						foreignKey: ['a', 'b'],
+						sourceKey: ['a', 'b'],
+						relationType: 'hasMany',
+					},
+				],
+				adapter as any,
+				makeHydrateOptions(model),
+			);
+
+			// Each parent must hydrate only its own child — no false collision
+			expect((results[0] as any).items).toEqual([
+				{ id: 1, a: `foo${NUL}bar`, b: 'y', label: 'match-1' },
+			]);
+			expect((results[1] as any).items).toEqual([
+				{ id: 2, a: `foo`, b: `${NUL}bar_y`, label: 'match-2' },
 			]);
 		});
 

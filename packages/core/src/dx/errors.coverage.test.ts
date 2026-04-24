@@ -578,11 +578,14 @@ describe('UnsafeOperationError (coverage)', () => {
 // ============================================================================
 
 describe('AmbiguousRelationError (coverage)', () => {
-	it('handles empty options array (fallback firstOption)', () => {
+	it('handles empty options array (generic message + empty options)', () => {
 		const error = new AmbiguousRelationError('users', 'posts', []);
 
-		// options[0] ?? 'relationName' → 'relationName'
-		expect(error.message).toContain("{ via: 'relationName' }");
+		// .message is the generic form; structured fields carry the detail
+		expect(error.message).toBe('Ambiguous relation');
+		expect(error.publicMessage).toBe('Ambiguous relation');
+		expect(error.sourceTable).toBe('users');
+		expect(error.targetTable).toBe('posts');
 		expect(error.options).toEqual([]);
 	});
 });

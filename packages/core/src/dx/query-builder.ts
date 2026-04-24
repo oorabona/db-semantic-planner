@@ -1398,16 +1398,10 @@ export class QueryBuilderImpl<TResult = unknown>
 			...this.planOptionsOverride,
 		};
 
-		let planReport: PlanReport;
-		try {
-			planReport = plan(intentWithHints, this.model, planOptions);
-		} catch (error) {
-			if (error instanceof AmbiguousPlanError) {
-				planReport = this.handleAmbiguity(error, intentWithHints, planOptions);
-			} else {
-				throw error;
-			}
-		}
+		const planReport = this.planWithAmbiguityHandling(
+			intentWithHints,
+			planOptions,
+		);
 
 		// 6. Compile and execute
 		const compileOptions: { schemaName?: string; model: ModelIR } = {

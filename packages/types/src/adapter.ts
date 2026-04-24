@@ -613,6 +613,15 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
  */
 export type CompileOnlyAdapter = CompilingAdapter &
 	DDLGeneratingAdapter & {
+		/** Naming convention used by this adapter. */
+		readonly dbCasing: DbCasing;
+
+		/**
+		 * Create a schema-scoped compile-only adapter.
+		 * Purely a schema-name prefix — no DB interaction required.
+		 */
+		withSchema(schemaName: string): CompileOnlyAdapter;
+
 		readonly execute?: never;
 		readonly executeOne?: never;
 		readonly executeOneOrThrow?: never;

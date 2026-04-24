@@ -605,12 +605,14 @@ describe('Q8: Ambiguity via/role', () => {
 				expect.fail('Should have thrown AmbiguousRelationError');
 			} catch (error) {
 				expect(error).toBeInstanceOf(AmbiguousRelationError);
-				const message = (error as Error).message;
-				// Message should include disambiguation hints
-				expect(message).toContain('Ambiguous relation');
-				expect(message).toContain('products');
-				expect(message).toContain('users');
-				expect(message).toContain('via');
+				const err = error as AmbiguousRelationError;
+				// Message is generic (information-leak-safe). Disambiguation
+				// detail lives in structured fields: sourceTable / targetTable
+				// / options — callers build the "via" hint from those.
+				expect(err.message).toBe('Ambiguous relation');
+				expect(err.sourceTable).toBe('products');
+				expect(err.targetTable).toBe('users');
+				expect(err.options.length).toBeGreaterThan(0);
 			}
 		});
 

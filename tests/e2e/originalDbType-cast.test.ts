@@ -22,9 +22,19 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	introspect,
 } from '@dbsp/adapter-pgsql';
+import type { Adapter } from '@dbsp/core';
 import { createOrm, eq } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { closeTestDb, dropSchema, getTestPool } from './testkit/index.js';
+
+// Compile-only adapter intentionally excludes execute/executeOne/executeMany
+// (typed as `?: never`), so it is not structurally assignable to
+// Adapter<unknown>. The tests below only exercise the compile path
+// (`dump()`), so we cast to Adapter<unknown> once here instead of
+// duplicating the cast at each createOrm() call site.
+function makeCompileOnlyAdapter(): Adapter<unknown> {
+	return createPgsqlCompileOnlyAdapter() as unknown as Adapter<unknown>;
+}
 
 // ─── S-2 schema ───────────────────────────────────────────────────────────────
 
@@ -119,8 +129,10 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 
 		// Use compile-only adapter to inspect SQL without executing against DB.
 		// Pass model (IntrospectedModelIR extends ModelIR) directly — no schema() wrapper needed.
-		const adapter = createPgsqlCompileOnlyAdapter();
-		const orm = createOrm({ model, adapter });
+		const orm = createOrm({
+			model,
+			adapter: makeCompileOnlyAdapter(),
+		});
 
 		const dump = orm
 			.withSchema(S2_SCHEMA)
@@ -146,8 +158,10 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 			},
 		});
 
-		const adapter = createPgsqlCompileOnlyAdapter();
-		const orm = createOrm({ schema: manualSchema, adapter });
+		const orm = createOrm({
+			schema: manualSchema,
+			adapter: makeCompileOnlyAdapter(),
+		});
 
 		const dump = orm.select('items').where(eq('fk_id', 42)).dump();
 
