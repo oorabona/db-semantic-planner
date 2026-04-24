@@ -6,7 +6,7 @@ title: ORM API Reference
 
 This is the complete reference for the `@dbsp/core` TypeScript API. It covers schema definition, ORM setup, query building, mutations, and observability — with progressive examples from a minimal first query to advanced patterns like set operations, CTEs, and streaming. Use it as your primary reference when building applications with `@dbsp/core`.
 
-**Related guides:** [NQL Reference](./nql-reference.md) | [README](../../README.md)
+**Related guides:** [NQL Reference](../nql/) | [README](https://github.com/oorabona/db-semantic-planner)
 
 ---
 
@@ -1159,7 +1159,7 @@ const users = await orm.nql<User[]>`users | where active = true | limit 10`.dump
 const dump = orm.nql`posts | where published = true | select title, author.*`.dump();
 ```
 
-See the [NQL Reference](./nql-reference.md) for full syntax.
+See the [NQL Reference](../nql/) for full syntax.
 
 ### Hierarchy Shortcuts
 

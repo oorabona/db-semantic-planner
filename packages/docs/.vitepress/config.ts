@@ -7,16 +7,41 @@ import { withMermaid } from 'vitepress-plugin-mermaid';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Site URL + base are provided by the deploy workflow via GitHub repo
+// variables (vars.SITE_URL, vars.SITE_BASE). No fallback — if these are
+// unset the build MUST fail so mis-configured CI is caught immediately
+// instead of publishing with broken sitemaps and OG images.
+function requireEnv(key: string): string {
+	const value = process.env[key];
+	if (!value) {
+		throw new Error(
+			`${key} environment variable is required. Set vars.${key} on the GitHub repository (Settings → Secrets and variables → Actions → Variables).`,
+		);
+	}
+	return value;
+}
+
+const SITE_URL = requireEnv('SITE_URL').replace(/\/$/, '');
+const SITE_BASE = requireEnv('SITE_BASE');
+const OG_IMAGE = `${SITE_URL}${SITE_BASE}og-image.png`.replace(
+	/([^:])\/+/g,
+	'$1/',
+);
+
 export default withMermaid(
 	defineConfig({
 		title: 'db-semantic-planner',
 		description: 'The intent-first query planner for PostgreSQL',
 		lastUpdated: true,
+		base: SITE_BASE,
 		sitemap: {
-			hostname: 'https://dbsp.dev',
+			hostname: SITE_URL,
 		},
 		head: [
-			['link', { rel: 'icon', type: 'image/svg+xml', href: '/logo.svg' }],
+			[
+				'link',
+				{ rel: 'icon', type: 'image/svg+xml', href: `${SITE_BASE}logo.svg` },
+			],
 			['meta', { name: 'og:type', content: 'website' }],
 			[
 				'meta',
@@ -33,7 +58,7 @@ export default withMermaid(
 						'Declare what you want. The planner decides how. Then shows you why. Type-safe, observable, PostgreSQL-native.',
 				},
 			],
-			['meta', { name: 'og:image', content: 'https://dbsp.dev/og-image.png' }],
+			['meta', { name: 'og:image', content: OG_IMAGE }],
 			['meta', { name: 'twitter:card', content: 'summary_large_image' }],
 			['meta', { name: 'twitter:title', content: 'db-semantic-planner' }],
 			[
@@ -147,10 +172,13 @@ export default withMermaid(
 		},
 		vite: {
 			plugins: [
-				...llmstxt({ domain: 'https://dbsp.dev' }),
+				...llmstxt({ domain: SITE_URL }),
 				robotsTxt({
 					policy: [{ userAgent: '*', allow: '/' }],
-					sitemap: 'https://dbsp.dev/sitemap.xml',
+					sitemap: `${SITE_URL}${SITE_BASE}sitemap.xml`.replace(
+						/([^:])\/+/g,
+						'$1/',
+					),
 				}),
 			],
 			resolve: {

@@ -25,6 +25,8 @@ jobs:
       - run: pnpm -C packages/core test
       - run: pnpm -C packages/adapter-pgsql test
       - run: pnpm -C packages/nql test
+      - name: Verify documentation examples
+        run: pnpm test:docs
 
   e2e:
     needs: test

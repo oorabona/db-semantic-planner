@@ -85,23 +85,59 @@ packages/
 Documentation lives entirely in `packages/docs/`. To run the site locally:
 
 ```bash
-pnpm -C packages/docs dev      # localhost:5173, hot reload
-pnpm -C packages/docs build    # production build (writes to dist/)
-pnpm -C packages/docs preview  # preview the build
+# Site URL / base must be set; for local dev, any placeholder value works
+export SITE_URL=http://localhost:5173
+export SITE_BASE=/
+
+pnpm -C packages/docs dev       # localhost:5173, hot reload
+pnpm -C packages/docs build     # production build (writes to dist/)
+pnpm -C packages/docs preview   # preview the build
 ```
 
-Code blocks inside `.md` files are validated by the doctest harness in
-`tests/docs-verification/` on every CI run. When adding a code block:
+In CI, `SITE_URL` and `SITE_BASE` come from repository Variables (Settings →
+Secrets and variables → Actions → Variables). The default values are:
+- `SITE_URL=https://oorabona.github.io/db-semantic-planner`
+- `SITE_BASE=/db-semantic-planner/`
 
-- Use `typescript` or `ts` for validated TypeScript blocks
-- Annotate expected SQL output inline for pedagogical blocks:
-  ```typescript
-  const result = orm.select('users').where(eq('id', 1)).dump();
-  // expected sql: SELECT "u".* FROM "users" "u" WHERE "u"."id" = $1
-  // expected params: [1]
-  ```
-- Blocks without annotations are snapshotted. If you legitimately change
-  an API, update snapshots with `pnpm vitest run tests/docs-verification/ -u`.
+When the site moves to a custom domain, update these two variables — the
+`config.ts` reads them with no fallback so build failure makes the
+misconfiguration immediately visible.
+
+### Docs verification (doctest)
+
+Every `typescript` / `ts` code block in the docs is extracted and executed
+by the framework in `tests/docs-verification/` on every CI run. A block
+that no longer compiles or throws at runtime fails CI.
+
+Run locally:
+
+```bash
+pnpm test:docs                 # regenerate + run the full suite
+pnpm test:docs:generate        # just regenerate __generated__/ test files
+```
+
+**Annotations** (place inside the block as a `//` comment):
+
+| Annotation | Effect |
+|------------|--------|
+| `// doctest: skip — <reason>` | Skip the block; reason shown in CI summary |
+| `// doctest: dry-run` | Import only, do not assert |
+| `// expected sql: SELECT …` | Strict match of the compiled SQL from `.dump()` |
+| `// expected params: [1, "a"]` | Strict match of the params array |
+
+**When to skip:**
+- Block requires a real PostgreSQL connection (e.g. `.all()`, `.execute()`,
+  transactions, streaming). Use the exact runtime error as the justification
+  so the next contributor can verify the reason is still valid.
+- Block is a type signature / pseudo-code / fragment that is not meant to
+  execute in isolation.
+- Block demonstrates a production application pattern (full web server,
+  long-lived daemon) that cannot be expressed as a standalone snippet.
+
+**When to un-skip:** if you widen the runner preamble in
+`tests/docs-verification/runner.ts` to expose more symbols or tables, audit
+existing skips to see if any of them were only there because the preamble
+was too narrow.
 
 ### Architecture rule (strict)
 

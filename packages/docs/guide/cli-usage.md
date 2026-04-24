@@ -545,4 +545,4 @@ dbsp repl \
 
 ## See Also
 
-- [Production Deployment Guide](./PRODUCTION.md) - Connection pooling, observability, and security hardening
+- [Production Deployment Guide](./production) - Connection pooling, observability, and security hardening
