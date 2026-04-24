@@ -41,11 +41,21 @@ export default {
     // Reject trailing period on subject
     'subject-full-stop': [2, 'never', '.'],
 
-    // Reject capitalized first word on subject
-    'subject-case': [2, 'always', 'lower-case'],
+    // Subject case: forbid sentence-case/pascal-case/start-case starts, but
+    // allow technical acronyms (CVE, SQL, NQL, DDL, API, etc.) inline.
+    // Matches @commitlint/config-conventional's default behavior.
+    'subject-case': [
+      2,
+      'never',
+      ['sentence-case', 'start-case', 'pascal-case', 'upper-case'],
+    ],
 
     // Body / footer leading blank line
     'body-leading-blank': [2, 'always'],
     'footer-leading-blank': [2, 'always'],
+
+    // Allow long lines in body/footer (URLs, file paths, tool output, diffs)
+    'body-max-line-length': [0],
+    'footer-max-line-length': [0],
   },
 };
