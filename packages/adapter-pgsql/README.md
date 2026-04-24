@@ -58,10 +58,10 @@ const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 
 ## Documentation
 
-- [Guides](../../docs/guides/)
-- [DDL helpers guide](../../docs/guides/how-to-use-ddl-helpers.md)
-- [RLS policies guide](../../docs/guides/how-to-use-rls-policies.md)
-- [Schema versioning guide](../../docs/guides/how-to-use-schema-versioning.md)
+- [Guides](https://oorabona.github.io/db-semantic-planner/guide/)
+- [DDL helpers guide](https://oorabona.github.io/db-semantic-planner/guide/ddl-helpers)
+- [RLS policies guide](https://oorabona.github.io/db-semantic-planner/guide/rls-policies)
+- [Schema versioning guide](https://oorabona.github.io/db-semantic-planner/guide/schema-versioning)
 
 ## License
 

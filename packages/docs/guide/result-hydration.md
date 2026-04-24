@@ -1,3 +1,7 @@
+---
+title: Result Hydration
+---
+
 # How to Understand Result Hydration
 
 This guide explains how `include()` transforms flat database rows into nested JavaScript objects. Read it when you need to understand which hydration strategy the planner selects, why `hasMany` relations default to subqueries instead of JOINs, or how to tune include performance for your access patterns.

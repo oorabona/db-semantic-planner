@@ -55,9 +55,9 @@ npx dbsp generate ddl --schema ./dbsp.schema.ts -o ./generated
 
 ## Documentation
 
-- [Guides](../../docs/guides/)
-- [Schema versioning guide](../../docs/guides/how-to-use-schema-versioning.md)
-- [Batch values guide](../../docs/guides/how-to-use-batch-values.md)
+- [Guides](https://oorabona.github.io/db-semantic-planner/guide/)
+- [Schema versioning guide](https://oorabona.github.io/db-semantic-planner/guide/schema-versioning)
+- [Batch values guide](https://oorabona.github.io/db-semantic-planner/guide/batch-values)
 
 ## License
 

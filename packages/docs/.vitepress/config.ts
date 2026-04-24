@@ -71,6 +71,7 @@ export default withMermaid(
 							{ text: 'Schema Definition', link: '/guide/schema' },
 							{ text: 'Queries', link: '/guide/queries' },
 							{ text: 'Relations & Includes', link: '/guide/includes' },
+							{ text: 'Result Hydration', link: '/guide/result-hydration' },
 							{ text: 'Mutations', link: '/guide/mutations' },
 							{ text: 'Observability', link: '/guide/observability' },
 						],
@@ -102,6 +103,7 @@ export default withMermaid(
 							{ text: 'RLS Policies', link: '/guide/rls-policies' },
 							{ text: 'Multi-tenant', link: '/guide/multi-tenant' },
 							{ text: 'Production', link: '/guide/production' },
+							{ text: 'CLI Usage', link: '/guide/cli-usage' },
 						],
 					},
 					{
@@ -110,6 +112,15 @@ export default withMermaid(
 							{ text: 'From Prisma', link: '/guide/migrating-from-prisma' },
 							{ text: 'From Drizzle', link: '/guide/migrating-from-drizzle' },
 							{ text: 'From Kysely', link: '/guide/migrating-from-kysely' },
+						],
+					},
+				],
+				'/api/': [
+					{
+						text: 'API',
+						items: [
+							{ text: 'Overview', link: '/api/' },
+							{ text: 'ORM API Reference', link: '/api/orm-api' },
 						],
 					},
 				],

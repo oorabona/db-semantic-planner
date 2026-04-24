@@ -1,3 +1,7 @@
+---
+title: CLI Usage
+---
+
 # CLI Usage Guide
 
 **Package:** `@dbsp/cli`

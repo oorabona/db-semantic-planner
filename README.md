@@ -55,7 +55,7 @@ The planner picks the right strategy (EXISTS, JOIN, lateral subquery) based on c
 | Zero codegen | Yes | No | Yes | Yes |
 | PostgreSQL extensions (pgvector, BM25) | Built-in helpers | Raw SQL | Raw SQL | Raw SQL |
 
-See [full comparison](docs/COMPARISON.md) with 16 tools.
+See [full comparison](https://oorabona.github.io/db-semantic-planner/comparison) with 16 tools.
 
 ---
 
@@ -130,7 +130,7 @@ console.log(dump.params);  // [true]
 console.log(dump.plan);    // { decisions: [...], warnings: [...] }
 ```
 
-See the [Getting Started guide](docs/guides/getting-started.md) for the full walkthrough.
+See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/guide/getting-started) for the full walkthrough.
 
 ---
 
@@ -248,18 +248,20 @@ The core package is database-agnostic. It only knows about schema shapes and que
 
 ## Documentation
 
+Full documentation is published at **[dbsp.dev](https://oorabona.github.io/db-semantic-planner/)** (GitHub Pages).
+
 | Guide | Description |
 |-------|-------------|
-| [Getting Started](docs/guides/getting-started.md) | Full walkthrough from schema to first query |
-| [ORM API](docs/guides/orm-api.md) | Complete TypeScript API reference |
-| [NQL Reference](docs/guides/nql-reference.md) | Pipe-based query language syntax |
-| [CLI Usage](docs/CLI_USAGE.md) | generate, verify, repl commands |
-| [Joins Guide](docs/guides/how-to-use-joins.md) | Manual joins, LATERAL, DISTINCT ON |
-| [Expression Primitives](docs/guides/how-to-use-expression-primitives.md) | op(), fn(), ref(), cast() |
-| [DDL Helpers](docs/guides/how-to-use-ddl-helpers.md) | Schema diff and DDL generation |
-| [Full-text Search](docs/guides/how-to-use-full-text-search.md) | pgvector and ParadeDB BM25 |
-| [Recursive CTEs](docs/guides/how-to-use-recursive-cte.md) | Tree traversal with include() |
-| [Full comparison](docs/COMPARISON.md) | dbsp vs 16 query libraries |
+| [Getting Started](https://oorabona.github.io/db-semantic-planner/guide/getting-started) | Full walkthrough from schema to first query |
+| [ORM API Reference](https://oorabona.github.io/db-semantic-planner/api/orm-api) | Complete TypeScript API reference |
+| [NQL Reference](https://oorabona.github.io/db-semantic-planner/nql/) | Pipe-based query language syntax |
+| [CLI Usage](https://oorabona.github.io/db-semantic-planner/guide/cli-usage) | `generate`, `verify`, `repl` commands |
+| [Joins Guide](https://oorabona.github.io/db-semantic-planner/guide/joins) | Manual joins, LATERAL, DISTINCT ON |
+| [Expression Primitives](https://oorabona.github.io/db-semantic-planner/guide/expression-primitives) | `op()`, `fn()`, `ref()`, `cast()` |
+| [DDL Helpers](https://oorabona.github.io/db-semantic-planner/guide/ddl-helpers) | Schema diff and DDL generation |
+| [Full-text Search](https://oorabona.github.io/db-semantic-planner/guide/full-text-search) | pgvector and ParadeDB BM25 |
+| [Recursive CTEs](https://oorabona.github.io/db-semantic-planner/guide/recursive-cte) | Tree traversal with `include()` |
+| [Comparison](https://oorabona.github.io/db-semantic-planner/comparison) | dbsp vs 16 query libraries |
 
 ---
 

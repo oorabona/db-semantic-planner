@@ -12,6 +12,19 @@ When you need conditional logic in SELECT columns (e.g. label mapping, status di
 or ORDER BY clauses. The `caseWhen()` builder produces a `CaseExpr` that integrates directly with
 the query builder API via `.as()` for aliasing.
 
+## Two forms of `caseWhen`
+
+There are two separately-exported `caseWhen` symbols in `@dbsp/core`:
+
+| Form | Import source | Signature | When to use |
+|------|---------------|-----------|-------------|
+| **Fluent no-arg builder** | `packages/core/src/dx/functions.ts` | `caseWhen<T>(): CaseBuilder<T>` | All new code — the idiomatic API. Chain `.when(condStr, value)` calls, finalise with `.else(value)`. |
+| **Two-arg lower-level** | `packages/core/src/dx/case-when-builder.ts` | `caseWhen(condition: WhereIntent, thenValue: CaseValue): CaseBuilder` | Internal / advanced use only. Accepts a `WhereIntent` object instead of a raw condition string. Not the public default export from `@dbsp/core`. |
+
+Both are accessible via `import { caseWhen } from '@dbsp/core'` — the public barrel resolves to the **fluent no-arg form**. The two-arg form is available for callers that already have a `WhereIntent` object, but prefer the no-arg builder for readability.
+
+**Recommendation:** Use `caseWhen<T>()` (fluent form) in all application code. The two-arg form is an implementation detail exposed for interoperability.
+
 ## API
 
 ```typescript
@@ -176,7 +189,7 @@ ORDER BY "events"."userId", "events"."createdAt" DESC
 
 ## Key Files
 
-- **Builder + types:** `packages/core/src/dx/functions.ts` — `caseWhen()`, `CaseBuilder<T>`, `CaseExpr<T>`, `CaseWhenClause<T>`, `CaseBuilderImpl`
+- **Builder + types:** `packages/core/src/dx/functions.ts` — `caseWhen()`, `CaseBuilder<T>`, `CaseExpr<T>`, `CaseWhenClause<T>`
 - **Adapter handler:** `packages/adapter-pgsql/src/handlers/expression/case.ts` — compiles `CaseExpr` intent into SQL fragments
 
 ## Gotchas
@@ -187,4 +200,3 @@ ORDER BY "events"."userId", "events"."createdAt" DESC
 - **Use `ref('col')` for column references in results** — passing a column name as a plain string to THEN/ELSE treats it as a string literal. Use `ref('columnName')` to reference a column value.
 - **`.else()` is required** — the builder enforces ELSE at the TypeScript level. To produce a CASE without ELSE (implicit NULL), this API does not support it directly; use the lower-level `op()` / `fn()` expression primitives instead.
 - **Alias validation** — `.as(alias)` calls `validateAlias(alias)` internally. Invalid identifiers (e.g. names with spaces or SQL keywords) will throw at build time.
-

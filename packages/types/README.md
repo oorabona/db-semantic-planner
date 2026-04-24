@@ -41,7 +41,7 @@ function inspect(report: PlanReport): void {
 
 ## Documentation
 
-See the [architecture overview](../../ARCHITECTURE.md) and [guides](../../docs/guides/) for details.
+See the [architecture overview](../../ARCHITECTURE.md) and [guides](https://oorabona.github.io/db-semantic-planner/guide/) for details.
 
 ## License
 

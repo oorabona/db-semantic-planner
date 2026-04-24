@@ -216,5 +216,5 @@ The convention is:
 - `packages/adapter-pgsql/src/extensions/index.ts` — public re-exports
 - `packages/core/src/dx/expressions.ts` — underlying expression primitives
 - `packages/core/src/dx/schema.ts` — `SchemaIndexOptions` (method, opclass, with)
-- `docs/guides/how-to-use-expression-primitives.md` — full primitive reference
+- [guide](https://oorabona.github.io/db-semantic-planner/guide/expression-primitives) — full primitive reference
 

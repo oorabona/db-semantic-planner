@@ -287,7 +287,7 @@ The `key_field` option must match the `keyField` argument to `textScore()`.
 - `packages/core/src/dx/full-text-search.ts` — `fullTextSearch()`, `textScore()`, type definitions
 - `packages/adapter-pgsql/src/__tests__/full-text-search.test.ts` — test suite with SQL snapshots
 - `packages/adapter-pgsql/src/extensions/paradedb.ts` — lower-level `score()`, `parse()`, `boost()`, `bm25Search()` primitives
-- `docs/guides/how-to-use-extensions.md` — pgvector + lower-level ParadeDB primitives
+- [guide](https://oorabona.github.io/db-semantic-planner/guide/extensions) — pgvector + lower-level ParadeDB primitives
 
 ---
 

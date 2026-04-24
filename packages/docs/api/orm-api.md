@@ -1,3 +1,7 @@
+---
+title: ORM API Reference
+---
+
 # ORM API Guide
 
 This is the complete reference for the `@dbsp/core` TypeScript API. It covers schema definition, ORM setup, query building, mutations, and observability — with progressive examples from a minimal first query to advanced patterns like set operations, CTEs, and streaming. Use it as your primary reference when building applications with `@dbsp/core`.

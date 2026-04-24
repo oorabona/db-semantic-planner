@@ -70,11 +70,38 @@ packages/
   nql/            Natural query language parser (Chevrotain) -> IntentAST
   cli/            dbsp CLI (generate, verify, repl)
   mcp-server/     MCP server for editor integrations
-  gui/            Desktop GUI (Tauri + React)
-docs/
-  guides/         How-to guides for specific features
-  specs/          Feature specifications
+  gui/            Desktop GUI (Tauri + React, private — not published to npm)
+  docs/           VitePress site source for https://oorabona.github.io/db-semantic-planner/
+                  (private — not published to npm; name @dbsp/docs is a workspace
+                   identifier only). Contains all user-facing documentation:
+                     - guide/            How-to guides and core concepts
+                     - api/              API reference
+                     - nql/              NQL reference
+                     - {index,comparison,patterns,roadmap,demo,playground}.md
 ```
+
+### Docs authoring
+
+Documentation lives entirely in `packages/docs/`. To run the site locally:
+
+```bash
+pnpm -C packages/docs dev      # localhost:5173, hot reload
+pnpm -C packages/docs build    # production build (writes to dist/)
+pnpm -C packages/docs preview  # preview the build
+```
+
+Code blocks inside `.md` files are validated by the doctest harness in
+`tests/docs-verification/` on every CI run. When adding a code block:
+
+- Use `typescript` or `ts` for validated TypeScript blocks
+- Annotate expected SQL output inline for pedagogical blocks:
+  ```typescript
+  const result = orm.select('users').where(eq('id', 1)).dump();
+  // expected sql: SELECT "u".* FROM "users" "u" WHERE "u"."id" = $1
+  // expected params: [1]
+  ```
+- Blocks without annotations are snapshotted. If you legitimately change
+  an API, update snapshots with `pnpm vitest run tests/docs-verification/ -u`.
 
 ### Architecture rule (strict)
 

@@ -57,7 +57,7 @@ npx dbsp-mcp --schema ./dbsp.schema.ts
 
 ## Documentation
 
-- [Guides](../../docs/guides/)
+- [Guides](https://oorabona.github.io/db-semantic-planner/guide/)
 
 ## License
 

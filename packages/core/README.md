@@ -59,10 +59,10 @@ console.log(dump.plan);    // PlanReport with decisions + reasoning
 
 ## Documentation
 
-- [Guides](../../docs/guides/)
-- [Expression primitives guide](../../docs/guides/how-to-use-expression-primitives.md)
-- [Joins guide](../../docs/guides/how-to-use-joins.md)
-- [DDL helpers guide](../../docs/guides/how-to-use-ddl-helpers.md)
+- [Guides](https://oorabona.github.io/db-semantic-planner/guide/)
+- [Expression primitives guide](https://oorabona.github.io/db-semantic-planner/guide/expression-primitives)
+- [Joins guide](https://oorabona.github.io/db-semantic-planner/guide/joins)
+- [DDL helpers guide](https://oorabona.github.io/db-semantic-planner/guide/ddl-helpers)
 
 ## License
 

@@ -58,8 +58,8 @@ orders | group customerId | select customerId, sum(total) as revenue
 
 ## Documentation
 
-- [Guides](../../docs/guides/)
-- [Full-text search guide](../../docs/guides/how-to-use-full-text-search.md)
+- [Guides](https://oorabona.github.io/db-semantic-planner/guide/)
+- [Full-text search guide](https://oorabona.github.io/db-semantic-planner/guide/full-text-search)
 
 ## License
 
