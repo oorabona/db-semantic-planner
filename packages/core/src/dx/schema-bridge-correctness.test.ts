@@ -503,7 +503,7 @@ describe('M-2: prototype-pollution keys rejected in column dict and indexes dict
 		>;
 
 		// Inject __proto__ as an own-property column key via JSON.parse
-		const tablesInput = input['tables'] as Record<string, unknown>;
+		const tablesInput = input.tables as Record<string, unknown>;
 		const usersTable = JSON.parse(
 			'{"id": {"type": "uuid"}, "__proto__": {"type": "integer"}}',
 		) as Record<string, unknown>;
@@ -544,7 +544,7 @@ describe('M-2: prototype-pollution keys rejected in column dict and indexes dict
 		const indexesInput = JSON.parse(
 			'{"__proto__": [{"name": "idx_evil", "columns": ["id"], "method": "btree"}]}',
 		) as Record<string, unknown>;
-		input['indexes'] = indexesInput;
+		input.indexes = indexesInput;
 
 		const result = resolvedSchemaToGeneratedSchema(input);
 		// safeRecord on IndexesDefinitionSchema must reject the __proto__ key
