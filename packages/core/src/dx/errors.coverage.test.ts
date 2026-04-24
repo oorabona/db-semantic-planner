@@ -578,7 +578,7 @@ describe('UnsafeOperationError (coverage)', () => {
 // ============================================================================
 
 describe('AmbiguousRelationError (coverage)', () => {
-	it('handles empty options array (fallback firstOption)', () => {
+	it('handles empty options array (generic message + empty options)', () => {
 		const error = new AmbiguousRelationError('users', 'posts', []);
 
 		// .message is the generic form; structured fields carry the detail

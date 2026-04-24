@@ -46,6 +46,14 @@ export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
  *
  * @typeParam TResult - The expected result type
  */
+
+/**
+ * NUL byte (U+0000) used as the composite-key separator. Kept as a named
+ * constant because literal control characters are invisible in diffs and
+ * can be corrupted by editor normalization.
+ */
+const COMPOSITE_KEY_SEP = '\0';
+
 export class ResultHydrator<TResult = unknown> {
 	private readonly model: ModelIR;
 	private readonly from: string;
@@ -563,14 +571,12 @@ export class ResultHydrator<TResult = unknown> {
 
 	/**
 	 * Extract a key value from an object, handling composite keys.
-	 */
-	/**
-	 * Extract a key value from an object, handling composite keys.
 	 *
-	 * Fast path: NUL-byte separator for the common case of string/number PKs (~5× faster
-	 * than JSON.stringify). Fallback: if any serialized part contains a NUL byte (e.g. bytea
-	 * PKs stored as strings), two distinct keys could collide under the fast path — use
-	 * JSON.stringify in that case (slower but collision-safe for any value content).
+	 * Fast path: NUL-byte separator for the common case of string/number PKs
+	 * (~5× faster than JSON.stringify). Fallback: if any serialized part
+	 * contains a NUL byte (e.g. bytea PKs stored as strings), two distinct
+	 * keys could collide under the fast path — use JSON.stringify in that
+	 * case (slower but collision-safe for any value content).
 	 */
 	private extractKeyValue(
 		obj: Record<string, unknown>,
@@ -586,10 +592,10 @@ export class ResultHydrator<TResult = unknown> {
 			return undefined;
 		}
 		const parts = values.map((v) => String(v));
-		if (parts.some((p) => p.includes(' '))) {
+		if (parts.some((p) => p.includes(COMPOSITE_KEY_SEP))) {
 			// Collision-safe fallback — slower but correct for any value content.
 			return JSON.stringify(values);
 		}
-		return parts.join(' ');
+		return parts.join(COMPOSITE_KEY_SEP);
 	}
 }

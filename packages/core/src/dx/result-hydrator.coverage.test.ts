@@ -1918,7 +1918,9 @@ describe('ResultHydrator', () => {
 			// If a PK value contains a NUL byte (e.g. bytea stored as string),
 			// the fast-path NUL separator could produce a false collision.
 			// The fallback uses JSON.stringify to remain collision-safe.
-			const NUL = ' ';
+			// Use an explicit escape so the control character stays visible
+			// in diffs and survives editor normalization.
+			const NUL = '\0';
 			const model = createMockModel();
 			const hydrator = new ResultHydrator(model as any, 'orders');
 			// Two parent rows whose 'a' fields have embedded NUL bytes
