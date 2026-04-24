@@ -304,7 +304,6 @@ Recursive includes (self-referential relations) use `WITH RECURSIVE` CTEs.
 They are controlled by the `maxDepth` option (default: 100):
 
 ```typescript
-// doctest: skip — categories table not in default schema; requires self-referential schema
 orm.select('categories')
   .include('children', { recursive: true, direction: 'descendants', maxDepth: 5 })
   .dump()
@@ -351,14 +350,12 @@ const posts = await orm.select('posts').include('author').dump();
 
 **Wrong:** Open-ended recursive traversal on an unbounded tree:
 ```typescript
-// doctest: skip — categories table not in default schema; requires self-referential schema
 orm.select('categories').include('children', { recursive: true }).dump()
 // Default maxDepth: 100 — may fetch enormous trees
 ```
 
 **Right:** Always specify an explicit `maxDepth` for trees you do not control:
 ```typescript
-// doctest: skip — categories table not in default schema; requires self-referential schema
 orm.select('categories')
   .include('children', { recursive: true, direction: 'descendants', maxDepth: 10 })
   .dump()
