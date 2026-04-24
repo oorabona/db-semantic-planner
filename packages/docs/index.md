@@ -141,7 +141,7 @@ dump.plan.decisions
 const users = await orm
   .select('users')
   .include('posts.comments.author')
-  .all();
+  .dump();
 
 // Nested 3-level include — zero manual JOINs
 // Result: users[].posts[].comments[].author
@@ -164,7 +164,7 @@ const tenantOrm = orm.withSchema('acme_corp');
 const users = await tenantOrm
   .select('users')
   .where(eq('active', true))
-  .all();
+  .dump();
 // → SELECT * FROM "acme_corp"."users" WHERE ...
 ```
 

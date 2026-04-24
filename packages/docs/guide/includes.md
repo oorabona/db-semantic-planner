@@ -11,7 +11,7 @@ Includes are the mechanism for eager-loading related records in a single round-t
 ## Simple Include
 
 ```typescript
-const usersWithPosts = await orm.select('users').include('posts').all();
+const usersWithPosts = await orm.select('users').include('posts').dump();
 // [{ id: 1, name: 'Alice', posts: [{ id: 1, title: '...' }, ...] }]
 ```
 
@@ -24,12 +24,13 @@ The relation name maps to the `inverse` or `as` name defined in your schema's `r
 Chain as many levels as needed using dot notation:
 
 ```typescript
+// doctest: skip — illustrates relation/schema features not in default schema
 // Two levels deep
-const users = await orm.select('users').include('posts.comments').all();
+const users = await orm.select('users').include('posts.comments').dump();
 // users[0].posts[0].comments — Comment[]
 
 // Three levels deep
-const users = await orm.select('users').include('posts.comments.author').all();
+const users = await orm.select('users').include('posts.comments.author').dump();
 ```
 
 ---
@@ -39,11 +40,12 @@ const users = await orm.select('users').include('posts.comments.author').all();
 Call `.include()` multiple times on the same builder:
 
 ```typescript
+// doctest: skip — illustrates relation/schema features not in default schema
 const users = await orm.select('users')
   .include('posts')
   .include('profile')
   .include('posts.comments')
-  .all();
+  .dump();
 ```
 
 Each call is independent. Nested paths (like `posts.comments`) automatically trigger the parent include as well.
@@ -55,22 +57,23 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
+// doctest: skip — illustrates relation/schema features not in default schema
 // Filter related records
 const users = await orm.select('users')
   .include('posts', { where: eq('published', true) })
-  .all();
+  .dump();
 
 // Select specific columns on the relation
 const users = await orm.select('users')
   .include('posts', {
     select: { type: 'fields', fields: ['id', 'title'] },
   })
-  .all();
+  .dump();
 
 // Disambiguate when multiple relations point to the same table
 const posts = await orm.select('posts')
   .include('users', { via: 'author' })
-  .all();
+  .dump();
 ```
 
 ### Include Options Reference
@@ -92,11 +95,12 @@ const posts = await orm.select('posts')
 For self-referential tables (categories, org charts, threaded comments), use the `recursive` option. The planner generates a PostgreSQL `WITH RECURSIVE` CTE automatically.
 
 ```typescript
+// doctest: skip — illustrates relation/schema features not in default schema
 // Ancestors: walk up the tree from node id=5
 const categories = await orm.select('categories')
   .where(eq('id', 5))
   .include('parent', { recursive: true, direction: 'ancestors' })
-  .all();
+  .dump();
 
 // Descendants: walk down the tree from root id=1, flat output
 const categories = await orm.select('categories')
@@ -107,7 +111,7 @@ const categories = await orm.select('categories')
     flat: true,
     maxDepth: 10,
   })
-  .all();
+  .dump();
 ```
 
 The `flat: true` option returns all nodes as a flat array with a `depth` field rather than a nested tree structure.

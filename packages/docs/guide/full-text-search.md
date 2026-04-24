@@ -27,6 +27,7 @@ one or more text columns of a table, with optional per-field boost weights.
 Produces a `WHERE` filter using the ParadeDB `@@@` operator with per-field boost weights.
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 import { fullTextSearch } from '@dbsp/core';
 
 fullTextSearch({
@@ -66,6 +67,7 @@ Each field gets its own `$N` parameter slot, all bound to the same query value.
 Produces `paradedb.score("keyField")` for use in `.columns()` and `.orderBy()`.
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 import { textScore } from '@dbsp/core';
 
 textScore(keyField?: string): ExpressionRef
@@ -88,6 +90,7 @@ Binds no parameters — the key field is a column reference, not a value.
 ### Basic Full-Text Search
 
 ```typescript
+// doctest: skip — illustrates fullTextSearch API, requires query variable
 import { fullTextSearch } from '@dbsp/core';
 
 const results = await orm
@@ -121,6 +124,7 @@ Boost makes matches in high-priority fields score higher than matches in
 lower-priority fields.
 
 ```typescript
+// doctest: skip — illustrates fullTextSearch API, requires query variable
 import { fullTextSearch } from '@dbsp/core';
 
 const results = await orm
@@ -154,6 +158,7 @@ const results = await orm
 Use `textScore()` in both `.columns()` (to surface the score) and `.orderBy()` (to rank).
 
 ```typescript
+// doctest: skip — illustrates fullTextSearch API, requires query variable
 import { fullTextSearch, textScore } from '@dbsp/core';
 
 const results = await orm
@@ -193,6 +198,7 @@ Chain `fullTextSearch()` alongside other filter helpers using `.where()`. Multip
 `.where()` calls are combined with `AND`.
 
 ```typescript
+// doctest: skip — illustrates fullTextSearch API, requires query variable
 import { fullTextSearch, eq } from '@dbsp/core';
 
 const results = await orm
@@ -229,15 +235,15 @@ When the BM25 index uses a key field other than `id`, pass the field name explic
 ```typescript
 import { textScore } from '@dbsp/core';
 
-orm.select('documents')
-  .columns(['*', textScore('doc_id').as('relevance')])
-  .orderBy(textScore('doc_id'), 'desc')
-  .all();
+orm.select('users')
+  .columns(['*', textScore('id').as('relevance')])
+  .orderBy(textScore('id'), 'desc')
+  .dump();
 
 // SQL:
-//   SELECT *, paradedb.score(doc_id) AS "relevance"
-//   FROM "documents"
-//   ORDER BY paradedb.score(doc_id) DESC
+//   SELECT *, paradedb.score(id) AS "relevance"
+//   FROM "users"
+//   ORDER BY paradedb.score(id) DESC
 ```
 
 ---
@@ -304,7 +310,9 @@ In the standard ORM pipeline, the root table has no alias — pass the actual ta
 name (e.g., `'articles'`). If you use an explicit SQL alias in a subquery or CTE,
 pass that alias instead. There is no default.
 
-```typescript
+```typescriptconst searchTerm = 'hello world';
+const query = searchTerm;
+
 // Correct for a root table named 'symbols':
 fullTextSearch({ query, tableAlias: 'symbols', fields })
 

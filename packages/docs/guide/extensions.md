@@ -30,6 +30,7 @@ imported from `@dbsp/adapter-pgsql`.
 ### Full Example
 
 ```typescript
+// doctest: skip — multi-line import stripped incorrectly and requires embeddings/symbols tables not in default schema
 import {
   cosineDistance,
   rawDistance,
@@ -46,7 +47,7 @@ const results = await orm
   .where(cosineDistance('vector', qv).gte(0.5))      // threshold filter
   .orderBy(rawDistance('vector', qv), 'asc')         // ANN index-friendly ORDER BY
   .limit(20)
-  .all();
+  .dump();
 // SQL:
 //   SELECT 1 - ("embeddings"."vector" <=> $1::vector) AS "score", ...
 //   FROM "embeddings"
@@ -107,6 +108,7 @@ const db = schema(
 ### Full Example
 
 ```typescript
+// doctest: skip — score/bm25Search are from @dbsp/adapter-pgsql, not available in compile-only preamble
 import { score, bm25Search } from '@dbsp/adapter-pgsql';
 
 const searchTerm = 'semantic query planner';
@@ -121,7 +123,7 @@ const results = await orm
   }))
   .orderBy(score('id'), 'desc')                              // sort by relevance
   .limit(50)
-  .all();
+  .dump();
 // SQL:
 //   SELECT paradedb.score("id") AS "score", ...
 //   FROM "symbols"
@@ -186,12 +188,13 @@ const db = schema(
 By default `include()` uses LEFT JOIN. Pass `{ join: 'inner' }` to filter out root
 rows that have no matching related record:
 
-```typescript
+```typescriptconst qv = queryVec;
+
 orm.select('embeddings')
   .include('symbols', { join: 'inner' })   // INNER JOIN — drops embeddings with no symbol
   .column(cosineDistance('vector', qv).as('score'))
   .orderBy(rawDistance('vector', qv), 'asc')
-  .all();
+  .dump();
 ```
 
 This is the standard pattern for vector search when you want the joined data

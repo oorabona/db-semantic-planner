@@ -39,6 +39,7 @@ Each adapter implements the `Adapter` interface from `@dbsp/types`. The core nev
 This means your application code stays the same — only the adapter import changes:
 
 ```typescript
+// doctest: skip — illustrates future multi-adapter support, adapter-sqlite not yet available
 // PostgreSQL (today)
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const adapter = createPgsqlAdapter(pool);

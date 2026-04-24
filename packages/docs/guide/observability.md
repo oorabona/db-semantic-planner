@@ -127,7 +127,9 @@ This is the recommended pattern for integration with migration tools, schema dif
 
 Attach a correlation ID to a query to propagate request context through your logs:
 
-```typescript
+```typescriptconst userId = 1;
+const requestId = 'req-123';
+
 const dump = orm.select('users')
   .where(eq('id', userId))
   .as('fetch-user', { correlationId: requestId })

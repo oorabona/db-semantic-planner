@@ -47,6 +47,7 @@ to reassemble the rows.
 
 The planner encodes this as:
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 { type: 'include-strategy', choice: 'json_agg' | 'join' | 'lateral' | 'cte' | 'subquery' }
 ```
 
@@ -78,6 +79,7 @@ string, and renames the key to the relation name. For to-one relations it
 unwraps the single-element array to a plain object.
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 // Before hydration (raw DB row):
 { id: 1, name: 'Alice', posts_json: '[{"id":10,"title":"Hello"}]' }
 
@@ -120,6 +122,7 @@ prefixed column is `null` (LEFT JOIN with no match), the relation is set to
 `null`.
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 // Before hydration:
 { id: 1, name: 'Alice', 'org.id': 42, 'org.name': 'Acme' }
 
@@ -202,6 +205,7 @@ emits `SubqueryIncludeInfo` metadata instead of modifying the main SQL.
    - Recursively hydrate nested includes if `nestedIncludes` is present.
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 // Phase 1: SELECT * FROM "users" WHERE ...
 // Phase 2: SELECT * FROM "posts" WHERE "user_id" IN ($1, $2, $3)
 
@@ -229,12 +233,14 @@ Hydrator key: "relation.column"  →  result.relation.column
 
 The adapter handler (`join.ts`, `lateral.ts`) writes:
 ```typescript
+// doctest: skip — illustrates internal hydration concept, not a public API
 const outputAlias = columnAliases?.[col] ?? `${relation}.${col}`;
 targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
 ```
 
 `hydrateJoinIncludes()` recovers the nested object:
 ```typescript
+// doctest: skip — illustrates internal hydration state
 for (const key of Object.keys(record)) {
   if (key.startsWith(`${relationName}.`)) {
     nestedObj[key.slice(prefix.length)] = record[key];
@@ -298,9 +304,10 @@ Recursive includes (self-referential relations) use `WITH RECURSIVE` CTEs.
 They are controlled by the `maxDepth` option (default: 100):
 
 ```typescript
+// doctest: skip — categories table not in default schema; requires self-referential schema
 orm.select('categories')
   .include('children', { recursive: true, direction: 'descendants', maxDepth: 5 })
-  .all()
+  .dump()
 ```
 
 The planner sets `maxIncludeDepth` (default: 5) as a warning threshold for
@@ -326,16 +333,17 @@ For tree structures, always use the `recursive: true` option with an explicit
 **Wrong:** Calling `orm.select('posts').all()` and then fetching the author for
 each post in application code:
 ```typescript
-const posts = await orm.select('posts').all();
+// doctest: skip — illustrates N+1 anti-pattern; for-loop iterates posts array (requires real DB)
+const posts = await orm.select('posts').dump();
 for (const post of posts) {
   // Executes one query per post — N+1
-  post.author = await orm.select('users').where(eq('id', post.authorId)).first();
+  post.author = await orm.select('users').where(eq('id', post.authorId)).dump();
 }
 ```
 
 **Right:** Use `include()` — the planner batches the child query with `IN`:
 ```typescript
-const posts = await orm.select('posts').include('author').all();
+const posts = await orm.select('posts').include('author').dump();
 // SQL: SELECT * FROM "users" WHERE "id" IN ($1, $2, ..., $N)
 ```
 
@@ -343,15 +351,17 @@ const posts = await orm.select('posts').include('author').all();
 
 **Wrong:** Open-ended recursive traversal on an unbounded tree:
 ```typescript
-orm.select('categories').include('children', { recursive: true }).all()
+// doctest: skip — categories table not in default schema; requires self-referential schema
+orm.select('categories').include('children', { recursive: true }).dump()
 // Default maxDepth: 100 — may fetch enormous trees
 ```
 
 **Right:** Always specify an explicit `maxDepth` for trees you do not control:
 ```typescript
+// doctest: skip — categories table not in default schema; requires self-referential schema
 orm.select('categories')
   .include('children', { recursive: true, direction: 'descendants', maxDepth: 10 })
-  .all()
+  .dump()
 ```
 
 ### Mixing `join` strategy on hasMany

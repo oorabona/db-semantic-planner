@@ -14,6 +14,7 @@ pnpm add @dbsp/types
 ## Usage
 
 ```typescript
+// doctest: skip — type annotation illustration, not executable
 import type { ModelIR, IntentAST, PlanReport, Adapter } from '@dbsp/types';
 
 // Type-check your adapter implementation

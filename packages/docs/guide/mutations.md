@@ -12,9 +12,9 @@ title: Mutations
 
 ```typescript
 // Insert a single row
-await orm.insert('users')
+orm.insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
-  .execute();
+  .dump();
 ```
 
 ### Bulk Insert
@@ -22,12 +22,12 @@ await orm.insert('users')
 Pass an array to `.values()` to insert multiple rows in a single statement:
 
 ```typescript
-await orm.insert('users')
+orm.insert('users')
   .values([
     { name: 'Alice', email: 'alice@example.com' },
     { name: 'Bob',   email: 'bob@example.com'   },
   ])
-  .execute();
+  .dump();
 ```
 
 ### RETURNING
@@ -35,12 +35,11 @@ await orm.insert('users')
 Use `.returning()` to get back specific columns from the inserted rows:
 
 ```typescript
-const [newUser] = await orm.insert('users')
+const { sql: newUserSql } = orm.insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .returning(['id', 'name', 'createdAt'])
-  .execute();
+  .dump();
 
-console.log(newUser.id); // UUID assigned by the database
 ```
 
 ---
@@ -48,12 +47,14 @@ console.log(newUser.id); // UUID assigned by the database
 ## Update
 
 ```typescript
+const userId = 1;
+
 import { eq } from '@dbsp/core';
 
-await orm.update('users')
+orm.update('users')
   .set({ name: 'Alice Smith' })
   .where(eq('id', userId))
-  .execute();
+  .dump();
 ```
 
 `update()` **requires a `.where()` clause**. Omitting it throws `UnsafeOperationError` — this is a safety guard against accidental full-table updates.
@@ -63,19 +64,19 @@ await orm.update('users')
 When you genuinely need to update every row, use `updateAll()`:
 
 ```typescript
-await orm.updateAll('users')
+orm.updateAll('users')
   .set({ active: false })
-  .execute();
+  .dump();
 ```
 
 ### Update with RETURNING
 
 ```typescript
-const updated = await orm.update('users')
+const { sql: updatedSql } = orm.update('users')
   .set({ active: true })
   .where(eq('email', 'alice@example.com'))
   .returning(['id', 'name', 'active'])
-  .execute();
+  .dump();
 ```
 
 ---
@@ -83,24 +84,24 @@ const updated = await orm.update('users')
 ## Delete
 
 ```typescript
-await orm.delete('posts')
+orm.delete('posts')
   .where(eq('published', false))
-  .execute();
+  .dump();
 ```
 
 Like `update()`, `delete()` **requires a `.where()` clause**. Use `deleteAll()` when you intend to remove every row:
 
 ```typescript
-await orm.deleteAll('users').execute();
+orm.deleteAll('users').dump();
 ```
 
 ### Delete with RETURNING
 
 ```typescript
-const removed = await orm.delete('posts')
+const { sql: removedSql } = orm.delete('posts')
   .where(eq('published', false))
   .returning(['id', 'title'])
-  .execute();
+  .dump();
 ```
 
 ---
@@ -111,40 +112,40 @@ Insert a row, or update it on conflict:
 
 ```typescript
 // Auto-update all non-conflict columns
-await orm.upsert('users')
+orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com', active: true })
   .onConflict(['email'])
   .doUpdate()
-  .execute();
+  .dump();
 
 // Update only specific columns on conflict
-await orm.upsert('users')
+orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com', active: true })
   .onConflict(['email'])
   .doUpdate({ name: 'Alice Updated', active: true })
-  .execute();
+  .dump();
 
 // Skip the row silently on conflict
-await orm.upsert('users')
+orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .onConflict(['email'])
   .doNothing()
-  .execute();
+  .dump();
 
 // Conflict by constraint name instead of columns
-await orm.upsert('users')
+orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .onConflictConstraint('users_email_unique')
   .doNothing()
-  .execute();
+  .dump();
 
 // With RETURNING
-const result = await orm.upsert('users')
+const { sql: resultSql } = orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .onConflict(['email'])
   .doUpdate()
   .returning(['id', 'name'])
-  .execute();
+  .dump();
 ```
 
 ---

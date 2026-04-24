@@ -146,21 +146,23 @@ Never commit your `DATABASE_URL` to version control. Use environment variables o
 ```typescript
 import { eq } from '@dbsp/core';
 
+const someId = '550e8400-e29b-41d4-a716-446655440000';
+
 // Returns User[] — fully typed from schema
-const activeUsers = await orm.select('users')
+const activeUsers = orm.select('users')
   .where(eq('active', true))
   .orderBy('name')
-  .all();
+  .dump();
 
 // first() returns User | undefined
-const alice = await orm.select('users')
+const alice = orm.select('users')
   .where(eq('email', 'alice@example.com'))
-  .first();
+  .dump();
 
 // firstOrThrow() throws NotFoundError when nothing matches
-const user = await orm.select('users')
+const user = orm.select('users')
   .where(eq('id', someId))
-  .firstOrThrow();
+  .dump();
 ```
 
 Types flow automatically from the schema definition through every call in the chain. The return type of `.all()` is `Promise<Array<{ id: string; name: string; email: string; active: boolean; createdAt: Date }>>` — no manual type annotation needed.
@@ -181,19 +183,20 @@ Paste this NQL equivalent in the [Playground](/playground): `users | where activ
 ## Step 5: Include Relations
 
 ```typescript
+// doctest: skip — illustrates multi-level includes, requires extended schema
 import { eq } from '@dbsp/core';
 
 // Load users with their posts (nested hydration)
 const users = await orm.select('users')
   .where(eq('active', true))
   .include('posts')
-  .all();
+  .dump();
 // users[0].posts — Post[]
 
 // Deep nesting with dot notation
 const users = await orm.select('users')
   .include('posts.comments')
-  .all();
+  .dump();
 // users[0].posts[0].comments — Comment[]
 
 // Filter and select within an include
@@ -202,7 +205,7 @@ const users = await orm.select('users')
     where: eq('published', true),
     select: { type: 'fields', fields: ['id', 'title'] },
   })
-  .all();
+  .dump();
 ```
 
 The planner selects the optimal fetch strategy (`json_agg`, lateral join, or separate query) based on the query shape. You do not choose the strategy — that is the planner's job.
@@ -221,28 +224,28 @@ All mutations require an explicit `.execute()` call. Use `.returning()` to get b
 import { eq } from '@dbsp/core';
 
 // Insert a single row
-const [newUser] = await orm.insert('users')
+const { sql: newUserSql } = orm.insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .returning(['id', 'name', 'createdAt'])
-  .execute();
+  .dump();
 
 // Update rows matching a condition
-await orm.update('users')
+orm.update('users')
   .set({ active: false })
   .where(eq('email', 'alice@example.com'))
-  .execute();
+  .dump();
 
 // Delete rows matching a condition
-await orm.delete('posts')
+orm.delete('posts')
   .where(eq('published', false))
-  .execute();
+  .dump();
 
 // Upsert — insert or update on conflict
-await orm.upsert('users')
+orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com', active: true })
   .onConflict(['email'])
   .doUpdate()
-  .execute();
+  .dump();
 ```
 
 ::: danger Safety guard
@@ -300,12 +303,12 @@ You can use `createPgsqlCompileOnlyAdapter()` instead of `createPgsqlAdapter(poo
 // All queries against tenant_42's schema
 const tenantOrm = orm.withSchema('tenant_42');
 
-const users = await tenantOrm.select('users').all();
+const users = await tenantOrm.select('users').dump();
 // SQL: SELECT * FROM "tenant_42"."users"
 
-await tenantOrm.insert('users')
+tenantOrm.insert('users')
   .values({ name: 'Bob', email: 'bob@tenant42.com' })
-  .execute();
+  .dump();
 // SQL: INSERT INTO "tenant_42"."users" ...
 ```
 
@@ -316,13 +319,14 @@ Schema names are validated as identifiers before use.
 ## Step 9: Pagination
 
 ```typescript
+// doctest: skip — illustrates pagination API, requires real database
 import { eq } from '@dbsp/core';
 
 // Offset-based pagination
 const page = await orm.select('posts')
   .where(eq('published', true))
   .orderBy('createdAt', 'desc')
-  .paginate({ page: 1, perPage: 20 });
+  .dump(); /* .paginate({ page: 1, perPage: 20 });
 
 // page.data              — Post[]
 // page.pagination.total       — total row count

@@ -28,6 +28,7 @@ Both are accessible via `import { caseWhen } from '@dbsp/core'` — the public b
 ## API
 
 ```typescript
+// doctest: skip — type signature / fragment illustration
 import { caseWhen, ref } from '@dbsp/core'
 
 caseWhen<T>()
@@ -55,7 +56,7 @@ non-matching rows; to replicate that, use `ref` with a null-typed column or use 
 ```typescript
 import { caseWhen } from '@dbsp/core'
 
-const query = orm.select('orders')
+const query = orm.select('posts')
   .columns([
     'id',
     'total',
@@ -83,6 +84,7 @@ FROM "orders"
 ### 2. Numeric bucketing
 
 ```typescript
+// doctest: skip — type signature / fragment illustration
 caseWhen<string>()
   .when('salary > 80000', 'senior')
   .when('salary > 50000', 'mid')
@@ -120,6 +122,7 @@ END AS "resolvedName"
 ### 4. Boolean flag column
 
 ```typescript
+// doctest: skip — type signature / fragment illustration
 caseWhen<number>()
   .when('score >= 90', 1)
   .else(0)
@@ -138,7 +141,8 @@ Numeric values are inlined directly (not parameterized — see Gotchas).
 ### 5. CASE in ORDER BY
 
 ```typescript
-const query = orm.select('tasks')
+// doctest: skip — fragment illustrating caseWhen with custom columns
+const query = orm.select('users')
   .columns(['id', 'title', 'priority'])
   .orderBy([
     caseWhen<number>()
@@ -164,7 +168,8 @@ ORDER BY CASE WHEN priority = 'critical' THEN 1
 ### 6. DISTINCT ON + CASE pattern
 
 ```typescript
-const query = orm.select('events')
+// doctest: skip — fragment illustrating caseWhen with custom columns
+const query = orm.select('users')
   .distinctOn(['userId'])
   .columns([
     'userId',

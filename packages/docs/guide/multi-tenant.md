@@ -10,7 +10,7 @@ db-semantic-planner supports schema-per-tenant isolation via `orm.withSchema()`.
 
 ```typescript
 const tenantOrm = orm.withSchema('acme_corp');
-const users = await tenantOrm.select('users').all();
+const users = await tenantOrm.select('users').dump();
 // SQL: SELECT * FROM "acme_corp"."users"
 ```
 

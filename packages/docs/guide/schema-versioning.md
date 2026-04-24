@@ -158,6 +158,7 @@ dbsp migrate rollback 1 -d postgresql://... --force
 The versioning infrastructure is also available as a library for custom tooling:
 
 ```typescript
+// doctest: skip — DDL schema comparison requires real adapter connection
 import { compareSchemata } from '@dbsp/adapter-pgsql';
 import { generateMigrationSQL, generateDownSQL } from '@dbsp/adapter-pgsql';
 import {

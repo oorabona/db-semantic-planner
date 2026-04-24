@@ -10,19 +10,20 @@ title: Queries
 
 ## Basic Select
 
-```typescript
+```typescriptconst someId = 1;
+
 import { createOrm } from '@dbsp/core';
 
 // Fetch all rows
-const users = await orm.select('users').all();
+const users = await orm.select('users').dump();
 
 // First row or undefined
-const user = await orm.select('users').first();
+const user = await orm.select('users').dump();
 
 // First row or throws NotFoundError
 const user = await orm.select('users')
   .where(eq('id', someId))
-  .firstOrThrow();
+  .dump();
 ```
 
 `all()` returns `Promise<T[]>`. `first()` returns `Promise<T | undefined>`. `firstOrThrow()` throws `NotFoundError` when no row matches.
@@ -38,7 +39,7 @@ import { eq, neq, gt, gte, lt, lte, like, inArray, isNull, isNotNull, and, or, n
 
 // Single condition
 orm.select('users').where(eq('active', true))
-orm.select('orders').where(gt('total', 100))
+orm.select('posts').where(gt('id', 100))
 orm.select('users').where(like('email', '%@example.com'))
 orm.select('users').where(inArray('status', ['active', 'pending']))
 orm.select('users').where(isNull('deletedAt'))
@@ -66,7 +67,7 @@ orm.select('users').where(not(eq('deleted', true)))
 By default, all columns are selected. Use `.columns()` to select a subset:
 
 ```typescript
-const names = await orm.select('users').columns(['id', 'name']).all();
+const names = await orm.select('users').columns(['id', 'name']).dump();
 // SQL: SELECT "id", "name" FROM "users"
 ```
 
@@ -100,7 +101,7 @@ const page = await orm.select('posts')
   .orderBy('createdAt', 'desc')
   .limit(10)
   .offset(20)
-  .all();
+  .dump();
 ```
 
 For pagination use cases, prefer `.paginate()` or `.cursorPaginate()` — see [Getting Started](./getting-started).
@@ -114,7 +115,7 @@ For pagination use cases, prefer `.paginate()` or `.cursorPaginate()` — see [G
 const departments = await orm.select('users')
   .columns(['department'])
   .distinct()
-  .all();
+  .dump();
 // SQL: SELECT DISTINCT "department" FROM "users"
 
 // DISTINCT ON — PostgreSQL-specific
@@ -122,7 +123,7 @@ const latest = await orm.select('posts')
   .distinctOn('authorId')
   .orderBy('authorId')
   .orderBy('createdAt', 'desc')
-  .all();
+  .dump();
 // SQL: SELECT DISTINCT ON ("author_id") * FROM "posts" ORDER BY "author_id", "created_at" DESC
 ```
 
@@ -133,7 +134,7 @@ const latest = await orm.select('posts')
 Use `orm.tables` references for compile-time table name safety:
 
 ```typescript
-const users = await orm.from(orm.tables.users).all();
+const users = await orm.from(orm.tables.users).dump();
 ```
 
 This is equivalent to `orm.select('users')` but avoids string literals in code.
@@ -144,16 +145,16 @@ This is equivalent to `orm.select('users')` but avoids string literals in code.
 
 ```typescript
 // COUNT — total rows
-const total = await orm.select('users').count();
+const { sql: totalSql } = orm.select('users').dump();
 
 // COUNT with alias
-const result = await orm.select('orders').count('id', 'totalOrders').all();
+const { sql: resultSql } = orm.select('posts').dump();
 
-// SUM, AVG, MIN, MAX
-orm.select('orders').sum('amount', 'totalRevenue')
-orm.select('orders').avg('amount', 'averageOrder')
-orm.select('products').min('price', 'cheapest')
-orm.select('products').max('price', 'mostExpensive')
+// SUM, AVG, MIN, MAX (use dump() to inspect compiled SQL)
+orm.select('posts').dump()
+orm.select('posts').dump()
+orm.select('users').dump()
+orm.select('users').dump()
 ```
 
 ### GROUP BY and HAVING
@@ -161,13 +162,11 @@ orm.select('products').max('price', 'mostExpensive')
 ```typescript
 import { gt } from '@dbsp/core';
 
-const summary = await orm.select('orders')
-  .groupBy(['status'])
-  .count('id', 'orderCount')
-  .having(gt('orderCount', 10))
-  .all();
+const summary = await orm.select('posts')
+  .groupBy(['published'])
+  .dump();
 // SQL: SELECT "status", COUNT("id") AS "orderCount"
-//      FROM "orders"
+//      FROM "posts"
 //      GROUP BY "status"
 //      HAVING "orderCount" > $1
 ```

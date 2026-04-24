@@ -11,6 +11,7 @@ The schema is the foundation of dbsp. It describes your tables, columns, and rel
 Columns can be defined as a **shorthand string** (just the type) or as an **object** with options:
 
 ```typescript
+// doctest: skip — column type shorthand fragment, not standalone executable
 // Shorthand — simplest form
 name: 'string',
 
@@ -100,6 +101,7 @@ Use `{ type: 'text', nullable: true }` for nullable columns.
 Use `ref()` to define foreign key relationships. The planner auto-infers `belongsTo` (N:1) and `hasMany` (1:N) directions from FK placement.
 
 ```typescript
+// doctest: skip — FK reference fragment illustration
 // Simple FK — targets the primary key of the referenced table
 authorId: ref('users'),
 

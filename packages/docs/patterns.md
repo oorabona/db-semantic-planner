@@ -48,6 +48,7 @@ IncludeHandler  { operators: string[]; compile(decision, ctx, state): IncludeRes
 Registration:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 registerWhereHandler(handler: WhereHandler): void   // throws on duplicate
 registerExpressionHandler(handler: ExpressionHandler): void
 registerIncludeHandler(handler: IncludeHandler): void
@@ -56,6 +57,7 @@ registerIncludeHandler(handler: IncludeHandler): void
 Lookup (throws if missing):
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 getWhereHandler(operator: string): WhereHandler
 getExpressionHandler(operator: string): ExpressionHandler
 getIncludeHandler(operator: string): IncludeHandler
@@ -66,6 +68,7 @@ getIncludeHandler(operator: string): IncludeHandler
 Adding a WHERE handler for `ILIKE`:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // packages/adapter-pgsql/src/handlers/where/pattern.ts
 const ilikeHandler: WhereHandler = {
   operators: ['ilike', 'not_ilike'],
@@ -121,12 +124,12 @@ Invariant enforced by `buildIntent()`: the builder collects state into an `Inten
 
 ```typescript
 // Each step produces a new builder — nothing mutated
-const result = await orm
-  .select('orders')
-  .where(eq('status', 'pending'))
-  .orderBy('created_at', 'desc')
+const result = orm
+  .select('posts')
+  .where(eq('published', false))
+  .orderBy('title', 'desc')
   .limit(20)
-  .all();
+  .dump();
 ```
 
 ```typescript
@@ -135,7 +138,7 @@ const inserted = await orm
   .insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .returning(['id', 'created_at'])
-  .execute();
+  .dump();
 ```
 
 ### Convention
@@ -168,6 +171,7 @@ Keep the Chevrotain CST visitor class as a thin dispatcher — one method per gr
 `NqlCstVisitor` holds a single `VisitFn` (`this.v = (node) => this.visit(node)`) and passes it to every domain function so they can recurse without importing the visitor class.
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // visitor.ts — thin dispatcher
 export class NqlCstVisitor extends BaseCstVisitor {
   private readonly v: VisitFn;
@@ -184,6 +188,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 ```
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // visit-query.ts — domain logic
 export function visitQuery(ctx: CstContext, visit: VisitFn): NqlQuery {
   // real implementation here
@@ -245,6 +250,7 @@ Strategies:
 Schema-level hint:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 const schema = defineSchema({
   users: table({
     posts: hasMany(() => posts, { includeStrategy: 'lateral' }),
@@ -317,6 +323,7 @@ const orm = createOrm({
 Testing core logic without a database:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // core unit tests use createMockAdapter() from test-utils.ts
 // which implements only the Adapter methods needed for the test
 const adapter = createMockAdapter({ compile: vi.fn().mockReturnValue(...) });
@@ -418,6 +425,7 @@ Break circular import cycles between NQL compiler modules (`compile-query` ↔ `
 | Consumers | `compile-query.ts`, `compile-select.ts`, `compile-expression.ts`, `compile-mutation.ts`, `compile-cte.ts` |
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // types.ts
 export interface CompilerFns {
   compileQuery(query: NqlQuery, ctx: CompilerContext): QueryIntent | SetOperationIntent;
@@ -427,6 +435,7 @@ export interface CompilerFns {
 ```
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // NqlCompiler constructor — wires the functions once
 this.fns = {
   compileQuery:       (query, ctx)        => compileQuery(query, ctx, this.fns),
@@ -442,6 +451,7 @@ Every domain function receives `fns` as a parameter and calls `fns.compileQuery(
 A new compiler module that needs to recursively compile sub-expressions:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 // compile-window.ts
 export function compileWindowClause(
   clause: NqlWindowClause,
@@ -490,6 +500,7 @@ execute()   → buildIntent() → compileIntent(adapter, intent, options) → ad
 Abstract methods that subclasses must implement:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 protected abstract buildIntent(): TIntent;
 protected abstract compileIntent(
   adapter: Adapter,
@@ -508,6 +519,7 @@ Concrete methods shared by all subclasses (on base):
 `InsertBuilder` overrides the two abstract methods:
 
 ```typescript
+// doctest: skip — illustrates internal pattern / implementation detail
 protected buildIntent(): InsertIntent {
   if (this.valuesData.length === 0) {
     throw new InvalidOperationError('insert', 'No values provided for insert');

@@ -20,6 +20,7 @@ Use `orm.recursive()` instead of application-side loops or multiple round-trips.
 ## API
 
 ```typescript
+// doctest: skip — type signature / pseudo-code illustration
 orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult>
 ```
 
@@ -68,7 +69,8 @@ FROM name
 
 Suppose an `employees` table with a `manager_id` self-reference:
 
-```typescript
+```typescriptconst employeeId = 1;
+
 import { createOrm, eq } from '@dbsp/core';
 
 type Employee = { id: number; name: string; manager_id: number | null };
@@ -79,7 +81,7 @@ const ancestors = await orm
     step: orm.select('ancestor_chain'),
   })
   .columns(['id', 'name', 'manager_id'])
-  .all();
+  .dump();
 ```
 
 Generated SQL:
@@ -98,7 +100,8 @@ FROM ancestor_chain
 
 When cycles are possible or the tree depth is unbounded, use `maxDepth` to prevent infinite recursion. The depth guard is injected automatically into the step query.
 
-```typescript
+```typescriptconst rootId = 1;
+
 const subtree = await orm
   .recursive('cat_tree', {
     base: orm.select('categories').where(eq('parent_id', rootId)),
@@ -108,7 +111,7 @@ const subtree = await orm
   })
   .columns(['id', 'name', 'parent_id'])
   .orderBy('id')
-  .all();
+  .dump();
 ```
 
 Generated SQL:
@@ -137,7 +140,8 @@ SELECT chain.* FROM chain WHERE chain.name = $2 AND "depth" < $3
 
 Use `unionAll: false` when the same node can be reached by multiple paths and you only want it once in the result:
 
-```typescript
+```typescriptconst startId = 1;
+
 const reachable = await orm
   .recursive('reachable_nodes', {
     base: orm.select('graph_edges').where(eq('from_id', startId)),
@@ -145,7 +149,7 @@ const reachable = await orm
     unionAll: false,   // UNION deduplicates across iterations
   })
   .columns(['from_id', 'to_id'])
-  .all();
+  .dump();
 ```
 
 Generated SQL uses `UNION` instead of `UNION ALL`:
@@ -167,6 +171,7 @@ Note: `UNION ALL` is the default and is faster — it avoids the deduplication p
 Inspect the compiled SQL and parameters without running against the database:
 
 ```typescript
+// doctest: skip — illustrates recursive CTE API — requires extended schema with self-referential table
 const builder = orm.recursive('parent_chain', {
   base: orm.select('employees').where(eq('id', 7)),
   step: orm.select('parent_chain'),
