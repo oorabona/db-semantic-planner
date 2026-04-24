@@ -112,27 +112,27 @@ export class AmbiguousRelationError extends Error {
 	 */
 	readonly options: readonly string[];
 
+	/**
+	 * Public-safe message (no schema enumeration).
+	 * Matches the pattern of RelationNotFoundError, TableNotFoundError, ColumnNotFoundError.
+	 */
+	readonly publicMessage: string;
+
 	constructor(
 		sourceTable: string,
 		targetTable: string,
 		options: readonly string[],
 	) {
-		const optionsList = options.join(', ');
-		const firstOption = options[0] ?? 'relationName';
+		// Generic message for .message — does NOT embed schema details to avoid info leakage.
+		// Detailed developer guidance is available via .sourceTable, .targetTable, .options.
+		const genericMessage = 'Ambiguous relation';
 
-		const message =
-			`Ambiguous relation from '${sourceTable}' to '${targetTable}'.\n` +
-			`Multiple relations found: ${optionsList}\n\n` +
-			`To fix, specify which relation to use:\n` +
-			`  .include('${targetTable}', { via: '${firstOption}' })\n\n` +
-			`Or set a global hint in createOrm:\n` +
-			`  createOrm({ db, relationHints: { ${targetTable}: '${firstOption}' } })`;
-
-		super(message);
+		super(genericMessage);
 
 		this.sourceTable = sourceTable;
 		this.targetTable = targetTable;
 		this.options = options;
+		this.publicMessage = genericMessage;
 
 		// Required for proper instanceof checks when extending built-in classes
 		// See: https://github.com/microsoft/TypeScript/wiki/FAQ#why-doesnt-extending-built-ins-like-error-array-and-map-work

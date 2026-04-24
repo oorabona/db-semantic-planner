@@ -2,21 +2,12 @@
  * Transactions E2E Tests
  *
  * Tests transaction support: basic commit/rollback, nested, and schema-scoped.
- *
- * TODO (M-4): Migrate OrmInstanceInternal casts to tx.into(tx.tables.posts).
- * Blocked: this test uses `createOrm({ model: blogModel })` with a raw ModelIR
- * (not a typed `schema()`), so `tx` has type `OrmInstance<unknown>` and
- * `tx.tables.posts` lacks static table types. Full migration requires either:
- *   (a) switching to `createOrm({ schema: blogSchema })`, or
- *   (b) accepting the weaker `InsertBuilder<unknown>` return type.
- * Track in: follow-up issue for typed E2E test refactor.
  */
 
 import { createOrm } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { OrmInstanceInternal } from '../../packages/core/src/dx/orm-instance-types.js';
 import {
-	blogModel,
+	blogSchema,
 	closeTestDb,
 	createBlogSchema,
 	dropBlogSchema,
@@ -53,7 +44,7 @@ describe('Transactions', () => {
 	describe('Basic transaction', () => {
 		it('should commit on success', async () => {
 			const adapter = await getTestAdapter();
-			const orm = createOrm({ model: blogModel, adapter });
+			const orm = createOrm({ schema: blogSchema, adapter });
 			const scoped = orm.withSchema(SCHEMA);
 
 			// Arrange
@@ -62,8 +53,8 @@ describe('Transactions', () => {
 
 			// Act
 			await scoped.transaction(async (tx) => {
-				await (tx as unknown as OrmInstanceInternal)
-					.insert('posts')
+				await tx
+					.into(tx.tables.posts)
 					.values({
 						title: 'Tx Post',
 						content: 'Created in transaction',
@@ -80,7 +71,7 @@ describe('Transactions', () => {
 
 		it('should rollback on error', async () => {
 			const adapter = await getTestAdapter();
-			const orm = createOrm({ model: blogModel, adapter });
+			const orm = createOrm({ schema: blogSchema, adapter });
 			const scoped = orm.withSchema(SCHEMA);
 
 			// Arrange
@@ -90,8 +81,8 @@ describe('Transactions', () => {
 			// Act
 			await expect(
 				scoped.transaction(async (tx) => {
-					await (tx as unknown as OrmInstanceInternal)
-						.insert('posts')
+					await tx
+						.into(tx.tables.posts)
 						.values({
 							title: 'Rollback Post',
 							content: 'Should not persist',
@@ -110,7 +101,7 @@ describe('Transactions', () => {
 
 		it('should return callback result on commit', async () => {
 			const adapter = await getTestAdapter();
-			const orm = createOrm({ model: blogModel, adapter });
+			const orm = createOrm({ schema: blogSchema, adapter });
 			const scoped = orm.withSchema(SCHEMA);
 
 			const result = await scoped.transaction(async (tx) => {
@@ -126,7 +117,7 @@ describe('Transactions', () => {
 	describe('Nested transaction', () => {
 		it('should reuse parent transaction context', async () => {
 			const adapter = await getTestAdapter();
-			const orm = createOrm({ model: blogModel, adapter });
+			const orm = createOrm({ schema: blogSchema, adapter });
 			const scoped = orm.withSchema(SCHEMA);
 
 			const before = await scoped.select('posts').all();
@@ -134,8 +125,8 @@ describe('Transactions', () => {
 
 			// Outer with nested inner
 			await scoped.transaction(async (outer) => {
-				await (outer as unknown as OrmInstanceInternal)
-					.insert('posts')
+				await outer
+					.into(outer.tables.posts)
 					.values({
 						title: 'Outer Post',
 						content: 'From outer tx',
@@ -145,8 +136,8 @@ describe('Transactions', () => {
 					.execute();
 
 				await outer.transaction(async (inner) => {
-					await (inner as unknown as OrmInstanceInternal)
-						.insert('posts')
+					await inner
+						.into(inner.tables.posts)
 						.values({
 							title: 'Inner Post',
 							content: 'From inner tx',
@@ -164,7 +155,7 @@ describe('Transactions', () => {
 
 		it('should rollback all on inner error', async () => {
 			const adapter = await getTestAdapter();
-			const orm = createOrm({ model: blogModel, adapter });
+			const orm = createOrm({ schema: blogSchema, adapter });
 			const scoped = orm.withSchema(SCHEMA);
 
 			const before = await scoped.select('posts').all();
@@ -172,8 +163,8 @@ describe('Transactions', () => {
 
 			await expect(
 				scoped.transaction(async (outer) => {
-					await (outer as unknown as OrmInstanceInternal)
-						.insert('posts')
+					await outer
+						.into(outer.tables.posts)
 						.values({
 							title: 'Will Rollback',
 							content: 'Neither should persist',
@@ -183,8 +174,8 @@ describe('Transactions', () => {
 						.execute();
 
 					await outer.transaction(async (inner) => {
-						await (inner as unknown as OrmInstanceInternal)
-							.insert('posts')
+						await inner
+							.into(inner.tables.posts)
 							.values({
 								title: 'Inner Will Rollback',
 								content: 'Neither should persist',
