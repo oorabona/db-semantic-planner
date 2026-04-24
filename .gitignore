@@ -5,6 +5,8 @@ node_modules/
 dist/
 dist-types/
 *.tsbuildinfo
+*.config.d.ts
+*.config.d.ts.map
 
 # Generated files (dbsp generate)
 generated/

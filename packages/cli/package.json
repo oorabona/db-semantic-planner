@@ -63,7 +63,7 @@
 		"@dbsp/core": "workspace:*",
 		"@dbsp/nql": "workspace:*",
 		"@dbsp/types": "workspace:*",
-		"@oclif/table": "^0.5.3",
+		"@oclif/table": "^0.5.4",
 		"commander": "catalog:",
 		"ink": "catalog:",
 		"react": "catalog:"
