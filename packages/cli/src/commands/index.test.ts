@@ -3,22 +3,24 @@
  *
  * These tests verify that Commander throws CommanderError with the correct
  * exit codes and error codes when --help, --version, or an unknown command is
- * parsed. They do NOT test the real `main()` function in index.ts (which has
- * top-level side effects and requires a spawn-based harness).
+ * parsed. They do NOT exercise the real CLI entry-point in index.ts (which
+ * is a top-level script — no exported main() — with side effects that require
+ * a spawn-based integration harness).
  *
  * What IS covered here:
  *   - Commander exits 0 for --help and --version (human-readable output, not errors)
  *   - Commander exits 1 for an unknown command (real error path)
- *   - These exit-code distinctions are what main() branches on to decide whether
- *     to JSON-wrap the error.
+ *   - These exit-code distinctions are what the real entry-point branches
+ *     on to decide whether to JSON-wrap the error.
  *
  * What is NOT covered here:
- *   - The JSON-wrap decision logic in main() itself
+ *   - The JSON-wrap decision logic in the real index.ts entry-point
  *   - Real process.exit() calls
  *
- * TODO: A full entry-point integration test (real `main()` called with
- * process.argv) would require a spawn-based harness — see TODO.md
- * § "CLI integration test harness" for follow-up.
+ * TODO: A full entry-point integration test (spawn the CLI binary with
+ * process.argv and assert stdout/stderr shape + exit code) would require
+ * a spawn-based harness — see TODO.md § "CLI integration test harness"
+ * for follow-up.
  */
 
 import { Command, CommanderError } from 'commander';
