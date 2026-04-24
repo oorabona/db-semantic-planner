@@ -507,7 +507,7 @@ describe('M-2: prototype-pollution keys rejected in column dict and indexes dict
 		const usersTable = JSON.parse(
 			'{"id": {"type": "uuid"}, "__proto__": {"type": "integer"}}',
 		) as Record<string, unknown>;
-		tablesInput['users'] = usersTable;
+		tablesInput.users = usersTable;
 
 		// Verify the injection produced a true own-property (not inherited)
 		expect(Object.keys(usersTable)).toContain('__proto__');
