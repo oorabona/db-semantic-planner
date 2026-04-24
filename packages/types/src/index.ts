@@ -13,6 +13,9 @@ export * from './adapter.js';
 export * from './dialects.js';
 // IntentAST types (shared between core and nql)
 export * from './intent-ast.js';
+// LoadedSchema + isValidSchema (canonical cross-package type, consumed by cli, gui, mcp-server)
+export type { LoadedSchema } from './loaded-schema.js';
+export { isValidSchema } from './loaded-schema.js';
 // ModelIR types (schema representation)
 export * from './model-ir.js';
 // Planner types (plan report, decisions, warnings)

@@ -41,11 +41,13 @@
 	],
 	"scripts": {
 		"build": "tsup",
+		"test": "vitest run",
 		"typecheck": "tsc --noEmit"
 	},
 	"devDependencies": {
 		"@types/node": "catalog:",
 		"typescript": "catalog:",
-		"tsup": "catalog:"
+		"tsup": "catalog:",
+		"vitest": "catalog:"
 	}
 }
