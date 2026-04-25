@@ -169,7 +169,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).toContain('custom_schema');
 		});
 
-		it('adapter schema takes precedence over compile options', () => {
+		it('compile options schemaName takes precedence over adapter constructor schemaName', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				schemaName: 'adapter_schema',
 			});
@@ -180,8 +180,63 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 			const result = adapter.compile(plan, { schemaName: 'override_schema' });
 
-			// adapter schema takes precedence via ?? operator
-			expect(result.sql).toContain('adapter_schema');
+			// options.schemaName takes precedence over adapter constructor schemaName.
+			// buildCompileDeps() uses || (not ??) for schemaName: empty string falls through
+			// to the adapter constructor value. For model it still uses ?? (empty model is meaningful).
+			expect(result.sql).toContain('override_schema');
+		});
+
+		it('compile options schemaName empty string falls through to adapter constructor schemaName', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'adapter_default',
+			});
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			const result = adapter.compile(plan, { schemaName: '' });
+
+			// Empty string should NOT win; constructor schemaName wins via `||`
+			expect(result.sql).toContain('adapter_default');
+			expect(result.sql).not.toContain('"".');
+		});
+	});
+
+	describe('compile - schemaName validation in options', () => {
+		it('rejects malicious schemaName via compile options (SQL injection)', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			expect(() =>
+				adapter.compile(plan, { schemaName: 'x"; DROP TABLE users--' }),
+			).toThrow(/[Ii]nvalid|identifier/);
+		});
+
+		it('rejects schemaName with semicolon via compile options', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			expect(() =>
+				adapter.compile(plan, { schemaName: 'bad;schema' }),
+			).toThrow(/[Ii]nvalid|identifier/);
+		});
+
+		it('accepts valid identifier in options.schemaName', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			const result = adapter.compile(plan, { schemaName: 'tenant_42' });
+			expect(result.sql).toContain('tenant_42');
 		});
 	});
 
@@ -592,6 +647,22 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				schemaName: 'opt_schema',
 			});
 			expect(result.sql).toContain('opt_schema');
+		});
+
+		it('empty-string compile options schemaName falls through to adapter constructor schemaName (INSERT path)', () => {
+			// Regression guard for M-1 fix: deps.schemaName is now authoritative.
+			// buildCompileDeps() uses || for schemaName, so '' falls through to constructor value.
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'adapter_default',
+			});
+			const intent = {
+				table: 'users',
+				values: [{ name: 'Eve' }],
+			};
+			const result = adapter.compileInsert(intent as any, { schemaName: '' });
+			// Constructor schema must win when options.schemaName is empty string
+			expect(result.sql).toContain('adapter_default');
+			expect(result.sql).not.toContain('""."'); // empty-schema prefix must never appear
 		});
 
 		it('compiles INSERT with multiple rows', () => {

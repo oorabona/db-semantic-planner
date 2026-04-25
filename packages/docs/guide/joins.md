@@ -54,7 +54,6 @@ Chaining multiple `.join()` calls accumulates joins in order.
 Given a schema with `calls.caller_id → symbols`:
 
 ```typescript
-// doctest: skip — join('caller'): relation-mode join requires a model for FK resolution.
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -97,7 +96,6 @@ The default join type is `INNER JOIN`.
 ### 2. Left join (keep root rows without a match)
 
 ```typescript
-// doctest: skip — join('callee'): relation-mode join requires a model for FK resolution.
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -134,7 +132,6 @@ Use `type: 'left'` when root rows without a matching related row should still ap
 `.join()` and `.where()` compose freely. The WHERE applies after the join:
 
 ```typescript
-// doctest: skip — join('caller'): relation-mode join requires a model for FK resolution.
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -173,7 +170,6 @@ WHERE "calls"."id" = $1
 Chain `.join()` calls to add more than one join. They accumulate left-to-right:
 
 ```typescript
-// doctest: skip — join('caller'): relation-mode join requires a model for FK resolution.
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -284,7 +280,6 @@ const results = await orm.select('embeddings')
 Use `as` to override the alias the joined table receives in the query:
 
 ```typescript
-// doctest: skip — join('caller'): relation-mode join requires a model for FK resolution.
 const __joinsDb = schema({
   calls: {
     id: 'integer',
