@@ -32,7 +32,8 @@ export function compileSubqueryInclude(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 	const state = createCompilerState();
 
 	// Handle empty parent IDs - return query that returns no results

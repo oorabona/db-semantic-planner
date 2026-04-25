@@ -612,7 +612,8 @@ export function compileSelect<T = unknown>(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery<T> {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const resolvedModelForCompiler = options?.model ?? deps.model;
 	const compilerOptions: CompilerOptions = {

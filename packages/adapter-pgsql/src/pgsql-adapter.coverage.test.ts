@@ -169,7 +169,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).toContain('custom_schema');
 		});
 
-		it('adapter schema takes precedence over compile options', () => {
+		it('compile options schemaName takes precedence over adapter constructor schemaName', () => {
 			const adapter = createPgsqlCompileOnlyAdapter({
 				schemaName: 'adapter_schema',
 			});
@@ -180,8 +180,25 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 			const result = adapter.compile(plan, { schemaName: 'override_schema' });
 
-			// adapter schema takes precedence via ?? operator
-			expect(result.sql).toContain('adapter_schema');
+			// options.schemaName takes precedence over adapter constructor schemaName
+			// (options?.schemaName ?? this.schemaName — left side wins when defined)
+			expect(result.sql).toContain('override_schema');
+		});
+
+		it('compile options schemaName empty string falls through to adapter constructor schemaName', () => {
+			const adapter = createPgsqlCompileOnlyAdapter({
+				schemaName: 'adapter_default',
+			});
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			const result = adapter.compile(plan, { schemaName: '' });
+
+			// Empty string should NOT win; constructor schemaName wins via `||`
+			expect(result.sql).toContain('adapter_default');
+			expect(result.sql).not.toContain('"".');
 		});
 	});
 

@@ -240,11 +240,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 	}
 
-	private get compileDeps(): AdapterCompilerDeps {
+	private buildCompileDeps(options?: CompileOptions): AdapterCompilerDeps {
 		return {
 			naming: this.naming,
-			schemaName: this.schemaName,
-			model: this.model,
+			// `||` (not `??`): empty string is treated as "no schema" and falls through to constructor default
+			schemaName: options?.schemaName || this.schemaName,
+			model: options?.model ?? this.model,
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
 		};
@@ -299,7 +300,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		return compileSelect<T>(plan, options, this.compileDeps);
+		return compileSelect<T>(plan, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -309,7 +310,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
-		return compileWithIncludesImpl<T>(plan, options, this.compileDeps);
+		return compileWithIncludesImpl<T>(plan, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -330,7 +331,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			info,
 			parentIds,
 			options,
-			this.compileDeps,
+			this.buildCompileDeps(options),
 		);
 	}
 
@@ -389,7 +390,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-		return compileInsertImpl(intent, options, this.compileDeps);
+		return compileInsertImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -400,14 +401,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileInsertFromImpl(intent, options, this.compileDeps);
+		return compileInsertFromImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
 	 * Compile an update intent to executable SQL.
 	 */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {
-		return compileUpdateImpl(intent, options, this.compileDeps);
+		return compileUpdateImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -423,21 +424,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileBatchUpdateImpl(intent, options, this.compileDeps);
+		return compileBatchUpdateImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
 	 * Compile a delete intent to executable SQL.
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery {
-		return compileDeleteImpl(intent, options, this.compileDeps);
+		return compileDeleteImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
-		return compileUpsertImpl(intent, options, this.compileDeps);
+		return compileUpsertImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -448,7 +449,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileUpsertFromImpl(intent, options, this.compileDeps);
+		return compileUpsertFromImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -460,7 +461,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileRecursiveImpl(report, model, options, this.compileDeps);
+		return compileRecursiveImpl(report, model, options, this.buildCompileDeps(options));
 	}
 
 	/**
@@ -474,7 +475,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: CteQueryIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileCteQueryImpl(intent, options, this.compileDeps);
+		return compileCteQueryImpl(intent, options, this.buildCompileDeps(options));
 	}
 
 	/**
