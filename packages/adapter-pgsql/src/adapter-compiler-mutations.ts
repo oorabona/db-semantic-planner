@@ -199,7 +199,8 @@ export function compileInsert(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
@@ -262,10 +263,11 @@ export function compileInsert(
  */
 export function compileInsertFrom(
 	intent: InsertFromIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
@@ -303,10 +305,11 @@ export function compileInsertFrom(
  */
 export function compileUpdate(
 	intent: UpdateIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
@@ -356,10 +359,11 @@ export function compileUpdate(
  */
 export function compileBatchUpdate(
 	intent: BatchUpdateIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
@@ -458,7 +462,8 @@ export function compileDelete(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const resolvedModel = options?.model ?? deps.model;
 	const ctx: CompilerContext = {
@@ -504,7 +509,8 @@ export function compileUpsert(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
@@ -632,7 +638,8 @@ export function compileUpsertFrom(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,

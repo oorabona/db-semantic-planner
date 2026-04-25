@@ -54,10 +54,11 @@ import {
 export function compileRecursive(
 	report: RecursivePlanReport,
 	_model: ModelIR,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 	const intent = report.intent;
 	const traversal = intent.traversal;
 
@@ -262,10 +263,11 @@ export function compileRecursive(
  */
 export function compileCteQuery(
 	intent: CteQueryIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const schemaName = deps.schemaName ?? options?.schemaName;
+	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
+	const schemaName = deps.schemaName;
 	const state = createCompilerState();
 
 	// All parameters accumulated from all CTEs (in declaration order)
