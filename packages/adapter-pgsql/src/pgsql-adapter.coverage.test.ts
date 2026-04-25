@@ -203,6 +203,43 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 	});
 
+	describe('compile - schemaName validation in options', () => {
+		it('rejects malicious schemaName via compile options (SQL injection)', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			expect(() =>
+				adapter.compile(plan, { schemaName: 'x"; DROP TABLE users--' }),
+			).toThrow(/[Ii]nvalid|identifier/);
+		});
+
+		it('rejects schemaName with semicolon via compile options', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			expect(() =>
+				adapter.compile(plan, { schemaName: 'bad;schema' }),
+			).toThrow(/[Ii]nvalid|identifier/);
+		});
+
+		it('accepts valid identifier in options.schemaName', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'users',
+				decisions: [{ type: 'select', column: '*' }],
+			} as any;
+
+			const result = adapter.compile(plan, { schemaName: 'tenant_42' });
+			expect(result.sql).toContain('tenant_42');
+		});
+	});
+
 	describe('compile - DISTINCT', () => {
 		it('compiles SELECT DISTINCT', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();

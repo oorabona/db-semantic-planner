@@ -241,6 +241,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private buildCompileDeps(options?: CompileOptions): AdapterCompilerDeps {
+		// Validate schemaName from CompileOptions before use — prevents SQL injection
+		// via direct callers of adapter.compile().  Empty string is treated as "no
+		// override" (falls through to this.schemaName via ||), so we skip it here;
+		// the empty-string → fallback behaviour is covered by existing tests.
+		if (options?.schemaName) {
+			validateIdentifier(options.schemaName, 'schema');
+		}
 		return {
 			naming: this.naming,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
