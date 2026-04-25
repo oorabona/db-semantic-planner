@@ -243,7 +243,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private buildCompileDeps(options?: CompileOptions): AdapterCompilerDeps {
 		return {
 			naming: this.naming,
-			// `||` (not `??`): empty string is treated as "no schema" and falls through to constructor default
+			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName: options?.schemaName || this.schemaName,
 			model: options?.model ?? this.model,
 			defaultPk: this.defaultPk,

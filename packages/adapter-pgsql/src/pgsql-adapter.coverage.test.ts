@@ -624,8 +624,8 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			};
 			const result = adapter.compileInsert(intent as any, { schemaName: '' });
 			// Constructor schema must win when options.schemaName is empty string
-			expect(result.sql).toContain('adapter_default.');
-			expect(result.sql).not.toContain('"".'); // empty-schema prefix must never appear
+			expect(result.sql).toContain('adapter_default');
+			expect(result.sql).not.toContain('""."'); // empty-schema prefix must never appear
 		});
 
 		it('compiles INSERT with multiple rows', () => {

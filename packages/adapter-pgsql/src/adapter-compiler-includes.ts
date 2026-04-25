@@ -29,7 +29,7 @@ import { createCompilerState } from './handlers/index.js';
 export function compileSubqueryInclude(
 	info: SubqueryIncludeInfo,
 	parentIds: readonly unknown[],
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
