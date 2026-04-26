@@ -15,6 +15,7 @@ import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { getColumnName } from './column-utils.js';
 import { and } from './filters.js';
+import type { DumpMetaInput } from './query-builder-types.js';
 import {
 	BRAND,
 	type ColumnRef,
@@ -128,7 +129,7 @@ export interface FromBuilder<
 	/**
 	 * Get SQL dump without executing.
 	 */
-	dump(): Dump;
+	dump(meta?: DumpMetaInput): Dump;
 }
 
 // ============================================================================
@@ -330,7 +331,7 @@ class FromBuilderImpl<
 		return executePlan(intent, this.model);
 	}
 
-	dump(): Dump {
+	dump(meta?: DumpMetaInput): Dump {
 		if (!this.adapter) {
 			throw new Error(
 				'Cannot dump query without adapter. Create ORM with an adapter to use dump().',
@@ -339,7 +340,13 @@ class FromBuilderImpl<
 
 		const planReport = this.plan();
 		const compiled = this.adapter.compile(planReport);
-		return this.adapter.createDump(planReport, compiled);
+		const dumpMeta: DumpMetaInput = {
+			...(meta?.queryName !== undefined && { queryName: meta.queryName }),
+			...(meta?.correlationId !== undefined && {
+				correlationId: meta.correlationId,
+			}),
+		};
+		return this.adapter.createDump(planReport, compiled, dumpMeta);
 	}
 
 	async all(): Promise<TResult[]> {

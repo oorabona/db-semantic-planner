@@ -205,28 +205,40 @@ When a string is a value (not a column), use `param()` or `literal()` explicitly
 ## Use in Query Builder
 
 ```typescript
-// doctest: skip — orm.select(...).column is not a function
-import { op, ref, param, cast, unary } from '@dbsp/core';
+import { schema, createOrm, op, ref, param, cast, literal } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  embeddings: {
+    id: { type: 'integer', autoIncrement: true, primaryKey: true },
+    vector: { type: 'text', dbType: 'vector(768)' },
+  },
+} as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 const qv = [0.1, 0.2, 0.3];
 
-// .column() — expression with alias in SELECT
+// .columns([expr]) — expression with alias in SELECT
 orm.select('embeddings')
-  .column(op('<=>', ref('vector'), cast(param(qv), 'vector')).as('distance'))
+  .columns([op('<=>', ref('vector'), cast(param(qv), 'vector')).as('distance')])
+  .dump();
 
 // .where() — expression comparison
 orm.select('embeddings')
   .where(op('<=>', ref('vector'), cast(param(qv), 'vector')).lte(0.5))
+  .dump();
 
 // .orderBy() — expression with direction
 orm.select('embeddings')
   .orderBy(op('<=>', ref('vector'), cast(param(qv), 'vector')), 'asc')
+  .dump();
 
 // Combining all three
 orm.select('embeddings')
-  .column(op('-', literal(1), op('<=>', ref('vector'), cast(param(qv), 'vector'))).as('score'))
+  .columns([op('-', literal(1), op('<=>', ref('vector'), cast(param(qv), 'vector'))).as('score')])
   .where(op('-', literal(1), op('<=>', ref('vector'), cast(param(qv), 'vector'))).gte(0.5))
   .orderBy(op('<=>', ref('vector'), cast(param(qv), 'vector')), 'asc')
+  .dump();
 ```
 
 ## Security

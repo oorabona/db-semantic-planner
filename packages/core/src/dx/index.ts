@@ -407,6 +407,7 @@ export type {
 	// Pagination (DX-028)
 	CursorPaginatedResult,
 	CursorPaginateOptions,
+	DumpMetaInput,
 	ExpressionSpec,
 	HierarchyOptions,
 	IncludeOptions,

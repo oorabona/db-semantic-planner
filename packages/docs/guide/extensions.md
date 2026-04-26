@@ -30,20 +30,29 @@ imported from `@dbsp/adapter-pgsql`.
 ### Full Example
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-85f3c6c7.ts:133:1
-import {
-  cosineDistance,
-  rawDistance,
-  l2Distance,
-  innerProduct,
-} from '@dbsp/adapter-pgsql';
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  embeddings: {
+    id: { type: 'integer', autoIncrement: true, primaryKey: true },
+    vector: { type: 'text', dbType: 'vector(768)' },
+    symbolId: 'integer',
+  },
+  symbols: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'text',
+    signature: 'text',
+  },
+} as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 const qv = [0.1, 0.2, 0.3]; // query vector (same dimension as stored vectors)
 
-const results = await orm
+const results = orm
   .select('embeddings')
   .include('symbols', { join: 'inner' })        // INNER JOIN — filter root rows
-  .column(cosineDistance('vector', qv).as('score'))  // similarity score in SELECT
+  .columns(['*', cosineDistance('vector', qv).as('score')])  // similarity score in SELECT
   .where(cosineDistance('vector', qv).gte(0.5))      // threshold filter
   .orderBy(rawDistance('vector', qv), 'asc')         // ANN index-friendly ORDER BY
   .limit(20)
@@ -108,14 +117,24 @@ const db = schema(
 ### Full Example
 
 ```typescript
-// doctest: skip — needs API + schema rewrite: .column() is obsolete (use .columns([...])) and symbols is not in the default schema
-import { score, bm25Search } from '@dbsp/adapter-pgsql';
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter, score, bm25Search } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  symbols: {
+    id: { type: 'integer', autoIncrement: true, primaryKey: true },
+    name: 'text',
+    signature: 'text',
+    doc_comment: 'text',
+  },
+} as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 const searchTerm = 'semantic query planner';
 
-const results = await orm
+const results = orm
   .select('symbols')
-  .column(score('id').as('score'))                           // BM25 relevance score
+  .columns([score('id').as('score')])                        // BM25 relevance score
   .where(bm25Search('symbols', searchTerm, {
     name: 3.0,          // 3x weight on name column
     signature: 1.5,     // 1.5x weight on signature
@@ -189,15 +208,27 @@ By default `include()` uses LEFT JOIN. Pass `{ join: 'inner' }` to filter out ro
 rows that have no matching related record:
 
 ```typescript
-// doctest: skip — .column() not available; use .columns([...]) instead
-// Assumes `queryVec` (number[]) and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter, cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
 
-const qv = queryVec;
+const db = schema({
+  embeddings: {
+    id: { type: 'integer', autoIncrement: true, primaryKey: true },
+    vector: { type: 'text', dbType: 'vector(768)' },
+    symbolId: 'integer',
+  },
+  symbols: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'text',
+  },
+} as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
+
+const qv = [0.1, 0.2, 0.3];
 
 orm.select('embeddings')
   .include('symbols', { join: 'inner' })   // INNER JOIN — drops embeddings with no symbol
-  .column(cosineDistance('vector', qv).as('score'))
+  .columns(['*', cosineDistance('vector', qv).as('score')])
   .orderBy(rawDistance('vector', qv), 'asc')
   .dump();
 ```

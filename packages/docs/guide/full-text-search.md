@@ -351,18 +351,21 @@ name (e.g., `'articles'`). If you use an explicit SQL alias in a subquery or CTE
 pass that alias instead. There is no default.
 
 ```typescript
-// doctest: skip — `fields` variable is illustrative only; requires a concrete FullTextSearchField[] array
-// Assumes `searchTerm` (string) and `query` (string) are in scope as preamble globals.
 import { fullTextSearch } from '@dbsp/core';
+import type { FullTextSearchField } from '@dbsp/core';
 
-const searchTerm = 'hello world';
-const query = searchTerm;
+const query = 'hello world';
+
+const fields: FullTextSearchField[] = [
+  { name: 'name', boost: 2.0 },
+  { name: 'doc_comment', boost: 1.0 },
+];
 
 // Correct for a root table named 'symbols':
-fullTextSearch({ query, tableAlias: 'symbols', fields })
+fullTextSearch({ query, tableAlias: 'symbols', fields });
 
 // Wrong — 't0' is not assigned by the ORM by default:
-fullTextSearch({ query, tableAlias: 't0', fields })
+// fullTextSearch({ query, tableAlias: 't0', fields });
 ```
 
 ### One parameter slot per field, not one shared slot
