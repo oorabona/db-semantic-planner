@@ -54,6 +54,9 @@ Chaining multiple `.join()` calls accumulates joins in order.
 Given a schema with `calls.caller_id → symbols`:
 
 ```typescript
+import { createOrm, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -71,7 +74,6 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
-import { createOrm } from '@dbsp/core';
 
 const results = await orm.select('calls')
   .join('caller')
@@ -96,6 +98,9 @@ The default join type is `INNER JOIN`.
 ### 2. Left join (keep root rows without a match)
 
 ```typescript
+import { createOrm, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -113,6 +118,7 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+
 const results = await orm.select('calls')
   .join('callee', { type: 'left' })
   .dump();
@@ -132,6 +138,9 @@ Use `type: 'left'` when root rows without a matching related row should still ap
 `.join()` and `.where()` compose freely. The WHERE applies after the join:
 
 ```typescript
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -149,7 +158,6 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
-import { eq } from '@dbsp/core';
 
 const results = await orm.select('calls')
   .join('caller')
@@ -170,6 +178,9 @@ WHERE "calls"."id" = $1
 Chain `.join()` calls to add more than one join. They accumulate left-to-right:
 
 ```typescript
+import { createOrm, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -187,6 +198,7 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+
 const results = await orm.select('calls')
   .join('caller')
   .join('callee', { type: 'left' })
@@ -206,6 +218,9 @@ When joining a table to itself, provide `as` (required to disambiguate) and an e
 `on` condition using `ref()` for column references:
 
 ```typescript
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -223,7 +238,6 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
-import { eq, ref } from '@dbsp/core';
 
 // Find all pairs where embeddings.id < e2.id
 const results = await orm.select('embeddings')
@@ -246,6 +260,9 @@ For simpler equality ON conditions you can use the `eq` filter helper directly. 
 dotted `'table.column'` notation to qualify column references in the ON condition:
 
 ```typescript
+import { createOrm, eq, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -263,7 +280,6 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
-import { eq } from '@dbsp/core';
 
 // Explicit equality ON condition
 const results = await orm.select('embeddings')
@@ -280,6 +296,9 @@ const results = await orm.select('embeddings')
 Use `as` to override the alias the joined table receives in the query:
 
 ```typescript
+import { createOrm, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -297,6 +316,7 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
+
 const results = await orm.select('calls')
   .join('caller', { as: 'c', type: 'inner' })
   .dump();
@@ -324,6 +344,9 @@ escape hatch or restructure the query (swap root table / use `union`) if needed.
 The `on` parameter accepts any `WhereIntent` — the same filter helpers used in `.where()`:
 
 ```typescript
+import { and, createOrm, eq, gt, ref, schema } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
 const __joinsDb = schema({
   calls: {
     id: 'integer',
@@ -341,7 +364,6 @@ const __joinsDb = schema({
   },
 } as const);
 const orm = createOrm({ schema: __joinsDb, adapter: createPgsqlCompileOnlyAdapter() });
-import { and, eq, gt } from '@dbsp/core';
 
 // ON condition with AND
 const results = await orm.select('calls')

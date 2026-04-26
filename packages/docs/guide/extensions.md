@@ -188,7 +188,12 @@ const db = schema(
 By default `include()` uses LEFT JOIN. Pass `{ join: 'inner' }` to filter out root
 rows that have no matching related record:
 
-```typescriptconst qv = queryVec;
+```typescript
+// doctest: skip — .column() not available; use .columns([...]) instead
+// Assumes `queryVec` (number[]) and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { cosineDistance, rawDistance } from '@dbsp/adapter-pgsql';
+
+const qv = queryVec;
 
 orm.select('embeddings')
   .include('symbols', { join: 'inner' })   // INNER JOIN — drops embeddings with no symbol

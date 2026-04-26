@@ -69,9 +69,11 @@ FROM name
 
 Suppose an `employees` table with a `manager_id` self-reference:
 
-```typescriptconst employeeId = 1;
-
+```typescript
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
 import { createOrm, eq } from '@dbsp/core';
+
+const employeeId = 1;
 
 type Employee = { id: number; name: string; manager_id: number | null };
 
@@ -100,7 +102,11 @@ FROM ancestor_chain
 
 When cycles are possible or the tree depth is unbounded, use `maxDepth` to prevent infinite recursion. The depth guard is injected automatically into the step query.
 
-```typescriptconst rootId = 1;
+```typescript
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { eq } from '@dbsp/core';
+
+const rootId = 1;
 
 const subtree = await orm
   .recursive('cat_tree', {
@@ -140,7 +146,11 @@ SELECT chain.* FROM chain WHERE chain.name = $2 AND "depth" < $3
 
 Use `unionAll: false` when the same node can be reached by multiple paths and you only want it once in the result:
 
-```typescriptconst startId = 1;
+```typescript
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { eq } from '@dbsp/core';
+
+const startId = 1;
 
 const reachable = await orm
   .recursive('reachable_nodes', {
@@ -171,6 +181,9 @@ Note: `UNION ALL` is the default and is faster — it avoids the deduplication p
 Inspect the compiled SQL and parameters without running against the database:
 
 ```typescript
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { eq } from '@dbsp/core';
+
 const builder = orm.recursive('parent_chain', {
   base: orm.select('employees').where(eq('id', 7)),
   step: orm.select('parent_chain'),

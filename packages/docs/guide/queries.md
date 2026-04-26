@@ -10,18 +10,20 @@ title: Queries
 
 ## Basic Select
 
-```typescriptconst someId = 1;
+```typescript
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { createOrm, eq } from '@dbsp/core';
 
-import { createOrm } from '@dbsp/core';
+const someId = 1;
 
 // Fetch all rows
 const users = await orm.select('users').dump();
 
 // First row or undefined
-const user = await orm.select('users').dump();
+const user1 = await orm.select('users').dump();
 
 // First row or throws NotFoundError
-const user = await orm.select('users')
+const user2 = await orm.select('users')
   .where(eq('id', someId))
   .dump();
 ```
