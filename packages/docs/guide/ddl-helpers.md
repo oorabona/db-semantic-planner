@@ -17,7 +17,7 @@ respect `orm.withSchema()` for multi-tenant isolation.
 ### Table Maintenance
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
+// doctest: skip — API signature reference; not executable code
 // TRUNCATE TABLE — remove all rows
 orm.tables.users.truncate(options?)
 // options: { cascade?: boolean; restartIdentity?: boolean }
@@ -27,42 +27,43 @@ orm.tables.users.vacuum(options?)
 // options: { full?: boolean; analyze?: boolean }
 
 // Storage size — total bytes (table + indexes + TOAST)
-const bytes: number = await orm.tables.users.storageSize()
+const bytes = await orm.tables.users.storageSize()
 ```
 
 ### Column Alteration
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
-orm.tables.users.alterColumn(column: string, options: AlterColumnOptions): Promise<void>
-
-// AlterColumnOptions:
-// {
+// doctest: skip — API signature reference; not executable code
+orm.tables.users.alterColumn(column, options)
+// column: string
+// options: AlterColumnOptions {
 //   type?: string         — new column type expression (e.g. 'text', 'integer')
 //   using?: string        — USING clause for type conversion (raw SQL expression)
 //   setNotNull?: boolean  — add or drop NOT NULL constraint
 //   setDefault?: unknown  — set DEFAULT value
 //   dropDefault?: boolean — drop DEFAULT
 // }
+// returns: Promise<void>
 ```
 
 ### Index Management
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
+// doctest: skip — API signature reference; not executable code
 // Create an index
-orm.tables.users.indexes.create(options: CreateIndexOptions): Promise<void>
+orm.tables.users.indexes.create(options)   // options: CreateIndexOptions → Promise<void>
 
 // Drop an index
-orm.tables.users.indexes.drop(name: string, options?: DropIndexOptions): Promise<void>
+orm.tables.users.indexes.drop(name, options)  // name: string, options?: DropIndexOptions → Promise<void>
 
 // List indexes on the table
-orm.tables.users.indexes.list(options?: { namePattern?: string }): Promise<IndexInfo[]>
+orm.tables.users.indexes.list(options)
+// options?: { namePattern?: string } → Promise<IndexInfo[]>
 // IndexInfo: { name: string; definition: string; unique: boolean; method: string }
 // namePattern supports SQL LIKE wildcards: % and _
 
 // Check if an index exists
-orm.tables.users.indexes.exists(name: string): Promise<boolean>
+orm.tables.users.indexes.exists(name)  // name: string → Promise<boolean>
 ```
 
 **`CreateIndexOptions`** fields:
@@ -85,9 +86,9 @@ orm.tables.users.indexes.exists(name: string): Promise<boolean>
 ### Global Shortcuts
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
+// doctest: skip — API signature reference; not executable code
 // Drop an index when you don't have a table reference
-orm.ddl.dropIndex(name: string, options?: DropIndexOptions): Promise<void>
+orm.ddl.dropIndex(name, options)  // name: string, options?: DropIndexOptions → Promise<void>
 ```
 
 ### Schema Scoping
@@ -105,9 +106,14 @@ tenantOrm.tables.users.truncate()
 ### 1. Truncate with cascade and identity reset
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'truncate')
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+const __db = schema({ orders: { id: 'integer', total: 'integer' } });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+
 // Clear orders and all dependent rows, reset auto-increment sequences
-orm.tables.orders.truncate({ cascade: true, restartIdentity: true })
+await __orm.tables.orders.truncate({ cascade: true, restartIdentity: true })
 ```
 
 Generated SQL:
@@ -118,9 +124,14 @@ TRUNCATE "orders" CASCADE RESTART IDENTITY
 ### 2. VACUUM FULL with ANALYZE
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'vacuum')
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+const __db = schema({ events: { id: 'integer', type: 'string', occurredAt: 'timestamp' } });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+
 // Reclaim storage and update planner statistics (locks table)
-orm.tables.events.vacuum({ full: true, analyze: true })
+await __orm.tables.events.vacuum({ full: true, analyze: true })
 ```
 
 Generated SQL:
@@ -131,8 +142,13 @@ VACUUM FULL ANALYZE "events"
 ### 3. HNSW vector index
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'indexes')
-orm.tables.embeddings.indexes.create({
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+const __db = schema({ embeddings: { id: 'integer', vector: { type: 'vector', nullable: true } } });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+
+await __orm.tables.embeddings.indexes.create({
   name: 'idx_embeddings_vector_hnsw',
   columns: ['vector'],
   method: 'hnsw',
@@ -152,7 +168,7 @@ CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
 ### 4. Expression index (partial)
 
 ```typescript
-// doctest: skip — Cannot execute DDL on compile-only adapter
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
 await orm.tables.users.indexes.create({
   name: 'idx_users_email_lower',
   columns: ['email'],
@@ -170,9 +186,14 @@ CREATE INDEX "idx_users_email_lower"
 ### 5. ALTER COLUMN type with USING
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'alterColumn')
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+const __db = schema({ products: { id: 'integer', name: 'string', price_cents: 'string' } });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+
 // Convert a text column to integer, with explicit cast
-orm.tables.products.alterColumn('price_cents', {
+await __orm.tables.products.alterColumn('price_cents', {
   type: 'integer',
   using: '"price_cents"::integer',
 })
@@ -187,7 +208,7 @@ ALTER TABLE "products"
 ### 6. Index existence check before operation
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
 const exists = await orm.tables.users.indexes.exists('idx_users_email')
 if (!exists) {
   await orm.tables.users.indexes.create({
@@ -201,14 +222,19 @@ if (!exists) {
 ### 7. List indexes and check storage
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'indexes')
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+const __db = schema({ embeddings: { id: 'integer', vector: { type: 'vector', nullable: true } } });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
+
 // List indexes matching a pattern
-const vecIndexes = await orm.tables.embeddings.indexes.list({
+const vecIndexes = await __orm.tables.embeddings.indexes.list({
   namePattern: 'idx_embeddings_%',
 })
 
 // Check table storage (bytes)
-const size = await orm.tables.embeddings.storageSize()
+const size = await __orm.tables.embeddings.storageSize()
 console.log(`embeddings table: ${(size / 1024 / 1024).toFixed(1)} MB`)
 ```
 

@@ -71,7 +71,7 @@ not statically typed because the schema is runtime-defined.
 Fetch the batch values as a standalone result set.
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 import { batchValues } from '@dbsp/core'
 
 const batch = batchValues(
@@ -181,7 +181,7 @@ Use `ordinality: true` to get a zero-indexed row number (`ord` column). Useful f
 preserving caller-defined ordering in a JOIN or SELECT.
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 import { batchValues } from '@dbsp/core'
 
 const requestedPaths = ['/src/c.ts', '/src/a.ts', '/src/b.ts']
@@ -218,7 +218,7 @@ Use an inner join against a batch as a scalable alternative to `WHERE id IN (...
 large value sets.
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const activeIds = [/* potentially thousands of ids */]
