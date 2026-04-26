@@ -140,8 +140,21 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 **Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
-// doctest: skip — `some`/`every`/`none` expect a RelationRef (e.g., users.posts) not a string; the example illustrates the helpers conceptually
-orm.select('users').where(some('posts', eq('published', true))).dump();
+import { Pool } from 'pg';
+import { schema, ref, createOrm, eq, some } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const __db = schema({
+  users: { id: 'integer', name: 'string' },
+  posts: { id: 'integer', userId: ref('users'), published: 'boolean' },
+} as const);
+const __pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(__pool) });
+
+// Find users with at least one published post
+__orm.select('users')
+  .where(some(__db.tables.users.posts, (p) => eq(p.published, true)))
+  .dump();
 // → WHERE EXISTS (SELECT 1 FROM "posts" WHERE ...)
 ```
 

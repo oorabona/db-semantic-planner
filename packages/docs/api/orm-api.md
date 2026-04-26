@@ -510,23 +510,31 @@ const changed = await orm.select('users')
 Filter by related records without loading them:
 
 ```typescript
-// doctest: skip — `some`/`every`/`none` expect a RelationRef (e.g., users.posts) not a string; the example illustrates the helpers conceptually
-import { exists, notExists, some, every, none } from '@dbsp/core';
+import { Pool } from 'pg';
+import { schema, ref, createOrm, eq, exists, notExists, some, every, none } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const __db = schema({
+  users: { id: 'integer', name: 'string' },
+  posts: { id: 'integer', userId: ref('users'), published: 'boolean' },
+} as const);
+const __pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(__pool) });
 
 // Users who have at least one post
-orm.select('users').where(exists('posts'))
+__orm.select('users').where(exists('posts'))
 
 // Users who have no posts
-orm.select('users').where(notExists('posts'))
+__orm.select('users').where(notExists('posts'))
 
-// Users who have at least one published post
-orm.select('users').where(some('posts', eq('published', true)))
+// Users who have at least one published post — some() requires a RelationRef
+__orm.select('users').where(some(__db.tables.users.posts, (p) => eq(p.published, true)))
 
 // Users where ALL posts are published
-orm.select('users').where(every('posts', eq('published', true)))
+__orm.select('users').where(every(__db.tables.users.posts, (p) => eq(p.published, true)))
 
-// Users where NO post is a draft
-orm.select('users').where(none('posts', eq('draft', true)))
+// Users where NO post is a draft (false = not draft)
+__orm.select('users').where(none(__db.tables.users.posts, (p) => eq(p.published, false)))
 ```
 
 ### Range Operators (PostgreSQL)
@@ -602,7 +610,7 @@ orm.select('posts')
 ### Window Functions
 
 ```typescript
-// doctest: skip — illustrative fragment (window function helpers not in doctest preamble; multi-line import also requires single-line form)
+// doctest: skip — illustrative fragment (window function helpers rowNumber/rank/denseRank/wSum/wAvg/wCount/wMin/wMax/lag/lead not in doctest preamble)
 import { rowNumber, rank, denseRank, wSum, wAvg, wCount, wMin, wMax, lag, lead } from '@dbsp/core';
 
 // Row numbering

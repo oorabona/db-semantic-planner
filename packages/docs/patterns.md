@@ -171,7 +171,7 @@ Keep the Chevrotain CST visitor class as a thin dispatcher — one method per gr
 `NqlCstVisitor` holds a single `VisitFn` (`this.v = (node) => this.visit(node)`) and passes it to every domain function so they can recurse without importing the visitor class.
 
 ```typescript
-// doctest: skip — illustrative source code fragment (top-level export not valid in doctest IIFE context)
+// doctest: skip — illustrative source code fragment (project-internal types BaseCstVisitor/VisitFn/CstContext not in doctest preamble)
 // visitor.ts — thin dispatcher
 export class NqlCstVisitor extends BaseCstVisitor {
   private readonly v: VisitFn;
@@ -188,7 +188,7 @@ export class NqlCstVisitor extends BaseCstVisitor {
 ```
 
 ```typescript
-// doctest: skip — illustrative source code fragment (top-level export not valid in doctest IIFE context)
+// doctest: skip — illustrative source code fragment (project-internal types CstContext/VisitFn/NqlQuery not in doctest preamble)
 // visit-query.ts — domain logic
 export function visitQuery(ctx: CstContext, visit: VisitFn): NqlQuery {
   // real implementation here
@@ -425,7 +425,7 @@ Break circular import cycles between NQL compiler modules (`compile-query` ↔ `
 | Consumers | `compile-query.ts`, `compile-select.ts`, `compile-expression.ts`, `compile-mutation.ts`, `compile-cte.ts` |
 
 ```typescript
-// doctest: skip — illustrative source code fragment (TypeScript interface with top-level export not valid in doctest IIFE context)
+// doctest: skip — illustrative source code fragment (project-internal types NqlQuery/CompilerContext/QueryIntent/SetOperationIntent not in doctest preamble)
 // types.ts
 export interface CompilerFns {
   compileQuery(query: NqlQuery, ctx: CompilerContext): QueryIntent | SetOperationIntent;
@@ -451,7 +451,7 @@ Every domain function receives `fns` as a parameter and calls `fns.compileQuery(
 A new compiler module that needs to recursively compile sub-expressions:
 
 ```typescript
-// doctest: skip — illustrative source code fragment (top-level export not valid in doctest IIFE context)
+// doctest: skip — illustrative source code fragment (project-internal types NqlWindowClause/CompilerContext/CompilerFns/WindowIntent not in doctest preamble)
 // compile-window.ts
 export function compileWindowClause(
   clause: NqlWindowClause,
