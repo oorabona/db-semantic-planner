@@ -763,7 +763,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const customChecker: FeatureChecker = {
 				capability: 'supportsSchemas',
 				feature: 'extension',
-				detectUsage(model): readonly FeatureUsage[] {
+				detectUsage(_model): readonly FeatureUsage[] {
 					called.push(true);
 					return [{ detail: 'always-triggers' }];
 				},

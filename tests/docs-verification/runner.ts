@@ -9,9 +9,10 @@
  * `await import()` it. The filesystem indirection is cheap (~10ms) and gives
  * us real parse errors with accurate line numbers from the TS compiler.
  */
+
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { randomBytes } from 'node:crypto';
 
 const TMP_ROOT = join(
 	process.cwd(),

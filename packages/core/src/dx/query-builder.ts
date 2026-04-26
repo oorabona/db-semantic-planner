@@ -209,7 +209,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	// The overloads above refine the type; the implementation signature is intentionally
 	// broad to satisfy all three overloads (TypeScript requires an assignable
 	// implementation signature).
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	// biome-ignore lint/suspicious/noExplicitAny: implementation signature accepts erased type — public overloads above guarantee the correct narrowed return type for callers
 	columns(columns: readonly ColumnSpec[]): QueryBuilder<any> {
 		const builder = this.clone();
 
@@ -242,7 +242,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		}
 
 		// Cast is safe: the public overloads above guarantee the correct narrowed type.
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		// biome-ignore lint/suspicious/noExplicitAny: implementation signature cast — public overloads above guarantee the correct narrowed type for callers
 		return builder as QueryBuilder<any>;
 	}
 

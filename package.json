@@ -1,53 +1,53 @@
 {
-  "name": "db-semantic-planner",
-  "version": "1.0.0",
-  "private": true,
-  "type": "module",
-  "packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
-  "engines": {
-    "node": ">=20"
-  },
-  "scripts": {
-    "build": "pnpm -r build",
-    "test": "pnpm run test:unit && pnpm run test:e2e",
-    "test:unit": "pnpm -r test",
-    "test:e2e": "vitest run --config tests/e2e/vitest.config.e2e.ts",
-    "lint": "pnpm biome check .",
-    "lint:fix": "pnpm biome check --write .",
-    "typecheck": "pnpm -r typecheck",
-    "dbsp": "pnpm tsx packages/cli/src/index.ts",
-    "docs:api": "typedoc",
-    "gui:dev": "pnpm -C packages/gui tauri dev",
-    "test:docs:generate": "pnpm tsx tests/docs-verification/generate-tests.ts",
-    "test:docs": "pnpm test:docs:generate && pnpm vitest run tests/docs-verification/__generated__/"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "cpu-features",
-      "ssh2",
-      "protobufjs"
-    ],
-    "overrides": {
-      "lodash@>=4.0.0 <4.17.23": ">=4.17.23",
-      "dompurify": ">=3.3.2"
-    }
-  },
-  "devDependencies": {
-    "@biomejs/biome": "catalog:",
-    "@dbsp/adapter-pgsql": "workspace:*",
-    "@dbsp/core": "workspace:*",
-    "@dbsp/nql": "workspace:*",
-    "@testcontainers/postgresql": "catalog:",
-    "@types/node": "catalog:",
-    "@types/pg": "catalog:",
-    "@vitest/coverage-v8": "^4.1.5",
-    "monaco-editor": "^0.55.1",
-    "pg": "catalog:",
-    "testcontainers": "^11.14.0",
-    "tsx": "catalog:",
-    "typedoc": "catalog:",
-    "typescript": "catalog:",
-    "vitest": "catalog:"
-  }
+	"name": "db-semantic-planner",
+	"version": "1.0.0",
+	"private": true,
+	"type": "module",
+	"packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",
+	"engines": {
+		"node": ">=20"
+	},
+	"scripts": {
+		"build": "pnpm -r build",
+		"test": "pnpm run test:unit && pnpm run test:e2e",
+		"test:unit": "pnpm -r test",
+		"test:e2e": "vitest run --config tests/e2e/vitest.config.e2e.ts",
+		"lint": "pnpm biome check .",
+		"lint:fix": "pnpm biome check --write .",
+		"typecheck": "pnpm -r typecheck",
+		"dbsp": "pnpm tsx packages/cli/src/index.ts",
+		"docs:api": "typedoc",
+		"gui:dev": "pnpm -C packages/gui tauri dev",
+		"test:docs:generate": "pnpm tsx tests/docs-verification/generate-tests.ts",
+		"test:docs": "pnpm test:docs:generate && pnpm vitest run tests/docs-verification/__generated__/"
+	},
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"esbuild",
+			"cpu-features",
+			"ssh2",
+			"protobufjs"
+		],
+		"overrides": {
+			"lodash@>=4.0.0 <4.17.23": ">=4.17.23",
+			"dompurify": ">=3.3.2"
+		}
+	},
+	"devDependencies": {
+		"@biomejs/biome": "catalog:",
+		"@dbsp/adapter-pgsql": "workspace:*",
+		"@dbsp/core": "workspace:*",
+		"@dbsp/nql": "workspace:*",
+		"@testcontainers/postgresql": "catalog:",
+		"@types/node": "catalog:",
+		"@types/pg": "catalog:",
+		"@vitest/coverage-v8": "^4.1.5",
+		"monaco-editor": "^0.55.1",
+		"pg": "catalog:",
+		"testcontainers": "^11.14.0",
+		"tsx": "catalog:",
+		"typedoc": "catalog:",
+		"typescript": "catalog:",
+		"vitest": "catalog:"
+	}
 }

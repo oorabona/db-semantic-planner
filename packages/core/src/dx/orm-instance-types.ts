@@ -290,7 +290,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 		// TODO(FIND-030): Thread a TSchema generic through OrmInstance to replace `any`
 		// with `RowToRelationRefs<K, DB, TSchema>` once the schema-tables-types
 		// infrastructure is wired through createOrm().
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		// biome-ignore lint/suspicious/noExplicitAny: TRelations generic is intentionally deferred — see TODO(FIND-030); full type requires schema-level information not available in OrmInstance<DB>
 		[K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any>;
 	};
 
@@ -324,6 +324,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 		from: K,
 	): QueryBuilder<TResult>;
 
+	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	from<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): QueryBuilder<InferTableRow<TTable>>;
@@ -362,6 +363,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	into<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): InsertBuilder<InferTableRow<TTable>>;
@@ -381,6 +383,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	modify<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): UpdateBuilder<InferTableRow<TTable>>;
@@ -400,6 +403,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	removeFrom<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): DeleteBuilder<InferTableRow<TTable>>;
@@ -423,6 +427,7 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
+	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	upsertInto<TTable extends TableRef<any, any, any>>(
 		table: TTable,
 	): UpsertBuilder<InferTableRow<TTable>>;

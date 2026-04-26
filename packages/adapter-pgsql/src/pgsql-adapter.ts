@@ -317,7 +317,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
-		return compileWithIncludesImpl<T>(plan, options, this.buildCompileDeps(options));
+		return compileWithIncludesImpl<T>(
+			plan,
+			options,
+			this.buildCompileDeps(options),
+		);
 	}
 
 	/**
@@ -408,7 +412,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileInsertFromImpl(intent, options, this.buildCompileDeps(options));
+		return compileInsertFromImpl(
+			intent,
+			options,
+			this.buildCompileDeps(options),
+		);
 	}
 
 	/**
@@ -431,7 +439,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileBatchUpdateImpl(intent, options, this.buildCompileDeps(options));
+		return compileBatchUpdateImpl(
+			intent,
+			options,
+			this.buildCompileDeps(options),
+		);
 	}
 
 	/**
@@ -456,7 +468,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileUpsertFromImpl(intent, options, this.buildCompileDeps(options));
+		return compileUpsertFromImpl(
+			intent,
+			options,
+			this.buildCompileDeps(options),
+		);
 	}
 
 	/**
@@ -468,7 +484,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileRecursiveImpl(report, model, options, this.buildCompileDeps(options));
+		return compileRecursiveImpl(
+			report,
+			model,
+			options,
+			this.buildCompileDeps(options),
+		);
 	}
 
 	/**

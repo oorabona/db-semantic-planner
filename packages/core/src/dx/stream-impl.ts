@@ -153,6 +153,7 @@ export function stream<TResult>(
 				// compiledQuery is guaranteed non-null: hooksFired is true at this
 				// point, meaning the block above has completed and set compiledQuery.
 				adapterIterator = adapter.stream<TResult>(
+					// biome-ignore lint/style/noNonNullAssertion: invariant — hooksFired=true means the block above set compiledQuery before reaching this branch
 					compiledQuery!,
 					adapterOptions,
 				);

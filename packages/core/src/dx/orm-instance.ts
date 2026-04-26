@@ -463,6 +463,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		strictMode,
 		nql,
 		tables: tablesDDLProxy as OrmInstance<DB>['tables'],
+		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
 		from<TTable extends TableRef<any, any, any>>(
 			table: TTable | BatchValuesRef,
 		):
@@ -697,6 +698,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Extract table name from TableRef metadata and delegate to string methods
 		// =====================================================================
 
+		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
 		into<TTable extends TableRef<any, any, any>>(
 			tableRef: TTable,
 		): InsertBuilder<InferTableRow<TTable>> {
@@ -710,6 +712,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			}) as InsertBuilder<InferTableRow<TTable>>;
 		},
 
+		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
 		modify<TTable extends TableRef<any, any, any>>(
 			tableRef: TTable,
 		): UpdateBuilder<InferTableRow<TTable>> {
@@ -723,6 +726,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			}) as UpdateBuilder<InferTableRow<TTable>>;
 		},
 
+		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
 		removeFrom<TTable extends TableRef<any, any, any>>(
 			tableRef: TTable,
 		): DeleteBuilder<InferTableRow<TTable>> {
@@ -736,6 +740,7 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 			}) as DeleteBuilder<InferTableRow<TTable>>;
 		},
 
+		// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this implementation signature
 		upsertInto<TTable extends TableRef<any, any, any>>(
 			tableRef: TTable,
 		): UpsertBuilder<InferTableRow<TTable>> {

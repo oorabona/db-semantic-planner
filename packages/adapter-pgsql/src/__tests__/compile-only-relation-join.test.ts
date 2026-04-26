@@ -101,7 +101,11 @@ describe('compile-only adapter — relation-mode join without constructor model'
 		const adapter = createPgsqlCompileOnlyAdapter(); // no model, no schema
 		const orm = createOrm({ schema: testSchema, adapter });
 
-		const dump = orm.withSchema('tenant_x').select('calls').join('caller').dump();
+		const dump = orm
+			.withSchema('tenant_x')
+			.select('calls')
+			.join('caller')
+			.dump();
 		const sql = ws(dump.sql);
 
 		expect(sql).toContain('tenant_x');
