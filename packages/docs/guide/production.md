@@ -300,7 +300,7 @@ logger.info('Query executed', {
 ### Structured Logging
 
 ```typescript
-// doctest: skip — illustrative data/type literal fragment (not executable code)
+// doctest: skip — requires a request context (req) and a real PostgreSQL connection (.all())
 // Configure correlation IDs
 const users = await orm.select('users')
   .option('correlationId', req.headers['x-request-id'])

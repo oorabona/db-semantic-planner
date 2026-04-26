@@ -154,7 +154,7 @@ Implicit conversions apply to all items (same rules as `fn()` and `op()`).
 ### COUNT(*)
 
 ```typescript
-// doctest: skip — API signature reference (TypeScript function signature, not executable code)
+// doctest: skip — pseudo-code with placeholders (replace `(...)` with concrete arguments to make runnable)
 import { fn, star, cast, eq } from '@dbsp/core';
 
 fn('count', star())                     // → count(*)
