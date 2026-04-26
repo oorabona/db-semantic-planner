@@ -9,7 +9,15 @@
  * @since R01
  */
 
-import type { Dump } from '../adapter.js';
+import type { Dump, DumpMeta } from '../adapter.js';
+
+/**
+ * Caller-supplied subset of DumpMeta accepted by `.dump(meta?)`.
+ * Contains only the fields the caller can set — `schema` and `compiledAt`
+ * are populated by the adapter.
+ */
+export type DumpMetaInput = Pick<DumpMeta, 'queryName' | 'correlationId'>;
+
 import type {
 	LockStrength,
 	LockWaitPolicy,
@@ -757,7 +765,7 @@ export interface QueryBuilder<TResult = unknown> {
 	 * console.log(dump.meta);      // { tenant: 'acme', compiledAt: Date }
 	 * ```
 	 */
-	dump(): Dump;
+	dump(meta?: DumpMetaInput): Dump;
 
 	/**
 	 * Check whether any matching rows exist.

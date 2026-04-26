@@ -16,6 +16,7 @@ import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
+import type { DumpMetaInput } from './query-builder-types.js';
 
 // ============================================================================
 // Types
@@ -36,7 +37,7 @@ export interface NqlBuilder<T> {
 	/** Get the execution plan */
 	plan(): PlanReport;
 	/** Get full dump (plan + SQL + params) */
-	dump(): Dump;
+	dump(meta?: DumpMetaInput): Dump;
 }
 
 /**
@@ -155,7 +156,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		return executePlan(intent, this.model);
 	}
 
-	dump(): Dump {
+	dump(meta?: DumpMetaInput): Dump {
 		const planReport = this.plan();
 
 		if (!this.adapter) {
@@ -163,15 +164,42 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				plan: planReport,
 				sql: '[No adapter - SQL not available]',
 				params: [],
+				...(meta !== undefined && { meta }),
 			};
 		}
 
 		const compiled = this.adapter.compile<T>(planReport);
-		return {
-			plan: planReport,
-			sql: compiled.sql,
-			params: compiled.parameters as readonly unknown[],
-		};
+
+		try {
+			return this.adapter.createDump(planReport, compiled, meta);
+		} catch (err) {
+			if (
+				err instanceof Error &&
+				err.message.toLowerCase().includes('not implemented')
+			) {
+				// Fallback for mock adapters that don't implement createDump
+				const base: Dump = {
+					plan: planReport,
+					sql: compiled.sql,
+					params: compiled.parameters as readonly unknown[],
+				};
+				if (meta !== undefined) {
+					return {
+						...base,
+						meta: {
+							...(meta.queryName !== undefined && {
+								queryName: meta.queryName,
+							}),
+							...(meta.correlationId !== undefined && {
+								correlationId: meta.correlationId,
+							}),
+						},
+					};
+				}
+				return base;
+			}
+			throw err;
+		}
 	}
 
 	async all(): Promise<T[]> {

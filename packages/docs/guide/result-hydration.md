@@ -233,14 +233,14 @@ Hydrator key: "relation.column"  →  result.relation.column
 
 The adapter handler (`join.ts`, `lateral.ts`) writes:
 ```typescript
-// doctest: skip — columnAliases is not defined
+// doctest: skip — illustrative excerpt of internal handler implementation; references local variables (columnAliases, col, relation, targetAlias, ctx) only available inside the handler scope
 const outputAlias = columnAliases?.[col] ?? `${relation}.${col}`;
 targets.push(columnTarget(col, outputAlias, targetAlias, ctx.naming));
 ```
 
 `hydrateJoinIncludes()` recovers the nested object:
 ```typescript
-// doctest: skip — record is not defined
+// doctest: skip — illustrative excerpt of internal handler implementation; references local variables (record, relationName, prefix, nestedObj) only available inside the hydrator scope
 for (const key of Object.keys(record)) {
   if (key.startsWith(`${relationName}.`)) {
     nestedObj[key.slice(prefix.length)] = record[key];

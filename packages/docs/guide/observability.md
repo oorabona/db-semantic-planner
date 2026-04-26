@@ -128,19 +128,21 @@ This is the recommended pattern for integration with migration tools, schema dif
 Attach a correlation ID to a query to propagate request context through your logs:
 
 ```typescript
-// doctest: skip — .as() chaining before .dump() not available in this form; use .dump() directly
-// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
-import { eq } from '@dbsp/core';
+import { schema, createOrm, eq } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ users: { id: 'integer', name: 'string' } } as const);
+const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
 const userId = 1;
 const requestId = 'req-123';
 
 const dump = orm.select('users')
   .where(eq('id', userId))
-  .as('fetch-user', { correlationId: requestId })
-  .dump();
+  .dump({ queryName: 'fetch-user', correlationId: requestId });
 
-console.log(dump.meta?.correlationId); // the request ID you passed
+console.log(dump.meta?.correlationId); // 'req-123'
+console.log(dump.meta?.queryName);     // 'fetch-user'
 ```
 
 The correlation ID appears in `dump.meta.correlationId` and is not sent to PostgreSQL — it is purely a client-side metadata field for log correlation.

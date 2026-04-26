@@ -59,6 +59,7 @@ import {
 } from './object-filter.js';
 import * as paginationImpl from './pagination-impl.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
+import type { DumpMetaInput } from './query-builder-types.js';
 import { ResultHydrator } from './result-hydrator.js';
 import type { DefaultFilters } from './schema.js';
 import {
@@ -886,7 +887,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		return and(...conditions);
 	}
 
-	dump(): Dump {
+	dump(meta?: DumpMetaInput): Dump {
 		const adapter = this.getConfiguredAdapter();
 		const planReport = this.plan();
 
@@ -901,9 +902,17 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		const compiled = adapter.compile(planReport, compileOptions);
 
+		// Build DumpMeta: adapter-level schema + caller-supplied queryName/correlationId
+		const dumpMeta: DumpMetaInput = {
+			...(meta?.queryName !== undefined && { queryName: meta.queryName }),
+			...(meta?.correlationId !== undefined && {
+				correlationId: meta.correlationId,
+			}),
+		};
+
 		// Use adapter.createDump() to properly capture adapter's schema
 		// Then merge with context schema if needed
-		const dump = adapter.createDump(planReport, compiled);
+		const dump = adapter.createDump(planReport, compiled, dumpMeta);
 
 		// If adapter didn't set schema but context has one, add it
 		if (dump.meta?.schema === undefined && this.schemaName !== undefined) {
