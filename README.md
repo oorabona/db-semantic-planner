@@ -213,6 +213,16 @@ import { cosineDistance } from '@dbsp/adapter-pgsql';
 orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).limit(10).all();
 ```
 
+**Range Operators** — First-class PostgreSQL range type support: `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` covering `daterange`, `int4range`, `tsrange`, and friends. No raw SQL needed.
+
+**Observability Metadata** — Pass `{ queryName, correlationId }` to `.dump()` to propagate request context to logs and traces without coupling your query layer to your observability stack.
+
+```typescript
+const dump = orm.select('events').where(eq('status', 'open'))
+  .dump({ queryName: 'list-open-events', correlationId: req.id });
+// dump.meta?.correlationId === req.id
+```
+
 ---
 
 ## Architecture

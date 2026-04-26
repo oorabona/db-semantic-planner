@@ -152,6 +152,12 @@ const adapter = createPgsqlCompileOnlyAdapter();
 const orm = createOrm({ schema: db, adapter });
 const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 // sql, params — no Pool needed
+
+// Attach observability metadata (correlationId for distributed tracing, queryName for logging):
+const requestId = 'req-abc-123'; // typically from req.headers['x-request-id']
+const dump = orm.select('users').where(eq('active', true))
+  .dump({ queryName: 'fetch-active-users', correlationId: requestId });
+console.log(dump.meta?.correlationId);
 ```
 
 ## Schema Scoping API
@@ -166,6 +172,8 @@ const users = await scopedOrm.select('users').all();
 ```
 
 **Security:** Schema name MUST be validated against allow-list pattern (identifier validation).
+
+- **Schema name validation:** both `orm.withSchema(name)` AND `adapter.compile(plan, { schemaName })` validate the schema name via `validateIdentifier`. Direct callers of the adapter's compile path are protected against SQL injection in addition to the ORM-level entry point.
 
 ## DDL Features
 
@@ -209,6 +217,7 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
+| Range operators (PostgreSQL) | `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | `rangeOverlaps('period', ['2024-01-01', '2024-01-31'])` — covers `daterange`, `int4range`, `tsrange`, etc. |
 | Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md`, `docs/guides/how-to-use-schema-versioning.md`, `docs/guides/how-to-understand-result-hydration.md` | |
 
 ## Observability

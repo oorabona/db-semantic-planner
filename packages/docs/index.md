@@ -235,6 +235,7 @@ const users = await tenantOrm
       <span class="pg-badge">Window Fn</span>
       <span class="pg-badge">DISTINCT ON</span>
       <span class="pg-badge">Multi-tenant</span>
+      <span class="pg-badge">Range Types</span>
     </div>
   </div>
   <div class="db-card db-planned">
@@ -267,6 +268,8 @@ const users = await tenantOrm
   <div class="stat"><span class="stat-value">v1.0</span><span class="stat-label">stable</span></div>
   <div class="stat"><span class="stat-value">MIT</span><span class="stat-label">license</span></div>
 </div>
+
+<p class="whats-new"><strong>v1.0.1 highlights:</strong> Range operators (<code>rangeOverlaps</code>, <code>rangeContains</code>, <code>rangeContainedBy</code>), <code>dump(meta?)</code> for distributed tracing, fixed relation-mode <code>.join()</code> on compile-only adapters.</p>
 
 <div class="cta-buttons">
   <a href="/guide/getting-started" class="cta-primary">Get Started</a>
