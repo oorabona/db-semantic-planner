@@ -195,7 +195,7 @@ dbsp verify --schema ./dbsp.schema.ts --db postgres://localhost/mydb
 **pgvector + ParadeDB** — Built-in helpers for vector similarity search and full-text BM25. No raw SQL.
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection (docs table uses custom schema not in default preamble)
+// doctest: skip — exec-only operation (.all() requires a real PostgreSQL connection); the `docs` table is also not in the default doctest preamble (preamble uses `documents`)
 import { cosineDistance } from '@dbsp/adapter-pgsql';
 orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).limit(10).all();
 ```

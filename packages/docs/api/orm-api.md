@@ -1210,7 +1210,6 @@ const results = await orm.raw<{ count: number }>(
 Available from `@dbsp/adapter-pgsql`:
 
 ```typescript
-// doctest: skip — illustrative fragment (generateSeries/nextval return AST nodes for use inside query builders, not standalone expressions)
 import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
 
 // Generate a series of values
