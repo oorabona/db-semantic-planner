@@ -23,7 +23,7 @@ Use `include()` instead when you want nested hydration (e.g. `user.posts[]`).
 ## API
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-b9a4e00b.ts:130:1
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 // Overload 1 — Relation mode: FK auto-resolved from schema
 .join(relationName: string, opts?: {
   type?: 'inner' | 'left';  // default: 'inner'

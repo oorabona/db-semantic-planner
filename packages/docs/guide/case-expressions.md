@@ -28,7 +28,7 @@ Both are accessible via `import { caseWhen } from '@dbsp/core'` — the public b
 ## API
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-2
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 import { caseWhen, ref } from '@dbsp/core'
 
 caseWhen<T>()

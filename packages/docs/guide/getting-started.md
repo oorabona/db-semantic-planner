@@ -318,19 +318,19 @@ Schema names are validated as identifiers before use.
 ## Step 9: Pagination
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unterminated multiline comment ╭─[ tests/docs-verification/__generated__/.tmp/block-5415
+// doctest: skip — paginate() and cursorPaginate() require a real PostgreSQL connection
 import { eq } from '@dbsp/core';
 
 // Offset-based pagination
 const page = await orm.select('posts')
   .where(eq('published', true))
   .orderBy('createdAt', 'desc')
-  .dump(); /* .paginate({ page: 1, perPage: 20 });
+  .paginate({ page: 1, perPage: 20 });
 
-// page.data              — Post[]
-// page.pagination.total       — total row count
-// page.pagination.totalPages  — number of pages
-// page.pagination.hasNextPage — boolean
+// page.data                    — Post[]
+// page.pagination.total        — total row count
+// page.pagination.totalPages   — number of pages
+// page.pagination.hasNextPage  — boolean
 
 // Cursor-based pagination (stable under concurrent inserts)
 const first = await orm.select('posts')
