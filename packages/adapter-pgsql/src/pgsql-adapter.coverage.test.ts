@@ -223,9 +223,9 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				decisions: [{ type: 'select', column: '*' }],
 			} as any;
 
-			expect(() =>
-				adapter.compile(plan, { schemaName: 'bad;schema' }),
-			).toThrow(/[Ii]nvalid|identifier/);
+			expect(() => adapter.compile(plan, { schemaName: 'bad;schema' })).toThrow(
+				/[Ii]nvalid|identifier/,
+			);
 		});
 
 		it('accepts valid identifier in options.schemaName', () => {

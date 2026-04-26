@@ -84,6 +84,7 @@ export function sniffCsvFormat(
 	const separator = detectSeparator(lines, quote);
 
 	// 3. Parse first row as potential header
+	// biome-ignore lint/style/noNonNullAssertion: guarded by `if (lines.length === 0) return` at function entry
 	const firstRowFields = parseCsvLine(lines[0]!, separator, quote);
 
 	// 4. Detect header
@@ -126,6 +127,7 @@ function detectSeparator(lines: readonly string[], quote: string): string {
 	for (const sep of CANDIDATE_SEPARATORS) {
 		const counts = lines.map((line) => parseCsvLine(line, sep, quote).length);
 		// Score: high if consistent count AND count > 1
+		// biome-ignore lint/style/noNonNullAssertion: counts is derived from lines.map() which is non-empty (CANDIDATE_SEPARATORS loop body only reached when lines.length > 0)
 		const firstCount = counts[0]!;
 		if (firstCount <= 1) continue;
 
@@ -196,6 +198,7 @@ export function parseCsvLine(
 	let i = 0;
 
 	while (i < line.length) {
+		// biome-ignore lint/style/noNonNullAssertion: loop invariant — i < line.length guaranteed by while condition
 		const char = line[i]!;
 
 		if (inQuotes) {
@@ -300,6 +303,7 @@ function tokeniseCsvContent(content: string, quoteChar: string): LogicalRow[] {
 	let firstLineOfRowEnd = -1;
 
 	for (let i = 0; i < content.length; i++) {
+		// biome-ignore lint/style/noNonNullAssertion: loop invariant — i < content.length guaranteed by for-loop condition
 		const ch = content[i]!;
 
 		if (ch === q) {
@@ -416,6 +420,7 @@ function parseLogicalRow(
 	let i = 0;
 
 	while (i < text.length) {
+		// biome-ignore lint/style/noNonNullAssertion: loop invariant — i < text.length guaranteed by while condition
 		const ch = text[i]!;
 
 		if (inQuotes) {
@@ -566,6 +571,7 @@ export async function parseCsvFile(
 
 		const row: Record<string, string> = {};
 		for (let i = 0; i < format.columns.length; i++) {
+			// biome-ignore lint/style/noNonNullAssertion: loop invariant — i < format.columns.length guaranteed by for-loop condition
 			row[format.columns[i]!] = fields[i] ?? '';
 		}
 		rows.push(row);

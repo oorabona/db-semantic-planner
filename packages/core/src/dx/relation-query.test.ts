@@ -48,7 +48,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const { users } = s.tables;
 
 			// Access column through relation (runtime works, types need cast)
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const col = (users as any).posts.published;
 
 			// Should have RELATION_PATH symbol
@@ -74,7 +73,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 
 			// Access column through chained relations: users -> posts -> comments
 			// Note: This depends on inverse relation being set up
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const col = (users as any).posts.comments;
 
 			// RelationRef should have path
@@ -93,7 +91,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const s = createTestSchema();
 			const { users } = s.tables;
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const filter = every((users as any).posts as any, (p: any) =>
 				eq(p.published, true),
 			);
@@ -115,7 +112,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const s = createTestSchema();
 			const { users } = s.tables;
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const filter = none((users as any).posts as any, (p: any) =>
 				eq(p.flagged, true),
 			);
@@ -137,7 +133,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			const s = createTestSchema();
 			const { users } = s.tables;
 
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			const filter = some((users as any).posts as any, (p: any) =>
 				eq(p.published, true),
 			);
@@ -166,7 +161,6 @@ describe('DX-040 Block 7: Cross-Table Queries', () => {
 			// This is a compile-time test - if it compiles, it passes
 			// The callback receives the posts relation with its columns
 			// Note: inverse relations are runtime-only, types need cast
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
 			every((users as any).posts, (posts: any) => {
 				// These should all be valid column accesses
 				void posts.title;

@@ -12,9 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // through handleExecuteSQL: SELECT/WITH → paginated, others → direct.
 
 describe('query-executor', () => {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let handleExecuteSQL: any;
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	let handleFetchMore: any;
 
 	beforeEach(async () => {
