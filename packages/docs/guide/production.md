@@ -75,7 +75,7 @@ For cloud databases (RDS, Cloud SQL), check provider limits.
 ### Connection Monitoring
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'on')
+// doctest: skip — Pool event handlers require a real pg.Pool instance, not the doctest stub
 // Monitor pool health
 pool.on('connect', () => {
   console.log('Pool: connection acquired');
@@ -104,7 +104,7 @@ setInterval(() => {
 Set timeouts at multiple levels for defense in depth:
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // 1. Pool-level (PostgreSQL statement_timeout)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -341,7 +341,7 @@ const users = await orm.select('users')
 For large result sets, use streaming to avoid memory exhaustion:
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Stream 1M rows without loading all in memory
 const stream = orm.select('users').stream();
 
@@ -362,7 +362,7 @@ for await (const row of stream) {
 The PostgreSQL adapter supports cursor-based streaming via `pg-cursor`. For result sets too large to fit in memory, prefer streaming over loading all rows at once. If streaming is not available for your use case, fall back to offset pagination:
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Offset pagination fallback
 const pageSize = 1000;
 let offset = 0;
@@ -386,7 +386,7 @@ while (true) {
 Use EXPLAIN to analyze query performance:
 
 ```typescript
-// doctest: skip — Cannot read properties of undefined (reading 'query')
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Compile the query first, then EXPLAIN via raw SQL
 const dump = await orm.select('users').where(eq('active', true)).dump();
 
