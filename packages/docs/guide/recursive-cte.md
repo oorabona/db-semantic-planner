@@ -20,7 +20,7 @@ Use `orm.recursive()` instead of application-side loops or multiple round-trips.
 ## API
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-5
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 orm.recursive<TResult>(name: string, options: RecursiveOptions): RawCteQueryBuilder<TResult>
 ```
 

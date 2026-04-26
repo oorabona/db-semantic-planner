@@ -17,7 +17,7 @@ respect `orm.withSchema()` for multi-tenant isolation.
 ### Table Maintenance
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-73f8bc21.ts:130:35
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 // TRUNCATE TABLE — remove all rows
 orm.tables.users.truncate(options?)
 // options: { cascade?: boolean; restartIdentity?: boolean }
@@ -33,7 +33,7 @@ const bytes: number = await orm.tables.users.storageSize()
 ### Column Alteration
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-e
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 orm.tables.users.alterColumn(column: string, options: AlterColumnOptions): Promise<void>
 
 // AlterColumnOptions:
@@ -49,7 +49,7 @@ orm.tables.users.alterColumn(column: string, options: AlterColumnOptions): Promi
 ### Index Management
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-b
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 // Create an index
 orm.tables.users.indexes.create(options: CreateIndexOptions): Promise<void>
 
@@ -85,7 +85,7 @@ orm.tables.users.indexes.exists(name: string): Promise<boolean>
 ### Global Shortcuts
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-9
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 // Drop an index when you don't have a table reference
 orm.ddl.dropIndex(name: string, options?: DropIndexOptions): Promise<void>
 ```

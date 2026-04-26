@@ -47,7 +47,7 @@ to reassemble the rows.
 
 The planner encodes this as:
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — illustrative data/type literal fragment (not executable code)
 { type: 'include-strategy', choice: 'json_agg' | 'join' | 'lateral' | 'cte' | 'subquery' }
 ```
 
@@ -79,7 +79,7 @@ string, and renames the key to the relation name. For to-one relations it
 unwraps the single-element array to a plain object.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — illustrative data/type literal fragment (not executable code)
 // Before hydration (raw DB row):
 { id: 1, name: 'Alice', posts_json: '[{"id":10,"title":"Hello"}]' }
 
@@ -122,7 +122,7 @@ prefixed column is `null` (LEFT JOIN with no match), the relation is set to
 `null`.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — illustrative data/type literal fragment (not executable code)
 // Before hydration:
 { id: 1, name: 'Alice', 'org.id': 42, 'org.name': 'Acme' }
 
@@ -205,7 +205,7 @@ emits `SubqueryIncludeInfo` metadata instead of modifying the main SQL.
    - Recursively hydrate nested includes if `nestedIncludes` is present.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — illustrative data/type literal fragment (not executable code)
 // Phase 1: SELECT * FROM "users" WHERE ...
 // Phase 2: SELECT * FROM "posts" WHERE "user_id" IN ($1, $2, $3)
 

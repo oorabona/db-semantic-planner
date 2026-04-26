@@ -24,7 +24,7 @@ which is a single parameterized rangefunction — zero extra round-trips, no tem
 ### Standalone factory (import from `@dbsp/core`)
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-f
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 import { batchValues } from '@dbsp/core'
 
 batchValues(
@@ -38,7 +38,7 @@ batchValues(
 ### ORM method (identical, attached to orm instance)
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-b9644a36.ts:129:58
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 const batch = orm.batchValues(data, columns, types, opts?)
 ```
 

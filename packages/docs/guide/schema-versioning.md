@@ -158,14 +158,8 @@ dbsp migrate rollback 1 -d postgresql://... --force
 The versioning infrastructure is also available as a library for custom tooling:
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-c01acc36.ts:132:1
-import { compareSchemata } from '@dbsp/adapter-pgsql';
-import { generateMigrationSQL, generateDownSQL } from '@dbsp/adapter-pgsql';
-import {
-  getAppliedMigrations,
-  getNextSchemaVersion,
-  recordMigration,
-} from '@dbsp/adapter-pgsql';
+// doctest: skip — requires real PostgreSQL connection (getAppliedMigrations, getNextSchemaVersion, recordMigration use pool)
+import { compareSchemata, generateDownSQL, generateMigrationSQL, getAppliedMigrations, getNextSchemaVersion, recordMigration } from '@dbsp/adapter-pgsql';
 
 // Compare schema definition vs live DB
 const diff = compareSchemata(schemaModel, introspectedModel);

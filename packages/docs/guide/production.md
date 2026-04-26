@@ -300,7 +300,7 @@ logger.info('Query executed', {
 ### Structured Logging
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — requires a request context (req) and a real PostgreSQL connection (.all())
 // Configure correlation IDs
 const users = await orm.select('users')
   .option('correlationId', req.headers['x-request-id'])

@@ -27,7 +27,7 @@ one or more text columns of a table, with optional per-field boost weights.
 Produces a `WHERE` filter using the ParadeDB `@@@` operator with per-field boost weights.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-0321b556.ts:132:31
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 import { fullTextSearch } from '@dbsp/core';
 
 fullTextSearch({
@@ -67,7 +67,7 @@ Each field gets its own `$N` parameter slot, all bound to the same query value.
 Produces `paradedb.score("keyField")` for use in `.columns()` and `.orderBy()`.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Unexpected token ╭─[ tests/docs-verification/__generated__/.tmp/block-9de3e138.ts:130:20
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 import { textScore } from '@dbsp/core';
 
 textScore(keyField?: string): ExpressionRef
