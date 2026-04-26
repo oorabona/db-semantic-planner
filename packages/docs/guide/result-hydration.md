@@ -332,7 +332,7 @@ For tree structures, always use the `recursive: true` option with an explicit
 **Wrong:** Calling `orm.select('posts').all()` and then fetching the author for
 each post in application code:
 ```typescript
-// doctest: skip — N+1 anti-pattern illustration; `.dump()` returns a Dump object (not an array), making the for-loop fail — that's the lesson, not the bug
+// doctest: skip — anti-pattern illustration; `.dump()` returns a Dump object (not an array)
 const posts = await orm.select('posts').dump();
 for (const post of posts) {
   // Executes one query per post — N+1

@@ -439,7 +439,7 @@ Rate limiting is handled at the application layer (not by DBSP):
 ### Per-Tenant Rate Limiting
 
 ```typescript
-// doctest: skip — rate-limiting integration example; the `your-rate-limiter` import is a placeholder for any user-chosen rate-limiter package
+// doctest: skip — rate-limiting integration example; `your-rate-limiter` and the related error classes (RateLimiterError, TooManyRequestsError) are library-specific placeholders
 import { RateLimiter } from 'your-rate-limiter';
 
 const limiter = new RateLimiter({
