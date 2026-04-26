@@ -17,7 +17,7 @@ respect `orm.withSchema()` for multi-tenant isolation.
 ### Table Maintenance
 
 ```typescript
-// doctest: skip — API signature reference; not executable code
+// doctest: skip — mixed API reference + exec-only example; storageSize() requires a real PostgreSQL connection
 // TRUNCATE TABLE — remove all rows
 orm.tables.users.truncate(options?)
 // options: { cascade?: boolean; restartIdentity?: boolean }
@@ -145,7 +145,7 @@ VACUUM FULL ANALYZE "events"
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-const __db = schema({ embeddings: { id: 'integer', vector: { type: 'vector', nullable: true } } });
+const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });
 const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
 
 await __orm.tables.embeddings.indexes.create({
@@ -225,7 +225,7 @@ if (!exists) {
 // doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-const __db = schema({ embeddings: { id: 'integer', vector: { type: 'vector', nullable: true } } });
+const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });
 const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(pool) });
 
 // List indexes matching a pattern
