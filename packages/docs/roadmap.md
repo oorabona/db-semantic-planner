@@ -39,7 +39,7 @@ Each adapter implements the `Adapter` interface from `@dbsp/types`. The core nev
 This means your application code stays the same — only the adapter import changes:
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `adapter` has already been declared ╭─[ tests/docs-verification/__generated__
+// doctest: skip — aspirational adapter portability example (adapter-sqlite is planned, not yet implemented; duplicate const declarations are intentional for illustration)
 // PostgreSQL (today)
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const adapter = createPgsqlAdapter(pool);

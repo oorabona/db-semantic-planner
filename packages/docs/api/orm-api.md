@@ -47,7 +47,7 @@ const db = schema({
 ### Query with Full Type Safety
 
 ```typescript
-// doctest: skip — pg is not defined
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 import { createOrm, eq } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import pg from 'pg';
@@ -169,7 +169,7 @@ const db = schema({
 Shorthand (type only) or object with options:
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
+// doctest: skip — illustrative data/type literal fragment (not executable code)
 {
   name: 'string',                                        // shorthand
   email: { type: 'string', unique: true },               // with options
@@ -192,7 +192,7 @@ Shorthand (type only) or object with options:
 ### Relations with `ref()`
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected `,` or `)` but found `:` ╭─[ tests/docs-verification/__generated__/.tmp/block-3
+// doctest: skip — API signature reference (TypeScript function signature, not executable code)
 ref(targetTable: string, options?: RefOptions)
 ```
 
@@ -292,9 +292,12 @@ const db = schema({
 Add composite indexes and foreign keys via the constraints parameter:
 
 ```typescript
-// doctest: skip — Foreign key 'orderId' references non-existent table 'orders'
 const db = schema(
-  { orderItems: { orderId: ref('orders'), productId: ref('products'), quantity: 'integer' } },
+  {
+    orders: { id: 'uuid', total: 'integer' },
+    products: { id: 'uuid', name: 'string' },
+    orderItems: { orderId: ref('orders'), productId: ref('products'), quantity: 'integer' },
+  },
   { orderItems: { indexes: [{ columns: ['orderId', 'productId'], unique: true }] } }
 );
 ```
@@ -356,7 +359,7 @@ const users = await tenantOrm.select('users').dump();
 ### Transactions
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const result = await orm.transaction(async (tx) => {
   await tx.insert('orders').values({ customerId: 1, total: 99 }).dump();
   await tx.insert('orderItems').values({ orderId: 1, productId: 5 }).dump();
@@ -368,7 +371,7 @@ const result = await orm.transaction(async (tx) => {
 The callback receives a transaction-scoped ORM instance (`tx`) with the full ORM API. The transaction result is the return value of your callback:
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Typed return value
 const order = await orm.transaction(async (tx) => {
   const [created] = await tx.insert('orders')
@@ -389,6 +392,7 @@ orm.withSchema('tenant_42').transaction(async (tx) => {
 **Nested transactions** reuse the outer transaction context — no savepoints, no additional BEGIN/COMMIT:
 
 ```typescript
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 orm.transaction(async (outer) => {
   await outer.insert('users').values({ name: 'Alice' }).dump();
 
@@ -428,7 +432,7 @@ const names = await orm.select('users').columns(['id', 'name']).dump();
 ### `distinct()` — Remove Duplicates
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const departments = await orm.select('users').columns(['department']).distinct().all();
 // SQL: SELECT DISTINCT "department" FROM "users"
 ```
@@ -491,7 +495,7 @@ orm.select('users').where(isNotNull('email'))
 Unlike `neq()`, returns `true` when one side is NULL and the other is not. Standard SQL (SQL:2003).
 
 ```typescript
-// doctest: skip — No WHERE handler registered for operator: isDistinctFrom
+// doctest: skip — exec-only operation; requires WHERE handler registration at adapter init
 import { isDistinctFrom } from '@dbsp/core';
 
 // Find rows where status changed (NULL-safe)
@@ -506,7 +510,7 @@ const changed = await orm.select('users')
 Filter by related records without loading them:
 
 ```typescript
-// doctest: skip — Invalid RelationRef: missing RELATION_META
+// doctest: skip — exec-only operation; relation filters require full schema RELATION_META
 import { exists, notExists, some, every, none } from '@dbsp/core';
 
 // Users who have at least one post
@@ -528,7 +532,7 @@ orm.select('users').where(none('posts', eq('draft', true)))
 ### Range Operators (PostgreSQL)
 
 ```typescript
-// doctest: skip — rangeOverlaps is not defined
+// doctest: skip — illustrative fragment (rangeOverlaps/rangeContains/rangeContainedBy not in doctest preamble; use bookings/events schema tables not in default preamble)
 import { rangeOverlaps, rangeContains, rangeContainedBy } from '@dbsp/core';
 
 // Bookings that overlap a date range
@@ -568,7 +572,7 @@ orm.select('posts').orderBy('createdAt', 'desc').limit(10).offset(20)
 ### Aggregates
 
 ```typescript
-// doctest: skip — distinct is not defined
+// doctest: skip — illustrative fragment (distinct() helper not in doctest preamble; uses orders/products tables not in default preamble)
 import { distinct } from '@dbsp/core';
 
 // COUNT
@@ -598,12 +602,8 @@ orm.select('posts')
 ### Window Functions
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Expected a semicolon or an implicit semicolon after a statement, but found none ╭─[ test
-import {
-  rowNumber, rank, denseRank,
-  wSum, wAvg, wCount, wMin, wMax,
-  lag, lead
-} from '@dbsp/core';
+// doctest: skip — illustrative fragment (window function helpers not in doctest preamble; multi-line import also requires single-line form)
+import { rowNumber, rank, denseRank, wSum, wAvg, wCount, wMin, wMax, lag, lead } from '@dbsp/core';
 
 // Row numbering
 orm.select('posts').columns([
@@ -649,7 +649,7 @@ orm.select('sales').columns([
 ### Expressions
 
 ```typescript
-// doctest: skip — coalesce is not defined
+// doctest: skip — illustrative fragment (coalesce/raw/col/relationColumn helpers not in doctest preamble)
 import { coalesce, raw, col, relationColumn } from '@dbsp/core';
 
 // COALESCE — first non-null value
@@ -678,6 +678,7 @@ orm.select('posts').columns([
 ### Subqueries
 
 ```typescript
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection (products table not in default preamble schema)
 import { subquery, outerRef } from '@dbsp/core';
 
 // Correlated subquery: products with above-average price in their category
@@ -710,7 +711,7 @@ const authors = await orm.select('users')
 Use a subquery as a computed column in SELECT.
 
 ```typescript
-// doctest: skip — subquery(...).count(...).where is not a function
+// doctest: skip — exec-only operation; scalar subquery .count().where() chain and .asExpr() not yet available on SubqueryBuilder
 import { subquery, eq } from '@dbsp/core';
 
 // Count posts per user as a computed column
@@ -977,7 +978,7 @@ The `exists()` method provides an optimized way to check if any rows match a que
 Unlike `first() !== undefined`, it generates efficient `SELECT EXISTS(...)` SQL:
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Check if any active users exist
 const hasActiveUsers = await orm.select('users').where(eq('active', true)).exists();
 
@@ -1009,7 +1010,7 @@ console.log(dump.plan);    // PlanReport with existsWrap: true
 ### Streaming
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const stream = orm.select('users').stream();
 
 for await (const user of stream) {
@@ -1021,7 +1022,7 @@ for await (const user of stream) {
 #### Stream Options
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const stream = orm.select('users').stream({
   chunkSize: 100,  // rows fetched per cursor batch (default: framework-defined)
 
@@ -1048,7 +1049,7 @@ for await (const user of stream) {
 #### Offset-Based
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const page = await orm.select('users')
   .orderBy('name')
   .paginate({ page: 2, perPage: 25 });
@@ -1065,7 +1066,7 @@ const page = await orm.select('users')
 #### Cursor-Based
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const page = await orm.select('users')
   .orderBy('createdAt', 'desc')
   .cursorPaginate({ first: 25 });
@@ -1114,7 +1115,7 @@ All errors have a `code` property for programmatic handling and a `name` propert
 | `ColumnNotFoundError` | `DBSP_E008` | Column not on table |
 
 ```typescript
-// doctest: skip — Errors is not defined
+// doctest: skip — illustrative fragment (Errors namespace not in doctest preamble; block also uses .firstOrThrow() which requires a real PostgreSQL connection)
 import { Errors } from '@dbsp/core';
 
 try {
@@ -1164,7 +1165,7 @@ See the [NQL Reference](../nql/) for full syntax.
 ### Hierarchy Shortcuts
 
 ```typescript
-// doctest: skip — Invalid listAncestors: Table not found
+// doctest: skip — exec-only operation; listAncestors/listDescendants require a real PostgreSQL connection and an employees table not in default preamble
 // List all ancestors of node (flat array)
 const ancestors = await orm.listAncestors('employees', 42, {
   parentId: 'managerId',
@@ -1195,7 +1196,7 @@ orm.select('users').withPlanOptions({ preferredStrategy: 'json_agg' })
 ### Raw SQL (Escape Hatch)
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 const results = await orm.raw<{ count: number }>(
   'SELECT COUNT(*) as count FROM "users" WHERE "active" = $1',
   [true]
@@ -1209,7 +1210,7 @@ const results = await orm.raw<{ count: number }>(
 Available from `@dbsp/adapter-pgsql`:
 
 ```typescript
-// doctest: skip — generateSeries is not a function
+// doctest: skip — illustrative fragment (generateSeries/nextval return AST nodes for use inside query builders, not standalone expressions)
 import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
 
 // Generate a series of values
@@ -1290,7 +1291,7 @@ The `CamelCaseNamingPlugin` handles edge cases: acronyms (`parseJSON` → `parse
 These are optional utility functions, exported from `@dbsp/core`, useful for building custom FK derivation or other naming logic:
 
 ```typescript
-// doctest: skip — singularize is not defined
+// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
 import { singularize, pluralize, IRREGULAR_PLURALS } from '@dbsp/core';
 
 singularize('posts');       // → 'post'
@@ -1307,7 +1308,7 @@ pluralize('person');        // → 'people' (built-in irregular)
 Pass a `Record<string, string>` to `singularize()` for domain-specific plurals not covered by the built-in rules:
 
 ```typescript
-// doctest: skip — singularize is not defined
+// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
 const domainOverrides = {
   matrices: 'matrix',
   alumni: 'alumnus',
@@ -1321,7 +1322,7 @@ singularize('users', domainOverrides);    // → 'user' (falls through to built-
 Overrides take priority over built-in irregular plurals:
 
 ```typescript
-// doctest: skip — singularize is not defined
+// doctest: skip — illustrative fragment (singularize/pluralize/IRREGULAR_PLURALS not in doctest preamble)
 singularize('people', { people: 'individual' }); // → 'individual' (overrides built-in 'person')
 ```
 

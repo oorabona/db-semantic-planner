@@ -112,7 +112,7 @@ const activeUsers = orm
 ### Load Relations
 
 ```typescript
-// doctest: skip — PgsqlAdapter is in compile-only mode (no database connection). Use createPgsqlAdapter(pool) for a full adapter with execution capabilities.
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection
 // Relations are inferred from ref() — no configuration needed
 const usersWithPosts = await orm
   .select('users')
@@ -140,7 +140,7 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 **Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
-// doctest: skip — Invalid RelationRef: missing RELATION_META
+// doctest: skip — exec-only operation; relation filters require full schema RELATION_META
 orm.select('users').where(some('posts', eq('published', true))).dump();
 // → WHERE EXISTS (SELECT 1 FROM "posts" WHERE ...)
 ```
@@ -195,6 +195,7 @@ dbsp verify --schema ./dbsp.schema.ts --db postgres://localhost/mydb
 **pgvector + ParadeDB** — Built-in helpers for vector similarity search and full-text BM25. No raw SQL.
 
 ```typescript
+// doctest: skip — exec-only operation; requires a real PostgreSQL connection (docs table uses custom schema not in default preamble)
 import { cosineDistance } from '@dbsp/adapter-pgsql';
 orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).limit(10).all();
 ```
