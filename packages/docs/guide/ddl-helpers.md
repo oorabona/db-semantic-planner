@@ -96,6 +96,7 @@ orm.ddl.dropIndex(name, options)  // name: string, options?: DropIndexOptions â†
 All methods respect `orm.withSchema()`:
 
 ```typescript
+// doctest: skip â€” exec-only operation; requires a real PostgreSQL connection
 const tenantOrm = orm.withSchema('tenant_42')
 tenantOrm.tables.users.truncate()
 // SQL: TRUNCATE "tenant_42"."users"

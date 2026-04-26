@@ -218,9 +218,10 @@ orm.select('docs').orderBy(cosineDistance('embedding', queryVec).as('score')).li
 **Observability Metadata** — Pass `{ queryName, correlationId }` to `.dump()` to propagate request context to logs and traces without coupling your query layer to your observability stack.
 
 ```typescript
-const dump = orm.select('events').where(eq('status', 'open'))
-  .dump({ queryName: 'list-open-events', correlationId: req.id });
-// dump.meta?.correlationId === req.id
+const requestId = 'req-abc-123'; // typically req.headers['x-request-id']
+const dump = orm.select('users').where(eq('active', true))
+  .dump({ queryName: 'list-active-users', correlationId: requestId });
+// dump.meta?.correlationId === requestId
 ```
 
 ---

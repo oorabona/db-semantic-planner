@@ -1,7 +1,7 @@
 /**
  * NQL Reference Guide — Plan Validation
  *
- * Extracts NQL queries from docs/guides/nql-reference.md,
+ * Extracts NQL queries from packages/docs/nql/index.md,
  * compiles each against its schema, and validates the plan.
  *
  * This test ensures all documented NQL queries actually compile
@@ -28,7 +28,7 @@ import {
 } from '../../packages/adapter-pgsql/src/set-operation.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '../..');
-const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
+const DOC_PATH = resolve(ROOT_DIR, 'packages/docs/nql/index.md');
 
 // ---------------------------------------------------------------------------
 // All schemas used in the reference document
