@@ -510,6 +510,10 @@ const changed = await orm.select('users')
 Filter by related records without loading them:
 
 ```typescript
+import { Pool } from 'pg';
+import { schema, ref, createOrm, eq, exists, notExists, some, every, none } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
 const __db = schema({
   users: { id: 'integer', name: 'string' },
   posts: { id: 'integer', userId: ref('users'), published: 'boolean' },

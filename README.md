@@ -140,6 +140,10 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 **Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
+import { Pool } from 'pg';
+import { schema, ref, createOrm, eq, some } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
 const __db = schema({
   users: { id: 'integer', name: 'string' },
   posts: { id: 'integer', userId: ref('users'), published: 'boolean' },

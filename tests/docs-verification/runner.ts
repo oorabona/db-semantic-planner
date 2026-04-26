@@ -199,12 +199,22 @@ function stripImports(code: string): string {
 }
 
 /**
- * Strip the leading `export` (and optional `default`/`declare`) keyword from
- * top-level declarations so the code can execute inside an async IIFE wrapper
- * (which does not allow module-level exports).
+ * Strip the leading `export` keyword from top-level declarations so the code
+ * can execute inside an async IIFE wrapper (which does not allow module-level
+ * exports).
  *
- * Handles: interface, type, class, function, const, enum, abstract, and their
- * modifiers: async, default, declare — in any order.
+ * Handles: interface, type, class, function (incl. async), const, enum,
+ * abstract — with optional `default`/`declare` modifiers between `export`
+ * and the declaration kind. The `async` modifier (if present) is preserved
+ * in the output.
+ *
+ * Supported order: `export [default] [declare] [async] <kind>`
+ *
+ * Examples:
+ *   export interface X { ... }        → interface X { ... }
+ *   export async function f() { ... } → async function f() { ... }
+ *   export default class Y { ... }    → class Y { ... }
+ *   export declare const Z = 1;       → const Z = 1;
  */
 function stripTopLevelExport(code: string): string {
 	// Strip `export` and optionally `default`/`declare`, but preserve `async`
