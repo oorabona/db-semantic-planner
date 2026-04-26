@@ -292,3 +292,34 @@ describe('range helpers — tuple validation', () => {
 		});
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Overload type-narrowing — compile-time guarantees
+// ---------------------------------------------------------------------------
+
+describe('rangeContains — overload narrowing', () => {
+	it('tuple literal routes to ExpressionRef', () => {
+		const expr = rangeContains('col', ['2024-01-01', '2024-12-31'] as const);
+		// ExpressionRef has an `intent` field (not `kind: "range"`)
+		expect(expr).toHaveProperty('intent');
+	});
+
+	it('RangeValue object routes to WhereRangeIntent', () => {
+		const intent = rangeContains('col', {
+			lower: '2024-01-01',
+			upper: '2024-12-31',
+		});
+		expect(intent).toMatchObject({ kind: 'range', operator: 'contains' });
+	});
+
+	it('string[] routed as tuple via explicit cast', () => {
+		// A caller with a string[] must explicitly cast to tuple type.
+		// This documents the runtime path: Array.isArray → tuple (ExpressionRef).
+		const arr: string[] = ['2024-01-01', '2024-12-31'];
+		const expr = rangeContains(
+			'col',
+			arr as unknown as readonly [string, string],
+		);
+		expect(expr).toHaveProperty('intent');
+	});
+});

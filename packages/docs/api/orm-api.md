@@ -536,8 +536,8 @@ import { schema, createOrm, rangeOverlaps, rangeContains, rangeContainedBy } fro
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const __rangeDb = schema({
-  bookings: { id: 'integer', period: 'string' },
-  events: { id: 'integer', dateRange: 'string' },
+  bookings: { id: 'integer', period: 'daterange' },
+  events: { id: 'integer', dateRange: 'daterange' },
 } as const);
 const __rangeOrm = createOrm({ schema: __rangeDb, adapter: createPgsqlCompileOnlyAdapter() });
 

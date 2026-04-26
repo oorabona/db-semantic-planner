@@ -139,19 +139,18 @@ export function rangeContains(
 ): ExpressionRef;
 
 /**
- * Range CONTAINS — object/scalar API: delegates to WhereRangeIntent (planner path)
+ * Range CONTAINS — object API: delegates to WhereRangeIntent (planner path)
  *
- * @example rangeContains('salary_range', 50000)
  * @example rangeContains('date_range', { lower: '2025-01-01', upper: '2025-01-05' })
  */
 export function rangeContains(
 	field: string,
-	value: RangeValue | unknown,
+	value: RangeValue,
 ): WhereRangeIntent;
 
 export function rangeContains(
 	fieldOrColumn: string,
-	valueOrRange: RangeValue | readonly [unknown, unknown] | unknown,
+	valueOrRange: RangeValue | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
