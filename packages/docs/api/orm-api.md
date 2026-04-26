@@ -514,7 +514,8 @@ const __db = schema({
   users: { id: 'integer', name: 'string' },
   posts: { id: 'integer', userId: ref('users'), published: 'boolean' },
 } as const);
-const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
+const __pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const __orm = createOrm({ schema: __db, adapter: createPgsqlAdapter(__pool) });
 
 // Users who have at least one post
 __orm.select('users').where(exists('posts'))

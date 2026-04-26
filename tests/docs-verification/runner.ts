@@ -174,8 +174,15 @@ function stripImports(code: string): string {
 			continue;
 		}
 
-		// Multi-line import start: `import {` (or `import type {`) without `from` on same line
-		if (/^\s*import\s+(type\s+)?\{/.test(line) && !/from\s+['"]/.test(line)) {
+		// Multi-line import start: open-brace without `from` on the same line.
+		// Covers:  `import {`           (named only)
+		//          `import type {`      (type-only named)
+		//          `import Default, {`  (default + named)
+		//          `import type D, {`   (type default + named, rare but valid)
+		if (
+			/^\s*import\s+(type\s+)?(\w+\s*,\s*)?\{/.test(line) &&
+			!/from\s+['"]/.test(line)
+		) {
 			inMultiLineImport = true;
 			continue;
 		}
@@ -192,14 +199,26 @@ function stripImports(code: string): string {
 }
 
 /**
- * Strip the leading `export` keyword from top-level declarations so the code
- * can execute inside an async IIFE wrapper (which does not allow module-level
- * exports).  Handles: interface, type, class, function, const, enum, abstract.
+ * Strip the leading `export` (and optional `default`/`declare`) keyword from
+ * top-level declarations so the code can execute inside an async IIFE wrapper
+ * (which does not allow module-level exports).
+ *
+ * Handles: interface, type, class, function, const, enum, abstract, and their
+ * modifiers: async, default, declare — in any order.
  */
 function stripTopLevelExport(code: string): string {
+	// Strip `export` and optionally `default`/`declare`, but preserve `async`
+	// and the declaration keyword so semantics are unchanged.
+	//
+	// Examples handled:
+	//   export interface X {}          → interface X {}
+	//   export async function f() {}   → async function f() {}
+	//   export default class Y {}      → class Y {}
+	//   export declare const Z = 1;    → const Z = 1;
+	//   export default async function  → async function
 	return code.replace(
-		/^(\s*)export\s+(interface|type|class|function|const|enum|abstract)\s/gm,
-		'$1$2 ',
+		/^(\s*)export\s+(?:default\s+)?(?:declare\s+)?((?:async\s+)?(?:interface|type|class|function|const|enum|abstract)\s)/gm,
+		'$1$2',
 	);
 }
 
