@@ -149,22 +149,70 @@ const searchTerm = 'example';
 `;
 
 /**
- * Run a single doctest block. Writes the code to a temp file wrapped in an
- * async IIFE, then imports it dynamically so TS/JS parse + runtime errors
- * propagate through as regular exceptions.
+ * Strip all import statements from a code block (single-line and multi-line).
+ * The preamble already provides every symbol the block needs.
  */
+function stripImports(code: string): string {
+	const lines = code.split('\n');
+	const result: string[] = [];
+	let inMultiLineImport = false;
+
+	for (const line of lines) {
+		if (inMultiLineImport) {
+			// Skip until we find the closing `} from '...';` line
+			if (/^\s*\}\s*from\s+['"]/.test(line)) {
+				inMultiLineImport = false;
+			}
+			continue;
+		}
+
+		// Single-line import: matches the full pattern on one line
+		if (
+			/^\s*import\s+.*from\s+['"]/.test(line) &&
+			/;\s*$/.test(line.trimEnd())
+		) {
+			continue;
+		}
+
+		// Multi-line import start: `import {` (or `import type {`) without `from` on same line
+		if (/^\s*import\s+(type\s+)?\{/.test(line) && !/from\s+['"]/.test(line)) {
+			inMultiLineImport = true;
+			continue;
+		}
+
+		// Side-effect import or default import (single line)
+		if (/^\s*import\s+/.test(line)) {
+			continue;
+		}
+
+		result.push(line);
+	}
+
+	return result.join('\n');
+}
+
+/**
+ * Strip the leading `export` keyword from top-level declarations so the code
+ * can execute inside an async IIFE wrapper (which does not allow module-level
+ * exports).  Handles: interface, type, class, function, const, enum, abstract.
+ */
+function stripTopLevelExport(code: string): string {
+	return code.replace(
+		/^(\s*)export\s+(interface|type|class|function|const|enum|abstract)\s/gm,
+		'$1$2 ',
+	);
+}
+
 export async function runBlock(
 	code: string,
 	file: string,
 	line: number,
 ): Promise<void> {
-	// Strip \`import\` lines from the block; the preamble provides every symbol.
-	const noImports = code
-		.split('\n')
-		.filter((l) => !/^\s*import\s+/.test(l))
-		.join('\n');
+	// Strip imports (single-line and multi-line) then top-level `export` keywords
+	// so the code can safely execute inside the async IIFE wrapper.
+	const cleaned = stripTopLevelExport(stripImports(code));
 
-	const body = `${PREAMBLE}\nasync function __main() {\n${noImports}\n}\nawait __main();\n`;
+	const body = `${PREAMBLE}\nasync function __main() {\n${cleaned}\n}\nawait __main();\n`;
 
 	const slug = randomBytes(4).toString('hex');
 	const tmpFile = join(TMP_ROOT, `block-${slug}.ts`);
