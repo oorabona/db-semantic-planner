@@ -259,3 +259,36 @@ describe('RangeType coverage', () => {
 		});
 	}
 });
+
+// ---------------------------------------------------------------------------
+// Tuple validation — length guard
+// ---------------------------------------------------------------------------
+
+describe('range helpers — tuple validation', () => {
+	it('throws on length-1 array', () => {
+		expect(() =>
+			rangeOverlaps('col', ['2024-01-01'] as unknown as [string, string]),
+		).toThrow(/exactly 2/);
+	});
+
+	it('throws on length-3 array', () => {
+		expect(() =>
+			rangeContains('col', ['a', 'b', 'c'] as unknown as [string, string]),
+		).toThrow(/exactly 2/);
+	});
+
+	it('throws on empty array', () => {
+		expect(() =>
+			rangeContainedBy('col', [] as unknown as [string, string]),
+		).toThrow(/exactly 2/);
+	});
+
+	it('still routes object input to legacy path (WhereRangeIntent)', () => {
+		const result = rangeContains('col', { lower: 1, upper: 100 });
+		expect(result).toMatchObject({
+			kind: 'range',
+			field: 'col',
+			operator: 'contains',
+		});
+	});
+});

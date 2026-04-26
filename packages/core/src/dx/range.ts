@@ -63,6 +63,19 @@ function makeRangeFn(
 	return fn(rangeType, param(range[0]), param(range[1]));
 }
 
+/**
+ * Assert that `arr` is a 2-element tuple.
+ * Throws a clear error for 0-, 1-, or 3+-element arrays so callers get
+ * actionable feedback instead of silently producing bad SQL.
+ */
+function assertTupleLength(arr: unknown[]): void {
+	if (arr.length !== 2) {
+		throw new Error(
+			`range tuple must have exactly 2 elements (got ${arr.length}); use [lower, upper] or pass a RangeValue object`,
+		);
+	}
+}
+
 // ============================================================================
 // rangeOverlaps — &&
 // ============================================================================
@@ -97,6 +110,7 @@ export function rangeOverlaps(
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
+		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
 		return op('&&', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
 	}
@@ -141,6 +155,7 @@ export function rangeContains(
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
+		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
 		return op('@>', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
 	}
@@ -184,6 +199,7 @@ export function rangeContainedBy(
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
+		assertTupleLength(valueOrRange);
 		const tuple = valueOrRange as unknown as readonly [unknown, unknown];
 		return op('<@', ref(fieldOrColumn), makeRangeFn(tuple, rangeType));
 	}
