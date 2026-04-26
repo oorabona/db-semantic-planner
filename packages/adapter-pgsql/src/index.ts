@@ -71,12 +71,20 @@ export {
 	getTotalExecutionTime,
 	parseExplainJson,
 } from './explain/index.js';
-// Extensions (pgvector, etc.)
+// Extensions (pgvector, ParadeDB, PG builtins)
 export {
+	bm25Search,
+	booleanSearch,
+	boost,
 	cosineDistance,
+	generateSeries,
 	innerProduct,
 	l2Distance,
+	nextval,
+	parse,
 	rawDistance,
+	score,
+	vectorDims,
 } from './extensions/index.js';
 // Handler Registry — types only (implementation details remain in ./handlers/index.js)
 export type {

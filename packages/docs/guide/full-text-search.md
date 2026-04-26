@@ -90,10 +90,21 @@ Binds no parameters — the key field is a column reference, not a value.
 ### Basic Full-Text Search
 
 ```typescript
-// doctest: skip — Unknown table: articles
-import { fullTextSearch } from '@dbsp/core';
+import { schema, createOrm, fullTextSearch } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const results = await orm
+const __ftsArticlesDb = schema({
+  articles: {
+    id: 'uuid',
+    title: 'string',
+    body: 'text',
+    status: 'string',
+    searchVector: { type: 'tsvector', nullable: true },
+  },
+} as const);
+const __ftsArticlesOrm = createOrm({ schema: __ftsArticlesDb, adapter: createPgsqlCompileOnlyAdapter() });
+
+const results = await __ftsArticlesOrm
   .select('articles')
   .where(fullTextSearch({
     query: searchTerm,
@@ -103,7 +114,7 @@ const results = await orm
       { name: 'body', boost: 1.0 },
     ],
   }))
-  .all();
+  .dump();
 
 // SQL:
 //   SELECT * FROM "articles"
@@ -124,10 +135,20 @@ Boost makes matches in high-priority fields score higher than matches in
 lower-priority fields.
 
 ```typescript
-// doctest: skip — Unknown table: symbols
-import { fullTextSearch } from '@dbsp/core';
+import { schema, createOrm, fullTextSearch } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const results = await orm
+const __ftsSymbolsDb = schema({
+  symbols: {
+    id: 'uuid',
+    name: 'string',
+    signature: 'string',
+    doc_comment: { type: 'text', nullable: true },
+  },
+} as const);
+const __ftsSymbolsOrm = createOrm({ schema: __ftsSymbolsDb, adapter: createPgsqlCompileOnlyAdapter() });
+
+const results = await __ftsSymbolsOrm
   .select('symbols')
   .where(fullTextSearch({
     query: searchTerm,
@@ -138,7 +159,7 @@ const results = await orm
       { name: 'doc_comment', boost: 1.0 },  // doc text — baseline weight
     ],
   }))
-  .all();
+  .dump();
 
 // SQL:
 //   WHERE symbols @@@ paradedb.boolean(
@@ -158,10 +179,19 @@ const results = await orm
 Use `textScore()` in both `.columns()` (to surface the score) and `.orderBy()` (to rank).
 
 ```typescript
-// doctest: skip — Unknown table: symbols
-import { fullTextSearch, textScore } from '@dbsp/core';
+import { schema, createOrm, fullTextSearch, textScore } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const results = await orm
+const __ftsSymbolsScoreDb = schema({
+  symbols: {
+    id: 'uuid',
+    name: 'string',
+    doc_comment: { type: 'text', nullable: true },
+  },
+} as const);
+const __ftsSymbolsScoreOrm = createOrm({ schema: __ftsSymbolsScoreDb, adapter: createPgsqlCompileOnlyAdapter() });
+
+const results = await __ftsSymbolsScoreOrm
   .select('symbols')
   .columns(['*', textScore().as('score')])            // include score in results
   .where(fullTextSearch({
@@ -174,7 +204,7 @@ const results = await orm
   }))
   .orderBy(textScore(), 'desc')                       // rank by relevance
   .limit(20)
-  .all();
+  .dump();
 
 // SQL:
 //   SELECT *, paradedb.score(id) AS "score"
@@ -198,10 +228,20 @@ Chain `fullTextSearch()` alongside other filter helpers using `.where()`. Multip
 `.where()` calls are combined with `AND`.
 
 ```typescript
-// doctest: skip — Unknown table: articles
-import { fullTextSearch, eq } from '@dbsp/core';
+import { schema, createOrm, fullTextSearch, eq } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const results = await orm
+const __ftsArticlesWhereDb = schema({
+  articles: {
+    id: 'uuid',
+    title: 'string',
+    body: 'text',
+    status: 'string',
+  },
+} as const);
+const __ftsArticlesWhereOrm = createOrm({ schema: __ftsArticlesWhereDb, adapter: createPgsqlCompileOnlyAdapter() });
+
+const results = await __ftsArticlesWhereOrm
   .select('articles')
   .where(eq('status', 'published'))           // standard equality filter
   .where(fullTextSearch({
@@ -212,7 +252,7 @@ const results = await orm
       { name: 'body', boost: 1.0 },
     ],
   }))
-  .all();
+  .dump();
 
 // SQL:
 //   SELECT * FROM "articles"

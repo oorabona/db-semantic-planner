@@ -251,7 +251,8 @@ import { generateSeries, nextval } from '@dbsp/adapter-pgsql';
 Generate a series of values (commonly used with CTE for batch operations):
 
 ```typescript
-// doctest: skip — generateSeries is not a function
+import { generateSeries } from '@dbsp/adapter-pgsql';
+
 generateSeries(1, 100)       // → generate_series(1, 100)
 generateSeries(0, 50, 5)     // → generate_series(0, 50, 5)
 ```
@@ -261,7 +262,8 @@ generateSeries(0, 50, 5)     // → generate_series(0, 50, 5)
 Get the next value from a PostgreSQL sequence:
 
 ```typescript
-// doctest: skip — nextval is not a function
+import { nextval } from '@dbsp/adapter-pgsql';
+
 nextval('order_id_seq')      // → nextval('order_id_seq')
 ```
 
