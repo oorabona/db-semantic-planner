@@ -108,7 +108,7 @@ const db = schema(
 ### Full Example
 
 ```typescript
-// doctest: skip — score is not a function
+// doctest: skip — needs API + schema rewrite: .column() is obsolete (use .columns([...])) and symbols is not in the default schema
 import { score, bm25Search } from '@dbsp/adapter-pgsql';
 
 const searchTerm = 'semantic query planner';

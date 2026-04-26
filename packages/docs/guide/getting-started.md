@@ -183,24 +183,23 @@ Paste this NQL equivalent in the [Playground](/playground): `users | where activ
 ## Step 5: Include Relations
 
 ```typescript
-// doctest: skip — Transform failed with 2 errors: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/
 import { eq } from '@dbsp/core';
 
 // Load users with their posts (nested hydration)
-const users = await orm.select('users')
+const usersWithPosts = await orm.select('users')
   .where(eq('active', true))
   .include('posts')
   .dump();
-// users[0].posts — Post[]
+// usersWithPosts[0].posts — Post[]
 
 // Deep nesting with dot notation
-const users = await orm.select('users')
+const usersWithComments = await orm.select('users')
   .include('posts.comments')
   .dump();
-// users[0].posts[0].comments — Comment[]
+// usersWithComments[0].posts[0].comments — Comment[]
 
 // Filter and select within an include
-const users = await orm.select('users')
+const usersFiltered = await orm.select('users')
   .include('posts', {
     where: eq('published', true),
     select: { type: 'fields', fields: ['id', 'title'] },

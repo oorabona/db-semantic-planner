@@ -100,22 +100,30 @@ Parameters: `[['/src/a.ts', '/src/b.ts'], ['a.ts', 'b.ts']]`
 Filter rows in a real table against a set of in-memory values.
 
 ```typescript
-// doctest: skip — Unknown table: calls
-import { batchValues, eq, ref } from '@dbsp/core'
+import { schema, createOrm, batchValues, eq, ref } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const __batchCallsDb = schema({
+  calls: {
+    id: 'integer',
+    callee_id: 'integer',
+  },
+} as const);
+const __batchCallsOrm = createOrm({ schema: __batchCallsDb, adapter: createPgsqlCompileOnlyAdapter() });
 
 const batch = batchValues(
   [[1, 2, 3], [10, 20, 30]],
   ['id', 'callee_id'],
   ['integer', 'integer'],
   { alias: 'batch' },
-)
+);
 
-const rows = await orm.select('calls')
+const rows = await __batchCallsOrm.select('calls')
   .join(batch, {
     on: eq('calls.id', ref('batch.id')),
     type: 'inner',
   })
-  .all()
+  .dump();
 ```
 
 Generated SQL:

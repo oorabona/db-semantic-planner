@@ -24,13 +24,12 @@ The relation name maps to the `inverse` or `as` name defined in your schema's `r
 Chain as many levels as needed using dot notation:
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/.
 // Two levels deep
-const users = await orm.select('users').include('posts.comments').dump();
-// users[0].posts[0].comments — Comment[]
+const usersWithComments = await orm.select('users').include('posts.comments').dump();
+// usersWithComments[0].posts[0].comments — Comment[]
 
 // Three levels deep
-const users = await orm.select('users').include('posts.comments.author').dump();
+const usersWithAuthors = await orm.select('users').include('posts.comments.author').dump();
 ```
 
 ---
@@ -56,14 +55,13 @@ Each call is independent. Nested paths (like `posts.comments`) automatically tri
 Pass an options object as the second argument to filter, project, or disambiguate the include:
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `users` has already been declared ╭─[ tests/docs-verification/__generated__/.
 // Filter related records
-const users = await orm.select('users')
+const usersFiltered = await orm.select('users')
   .include('posts', { where: eq('published', true) })
   .dump();
 
 // Select specific columns on the relation
-const users = await orm.select('users')
+const usersSelected = await orm.select('users')
   .include('posts', {
     select: { type: 'fields', fields: ['id', 'title'] },
   })
@@ -94,15 +92,14 @@ const posts = await orm.select('posts')
 For self-referential tables (categories, org charts, threaded comments), use the `recursive` option. The planner generates a PostgreSQL `WITH RECURSIVE` CTE automatically.
 
 ```typescript
-// doctest: skip — Transform failed with 1 error: [PARSE_ERROR] Error: Identifier `categories` has already been declared ╭─[ tests/docs-verification/__generate
 // Ancestors: walk up the tree from node id=5
-const categories = await orm.select('categories')
+const ancestors = await orm.select('categories')
   .where(eq('id', 5))
   .include('parent', { recursive: true, direction: 'ancestors' })
   .dump();
 
 // Descendants: walk down the tree from root id=1, flat output
-const categories = await orm.select('categories')
+const descendants = await orm.select('categories')
   .where(eq('id', 1))
   .include('children', {
     recursive: true,
