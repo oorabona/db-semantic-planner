@@ -179,7 +179,7 @@ op('<=>', ref('embedding'), cast(param(queryVec), 'vector')).as('distance')
 ### Comparison methods — use in `.where()`
 
 ```typescript
-// doctest: skip — expr is not defined
+// doctest: skip — fluent expression API reference (replace `expr` with a real expression call)
 expr.eq(value)   // expr = $N
 expr.neq(value)  // expr != $N
 expr.gt(value)   // expr > $N

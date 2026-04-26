@@ -152,7 +152,7 @@ const users = await queryWithTimeout(
 Use `withSchema()` for PostgreSQL schema isolation:
 
 ```typescript
-// doctest: skip — app is not defined
+// doctest: skip — Express integration example; requires a configured web framework outside doctest scope
 // Tenant middleware (Express example)
 app.use(async (req, res, next) => {
   const tenantId = extractTenantId(req); // From JWT, header, etc.
@@ -203,7 +203,7 @@ function extractTenantId(req: Request): string {
 DBSP provides typed errors with error codes for programmatic handling:
 
 ```typescript
-// doctest: skip — Errors is not defined
+// doctest: skip — requires a real PostgreSQL connection (.all()) and a logger instance; Errors and ErrorCode are exported from @dbsp/core
 import { Errors, ErrorCode } from '@dbsp/core';
 
 try {
@@ -278,7 +278,7 @@ function toErrorResponse(error: Error, requestId: string): ErrorResponse {
 Every query produces a `Dump` with plan, SQL, and parameters:
 
 ```typescript
-// doctest: skip — logger is not defined
+// doctest: skip — production logging integration; requires a logger instance and the aspirational redactParams helper (tracked separately)
 import { redactParams } from '@dbsp/adapter-pgsql';
 
 // Get query dump without executing
@@ -439,7 +439,7 @@ Rate limiting is handled at the application layer (not by DBSP):
 ### Per-Tenant Rate Limiting
 
 ```typescript
-// doctest: skip — RateLimiter is not defined
+// doctest: skip — rate-limiting integration example; `your-rate-limiter` and the related error classes (RateLimiterError, TooManyRequestsError) are library-specific placeholders
 import { RateLimiter } from 'your-rate-limiter';
 
 const limiter = new RateLimiter({
@@ -471,7 +471,7 @@ async function rateLimitedQuery<T>(
 For complex queries, estimate cost before execution:
 
 ```typescript
-// doctest: skip — tenant is not defined
+// doctest: skip — user-defined query cost estimator example; references caller-provided context (tenant) outside the function signature
 function estimateQueryCost(intent: SelectIntent): number {
   let cost = 1;
 
@@ -544,7 +544,7 @@ function sanitizeTableName(name: string): string {
 Never log sensitive data:
 
 ```typescript
-// doctest: skip — redactParams is not defined
+// doctest: skip — illustrates the aspirational redactParams + DEFAULT_REDACTION_PATTERNS helpers (not yet implemented in @dbsp/adapter-pgsql)
 import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
 
 const safeParams = redactParams(dump.params, {
@@ -564,7 +564,7 @@ const safeParams = redactParams(dump.params, {
 ### Database Health Check
 
 ```typescript
-// doctest: skip — app is not defined
+// doctest: skip — Express integration example; requires a configured web framework outside doctest scope
 app.get('/health', async (req, res) => {
   const checks = {
     database: false,
@@ -587,7 +587,7 @@ app.get('/health', async (req, res) => {
 ### Readiness vs Liveness
 
 ```typescript
-// doctest: skip — app is not defined
+// doctest: skip — Express integration example; requires a configured web framework outside doctest scope
 // Liveness: Is the process alive?
 app.get('/health/live', (req, res) => {
   res.status(200).json({ status: 'ok' });
