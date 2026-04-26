@@ -72,6 +72,8 @@ orm.updateAll('users')
 ### Update with RETURNING
 
 ```typescript
+import { eq } from '@dbsp/core';
+
 const { sql: updatedSql } = orm.update('users')
   .set({ active: true })
   .where(eq('email', 'alice@example.com'))
@@ -84,6 +86,8 @@ const { sql: updatedSql } = orm.update('users')
 ## Delete
 
 ```typescript
+import { eq } from '@dbsp/core';
+
 orm.delete('posts')
   .where(eq('published', false))
   .dump();
@@ -98,6 +102,8 @@ orm.deleteAll('users').dump();
 ### Delete with RETURNING
 
 ```typescript
+import { eq } from '@dbsp/core';
+
 const { sql: removedSql } = orm.delete('posts')
   .where(eq('published', false))
   .returning(['id', 'title'])

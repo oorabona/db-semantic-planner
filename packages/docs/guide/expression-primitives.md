@@ -169,6 +169,9 @@ All primitives return an `ExpressionRef` — a chainable wrapper with three usag
 ### `.as(alias)` — alias in SELECT
 
 ```typescript
+// Assumes `queryVec` (number[]) is in scope as a preamble global.
+import { cast, op, param, ref } from '@dbsp/core';
+
 op('<=>', ref('embedding'), cast(param(queryVec), 'vector')).as('distance')
 // → "embedding" <=> $1::vector AS "distance"
 ```

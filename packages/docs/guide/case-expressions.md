@@ -84,6 +84,8 @@ FROM "orders"
 ### 2. Numeric bucketing
 
 ```typescript
+import { caseWhen } from '@dbsp/core';
+
 caseWhen<string>()
   .when('salary > 80000', 'senior')
   .when('salary > 50000', 'mid')
@@ -121,6 +123,8 @@ END AS "resolvedName"
 ### 4. Boolean flag column
 
 ```typescript
+import { caseWhen } from '@dbsp/core';
+
 caseWhen<number>()
   .when('score >= 90', 1)
   .else(0)
@@ -139,6 +143,9 @@ Numeric values are inlined directly (not parameterized — see Gotchas).
 ### 5. CASE in ORDER BY
 
 ```typescript
+// Assumes `orm` from `createOrm({ schema: db, adapter })` is in scope.
+import { caseWhen } from '@dbsp/core';
+
 const query = orm.select('users')
   .columns(['id', 'title', 'priority'])
   .orderBy([
@@ -165,6 +172,9 @@ ORDER BY CASE WHEN priority = 'critical' THEN 1
 ### 6. DISTINCT ON + CASE pattern
 
 ```typescript
+// Assumes `orm` from `createOrm({ schema: db, adapter })` is in scope.
+import { caseWhen } from '@dbsp/core';
+
 const query = orm.select('users')
   .distinctOn(['userId'])
   .columns([

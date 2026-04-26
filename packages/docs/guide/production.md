@@ -410,6 +410,9 @@ if (plan.includes('Seq Scan') && rowCount > 10000) {
 Establish baselines for common queries:
 
 ```typescript
+// Assumes `orm` from `createOrm({ schema: db, adapter })` is in scope.
+import { eq } from '@dbsp/core';
+
 // On startup or scheduled
 async function measureBaselines() {
   const queries = [

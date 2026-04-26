@@ -127,7 +127,12 @@ This is the recommended pattern for integration with migration tools, schema dif
 
 Attach a correlation ID to a query to propagate request context through your logs:
 
-```typescriptconst userId = 1;
+```typescript
+// doctest: skip — .as() chaining before .dump() not available in this form; use .dump() directly
+// Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
+import { eq } from '@dbsp/core';
+
+const userId = 1;
 const requestId = 'req-123';
 
 const dump = orm.select('users')
