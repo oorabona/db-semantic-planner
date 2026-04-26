@@ -111,11 +111,6 @@ export {
 	not,
 	notExists,
 	or,
-	type RangeValue,
-	// Range (PostgreSQL)
-	rangeContainedBy,
-	rangeContains,
-	rangeOverlaps,
 	rank,
 	// Raw SQL escape hatch
 	raw,
@@ -249,6 +244,14 @@ export {
 	type SimplifiedOrmOptions,
 } from './orm.js';
 export type { OrmOf } from './orm-instance-types.js';
+// Range Operator Helpers (PostgreSQL) — tuple API + backward-compat object API
+export {
+	type RangeType,
+	type RangeValue,
+	rangeContainedBy,
+	rangeContains,
+	rangeOverlaps,
+} from './range.js';
 // Raw CTE Builder — WITH RECURSIVE (FR-8)
 export {
 	createRawCteBuilder,

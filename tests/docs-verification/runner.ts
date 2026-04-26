@@ -61,6 +61,9 @@ import {
 \tarray,
 \tfullTextSearch,
 \ttextScore,
+\trangeContainedBy,
+\trangeContains,
+\trangeOverlaps,
 } from '@dbsp/core';
 
 // === PG-specific helpers (live in the adapter, not core) ===

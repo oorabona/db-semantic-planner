@@ -532,17 +532,23 @@ orm.select('users').where(none('posts', eq('draft', true)))
 ### Range Operators (PostgreSQL)
 
 ```typescript
-// doctest: skip — illustrative fragment (rangeOverlaps/rangeContains/rangeContainedBy not in doctest preamble; use bookings/events schema tables not in default preamble)
-import { rangeOverlaps, rangeContains, rangeContainedBy } from '@dbsp/core';
+import { schema, createOrm, rangeOverlaps, rangeContains, rangeContainedBy } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+
+const __rangeDb = schema({
+  bookings: { id: 'integer', period: 'string' },
+  events: { id: 'integer', dateRange: 'string' },
+} as const);
+const __rangeOrm = createOrm({ schema: __rangeDb, adapter: createPgsqlCompileOnlyAdapter() });
 
 // Bookings that overlap a date range
-orm.select('bookings').where(rangeOverlaps('period', ['2024-01-01', '2024-01-31']))
+__rangeOrm.select('bookings').where(rangeOverlaps('period', ['2024-01-01', '2024-01-31'])).dump();
 
 // Events that contain a specific date
-orm.select('events').where(rangeContains('dateRange', ['2024-06-15', '2024-06-15']))
+__rangeOrm.select('events').where(rangeContains('dateRange', ['2024-06-15', '2024-06-15'])).dump();
 
 // Events within a year
-orm.select('events').where(rangeContainedBy('dateRange', ['2024-01-01', '2024-12-31']))
+__rangeOrm.select('events').where(rangeContainedBy('dateRange', ['2024-01-01', '2024-12-31'])).dump();
 ```
 
 ### `orderBy()` — Sort Results
