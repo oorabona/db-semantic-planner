@@ -250,7 +250,7 @@ Strategies:
 Schema-level hint:
 
 ```typescript
-// doctest: skip — illustrative fragment (defineSchema is a legacy schema DSL not exposed in doctest preamble)
+// doctest: skip — illustrative fragment (defineSchema and `table`/`hasMany` helpers are not in the doctest preamble)
 const schema = defineSchema({
   users: table({
     posts: hasMany(() => posts, { includeStrategy: 'lateral' }),

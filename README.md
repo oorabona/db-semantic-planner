@@ -140,7 +140,7 @@ See the [Getting Started guide](https://oorabona.github.io/db-semantic-planner/g
 **Semantic Planning** — The planner chooses between EXISTS, JOIN, and lateral subqueries based on cardinality. No configuration required.
 
 ```typescript
-// doctest: skip — exec-only operation; relation filters require full schema RELATION_META
+// doctest: skip — `some`/`every`/`none` expect a RelationRef (e.g., users.posts) not a string; the example illustrates the helpers conceptually
 orm.select('users').where(some('posts', eq('published', true))).dump();
 // → WHERE EXISTS (SELECT 1 FROM "posts" WHERE ...)
 ```

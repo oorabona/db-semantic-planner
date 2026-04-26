@@ -495,7 +495,7 @@ orm.select('users').where(isNotNull('email'))
 Unlike `neq()`, returns `true` when one side is NULL and the other is not. Standard SQL (SQL:2003).
 
 ```typescript
-// doctest: skip — exec-only operation; requires WHERE handler registration at adapter init
+// doctest: skip — block uses an isDistinctFrom WHERE handler not registered in the doctest adapter (compile-time, not exec-time)
 import { isDistinctFrom } from '@dbsp/core';
 
 // Find rows where status changed (NULL-safe)
@@ -510,7 +510,7 @@ const changed = await orm.select('users')
 Filter by related records without loading them:
 
 ```typescript
-// doctest: skip — exec-only operation; relation filters require full schema RELATION_META
+// doctest: skip — `some`/`every`/`none` expect a RelationRef (e.g., users.posts) not a string; the example illustrates the helpers conceptually
 import { exists, notExists, some, every, none } from '@dbsp/core';
 
 // Users who have at least one post
