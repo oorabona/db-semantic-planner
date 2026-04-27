@@ -1026,6 +1026,7 @@ console.log(dump.plan);    // PlanReport with existsWrap: true
 ```typescript
 // doctest: real-db-only — requires a live PostgreSQL connection
 const stream = orm.select('users').stream();
+let shouldStop = false; // set to true to stop early (e.g. on timeout or signal)
 
 for await (const user of stream) {
   console.log(user.name);

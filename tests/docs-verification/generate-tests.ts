@@ -151,7 +151,9 @@ import { runBlock } from '../runner.js';
 
 const mode = REAL_DB ? 'real-db' : 'compile-only';
 const realDbSuffix =
-	skippedRealDbOnly > 0 ? `, real-db-only: ${skippedRealDbOnly} [REAL_DB=0]` : '';
+	skippedRealDbOnly > 0
+		? `, real-db-only: ${skippedRealDbOnly} [REAL_DB=0]`
+		: '';
 console.log(
 	`Generated ${totalBlocks} block cases across ${Object.keys(SOURCES).length} buckets: ${runnableBlocks} runnable, ${skippedBlocks} skipped` +
 		` (fragment: ${skippedFragment}, explicit-skip: ${skippedExplicit}${realDbSuffix}) [mode: ${mode}].`,
