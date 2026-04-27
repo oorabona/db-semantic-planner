@@ -241,11 +241,20 @@ export async function executeBatch(
 			throw new Error(`Assertion file parse errors:\n${errorMessages}`);
 		}
 
-		// Validate query references
+		// C4: Validate against executable queries (strips comments + blanks) so
+		// assertion indexes align with what runAssertions receives at runtime.
+		// Raw `queries` includes comment lines (#...) and blank lines that the
+		// engine skips — validating against them lets queryIndex N pass for a
+		// comment slot, then fail silently at runtime when executable[N] is a
+		// different query.
+		const preExecExecutableQueries = queries.filter((q) => {
+			const t = q.trim();
+			return t.length > 0 && !t.startsWith('#');
+		});
 		const validationErrors = validateAssertionBlocks(
 			parseResult.blocks,
-			queries.length,
-			queries,
+			preExecExecutableQueries.length,
+			preExecExecutableQueries,
 		);
 		if (validationErrors.length > 0) {
 			await engine.destroy();
