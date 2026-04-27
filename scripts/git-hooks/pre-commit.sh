@@ -22,6 +22,21 @@ fi
 
 echo "🔨 Rebuilding dist/ (source files staged)..."
 
+# Warn if working-tree has unstaged changes in library source — the rebuild
+# runs against the working tree, so unstaged WIP can produce a false build
+# failure (or an unstaged fix can mask a staged break). Stage whole files
+# (no `git add -p`) and stash WIP before committing if you want certainty.
+dirty=$(git diff --name-only \
+  -- 'packages/types/src/' \
+     'packages/nql/src/' \
+     'packages/core/src/' \
+     'packages/adapter-pgsql/src/' \
+  2>/dev/null)
+if [ -n "$dirty" ]; then
+  echo "⚠️  Unstaged changes detected in library source — build runs against the working tree, not staged content."
+  echo "   If the rebuild result surprises you, stash WIP and re-run the commit."
+fi
+
 # Build in dependency order: types → nql → core → adapter-pgsql
 pnpm -C packages/types build
 pnpm -C packages/nql build
