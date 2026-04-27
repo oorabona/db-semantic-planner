@@ -1,38 +1,27 @@
 #!/bin/bash
-# Pre-commit: rebuild dist/ if source files are staged
-# Ensures committed code always has fresh dist/ and build succeeds
+# Pre-commit: rebuild dist/ if library source files are staged
+# Acts as a smoke test: blocks the commit if any library package fails to build.
+# dist/ is gitignored — the rebuild is for local workspace consumers (cli, mcp-server, gui)
+# and as fast feedback that source still compiles cleanly.
+set -eo pipefail
 
-staged=$(git diff --cached --name-only -- 'packages/*/src/**/*.ts' 2>/dev/null)
+staged=$(git diff --cached --name-only \
+  -- 'packages/types/src/' \
+     'packages/core/src/' \
+     'packages/nql/src/' \
+     'packages/adapter-pgsql/src/' \
+  2>/dev/null)
 
 if [ -z "$staged" ]; then
-  exit 0  # No source changes staged, skip
+  exit 0  # No library source changes staged, skip
 fi
 
 echo "🔨 Rebuilding dist/ (source files staged)..."
 
-# Build in dependency order: types → core + nql (parallel) → adapter
-if ! pnpm -C packages/types build 2>&1 | tail -1; then
-  echo "❌ packages/types build failed"
-  exit 1
-fi
-
-if ! pnpm -C packages/core build 2>&1 | tail -1; then
-  echo "❌ packages/core build failed"
-  exit 1
-fi
-
-pnpm -C packages/nql build 2>&1 | tail -1 &
-NQL_PID=$!
-
-wait $NQL_PID
-if [ $? -ne 0 ]; then
-  echo "❌ packages/nql build failed"
-  exit 1
-fi
-
-if ! pnpm -C packages/adapter-pgsql build 2>&1 | tail -1; then
-  echo "❌ packages/adapter-pgsql build failed"
-  exit 1
-fi
+# Build in dependency order: types → core → nql → adapter-pgsql
+pnpm -C packages/types build
+pnpm -C packages/core build
+pnpm -C packages/nql build
+pnpm -C packages/adapter-pgsql build
 
 echo "✅ dist/ rebuilt — build OK"

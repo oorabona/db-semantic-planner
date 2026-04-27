@@ -228,13 +228,16 @@ pull request. Scope is **required** and must match one of:
 
 Running `pnpm install` automatically wires up two git hooks via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks):
 
-- **pre-commit** rebuilds the per-package `dist/` artifacts when source files
-  in `packages/*/src/` are staged, so committed code always has a fresh
-  build that other workspaces can consume.
+- **pre-commit** rebuilds the per-package `dist/` artifacts when source
+  files in any of the library packages (`types`, `core`, `nql`,
+  `adapter-pgsql`) are staged. The build acts as a smoke test: if it
+  fails the commit is blocked. `dist/` itself is gitignored — the
+  rebuild is for local workspace consumers (e.g. `cli`, `mcp-server`,
+  `gui`) and as a fast feedback signal that source compiles cleanly.
 - **commit-msg** validates the commit message against
   `commitlint.config.mjs` (Conventional Commits, scope-enum, body/footer
-  rules). The rules mirror what CI enforces — local validation gives fast
-  feedback before push.
+  rules). The rules mirror what CI enforces — local validation gives
+  fast feedback before push.
 
 CI is authoritative: even if you bypass the local hook with
 `git commit --no-verify`, the `commitlint` GitHub Action will catch any
@@ -246,11 +249,6 @@ appears in the commit body without a blank line before it, the rule
 `footer-leading-blank` rejects the commit. To avoid this:
 - Move the reference to a real footer with a blank line before it, OR
 - Rephrase to break the `<word> #<digits>` shape (e.g. `PR 42`, `the prior PR`).
-
-**Workflow note.** This project's commit hooks rebuild `dist/` from staged
-source files, then `git add` them back. Avoid `git add -p` (partial
-staging by hunk) — the rebuild may produce a `dist/` that doesn't match
-what you intended to commit. Stage whole files and commit them as units.
 
 ### Rebuilding after source changes
 
