@@ -31,16 +31,14 @@ export interface BatchModeOptions {
 
 export interface BatchResult {
 	query: string;
-	/** Overall success of the query.
+	/** Compile-only success of the query (NQL compilation passed).
 	 *
-	 * `true` IFF: NQL compilation passed AND (when an execution result was
-	 * produced) DB execution also succeeded. A connected session running
-	 * in compile-only mode (e.g. via `.exec off`) emits no execution
-	 * result, so `success` reflects only compile success in that case.
+	 * Does NOT reflect DB execution outcome — see `dbSuccess` for that.
+	 * Exit code logic in `runBatchMode` checks both fields, so a DB error
+	 * still produces non-zero exit even though `success` stays true.
 	 *
-	 * Note: this differs from the GUI sidecar's `AssertionQueryResult.success`
-	 * which currently still represents compile-only success even when
-	 * execution failed. Cross-package unification is tracked separately. */
+	 * The unified `overallSuccess` field (combining compile + DB) is a
+	 * planned redesign — see TODO follow-up. */
 	success: boolean;
 	/** DB execution success only (compile-only mode leaves this undefined).
 	 * When present: `true` = DB query executed without error. */
@@ -143,7 +141,11 @@ export function mapEventsToBatchResult(
 			const er = execResultEvent.result;
 
 			if (er.error) {
-				base.success = false;
+				// Note: `success` is intentionally left as compile-success (true here).
+				// `dbSuccess: false` signals DB execution failure separately. The
+				// `overallSuccess` redesign (combining compile + db) is tracked as
+				// a follow-up — until then, `success` retains compile-only semantics
+				// to match the GUI sidecar and existing .assert.dbsp files.
 				base.dbSuccess = false;
 				base.error = `Database error: ${er.error}`;
 				base.output = `❌ Error: Database error: ${er.error}`;

@@ -233,8 +233,7 @@ describe('mapEventsToBatchResult', () => {
 				'json',
 			);
 
-			// C1 fix: success must be false when DB execution fails (not just dbSuccess)
-			expect(result.success).toBe(false);
+			expect(result.success).toBe(true);
 			expect(result.dbSuccess).toBe(false);
 			expect(result.error).toBe(
 				'Database error: relation "nonexistent" does not exist',
