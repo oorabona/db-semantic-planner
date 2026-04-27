@@ -254,3 +254,43 @@ describe('CsvParseError', () => {
 		expect(err).toBeInstanceOf(Error);
 	});
 });
+
+
+// ============================================================================
+// C6 regression: headerless CSV detection defaults to no-header
+// ============================================================================
+
+describe('[C6] CSV load defaults to no-header without schema columns', () => {
+	it('[C6] Alice,Paris\\nBob,London imports both rows when no schema columns given (regression gate)', async () => {
+		// Previously the heuristic saw non-numeric values in row 1 and consumed
+		// it as a header row, silently dropping Alice/Paris.
+		const path = createTempCsv('Alice,Paris\nBob,London\n');
+
+		const result = await parseCsvFile(path);
+
+		// Both rows must be present — first row must NOT be treated as header
+		expect(result.rows).toHaveLength(2);
+		expect(result.format.hasHeader).toBe(false);
+	});
+
+	it('does NOT auto-detect header when first-row values are proper nouns (uppercase-first)', async () => {
+		const path = createTempCsv('Alice,Paris\nBob,London\nCarol,Tokyo\n');
+
+		// Proper nouns (uppercase first letter) must never be auto-detected as
+		// column names — they look like data rows (same heuristic as the primary test).
+		const result = await parseCsvFile(path);
+
+		expect(result.rows).toHaveLength(3);
+		expect(result.format.hasHeader).toBe(false);
+	});
+
+	it('detects header when schema columns match the first row', async () => {
+		const path = createTempCsv('name,city\nAlice,Paris\nBob,London\n');
+
+		// With matching schema columns, header is detected
+		const result = await parseCsvFile(path, ['name', 'city']);
+
+		expect(result.rows).toHaveLength(2); // header consumed, 2 data rows
+		expect(result.format.hasHeader).toBe(true);
+	});
+});

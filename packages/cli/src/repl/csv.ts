@@ -167,15 +167,18 @@ function detectHeader(
 		if (matchCount > firstRowFields.length / 2) return true;
 	}
 
-	// Heuristic: if all values look like identifiers (not numeric), it's a header
+	// C6: The broad heuristic "all values are non-numeric, short strings" has an
+	// unacceptably high false-positive rate for plain data (e.g. Alice,Paris —
+	// both non-numeric, both short). Tighten to: only auto-detect as header when
+	// ALL values match the DB identifier pattern (lowercase/digits/underscores,
+	// no uppercase, no spaces). This reliably distinguishes column names like
+	// `name`, `user_id`, `created_at` from proper-noun data like `Alice`, `Paris`.
 	return firstRowFields.every((field) => {
 		const trimmed = field.trim();
 		if (trimmed === '') return false;
-		// Purely numeric → data, not header
-		if (/^\d+(\.\d+)?$/.test(trimmed)) return false;
-		// Very long strings (>50 chars) are probably data
-		if (trimmed.length > 50) return false;
-		return true;
+		// Must match DB identifier pattern: only lowercase letters, digits, underscores.
+		// Uppercase first letter → almost certainly data (proper noun), not a column name.
+		return /^[a-z][a-z0-9_]*$/.test(trimmed);
 	});
 }
 
