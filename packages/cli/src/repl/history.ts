@@ -44,7 +44,12 @@ export class CommandHistory {
 				const content = readFileSync(HISTORY_FILE, 'utf-8');
 				this.history = content
 					.split('\n')
-					.filter((line) => line.trim().length > 0);
+					.filter((line) => line.trim().length > 0)
+					// C8: Decode escape sequences written by save(). Reverse order:
+					// unescape \\n → \n first, then \\\\ → \.
+					.map((line) =>
+						line.replace(/\\n/g, '\n').replace(/\\\\/g, '\\'),
+					);
 			}
 		} catch {
 			// Ignore load errors, start with empty history
@@ -60,8 +65,16 @@ export class CommandHistory {
 			if (!existsSync(dir)) {
 				mkdirSync(dir, { recursive: true });
 			}
+			// C8: Escape embedded newlines so multiline queries survive the \n-based
+			// line separator. Each entry has its \ → \\, then \n → \n-literal before
+			// join so load() can reverse the escaping.
+			const encoded = this.history
+				.map((entry) =>
+					entry.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'),
+				)
+				.join('\n');
 			// SEC-5: Write with mode 0600 (user-only read/write)
-			writeFileSync(HISTORY_FILE, this.history.join('\n'), {
+			writeFileSync(HISTORY_FILE, encoded, {
 				encoding: 'utf-8',
 				mode: 0o600,
 			});
