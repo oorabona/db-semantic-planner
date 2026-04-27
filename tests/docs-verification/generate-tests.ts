@@ -126,7 +126,7 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 			// errors in one block don't abort other blocks' tests.
 			const encoded = JSON.stringify(block.code);
 			cases.push(
-				`it(${label}, async () => { await runBlock(${encoded}, ${JSON.stringify(block.file)}, ${block.line}); });`,
+				`it(${label}, async () => { await runBlock(${encoded}, ${JSON.stringify(block.file)}, ${block.line}, { realDbOnly: ${block.annotations.realDbOnly === true} }); });`,
 			);
 		}
 	}

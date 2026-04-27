@@ -1,5 +1,5 @@
 /**
- * Verify all NQL examples in docs/guides/nql-reference.md
+ * Verify all NQL examples in packages/docs/nql/index.md
  *
  * Parses the markdown to extract NQL queries and their expected SQL,
  * then compiles each through the real pipeline and compares.
@@ -150,7 +150,7 @@ function parseExamples(content: string): Example[] {
 }
 
 async function main() {
-	const mdPath = resolve(ROOT, 'docs/guides/nql-reference.md');
+	const mdPath = resolve(ROOT, 'packages/docs/nql/index.md');
 	const content = readFileSync(mdPath, 'utf-8');
 	const examples = parseExamples(content);
 

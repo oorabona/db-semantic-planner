@@ -23,6 +23,52 @@ const TMP_ROOT = join(
 );
 mkdirSync(TMP_ROOT, { recursive: true });
 
+/**
+ * Shared __defaultDb schema literal injected into both PREAMBLE and REAL_DB_PREAMBLE.
+ * All id columns carry primaryKey: true so FK references are valid in a real PG.
+ * Blocks that need exotic tables can shadow `db` / `orm` with their own declarations.
+ */
+const DEFAULT_SCHEMA_DEFINITION = `
+// Default schema — rich enough to cover most doc scenarios without redeclaration.
+// All id columns carry primaryKey: true so FK references satisfy PG uniqueness checks.
+// Blocks that need exotic tables (embeddings, vector search, FTS index etc.)
+// can shadow \`db\` / \`orm\` with their own declarations.
+const __defaultDb = schema({
+\tusers: {
+\t\tid: { type: 'uuid', primaryKey: true },
+\t\tname: 'string',
+\t\temail: 'string',
+\t\tcreatedAt: 'timestamp',
+\t\tactive: 'boolean',
+\t},
+\tposts: {
+\t\tid: { type: 'uuid', primaryKey: true },
+\t\ttitle: 'string',
+\t\tcontent: { type: 'text', nullable: true },
+\t\tauthorId: ref('users'),
+\t\tpublished: 'boolean',
+\t\tcreatedAt: 'timestamp',
+\t\tsearchVector: { type: 'tsvector', nullable: true },
+\t},
+\tcomments: {
+\t\tid: { type: 'uuid', primaryKey: true },
+\t\tpostId: ref('posts'),
+\t\tbody: 'string',
+\t},
+\tcategories: {
+\t\tid: { type: 'uuid', primaryKey: true },
+\t\tname: 'string',
+\t\tparentId: { type: ref('categories'), nullable: true },
+\t},
+\tdocuments: {
+\t\tid: { type: 'uuid', primaryKey: true },
+\t\ttitle: 'string',
+\t\tbody: 'text',
+\t\tembedding: { type: 'vector', nullable: true },
+\t},
+} as const);
+`;
+
 const PREAMBLE = `
 // === Core DX surface ===
 import {
@@ -94,43 +140,7 @@ class Pool { constructor(_: any) {} async query() { return { rows: [], rowCount:
 // Deterministic fake env for blocks referencing process.env
 process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 
-// Default schema — rich enough to cover most doc scenarios without redeclaration.
-// Blocks that need exotic tables (embeddings, vector search, FTS index etc.)
-// can shadow \`db\` / \`orm\` with their own declarations.
-const __defaultDb = schema({
-\tusers: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tname: 'string',
-\t\temail: 'string',
-\t\tcreatedAt: 'timestamp',
-\t\tactive: 'boolean',
-\t},
-\tposts: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\ttitle: 'string',
-\t\tcontent: { type: 'text', nullable: true },
-\t\tauthorId: ref('users'),
-\t\tpublished: 'boolean',
-\t\tcreatedAt: 'timestamp',
-\t\tsearchVector: { type: 'tsvector', nullable: true },
-\t},
-\tcomments: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tpostId: ref('posts'),
-\t\tbody: 'string',
-\t},
-\tcategories: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tname: 'string',
-\t\tparentId: { type: ref('categories'), nullable: true },
-\t},
-\tdocuments: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\ttitle: 'string',
-\t\tbody: 'text',
-\t\tembedding: { type: 'vector', nullable: true },
-\t},
-} as const);
+${DEFAULT_SCHEMA_DEFINITION}
 const __defaultOrm = createOrm({
 \tschema: __defaultDb,
 \tadapter: createPgsqlCompileOnlyAdapter(),
@@ -237,41 +247,7 @@ import { Pool } from 'pg';
 // Deterministic fake env for blocks referencing process.env
 process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
 
-// All id columns carry primaryKey: true so FK references are valid in a real PG.
-const __defaultDb = schema({
-\tusers: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tname: 'string',
-\t\temail: 'string',
-\t\tcreatedAt: 'timestamp',
-\t\tactive: 'boolean',
-\t},
-\tposts: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\ttitle: 'string',
-\t\tcontent: { type: 'text', nullable: true },
-\t\tauthorId: ref('users'),
-\t\tpublished: 'boolean',
-\t\tcreatedAt: 'timestamp',
-\t\tsearchVector: { type: 'tsvector', nullable: true },
-\t},
-\tcomments: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tpostId: ref('posts'),
-\t\tbody: 'string',
-\t},
-\tcategories: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\tname: 'string',
-\t\tparentId: { type: ref('categories'), nullable: true },
-\t},
-\tdocuments: {
-\t\tid: { type: 'uuid', primaryKey: true },
-\t\ttitle: 'string',
-\t\tbody: 'text',
-\t\tembedding: { type: 'vector', nullable: true },
-\t},
-} as const);
+${DEFAULT_SCHEMA_DEFINITION}
 
 // One Pool per block-module (each temp file is a fresh module).
 // Pool is ended at the bottom of __main() to avoid leaked connections.
@@ -427,15 +403,15 @@ export async function runBlock(
 	code: string,
 	file: string,
 	line: number,
+	options?: { realDbOnly?: boolean },
 ): Promise<void> {
 	// Strip imports (single-line and multi-line) then top-level `export` keywords
 	// so the code can safely execute inside the async IIFE wrapper.
 	const cleaned = stripTopLevelExport(stripImports(code));
 
-	// Detect `// doctest: real-db-only` annotation (any position in the block).
-	// Allow leading whitespace so indented annotations are also matched.
-	const isRealDbOnly =
-		REAL_DB && /^\s*\/\/\s*doctest:\s*real-db-only\b/im.test(code);
+	// Use the pre-parsed annotation flag passed by the generator.
+	// Avoids dual-parsing risk (regex anchor vs trim-line mismatch).
+	const isRealDbOnly = REAL_DB && (options?.realDbOnly ?? false);
 
 	let body: string;
 	if (isRealDbOnly) {
