@@ -218,7 +218,7 @@ Use an inner join against a batch as a scalable alternative to `WHERE id IN (...
 large value sets.
 
 ```typescript
-// doctest: skip — ref() in batchValues join on-clause compiled as literal object instead of column reference; tracked as compiler bug
+// doctest: real-db-only — requires a live PostgreSQL connection
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const activeIds = [/* potentially thousands of ids */]
