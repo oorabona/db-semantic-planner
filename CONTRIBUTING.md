@@ -224,16 +224,33 @@ pull request. Scope is **required** and must match one of:
 `types`, `nql`, `core`, `adapter-pgsql`, `cli`, `mcp-server`, `gui`, `docs`,
 `release`, `deps`, `deps-dev`, `ci`, `build`, `repo`.
 
-**Optional local hook** — if you want fast feedback at commit time instead
-of waiting for CI, install a client-side hook:
+### Local commit hooks
 
-```bash
-pnpm add -D -w @commitlint/cli @commitlint/config-conventional simple-git-hooks
-pnpm pkg set "simple-git-hooks.commit-msg"="pnpm exec commitlint --edit \$1"
-pnpm exec simple-git-hooks
-```
+Running `pnpm install` automatically wires up two git hooks via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks):
 
-This is purely optional — the CI enforcement is authoritative.
+- **pre-commit** rebuilds the per-package `dist/` artifacts when source files
+  in `packages/*/src/` are staged, so committed code always has a fresh
+  build that other workspaces can consume.
+- **commit-msg** validates the commit message against
+  `commitlint.config.mjs` (Conventional Commits, scope-enum, body/footer
+  rules). The rules mirror what CI enforces — local validation gives fast
+  feedback before push.
+
+CI is authoritative: even if you bypass the local hook with
+`git commit --no-verify`, the `commitlint` GitHub Action will catch any
+violation on push.
+
+**Watchpoint — footer-leading-blank trap.** Commitlint's parser treats
+lines like `PR #42` or `fixes #42` as footer references. If such a line
+appears in the commit body without a blank line before it, the rule
+`footer-leading-blank` rejects the commit. To avoid this:
+- Move the reference to a real footer with a blank line before it, OR
+- Rephrase to break the `<word> #<digits>` shape (e.g. `PR 42`, `the prior PR`).
+
+**Workflow note.** This project's commit hooks rebuild `dist/` from staged
+source files, then `git add` them back. Avoid `git add -p` (partial
+staging by hunk) — the rebuild may produce a `dist/` that doesn't match
+what you intended to commit. Stage whole files and commit them as units.
 
 ### Rebuilding after source changes
 
