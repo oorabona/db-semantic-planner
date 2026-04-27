@@ -12,6 +12,7 @@ import type {
 	ExpressionIntent,
 	ModelIR,
 	QueryIntent,
+	RefExpressionIntent,
 	WhereAndIntent,
 	WhereComparisonIntent,
 	WhereIntent,
@@ -49,6 +50,7 @@ import type {
 	Decision,
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
+import { buildColumnRef } from './handlers/where/utils.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -548,9 +550,27 @@ function handleLogicalIntent(
 }
 
 /**
- * Handle the 'comparison' kind when the right-hand value is an ExpressionRef.
- * The generic comparison handler expects a scalar value and would call buildParamRef — wrong.
- * Returns null when value is not an ExpressionRef (caller falls through to dispatcher).
+ * Handle the 'comparison' kind when the right-hand value is an ExpressionRef
+ * or a RefDefinition (schema `ref()`).
+ *
+ * Two distinct right-hand types arrive here:
+ *  - ExpressionRef  (`__expr === true`)  — from `exprRef()` / expressions-layer ref
+ *  - RefDefinition  (`__brand === 'ref'`) — from the public `ref()` exported by @dbsp/core
+ *
+ * Both represent a column reference (not a literal value). The generic comparison
+ * handler would call buildParamRef and parameterise the object — wrong.
+ *
+ * ExpressionRef is a column reference: ExpressionRef → compileExpressionIntent.
+ * RefDefinition carries `target` (e.g. 'filter.id') and must be compiled to
+ * the column-ref path so it produces "filter"."id" in SQL.
+ * Note: when a `RefDefinition` is used as a column reference here, any FK options
+ * carried in `RefDefinition.options` are intentionally ignored — those only apply
+ * at schema declaration time. Only `target` is consulted.
+ *
+ * buildColumnRef is used for the left side so that dotted field names like
+ * 'users.id' are split correctly into table='users', column='id'.
+ *
+ * Returns null when value is neither type (caller falls through to dispatcher).
  */
 function handleComparisonWithExprRef(
 	intent: WhereIntent,
@@ -559,27 +579,46 @@ function handleComparisonWithExprRef(
 ): Node | null {
 	const cmpIntent = intent as WhereComparisonIntent;
 	const v = cmpIntent.value;
-	const isExprRef =
-		v !== null &&
-		typeof v === 'object' &&
-		(v as Record<string, unknown>).__expr === true;
 
-	if (!isExprRef) return null;
+	if (v === null || typeof v !== 'object') return null;
 
-	const exprRef = v as { intent: ExpressionIntent };
-	const leftNode = columnRef(
-		cmpIntent.field,
-		ctx.rootTable,
-		undefined,
-		ctx.naming,
-	);
-	const rightNode = compileExpressionIntent(
-		exprRef.intent,
-		handlerCtx,
-		ctx.paramState,
-	);
-	const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
-	return binaryExpr(sqlOp, leftNode, rightNode);
+	const rec = v as Record<string, unknown>;
+
+	// ExpressionRef path: already has a compiled ExpressionIntent — delegate directly.
+	// ExpressionRef implements the `ExpressionSpec` duck type: __expr === true.
+	if (rec.__expr === true) {
+		const exprRef = v as { intent: ExpressionIntent };
+		// buildColumnRef handles dotted field names like 'table.col' by splitting them.
+		const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
+		const rightNode = compileExpressionIntent(
+			exprRef.intent,
+			handlerCtx,
+			ctx.paramState,
+		);
+		const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
+		return binaryExpr(sqlOp, leftNode, rightNode);
+	}
+
+	// RefDefinition path: the public ref() from @dbsp/core (schema DSL) returns
+	// { __brand: 'ref', target: 'alias.col', options: {} }. When used in an ON
+	// clause like eq('table.col', ref('alias.col')), `target` is a dotted column
+	// reference (table.column or just column) — compile it via RefExpressionIntent
+	// so it produces "alias"."col" instead of being parameterised as a literal.
+	if (rec.__brand === 'ref' && typeof rec.target === 'string') {
+		// buildColumnRef handles dotted field names like 'table.col' by splitting them.
+		const leftNode = buildColumnRef(cmpIntent.field, handlerCtx);
+		// Reuse the existing 'ref' kind handler via RefExpressionIntent.
+		// compileExpressionIntent splits 'table.col' into qualifier + column correctly.
+		const rightNode = compileExpressionIntent(
+			{ kind: 'ref', column: rec.target } satisfies RefExpressionIntent,
+			handlerCtx,
+			ctx.paramState,
+		);
+		const sqlOp = OP_MAP[cmpIntent.operator] ?? '=';
+		return binaryExpr(sqlOp, leftNode, rightNode);
+	}
+
+	return null;
 }
 
 export function compileWhereIntent(
