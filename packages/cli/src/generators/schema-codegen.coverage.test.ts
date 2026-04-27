@@ -591,7 +591,6 @@ describe('generateSchemaFile — coverage', () => {
 	});
 });
 
-
 // -----------------------------------------------------------------------
 // C7: invalid JS identifier table/column names are quoted in output
 // -----------------------------------------------------------------------
@@ -604,9 +603,7 @@ describe('[C7] invalid JS identifier names are quoted in generated schema', () =
 				'user-profile',
 				{
 					name: 'user-profile',
-					columns: [
-						{ name: 'id', type: 'uuid', nullable: false },
-					],
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
 					primaryKey: 'id',
 					foreignKeys: [],
 					indexes: [],

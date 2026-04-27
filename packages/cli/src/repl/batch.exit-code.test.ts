@@ -558,7 +558,11 @@ describe('[C4] assertion validation uses executable query list (no comments/blan
 		});
 		mockValidateAssertionBlocks.mockReturnValue([]);
 		mockRunAssertions.mockReturnValue({
-			total: 1, passed: 1, failed: 0, skipped: 0, results: [],
+			total: 1,
+			passed: 1,
+			failed: 0,
+			skipped: 0,
+			results: [],
 		});
 
 		await executeBatch({
@@ -572,7 +576,8 @@ describe('[C4] assertion validation uses executable query list (no comments/blan
 		// The second arg to validateAssertionBlocks must be executableQueries.length (1),
 		// NOT queries.length (3). Bug: raw count 3 would allow queryIndex=2 to pass
 		// validation, then fail silently at runtime because executable[2] doesn't exist.
-		const [, countArg, queryArrayArg] = mockValidateAssertionBlocks.mock.calls[0]!;
+		const [, countArg, queryArrayArg] =
+			mockValidateAssertionBlocks.mock.calls[0]!;
 		expect(countArg).toBe(1); // only 'from users' is executable
 		expect(queryArrayArg).toEqual(['from users']);
 	});

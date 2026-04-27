@@ -351,7 +351,9 @@ function generateTableCode(
 		return `\t\t${colKey}: ${code}`;
 	});
 
-	const rawTableName = shouldCamelCase ? snakeToCamelCase(table.name) : table.name;
+	const rawTableName = shouldCamelCase
+		? snakeToCamelCase(table.name)
+		: table.name;
 	// C7: quote the table key if it's not a valid JS identifier
 	const tableKey = quoteKey(rawTableName);
 	return `\t${tableKey}: {\n${columnLines.join(',\n')},\n\t}`;
