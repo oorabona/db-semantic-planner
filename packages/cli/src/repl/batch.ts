@@ -33,12 +33,14 @@ export interface BatchResult {
 	query: string;
 	/** Overall success of the query.
 	 *
-	 * `true` IFF: NQL compilation passed AND (if a DB connection was
-	 * available) DB execution also succeeded.
+	 * `true` IFF: NQL compilation passed AND (when an execution result was
+	 * produced) DB execution also succeeded. A connected session running
+	 * in compile-only mode (e.g. via `.exec off`) emits no execution
+	 * result, so `success` reflects only compile success in that case.
 	 *
 	 * Note: this differs from the GUI sidecar's `AssertionQueryResult.success`
-	 * which currently still represents compile-only success. Cross-package
-	 * unification is tracked separately. */
+	 * which currently still represents compile-only success even when
+	 * execution failed. Cross-package unification is tracked separately. */
 	success: boolean;
 	/** DB execution success only (compile-only mode leaves this undefined).
 	 * When present: `true` = DB query executed without error. */
