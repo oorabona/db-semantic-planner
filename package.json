@@ -56,6 +56,6 @@
 	},
 	"simple-git-hooks": {
 		"pre-commit": "scripts/git-hooks/pre-commit.sh",
-		"commit-msg": "scripts/git-hooks/commit-msg.sh $1"
+		"commit-msg": "scripts/git-hooks/commit-msg.sh \"$1\""
 	}
 }

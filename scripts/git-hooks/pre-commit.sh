@@ -5,6 +5,10 @@
 # and as fast feedback that source still compiles cleanly.
 set -eo pipefail
 
+# Anchor to repo root so relative paths and pnpm context resolve correctly,
+# even if the hook is invoked from a subdirectory.
+cd "$(git rev-parse --show-toplevel)"
+
 staged=$(git diff --cached --name-only \
   -- 'packages/types/src/' \
      'packages/core/src/' \

@@ -8,6 +8,10 @@ if [ -x "$GLOBAL_HOOK" ]; then
   "$GLOBAL_HOOK" "$1" || exit $?
 fi
 
+# Anchor to repo root so pnpm context resolves correctly,
+# even if the hook is invoked from a subdirectory.
+cd "$(git rev-parse --show-toplevel)"
+
 # Project-level commitlint validation against commitlint.config.mjs.
 # Catches footer-leading-blank, scope-enum, subject-case, etc.
 # CI runs the same rules; this hook gives fast local feedback.

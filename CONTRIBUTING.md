@@ -228,6 +228,11 @@ pull request. Scope is **required** and must match one of:
 
 Running `pnpm install` automatically wires up two git hooks via [simple-git-hooks](https://github.com/toplenboren/simple-git-hooks):
 
+> **If `pnpm install` was run with `--ignore-scripts`** (or your global pnpm
+> config disables lifecycle scripts), the hooks won't install automatically.
+> Run `pnpm run prepare` (or `pnpm exec simple-git-hooks`) once to set them
+> up.
+
 - **pre-commit** rebuilds the per-package `dist/` artifacts when source
   files in any of the library packages (`types`, `core`, `nql`,
   `adapter-pgsql`) are staged. The build acts as a smoke test: if it
