@@ -80,7 +80,10 @@ function quoteKey(name: string): string {
 	if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
 		return name;
 	}
-	return `'${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+	// F3: Delegate to singleQuoteEscape() which also handles \n, \r, \t.
+	// The previous inline chain only escaped \\ and ' — identifiers containing
+	// newlines, CR, or tabs would have produced invalid TypeScript output.
+	return singleQuoteEscape(name);
 }
 
 function emitDefault(d: unknown): string {

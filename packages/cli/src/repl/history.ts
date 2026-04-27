@@ -18,6 +18,39 @@ const HISTORY_FILE = join(homedir(), '.dbsp_history');
 const MAX_HISTORY_SIZE = 1000;
 
 /**
+ * Decode a single history file line back to the original command string.
+ *
+ * This is the correct inverse of the save() encoding:
+ *   \\\\ → \\ (literal backslash)
+ *   \\n  → \n (newline)
+ *
+ * A regex-replace chain (replace /\\n/g then /\\\\/g) has a mis-ordering
+ * hazard: an entry that contained a literal "\\n" sequence would decode as
+ * an actual newline, corrupting round-trips that mix literal and escaped forms.
+ */
+function unescapeHistoryLine(line: string): string {
+	let result = '';
+	for (let i = 0; i < line.length; i++) {
+		if (line[i] === '\\' && i + 1 < line.length) {
+			const next = line[i + 1];
+			if (next === '\\') {
+				result += '\\';
+				i++;
+			} else if (next === 'n') {
+				result += '\n';
+				i++;
+			} else {
+				// Unknown escape sequence — pass through unchanged
+				result += line[i];
+			}
+		} else {
+			result += line[i];
+		}
+	}
+	return result;
+}
+
+/**
  * Command history manager
  */
 export class CommandHistory {
@@ -45,9 +78,11 @@ export class CommandHistory {
 				this.history = content
 					.split('\n')
 					.filter((line) => line.trim().length > 0)
-					// C8: Decode escape sequences written by save(). Reverse order:
-					// unescape \\n → \n first, then \\\\ → \.
-					.map((line) => line.replace(/\\n/g, '\n').replace(/\\\\/g, '\\'));
+					// C8 / F1: Char-by-char decode is the correct inverse of save().
+					// A regex-replace chain has a mis-ordering hazard: an entry
+					// containing literal "\n" (backslash + n) would decode to an actual
+					// newline, corrupting round-trips that mix literal and escaped forms.
+					.map((line) => unescapeHistoryLine(line));
 			}
 		} catch {
 			// Ignore load errors, start with empty history

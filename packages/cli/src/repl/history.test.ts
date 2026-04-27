@@ -213,6 +213,66 @@ describe('CommandHistory', () => {
 // C8 regression: multiline queries preserve across sessions
 // ============================================================================
 
+// ============================================================================
+// F1 regression: char-by-char unescape decoder correctness
+// ============================================================================
+
+describe('[F1] history escape round-trip — literal backslash-n vs actual newline', () => {
+	let capturedWrite: string | undefined;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		capturedWrite = undefined;
+		vi.mocked(fs.existsSync).mockReturnValue(false);
+		vi.mocked(fs.readFileSync).mockReturnValue('');
+		vi.mocked(fs.writeFileSync).mockImplementation((_path, data) => {
+			capturedWrite = data as string;
+		});
+	});
+
+	it('literal \\\\n sequence (backslash + n) survives round-trip without becoming a newline', () => {
+		// Entry contains a literal backslash followed by 'n' — NOT a newline
+		const entry = 'foo\\nbar';
+		const h1 = new CommandHistory();
+		h1.add(entry);
+		expect(capturedWrite).toBeDefined();
+
+		// Reload
+		vi.mocked(fs.existsSync).mockReturnValue(true);
+		vi.mocked(fs.readFileSync).mockReturnValue(capturedWrite!);
+		const h2 = new CommandHistory();
+		expect(h2.length).toBe(1);
+		// Must come back as literal \n, not as a real newline character
+		expect(h2.getAll()[0]).toBe('foo\\nbar');
+	});
+
+	it('actual newline survives round-trip as a real newline character', () => {
+		const entry = 'foo\nbar'; // actual newline
+		const h1 = new CommandHistory();
+		h1.add(entry);
+		expect(capturedWrite).toBeDefined();
+
+		vi.mocked(fs.existsSync).mockReturnValue(true);
+		vi.mocked(fs.readFileSync).mockReturnValue(capturedWrite!);
+		const h2 = new CommandHistory();
+		expect(h2.length).toBe(1);
+		expect(h2.getAll()[0]).toBe('foo\nbar');
+	});
+
+	it('literal double backslash (\\\\\\\\) survives round-trip unchanged', () => {
+		const entry = 'path: C:\\\\Users'; // two literal backslashes in TS source
+		const h1 = new CommandHistory();
+		h1.add(entry);
+		expect(capturedWrite).toBeDefined();
+
+		vi.mocked(fs.existsSync).mockReturnValue(true);
+		vi.mocked(fs.readFileSync).mockReturnValue(capturedWrite!);
+		const h2 = new CommandHistory();
+		expect(h2.length).toBe(1);
+		expect(h2.getAll()[0]).toBe(entry);
+	});
+});
+
 describe('[C8] multiline history round-trip', () => {
 	let history: CommandHistory;
 	let capturedWrite: string | undefined;

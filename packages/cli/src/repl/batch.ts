@@ -192,6 +192,31 @@ export function mapEventsToBatchResult(
 }
 
 /**
+ * Coalesce backslash-continuation lines into single logical query strings.
+ *
+ * Mirrors the continuation logic in ReplEngine.submit(): a line ending with '\'
+ * is not a complete statement — it is joined with the next line. Callers that
+ * need to count distinct executable queries (e.g. assertion validation) must
+ * call this before counting so that continuation fragments do not appear as
+ * separate slots.
+ */
+function coalesceContinuations(lines: string[]): string[] {
+	const result: string[] = [];
+	let pending = '';
+	for (const q of lines) {
+		const trimmed = q.trim();
+		if (trimmed.endsWith('\\')) {
+			pending += (pending ? ' ' : '') + trimmed.slice(0, -1);
+		} else {
+			result.push(pending ? pending + ' ' + trimmed : trimmed);
+			pending = '';
+		}
+	}
+	if (pending) result.push(pending.trim());
+	return result;
+}
+
+/**
  * Core batch execution logic — runs queries and optional assertions,
  * returning structured results without printing or calling process.exit().
  *
@@ -255,10 +280,17 @@ export async function executeBatch(
 		// engine skips — validating against them lets queryIndex N pass for a
 		// comment slot, then fail silently at runtime when executable[N] is a
 		// different query.
-		const preExecExecutableQueries = queries.filter((q) => {
-			const t = q.trim();
-			return t.length > 0 && !t.startsWith('#');
-		});
+		// F2: Coalesce continuation lines before counting executable queries.
+		// engine.submit() internally accumulates lines ending with '\' and emits
+		// no events until the full statement arrives. Without coalescing here,
+		// the validation count would include each continuation fragment as a
+		// separate query slot, causing assertion index misalignment at runtime.
+		const preExecExecutableQueries = coalesceContinuations(
+			queries.filter((q) => {
+				const t = q.trim();
+				return t.length > 0 && !t.startsWith('#');
+			}),
+		);
 		const validationErrors = validateAssertionBlocks(
 			parseResult.blocks,
 			preExecExecutableQueries.length,
