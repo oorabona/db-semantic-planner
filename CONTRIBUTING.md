@@ -122,17 +122,41 @@ pnpm test:docs:generate        # just regenerate __generated__/ test files
 |------------|--------|
 | `// doctest: skip — <reason>` | Skip the block; reason shown in CI summary |
 | `// doctest: dry-run` | Import only, do not assert |
+| `// doctest: real-db-only` | Skip in compile-only mode; run in real-DB mode (CI job `test-docs-real-db` with `DBSP_DOCTEST_REAL_DB=1`) |
 | `// expected sql: SELECT …` | Strict match of the compiled SQL from `.dump()` |
 | `// expected params: [1, "a"]` | Strict match of the params array |
 
+`// doctest: real-db-only` is the correct annotation for blocks that call `.all()`, `.execute()`, `.stream()`, `.transaction()`, or DDL helpers (`.truncate()`, `.vacuum()`, `.indexes.create()`, etc.) — any block that requires a live PostgreSQL connection. Use `// doctest: skip` only for blocks that cannot execute even with a real DB (pseudo-code, API-signature fragments, or blocks referencing tables not in the default schema).
+
+**When to use `real-db-only`:**
+- Block calls `.all()`, `.execute()`, `.stream()`, `.transaction()`, or any DDL
+  helper that requires a live PostgreSQL connection.
+- The block uses tables from the default schema (`users`, `posts`, `comments`,
+  `categories`, `documents`). Blocks referencing other tables should use
+  `// doctest: skip` instead.
+
 **When to skip:**
-- Block requires a real PostgreSQL connection (e.g. `.all()`, `.execute()`,
-  transactions, streaming). Use the exact runtime error as the justification
-  so the next contributor can verify the reason is still valid.
 - Block is a type signature / pseudo-code / fragment that is not meant to
-  execute in isolation.
+  execute in isolation (e.g. `orm.tables.users.truncate(options?)`).
 - Block demonstrates a production application pattern (full web server,
   long-lived daemon) that cannot be expressed as a standalone snippet.
+- Block references tables or helpers not available in the default preamble schema.
+
+**Running the real-DB doctest suite locally:**
+
+```bash
+# Start a local PostgreSQL container (podman or docker)
+podman run -d --name dbsp-doctest -p 5432:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=doctest \
+  ghcr.io/oorabona/postgres:18-alpine-full
+
+# Run the real-DB suite
+DBSP_DOCTEST_REAL_DB=1 DATABASE_URL=postgres://postgres:postgres@localhost:5432/doctest \
+  pnpm test:docs
+
+# Cleanup
+podman stop dbsp-doctest && podman rm dbsp-doctest
+```
 
 **When to un-skip:** if you widen the runner preamble in
 `tests/docs-verification/runner.ts` to expose more symbols or tables, audit

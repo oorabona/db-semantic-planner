@@ -71,7 +71,7 @@ not statically typed because the schema is runtime-defined.
 Fetch the batch values as a standalone result set.
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 import { batchValues } from '@dbsp/core'
 
 const batch = batchValues(
@@ -181,7 +181,7 @@ Use `ordinality: true` to get a zero-indexed row number (`ord` column). Useful f
 preserving caller-defined ordering in a JOIN or SELECT.
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only operation; uses files table not in default preamble schema
 import { batchValues } from '@dbsp/core'
 
 const requestedPaths = ['/src/c.ts', '/src/a.ts', '/src/b.ts']
@@ -218,7 +218,7 @@ Use an inner join against a batch as a scalable alternative to `WHERE id IN (...
 large value sets.
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — ref() in batchValues join on-clause compiled as literal object instead of column reference; tracked as compiler bug
 import { batchValues, eq, ref } from '@dbsp/core'
 
 const activeIds = [/* potentially thousands of ids */]
@@ -226,7 +226,7 @@ const activeIds = [/* potentially thousands of ids */]
 const batch = batchValues(
   [activeIds],
   ['id'],
-  ['integer'],
+  ['uuid'],
   { alias: 'filter' },
 )
 

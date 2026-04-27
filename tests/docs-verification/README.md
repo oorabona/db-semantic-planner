@@ -53,12 +53,28 @@ Add these as comments inside a block to control how it's tested:
 ```typescript
 // doctest: skip                              — skip this block entirely
 // doctest: dry-run                           — compile/import only, no SQL assertion
+// doctest: real-db-only                      — skip in compile-only mode; run when DBSP_DOCTEST_REAL_DB=1
 // expected sql: SELECT "u".* FROM "users"…  — strict SQL match
 // expected params: [1, "alice"]             — strict params match
 ```
 
 Blocks that start with a `.methodName(...)` or a binary operator are auto-
 detected as fragment continuations and skipped.
+
+`real-db-only` is the right annotation for blocks that call `.all()`, `.execute()`,
+`.stream()`, `.transaction()`, or any DDL helper. The CI job `test-docs-real-db`
+runs these blocks against a real PostgreSQL instance (`ghcr.io/oorabona/postgres:18-alpine-full`).
+
+## Running
+
+```bash
+pnpm test:docs                 # generate + run (compile-only)
+pnpm test:docs:generate        # just regenerate the *.test.ts files
+
+# Real-DB mode (requires a running PostgreSQL instance):
+DBSP_DOCTEST_REAL_DB=1 DATABASE_URL=postgres://postgres:postgres@localhost:5432/doctest \
+  pnpm test:docs
+```
 
 ## When CI fails
 
@@ -68,6 +84,8 @@ Two kinds of fixes:
 1. **API changed, docs are stale** — update the doc block to use the current
    API. This is the common case and the whole point of this framework.
 
-2. **Doc block depends on a live database** — convert the block to use
-   `.dump()` (shows compiled SQL) instead of `.all()`/`.execute()`, or mark
-   it `// doctest: skip` if the block intentionally demonstrates execution.
+2. **Doc block depends on a live database** — annotate the block with
+   `// doctest: real-db-only` (if it uses standard schema tables) so it runs
+   in the `test-docs-real-db` CI job. Use `// doctest: skip` only for blocks
+   that genuinely cannot execute even with a real DB (pseudo-code, non-standard
+   tables, feature gaps).

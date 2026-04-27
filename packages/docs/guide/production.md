@@ -104,7 +104,7 @@ setInterval(() => {
 Set timeouts at multiple levels for defense in depth:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 // 1. Pool-level (PostgreSQL statement_timeout)
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -341,7 +341,7 @@ const users = await orm.select('users')
 For large result sets, use streaming to avoid memory exhaustion:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 // Stream 1M rows without loading all in memory
 const stream = orm.select('users').stream();
 
@@ -362,7 +362,7 @@ for await (const row of stream) {
 The PostgreSQL adapter supports cursor-based streaming via `pg-cursor`. For result sets too large to fit in memory, prefer streaming over loading all rows at once. If streaming is not available for your use case, fall back to offset pagination:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 // Offset pagination fallback
 const pageSize = 1000;
 let offset = 0;
@@ -386,7 +386,7 @@ while (true) {
 Use EXPLAIN to analyze query performance:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 // Compile the query first, then EXPLAIN via raw SQL
 const dump = await orm.select('users').where(eq('active', true)).dump();
 
@@ -397,6 +397,7 @@ const explainResult = await pool.query(
 
 // Check for issues
 const plan = JSON.stringify(explainResult.rows[0]);
+const rowCount = explainResult.rows.length;
 if (plan.includes('Seq Scan') && rowCount > 10000) {
   logger.warn('Sequential scan on large table', {
     sql: dump.sql,

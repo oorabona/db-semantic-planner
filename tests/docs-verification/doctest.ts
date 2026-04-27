@@ -15,6 +15,8 @@ export interface Annotation {
 	params?: string;
 	skip?: boolean;
 	dryRun?: boolean;
+	/** When true, the block is skipped in compile-only mode and runs only when DBSP_DOCTEST_REAL_DB=1. */
+	realDbOnly?: boolean;
 }
 
 export interface ExtractedBlock {
@@ -33,6 +35,7 @@ export interface ExtractedBlock {
  *   // expected params: <JSON array>
  *   // doctest: skip        — skip this block entirely
  *   // doctest: dry-run      — compile only, no snapshot/expect
+ *   // doctest: real-db-only — runs only when DBSP_DOCTEST_REAL_DB=1
  */
 function parseAnnotations(code: string): Annotation {
 	const lines = code.split('\n');
@@ -45,6 +48,7 @@ function parseAnnotations(code: string): Annotation {
 		if (paramsMatch) ann.params = paramsMatch[1].trim();
 		if (/^\/\/\s*doctest:\s*skip\b/i.test(line)) ann.skip = true;
 		if (/^\/\/\s*doctest:\s*dry-run\b/i.test(line)) ann.dryRun = true;
+		if (/^\/\/\s*doctest:\s*real-db-only\b/i.test(line)) ann.realDbOnly = true;
 	}
 	return ann;
 }

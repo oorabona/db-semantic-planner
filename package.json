@@ -19,7 +19,7 @@
 		"docs:api": "typedoc",
 		"gui:dev": "pnpm -C packages/gui tauri dev",
 		"test:docs:generate": "pnpm tsx tests/docs-verification/generate-tests.ts",
-		"test:docs": "pnpm test:docs:generate && pnpm vitest run tests/docs-verification/__generated__/"
+		"test:docs": "pnpm test:docs:generate && pnpm vitest run --config tests/docs-verification/vitest.config.docs.ts"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [

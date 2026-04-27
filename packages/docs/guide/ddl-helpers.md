@@ -96,7 +96,7 @@ orm.ddl.dropIndex(name, options)  // name: string, options?: DropIndexOptions �
 All methods respect `orm.withSchema()`:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 const tenantOrm = orm.withSchema('tenant_42')
 tenantOrm.tables.users.truncate()
 // SQL: TRUNCATE "tenant_42"."users"
@@ -107,7 +107,7 @@ tenantOrm.tables.users.truncate()
 ### 1. Truncate with cascade and identity reset
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ orders: { id: 'integer', total: 'integer' } });
@@ -125,7 +125,7 @@ TRUNCATE "orders" CASCADE RESTART IDENTITY
 ### 2. VACUUM FULL with ANALYZE
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ events: { id: 'integer', type: 'string', occurredAt: 'timestamp' } });
@@ -143,7 +143,7 @@ VACUUM FULL ANALYZE "events"
 ### 3. HNSW vector index
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });
@@ -169,7 +169,7 @@ CREATE INDEX IF NOT EXISTS "idx_embeddings_vector_hnsw"
 ### 4. Expression index (partial)
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 await orm.tables.users.indexes.create({
   name: 'idx_users_email_lower',
   columns: ['email'],
@@ -187,7 +187,7 @@ CREATE INDEX "idx_users_email_lower"
 ### 5. ALTER COLUMN type with USING
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ products: { id: 'integer', name: 'string', price_cents: 'string' } });
@@ -209,7 +209,7 @@ ALTER TABLE "products"
 ### 6. Index existence check before operation
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const exists = await orm.tables.users.indexes.exists('idx_users_email')
 if (!exists) {
   await orm.tables.users.indexes.create({
@@ -223,7 +223,7 @@ if (!exists) {
 ### 7. List indexes and check storage
 
 ```typescript
-// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only DDL operation; requires a real PostgreSQL connection and table bootstrap
 import { schema, createOrm } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 const __db = schema({ embeddings: { id: 'integer', vector: { type: 'text', dbType: 'vector(384)', nullable: true } } });

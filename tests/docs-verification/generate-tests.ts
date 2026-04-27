@@ -18,6 +18,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '../..');
 const GENERATED = join(__dirname, '__generated__');
 
+/** When true, blocks annotated with `// doctest: real-db-only` are included as runnable tests. */
+const REAL_DB = process.env.DBSP_DOCTEST_REAL_DB === '1';
+
 const SOURCES: Record<string, string[]> = {
 	readme: ['README.md'],
 	'package-readmes': [
@@ -95,7 +98,10 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 				`${block.file}:${block.line} (block ${block.index})`,
 			);
 
-			if (block.annotations.skip) {
+			const shouldSkip =
+				block.annotations.skip ||
+				(block.annotations.realDbOnly === true && !REAL_DB);
+			if (shouldSkip) {
 				skippedBlocks++;
 				cases.push(`it.skip(${label}, () => {});`);
 				continue;
@@ -135,6 +141,7 @@ import { runBlock } from '../runner.js';
 `;
 }
 
+const mode = REAL_DB ? 'real-db' : 'compile-only';
 console.log(
-	`Generated ${totalBlocks} block cases across ${Object.keys(SOURCES).length} buckets: ${runnableBlocks} runnable, ${skippedBlocks} skipped (fragment/explicit-skip).`,
+	`Generated ${totalBlocks} block cases across ${Object.keys(SOURCES).length} buckets: ${runnableBlocks} runnable, ${skippedBlocks} skipped (fragment/explicit-skip) [mode: ${mode}].`,
 );
