@@ -47,27 +47,40 @@ const db = schema({
 ### Query with Full Type Safety
 
 ```typescript
-// doctest: skip — demonstrates dbCasing: 'snake_case' option which requires a DB with snake_case column names; incompatible with default preamble schema (camelCase columns)
-import { createOrm, eq } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-import { Pool } from 'pg';
+import { createOrm, schema, ref, eq } from '@dbsp/core';
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
-const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
+// Schema declares camelCase identifiers (idiomatic JS/TS).
+const db = schema({
+  users: {
+    id: { type: 'uuid', primaryKey: true },
+    email: 'string',
+    active: 'boolean',
+  },
+  posts: {
+    id: { type: 'uuid', primaryKey: true },
+    title: 'string',
+    authorId: ref('users'),      // camelCase FK in JS
+    createdAt: 'timestamp',
+  },
+});
+
+// dbCasing: 'snake_case' translates camelCase model identifiers to
+// snake_case at the SQL boundary — no runtime column renaming needed.
+const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'snake_case' });
 const orm = createOrm({ schema: db, adapter });
 
-// Type-safe queries — table names and columns are autocompleted
-const activeUsers = await orm.select('users')
-  .where(eq('active', true))
-  .include('posts')
-  .all();
-// activeUsers: Array<{ id: string; email: string; name: string; active: boolean; posts: Array<...> }>
+// Type-safe query — code uses camelCase names; SQL uses snake_case columns.
+const dump = orm
+  .select('posts')
+  .where(eq('authorId', '11111111-1111-1111-1111-111111111111'))
+  .dump();
 
-// Inspect what the planner decided
-const dump = orm.select('users').include('posts').dump();
-console.log(dump.sql);       // Compiled SQL with $N parameters
-console.log(dump.params);    // Bound parameter values
-console.log(dump.plan);      // PlanReport: decisions, warnings, strategies
+// Generated SQL uses snake_case for all translated identifiers:
+//   SELECT "t0".* FROM "posts" AS "t0" WHERE "t0"."author_id" = $1
+// (createdAt → "created_at", users.email → "email", etc.)
+console.log(dump.sql);
+console.log(dump.params); // ['11111111-1111-1111-1111-111111111111']
 ```
 
 ### Type Inference Flow
