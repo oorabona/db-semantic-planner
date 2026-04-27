@@ -255,6 +255,18 @@ appears in the commit body without a blank line before it, the rule
 - Move the reference to a real footer with a blank line before it, OR
 - Rephrase to break the `<word> #<digits>` shape (e.g. `PR 42`, `the prior PR`).
 
+**Optional: chain a personal commit-msg hook.** If you have a global
+commit-msg validation script (e.g. one shared across multiple repos),
+opt in by exporting `DBSP_GLOBAL_COMMIT_MSG_HOOK` to its absolute
+path before committing:
+
+```sh
+export DBSP_GLOBAL_COMMIT_MSG_HOOK="$HOME/path/to/your/commit-msg-hook.sh"
+```
+
+The repo's commit-msg hook will run yours first, then the project's
+commitlint validation. Without the env var, only commitlint runs.
+
 ### Rebuilding after source changes
 
 Whenever you modify source files, rebuild the affected package before running E2E tests or the CLI:

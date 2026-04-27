@@ -22,10 +22,10 @@ fi
 
 echo "🔨 Rebuilding dist/ (source files staged)..."
 
-# Build in dependency order: types → core → nql → adapter-pgsql
+# Build in dependency order: types → nql → core → adapter-pgsql
 pnpm -C packages/types build
-pnpm -C packages/core build
 pnpm -C packages/nql build
+pnpm -C packages/core build
 pnpm -C packages/adapter-pgsql build
 
 echo "✅ dist/ rebuilt — build OK"
