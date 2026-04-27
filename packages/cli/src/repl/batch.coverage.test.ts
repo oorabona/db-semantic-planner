@@ -185,6 +185,27 @@ describe('mapEventsToBatchResult — coverage', () => {
 				'Error: Database error: permission denied',
 			);
 		});
+
+		// C1 regression: DB execution failure must propagate to success=false
+		// so that JSON consumers relying on `.success` (not `.dbSuccess`) get the
+		// correct signal without needing the runBatchMode-level workaround.
+		it('[C1] success is false when DB execution fails (regression gate)', () => {
+			const events: EngineEvent[] = [
+				queryResultEvent({ sql: 'SELECT 1', params: [] }),
+				executionResultEvent({
+					error: 'relation "nonexistent" does not exist',
+					rows: [],
+					columns: [],
+					rowCount: 0,
+					executionTimeMs: 0,
+				}),
+			];
+
+			const result = mapEventsToBatchResult('from nonexistent', events, 'json');
+
+			expect(result.success).toBe(false);
+			expect(result.dbSuccess).toBe(false);
+		});
 	});
 
 	describe('intent is not spread onto result when absent', () => {

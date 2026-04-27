@@ -133,6 +133,7 @@ export function mapEventsToBatchResult(
 			const er = execResultEvent.result;
 
 			if (er.error) {
+				base.success = false;
 				base.dbSuccess = false;
 				base.error = `Database error: ${er.error}`;
 				base.output = `❌ Error: Database error: ${er.error}`;
