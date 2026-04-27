@@ -47,9 +47,7 @@ export class CommandHistory {
 					.filter((line) => line.trim().length > 0)
 					// C8: Decode escape sequences written by save(). Reverse order:
 					// unescape \\n → \n first, then \\\\ → \.
-					.map((line) =>
-						line.replace(/\\n/g, '\n').replace(/\\\\/g, '\\'),
-					);
+					.map((line) => line.replace(/\\n/g, '\n').replace(/\\\\/g, '\\'));
 			}
 		} catch {
 			// Ignore load errors, start with empty history
@@ -69,9 +67,7 @@ export class CommandHistory {
 			// line separator. Each entry has its \ → \\, then \n → \n-literal before
 			// join so load() can reverse the escaping.
 			const encoded = this.history
-				.map((entry) =>
-					entry.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'),
-				)
+				.map((entry) => entry.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'))
 				.join('\n');
 			// SEC-5: Write with mode 0600 (user-only read/write)
 			writeFileSync(HISTORY_FILE, encoded, {

@@ -144,12 +144,17 @@ function detectSeparator(lines: readonly string[], quote: string): string {
 }
 
 /**
- * Detect whether the first row is a header row.
+ * Heuristic header detection (used when no '--header' / '--no-header' flag).
  *
- * Heuristics:
- * - If schema columns provided and first row matches them → header
- * - If all first-row values are non-numeric, non-empty short strings → header
- * - Otherwise → not a header
+ * Returns true only when ALL first-row values match a strict snake_case
+ * identifier pattern (lowercase letters, digits, underscores only, must
+ * start with a lowercase letter). This conservative heuristic rejects
+ * PascalCase / camelCase headers — pass 'schemaColumns' explicitly
+ * (or use '--header') for those.
+ *
+ * Conservative on purpose: incorrectly classifying a data row as header
+ * silently drops one record (worse than failing to detect a header,
+ * which only causes a recoverable schema mismatch error).
  */
 function detectHeader(
 	firstRowFields: readonly string[],

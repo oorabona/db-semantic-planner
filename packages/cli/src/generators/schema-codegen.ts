@@ -189,11 +189,11 @@ function generateRefCode(
 ): string {
 	const refOptions: string[] = [];
 
-	// C2: Non-PK FK column — emit references option so codegen round-trips correctly.
-	// generateTableCode stores entry.column only when refCol !== 'id' (the default PK).
-	if (fkInfo.column && fkInfo.column !== 'id') {
-		refOptions.push(`references: ['${fkInfo.column}']`);
-	}
+	// C2 REVERTED: `references` on column-level ref() is documented as
+	// "Composite FK support (table-level foreignKeys only)" and is silently
+	// ignored by buildFkColumn for column-level FKs (it always uses 'id').
+	// Emitting it would be a misleading no-op. Non-PK FK column round-trip
+	// is a known limitation tracked separately (core/ scope).
 
 	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
 	if (isPrimaryKey) {
