@@ -275,14 +275,20 @@ const __defaultDb = schema({
 
 // One Pool per block-module (each temp file is a fresh module).
 // Pool is ended at the bottom of __main() to avoid leaked connections.
-const pool = new Pool({
+const __pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   max: 2,
   min: 0,
   idleTimeoutMillis: 1000,
 });
 
-const adapter = createPgsqlAdapter(pool);
+// User-facing alias — doctest blocks reading 'pool' get the preamble pool.
+// Blocks that redeclare 'const pool = ...' shadow this binding, leaving
+// '__pool' unaffected.
+// biome-ignore lint/suspicious/noExplicitAny: doctest-scoped escape hatch
+const pool: any = __pool;
+
+const adapter = createPgsqlAdapter(__pool);
 // biome-ignore lint/suspicious/noExplicitAny: doctest-scoped escape hatch
 const orm: any = createOrm({ schema: __defaultDb, adapter });
 // biome-ignore lint/suspicious/noExplicitAny: doctest-scoped escape hatch
@@ -309,11 +315,11 @@ async function __resetSchema(): Promise<void> {
 \tconst tableNames: string[] = [...__defaultDb.tableNames] as string[];
 \tif (tableNames.length > 0) {
 \t\tconst quoted = tableNames.map((n) => '"' + n + '"').join(', ');
-\t\tawait pool.query('DROP TABLE IF EXISTS ' + quoted + ' CASCADE');
+\t\tawait __pool.query('DROP TABLE IF EXISTS ' + quoted + ' CASCADE');
 \t}
 \t// Replay all DDL statements (CREATE TABLE + FK constraints + indexes).
 \tfor (const stmt of __bootstrapDDL) {
-\t\tawait pool.query(stmt);
+\t\tawait __pool.query(stmt);
 \t}
 }
 
@@ -435,7 +441,12 @@ export async function runBlock(
 	if (isRealDbOnly) {
 		// Prepend schema reset; wrap block in try/finally so pool.end() always
 		// runs even if the block throws or returns early (prevents leaked Pools).
-		const blockWithReset = `await __resetSchema();\ntry {\n${cleaned}\n} finally {\n  await pool.end();\n}`;
+		const blockWithReset = `await __resetSchema();
+try {
+${cleaned}
+} finally {
+  await __pool.end();
+}`;
 		body = `${REAL_DB_PREAMBLE}\nasync function __main() {\n${blockWithReset}\n}\nawait __main();\n`;
 	} else {
 		body = `${PREAMBLE}\nasync function __main() {\n${cleaned}\n}\nawait __main();\n`;
