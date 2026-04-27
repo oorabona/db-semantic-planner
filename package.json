@@ -8,6 +8,7 @@
 		"node": ">=20"
 	},
 	"scripts": {
+		"prepare": "simple-git-hooks",
 		"build": "pnpm -r build",
 		"test": "pnpm run test:unit && pnpm run test:e2e",
 		"test:unit": "pnpm -r test",
@@ -34,6 +35,8 @@
 		}
 	},
 	"devDependencies": {
+		"@commitlint/cli": "^19.7.1",
+		"@commitlint/config-conventional": "^19.7.1",
 		"@biomejs/biome": "catalog:",
 		"@dbsp/adapter-pgsql": "workspace:*",
 		"@dbsp/core": "workspace:*",
@@ -48,6 +51,11 @@
 		"tsx": "catalog:",
 		"typedoc": "catalog:",
 		"typescript": "catalog:",
+		"simple-git-hooks": "^2.11.1",
 		"vitest": "catalog:"
+	},
+	"simple-git-hooks": {
+		"pre-commit": "scripts/git-hooks/pre-commit.sh",
+		"commit-msg": "scripts/git-hooks/commit-msg.sh \"$1\""
 	}
 }

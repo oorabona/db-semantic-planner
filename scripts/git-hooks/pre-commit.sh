@@ -1,0 +1,46 @@
+#!/bin/bash
+# Pre-commit: rebuild dist/ if library source files are staged
+# Acts as a smoke test: blocks the commit if any library package fails to build.
+# dist/ is gitignored — the rebuild is for local workspace consumers (cli, mcp-server, gui)
+# and as fast feedback that source still compiles cleanly.
+set -eo pipefail
+
+# Anchor to repo root so relative paths and pnpm context resolve correctly,
+# even if the hook is invoked from a subdirectory.
+cd "$(git rev-parse --show-toplevel)"
+
+staged=$(git diff --cached --name-only \
+  -- 'packages/types/src/' \
+     'packages/core/src/' \
+     'packages/nql/src/' \
+     'packages/adapter-pgsql/src/' \
+  2>/dev/null)
+
+if [ -z "$staged" ]; then
+  exit 0  # No library source changes staged, skip
+fi
+
+echo "🔨 Rebuilding dist/ (source files staged)..."
+
+# Warn if working-tree has unstaged changes in library source — the rebuild
+# runs against the working tree, so unstaged WIP can produce a false build
+# failure (or an unstaged fix can mask a staged break). Stage whole files
+# (no `git add -p`) and stash WIP before committing if you want certainty.
+dirty=$(git diff --name-only \
+  -- 'packages/types/src/' \
+     'packages/nql/src/' \
+     'packages/core/src/' \
+     'packages/adapter-pgsql/src/' \
+  2>/dev/null)
+if [ -n "$dirty" ]; then
+  echo "⚠️  Unstaged changes detected in library source — build runs against the working tree, not staged content."
+  echo "   If the rebuild result surprises you, stash WIP and re-run the commit."
+fi
+
+# Build in dependency order: types → nql → core → adapter-pgsql
+pnpm -C packages/types build
+pnpm -C packages/nql build
+pnpm -C packages/core build
+pnpm -C packages/adapter-pgsql build
+
+echo "✅ dist/ rebuilt — build OK"
