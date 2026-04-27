@@ -31,9 +31,17 @@ export interface BatchModeOptions {
 
 export interface BatchResult {
 	query: string;
-	/** NQL compilation success (parsing + semantic analysis) */
+	/** Compile-only success of the query (NQL compilation passed).
+	 *
+	 * Does NOT reflect DB execution outcome — see `dbSuccess` for that.
+	 * Exit code logic in `runBatchMode` checks both fields, so a DB error
+	 * still produces non-zero exit even though `success` stays true.
+	 *
+	 * The unified `overallSuccess` field (combining compile + DB) is a
+	 * planned redesign — see TODO follow-up. */
 	success: boolean;
-	/** DB execution success (only set when database is connected) */
+	/** DB execution success only (compile-only mode leaves this undefined).
+	 * When present: `true` = DB query executed without error. */
 	dbSuccess?: boolean;
 	output?: string;
 	sql?: string;
@@ -133,6 +141,11 @@ export function mapEventsToBatchResult(
 			const er = execResultEvent.result;
 
 			if (er.error) {
+				// Note: `success` is intentionally left as compile-success (true here).
+				// `dbSuccess: false` signals DB execution failure separately. The
+				// `overallSuccess` redesign (combining compile + db) is tracked as
+				// a follow-up — until then, `success` retains compile-only semantics
+				// to match the GUI sidecar and existing .assert.dbsp files.
 				base.dbSuccess = false;
 				base.error = `Database error: ${er.error}`;
 				base.output = `❌ Error: Database error: ${er.error}`;
@@ -180,6 +193,31 @@ export function mapEventsToBatchResult(
 		output: '',
 		type: 'command',
 	};
+}
+
+/**
+ * Coalesce backslash-continuation lines into single logical query strings.
+ *
+ * Mirrors the continuation logic in ReplEngine.submit(): a line ending with '\'
+ * is not a complete statement — it is joined with the next line. Callers that
+ * need to count distinct executable queries (e.g. assertion validation) must
+ * call this before counting so that continuation fragments do not appear as
+ * separate slots.
+ */
+function coalesceContinuations(lines: string[]): string[] {
+	const result: string[] = [];
+	let pending = '';
+	for (const q of lines) {
+		const trimmed = q.trim();
+		if (trimmed.endsWith('\\')) {
+			pending += (pending ? ' ' : '') + trimmed.slice(0, -1);
+		} else {
+			result.push(pending ? `${pending} ${trimmed}` : trimmed);
+			pending = '';
+		}
+	}
+	if (pending) result.push(pending.trim());
+	return result;
 }
 
 /**
@@ -240,11 +278,27 @@ export async function executeBatch(
 			throw new Error(`Assertion file parse errors:\n${errorMessages}`);
 		}
 
-		// Validate query references
+		// C4: Validate against executable queries (strips comments + blanks) so
+		// assertion indexes align with what runAssertions receives at runtime.
+		// Raw `queries` includes comment lines (#...) and blank lines that the
+		// engine skips — validating against them lets queryIndex N pass for a
+		// comment slot, then fail silently at runtime when executable[N] is a
+		// different query.
+		// F2: Coalesce continuation lines before counting executable queries.
+		// engine.submit() internally accumulates lines ending with '\' and emits
+		// no events until the full statement arrives. Without coalescing here,
+		// the validation count would include each continuation fragment as a
+		// separate query slot, causing assertion index misalignment at runtime.
+		const preExecExecutableQueries = coalesceContinuations(
+			queries.filter((q) => {
+				const t = q.trim();
+				return t.length > 0 && !t.startsWith('#');
+			}),
+		);
 		const validationErrors = validateAssertionBlocks(
 			parseResult.blocks,
-			queries.length,
-			queries,
+			preExecExecutableQueries.length,
+			preExecExecutableQueries,
 		);
 		if (validationErrors.length > 0) {
 			await engine.destroy();

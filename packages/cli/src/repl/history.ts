@@ -18,6 +18,39 @@ const HISTORY_FILE = join(homedir(), '.dbsp_history');
 const MAX_HISTORY_SIZE = 1000;
 
 /**
+ * Decode a single history file line back to the original command string.
+ *
+ * This is the correct inverse of the save() encoding:
+ *   \\\\ → \\ (literal backslash)
+ *   \\n  → \n (newline)
+ *
+ * A regex-replace chain (replace /\\n/g then /\\\\/g) has a mis-ordering
+ * hazard: an entry that contained a literal "\\n" sequence would decode as
+ * an actual newline, corrupting round-trips that mix literal and escaped forms.
+ */
+function unescapeHistoryLine(line: string): string {
+	let result = '';
+	for (let i = 0; i < line.length; i++) {
+		if (line[i] === '\\' && i + 1 < line.length) {
+			const next = line[i + 1];
+			if (next === '\\') {
+				result += '\\';
+				i++;
+			} else if (next === 'n') {
+				result += '\n';
+				i++;
+			} else {
+				// Unknown escape sequence — pass through unchanged
+				result += line[i];
+			}
+		} else {
+			result += line[i];
+		}
+	}
+	return result;
+}
+
+/**
  * Command history manager
  */
 export class CommandHistory {
@@ -44,7 +77,12 @@ export class CommandHistory {
 				const content = readFileSync(HISTORY_FILE, 'utf-8');
 				this.history = content
 					.split('\n')
-					.filter((line) => line.trim().length > 0);
+					.filter((line) => line.trim().length > 0)
+					// C8 / F1: Char-by-char decode is the correct inverse of save().
+					// A regex-replace chain has a mis-ordering hazard: an entry
+					// containing literal "\n" (backslash + n) would decode to an actual
+					// newline, corrupting round-trips that mix literal and escaped forms.
+					.map((line) => unescapeHistoryLine(line));
 			}
 		} catch {
 			// Ignore load errors, start with empty history
@@ -60,8 +98,14 @@ export class CommandHistory {
 			if (!existsSync(dir)) {
 				mkdirSync(dir, { recursive: true });
 			}
+			// C8: Escape embedded newlines so multiline queries survive the \n-based
+			// line separator. Each entry has its \ → \\, then \n → \n-literal before
+			// join so load() can reverse the escaping.
+			const encoded = this.history
+				.map((entry) => entry.replace(/\\/g, '\\\\').replace(/\n/g, '\\n'))
+				.join('\n');
 			// SEC-5: Write with mode 0600 (user-only read/write)
-			writeFileSync(HISTORY_FILE, this.history.join('\n'), {
+			writeFileSync(HISTORY_FILE, encoded, {
 				encoding: 'utf-8',
 				mode: 0o600,
 			});

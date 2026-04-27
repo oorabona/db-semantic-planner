@@ -516,6 +516,74 @@ describe('[CODEX-5] .exit/.quit terminates batch loop', () => {
 });
 
 // ---------------------------------------------------------------------------
+// C4 regression: validateAssertionBlocks receives executableQueries, not raw
+// ---------------------------------------------------------------------------
+
+describe('[C4] assertion validation uses executable query list (no comments/blanks)', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockReplEngineCtorArgs.length = 0;
+		mockEngineInstance.init.mockResolvedValue(undefined);
+		mockEngineInstance.destroy.mockResolvedValue(undefined);
+		mockEngineInstance.on.mockReturnValue(vi.fn());
+		mockEngineInstance.getState.mockReturnValue({ outputMode: 'json' });
+	});
+
+	it('[C4] validateAssertionBlocks is called with executableQueries count, not raw queries count', async () => {
+		// File has 3 lines: a comment, a blank, then a real query.
+		// Only 1 is executable — validateAssertionBlocks must receive count=1.
+		const queries = ['# comment', '', 'from users'];
+
+		let callIdx = 0;
+		let storedCb: ((event: unknown) => void) | undefined;
+		mockEngineInstance.on.mockImplementation((cb) => {
+			callIdx++;
+			if (callIdx > 1) storedCb = cb;
+			return vi.fn();
+		});
+		mockEngineInstance.submit.mockImplementation(async () => {
+			// Emit events only for the real query (engine skips comment/blank)
+			if (storedCb) {
+				storedCb({
+					type: 'query-result',
+					result: { sql: 'SELECT * FROM users', params: [] },
+				});
+			}
+		});
+
+		mockReadFileSync.mockReturnValue('valid assert content');
+		mockParseAssertionFile.mockReturnValue({
+			blocks: [{ queryIndex: 0, assertions: [{ type: 'success' }] }],
+			errors: [],
+		});
+		mockValidateAssertionBlocks.mockReturnValue([]);
+		mockRunAssertions.mockReturnValue({
+			total: 1,
+			passed: 1,
+			failed: 0,
+			skipped: 0,
+			results: [],
+		});
+
+		await executeBatch({
+			queries,
+			schema: makeSchema(),
+			schemaPath: 'test.schema.ts',
+			format: 'text' as const,
+			assertFile: '/path/to/file.assert.dbsp',
+		});
+
+		// The second arg to validateAssertionBlocks must be executableQueries.length (1),
+		// NOT queries.length (3). Bug: raw count 3 would allow queryIndex=2 to pass
+		// validation, then fail silently at runtime because executable[2] doesn't exist.
+		const [, countArg, queryArrayArg] =
+			mockValidateAssertionBlocks.mock.calls[0]!;
+		expect(countArg).toBe(1); // only 'from users' is executable
+		expect(queryArrayArg).toEqual(['from users']);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // M-class: CC-5+EH-6 — typed sentinel for init-error (no substring matching)
 // ---------------------------------------------------------------------------
 

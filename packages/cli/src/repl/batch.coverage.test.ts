@@ -1511,3 +1511,45 @@ describe('runBatchMode — coverage', () => {
 		expect(consoleLogSpy).not.toHaveBeenCalled();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// F2 regression: preExecExecutableQueries must coalesce continuation lines
+// ---------------------------------------------------------------------------
+
+describe('[F2] batch assertion validation with continuation lines', () => {
+	// We test coalesceContinuations indirectly via executeBatch: if the assertion
+	// file declares 1 block but the queries array contains a 2-line continuation
+	// (2 raw entries that form 1 logical query), validation must NOT fail.
+
+	it('continuation query counts as a single executable query in assertion validation', async () => {
+		// Two raw lines that form one logical query via backslash continuation
+		const queries = ['from users \\', 'where id = 1'];
+
+		// validateAssertionBlocks returns no errors when block count matches coalesced count
+		mockValidateAssertionBlocks.mockReturnValue([]);
+		mockParseAssertionFile.mockReturnValue({ blocks: [{}], errors: [] });
+		mockReadFileSync.mockReturnValue('');
+
+		// We only need to verify that executeBatch does NOT throw a validation error
+		// (i.e., "Assertion validation errors") — the engine mock handles the rest.
+		mockEngineInstance.on.mockImplementation((_cb) => vi.fn());
+
+		let threw = false;
+		try {
+			await executeBatch({
+				queries,
+				schema: makeSchema(),
+				schemaPath: '/schema.ts',
+				format: 'json',
+				assertFile: '/test.assert.dbsp',
+			});
+		} catch (e) {
+			if (String(e).includes('Assertion validation errors')) threw = true;
+		}
+		expect(threw).toBe(false);
+
+		// Confirm validateAssertionBlocks was called with coalesced count = 1, not 2
+		const [, executableCount] = mockValidateAssertionBlocks.mock.calls[0];
+		expect(executableCount).toBe(1);
+	});
+});

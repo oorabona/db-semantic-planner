@@ -590,3 +590,266 @@ describe('generateSchemaFile — coverage', () => {
 		});
 	});
 });
+
+// -----------------------------------------------------------------------
+// C7: invalid JS identifier table/column names are quoted in output
+// -----------------------------------------------------------------------
+describe('[C7] invalid JS identifier names are quoted in generated schema', () => {
+	it('[C7] table name with hyphen is quoted as object key (regression gate)', () => {
+		// Tables with names like user-profile cannot be bare keys in JS/TS object
+		// literals. The generated schema must quote them.
+		const tables = new Map<string, TableIR>([
+			[
+				'user-profile',
+				{
+					name: 'user-profile',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]);
+		const model: ModelIR = {
+			tables,
+			relations: new Map(),
+			getTable: (n) => tables.get(n),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		};
+
+		const result = generateSchemaFile(model);
+
+		// Bare key `user-profile` is invalid JS; must be quoted
+		expect(result).toMatch(/'user-profile':|"user-profile":/);
+		// Must not contain the bare unquoted identifier
+		expect(result).not.toContain('\tuser-profile: {');
+	});
+
+	it('valid JS identifier names remain unquoted', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		// 'users' is a valid identifier — no quoting needed
+		expect(result).toContain('\tusers: {');
+	});
+});
+
+// ============================================================================
+// F3 regression: quoteKey must escape control chars (newline, CR, tab) via
+// singleQuoteEscape — not just \\ and ' as the previous inline chain did.
+// ============================================================================
+
+describe('[F3] quoteKey escapes control characters in identifiers', () => {
+	// We test via generateSchemaFile by injecting a table whose name contains
+	// control characters (simulating an introspected schema with exotic names).
+
+	it('identifier with newline produces valid TS output', () => {
+		const model = schema({
+			users: { id: { type: 'uuid', primaryKey: true } },
+		}).model;
+		// Inject a table name that contains a real newline
+		const tables = new Map(model.tables);
+		const usersTable = tables.get('users')!;
+		tables.set('line\nnewline', {
+			...usersTable,
+			name: 'line\nnewline',
+		});
+		tables.delete('users');
+		const injected = {
+			...model,
+			tables,
+			getTable: (n: string) => tables.get(n),
+		};
+		const result = generateSchemaFile(injected as never);
+		// The key must appear as 'line\\nnewline' — not a literal newline inside quotes
+		expect(result).toContain("'line\\nnewline'");
+		// No raw newline should appear inside a string literal on the key line
+		const keyLine = result
+			.split('\n')
+			.find((l) => l.includes("'line\\nnewline'"));
+		expect(keyLine).toBeDefined();
+	});
+
+	it('identifier with tab produces valid TS output', () => {
+		const model = schema({
+			users: { id: { type: 'uuid', primaryKey: true } },
+		}).model;
+		const tables = new Map(model.tables);
+		const usersTable = tables.get('users')!;
+		tables.set('tab\there', {
+			...usersTable,
+			name: 'tab\there',
+		});
+		tables.delete('users');
+		const injected = {
+			...model,
+			tables,
+			getTable: (n: string) => tables.get(n),
+		};
+		const result = generateSchemaFile(injected as never);
+		expect(result).toContain("'tab\\there'");
+	});
+});
+
+// ============================================================================
+// SQL expression defaults + escape coverage
+// (recovered from deleted schema-codegen.codex.test.ts — non-C2 portions only)
+// ============================================================================
+
+describe('CODEX-11: SQL-expression defaults round-trip', () => {
+	it('emits { sql: "now()" } for a SQL-expression default — not [object Object]', () => {
+		const model = schema({
+			events: {
+				id: { type: 'uuid', primaryKey: true },
+				created_at: { type: 'datetime', default: 'placeholder' },
+			},
+		}).model;
+
+		const col = model.tables
+			.get('events')
+			?.columns.find((c) => c.name === 'created_at');
+		if (col) (col as { default: unknown }).default = { sql: 'now()' };
+
+		const result = generateSchemaFile(model);
+
+		expect(result).toContain("{ sql: 'now()' }");
+		expect(result).not.toContain('[object Object]');
+	});
+
+	it('emits { sql: "CURRENT_TIMESTAMP" } for a multi-word SQL default', () => {
+		const model = schema({
+			things: {
+				id: { type: 'uuid', primaryKey: true },
+				ts: { type: 'datetime', default: 'placeholder' },
+			},
+		}).model;
+
+		const col = model.tables
+			.get('things')
+			?.columns.find((c) => c.name === 'ts');
+		if (col)
+			(col as { default: unknown }).default = { sql: 'CURRENT_TIMESTAMP' };
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain("{ sql: 'CURRENT_TIMESTAMP' }");
+		expect(result).not.toContain('[object Object]');
+	});
+
+	it('emits { sql: "..." } for a SQL default with special characters', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				x: { type: 'string', default: 'placeholder' },
+			},
+		}).model;
+
+		const col = model.tables.get('t')?.columns.find((c) => c.name === 'x');
+		if (col)
+			(col as { default: unknown }).default = {
+				sql: "nextval('seq'::regclass)",
+			};
+
+		const result = generateSchemaFile(model);
+		// Apostrophes inside sql expr are escaped as \'
+		expect(result).toContain("{ sql: 'nextval(\\'seq\\'::regclass)' }");
+		expect(result).not.toContain('[object Object]');
+	});
+});
+
+describe('CODEX-14: string defaults are properly escaped', () => {
+	it('escapes double-quote in string default (single-quote TS style)', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				label: { type: 'string', default: 'say "hi"' },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		// Double-quotes don't need escaping inside single-quoted strings
+		expect(result).toContain('default: \'say "hi"\'');
+		expect(result).not.toContain('[object Object]');
+	});
+
+	it('escapes backslash in string default', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				path: { type: 'string', default: 'C:\\Users' },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		expect(result).toContain("default: 'C:\\\\Users'");
+	});
+
+	it('escapes single-quote in string default (produces valid TS)', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string', default: "O'Brien" },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		expect(result).toContain("default: 'O\\'Brien'");
+	});
+
+	it('preserves number defaults as unquoted literals', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				count: { type: 'integer', default: 42 },
+				score: { type: 'number', default: 0 },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		expect(result).toContain('default: 42');
+		expect(result).toContain('default: 0');
+		expect(result).not.toContain("default: '42'");
+	});
+
+	it('preserves boolean defaults as unquoted literals', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				active: { type: 'boolean', default: true },
+				archived: { type: 'boolean', default: false },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		expect(result).toContain('default: true');
+		expect(result).toContain('default: false');
+	});
+
+	it('emits null for a null default', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				opt: { type: 'string', nullable: true, default: 'placeholder' },
+			},
+		}).model;
+		const col = model.tables.get('t')?.columns.find((c) => c.name === 'opt');
+		if (col) (col as { default: unknown }).default = null;
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain('default: null');
+	});
+
+	it('escapes newline in string default', () => {
+		const model = schema({
+			t: {
+				id: { type: 'uuid', primaryKey: true },
+				note: { type: 'string', default: 'line1\nline2' },
+			},
+		}).model;
+		const result = generateSchemaFile(model);
+		// \n becomes \\n in the TS source literal
+		expect(result).toContain("default: 'line1\\nline2'");
+	});
+});
