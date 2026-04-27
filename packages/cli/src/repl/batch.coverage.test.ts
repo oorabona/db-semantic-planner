@@ -185,7 +185,6 @@ describe('mapEventsToBatchResult — coverage', () => {
 				'Error: Database error: permission denied',
 			);
 		});
-
 	});
 
 	describe('intent is not spread onto result when absent', () => {

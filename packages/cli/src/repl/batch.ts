@@ -212,7 +212,7 @@ function coalesceContinuations(lines: string[]): string[] {
 		if (trimmed.endsWith('\\')) {
 			pending += (pending ? ' ' : '') + trimmed.slice(0, -1);
 		} else {
-			result.push(pending ? pending + ' ' + trimmed : trimmed);
+			result.push(pending ? `${pending} ${trimmed}` : trimmed);
 			pending = '';
 		}
 	}
