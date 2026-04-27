@@ -176,6 +176,12 @@ function generateRefCode(
 ): string {
 	const refOptions: string[] = [];
 
+	// C2: Non-PK FK column — emit references option so codegen round-trips correctly.
+	// generateTableCode stores entry.column only when refCol !== 'id' (the default PK).
+	if (fkInfo.column && fkInfo.column !== 'id') {
+		refOptions.push(`references: ['${fkInfo.column}']`);
+	}
+
 	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
 	if (isPrimaryKey) {
 		refOptions.push('isPrimaryKey: true');

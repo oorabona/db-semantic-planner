@@ -345,3 +345,66 @@ describe('CODEX-13: FK + PK overlap', () => {
 		expect(result).toContain("ref('users'");
 	});
 });
+
+// ---------------------------------------------------------------------------
+// C2 regression: non-PK FK column reference preserved in codegen
+// ---------------------------------------------------------------------------
+describe('[C2] schema codegen preserves non-PK FK column references', () => {
+	it('emits references option when FK targets a non-id column (regression gate)', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+				email: { type: 'string' },
+			},
+			memberships: {
+				id: { type: 'uuid', primaryKey: true },
+				user_email: { type: 'string' },
+			},
+		}).model;
+
+		// Inject FK: memberships.user_email → users.email
+		const table = model.tables.get('memberships');
+		if (table) {
+			(table.foreignKeys as Array<import('@dbsp/types').ForeignKeyIR>).push({
+				columns: ['user_email'] as readonly string[],
+				references: {
+					table: 'users',
+					columns: ['email'] as readonly string[],
+				},
+			});
+		}
+
+		const result = generateSchemaFile(model);
+
+		// Must emit ref('users', { references: ['email'] }) — not ref('users')
+		expect(result).toContain("references: ['email']");
+		expect(result).not.toMatch(/ref\('users'\)(?!\s*\/\*)/);
+	});
+
+	it('does NOT emit references option when FK targets the default PK (id)', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				author_id: { type: 'uuid' },
+			},
+		}).model;
+
+		// Inject FK: posts.author_id → users.id  (default PK, no references: needed)
+		const table = model.tables.get('posts');
+		if (table) {
+			(table.foreignKeys as Array<import('@dbsp/types').ForeignKeyIR>).push({
+				columns: ['author_id'] as readonly string[],
+				references: {
+					table: 'users',
+					columns: ['id'] as readonly string[],
+				},
+			});
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).not.toContain("references:");
+	});
+});
