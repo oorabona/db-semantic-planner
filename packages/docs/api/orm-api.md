@@ -47,12 +47,12 @@ const db = schema({
 ### Query with Full Type Safety
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — demonstrates dbCasing: 'snake_case' option which requires a DB with snake_case column names; incompatible with default preamble schema (camelCase columns)
 import { createOrm, eq } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-import pg from 'pg';
+import { Pool } from 'pg';
 
-const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
 const orm = createOrm({ schema: db, adapter });
 
@@ -359,7 +359,7 @@ const users = await tenantOrm.select('users').dump();
 ### Transactions
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only operation; uses orders/orderItems tables not in default preamble schema
 const result = await orm.transaction(async (tx) => {
   await tx.insert('orders').values({ customerId: 1, total: 99 }).dump();
   await tx.insert('orderItems').values({ orderId: 1, productId: 5 }).dump();
@@ -371,7 +371,7 @@ const result = await orm.transaction(async (tx) => {
 The callback receives a transaction-scoped ORM instance (`tx`) with the full ORM API. The transaction result is the return value of your callback:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only operation; uses orders table not in default preamble schema
 // Typed return value
 const order = await orm.transaction(async (tx) => {
   const [created] = await tx.insert('orders')
@@ -392,7 +392,7 @@ orm.withSchema('tenant_42').transaction(async (tx) => {
 **Nested transactions** reuse the outer transaction context — no savepoints, no additional BEGIN/COMMIT:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: skip — exec-only operation; uses logs table not in default preamble schema
 orm.transaction(async (outer) => {
   await outer.insert('users').values({ name: 'Alice' }).dump();
 
@@ -432,9 +432,9 @@ const names = await orm.select('users').columns(['id', 'name']).dump();
 ### `distinct()` — Remove Duplicates
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
-const departments = await orm.select('users').columns(['department']).distinct().all();
-// SQL: SELECT DISTINCT "department" FROM "users"
+// doctest: real-db-only — requires a live PostgreSQL connection
+const distinctNames = await orm.select('users').columns(['name']).distinct().all();
+// SQL: SELECT DISTINCT "name" FROM "users"
 ```
 
 ### `where()` — Filter Rows
@@ -992,7 +992,7 @@ The `exists()` method provides an optimized way to check if any rows match a que
 Unlike `first() !== undefined`, it generates efficient `SELECT EXISTS(...)` SQL:
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 // Check if any active users exist
 const hasActiveUsers = await orm.select('users').where(eq('active', true)).exists();
 
@@ -1024,8 +1024,9 @@ console.log(dump.plan);    // PlanReport with existsWrap: true
 ### Streaming
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const stream = orm.select('users').stream();
+let shouldStop = false; // set to true to stop early (e.g. on timeout or signal)
 
 for await (const user of stream) {
   console.log(user.name);
@@ -1036,7 +1037,7 @@ for await (const user of stream) {
 #### Stream Options
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const stream = orm.select('users').stream({
   chunkSize: 100,  // rows fetched per cursor batch (default: framework-defined)
 
@@ -1063,7 +1064,7 @@ for await (const user of stream) {
 #### Offset-Based
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const page = await orm.select('users')
   .orderBy('name')
   .paginate({ page: 2, perPage: 25 });
@@ -1080,7 +1081,7 @@ const page = await orm.select('users')
 #### Cursor-Based
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const page = await orm.select('users')
   .orderBy('createdAt', 'desc')
   .cursorPaginate({ first: 25 });
@@ -1210,7 +1211,7 @@ orm.select('users').withPlanOptions({ preferredStrategy: 'json_agg' })
 ### Raw SQL (Escape Hatch)
 
 ```typescript
-// doctest: skip — exec-only operation; requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 const results = await orm.raw<{ count: number }>(
   'SELECT COUNT(*) as count FROM "users" WHERE "active" = $1',
   [true]
