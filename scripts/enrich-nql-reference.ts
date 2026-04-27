@@ -1,7 +1,7 @@
 /**
  * NQL Reference Guide — Doc Enrichment Script
  *
- * Extracts NQL queries from docs/guides/nql-reference.md,
+ * Extracts NQL queries from packages/docs/nql/index.md,
  * compiles each against its schema, and enriches the document
  * with collapsible SQL + plan details + pedagogical explanations.
  *
@@ -29,7 +29,7 @@ import { compile } from '@dbsp/nql';
 import { createPgsqlCompileOnlyAdapter } from '../packages/adapter-pgsql/src/pgsql-adapter.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '..');
-const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
+const DOC_PATH = resolve(ROOT_DIR, 'packages/docs/nql/index.md');
 
 // ---------------------------------------------------------------------------
 // Schema loading

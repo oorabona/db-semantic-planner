@@ -65,7 +65,7 @@ detected as fragment continuations and skipped.
 `.stream()`, `.transaction()`, or any DDL helper. The CI job `test-docs-real-db`
 runs these blocks against a real PostgreSQL instance (`ghcr.io/oorabona/postgres:18-alpine-full`).
 
-## Running
+## Real-DB mode
 
 ```bash
 pnpm test:docs                 # generate + run (compile-only)

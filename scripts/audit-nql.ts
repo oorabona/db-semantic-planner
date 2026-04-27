@@ -1,5 +1,5 @@
 /**
- * NQL Audit Script — Compiles all NQL queries from nql-reference.md
+ * NQL Audit Script — Compiles all NQL queries from packages/docs/nql/index.md
  * and dumps SQL + planner decisions for automated review.
  *
  * Detects common bugs:
@@ -27,7 +27,7 @@ import { compile } from '@dbsp/nql';
 import { createPgsqlCompileOnlyAdapter } from '../packages/adapter-pgsql/src/pgsql-adapter.js';
 
 const ROOT_DIR = resolve(import.meta.dirname, '..');
-const DOC_PATH = resolve(ROOT_DIR, 'docs/guides/nql-reference.md');
+const DOC_PATH = resolve(ROOT_DIR, 'packages/docs/nql/index.md');
 
 async function loadExampleSchema(
 	name: string,
