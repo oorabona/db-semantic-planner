@@ -70,6 +70,19 @@ function singleQuoteEscape(s: string): string {
 		.replace(/\t/g, '\\t')}'`;
 }
 
+/**
+ * Return the key suitable for use as a TypeScript object key.
+ * Valid JS identifiers can be used bare; anything else is single-quote-wrapped.
+ * A valid JS identifier starts with a letter, underscore, or $, followed by
+ * letters, digits, underscores, or $.
+ */
+function quoteKey(name: string): string {
+	if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(name)) {
+		return name;
+	}
+	return `'${name.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
 function emitDefault(d: unknown): string {
 	if (d === null || d === undefined) return 'null';
 	if (typeof d === 'number' || typeof d === 'boolean') return String(d);
@@ -332,12 +345,16 @@ function generateTableCode(
 			: false;
 		const fkInfo = fkMap.get(col.name);
 		const code = generateColumnCode(col, isPrimaryKey, fkInfo, options);
-		const colName = shouldCamelCase ? snakeToCamelCase(col.name) : col.name;
-		return `\t\t${colName}: ${code}`;
+		const rawColName = shouldCamelCase ? snakeToCamelCase(col.name) : col.name;
+		// C7: quote the key if it's not a valid JS identifier (e.g. contains hyphens)
+		const colKey = quoteKey(rawColName);
+		return `\t\t${colKey}: ${code}`;
 	});
 
-	const tableName = shouldCamelCase ? snakeToCamelCase(table.name) : table.name;
-	return `\t${tableName}: {\n${columnLines.join(',\n')},\n\t}`;
+	const rawTableName = shouldCamelCase ? snakeToCamelCase(table.name) : table.name;
+	// C7: quote the table key if it's not a valid JS identifier
+	const tableKey = quoteKey(rawTableName);
+	return `\t${tableKey}: {\n${columnLines.join(',\n')},\n\t}`;
 }
 
 /**

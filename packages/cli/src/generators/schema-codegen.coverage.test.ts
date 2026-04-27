@@ -590,3 +590,57 @@ describe('generateSchemaFile — coverage', () => {
 		});
 	});
 });
+
+
+// -----------------------------------------------------------------------
+// C7: invalid JS identifier table/column names are quoted in output
+// -----------------------------------------------------------------------
+describe('[C7] invalid JS identifier names are quoted in generated schema', () => {
+	it('[C7] table name with hyphen is quoted as object key (regression gate)', () => {
+		// Tables with names like user-profile cannot be bare keys in JS/TS object
+		// literals. The generated schema must quote them.
+		const tables = new Map<string, TableIR>([
+			[
+				'user-profile',
+				{
+					name: 'user-profile',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]);
+		const model: ModelIR = {
+			tables,
+			relations: new Map(),
+			getTable: (n) => tables.get(n),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		};
+
+		const result = generateSchemaFile(model);
+
+		// Bare key `user-profile` is invalid JS; must be quoted
+		expect(result).toMatch(/'user-profile':|"user-profile":/);
+		// Must not contain the bare unquoted identifier
+		expect(result).not.toContain('\tuser-profile: {');
+	});
+
+	it('valid JS identifier names remain unquoted', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		// 'users' is a valid identifier — no quoting needed
+		expect(result).toContain('\tusers: {');
+	});
+});
