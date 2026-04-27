@@ -75,6 +75,9 @@ mkdirSync(GENERATED, { recursive: true });
 
 let totalBlocks = 0;
 let skippedBlocks = 0;
+let skippedFragment = 0;
+let skippedExplicit = 0;
+let skippedRealDbOnly = 0;
 let runnableBlocks = 0;
 
 for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
@@ -98,16 +101,21 @@ for (const [bucket, mdFiles] of Object.entries(SOURCES)) {
 				`${block.file}:${block.line} (block ${block.index})`,
 			);
 
-			const shouldSkip =
-				block.annotations.skip ||
-				(block.annotations.realDbOnly === true && !REAL_DB);
-			if (shouldSkip) {
+			if (block.annotations.skip) {
 				skippedBlocks++;
+				skippedExplicit++;
+				cases.push(`it.skip(${label}, () => {});`);
+				continue;
+			}
+			if (block.annotations.realDbOnly === true && !REAL_DB) {
+				skippedBlocks++;
+				skippedRealDbOnly++;
 				cases.push(`it.skip(${label}, () => {});`);
 				continue;
 			}
 			if (looksLikeFragment(block.code)) {
 				skippedBlocks++;
+				skippedFragment++;
 				cases.push(`it.skip(${label} + ' — fragment', () => {});`);
 				continue;
 			}
@@ -142,6 +150,9 @@ import { runBlock } from '../runner.js';
 }
 
 const mode = REAL_DB ? 'real-db' : 'compile-only';
+const realDbSuffix =
+	skippedRealDbOnly > 0 ? `, real-db-only: ${skippedRealDbOnly} [REAL_DB=0]` : '';
 console.log(
-	`Generated ${totalBlocks} block cases across ${Object.keys(SOURCES).length} buckets: ${runnableBlocks} runnable, ${skippedBlocks} skipped (fragment/explicit-skip) [mode: ${mode}].`,
+	`Generated ${totalBlocks} block cases across ${Object.keys(SOURCES).length} buckets: ${runnableBlocks} runnable, ${skippedBlocks} skipped` +
+		` (fragment: ${skippedFragment}, explicit-skip: ${skippedExplicit}${realDbSuffix}) [mode: ${mode}].`,
 );

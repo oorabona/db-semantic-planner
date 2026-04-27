@@ -395,12 +395,15 @@ const explainResult = await pool.query(
   dump.params,
 );
 
-// Check for issues
-const plan = JSON.stringify(explainResult.rows[0]);
-const rowCount = explainResult.rows.length;
-if (plan.includes('Seq Scan') && rowCount > 10000) {
+// EXPLAIN (FORMAT JSON) returns one result row containing the plan tree.
+// "Actual Rows" is the count of rows the executor actually returned at the top node.
+const planTree = explainResult.rows[0]?.['QUERY PLAN']?.[0]?.Plan;
+const actualRows: number = planTree?.['Actual Rows'] ?? 0;
+const planText = JSON.stringify(planTree);
+if (planText.includes('Seq Scan') && actualRows > 10000) {
   logger.warn('Sequential scan on large table', {
     sql: dump.sql,
+    actualRows,
     suggestion: 'Consider adding an index',
   });
 }

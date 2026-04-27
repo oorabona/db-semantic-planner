@@ -427,13 +427,15 @@ export async function runBlock(
 	const cleaned = stripTopLevelExport(stripImports(code));
 
 	// Detect `// doctest: real-db-only` annotation (any position in the block).
+	// Allow leading whitespace so indented annotations are also matched.
 	const isRealDbOnly =
-		REAL_DB && /^\/\/\s*doctest:\s*real-db-only\b/im.test(code);
+		REAL_DB && /^\s*\/\/\s*doctest:\s*real-db-only\b/im.test(code);
 
 	let body: string;
 	if (isRealDbOnly) {
-		// Prepend schema reset and append pool close so each block is fully isolated.
-		const blockWithReset = `await __resetSchema();\n${cleaned}\nawait pool.end();`;
+		// Prepend schema reset; wrap block in try/finally so pool.end() always
+		// runs even if the block throws or returns early (prevents leaked Pools).
+		const blockWithReset = `await __resetSchema();\ntry {\n${cleaned}\n} finally {\n  await pool.end();\n}`;
 		body = `${REAL_DB_PREAMBLE}\nasync function __main() {\n${blockWithReset}\n}\nawait __main();\n`;
 	} else {
 		body = `${PREAMBLE}\nasync function __main() {\n${cleaned}\n}\nawait __main();\n`;
