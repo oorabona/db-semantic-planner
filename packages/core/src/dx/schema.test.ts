@@ -1490,6 +1490,9 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 		});
 
 		it('should default references to [id] when not specified', () => {
+			// Single-column FK with default references — validateFkTargets requires
+			// matching source/target column counts (R6-3a), so this test uses a 1:1 FK
+			// to specifically exercise the default-references-to-id behaviour.
 			const s = schema(
 				{
 					targets: {
@@ -1498,14 +1501,13 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 					sources: {
 						id: { type: 'uuid', primaryKey: true },
 						targetA: 'uuid',
-						targetB: 'uuid',
 					},
 				},
 				{
 					sources: {
 						foreignKeys: [
 							ref('targets', {
-								columns: ['targetA', 'targetB'],
+								columns: ['targetA'],
 							}),
 						],
 					},
@@ -1513,7 +1515,7 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			);
 
 			const table = s.model.tables.get('sources');
-			const fk = table!.foreignKeys.find((f) => f.columns.length === 2);
+			const fk = table!.foreignKeys.find((f) => f.columns.length === 1);
 			expect(fk!.references.columns).toEqual(['id']);
 		});
 

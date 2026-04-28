@@ -9,6 +9,22 @@
  */
 export default {
   extends: ['@commitlint/config-conventional'],
+
+  // Skip commits that carry a duplicate conventional-commit header as the
+  // first body paragraph — an artefact of certain squash-merge workflows
+  // where the PR title is prepended to the squashed body verbatim.
+  // The pattern: header line == third line (blank line 2, duplicate header line 3).
+  ignores: [
+    (commit) => {
+      const lines = commit.split('\n');
+      return (
+        lines.length >= 3 &&
+        lines[1] === '' &&
+        lines[0] === lines[2] &&
+        /^\w+(\([^)]+\))?: .+/.test(lines[0])
+      );
+    },
+  ],
   rules: {
     // Require scope — reject bare `feat:`, `fix:`, etc.
     'scope-empty': [2, 'never'],

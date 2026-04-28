@@ -348,7 +348,7 @@ describe('C7: resolveExistsIntent recursive walk', () => {
 describe('D1: validateSqlExpression $$ clarification', () => {
 	it('error message mentions "$$ (dollar-quoted strings)"', () => {
 		expect(() => validateSqlExpression('foo$$bar', 'test')).toThrow(
-			'$$ (dollar-quoted strings)',
+			'"$$" (dollar-quoted strings)',
 		);
 	});
 

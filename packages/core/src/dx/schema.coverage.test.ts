@@ -960,17 +960,20 @@ describe('schema coverage', () => {
 	// ======================================================================
 
 	describe('getTargetPkType fallback branches', () => {
-		it('should fall back to uuid when target table does not exist', () => {
-			// Edge case: the definition has a ref to a table that exists but has no id / no PK
-			// The ref target MUST exist (validated) but may lack explicit PK → falls back through the chain
+		it('should derive FK column type from target id when target uses implicit-id PK', () => {
+			// Renamed (was: 'should fall back to uuid when target table does not exist').
+			// Original test relied on a target table with no PK and no 'id' column — that
+			// schema is now correctly rejected by the post-build FK target gate
+			// (validateFkTargets) because 'tags.id' did not exist. The test now verifies
+			// that the implicit-id-PK convention resolves cleanly: with `id: 'uuid'` on
+			// the target, the FK source's type resolves to 'uuid' through the PK chain.
 			const db = schema({
-				tags: { name: 'text' }, // No PK, no id column
-				posts: { id: 'uuid', tagName: ref('tags') },
+				tags: { id: 'uuid', name: 'text' }, // implicit PK via 'id' convention
+				posts: { id: 'uuid', tagId: ref('tags') },
 			});
 
 			const table = db.model.getTable('posts');
-			const fkCol = table?.columns.find((c) => c.name === 'tagName');
-			// Falls through: no explicit PK, no 'id' column → uuid fallback
+			const fkCol = table?.columns.find((c) => c.name === 'tagId');
 			expect(fkCol?.type).toBe('uuid');
 		});
 
@@ -1218,6 +1221,7 @@ describe('schema coverage', () => {
 				categories: {
 					catId: { type: 'uuid', primaryKey: true },
 					parentCatId: ref('categories', {
+						references: ['catId'], // target PK is 'catId', not the default 'id'
 						nullable: true,
 						roles: { parent: 'parent', children: 'children' },
 					}),
@@ -1230,12 +1234,17 @@ describe('schema coverage', () => {
 		});
 
 		it('should use array first element as pkColumn when composite PK', () => {
-			// Edge case: self-ref table with composite PK — pkColumn takes first element
+			// Edge case: self-ref table with composite PK — pkColumn takes first element.
+			// `a` is also marked `unique: true` so the FK can independently target it
+			// (PG strict semantics: a single column from a composite PK is not unique
+			// alone — it needs an explicit UNIQUE constraint). The composite PK shape
+			// is preserved for the pseudoColumn-from-composite-PK behavior under test.
 			const db = schema({
 				nodes: {
-					a: { type: 'uuid', primaryKey: true },
+					a: { type: 'uuid', primaryKey: true, unique: true },
 					b: { type: 'uuid', primaryKey: true },
 					parentA: ref('nodes', {
+						references: ['a'], // target the unique-and-PK-member column
 						nullable: true,
 						roles: { parent: 'up', children: 'down' },
 					}),

@@ -249,6 +249,39 @@ export interface SchemaOptions {
 	 * Override with `.withoutDefaultFilters()` on the query builder.
 	 */
 	defaultFilters?: DefaultFilters;
+	/**
+	 * Column name treated as the implicit primary key for short-form column
+	 * declarations. When a table has no explicit `primaryKey: true` flag and
+	 * no FK columns, a column matching this name is inferred as the PK.
+	 *
+	 * Default: `'id'` (matches existing codebase convention).
+	 *
+	 * Set to `null` to disable the implicit-PK convention entirely. Primary
+	 * keys must then be declared explicitly with `primaryKey: true` (or are
+	 * inferred from FK columns for junction tables).
+	 *
+	 * Match the adapter's `defaultPkColumnName` if your project uses a
+	 * different naming scheme (e.g. `'pk_uuid'`).
+	 *
+	 * @remarks
+	 * `inferPrimaryKey` resolves PKs in this order:
+	 *   1. Explicit `primaryKey: true` on column(s)
+	 *   2. Column matching `defaultPkColumnName` (this option) — skipped when set to `null`
+	 *   3. FK columns (composite, for junction tables — applies regardless of this option)
+	 *   4. No primary key
+	 *
+	 * @example
+	 * // Default — 'id' is implicit PK
+	 * schema({ users: { id: 'uuid' } });
+	 *
+	 * // Custom convention
+	 * schema({ users: { pk_uuid: 'uuid' } }, undefined, { defaultPkColumnName: 'pk_uuid' });
+	 *
+	 * // Strict — no implicit PK convention
+	 * schema({ users: { id: 'uuid' } }, undefined, { defaultPkColumnName: null });
+	 * // ↑ no PK declared — FKs targeting users.id will fail validation.
+	 */
+	defaultPkColumnName?: string | null;
 }
 
 export interface Schema<T extends SchemaDefinition> {
@@ -539,7 +572,7 @@ export function schema<T extends SchemaDefinition>(
 	extras?: SchemaExtras,
 ): Schema<T> {
 	// Validate and convert to ModelIR
-	const model = schemaToModelIR(definition, constraints, extras);
+	const model = schemaToModelIR(definition, constraints, extras, options);
 	const tableNames = Object.keys(definition) as (keyof T)[];
 
 	// Validate default filters reference existing tables
@@ -598,17 +631,27 @@ export function schemaToModelIR(
 	definition: SchemaDefinition,
 	constraints?: SchemaConstraints,
 	extras?: SchemaExtras,
+	options?: SchemaOptions,
 ): ModelIR {
 	const tableNames = Object.keys(definition);
 
-	// Phase 1: Validate refs point to existing tables
+	// Phase 1: Validate refs point to existing tables (existence + roles only)
 	validateRefs(definition, tableNames);
 
 	// Phase 2: Collect all refs and validate constraints
 	const refsByTable = collectRefs(definition);
 
-	// Phase 3: Build tables (columns, PKs, FKs, indexes)
-	const tables = buildTables(definition, refsByTable, tableNames, constraints);
+	// Phase 3: Build tables (columns, PKs, FKs, indexes) — inferPrimaryKey runs here
+	const tables = buildTables(
+		definition,
+		refsByTable,
+		tableNames,
+		constraints,
+		options,
+	);
+
+	// Phase 3.5: Validate FK targets exist and are referenceable (post-build, uses resolved PKs)
+	validateFkTargets(tables);
 
 	// Phase 4: Build relations from refs
 	const relations = buildRelations(definition, refsByTable, tableNames);
@@ -649,9 +692,6 @@ export function schemaToModelIR(
 // Validation
 // ============================================================================
 
-/**
- * Validates that all refs point to existing tables.
- */
 function validateRefs(
 	definition: SchemaDefinition,
 	tableNames: string[],
@@ -685,6 +725,152 @@ function validateRefs(
 						`'roles' option is only valid for self-referential FKs, but '${columnName}' references '${columnDef.target}'`,
 						tableName,
 						columnName,
+					);
+				}
+			}
+		}
+	}
+}
+
+/**
+ * PostgreSQL UNIQUE constraints only support btree and hash index methods.
+ * Other methods (gin, gist, brin, spgist, hnsw, bm25, etc.) cannot enforce
+ * uniqueness and therefore cannot back a foreign key target column.
+ * Treat undefined as 'btree' (the PostgreSQL default).
+ */
+const UNIQUE_CAPABLE_INDEX_METHODS = new Set(['btree', 'hash']);
+
+/**
+ * Validates FK target columns exist and are referenceable.
+ *
+ * For ALL FKs (single-column and composite):
+ *   - Source and target column counts must match.
+ *   - Every referenced column must exist on the target table.
+ *
+ * For single-column FKs only (the case `buildRefColumn` produces where both
+ * `fk.columns.length === 1` AND `fk.references.columns.length === 1`):
+ *   - Referenced column must be referenceable: singleton primary key,
+ *     column-level `unique: true`, or a single-column UNIQUE index declared
+ *     via SchemaConstraints covering exactly the referenced column with no
+ *     partial-index `WHERE` clause, no expression columns, and using a
+ *     uniqueness-capable index method (btree or hash).
+ *   - Mirrors PostgreSQL error 42830 ("there is no unique constraint matching
+ *     given keys for referenced table") at schema()-time instead of at DDL
+ *     apply time.
+ *
+ * Composite PK members alone do not qualify as referenceable (matches PG strict
+ * semantics): a column that is part of a composite PK still needs an explicit
+ * UNIQUE constraint to be the target of an FK.
+ */
+function validateFkTargets(tables: readonly TableIR[]): void {
+	const tableMap = new Map(tables.map((t) => [t.name, t]));
+
+	for (const table of tables) {
+		for (const fk of table.foreignKeys) {
+			const target = tableMap.get(fk.references.table);
+			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
+			// but table-level constraints.foreignKeys bypass that — so this gate is
+			// the only barrier against constraint-based FKs to non-existent tables.
+			// Throw rather than skip silently.
+			if (!target) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' references non-existent table '${fk.references.table}'`,
+					table.name,
+					fk.columns[0],
+				);
+			}
+
+			// R4-1: Source-column existence — guard against constraint-level FKs that
+			// declare `columns: [...]` referencing local columns that don't exist on
+			// the source table. Column-level FKs (via buildRefColumn) can't trigger
+			// this because the source column IS the column being declared, but
+			// SchemaConstraints.foreignKeys does not validate this elsewhere.
+			for (const srcCol of fk.columns) {
+				if (!table.columns.some((c) => c.name === srcCol)) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' uses non-existent source column '${srcCol}'`,
+						table.name,
+						srcCol,
+					);
+				}
+			}
+
+			// Validate column counts. Zero-length arrays on either side are malformed
+			// and should be flagged here rather than silently passed to PG.
+			if (fk.columns.length === 0 || fk.references.columns.length === 0) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' has zero-length \`columns\` or \`references\` array`,
+					table.name,
+					fk.columns[0] ?? '',
+				);
+			}
+
+			// R6-3a: source and target column counts must match for ALL FKs (composite included).
+			// PostgreSQL requires a 1-to-1 mapping between source and referenced columns.
+			if (fk.columns.length !== fk.references.columns.length) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' has mismatched column counts: ` +
+						`${fk.columns.length} source column(s) but ${fk.references.columns.length} referenced column(s)`,
+					table.name,
+					fk.columns[0],
+				);
+			}
+
+			// R6-3b: every referenced column must exist on the target table — applies to ALL FKs.
+			for (const refCol of fk.references.columns) {
+				if (!target.columns.some((c) => c.name === refCol)) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' references non-existent column '${target.name}.${refCol}'`,
+						table.name,
+						fk.columns[0],
+					);
+				}
+			}
+
+			// Uniqueness check is single-column-only — composites left to PostgreSQL.
+			if (fk.columns.length !== 1 || fk.references.columns.length !== 1)
+				continue;
+
+			for (const refCol of fk.references.columns) {
+				// Existence already validated by R6-3b above for all FKs — targetCol is guaranteed defined here.
+				const targetCol = target.columns.find((c) => c.name === refCol);
+				if (!targetCol) continue; // defensive
+				// Uniqueness — a column is referenceable when any of the following holds:
+				//   1. It is the table's singleton resolved primaryKey (covers explicit column-level PK,
+				//      table-level singleton PK, and the implicit-id convention resolved by inferPrimaryKey).
+				//   2. It has explicit `unique: true`.
+				//   3. It is the sole column of a non-partial, non-expression single-column UNIQUE index
+				//      declared via SchemaConstraints (partial indexes with a WHERE clause, or expression
+				//      indexes, do NOT make a column referenceable — PG error 42830).
+				// Members of a composite PK alone do not qualify (matches PG strict semantics).
+				const isSingletonPk =
+					typeof target.primaryKey === 'string' && target.primaryKey === refCol;
+				const isUnique = targetCol.unique === true;
+				// R2-F2: PG only allows UNIQUE constraints on btree/hash indexes —
+				// gin/gist/brin/spgist/hnsw/bm25 cannot enforce uniqueness even when
+				// `unique: true` is declared. Fail at schema() time instead of DDL apply.
+				const isUniqueIndex =
+					target.indexes?.some((idx) => {
+						const method = idx.method ?? 'btree';
+						return (
+							idx.unique === true &&
+							idx.columns.length === 1 &&
+							idx.columns[0] === refCol &&
+							idx.where === undefined &&
+							(idx.expressions === undefined || idx.expressions.length === 0) &&
+							UNIQUE_CAPABLE_INDEX_METHODS.has(method)
+						);
+					}) ?? false;
+				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +
+							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
+							`add a single-column unique index via SchemaConstraints, ` +
+							`or — if '${refCol}' is your primary-key column convention — pass ` +
+							`\`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` ` +
+							`(or omit the option entirely if '${refCol}' is 'id').`,
+						table.name,
+						fk.columns[0],
 					);
 				}
 			}
@@ -880,6 +1066,22 @@ function getTargetPkType(
 }
 
 /**
+ * Returns the ColumnType for a specific named column in a target table definition.
+ * Used by buildRefColumn to derive the source column type when `references` points
+ * to a non-PK unique column. Falls back to `undefined` when the column is not found
+ * or is itself a ref (chain case handled by getTargetPkType).
+ */
+function getReferencedColumnType(
+	targetDef: TableDef,
+	referencedCol: string,
+): ColumnType | undefined {
+	const colDef = targetDef[referencedCol];
+	if (!colDef) return undefined;
+	if (isRef(colDef)) return undefined; // chain case — fall through to getTargetPkType
+	return normalizeColumnDef(colDef).type;
+}
+
+/**
  * Builds a FK column + ForeignKeyIR pair from a ref definition.
  */
 function buildRefColumn(
@@ -887,10 +1089,23 @@ function buildRefColumn(
 	columnDef: RefDefinition,
 	definition: SchemaDefinition,
 ): { col: ColumnIR; fk: ForeignKeyIR } {
-	const targetPkType = getTargetPkType(definition, columnDef.target);
+	// R5-1: When options.references specifies a single target column, derive the
+	// source column type from THAT column's type rather than the target's PK type.
+	// This prevents a type mismatch when the FK points at a unique non-PK column
+	// that has a different type than the table's PK (e.g. email:string vs id:uuid).
+	const targetDef = definition[columnDef.target];
+	const targetCol =
+		columnDef.options.references?.length === 1
+			? columnDef.options.references[0]
+			: undefined;
+	const inferredType =
+		targetCol && targetDef
+			? (getReferencedColumnType(targetDef, targetCol) ??
+				getTargetPkType(definition, columnDef.target))
+			: getTargetPkType(definition, columnDef.target);
 	const col: Mutable<ColumnIR> = {
 		name: columnName,
-		type: targetPkType,
+		type: inferredType,
 		nullable: columnDef.options.nullable ?? false,
 	};
 	if (columnDef.options.unique) col.unique = true;
@@ -963,22 +1178,40 @@ function buildColumnsForTable(
 }
 
 /**
- * Infers the final primary key from explicit list, FK columns, or 'id' fallback.
- * Strategy: explicit > composite FK > 'id' column > omit.
+ * Infers the final primary key from explicit declarations, the implicit-PK name
+ * convention, or FK columns (for junction tables).
+ *
+ * Resolution order:
+ *   1. Explicit `primaryKey: true` on column(s)
+ *   2. Column matching `defaultPkColumnName` (options.defaultPkColumnName) — skipped
+ *      when set to `null` (strict mode)
+ *   3. FK columns (composite PK for junction tables — applies regardless of option)
+ *   4. No primary key
  */
 function inferPrimaryKey(
 	primaryKey: string[],
 	foreignKeys: ForeignKeyIR[],
 	columns: ColumnIR[],
+	options?: { defaultPkColumnName?: string | null },
 ): string | readonly string[] | undefined {
 	if (primaryKey.length > 0) {
 		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
 	}
+	// Implicit PK convention BEFORE FK fallback. Honoured unless explicitly
+	// disabled with `defaultPkColumnName: null`.
+	const pkColName =
+		options?.defaultPkColumnName === undefined
+			? 'id'
+			: options.defaultPkColumnName;
+	if (pkColName !== null && columns.some((c) => c.name === pkColName)) {
+		return pkColName;
+	}
+	// FK fallback for junction tables (applies regardless of the option above).
 	const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
 	if (fkColumns.length > 0) {
 		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
 	}
-	return columns.some((c) => c.name === 'id') ? 'id' : undefined;
+	return undefined;
 }
 
 /**
@@ -1106,6 +1339,7 @@ function buildTables(
 	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
 	constraints?: SchemaConstraints,
+	options?: SchemaOptions,
 ): TableIR[] {
 	const tables: TableIR[] = [];
 
@@ -1118,7 +1352,7 @@ function buildTables(
 			tableDef,
 			definition,
 		);
-		const finalPk = inferPrimaryKey(primaryKey, foreignKeys, columns);
+		const finalPk = inferPrimaryKey(primaryKey, foreignKeys, columns, options);
 		const pseudoColumns = buildPseudoColumns(tableName, refsByTable, finalPk);
 		const columnIndexes = buildColumnIndexes(tableName, tableDef);
 		const { extraIndexes, checkConstraints, extraForeignKeys } =

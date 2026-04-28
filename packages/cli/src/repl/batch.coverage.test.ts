@@ -8,6 +8,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mapEventsToBatchResult } from './batch.js';
+import { coalesceContinuations } from './batch-internals.js';
 import type { EngineEvent } from './engine/engine-types.js';
 import type { ExecutionResult, QueryResult } from './types.js';
 
@@ -1551,5 +1552,63 @@ describe('[F2] batch assertion validation with continuation lines', () => {
 		// Confirm validateAssertionBlocks was called with coalesced count = 1, not 2
 		const [, executableCount] = mockValidateAssertionBlocks.mock.calls[0];
 		expect(executableCount).toBe(1);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// coalesceContinuations parity with engine
+// ---------------------------------------------------------------------------
+
+describe('coalesceContinuations parity with engine', () => {
+	it('joins single backslash-continuation pair with \\n', () => {
+		expect(coalesceContinuations(['from users \\', 'where id = 1'])).toEqual([
+			'from users\nwhere id = 1',
+		]);
+	});
+
+	it('joins three-line chain with \\n separators', () => {
+		expect(
+			coalesceContinuations([
+				'from users \\',
+				'where active = true \\',
+				'order by id',
+			]),
+		).toEqual(['from users\nwhere active = true\norder by id']);
+	});
+
+	it('blank line flushes pending continuation and is dropped', () => {
+		// 'from users \\' starts an accumulation; '' flushes it; only 'where id = 1' remains
+		expect(
+			coalesceContinuations(['from users \\', '', 'where id = 1']),
+		).toEqual(['where id = 1']);
+	});
+
+	it('comment line flushes pending continuation and is dropped', () => {
+		expect(
+			coalesceContinuations(['from users \\', '# comment', 'where id = 1']),
+		).toEqual(['where id = 1']);
+	});
+
+	it('preserves blank lines as separators between queries (no spurious empty entries)', () => {
+		expect(coalesceContinuations(['users', '', 'posts'])).toEqual([
+			'users',
+			'posts',
+		]);
+	});
+
+	it('comment lines never appear in output', () => {
+		expect(
+			coalesceContinuations(['users', '# this is a comment', 'posts']),
+		).toEqual(['users', 'posts']);
+	});
+
+	it('dangling continuation at EOF is emitted as a final entry', () => {
+		expect(coalesceContinuations(['from users \\'])).toEqual(['from users']);
+	});
+
+	it('whitespace-only line counts as blank', () => {
+		expect(
+			coalesceContinuations(['from users \\', '   ', 'where id = 1']),
+		).toEqual(['where id = 1']);
 	});
 });

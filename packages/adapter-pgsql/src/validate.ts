@@ -589,7 +589,7 @@ export function validateSqlExpression(sql: string, context: string): void {
 	// dollar-quoted strings ($$), backslashes.
 	if (/[;]|--|\/\*|\*\/|\$\$|\\/.test(sql)) {
 		throw new Error(
-			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, */, $$ (dollar-quoted strings), \\). Value: "${sql}"`,
+			`Unsafe SQL expression in ${context}: contains forbidden characters (;, --, /*, */, "$$" (dollar-quoted strings), \\). Value: "${sql}"`,
 		);
 	}
 }
