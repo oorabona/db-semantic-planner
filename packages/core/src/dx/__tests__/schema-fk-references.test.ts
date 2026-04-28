@@ -3,12 +3,10 @@
  *
  * Verifies that `ref('table', { references: ['col'] })` correctly propagates
  * the target column into ModelIR ForeignKeyIR instead of always defaulting to 'id'.
- *
- * See: PR #83 fix/core-fk-non-pk-round-trip
  */
 
 import { describe, expect, it } from 'vitest';
-import { ref, schema, schemaToModelIR } from '../schema.js';
+import { ref, schema, schemaToModelIR, SchemaValidationError } from '../schema.js';
 
 describe('buildRefColumn — column-level non-PK FK references', () => {
 	it('preserves options.references in ModelIR FK declaration', () => {
@@ -24,10 +22,7 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 		});
 
 		const model = schemaToModelIR(db.definition);
-		const posts = model.tables.get('posts');
-		const fk = posts?.foreignKeys?.[0];
-
-		expect(fk).toBeDefined();
+		const fk = model.tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.references.table).toBe('users');
 		expect(fk?.references.columns).toEqual(['email']);
 	});
@@ -41,12 +36,11 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			},
 		});
 
-		const model = schemaToModelIR(db.definition);
-		const fk = model.tables.get('posts')?.foreignKeys?.[0];
+		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.references.columns).toEqual(['id']);
 	});
 
-	it('defaults to ["id"] when options.references is not set but other options are', () => {
+	it('defaults to ["id"] when other options are set without references', () => {
 		const db = schema({
 			users: { id: { type: 'uuid', primaryKey: true } },
 			posts: {
@@ -55,27 +49,32 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			},
 		});
 
-		const model = schemaToModelIR(db.definition);
-		const fk = model.tables.get('posts')?.foreignKeys?.[0];
+		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.references.columns).toEqual(['id']);
 	});
 
-	it('stores the target column in the references array', () => {
+	it('plumbs onUpdate from options into ForeignKeyIR', () => {
 		const db = schema({
-			users: {
-				id: { type: 'uuid', primaryKey: true },
-				email: { type: 'string', unique: true },
-			},
+			users: { id: { type: 'uuid', primaryKey: true } },
 			posts: {
 				id: { type: 'uuid', primaryKey: true },
-				authorEmail: ref('users', { references: ['email'] }),
+				authorId: ref('users', { onUpdate: 'CASCADE' }),
 			},
 		});
 
-		const model = schemaToModelIR(db.definition);
-		const fk = model.tables.get('posts')?.foreignKeys?.[0];
-		expect(Array.isArray(fk?.references.columns)).toBe(true);
-		expect(fk?.references.columns).toHaveLength(1);
-		expect(fk?.references.columns[0]).toBe('email');
+		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
+		expect(fk?.onUpdate).toBe('CASCADE');
+	});
+
+	it('throws SchemaValidationError on empty references array', () => {
+		expect(() =>
+			schema({
+				users: { id: { type: 'uuid', primaryKey: true } },
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: ref('users', { references: [] }),
+				},
+			}),
+		).toThrow(SchemaValidationError);
 	});
 });

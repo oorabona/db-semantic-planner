@@ -108,7 +108,7 @@ export interface RefOptions {
 	columns?: readonly string[];
 	/**
 	 * Target columns the FK references. For column-level ref(): the
-	 * target column on the referenced table (defaults to its PK, i.e. ['id']).
+	 * target column on the referenced table (defaults to ['id'] by convention; the actual target PK column is not auto-resolved).
 	 * For table-level composite FKs: the list of target columns.
 	 */
 	references?: readonly string[];
@@ -891,6 +891,11 @@ function buildRefColumn(
 	};
 	if (columnDef.options.unique) col.unique = true;
 
+	if (columnDef.options.references && columnDef.options.references.length === 0) {
+		throw new SchemaValidationError(
+			`FK column '${columnName}' has empty 'references' array; provide at least one target column or omit to default to ['id'].`,
+		);
+	}
 	const fk: Mutable<ForeignKeyIR> = {
 		columns: [columnName],
 		references: {
@@ -899,6 +904,7 @@ function buildRefColumn(
 		},
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
+	if (columnDef.options.onUpdate) fk.onUpdate = columnDef.options.onUpdate;
 
 	return { col: col as ColumnIR, fk: fk as ForeignKeyIR };
 }

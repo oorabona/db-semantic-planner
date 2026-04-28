@@ -196,7 +196,7 @@ function generateRefCode(
 	// Now that buildRefColumn plumbs options.references into ModelIR,
 	// emitting ref('table', { references: ['col'] }) round-trips correctly.
 	if (fkInfo.column) {
-		refOptions.push(`references: ['${fkInfo.column}']`);
+		refOptions.push(`references: [${singleQuoteEscape(fkInfo.column)}]`);
 	}
 
 	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
