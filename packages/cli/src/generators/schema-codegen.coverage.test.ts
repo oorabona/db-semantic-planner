@@ -10,7 +10,8 @@
  */
 
 import type { ModelIR, TableIR } from '@dbsp/core';
-import { schema } from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
+import type { ForeignKeyIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { generateSchemaFile } from './schema-codegen.js';
 
@@ -851,5 +852,179 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 		const result = generateSchemaFile(model);
 		// \n becomes \\n in the TS source literal
 		expect(result).toContain("default: 'line1\\nline2'");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// CODEX-12: FK onUpdate preserved in ref()
+// ---------------------------------------------------------------------------
+describe('CODEX-12: FK onUpdate preserved in generated ref()', () => {
+	it('emits onUpdate: "CASCADE" when FK has ON UPDATE CASCADE', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			orders: {
+				id: { type: 'uuid', primaryKey: true },
+				user_id: ref('users'),
+			},
+		}).model;
+
+		// Inject onUpdate via mutation of the FK (simulates introspection)
+		const table = model.tables.get('orders');
+		if (table) {
+			const fk = table.foreignKeys[0];
+			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'CASCADE';
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain("onUpdate: 'CASCADE'");
+	});
+
+	it('omits onUpdate when FK has ON UPDATE NO ACTION (default)', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			orders: {
+				id: { type: 'uuid', primaryKey: true },
+				user_id: ref('users'),
+			},
+		}).model;
+
+		const table = model.tables.get('orders');
+		if (table) {
+			const fk = table.foreignKeys[0];
+			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'NO ACTION';
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).not.toContain('onUpdate:');
+	});
+
+	it('emits both onDelete and onUpdate when both are non-default', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			orders: {
+				id: { type: 'uuid', primaryKey: true },
+				user_id: ref('users'),
+			},
+		}).model;
+
+		const table = model.tables.get('orders');
+		if (table) {
+			const fk = table.foreignKeys[0];
+			if (fk) {
+				(fk as unknown as { onDelete: string; onUpdate: string }).onDelete =
+					'RESTRICT';
+				(fk as unknown as { onDelete: string; onUpdate: string }).onUpdate =
+					'SET DEFAULT';
+			}
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain("onDelete: 'RESTRICT'");
+		expect(result).toContain("onUpdate: 'SET DEFAULT'");
+	});
+
+	it('handles SET NULL as onUpdate', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				author_id: ref('users', { nullable: true }),
+			},
+		}).model;
+
+		const table = model.tables.get('posts');
+		if (table) {
+			const fk = table.foreignKeys[0];
+			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'SET NULL';
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain("onUpdate: 'SET NULL'");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// CODEX-13: FK + PK overlap — shared-PK 1:1 pattern
+// ---------------------------------------------------------------------------
+describe('CODEX-13: FK + PK overlap', () => {
+	it('emits isPrimaryKey: true inside ref() for a column that is both PK and FK', () => {
+		// Shared-PK 1:1: profiles.id is PK and also FK → users.id
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			profiles: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+		}).model;
+
+		// Inject FK: profiles.id → users.id
+		const table = model.tables.get('profiles');
+		if (table) {
+			(table.foreignKeys as Array<ForeignKeyIR>).push({
+				columns: ['id'] as readonly string[],
+				references: { table: 'users', columns: ['id'] as readonly string[] },
+			});
+		}
+
+		const result = generateSchemaFile(model);
+
+		// Must emit ref() (FK wins the code structure)
+		expect(result).toContain("ref('users'");
+		// Must preserve the PK flag inside ref() options
+		expect(result).toContain('isPrimaryKey: true');
+	});
+
+	it('does NOT emit isPrimaryKey for a non-PK FK column', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				author_id: ref('users'),
+			},
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		// author_id is FK but not PK — isPrimaryKey must not appear
+		expect(result).toContain("author_id: ref('users')");
+		expect(result).not.toContain('isPrimaryKey: true');
+	});
+
+	it('emits isPrimaryKey: true even when the column is also nullable FK', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			profiles: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+		}).model;
+
+		const table = model.tables.get('profiles');
+		if (table) {
+			(table.foreignKeys as Array<ForeignKeyIR>).push({
+				columns: ['id'] as readonly string[],
+				references: { table: 'users', columns: ['id'] as readonly string[] },
+			});
+			// Mark the column nullable
+			const col = table.columns.find((c) => c.name === 'id');
+			if (col) (col as { nullable: boolean }).nullable = true;
+		}
+
+		const result = generateSchemaFile(model);
+		expect(result).toContain('isPrimaryKey: true');
+		expect(result).toContain('nullable: true');
+		expect(result).toContain("ref('users'");
 	});
 });
