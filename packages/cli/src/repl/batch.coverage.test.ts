@@ -7,7 +7,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { coalesceContinuations, mapEventsToBatchResult } from './batch.js';
+import { mapEventsToBatchResult } from './batch.js';
+import { coalesceContinuations } from './batch-internals.js';
 import type { EngineEvent } from './engine/engine-types.js';
 import type { ExecutionResult, QueryResult } from './types.js';
 

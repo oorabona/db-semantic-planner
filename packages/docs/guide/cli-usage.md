@@ -311,7 +311,7 @@ When invoked in batch mode (`--eval` or `--input`) with `--format json`, `dbsp r
 | `error` | `string` | on failure | Human-readable error message. Set when `success === false` (compile error) or when `dbSuccess === false` (DB error). |
 | `sql` | `string` | for `query` / `mutation` | Compiled SQL (parameterized). |
 | `params` | `unknown[]` | for `query` / `mutation` | Positional parameter values bound to `$1..$N`. |
-| `output` | `string` | depends on `--output` mode | Pre-rendered result text (table/csv/json) — present when the engine emitted a textual rendering. |
+| `output` | `string` | depends on REPL `.output` mode | Pre-rendered result text (table/csv/json) — present when the engine emitted a textual rendering. |
 | `rowCount` | `number` | when `--db` and statement returned rows | Number of rows returned by the DB. |
 | `columns` | `string[]` | when `--db` and statement returned rows | Column names from the DB result, in order. |
 | `rows` | `unknown[]` | when `--db` and statement returned rows | Materialized row data — used by `db.value.equals` / `db.rows.equals` assertions. |
@@ -345,7 +345,7 @@ Present only when `--assert <file>` is supplied.
 
 | Code | Condition |
 |------|-----------|
-| `0` | All queries succeeded (compile **and** DB) and all assertions passed. |
+| `0` | All queries compiled successfully, and (when `--db` is provided) all DB executions succeeded, and all assertions passed. |
 | `1` | At least one query failed (`success === false` OR `dbSuccess === false`) **or** at least one assertion failed. |
 
 ::: tip Compile-only vs full success
