@@ -664,7 +664,9 @@ describe('defaultPkColumnName option', () => {
 			),
 		).toThrow(SchemaValidationError);
 	});
+});
 
+describe('getReferencedColumnType chain resolution (R5-1, R6-5)', () => {
 	it('FK source column type matches the referenced non-PK unique column type (R5-1)', () => {
 		const db = schema({
 			users: {
@@ -711,5 +713,43 @@ describe('defaultPkColumnName option', () => {
 			.get('userRoles')
 			?.columns.find((c) => c.name === 'roleOrg');
 		expect(fkCol?.type).toBe('string');
+	});
+
+	it('R6-5b: visited-Set cycle guard prevents infinite recursion on circular ref chains', () => {
+		// Construct a schema where two tables point to each other via non-PK ref()
+		// columns with explicit references clauses, forming a cycle in the
+		// getReferencedColumnType resolution chain. The visited-Set guard must
+		// short-circuit and return undefined before hitting a stack overflow.
+		//
+		// validateFkTargets will likely throw SchemaValidationError (FK targets are
+		// not PK/unique) before getReferencedColumnType even runs — that is also an
+		// acceptable outcome. The contract is: NO RangeError / stack overflow under
+		// any circumstances.
+		let caughtError: unknown;
+		try {
+			schema({
+				a: {
+					id: { type: 'uuid', primaryKey: true },
+					bRef: ref('b', { references: ['aRef'] }),
+				},
+				b: {
+					id: { type: 'uuid', primaryKey: true },
+					aRef: ref('a', { references: ['bRef'] }),
+				},
+			});
+		} catch (err) {
+			caughtError = err;
+		}
+		// validateFkTargets throws SchemaValidationError on this malformed schema
+		// (FK targets are not PK/unique), and that throw fires AFTER the cycle
+		// guard short-circuits. Assert an error fired AND it's the expected kind —
+		// a silent-pass future regression should fail this test, not silently
+		// accept it.
+		expect(caughtError).toBeDefined();
+		expect(caughtError).not.toBeInstanceOf(RangeError);
+		expect((caughtError as Error).message).not.toMatch(
+			/Maximum call stack|stack overflow/i,
+		);
+		expect(caughtError).toBeInstanceOf(SchemaValidationError);
 	});
 });

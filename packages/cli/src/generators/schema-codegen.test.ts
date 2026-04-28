@@ -502,6 +502,28 @@ describe('generateSchemaFile', () => {
 			expect(result).not.toContain("references: ['email_address']");
 		});
 
+		it('does NOT transform fk.references.columns entries when dbCasing is preserve (L1-followup-4-symmetry)', () => {
+			// Symmetric negative regression paired with the snake_case positive test above.
+			// In preserve mode, entries inside references[] must round-trip unchanged.
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email_address: { type: 'string', unique: true },
+				},
+				memberships: {
+					id: { type: 'uuid', primaryKey: true },
+					user_email: ref('users', { references: ['email_address'] }),
+				},
+			}).model;
+			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+			// references[] entry must NOT be camelCase-transformed in preserve mode
+			expect(result).toContain("references: ['email_address']");
+			expect(result).not.toContain("references: ['emailAddress']");
+			// Source column name also preserved as-is
+			expect(result).toContain('user_email:');
+			expect(result).not.toContain('userEmail:');
+		});
+
 		it('preserves column names when dbCasing is preserve', () => {
 			const model = schema({
 				users: {
