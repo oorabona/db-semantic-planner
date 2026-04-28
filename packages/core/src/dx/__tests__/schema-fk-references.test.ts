@@ -211,6 +211,41 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 			}),
 		).not.toThrow();
 	});
+
+	it('rejects FK targeting a non-PK column named like the implicit-PK convention', () => {
+		// Edge case: target table has BOTH a column named 'id' (which is NOT PK)
+		// AND a different actual PK. The FK targets 'id'. This must be rejected
+		// because PostgreSQL would reject it (42830) — the 'id' column is neither
+		// PK nor unique despite matching the implicit-PK convention name.
+		expect(() =>
+			schema({
+				tags: {
+					tagKey: { type: 'uuid', primaryKey: true }, // actual PK
+					id: { type: 'string' }, // looks like implicit-PK by name, but isn't unique/PK
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					tagRef: ref('tags', { references: ['id'] }),
+				},
+			}),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('accepts FK to implicit-id PK on a target without explicit primaryKey flag', () => {
+		// After the inferPrimaryKey priority swap, a target table with `id: 'uuid'`
+		// (short-form, no flag) AND additional FK columns still resolves the PK as 'id',
+		// not the FK column. The FK targeting 'id' must pass.
+		expect(() =>
+			schema({
+				users: { id: 'uuid' }, // implicit PK via convention
+				permissions: { id: 'uuid', userRef: ref('users') }, // userRef is FK column
+				audits: {
+					id: { type: 'uuid', primaryKey: true },
+					permissionRef: ref('permissions'), // permissions.id resolves as PK, not userRef
+				},
+			}),
+		).not.toThrow();
+	});
 });
 
 describe('idsArePrimaryKeys option', () => {

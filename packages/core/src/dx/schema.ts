@@ -259,6 +259,13 @@ export interface SchemaOptions {
 	 *   - column-level: `id: { type: 'uuid', primaryKey: true }`
 	 *   - table-level via constraints: `primaryKey: ['id']`
 	 *
+	 * @remarks
+	 * When `true`, `inferPrimaryKey` resolves PKs in this order:
+	 * 1. Explicit `primaryKey: true` on a column or table-level `primaryKey: [...]`
+	 * 2. Column matching `defaultPkColumnName` (the implicit convention)
+	 * 3. FK columns (composite, for junction tables with no `id`)
+	 * 4. Otherwise no PK
+	 *
 	 * @example
 	 * // Implicit-PK enabled (default)
 	 * schema({ users: { id: 'uuid' } });  // 'id' becomes PK
@@ -643,7 +650,7 @@ export function schemaToModelIR(
 	);
 
 	// Phase 3.5: Validate FK targets exist and are referenceable (post-build, uses resolved PKs)
-	validateFkTargets(tables, options);
+	validateFkTargets(tables);
 
 	// Phase 4: Build relations from refs
 	const relations = buildRelations(definition, refsByTable, tableNames);
@@ -683,16 +690,6 @@ export function schemaToModelIR(
 // ============================================================================
 // Validation
 // ============================================================================
-
-/**
- * Validates that all refs point to existing tables.
- */
-
-/**
- * Returns true when a target table column satisfies FK uniqueness requirements
- * (PostgreSQL error 42830 prevention): column must be declared as primary key
- * or unique. Short-form string column types and RefDefinitions always fail.
- */
 
 function validateRefs(
 	definition: SchemaDefinition,
@@ -735,25 +732,22 @@ function validateRefs(
 }
 
 /**
- * Validates that every FK's target columns exist on the target table AND are
- * referenceable — i.e. covered by either:
- *   - the target's primary key (column-level PK declared, table-level singleton PK,
- *     or the implicit-id PK convention when idsArePrimaryKeys is true)
- *   - an explicit `unique: true` flag on the target column(s)
+ * Validates each single-column FK's target column exists and is referenceable
+ * (singleton primary key OR `unique: true`).
  *
  * Mirrors PostgreSQL error 42830 ("there is no unique constraint matching given
  * keys for referenced table") at schema()-time instead of at DDL apply time.
  *
- * For column-level FKs (single-column targets, the only case `buildRefColumn` allows),
- * the rule is: target must be column-level PK / single-col table-level PK / unique.
- * Members of a composite PK alone don't qualify (matches PG strict semantics).
+ * Scope: single-column FKs (the case `buildRefColumn` produces) where both
+ * `fk.columns.length === 1` AND `fk.references.columns.length === 1`. Composite
+ * (table-level) FKs are skipped — PostgreSQL enforces them at DDL apply time, and
+ * the columns-vs-references count match is also a PG-side concern.
+ *
+ * Composite PK members alone do not qualify as referenceable (matches PG strict
+ * semantics): a column that is part of a composite PK still needs an explicit
+ * UNIQUE constraint to be the target of an FK.
  */
-function validateFkTargets(
-	tables: readonly TableIR[],
-	options?: { idsArePrimaryKeys?: boolean; defaultPkColumnName?: string },
-): void {
-	const idsArePk = options?.idsArePrimaryKeys ?? true;
-	const pkColName = options?.defaultPkColumnName ?? 'id';
+function validateFkTargets(tables: readonly TableIR[]): void {
 	const tableMap = new Map(tables.map((t) => [t.name, t]));
 
 	for (const table of tables) {
@@ -761,11 +755,10 @@ function validateFkTargets(
 			const target = tableMap.get(fk.references.table);
 			if (!target) continue; // already caught by validateRefs
 
-			// Only validate single-column FKs (column-level refs via buildRefColumn).
-			// Composite FKs from table-level constraints reference composite PKs/unique
-			// constraints that cannot be checked column-by-column — PostgreSQL will
-			// enforce those at DDL apply time (error 42830).
-			if (fk.references.columns.length !== 1) continue;
+			// Validate only column-level (single-column on both sides). Composite + count-mismatch
+			// FKs are skipped — PostgreSQL enforces them at DDL apply time.
+			if (fk.columns.length !== 1 || fk.references.columns.length !== 1)
+				continue;
 
 			for (const refCol of fk.references.columns) {
 				// Existence
@@ -779,17 +772,13 @@ function validateFkTargets(
 				}
 				// Uniqueness — a column is referenceable when any of the following holds:
 				//   1. It is the table's singleton resolved primaryKey (covers explicit column-level PK,
-				//      table-level singleton PK, and the implicit-id convention when inferPrimaryKey
-				//      was able to reach the fallback branch).
+				//      table-level singleton PK, and the implicit-id convention resolved by inferPrimaryKey).
 				//   2. It has explicit `unique: true`.
-				//   3. The column name matches the implicit-PK convention (idsArePrimaryKeys=true +
-				//      defaultPkColumnName) — covers self-ref tables where the FK-column fallback in
-				//      inferPrimaryKey assigned a different column as PK before the id-fallback ran.
+				// Members of a composite PK alone do not qualify (matches PG strict semantics).
 				const isSingletonPk =
 					typeof target.primaryKey === 'string' && target.primaryKey === refCol;
-				const isImplicitPk = idsArePk && refCol === pkColName;
 				const isUnique = targetCol.unique === true;
-				if (!isSingletonPk && !isImplicitPk && !isUnique) {
+				if (!isSingletonPk && !isUnique) {
 					throw new SchemaValidationError(
 						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +
 							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
@@ -1074,8 +1063,8 @@ function buildColumnsForTable(
 }
 
 /**
- * Infers the final primary key from explicit list, FK columns, or 'id' fallback.
- * Strategy: explicit > composite FK > 'id' column > omit.
+ * Infers the final primary key from explicit list, 'id' fallback, or FK columns.
+ * Strategy: explicit > 'id' column > composite FK > omit.
  */
 function inferPrimaryKey(
 	primaryKey: string[],
@@ -1086,16 +1075,18 @@ function inferPrimaryKey(
 	if (primaryKey.length > 0) {
 		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
 	}
-	const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
-	if (fkColumns.length > 0) {
-		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
-	}
-	// Implicit PK convention: a column matching defaultPkColumnName is the PK
-	// unless explicitly disabled via options.idsArePrimaryKeys = false.
+	// Implicit PK convention BEFORE FK fallback: a column matching defaultPkColumnName
+	// is the PK unless explicitly disabled. This matches the SchemaOptions JSDoc and
+	// avoids self-ref tables ending up with a FK column as PK.
 	const idsArePk = options?.idsArePrimaryKeys ?? true;
 	const pkColName = options?.defaultPkColumnName ?? 'id';
 	if (idsArePk && columns.some((c) => c.name === pkColName)) {
 		return pkColName;
+	}
+	// FK fallback: junction tables (no id, no explicit PK) use FK columns as composite PK.
+	const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
+	if (fkColumns.length > 0) {
+		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
 	}
 	return undefined;
 }
