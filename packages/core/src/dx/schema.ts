@@ -260,8 +260,9 @@ export interface SchemaOptions {
 	 *
 	 * Set to `null` to disable the implicit-PK convention entirely. Primary
 	 * keys must then be declared explicitly with `primaryKey: true` (or are
-	 * inferred from FK columns for junction tables). Empty string (`''`) is
-	 * rejected at `schema()` time with a `SchemaValidationError`.
+	 * inferred from FK columns for junction tables). Empty string (`''`) and
+	 * whitespace-only strings are rejected at `schema()` time with a
+	 * `SchemaValidationError`.
 	 *
 	 * Match the adapter's `defaultPkColumnName` if your project uses a
 	 * different naming scheme (e.g. `'pk_uuid'`).
@@ -865,8 +866,8 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 						);
 					}) ?? false;
 				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
-					const hasExplicitPk = target.primaryKey !== undefined;
-					const suggestion = hasExplicitPk
+					const hasResolvedPk = target.primaryKey !== undefined;
+					const suggestion = hasResolvedPk
 						? `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or change the FK to target the existing primary key column.`
 						: `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or — if '${refCol}' is your primary-key column convention — pass \`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` (or omit the option entirely if '${refCol}' is 'id').`;
 					throw new SchemaValidationError(
@@ -1236,7 +1237,7 @@ function inferPrimaryKey(
 	// Pass null to disable the convention; omit the option for the default 'id'.
 	if (typeof pkColNameRaw === 'string' && pkColNameRaw.trim().length === 0) {
 		throw new SchemaValidationError(
-			`defaultPkColumnName cannot be empty string. Pass null to disable the implicit-PK convention or omit the option for the default 'id'.`,
+			`defaultPkColumnName cannot be an empty or whitespace-only string. Pass null to disable the implicit-PK convention or omit the option for the default 'id'.`,
 		);
 	}
 	const pkColName = pkColNameRaw;

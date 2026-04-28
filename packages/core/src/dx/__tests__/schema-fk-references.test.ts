@@ -191,7 +191,7 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 		);
 	});
 
-	it('R6-1: error message suggests unique/PK instead of defaultPkColumnName when target has an explicit PK', () => {
+	it('R6-4a: error message suggests unique/PK instead of defaultPkColumnName when target has an explicit PK', () => {
 		// When the target table already has an explicit PK, suggesting
 		// defaultPkColumnName is misleading — the right fix is to make the target
 		// column unique or change the FK to reference the existing PK.
@@ -215,7 +215,7 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 		);
 	});
 
-	it('R6-1: error message includes defaultPkColumnName hint when target has no explicit PK', () => {
+	it('R6-4b: error message includes defaultPkColumnName hint when target has no explicit PK', () => {
 		// When the target table has NO explicit PK, suggesting defaultPkColumnName is valid.
 		expect(() =>
 			schema({
@@ -576,7 +576,9 @@ describe('defaultPkColumnName option', () => {
 			schema({ users: { id: 'uuid' } }, undefined, { defaultPkColumnName: '' }),
 		).toThrow(
 			expect.objectContaining({
-				message: expect.stringContaining('cannot be empty'),
+				message: expect.stringContaining(
+					'cannot be an empty or whitespace-only',
+				),
 			}),
 		);
 	});
@@ -659,7 +661,7 @@ describe('defaultPkColumnName option', () => {
 		expect(fkCol?.type).toBe('string');
 	});
 
-	it('R6-4: resolves FK source column type through a chained ref()', () => {
+	it('R6-5: resolves FK source column type through a chained ref()', () => {
 		// roles.orgId = ref('orgs', { unique: true }) where orgs.id is 'string'.
 		// unique:true makes orgId a valid FK target AND lets us test chained type resolution.
 		// userRoles.roleOrg = ref('roles', { references: ['orgId'] }) should
