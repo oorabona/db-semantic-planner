@@ -251,14 +251,17 @@ export interface SchemaOptions {
 	defaultFilters?: DefaultFilters;
 	/**
 	 * Column name treated as the implicit primary key for short-form column
-	 * declarations. When a table has no explicit `primaryKey: true` flag and
-	 * no FK columns, a column matching this name is inferred as the PK.
+	 * declarations. When set (default `'id'`), `inferPrimaryKey` resolves the
+	 * implicit PK BEFORE falling back to FK columns: a column matching this name
+	 * is treated as the PK whenever no explicit `primaryKey: true` flag is present
+	 * on any column — regardless of whether the table also has FK columns.
 	 *
 	 * Default: `'id'` (matches existing codebase convention).
 	 *
 	 * Set to `null` to disable the implicit-PK convention entirely. Primary
 	 * keys must then be declared explicitly with `primaryKey: true` (or are
-	 * inferred from FK columns for junction tables).
+	 * inferred from FK columns for junction tables). Empty string (`''`) is
+	 * rejected at `schema()` time with a `SchemaValidationError`.
 	 *
 	 * Match the adapter's `defaultPkColumnName` if your project uses a
 	 * different naming scheme (e.g. `'pk_uuid'`).
@@ -801,7 +804,7 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				throw new SchemaValidationError(
 					`Foreign key in '${table.name}' has zero-length \`columns\` or \`references\` array`,
 					table.name,
-					fk.columns[0] ?? '',
+					fk.columns[0],
 				);
 			}
 
@@ -862,13 +865,12 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 						);
 					}) ?? false;
 				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
+					const hasExplicitPk = target.primaryKey !== undefined;
+					const suggestion = hasExplicitPk
+						? `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or change the FK to target the existing primary key column.`
+						: `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or — if '${refCol}' is your primary-key column convention — pass \`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` (or omit the option entirely if '${refCol}' is 'id').`;
 					throw new SchemaValidationError(
-						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +
-							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
-							`add a single-column unique index via SchemaConstraints, ` +
-							`or — if '${refCol}' is your primary-key column convention — pass ` +
-							`\`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` ` +
-							`(or omit the option entirely if '${refCol}' is 'id').`,
+						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ${suggestion}`,
 						table.name,
 						fk.columns[0],
 					);
@@ -1074,10 +1076,37 @@ function getTargetPkType(
 function getReferencedColumnType(
 	targetDef: TableDef,
 	referencedCol: string,
+	definition?: SchemaDefinition,
+	visited?: Set<string>,
 ): ColumnType | undefined {
 	const colDef = targetDef[referencedCol];
 	if (!colDef) return undefined;
-	if (isRef(colDef)) return undefined; // chain case — fall through to getTargetPkType
+	if (isRef(colDef)) {
+		// R6-5 (chained ref): follow the chain to resolve the final concrete type.
+		// Guard against cycles and runaway chains with a visited-key accumulator.
+		if (!definition) return undefined;
+		const chainedTableName = colDef.target;
+		const chainedTargetDef = definition[chainedTableName];
+		if (!chainedTargetDef) return undefined;
+		// The chained ref's referenced column: options.references[0] ?? 'id'
+		const chainedRefCols = colDef.options.references;
+		const firstChainedRefCol =
+			chainedRefCols && chainedRefCols.length === 1
+				? chainedRefCols[0]
+				: undefined;
+		const chainedRefCol: string = firstChainedRefCol ?? 'id';
+		// Visited key uniquely identifies the (tableDef, column) pair in the chain.
+		const visitedKey = `${chainedTableName}.${chainedRefCol}`;
+		const seen = visited ?? new Set<string>();
+		if (seen.has(visitedKey)) return undefined; // cycle detected
+		seen.add(visitedKey);
+		return getReferencedColumnType(
+			chainedTargetDef,
+			chainedRefCol,
+			definition,
+			seen,
+		);
+	}
 	return normalizeColumnDef(colDef).type;
 }
 
@@ -1100,7 +1129,7 @@ function buildRefColumn(
 			: undefined;
 	const inferredType =
 		targetCol && targetDef
-			? (getReferencedColumnType(targetDef, targetCol) ??
+			? (getReferencedColumnType(targetDef, targetCol, definition) ??
 				getTargetPkType(definition, columnDef.target))
 			: getTargetPkType(definition, columnDef.target);
 	const col: Mutable<ColumnIR> = {
@@ -1199,10 +1228,18 @@ function inferPrimaryKey(
 	}
 	// Implicit PK convention BEFORE FK fallback. Honoured unless explicitly
 	// disabled with `defaultPkColumnName: null`.
-	const pkColName =
+	const pkColNameRaw =
 		options?.defaultPkColumnName === undefined
 			? 'id'
 			: options.defaultPkColumnName;
+	// R6-L1: reject empty string — it silently matches nothing and is confusing.
+	// Pass null to disable the convention; omit the option for the default 'id'.
+	if (typeof pkColNameRaw === 'string' && pkColNameRaw.trim().length === 0) {
+		throw new SchemaValidationError(
+			`defaultPkColumnName cannot be empty string. Pass null to disable the implicit-PK convention or omit the option for the default 'id'.`,
+		);
+	}
+	const pkColName = pkColNameRaw;
 	if (pkColName !== null && columns.some((c) => c.name === pkColName)) {
 		return pkColName;
 	}

@@ -195,8 +195,14 @@ function generateRefCode(
 	// C2: emit references option for non-PK FK target columns.
 	// Now that buildRefColumn plumbs options.references into ModelIR,
 	// emitting ref('table', { references: ['col'] }) round-trips correctly.
+	// L1-followup-4: apply snake→camel transform to the target column name when
+	// dbCasing='snake_case' so the generated references array round-trips correctly.
 	if (fkInfo.column) {
-		refOptions.push(`references: [${singleQuoteEscape(fkInfo.column)}]`);
+		const refColName =
+			options.dbCasing === 'snake_case'
+				? snakeToCamelCase(fkInfo.column)
+				: fkInfo.column;
+		refOptions.push(`references: [${singleQuoteEscape(refColName)}]`);
 	}
 
 	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
