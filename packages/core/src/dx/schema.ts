@@ -106,7 +106,11 @@ export interface RefOptions {
 	// Composite FK support (table-level foreignKeys only)
 	/** Source columns forming the composite FK */
 	columns?: readonly string[];
-	/** Target columns (defaults to target table's PK) */
+	/**
+	 * Target columns the FK references. For column-level ref(): the
+	 * target column on the referenced table (defaults to its PK, i.e. ['id']).
+	 * For table-level composite FKs: the list of target columns.
+	 */
 	references?: readonly string[];
 }
 
@@ -889,7 +893,7 @@ function buildRefColumn(
 
 	const fk: Mutable<ForeignKeyIR> = {
 		columns: [columnName],
-		references: { table: columnDef.target, columns: ['id'] },
+		references: { table: columnDef.target, columns: columnDef.options.references ?? ['id'] },
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
 

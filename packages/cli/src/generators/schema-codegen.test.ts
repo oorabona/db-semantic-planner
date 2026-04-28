@@ -721,4 +721,95 @@ describe('generateSchemaFile', () => {
 			expect(result).not.toContain('export const dbCasing');
 		});
 	});
+
+	describe('non-PK FK references round-trip (C2 codegen)', () => {
+		it('emits references option for non-PK FK column', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email: { type: 'string', unique: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// The non-PK FK should emit references option
+			expect(result).toContain("references: ['email']");
+			// Should use ref() with the option, not bare ref()
+			expect(result).toContain("ref('users', { references: ['email'] })");
+		});
+
+		it('does not emit references option for default PK FK (id)', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: ref('users'),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// Default PK FK should use bare ref() — no references option
+			expect(result).toContain("ref('users')");
+			expect(result).not.toContain('references:');
+		});
+
+		it('round-trips: schema → model → codegen → contains correct ref call', () => {
+			// This test verifies the full round-trip:
+			// ref('users', { references: ['email'] })
+			//   → ModelIR FK { references: { table: 'users', columns: ['email'] } }
+			//   → generateSchemaFile → ref('users', { references: ['email'] })
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email: { type: 'string', unique: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// Verify the FK column references the non-PK column
+			const fk = model.tables.get('posts')?.foreignKeys[0];
+			expect(fk?.references.columns).toEqual(['email']);
+
+			// Verify the generated code emits the references option
+			expect(result).toContain("ref('users', { references: ['email'] })");
+		});
+
+		it('emits references alongside other FK options', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email: { type: 'string', unique: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', {
+						references: ['email'],
+						nullable: true,
+						onDelete: 'CASCADE',
+					}),
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			// All options should be emitted
+			expect(result).toContain("references: ['email']");
+			expect(result).toContain('nullable: true');
+			expect(result).toContain("onDelete: 'CASCADE'");
+		});
+	});
+
 });
