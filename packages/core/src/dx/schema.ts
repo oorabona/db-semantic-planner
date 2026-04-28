@@ -789,8 +789,8 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 							idx.unique === true &&
 							idx.columns.length === 1 &&
 							idx.columns[0] === refCol &&
-							idx.where == null &&
-							!idx.expressions?.length,
+							idx.where === undefined &&
+							(idx.expressions === undefined || idx.expressions.length === 0),
 					) ?? false;
 				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
 					throw new SchemaValidationError(
