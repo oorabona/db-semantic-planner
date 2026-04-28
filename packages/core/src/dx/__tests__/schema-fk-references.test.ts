@@ -664,7 +664,9 @@ describe('defaultPkColumnName option', () => {
 			),
 		).toThrow(SchemaValidationError);
 	});
+});
 
+describe('getReferencedColumnType chain resolution (R5-1, R6-5)', () => {
 	it('FK source column type matches the referenced non-PK unique column type (R5-1)', () => {
 		const db = schema({
 			users: {
@@ -738,13 +740,16 @@ describe('defaultPkColumnName option', () => {
 		} catch (err) {
 			caughtError = err;
 		}
-		// A SchemaValidationError is acceptable — a stack overflow is not.
-		if (caughtError !== undefined) {
-			expect(caughtError).not.toBeInstanceOf(RangeError);
-			expect((caughtError as Error).message).not.toMatch(
-				/Maximum call stack|stack overflow/i,
-			);
-			expect(caughtError).toBeInstanceOf(SchemaValidationError);
-		}
+		// validateFkTargets throws SchemaValidationError on this malformed schema
+		// (FK targets are not PK/unique), and that throw fires AFTER the cycle
+		// guard short-circuits. Assert an error fired AND it's the expected kind —
+		// a silent-pass future regression should fail this test, not silently
+		// accept it.
+		expect(caughtError).toBeDefined();
+		expect(caughtError).not.toBeInstanceOf(RangeError);
+		expect((caughtError as Error).message).not.toMatch(
+			/Maximum call stack|stack overflow/i,
+		);
+		expect(caughtError).toBeInstanceOf(SchemaValidationError);
 	});
 });

@@ -306,7 +306,7 @@ The third argument to `schema()` accepts a `SchemaOptions` object that controls 
 
 ```typescript
 // doctest: skip — signature reference
-schema(definition, constraints, options)
+schema(definition, constraints?, options?, extras?)
 ```
 
 | Option | Type | Default | Description |
