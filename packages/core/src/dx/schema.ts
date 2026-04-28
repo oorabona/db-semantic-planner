@@ -893,7 +893,10 @@ function buildRefColumn(
 
 	const fk: Mutable<ForeignKeyIR> = {
 		columns: [columnName],
-		references: { table: columnDef.target, columns: columnDef.options.references ?? ['id'] },
+		references: {
+			table: columnDef.target,
+			columns: columnDef.options.references ?? ['id'],
+		},
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
 

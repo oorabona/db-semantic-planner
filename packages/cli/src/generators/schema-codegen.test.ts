@@ -811,5 +811,4 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain("onDelete: 'CASCADE'");
 		});
 	});
-
 });
