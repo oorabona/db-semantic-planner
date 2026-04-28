@@ -256,7 +256,8 @@ export interface SchemaOptions {
 	 * Default: `true` (matches existing codebase convention).
 	 *
 	 * When `false`, primary keys must be declared explicitly at the column level:
-	 *   - `id: { type: 'uuid', primaryKey: true }`
+	 *   - Single PK: `id: { type: 'uuid', primaryKey: true }`
+	 *   - Composite PK: mark each member column with `primaryKey: true`
 	 *
 	 * @remarks
 	 * When `true`, `inferPrimaryKey` resolves PKs in this order:
@@ -754,6 +755,10 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 	for (const table of tables) {
 		for (const fk of table.foreignKeys) {
 			const target = tableMap.get(fk.references.table);
+			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
+			// but table-level constraints.foreignKeys bypass that — so this gate is
+			// the only barrier against constraint-based FKs to non-existent tables.
+			// Throw rather than skip silently.
 			if (!target) {
 				throw new SchemaValidationError(
 					`Foreign key in '${table.name}' references non-existent table '${fk.references.table}'`,
