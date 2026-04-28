@@ -6,7 +6,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { ref, schema, schemaToModelIR, SchemaValidationError } from '../schema.js';
+import {
+	ref,
+	SchemaValidationError,
+	schema,
+	schemaToModelIR,
+} from '../schema.js';
 
 describe('buildRefColumn — column-level non-PK FK references', () => {
 	it('preserves options.references in ModelIR FK declaration', () => {
@@ -36,7 +41,8 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			},
 		});
 
-		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
+		const model = schemaToModelIR(db.definition);
+		const fk = model.tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.references.columns).toEqual(['id']);
 	});
 
@@ -49,7 +55,8 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			},
 		});
 
-		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
+		const model = schemaToModelIR(db.definition);
+		const fk = model.tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.references.columns).toEqual(['id']);
 	});
 
@@ -62,7 +69,8 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			},
 		});
 
-		const fk = schemaToModelIR(db.definition).tables.get('posts')?.foreignKeys?.[0];
+		const model = schemaToModelIR(db.definition);
+		const fk = model.tables.get('posts')?.foreignKeys?.[0];
 		expect(fk?.onUpdate).toBe('CASCADE');
 	});
 
