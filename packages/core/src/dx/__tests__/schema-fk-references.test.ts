@@ -419,6 +419,53 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 			),
 		).toThrow(SchemaValidationError);
 	});
+
+	it('accepts FK to a column with a single-column UNIQUE btree index (explicit method)', () => {
+		// btree is a uniqueness-capable method — must be accepted.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [{ columns: ['email'], unique: true, method: 'btree' }],
+					},
+				},
+			),
+		).not.toThrow();
+	});
+
+	it('rejects FK to a column whose UNIQUE index uses a non-unique-capable method (gin)', () => {
+		// PostgreSQL does not allow UNIQUE on GIN/GiST/BRIN/SP-GiST/HNSW/BM25 indexes.
+		// The gate must reject these schemas at construction time even when unique:true is set.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [{ columns: ['email'], unique: true, method: 'gin' }],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
 });
 
 describe('defaultPkColumnName option', () => {

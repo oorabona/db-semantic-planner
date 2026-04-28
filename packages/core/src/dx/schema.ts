@@ -733,6 +733,14 @@ function validateRefs(
 }
 
 /**
+ * PostgreSQL UNIQUE constraints only support btree and hash index methods.
+ * Other methods (gin, gist, brin, spgist, hnsw, bm25, etc.) cannot enforce
+ * uniqueness and therefore cannot back a foreign key target column.
+ * Treat undefined as 'btree' (the PostgreSQL default).
+ */
+const UNIQUE_CAPABLE_INDEX_METHODS = new Set(['btree', 'hash']);
+
+/**
  * Validates FK target columns exist and are referenceable.
  *
  * For ALL FKs (single-column and composite):
@@ -744,7 +752,8 @@ function validateRefs(
  *   - Referenced column must be referenceable: singleton primary key,
  *     column-level `unique: true`, or a single-column UNIQUE index declared
  *     via SchemaConstraints covering exactly the referenced column with no
- *     partial-index `WHERE` clause and no expression columns.
+ *     partial-index `WHERE` clause, no expression columns, and using a
+ *     uniqueness-capable index method (btree or hash).
  *   - Mirrors PostgreSQL error 42830 ("there is no unique constraint matching
  *     given keys for referenced table") at schema()-time instead of at DDL
  *     apply time.
@@ -837,15 +846,21 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				const isSingletonPk =
 					typeof target.primaryKey === 'string' && target.primaryKey === refCol;
 				const isUnique = targetCol.unique === true;
+				// R2-F2: PG only allows UNIQUE constraints on btree/hash indexes —
+				// gin/gist/brin/spgist/hnsw/bm25 cannot enforce uniqueness even when
+				// `unique: true` is declared. Fail at schema() time instead of DDL apply.
 				const isUniqueIndex =
-					target.indexes?.some(
-						(idx) =>
+					target.indexes?.some((idx) => {
+						const method = idx.method ?? 'btree';
+						return (
 							idx.unique === true &&
 							idx.columns.length === 1 &&
 							idx.columns[0] === refCol &&
 							idx.where === undefined &&
-							(idx.expressions === undefined || idx.expressions.length === 0),
-					) ?? false;
+							(idx.expressions === undefined || idx.expressions.length === 0) &&
+							UNIQUE_CAPABLE_INDEX_METHODS.has(method)
+						);
+					}) ?? false;
 				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
 					throw new SchemaValidationError(
 						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +

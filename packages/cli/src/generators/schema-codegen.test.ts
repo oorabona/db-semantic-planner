@@ -482,32 +482,29 @@ describe('generateSchemaFile', () => {
 			expect(result).not.toMatch(/\tauthor_id:/);
 		});
 
-		// TODO: schema-codegen does not yet camelCase non-PK FK target references — tracked separately
-		it.skip('converts non-PK FK target column to camelCase in references option (dbCasing snake_case)', () => {
-			// Regression: PR #83 landed non-PK FK references plumbing but the
-			// schema-bridge camelCase transform must also apply to references[]
-			// columns, not just FK source column names.
-			const model = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-					email_address: { type: 'string', unique: true },
-				},
-				memberships: {
-					id: { type: 'uuid', primaryKey: true },
-					user_email: ref('users', { references: ['email_address'] }),
-				},
-			}).model;
-
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
-
-			// FK source column: snake_case → camelCase
-			expect(result).toContain('userEmail:');
-			expect(result).not.toMatch(/\tuser_email:/);
-
-			// FK target references[] entry: snake_case → camelCase
-			expect(result).toContain("references: ['emailAddress']");
-			expect(result).not.toContain("references: ['email_address']");
-		});
+		// TODO: schema-codegen does not yet apply snake→camel transform to entries
+		// inside fk.references.columns. Tracked in TODO.md as L1-followup-4.
+		// Once fixed, restore this as it() with the body below:
+		//   const model = schema({
+		//     users: {
+		//       id: { type: 'uuid', primaryKey: true },
+		//       email_address: { type: 'string', unique: true },
+		//     },
+		//     memberships: {
+		//       id: { type: 'uuid', primaryKey: true },
+		//       user_email: ref('users', { references: ['email_address'] }),
+		//     },
+		//   }).model;
+		//   const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+		//   // FK source column: snake_case → camelCase
+		//   expect(result).toContain('userEmail:');
+		//   expect(result).not.toMatch(/\tuser_email:/);
+		//   // FK target references[] entry: snake_case → camelCase
+		//   expect(result).toContain("references: ['emailAddress']");
+		//   expect(result).not.toContain("references: ['email_address']");
+		it.todo(
+			'converts non-PK FK target column to camelCase in references option (dbCasing snake_case)',
+		);
 
 		it('preserves column names when dbCasing is preserve', () => {
 			const model = schema({
