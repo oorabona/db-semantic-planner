@@ -262,6 +262,96 @@ dbsp repl --input queries.txt --db postgresql://localhost/mydb
 dbsp repl --input queries.txt --assert queries.assert.txt
 ```
 
+### JSON output schema (`--format json`)
+
+When invoked in batch mode (`--eval` or `--input`) with `--format json`, `dbsp repl` emits a single JSON document on stdout containing the per-query results plus an optional assertion summary. The shape is stable and meant for machine consumption (CI pipelines, golden-file tests, GUI sidecars).
+
+```json
+{
+  "queries": [
+    {
+      "query": "users where active = true",
+      "type": "query",
+      "success": true,
+      "dbSuccess": true,
+      "sql": "SELECT \"id\", \"email\" FROM \"users\" WHERE \"active\" = $1",
+      "params": [true],
+      "rowCount": 12,
+      "columns": ["id", "email"],
+      "rows": [{ "id": 1, "email": "a@example.com" }],
+      "intent": {
+        "type": "query",
+        "table": "users",
+        "with": [],
+        "hasWhere": true,
+        "hasGroupBy": false,
+        "hasOrderBy": false,
+        "ctes": []
+      }
+    }
+  ],
+  "assertions": {
+    "total": 4,
+    "passed": 4,
+    "failed": 0,
+    "skipped": 0,
+    "results": []
+  }
+}
+```
+
+#### `queries[]` — `BatchResult` shape
+
+| Field | Type | When present | Description |
+|-------|------|--------------|-------------|
+| `query` | `string` | always | The original input query (NQL, raw SQL, or `.command`). |
+| `type` | `'command' \| 'query' \| 'mutation'` | always | Classification of the input. `command` covers REPL dot-commands. |
+| `success` | `boolean` | always | **Compile-only success** — `true` if NQL compilation passed (or the dot-command executed). Does NOT reflect DB execution outcome. |
+| `dbSuccess` | `boolean` | only when `--db` is provided | DB execution outcome. `true` = query ran without error; `false` = DB rejected the statement; absent = compile-only mode. |
+| `error` | `string` | on failure | Human-readable error message. Set when `success === false` (compile error) or when `dbSuccess === false` (DB error). |
+| `sql` | `string` | for `query` / `mutation` | Compiled SQL (parameterized). |
+| `params` | `unknown[]` | for `query` / `mutation` | Positional parameter values bound to `$1..$N`. |
+| `output` | `string` | depends on `--output` mode | Pre-rendered result text (table/csv/json) — present when the engine emitted a textual rendering. |
+| `rowCount` | `number` | when `--db` and statement returned rows | Number of rows returned by the DB. |
+| `columns` | `string[]` | when `--db` and statement returned rows | Column names from the DB result, in order. |
+| `rows` | `unknown[]` | when `--db` and statement returned rows | Materialized row data — used by `db.value.equals` / `db.rows.equals` assertions. |
+| `intent` | `IntentSummary` | for compiled NQL queries | Structural summary of the intent (see below). |
+
+#### `intent` — `IntentSummary` shape
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type` | `'query' \| 'insert' \| 'update' \| 'delete' \| 'upsert' \| 'setOperation'` | Intent kind. |
+| `table` | `string` | Main table name. |
+| `with` | `string[]` | Relation names joined via NQL `with`. |
+| `hasWhere` | `boolean` | `true` if a WHERE clause is present. |
+| `hasGroupBy` | `boolean` | `true` if GROUP BY is present. |
+| `hasOrderBy` | `boolean` | `true` if ORDER BY is present. |
+| `ctes` | `string[]` | Names of CTEs (NQL `let` bindings). |
+
+#### `assertions` — `AssertionSummary` shape
+
+Present only when `--assert <file>` is supplied.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `total` | `number` | Total assertions evaluated. |
+| `passed` | `number` | Assertions that passed. |
+| `failed` | `number` | Assertions that failed (drives non-zero exit code). |
+| `skipped` | `number` | Assertions skipped (typically DB-bound assertions when no `--db`). |
+| `results` | `QueryAssertionResult[]` | Per-query assertion outcomes (line refs, expected vs actual). |
+
+#### Exit codes
+
+| Code | Condition |
+|------|-----------|
+| `0` | All queries succeeded (compile **and** DB) and all assertions passed. |
+| `1` | At least one query failed (`success === false` OR `dbSuccess === false`) **or** at least one assertion failed. |
+
+::: tip Compile-only vs full success
+`success` reflects compilation only. A query that compiles cleanly but is rejected by the DB has `success: true` and `dbSuccess: false`, and produces exit code `1`. A unified `overallSuccess` field is on the roadmap.
+:::
+
 ---
 
 ## REPL Commands
