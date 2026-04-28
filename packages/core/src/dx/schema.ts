@@ -652,6 +652,25 @@ export function schemaToModelIR(
 /**
  * Validates that all refs point to existing tables.
  */
+
+/**
+ * Returns true when a target table column satisfies FK uniqueness requirements
+ * (PostgreSQL error 42830 prevention): column must be declared as primary key
+ * or unique. Short-form string column types and RefDefinitions always fail.
+ */
+function isColumnPkOrUnique(colDef: unknown): boolean {
+	if (typeof colDef !== 'object' || colDef === null) {
+		// Short-form string type (e.g. 'string', 'integer') — no PK/unique flags
+		return false;
+	}
+	if (isRef(colDef as ColumnDef | RefDefinition)) {
+		// RefDefinitions are not the target's own PK/unique gate
+		return false;
+	}
+	const col = colDef as Record<string, unknown>;
+	return col['primaryKey'] === true || col['unique'] === true;
+}
+
 function validateRefs(
 	definition: SchemaDefinition,
 	tableNames: string[],
@@ -686,6 +705,36 @@ function validateRefs(
 						tableName,
 						columnName,
 					);
+				}
+
+				// Target column existence + uniqueness gate
+				const target = columnDef.target;
+				// definition[target] is guaranteed defined — table existence checked above
+				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+				const targetDef = definition[target]!;
+				const refCols: string[] =
+					columnDef.options.references &&
+					columnDef.options.references.length > 0
+						? (columnDef.options.references as string[])
+						: ['id'];
+				for (const refCol of refCols) {
+					// Column must exist on target table
+					if (!(refCol in targetDef)) {
+						throw new SchemaValidationError(
+							`Foreign key '${columnName}' references non-existent column '${target}.${refCol}'`,
+							tableName,
+							columnName,
+						);
+					}
+					// Column must be PK or unique
+					const targetColDef = targetDef[refCol as keyof typeof targetDef];
+					if (!isColumnPkOrUnique(targetColDef)) {
+						throw new SchemaValidationError(
+							`Foreign key '${columnName}' targets '${target}.${refCol}' which is neither primary key nor unique`,
+							tableName,
+							columnName,
+						);
+					}
 				}
 			}
 		}
