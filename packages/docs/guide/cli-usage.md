@@ -312,9 +312,9 @@ When invoked in batch mode (`--eval` or `--input`) with `--format json`, `dbsp r
 | `sql` | `string` | for `query` / `mutation` | Compiled SQL (parameterized). |
 | `params` | `unknown[]` | for `query` / `mutation` | Positional parameter values bound to `$1..$N`. |
 | `output` | `string` | depends on REPL `.output` mode | Pre-rendered result text (table/csv/json) — present when the engine emitted a textual rendering. |
-| `rowCount` | `number` | when `--db` and statement returned rows | Number of rows returned by the DB. |
-| `columns` | `string[]` | when `--db` and statement returned rows | Column names from the DB result, in order. |
-| `rows` | `unknown[]` | when `--db` and statement returned rows | Materialized row data — used by `db.value.equals` / `db.rows.equals` assertions. |
+| `rowCount` | `number` | when `dbSuccess === true` (rows affected for DML without RETURNING; 0 if none) | Number of rows returned (SELECT) or affected (DML). |
+| `columns` | `string[]` | when `dbSuccess === true` (empty array for non-SELECT statements) | Column names from the DB result, in order. |
+| `rows` | `unknown[]` | when `dbSuccess === true` (empty array for non-SELECT statements) | Materialized row data — used by `db.value.equals` / `db.rows.equals` assertions. |
 | `intent` | `IntentSummary` | for compiled NQL queries | Structural summary of the intent (see below). |
 
 #### `intent` — `IntentSummary` shape

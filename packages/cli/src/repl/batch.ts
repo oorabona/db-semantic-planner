@@ -254,23 +254,17 @@ export async function executeBatch(
 			throw new Error(`Assertion file parse errors:\n${errorMessages}`);
 		}
 
-		// C4: Validate against executable queries (strips comments + blanks) so
-		// assertion indexes align with what runAssertions receives at runtime.
-		// Raw `queries` includes comment lines (#...) and blank lines that the
-		// engine skips — validating against them lets queryIndex N pass for a
-		// comment slot, then fail silently at runtime when executable[N] is a
-		// different query.
-		// F2: Coalesce continuation lines before counting executable queries.
-		// engine.submit() internally accumulates lines ending with '\' and emits
-		// no events until the full statement arrives. Without coalescing here,
-		// the validation count would include each continuation fragment as a
-		// separate query slot, causing assertion index misalignment at runtime.
-		const preExecExecutableQueries = coalesceContinuations(
-			queries.filter((q) => {
-				const t = q.trim();
-				return t.length > 0 && !t.startsWith('#');
-			}),
-		);
+		// C4 + F2: Validate against executable queries returned by coalesceContinuations.
+		// The helper drops blank + comment lines AND coalesces continuation chains, so
+		// preExecExecutableQueries.length matches what runAssertions receives at runtime
+		// — assertion indexes align with the engine's actual emit order.
+		// engine.submit() internally accumulates lines ending with '\' and emits no
+		// events until the full statement arrives, so without coalescing here the
+		// validation count would inflate every continuation fragment as a separate slot.
+		// Pass `queries` raw so the helper handles all three cases in one place; an
+		// upstream pre-filter would defeat the flush semantics for the comment-inside-
+		// continuation edge case (engine flushes; pre-filter silently merges).
+		const preExecExecutableQueries = coalesceContinuations(queries);
 		const validationErrors = validateAssertionBlocks(
 			parseResult.blocks,
 			preExecExecutableQueries.length,
