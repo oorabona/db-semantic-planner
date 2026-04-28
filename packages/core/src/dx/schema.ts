@@ -103,13 +103,17 @@ export interface RefOptions {
 	/** Role names for self-referential relations */
 	roles?: SelfRefRoles;
 
-	// Composite FK support (table-level foreignKeys only)
-	/** Source columns forming the composite FK */
-	columns?: readonly string[];
 	/**
-	 * Target columns the FK references. For column-level ref(): the
-	 * target column on the referenced table (defaults to ['id'] by convention; the actual target PK column is not auto-resolved).
-	 * For table-level composite FKs: the list of target columns.
+	 * Source columns forming a composite FK (table-level `foreignKeys` only).
+	 */
+	columns?: readonly string[];
+
+	/**
+	 * Target columns the FK references.
+	 * - For column-level `ref()`: the target column on the referenced
+	 *   table. Defaults to `['id']` by convention; the actual target
+	 *   PK column is not auto-resolved. Length must be exactly 1.
+	 * - For table-level composite FKs: the list of target columns.
 	 */
 	references?: readonly string[];
 }
@@ -891,9 +895,12 @@ function buildRefColumn(
 	};
 	if (columnDef.options.unique) col.unique = true;
 
-	if (columnDef.options.references && columnDef.options.references.length === 0) {
+	if (
+		columnDef.options.references &&
+		columnDef.options.references.length !== 1
+	) {
 		throw new SchemaValidationError(
-			`FK column '${columnName}' has empty 'references' array; provide at least one target column or omit to default to ['id'].`,
+			`FK column '${columnName}' got 'references' with ${columnDef.options.references.length} columns; column-level FK requires exactly one target column (use table-level foreignKeys for composite FKs).`,
 		);
 	}
 	const fk: Mutable<ForeignKeyIR> = {

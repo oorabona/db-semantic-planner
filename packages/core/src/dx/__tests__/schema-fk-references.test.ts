@@ -85,4 +85,19 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			}),
 		).toThrow(SchemaValidationError);
 	});
+
+	it('throws on multi-column references at column-level (length must be 1)', () => {
+		expect(() =>
+			schema({
+				users: {
+					tenantId: { type: 'uuid', primaryKey: true },
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: ref('users', { references: ['tenantId', 'id'] }),
+				},
+			}),
+		).toThrow(SchemaValidationError);
+	});
 });
