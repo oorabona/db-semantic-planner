@@ -103,10 +103,18 @@ export interface RefOptions {
 	/** Role names for self-referential relations */
 	roles?: SelfRefRoles;
 
-	// Composite FK support (table-level foreignKeys only)
-	/** Source columns forming the composite FK */
+	/**
+	 * Source columns forming a composite FK (table-level `foreignKeys` only).
+	 */
 	columns?: readonly string[];
-	/** Target columns (defaults to target table's PK) */
+
+	/**
+	 * Target columns the FK references.
+	 * - For column-level `ref()`: the target column on the referenced
+	 *   table. Defaults to `['id']` by convention; the actual target
+	 *   PK column is not auto-resolved. Length must be exactly 1.
+	 * - For table-level composite FKs: the list of target columns.
+	 */
 	references?: readonly string[];
 }
 
@@ -887,11 +895,23 @@ function buildRefColumn(
 	};
 	if (columnDef.options.unique) col.unique = true;
 
+	if (
+		columnDef.options.references &&
+		columnDef.options.references.length !== 1
+	) {
+		throw new SchemaValidationError(
+			`FK column '${columnName}' got 'references' with ${columnDef.options.references.length} columns; column-level FK requires exactly one target column (use table-level foreignKeys for composite FKs).`,
+		);
+	}
 	const fk: Mutable<ForeignKeyIR> = {
 		columns: [columnName],
-		references: { table: columnDef.target, columns: ['id'] },
+		references: {
+			table: columnDef.target,
+			columns: columnDef.options.references ?? ['id'],
+		},
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
+	if (columnDef.options.onUpdate) fk.onUpdate = columnDef.options.onUpdate;
 
 	return { col: col as ColumnIR, fk: fk as ForeignKeyIR };
 }

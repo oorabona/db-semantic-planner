@@ -192,11 +192,12 @@ function generateRefCode(
 ): string {
 	const refOptions: string[] = [];
 
-	// C2 REVERTED: `references` on column-level ref() is documented as
-	// "Composite FK support (table-level foreignKeys only)" and is silently
-	// ignored by buildFkColumn for column-level FKs (it always uses 'id').
-	// Emitting it would be a misleading no-op. Non-PK FK column round-trip
-	// is a known limitation tracked separately (core/ scope).
+	// C2: emit references option for non-PK FK target columns.
+	// Now that buildRefColumn plumbs options.references into ModelIR,
+	// emitting ref('table', { references: ['col'] }) round-trips correctly.
+	if (fkInfo.column) {
+		refOptions.push(`references: [${singleQuoteEscape(fkInfo.column)}]`);
+	}
 
 	// CODEX-13: FK column that is also PK — emit isPrimaryKey inside ref() options
 	if (isPrimaryKey) {
