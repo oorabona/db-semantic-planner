@@ -191,6 +191,72 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 		);
 	});
 
+	it('R6-4a: error message suggests unique/PK instead of defaultPkColumnName when target has an explicit PK', () => {
+		// When the target table already has an explicit PK, suggesting
+		// defaultPkColumnName is misleading — the right fix is to make the target
+		// column unique or change the FK to reference the existing PK.
+		expect(() =>
+			schema({
+				users: {
+					userId: { type: 'uuid', primaryKey: true }, // explicit PK ≠ 'id'
+					email: { type: 'string' }, // neither PK nor unique
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringMatching(
+					/change the FK to target the existing primary key column/,
+				),
+			}),
+		);
+	});
+
+	it('R6-4b: error message includes defaultPkColumnName hint when target has no explicit PK', () => {
+		// When the target table has NO explicit PK, suggesting defaultPkColumnName is valid.
+		expect(() =>
+			schema({
+				users: {
+					email: { type: 'string' }, // not PK, not unique
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringMatching(/defaultPkColumnName/),
+			}),
+		);
+	});
+
+	it('R6-4c: error message handles composite-PK target without suggesting a single column', () => {
+		// When the target table has a COMPOSITE primary key, the suggestion must
+		// not say "change the FK to target the existing primary key column" (singular).
+		// Instead, point at unique:true / unique index, or the composite-FK path.
+		expect(() =>
+			schema({
+				users: {
+					tenantId: { type: 'uuid', primaryKey: true },
+					userId: { type: 'uuid', primaryKey: true },
+					email: { type: 'string' }, // not unique, not in PK
+				},
+				memberships: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringMatching(/composite primary key/),
+			}),
+		);
+	});
+
 	it('accepts FK to a column with unique:true even when not PK', () => {
 		expect(() =>
 			schema({
@@ -528,6 +594,18 @@ describe('defaultPkColumnName option', () => {
 		).not.toThrow();
 	});
 
+	it('R6-L1: rejects empty string defaultPkColumnName at schema() time', () => {
+		expect(() =>
+			schema({ users: { id: 'uuid' } }, undefined, { defaultPkColumnName: '' }),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining(
+					'cannot be an empty or whitespace-only',
+				),
+			}),
+		);
+	});
+
 	it('defaultPkColumnName: null — explicit primaryKey:true on pk_uuid works regardless of convention', () => {
 		// With explicit primaryKey:true, the FK passes even when the implicit convention is disabled
 		expect(() =>
@@ -603,6 +681,35 @@ describe('defaultPkColumnName option', () => {
 			.get('memberships')
 			?.columns.find((c) => c.name === 'userEmail');
 		// Must be 'string' (matches users.email type), NOT 'uuid' (which is users.id type)
+		expect(fkCol?.type).toBe('string');
+	});
+
+	it('R6-5: resolves FK source column type through a chained ref()', () => {
+		// roles.orgId = ref('orgs', { unique: true }) where orgs.id is 'string'.
+		// unique:true makes orgId a valid FK target AND lets us test chained type resolution.
+		// userRoles.roleOrg = ref('roles', { references: ['orgId'] }) should
+		// resolve userRoles.roleOrg.type as 'string' by following the chain.
+		const db = schema({
+			orgs: {
+				id: { type: 'string', primaryKey: true },
+				name: 'string',
+			},
+			roles: {
+				id: { type: 'uuid', primaryKey: true },
+				// unique: true — makes orgId a valid FK target AND gives it a concrete type path
+				orgId: ref('orgs', { unique: true }),
+			},
+			userRoles: {
+				id: { type: 'uuid', primaryKey: true },
+				// References roles.orgId which is a ref(orgs) — chained ref case.
+				// Expected resolved type: 'string' (= orgs.id type), not 'uuid' (= roles.id type).
+				roleOrg: ref('roles', { references: ['orgId'] }),
+			},
+		});
+		const model = schemaToModelIR(db.definition);
+		const fkCol = model.tables
+			.get('userRoles')
+			?.columns.find((c) => c.name === 'roleOrg');
 		expect(fkCol?.type).toBe('string');
 	});
 });
