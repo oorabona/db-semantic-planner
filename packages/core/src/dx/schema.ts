@@ -866,10 +866,18 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 						);
 					}) ?? false;
 				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
-					const hasResolvedPk = target.primaryKey !== undefined;
-					const suggestion = hasResolvedPk
-						? `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or change the FK to target the existing primary key column.`
-						: `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or — if '${refCol}' is your primary-key column convention — pass \`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` (or omit the option entirely if '${refCol}' is 'id').`;
+					// R2-F1: tailor the remediation hint based on the target's PK shape.
+					// - composite PK (string[]): no single PK column to target; suggest
+					//   marking unique or using a table-level composite FK.
+					// - resolved single PK (string): point at the existing PK column.
+					// - no PK at all: suggest the defaultPkColumnName convention.
+					const isCompositePk = Array.isArray(target.primaryKey);
+					const hasSingleResolvedPk = typeof target.primaryKey === 'string';
+					const suggestion = isCompositePk
+						? `Either mark '${target.name}.${refCol}' with \`unique: true\` or add a single-column unique index via SchemaConstraints — '${target.name}' has a composite primary key, so a single-column FK cannot target the PK directly (use a table-level composite FK referencing all PK columns if that is the intent).`
+						: hasSingleResolvedPk
+							? `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or change the FK to target the existing primary key column '${target.primaryKey as string}'.`
+							: `Either mark the target column with \`unique: true\`, add a single-column unique index via SchemaConstraints, or — if '${refCol}' is your primary-key column convention — pass \`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` (or omit the option entirely if '${refCol}' is 'id').`;
 					throw new SchemaValidationError(
 						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ${suggestion}`,
 						table.name,

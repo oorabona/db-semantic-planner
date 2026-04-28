@@ -234,6 +234,29 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 		);
 	});
 
+	it('R6-4c: error message handles composite-PK target without suggesting a single column', () => {
+		// When the target table has a COMPOSITE primary key, the suggestion must
+		// not say "change the FK to target the existing primary key column" (singular).
+		// Instead, point at unique:true / unique index, or the composite-FK path.
+		expect(() =>
+			schema({
+				users: {
+					tenantId: { type: 'uuid', primaryKey: true },
+					userId: { type: 'uuid', primaryKey: true },
+					email: { type: 'string' }, // not unique, not in PK
+				},
+				memberships: {
+					id: { type: 'uuid', primaryKey: true },
+					authorEmail: ref('users', { references: ['email'] }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringMatching(/composite primary key/),
+			}),
+		);
+	});
+
 	it('accepts FK to a column with unique:true even when not PK', () => {
 		expect(() =>
 			schema({
