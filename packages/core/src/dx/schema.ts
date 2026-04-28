@@ -733,7 +733,9 @@ function validateRefs(
 
 /**
  * Validates each single-column FK's target column exists and is referenceable
- * (singleton primary key OR `unique: true`).
+ * (singleton primary key, column-level `unique: true`, or a single-column
+ * UNIQUE index declared via SchemaConstraints covering exactly the referenced
+ * column with no partial-index `WHERE` clause and no expression columns).
  *
  * Mirrors PostgreSQL error 42830 ("there is no unique constraint matching given
  * keys for referenced table") at schema()-time instead of at DDL apply time.
@@ -774,15 +776,29 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				//   1. It is the table's singleton resolved primaryKey (covers explicit column-level PK,
 				//      table-level singleton PK, and the implicit-id convention resolved by inferPrimaryKey).
 				//   2. It has explicit `unique: true`.
+				//   3. It is the sole column of a non-partial, non-expression single-column UNIQUE index
+				//      declared via SchemaConstraints (partial indexes with a WHERE clause, or expression
+				//      indexes, do NOT make a column referenceable — PG error 42830).
 				// Members of a composite PK alone do not qualify (matches PG strict semantics).
 				const isSingletonPk =
 					typeof target.primaryKey === 'string' && target.primaryKey === refCol;
 				const isUnique = targetCol.unique === true;
-				if (!isSingletonPk && !isUnique) {
+				const isUniqueIndex =
+					target.indexes?.some(
+						(idx) =>
+							idx.unique === true &&
+							idx.columns.length === 1 &&
+							idx.columns[0] === refCol &&
+							idx.where == null &&
+							!idx.expressions?.length,
+					) ?? false;
+				if (!isSingletonPk && !isUnique && !isUniqueIndex) {
 					throw new SchemaValidationError(
 						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +
 							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
-							`or — if '${refCol}' is your primary-key convention — enable \`schema(definition, undefined, { idsArePrimaryKeys: true })\` (the default).`,
+							`add a single-column unique index via SchemaConstraints, ` +
+							`or — if '${refCol}' is your primary-key column convention — pass ` +
+							`\`{ idsArePrimaryKeys: true, defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\`.`,
 						table.name,
 						fk.columns[0],
 					);

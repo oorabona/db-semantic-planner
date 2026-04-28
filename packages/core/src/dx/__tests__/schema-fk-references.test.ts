@@ -246,6 +246,106 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 			}),
 		).not.toThrow();
 	});
+
+	it('accepts FK to a column made unique via table-level unique index', () => {
+		// Edge case: target column has no column-level `unique` flag, but the schema's
+		// SchemaConstraints declares a single-column UNIQUE index covering it. PostgreSQL
+		// accepts FKs to such columns; the gate must too.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string', // no column-level unique
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [{ columns: ['email'], unique: true }],
+					},
+				},
+			),
+		).not.toThrow();
+	});
+
+	it('rejects FK to a column with a non-unique table-level index', () => {
+		// Sanity check: a non-unique index does NOT qualify for FK target.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [{ columns: ['email'] /* no unique */ }],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('rejects FK to a column covered only by a multi-column unique index', () => {
+		// PG strict: a multi-column unique index does NOT make individual columns
+		// referenceable (same rule as composite PK).
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+						tenantId: 'uuid',
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [{ columns: ['tenantId', 'email'], unique: true }],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('rejects FK to a column covered only by a partial unique index (WHERE clause)', () => {
+		// PG strict: partial unique indexes (WHERE clause) do NOT make a column referenceable
+		// for foreign keys. The gate must reject these schemas at construction time.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+						deletedAt: { type: 'datetime', nullable: true },
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userEmail: ref('users', { references: ['email'] }),
+					},
+				},
+				{
+					users: {
+						indexes: [
+							{ columns: ['email'], unique: true, where: 'deleted_at IS NULL' },
+						],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
 });
 
 describe('idsArePrimaryKeys option', () => {
