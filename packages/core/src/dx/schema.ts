@@ -733,18 +733,21 @@ function validateRefs(
 }
 
 /**
- * Validates each single-column FK's target column exists and is referenceable
- * (singleton primary key, column-level `unique: true`, or a single-column
- * UNIQUE index declared via SchemaConstraints covering exactly the referenced
- * column with no partial-index `WHERE` clause and no expression columns).
+ * Validates FK target columns exist and are referenceable.
  *
- * Mirrors PostgreSQL error 42830 ("there is no unique constraint matching given
- * keys for referenced table") at schema()-time instead of at DDL apply time.
+ * For ALL FKs (single-column and composite):
+ *   - Source and target column counts must match.
+ *   - Every referenced column must exist on the target table.
  *
- * Scope: single-column FKs (the case `buildRefColumn` produces) where both
- * `fk.columns.length === 1` AND `fk.references.columns.length === 1`. Composite
- * (table-level) FKs are skipped — PostgreSQL enforces them at DDL apply time, and
- * the columns-vs-references count match is also a PG-side concern.
+ * For single-column FKs only (the case `buildRefColumn` produces where both
+ * `fk.columns.length === 1` AND `fk.references.columns.length === 1`):
+ *   - Referenced column must be referenceable: singleton primary key,
+ *     column-level `unique: true`, or a single-column UNIQUE index declared
+ *     via SchemaConstraints covering exactly the referenced column with no
+ *     partial-index `WHERE` clause and no expression columns.
+ *   - Mirrors PostgreSQL error 42830 ("there is no unique constraint matching
+ *     given keys for referenced table") at schema()-time instead of at DDL
+ *     apply time.
  *
  * Composite PK members alone do not qualify as referenceable (matches PG strict
  * semantics): a column that is part of a composite PK still needs an explicit
@@ -792,21 +795,37 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 					fk.columns[0] ?? '',
 				);
 			}
-			// Validate only column-level (single-column on both sides). Composite +
-			// count-mismatch FKs are still skipped — PostgreSQL enforces them at DDL apply time.
-			if (fk.columns.length !== 1 || fk.references.columns.length !== 1)
-				continue;
 
+			// R6-3a: source and target column counts must match for ALL FKs (composite included).
+			// PostgreSQL requires a 1-to-1 mapping between source and referenced columns.
+			if (fk.columns.length !== fk.references.columns.length) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' has mismatched column counts: ` +
+						`${fk.columns.length} source column(s) but ${fk.references.columns.length} referenced column(s)`,
+					table.name,
+					fk.columns[0],
+				);
+			}
+
+			// R6-3b: every referenced column must exist on the target table — applies to ALL FKs.
 			for (const refCol of fk.references.columns) {
-				// Existence
-				const targetCol = target.columns.find((c) => c.name === refCol);
-				if (!targetCol) {
+				if (!target.columns.some((c) => c.name === refCol)) {
 					throw new SchemaValidationError(
 						`Foreign key in '${table.name}' references non-existent column '${target.name}.${refCol}'`,
 						table.name,
 						fk.columns[0],
 					);
 				}
+			}
+
+			// Uniqueness check is single-column-only — composites left to PostgreSQL.
+			if (fk.columns.length !== 1 || fk.references.columns.length !== 1)
+				continue;
+
+			for (const refCol of fk.references.columns) {
+				// Existence already validated by R6-3b above for all FKs — targetCol is guaranteed defined here.
+				const targetCol = target.columns.find((c) => c.name === refCol);
+				if (!targetCol) continue; // defensive
 				// Uniqueness — a column is referenceable when any of the following holds:
 				//   1. It is the table's singleton resolved primaryKey (covers explicit column-level PK,
 				//      table-level singleton PK, and the implicit-id convention resolved by inferPrimaryKey).

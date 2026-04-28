@@ -361,6 +361,64 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 			}),
 		);
 	});
+
+	it('rejects composite FK referencing non-existent target columns (R6-3b)', () => {
+		// A composite (table-level) FK where one of the referenced columns does not
+		// exist on the target table must be caught at schema()-time, not at DDL apply time.
+		expect(() =>
+			schema(
+				{
+					users: {
+						a: { type: 'uuid', primaryKey: true },
+						b: { type: 'uuid', primaryKey: true },
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						aRef: { type: 'uuid' },
+						bRef: { type: 'uuid' },
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', {
+								columns: ['aRef', 'bRef'],
+								references: ['a', 'nonExistent'], // 'nonExistent' is not on users
+							}),
+						],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('rejects FK with mismatched source/target column counts (R6-3a)', () => {
+		// source has 2 columns, referenced has 1 — PostgreSQL would reject this; the gate must too.
+		expect(() =>
+			schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						a: { type: 'uuid' },
+						b: { type: 'uuid' },
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', {
+								columns: ['a', 'b'], // 2 source columns
+								references: ['id'], // 1 referenced — mismatch
+							}),
+						],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
 });
 
 describe('defaultPkColumnName option', () => {
