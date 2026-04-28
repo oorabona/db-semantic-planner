@@ -969,11 +969,11 @@ describe('schema coverage', () => {
 			// the target, the FK source's type resolves to 'uuid' through the PK chain.
 			const db = schema({
 				tags: { id: 'uuid', name: 'text' }, // implicit PK via 'id' convention
-				posts: { id: 'uuid', tagName: ref('tags') },
+				posts: { id: 'uuid', tagId: ref('tags') },
 			});
 
 			const table = db.model.getTable('posts');
-			const fkCol = table?.columns.find((c) => c.name === 'tagName');
+			const fkCol = table?.columns.find((c) => c.name === 'tagId');
 			expect(fkCol?.type).toBe('uuid');
 		});
 

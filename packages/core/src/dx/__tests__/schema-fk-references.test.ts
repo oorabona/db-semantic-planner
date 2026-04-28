@@ -363,8 +363,8 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 	});
 });
 
-describe('idsArePrimaryKeys option', () => {
-	it('default behavior (idsArePrimaryKeys=true): short-form id is implicit PK and FK to it succeeds', () => {
+describe('defaultPkColumnName option', () => {
+	it('default behavior: short-form id is implicit PK and FK to it succeeds', () => {
 		// Both tables use short-form 'uuid' for id — implicit PK convention
 		expect(() =>
 			schema({
@@ -374,7 +374,7 @@ describe('idsArePrimaryKeys option', () => {
 		).not.toThrow();
 	});
 
-	it('idsArePrimaryKeys=false: short-form id is NOT implicit PK; FK to it throws', () => {
+	it('defaultPkColumnName: null — short-form id is NOT implicit PK; FK to it throws', () => {
 		expect(() =>
 			schema(
 				{
@@ -382,7 +382,7 @@ describe('idsArePrimaryKeys option', () => {
 					posts: { id: 'uuid', authorId: ref('users') },
 				},
 				undefined,
-				{ idsArePrimaryKeys: false },
+				{ defaultPkColumnName: null },
 			),
 		).toThrow(
 			expect.objectContaining({
@@ -391,7 +391,7 @@ describe('idsArePrimaryKeys option', () => {
 		);
 	});
 
-	it('idsArePrimaryKeys=false: explicit primaryKey:true on id makes FK pass', () => {
+	it('defaultPkColumnName: null — explicit primaryKey:true on id makes FK pass', () => {
 		expect(() =>
 			schema(
 				{
@@ -402,7 +402,7 @@ describe('idsArePrimaryKeys option', () => {
 					},
 				},
 				undefined,
-				{ idsArePrimaryKeys: false },
+				{ defaultPkColumnName: null },
 			),
 		).not.toThrow();
 	});
@@ -423,27 +423,8 @@ describe('idsArePrimaryKeys option', () => {
 		).not.toThrow();
 	});
 
-	it('custom defaultPkColumnName + idsArePrimaryKeys=false requires explicit PK flag', () => {
-		// Without explicit primaryKey flag on pk_uuid, FK fails when idsArePrimaryKeys=false
-		expect(() =>
-			schema(
-				{
-					users: { pk_uuid: 'uuid' },
-					posts: {
-						id: 'uuid',
-						userPk: ref('users', { references: ['pk_uuid'] }),
-					},
-				},
-				undefined,
-				{ idsArePrimaryKeys: false, defaultPkColumnName: 'pk_uuid' },
-			),
-		).toThrow(
-			expect.objectContaining({
-				message: expect.stringContaining('neither primary key nor unique'),
-			}),
-		);
-
-		// With explicit primaryKey:true, it passes even with idsArePrimaryKeys=false
+	it('defaultPkColumnName: null — explicit primaryKey:true on pk_uuid works regardless of convention', () => {
+		// With explicit primaryKey:true, the FK passes even when the implicit convention is disabled
 		expect(() =>
 			schema(
 				{
@@ -454,8 +435,69 @@ describe('idsArePrimaryKeys option', () => {
 					},
 				},
 				undefined,
-				{ idsArePrimaryKeys: false, defaultPkColumnName: 'pk_uuid' },
+				{ defaultPkColumnName: null },
 			),
 		).not.toThrow();
+	});
+
+	it('rejects constraint-level FK whose source column does not exist on the local table', () => {
+		expect(() =>
+			schema(
+				{
+					users: { id: { type: 'uuid', primaryKey: true } },
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						realCol: { type: 'uuid' },
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', { columns: ['nonExistentSrc'], references: ['id'] }),
+						],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('rejects constraint-level FK with zero-length references array', () => {
+		expect(() =>
+			schema(
+				{
+					users: { id: { type: 'uuid', primaryKey: true } },
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						realCol: { type: 'uuid' },
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', { columns: ['realCol'], references: [] }),
+						],
+					},
+				},
+			),
+		).toThrow(SchemaValidationError);
+	});
+
+	it('FK source column type matches the referenced non-PK unique column type (R5-1)', () => {
+		const db = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+				email: { type: 'string', unique: true },
+			},
+			memberships: {
+				id: { type: 'uuid', primaryKey: true },
+				userEmail: ref('users', { references: ['email'] }),
+			},
+		});
+		const model = schemaToModelIR(db.definition);
+		const fkCol = model.tables
+			.get('memberships')
+			?.columns.find((c) => c.name === 'userEmail');
+		// Must be 'string' (matches users.email type), NOT 'uuid' (which is users.id type)
+		expect(fkCol?.type).toBe('string');
 	});
 });

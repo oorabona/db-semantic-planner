@@ -250,37 +250,38 @@ export interface SchemaOptions {
 	 */
 	defaultFilters?: DefaultFilters;
 	/**
-	 * Treat short-form `id` columns (or whatever `defaultPkColumnName` resolves to)
-	 * as implicit primary keys when no explicit `primaryKey` flag is set.
+	 * Column name treated as the implicit primary key for short-form column
+	 * declarations. When a table has no explicit `primaryKey: true` flag and
+	 * no FK columns, a column matching this name is inferred as the PK.
 	 *
-	 * Default: `true` (matches existing codebase convention).
+	 * Default: `'id'` (matches existing codebase convention).
 	 *
-	 * When `false`, primary keys must be declared explicitly at the column level:
-	 *   - Single PK: `id: { type: 'uuid', primaryKey: true }`
-	 *   - Composite PK: mark each member column with `primaryKey: true`
+	 * Set to `null` to disable the implicit-PK convention entirely. Primary
+	 * keys must then be declared explicitly with `primaryKey: true` (or are
+	 * inferred from FK columns for junction tables).
+	 *
+	 * Match the adapter's `defaultPkColumnName` if your project uses a
+	 * different naming scheme (e.g. `'pk_uuid'`).
 	 *
 	 * @remarks
-	 * When `true`, `inferPrimaryKey` resolves PKs in this order:
-	 * 1. Explicit `primaryKey: true` on a column
-	 * 2. Column matching `defaultPkColumnName` (the implicit convention)
-	 * 3. FK columns (composite, for junction tables with no `id`)
-	 * 4. Otherwise no PK
+	 * `inferPrimaryKey` resolves PKs in this order:
+	 *   1. Explicit `primaryKey: true` on column(s)
+	 *   2. Column matching `defaultPkColumnName` (this option) — skipped when set to `null`
+	 *   3. FK columns (composite, for junction tables — applies regardless of this option)
+	 *   4. No primary key
 	 *
 	 * @example
-	 * // Implicit-PK enabled (default)
-	 * schema({ users: { id: 'uuid' } });  // 'id' becomes PK
+	 * // Default — 'id' is implicit PK
+	 * schema({ users: { id: 'uuid' } });
 	 *
-	 * // Explicit-only
-	 * schema({ users: { id: 'uuid' } }, undefined, { idsArePrimaryKeys: false });
-	 * // ↑ no PK declared — FKs targeting users.id will fail validation
+	 * // Custom convention
+	 * schema({ users: { pk_uuid: 'uuid' } }, undefined, { defaultPkColumnName: 'pk_uuid' });
+	 *
+	 * // Strict — no implicit PK convention
+	 * schema({ users: { id: 'uuid' } }, undefined, { defaultPkColumnName: null });
+	 * // ↑ no PK declared — FKs targeting users.id will fail validation.
 	 */
-	idsArePrimaryKeys?: boolean;
-	/**
-	 * Column name treated as the implicit primary key when `idsArePrimaryKeys` is true.
-	 * Default: `'id'`. Match the adapter's `defaultPkColumnName` convention if you use a
-	 * different naming scheme (e.g. `'uuid'`).
-	 */
-	defaultPkColumnName?: string;
+	defaultPkColumnName?: string | null;
 }
 
 export interface Schema<T extends SchemaDefinition> {
@@ -767,8 +768,32 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				);
 			}
 
-			// Validate only column-level (single-column on both sides). Composite + count-mismatch
-			// FKs are skipped — PostgreSQL enforces them at DDL apply time.
+			// R4-1: Source-column existence — guard against constraint-level FKs that
+			// declare `columns: [...]` referencing local columns that don't exist on
+			// the source table. Column-level FKs (via buildRefColumn) can't trigger
+			// this because the source column IS the column being declared, but
+			// SchemaConstraints.foreignKeys does not validate this elsewhere.
+			for (const srcCol of fk.columns) {
+				if (!table.columns.some((c) => c.name === srcCol)) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' uses non-existent source column '${srcCol}'`,
+						table.name,
+						srcCol,
+					);
+				}
+			}
+
+			// Validate column counts. Zero-length arrays on either side are malformed
+			// and should be flagged here rather than silently passed to PG.
+			if (fk.columns.length === 0 || fk.references.columns.length === 0) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' has zero-length \`columns\` or \`references\` array`,
+					table.name,
+					fk.columns[0] ?? '',
+				);
+			}
+			// Validate only column-level (single-column on both sides). Composite +
+			// count-mismatch FKs are still skipped — PostgreSQL enforces them at DDL apply time.
 			if (fk.columns.length !== 1 || fk.references.columns.length !== 1)
 				continue;
 
@@ -808,7 +833,8 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
 							`add a single-column unique index via SchemaConstraints, ` +
 							`or — if '${refCol}' is your primary-key column convention — pass ` +
-							`\`{ idsArePrimaryKeys: true, defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\`.`,
+							`\`{ defaultPkColumnName: '${refCol}' }\` as the third argument to \`schema()\` ` +
+							`(or omit the option entirely if '${refCol}' is 'id').`,
 						table.name,
 						fk.columns[0],
 					);
@@ -1006,6 +1032,22 @@ function getTargetPkType(
 }
 
 /**
+ * Returns the ColumnType for a specific named column in a target table definition.
+ * Used by buildRefColumn to derive the source column type when `references` points
+ * to a non-PK unique column. Falls back to `undefined` when the column is not found
+ * or is itself a ref (chain case handled by getTargetPkType).
+ */
+function getReferencedColumnType(
+	targetDef: TableDef,
+	referencedCol: string,
+): ColumnType | undefined {
+	const colDef = targetDef[referencedCol];
+	if (!colDef) return undefined;
+	if (isRef(colDef)) return undefined; // chain case — fall through to getTargetPkType
+	return normalizeColumnDef(colDef).type;
+}
+
+/**
  * Builds a FK column + ForeignKeyIR pair from a ref definition.
  */
 function buildRefColumn(
@@ -1013,10 +1055,23 @@ function buildRefColumn(
 	columnDef: RefDefinition,
 	definition: SchemaDefinition,
 ): { col: ColumnIR; fk: ForeignKeyIR } {
-	const targetPkType = getTargetPkType(definition, columnDef.target);
+	// R5-1: When options.references specifies a single target column, derive the
+	// source column type from THAT column's type rather than the target's PK type.
+	// This prevents a type mismatch when the FK points at a unique non-PK column
+	// that has a different type than the table's PK (e.g. email:string vs id:uuid).
+	const targetDef = definition[columnDef.target];
+	const targetCol =
+		columnDef.options.references?.length === 1
+			? columnDef.options.references[0]
+			: undefined;
+	const inferredType =
+		targetCol && targetDef
+			? (getReferencedColumnType(targetDef, targetCol) ??
+				getTargetPkType(definition, columnDef.target))
+			: getTargetPkType(definition, columnDef.target);
 	const col: Mutable<ColumnIR> = {
 		name: columnName,
-		type: targetPkType,
+		type: inferredType,
 		nullable: columnDef.options.nullable ?? false,
 	};
 	if (columnDef.options.unique) col.unique = true;
@@ -1089,27 +1144,35 @@ function buildColumnsForTable(
 }
 
 /**
- * Infers the final primary key from explicit list, 'id' fallback, or FK columns.
- * Strategy: explicit > 'id' column > composite FK > omit.
+ * Infers the final primary key from explicit declarations, the implicit-PK name
+ * convention, or FK columns (for junction tables).
+ *
+ * Resolution order:
+ *   1. Explicit `primaryKey: true` on column(s)
+ *   2. Column matching `defaultPkColumnName` (options.defaultPkColumnName) — skipped
+ *      when set to `null` (strict mode)
+ *   3. FK columns (composite PK for junction tables — applies regardless of option)
+ *   4. No primary key
  */
 function inferPrimaryKey(
 	primaryKey: string[],
 	foreignKeys: ForeignKeyIR[],
 	columns: ColumnIR[],
-	options?: { idsArePrimaryKeys?: boolean; defaultPkColumnName?: string },
+	options?: { defaultPkColumnName?: string | null },
 ): string | readonly string[] | undefined {
 	if (primaryKey.length > 0) {
 		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
 	}
-	// Implicit PK convention BEFORE FK fallback: a column matching defaultPkColumnName
-	// is the PK unless explicitly disabled. This matches the SchemaOptions JSDoc and
-	// avoids self-ref tables ending up with a FK column as PK.
-	const idsArePk = options?.idsArePrimaryKeys ?? true;
-	const pkColName = options?.defaultPkColumnName ?? 'id';
-	if (idsArePk && columns.some((c) => c.name === pkColName)) {
+	// Implicit PK convention BEFORE FK fallback. Honoured unless explicitly
+	// disabled with `defaultPkColumnName: null`.
+	const pkColName =
+		options?.defaultPkColumnName === undefined
+			? 'id'
+			: options.defaultPkColumnName;
+	if (pkColName !== null && columns.some((c) => c.name === pkColName)) {
 		return pkColName;
 	}
-	// FK fallback: junction tables (no id, no explicit PK) use FK columns as composite PK.
+	// FK fallback for junction tables (applies regardless of the option above).
 	const fkColumns = foreignKeys.flatMap((fk) => fk.columns);
 	if (fkColumns.length > 0) {
 		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
