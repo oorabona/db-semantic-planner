@@ -172,24 +172,18 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 	it('rejects FK targeting a member of a composite PK alone (singleton-only rule)', () => {
 		// Composite PK members do not make individual columns unique — matches PG semantics
 		expect(() =>
-			schema(
-				{
-					users: {
-						tenantId: { type: 'uuid' },
-						userId: { type: 'uuid' },
-						name: { type: 'string' },
-					},
-					posts: {
-						id: { type: 'uuid', primaryKey: true },
-						// targeting only 'userId' which is part of composite PK but not singleton PK
-						authorId: ref('users', { references: ['userId'] }),
-					},
+			schema({
+				users: {
+					tenantId: { type: 'uuid', primaryKey: true },
+					userId: { type: 'uuid', primaryKey: true },
+					name: { type: 'string' },
 				},
-				{
-					// table-level composite PK via constraints
-					users: { primaryKey: ['tenantId', 'userId'] },
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					// targeting only 'userId' which is part of composite PK but not singleton PK
+					authorId: ref('users', { references: ['userId'] }),
 				},
-			),
+			}),
 		).toThrow(
 			expect.objectContaining({
 				message: expect.stringContaining('neither primary key nor unique'),
@@ -345,6 +339,27 @@ describe('FK target uniqueness gate (post-build validateFkTargets)', () => {
 				},
 			),
 		).toThrow(SchemaValidationError);
+	});
+
+	it('rejects constraint-level FK to a non-existent table', () => {
+		// validateRefs only checks column-level refs; constraint-level FKs to missing
+		// tables must be caught by validateFkTargets instead.
+		expect(() =>
+			schema(
+				{
+					orders: { id: { type: 'uuid', primaryKey: true }, total: 'number' },
+				},
+				{
+					orders: {
+						foreignKeys: [ref('ghost_table', { columns: ['total'] })],
+					},
+				},
+			),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining("non-existent table 'ghost_table'"),
+			}),
+		);
 	});
 });
 

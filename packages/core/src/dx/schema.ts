@@ -255,13 +255,12 @@ export interface SchemaOptions {
 	 *
 	 * Default: `true` (matches existing codebase convention).
 	 *
-	 * When `false`, primary keys must be declared explicitly:
-	 *   - column-level: `id: { type: 'uuid', primaryKey: true }`
-	 *   - table-level via constraints: `primaryKey: ['id']`
+	 * When `false`, primary keys must be declared explicitly at the column level:
+	 *   - `id: { type: 'uuid', primaryKey: true }`
 	 *
 	 * @remarks
 	 * When `true`, `inferPrimaryKey` resolves PKs in this order:
-	 * 1. Explicit `primaryKey: true` on a column or table-level `primaryKey: [...]`
+	 * 1. Explicit `primaryKey: true` on a column
 	 * 2. Column matching `defaultPkColumnName` (the implicit convention)
 	 * 3. FK columns (composite, for junction tables with no `id`)
 	 * 4. Otherwise no PK
@@ -755,7 +754,13 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 	for (const table of tables) {
 		for (const fk of table.foreignKeys) {
 			const target = tableMap.get(fk.references.table);
-			if (!target) continue; // already caught by validateRefs
+			if (!target) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' references non-existent table '${fk.references.table}'`,
+					table.name,
+					fk.columns[0],
+				);
+			}
 
 			// Validate only column-level (single-column on both sides). Composite + count-mismatch
 			// FKs are skipped — PostgreSQL enforces them at DDL apply time.
