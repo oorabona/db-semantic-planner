@@ -261,8 +261,8 @@ export interface SchemaOptions {
 	 * Set to `null` to disable the implicit-PK convention entirely. Primary
 	 * keys must then be declared explicitly with `primaryKey: true` (or are
 	 * inferred from FK columns for junction tables). Empty string (`''`) and
-	 * whitespace-only strings are rejected at `schema()` time with a
-	 * `SchemaValidationError`.
+	 * whitespace-only strings are rejected eagerly at `schema()` time
+	 * (before any per-table processing) with a `SchemaValidationError`.
 	 *
 	 * Match the adapter's `defaultPkColumnName` if your project uses a
 	 * different naming scheme (e.g. `'pk_uuid'`).
@@ -637,6 +637,19 @@ export function schemaToModelIR(
 	extras?: SchemaExtras,
 	options?: SchemaOptions,
 ): ModelIR {
+	// R6-L1: fail-fast before any per-table work. Empty / whitespace-only
+	// defaultPkColumnName is rejected here (once) rather than per-table in
+	// inferPrimaryKey, because the error is a schema-level misconfiguration
+	// and should be reported at the earliest possible point.
+	if (
+		typeof options?.defaultPkColumnName === 'string' &&
+		options.defaultPkColumnName.trim().length === 0
+	) {
+		throw new SchemaValidationError(
+			`defaultPkColumnName cannot be an empty or whitespace-only string. Pass null to disable the implicit-PK convention or omit the option for the default 'id'.`,
+		);
+	}
+
 	const tableNames = Object.keys(definition);
 
 	// Phase 1: Validate refs point to existing tables (existence + roles only)
@@ -1236,19 +1249,12 @@ function inferPrimaryKey(
 		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
 	}
 	// Implicit PK convention BEFORE FK fallback. Honoured unless explicitly
-	// disabled with `defaultPkColumnName: null`.
-	const pkColNameRaw =
+	// disabled with `defaultPkColumnName: null`. Empty/whitespace-only strings
+	// are rejected at schemaToModelIR() time (R6-L1 guard fires before this runs).
+	const pkColName =
 		options?.defaultPkColumnName === undefined
 			? 'id'
 			: options.defaultPkColumnName;
-	// R6-L1: reject empty string — it silently matches nothing and is confusing.
-	// Pass null to disable the convention; omit the option for the default 'id'.
-	if (typeof pkColNameRaw === 'string' && pkColNameRaw.trim().length === 0) {
-		throw new SchemaValidationError(
-			`defaultPkColumnName cannot be an empty or whitespace-only string. Pass null to disable the implicit-PK convention or omit the option for the default 'id'.`,
-		);
-	}
-	const pkColName = pkColNameRaw;
 	if (pkColName !== null && columns.some((c) => c.name === pkColName)) {
 		return pkColName;
 	}

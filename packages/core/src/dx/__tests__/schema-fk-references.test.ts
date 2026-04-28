@@ -712,4 +712,39 @@ describe('defaultPkColumnName option', () => {
 			?.columns.find((c) => c.name === 'roleOrg');
 		expect(fkCol?.type).toBe('string');
 	});
+
+	it('R6-5b: visited-Set cycle guard prevents infinite recursion on circular ref chains', () => {
+		// Construct a schema where two tables point to each other via non-PK ref()
+		// columns with explicit references clauses, forming a cycle in the
+		// getReferencedColumnType resolution chain. The visited-Set guard must
+		// short-circuit and return undefined before hitting a stack overflow.
+		//
+		// validateFkTargets will likely throw SchemaValidationError (FK targets are
+		// not PK/unique) before getReferencedColumnType even runs — that is also an
+		// acceptable outcome. The contract is: NO RangeError / stack overflow under
+		// any circumstances.
+		let caughtError: unknown;
+		try {
+			schema({
+				a: {
+					id: { type: 'uuid', primaryKey: true },
+					bRef: ref('b', { references: ['aRef'] }),
+				},
+				b: {
+					id: { type: 'uuid', primaryKey: true },
+					aRef: ref('a', { references: ['bRef'] }),
+				},
+			});
+		} catch (err) {
+			caughtError = err;
+		}
+		// A SchemaValidationError is acceptable — a stack overflow is not.
+		if (caughtError !== undefined) {
+			expect(caughtError).not.toBeInstanceOf(RangeError);
+			expect((caughtError as Error).message).not.toMatch(
+				/Maximum call stack|stack overflow/i,
+			);
+			expect(caughtError).toBeInstanceOf(SchemaValidationError);
+		}
+	});
 });

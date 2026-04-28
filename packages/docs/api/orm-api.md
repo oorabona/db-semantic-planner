@@ -300,6 +300,52 @@ const db = schema({
 | `'camelCase'` | `firstName` | `firstName` | No transform |
 | `'preserve'` | as-is | as-is | No transform |
 
+### Schema Options (`SchemaOptions`)
+
+The third argument to `schema()` accepts a `SchemaOptions` object that controls schema-wide DSL interpretation:
+
+```typescript
+// doctest: skip — signature reference
+schema(definition, constraints, options)
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `defaultFilters` | `Record<string, WhereIntent>` | — | Filters applied automatically to all queries per table. Override with `.withoutDefaultFilters()` on the query builder. |
+| `defaultPkColumnName` | `string \| null` | `'id'` | Column name treated as the implicit primary key for short-form columns. Set to `null` to disable the convention; pass a custom string for project-specific naming schemes. Empty or whitespace-only strings are rejected eagerly at `schema()` time. |
+
+#### Example: implicit-PK convention
+
+```typescript
+// Default: 'id' is treated as PK when no explicit primaryKey: true is set
+const db = schema({
+  users: { id: 'uuid' }, // 'id' becomes PK via convention
+});
+
+// Custom convention: 'pk_uuid' is the implicit PK name
+const db2 = schema(
+  { users: { pk_uuid: 'uuid' } },
+  undefined,
+  { defaultPkColumnName: 'pk_uuid' }
+);
+
+// Strict mode: no implicit PK convention — every PK must be explicit
+const db3 = schema(
+  { users: { id: { type: 'uuid', primaryKey: true } } },
+  undefined,
+  { defaultPkColumnName: null }
+);
+```
+
+#### Resolution order
+
+When inferring the primary key for a table, `schema()` checks in this order:
+
+1. Explicit `primaryKey: true` on a column
+2. Column matching `defaultPkColumnName` (the implicit convention) — skipped when set to `null`
+3. FK columns (composite, for junction tables — applies regardless of `defaultPkColumnName`)
+4. No primary key
+
 ### Schema Constraints
 
 Add composite indexes and foreign keys via the constraints parameter:
