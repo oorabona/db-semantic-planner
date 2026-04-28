@@ -249,6 +249,31 @@ export interface SchemaOptions {
 	 * Override with `.withoutDefaultFilters()` on the query builder.
 	 */
 	defaultFilters?: DefaultFilters;
+	/**
+	 * Treat short-form `id` columns (or whatever `defaultPkColumnName` resolves to)
+	 * as implicit primary keys when no explicit `primaryKey` flag is set.
+	 *
+	 * Default: `true` (matches existing codebase convention).
+	 *
+	 * When `false`, primary keys must be declared explicitly:
+	 *   - column-level: `id: { type: 'uuid', primaryKey: true }`
+	 *   - table-level via constraints: `primaryKey: ['id']`
+	 *
+	 * @example
+	 * // Implicit-PK enabled (default)
+	 * schema({ users: { id: 'uuid' } });  // 'id' becomes PK
+	 *
+	 * // Explicit-only
+	 * schema({ users: { id: 'uuid' } }, undefined, { idsArePrimaryKeys: false });
+	 * // ↑ no PK declared — FKs targeting users.id will fail validation
+	 */
+	idsArePrimaryKeys?: boolean;
+	/**
+	 * Column name treated as the implicit primary key when `idsArePrimaryKeys` is true.
+	 * Default: `'id'`. Match the adapter's `defaultPkColumnName` convention if you use a
+	 * different naming scheme (e.g. `'uuid'`).
+	 */
+	defaultPkColumnName?: string;
 }
 
 export interface Schema<T extends SchemaDefinition> {
@@ -539,7 +564,7 @@ export function schema<T extends SchemaDefinition>(
 	extras?: SchemaExtras,
 ): Schema<T> {
 	// Validate and convert to ModelIR
-	const model = schemaToModelIR(definition, constraints, extras);
+	const model = schemaToModelIR(definition, constraints, extras, options);
 	const tableNames = Object.keys(definition) as (keyof T)[];
 
 	// Validate default filters reference existing tables
@@ -598,17 +623,27 @@ export function schemaToModelIR(
 	definition: SchemaDefinition,
 	constraints?: SchemaConstraints,
 	extras?: SchemaExtras,
+	options?: SchemaOptions,
 ): ModelIR {
 	const tableNames = Object.keys(definition);
 
-	// Phase 1: Validate refs point to existing tables
+	// Phase 1: Validate refs point to existing tables (existence + roles only)
 	validateRefs(definition, tableNames);
 
 	// Phase 2: Collect all refs and validate constraints
 	const refsByTable = collectRefs(definition);
 
-	// Phase 3: Build tables (columns, PKs, FKs, indexes)
-	const tables = buildTables(definition, refsByTable, tableNames, constraints);
+	// Phase 3: Build tables (columns, PKs, FKs, indexes) — inferPrimaryKey runs here
+	const tables = buildTables(
+		definition,
+		refsByTable,
+		tableNames,
+		constraints,
+		options,
+	);
+
+	// Phase 3.5: Validate FK targets exist and are referenceable (post-build, uses resolved PKs)
+	validateFkTargets(tables, options);
 
 	// Phase 4: Build relations from refs
 	const relations = buildRelations(definition, refsByTable, tableNames);
@@ -658,18 +693,6 @@ export function schemaToModelIR(
  * (PostgreSQL error 42830 prevention): column must be declared as primary key
  * or unique. Short-form string column types and RefDefinitions always fail.
  */
-function isColumnPkOrUnique(colDef: unknown): boolean {
-	if (typeof colDef !== 'object' || colDef === null) {
-		// Short-form string type (e.g. 'string', 'integer') — no PK/unique flags
-		return false;
-	}
-	if (isRef(colDef as ColumnDef | RefDefinition)) {
-		// RefDefinitions are not the target's own PK/unique gate
-		return false;
-	}
-	const col = colDef as Record<string, unknown>;
-	return col['primaryKey'] === true || col['unique'] === true;
-}
 
 function validateRefs(
 	definition: SchemaDefinition,
@@ -706,35 +729,74 @@ function validateRefs(
 						columnName,
 					);
 				}
+			}
+		}
+	}
+}
 
-				// Target column existence + uniqueness gate
-				const target = columnDef.target;
-				// definition[target] is guaranteed defined — table existence checked above
-				// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-				const targetDef = definition[target]!;
-				const refCols: string[] =
-					columnDef.options.references &&
-					columnDef.options.references.length > 0
-						? (columnDef.options.references as string[])
-						: ['id'];
-				for (const refCol of refCols) {
-					// Column must exist on target table
-					if (!(refCol in targetDef)) {
-						throw new SchemaValidationError(
-							`Foreign key '${columnName}' references non-existent column '${target}.${refCol}'`,
-							tableName,
-							columnName,
-						);
-					}
-					// Column must be PK or unique
-					const targetColDef = targetDef[refCol as keyof typeof targetDef];
-					if (!isColumnPkOrUnique(targetColDef)) {
-						throw new SchemaValidationError(
-							`Foreign key '${columnName}' targets '${target}.${refCol}' which is neither primary key nor unique`,
-							tableName,
-							columnName,
-						);
-					}
+/**
+ * Validates that every FK's target columns exist on the target table AND are
+ * referenceable — i.e. covered by either:
+ *   - the target's primary key (column-level PK declared, table-level singleton PK,
+ *     or the implicit-id PK convention when idsArePrimaryKeys is true)
+ *   - an explicit `unique: true` flag on the target column(s)
+ *
+ * Mirrors PostgreSQL error 42830 ("there is no unique constraint matching given
+ * keys for referenced table") at schema()-time instead of at DDL apply time.
+ *
+ * For column-level FKs (single-column targets, the only case `buildRefColumn` allows),
+ * the rule is: target must be column-level PK / single-col table-level PK / unique.
+ * Members of a composite PK alone don't qualify (matches PG strict semantics).
+ */
+function validateFkTargets(
+	tables: readonly TableIR[],
+	options?: { idsArePrimaryKeys?: boolean; defaultPkColumnName?: string },
+): void {
+	const idsArePk = options?.idsArePrimaryKeys ?? true;
+	const pkColName = options?.defaultPkColumnName ?? 'id';
+	const tableMap = new Map(tables.map((t) => [t.name, t]));
+
+	for (const table of tables) {
+		for (const fk of table.foreignKeys) {
+			const target = tableMap.get(fk.references.table);
+			if (!target) continue; // already caught by validateRefs
+
+			// Only validate single-column FKs (column-level refs via buildRefColumn).
+			// Composite FKs from table-level constraints reference composite PKs/unique
+			// constraints that cannot be checked column-by-column — PostgreSQL will
+			// enforce those at DDL apply time (error 42830).
+			if (fk.references.columns.length !== 1) continue;
+
+			for (const refCol of fk.references.columns) {
+				// Existence
+				const targetCol = target.columns.find((c) => c.name === refCol);
+				if (!targetCol) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' references non-existent column '${target.name}.${refCol}'`,
+						table.name,
+						fk.columns[0],
+					);
+				}
+				// Uniqueness — a column is referenceable when any of the following holds:
+				//   1. It is the table's singleton resolved primaryKey (covers explicit column-level PK,
+				//      table-level singleton PK, and the implicit-id convention when inferPrimaryKey
+				//      was able to reach the fallback branch).
+				//   2. It has explicit `unique: true`.
+				//   3. The column name matches the implicit-PK convention (idsArePrimaryKeys=true +
+				//      defaultPkColumnName) — covers self-ref tables where the FK-column fallback in
+				//      inferPrimaryKey assigned a different column as PK before the id-fallback ran.
+				const isSingletonPk =
+					typeof target.primaryKey === 'string' && target.primaryKey === refCol;
+				const isImplicitPk = idsArePk && refCol === pkColName;
+				const isUnique = targetCol.unique === true;
+				if (!isSingletonPk && !isImplicitPk && !isUnique) {
+					throw new SchemaValidationError(
+						`Foreign key in '${table.name}' targets '${target.name}.${refCol}' which is neither primary key nor unique. ` +
+							`Either mark the target column with \`unique: true\` (or \`primaryKey: true\`), ` +
+							`or — if '${refCol}' is your primary-key convention — enable \`schema(definition, undefined, { idsArePrimaryKeys: true })\` (the default).`,
+						table.name,
+						fk.columns[0],
+					);
 				}
 			}
 		}
@@ -1019,6 +1081,7 @@ function inferPrimaryKey(
 	primaryKey: string[],
 	foreignKeys: ForeignKeyIR[],
 	columns: ColumnIR[],
+	options?: { idsArePrimaryKeys?: boolean; defaultPkColumnName?: string },
 ): string | readonly string[] | undefined {
 	if (primaryKey.length > 0) {
 		return primaryKey.length === 1 ? (primaryKey[0] as string) : primaryKey;
@@ -1027,7 +1090,14 @@ function inferPrimaryKey(
 	if (fkColumns.length > 0) {
 		return fkColumns.length === 1 ? fkColumns[0] : fkColumns;
 	}
-	return columns.some((c) => c.name === 'id') ? 'id' : undefined;
+	// Implicit PK convention: a column matching defaultPkColumnName is the PK
+	// unless explicitly disabled via options.idsArePrimaryKeys = false.
+	const idsArePk = options?.idsArePrimaryKeys ?? true;
+	const pkColName = options?.defaultPkColumnName ?? 'id';
+	if (idsArePk && columns.some((c) => c.name === pkColName)) {
+		return pkColName;
+	}
+	return undefined;
 }
 
 /**
@@ -1155,6 +1225,7 @@ function buildTables(
 	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
 	constraints?: SchemaConstraints,
+	options?: SchemaOptions,
 ): TableIR[] {
 	const tables: TableIR[] = [];
 
@@ -1167,7 +1238,7 @@ function buildTables(
 			tableDef,
 			definition,
 		);
-		const finalPk = inferPrimaryKey(primaryKey, foreignKeys, columns);
+		const finalPk = inferPrimaryKey(primaryKey, foreignKeys, columns, options);
 		const pseudoColumns = buildPseudoColumns(tableName, refsByTable, finalPk);
 		const columnIndexes = buildColumnIndexes(tableName, tableDef);
 		const { extraIndexes, checkConstraints, extraForeignKeys } =
