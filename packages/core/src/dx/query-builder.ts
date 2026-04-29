@@ -93,10 +93,8 @@ import {
 export class QueryBuilderImpl<TResult = unknown>
 	implements QueryBuilder<TResult>
 {
-	private readonly ctx: QueryBuilderContext;
-	/** @internal — read by pagination-impl and stream-impl */
-	readonly model: ModelIR;
-	private readonly strictMode: boolean;
+	/** @internal — read by stream-impl and pagination-impl */
+	readonly ctx: QueryBuilderContext;
 	/** @internal — read by stream-impl */
 	readonly from: string;
 	/** @internal — mutated by pagination-impl on clones */
@@ -104,20 +102,6 @@ export class QueryBuilderImpl<TResult = unknown>
 	/** @internal — mutated by pagination-impl on clones */
 	readonly recursiveIncludes: RecursiveIncludeConfig[] = [];
 	private readonly relationHints: RelationHints;
-	private readonly adapter: Adapter | undefined;
-	/** @internal — read by pagination-impl and stream-impl */
-	readonly schemaName: string | undefined;
-	/** @internal — read by stream-impl */
-	readonly dialectCapabilities: DialectCapabilities | undefined;
-	private readonly defaultFilters: DefaultFilters | undefined;
-	/** @internal — read by stream-impl */
-	readonly hookStore: HookStore | undefined;
-	/** @internal — read by stream-impl */
-	readonly onHookError: HookErrorHandler | undefined;
-	/** @internal — read by stream-impl */
-	readonly inTransaction: boolean | undefined;
-	/** @internal — read by stream-impl */
-	planOptionsOverride: PlanOptions | undefined;
 	/** @internal — mutated by pagination-impl on clones */
 	selectIntent: SelectIntent | undefined = undefined;
 	/** @internal — mutated by pagination-impl on clones */
@@ -149,18 +133,8 @@ export class QueryBuilderImpl<TResult = unknown>
 		relationHints: RelationHints = {},
 	) {
 		this.ctx = ctx;
-		this.model = ctx.model;
-		this.strictMode = ctx.strictMode;
 		this.from = from;
 		this.relationHints = relationHints;
-		this.adapter = ctx.adapter;
-		this.schemaName = ctx.schemaName;
-		this.dialectCapabilities = ctx.dialectCapabilities;
-		this.planOptionsOverride = ctx.planOptionsOverride;
-		this.defaultFilters = ctx.defaultFilters;
-		this.hookStore = ctx.hookStore;
-		this.onHookError = ctx.onHookError;
-		this.inTransaction = ctx.inTransaction;
 	}
 
 	include(
@@ -171,7 +145,7 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Validate recursive includes (DX-017)
 		if (isRecursiveIncludeOptions(options)) {
-			validateRecursiveInclude(this.model, this.from, relation, options);
+			validateRecursiveInclude(this.ctx.model, this.from, relation, options);
 			// DX-017: No longer store separately - let includeOptionsToIntent handle conversion
 		}
 
@@ -663,11 +637,15 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	withPlanOptions(options: PlanOptions): QueryBuilder<TResult> {
+		// Clone with merged planOptionsOverride baked into ctx (ctx is readonly — cannot mutate in place).
 		const builder = this.clone();
-		// Merge with existing planOptions (per-query overrides take precedence)
-		builder.planOptionsOverride = {
-			...builder.planOptionsOverride,
-			...options,
+		// Reconstruct ctx with merged planOptions; spread preserves all other fields.
+		(builder as { ctx: QueryBuilderContext }).ctx = {
+			...builder.ctx,
+			planOptionsOverride: {
+				...builder.ctx.planOptionsOverride,
+				...options,
+			},
 		};
 		return builder;
 	}
@@ -678,14 +656,14 @@ export class QueryBuilderImpl<TResult = unknown>
 	private getEffectiveStrictMode(): boolean {
 		return this.strictModeOverride !== undefined
 			? this.strictModeOverride
-			: this.strictMode;
+			: this.ctx.strictMode;
 	}
 
 	plan(): PlanReport {
 		const intent = this.buildIntent();
 
 		// E15: Warn when lock is used outside a transaction context
-		if (intent.lock && !this.inTransaction) {
+		if (intent.lock && !this.ctx.inTransaction) {
 			console.warn(
 				'[dbsp] Row-level lock (FOR UPDATE/SHARE) used outside a transaction. ' +
 					'Locks are only effective within a transaction.',
@@ -697,15 +675,15 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Build plan options: dialectCapabilities + per-query overrides
 		const planOptions: PlanOptions = {
-			...(this.dialectCapabilities && {
-				dialectCapabilities: this.dialectCapabilities,
+			...(this.ctx.dialectCapabilities && {
+				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
 			// planOptions (global + per-query) take highest precedence
-			...this.planOptionsOverride,
+			...this.ctx.planOptionsOverride,
 		};
 
 		try {
-			return plan(intentWithHints, this.model, planOptions);
+			return plan(intentWithHints, this.ctx.model, planOptions);
 		} catch (error) {
 			if (error instanceof AmbiguousPlanError) {
 				return this.handleAmbiguity(error, intentWithHints, planOptions);
@@ -718,7 +696,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		const adapter = this.getConfiguredAdapter();
 
 		// E17b: Hook-aware execution path
-		if (this.hookStore && hasHooks(this.hookStore)) {
+		if (this.ctx.hookStore && hasHooks(this.ctx.hookStore)) {
 			return this.executeWithHooks(adapter, 'all');
 		}
 
@@ -729,9 +707,9 @@ export class QueryBuilderImpl<TResult = unknown>
 		const compileOptions: {
 			schemaName?: string;
 			model: ModelIR;
-		} = { model: this.model };
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		} = { model: this.ctx.model };
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
 		// Use compileWithIncludes to get subquery include info for hasMany relations
@@ -745,9 +723,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// Create hydrator for result transformation (AUD-005)
 		const hydrator = new ResultHydrator<TResult>(
-			this.model,
+			this.ctx.model,
 			this.from,
-			this.schemaName,
+			this.ctx.schemaName,
 		);
 
 		// E2E-004: Hydrate json_agg includes by parsing JSON columns
@@ -780,7 +758,7 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	async first(): Promise<TResult | undefined> {
 		// E17b: Hook-aware path — hooks see resultType='first'
-		if (this.hookStore && hasHooks(this.hookStore)) {
+		if (this.ctx.hookStore && hasHooks(this.ctx.hookStore)) {
 			const adapter = this.getConfiguredAdapter();
 			const rows = await this.executeWithHooks<TResult[]>(adapter, 'first');
 			return rows[0];
@@ -829,7 +807,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * Returns the first PK column if composite, falls back to 'id' if undefined.
 	 */
 	private getSimplePkColumn(): string {
-		const table = this.model.getTable(this.from);
+		const table = this.ctx.model.getTable(this.from);
 		const pk = table?.primaryKey;
 		if (typeof pk === 'string') {
 			return pk;
@@ -852,7 +830,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			return eq(this.getSimplePkColumn(), value);
 		}
 		// FIND-009: Validate composite PK keys against schema-defined primary key columns
-		const table = this.model.getTable(this.from);
+		const table = this.ctx.model.getTable(this.from);
 		if (!table) {
 			throw new InvalidOperationError('byId', 'Unknown table');
 		}
@@ -895,9 +873,9 @@ export class QueryBuilderImpl<TResult = unknown>
 		const compileOptions: {
 			schemaName?: string;
 			model: ModelIR;
-		} = { model: this.model };
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		} = { model: this.ctx.model };
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
 		const compiled = adapter.compile(planReport, compileOptions);
@@ -915,12 +893,12 @@ export class QueryBuilderImpl<TResult = unknown>
 		const dump = adapter.createDump(planReport, compiled, dumpMeta);
 
 		// If adapter didn't set schema but context has one, add it
-		if (dump.meta?.schema === undefined && this.schemaName !== undefined) {
+		if (dump.meta?.schema === undefined && this.ctx.schemaName !== undefined) {
 			return {
 				...dump,
 				meta: {
 					...dump.meta,
-					schema: this.schemaName,
+					schema: this.ctx.schemaName,
 				},
 			};
 		}
@@ -932,9 +910,9 @@ export class QueryBuilderImpl<TResult = unknown>
 		const adapter = this.getConfiguredAdapter();
 
 		// E17b: Hook-aware path for exists()
-		if (this.hookStore && hasHooks(this.hookStore)) {
+		if (this.ctx.hookStore && hasHooks(this.ctx.hookStore)) {
 			// INV-07: Re-entrancy guard
-			return withReentrancyGuard(this.hookStore, (s) =>
+			return withReentrancyGuard(this.ctx.hookStore, (s) =>
 				this.existsWithHooks(adapter, s),
 			);
 		}
@@ -944,10 +922,10 @@ export class QueryBuilderImpl<TResult = unknown>
 		const intentWithHints = this.applyRelationHints(existsIntent);
 
 		const planOptions: PlanOptions = {
-			...(this.dialectCapabilities && {
-				dialectCapabilities: this.dialectCapabilities,
+			...(this.ctx.dialectCapabilities && {
+				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
-			...this.planOptionsOverride,
+			...this.ctx.planOptionsOverride,
 		};
 
 		const planReport = this.planWithAmbiguityHandling(
@@ -958,9 +936,9 @@ export class QueryBuilderImpl<TResult = unknown>
 		const compileOptions: {
 			schemaName?: string;
 			model: ModelIR;
-		} = { model: this.model };
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		} = { model: this.ctx.model };
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
 		const compiled = adapter.compile(planReport, compileOptions);
@@ -983,8 +961,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			operation: 'select',
 			intent: rawIntent,
 			resultType: 'exists',
-			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
-			...(this.inTransaction && { inTransaction: true }),
+			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.inTransaction && { inTransaction: true }),
 		};
 
 		// Run beforeQuery hooks
@@ -993,7 +971,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			const afterHookCtx = await runBeforeQueryHooks(
 				store.beforeQuery,
 				beforeCtx,
-				this.onHookError,
+				this.ctx.onHookError,
 			);
 			intent = afterHookCtx.intent;
 		} catch (error) {
@@ -1016,20 +994,20 @@ export class QueryBuilderImpl<TResult = unknown>
 		const existsIntent = this.buildExistsIntentFromIntent(intent);
 		const intentWithHints = this.applyRelationHints(existsIntent);
 		const planOptions: PlanOptions = {
-			...(this.dialectCapabilities && {
-				dialectCapabilities: this.dialectCapabilities,
+			...(this.ctx.dialectCapabilities && {
+				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
-			...this.planOptionsOverride,
+			...this.ctx.planOptionsOverride,
 		};
 		const planReport = this.planWithAmbiguityHandling(
 			intentWithHints,
 			planOptions,
 		);
 		const compileOptions: { schemaName?: string; model: ModelIR } = {
-			model: this.model,
+			model: this.ctx.model,
 		};
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 		const compiled = adapter.compile(planReport, compileOptions);
 		const rows = await adapter.execute(compiled);
@@ -1045,14 +1023,14 @@ export class QueryBuilderImpl<TResult = unknown>
 			sql: compiled.sql,
 			parameters: compiled.parameters,
 			duration: Date.now() - startTime,
-			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
 		};
 		try {
 			return await runAfterQueryHooks(
 				store.afterQuery,
 				afterCtx,
 				result,
-				this.onHookError,
+				this.ctx.onHookError,
 			);
 		} catch (error) {
 			if (store.onError.length > 0) {
@@ -1075,10 +1053,10 @@ export class QueryBuilderImpl<TResult = unknown>
 		const intentWithHints = this.applyRelationHints(existsIntent);
 
 		const planOptions: PlanOptions = {
-			...(this.dialectCapabilities && {
-				dialectCapabilities: this.dialectCapabilities,
+			...(this.ctx.dialectCapabilities && {
+				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
-			...this.planOptionsOverride,
+			...this.ctx.planOptionsOverride,
 		};
 
 		const planReport = this.planWithAmbiguityHandling(
@@ -1089,20 +1067,20 @@ export class QueryBuilderImpl<TResult = unknown>
 		const compileOptions: {
 			schemaName?: string;
 			model: ModelIR;
-		} = { model: this.model };
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		} = { model: this.ctx.model };
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
 		const compiled = adapter.compile(planReport, compileOptions);
 		const dump = adapter.createDump(planReport, compiled);
 
-		if (dump.meta?.schema === undefined && this.schemaName !== undefined) {
+		if (dump.meta?.schema === undefined && this.ctx.schemaName !== undefined) {
 			return {
 				...dump,
 				meta: {
 					...dump.meta,
-					schema: this.schemaName,
+					schema: this.ctx.schemaName,
 				},
 			};
 		}
@@ -1141,14 +1119,14 @@ export class QueryBuilderImpl<TResult = unknown>
 	 */
 	/** @internal — called by pagination-impl and stream-impl */
 	getConfiguredAdapter(): Adapter {
-		if (!this.adapter) {
+		if (!this.ctx.adapter) {
 			throw new ExecutionError({
 				operation: 'query execution',
 				reason: 'Adapter not configured',
 				fix: 'Pass an adapter to createOrm({ adapter: yourAdapter })',
 			});
 		}
-		return this.adapter;
+		return this.ctx.adapter;
 	}
 
 	/**
@@ -1235,8 +1213,8 @@ export class QueryBuilderImpl<TResult = unknown>
 		// Prepend default filter for this table (if configured and not skipped)
 		if (applyDefaultFilters) {
 			const tableDefaultFilter =
-				!this.skipDefaultFilters && this.defaultFilters
-					? this.defaultFilters[this.from]
+				!this.skipDefaultFilters && this.ctx.defaultFilters
+					? this.ctx.defaultFilters[this.from]
 					: undefined;
 			if (tableDefaultFilter) {
 				allWhereIntents.push(tableDefaultFilter);
@@ -1322,8 +1300,8 @@ export class QueryBuilderImpl<TResult = unknown>
 	 */
 	/** @internal — called by stream-impl */
 	applyDefaultFiltersToIntent(intent: QueryIntent): QueryIntent {
-		if (this.skipDefaultFilters || !this.defaultFilters) return intent;
-		const tableDefaultFilter = this.defaultFilters[this.from];
+		if (this.skipDefaultFilters || !this.ctx.defaultFilters) return intent;
+		const tableDefaultFilter = this.ctx.defaultFilters[this.from];
 		if (!tableDefaultFilter) return intent;
 
 		const existingWhere = intent.where;
@@ -1343,7 +1321,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		adapter: Adapter,
 		resultType: QueryResultType,
 	): Promise<R> {
-		const store = this.hookStore;
+		const store = this.ctx.hookStore;
 		if (!store) throw new Error('executeWithHooks called without hookStore');
 		// INV-07: Re-entrancy guard — prevent infinite loops from hooks issuing queries
 		return withReentrancyGuard(store, (s) =>
@@ -1367,8 +1345,8 @@ export class QueryBuilderImpl<TResult = unknown>
 			operation: 'select',
 			intent: rawIntent,
 			resultType,
-			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
-			...(this.inTransaction && { inTransaction: true }),
+			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.inTransaction && { inTransaction: true }),
 		};
 
 		// 3. Run beforeQuery hooks (FIFO) — may modify intent
@@ -1377,7 +1355,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			const afterHookCtx = await runBeforeQueryHooks(
 				store.beforeQuery,
 				beforeCtx,
-				this.onHookError,
+				this.ctx.onHookError,
 			);
 			intent = afterHookCtx.intent;
 		} catch (error) {
@@ -1401,10 +1379,10 @@ export class QueryBuilderImpl<TResult = unknown>
 		// 5. Apply relation hints and plan
 		const intentWithHints = this.applyRelationHints(intent);
 		const planOptions: PlanOptions = {
-			...(this.dialectCapabilities && {
-				dialectCapabilities: this.dialectCapabilities,
+			...(this.ctx.dialectCapabilities && {
+				dialectCapabilities: this.ctx.dialectCapabilities,
 			}),
-			...this.planOptionsOverride,
+			...this.ctx.planOptionsOverride,
 		};
 
 		const planReport = this.planWithAmbiguityHandling(
@@ -1414,10 +1392,10 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// 6. Compile and execute
 		const compileOptions: { schemaName?: string; model: ModelIR } = {
-			model: this.model,
+			model: this.ctx.model,
 		};
-		if (this.schemaName !== undefined) {
-			compileOptions.schemaName = this.schemaName;
+		if (this.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = this.ctx.schemaName;
 		}
 
 		const compiledWithIncludes = adapter.compileWithIncludes(
@@ -1447,9 +1425,9 @@ export class QueryBuilderImpl<TResult = unknown>
 
 		// 7. Hydrate
 		const hydrator = new ResultHydrator<TResult>(
-			this.model,
+			this.ctx.model,
 			this.from,
-			this.schemaName,
+			this.ctx.schemaName,
 		);
 		hydrator.hydrateJsonAggIncludes(mainResults, planReport);
 		hydrator.hydrateJoinIncludes(mainResults, planReport);
@@ -1479,7 +1457,7 @@ export class QueryBuilderImpl<TResult = unknown>
 			sql: compiledWithIncludes.main.sql,
 			parameters: compiledWithIncludes.main.parameters,
 			duration,
-			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
 		};
 
 		// 9. Run afterQuery hooks (LIFO) — may transform results
@@ -1491,7 +1469,7 @@ export class QueryBuilderImpl<TResult = unknown>
 				store.afterQuery,
 				afterCtx,
 				mainResults as unknown as R,
-				this.onHookError,
+				this.ctx.onHookError,
 			);
 			return finalResults;
 		} catch (error) {
@@ -1570,7 +1548,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		planOptions: PlanOptions,
 	): PlanReport {
 		try {
-			return plan(intent, this.model, planOptions);
+			return plan(intent, this.ctx.model, planOptions);
 		} catch (error) {
 			if (error instanceof AmbiguousPlanError) {
 				return this.handleAmbiguity(error, intent, planOptions);
@@ -1613,7 +1591,7 @@ export class QueryBuilderImpl<TResult = unknown>
 		};
 
 		// Re-plan with disambiguation
-		const result = plan(intent, this.model, planOptions);
+		const result = plan(intent, this.ctx.model, planOptions);
 
 		// Add warning about automatic disambiguation.
 		// The chosen relation is the alphabetically-first name (deterministic
@@ -1640,13 +1618,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	/** @internal — called by pagination-impl and stream-impl */
 	clone(): QueryBuilderImpl<TResult> {
 		const builder = new QueryBuilderImpl<TResult>(
-			// Shallow-clone planOptionsOverride into ctx so both ctx.planOptionsOverride
-			// and this.planOptionsOverride (set by the constructor from ctx) reference
-			// the same new object — no dual-state divergence.
+			// Shallow-clone planOptionsOverride so the new builder has its own copy;
+			// ctx itself is spread by reference for all other unchanged fields.
 			{
 				...this.ctx,
-				...(this.planOptionsOverride !== undefined
-					? { planOptionsOverride: { ...this.planOptionsOverride } }
+				...(this.ctx.planOptionsOverride !== undefined
+					? { planOptionsOverride: { ...this.ctx.planOptionsOverride } }
 					: {}),
 			},
 			this.from,
@@ -1668,7 +1645,6 @@ export class QueryBuilderImpl<TResult = unknown>
 		builder.strictModeOverride = this.strictModeOverride;
 		builder.limitValue = this.limitValue;
 		builder.offsetValue = this.offsetValue;
-		// planOptionsOverride already shallow-cloned via ctx spread above; no separate assignment needed.
 		builder.lockIntent = this.lockIntent;
 		builder.joinIntents.push(...this.joinIntents);
 		if (this.batchValuesSource) {
@@ -1702,9 +1678,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
@@ -1716,9 +1692,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
@@ -1730,9 +1706,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
@@ -1744,9 +1720,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
@@ -1758,9 +1734,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
@@ -1772,9 +1748,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				this,
 				other as unknown as QueryIntentSource,
 			),
-			this.model,
-			this.adapter,
-			this.schemaName,
+			this.ctx.model,
+			this.ctx.adapter,
+			this.ctx.schemaName,
 		);
 	}
 
