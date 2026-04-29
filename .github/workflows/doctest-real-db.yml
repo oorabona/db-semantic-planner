@@ -3,8 +3,11 @@ name: Doctest (real DB)
 # Runs the doctest suite against a real PostgreSQL container (the `// doctest:
 # real-db-only` blocks). Triggered on:
 #
-#   - PRs that touch documentation, the doctest framework, or schema-/SQL-
-#     emitting source under packages/core/src and packages/adapter-pgsql/src.
+#   - PRs that touch documentation, the doctest framework, source dirs of
+#     packages whose code feeds into doctests (types, nql, core,
+#     adapter-pgsql), or build inputs that can affect runtime/DB behavior
+#     (per-package package.json/tsconfig.json/tsup.config.ts, root
+#     package.json/tsconfig.json, pnpm-lock.yaml, pnpm-workspace.yaml).
 #     Code-only PRs in unrelated packages (cli, gui, mcp-server) skip this
 #     job to keep CI snappy.
 #   - Pushes to main (always — catches anything that landed without a PR).
