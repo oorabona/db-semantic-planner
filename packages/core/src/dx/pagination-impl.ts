@@ -231,10 +231,10 @@ export async function paginate<TResult>(
 		// is retained for efficiency.
 		const adapter = builder.getConfiguredAdapter();
 		const compileOptions: { schemaName?: string; model: ModelIR } = {
-			model: builder.model,
+			model: builder.ctx.model,
 		};
-		if (builder.schemaName !== undefined) {
-			compileOptions.schemaName = builder.schemaName;
+		if (builder.ctx.schemaName !== undefined) {
+			compileOptions.schemaName = builder.ctx.schemaName;
 		}
 
 		const hasGroupBy = builder.groupByFields.length > 0;

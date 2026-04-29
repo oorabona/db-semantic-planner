@@ -37,11 +37,11 @@ export function stream<TResult>(
 			: undefined;
 
 	// E17b: Fire beforeQuery hook with isStreaming=true (afterQuery does NOT fire for streams)
-	const hookStore = builder.hookStore;
-	const onHookError = builder.onHookError;
+	const hookStore = builder.ctx.hookStore;
+	const onHookError = builder.ctx.onHookError;
 	const table = builder.from;
-	const schemaName = builder.schemaName;
-	const txFlag = builder.inTransaction;
+	const schemaName = builder.ctx.schemaName;
+	const txFlag = builder.ctx.inTransaction;
 
 	// Capture builder references needed inside the lazy iterator closure.
 	// These are captured once to avoid re-reading mutable builder state on
@@ -110,17 +110,17 @@ export function stream<TResult>(
 					const intentWithHints =
 						builder.applyRelationHints(intentAfterDefaults);
 					const planOptions: PlanOptions = {
-						...(builder.dialectCapabilities && {
-							dialectCapabilities: builder.dialectCapabilities,
+						...(builder.ctx.dialectCapabilities && {
+							dialectCapabilities: builder.ctx.dialectCapabilities,
 						}),
-						...builder.planOptionsOverride,
+						...builder.ctx.planOptionsOverride,
 					};
 					const planReport = builder.planWithAmbiguityHandling(
 						intentWithHints,
 						planOptions,
 					);
 					const compileOptions: { schemaName?: string; model: ModelIR } = {
-						model: builder.model,
+						model: builder.ctx.model,
 					};
 					if (schemaName !== undefined) {
 						compileOptions.schemaName = schemaName;
