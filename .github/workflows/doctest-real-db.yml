@@ -1,0 +1,91 @@
+name: Doctest (real DB)
+
+# Runs the doctest suite against a real PostgreSQL container (the `// doctest:
+# real-db-only` blocks). Triggered on:
+#
+#   - PRs that touch documentation, the doctest framework, source dirs of
+#     packages whose code feeds into doctests (types, nql, core,
+#     adapter-pgsql), or build inputs that can affect runtime/DB behavior
+#     (per-package package.json/tsconfig.json/tsup.config.ts, root
+#     package.json/tsconfig.json, pnpm-lock.yaml, pnpm-workspace.yaml).
+#     Code-only PRs in unrelated packages (cli, gui, mcp-server) skip this
+#     job to keep CI snappy.
+#   - Pushes to main (always — catches anything that landed without a PR).
+#   - workflow_dispatch (manual full-coverage run).
+#   - Nightly cron (safety net for any path-filter blind spot).
+#
+# Compile-only doctests still run unconditionally as the `Verify documentation
+# examples` step inside the `test` job in ci.yml. This workflow only governs
+# the slower real-DB variant.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'packages/docs/**'
+      - 'tests/docs-verification/**'
+      - 'packages/core/src/**'
+      - 'packages/adapter-pgsql/src/**'
+      - 'packages/types/src/**'
+      - 'packages/nql/src/**'
+      # Build inputs that can affect runtime/DB behavior without touching src/.
+      - 'packages/core/package.json'
+      - 'packages/core/tsconfig.json'
+      - 'packages/core/tsup.config.ts'
+      - 'packages/adapter-pgsql/package.json'
+      - 'packages/adapter-pgsql/tsconfig.json'
+      - 'packages/adapter-pgsql/tsup.config.ts'
+      - 'packages/types/package.json'
+      - 'packages/types/tsconfig.json'
+      - 'packages/types/tsup.config.ts'
+      - 'packages/nql/package.json'
+      - 'packages/nql/tsconfig.json'
+      - 'packages/nql/tsup.config.ts'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      # Root-level build/test inputs (test:docs script, base TS config).
+      - 'package.json'
+      - 'tsconfig.json'
+      - '.github/workflows/doctest-real-db.yml'
+  workflow_dispatch:
+  schedule:
+    # 03:17 UTC every night — slightly off-the-hour to avoid GHA contention.
+    - cron: '17 3 * * *'
+
+jobs:
+  test-docs-real-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ghcr.io/oorabona/postgres:18-alpine-full
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: doctest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Split per-package builds so workflow logs surface which package failed
+      # individually (matches the ci.yml `test` job style).
+      - run: pnpm -C packages/types build
+      - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
+      - run: pnpm -C packages/adapter-pgsql build
+      - run: pnpm test:docs
+        env:
+          DBSP_DOCTEST_REAL_DB: '1'
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/doctest
