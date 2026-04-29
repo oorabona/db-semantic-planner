@@ -95,9 +95,9 @@ export interface AssertionSummary {
  * | true    | true       | true   |
  * | true    | false      | false  |
  *
- * Contract: `dbSuccess` MUST be either omitted (compile-only mode) or
- * a real boolean. Internal producers in `mapEventsToBatchResult` and the
- * GUI sidecar always omit it or set a real boolean.
+ * Contract: conforming producers either omit `dbSuccess` (compile-only
+ * mode — no DB execution) or set it to a real boolean reflecting DB
+ * outcome.
  *
  * Stable predicate — the truth table above IS the contract; callers may
  * rely on its exact behavior. As a `@public` helper, the implementation
