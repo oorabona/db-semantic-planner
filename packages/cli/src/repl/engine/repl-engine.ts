@@ -8,10 +8,7 @@
 import type { ModelIR } from '@dbsp/core';
 import {
 	config as appConfig,
-	type BorderStyle,
-	type HeaderFormatter,
 	isValidTableOption,
-	type OverflowStyle,
 	TABLE_OPTIONS,
 } from '../../config.js';
 import {
@@ -67,7 +64,6 @@ export function isInsideStringLiteral(input: string): boolean {
 	return inString;
 }
 
-
 type TableConfigKey = keyof typeof TABLE_OPTIONS;
 
 type TableOptionHandler = {
@@ -105,7 +101,6 @@ const TABLE_OPTION_HANDLERS: Record<string, TableOptionHandler> = {
 		parse: (s) => Number.parseInt(s, 10),
 	},
 };
-
 
 export class ReplEngine {
 	private state: EngineState;
@@ -572,9 +567,9 @@ export class ReplEngine {
 		if (option === 'reset') {
 			appConfig.resetTable();
 			this.emit({
-			type: 'info',
-			message: '✓ Table configuration reset to defaults',
-		});
+				type: 'info',
+				message: '✓ Table configuration reset to defaults',
+			});
 			return;
 		}
 
@@ -597,11 +592,9 @@ export class ReplEngine {
 
 		const parsed = handler.parse(value);
 		if (isValidTableOption(handler.field, parsed)) {
-			appConfig.updateTable(
-			{ [handler.field]: parsed } as Parameters<
+			appConfig.updateTable({ [handler.field]: parsed } as Parameters<
 				typeof appConfig.updateTable
-			>[0],
-		);
+			>[0]);
 			this.emit({ type: 'info', message: `✓ ${handler.label} = ${parsed}` });
 		} else {
 			this.emit({
