@@ -550,7 +550,7 @@ Never log sensitive data:
 ```typescript
 import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
 
-const dump = { params: ['user@example.com', 'my-api-key-12345', 42] };
+const dump = { params: ['user@example.com', 'api-key-12345', 42] };
 
 const safeParams = redactParams(dump.params, {
   patterns: [

@@ -57,10 +57,14 @@ function matchesAnyPattern(
 	const lowerValue = value.toLowerCase();
 	for (const pattern of patterns) {
 		if (typeof pattern === 'string') {
-			if (pattern.length > 0 && lowerValue.includes(pattern.toLowerCase())) return true;
+			if (pattern.length > 0 && lowerValue.includes(pattern.toLowerCase()))
+				return true;
 		} else {
-			pattern.lastIndex = 0;
-			if (pattern.test(value)) return true;
+			const re =
+				pattern.global || pattern.sticky
+					? new RegExp(pattern.source, pattern.flags)
+					: pattern;
+			if (re.test(value)) return true;
 		}
 	}
 	return false;

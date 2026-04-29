@@ -35,18 +35,20 @@ describe('redactParams', () => {
 		expect(result).toEqual(['***']);
 	});
 
-	test('DEFAULT_REDACTION_PATTERNS matches email, bearer token, JWT, SSN, credit card', () => {
+	test('DEFAULT_REDACTION_PATTERNS matches email, bearer token, JWT, SSN, credit card, OpenAI API key', () => {
 		const params = [
 			'user@example.com',
 			'Bearer eyABC.def.ghi',
 			'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.abc123def456',
 			'123-45-6789',
 			'4111 1111 1111 1111',
+			'sk-abcdefghijklmnopqrstuvwxyz1234567890',
 		];
 		const result = redactParams(params, {
 			patterns: DEFAULT_REDACTION_PATTERNS,
 		});
 		expect(result).toEqual([
+			'[REDACTED]',
 			'[REDACTED]',
 			'[REDACTED]',
 			'[REDACTED]',
@@ -120,6 +122,16 @@ describe('redactParams', () => {
 		expect(second).toEqual(['[REDACTED]']);
 	});
 
+	test('F6 lock: redactParams does not mutate caller-supplied global regex', () => {
+		const re = /secret/g;
+		// simulate a previous successful match having advanced lastIndex
+		re.test('has-secret-1');
+		const before = re.lastIndex;
+		expect(before).toBeGreaterThan(0);
+		redactParams(['has-secret-2'], { patterns: [re] });
+		expect(re.lastIndex).toBe(before); // unchanged — proves we cloned, didn't mutate
+	});
+
 	test('F4 lock: case-insensitive substring match still works after moving toLowerCase() outside loop', () => {
 		// Confirms the pre-computed lowerValue is used correctly for string patterns.
 		const result = redactParams(['MyEmailAddr@x.com'], { patterns: ['email'] });
@@ -129,13 +141,17 @@ describe('redactParams', () => {
 
 	test('S1 lock: DEFAULT_REDACTION_PATTERNS does not redact a UUID-without-dashes (32 hex chars)', () => {
 		const uuid = '550e8400e29b41d4a716446655440000'; // valid UUID v4 without dashes
-		const result = redactParams([uuid], { patterns: [...DEFAULT_REDACTION_PATTERNS] });
+		const result = redactParams([uuid], {
+			patterns: [...DEFAULT_REDACTION_PATTERNS],
+		});
 		expect(result).toEqual([uuid]); // NOT redacted — UUIDs are identifiers, not secrets
 	});
 
 	test('S1 lock: DEFAULT_REDACTION_PATTERNS does not redact a 40-char git commit SHA', () => {
 		const sha = '17aa207f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d';
-		const result = redactParams([sha], { patterns: [...DEFAULT_REDACTION_PATTERNS] });
+		const result = redactParams([sha], {
+			patterns: [...DEFAULT_REDACTION_PATTERNS],
+		});
 		expect(result).toEqual([sha]); // NOT redacted
 	});
 });
