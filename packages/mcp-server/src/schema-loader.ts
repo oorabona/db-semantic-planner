@@ -183,18 +183,6 @@ export function validatePath(
 }
 
 /**
- * Load a schema from a TypeScript or JavaScript file.
- *
- * Security measures:
- * - Path normalization to prevent traversal
- * - Optional allowlist of root directories
- * - Symlink resolution to detect escape attempts
- *
- * @param options - Schema loader options
- * @returns The loaded schema and resolved path
- * @throws SchemaLoadError on validation or loading errors
- */
-/**
  * Load a JS or TS schema module from a file URL.
  *
  * For `.ts` files, attempts to use tsx's programmatic API (`tsImport`) so the
@@ -202,10 +190,10 @@ export function validatePath(
  * `tsImport` call is scoped — it does not register a global ESM hook, so
  * each load is self-contained.
  *
- * If tsx is not installed (caught via "Cannot find package 'tsx'"), falls
- * back to native `import()` which will fail with a "Cannot find module"
- * error that the caller's catch block translates into the actionable
- * "install tsx" message.
+ * If tsx is not installed, falls back to native `import()`. On Node 20+/22
+ * that will fail with `ERR_UNKNOWN_FILE_EXTENSION` (or `Cannot find module`
+ * on older runtimes); the caller's catch block matches both and emits the
+ * actionable "install tsx" message.
  *
  * @internal
  */
@@ -233,6 +221,18 @@ async function loadSchemaModule(
 	return (await import(fileUrl)) as Record<string, unknown>;
 }
 
+/**
+ * Load a schema from a TypeScript or JavaScript file.
+ *
+ * Security measures:
+ * - Path normalization to prevent traversal
+ * - Optional allowlist of root directories
+ * - Symlink resolution to detect escape attempts
+ *
+ * @param options - Schema loader options
+ * @returns The loaded schema and resolved path
+ * @throws SchemaLoadError on validation or loading errors
+ */
 export async function loadSchema(
 	options: SchemaLoaderOptions,
 ): Promise<SchemaLoaderResult> {
@@ -315,16 +315,25 @@ export async function loadSchema(
 			parent: dirname(resolvedPath),
 		});
 
-		// Provide helpful error for TypeScript files
+		// Provide helpful error for TypeScript files. Native import() of .ts
+		// fails with different error shapes depending on Node version and
+		// resolver path: `ERR_UNKNOWN_FILE_EXTENSION` (Node 20+ ESM strict),
+		// `ERR_MODULE_NOT_FOUND` (some ESM resolve paths), and the legacy
+		// `Cannot find module` substring (older runtimes / CJS overlap).
+		// Match all three so the helpful message reaches the user regardless
+		// of Node version or resolver state.
 		if (
 			resolvedPath.endsWith('.ts') &&
-			rawMessage.includes('Cannot find module')
+			(rawMessage.includes('Cannot find module') ||
+				rawMessage.includes('ERR_UNKNOWN_FILE_EXTENSION') ||
+				rawMessage.includes('ERR_MODULE_NOT_FOUND'))
 		) {
 			throw new SchemaLoadError(
-				`Failed to load TypeScript schema. Make sure 'tsx' is installed:\n` +
+				`Failed to load TypeScript schema. Install 'tsx' as a peer dependency:\n` +
 					`  pnpm add -D tsx\n\n` +
-					`Then run the MCP server via tsx:\n` +
-					`  pnpm tsx node_modules/.bin/dbsp-mcp --schema ./schema.ts\n\n` +
+					`Then re-run the MCP server with the same arguments — the loader will\n` +
+					`pick up tsx automatically and load .ts schemas directly:\n` +
+					`  dbsp-mcp --schema ./schema.ts\n\n` +
 					`Original error: ${message}`,
 				'LOAD_FAILED',
 			);
