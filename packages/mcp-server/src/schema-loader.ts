@@ -307,6 +307,14 @@ export async function loadSchema(
 
 		const rawMessage = error instanceof Error ? error.message : String(error);
 
+		// Node attaches diagnostic codes to `error.code`, NOT to `error.message`.
+		// Read the code separately so we can dispatch on it; the message is
+		// retained for sanitization + user-facing display.
+		const errCode =
+			error && typeof error === 'object' && 'code' in error
+				? String((error as { code: unknown }).code)
+				: '';
+
 		// Sanitize the error message via the canonical helper (M-C + Copilot R5 structural).
 		// sanitizeErrorMessage replaces all occurrences of resolved path and parent dir,
 		// then caps the message length to prevent oversized error strings.
@@ -317,16 +325,18 @@ export async function loadSchema(
 
 		// Provide helpful error for TypeScript files. Native import() of .ts
 		// fails with different error shapes depending on Node version and
-		// resolver path: `ERR_UNKNOWN_FILE_EXTENSION` (Node 20+ ESM strict),
-		// `ERR_MODULE_NOT_FOUND` (some ESM resolve paths), and the legacy
-		// `Cannot find module` substring (older runtimes / CJS overlap).
-		// Match all three so the helpful message reaches the user regardless
-		// of Node version or resolver state.
+		// resolver path:
+		//   - `ERR_UNKNOWN_FILE_EXTENSION` (Node 20+ ESM strict resolve)
+		//   - `ERR_MODULE_NOT_FOUND` (some ESM resolve paths)
+		//   - "Cannot find module ..." message (legacy / CJS overlap)
+		// Codes live on error.code; the legacy form is only present in the
+		// message string. Match both surfaces so the helpful "install tsx"
+		// hint reaches the user regardless of Node version.
 		if (
 			resolvedPath.endsWith('.ts') &&
-			(rawMessage.includes('Cannot find module') ||
-				rawMessage.includes('ERR_UNKNOWN_FILE_EXTENSION') ||
-				rawMessage.includes('ERR_MODULE_NOT_FOUND'))
+			(errCode === 'ERR_UNKNOWN_FILE_EXTENSION' ||
+				errCode === 'ERR_MODULE_NOT_FOUND' ||
+				rawMessage.includes('Cannot find module'))
 		) {
 			throw new SchemaLoadError(
 				`Failed to load TypeScript schema. Install 'tsx' as a peer dependency:\n` +
