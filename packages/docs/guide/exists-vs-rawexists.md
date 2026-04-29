@@ -26,7 +26,7 @@ Use this table to decide which API to reach for:
 | Target table has a `ref()` FK to the source | `exists('relation', { where })` |
 | Cross-column comparison across FK tables (`f.lastParsed > c.createdAt`) | `exists('relation', { where: gt(..., outerRef(...)) })` |
 | Target table has **no FK** to the source (polymorphic, ad-hoc) | `rawExists(subquery(...))` |
-| You need control over the inner `SELECT` list or join predicate | `rawExists(subquery(...))` |
+| You need control over the inner `SELECT` list (e.g. `select('1')` vs `select(['col'])`) | `rawExists(subquery(...))` |
 | You want to correlate with `outerRef()` **and** there is no FK | Not yet supported — see [Known Limitations](#known-limitations) |
 
 ## Cheat sheet
@@ -203,9 +203,10 @@ Error: correlated subqueries (outerRef inside the inner WHERE) are not yet suppo
 ```
 
 **Workaround:** If the target table has a declared FK relation, use
-`exists('relation', { where: gt(col, outerRef(col)) })` — that path is fully wired
-for correlated queries. The `rawExists` correlated path is tracked as a follow-up
-(TODO L104).
+`exists('relation', { where: gt('innerCol', outerRef('outerCol')) })` — that path
+is fully wired for correlated queries. The `rawExists` correlated path is tracked
+as a follow-up (outerAlias context + SubqueryRefIntent normalization in the
+rawExists handler).
 
 ### `exists()` silently drops the WHERE for undeclared relations
 

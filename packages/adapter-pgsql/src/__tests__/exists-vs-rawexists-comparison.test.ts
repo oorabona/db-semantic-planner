@@ -25,7 +25,7 @@
  * These tests are the regression lock.  If a future change makes exists()
  * throw on undeclared relations (which would be the preferred behavior),
  * Case 2 / test 3 will fail loudly, prompting an update to both this file
- * and the companion guide (docs/guide/exists-vs-rawexists.md).
+ * and the companion guide (packages/docs/guide/exists-vs-rawexists.md).
  */
 
 import {
@@ -141,8 +141,10 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 		 * This is the documented boundary: use exists('relation', { where })
 		 * when a schema FK relation is declared.
 		 *
-		 * If/when the rawExists correlated path is wired up (TODO L104), this
-		 * test should be updated to assert the correct SQL instead of a throw.
+		 * If/when the rawExists correlated path is wired up (see PR #99 follow-up
+		 * tracked locally — outerAlias context + SubqueryRefIntent normalization
+		 * in the rawExists handler path), this test should be updated to assert
+		 * the correct SQL instead of a throw.
 		 */
 		it('rawExists() with outerRef THROWS today (boundary documented)', () => {
 			const orm = buildOrm();
