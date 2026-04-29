@@ -64,6 +64,10 @@ Compiles to `"column" <@ rangeType($1, $2)`. Use when the test range must enclos
 
 Mismatched types fail at the database, not at compile time — pass `rangeType` explicitly when your column is anything other than `daterange`.
 
+::: warning Bounds default to `[)` (lower-inclusive, upper-exclusive)
+The 2-argument PostgreSQL range constructors (`daterange($1, $2)`, `tsrange($1, $2)`, etc.) emit half-open ranges. Equal endpoints — e.g. `daterange('2024-06-15', '2024-06-15')` — produce the **empty** range, which contains no points. To target a single day, encode it as `[d, d+1)`: `daterange('2024-06-15', '2024-06-16')`. To cover an inclusive `[a, b]` window, encode it as `[a, b+1)`.
+:::
+
 ---
 
 ## Examples
@@ -112,9 +116,10 @@ const __db = schema({
 const __orm = createOrm({ schema: __db, adapter: createPgsqlCompileOnlyAdapter() });
 
 // "Which tier covers 2024-06-15?"
+// Encode the single day as a half-open range [2024-06-15, 2024-06-16):
 __orm
   .select('pricingTiers')
-  .where(rangeContains('validity', ['2024-06-15', '2024-06-15']))
+  .where(rangeContains('validity', ['2024-06-15', '2024-06-16']))
   .dump();
 // SQL: SELECT ... FROM "pricingTiers" WHERE "validity" @> daterange($1, $2)
 ```
@@ -202,7 +207,7 @@ rangeOverlaps('period', ['2024-01-01']);
 // Error: range tuple must have exactly 2 elements (got 1); use [lower, upper] or pass a RangeValue object
 ```
 
-This catches schema/usage drift at compile time of the query rather than producing malformed SQL the database rejects later.
+This catches schema/usage drift at query construction time rather than producing malformed SQL the database rejects later.
 
 ---
 
