@@ -1617,8 +1617,9 @@ export class QueryBuilderImpl<TResult = unknown>
 	 *
 	 * `cloneWithCtxOverride({})` performs a shallow copy of `planOptionsOverride`
 	 * so per-builder overrides do not leak across clones. All other ctx fields
-	 * are intentionally shared by reference (model / adapter / hookStore are
-	 * process-singletons by design).
+	 * are intentionally shared by reference — model / adapter / hookStore are
+	 * part of the ORM instance's stable configuration and are treated as
+	 * read-only for the lifetime of the builder chain.
 	 *
 	 * @internal — called by pagination-impl and stream-impl
 	 */
