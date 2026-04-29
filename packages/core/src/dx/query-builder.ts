@@ -35,7 +35,6 @@ import {
 	isDistinctField,
 } from './filters.js';
 import {
-	type HookErrorHandler,
 	type HookStore,
 	hasHooks,
 	type QueryHookContext,
@@ -61,7 +60,6 @@ import * as paginationImpl from './pagination-impl.js';
 import type { QueryBuilderContext } from './query-builder-context.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 import { ResultHydrator } from './result-hydrator.js';
-import type { DefaultFilters } from './schema.js';
 import {
 	buildSetOperationIntent,
 	type QueryIntentSource,
@@ -961,7 +959,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			operation: 'select',
 			intent: rawIntent,
 			resultType: 'exists',
-			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.schemaName !== undefined && {
+				schemaName: this.ctx.schemaName,
+			}),
 			...(this.ctx.inTransaction && { inTransaction: true }),
 		};
 
@@ -1023,7 +1023,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			sql: compiled.sql,
 			parameters: compiled.parameters,
 			duration: Date.now() - startTime,
-			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.schemaName !== undefined && {
+				schemaName: this.ctx.schemaName,
+			}),
 		};
 		try {
 			return await runAfterQueryHooks(
@@ -1345,7 +1347,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			operation: 'select',
 			intent: rawIntent,
 			resultType,
-			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.schemaName !== undefined && {
+				schemaName: this.ctx.schemaName,
+			}),
 			...(this.ctx.inTransaction && { inTransaction: true }),
 		};
 
@@ -1457,7 +1461,9 @@ export class QueryBuilderImpl<TResult = unknown>
 			sql: compiledWithIncludes.main.sql,
 			parameters: compiledWithIncludes.main.parameters,
 			duration,
-			...(this.ctx.schemaName !== undefined && { schemaName: this.ctx.schemaName }),
+			...(this.ctx.schemaName !== undefined && {
+				schemaName: this.ctx.schemaName,
+			}),
 		};
 
 		// 9. Run afterQuery hooks (LIFO) — may transform results
