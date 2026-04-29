@@ -29,9 +29,8 @@ export const DEFAULT_REDACTION_PATTERNS: ReadonlyArray<RegExp> = Object.freeze([
 	/^Bearer\s+[A-Za-z0-9._-]+$/i, // bearer token
 	/^eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/, // JWT
 	/^\d{3}-\d{2}-\d{4}$/, // US SSN
-	/^(?:\d[ -]?){13,19}$/, // credit card (13-19 digits, optional spaces/dashes)
+	/^\d(?:[ -]?\d){12,18}$/, // credit card (13-19 digits, optional spaces/dashes between)
 	/^sk-[A-Za-z0-9]{20,}$/, // OpenAI-style API key
-	/^[A-Fa-f0-9]{32,}$/, // hex secret (32+ chars)
 ]);
 
 const DEFAULT_REPLACEMENT = '[REDACTED]';
@@ -43,7 +42,7 @@ const DEFAULT_REPLACEMENT = '[REDACTED]';
 export function redactParams(
 	params: readonly unknown[],
 	config: RedactionConfig,
-): unknown[] {
+): readonly unknown[] {
 	const replacement = config.replacement ?? DEFAULT_REPLACEMENT;
 	return params.map((value) =>
 		matchesAnyPattern(value, config.patterns) ? replacement : value,
@@ -55,15 +54,13 @@ function matchesAnyPattern(
 	patterns: ReadonlyArray<RedactionPattern>,
 ): boolean {
 	if (typeof value !== 'string') return false;
+	const lowerValue = value.toLowerCase();
 	for (const pattern of patterns) {
 		if (typeof pattern === 'string') {
-			if (
-				pattern.length > 0 &&
-				value.toLowerCase().includes(pattern.toLowerCase())
-			)
-				return true;
-		} else if (pattern.test(value)) {
-			return true;
+			if (pattern.length > 0 && lowerValue.includes(pattern.toLowerCase())) return true;
+		} else {
+			pattern.lastIndex = 0;
+			if (pattern.test(value)) return true;
 		}
 	}
 	return false;

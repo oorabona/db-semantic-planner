@@ -278,7 +278,7 @@ function toErrorResponse(error: Error, requestId: string): ErrorResponse {
 Every query produces a `Dump` with plan, SQL, and parameters:
 
 ```typescript
-// doctest: skip — production logging integration; requires a `logger` instance with a `.info()` method (outside doctest scope)
+// doctest: skip — production logging example; requires a configured ORM/query context (`orm`, `eq`) and database-backed setup outside doctest scope
 import { redactParams } from '@dbsp/adapter-pgsql';
 
 // Get query dump without executing
@@ -550,14 +550,14 @@ Never log sensitive data:
 ```typescript
 import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
 
-const dump = { params: ['user@example.com', 'my-api-key-12345', 42] as const };
+const dump = { params: ['user@example.com', 'my-api-key-12345', 42] };
 
 const safeParams = redactParams(dump.params, {
   patterns: [
     ...DEFAULT_REDACTION_PATTERNS,
     'ssn',
     'credit_card',
-    /^api[_-]?key$/i,
+    /^api[_-]?key/i,
   ],
 });
 console.log(safeParams);

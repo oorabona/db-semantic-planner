@@ -109,4 +109,33 @@ describe('redactParams', () => {
 		expect(result[0]).toBe('[REDACTED]');
 		expect(result[1]).toBe('not-a-match');
 	});
+
+	test('F3 lock: global-flag regex redacts consistently on repeated calls (lastIndex reset)', () => {
+		// Without lastIndex=0 reset, the second call on a /g regex would skip the match
+		// because lastIndex is left non-zero from the first successful test().
+		const globalRegex = /secret/g;
+		const first = redactParams(['has-secret-1'], { patterns: [globalRegex] });
+		const second = redactParams(['has-secret-1'], { patterns: [globalRegex] });
+		expect(first).toEqual(['[REDACTED]']);
+		expect(second).toEqual(['[REDACTED]']);
+	});
+
+	test('F4 lock: case-insensitive substring match still works after moving toLowerCase() outside loop', () => {
+		// Confirms the pre-computed lowerValue is used correctly for string patterns.
+		const result = redactParams(['MyEmailAddr@x.com'], { patterns: ['email'] });
+		// 'email' is a substring of 'myemailaddr@x.com' (lowercased), so must be redacted.
+		expect(result).toEqual(['[REDACTED]']);
+	});
+
+	test('S1 lock: DEFAULT_REDACTION_PATTERNS does not redact a UUID-without-dashes (32 hex chars)', () => {
+		const uuid = '550e8400e29b41d4a716446655440000'; // valid UUID v4 without dashes
+		const result = redactParams([uuid], { patterns: [...DEFAULT_REDACTION_PATTERNS] });
+		expect(result).toEqual([uuid]); // NOT redacted — UUIDs are identifiers, not secrets
+	});
+
+	test('S1 lock: DEFAULT_REDACTION_PATTERNS does not redact a 40-char git commit SHA', () => {
+		const sha = '17aa207f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d';
+		const result = redactParams([sha], { patterns: [...DEFAULT_REDACTION_PATTERNS] });
+		expect(result).toEqual([sha]); // NOT redacted
+	});
 });
