@@ -79,12 +79,16 @@ type TableOptionHandler = {
 const borderHandler: TableOptionHandler = {
 	field: 'borderStyle',
 	label: 'borders',
-	parse: (s) => s,
+	// Border style values (none / outline / rounded / etc.) are all-lowercase —
+	// normalize input so e.g. `.table borders NONE` matches.
+	parse: (s) => s.toLowerCase(),
 };
 
 const headerHandler: TableOptionHandler = {
 	field: 'headerFormatter',
 	label: 'headers',
+	// Header-formatter values include camelCase (capitalCase / snakeCase / camelCase) —
+	// preserve original case so the user-typed value matches TABLE_OPTIONS exactly.
 	parse: (s) => s,
 };
 
@@ -92,7 +96,12 @@ const headerHandler: TableOptionHandler = {
 const TABLE_OPTION_HANDLERS: Record<string, TableOptionHandler> = {
 	borders: borderHandler,
 	border: borderHandler,
-	overflow: { field: 'overflow', label: 'overflow', parse: (s) => s },
+	overflow: {
+		field: 'overflow',
+		label: 'overflow',
+		// Overflow values (truncate / wrap) are all-lowercase — normalize input.
+		parse: (s) => s.toLowerCase(),
+	},
 	headers: headerHandler,
 	header: headerHandler,
 	padding: {

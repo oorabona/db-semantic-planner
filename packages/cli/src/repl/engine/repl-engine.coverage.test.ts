@@ -552,6 +552,16 @@ describe('ReplEngine — coverage', () => {
 			});
 		});
 
+		it('accepts uppercase border style (case-insensitive normalization)', async () => {
+			const engine = createEngine();
+
+			await engine.submit('.table borders NONE');
+
+			expect(mockConfig.updateTable).toHaveBeenCalledWith({
+				borderStyle: 'none',
+			});
+		});
+
 		it('rejects invalid border style', async () => {
 			const engine = createEngine();
 			const events = collectEvents(engine);
