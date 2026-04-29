@@ -701,103 +701,16 @@ export class ReplEngine {
 					: 'EXECUTED'
 				: '';
 
-			const pr = result.planReport;
-			const queryResult: QueryResult = {
-				sql: finalSql,
-				params: result.params,
-				intent: result.intent,
-				plan: {
-					strategy: isMutation
-						? `${result.intentType.toUpperCase()} - ${planInfo}`
-						: 'NQL v2',
-					rootTable: pr?.rootTable ?? '',
-					tables: [
-						...new Set(
-							pr?.decisions.map((d) => d.context.sourceTable).filter(Boolean) ??
-								[],
-						),
-					],
-					decisions:
-						pr?.decisions.map((d) => ({
-							type: d.type,
-							context: [d.context.sourceTable, d.context.target]
-								.filter(Boolean)
-								.join(' → '),
-							choice: d.choice,
-							reasoning: d.reasoning,
-							...(d.alternatives.length > 0 && {
-								alternatives: [...d.alternatives],
-							}),
-							...(d.context.foreignKey !== undefined && {
-								foreignKey:
-									typeof d.context.foreignKey === 'string'
-										? d.context.foreignKey
-										: [...d.context.foreignKey],
-							}),
-							...(d.context.relationType !== undefined && {
-								relationType: d.context.relationType,
-							}),
-							...(d.context.intentPath !== undefined && {
-								intentPath: d.context.intentPath,
-							}),
-							...(d.context.relationPath !== undefined && {
-								relationPath: d.context.relationPath,
-							}),
-							...(d.id !== undefined && { decisionId: d.id }),
-						})) ?? [],
-					warnings: [
-						...(isDryRun
-							? [{ message: 'This is a dry-run. Add ! suffix to execute.' }]
-							: []),
-						...(pr?.warnings.map((w) => ({
-							message: w.message,
-							...(w.suggestion !== undefined && { suggestion: w.suggestion }),
-							...(w.code !== undefined && { code: w.code }),
-							...(w.relatedDecision !== undefined && {
-								relatedDecision: w.relatedDecision,
-							}),
-						})) ?? []),
-					],
-					cteCount: pr?.ctes.length ?? 0,
-					planningTimeMs: pr?.metadata.planningTimeMs ?? 0,
-					...(pr?.ctes && pr.ctes.length > 0
-						? {
-								ctes: pr.ctes.map((c) => ({
-									name: c.name,
-									purpose: c.purpose,
-									...(c.recursive && { recursive: c.recursive }),
-									...(c.referencedBy.length > 0 && {
-										referencedBy: [...c.referencedBy],
-									}),
-								})),
-							}
-						: {}),
-					...(pr?.metadata
-						? {
-								metadata: {
-									relationsAnalyzed: pr.metadata.relationsAnalyzed,
-									isAmbiguous: pr.metadata.isAmbiguous,
-									...(pr.metadata.ambiguousOptions &&
-										pr.metadata.ambiguousOptions.length > 0 && {
-											ambiguousOptions: [...pr.metadata.ambiguousOptions],
-										}),
-								},
-							}
-						: {}),
-				},
-			};
-
+			const queryResult = this.buildQueryResult(
+				result,
+				finalSql,
+				isMutation,
+				isDryRun,
+				planInfo,
+			);
 			this.emit({ type: 'query-result', result: queryResult });
 
-			// Execute if appropriate
-			const shouldExecute = isMutation
-				? !isDryRun &&
-					this.state.execMode &&
-					this.state.connected &&
-					this.dbConnection
-				: this.state.execMode && this.state.connected && this.dbConnection;
-
-			if (shouldExecute && this.dbConnection) {
+			if (this.shouldExecuteQuery(isMutation, isDryRun) && this.dbConnection) {
 				const execResult = await this.dbConnection.executeRaw(
 					finalSql,
 					result.params,
@@ -818,5 +731,111 @@ export class ReplEngine {
 				result: { sql: '', params: [], error: enhancedError },
 			});
 		}
+	}
+
+	// ========================================================================
+	// Private: NQL helpers
+	// ========================================================================
+
+	private buildQueryResult(
+		nqlResult: Awaited<ReturnType<typeof compileNqlToSql>>,
+		finalSql: string,
+		isMutation: boolean,
+		isDryRun: boolean,
+		planInfo: string,
+	): QueryResult {
+		const pr = nqlResult.planReport;
+		return {
+			sql: finalSql,
+			params: nqlResult.params,
+			intent: nqlResult.intent,
+			plan: {
+				strategy: isMutation
+					? `${nqlResult.intentType.toUpperCase()} - ${planInfo}`
+					: 'NQL v2',
+				rootTable: pr?.rootTable ?? '',
+				tables: [
+					...new Set(
+						pr?.decisions.map((d) => d.context.sourceTable).filter(Boolean) ??
+							[],
+					),
+				],
+				decisions:
+					pr?.decisions.map((d) => ({
+						type: d.type,
+						context: [d.context.sourceTable, d.context.target]
+							.filter(Boolean)
+							.join(' → '),
+						choice: d.choice,
+						reasoning: d.reasoning,
+						...(d.alternatives.length > 0 && {
+							alternatives: [...d.alternatives],
+						}),
+						...(d.context.foreignKey !== undefined && {
+							foreignKey:
+								typeof d.context.foreignKey === 'string'
+									? d.context.foreignKey
+									: [...d.context.foreignKey],
+						}),
+						...(d.context.relationType !== undefined && {
+							relationType: d.context.relationType,
+						}),
+						...(d.context.intentPath !== undefined && {
+							intentPath: d.context.intentPath,
+						}),
+						...(d.context.relationPath !== undefined && {
+							relationPath: d.context.relationPath,
+						}),
+						...(d.id !== undefined && { decisionId: d.id }),
+					})) ?? [],
+				warnings: [
+					...(isDryRun
+						? [{ message: 'This is a dry-run. Add ! suffix to execute.' }]
+						: []),
+					...(pr?.warnings.map((w) => ({
+						message: w.message,
+						...(w.suggestion !== undefined && { suggestion: w.suggestion }),
+						...(w.code !== undefined && { code: w.code }),
+						...(w.relatedDecision !== undefined && {
+							relatedDecision: w.relatedDecision,
+						}),
+					})) ?? []),
+				],
+				cteCount: pr?.ctes.length ?? 0,
+				planningTimeMs: pr?.metadata.planningTimeMs ?? 0,
+				...(pr?.ctes && pr.ctes.length > 0
+					? {
+							ctes: pr.ctes.map((c) => ({
+								name: c.name,
+								purpose: c.purpose,
+								...(c.recursive && { recursive: c.recursive }),
+								...(c.referencedBy.length > 0 && {
+									referencedBy: [...c.referencedBy],
+								}),
+							})),
+						}
+					: {}),
+				...(pr?.metadata
+					? {
+							metadata: {
+								relationsAnalyzed: pr.metadata.relationsAnalyzed,
+								isAmbiguous: pr.metadata.isAmbiguous,
+								...(pr.metadata.ambiguousOptions &&
+									pr.metadata.ambiguousOptions.length > 0 && {
+										ambiguousOptions: [...pr.metadata.ambiguousOptions],
+									}),
+							},
+						}
+					: {}),
+			},
+		};
+	}
+
+	private shouldExecuteQuery(isMutation: boolean, isDryRun: boolean): boolean {
+		// dbConnection narrowing is left to the call site so its truthy check participates
+		// in TypeScript flow analysis without requiring this helper to repeat the assertion.
+		return isMutation
+			? !isDryRun && this.state.execMode && this.state.connected
+			: this.state.execMode && this.state.connected;
 	}
 }
