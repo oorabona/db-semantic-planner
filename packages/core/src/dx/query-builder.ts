@@ -1624,29 +1624,28 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * @internal — called by pagination-impl and stream-impl
 	 */
 	clone(): QueryBuilderImpl<TResult> {
-		// Shallow-clone planOptionsOverride so the cloned builder owns its own
-		// reference and per-builder overrides do not leak across clones.
-		return this.cloneWithCtxOverride(
-			this.ctx.planOptionsOverride !== undefined
-				? { planOptionsOverride: { ...this.ctx.planOptionsOverride } }
-				: {},
-		);
+		return this.cloneWithCtxOverride({});
 	}
 
-	/**
-	 * Build a new builder whose ctx merges `ctxOverride` over the source ctx.
-	 * Pure merge: callers own the policy of what to spread/clone.
-	 *
-	 * @internal — used by clone() and withPlanOptions().
-	 */
+	/** @internal — clones the builder with a partial ctx override applied at construction.
+	 * Avoids readonly-cast at call sites: the merged ctx is baked in before the new instance
+	 * is created, so no post-construction mutation is required. */
 	private cloneWithCtxOverride(
 		ctxOverride: Partial<QueryBuilderContext>,
 	): QueryBuilderImpl<TResult> {
-		const builder = new QueryBuilderImpl<TResult>(
-			{ ...this.ctx, ...ctxOverride },
-			this.from,
-			{ ...this.relationHints },
-		);
+		// Shallow-clone planOptionsOverride from this.ctx unless the caller is replacing it,
+		// so the new builder owns its own object reference.
+		const mergedCtx: QueryBuilderContext = {
+			...this.ctx,
+			...(ctxOverride.planOptionsOverride === undefined &&
+			this.ctx.planOptionsOverride !== undefined
+				? { planOptionsOverride: { ...this.ctx.planOptionsOverride } }
+				: {}),
+			...ctxOverride,
+		};
+		const builder = new QueryBuilderImpl<TResult>(mergedCtx, this.from, {
+			...this.relationHints,
+		});
 		// Clone array state
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);
