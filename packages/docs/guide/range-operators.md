@@ -185,7 +185,18 @@ __orm
 Range operators benefit substantially from a GiST index on the range column. The DDL helpers wire this up with the `gist` index method:
 
 ```typescript
-// doctest: skip — exec-only DDL example; requires a live PostgreSQL connection
+// doctest: skip — exec-only DDL example; requires a live pg.Pool (the
+// compile-only adapter used elsewhere in this guide cannot execute DDL).
+import { Pool } from 'pg';
+import { schema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  bookings: { id: 'integer', period: 'daterange' },
+} as const);
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+
 await orm.tables.bookings.indexes.create({
   name: 'bookings_period_gist',
   columns: ['period'],
