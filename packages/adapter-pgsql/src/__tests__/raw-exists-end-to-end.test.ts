@@ -97,30 +97,27 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 	});
 
 	/**
-	 * 3. Correlated rawExists with outerRef — the subquery WHERE must reference
-	 *    the outer table's column (e.g., "communities"."id" or equivalent).
+	 * 3. Correlated rawExists with outerRef — NOT YET SUPPORTED. The pipeline
+	 *    throws at decision-time so callers don't get silently-broken SQL
+	 *    (which is what the previous untested path produced — outerRef was
+	 *    parameterized as $N with the SubqueryRefIntent object literal).
+	 *    Tracked for follow-up: wire correlation through buildSubqueryFromIntent
+	 *    by setting up an outerAlias context.
 	 */
-	it('rawExists with outerRef produces correlated subquery referencing outer column', () => {
+	it('rawExists with outerRef throws "not yet supported" (boundary documented)', () => {
 		const orm = buildOrm();
-		const dump = (orm as any)
-			.select('communities')
-			.where(
-				rawExists(
-					subquery('files')
-						.where(eq('community_id', outerRef('id')))
-						.select('id'),
-				),
-			)
-			.dump();
-
-		const sql = ws(dump.sql);
-
-		expect(sql).toMatch(/WHERE/i);
-		expect(sql).toMatch(/EXISTS\s*\(/i);
-		// The outer-table column reference must appear inside the subquery WHERE.
-		// It may be rendered as communities.id, "communities"."id", etc.
-		expect(sql).toMatch(/communities/i);
-		expect(sql).toMatch(/community_id/i);
+		expect(() =>
+			(orm as any)
+				.select('communities')
+				.where(
+					rawExists(
+						subquery('files')
+							.where(eq('community_id', outerRef('id')))
+							.select('id'),
+					),
+				)
+				.dump(),
+		).toThrow(/correlated subqueries.*not yet supported/i);
 	});
 
 	/**
@@ -131,9 +128,7 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('communities')
-			.where(
-				and(eq('name', 'acme'), rawExists(subquery('files').select('id'))),
-			)
+			.where(and(eq('name', 'acme'), rawExists(subquery('files').select('id'))))
 			.dump();
 
 		const sql = ws(dump.sql);

@@ -244,6 +244,28 @@ interface FlatWhereFields {
 // Where condition handlers — one per WhereIntent.kind
 // ============================================================================
 
+/**
+ * Recursively walk a WhereIntent looking for a SubqueryRefIntent
+ * (`{ kind: 'ref', column }` produced by `outerRef()`). Used to detect
+ * correlated subqueries inside rawExists/rawNotExists, which the current
+ * pipeline does not support — we throw rather than emit broken SQL.
+ */
+function containsOuterRef(where: unknown): boolean {
+	if (!where || typeof where !== 'object') return false;
+	const w = where as Record<string, unknown>;
+	if (isSubqueryRef(w)) return true;
+	for (const value of Object.values(w)) {
+		if (Array.isArray(value)) {
+			for (const item of value) {
+				if (containsOuterRef(item)) return true;
+			}
+		} else if (typeof value === 'object' && value !== null) {
+			if (containsOuterRef(value)) return true;
+		}
+	}
+	return false;
+}
+
 /** Handle kind: 'comparison' — field OP value */
 function convertComparison(
 	cond: FlatWhereFields,
@@ -566,15 +588,39 @@ export function convertWhereCondition(
 		case 'subquery':
 			return convertSubquery(cond);
 		case 'rawExists':
-		case 'rawNotExists':
+		case 'rawNotExists': {
+			const sub = (cond as unknown as { subquery: QueryIntent | undefined })
+				.subquery;
+			if (!sub) {
+				// Defensive: malformed intent (rawExists called without a subquery).
+				// Returning null causes the WHERE filter to be dropped — same as any
+				// other unrecognized kind. Better to fail loudly so the bug surfaces.
+				throw new Error(
+					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
+				);
+			}
+			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
+			// supported on the rawExists/rawNotExists path: buildSubqueryFromIntent
+			// builds a fresh WhereCompilerCtx with no outerAlias, so SubqueryRefIntent
+			// values fall back to being parameterized as $N (an object literal!) which
+			// produces wrong SQL at best and a runtime error at worst. Detect this
+			// case at decision-time and throw a clear "not yet supported" error so
+			// callers don't get silently-broken queries.
+			if (sub.where && containsOuterRef(sub.where)) {
+				throw new Error(
+					`${cond.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
+						'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+				);
+			}
 			return {
 				type: 'where',
 				operator: cond.kind,
 				// Reuse expressionIntent (already present on PlanDecision) to carry the
 				// inner QueryIntent; the rawExistsHandler discriminates by operator name.
-				expressionIntent: (cond as unknown as { subquery: unknown }).subquery,
+				expressionIntent: sub,
 				table: rootTable,
 			};
+		}
 		case 'jsonContains':
 			return {
 				type: 'where',

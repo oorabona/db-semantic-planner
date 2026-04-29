@@ -12,7 +12,6 @@ import { comparisonHandler } from './comparison.js';
 import { customExpressionWhereHandler } from './custom-expression.js';
 // Handler imports - complex (exists, subquery, relation)
 import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
-import { rawExistsHandler } from './raw-exists.js';
 import { inHandler } from './in.js';
 import {
 	jsonComparisonHandler,
@@ -23,6 +22,7 @@ import { likeHandler } from './like.js';
 import { andHandler, notHandler, orHandler } from './logical.js';
 import { nullHandler } from './null.js';
 import { rangeHandler } from './range.js';
+import { rawExistsHandler } from './raw-exists.js';
 import {
 	hasNoRelationHandler,
 	hasRelationHandler,
@@ -41,7 +41,6 @@ export { comparisonHandler } from './comparison.js';
 export { customExpressionWhereHandler } from './custom-expression.js';
 export { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 export { inHandler } from './in.js';
-export { rawExistsHandler } from './raw-exists.js';
 export {
 	jsonComparisonHandler,
 	jsonContainsHandler,
@@ -51,6 +50,7 @@ export { likeHandler } from './like.js';
 export { andHandler, notHandler, orHandler } from './logical.js';
 export { nullHandler } from './null.js';
 export { rangeHandler } from './range.js';
+export { rawExistsHandler } from './raw-exists.js';
 export {
 	hasNoRelationHandler,
 	hasRelationHandler,
