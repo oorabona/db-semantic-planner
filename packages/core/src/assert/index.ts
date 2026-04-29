@@ -59,3 +59,6 @@ export type {
 	IntentSummary,
 	QueryAssertionResult,
 } from './types.js';
+
+// Helpers
+export { isOverallSuccess } from './types.js';
