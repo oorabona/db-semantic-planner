@@ -194,6 +194,45 @@ export function validatePath(
  * @returns The loaded schema and resolved path
  * @throws SchemaLoadError on validation or loading errors
  */
+/**
+ * Load a JS or TS schema module from a file URL.
+ *
+ * For `.ts` files, attempts to use tsx's programmatic API (`tsImport`) so the
+ * user does not need to invoke the MCP CLI through the tsx wrapper. The
+ * `tsImport` call is scoped — it does not register a global ESM hook, so
+ * each load is self-contained.
+ *
+ * If tsx is not installed (caught via "Cannot find package 'tsx'"), falls
+ * back to native `import()` which will fail with a "Cannot find module"
+ * error that the caller's catch block translates into the actionable
+ * "install tsx" message.
+ *
+ * @internal
+ */
+async function loadSchemaModule(
+	fileUrl: string,
+	canonicalPath: string,
+): Promise<Record<string, unknown>> {
+	if (canonicalPath.endsWith('.ts')) {
+		try {
+			const { tsImport } = await import('tsx/esm/api');
+			return (await tsImport(fileUrl, import.meta.url)) as Record<
+				string,
+				unknown
+			>;
+		} catch (tsxErr) {
+			// tsx not installed → fall through to native import which fails with
+			// the existing helpful catch. Other errors (e.g. real .ts compile
+			// errors) re-throw so the caller's catch can sanitize them.
+			const msg = tsxErr instanceof Error ? tsxErr.message : String(tsxErr);
+			if (!/Cannot find (package|module) ['"]tsx/.test(msg)) {
+				throw tsxErr;
+			}
+		}
+	}
+	return (await import(fileUrl)) as Record<string, unknown>;
+}
+
 export async function loadSchema(
 	options: SchemaLoaderOptions,
 ): Promise<SchemaLoaderResult> {
@@ -236,7 +275,12 @@ export async function loadSchema(
 
 		// Convert canonical real-path to file URL for dynamic import
 		const fileUrl = pathToFileURL(canonicalPath).href;
-		const module = await import(fileUrl);
+
+		// For .ts files, attempt to use tsx programmatically so users don't need
+		// to wrap the CLI in `tsx node_modules/.bin/dbsp-mcp`. Falls back to native
+		// import() if tsx isn't installed — the catch block below provides a
+		// clear "install tsx" message in that case.
+		const module = await loadSchemaModule(fileUrl, canonicalPath);
 
 		// Look for schema export (named 'schema' or default)
 		const schema = module.schema ?? module.default;
