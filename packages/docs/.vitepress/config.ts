@@ -113,6 +113,7 @@ export default withMermaid(
 							{ text: 'Case Expressions', link: '/guide/case-expressions' },
 							{ text: 'Batch Values', link: '/guide/batch-values' },
 							{ text: 'Full-Text Search', link: '/guide/full-text-search' },
+							{ text: 'Range Operators', link: '/guide/range-operators' },
 							{
 								text: 'Extensions (pgvector, ParadeDB)',
 								link: '/guide/extensions',
