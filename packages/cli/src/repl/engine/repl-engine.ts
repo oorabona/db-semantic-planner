@@ -455,7 +455,13 @@ export class ReplEngine {
 	private handleShowCommand(arg: string): void {
 		// Panel inspection commands — open anchored panel below input
 		// Usage: .show sql | plan | results | params | dump
-		const validViews: PanelView[] = ['sql', 'plan', 'results', 'params', 'dump'];
+		const validViews: PanelView[] = [
+			'sql',
+			'plan',
+			'results',
+			'params',
+			'dump',
+		];
 		const viewArg = arg?.toLowerCase();
 
 		if (!viewArg) {
@@ -551,7 +557,6 @@ export class ReplEngine {
 
 		this.emitStateChange();
 	}
-
 
 	// ========================================================================
 	// Private: .table config
