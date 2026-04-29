@@ -291,7 +291,11 @@ function handleUse(arg: string): DotCommandResult {
 	};
 }
 
-function handleExec(arg: string, _schema: LoadedSchema, state: BatchState): DotCommandResult {
+function handleExec(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
 	return handleBooleanToggle(arg, 'execEnabled', 'Execution mode', state);
 }
 
@@ -309,11 +313,19 @@ function handleSql(): DotCommandResult {
 	};
 }
 
-function handleExplain(arg: string, _schema: LoadedSchema, state: BatchState): DotCommandResult {
+function handleExplain(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
 	return handleBooleanToggle(arg, 'explainMode', 'EXPLAIN mode', state);
 }
 
-function handleParse(arg: string, _schema: LoadedSchema, state: BatchState): DotCommandResult {
+function handleParse(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
 	return handleBooleanToggle(arg, 'parseMode', 'Parse mode', state);
 }
 
