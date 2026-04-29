@@ -28,6 +28,21 @@ on:
       - 'packages/adapter-pgsql/src/**'
       - 'packages/types/src/**'
       - 'packages/nql/src/**'
+      # Build inputs that can affect runtime/DB behavior without touching src/.
+      - 'packages/core/package.json'
+      - 'packages/core/tsconfig.json'
+      - 'packages/core/tsup.config.ts'
+      - 'packages/adapter-pgsql/package.json'
+      - 'packages/adapter-pgsql/tsconfig.json'
+      - 'packages/adapter-pgsql/tsup.config.ts'
+      - 'packages/types/package.json'
+      - 'packages/types/tsconfig.json'
+      - 'packages/types/tsup.config.ts'
+      - 'packages/nql/package.json'
+      - 'packages/nql/tsconfig.json'
+      - 'packages/nql/tsup.config.ts'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
       - '.github/workflows/doctest-real-db.yml'
   workflow_dispatch:
   schedule:
@@ -58,7 +73,12 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -C packages/types build && pnpm -C packages/nql build && pnpm -C packages/core build && pnpm -C packages/adapter-pgsql build
+      # Split per-package builds so workflow logs surface which package failed
+      # individually (matches the ci.yml `test` job style).
+      - run: pnpm -C packages/types build
+      - run: pnpm -C packages/nql build
+      - run: pnpm -C packages/core build
+      - run: pnpm -C packages/adapter-pgsql build
       - run: pnpm test:docs
         env:
           DBSP_DOCTEST_REAL_DB: '1'
