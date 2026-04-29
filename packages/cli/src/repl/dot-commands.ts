@@ -108,16 +108,6 @@ function formatRelations(schema: LoadedSchema, tableName?: string): string {
 	return lines.join('\n');
 }
 
-// ============================================================================
-// Dot Command Processor
-// ============================================================================
-
-/**
- * Process a dot command (async to support .import)
- * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
- * @internal - Exported for testing
- */
-
 /**
  * [SC-11] Shared helper for boolean-toggle dot-commands (.exec/.explain/.parse).
  *
@@ -327,7 +317,11 @@ function handleParse(arg: string, _schema: LoadedSchema, state: BatchState): Dot
 	return handleBooleanToggle(arg, 'parseMode', 'Parse mode', state);
 }
 
-function handleOutput(arg: string, _schema: LoadedSchema, state: BatchState): DotCommandResult {
+function handleOutput(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
 	const validModes = ['json', 'table', 'csv'] as const;
 	type OutputMode = (typeof validModes)[number];
 
@@ -359,7 +353,11 @@ const handleCommit: DotCommandHandler = (_arg, _schema, state) =>
 const handleRollback: DotCommandHandler = (_arg, _schema, state) =>
 	runTransactionAction(state, 'rollback');
 
-async function handleImport(arg: string, _schema: LoadedSchema, state: BatchState): Promise<DotCommandResult> {
+async function handleImport(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
 	if (!arg) {
 		return { output: '❌ Usage: .import <file.sql>' };
 	}
