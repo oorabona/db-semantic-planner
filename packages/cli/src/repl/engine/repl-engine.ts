@@ -8,10 +8,7 @@
 import type { ModelIR } from '@dbsp/core';
 import {
 	config as appConfig,
-	type BorderStyle,
-	type HeaderFormatter,
 	isValidTableOption,
-	type OverflowStyle,
 	TABLE_OPTIONS,
 } from '../../config.js';
 import {
@@ -66,6 +63,53 @@ export function isInsideStringLiteral(input: string): boolean {
 	}
 	return inString;
 }
+
+type TableConfigKey = keyof typeof TABLE_OPTIONS;
+
+type TableOptionHandler = {
+	/** The config field name passed to appConfig.updateTable / TABLE_OPTIONS / isValidTableOption. */
+	field: TableConfigKey;
+	/** Human-readable label printed in success/error messages. */
+	label: string;
+	/** Parses the raw string argument into the validated value type. */
+	parse: (raw: string) => string | number;
+};
+
+// Keyed by every command word the user can type — aliases share the same handler instance.
+const borderHandler: TableOptionHandler = {
+	field: 'borderStyle',
+	label: 'borders',
+	// Border style values (none / outline / rounded / etc.) are all-lowercase —
+	// normalize input so e.g. `.table borders NONE` matches.
+	parse: (s) => s.toLowerCase(),
+};
+
+const headerHandler: TableOptionHandler = {
+	field: 'headerFormatter',
+	label: 'headers',
+	// Header-formatter values include camelCase (capitalCase / snakeCase / camelCase) —
+	// preserve original case so the user-typed value matches TABLE_OPTIONS exactly.
+	parse: (s) => s,
+};
+
+// Keyed by every command word the user can type — aliases share the same handler instance.
+const TABLE_OPTION_HANDLERS: Record<string, TableOptionHandler> = {
+	borders: borderHandler,
+	border: borderHandler,
+	overflow: {
+		field: 'overflow',
+		label: 'overflow',
+		// Overflow values (truncate / wrap) are all-lowercase — normalize input.
+		parse: (s) => s.toLowerCase(),
+	},
+	headers: headerHandler,
+	header: headerHandler,
+	padding: {
+		field: 'padding',
+		label: 'padding',
+		parse: (s) => Number.parseInt(s, 10),
+	},
+};
 
 export class ReplEngine {
 	private state: EngineState;
@@ -519,7 +563,7 @@ export class ReplEngine {
 		const tableConfig = appConfig.getTable();
 		const parts = arg.split(/\s+/);
 		const option = parts[0]?.toLowerCase() ?? '';
-		const value = parts[1]?.toLowerCase() ?? '';
+		const value = parts[1] ?? '';
 
 		if (!option) {
 			this.emit({
@@ -538,85 +582,35 @@ export class ReplEngine {
 			return;
 		}
 
-		if (option === 'borders' || option === 'border') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.borderStyle}\nOptions: ${TABLE_OPTIONS.borderStyle.join(', ')}`,
-				});
-			} else if (isValidTableOption('borderStyle', value)) {
-				appConfig.updateTable({ borderStyle: value as BorderStyle });
-				this.emit({ type: 'info', message: `✓ borders = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.borderStyle.join(', ')}`,
-				});
-			}
+		const handler = TABLE_OPTION_HANDLERS[option];
+		if (!handler) {
+			this.emit({
+				type: 'error',
+				message: `Unknown option: ${option}. Options: borders, overflow, headers, padding, reset`,
+			});
 			return;
 		}
 
-		if (option === 'overflow') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.overflow}\nOptions: ${TABLE_OPTIONS.overflow.join(', ')}`,
-				});
-			} else if (isValidTableOption('overflow', value)) {
-				appConfig.updateTable({ overflow: value as OverflowStyle });
-				this.emit({ type: 'info', message: `✓ overflow = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.overflow.join(', ')}`,
-				});
-			}
+		if (!value) {
+			this.emit({
+				type: 'info',
+				message: `Current: ${tableConfig[handler.field]}\nOptions: ${TABLE_OPTIONS[handler.field].join(', ')}`,
+			});
 			return;
 		}
 
-		if (option === 'headers' || option === 'header') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.headerFormatter}\nOptions: ${TABLE_OPTIONS.headerFormatter.join(', ')}`,
-				});
-			} else if (isValidTableOption('headerFormatter', value)) {
-				appConfig.updateTable({ headerFormatter: value as HeaderFormatter });
-				this.emit({ type: 'info', message: `✓ headers = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.headerFormatter.join(', ')}`,
-				});
-			}
-			return;
+		const parsed = handler.parse(value);
+		if (isValidTableOption(handler.field, parsed)) {
+			appConfig.updateTable({ [handler.field]: parsed } as Parameters<
+				typeof appConfig.updateTable
+			>[0]);
+			this.emit({ type: 'info', message: `✓ ${handler.label} = ${parsed}` });
+		} else {
+			this.emit({
+				type: 'error',
+				message: `Invalid value. Options: ${TABLE_OPTIONS[handler.field].join(', ')}`,
+			});
 		}
-
-		if (option === 'padding') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.padding}\nOptions: ${TABLE_OPTIONS.padding.join(', ')}`,
-				});
-			} else {
-				const numValue = Number.parseInt(value, 10);
-				if (isValidTableOption('padding', numValue)) {
-					appConfig.updateTable({ padding: numValue });
-					this.emit({ type: 'info', message: `✓ padding = ${numValue}` });
-				} else {
-					this.emit({
-						type: 'error',
-						message: `Invalid value. Options: ${TABLE_OPTIONS.padding.join(', ')}`,
-					});
-				}
-			}
-			return;
-		}
-
-		this.emit({
-			type: 'error',
-			message: `Unknown option: ${option}. Options: borders, overflow, headers, padding, reset`,
-		});
 	}
 
 	// ========================================================================
