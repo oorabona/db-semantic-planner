@@ -722,7 +722,13 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		expect(innerInTransaction).toBe(true);
 	});
 
-	it('logger is propagated to transaction-scoped adapter — observable via stream cleanup path', async () => {
+	it('logger option reaches stream cleanup path on non-tx adapter — proves logger reachability (transaction propagation covered transitively via cloneOptions)', async () => {
+		// This test exercises the NON-TRANSACTION stream cleanup path because that
+		// is where logger.debug is observable from outside. It does NOT directly
+		// exercise transaction() — propagation through transaction() is covered
+		// transitively because cloneOptions() uses the same option-spread for both
+		// withSchema() and transaction(). See the assertion comment below.
+		//
 		// The non-transaction stream path calls logger.debug when a cleanup
 		// ROLLBACK throws in the finally block. We set up a pool where:
 		//  1. pool.connect() returns a mock client
