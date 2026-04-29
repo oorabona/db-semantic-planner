@@ -67,6 +67,29 @@ export function isInsideStringLiteral(input: string): boolean {
 	return inString;
 }
 
+
+type TableConfigKey = 'borderStyle' | 'overflow' | 'headerFormatter' | 'padding';
+
+type TableOptionHandler = {
+	/** The config field name passed to appConfig.updateTable / TABLE_OPTIONS / isValidTableOption. */
+	field: TableConfigKey;
+	/** Human-readable label printed in success/error messages. */
+	label: string;
+	/** Parses the raw string argument into the validated value type. */
+	parse: (raw: string) => string | number;
+};
+
+// Keyed by every command word the user can type — aliases share the same handler instance.
+const TABLE_OPTION_HANDLERS: Record<string, TableOptionHandler> = {
+	borders: { field: 'borderStyle', label: 'borders', parse: (s) => s },
+	border: { field: 'borderStyle', label: 'borders', parse: (s) => s },
+	overflow: { field: 'overflow', label: 'overflow', parse: (s) => s },
+	headers: { field: 'headerFormatter', label: 'headers', parse: (s) => s },
+	header: { field: 'headerFormatter', label: 'headers', parse: (s) => s },
+	padding: { field: 'padding', label: 'padding', parse: (s) => Number.parseInt(s, 10) },
+};
+
+
 export class ReplEngine {
 	private state: EngineState;
 	private listeners: EngineEventHandler[] = [];
@@ -531,92 +554,37 @@ export class ReplEngine {
 
 		if (option === 'reset') {
 			appConfig.resetTable();
+			this.emit({ type: 'info', message: '✓ Table configuration reset to defaults' });
+			return;
+		}
+
+		const handler = TABLE_OPTION_HANDLERS[option];
+		if (!handler) {
 			this.emit({
-				type: 'info',
-				message: '✓ Table configuration reset to defaults',
+				type: 'error',
+				message: `Unknown option: ${option}. Options: borders, overflow, headers, padding, reset`,
 			});
 			return;
 		}
 
-		if (option === 'borders' || option === 'border') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.borderStyle}\nOptions: ${TABLE_OPTIONS.borderStyle.join(', ')}`,
-				});
-			} else if (isValidTableOption('borderStyle', value)) {
-				appConfig.updateTable({ borderStyle: value as BorderStyle });
-				this.emit({ type: 'info', message: `✓ borders = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.borderStyle.join(', ')}`,
-				});
-			}
+		if (!value) {
+			this.emit({
+				type: 'info',
+				message: `Current: ${tableConfig[handler.field]}\nOptions: ${TABLE_OPTIONS[handler.field].join(', ')}`,
+			});
 			return;
 		}
 
-		if (option === 'overflow') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.overflow}\nOptions: ${TABLE_OPTIONS.overflow.join(', ')}`,
-				});
-			} else if (isValidTableOption('overflow', value)) {
-				appConfig.updateTable({ overflow: value as OverflowStyle });
-				this.emit({ type: 'info', message: `✓ overflow = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.overflow.join(', ')}`,
-				});
-			}
-			return;
+		const parsed = handler.parse(value);
+		if (isValidTableOption(handler.field, parsed)) {
+			appConfig.updateTable({ [handler.field]: parsed } as Parameters<typeof appConfig.updateTable>[0]);
+			this.emit({ type: 'info', message: `✓ ${handler.label} = ${parsed}` });
+		} else {
+			this.emit({
+				type: 'error',
+				message: `Invalid value. Options: ${TABLE_OPTIONS[handler.field].join(', ')}`,
+			});
 		}
-
-		if (option === 'headers' || option === 'header') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.headerFormatter}\nOptions: ${TABLE_OPTIONS.headerFormatter.join(', ')}`,
-				});
-			} else if (isValidTableOption('headerFormatter', value)) {
-				appConfig.updateTable({ headerFormatter: value as HeaderFormatter });
-				this.emit({ type: 'info', message: `✓ headers = ${value}` });
-			} else {
-				this.emit({
-					type: 'error',
-					message: `Invalid value. Options: ${TABLE_OPTIONS.headerFormatter.join(', ')}`,
-				});
-			}
-			return;
-		}
-
-		if (option === 'padding') {
-			if (!value) {
-				this.emit({
-					type: 'info',
-					message: `Current: ${tableConfig.padding}\nOptions: ${TABLE_OPTIONS.padding.join(', ')}`,
-				});
-			} else {
-				const numValue = Number.parseInt(value, 10);
-				if (isValidTableOption('padding', numValue)) {
-					appConfig.updateTable({ padding: numValue });
-					this.emit({ type: 'info', message: `✓ padding = ${numValue}` });
-				} else {
-					this.emit({
-						type: 'error',
-						message: `Invalid value. Options: ${TABLE_OPTIONS.padding.join(', ')}`,
-					});
-				}
-			}
-			return;
-		}
-
-		this.emit({
-			type: 'error',
-			message: `Unknown option: ${option}. Options: borders, overflow, headers, padding, reset`,
-		});
 	}
 
 	// ========================================================================
