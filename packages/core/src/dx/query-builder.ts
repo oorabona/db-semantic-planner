@@ -1,7 +1,6 @@
 /* biome-ignore-all lint/style/noNonNullAssertion: Builder internals use non-null assertions on validated state */
 import type { Mutable } from '@dbsp/types/internal';
 import type { Adapter, Dump } from '../adapter.js';
-import type { DialectCapabilities } from '../dialects/index.js';
 import type {
 	AggregateIntent,
 	ColumnExpressionIntent,
