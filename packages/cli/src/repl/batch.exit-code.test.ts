@@ -13,6 +13,7 @@
  *   EH-11    — plain-text error in --json mode goes to stderr
  */
 
+import { isOverallSuccess } from '@dbsp/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
@@ -761,4 +762,39 @@ describe('[M3] text output: labels use result.query (not queries array index)', 
 		// The continuation line text must NOT appear as a label
 		expect(labelLines.join(' ')).not.toContain('from users \\');
 	});
+});
+
+// ---------------------------------------------------------------------------
+// C1 regression-lock: isOverallSuccess semantic equivalence
+// Verifies that the helper from @dbsp/core is semantically identical to the
+// prior inline predicate `!r.success || r.dbSuccess === false`.
+// ---------------------------------------------------------------------------
+
+describe('[C1] isOverallSuccess — semantic equivalence with prior inline predicate', () => {
+	// Reference implementation: the predicate exactly as it appeared at
+	// batch.ts:454 before the helper extraction. The equivalence claim is
+	// structural (helper ≡ priorInline) instead of arithmetic per-row.
+	const priorInline = (r: { success: boolean; dbSuccess?: boolean }) =>
+		!r.success || r.dbSuccess === false;
+
+	const cases: { success: boolean; dbSuccess?: boolean; label: string }[] = [
+		{ success: false, label: 'row 1: compile fail, no DB → fail' },
+		{ success: true, label: 'row 2: compile ok, no DB → success' },
+		{
+			success: true,
+			dbSuccess: true,
+			label: 'row 3: compile ok, DB ok → success',
+		},
+		{
+			success: true,
+			dbSuccess: false,
+			label: 'row 4: compile ok, DB fail → fail',
+		},
+	];
+
+	for (const r of cases) {
+		it(`equivalence — ${r.label}`, () => {
+			expect(!isOverallSuccess(r)).toBe(priorInline(r));
+		});
+	}
 });

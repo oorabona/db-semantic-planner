@@ -82,3 +82,34 @@ export interface AssertionSummary {
 	skipped: number;
 	results: QueryAssertionResult[];
 }
+
+/**
+ * Determine whether a query result represents end-to-end success
+ * (compile + DB execution combined).
+ *
+ * Truth table:
+ * | success | dbSuccess  | result |
+ * |---------|------------|--------|
+ * | false   | (any)      | false  |
+ * | true    | undefined  | true   | (compile-only mode — no DB)
+ * | true    | true       | true   |
+ * | true    | false      | false  |
+ *
+ * Contract: `dbSuccess` MUST be either omitted (compile-only mode) or
+ * a real boolean. Internal producers in `mapEventsToBatchResult` and the
+ * GUI sidecar always omit it or set a real boolean.
+ *
+ * Stable predicate — the truth table above IS the contract; callers may
+ * rely on its exact behavior. As a `@public` helper, the implementation
+ * is also defensive: malformed input (`null`, `undefined`, missing
+ * `success`, non-boolean `success`) returns `false` rather than throwing
+ * or returning a non-boolean.
+ *
+ * @public
+ */
+export function isOverallSuccess(r: {
+	success: boolean;
+	dbSuccess?: boolean;
+}): boolean {
+	return Boolean(r) && r.success === true && r.dbSuccess !== false;
+}

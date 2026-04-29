@@ -7,6 +7,7 @@
 
 import { readFileSync } from 'node:fs';
 import type { IntentSummary } from '@dbsp/core';
+import { isOverallSuccess } from '@dbsp/core';
 import type { LoadedSchema } from '@dbsp/types';
 import {
 	parseAssertionFile,
@@ -35,11 +36,8 @@ export interface BatchResult {
 	/** Compile-only success of the query (NQL compilation passed).
 	 *
 	 * Does NOT reflect DB execution outcome — see `dbSuccess` for that.
-	 * Exit code logic in `runBatchMode` checks both fields, so a DB error
-	 * still produces non-zero exit even though `success` stays true.
-	 *
-	 * The unified `overallSuccess` field (combining compile + DB) is a
-	 * planned redesign — see TODO follow-up. */
+	 * Combine with `dbSuccess` via `@dbsp/core`'s `isOverallSuccess()` for
+	 * end-to-end status; exit-code logic in `runBatchMode` does exactly that. */
 	success: boolean;
 	/** DB execution success only (compile-only mode leaves this undefined).
 	 * When present: `true` = DB query executed without error. */
@@ -450,9 +448,7 @@ export async function runBatchMode(options: BatchModeOptions): Promise<void> {
 	// CODEX-6: Exit code considers BOTH query failures AND assertion failures.
 	// When assertions are present, exit 1 if any query failed OR any assertion failed.
 	// When no assertions, exit 1 if any query failed.
-	const hasFailedQueries = results.some(
-		(r) => !r.success || r.dbSuccess === false,
-	);
+	const hasFailedQueries = results.some((r) => !isOverallSuccess(r));
 	const failed =
 		hasFailedQueries ||
 		(assertionSummary !== undefined && assertionSummary.failed > 0);

@@ -459,6 +459,7 @@ export {
 	assertSQLJoin,
 	assertSQLTable,
 	assertSuccess,
+	isOverallSuccess,
 	parseAssertionFile,
 	requiresDatabase,
 	resolveQueryIndex,
