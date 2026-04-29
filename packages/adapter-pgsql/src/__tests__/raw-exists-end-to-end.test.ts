@@ -14,12 +14,10 @@ import {
 	and,
 	createOrm,
 	eq,
-	gt,
 	or,
 	outerRef,
 	rawExists,
 	rawNotExists,
-	ref,
 	schema,
 	subquery,
 } from '@dbsp/core';
@@ -134,10 +132,7 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		const dump = (orm as any)
 			.select('communities')
 			.where(
-				and(
-					eq('name', 'acme'),
-					rawExists(subquery('files').select('id')),
-				),
+				and(eq('name', 'acme'), rawExists(subquery('files').select('id'))),
 			)
 			.dump();
 
@@ -177,11 +172,7 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		const dump = (orm as any)
 			.select('communities')
 			.where(
-				rawExists(
-					subquery('files')
-						.where(eq('community_id', 42))
-						.select('id'),
-				),
+				rawExists(subquery('files').where(eq('community_id', 42)).select('id')),
 			)
 			.dump();
 
@@ -200,12 +191,7 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('communities')
-			.where(
-				or(
-					eq('id', 1),
-					rawExists(subquery('files').select('id')),
-				),
-			)
+			.where(or(eq('id', 1), rawExists(subquery('files').select('id'))))
 			.dump();
 
 		const sql = ws(dump.sql);
@@ -235,5 +221,6 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 				)
 				.dump(),
 		).toThrow(/nested subquery not supported/i);
+		// (kept multi-line: nested method-chain readability > biome single-line preference)
 	});
 });
