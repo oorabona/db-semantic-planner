@@ -373,8 +373,7 @@ async function handleImport(arg: string, _schema: LoadedSchema, state: BatchStat
 	try {
 		resolvedPath = validatePathInCwd(arg);
 	} catch (err) {
-		const reason =
-			err instanceof PathEscapeError ? err.message : String(err);
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
@@ -405,9 +404,7 @@ async function handleImport(arg: string, _schema: LoadedSchema, state: BatchStat
 			result.rowCount !== undefined
 				? ` (${result.rowCount} rows affected)`
 				: '';
-		const schemaInfo = state.schemaName
-			? ` (schema: ${state.schemaName})`
-			: '';
+		const schemaInfo = state.schemaName ? ` (schema: ${state.schemaName})` : '';
 		return {
 			output: `✅ Imported: ${arg}${rowInfo}${schemaInfo}`,
 			success: true,
@@ -443,7 +440,8 @@ async function handleLoad(
 	try {
 		validateIdentifier(tableName, 'table');
 	} catch (err) {
-		const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
+		const reason =
+			err instanceof InvalidIdentifierError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
@@ -481,7 +479,8 @@ async function handleLoad(
 			try {
 				validateIdentifier(col, 'column');
 			} catch (err) {
-				const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
+				const reason =
+					err instanceof InvalidIdentifierError ? err.message : String(err);
 				return {
 					output: `❌ CSV header contains invalid column: ${reason}`,
 				};
@@ -566,7 +565,8 @@ async function handleDump(
 	try {
 		validateIdentifier(dumpTableName, 'table');
 	} catch (err) {
-		const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
+		const reason =
+			err instanceof InvalidIdentifierError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
