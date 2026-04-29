@@ -44,6 +44,12 @@ export const rawExistsHandler: WhereHandler = {
 	): Node {
 		const subIntent = decision.expressionIntent as QueryIntent;
 
+		// Fail-fast contract: parameters and paramIndex are mutated unconditionally
+		// before the deparser emits anything. If buildSubqueryFromIntent throws
+		// (e.g. nested rawExists hitting "nested subquery not supported"), the
+		// outer state may be left with bumped paramIndex. We do NOT roll back —
+		// callers must let the throw propagate, not catch-and-recover. Same
+		// contract as the mutation path.
 		const {
 			sql: subNode,
 			paramCount,

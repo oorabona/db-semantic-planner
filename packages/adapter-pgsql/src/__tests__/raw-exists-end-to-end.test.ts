@@ -15,6 +15,7 @@ import {
 	createOrm,
 	eq,
 	gt,
+	or,
 	outerRef,
 	rawExists,
 	rawNotExists,
@@ -189,5 +190,50 @@ describe('rawExists / rawNotExists — SELECT pipeline (L103 regression lock)', 
 		expect(sql).toMatch(/WHERE/i);
 		expect(sql).toMatch(/EXISTS\s*\(/i);
 		expect(dump.params).toContain(42);
+	});
+
+	/**
+	 * 7. rawExists inside or() — exercises convertLogicalGroup recursion path.
+	 *    Locks the regression that OR routing also walks through convertWhereCondition.
+	 */
+	it('rawExists in or() group propagates EXISTS to SQL', () => {
+		const orm = buildOrm();
+		const dump = (orm as any)
+			.select('communities')
+			.where(
+				or(
+					eq('id', 1),
+					rawExists(subquery('files').select('id')),
+				),
+			)
+			.dump();
+
+		const sql = ws(dump.sql);
+
+		expect(sql).toMatch(/WHERE/i);
+		expect(sql).toMatch(/EXISTS\s*\(/i);
+		// Both branches of OR must appear
+		expect(sql).toMatch(/OR/i);
+	});
+
+	/**
+	 * 8. Nested rawExists boundary — the inner WhereCompilerCtx's compileSubquery
+	 *    callback throws "nested subquery not supported" by design. This test
+	 *    documents that boundary so any future change to that contract is loud.
+	 */
+	it('nested rawExists throws "nested subquery not supported" (documented boundary)', () => {
+		const orm = buildOrm();
+		expect(() =>
+			(orm as any)
+				.select('communities')
+				.where(
+					rawExists(
+						subquery('files')
+							.where(rawExists(subquery('files').select('id')))
+							.select('id'),
+					),
+				)
+				.dump(),
+		).toThrow(/nested subquery not supported/i);
 	});
 });
