@@ -832,13 +832,10 @@ export class ReplEngine {
 	}
 
 	private shouldExecuteQuery(isMutation: boolean, isDryRun: boolean): boolean {
+		// dbConnection narrowing is left to the call site so its truthy check participates
+		// in TypeScript flow analysis without requiring this helper to repeat the assertion.
 		return isMutation
-			? !isDryRun &&
-					this.state.execMode &&
-					this.state.connected &&
-					Boolean(this.dbConnection)
-			: this.state.execMode &&
-					this.state.connected &&
-					Boolean(this.dbConnection);
+			? !isDryRun && this.state.execMode && this.state.connected
+			: this.state.execMode && this.state.connected;
 	}
 }
