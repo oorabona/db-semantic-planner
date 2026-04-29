@@ -349,7 +349,7 @@ Present only when `--assert <file>` is supplied.
 | `1` | At least one query failed (`success === false` OR `dbSuccess === false`) **or** at least one assertion failed. |
 
 ::: tip Compile-only vs full success
-`success` reflects compilation only. A query that compiles cleanly but is rejected by the DB has `success: true` and `dbSuccess: false`, and produces exit code `1`. A unified `overallSuccess` field is on the roadmap.
+`success` reflects compilation only. A query that compiles cleanly but is rejected by the DB has `success: true` and `dbSuccess: false`, and produces exit code `1`. To check end-to-end success in code, use `isOverallSuccess(r)` from `@dbsp/core` — it returns `r.success && r.dbSuccess !== false` and is hardened against malformed input.
 :::
 
 ---
