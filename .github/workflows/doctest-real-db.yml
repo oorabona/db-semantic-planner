@@ -43,6 +43,9 @@ on:
       - 'packages/nql/tsup.config.ts'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
+      # Root-level build/test inputs (test:docs script, base TS config).
+      - 'package.json'
+      - 'tsconfig.json'
       - '.github/workflows/doctest-real-db.yml'
   workflow_dispatch:
   schedule:
