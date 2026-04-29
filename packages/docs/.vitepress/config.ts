@@ -108,6 +108,10 @@ export default withMermaid(
 								text: 'Expression Primitives',
 								link: '/guide/expression-primitives',
 							},
+							{
+								text: 'exists() vs rawExists()',
+								link: '/guide/exists-vs-rawexists',
+							},
 							{ text: 'Joins', link: '/guide/joins' },
 							{ text: 'Recursive CTEs', link: '/guide/recursive-cte' },
 							{ text: 'Case Expressions', link: '/guide/case-expressions' },
