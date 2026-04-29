@@ -784,7 +784,7 @@ const authors = await orm.select('users')
 Use a subquery as a computed column in SELECT.
 
 ```typescript
-// doctest: skip — exec-only operation; scalar subquery .count().where() chain and .asExpr() not yet available on SubqueryBuilder
+// doctest: skip — exec-only (uses `await orm.select(...).all()`); see compile-only `.asExpr()` example near the bottom of this file for a runnable variant
 import { subquery, eq } from '@dbsp/core';
 
 // Count posts per user as a computed column

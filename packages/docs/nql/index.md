@@ -1311,7 +1311,17 @@ pseudo-columns for traversal: `manager` (parent), `managementChain` (ancestors),
 
 Navigate one level up the hierarchy with the `manager` pseudo-column.
 
-> **Known limitation:** Pseudo-column traversal (`manager.name`) is not yet compiled to SQL — only direct columns are returned. The LEFT JOIN self-join is planned but not yet implemented.
+> **Known limitation:** Pseudo-column traversal (`manager.name`) is not yet compiled to SQL by NQL — only direct columns are returned. The auto-emitted LEFT JOIN self-join is planned.
+>
+> **Workaround (today):** use the ORM with `.include('manager')` to hydrate the parent row, or write the self-join explicitly via the raw SQL escape hatch:
+>
+> ```typescript
+> // doctest: skip — illustrative ORM workaround for pseudo-column traversal
+> const employees = await orm.select('employees')
+>   .columns(['name', 'title'])
+>   .include('manager', { columns: ['name'] })  // hydrates row.manager.name
+>   .all();
+> ```
 
 ```nql
 employees | select name, title, manager.name
