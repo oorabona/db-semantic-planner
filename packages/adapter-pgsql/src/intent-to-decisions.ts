@@ -565,6 +565,16 @@ export function convertWhereCondition(
 		}
 		case 'subquery':
 			return convertSubquery(cond);
+		case 'rawExists':
+		case 'rawNotExists':
+			return {
+				type: 'where',
+				operator: cond.kind,
+				// Reuse expressionIntent (already present on PlanDecision) to carry the
+				// inner QueryIntent; the rawExistsHandler discriminates by operator name.
+				expressionIntent: (cond as unknown as { subquery: unknown }).subquery,
+				table: rootTable,
+			};
 		case 'jsonContains':
 			return {
 				type: 'where',

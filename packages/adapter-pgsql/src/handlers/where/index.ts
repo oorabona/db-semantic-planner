@@ -12,6 +12,7 @@ import { comparisonHandler } from './comparison.js';
 import { customExpressionWhereHandler } from './custom-expression.js';
 // Handler imports - complex (exists, subquery, relation)
 import { everyHandler, existsHandler, notExistsHandler } from './exists.js';
+import { rawExistsHandler } from './raw-exists.js';
 import { inHandler } from './in.js';
 import {
 	jsonComparisonHandler,
@@ -40,6 +41,7 @@ export { comparisonHandler } from './comparison.js';
 export { customExpressionWhereHandler } from './custom-expression.js';
 export { everyHandler, existsHandler, notExistsHandler } from './exists.js';
 export { inHandler } from './in.js';
+export { rawExistsHandler } from './raw-exists.js';
 export {
 	jsonComparisonHandler,
 	jsonContainsHandler,
@@ -88,6 +90,7 @@ export const complexWhereHandlers = [
 	existsHandler,
 	notExistsHandler,
 	everyHandler,
+	rawExistsHandler,
 	// Subquery-based
 	scalarSubqueryHandler,
 	inSubqueryHandler,
