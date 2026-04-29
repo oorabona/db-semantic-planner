@@ -22,6 +22,7 @@ import { likeHandler } from './like.js';
 import { andHandler, notHandler, orHandler } from './logical.js';
 import { nullHandler } from './null.js';
 import { rangeHandler } from './range.js';
+import { rawExistsHandler } from './raw-exists.js';
 import {
 	hasNoRelationHandler,
 	hasRelationHandler,
@@ -49,6 +50,7 @@ export { likeHandler } from './like.js';
 export { andHandler, notHandler, orHandler } from './logical.js';
 export { nullHandler } from './null.js';
 export { rangeHandler } from './range.js';
+export { rawExistsHandler } from './raw-exists.js';
 export {
 	hasNoRelationHandler,
 	hasRelationHandler,
@@ -88,6 +90,7 @@ export const complexWhereHandlers = [
 	existsHandler,
 	notExistsHandler,
 	everyHandler,
+	rawExistsHandler,
 	// Subquery-based
 	scalarSubqueryHandler,
 	inSubqueryHandler,

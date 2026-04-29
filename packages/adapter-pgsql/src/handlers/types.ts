@@ -165,6 +165,7 @@ export interface Decision {
 	// Pre-compiled FILTER (WHERE ...) node for aggregate expressions (set by compiler)
 	readonly filterWhere?: import('@pgsql/types').Node;
 	// Custom expression intent for selectCustomExpression, WHERE expression, and ORDER BY expression
+	// Also carries QueryIntent for rawExists/rawNotExists (operator discriminates the kind).
 	readonly expressionIntent?: unknown;
 	// LIKE escape character
 	readonly escape?: string;
