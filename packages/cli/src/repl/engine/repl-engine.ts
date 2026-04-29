@@ -756,9 +756,8 @@ export class ReplEngine {
 				rootTable: pr?.rootTable ?? '',
 				tables: [
 					...new Set(
-						pr?.decisions
-							.map((d) => d.context.sourceTable)
-							.filter(Boolean) ?? [],
+						pr?.decisions.map((d) => d.context.sourceTable).filter(Boolean) ??
+							[],
 					),
 				],
 				decisions:
