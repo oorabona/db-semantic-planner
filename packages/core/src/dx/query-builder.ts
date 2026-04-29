@@ -1642,11 +1642,9 @@ export class QueryBuilderImpl<TResult = unknown>
 				: {}),
 			...ctxOverride,
 		};
-		const builder = new QueryBuilderImpl<TResult>(
-			mergedCtx,
-			this.from,
-			{ ...this.relationHints },
-		);
+		const builder = new QueryBuilderImpl<TResult>(mergedCtx, this.from, {
+			...this.relationHints,
+		});
 		// Clone array state
 		builder.includes.push(...this.includes);
 		builder.recursiveIncludes.push(...this.recursiveIncludes);
