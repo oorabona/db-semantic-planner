@@ -635,6 +635,36 @@ describe('processDotCommand — coverage', () => {
 			expect(sql).toContain('"my_tenant".');
 		});
 
+		it('.load uses $N parameter binding placeholders (not bare digit literals)', async () => {
+			const csvFile = join(testDir, 'params.csv');
+			writeFileSync(csvFile, 'id,name\n1,Alice\n2,Bob\n');
+			const capturedSqlCalls: string[] = [];
+			const mockExecuteRaw = vi.fn().mockImplementation((sql: string) => {
+				capturedSqlCalls.push(sql);
+				return Promise.resolve({
+					rows: [],
+					columns: [],
+					rowCount: 2,
+					executionTimeMs: 1,
+				});
+			});
+			const db = createMockDbConnection({ executeRaw: mockExecuteRaw });
+			const state = createState({ dbConnection: db });
+
+			const result = await processDotCommand(
+				`.load users ${csvFile}`,
+				mockSchema,
+				state,
+			);
+
+			expect(result.success).toBe(true);
+			expect(capturedSqlCalls.length).toBeGreaterThan(0);
+			const sql = capturedSqlCalls[0];
+			// Must use $N parameter placeholders — bare digits (e.g. "VALUES (1, 2)")
+			// would bypass parameter binding and risk SQL injection / type errors.
+			expect(sql).toMatch(/VALUES\s+\(\$\d+(,\s*\$\d+)*\)/);
+		});
+
 		it('handles parseCsvFile exception', async () => {
 			// A binary file should cause parsing to fail or produce unexpected results
 			const binFile = join(testDir, 'binary.csv');

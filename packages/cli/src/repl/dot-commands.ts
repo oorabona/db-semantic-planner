@@ -422,7 +422,11 @@ async function handleImport(arg: string, _schema: LoadedSchema, state: BatchStat
 	}
 }
 
-async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState): Promise<DotCommandResult> {
+async function handleLoad(
+	arg: string,
+	schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
 	const loadParts = arg.split(/\s+/);
 	const tableName = loadParts[0];
 	const filePath = loadParts.slice(1).join(' ');
@@ -439,8 +443,7 @@ async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState):
 	try {
 		validateIdentifier(tableName, 'table');
 	} catch (err) {
-		const reason =
-			err instanceof InvalidIdentifierError ? err.message : String(err);
+		const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
@@ -455,8 +458,7 @@ async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState):
 	try {
 		loadFilePath = validatePathInCwd(filePath);
 	} catch (err) {
-		const reason =
-			err instanceof PathEscapeError ? err.message : String(err);
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
@@ -479,8 +481,7 @@ async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState):
 			try {
 				validateIdentifier(col, 'column');
 			} catch (err) {
-				const reason =
-					err instanceof InvalidIdentifierError ? err.message : String(err);
+				const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
 				return {
 					output: `❌ CSV header contains invalid column: ${reason}`,
 				};
@@ -509,7 +510,7 @@ async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState):
 				const placeholders: string[] = [];
 				for (const col of validColumns) {
 					params.push(row[col] ?? null);
-					placeholders.push(`${params.length}`);
+					placeholders.push(`$${params.length}`);
 				}
 				valueRows.push(`(${placeholders.join(', ')})`);
 			}
@@ -544,7 +545,11 @@ async function handleLoad(arg: string, schema: LoadedSchema, state: BatchState):
 	}
 }
 
-async function handleDump(arg: string, schema: LoadedSchema, state: BatchState): Promise<DotCommandResult> {
+async function handleDump(
+	arg: string,
+	schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
 	const dumpParts = arg.split(/\s+/);
 	const dumpTableName = dumpParts[0];
 	const dumpFilePath = dumpParts.slice(1).join(' ');
@@ -561,8 +566,7 @@ async function handleDump(arg: string, schema: LoadedSchema, state: BatchState):
 	try {
 		validateIdentifier(dumpTableName, 'table');
 	} catch (err) {
-		const reason =
-			err instanceof InvalidIdentifierError ? err.message : String(err);
+		const reason = err instanceof InvalidIdentifierError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
@@ -577,8 +581,7 @@ async function handleDump(arg: string, schema: LoadedSchema, state: BatchState):
 	try {
 		resolvedDumpPath = validatePathInCwd(dumpFilePath);
 	} catch (err) {
-		const reason =
-			err instanceof PathEscapeError ? err.message : String(err);
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
 		return { output: `❌ ${reason}` };
 	}
 
