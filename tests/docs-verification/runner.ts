@@ -131,6 +131,8 @@ import {
 \tl2Distance,
 \trawDistance,
 \tvectorDims,
+\tredactParams,
+\tDEFAULT_REDACTION_PATTERNS,
 } from '@dbsp/adapter-pgsql';
 
 // Mocked Pool avoids real DB connections in doctests.
@@ -240,6 +242,8 @@ import {
 \trawDistance,
 \tvectorDims,
 \tgenerateDDL,
+\tredactParams,
+\tDEFAULT_REDACTION_PATTERNS,
 } from '@dbsp/adapter-pgsql';
 
 import { Pool } from 'pg';

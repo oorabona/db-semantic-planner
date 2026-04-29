@@ -149,6 +149,13 @@ export {
 	PgsqlAdapter,
 	type PgsqlAdapterOptions,
 } from './pgsql-adapter.js';
+// Redaction (params logging safety)
+export {
+	DEFAULT_REDACTION_PATTERNS,
+	type RedactionConfig,
+	type RedactionPattern,
+	redactParams,
+} from './redact-params.js';
 // Set operations (UNION/INTERSECT/EXCEPT)
 export {
 	compileSetOperation,
