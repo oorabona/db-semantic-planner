@@ -278,7 +278,7 @@ function toErrorResponse(error: Error, requestId: string): ErrorResponse {
 Every query produces a `Dump` with plan, SQL, and parameters:
 
 ```typescript
-// doctest: skip — production logging integration; requires a logger instance and the aspirational redactParams helper (tracked separately)
+// doctest: skip — production logging integration; requires a `logger` instance with a `.info()` method (outside doctest scope)
 import { redactParams } from '@dbsp/adapter-pgsql';
 
 // Get query dump without executing
@@ -548,8 +548,9 @@ function sanitizeTableName(name: string): string {
 Never log sensitive data:
 
 ```typescript
-// doctest: skip — illustrates the aspirational redactParams + DEFAULT_REDACTION_PATTERNS helpers (not yet implemented in @dbsp/adapter-pgsql)
 import { redactParams, DEFAULT_REDACTION_PATTERNS } from '@dbsp/adapter-pgsql';
+
+const dump = { params: ['user@example.com', 'my-api-key-12345', 42] as const };
 
 const safeParams = redactParams(dump.params, {
   patterns: [
@@ -559,6 +560,8 @@ const safeParams = redactParams(dump.params, {
     /^api[_-]?key$/i,
   ],
 });
+console.log(safeParams);
+// → ['[REDACTED]', '[REDACTED]', 42]  — email matched DEFAULT_REDACTION_PATTERNS, api key matched the inline regex, number passed through
 ```
 
 ---
