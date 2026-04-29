@@ -626,6 +626,16 @@ describe('ReplEngine — coverage', () => {
 			});
 		});
 
+		it('preserves case for camelCase header values like capitalCase', async () => {
+			const engine = createEngine();
+
+			await engine.submit('.table headers capitalCase');
+
+			expect(mockConfig.updateTable).toHaveBeenCalledWith({
+				headerFormatter: 'capitalCase',
+			});
+		});
+
 		it('rejects invalid header formatter', async () => {
 			const engine = createEngine();
 			const events = collectEvents(engine);

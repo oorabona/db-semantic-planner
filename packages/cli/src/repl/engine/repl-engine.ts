@@ -68,7 +68,7 @@ export function isInsideStringLiteral(input: string): boolean {
 }
 
 
-type TableConfigKey = 'borderStyle' | 'overflow' | 'headerFormatter' | 'padding';
+type TableConfigKey = keyof typeof TABLE_OPTIONS;
 
 type TableOptionHandler = {
 	/** The config field name passed to appConfig.updateTable / TABLE_OPTIONS / isValidTableOption. */
@@ -80,13 +80,30 @@ type TableOptionHandler = {
 };
 
 // Keyed by every command word the user can type — aliases share the same handler instance.
+const borderHandler: TableOptionHandler = {
+	field: 'borderStyle',
+	label: 'borders',
+	parse: (s) => s,
+};
+
+const headerHandler: TableOptionHandler = {
+	field: 'headerFormatter',
+	label: 'headers',
+	parse: (s) => s,
+};
+
+// Keyed by every command word the user can type — aliases share the same handler instance.
 const TABLE_OPTION_HANDLERS: Record<string, TableOptionHandler> = {
-	borders: { field: 'borderStyle', label: 'borders', parse: (s) => s },
-	border: { field: 'borderStyle', label: 'borders', parse: (s) => s },
+	borders: borderHandler,
+	border: borderHandler,
 	overflow: { field: 'overflow', label: 'overflow', parse: (s) => s },
-	headers: { field: 'headerFormatter', label: 'headers', parse: (s) => s },
-	header: { field: 'headerFormatter', label: 'headers', parse: (s) => s },
-	padding: { field: 'padding', label: 'padding', parse: (s) => Number.parseInt(s, 10) },
+	headers: headerHandler,
+	header: headerHandler,
+	padding: {
+		field: 'padding',
+		label: 'padding',
+		parse: (s) => Number.parseInt(s, 10),
+	},
 };
 
 
@@ -542,7 +559,7 @@ export class ReplEngine {
 		const tableConfig = appConfig.getTable();
 		const parts = arg.split(/\s+/);
 		const option = parts[0]?.toLowerCase() ?? '';
-		const value = parts[1]?.toLowerCase() ?? '';
+		const value = parts[1] ?? '';
 
 		if (!option) {
 			this.emit({
@@ -554,7 +571,10 @@ export class ReplEngine {
 
 		if (option === 'reset') {
 			appConfig.resetTable();
-			this.emit({ type: 'info', message: '✓ Table configuration reset to defaults' });
+			this.emit({
+			type: 'info',
+			message: '✓ Table configuration reset to defaults',
+		});
 			return;
 		}
 
@@ -577,7 +597,11 @@ export class ReplEngine {
 
 		const parsed = handler.parse(value);
 		if (isValidTableOption(handler.field, parsed)) {
-			appConfig.updateTable({ [handler.field]: parsed } as Parameters<typeof appConfig.updateTable>[0]);
+			appConfig.updateTable(
+			{ [handler.field]: parsed } as Parameters<
+				typeof appConfig.updateTable
+			>[0],
+		);
 			this.emit({ type: 'info', message: `✓ ${handler.label} = ${parsed}` });
 		} else {
 			this.emit({
