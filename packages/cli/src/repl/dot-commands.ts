@@ -108,16 +108,6 @@ function formatRelations(schema: LoadedSchema, tableName?: string): string {
 	return lines.join('\n');
 }
 
-// ============================================================================
-// Dot Command Processor
-// ============================================================================
-
-/**
- * Process a dot command (async to support .import)
- * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
- * @internal - Exported for testing
- */
-
 /**
  * [SC-11] Shared helper for boolean-toggle dot-commands (.exec/.explain/.parse).
  *
@@ -166,25 +156,80 @@ function handleBooleanToggle(
 	};
 }
 
-export async function processDotCommand(
-	input: string,
-	schema: LoadedSchema,
-	state: BatchState,
-): Promise<{
+// ============================================================================
+// Dot Command Handler Types
+// ============================================================================
+
+type DotCommandResult = {
 	output: string;
 	stateChange?: Partial<BatchState>;
 	success?: boolean;
 	error?: string;
-}> {
-	const parts = input.split(/\s+/);
-	const command = (parts[0] ?? '').toLowerCase();
-	// [SEC-M2] Strip NUL bytes from arg before any use
-	const arg = parts.slice(1).join(' ').trim().replace(/\0/g, '');
+};
 
-	switch (command) {
-		case '.help':
-			return {
-				output: `Available commands:
+type DotCommandHandler = (
+	arg: string,
+	schema: LoadedSchema,
+	state: BatchState,
+) => Promise<DotCommandResult> | DotCommandResult;
+
+// ============================================================================
+// Transaction Helper
+// ============================================================================
+
+async function runTransactionAction(
+	state: BatchState,
+	action: 'begin' | 'commit' | 'rollback',
+): Promise<DotCommandResult> {
+	if (!state.dbConnection) {
+		return { output: '❌ No database connection. Use --db option.' };
+	}
+	const methodMap = {
+		begin: {
+			method: 'beginTransaction' as const,
+			expectInTx: false,
+			errorMsg: 'Transaction already active. Use .commit or .rollback first.',
+			okOutput: '✓ Transaction started (BEGIN)',
+			failPrefix: 'Failed to begin transaction',
+			stateChange: { inTransaction: true },
+		},
+		commit: {
+			method: 'commitTransaction' as const,
+			expectInTx: true,
+			errorMsg: 'No active transaction. Use .begin first.',
+			okOutput: '✓ Transaction committed (COMMIT)',
+			failPrefix: 'Commit failed',
+			stateChange: { inTransaction: false },
+		},
+		rollback: {
+			method: 'rollbackTransaction' as const,
+			expectInTx: true,
+			errorMsg: 'No active transaction. Use .begin first.',
+			okOutput: '✓ Transaction rolled back (ROLLBACK)',
+			failPrefix: 'Rollback failed',
+			stateChange: { inTransaction: false },
+		},
+	};
+	const cfg = methodMap[action];
+	if (state.dbConnection.inTransaction !== cfg.expectInTx) {
+		return { output: `❌ ${cfg.errorMsg}` };
+	}
+	try {
+		await state.dbConnection[cfg.method]();
+		return { output: cfg.okOutput, stateChange: cfg.stateChange };
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return { output: `❌ ${cfg.failPrefix}: ${message}` };
+	}
+}
+
+// ============================================================================
+// Individual Command Handlers
+// ============================================================================
+
+function handleHelp(): DotCommandResult {
+	return {
+		output: `Available commands:
   .tables           - List all tables
   .schema <table>   - Show table schema
   .relations [table]- Show relations (optionally for a specific table)
@@ -202,414 +247,442 @@ export async function processDotCommand(
   .commit           - Commit the active transaction
   .rollback         - Rollback the active transaction
   .help             - Show this help`,
-			};
+	};
+}
 
-		case '.tables':
-			return { output: formatTables(schema) };
+function handleTables(_arg: string, schema: LoadedSchema): DotCommandResult {
+	return { output: formatTables(schema) };
+}
 
-		case '.schema':
-			if (!arg) {
-				const tableCount = schema.tableNames.length;
-				const relationCount = schema.model.relations.size;
-				return {
-					output: `Schema Summary:\n  - Tables: ${tableCount}\n  - Relations: ${relationCount}\n  Use .schema <table> for details`,
-				};
-			}
-			return { output: formatTableSchema(schema, arg) };
-
-		case '.relations':
-			return { output: formatRelations(schema, arg || undefined) };
-
-		case '.use': {
-			if (!arg) {
-				return {
-					output: 'Cleared schema scope. Queries now use default schema.',
-					stateChange: { schemaName: undefined },
-				};
-			}
-			// [SEC-S1] Validate schema name at set-time to prevent injection
-			// via SET search_path TO "${schemaName}" in .import
-			try {
-				validateIdentifier(arg, 'schema');
-			} catch (err) {
-				const reason =
-					err instanceof InvalidIdentifierError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-			return {
-				output: `Using schema: ${arg}`,
-				stateChange: { schemaName: arg },
-			};
-		}
-
-		case '.exec':
-			return handleBooleanToggle(arg, 'execEnabled', 'Execution mode', state);
-
-		case '.natural':
-			return {
-				output: 'Switched to natural query mode',
-				stateChange: { mode: 'natural' },
-			};
-
-		case '.sql':
-			return {
-				output: 'Switched to SQL mode',
-				stateChange: { mode: 'sql' },
-			};
-
-		case '.explain':
-			return handleBooleanToggle(arg, 'explainMode', 'EXPLAIN mode', state);
-
-		case '.parse':
-			return handleBooleanToggle(arg, 'parseMode', 'Parse mode', state);
-
-		case '.output': {
-			const validModes = ['json', 'table', 'csv'] as const;
-			type OutputMode = (typeof validModes)[number];
-
-			if (!arg) {
-				return {
-					output: `Current output mode: ${state.outputMode}`,
-				};
-			}
-
-			const requestedMode = arg.toLowerCase();
-			if (!validModes.includes(requestedMode as OutputMode)) {
-				return {
-					output: `❌ Invalid output mode: ${arg}. Use: json, table, csv`,
-				};
-			}
-
-			return {
-				output: `✓ Output mode: ${requestedMode}`,
-				stateChange: { outputMode: requestedMode as OutputMode },
-			};
-		}
-
-		case '.begin': {
-			if (!state.dbConnection) {
-				return { output: '❌ No database connection. Use --db option.' };
-			}
-			if (state.dbConnection.inTransaction) {
-				return {
-					output:
-						'❌ Transaction already active. Use .commit or .rollback first.',
-				};
-			}
-			try {
-				await state.dbConnection.beginTransaction();
-				return {
-					output: '✓ Transaction started (BEGIN)',
-					stateChange: { inTransaction: true },
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return { output: `❌ Failed to begin transaction: ${message}` };
-			}
-		}
-
-		case '.commit': {
-			if (!state.dbConnection) {
-				return { output: '❌ No database connection. Use --db option.' };
-			}
-			if (!state.dbConnection.inTransaction) {
-				return { output: '❌ No active transaction. Use .begin first.' };
-			}
-			try {
-				await state.dbConnection.commitTransaction();
-				return {
-					output: '✓ Transaction committed (COMMIT)',
-					stateChange: { inTransaction: false },
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return { output: `❌ Commit failed: ${message}` };
-			}
-		}
-
-		case '.rollback': {
-			if (!state.dbConnection) {
-				return { output: '❌ No database connection. Use --db option.' };
-			}
-			if (!state.dbConnection.inTransaction) {
-				return { output: '❌ No active transaction. Use .begin first.' };
-			}
-			try {
-				await state.dbConnection.rollbackTransaction();
-				return {
-					output: '✓ Transaction rolled back (ROLLBACK)',
-					stateChange: { inTransaction: false },
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return { output: `❌ Rollback failed: ${message}` };
-			}
-		}
-
-		case '.import': {
-			if (!arg) {
-				return { output: '❌ Usage: .import <file.sql>' };
-			}
-
-			if (!state.dbConnection) {
-				return { output: '❌ .import requires database connection (--db)' };
-			}
-
-			// [SEC-M2] Path containment — rejects ../ escapes; NUL already stripped
-			let resolvedPath: string;
-			try {
-				resolvedPath = validatePathInCwd(arg);
-			} catch (err) {
-				const reason =
-					err instanceof PathEscapeError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-
-			if (!existsSync(resolvedPath)) {
-				return { output: `❌ File not found: ${arg}` };
-			}
-
-			try {
-				let sqlContent = readFileSync(resolvedPath, 'utf-8');
-
-				// [SEC-S1] schemaName is already validated at .use time —
-				// safe to interpolate here (double-quoted, no injection path)
-				if (state.schemaName) {
-					sqlContent = `SET search_path TO "${state.schemaName}", public;\n${sqlContent}`;
-				}
-
-				const result = await state.dbConnection.executeRaw(sqlContent, []);
-
-				if (result.error) {
-					return {
-						output: `❌ Import failed: ${result.error}`,
-						success: false,
-						error: result.error,
-					};
-				}
-
-				const rowInfo =
-					result.rowCount !== undefined
-						? ` (${result.rowCount} rows affected)`
-						: '';
-				const schemaInfo = state.schemaName
-					? ` (schema: ${state.schemaName})`
-					: '';
-				return {
-					output: `✅ Imported: ${arg}${rowInfo}${schemaInfo}`,
-					success: true,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					output: `❌ Import failed: ${message}`,
-					success: false,
-					error: message,
-				};
-			}
-		}
-
-		case '.load': {
-			const loadParts = arg.split(/\s+/);
-			const tableName = loadParts[0];
-			const filePath = loadParts.slice(1).join(' ');
-
-			if (!tableName || !filePath) {
-				return { output: '❌ Usage: .load <table> <file.csv>' };
-			}
-
-			if (!state.dbConnection) {
-				return { output: '❌ .load requires database connection (--db)' };
-			}
-
-			// [SEC-S2] Validate table identifier before any SQL interpolation
-			try {
-				validateIdentifier(tableName, 'table');
-			} catch (err) {
-				const reason =
-					err instanceof InvalidIdentifierError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-
-			// Check schema for column hints (optional — table may exist only in DB)
-			const loadTable = schema.model.tables.get(tableName);
-			const schemaColumns = loadTable
-				? loadTable.columns.map((c) => c.name)
-				: undefined;
-
-			// [SEC-M2] Path containment for file argument
-			let loadFilePath: string;
-			try {
-				loadFilePath = validatePathInCwd(filePath);
-			} catch (err) {
-				const reason =
-					err instanceof PathEscapeError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-
-			if (!existsSync(loadFilePath)) {
-				return { output: `❌ File not found: ${filePath}` };
-			}
-
-			try {
-				const csvData = await parseCsvFile(loadFilePath, schemaColumns);
-
-				if (csvData.rows.length === 0) {
-					return { output: '⚠️ CSV file is empty — no rows to import' };
-				}
-
-				// Use CSV columns, optionally filtered to schema columns
-				const csvColumns = [...csvData.format.columns];
-
-				// [SEC-S2] Validate every CSV column name before SQL interpolation
-				for (const col of csvColumns) {
-					try {
-						validateIdentifier(col, 'column');
-					} catch (err) {
-						const reason =
-							err instanceof InvalidIdentifierError ? err.message : String(err);
-						return {
-							output: `❌ CSV header contains invalid column: ${reason}`,
-						};
-					}
-				}
-
-				const validColumns = schemaColumns
-					? csvColumns.filter((c) => schemaColumns.includes(c))
-					: csvColumns;
-				if (validColumns.length === 0) {
-					return {
-						output: `❌ No matching columns found in CSV: ${csvColumns.join(', ')}`,
-					};
-				}
-
-				// Batch insert (100 rows per batch to avoid parameter limit)
-				const BATCH_SIZE = 100;
-				let totalInserted = 0;
-
-				for (let i = 0; i < csvData.rows.length; i += BATCH_SIZE) {
-					const batch = csvData.rows.slice(i, i + BATCH_SIZE);
-					const params: unknown[] = [];
-					const valueRows: string[] = [];
-
-					for (const row of batch) {
-						const placeholders: string[] = [];
-						for (const col of validColumns) {
-							params.push(row[col] ?? null);
-							placeholders.push(`$${params.length}`);
-						}
-						valueRows.push(`(${placeholders.join(', ')})`);
-					}
-
-					const quotedCols = validColumns.map((c) => `"${c}"`).join(', ');
-					const schemaPrefix = state.schemaName ? `"${state.schemaName}".` : '';
-					const sql = `INSERT INTO ${schemaPrefix}"${tableName}" (${quotedCols}) VALUES ${valueRows.join(', ')}`;
-
-					const result = await state.dbConnection.executeRaw(sql, params);
-					if (result.error) {
-						return {
-							output: `❌ Insert failed at row ${totalInserted + 1}: ${result.error}`,
-							success: false,
-							error: result.error,
-						};
-					}
-					totalInserted += batch.length;
-				}
-
-				const formatInfo = `separator: '${csvData.format.separator === '\t' ? '\\t' : csvData.format.separator}', header: ${csvData.format.hasHeader ? 'yes' : 'no'}`;
-				return {
-					output: `✅ Loaded ${totalInserted} rows into ${tableName} (${formatInfo})`,
-					success: true,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					output: `❌ Load failed: ${message}`,
-					success: false,
-					error: message,
-				};
-			}
-		}
-
-		case '.dump': {
-			const dumpParts = arg.split(/\s+/);
-			const dumpTableName = dumpParts[0];
-			const dumpFilePath = dumpParts.slice(1).join(' ');
-
-			if (!dumpTableName || !dumpFilePath) {
-				return { output: '❌ Usage: .dump <table> <file.csv>' };
-			}
-
-			if (!state.dbConnection) {
-				return { output: '❌ .dump requires database connection (--db)' };
-			}
-
-			// [SEC-S2] Validate table identifier before any SQL interpolation
-			try {
-				validateIdentifier(dumpTableName, 'table');
-			} catch (err) {
-				const reason =
-					err instanceof InvalidIdentifierError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-
-			// Verify table exists in schema
-			const dumpTable = schema.model.tables.get(dumpTableName);
-			if (!dumpTable) {
-				return { output: `❌ Table not found: ${dumpTableName}` };
-			}
-
-			// [SEC-M2] Path containment for output file
-			let resolvedDumpPath: string;
-			try {
-				resolvedDumpPath = validatePathInCwd(dumpFilePath);
-			} catch (err) {
-				const reason =
-					err instanceof PathEscapeError ? err.message : String(err);
-				return { output: `❌ ${reason}` };
-			}
-
-			try {
-				const schemaPrefix = state.schemaName ? `"${state.schemaName}".` : '';
-				const result = await state.dbConnection.executeRaw(
-					`SELECT * FROM ${schemaPrefix}"${dumpTableName}"`,
-				);
-
-				if (result.error) {
-					return {
-						output: `❌ Query failed: ${result.error}`,
-						success: false,
-						error: result.error,
-					};
-				}
-
-				const columns =
-					result.columns.length > 0
-						? result.columns
-						: dumpTable.columns.map((c) => c.name);
-
-				const csv = formatCsv(result.rows, columns);
-				writeFileSync(resolvedDumpPath, `${csv}\n`, 'utf-8');
-
-				return {
-					output: `✅ Dumped ${result.rows.length} rows from ${dumpTableName} to ${dumpFilePath}`,
-					success: true,
-				};
-			} catch (err) {
-				const message = err instanceof Error ? err.message : String(err);
-				return {
-					output: `❌ Dump failed: ${message}`,
-					success: false,
-					error: message,
-				};
-			}
-		}
-
-		case '.exit':
-		case '.quit':
-			return { output: 'Exiting...' };
-
-		default:
-			return { output: `❌ Unknown command: ${command}` };
+function handleSchema(arg: string, schema: LoadedSchema): DotCommandResult {
+	if (!arg) {
+		const tableCount = schema.tableNames.length;
+		const relationCount = schema.model.relations.size;
+		return {
+			output: `Schema Summary:\n  - Tables: ${tableCount}\n  - Relations: ${relationCount}\n  Use .schema <table> for details`,
+		};
 	}
+	return { output: formatTableSchema(schema, arg) };
+}
+
+function handleRelations(arg: string, schema: LoadedSchema): DotCommandResult {
+	return { output: formatRelations(schema, arg || undefined) };
+}
+
+function handleUse(arg: string): DotCommandResult {
+	if (!arg) {
+		return {
+			output: 'Cleared schema scope. Queries now use default schema.',
+			stateChange: { schemaName: undefined },
+		};
+	}
+	// [SEC-S1] Validate schema name at set-time to prevent injection
+	// via SET search_path TO "${schemaName}" in .import
+	try {
+		validateIdentifier(arg, 'schema');
+	} catch (err) {
+		const reason =
+			err instanceof InvalidIdentifierError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+	return {
+		output: `Using schema: ${arg}`,
+		stateChange: { schemaName: arg },
+	};
+}
+
+function handleExec(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
+	return handleBooleanToggle(arg, 'execEnabled', 'Execution mode', state);
+}
+
+function handleNatural(): DotCommandResult {
+	return {
+		output: 'Switched to natural query mode',
+		stateChange: { mode: 'natural' },
+	};
+}
+
+function handleSql(): DotCommandResult {
+	return {
+		output: 'Switched to SQL mode',
+		stateChange: { mode: 'sql' },
+	};
+}
+
+function handleExplain(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
+	return handleBooleanToggle(arg, 'explainMode', 'EXPLAIN mode', state);
+}
+
+function handleParse(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
+	return handleBooleanToggle(arg, 'parseMode', 'Parse mode', state);
+}
+
+function handleOutput(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): DotCommandResult {
+	const validModes = ['json', 'table', 'csv'] as const;
+	type OutputMode = (typeof validModes)[number];
+
+	if (!arg) {
+		return {
+			output: `Current output mode: ${state.outputMode}`,
+		};
+	}
+
+	const requestedMode = arg.toLowerCase();
+	if (!validModes.includes(requestedMode as OutputMode)) {
+		return {
+			output: `❌ Invalid output mode: ${arg}. Use: json, table, csv`,
+		};
+	}
+
+	return {
+		output: `✓ Output mode: ${requestedMode}`,
+		stateChange: { outputMode: requestedMode as OutputMode },
+	};
+}
+
+const handleBegin: DotCommandHandler = (_arg, _schema, state) =>
+	runTransactionAction(state, 'begin');
+
+const handleCommit: DotCommandHandler = (_arg, _schema, state) =>
+	runTransactionAction(state, 'commit');
+
+const handleRollback: DotCommandHandler = (_arg, _schema, state) =>
+	runTransactionAction(state, 'rollback');
+
+async function handleImport(
+	arg: string,
+	_schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
+	if (!arg) {
+		return { output: '❌ Usage: .import <file.sql>' };
+	}
+
+	if (!state.dbConnection) {
+		return { output: '❌ .import requires database connection (--db)' };
+	}
+
+	// [SEC-M2] Path containment — rejects ../ escapes; NUL already stripped
+	let resolvedPath: string;
+	try {
+		resolvedPath = validatePathInCwd(arg);
+	} catch (err) {
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+
+	if (!existsSync(resolvedPath)) {
+		return { output: `❌ File not found: ${arg}` };
+	}
+
+	try {
+		let sqlContent = readFileSync(resolvedPath, 'utf-8');
+
+		// [SEC-S1] schemaName is already validated at .use time —
+		// safe to interpolate here (double-quoted, no injection path)
+		if (state.schemaName) {
+			sqlContent = `SET search_path TO "${state.schemaName}", public;\n${sqlContent}`;
+		}
+
+		const result = await state.dbConnection.executeRaw(sqlContent, []);
+
+		if (result.error) {
+			return {
+				output: `❌ Import failed: ${result.error}`,
+				success: false,
+				error: result.error,
+			};
+		}
+
+		const rowInfo =
+			result.rowCount !== undefined
+				? ` (${result.rowCount} rows affected)`
+				: '';
+		const schemaInfo = state.schemaName ? ` (schema: ${state.schemaName})` : '';
+		return {
+			output: `✅ Imported: ${arg}${rowInfo}${schemaInfo}`,
+			success: true,
+		};
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			output: `❌ Import failed: ${message}`,
+			success: false,
+			error: message,
+		};
+	}
+}
+
+async function handleLoad(
+	arg: string,
+	schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
+	const loadParts = arg.split(/\s+/);
+	const tableName = loadParts[0];
+	const filePath = loadParts.slice(1).join(' ');
+
+	if (!tableName || !filePath) {
+		return { output: '❌ Usage: .load <table> <file.csv>' };
+	}
+
+	if (!state.dbConnection) {
+		return { output: '❌ .load requires database connection (--db)' };
+	}
+
+	// [SEC-S2] Validate table identifier before any SQL interpolation
+	try {
+		validateIdentifier(tableName, 'table');
+	} catch (err) {
+		const reason =
+			err instanceof InvalidIdentifierError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+
+	// Check schema for column hints (optional — table may exist only in DB)
+	const loadTable = schema.model.tables.get(tableName);
+	const schemaColumns = loadTable
+		? loadTable.columns.map((c) => c.name)
+		: undefined;
+
+	// [SEC-M2] Path containment for file argument
+	let loadFilePath: string;
+	try {
+		loadFilePath = validatePathInCwd(filePath);
+	} catch (err) {
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+
+	if (!existsSync(loadFilePath)) {
+		return { output: `❌ File not found: ${filePath}` };
+	}
+
+	try {
+		const csvData = await parseCsvFile(loadFilePath, schemaColumns);
+
+		if (csvData.rows.length === 0) {
+			return { output: '⚠️ CSV file is empty — no rows to import' };
+		}
+
+		// Use CSV columns, optionally filtered to schema columns
+		const csvColumns = [...csvData.format.columns];
+
+		// [SEC-S2] Validate every CSV column name before SQL interpolation
+		for (const col of csvColumns) {
+			try {
+				validateIdentifier(col, 'column');
+			} catch (err) {
+				const reason =
+					err instanceof InvalidIdentifierError ? err.message : String(err);
+				return {
+					output: `❌ CSV header contains invalid column: ${reason}`,
+				};
+			}
+		}
+
+		const validColumns = schemaColumns
+			? csvColumns.filter((c) => schemaColumns.includes(c))
+			: csvColumns;
+		if (validColumns.length === 0) {
+			return {
+				output: `❌ No matching columns found in CSV: ${csvColumns.join(', ')}`,
+			};
+		}
+
+		// Batch insert (100 rows per batch to avoid parameter limit)
+		const BATCH_SIZE = 100;
+		let totalInserted = 0;
+
+		for (let i = 0; i < csvData.rows.length; i += BATCH_SIZE) {
+			const batch = csvData.rows.slice(i, i + BATCH_SIZE);
+			const params: unknown[] = [];
+			const valueRows: string[] = [];
+
+			for (const row of batch) {
+				const placeholders: string[] = [];
+				for (const col of validColumns) {
+					params.push(row[col] ?? null);
+					placeholders.push(`$${params.length}`);
+				}
+				valueRows.push(`(${placeholders.join(', ')})`);
+			}
+
+			const quotedCols = validColumns.map((c) => `"${c}"`).join(', ');
+			const schemaPrefix = state.schemaName ? `"${state.schemaName}".` : '';
+			const sql = `INSERT INTO ${schemaPrefix}"${tableName}" (${quotedCols}) VALUES ${valueRows.join(', ')}`;
+
+			const result = await state.dbConnection.executeRaw(sql, params);
+			if (result.error) {
+				return {
+					output: `❌ Insert failed at row ${totalInserted + 1}: ${result.error}`,
+					success: false,
+					error: result.error,
+				};
+			}
+			totalInserted += batch.length;
+		}
+
+		const formatInfo = `separator: '${csvData.format.separator === '\t' ? '\\t' : csvData.format.separator}', header: ${csvData.format.hasHeader ? 'yes' : 'no'}`;
+		return {
+			output: `✅ Loaded ${totalInserted} rows into ${tableName} (${formatInfo})`,
+			success: true,
+		};
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			output: `❌ Load failed: ${message}`,
+			success: false,
+			error: message,
+		};
+	}
+}
+
+async function handleDump(
+	arg: string,
+	schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
+	const dumpParts = arg.split(/\s+/);
+	const dumpTableName = dumpParts[0];
+	const dumpFilePath = dumpParts.slice(1).join(' ');
+
+	if (!dumpTableName || !dumpFilePath) {
+		return { output: '❌ Usage: .dump <table> <file.csv>' };
+	}
+
+	if (!state.dbConnection) {
+		return { output: '❌ .dump requires database connection (--db)' };
+	}
+
+	// [SEC-S2] Validate table identifier before any SQL interpolation
+	try {
+		validateIdentifier(dumpTableName, 'table');
+	} catch (err) {
+		const reason =
+			err instanceof InvalidIdentifierError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+
+	// Verify table exists in schema
+	const dumpTable = schema.model.tables.get(dumpTableName);
+	if (!dumpTable) {
+		return { output: `❌ Table not found: ${dumpTableName}` };
+	}
+
+	// [SEC-M2] Path containment for output file
+	let resolvedDumpPath: string;
+	try {
+		resolvedDumpPath = validatePathInCwd(dumpFilePath);
+	} catch (err) {
+		const reason = err instanceof PathEscapeError ? err.message : String(err);
+		return { output: `❌ ${reason}` };
+	}
+
+	try {
+		const schemaPrefix = state.schemaName ? `"${state.schemaName}".` : '';
+		const result = await state.dbConnection.executeRaw(
+			`SELECT * FROM ${schemaPrefix}"${dumpTableName}"`,
+		);
+
+		if (result.error) {
+			return {
+				output: `❌ Query failed: ${result.error}`,
+				success: false,
+				error: result.error,
+			};
+		}
+
+		const columns =
+			result.columns.length > 0
+				? result.columns
+				: dumpTable.columns.map((c) => c.name);
+
+		const csv = formatCsv(result.rows, columns);
+		writeFileSync(resolvedDumpPath, `${csv}\n`, 'utf-8');
+
+		return {
+			output: `✅ Dumped ${result.rows.length} rows from ${dumpTableName} to ${dumpFilePath}`,
+			success: true,
+		};
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
+		return {
+			output: `❌ Dump failed: ${message}`,
+			success: false,
+			error: message,
+		};
+	}
+}
+
+function handleExit(): DotCommandResult {
+	return { output: 'Exiting...' };
+}
+
+// ============================================================================
+// Dispatch Table
+// ============================================================================
+
+const DOT_COMMAND_HANDLERS: Map<string, DotCommandHandler> = new Map([
+	['.help', handleHelp],
+	['.tables', handleTables],
+	['.schema', handleSchema],
+	['.relations', handleRelations],
+	['.use', handleUse],
+	['.exec', handleExec],
+	['.natural', handleNatural],
+	['.sql', handleSql],
+	['.explain', handleExplain],
+	['.parse', handleParse],
+	['.output', handleOutput],
+	['.begin', handleBegin],
+	['.commit', handleCommit],
+	['.rollback', handleRollback],
+	['.import', handleImport],
+	['.load', handleLoad],
+	['.dump', handleDump],
+	['.exit', handleExit],
+	['.quit', handleExit], // alias — same handler instance
+]);
+
+// ============================================================================
+// Dot Command Processor
+// ============================================================================
+
+/**
+ * Process a dot command (async to support .import)
+ * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
+ * @internal - Exported for testing
+ */
+export async function processDotCommand(
+	input: string,
+	schema: LoadedSchema,
+	state: BatchState,
+): Promise<DotCommandResult> {
+	const parts = input.split(/\s+/);
+	const command = (parts[0] ?? '').toLowerCase();
+	// [SEC-M2] Strip NUL bytes from arg before any use
+	const arg = parts.slice(1).join(' ').trim().replace(/\0/g, '');
+
+	const handler = DOT_COMMAND_HANDLERS.get(command);
+	if (!handler) {
+		return { output: `❌ Unknown command: ${command}` };
+	}
+	return handler(arg, schema, state);
 }
