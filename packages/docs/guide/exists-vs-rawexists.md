@@ -11,8 +11,9 @@ differ fundamentally in *where the schema knowledge comes from*.
   auto-emits the join predicate, and weaves in your extra `where` conditions. This is
   the safe, type-guided path when the FK is declared in the schema.
 
-- **`rawExists(subquery(...))`** — you build the subquery explicitly, with full control
-  over the `SELECT` list, `WHERE`, table alias, and join column. No FK lookup, no
+- **`rawExists(subquery(...))`** — you build the subquery explicitly, with control
+  over the `SELECT` list, `WHERE` clause, and any inner aggregation. The inner table
+  alias is currently fixed (the compiler emits `${table}_sq`). No FK lookup, no
   planner help. This is the escape hatch for polymorphic tables, ad-hoc cross-schema
   references, and any target table that has no `ref()` declared toward the source.
 
@@ -34,9 +35,9 @@ Use this table to decide which API to reach for:
 |----------|-----|--------|
 | FK-declared relation, simple existence check | `exists('files')` | Works |
 | FK-declared relation + cross-column `where` | `exists('files', { where: gt('lastParsed', outerRef('createdAt')) })` | Works |
-| FK-declared relation + `rawExists` + `outerRef` | `rawExists(subquery('files').where(gt(..., outerRef(...))))` | Throws today |
-| No FK (polymorphic), plain filter | `rawExists(subquery('auditLog').where(eq('entityType', 'login')))` | Works |
-| No FK + `outerRef` correlation inside `rawExists` | `rawExists(subquery(...).where(eq('col', outerRef(...))))` | Throws today |
+| FK-declared relation + `rawExists` + `outerRef` | `rawExists(subquery('files').select('id').where(gt(..., outerRef(...))))` | Throws today |
+| No FK (polymorphic), plain filter | `rawExists(subquery('auditLog').select('id').where(eq('entityType', 'login')))` | Works |
+| No FK + `outerRef` correlation inside `rawExists` | `rawExists(subquery('t').select('id').where(eq('col', outerRef(...))))` | Throws today |
 | No FK + `exists('table', { where })` | `exists('auditLog', { where: ... })` from unrelated table | Silently drops WHERE today |
 
 ---

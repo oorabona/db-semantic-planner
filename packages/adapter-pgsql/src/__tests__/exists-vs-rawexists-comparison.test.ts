@@ -28,7 +28,17 @@
  * and the companion guide (docs/guide/exists-vs-rawexists.md).
  */
 
-import { createOrm, eq, exists, gt, outerRef, rawExists, ref, schema, subquery } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	exists,
+	gt,
+	outerRef,
+	rawExists,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -98,7 +108,9 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 			const orm = buildOrm();
 			const dump = (orm as any)
 				.select('communities')
-				.where(exists('files', { where: gt('lastParsed', outerRef('createdAt')) }))
+				.where(
+					exists('files', { where: gt('lastParsed', outerRef('createdAt')) }),
+				)
 				.dump();
 
 			const sql = ws(dump.sql);
@@ -110,7 +122,9 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 			expect(sql).toMatch(/WHERE EXISTS\s*\(/i);
 
 			// FK auto-emitted: outer.id = inner.communityId
-			expect(sql).toMatch(/communities\.id\s*=\s*files_exists_0\."communityId"/i);
+			expect(sql).toMatch(
+				/communities\.id\s*=\s*files_exists_0\."communityId"/i,
+			);
 
 			// Cross-column: inner.lastParsed > outer.createdAt
 			expect(sql).toMatch(
