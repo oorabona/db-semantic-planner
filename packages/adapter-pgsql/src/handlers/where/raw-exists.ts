@@ -72,8 +72,6 @@ export const rawExistsHandler: WhereHandler = {
 			SubLink: { subLinkType: 'EXISTS_SUBLINK', subselect: subNode },
 		} as unknown as Node;
 
-		return decision.operator === 'rawNotExists'
-			? notExpr(subLink)
-			: subLink;
+		return decision.operator === 'rawNotExists' ? notExpr(subLink) : subLink;
 	},
 };
