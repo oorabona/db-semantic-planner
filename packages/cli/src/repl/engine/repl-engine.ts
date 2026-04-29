@@ -121,6 +121,7 @@ export class ReplEngine {
 	private completionProvider: CompletionProvider;
 	private databaseUrl: string | undefined;
 	private continuationBuffer = '';
+	private readonly engineDotHandlers: Map<string, (arg: string) => void>;
 
 	constructor(config: EngineConfig) {
 		this.schema = config.schema;
@@ -147,6 +148,22 @@ export class ReplEngine {
 			planVerbosity: 'normal',
 			inTransaction: false,
 		};
+
+		this.engineDotHandlers = new Map<string, (arg: string) => void>([
+			['.exit', this.handleExitCommand.bind(this)],
+			['.quit', this.handleExitCommand.bind(this)],
+			['.clear', this.handleClearCommand.bind(this)],
+			['.help', this.handleHelpCommand.bind(this)],
+			['.history', this.handleHistoryCommand.bind(this)],
+			['.aliasing', this.handleAliasingCommand.bind(this)],
+			['.strategy', this.handleStrategyCommand.bind(this)],
+			['.dialect', this.handleDialectCommand.bind(this)],
+			['.table', this.handleTableCommand.bind(this)],
+			['.show', this.handleShowCommand.bind(this)],
+			['.close', this.handleCloseCommand.bind(this)],
+			['.layout', this.handleLayoutCommand.bind(this)],
+			['.plan', this.handlePlanCommand.bind(this)],
+		]);
 	}
 
 	/**
@@ -294,212 +311,17 @@ export class ReplEngine {
 	// ========================================================================
 
 	private async processDotCommand(input: string): Promise<void> {
-		const [cmd, ...args] = input.split(' ');
+		const [cmd = '', ...args] = input.split(' ');
 		const arg = args.join(' ').trim();
 
-		// Commands handled by the engine (not delegated to dot-commands.ts)
-		switch (cmd) {
-			case '.exit':
-			case '.quit':
-				this.emit({ type: 'exit' });
-				return;
-
-			case '.clear':
-				this.emit({ type: 'clear' });
-				return;
-
-			case '.help':
-				this.emit({ type: 'info', message: 'SHOW_HELP' });
-				return;
-
-			case '.history':
-				this.emit({ type: 'show-history' });
-				return;
-
-			case '.aliasing': {
-				const newMode =
-					this.state.aliasingMode === 'always' ? 'onCollision' : 'always';
-				this.state.aliasingMode = newMode;
-				this.emitStateChange();
-				this.emit({
-					type: 'info',
-					message: `🏷️ Column aliasing mode: ${newMode}${newMode === 'always' ? ' (all included columns prefixed)' : ' (only colliding columns prefixed)'}`,
-				});
-				return;
-			}
-
-			case '.strategy': {
-				const strategyArg = arg?.toLowerCase();
-				const validStrategies = DIALECT_STRATEGIES[this.state.dialect] ?? [];
-
-				if (!strategyArg) {
-					const lines = [
-						`🔗 Include Strategy: ${this.state.includeStrategy.toUpperCase()}`,
-						`Dialect: ${this.state.dialect}`,
-						`Available: ${validStrategies.join(', ')}`,
-						`Usage: .strategy ${validStrategies.join(' | ')}`,
-					];
-					this.emit({ type: 'info', message: lines.join('\n') });
-				} else if (
-					validStrategies.includes(
-						strategyArg as (typeof validStrategies)[number],
-					)
-				) {
-					this.state.includeStrategy =
-						strategyArg as typeof this.state.includeStrategy;
-					this.emitStateChange();
-					this.emit({
-						type: 'info',
-						message: `✓ Include strategy: ${strategyArg.toUpperCase()}`,
-					});
-				} else {
-					this.emit({
-						type: 'error',
-						message: `❌ Unknown or unavailable strategy: ${strategyArg}. Available: ${validStrategies.join(', ')}`,
-					});
-				}
-				return;
-			}
-
-			case '.dialect': {
-				const dialectArg = arg?.toLowerCase();
-				const validDialects = Object.keys(DIALECT_STRATEGIES);
-
-				if (!dialectArg) {
-					const lines = [
-						`🗄️ SQL Dialect: ${this.state.dialect}`,
-						`Available: ${validDialects.join(', ')}`,
-						`Usage: .dialect ${validDialects.join(' | ')}`,
-					];
-					this.emit({ type: 'info', message: lines.join('\n') });
-				} else if (validDialects.includes(dialectArg)) {
-					const strategies =
-						DIALECT_STRATEGIES[dialectArg as keyof typeof DIALECT_STRATEGIES];
-					this.state.dialect = dialectArg as typeof this.state.dialect;
-					// Reset strategy if incompatible with new dialect
-					if (
-						strategies &&
-						!strategies.includes(this.state.includeStrategy as never)
-					) {
-						this.state.includeStrategy = 'join';
-						this.emitStateChange();
-						this.emit({
-							type: 'info',
-							message: `✓ Dialect: ${dialectArg}\n⚠ Strategy reset to 'join' (previous not available for ${dialectArg})`,
-						});
-					} else {
-						this.emitStateChange();
-						this.emit({ type: 'info', message: `✓ Dialect: ${dialectArg}` });
-					}
-				} else {
-					this.emit({
-						type: 'error',
-						message: `❌ Unknown dialect: ${dialectArg}. Available: ${validDialects.join(', ')}`,
-					});
-				}
-				return;
-			}
-
-			case '.table': {
-				this.handleTableConfig(arg);
-				return;
-			}
-
-			// Panel inspection commands — open anchored panel below input
-			// Usage: .show sql | plan | results | params | dump
-			case '.show': {
-				const validViews: PanelView[] = [
-					'sql',
-					'plan',
-					'results',
-					'params',
-					'dump',
-				];
-				const viewArg = arg?.toLowerCase();
-
-				if (!viewArg) {
-					this.emit({
-						type: 'info',
-						message: `📋 Inspection panel views: ${validViews.join(', ')}\nUsage: .show ${validViews.join(' | ')}`,
-					});
-				} else if (validViews.includes(viewArg as PanelView)) {
-					this.emit({ type: 'show-panel', view: viewArg as PanelView });
-				} else {
-					this.emit({
-						type: 'error',
-						message: `❌ Unknown panel view: ${viewArg}. Available: ${validViews.join(', ')}`,
-					});
-				}
-				return;
-			}
-
-			case '.close': {
-				this.emit({ type: 'close-panel' });
-				return;
-			}
-
-			case '.layout': {
-				const validLayouts: OutputLayout[] = [
-					'compact',
-					'results',
-					'sql',
-					'full',
-				];
-				const layoutArg = arg?.toLowerCase();
-
-				if (!layoutArg) {
-					this.emit({
-						type: 'info',
-						message: `📐 Output layout: ${this.state.outputLayout}\nAvailable: ${validLayouts.join(', ')}\nUsage: .layout ${validLayouts.join(' | ')}`,
-					});
-				} else if (validLayouts.includes(layoutArg as OutputLayout)) {
-					this.state.outputLayout = layoutArg as OutputLayout;
-					this.emitStateChange();
-					this.emit({
-						type: 'layout-change',
-						layout: this.state.outputLayout,
-					});
-					this.emit({
-						type: 'info',
-						message: `✓ Output layout: ${layoutArg}`,
-					});
-				} else {
-					this.emit({
-						type: 'error',
-						message: `❌ Unknown layout: ${layoutArg}. Available: ${validLayouts.join(', ')}`,
-					});
-				}
-				return;
-			}
-
-			case '.plan': {
-				const validLevels: PlanVerbosity[] = ['compact', 'normal', 'verbose'];
-				const level = arg?.toLowerCase();
-
-				if (!level) {
-					this.emit({
-						type: 'info',
-						message: `📋 Plan verbosity: ${this.state.planVerbosity}\nAvailable: ${validLevels.join(', ')}\nUsage: .plan ${validLevels.join(' | ')}`,
-					});
-				} else if (validLevels.includes(level as PlanVerbosity)) {
-					this.state.planVerbosity = level as PlanVerbosity;
-					this.emitStateChange();
-					this.emit({
-						type: 'info',
-						message: `✓ Plan verbosity: ${level}`,
-					});
-				} else {
-					this.emit({
-						type: 'error',
-						message: `❌ Invalid plan verbosity: ${level}. Use: ${validLevels.join(', ')}`,
-					});
-				}
-				return;
-			}
+		// Engine-level commands first
+		const engineHandler = this.engineDotHandlers.get(cmd);
+		if (engineHandler) {
+			engineHandler(arg);
+			return;
 		}
 
 		// Delegate to shared dot-command processor (used by batch mode too)
-		// Build a BatchState-compatible object for the processor
 		const batchState: BatchState = {
 			mode: this.state.mode,
 			execEnabled: this.state.execMode,
@@ -516,44 +338,220 @@ export class ReplEngine {
 		};
 
 		const result = await processDotCommand(input, this.schema, batchState);
+		this.applyDotCommandStateChange(result.stateChange);
 
-		// Apply state changes from dot command
-		if (result.stateChange) {
-			if (result.stateChange.mode !== undefined) {
-				this.state.mode = result.stateChange.mode;
-			}
-			if (result.stateChange.execEnabled !== undefined) {
-				this.state.execMode = result.stateChange.execEnabled;
-			}
-			if ('schemaName' in result.stateChange) {
-				if (result.stateChange.schemaName !== undefined) {
-					this.state.schemaName = result.stateChange.schemaName;
-				} else {
-					delete this.state.schemaName;
-				}
-			}
-			if (result.stateChange.explainMode !== undefined) {
-				this.state.explainMode = result.stateChange.explainMode;
-			}
-			if (result.stateChange.parseMode !== undefined) {
-				this.state.parseMode = result.stateChange.parseMode;
-			}
-			if (result.stateChange.outputMode !== undefined) {
-				this.state.outputMode = result.stateChange.outputMode;
-			}
-			if (result.stateChange.inTransaction !== undefined) {
-				this.state.inTransaction = result.stateChange.inTransaction;
-			}
-			this.emitStateChange();
-		}
-
-		// Emit the output
 		if (result.error) {
 			this.emit({ type: 'error', message: result.output });
 		} else {
 			this.emit({ type: 'info', message: result.output });
 		}
 	}
+
+
+	// ========================================================================
+	// Private: engine-level dot-command handlers
+	// ========================================================================
+
+	private handleExitCommand(_arg: string): void {
+		this.emit({ type: 'exit' });
+	}
+
+	private handleClearCommand(_arg: string): void {
+		this.emit({ type: 'clear' });
+	}
+
+	private handleHelpCommand(_arg: string): void {
+		this.emit({ type: 'info', message: 'SHOW_HELP' });
+	}
+
+	private handleHistoryCommand(_arg: string): void {
+		this.emit({ type: 'show-history' });
+	}
+
+	private handleAliasingCommand(_arg: string): void {
+		const newMode =
+			this.state.aliasingMode === 'always' ? 'onCollision' : 'always';
+		this.state.aliasingMode = newMode;
+		this.emitStateChange();
+		this.emit({
+			type: 'info',
+			message: `🏷️ Column aliasing mode: ${newMode}${
+				newMode === 'always'
+					? ' (all included columns prefixed)'
+					: ' (only colliding columns prefixed)'
+			}`,
+		});
+	}
+
+	private handleStrategyCommand(arg: string): void {
+		const strategyArg = arg?.toLowerCase();
+		const validStrategies = DIALECT_STRATEGIES[this.state.dialect] ?? [];
+
+		if (!strategyArg) {
+			const lines = [
+				`🔗 Include Strategy: ${this.state.includeStrategy.toUpperCase()}`,
+				`Dialect: ${this.state.dialect}`,
+				`Available: ${validStrategies.join(', ')}`,
+				`Usage: .strategy ${validStrategies.join(' | ')}`,
+			];
+			this.emit({ type: 'info', message: lines.join('\n') });
+		} else if (
+			validStrategies.includes(strategyArg as (typeof validStrategies)[number])
+		) {
+			this.state.includeStrategy =
+				strategyArg as typeof this.state.includeStrategy;
+			this.emitStateChange();
+			this.emit({
+				type: 'info',
+				message: `✓ Include strategy: ${strategyArg.toUpperCase()}`,
+			});
+		} else {
+			this.emit({
+				type: 'error',
+				message: `❌ Unknown or unavailable strategy: ${strategyArg}. Available: ${validStrategies.join(', ')}`,
+			});
+		}
+	}
+
+	private handleDialectCommand(arg: string): void {
+		const dialectArg = arg?.toLowerCase();
+		const validDialects = Object.keys(DIALECT_STRATEGIES);
+
+		if (!dialectArg) {
+			const lines = [
+				`🗄️ SQL Dialect: ${this.state.dialect}`,
+				`Available: ${validDialects.join(', ')}`,
+				`Usage: .dialect ${validDialects.join(' | ')}`,
+			];
+			this.emit({ type: 'info', message: lines.join('\n') });
+		} else if (validDialects.includes(dialectArg)) {
+			const strategies =
+				DIALECT_STRATEGIES[dialectArg as keyof typeof DIALECT_STRATEGIES];
+			this.state.dialect = dialectArg as typeof this.state.dialect;
+			// Reset strategy if incompatible with new dialect
+			if (strategies && !strategies.includes(this.state.includeStrategy as never)) {
+				this.state.includeStrategy = 'join';
+				this.emitStateChange();
+				this.emit({
+					type: 'info',
+					message: `✓ Dialect: ${dialectArg}\n⚠ Strategy reset to 'join' (previous not available for ${dialectArg})`,
+				});
+			} else {
+				this.emitStateChange();
+				this.emit({ type: 'info', message: `✓ Dialect: ${dialectArg}` });
+			}
+		} else {
+			this.emit({
+				type: 'error',
+				message: `❌ Unknown dialect: ${dialectArg}. Available: ${validDialects.join(', ')}`,
+			});
+		}
+	}
+
+	private handleTableCommand(arg: string): void {
+		this.handleTableConfig(arg);
+	}
+
+	private handleShowCommand(arg: string): void {
+		// Panel inspection commands — open anchored panel below input
+		// Usage: .show sql | plan | results | params | dump
+		const validViews: PanelView[] = ['sql', 'plan', 'results', 'params', 'dump'];
+		const viewArg = arg?.toLowerCase();
+
+		if (!viewArg) {
+			this.emit({
+				type: 'info',
+				message: `📋 Inspection panel views: ${validViews.join(', ')}\nUsage: .show ${validViews.join(' | ')}`,
+			});
+		} else if (validViews.includes(viewArg as PanelView)) {
+			this.emit({ type: 'show-panel', view: viewArg as PanelView });
+		} else {
+			this.emit({
+				type: 'error',
+				message: `❌ Unknown panel view: ${viewArg}. Available: ${validViews.join(', ')}`,
+			});
+		}
+	}
+
+	private handleCloseCommand(_arg: string): void {
+		this.emit({ type: 'close-panel' });
+	}
+
+	private handleLayoutCommand(arg: string): void {
+		const validLayouts: OutputLayout[] = ['compact', 'results', 'sql', 'full'];
+		const layoutArg = arg?.toLowerCase();
+
+		if (!layoutArg) {
+			this.emit({
+				type: 'info',
+				message: `📐 Output layout: ${this.state.outputLayout}\nAvailable: ${validLayouts.join(', ')}\nUsage: .layout ${validLayouts.join(' | ')}`,
+			});
+		} else if (validLayouts.includes(layoutArg as OutputLayout)) {
+			this.state.outputLayout = layoutArg as OutputLayout;
+			this.emitStateChange();
+			this.emit({ type: 'layout-change', layout: this.state.outputLayout });
+			this.emit({ type: 'info', message: `✓ Output layout: ${layoutArg}` });
+		} else {
+			this.emit({
+				type: 'error',
+				message: `❌ Unknown layout: ${layoutArg}. Available: ${validLayouts.join(', ')}`,
+			});
+		}
+	}
+
+	private handlePlanCommand(arg: string): void {
+		const validLevels: PlanVerbosity[] = ['compact', 'normal', 'verbose'];
+		const level = arg?.toLowerCase();
+
+		if (!level) {
+			this.emit({
+				type: 'info',
+				message: `📋 Plan verbosity: ${this.state.planVerbosity}\nAvailable: ${validLevels.join(', ')}\nUsage: .plan ${validLevels.join(' | ')}`,
+			});
+		} else if (validLevels.includes(level as PlanVerbosity)) {
+			this.state.planVerbosity = level as PlanVerbosity;
+			this.emitStateChange();
+			this.emit({ type: 'info', message: `✓ Plan verbosity: ${level}` });
+		} else {
+			this.emit({
+				type: 'error',
+				message: `❌ Invalid plan verbosity: ${level}. Use: ${validLevels.join(', ')}`,
+			});
+		}
+	}
+
+	private applyDotCommandStateChange(
+		stateChange: Partial<BatchState> | undefined,
+	): void {
+		if (!stateChange) return;
+
+		if (stateChange.mode !== undefined) this.state.mode = stateChange.mode;
+		if (stateChange.execEnabled !== undefined) {
+			this.state.execMode = stateChange.execEnabled;
+		}
+		if ('schemaName' in stateChange) {
+			if (stateChange.schemaName !== undefined) {
+				this.state.schemaName = stateChange.schemaName;
+			} else {
+				delete this.state.schemaName;
+			}
+		}
+		if (stateChange.explainMode !== undefined) {
+			this.state.explainMode = stateChange.explainMode;
+		}
+		if (stateChange.parseMode !== undefined) {
+			this.state.parseMode = stateChange.parseMode;
+		}
+		if (stateChange.outputMode !== undefined) {
+			this.state.outputMode = stateChange.outputMode;
+		}
+		if (stateChange.inTransaction !== undefined) {
+			this.state.inTransaction = stateChange.inTransaction;
+		}
+
+		this.emitStateChange();
+	}
+
 
 	// ========================================================================
 	// Private: .table config
