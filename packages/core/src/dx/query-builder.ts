@@ -634,17 +634,12 @@ export class QueryBuilderImpl<TResult = unknown>
 	}
 
 	withPlanOptions(options: PlanOptions): QueryBuilder<TResult> {
-		// Clone with merged planOptionsOverride baked into ctx (ctx is readonly — cannot mutate in place).
-		const builder = this.clone();
-		// Reconstruct ctx with merged planOptions; spread preserves all other fields.
-		(builder as { ctx: QueryBuilderContext }).ctx = {
-			...builder.ctx,
+		return this.cloneWithCtxOverride({
 			planOptionsOverride: {
-				...builder.ctx.planOptionsOverride,
+				...this.ctx.planOptionsOverride,
 				...options,
 			},
-		};
-		return builder;
+		});
 	}
 
 	/**
@@ -1619,18 +1614,36 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	/**
 	 * Create a shallow clone of this builder.
+	 *
+	 * `cloneWithCtxOverride({})` performs a shallow copy of `planOptionsOverride`
+	 * so per-builder overrides do not leak across clones. All other ctx fields
+	 * are intentionally shared by reference (model / adapter / hookStore are
+	 * process-singletons by design).
+	 *
+	 * @internal — called by pagination-impl and stream-impl
 	 */
-	/** @internal — called by pagination-impl and stream-impl */
 	clone(): QueryBuilderImpl<TResult> {
+		return this.cloneWithCtxOverride({});
+	}
+
+	/** @internal — clones the builder with a partial ctx override applied at construction.
+	 * Avoids readonly-cast at call sites: the merged ctx is baked in before the new instance
+	 * is created, so no post-construction mutation is required. */
+	private cloneWithCtxOverride(
+		ctxOverride: Partial<QueryBuilderContext>,
+	): QueryBuilderImpl<TResult> {
+		// Shallow-clone planOptionsOverride from this.ctx unless the caller is replacing it,
+		// so the new builder owns its own object reference.
+		const mergedCtx: QueryBuilderContext = {
+			...this.ctx,
+			...(ctxOverride.planOptionsOverride === undefined &&
+			this.ctx.planOptionsOverride !== undefined
+				? { planOptionsOverride: { ...this.ctx.planOptionsOverride } }
+				: {}),
+			...ctxOverride,
+		};
 		const builder = new QueryBuilderImpl<TResult>(
-			// Shallow-clone planOptionsOverride so the new builder has its own copy;
-			// ctx itself is spread by reference for all other unchanged fields.
-			{
-				...this.ctx,
-				...(this.ctx.planOptionsOverride !== undefined
-					? { planOptionsOverride: { ...this.ctx.planOptionsOverride } }
-					: {}),
-			},
+			mergedCtx,
 			this.from,
 			{ ...this.relationHints },
 		);
