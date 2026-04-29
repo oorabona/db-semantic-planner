@@ -20,13 +20,30 @@ describe('isOverallSuccess', () => {
 	it('returns false when compile succeeded but DB execution failed', () => {
 		expect(isOverallSuccess({ success: true, dbSuccess: false })).toBe(false);
 	});
-	it('does not throw when fed `null` dbSuccess (contract: producers must omit or use real boolean — null is undefined behavior)', () => {
-		// Hardening guard: the helper must remain safe to call even if a
-		// non-conforming producer passes null. We do NOT lock the truthiness
-		// verdict — a future tightening (e.g. treating null as failure) is
-		// allowed. See JSDoc on isOverallSuccess for the contract.
+	it('does not throw when fed `null` dbSuccess (non-conforming producer)', () => {
 		expect(() =>
-			isOverallSuccess({ success: true, dbSuccess: null as unknown as undefined }),
+			isOverallSuccess({
+				success: true,
+				dbSuccess: null as unknown as undefined,
+			}),
 		).not.toThrow();
+	});
+	// @public defensive contract: malformed inputs return `false` rather
+	// than throwing or returning a non-boolean. See JSDoc on isOverallSuccess.
+	it('returns false (no throw) when fed null', () => {
+		expect(isOverallSuccess(null as unknown as { success: boolean })).toBe(false);
+	});
+	it('returns false (no throw) when fed undefined', () => {
+		expect(
+			isOverallSuccess(undefined as unknown as { success: boolean }),
+		).toBe(false);
+	});
+	it('returns false when `success` is missing', () => {
+		expect(isOverallSuccess({} as { success: boolean })).toBe(false);
+	});
+	it('returns false when `success` is non-boolean (truthy)', () => {
+		expect(
+			isOverallSuccess({ success: 'yes' } as unknown as { success: boolean }),
+		).toBe(false);
 	});
 });

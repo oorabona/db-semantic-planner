@@ -6,8 +6,8 @@
  */
 
 import { readFileSync } from 'node:fs';
-import { isOverallSuccess } from '@dbsp/core';
 import type { IntentSummary } from '@dbsp/core';
+import { isOverallSuccess } from '@dbsp/core';
 import type { LoadedSchema } from '@dbsp/types';
 import {
 	parseAssertionFile,

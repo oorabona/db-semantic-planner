@@ -780,8 +780,16 @@ describe('[C1] isOverallSuccess — semantic equivalence with prior inline predi
 	const cases: { success: boolean; dbSuccess?: boolean; label: string }[] = [
 		{ success: false, label: 'row 1: compile fail, no DB → fail' },
 		{ success: true, label: 'row 2: compile ok, no DB → success' },
-		{ success: true, dbSuccess: true, label: 'row 3: compile ok, DB ok → success' },
-		{ success: true, dbSuccess: false, label: 'row 4: compile ok, DB fail → fail' },
+		{
+			success: true,
+			dbSuccess: true,
+			label: 'row 3: compile ok, DB ok → success',
+		},
+		{
+			success: true,
+			dbSuccess: false,
+			label: 'row 4: compile ok, DB fail → fail',
+		},
 	];
 
 	for (const r of cases) {
