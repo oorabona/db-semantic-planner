@@ -1,0 +1,65 @@
+name: Doctest (real DB)
+
+# Runs the doctest suite against a real PostgreSQL container (the `// doctest:
+# real-db-only` blocks). Triggered on:
+#
+#   - PRs that touch documentation, the doctest framework, or schema-/SQL-
+#     emitting source under packages/core/src and packages/adapter-pgsql/src.
+#     Code-only PRs in unrelated packages (cli, gui, mcp-server) skip this
+#     job to keep CI snappy.
+#   - Pushes to main (always — catches anything that landed without a PR).
+#   - workflow_dispatch (manual full-coverage run).
+#   - Nightly cron (safety net for any path-filter blind spot).
+#
+# Compile-only doctests still run unconditionally as the `Verify documentation
+# examples` step inside the `test` job in ci.yml. This workflow only governs
+# the slower real-DB variant.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - 'packages/docs/**'
+      - 'tests/docs-verification/**'
+      - 'packages/core/src/**'
+      - 'packages/adapter-pgsql/src/**'
+      - 'packages/types/src/**'
+      - 'packages/nql/src/**'
+      - '.github/workflows/doctest-real-db.yml'
+  workflow_dispatch:
+  schedule:
+    # 03:17 UTC every night — slightly off-the-hour to avoid GHA contention.
+    - cron: '17 3 * * *'
+
+jobs:
+  test-docs-real-db:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: ghcr.io/oorabona/postgres:18-alpine-full
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: doctest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm -C packages/types build && pnpm -C packages/nql build && pnpm -C packages/core build && pnpm -C packages/adapter-pgsql build
+      - run: pnpm test:docs
+        env:
+          DBSP_DOCTEST_REAL_DB: '1'
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/doctest
