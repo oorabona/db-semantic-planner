@@ -149,9 +149,10 @@ export class ReplEngine {
 			inTransaction: false,
 		};
 
+		const exitHandler = this.handleExitCommand.bind(this);
 		this.engineDotHandlers = new Map<string, (arg: string) => void>([
-			['.exit', this.handleExitCommand.bind(this)],
-			['.quit', this.handleExitCommand.bind(this)],
+			['.exit', exitHandler],
+			['.quit', exitHandler],
 			['.clear', this.handleClearCommand.bind(this)],
 			['.help', this.handleHelpCommand.bind(this)],
 			['.history', this.handleHistoryCommand.bind(this)],
@@ -311,7 +312,8 @@ export class ReplEngine {
 	// ========================================================================
 
 	private async processDotCommand(input: string): Promise<void> {
-		const [cmd = '', ...args] = input.split(' ');
+		const [rawCmd = '', ...args] = input.trim().split(/\s+/);
+		const cmd = rawCmd.toLowerCase();
 		const arg = args.join(' ').trim();
 
 		// Engine-level commands first
@@ -346,7 +348,6 @@ export class ReplEngine {
 			this.emit({ type: 'info', message: result.output });
 		}
 	}
-
 
 	// ========================================================================
 	// Private: engine-level dot-command handlers
@@ -429,7 +430,10 @@ export class ReplEngine {
 				DIALECT_STRATEGIES[dialectArg as keyof typeof DIALECT_STRATEGIES];
 			this.state.dialect = dialectArg as typeof this.state.dialect;
 			// Reset strategy if incompatible with new dialect
-			if (strategies && !strategies.includes(this.state.includeStrategy as never)) {
+			if (
+				strategies &&
+				!strategies.includes(this.state.includeStrategy as never)
+			) {
 				this.state.includeStrategy = 'join';
 				this.emitStateChange();
 				this.emit({
