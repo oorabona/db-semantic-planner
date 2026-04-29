@@ -183,6 +183,45 @@ export function validatePath(
 }
 
 /**
+ * Load a JS or TS schema module from a file URL.
+ *
+ * For `.ts` files, attempts to use tsx's programmatic API (`tsImport`) so the
+ * user does not need to invoke the MCP CLI through the tsx wrapper. The
+ * `tsImport` call is scoped — it does not register a global ESM hook, so
+ * each load is self-contained.
+ *
+ * If tsx is not installed, falls back to native `import()`. On Node 20+/22
+ * that will fail with `ERR_UNKNOWN_FILE_EXTENSION` (or `Cannot find module`
+ * on older runtimes); the caller's catch block matches both and emits the
+ * actionable "install tsx" message.
+ *
+ * @internal
+ */
+async function loadSchemaModule(
+	fileUrl: string,
+	canonicalPath: string,
+): Promise<Record<string, unknown>> {
+	if (canonicalPath.endsWith('.ts')) {
+		try {
+			const { tsImport } = await import('tsx/esm/api');
+			return (await tsImport(fileUrl, import.meta.url)) as Record<
+				string,
+				unknown
+			>;
+		} catch (tsxErr) {
+			// tsx not installed → fall through to native import which fails with
+			// the existing helpful catch. Other errors (e.g. real .ts compile
+			// errors) re-throw so the caller's catch can sanitize them.
+			const msg = tsxErr instanceof Error ? tsxErr.message : String(tsxErr);
+			if (!/Cannot find (package|module) ['"]tsx/.test(msg)) {
+				throw tsxErr;
+			}
+		}
+	}
+	return (await import(fileUrl)) as Record<string, unknown>;
+}
+
+/**
  * Load a schema from a TypeScript or JavaScript file.
  *
  * Security measures:
@@ -236,7 +275,12 @@ export async function loadSchema(
 
 		// Convert canonical real-path to file URL for dynamic import
 		const fileUrl = pathToFileURL(canonicalPath).href;
-		const module = await import(fileUrl);
+
+		// For .ts files, attempt to use tsx programmatically so users don't need
+		// to wrap the CLI in `tsx node_modules/.bin/dbsp-mcp`. Falls back to native
+		// import() if tsx isn't installed — the catch block below provides a
+		// clear "install tsx" message in that case.
+		const module = await loadSchemaModule(fileUrl, canonicalPath);
 
 		// Look for schema export (named 'schema' or default)
 		const schema = module.schema ?? module.default;
@@ -263,6 +307,14 @@ export async function loadSchema(
 
 		const rawMessage = error instanceof Error ? error.message : String(error);
 
+		// Node attaches diagnostic codes to `error.code`, NOT to `error.message`.
+		// Read the code separately so we can dispatch on it; the message is
+		// retained for sanitization + user-facing display.
+		const errCode =
+			error && typeof error === 'object' && 'code' in error
+				? String((error as { code: unknown }).code)
+				: '';
+
 		// Sanitize the error message via the canonical helper (M-C + Copilot R5 structural).
 		// sanitizeErrorMessage replaces all occurrences of resolved path and parent dir,
 		// then caps the message length to prevent oversized error strings.
@@ -271,16 +323,27 @@ export async function loadSchema(
 			parent: dirname(resolvedPath),
 		});
 
-		// Provide helpful error for TypeScript files
+		// Provide helpful error for TypeScript files. Native import() of .ts
+		// fails with different error shapes depending on Node version and
+		// resolver path:
+		//   - `ERR_UNKNOWN_FILE_EXTENSION` (Node 20+ ESM strict resolve)
+		//   - `ERR_MODULE_NOT_FOUND` (some ESM resolve paths)
+		//   - "Cannot find module ..." message (legacy / CJS overlap)
+		// Codes live on error.code; the legacy form is only present in the
+		// message string. Match both surfaces so the helpful "install tsx"
+		// hint reaches the user regardless of Node version.
 		if (
 			resolvedPath.endsWith('.ts') &&
-			rawMessage.includes('Cannot find module')
+			(errCode === 'ERR_UNKNOWN_FILE_EXTENSION' ||
+				errCode === 'ERR_MODULE_NOT_FOUND' ||
+				rawMessage.includes('Cannot find module'))
 		) {
 			throw new SchemaLoadError(
-				`Failed to load TypeScript schema. Make sure 'tsx' is installed:\n` +
+				`Failed to load TypeScript schema. Install 'tsx' as a peer dependency:\n` +
 					`  pnpm add -D tsx\n\n` +
-					`Then run the MCP server via tsx:\n` +
-					`  pnpm tsx node_modules/.bin/dbsp-mcp --schema ./schema.ts\n\n` +
+					`Then re-run the MCP server with the same arguments — the loader will\n` +
+					`pick up tsx automatically and load .ts schemas directly:\n` +
+					`  dbsp-mcp --schema ./schema.ts\n\n` +
 					`Original error: ${message}`,
 				'LOAD_FAILED',
 			);
