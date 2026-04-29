@@ -31,12 +31,14 @@ describe('isOverallSuccess', () => {
 	// @public defensive contract: malformed inputs return `false` rather
 	// than throwing or returning a non-boolean. See JSDoc on isOverallSuccess.
 	it('returns false (no throw) when fed null', () => {
-		expect(isOverallSuccess(null as unknown as { success: boolean })).toBe(false);
+		expect(isOverallSuccess(null as unknown as { success: boolean })).toBe(
+			false,
+		);
 	});
 	it('returns false (no throw) when fed undefined', () => {
-		expect(
-			isOverallSuccess(undefined as unknown as { success: boolean }),
-		).toBe(false);
+		expect(isOverallSuccess(undefined as unknown as { success: boolean })).toBe(
+			false,
+		);
 	});
 	it('returns false when `success` is missing', () => {
 		expect(isOverallSuccess({} as { success: boolean })).toBe(false);
