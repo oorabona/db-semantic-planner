@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 
 type Step = {
 	prompt: string;
@@ -168,6 +168,26 @@ function isPlanLine(text: string): boolean {
 function isParamLine(text: string): boolean {
 	return text.startsWith('Parameters:');
 }
+
+/**
+ * When a line has output rows, the cursor should follow the last output row,
+ * not stay on the input row. This computed tracks which row the cursor sits on.
+ */
+const cursorLine = computed(() => {
+	if (isIdle.value || lines.value.length === 0) return null;
+	const lastLineIdx = lines.value.length - 1;
+	const lastLine = lines.value[lastLineIdx];
+	if (lastLine.output.length > 0) {
+		// cursor belongs on the last output row of the last line
+		return {
+			kind: 'output' as const,
+			lineIdx: lastLineIdx,
+			outIdx: lastLine.output.length - 1,
+		};
+	}
+	// still typing — cursor on the input row
+	return { kind: 'input' as const, lineIdx: lastLineIdx };
+});
 </script>
 
 <template>
@@ -184,7 +204,7 @@ function isParamLine(text: string): boolean {
           <span :class="['prompt', line.promptClass]">{{ line.prompt }}</span>
           <span class="command-text">{{ line.command }}</span>
           <span
-            v-if="i === lines.length - 1 && !isIdle"
+            v-if="cursorLine?.kind === 'input' && cursorLine.lineIdx === i"
             class="cursor"
           />
         </div>
@@ -197,6 +217,10 @@ function isParamLine(text: string): boolean {
           <span v-else-if="isPlanLine(out)" class="output-highlight">{{ out }}</span>
           <span v-else-if="isParamLine(out)" class="output-text">{{ out }}</span>
           <span v-else class="output-text">{{ out }}</span>
+          <span
+            v-if="cursorLine?.kind === 'output' && cursorLine.lineIdx === i && cursorLine.outIdx === j"
+            class="cursor"
+          />
         </div>
       </div>
       <div v-if="isIdle" class="terminal-row">
@@ -208,16 +232,20 @@ function isParamLine(text: string): boolean {
 </template>
 
 <style scoped>
+/* Terminal stays dark intentionally — macOS terminal aesthetic. Site theme is independent. */
 .terminal {
   background: #0f172a;
-  border-radius: 8px;
+  border-radius: var(--dbsp-radius-md, 8px);
   overflow: hidden;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+  /* Centralise mono font — falls back to JetBrains Mono if VP var not set */
+  font-family: var(--vp-font-family-mono, 'JetBrains Mono', monospace);
   font-size: 0.82rem;
   line-height: 1.65;
   max-width: 720px;
-  margin: 2rem auto;
+  margin: var(--dbsp-space-2xl, 2rem) auto;
+  /* Tell the browser this panel is always dark — dark scrollbars, color-scheme-aware UA styles */
+  color-scheme: dark;
 }
 
 .terminal-header {
@@ -236,9 +264,19 @@ function isParamLine(text: string): boolean {
   flex-shrink: 0;
 }
 
-.dot-red { background: #ef4444; }
-.dot-yellow { background: #eab308; }
-.dot-green { background: #22c55e; }
+/* Terminal is locked dark via color-scheme: dark.
+   Pin status accents to bright values so dots stay punchy
+   regardless of the surrounding site theme. */
+.terminal {
+  --dbsp-c-error: #f87171;
+  --dbsp-c-warning: #fbbf24;
+  --dbsp-c-success: #4ade80;
+}
+
+/* Terminal is always dark — dot colors use the pinned bright values above */
+.dot-red { background: var(--dbsp-c-error, #ef4444); }
+.dot-yellow { background: var(--dbsp-c-warning, #eab308); }
+.dot-green { background: var(--dbsp-c-success, #22c55e); }
 
 .terminal-title {
   flex: 1;

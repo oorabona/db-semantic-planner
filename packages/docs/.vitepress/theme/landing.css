@@ -9,13 +9,13 @@
 }
 
 .landing-section {
-	padding: 4rem 0;
+	padding: var(--dbsp-space-4xl) 0;
 	border-top: 1px solid var(--vp-c-divider);
 }
 
 .landing-section h2 {
 	text-align: center;
-	font-size: 1.75rem;
+	font-size: var(--dbsp-text-2xl);
 	font-weight: 700;
 	margin-bottom: 2.5rem;
 	background: linear-gradient(
@@ -42,8 +42,8 @@
 	max-width: 300px;
 	background: var(--vp-c-bg);
 	border: 1px solid var(--vp-c-divider);
-	border-radius: 12px;
-	padding: 1.5rem;
+	border-radius: var(--dbsp-radius-lg);
+	padding: var(--dbsp-space-xl);
 	transition: all 0.3s ease;
 	animation: fadeSlideUp 0.6s ease both;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -80,8 +80,8 @@
 	align-items: center;
 	justify-content: center;
 	font-weight: 700;
-	font-size: 0.875rem;
-	margin-bottom: 0.75rem;
+	font-size: var(--dbsp-text-sm);
+	margin-bottom: var(--dbsp-space-md);
 }
 
 .step-content h3 {
@@ -92,10 +92,10 @@
 }
 
 .step-content p {
-	font-size: 0.875rem;
+	font-size: var(--dbsp-text-sm);
 	color: var(--vp-c-text-2);
 	line-height: 1.6;
-	margin-bottom: 0.75rem;
+	margin-bottom: var(--dbsp-space-md);
 }
 
 .step-code {
@@ -113,9 +113,9 @@
 .pipeline-arrow {
 	display: flex;
 	align-items: center;
-	font-size: 1.5rem;
+	font-size: var(--dbsp-text-lg);
 	color: var(--vp-c-brand-1);
-	padding: 0 0.75rem;
+	padding: 0 var(--dbsp-space-md);
 	opacity: 0.6;
 }
 
@@ -149,7 +149,7 @@
 
 .cta-buttons {
 	display: flex;
-	gap: 1rem;
+	gap: var(--dbsp-space-lg);
 	justify-content: center;
 	flex-wrap: wrap;
 }
@@ -166,11 +166,11 @@
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	color: #ffffff !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
-	border-radius: 8px !important;
+	border-radius: var(--dbsp-radius-md, 8px) !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-weight: 600 !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
-	font-size: 1rem !important;
+	font-size: var(--dbsp-text-base, 1rem) !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	text-decoration: none !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
@@ -201,11 +201,11 @@
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	border: 1px solid var(--vp-c-divider) !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
-	border-radius: 8px !important;
+	border-radius: var(--dbsp-radius-md, 8px) !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	font-weight: 600 !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
-	font-size: 1rem !important;
+	font-size: var(--dbsp-text-base, 1rem) !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
 	text-decoration: none !important;
 	/* biome-ignore lint/complexity/noImportantStyles: VitePress default button styles load after theme — !important required to win cascade */
@@ -328,10 +328,10 @@
 
 .install-cmd {
 	display: inline-block;
-	padding: 0.75rem 1.75rem;
+	padding: var(--dbsp-space-md) 1.75rem;
 	background: var(--vp-c-bg);
 	border: 1px solid var(--vp-c-divider);
-	border-radius: 8px;
+	border-radius: var(--dbsp-radius-md);
 	font-family: var(--vp-font-family-mono);
 	font-size: 0.9rem;
 	color: var(--vp-c-text-1);
@@ -349,7 +349,7 @@
 .why-row {
 	display: grid;
 	grid-template-columns: 1fr 1fr;
-	gap: 2rem;
+	gap: var(--dbsp-space-2xl);
 	align-items: center;
 	margin-bottom: 2.5rem;
 }
@@ -385,7 +385,7 @@
 }
 
 .why-code {
-	border-radius: 8px;
+	border-radius: var(--dbsp-radius-md);
 	overflow: hidden;
 }
 
@@ -397,92 +397,13 @@
 	border-radius: 8px !important;
 }
 
-/* ---- Testimonials ---- */
-
-.testimonials-grid {
-	display: grid;
-	grid-template-columns: repeat(3, 1fr);
-	gap: 1.25rem;
-}
-
-@media (max-width: 768px) {
-	.testimonials-grid {
-		grid-template-columns: 1fr;
-	}
-}
-
-.testimonial-card {
-	background: var(--vp-c-bg);
-	border: 1px solid var(--vp-c-divider);
-	border-radius: 12px;
-	padding: 1.5rem;
-	display: flex;
-	flex-direction: column;
-	gap: 1rem;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-	transition: all 0.3s ease;
-}
-
-.dark .testimonial-card {
-	background: var(--vp-c-bg-soft);
-	box-shadow: none;
-}
-
-.testimonial-card:hover {
-	border-color: var(--vp-c-brand-1);
-	box-shadow: 0 4px 16px rgba(99, 102, 241, 0.1);
-	transform: translateY(-3px);
-}
-
-.testimonial-text {
-	font-size: 0.9rem;
-	color: var(--vp-c-text-1);
-	line-height: 1.65;
-	font-style: italic;
-	margin: 0;
-	flex: 1;
-}
-
-.testimonial-author {
-	display: flex;
-	align-items: center;
-	gap: 0.75rem;
-}
-
-.testimonial-avatar {
-	width: 40px;
-	height: 40px;
-	border-radius: 50%;
-	/* biome-ignore lint/complexity/noImportantStyles: VitePress resets background on child elements — !important preserves avatar gradient */
-	background: linear-gradient(135deg, #6366f1, #22d3ee) !important;
-	/* biome-ignore lint/complexity/noImportantStyles: VitePress resets color on child elements — !important preserves avatar text color */
-	color: #ffffff !important;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	font-size: 0.8rem;
-	font-weight: 700;
-	flex-shrink: 0;
-}
-
-.testimonial-name {
-	font-size: 0.85rem;
-	font-weight: 600;
-	color: var(--vp-c-text-1);
-}
-
-.testimonial-role {
-	font-size: 0.75rem;
-	color: var(--vp-c-text-3);
-}
-
 /* ---- Database section ---- */
 
 .pg-subtitle {
 	text-align: center;
 	font-size: 0.95rem;
 	color: var(--vp-c-text-2);
-	margin-bottom: 2rem;
+	margin-bottom: var(--dbsp-space-2xl);
 	max-width: 600px;
 	margin-left: auto;
 	margin-right: auto;
@@ -492,7 +413,7 @@
 .db-grid {
 	display: grid;
 	grid-template-columns: 2fr 1fr 1fr 1fr;
-	gap: 1rem;
+	gap: var(--dbsp-space-lg);
 }
 
 @media (max-width: 768px) {
@@ -504,7 +425,7 @@
 .db-card {
 	background: var(--vp-c-bg);
 	border: 1px solid var(--vp-c-divider);
-	border-radius: 12px;
+	border-radius: var(--dbsp-radius-lg);
 	padding: 1.25rem;
 	transition: all 0.2s;
 	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -580,7 +501,7 @@
 	display: flex;
 	gap: 2.5rem;
 	justify-content: center;
-	margin-bottom: 2rem;
+	margin-bottom: var(--dbsp-space-2xl);
 	flex-wrap: wrap;
 }
 
@@ -592,13 +513,13 @@
 }
 
 .stat-value {
-	font-size: 1.5rem;
+	font-size: var(--dbsp-text-lg);
 	font-weight: 700;
 	color: var(--vp-c-brand-1);
 }
 
 .stat-label {
-	font-size: 0.8rem;
+	font-size: 0.8rem; /* between text-xs 0.75rem and text-sm 0.875rem */
 	color: var(--vp-c-text-3);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;

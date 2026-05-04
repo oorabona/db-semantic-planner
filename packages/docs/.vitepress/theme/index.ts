@@ -1,4 +1,5 @@
 import DefaultTheme from 'vitepress/theme';
+import './design-tokens.css';
 import './custom.css';
 import './landing.css';
 import type { App } from 'vue';

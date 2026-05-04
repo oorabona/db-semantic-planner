@@ -1,0 +1,43 @@
+/* Design tokens — single source of truth for spacing, typography, and accent colors.
+   Consumers: landing.css, Playground.vue, TerminalDemo.vue.
+   Migration plan: replace ad-hoc values with var(--dbsp-*) progressively (~50% target). */
+
+:root {
+	/* Spacing scale — geometric 4/8/12/16/24/32/48/64 */
+	--dbsp-space-xs: 0.25rem; /* 4px */
+	--dbsp-space-sm: 0.5rem; /* 8px */
+	--dbsp-space-md: 0.75rem; /* 12px */
+	--dbsp-space-lg: 1rem; /* 16px */
+	--dbsp-space-xl: 1.5rem; /* 24px */
+	--dbsp-space-2xl: 2rem; /* 32px */
+	--dbsp-space-3xl: 3rem; /* 48px */
+	--dbsp-space-4xl: 4rem; /* 64px */
+
+	/* Typography scale */
+	--dbsp-text-xs: 0.75rem; /* 12px */
+	--dbsp-text-sm: 0.875rem; /* 14px */
+	--dbsp-text-base: 1rem; /* 16px */
+	--dbsp-text-md: 1.125rem; /* 18px */
+	--dbsp-text-lg: 1.5rem; /* 24px */
+	--dbsp-text-2xl: 1.75rem; /* 28px */
+
+	/* Semantic accent colors (light mode) */
+	--dbsp-c-cyan: #0e7490;
+	--dbsp-c-success: #15803d;
+	--dbsp-c-warning: #b45309;
+	--dbsp-c-error: #b91c1c;
+
+	/* Border radii (3 tiers + circle) */
+	--dbsp-radius-sm: 4px;
+	--dbsp-radius-md: 8px;
+	--dbsp-radius-lg: 12px;
+	--dbsp-radius-pill: 9999px;
+}
+
+.dark {
+	/* Semantic accent colors (dark mode — lighter for contrast on dark bg) */
+	--dbsp-c-cyan: #67e8f9;
+	--dbsp-c-success: #4ade80;
+	--dbsp-c-warning: #fbbf24;
+	--dbsp-c-error: #f87171;
+}
