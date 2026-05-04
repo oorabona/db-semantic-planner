@@ -36,7 +36,7 @@
 	);
 }
 
-/* Button styling — WCAG AA: #4f46e5 with white text = 5.5:1 (passes AA 4.5:1 threshold) */
+/* Button styling — WCAG AA: #4f46e5 with white text = 6.3:1 (passes AA 4.5:1 threshold) */
 .VPButton.brand {
 	background-color: #4f46e5;
 	border-color: #4f46e5;

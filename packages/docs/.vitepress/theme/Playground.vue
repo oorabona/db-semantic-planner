@@ -97,7 +97,7 @@
       </div>
 
       <div class="playground-output">
-        <div class="tabs" aria-label="Query output format">
+        <div class="tabs" role="group" aria-label="Query output format">
           <button
             v-for="tab in tabs"
             :key="tab"
@@ -865,8 +865,6 @@ async function copyTypeScript() {
   }
 }
 
-/* 768px block removed — identical to 900px, now unreachable */
-
 .schema-editor {
   border-right: 1px solid var(--vp-c-divider);
   display: flex;
@@ -1026,8 +1024,6 @@ async function copyTypeScript() {
     border-bottom: 1px solid var(--vp-c-divider);
   }
 }
-
-/* 768px blocks removed — identical to 900px, now unreachable */
 
 /* ============================================================
    Left panel (NQL input)
