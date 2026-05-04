@@ -11,14 +11,24 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // (vars.SITE_URL, vars.SITE_BASE). Local dev gets sensible defaults so
 // `vitepress build` works without env vars. CI builds (CI=true) still fail
 // loudly on mis-configuration instead of publishing with broken sitemaps.
-const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:4173').replace(/\/$/, '');
+const SITE_URL = (process.env.SITE_URL ?? 'http://localhost:4173').replace(
+	/\/$/,
+	'',
+);
 const SITE_BASE = process.env.SITE_BASE ?? '/';
-if (process.env.CI === 'true' && (!process.env.SITE_URL || !process.env.SITE_BASE)) {
+if (
+	process.env.CI === 'true' &&
+	(!process.env.SITE_URL || !process.env.SITE_BASE)
+) {
 	throw new Error(
 		'SITE_URL and SITE_BASE must be set in CI builds. Set vars.SITE_URL and vars.SITE_BASE on the GitHub repository (Settings → Secrets and variables → Actions → Variables).',
 	);
 }
-const OG_IMAGE = `${SITE_URL}${SITE_BASE}og-image.png`.replace(
+// Normalize SITE_BASE: must start AND end with '/'
+let normalizedBase = SITE_BASE;
+if (!normalizedBase.startsWith('/')) normalizedBase = `/${normalizedBase}`;
+if (!normalizedBase.endsWith('/')) normalizedBase = `${normalizedBase}/`;
+const OG_IMAGE = `${SITE_URL}${normalizedBase}og-image.png`.replace(
 	/([^:])\/+/g,
 	'$1/',
 );
@@ -28,14 +38,18 @@ export default withMermaid(
 		title: 'db-semantic-planner',
 		description: 'The intent-first query planner for PostgreSQL',
 		lastUpdated: true,
-		base: SITE_BASE,
+		base: normalizedBase,
 		sitemap: {
 			hostname: SITE_URL,
 		},
 		head: [
 			[
 				'link',
-				{ rel: 'icon', type: 'image/svg+xml', href: `${SITE_BASE}logo.svg` },
+				{
+					rel: 'icon',
+					type: 'image/svg+xml',
+					href: `${normalizedBase}logo.svg`,
+				},
 			],
 			['meta', { name: 'og:type', content: 'website' }],
 			[
@@ -175,7 +189,7 @@ export default withMermaid(
 				...llmstxt({ domain: SITE_URL }),
 				robotsTxt({
 					policy: [{ userAgent: '*', allow: '/' }],
-					sitemap: `${SITE_URL}${SITE_BASE}sitemap.xml`.replace(
+					sitemap: `${SITE_URL}${normalizedBase}sitemap.xml`.replace(
 						/([^:])\/+/g,
 						'$1/',
 					),

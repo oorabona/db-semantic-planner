@@ -61,7 +61,7 @@ When using db-semantic-planner in your applications:
 
 ### Dependencies
 
-- `pg` is the only runtime dependency for the PostgreSQL adapter
+- The third-party runtime dependencies for the PostgreSQL adapter are `pg` (official PostgreSQL driver) and `@pgsql/types` (PostgreSQL type definitions). Internal `@dbsp/*` packages are workspace dependencies bundled within this project.
 - We regularly audit dependencies for vulnerabilities
 - Run `pnpm audit` to check for known issues
 
