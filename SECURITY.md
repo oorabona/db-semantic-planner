@@ -13,8 +13,8 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ### How to Report
 
-1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Report vulnerabilities privately by emailing **oorabona@users.noreply.github.com** or using GitHub's [Private vulnerability reporting](https://github.com/oorabona/db-semantic-planner/security/advisories/new).
+1. **Do NOT** open a public GitHub issue for security vulnerabilities — public issues are NOT an appropriate channel for security reports.
+2. Report vulnerabilities privately via GitHub's [Private vulnerability reporting](https://github.com/oorabona/db-semantic-planner/security/advisories/new).
 3. Include as much detail as possible:
    - Description of the vulnerability
    - Steps to reproduce

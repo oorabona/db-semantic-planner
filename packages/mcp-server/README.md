@@ -57,9 +57,11 @@ Subscribe to releases on GitHub to be notified when these ship.
 
 ## Use cases
 
-- Let Claude or Cursor understand your database schema during coding sessions
-- Validate AI-generated queries before running them
-- Expose query plan reasoning to the AI for better SQL generation suggestions
+_Once the planned tools (see Roadmap) ship, this server will support:_
+
+- Letting Claude or Cursor understand your database schema during coding sessions
+- Validating AI-generated queries before running them
+- Exposing query plan reasoning to the AI for better SQL generation suggestions
 
 ## Documentation
 

@@ -6,7 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vitepress dev",
-		"build": "SITE_URL=${SITE_URL:-http://localhost:4173} SITE_BASE=${SITE_BASE:-/} vitepress build",
+		"build": "vitepress build .",
 		"preview": "vitepress preview"
 	},
 	"dependencies": {
