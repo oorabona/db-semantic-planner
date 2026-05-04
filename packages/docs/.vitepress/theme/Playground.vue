@@ -18,6 +18,7 @@
           autocorrect="off"
           autocapitalize="off"
           placeholder="Define your schema..."
+          aria-label="Schema definition (custom DSL)"
         />
       </div>
       <div class="schema-output">
@@ -85,6 +86,7 @@
           autocorrect="off"
           autocapitalize="off"
           placeholder="Enter NQL query..."
+          aria-label="NQL query"
           @keydown.ctrl.enter.prevent="compile"
           @keydown.meta.enter.prevent="compile"
         />
@@ -95,12 +97,13 @@
       </div>
 
       <div class="playground-output">
-        <div class="tabs">
+        <div class="tabs" aria-label="Query output format">
           <button
             v-for="tab in tabs"
             :key="tab"
             class="tab-btn"
             :class="{ active: activeTab === tab }"
+            type="button"
             @click="activeTab = tab"
           >
             {{ tab }}
@@ -777,9 +780,9 @@ async function copyTypeScript() {
    Container
    ============================================================ */
 .playground {
-  margin: 1.5rem 0;
+  margin: var(--dbsp-space-xl) 0;
   border: 1px solid var(--vp-c-brand-soft);
-  border-radius: 12px;
+  border-radius: var(--dbsp-radius-lg);
   overflow: hidden;
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
   background: var(--vp-c-bg-soft);
@@ -849,26 +852,26 @@ async function copyTypeScript() {
   border-bottom: 1px solid var(--vp-c-divider);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .schema-panels {
     grid-template-columns: 1fr;
     height: auto;
     max-height: 500px;
   }
+
+  .schema-editor {
+    border-right: none;
+    border-bottom: 1px solid var(--vp-c-divider);
+  }
 }
+
+/* 768px block removed — identical to 900px, now unreachable */
 
 .schema-editor {
   border-right: 1px solid var(--vp-c-divider);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-}
-
-@media (max-width: 768px) {
-  .schema-editor {
-    border-right: none;
-    border-bottom: 1px solid var(--vp-c-divider);
-  }
 }
 
 .schema-textarea {
@@ -1013,11 +1016,18 @@ async function copyTypeScript() {
   min-height: 360px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 900px) {
   .query-panels {
     grid-template-columns: 1fr;
   }
+
+  .playground-input {
+    border-right: none;
+    border-bottom: 1px solid var(--vp-c-divider);
+  }
 }
+
+/* 768px blocks removed — identical to 900px, now unreachable */
 
 /* ============================================================
    Left panel (NQL input)
@@ -1026,13 +1036,6 @@ async function copyTypeScript() {
   display: flex;
   flex-direction: column;
   border-right: 1px solid var(--vp-c-divider);
-}
-
-@media (max-width: 768px) {
-  .playground-input {
-    border-right: none;
-    border-bottom: 1px solid var(--vp-c-divider);
-  }
 }
 
 .panel-header {
@@ -1112,9 +1115,9 @@ async function copyTypeScript() {
   background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
   color: #fff;
   border: none;
-  border-radius: 6px;
-  padding: 0.5rem 1.4rem;
-  font-size: 0.875rem;
+  border-radius: 6px; /* between radius-sm 4px and radius-md 8px */
+  padding: var(--dbsp-space-sm) 1.4rem;
+  font-size: var(--dbsp-text-sm);
   font-weight: 600;
   cursor: pointer;
   transition: all 0.2s;
@@ -1183,7 +1186,7 @@ async function copyTypeScript() {
 .output-placeholder {
   flex: 1;
   overflow: auto;
-  padding: 1.25rem;
+  padding: 1.25rem; /* between space-lg 1rem and space-xl 1.5rem */
   background: transparent;
   animation: fadeIn 0.2s ease;
 }
@@ -1197,7 +1200,7 @@ async function copyTypeScript() {
 .output-error pre {
   margin: 0;
   font-family: var(--vp-font-family-mono);
-  font-size: 0.875rem;
+  font-size: var(--dbsp-text-sm);
   line-height: 1.7;
   white-space: pre-wrap;
   word-break: break-all;

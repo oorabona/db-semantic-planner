@@ -177,45 +177,6 @@ const users = await tenantOrm
 
 </section>
 
-<section class="landing-section testimonials-section">
-
-## What developers say
-
-<div class="testimonials-grid">
-  <div class="testimonial-card">
-    <p class="testimonial-text">"The dump() function changed how I debug queries. Seeing the plan decisions alongside the SQL is something no other ORM gives you."</p>
-    <div class="testimonial-author">
-      <div class="testimonial-avatar">JD</div>
-      <div>
-        <div class="testimonial-name">Jane Doe</div>
-        <div class="testimonial-role">Senior Backend Engineer</div>
-      </div>
-    </div>
-  </div>
-  <div class="testimonial-card">
-    <p class="testimonial-text">"We migrated from Prisma for the multi-tenant support. withSchema() just works — no hacks, no middleware, no runtime overhead."</p>
-    <div class="testimonial-author">
-      <div class="testimonial-avatar">JS</div>
-      <div>
-        <div class="testimonial-name">John Smith</div>
-        <div class="testimonial-role">CTO, SaaS Startup</div>
-      </div>
-    </div>
-  </div>
-  <div class="testimonial-card">
-    <p class="testimonial-text">"The NQL pipe syntax in the REPL is perfect for prototyping. I can iterate on complex queries in seconds without writing TypeScript."</p>
-    <div class="testimonial-author">
-      <div class="testimonial-avatar">AK</div>
-      <div>
-        <div class="testimonial-name">Alex Kim</div>
-        <div class="testimonial-role">Full-Stack Developer</div>
-      </div>
-    </div>
-  </div>
-</div>
-
-</section>
-
 <section class="landing-section pg-section">
 
 ## Adapter-agnostic core. PostgreSQL-native today.
