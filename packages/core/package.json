@@ -4,6 +4,9 @@
 	"description": "Intent-first semantic query planner for databases — declare WHAT to fetch, the planner decides HOW",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
+	"engines": {
+		"node": ">=20"
+	},
 	"keywords": [
 		"orm",
 		"query-planner",

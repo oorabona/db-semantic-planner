@@ -1,11 +1,12 @@
 {
 	"name": "@dbsp/docs",
 	"version": "1.0.0",
+	"description": "VitePress documentation site for db-semantic-planner",
 	"private": true,
 	"type": "module",
 	"scripts": {
 		"dev": "vitepress dev",
-		"build": "vitepress build",
+		"build": "SITE_URL=${SITE_URL:-http://localhost:4173} SITE_BASE=${SITE_BASE:-/} vitepress build",
 		"preview": "vitepress preview"
 	},
 	"dependencies": {

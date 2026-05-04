@@ -4,6 +4,9 @@
 	"description": "MCP Server for db-semantic-planner - expose schema and query planning to AI tools",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
+	"engines": {
+		"node": ">=20"
+	},
 	"keywords": [
 		"mcp",
 		"model-context-protocol",

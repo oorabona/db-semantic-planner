@@ -1,0 +1,23 @@
+* text=auto eol=lf
+
+*.md text
+*.json text
+*.yml text
+*.yaml text
+*.ts text
+*.tsx text
+*.js text
+*.cjs text
+*.mjs text
+
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+
+pnpm-lock.yaml -diff

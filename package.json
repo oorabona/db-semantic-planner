@@ -1,6 +1,27 @@
 {
 	"name": "db-semantic-planner",
 	"version": "1.0.0",
+	"description": "Semantic query planning for PostgreSQL — intent-first declarative API with full observability",
+	"keywords": [
+		"postgresql",
+		"query-builder",
+		"orm",
+		"typescript",
+		"intent-first",
+		"semantic-query",
+		"type-safe",
+		"observability"
+	],
+	"homepage": "https://oorabona.github.io/db-semantic-planner",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/oorabona/db-semantic-planner.git"
+	},
+	"bugs": {
+		"url": "https://github.com/oorabona/db-semantic-planner/issues"
+	},
+	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
+	"license": "MIT",
 	"private": true,
 	"type": "module",
 	"packageManager": "pnpm@10.33.0+sha512.10568bb4a6afb58c9eb3630da90cc9516417abebd3fabbe6739f0ae795728da1491e9db5a544c76ad8eb7570f5c4bb3d6c637b2cb41bfdcdb47fa823c8649319",

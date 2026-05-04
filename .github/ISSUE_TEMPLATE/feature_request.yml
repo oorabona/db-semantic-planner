@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest an idea or new capability
+title: "[Feature]: "
+labels: ["enhancement", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement. Help us understand the *why* before the *how*.
+  - type: textarea
+    id: problem
+    attributes:
+      label: "Problem"
+      description: "What problem does this feature solve? Be concrete: who hits it, when, how often."
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: "Proposed solution"
+      description: "Proposed API or behavior. Code sketch encouraged."
+      render: typescript
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: "Alternatives considered"
+      description: "Workarounds you've tried or discarded."
+    validations:
+      required: false
+  - type: textarea
+    id: context
+    attributes:
+      label: "Additional context"
+      description: "Links to related issues, PRs, prior art."
+    validations:
+      required: false

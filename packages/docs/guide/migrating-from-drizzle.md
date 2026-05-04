@@ -18,10 +18,6 @@ This guide helps you transition from Drizzle ORM to db-semantic-planner. Both to
 | Join strategy | Manual choice | Automatic (EXISTS vs JOIN vs lateral) |
 | Multi-tenant | Manual schema prefix | `.withSchema('tenant')` built-in |
 
-## Step-by-Step Migration
-
-*Coming soon.* See the [Getting Started guide](getting-started.md) to learn dbsp's API.
-
 ## Quick Translation Reference
 
 ### Drizzle → dbsp

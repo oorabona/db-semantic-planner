@@ -1,6 +1,7 @@
 {
 	"name": "@dbsp/gui",
-	"version": "0.0.1",
+	"version": "1.0.0",
+	"description": "Tauri v2 desktop UI for db-semantic-planner",
 	"private": true,
 	"type": "module",
 	"scripts": {
