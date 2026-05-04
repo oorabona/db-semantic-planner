@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/oorabona/db-semantic-planner/security/advisories/new
+    about: Report security issues privately, NOT via public issues.
+  - name: Documentation
+    url: https://oorabona.github.io/db-semantic-planner
+    about: Read the docs before opening an issue — your question may already be answered.

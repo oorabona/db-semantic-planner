@@ -4,6 +4,9 @@
 	"description": "CLI tools for db-semantic-planner — REPL, schema generation, DDL provisioning",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
+	"engines": {
+		"node": ">=20"
+	},
 	"keywords": [
 		"cli",
 		"database",

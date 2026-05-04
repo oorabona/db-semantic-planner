@@ -4,6 +4,9 @@
 	"description": "Shared type definitions for the db-semantic-planner ecosystem",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",
+	"engines": {
+		"node": ">=20"
+	},
 	"keywords": [
 		"typescript",
 		"types",

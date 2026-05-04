@@ -13,8 +13,8 @@ We take security vulnerabilities seriously. If you discover a security issue, pl
 
 ### How to Report
 
-1. **Do NOT** open a public GitHub issue for security vulnerabilities
-2. Email security concerns to the maintainers directly
+1. **Do NOT** open a public GitHub issue for security vulnerabilities — public issues are NOT an appropriate channel for security reports.
+2. Report vulnerabilities privately via GitHub's [Private vulnerability reporting](https://github.com/oorabona/db-semantic-planner/security/advisories/new).
 3. Include as much detail as possible:
    - Description of the vulnerability
    - Steps to reproduce
@@ -61,7 +61,7 @@ When using db-semantic-planner in your applications:
 
 ### Dependencies
 
-- Kysely is the only runtime dependency (peer dependency)
+- The third-party runtime dependencies for the PostgreSQL adapter are `pg` (official PostgreSQL driver) and `@pgsql/types` (PostgreSQL type definitions). The adapter also declares `@dbsp/core` and `@dbsp/types` as dependencies; these are first-party packages published separately from this same monorepo and are resolved by npm as standard package installs — they are not bundled.
 - We regularly audit dependencies for vulnerabilities
 - Run `pnpm audit` to check for known issues
 
@@ -79,7 +79,7 @@ When using db-semantic-planner in your applications:
 This security policy applies to:
 
 - `@dbsp/core`
-- `@dbsp/adapter-kysely`
+- `@dbsp/adapter-pgsql`
 - `@dbsp/cli`
 - `@dbsp/mcp-server`
 

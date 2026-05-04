@@ -18,10 +18,6 @@ This guide helps you transition from Kysely to db-semantic-planner. Both tools a
 | N+1 prevention | Manual | Automatic |
 | Multi-tenant | Manual | `.withSchema('tenant')` built-in |
 
-## Step-by-Step Migration
-
-*Coming soon.* See the [Getting Started guide](getting-started.md) to learn dbsp's API.
-
 ## Quick Translation Reference
 
 ### Kysely → dbsp

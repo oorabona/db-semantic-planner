@@ -18,10 +18,6 @@ This guide helps you transition from Prisma to db-semantic-planner. Both tools o
 | Multi-tenant | Manual schema switching | `.withSchema('tenant')` built-in |
 | Migrations | `prisma migrate` | `dbsp verify` + `generateMigrationSQL()` |
 
-## Step-by-Step Migration
-
-*Coming soon.* In the meantime, see the [Getting Started guide](getting-started.md) for a full walkthrough of dbsp's API.
-
 ## Quick Translation Reference
 
 ### Prisma → dbsp
