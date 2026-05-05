@@ -654,20 +654,26 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 	return schema(tableDefs);
 }
 
-async function renderDiagram(parsed: ParsedSchema): Promise<void> {
+let rebuildGeneration = 0;
+
+async function renderDiagram(parsed: ParsedSchema, gen: number): Promise<void> {
 	if (!mermaidInstance) return;
 	try {
 		const code = buildMermaidCode(parsed);
 		const id = `er-${Date.now()}`;
 		const { svg } = await mermaidInstance.render(id, code);
+		// A newer rebuild has started; bail before overwriting the latest svg.
+		if (gen !== rebuildGeneration) return;
 		mermaidSvg.value = svg;
 	} catch {
+		if (gen !== rebuildGeneration) return;
 		mermaidSvg.value = '';
 	}
 }
 
 async function rebuildOrm(dsl: string): Promise<void> {
 	if (!coreModule || !adapterModule) return;
+	const myGen = ++rebuildGeneration;
 
 	schemaError.value = null;
 
@@ -705,7 +711,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		nqlTag = null;
 	}
 
-	await renderDiagram(parsed);
+	await renderDiagram(parsed, myGen);
 }
 
 // ---------------------------------------------------------------------------
@@ -785,6 +791,14 @@ watch(nqlCode, () => {
 // button text doesn't keep claiming the previous SQL/params are still on
 // the clipboard after the displayed output changed.
 watch(result, () => {
+	if (sqlCopiedTimer !== null) {
+		clearTimeout(sqlCopiedTimer);
+		sqlCopiedTimer = null;
+	}
+	if (paramsCopiedTimer !== null) {
+		clearTimeout(paramsCopiedTimer);
+		paramsCopiedTimer = null;
+	}
 	sqlCopied.value = false;
 	paramsCopied.value = false;
 });
@@ -1039,12 +1053,19 @@ async function copyTypeScript() {
 	}, 2000);
 }
 
+let sqlCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+let paramsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function copySQL(): Promise<void> {
 	if (!result.value) return;
 	await navigator.clipboard.writeText(result.value.sql);
 	sqlCopied.value = true;
-	setTimeout(() => {
+	// Cancel any pending reset so two quick clicks don't end the feedback
+	// window early on the most recent click.
+	if (sqlCopiedTimer !== null) clearTimeout(sqlCopiedTimer);
+	sqlCopiedTimer = setTimeout(() => {
 		sqlCopied.value = false;
+		sqlCopiedTimer = null;
 	}, 2000);
 }
 
@@ -1052,8 +1073,10 @@ async function copyParams(): Promise<void> {
 	if (!result.value) return;
 	await navigator.clipboard.writeText(formatParams(result.value.params));
 	paramsCopied.value = true;
-	setTimeout(() => {
+	if (paramsCopiedTimer !== null) clearTimeout(paramsCopiedTimer);
+	paramsCopiedTimer = setTimeout(() => {
 		paramsCopied.value = false;
+		paramsCopiedTimer = null;
 	}, 2000);
 }
 </script>
