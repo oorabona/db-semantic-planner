@@ -536,7 +536,9 @@ async function syncUrlHash() {
 		});
 		const nextHash = '#' + encoded;
 		if (nextHash.length > MAX_HASH_LENGTH) {
-			showOversizeBanner();
+			if (errorBanner.value?.title !== 'URL sharing paused') {
+				showOversizeBanner();
+			}
 			return;
 		}
 		if (nextHash === lastEmittedHash) return;
@@ -806,6 +808,7 @@ onBeforeUnmount(() => {
 	rebuildGeneration += 1;
 	pendingManualCompile = false;
 	suppressNextNqlWatch = false;
+	nqlTag = null;
 });
 </script>
 
