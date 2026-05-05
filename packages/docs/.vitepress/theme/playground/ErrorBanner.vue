@@ -50,7 +50,7 @@ defineEmits<{ dismiss: [] }>();
   grid-template-columns: auto 1fr auto auto;
   align-items: start;
   gap: var(--dbsp-space-md, 0.75rem);
-  padding: var(--dbsp-space-sm, 0.5rem) var(--dbsp-space-md, 0.75rem);
+  padding: var(--dbsp-space-md, 0.75rem) var(--dbsp-space-lg, 1rem);
   border: 1px solid var(--vp-c-divider);
   border-left-width: 3px;
   border-radius: var(--dbsp-radius-md, 8px);

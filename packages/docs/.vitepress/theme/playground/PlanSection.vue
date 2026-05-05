@@ -66,11 +66,11 @@ const planDecisions = computed(() => props.result?.plan?.decisions ?? []);
   display: flex;
   flex-direction: column;
   gap: var(--dbsp-space-lg, 1rem);
-  padding: var(--dbsp-space-md, 0.75rem);
+  padding: var(--dbsp-space-lg, 1rem);
   background: rgba(99, 102, 241, 0.04);
   border: 1px solid var(--vp-c-divider);
   border-radius: var(--dbsp-radius-md, 8px);
-  margin-bottom: var(--dbsp-space-lg, 1rem);
+  margin-bottom: var(--dbsp-space-xl, 1.5rem);
 }
 
 .plan-meta {

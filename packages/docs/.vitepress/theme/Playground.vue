@@ -898,8 +898,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .playground {
-  margin: var(--dbsp-space-xl, 1.5rem) 0;
-  padding: var(--dbsp-space-md, 0.75rem);
+  margin: var(--dbsp-space-2xl, 2rem) 0;
+  padding: var(--dbsp-space-xl, 1.5rem);
   border: 1px solid var(--vp-c-brand-soft);
   border-radius: var(--dbsp-radius-lg, 12px);
   background: var(--vp-c-bg-soft);

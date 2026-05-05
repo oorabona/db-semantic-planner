@@ -98,8 +98,8 @@ function onCompileShortcut(e: KeyboardEvent) {
 .query-section {
   border: 1px solid var(--vp-c-divider);
   border-radius: var(--dbsp-radius-md, 8px);
-  padding: var(--dbsp-space-md, 0.75rem);
-  margin-bottom: var(--dbsp-space-lg, 1rem);
+  padding: var(--dbsp-space-lg, 1rem);
+  margin-bottom: var(--dbsp-space-xl, 1.5rem);
 }
 
 .query-header { display: flex; align-items: center; gap: var(--dbsp-space-md, 0.75rem); margin-bottom: var(--dbsp-space-sm, 0.5rem); }
@@ -134,8 +134,8 @@ function onCompileShortcut(e: KeyboardEvent) {
 
 .nql-textarea {
   width: 100%;
-  min-height: 7rem;
-  padding: var(--dbsp-space-sm, 0.5rem);
+  min-height: 9rem;
+  padding: var(--dbsp-space-md, 0.75rem);
   font-family: var(--vp-font-family-mono);
   font-size: 0.85rem;
   background: var(--vp-c-bg);

@@ -159,7 +159,7 @@ function formatContext(ctx: PlanDecision['context']): string {
   align-items: center;
   gap: var(--dbsp-space-md, 0.75rem);
   width: 100%;
-  padding: var(--dbsp-space-sm, 0.5rem) var(--dbsp-space-md, 0.75rem);
+  padding: var(--dbsp-space-md, 0.75rem) var(--dbsp-space-lg, 1rem);
   background: transparent;
   border: 0;
   cursor: pointer;
@@ -187,7 +187,7 @@ function formatContext(ctx: PlanDecision['context']): string {
 .plan-decision-chevron.open { transform: rotate(90deg); }
 
 .plan-decision-body {
-  padding: var(--dbsp-space-sm, 0.5rem) var(--dbsp-space-md, 0.75rem) var(--dbsp-space-md, 0.75rem);
+  padding: var(--dbsp-space-md, 0.75rem) var(--dbsp-space-lg, 1rem) var(--dbsp-space-lg, 1rem);
   border-top: 1px solid var(--vp-c-divider);
   font-size: 0.875rem;
   display: flex;

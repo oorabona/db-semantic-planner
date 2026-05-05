@@ -134,8 +134,8 @@ function highlightSQL(sql: string): string {
 .output-section {
   border: 1px solid var(--vp-c-divider);
   border-radius: var(--dbsp-radius-md, 8px);
-  padding: var(--dbsp-space-md, 0.75rem);
-  margin-bottom: var(--dbsp-space-lg, 1rem);
+  padding: var(--dbsp-space-lg, 1rem);
+  margin-bottom: var(--dbsp-space-xl, 1.5rem);
 }
 
 .output-tabs { display: flex; gap: 2px; padding-bottom: 0.4rem; border-bottom: 1px solid var(--vp-c-divider); margin-bottom: var(--dbsp-space-sm, 0.5rem); align-items: center; }
@@ -157,6 +157,10 @@ function highlightSQL(sql: string): string {
 
 .output-pre {
   margin: 0;
+  padding: var(--dbsp-space-md, 0.75rem);
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-sm, 4px);
   font-family: var(--vp-font-family-mono);
   font-size: 0.85rem;
   line-height: 1.7;

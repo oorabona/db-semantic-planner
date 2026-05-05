@@ -178,7 +178,7 @@ function toggleExpand() {
 .schema-section {
   border: 1px solid var(--vp-c-divider);
   border-radius: var(--dbsp-radius-md, 8px);
-  margin-bottom: var(--dbsp-space-lg, 1rem);
+  margin-bottom: var(--dbsp-space-xl, 1.5rem);
   overflow: hidden;
 }
 
@@ -187,7 +187,7 @@ function toggleExpand() {
   align-items: center;
   gap: var(--dbsp-space-sm, 0.5rem);
   width: 100%;
-  padding: var(--dbsp-space-sm, 0.5rem) var(--dbsp-space-md, 0.75rem);
+  padding: var(--dbsp-space-md, 0.75rem) var(--dbsp-space-lg, 1rem);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(34, 211, 238, 0.04) 100%);
   border: 0;
   border-bottom: 1px solid var(--vp-c-divider);
@@ -221,7 +221,7 @@ function toggleExpand() {
 .schema-action-btn:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
 .schema-action-edit { font-size: 0.8rem; color: var(--vp-c-brand-1); cursor: pointer; }
 
-.schema-body { padding: var(--dbsp-space-md, 0.75rem); }
+.schema-body { padding: var(--dbsp-space-lg, 1rem); }
 .schema-tabs { display: flex; gap: 2px; margin-bottom: var(--dbsp-space-sm, 0.5rem); align-items: center; }
 
 .schema-tab-btn {
