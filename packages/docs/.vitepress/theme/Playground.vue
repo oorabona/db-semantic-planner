@@ -628,13 +628,18 @@ function showFatalBanner(error: unknown): void {
 }
 
 function softResetUrl(): void {
-	clearHashFromUrl();
-	schemaDsl.value = DEFAULT_SCHEMA_DSL;
-	selectedExampleIndex.value = 0;
-	suppressNextNqlWatch = true;
-	nqlCode.value = ALL_EXAMPLES[0]?.code ?? '';
-	queryMode.value = 'nql';
-	errorBanner.value = null;
+	isHydrating = true;
+	try {
+		clearHashFromUrl();
+		schemaDsl.value = DEFAULT_SCHEMA_DSL;
+		selectedExampleIndex.value = 0;
+		suppressNextNqlWatch = true;
+		nqlCode.value = ALL_EXAMPLES[0]?.code ?? '';
+		queryMode.value = 'nql';
+		errorBanner.value = null;
+	} finally {
+		isHydrating = false;
+	}
 	void rebuildOrm(schemaDsl.value).then(() => {
 		if (!disposed && ready.value) compile();
 	});
@@ -798,7 +803,12 @@ function onLoadExample(index: number): void {
 }
 
 async function onCopyTs() {
-	await navigator.clipboard.writeText(generatedTs.value);
+	try {
+		await navigator.clipboard.writeText(generatedTs.value);
+	} catch (e) {
+		console.warn('Playground: clipboard write failed', e);
+		return;
+	}
 	tsCopied.value = true;
 	if (tsCopiedTimer !== null) clearTimeout(tsCopiedTimer);
 	tsCopiedTimer = setTimeout(() => {

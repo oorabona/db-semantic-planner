@@ -33,7 +33,12 @@ watch(
 
 async function copySQL() {
 	if (!props.result) return;
-	await navigator.clipboard.writeText(props.result.sql);
+	try {
+		await navigator.clipboard.writeText(props.result.sql);
+	} catch (e) {
+		console.warn('Playground: SQL clipboard write failed', e);
+		return;
+	}
 	sqlCopied.value = true;
 	if (sqlTimer !== null) clearTimeout(sqlTimer);
 	sqlTimer = setTimeout(() => {
@@ -45,7 +50,12 @@ async function copySQL() {
 
 async function copyParams() {
 	if (!props.result) return;
-	await navigator.clipboard.writeText(formatParams(props.result.params));
+	try {
+		await navigator.clipboard.writeText(formatParams(props.result.params));
+	} catch (e) {
+		console.warn('Playground: Params clipboard write failed', e);
+		return;
+	}
 	paramsCopied.value = true;
 	if (paramsTimer !== null) clearTimeout(paramsTimer);
 	paramsTimer = setTimeout(() => {
