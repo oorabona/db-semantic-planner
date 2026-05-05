@@ -72,12 +72,15 @@ function toggleExpand() {
 
 <template>
   <section class="schema-section" :data-expanded="expanded">
-    <button
-      type="button"
+    <div
       class="schema-bar"
+      role="button"
+      tabindex="0"
       :aria-expanded="expanded"
       aria-controls="schema-body"
       @click="toggleExpand"
+      @keydown.enter.prevent="toggleExpand"
+      @keydown.space.prevent="toggleExpand"
     >
       <span class="schema-chev" aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
       <span class="schema-label">Schema</span>
@@ -94,7 +97,7 @@ function toggleExpand() {
         </button>
         <span class="schema-action-edit">{{ expanded ? 'Collapse ↑' : 'Edit ↗' }}</span>
       </span>
-    </button>
+    </div>
 
     <div v-show="expanded" id="schema-body" class="schema-body">
       <div role="group" aria-label="Schema view" class="schema-tabs">
@@ -148,7 +151,7 @@ function toggleExpand() {
         @pointermove="onPointerMove"
         @pointerup="onPointerUp"
         @pointercancel="onPointerUp"
-        @wheel.passive="onWheel"
+        @wheel.prevent="onWheel"
       >
         <button
           type="button"

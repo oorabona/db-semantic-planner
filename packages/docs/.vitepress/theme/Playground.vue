@@ -18,9 +18,9 @@ import QuerySection from './playground/QuerySection.vue';
 import PlanSection from './playground/PlanSection.vue';
 import OutputSection from './playground/OutputSection.vue';
 import {
-	MAX_HASH_LENGTH,
 	decodeHash,
 	encodeHash,
+	isHashLengthOk,
 } from './playground/hash-codec';
 import type { ErrorBannerData } from './playground/types';
 
@@ -147,6 +147,7 @@ let coreModule: typeof import('@dbsp/core') | null = null;
 let adapterModule: typeof import('@dbsp/adapter-pgsql') | null = null;
 let mermaidInstance: typeof import('mermaid').default | null = null;
 let nqlTag: NqlTag | null = null;
+const nqlTagReady = ref(false);
 
 let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -196,7 +197,7 @@ const visibleExamples = computed(() => {
 	return ALL_EXAMPLES.filter((ex) => ex.requires.every((t) => tableNames.has(t)));
 });
 
-const ready = computed(() => !disposed && nqlTag !== null && !schemaError.value);
+const ready = computed(() => !disposed && nqlTagReady.value && !schemaError.value);
 
 // ---------------------------------------------------------------------------
 // Schema DSL parser (migrated verbatim from old Playground.vue)
@@ -457,6 +458,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		mermaidSvg.value = '';
 		generatedTs.value = '';
 		nqlTag = null;
+		nqlTagReady.value = false;
 		return;
 	}
 
@@ -467,6 +469,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		mermaidSvg.value = '';
 		generatedTs.value = '';
 		nqlTag = null;
+		nqlTagReady.value = false;
 		return;
 	}
 
@@ -481,10 +484,12 @@ async function rebuildOrm(dsl: string): Promise<void> {
 			adapter: adapterModule.createPgsqlCompileOnlyAdapter(),
 		});
 		nqlTag = orm.nql as NqlTag;
+		nqlTagReady.value = true;
 	} catch (e) {
 		if (myGen !== rebuildGeneration || disposed) return;
 		schemaError.value = `Schema error: ${e instanceof Error ? e.message : String(e)}`;
 		nqlTag = null;
+		nqlTagReady.value = false;
 		return;
 	}
 
@@ -535,7 +540,7 @@ async function syncUrlHash() {
 			m: 'nql',
 		});
 		const nextHash = '#' + encoded;
-		if (nextHash.length > MAX_HASH_LENGTH) {
+		if (!isHashLengthOk(encoded)) {
 			if (errorBanner.value?.title !== 'URL sharing paused') {
 				showOversizeBanner();
 			}
@@ -809,6 +814,7 @@ onBeforeUnmount(() => {
 	pendingManualCompile = false;
 	suppressNextNqlWatch = false;
 	nqlTag = null;
+	nqlTagReady.value = false;
 });
 </script>
 

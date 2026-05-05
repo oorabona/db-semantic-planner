@@ -10,8 +10,7 @@ defineEmits<{ dismiss: [] }>();
     v-if="data"
     class="playground-error-banner"
     :class="`error-banner--${data.severity}`"
-    :role="data.severity === 'fatal' ? 'alertdialog' : 'alert'"
-    :aria-modal="data.severity === 'fatal' ? 'true' : undefined"
+    role="alert"
   >
     <div class="error-banner-icon" aria-hidden="true">
       {{ data.severity === 'fatal' ? '✕' : '⚠' }}
