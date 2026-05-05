@@ -167,6 +167,26 @@
               </div>
             </div>
 
+            <div v-if="planCtes.length > 0" class="plan-ctes">
+              <div class="plan-section-title">CTEs ({{ planCtes.length }})</div>
+              <div
+                v-for="(cte, i) in planCtes"
+                :key="i"
+                class="plan-cte-card"
+              >
+                <div class="plan-cte-header">
+                  <span class="plan-cte-name">{{ cte.name }}</span>
+                  <span
+                    v-if="cte.referencedBy.length > 0"
+                    class="plan-cte-refs"
+                  >
+                    referenced by {{ cte.referencedBy.join(', ') }}
+                  </span>
+                </div>
+                <div class="plan-cte-purpose">{{ cte.purpose }}</div>
+              </div>
+            </div>
+
             <div v-if="planDecisions.length > 0" class="plan-decisions">
               <div class="plan-section-title">
                 Decisions ({{ planDecisions.length }})
@@ -239,7 +259,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { Dump, PlanDecision, PlanWarning } from '@dbsp/core';
+import type { CTEDefinition, Dump, PlanDecision, PlanWarning } from '@dbsp/core';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -720,16 +740,18 @@ onMounted(async () => {
 
 watch(schemaDsl, (newDsl) => {
 	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
-	schemaDebounceTimer = setTimeout(async () => {
+	const myTimer: ReturnType<typeof setTimeout> = setTimeout(async () => {
 		await rebuildOrm(newDsl);
+		// If a newer rebuild was scheduled while we were awaiting, leave the
+		// state to that callback — clearing here would mask the pending timer
+		// from the NQL watcher and let stale-schema compiles slip through.
+		if (schemaDebounceTimer !== myTimer) return;
 		schemaDebounceTimer = null;
-		// After schema settles, recompile current NQL so the output reflects
-		// the new schema. This also covers the case where the NQL watcher
-		// skipped its compile because schema was being rebuilt.
 		if (nqlCode.value.trim()) {
 			performCompile({ resetTab: false });
 		}
 	}, 500);
+	schemaDebounceTimer = myTimer;
 });
 
 // Auto-compile on NQL textarea change. Preserves activeTab (no reset) so the
@@ -817,24 +839,37 @@ const planWarnings = computed<readonly PlanWarning[]>(
 	() => result.value?.plan?.warnings ?? [],
 );
 const planMeta = computed(() => result.value?.plan?.metadata);
+const planCtes = computed<readonly CTEDefinition[]>(
+	() => result.value?.plan?.ctes ?? [],
+);
 
 const expandedDecisions = ref<Set<string>>(new Set());
-let knownDecisionIds = new Set<string>();
 
-// Default-expand newly seen decisions but preserve user collapse choices on
-// repeat compiles — auto-compile fires every keystroke, so wiping state on
-// every recompile would silently undo the user's manual collapses.
+// Build a structural signature so we can preserve the user's collapse state
+// across syntactically equivalent recompiles (every keystroke recompiles)
+// without leaking state across genuinely different plans. Decision `id`s are
+// per-plan counters (`jointype-001`, `includestrategy-001`, …) so they
+// collide across queries — signing on type/source/target/choice avoids that.
+function planSignature(decisions: readonly PlanDecision[]): string {
+	return decisions
+		.map((d) => {
+			const target = d.context.relation ?? d.context.target ?? '';
+			return `${d.type}:${d.context.sourceTable}:${target}:${d.choice}`;
+		})
+		.join('|');
+}
+
+let lastPlanSignature = '';
+
 watch(planDecisions, (decisions) => {
-	const currentIds = new Set(decisions.map((d) => d.id));
-	const next = new Set(expandedDecisions.value);
-	for (const id of currentIds) {
-		if (!knownDecisionIds.has(id)) next.add(id);
-	}
-	for (const id of next) {
-		if (!currentIds.has(id)) next.delete(id);
-	}
-	expandedDecisions.value = next;
-	knownDecisionIds = currentIds;
+	// Empty decisions are usually transient (compile error in flight); leaving
+	// state alone avoids a flash-of-default-expanded when the next compile
+	// succeeds.
+	if (decisions.length === 0) return;
+	const signature = planSignature(decisions);
+	if (signature === lastPlanSignature) return;
+	lastPlanSignature = signature;
+	expandedDecisions.value = new Set(decisions.map((d) => d.id));
 });
 
 function isDecisionExpanded(id: string): boolean {
@@ -1480,14 +1515,49 @@ async function copyParams(): Promise<void> {
 }
 
 .plan-warnings,
+.plan-ctes,
 .plan-decisions {
   display: flex;
   flex-direction: column;
 }
 
 .plan-warnings > .plan-warning-card + .plan-warning-card,
+.plan-ctes > .plan-cte-card + .plan-cte-card,
 .plan-decisions > .plan-decision-card + .plan-decision-card {
   margin-top: var(--dbsp-space-sm);
+}
+
+.plan-cte-card {
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--dbsp-c-cyan);
+  border-radius: var(--dbsp-radius-sm);
+  font-size: var(--dbsp-text-sm);
+}
+
+.plan-cte-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dbsp-space-md);
+  flex-wrap: wrap;
+}
+
+.plan-cte-name {
+  font-family: var(--vp-font-family-mono);
+  font-weight: 700;
+  color: var(--dbsp-c-cyan);
+}
+
+.plan-cte-refs {
+  font-size: 0.72rem;
+  color: var(--vp-c-text-3);
+}
+
+.plan-cte-purpose {
+  margin-top: var(--dbsp-space-xs);
+  color: var(--vp-c-text-2);
+  line-height: 1.5;
 }
 
 .plan-warning-card {
