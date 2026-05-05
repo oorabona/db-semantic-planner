@@ -115,8 +115,28 @@
         </div>
 
         <div v-else-if="result" class="output-content">
-          <pre v-if="activeTab === 'SQL'"><code v-html="highlightSQL(result.sql)"></code></pre>
-          <pre v-else-if="activeTab === 'Parameters'"><code>{{ formatParams(result.params) }}</code></pre>
+          <div v-if="activeTab === 'SQL'" class="output-pane">
+            <button
+              type="button"
+              class="copy-btn output-copy-btn"
+              aria-label="Copy SQL to clipboard"
+              @click="copySQL"
+            >
+              {{ sqlCopied ? 'Copied' : 'Copy' }}
+            </button>
+            <pre><code v-html="highlightSQL(result.sql)"></code></pre>
+          </div>
+          <div v-else-if="activeTab === 'Parameters'" class="output-pane">
+            <button
+              type="button"
+              class="copy-btn output-copy-btn"
+              aria-label="Copy parameters to clipboard"
+              @click="copyParams"
+            >
+              {{ paramsCopied ? 'Copied' : 'Copy' }}
+            </button>
+            <pre><code>{{ formatParams(result.params) }}</code></pre>
+          </div>
           <pre v-else-if="activeTab === 'Plan'"><code>{{ formatPlan(result.plan) }}</code></pre>
         </div>
 
@@ -487,6 +507,7 @@ let mermaidInstance: any = null;
 let nqlTag: NqlTag | null = null;
 
 let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 // ---------------------------------------------------------------------------
 // Schema rebuild logic
@@ -617,6 +638,17 @@ watch(schemaDsl, (newDsl) => {
 	}, 500);
 });
 
+// Auto-compile on NQL textarea change. Preserves activeTab (no reset) so the
+// user can stay on Plan tab while iterating. Manual button + Ctrl/Cmd+Enter
+// + example dropdown keep the reset-to-SQL behaviour.
+watch(nqlCode, () => {
+	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
+	nqlDebounceTimer = setTimeout(() => {
+		performCompile({ resetTab: false });
+		nqlDebounceTimer = null;
+	}, 300);
+});
+
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
@@ -625,35 +657,41 @@ function loadExample(): void {
 	const ex = visibleExamples.value[selectedExampleIndex.value];
 	if (ex) {
 		nqlCode.value = ex.code;
-		result.value = null;
-		error.value = null;
+		// Manual semantics: jump to SQL tab on example change. The nqlCode watcher
+		// will also fire 300ms later but that auto-compile is idempotent.
+		compile();
 	}
 }
 
-function compile(): void {
-	error.value = null;
-	result.value = null;
-
+function performCompile(opts: { resetTab: boolean }): void {
 	if (!nqlTag) {
 		error.value = schemaError.value
 			? `Schema error: ${schemaError.value}`
 			: 'Compiler not ready — please wait a moment and try again.';
+		result.value = null;
 		return;
 	}
 
 	const query = nqlCode.value.trim();
 	if (!query) {
 		error.value = 'Please enter an NQL query.';
+		result.value = null;
 		return;
 	}
 
 	try {
 		const builder = nqlTag`${query}`;
 		result.value = builder.dump();
-		activeTab.value = 'SQL';
+		error.value = null;
+		if (opts.resetTab) activeTab.value = 'SQL';
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
+		result.value = null;
 	}
+}
+
+function compile(): void {
+	performCompile({ resetTab: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -765,12 +803,32 @@ function highlightTS(code: string): string {
 
 const generatedTs = ref('');
 const copied = ref(false);
+const sqlCopied = ref(false);
+const paramsCopied = ref(false);
 
 async function copyTypeScript() {
 	await navigator.clipboard.writeText(generatedTs.value);
 	copied.value = true;
 	setTimeout(() => {
 		copied.value = false;
+	}, 2000);
+}
+
+async function copySQL(): Promise<void> {
+	if (!result.value) return;
+	await navigator.clipboard.writeText(result.value.sql);
+	sqlCopied.value = true;
+	setTimeout(() => {
+		sqlCopied.value = false;
+	}, 2000);
+}
+
+async function copyParams(): Promise<void> {
+	if (!result.value) return;
+	await navigator.clipboard.writeText(formatParams(result.value.params));
+	paramsCopied.value = true;
+	setTimeout(() => {
+		paramsCopied.value = false;
 	}, 2000);
 }
 </script>
@@ -1185,6 +1243,35 @@ async function copyTypeScript() {
   padding: 1.25rem; /* between space-lg 1rem and space-xl 1.5rem */
   background: transparent;
   animation: fadeIn 0.2s ease;
+}
+
+.output-pane {
+  position: relative;
+}
+
+.output-copy-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-sm);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  z-index: 1;
+}
+
+.output-copy-btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.output-copy-btn:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
 }
 
 @keyframes fadeIn {
