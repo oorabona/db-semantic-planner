@@ -266,7 +266,12 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
-import type { CTEDefinition, Dump, PlanDecision, PlanWarning } from '@dbsp/core';
+import type {
+	CTEDefinition,
+	Dump,
+	PlanDecision,
+	PlanWarning,
+} from '@dbsp/core';
 
 // ---------------------------------------------------------------------------
 // Types
