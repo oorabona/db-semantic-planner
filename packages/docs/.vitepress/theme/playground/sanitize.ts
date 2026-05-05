@@ -5,13 +5,26 @@ import {
 } from './types';
 
 /**
- * Identifier regex matches the same shape as @dbsp/adapter-pgsql's
- * validateIdentifier — letters / underscores, then alphanumerics.
+ * Identifier regex INTENTIONALLY STRICTER than @dbsp/adapter-pgsql's
+ * validateIdentifier: rejects `import {
+	MAX_NQL_BYTES,
+	MAX_SCHEMA_BYTES,
+	type HashPayloadV1,
+} from './types';
+
+ and identifiers > 63 chars, neither of
+ * which would be unsafe at the adapter level but both of which are
+ * uncommon enough in legitimate user schemas that we'd rather a
+ * shared-link author hit a "couldn't restore the link" banner than risk
+ * surprise behaviour. The runtime parser remains the authority for
+ * structurally valid schemas — this is a defense-in-depth pre-filter.
  */
 const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+/** PostgreSQL NAMEDATALEN - 1. Identifiers longer than this are rejected. */
+const MAX_IDENTIFIER_LENGTH = 63;
 
 export function validateIdentifier(value: string): boolean {
-	return IDENTIFIER_RE.test(value);
+	return value.length <= MAX_IDENTIFIER_LENGTH && IDENTIFIER_RE.test(value);
 }
 
 export function rejectsOversizeSchema(dsl: string): boolean {

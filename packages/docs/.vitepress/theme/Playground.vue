@@ -154,6 +154,7 @@ let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let hashWriteTimer: ReturnType<typeof setTimeout> | null = null;
 
 let suppressNextNqlWatch = false;
+let isHydrating = false;
 let pendingManualCompile = false;
 let rebuildGeneration = 0;
 let lastEmittedHash: string | null = null;
@@ -645,7 +646,23 @@ function softResetUrl(): void {
 
 async function runInitFlow(): Promise<void> {
 	isInitializing.value = true;
+	isHydrating = true;
+	try {
+		await _runInitFlowInner();
+	} finally {
+		isHydrating = false;
+	}
+}
 
+function applyDefaults(): void {
+	schemaDsl.value = DEFAULT_SCHEMA_DSL;
+	nqlCode.value = ALL_EXAMPLES[0]?.code ?? '';
+	selectedExampleIndex.value = 0;
+	queryMode.value = 'nql';
+	lastEmittedHash = null;
+}
+
+async function _runInitFlowInner(): Promise<void> {
 	if (window.location.hash) {
 		const decoded = await decodeHash(window.location.hash);
 		if (disposed) return;
@@ -655,8 +672,10 @@ async function runInitFlow(): Promise<void> {
 			queryMode.value = decoded.payload.m;
 			lastEmittedHash = window.location.hash;
 		} else if (decoded.reason === 'no-compression-stream') {
+			applyDefaults();
 			showNoCompressionStreamBanner();
 		} else if (decoded.reason === 'version') {
+			applyDefaults();
 			showVersionBanner('version');
 		} else if (
 			decoded.reason === 'decode-error' ||
@@ -664,6 +683,7 @@ async function runInitFlow(): Promise<void> {
 			decoded.reason === 'size' ||
 			decoded.reason === 'identifier'
 		) {
+			applyDefaults();
 			showVersionBanner('unknown');
 		}
 	}
@@ -715,6 +735,7 @@ async function onHashChange() {
 // ---------------------------------------------------------------------------
 
 watch(schemaDsl, (newDsl) => {
+	if (isHydrating) return;
 	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
 	const myTimer: ReturnType<typeof setTimeout> = setTimeout(async () => {
 		await rebuildOrm(newDsl);
@@ -732,6 +753,7 @@ watch(schemaDsl, (newDsl) => {
 });
 
 watch(nqlCode, () => {
+	if (isHydrating) return;
 	if (suppressNextNqlWatch) {
 		suppressNextNqlWatch = false;
 		return;
