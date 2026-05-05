@@ -115,4 +115,43 @@ describe('validatePayload', () => {
 	it('rejects missing fields with reason "shape"', () => {
 		expect(validatePayload({ v: 1, s: 'x' })).toEqual({ ok: false, reason: 'shape' });
 	});
+
+	it('locks current behaviour: column named `table` is silently skipped (regex artifact)', () => {
+		// Known limitation: the column-extraction filter skips `id !== 'table'`
+		// to avoid the column regex misfiring on `table NAME` lines, which has
+		// the side effect of letting a legitimate `table` column escape
+		// identifier validation. Runtime parser remains the authority.
+		const result = validatePayload({
+			...baseValid,
+			s: 'table users {\n  table: string\n  id: uuid pk\n}\n',
+		});
+		expect(result).toEqual({
+			ok: true,
+			payload: {
+				v: 1,
+				s: 'table users {\n  table: string\n  id: uuid pk\n}\n',
+				n: baseValid.n,
+				m: 'nql',
+			},
+		});
+	});
+
+	it('accepts an empty schema string (gate is vacuously satisfied)', () => {
+		const result = validatePayload({ ...baseValid, s: '' });
+		expect(result.ok).toBe(true);
+	});
+
+	it('accepts CRLF line endings in schema', () => {
+		const dslCrlf = 'table users {\r\n  id: uuid pk\r\n  name: string\r\n}\r\n';
+		const result = validatePayload({ ...baseValid, s: dslCrlf });
+		expect(result.ok).toBe(true);
+	});
+
+	it('strips extra fields silently (defence-in-depth)', () => {
+		const result = validatePayload({
+			...baseValid,
+			evil: '<script>alert(1)</script>',
+		});
+		expect(result).toEqual({ ok: true, payload: baseValid });
+	});
 });

@@ -24,9 +24,11 @@ export function rejectsOversizeNql(query: string): boolean {
 
 /**
  * Pull out every identifier mentioned by `table NAME { COL: ... }` lines.
- * NOT a full DSL parser — just enough to flag malformed table/column names
- * before we hand the DSL to the runtime parser. The runtime parser is the
- * authority; this is a fast first-pass for security.
+ * NOT a full DSL parser — catches obviously-broken identifier shapes
+ * (digits-first, hyphens, unicode), but does NOT detect identifiers
+ * concealed inside multi-token lines. The runtime parser remains the
+ * authority for structural validity; this is a fast first-pass
+ * defense-in-depth filter, not a sanitizer.
  */
 function* extractDslIdentifiers(dsl: string): Generator<string> {
 	const tableRe = /^\s*table\s+([^\s{]+)/gm;
@@ -77,6 +79,6 @@ export function validatePayload(input: unknown): ValidationResult {
 
 	return {
 		ok: true,
-		payload: { v: 1, s: obj.s, n: obj.n, m: 'nql' },
+		payload: { v: 1, s: obj.s, n: obj.n, m: obj.m as 'nql' },
 	};
 }
