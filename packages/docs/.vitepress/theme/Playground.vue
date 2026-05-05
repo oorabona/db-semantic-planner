@@ -616,6 +616,8 @@ let nqlTag: NqlTag | null = null;
 
 let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressNextNqlWatch = false;
+let pendingManualCompile = false;
 
 // ---------------------------------------------------------------------------
 // Schema rebuild logic
@@ -747,7 +749,12 @@ watch(schemaDsl, (newDsl) => {
 		// from the NQL watcher and let stale-schema compiles slip through.
 		if (schemaDebounceTimer !== myTimer) return;
 		schemaDebounceTimer = null;
-		if (nqlCode.value.trim()) {
+		// A manual gesture queued during the rebuild gets manual semantics
+		// (resets tab to SQL); otherwise just refresh the current output.
+		if (pendingManualCompile) {
+			pendingManualCompile = false;
+			if (nqlCode.value.trim()) performCompile({ resetTab: true });
+		} else if (nqlCode.value.trim()) {
 			performCompile({ resetTab: false });
 		}
 	}, 500);
@@ -758,6 +765,12 @@ watch(schemaDsl, (newDsl) => {
 // user can stay on Plan tab while iterating. Manual button + Ctrl/Cmd+Enter
 // + example dropdown keep the reset-to-SQL behaviour.
 watch(nqlCode, () => {
+	// loadExample() sets the textarea content programmatically and compiles
+	// synchronously — skip the watcher's debounced compile in that case.
+	if (suppressNextNqlWatch) {
+		suppressNextNqlWatch = false;
+		return;
+	}
 	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
 	nqlDebounceTimer = setTimeout(() => {
 		nqlDebounceTimer = null;
@@ -768,6 +781,14 @@ watch(nqlCode, () => {
 	}, 300);
 });
 
+// Reset the "Copied" feedback when a fresh compile result arrives so the
+// button text doesn't keep claiming the previous SQL/params are still on
+// the clipboard after the displayed output changed.
+watch(result, () => {
+	sqlCopied.value = false;
+	paramsCopied.value = false;
+});
+
 // ---------------------------------------------------------------------------
 // Actions
 // ---------------------------------------------------------------------------
@@ -775,9 +796,11 @@ watch(nqlCode, () => {
 function loadExample(): void {
 	const ex = visibleExamples.value[selectedExampleIndex.value];
 	if (ex) {
+		// Suppress the watcher-scheduled debounce that fires after this returns.
+		// Without this, every example switch triggered an immediate compile
+		// followed by a duplicate compile 300ms later.
+		suppressNextNqlWatch = true;
 		nqlCode.value = ex.code;
-		// Manual semantics: jump to SQL tab on example change. The nqlCode watcher
-		// will also fire 300ms later but that auto-compile is idempotent.
 		compile();
 	}
 }
@@ -816,6 +839,14 @@ function compile(): void {
 		clearTimeout(nqlDebounceTimer);
 		nqlDebounceTimer = null;
 	}
+	// If a schema rebuild is pending or in flight, queue this manual gesture
+	// so the click/shortcut compiles against the new nqlTag (not the stale
+	// one). The schema watcher fires the queued compile once the rebuild
+	// settles.
+	if (schemaDebounceTimer !== null) {
+		pendingManualCompile = true;
+		return;
+	}
 	performCompile({ resetTab: true });
 }
 
@@ -845,13 +876,24 @@ const planCtes = computed<readonly CTEDefinition[]>(
 
 const expandedDecisions = ref<Set<string>>(new Set());
 
-// Use the compiled SQL as the plan signature so we can preserve the user's
-// collapse state across syntactically-equivalent recompiles (every keystroke
-// recompiles) without leaking state across genuinely different plans.
-// Decision `id`s alone won't do — they're per-plan counters that collide
-// across queries — and any structural enumeration we'd hand-roll would drift
-// behind future PlanDecision fields. Identical SQL is the canonical "same
-// plan" oracle.
+// Sign the plan on the structural axes the planner actually decides on so the
+// user's collapse choices survive content-only edits (filter literal, select
+// list, parameter values) but reset cleanly when the plan shape changes.
+// Decision `id`s alone collide across queries (per-plan counters), and SQL
+// strings flip on every literal edit — both miss the right grain.
+function planSignature(decisions: readonly PlanDecision[]): string {
+	return decisions
+		.map((d) => {
+			const c = d.context;
+			const target = c.relation ?? c.target ?? '';
+			const path = c.relationPath ?? c.intentPath ?? '';
+			const alias = c.includeAlias ?? '';
+			const join = d.joinType ?? '';
+			return `${d.type}:${c.sourceTable}:${target}:${path}:${alias}:${join}:${d.choice}`;
+		})
+		.join('|');
+}
+
 let lastPlanSignature = '';
 
 watch(planDecisions, (decisions) => {
@@ -859,7 +901,7 @@ watch(planDecisions, (decisions) => {
 	// state alone avoids a flash-of-default-expanded when the next compile
 	// succeeds.
 	if (decisions.length === 0) return;
-	const signature = result.value?.sql ?? '';
+	const signature = planSignature(decisions);
 	if (signature === lastPlanSignature) return;
 	lastPlanSignature = signature;
 	expandedDecisions.value = new Set(decisions.map((d) => d.id));
