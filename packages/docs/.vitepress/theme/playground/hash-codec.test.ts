@@ -32,7 +32,7 @@ describe('encodeHash + decodeHash roundtrip', () => {
 
 	it('decodes from a hash that includes the leading "#"', async () => {
 		const encoded = await encodeHash(sample);
-		const decoded = await decodeHash('#' + encoded);
+		const decoded = await decodeHash(`#${encoded}`);
 		expect(decoded).toEqual({ ok: true, payload: sample });
 	});
 });
@@ -47,7 +47,7 @@ describe('decodeHash failure modes', () => {
 	});
 
 	it('reports "decode-error" when the base64url is corrupt', async () => {
-		expect(await decodeHash(HASH_PREFIX + 'not-valid-base64-!!!')).toEqual({
+		expect(await decodeHash(`${HASH_PREFIX}not-valid-base64-!!!`)).toEqual({
 			ok: false,
 			reason: 'decode-error',
 		});
@@ -55,7 +55,7 @@ describe('decodeHash failure modes', () => {
 
 	it('reports "decode-error" when the gzipped payload is invalid', async () => {
 		// 'AAAA' decodes to 3 bytes that aren't a valid gzip stream.
-		expect(await decodeHash(HASH_PREFIX + 'AAAA')).toEqual({
+		expect(await decodeHash(`${HASH_PREFIX}AAAA`)).toEqual({
 			ok: false,
 			reason: 'decode-error',
 		});
@@ -67,7 +67,7 @@ describe('decodeHash failure modes', () => {
 		// @ts-expect-error temporary delete to simulate old browser
 		delete (globalThis as { CompressionStream?: unknown }).CompressionStream;
 		try {
-			const encoded = HASH_PREFIX + 'anything';
+			const encoded = `${HASH_PREFIX}anything`;
 			expect(await decodeHash(encoded)).toEqual({
 				ok: false,
 				reason: 'no-compression-stream',

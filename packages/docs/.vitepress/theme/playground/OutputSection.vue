@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, type PropType } from 'vue';
 import type { Dump } from '@dbsp/core';
+import { type PropType, ref, watch } from 'vue';
 
 const props = defineProps({
 	result: { type: Object as PropType<Dump | null>, default: null },
@@ -67,7 +67,7 @@ async function copyParams() {
 
 function formatParams(params: readonly unknown[]): string {
 	if (params.length === 0) return '(no parameters)';
-	return params.map((p, i) => `$${ i + 1 }: ${JSON.stringify(p)}`).join('\n');
+	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
 const SQL_KEYWORDS = new RegExp(
@@ -84,12 +84,14 @@ function highlightSQL(sql: string): string {
 		.replace(/&/g, '&amp;')
 		.replace(/</g, '&lt;')
 		.replace(/>/g, '&gt;');
-	return escaped
-		.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
-		.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
-		.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
-		// biome-ignore lint/suspicious/noControlCharactersInRegex: \x00 sentinel
-		.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>');
+	return (
+		escaped
+			.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
+			.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
+			.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
+			// biome-ignore lint/suspicious/noControlCharactersInRegex: \x00 sentinel
+			.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>')
+	);
 }
 </script>
 

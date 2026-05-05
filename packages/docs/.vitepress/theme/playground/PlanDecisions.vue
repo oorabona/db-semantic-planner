@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, type PropType } from 'vue';
 import type { PlanDecision } from '@dbsp/core';
+import { type PropType, ref, watch } from 'vue';
 
 const props = defineProps({
 	decisions: {

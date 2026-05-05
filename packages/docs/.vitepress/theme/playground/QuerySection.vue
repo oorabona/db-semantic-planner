@@ -5,7 +5,9 @@ defineProps({
 	nqlCode: { type: String, required: true },
 	queryMode: { type: String as PropType<'nql'>, required: true },
 	examples: {
-		type: Array as PropType<readonly { readonly name: string; readonly code: string }[]>,
+		type: Array as PropType<
+			readonly { readonly name: string; readonly code: string }[]
+		>,
 		required: true,
 	},
 	selectedExampleIndex: { type: Number, required: true },

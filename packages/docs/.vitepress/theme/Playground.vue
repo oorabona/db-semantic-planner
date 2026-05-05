@@ -9,19 +9,20 @@
  * If a future requirement embeds the playground in guides, refactor the
  * `let` declarations into a `useState`-style composable.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+
 import type { Dump } from '@dbsp/core';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import ErrorBanner from './playground/ErrorBanner.vue';
-import SchemaSection from './playground/SchemaSection.vue';
-import QuerySection from './playground/QuerySection.vue';
-import PlanSection from './playground/PlanSection.vue';
-import OutputSection from './playground/OutputSection.vue';
 import {
 	decodeHash,
 	encodeHash,
 	isHashLengthOk,
 } from './playground/hash-codec';
+import OutputSection from './playground/OutputSection.vue';
+import PlanSection from './playground/PlanSection.vue';
+import QuerySection from './playground/QuerySection.vue';
+import SchemaSection from './playground/SchemaSection.vue';
 import type { ErrorBannerData } from './playground/types';
 
 // ---------------------------------------------------------------------------
@@ -98,7 +99,11 @@ const DEFAULT_SCHEMA_DSL = [
 	'}',
 ].join('\n');
 
-const ALL_EXAMPLES: ReadonlyArray<{ name: string; code: string; requires: readonly string[] }> = [
+const ALL_EXAMPLES: ReadonlyArray<{
+	name: string;
+	code: string;
+	requires: readonly string[];
+}> = [
 	{
 		name: 'Simple query',
 		code: 'users | where active = true | select id, name',
@@ -136,8 +141,13 @@ const ALL_EXAMPLES: ReadonlyArray<{ name: string; code: string; requires: readon
 	},
 ];
 
-interface NqlBuilder { dump(): Dump }
-type NqlTag = (strings: TemplateStringsArray, ...values: unknown[]) => NqlBuilder;
+interface NqlBuilder {
+	dump(): Dump;
+}
+type NqlTag = (
+	strings: TemplateStringsArray,
+	...values: unknown[]
+) => NqlBuilder;
 
 // ---------------------------------------------------------------------------
 // Module-scope state (single-instance)
@@ -195,10 +205,14 @@ const visibleExamples = computed(() => {
 	for (const m of schemaDsl.value.matchAll(/^\s*table\s+(\w+)/gm)) {
 		tableNames.add(m[1]);
 	}
-	return ALL_EXAMPLES.filter((ex) => ex.requires.every((t) => tableNames.has(t)));
+	return ALL_EXAMPLES.filter((ex) =>
+		ex.requires.every((t) => tableNames.has(t)),
+	);
 });
 
-const ready = computed(() => !disposed && nqlTagReady.value && !schemaError.value);
+const ready = computed(
+	() => !disposed && nqlTagReady.value && !schemaError.value,
+);
 
 // ---------------------------------------------------------------------------
 // Schema DSL parser (migrated verbatim from old Playground.vue)
@@ -540,7 +554,7 @@ async function syncUrlHash() {
 			n: nqlCode.value,
 			m: 'nql',
 		});
-		const nextHash = '#' + encoded;
+		const nextHash = `#${encoded}`;
 		if (!isHashLengthOk(encoded)) {
 			if (errorBanner.value?.title !== 'URL sharing paused') {
 				showOversizeBanner();
@@ -549,7 +563,8 @@ async function syncUrlHash() {
 		}
 		if (nextHash === lastEmittedHash) return;
 		lastEmittedHash = nextHash;
-		const nextUrl = window.location.pathname + window.location.search + nextHash;
+		const nextUrl =
+			window.location.pathname + window.location.search + nextHash;
 		history.replaceState(history.state ?? {}, '', nextUrl);
 	} catch {
 		// Encoding failed (validation rejected). Schema error already surfaces.
@@ -577,12 +592,14 @@ function clearHashFromUrl() {
 function showVersionBanner(reason: 'version' | 'unknown'): void {
 	errorBanner.value = {
 		severity: 'warn',
-		title: reason === 'version'
-			? 'Shared link from a newer version'
-			: "Couldn't restore the shared link",
-		message: reason === 'version'
-			? "This link uses a version of the playground hash format that isn't supported here. Loaded the default state."
-			: 'The URL hash is corrupt, oversized, or contains unsupported content. Loaded the default playground instead.',
+		title:
+			reason === 'version'
+				? 'Shared link from a newer version'
+				: "Couldn't restore the shared link",
+		message:
+			reason === 'version'
+				? "This link uses a version of the playground hash format that isn't supported here. Loaded the default state."
+				: 'The URL hash is corrupt, oversized, or contains unsupported content. Loaded the default playground instead.',
 		actions: [
 			{ label: 'Reset URL', handler: () => softResetUrl() },
 			{ label: 'Got it', handler: () => (errorBanner.value = null) },
@@ -594,7 +611,8 @@ function showNoCompressionStreamBanner(): void {
 	errorBanner.value = {
 		severity: 'warn',
 		title: "Couldn't restore the shared link",
-		message: 'This link needs CompressionStream (Firefox 113+, Safari 16.4+, Chrome 80+). Loaded the default state.',
+		message:
+			'This link needs CompressionStream (Firefox 113+, Safari 16.4+, Chrome 80+). Loaded the default state.',
 		actions: [
 			{ label: 'Reset URL', handler: () => softResetUrl() },
 			{ label: 'Got it', handler: () => (errorBanner.value = null) },
@@ -606,10 +624,9 @@ function showOversizeBanner(): void {
 	errorBanner.value = {
 		severity: 'warn',
 		title: 'URL sharing paused',
-		message: 'The current playground state is too large to share via URL. The page still works locally; URL sharing will resume when state shrinks below the limit.',
-		actions: [
-			{ label: 'Got it', handler: () => (errorBanner.value = null) },
-		],
+		message:
+			'The current playground state is too large to share via URL. The page still works locally; URL sharing will resume when state shrinks below the limit.',
+		actions: [{ label: 'Got it', handler: () => (errorBanner.value = null) }],
 	};
 }
 
@@ -622,7 +639,13 @@ function showFatalBanner(error: unknown): void {
 		message: `A network issue prevented the playground modules from loading. (${detail})`,
 		actions: [
 			{ label: 'Reload', handler: () => window.location.reload() },
-			{ label: 'Reset URL', handler: () => window.location.assign(window.location.pathname + window.location.search) },
+			{
+				label: 'Reset URL',
+				handler: () =>
+					window.location.assign(
+						window.location.pathname + window.location.search,
+					),
+			},
 		],
 	};
 }

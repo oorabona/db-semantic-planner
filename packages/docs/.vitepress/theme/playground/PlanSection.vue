@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, type PropType } from 'vue';
 import type { Dump } from '@dbsp/core';
+import { computed, type PropType } from 'vue';
 import PlanDecisions from './PlanDecisions.vue';
 
 const props = defineProps({
