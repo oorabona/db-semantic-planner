@@ -796,11 +796,14 @@ watch(result, () => {
 function loadExample(): void {
 	const ex = visibleExamples.value[selectedExampleIndex.value];
 	if (ex) {
-		// Suppress the watcher-scheduled debounce that fires after this returns.
-		// Without this, every example switch triggered an immediate compile
-		// followed by a duplicate compile 300ms later.
-		suppressNextNqlWatch = true;
-		nqlCode.value = ex.code;
+		// Only arm the watcher-suppress flag when the assignment will actually
+		// trigger the watcher — Vue refs short-circuit on `===` so re-picking
+		// the currently-active example would leave the flag set and silently
+		// swallow the next real keystroke's auto-compile.
+		if (nqlCode.value !== ex.code) {
+			suppressNextNqlWatch = true;
+			nqlCode.value = ex.code;
+		}
 		compile();
 	}
 }
