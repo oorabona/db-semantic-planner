@@ -65,6 +65,8 @@ temp/
 .claude/
 .claude-recovery.md
 .serena/
+.codex/
+.superpowers/
 
 # Process / backlog artifacts (internal, never committed)
 TODO.md
