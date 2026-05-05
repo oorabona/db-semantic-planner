@@ -86,7 +86,7 @@ function toggleExpand() {
       <span class="schema-label">Schema</span>
       <span class="schema-tables">{{ tableCount }} tables</span>
       <span class="schema-spacer"></span>
-      <span class="schema-actions" @click.stop>
+      <span class="schema-actions" @click.stop @keydown.stop>
         <button
           type="button"
           class="schema-action-btn"

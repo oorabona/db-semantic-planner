@@ -5,19 +5,14 @@ import {
 } from './types';
 
 /**
- * Identifier regex INTENTIONALLY STRICTER than @dbsp/adapter-pgsql's
- * validateIdentifier: rejects `import {
-	MAX_NQL_BYTES,
-	MAX_SCHEMA_BYTES,
-	type HashPayloadV1,
-} from './types';
-
- and identifiers > 63 chars, neither of
- * which would be unsafe at the adapter level but both of which are
- * uncommon enough in legitimate user schemas that we'd rather a
- * shared-link author hit a "couldn't restore the link" banner than risk
- * surprise behaviour. The runtime parser remains the authority for
- * structurally valid schemas — this is a defense-in-depth pre-filter.
+ * Identifier regex INTENTIONALLY STRICTER than the @dbsp/adapter-pgsql
+ * validator: it rejects the dollar sign and any identifier longer than
+ * 63 chars. Neither would be unsafe at the adapter level, but both are
+ * uncommon enough in legitimate user schemas that we prefer a "couldn't
+ * restore the shared link" banner over a surprise behaviour from a
+ * crafted URL hash. The runtime parser remains the authority for
+ * structurally valid schemas — this is a defense-in-depth pre-filter,
+ * not a sanitizer.
  */
 const IDENTIFIER_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 /** PostgreSQL NAMEDATALEN - 1. Identifiers longer than this are rejected. */
