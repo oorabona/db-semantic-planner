@@ -118,8 +118,8 @@
           <div v-if="activeTab === 'SQL'" class="output-pane">
             <button
               type="button"
-              class="copy-btn output-copy-btn"
-              aria-label="Copy SQL to clipboard"
+              class="output-copy-btn"
+              :aria-label="sqlCopied ? 'SQL copied to clipboard' : 'Copy SQL to clipboard'"
               @click="copySQL"
             >
               {{ sqlCopied ? 'Copied' : 'Copy' }}
@@ -129,8 +129,8 @@
           <div v-else-if="activeTab === 'Parameters'" class="output-pane">
             <button
               type="button"
-              class="copy-btn output-copy-btn"
-              aria-label="Copy parameters to clipboard"
+              class="output-copy-btn"
+              :aria-label="paramsCopied ? 'Parameters copied to clipboard' : 'Copy parameters to clipboard'"
               @click="copyParams"
             >
               {{ paramsCopied ? 'Copied' : 'Copy' }}
@@ -138,12 +138,12 @@
             <pre><code>{{ formatParams(result.params) }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'Plan'" class="plan-pane">
-            <div class="plan-meta">
-              <span v-if="planMeta.planningTimeMs !== undefined" class="plan-meta-item">
+            <div v-if="planMeta" class="plan-meta">
+              <span class="plan-meta-item">
                 <span class="plan-meta-label">Planned in</span>
                 <span class="plan-meta-value">{{ planMeta.planningTimeMs.toFixed(2) }}ms</span>
               </span>
-              <span v-if="planMeta.relationsAnalyzed !== undefined" class="plan-meta-item">
+              <span class="plan-meta-item">
                 <span class="plan-meta-label">Relations</span>
                 <span class="plan-meta-value">{{ planMeta.relationsAnalyzed }}</span>
               </span>
@@ -181,6 +181,7 @@
                   type="button"
                   class="plan-decision-header"
                   :aria-expanded="isDecisionExpanded(d.id)"
+                  :aria-controls="`plan-decision-body-${d.id}`"
                   @click="toggleDecision(d.id)"
                 >
                   <span class="plan-decision-type">
@@ -196,7 +197,11 @@
                     aria-hidden="true"
                   >▸</span>
                 </button>
-                <div v-if="isDecisionExpanded(d.id)" class="plan-decision-body">
+                <div
+                  v-show="isDecisionExpanded(d.id)"
+                  :id="`plan-decision-body-${d.id}`"
+                  class="plan-decision-body"
+                >
                   <div class="plan-decision-row">
                     <span class="plan-decision-label">Reasoning</span>
                     <span class="plan-decision-value">{{ d.reasoning }}</span>
@@ -234,54 +239,15 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
+import type { Dump, PlanDecision, PlanWarning } from '@dbsp/core';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface PlanDecision {
-	readonly id: string;
-	readonly type: string;
-	readonly context: {
-		readonly sourceTable: string;
-		readonly target?: string;
-		readonly relation?: string;
-		readonly relationType?: string;
-		readonly intentPath?: string;
-		readonly relationPath?: string;
-		readonly includeAlias?: string;
-		readonly foreignKey?: string | readonly string[];
-		readonly isSelfRef?: boolean;
-	};
-	readonly choice: string;
-	readonly joinType?: 'inner' | 'left';
-	readonly reasoning: string;
-	readonly alternatives: readonly string[];
-}
-
-interface PlanWarning {
-	readonly code: string;
-	readonly message: string;
-	readonly suggestion?: string;
-	readonly relatedDecision?: string;
-}
-
-interface PlanReport {
-	readonly rootTable?: string;
-	readonly decisions: readonly PlanDecision[];
-	readonly warnings: readonly PlanWarning[];
-	readonly metadata?: {
-		readonly planningTimeMs?: number;
-		readonly relationsAnalyzed?: number;
-		readonly isAmbiguous?: boolean;
-	};
-}
-
-interface CompileResult {
-	sql: string;
-	params: readonly unknown[];
-	plan: PlanReport;
-}
+// Re-export the upstream Dump shape locally so call sites read naturally.
+// `plan` is optional in Dump — every access goes through optional chaining.
+type CompileResult = Dump;
 
 interface ParsedColumn {
 	name: string;
@@ -754,9 +720,15 @@ onMounted(async () => {
 
 watch(schemaDsl, (newDsl) => {
 	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
-	schemaDebounceTimer = setTimeout(() => {
-		rebuildOrm(newDsl);
+	schemaDebounceTimer = setTimeout(async () => {
+		await rebuildOrm(newDsl);
 		schemaDebounceTimer = null;
+		// After schema settles, recompile current NQL so the output reflects
+		// the new schema. This also covers the case where the NQL watcher
+		// skipped its compile because schema was being rebuilt.
+		if (nqlCode.value.trim()) {
+			performCompile({ resetTab: false });
+		}
 	}, 500);
 });
 
@@ -766,8 +738,11 @@ watch(schemaDsl, (newDsl) => {
 watch(nqlCode, () => {
 	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
 	nqlDebounceTimer = setTimeout(() => {
-		performCompile({ resetTab: false });
 		nqlDebounceTimer = null;
+		// If a schema rebuild is pending or in flight, defer to it — the
+		// schema watcher will recompile once the new nqlTag is ready.
+		if (schemaDebounceTimer !== null) return;
+		performCompile({ resetTab: false });
 	}, 300);
 });
 
@@ -813,6 +788,12 @@ function performCompile(opts: { resetTab: boolean }): void {
 }
 
 function compile(): void {
+	// Cancel any in-flight auto-compile so loadExample/Ctrl+Enter/button click
+	// don't trigger a redundant performCompile 300ms later.
+	if (nqlDebounceTimer !== null) {
+		clearTimeout(nqlDebounceTimer);
+		nqlDebounceTimer = null;
+	}
 	performCompile({ resetTab: true });
 }
 
@@ -822,7 +803,7 @@ function compile(): void {
 
 function formatParams(params: readonly unknown[]): string {
 	if (params.length === 0) return '(no parameters)';
-	return params.map((p, i) => `${i + 1}: ${JSON.stringify(p)}`).join('\n');
+	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -830,21 +811,30 @@ function formatParams(params: readonly unknown[]): string {
 // ---------------------------------------------------------------------------
 
 const planDecisions = computed<readonly PlanDecision[]>(
-	() => result.value?.plan.decisions ?? [],
+	() => result.value?.plan?.decisions ?? [],
 );
 const planWarnings = computed<readonly PlanWarning[]>(
-	() => result.value?.plan.warnings ?? [],
+	() => result.value?.plan?.warnings ?? [],
 );
-const planMeta = computed<NonNullable<PlanReport['metadata']>>(
-	() => result.value?.plan.metadata ?? {},
-);
+const planMeta = computed(() => result.value?.plan?.metadata);
 
 const expandedDecisions = ref<Set<string>>(new Set());
+let knownDecisionIds = new Set<string>();
 
-// Default-expand every decision when the plan changes so the explainability
-// is visible at first glance. Users can collapse what they don't need.
+// Default-expand newly seen decisions but preserve user collapse choices on
+// repeat compiles — auto-compile fires every keystroke, so wiping state on
+// every recompile would silently undo the user's manual collapses.
 watch(planDecisions, (decisions) => {
-	expandedDecisions.value = new Set(decisions.map((d) => d.id));
+	const currentIds = new Set(decisions.map((d) => d.id));
+	const next = new Set(expandedDecisions.value);
+	for (const id of currentIds) {
+		if (!knownDecisionIds.has(id)) next.add(id);
+	}
+	for (const id of next) {
+		if (!currentIds.has(id)) next.delete(id);
+	}
+	expandedDecisions.value = next;
+	knownDecisionIds = currentIds;
 });
 
 function isDecisionExpanded(id: string): boolean {
@@ -1409,6 +1399,9 @@ async function copyParams(): Promise<void> {
 
 .output-pane {
   position: relative;
+  /* Reserve a top gutter so the absolutely-positioned copy button doesn't
+     overlap the first line of <pre> content. */
+  padding-top: var(--dbsp-space-xl);
 }
 
 .output-copy-btn {
