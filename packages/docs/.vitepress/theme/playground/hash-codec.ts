@@ -19,7 +19,8 @@ export function isHashLengthOk(hash: string): boolean {
 
 function toBase64Url(bytes: Uint8Array): string {
 	let binary = '';
-	for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+	for (let i = 0; i < bytes.length; i++)
+		binary += String.fromCharCode(bytes[i]);
 	return btoa(binary)
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_')
@@ -40,7 +41,9 @@ export async function encodeHash(payload: HashPayloadV1): Promise<string> {
 	// Defensive: refuse to encode anything that wouldn't pass decode validation.
 	const verdict = validatePayload(payload);
 	if (!verdict.ok) {
-		throw new Error(`encodeHash: payload failed validation (${verdict.reason})`);
+		throw new Error(
+			`encodeHash: payload failed validation (${verdict.reason})`,
+		);
 	}
 
 	const json = JSON.stringify(payload);

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-	rejectsOversizeSchema,
 	rejectsOversizeNql,
+	rejectsOversizeSchema,
 	validateIdentifier,
 	validatePayload,
 } from './sanitize';
@@ -58,11 +58,17 @@ describe('validatePayload', () => {
 	};
 
 	it('accepts a well-formed v1 payload', () => {
-		expect(validatePayload(baseValid)).toEqual({ ok: true, payload: baseValid });
+		expect(validatePayload(baseValid)).toEqual({
+			ok: true,
+			payload: baseValid,
+		});
 	});
 
 	it('rejects unknown version with reason "version"', () => {
-		const result = validatePayload({ ...baseValid, v: 99 } as unknown as HashPayloadV1);
+		const result = validatePayload({
+			...baseValid,
+			v: 99,
+		} as unknown as HashPayloadV1);
 		expect(result).toEqual({ ok: false, reason: 'version' });
 	});
 
@@ -113,7 +119,10 @@ describe('validatePayload', () => {
 	});
 
 	it('rejects missing fields with reason "shape"', () => {
-		expect(validatePayload({ v: 1, s: 'x' })).toEqual({ ok: false, reason: 'shape' });
+		expect(validatePayload({ v: 1, s: 'x' })).toEqual({
+			ok: false,
+			reason: 'shape',
+		});
 	});
 
 	it('locks current behaviour: column named `table` is silently skipped (regex artifact)', () => {

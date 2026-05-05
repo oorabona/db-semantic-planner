@@ -1,8 +1,4 @@
-import {
-	MAX_NQL_BYTES,
-	MAX_SCHEMA_BYTES,
-	type HashPayloadV1,
-} from './types';
+import { type HashPayloadV1, MAX_NQL_BYTES, MAX_SCHEMA_BYTES } from './types';
 
 /**
  * Identifier regex INTENTIONALLY STRICTER than the @dbsp/adapter-pgsql

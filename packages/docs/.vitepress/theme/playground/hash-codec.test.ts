@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
-	HASH_PREFIX,
-	HASH_VERSION,
-	MAX_HASH_LENGTH,
 	decodeHash,
 	encodeHash,
+	HASH_PREFIX,
+	HASH_VERSION,
 	isHashLengthOk,
+	MAX_HASH_LENGTH,
 } from './hash-codec';
 import type { HashPayloadV1 } from './types';
 
@@ -40,7 +40,10 @@ describe('encodeHash + decodeHash roundtrip', () => {
 describe('decodeHash failure modes', () => {
 	it('reports "no-hash" when input is empty / has no h= prefix', async () => {
 		expect(await decodeHash('')).toEqual({ ok: false, reason: 'no-hash' });
-		expect(await decodeHash('foo=bar')).toEqual({ ok: false, reason: 'no-hash' });
+		expect(await decodeHash('foo=bar')).toEqual({
+			ok: false,
+			reason: 'no-hash',
+		});
 	});
 
 	it('reports "decode-error" when the base64url is corrupt', async () => {
@@ -70,7 +73,8 @@ describe('decodeHash failure modes', () => {
 				reason: 'no-compression-stream',
 			});
 		} finally {
-			(globalThis as { CompressionStream?: unknown }).CompressionStream = original;
+			(globalThis as { CompressionStream?: unknown }).CompressionStream =
+				original;
 		}
 	});
 });
