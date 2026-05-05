@@ -170,8 +170,8 @@
             <div v-if="planCtes.length > 0" class="plan-ctes">
               <div class="plan-section-title">CTEs ({{ planCtes.length }})</div>
               <div
-                v-for="(cte, i) in planCtes"
-                :key="i"
+                v-for="cte in planCtes"
+                :key="cte.name"
                 class="plan-cte-card"
               >
                 <div class="plan-cte-header">
@@ -845,20 +845,13 @@ const planCtes = computed<readonly CTEDefinition[]>(
 
 const expandedDecisions = ref<Set<string>>(new Set());
 
-// Build a structural signature so we can preserve the user's collapse state
-// across syntactically equivalent recompiles (every keystroke recompiles)
-// without leaking state across genuinely different plans. Decision `id`s are
-// per-plan counters (`jointype-001`, `includestrategy-001`, …) so they
-// collide across queries — signing on type/source/target/choice avoids that.
-function planSignature(decisions: readonly PlanDecision[]): string {
-	return decisions
-		.map((d) => {
-			const target = d.context.relation ?? d.context.target ?? '';
-			return `${d.type}:${d.context.sourceTable}:${target}:${d.choice}`;
-		})
-		.join('|');
-}
-
+// Use the compiled SQL as the plan signature so we can preserve the user's
+// collapse state across syntactically-equivalent recompiles (every keystroke
+// recompiles) without leaking state across genuinely different plans.
+// Decision `id`s alone won't do — they're per-plan counters that collide
+// across queries — and any structural enumeration we'd hand-roll would drift
+// behind future PlanDecision fields. Identical SQL is the canonical "same
+// plan" oracle.
 let lastPlanSignature = '';
 
 watch(planDecisions, (decisions) => {
@@ -866,7 +859,7 @@ watch(planDecisions, (decisions) => {
 	// state alone avoids a flash-of-default-expanded when the next compile
 	// succeeds.
 	if (decisions.length === 0) return;
-	const signature = planSignature(decisions);
+	const signature = result.value?.sql ?? '';
 	if (signature === lastPlanSignature) return;
 	lastPlanSignature = signature;
 	expandedDecisions.value = new Set(decisions.map((d) => d.id));
