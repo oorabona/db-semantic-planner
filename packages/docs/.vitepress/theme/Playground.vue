@@ -1045,13 +1045,27 @@ const copied = ref(false);
 const sqlCopied = ref(false);
 const paramsCopied = ref(false);
 
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
+
 async function copyTypeScript() {
 	await navigator.clipboard.writeText(generatedTs.value);
 	copied.value = true;
-	setTimeout(() => {
+	if (copiedTimer !== null) clearTimeout(copiedTimer);
+	copiedTimer = setTimeout(() => {
 		copied.value = false;
+		copiedTimer = null;
 	}, 2000);
 }
+
+// Reset the "Copy TypeScript" feedback when the schema edit produces a new
+// generated TS source — keeps the parallel with the SQL/params buttons.
+watch(generatedTs, () => {
+	if (copiedTimer !== null) {
+		clearTimeout(copiedTimer);
+		copiedTimer = null;
+	}
+	copied.value = false;
+});
 
 let sqlCopiedTimer: ReturnType<typeof setTimeout> | null = null;
 let paramsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
