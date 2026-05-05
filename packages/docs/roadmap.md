@@ -10,21 +10,21 @@ db-semantic-planner's core is **adapter-agnostic** — the schema DSL, query bui
 
 | Feature | Status |
 |---------|--------|
-| Core: schema DSL, planner, query builders, NQL | Stable |
-| PostgreSQL adapter (native pg Pool) | Stable |
-| DDL: introspection, comparison, migrations | Stable |
-| CLI: generate, verify, migrate, REPL | Stable |
-| Extensions: pgvector, ParadeDB BM25 | Stable |
-| MCP Server for AI assistants | Stable |
+| Core: schema DSL, planner, query builders, NQL | <span class="status-badge status-stable">Stable</span> |
+| PostgreSQL adapter (native pg Pool) | <span class="status-badge status-stable">Stable</span> |
+| DDL: introspection, comparison, migrations | <span class="status-badge status-stable">Stable</span> |
+| CLI: generate, verify, migrate, REPL | <span class="status-badge status-stable">Stable</span> |
+| Extensions: pgvector, ParadeDB BM25 | <span class="status-badge status-stable">Stable</span> |
+| MCP Server for AI assistants | <span class="status-badge status-stable">Stable</span> |
 
 ## Planned
 
 | Adapter | Use Case | Status |
 |---------|----------|--------|
-| **SQLite** | Embedded, mobile, edge, testing | Planned |
-| **DuckDB** | Analytics, OLAP, data science | Planned |
-| **MySQL** | Legacy systems, WordPress ecosystem | Planned |
-| **LibSQL** (Turso) | Edge-distributed SQLite | Under consideration |
+| **SQLite** | Embedded, mobile, edge, testing | <span class="status-badge status-planned">Planned</span> |
+| **DuckDB** | Analytics, OLAP, data science | <span class="status-badge status-planned">Planned</span> |
+| **MySQL** | Legacy systems, WordPress ecosystem | <span class="status-badge status-planned">Planned</span> |
+| **LibSQL** (Turso) | Edge-distributed SQLite | <span class="status-badge status-considering">Under consideration</span> |
 
 ## How adapters work
 

@@ -115,9 +115,145 @@
         </div>
 
         <div v-else-if="result" class="output-content">
-          <pre v-if="activeTab === 'SQL'"><code v-html="highlightSQL(result.sql)"></code></pre>
-          <pre v-else-if="activeTab === 'Parameters'"><code>{{ formatParams(result.params) }}</code></pre>
-          <pre v-else-if="activeTab === 'Plan'"><code>{{ formatPlan(result.plan) }}</code></pre>
+          <div v-if="activeTab === 'SQL'" class="output-pane">
+            <button
+              type="button"
+              class="output-copy-btn"
+              :aria-label="sqlCopied ? 'SQL copied to clipboard' : 'Copy SQL to clipboard'"
+              @click="copySQL"
+            >
+              {{ sqlCopied ? 'Copied' : 'Copy' }}
+            </button>
+            <pre><code v-html="highlightSQL(result.sql)"></code></pre>
+          </div>
+          <div v-else-if="activeTab === 'Parameters'" class="output-pane">
+            <button
+              type="button"
+              class="output-copy-btn"
+              :aria-label="paramsCopied ? 'Parameters copied to clipboard' : 'Copy parameters to clipboard'"
+              @click="copyParams"
+            >
+              {{ paramsCopied ? 'Copied' : 'Copy' }}
+            </button>
+            <pre><code>{{ formatParams(result.params) }}</code></pre>
+          </div>
+          <div v-else-if="activeTab === 'Plan'" class="plan-pane">
+            <div v-if="planMeta || planRootTable" class="plan-meta">
+              <span v-if="planRootTable" class="plan-meta-item">
+                <span class="plan-meta-label">Root</span>
+                <span class="plan-meta-value">{{ planRootTable }}</span>
+              </span>
+              <span v-if="planMeta" class="plan-meta-item">
+                <span class="plan-meta-label">Planned in</span>
+                <span class="plan-meta-value">{{ planMeta.planningTimeMs.toFixed(2) }}ms</span>
+              </span>
+              <span v-if="planMeta" class="plan-meta-item">
+                <span class="plan-meta-label">Relations</span>
+                <span class="plan-meta-value">{{ planMeta.relationsAnalyzed }}</span>
+              </span>
+              <span v-if="planMeta?.isAmbiguous" class="plan-meta-item plan-meta-warn">
+                Ambiguous plan
+              </span>
+            </div>
+
+            <div v-if="planWarnings.length > 0" class="plan-warnings">
+              <div class="plan-section-title">Warnings ({{ planWarnings.length }})</div>
+              <div
+                v-for="(w, i) in planWarnings"
+                :key="i"
+                class="plan-warning-card"
+              >
+                <div class="plan-warning-code">{{ w.code }}</div>
+                <div class="plan-warning-message">{{ w.message }}</div>
+                <div v-if="w.suggestion" class="plan-warning-suggestion">
+                  → {{ w.suggestion }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="planCtes.length > 0" class="plan-ctes">
+              <div class="plan-section-title">CTEs ({{ planCtes.length }})</div>
+              <div
+                v-for="cte in planCtes"
+                :key="cte.name"
+                class="plan-cte-card"
+              >
+                <div class="plan-cte-header">
+                  <span class="plan-cte-name">{{ cte.name }}</span>
+                  <span v-if="cte.recursive" class="plan-cte-recursive">
+                    WITH RECURSIVE
+                  </span>
+                  <span
+                    v-if="cte.referencedBy.length > 0"
+                    class="plan-cte-refs"
+                  >
+                    referenced by {{ cte.referencedBy.join(', ') }}
+                  </span>
+                </div>
+                <div class="plan-cte-purpose">{{ cte.purpose }}</div>
+              </div>
+            </div>
+
+            <div v-if="planDecisions.length > 0" class="plan-decisions">
+              <div class="plan-section-title">
+                Decisions ({{ planDecisions.length }})
+              </div>
+              <div
+                v-for="d in planDecisions"
+                :key="d.id"
+                class="plan-decision-card"
+                :class="`plan-decision-card--${d.type}`"
+              >
+                <button
+                  type="button"
+                  class="plan-decision-header"
+                  :aria-expanded="isDecisionExpanded(d.id)"
+                  :aria-controls="`plan-decision-body-${d.id}`"
+                  @click="toggleDecision(d.id)"
+                >
+                  <span class="plan-decision-type">
+                    {{ formatDecisionType(d.type) }}
+                  </span>
+                  <span class="plan-decision-context">
+                    {{ formatDecisionContext(d.context) }}
+                  </span>
+                  <span class="plan-decision-choice">{{ d.choice }}</span>
+                  <span
+                    class="plan-decision-chevron"
+                    :class="{ open: isDecisionExpanded(d.id) }"
+                    aria-hidden="true"
+                  >▸</span>
+                </button>
+                <div
+                  v-show="isDecisionExpanded(d.id)"
+                  :id="`plan-decision-body-${d.id}`"
+                  class="plan-decision-body"
+                >
+                  <div class="plan-decision-row">
+                    <span class="plan-decision-label">Reasoning</span>
+                    <span class="plan-decision-value">{{ d.reasoning }}</span>
+                  </div>
+                  <div v-if="d.alternatives.length > 0" class="plan-decision-row">
+                    <span class="plan-decision-label">Alternatives considered</span>
+                    <ul class="plan-decision-alternatives">
+                      <li v-for="(alt, j) in d.alternatives" :key="j">{{ alt }}</li>
+                    </ul>
+                  </div>
+                  <div v-if="d.joinType" class="plan-decision-row">
+                    <span class="plan-decision-label">Join type</span>
+                    <span class="plan-decision-value">{{ d.joinType }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else-if="planWarnings.length === 0"
+              class="plan-empty"
+            >
+              <span>No planning decisions for this query.</span>
+            </div>
+          </div>
         </div>
 
         <div v-else class="output-placeholder">
@@ -129,17 +265,21 @@
 </template>
 
 <script setup lang="ts">
+import type {
+	CTEDefinition,
+	Dump,
+	PlanDecision,
+	PlanWarning,
+} from '@dbsp/core';
 import { computed, onMounted, ref, watch } from 'vue';
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-interface CompileResult {
-	sql: string;
-	params: readonly unknown[];
-	plan: unknown;
-}
+// Re-export the upstream Dump shape locally so call sites read naturally.
+// `plan` is optional in Dump — every access goes through optional chaining.
+type CompileResult = Dump;
 
 interface ParsedColumn {
 	name: string;
@@ -487,6 +627,9 @@ let mermaidInstance: any = null;
 let nqlTag: NqlTag | null = null;
 
 let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let suppressNextNqlWatch = false;
+let pendingManualCompile = false;
 
 // ---------------------------------------------------------------------------
 // Schema rebuild logic
@@ -523,20 +666,26 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 	return schema(tableDefs);
 }
 
-async function renderDiagram(parsed: ParsedSchema): Promise<void> {
+let rebuildGeneration = 0;
+
+async function renderDiagram(parsed: ParsedSchema, gen: number): Promise<void> {
 	if (!mermaidInstance) return;
 	try {
 		const code = buildMermaidCode(parsed);
 		const id = `er-${Date.now()}`;
 		const { svg } = await mermaidInstance.render(id, code);
+		// A newer rebuild has started; bail before overwriting the latest svg.
+		if (gen !== rebuildGeneration) return;
 		mermaidSvg.value = svg;
 	} catch {
+		if (gen !== rebuildGeneration) return;
 		mermaidSvg.value = '';
 	}
 }
 
 async function rebuildOrm(dsl: string): Promise<void> {
 	if (!coreModule || !adapterModule) return;
+	const myGen = ++rebuildGeneration;
 
 	schemaError.value = null;
 
@@ -574,7 +723,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		nqlTag = null;
 	}
 
-	await renderDiagram(parsed);
+	await renderDiagram(parsed, myGen);
 }
 
 // ---------------------------------------------------------------------------
@@ -611,10 +760,61 @@ onMounted(async () => {
 
 watch(schemaDsl, (newDsl) => {
 	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
-	schemaDebounceTimer = setTimeout(() => {
-		rebuildOrm(newDsl);
+	const myTimer: ReturnType<typeof setTimeout> = setTimeout(async () => {
+		await rebuildOrm(newDsl);
+		// If a newer rebuild was scheduled while we were awaiting, leave the
+		// state to that callback — clearing here would mask the pending timer
+		// from the NQL watcher and let stale-schema compiles slip through.
+		if (schemaDebounceTimer !== myTimer) return;
 		schemaDebounceTimer = null;
+		// A manual gesture queued during the rebuild gets manual semantics
+		// (resets tab to SQL) and runs unconditionally so the empty-query
+		// error path still fires — silently dropping the click would leave
+		// stale output on screen with no feedback. Auto path stays gated.
+		if (pendingManualCompile) {
+			pendingManualCompile = false;
+			performCompile({ resetTab: true });
+		} else if (nqlCode.value.trim()) {
+			performCompile({ resetTab: false });
+		}
 	}, 500);
+	schemaDebounceTimer = myTimer;
+});
+
+// Auto-compile on NQL textarea change. Preserves activeTab (no reset) so the
+// user can stay on Plan tab while iterating. Manual button + Ctrl/Cmd+Enter
+// + example dropdown keep the reset-to-SQL behaviour.
+watch(nqlCode, () => {
+	// loadExample() sets the textarea content programmatically and compiles
+	// synchronously — skip the watcher's debounced compile in that case.
+	if (suppressNextNqlWatch) {
+		suppressNextNqlWatch = false;
+		return;
+	}
+	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
+	nqlDebounceTimer = setTimeout(() => {
+		nqlDebounceTimer = null;
+		// If a schema rebuild is pending or in flight, defer to it — the
+		// schema watcher will recompile once the new nqlTag is ready.
+		if (schemaDebounceTimer !== null) return;
+		performCompile({ resetTab: false });
+	}, 300);
+});
+
+// Reset the "Copied" feedback when a fresh compile result arrives so the
+// button text doesn't keep claiming the previous SQL/params are still on
+// the clipboard after the displayed output changed.
+watch(result, () => {
+	if (sqlCopiedTimer !== null) {
+		clearTimeout(sqlCopiedTimer);
+		sqlCopiedTimer = null;
+	}
+	if (paramsCopiedTimer !== null) {
+		clearTimeout(paramsCopiedTimer);
+		paramsCopiedTimer = null;
+	}
+	sqlCopied.value = false;
+	paramsCopied.value = false;
 });
 
 // ---------------------------------------------------------------------------
@@ -624,36 +824,61 @@ watch(schemaDsl, (newDsl) => {
 function loadExample(): void {
 	const ex = visibleExamples.value[selectedExampleIndex.value];
 	if (ex) {
-		nqlCode.value = ex.code;
-		result.value = null;
-		error.value = null;
+		// Only arm the watcher-suppress flag when the assignment will actually
+		// trigger the watcher — Vue refs short-circuit on `===` so re-picking
+		// the currently-active example would leave the flag set and silently
+		// swallow the next real keystroke's auto-compile.
+		if (nqlCode.value !== ex.code) {
+			suppressNextNqlWatch = true;
+			nqlCode.value = ex.code;
+		}
+		compile();
 	}
 }
 
-function compile(): void {
-	error.value = null;
-	result.value = null;
-
+function performCompile(opts: { resetTab: boolean }): void {
 	if (!nqlTag) {
 		error.value = schemaError.value
 			? `Schema error: ${schemaError.value}`
 			: 'Compiler not ready — please wait a moment and try again.';
+		result.value = null;
 		return;
 	}
 
 	const query = nqlCode.value.trim();
 	if (!query) {
 		error.value = 'Please enter an NQL query.';
+		result.value = null;
 		return;
 	}
 
 	try {
 		const builder = nqlTag`${query}`;
 		result.value = builder.dump();
-		activeTab.value = 'SQL';
+		error.value = null;
+		if (opts.resetTab) activeTab.value = 'SQL';
 	} catch (e) {
 		error.value = e instanceof Error ? e.message : String(e);
+		result.value = null;
 	}
+}
+
+function compile(): void {
+	// Cancel any in-flight auto-compile so loadExample/Ctrl+Enter/button click
+	// don't trigger a redundant performCompile 300ms later.
+	if (nqlDebounceTimer !== null) {
+		clearTimeout(nqlDebounceTimer);
+		nqlDebounceTimer = null;
+	}
+	// If a schema rebuild is pending or in flight, queue this manual gesture
+	// so the click/shortcut compiles against the new nqlTag (not the stale
+	// one). The schema watcher fires the queued compile once the rebuild
+	// settles.
+	if (schemaDebounceTimer !== null) {
+		pendingManualCompile = true;
+		return;
+	}
+	performCompile({ resetTab: true });
 }
 
 // ---------------------------------------------------------------------------
@@ -665,8 +890,98 @@ function formatParams(params: readonly unknown[]): string {
 	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
-function formatPlan(plan: unknown): string {
-	return JSON.stringify(plan, null, 2);
+// ---------------------------------------------------------------------------
+// Plan tab — structured rendering
+// ---------------------------------------------------------------------------
+
+const planDecisions = computed<readonly PlanDecision[]>(
+	() => result.value?.plan?.decisions ?? [],
+);
+const planWarnings = computed<readonly PlanWarning[]>(
+	() => result.value?.plan?.warnings ?? [],
+);
+const planMeta = computed(() => result.value?.plan?.metadata);
+const planRootTable = computed(() => result.value?.plan?.rootTable);
+const planCtes = computed<readonly CTEDefinition[]>(
+	() => result.value?.plan?.ctes ?? [],
+);
+
+const expandedDecisions = ref<Set<string>>(new Set());
+
+// Track each decision's structural signature by id so we can preserve the
+// user's collapse state across content-only edits (filter literal, select
+// list, param values) and across additive plan changes (one new decision)
+// while still resetting cleanly when the planner reuses an id for a
+// structurally-different decision (per-plan counters collide across queries).
+function decisionSignature(d: PlanDecision): string {
+	const c = d.context;
+	const target = c.relation ?? c.target ?? '';
+	const path = c.relationPath ?? c.intentPath ?? '';
+	const alias = c.includeAlias ?? '';
+	const join = d.joinType ?? '';
+	return `${d.type}:${c.sourceTable}:${target}:${path}:${alias}:${join}:${d.choice}`;
+}
+
+let lastDecisionSignatures = new Map<string, string>();
+
+watch(planDecisions, (decisions) => {
+	// Empty decisions are usually transient (compile error in flight); leaving
+	// state alone avoids a flash-of-default-expanded when the next compile
+	// succeeds.
+	if (decisions.length === 0) return;
+
+	const currentSigs = new Map<string, string>();
+	for (const d of decisions) {
+		currentSigs.set(d.id, decisionSignature(d));
+	}
+
+	// No structural change at all? Nothing to update.
+	let unchanged = currentSigs.size === lastDecisionSignatures.size;
+	if (unchanged) {
+		for (const [id, sig] of currentSigs) {
+			if (lastDecisionSignatures.get(id) !== sig) {
+				unchanged = false;
+				break;
+			}
+		}
+	}
+	if (unchanged) return;
+
+	// Keep the collapse choice for ids whose semantic signature still matches;
+	// default-expand ids that are new OR whose id was reused with different
+	// semantics (cross-query reuse of per-plan counters).
+	const next = new Set<string>();
+	for (const [id, sig] of currentSigs) {
+		if (lastDecisionSignatures.get(id) === sig) {
+			if (expandedDecisions.value.has(id)) next.add(id);
+		} else {
+			next.add(id);
+		}
+	}
+	expandedDecisions.value = next;
+	lastDecisionSignatures = currentSigs;
+});
+
+function isDecisionExpanded(id: string): boolean {
+	return expandedDecisions.value.has(id);
+}
+
+function toggleDecision(id: string): void {
+	const next = new Set(expandedDecisions.value);
+	if (next.has(id)) next.delete(id);
+	else next.add(id);
+	expandedDecisions.value = next;
+}
+
+function formatDecisionType(type: string): string {
+	return type.replace(/-/g, ' ').toUpperCase();
+}
+
+function formatDecisionContext(ctx: PlanDecision['context']): string {
+	const parts: string[] = [ctx.sourceTable];
+	const target = ctx.relation ?? ctx.target;
+	if (target) parts.push(`→ ${target}`);
+	return parts.join(' ');
 }
 
 // SQL_KEYWORDS regex — kept as a variable to avoid repeating the long pattern
@@ -765,12 +1080,55 @@ function highlightTS(code: string): string {
 
 const generatedTs = ref('');
 const copied = ref(false);
+const sqlCopied = ref(false);
+const paramsCopied = ref(false);
+
+let copiedTimer: ReturnType<typeof setTimeout> | null = null;
 
 async function copyTypeScript() {
 	await navigator.clipboard.writeText(generatedTs.value);
 	copied.value = true;
-	setTimeout(() => {
+	if (copiedTimer !== null) clearTimeout(copiedTimer);
+	copiedTimer = setTimeout(() => {
 		copied.value = false;
+		copiedTimer = null;
+	}, 2000);
+}
+
+// Reset the "Copy TypeScript" feedback when the schema edit produces a new
+// generated TS source — keeps the parallel with the SQL/params buttons.
+watch(generatedTs, () => {
+	if (copiedTimer !== null) {
+		clearTimeout(copiedTimer);
+		copiedTimer = null;
+	}
+	copied.value = false;
+});
+
+let sqlCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+let paramsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+async function copySQL(): Promise<void> {
+	if (!result.value) return;
+	await navigator.clipboard.writeText(result.value.sql);
+	sqlCopied.value = true;
+	// Cancel any pending reset so two quick clicks don't end the feedback
+	// window early on the most recent click.
+	if (sqlCopiedTimer !== null) clearTimeout(sqlCopiedTimer);
+	sqlCopiedTimer = setTimeout(() => {
+		sqlCopied.value = false;
+		sqlCopiedTimer = null;
+	}, 2000);
+}
+
+async function copyParams(): Promise<void> {
+	if (!result.value) return;
+	await navigator.clipboard.writeText(formatParams(result.value.params));
+	paramsCopied.value = true;
+	if (paramsCopiedTimer !== null) clearTimeout(paramsCopiedTimer);
+	paramsCopiedTimer = setTimeout(() => {
+		paramsCopied.value = false;
+		paramsCopiedTimer = null;
 	}, 2000);
 }
 </script>
@@ -1185,6 +1543,292 @@ async function copyTypeScript() {
   padding: 1.25rem; /* between space-lg 1rem and space-xl 1.5rem */
   background: transparent;
   animation: fadeIn 0.2s ease;
+}
+
+.output-pane {
+  position: relative;
+  /* Reserve a top gutter so the absolutely-positioned copy button doesn't
+     overlap the first line of <pre> content. */
+  padding-top: var(--dbsp-space-xl);
+}
+
+.output-copy-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-sm);
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  transition: all 0.15s;
+  z-index: 1;
+}
+
+.output-copy-btn:hover {
+  border-color: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-1);
+}
+
+.output-copy-btn:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: 2px;
+}
+
+/* ============================================================
+   Plan tab — structured decision cards
+   ============================================================ */
+.plan-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-lg);
+}
+
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dbsp-space-md);
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-md);
+  font-size: var(--dbsp-text-sm);
+}
+
+.plan-meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--dbsp-space-xs);
+}
+
+.plan-meta-label {
+  color: var(--vp-c-text-3);
+}
+
+.plan-meta-value {
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-weight: 600;
+}
+
+.plan-meta-warn {
+  color: var(--dbsp-c-warning);
+  font-weight: 600;
+}
+
+.plan-section-title {
+  font-size: 0.72rem; /* between text-xs 0.75rem and the inline 0.7rem chip */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-text-2);
+  margin-bottom: var(--dbsp-space-sm);
+}
+
+.plan-warnings,
+.plan-ctes,
+.plan-decisions {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-warnings > .plan-warning-card + .plan-warning-card,
+.plan-ctes > .plan-cte-card + .plan-cte-card,
+.plan-decisions > .plan-decision-card + .plan-decision-card {
+  margin-top: var(--dbsp-space-sm);
+}
+
+.plan-cte-card {
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--dbsp-c-cyan);
+  border-radius: var(--dbsp-radius-sm);
+  font-size: var(--dbsp-text-sm);
+}
+
+.plan-cte-header {
+  display: flex;
+  align-items: baseline;
+  gap: var(--dbsp-space-md);
+  flex-wrap: wrap;
+}
+
+.plan-cte-name {
+  font-family: var(--vp-font-family-mono);
+  font-weight: 700;
+  color: var(--dbsp-c-cyan);
+}
+
+.plan-cte-recursive {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.7rem; /* between text-xs 0.75rem and decoration baseline */
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--dbsp-radius-sm);
+  background: color-mix(in srgb, var(--dbsp-c-warning) 12%, transparent);
+  color: var(--dbsp-c-warning);
+}
+
+.plan-cte-refs {
+  font-size: 0.72rem;
+  color: var(--vp-c-text-3);
+}
+
+.plan-cte-purpose {
+  margin-top: var(--dbsp-space-xs);
+  color: var(--vp-c-text-2);
+  line-height: 1.5;
+}
+
+.plan-warning-card {
+  padding: var(--dbsp-space-md);
+  background: var(--vp-c-bg-soft);
+  border-left: 3px solid var(--dbsp-c-warning);
+  border-radius: var(--dbsp-radius-sm);
+  font-size: var(--dbsp-text-sm);
+  line-height: 1.5;
+}
+
+.plan-warning-code {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dbsp-c-warning);
+  margin-bottom: var(--dbsp-space-xs);
+}
+
+.plan-warning-message {
+  color: var(--vp-c-text-1);
+}
+
+.plan-warning-suggestion {
+  margin-top: var(--dbsp-space-xs);
+  color: var(--vp-c-text-2);
+  font-style: italic;
+}
+
+.plan-decision-card {
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--dbsp-c-cyan);
+  border-radius: var(--dbsp-radius-sm);
+  background: var(--vp-c-bg);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.plan-decision-card--ambiguity {
+  border-left-color: var(--dbsp-c-warning);
+}
+
+.plan-decision-header {
+  display: flex;
+  align-items: center;
+  gap: var(--dbsp-space-md);
+  width: 100%;
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--dbsp-text-sm);
+  color: inherit;
+  transition: background 0.15s;
+}
+
+.plan-decision-header:hover {
+  background: var(--vp-c-bg-soft);
+}
+
+.plan-decision-header:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: -2px;
+}
+
+.plan-decision-type {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.7rem; /* between text-xs 0.75rem and chip baseline */
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dbsp-c-cyan);
+  flex-shrink: 0;
+}
+
+.plan-decision-card--ambiguity .plan-decision-type {
+  color: var(--dbsp-c-warning);
+}
+
+.plan-decision-context {
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-text-2);
+  flex-shrink: 0;
+}
+
+.plan-decision-choice {
+  flex: 1;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.plan-decision-chevron {
+  color: var(--vp-c-text-3);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+.plan-decision-chevron.open {
+  transform: rotate(90deg);
+}
+
+.plan-decision-body {
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md) var(--dbsp-space-md);
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: var(--dbsp-text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-sm);
+}
+
+.plan-decision-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-xs);
+}
+
+.plan-decision-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-text-3);
+}
+
+.plan-decision-value {
+  color: var(--vp-c-text-1);
+  line-height: 1.5;
+}
+
+.plan-decision-alternatives {
+  margin: 0;
+  padding-left: var(--dbsp-space-lg);
+  color: var(--vp-c-text-2);
+}
+
+.plan-decision-alternatives li {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.82rem; /* between text-sm 0.875rem and 0.75rem for compact list */
+  line-height: 1.6;
+}
+
+.plan-empty {
+  padding: var(--dbsp-space-xl);
+  text-align: center;
+  color: var(--vp-c-text-3);
+  font-size: var(--dbsp-text-sm);
 }
 
 @keyframes fadeIn {

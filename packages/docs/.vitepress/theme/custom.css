@@ -84,3 +84,54 @@
 		box-shadow 0.3s ease,
 		transform 0.3s ease;
 }
+
+/* Status badges — used in roadmap.md to colour-code feature/adapter availability.
+   Tokens come from design-tokens.css (semantic accents), with mode-aware tints
+   handled by the .dark overrides for legibility on dark backgrounds. */
+.status-badge {
+	display: inline-block;
+	padding: 0.15rem 0.6rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	border-radius: var(--dbsp-radius-pill);
+	border: 1px solid transparent;
+	white-space: nowrap;
+	line-height: 1.4;
+}
+
+/* Tints are color-mixed off the same --dbsp-c-* tokens used for text, so the
+   palette stays in sync with design-tokens.css across light/dark modes. Dark
+   mode uses slightly higher percentages to keep contrast on dark backgrounds. */
+.status-stable {
+	color: var(--dbsp-c-success);
+	background: color-mix(in srgb, var(--dbsp-c-success) 10%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-success) 25%, transparent);
+}
+
+.dark .status-stable {
+	background: color-mix(in srgb, var(--dbsp-c-success) 12%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-success) 30%, transparent);
+}
+
+.status-planned {
+	color: var(--dbsp-c-cyan);
+	background: color-mix(in srgb, var(--dbsp-c-cyan) 10%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-cyan) 25%, transparent);
+}
+
+.dark .status-planned {
+	background: color-mix(in srgb, var(--dbsp-c-cyan) 12%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-cyan) 30%, transparent);
+}
+
+.status-considering {
+	color: var(--dbsp-c-warning);
+	background: color-mix(in srgb, var(--dbsp-c-warning) 10%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-warning) 25%, transparent);
+}
+
+.dark .status-considering {
+	background: color-mix(in srgb, var(--dbsp-c-warning) 12%, transparent);
+	border-color: color-mix(in srgb, var(--dbsp-c-warning) 30%, transparent);
+}
