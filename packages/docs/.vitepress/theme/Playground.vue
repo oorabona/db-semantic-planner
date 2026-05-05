@@ -138,16 +138,20 @@
             <pre><code>{{ formatParams(result.params) }}</code></pre>
           </div>
           <div v-else-if="activeTab === 'Plan'" class="plan-pane">
-            <div v-if="planMeta" class="plan-meta">
-              <span class="plan-meta-item">
+            <div v-if="planMeta || planRootTable" class="plan-meta">
+              <span v-if="planRootTable" class="plan-meta-item">
+                <span class="plan-meta-label">Root</span>
+                <span class="plan-meta-value">{{ planRootTable }}</span>
+              </span>
+              <span v-if="planMeta" class="plan-meta-item">
                 <span class="plan-meta-label">Planned in</span>
                 <span class="plan-meta-value">{{ planMeta.planningTimeMs.toFixed(2) }}ms</span>
               </span>
-              <span class="plan-meta-item">
+              <span v-if="planMeta" class="plan-meta-item">
                 <span class="plan-meta-label">Relations</span>
                 <span class="plan-meta-value">{{ planMeta.relationsAnalyzed }}</span>
               </span>
-              <span v-if="planMeta.isAmbiguous" class="plan-meta-item plan-meta-warn">
+              <span v-if="planMeta?.isAmbiguous" class="plan-meta-item plan-meta-warn">
                 Ambiguous plan
               </span>
             </div>
@@ -176,6 +180,9 @@
               >
                 <div class="plan-cte-header">
                   <span class="plan-cte-name">{{ cte.name }}</span>
+                  <span v-if="cte.recursive" class="plan-cte-recursive">
+                    WITH RECURSIVE
+                  </span>
                   <span
                     v-if="cte.referencedBy.length > 0"
                     class="plan-cte-refs"
@@ -756,10 +763,12 @@ watch(schemaDsl, (newDsl) => {
 		if (schemaDebounceTimer !== myTimer) return;
 		schemaDebounceTimer = null;
 		// A manual gesture queued during the rebuild gets manual semantics
-		// (resets tab to SQL); otherwise just refresh the current output.
+		// (resets tab to SQL) and runs unconditionally so the empty-query
+		// error path still fires — silently dropping the click would leave
+		// stale output on screen with no feedback. Auto path stays gated.
 		if (pendingManualCompile) {
 			pendingManualCompile = false;
-			if (nqlCode.value.trim()) performCompile({ resetTab: true });
+			performCompile({ resetTab: true });
 		} else if (nqlCode.value.trim()) {
 			performCompile({ resetTab: false });
 		}
@@ -887,41 +896,65 @@ const planWarnings = computed<readonly PlanWarning[]>(
 	() => result.value?.plan?.warnings ?? [],
 );
 const planMeta = computed(() => result.value?.plan?.metadata);
+const planRootTable = computed(() => result.value?.plan?.rootTable);
 const planCtes = computed<readonly CTEDefinition[]>(
 	() => result.value?.plan?.ctes ?? [],
 );
 
 const expandedDecisions = ref<Set<string>>(new Set());
 
-// Sign the plan on the structural axes the planner actually decides on so the
-// user's collapse choices survive content-only edits (filter literal, select
-// list, parameter values) but reset cleanly when the plan shape changes.
-// Decision `id`s alone collide across queries (per-plan counters), and SQL
-// strings flip on every literal edit — both miss the right grain.
-function planSignature(decisions: readonly PlanDecision[]): string {
-	return decisions
-		.map((d) => {
-			const c = d.context;
-			const target = c.relation ?? c.target ?? '';
-			const path = c.relationPath ?? c.intentPath ?? '';
-			const alias = c.includeAlias ?? '';
-			const join = d.joinType ?? '';
-			return `${d.type}:${c.sourceTable}:${target}:${path}:${alias}:${join}:${d.choice}`;
-		})
-		.join('|');
+// Track each decision's structural signature by id so we can preserve the
+// user's collapse state across content-only edits (filter literal, select
+// list, param values) and across additive plan changes (one new decision)
+// while still resetting cleanly when the planner reuses an id for a
+// structurally-different decision (per-plan counters collide across queries).
+function decisionSignature(d: PlanDecision): string {
+	const c = d.context;
+	const target = c.relation ?? c.target ?? '';
+	const path = c.relationPath ?? c.intentPath ?? '';
+	const alias = c.includeAlias ?? '';
+	const join = d.joinType ?? '';
+	return `${d.type}:${c.sourceTable}:${target}:${path}:${alias}:${join}:${d.choice}`;
 }
 
-let lastPlanSignature = '';
+let lastDecisionSignatures = new Map<string, string>();
 
 watch(planDecisions, (decisions) => {
 	// Empty decisions are usually transient (compile error in flight); leaving
 	// state alone avoids a flash-of-default-expanded when the next compile
 	// succeeds.
 	if (decisions.length === 0) return;
-	const signature = planSignature(decisions);
-	if (signature === lastPlanSignature) return;
-	lastPlanSignature = signature;
-	expandedDecisions.value = new Set(decisions.map((d) => d.id));
+
+	const currentSigs = new Map<string, string>();
+	for (const d of decisions) {
+		currentSigs.set(d.id, decisionSignature(d));
+	}
+
+	// No structural change at all? Nothing to update.
+	let unchanged = currentSigs.size === lastDecisionSignatures.size;
+	if (unchanged) {
+		for (const [id, sig] of currentSigs) {
+			if (lastDecisionSignatures.get(id) !== sig) {
+				unchanged = false;
+				break;
+			}
+		}
+	}
+	if (unchanged) return;
+
+	// Keep the collapse choice for ids whose semantic signature still matches;
+	// default-expand ids that are new OR whose id was reused with different
+	// semantics (cross-query reuse of per-plan counters).
+	const next = new Set<string>();
+	for (const [id, sig] of currentSigs) {
+		if (lastDecisionSignatures.get(id) === sig) {
+			if (expandedDecisions.value.has(id)) next.add(id);
+		} else {
+			next.add(id);
+		}
+	}
+	expandedDecisions.value = next;
+	lastDecisionSignatures = currentSigs;
 });
 
 function isDecisionExpanded(id: string): boolean {
@@ -1622,6 +1655,17 @@ async function copyParams(): Promise<void> {
   font-family: var(--vp-font-family-mono);
   font-weight: 700;
   color: var(--dbsp-c-cyan);
+}
+
+.plan-cte-recursive {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.7rem; /* between text-xs 0.75rem and decoration baseline */
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--dbsp-radius-sm);
+  background: color-mix(in srgb, var(--dbsp-c-warning) 12%, transparent);
+  color: var(--dbsp-c-warning);
 }
 
 .plan-cte-refs {
