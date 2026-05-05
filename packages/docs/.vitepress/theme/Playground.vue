@@ -137,7 +137,91 @@
             </button>
             <pre><code>{{ formatParams(result.params) }}</code></pre>
           </div>
-          <pre v-else-if="activeTab === 'Plan'"><code>{{ formatPlan(result.plan) }}</code></pre>
+          <div v-else-if="activeTab === 'Plan'" class="plan-pane">
+            <div class="plan-meta">
+              <span v-if="planMeta.planningTimeMs !== undefined" class="plan-meta-item">
+                <span class="plan-meta-label">Planned in</span>
+                <span class="plan-meta-value">{{ planMeta.planningTimeMs.toFixed(2) }}ms</span>
+              </span>
+              <span v-if="planMeta.relationsAnalyzed !== undefined" class="plan-meta-item">
+                <span class="plan-meta-label">Relations</span>
+                <span class="plan-meta-value">{{ planMeta.relationsAnalyzed }}</span>
+              </span>
+              <span v-if="planMeta.isAmbiguous" class="plan-meta-item plan-meta-warn">
+                Ambiguous plan
+              </span>
+            </div>
+
+            <div v-if="planWarnings.length > 0" class="plan-warnings">
+              <div class="plan-section-title">Warnings ({{ planWarnings.length }})</div>
+              <div
+                v-for="(w, i) in planWarnings"
+                :key="i"
+                class="plan-warning-card"
+              >
+                <div class="plan-warning-code">{{ w.code }}</div>
+                <div class="plan-warning-message">{{ w.message }}</div>
+                <div v-if="w.suggestion" class="plan-warning-suggestion">
+                  → {{ w.suggestion }}
+                </div>
+              </div>
+            </div>
+
+            <div v-if="planDecisions.length > 0" class="plan-decisions">
+              <div class="plan-section-title">
+                Decisions ({{ planDecisions.length }})
+              </div>
+              <div
+                v-for="d in planDecisions"
+                :key="d.id"
+                class="plan-decision-card"
+                :class="`plan-decision-card--${d.type}`"
+              >
+                <button
+                  type="button"
+                  class="plan-decision-header"
+                  :aria-expanded="isDecisionExpanded(d.id)"
+                  @click="toggleDecision(d.id)"
+                >
+                  <span class="plan-decision-type">
+                    {{ formatDecisionType(d.type) }}
+                  </span>
+                  <span class="plan-decision-context">
+                    {{ formatDecisionContext(d.context) }}
+                  </span>
+                  <span class="plan-decision-choice">{{ d.choice }}</span>
+                  <span
+                    class="plan-decision-chevron"
+                    :class="{ open: isDecisionExpanded(d.id) }"
+                    aria-hidden="true"
+                  >▸</span>
+                </button>
+                <div v-if="isDecisionExpanded(d.id)" class="plan-decision-body">
+                  <div class="plan-decision-row">
+                    <span class="plan-decision-label">Reasoning</span>
+                    <span class="plan-decision-value">{{ d.reasoning }}</span>
+                  </div>
+                  <div v-if="d.alternatives.length > 0" class="plan-decision-row">
+                    <span class="plan-decision-label">Alternatives considered</span>
+                    <ul class="plan-decision-alternatives">
+                      <li v-for="(alt, j) in d.alternatives" :key="j">{{ alt }}</li>
+                    </ul>
+                  </div>
+                  <div v-if="d.joinType" class="plan-decision-row">
+                    <span class="plan-decision-label">Join type</span>
+                    <span class="plan-decision-value">{{ d.joinType }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div
+              v-else-if="planWarnings.length === 0"
+              class="plan-empty"
+            >
+              <span>No planning decisions for this query.</span>
+            </div>
+          </div>
         </div>
 
         <div v-else class="output-placeholder">
@@ -155,10 +239,48 @@ import { computed, onMounted, ref, watch } from 'vue';
 // Types
 // ---------------------------------------------------------------------------
 
+interface PlanDecision {
+	readonly id: string;
+	readonly type: string;
+	readonly context: {
+		readonly sourceTable: string;
+		readonly target?: string;
+		readonly relation?: string;
+		readonly relationType?: string;
+		readonly intentPath?: string;
+		readonly relationPath?: string;
+		readonly includeAlias?: string;
+		readonly foreignKey?: string | readonly string[];
+		readonly isSelfRef?: boolean;
+	};
+	readonly choice: string;
+	readonly joinType?: 'inner' | 'left';
+	readonly reasoning: string;
+	readonly alternatives: readonly string[];
+}
+
+interface PlanWarning {
+	readonly code: string;
+	readonly message: string;
+	readonly suggestion?: string;
+	readonly relatedDecision?: string;
+}
+
+interface PlanReport {
+	readonly rootTable?: string;
+	readonly decisions: readonly PlanDecision[];
+	readonly warnings: readonly PlanWarning[];
+	readonly metadata?: {
+		readonly planningTimeMs?: number;
+		readonly relationsAnalyzed?: number;
+		readonly isAmbiguous?: boolean;
+	};
+}
+
 interface CompileResult {
 	sql: string;
 	params: readonly unknown[];
-	plan: unknown;
+	plan: PlanReport;
 }
 
 interface ParsedColumn {
@@ -700,11 +822,51 @@ function compile(): void {
 
 function formatParams(params: readonly unknown[]): string {
 	if (params.length === 0) return '(no parameters)';
-	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
+	return params.map((p, i) => `${i + 1}: ${JSON.stringify(p)}`).join('\n');
 }
 
-function formatPlan(plan: unknown): string {
-	return JSON.stringify(plan, null, 2);
+// ---------------------------------------------------------------------------
+// Plan tab — structured rendering
+// ---------------------------------------------------------------------------
+
+const planDecisions = computed<readonly PlanDecision[]>(
+	() => result.value?.plan.decisions ?? [],
+);
+const planWarnings = computed<readonly PlanWarning[]>(
+	() => result.value?.plan.warnings ?? [],
+);
+const planMeta = computed<NonNullable<PlanReport['metadata']>>(
+	() => result.value?.plan.metadata ?? {},
+);
+
+const expandedDecisions = ref<Set<string>>(new Set());
+
+// Default-expand every decision when the plan changes so the explainability
+// is visible at first glance. Users can collapse what they don't need.
+watch(planDecisions, (decisions) => {
+	expandedDecisions.value = new Set(decisions.map((d) => d.id));
+});
+
+function isDecisionExpanded(id: string): boolean {
+	return expandedDecisions.value.has(id);
+}
+
+function toggleDecision(id: string): void {
+	const next = new Set(expandedDecisions.value);
+	if (next.has(id)) next.delete(id);
+	else next.add(id);
+	expandedDecisions.value = next;
+}
+
+function formatDecisionType(type: string): string {
+	return type.replace(/-/g, ' ').toUpperCase();
+}
+
+function formatDecisionContext(ctx: PlanDecision['context']): string {
+	const parts: string[] = [ctx.sourceTable];
+	const target = ctx.relation ?? ctx.target;
+	if (target) parts.push(`→ ${target}`);
+	return parts.join(' ');
 }
 
 // SQL_KEYWORDS regex — kept as a variable to avoid repeating the long pattern
@@ -1272,6 +1434,214 @@ async function copyParams(): Promise<void> {
 .output-copy-btn:focus-visible {
   outline: 2px solid var(--vp-c-brand-1);
   outline-offset: 2px;
+}
+
+/* ============================================================
+   Plan tab — structured decision cards
+   ============================================================ */
+.plan-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-lg);
+}
+
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--dbsp-space-md);
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: var(--vp-c-bg-soft);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-md);
+  font-size: var(--dbsp-text-sm);
+}
+
+.plan-meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--dbsp-space-xs);
+}
+
+.plan-meta-label {
+  color: var(--vp-c-text-3);
+}
+
+.plan-meta-value {
+  color: var(--vp-c-text-1);
+  font-family: var(--vp-font-family-mono);
+  font-weight: 600;
+}
+
+.plan-meta-warn {
+  color: var(--dbsp-c-warning);
+  font-weight: 600;
+}
+
+.plan-section-title {
+  font-size: 0.72rem; /* between text-xs 0.75rem and the inline 0.7rem chip */
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-text-2);
+  margin-bottom: var(--dbsp-space-sm);
+}
+
+.plan-warnings,
+.plan-decisions {
+  display: flex;
+  flex-direction: column;
+}
+
+.plan-warnings > .plan-warning-card + .plan-warning-card,
+.plan-decisions > .plan-decision-card + .plan-decision-card {
+  margin-top: var(--dbsp-space-sm);
+}
+
+.plan-warning-card {
+  padding: var(--dbsp-space-md);
+  background: var(--vp-c-bg-soft);
+  border-left: 3px solid var(--dbsp-c-warning);
+  border-radius: var(--dbsp-radius-sm);
+  font-size: var(--dbsp-text-sm);
+  line-height: 1.5;
+}
+
+.plan-warning-code {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dbsp-c-warning);
+  margin-bottom: var(--dbsp-space-xs);
+}
+
+.plan-warning-message {
+  color: var(--vp-c-text-1);
+}
+
+.plan-warning-suggestion {
+  margin-top: var(--dbsp-space-xs);
+  color: var(--vp-c-text-2);
+  font-style: italic;
+}
+
+.plan-decision-card {
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--dbsp-c-cyan);
+  border-radius: var(--dbsp-radius-sm);
+  background: var(--vp-c-bg);
+  overflow: hidden;
+  transition: border-color 0.15s;
+}
+
+.plan-decision-card--ambiguity {
+  border-left-color: var(--dbsp-c-warning);
+}
+
+.plan-decision-header {
+  display: flex;
+  align-items: center;
+  gap: var(--dbsp-space-md);
+  width: 100%;
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  font-size: var(--dbsp-text-sm);
+  color: inherit;
+  transition: background 0.15s;
+}
+
+.plan-decision-header:hover {
+  background: var(--vp-c-bg-soft);
+}
+
+.plan-decision-header:focus-visible {
+  outline: 2px solid var(--vp-c-brand-1);
+  outline-offset: -2px;
+}
+
+.plan-decision-type {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.7rem; /* between text-xs 0.75rem and chip baseline */
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--dbsp-c-cyan);
+  flex-shrink: 0;
+}
+
+.plan-decision-card--ambiguity .plan-decision-type {
+  color: var(--dbsp-c-warning);
+}
+
+.plan-decision-context {
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-text-2);
+  flex-shrink: 0;
+}
+
+.plan-decision-choice {
+  flex: 1;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.plan-decision-chevron {
+  color: var(--vp-c-text-3);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+}
+
+.plan-decision-chevron.open {
+  transform: rotate(90deg);
+}
+
+.plan-decision-body {
+  padding: var(--dbsp-space-sm) var(--dbsp-space-md) var(--dbsp-space-md);
+  border-top: 1px solid var(--vp-c-divider);
+  font-size: var(--dbsp-text-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-sm);
+}
+
+.plan-decision-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--dbsp-space-xs);
+}
+
+.plan-decision-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--vp-c-text-3);
+}
+
+.plan-decision-value {
+  color: var(--vp-c-text-1);
+  line-height: 1.5;
+}
+
+.plan-decision-alternatives {
+  margin: 0;
+  padding-left: var(--dbsp-space-lg);
+  color: var(--vp-c-text-2);
+}
+
+.plan-decision-alternatives li {
+  font-family: var(--vp-font-family-mono);
+  font-size: 0.82rem; /* between text-sm 0.875rem and 0.75rem for compact list */
+  line-height: 1.6;
+}
+
+.plan-empty {
+  padding: var(--dbsp-space-xl);
+  text-align: center;
+  color: var(--vp-c-text-3);
+  font-size: var(--dbsp-text-sm);
 }
 
 @keyframes fadeIn {
