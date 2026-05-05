@@ -84,3 +84,51 @@
 		box-shadow 0.3s ease,
 		transform 0.3s ease;
 }
+
+/* Status badges — used in roadmap.md to colour-code feature/adapter availability.
+   Tokens come from design-tokens.css (semantic accents), with mode-aware tints
+   handled by the .dark overrides for legibility on dark backgrounds. */
+.status-badge {
+	display: inline-block;
+	padding: 0.15rem 0.6rem;
+	font-size: 0.75rem;
+	font-weight: 600;
+	letter-spacing: 0.02em;
+	border-radius: var(--dbsp-radius-pill);
+	border: 1px solid transparent;
+	white-space: nowrap;
+	line-height: 1.4;
+}
+
+.status-stable {
+	color: var(--dbsp-c-success);
+	background: rgba(21, 128, 61, 0.1);
+	border-color: rgba(21, 128, 61, 0.25);
+}
+
+.dark .status-stable {
+	background: rgba(74, 222, 128, 0.12);
+	border-color: rgba(74, 222, 128, 0.3);
+}
+
+.status-planned {
+	color: var(--dbsp-c-cyan);
+	background: rgba(14, 116, 144, 0.1);
+	border-color: rgba(14, 116, 144, 0.25);
+}
+
+.dark .status-planned {
+	background: rgba(103, 232, 249, 0.12);
+	border-color: rgba(103, 232, 249, 0.3);
+}
+
+.status-considering {
+	color: var(--dbsp-c-warning);
+	background: rgba(180, 83, 9, 0.1);
+	border-color: rgba(180, 83, 9, 0.25);
+}
+
+.dark .status-considering {
+	background: rgba(251, 191, 36, 0.12);
+	border-color: rgba(251, 191, 36, 0.3);
+}
