@@ -7,9 +7,10 @@
  * dark-mode via the `isDark` ref from useData(). Two-way binding via
  * v-model (modelValue / update:modelValue).
  *
- * The `language="typescript"` prop value routes to the schema DSL tokenizer
- * (schema-mode.ts) rather than @codemirror/lang-javascript for backward
- * compatibility with SchemaSection.vue's existing prop.
+ * language prop values:
+ *   'schema' — schema DSL tokenizer (schema-mode.ts)
+ *   'nql'    — NQL tokenizer (nql-mode.ts)
+ *   'ts'     — TypeScript via @codemirror/lang-javascript
  */
 
 import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
@@ -43,7 +44,7 @@ import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 const props = defineProps<{
 	modelValue: string;
-	language: 'typescript' | 'nql';
+	language: 'schema' | 'nql' | 'ts';
 	placeholder?: string;
 	ariaLabel: string;
 	disabled?: boolean;
@@ -121,11 +122,13 @@ onMounted(async () => {
 		import('@codemirror/view'),
 		import('@codemirror/state'),
 		import('@codemirror/commands'),
-		// 'typescript' prop value kept for backward compat with SchemaSection.vue;
-		// internally loads the schema DSL tokenizer instead of @codemirror/lang-javascript.
-		props.language === 'typescript'
+		props.language === 'schema'
 			? import('./schema-mode').then((m) => ({ ext: m.schemaDsl() }))
-			: Promise.resolve({ ext: null }),
+			: props.language === 'ts'
+				? import('@codemirror/lang-javascript').then((m) => ({
+						ext: m.javascript({ typescript: true }),
+					}))
+				: Promise.resolve({ ext: null }),
 		import('./nql-mode'),
 	]);
 
@@ -133,11 +136,13 @@ onMounted(async () => {
 	if (disposed.value || !editorRoot.value) return;
 
 	const languageExt =
-		props.language === 'typescript' && langMod.ext
+		props.language === 'schema' && langMod.ext
 			? [langMod.ext]
-			: props.language === 'nql'
-				? [nqlLang()]
-				: [];
+			: props.language === 'ts' && langMod.ext
+				? [langMod.ext]
+				: props.language === 'nql'
+					? [nqlLang()]
+					: [];
 
 	const extensions: import('@codemirror/state').Extension[] = [
 		history(),
@@ -235,11 +240,13 @@ async function rebuildView(dark: boolean) {
 		import('@codemirror/view'),
 		import('@codemirror/state'),
 		import('@codemirror/commands'),
-		// 'typescript' prop value kept for backward compat with SchemaSection.vue;
-		// internally loads the schema DSL tokenizer instead of @codemirror/lang-javascript.
-		props.language === 'typescript'
+		props.language === 'schema'
 			? import('./schema-mode').then((m) => ({ ext: m.schemaDsl() }))
-			: Promise.resolve({ ext: null }),
+			: props.language === 'ts'
+				? import('@codemirror/lang-javascript').then((m) => ({
+						ext: m.javascript({ typescript: true }),
+					}))
+				: Promise.resolve({ ext: null }),
 		import('./nql-mode'),
 	]);
 
@@ -247,11 +254,13 @@ async function rebuildView(dark: boolean) {
 	if (disposed.value || token !== rebuildToken || !editorRoot.value) return;
 
 	const languageExt =
-		props.language === 'typescript' && langMod.ext
+		props.language === 'schema' && langMod.ext
 			? [langMod.ext]
-			: props.language === 'nql'
-				? [nqlLang()]
-				: [];
+			: props.language === 'ts' && langMod.ext
+				? [langMod.ext]
+				: props.language === 'nql'
+					? [nqlLang()]
+					: [];
 
 	const extensions: import('@codemirror/state').Extension[] = [
 		history(),

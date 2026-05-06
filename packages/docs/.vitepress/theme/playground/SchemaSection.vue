@@ -135,7 +135,7 @@ function toggleExpand() {
       <CodeEditor
         v-show="activeTab === 'editor'"
         :model-value="dsl"
-        language="typescript"
+        language="schema"
         aria-label="Schema DSL"
         @update:model-value="emit('update:dsl', $event)"
       />
@@ -162,10 +162,13 @@ function toggleExpand() {
         ></div>
       </div>
 
-      <pre
+      <CodeEditor
         v-show="activeTab === 'typescript'"
-        class="schema-ts"
-      ><code>{{ generatedTs }}</code></pre>
+        language="ts"
+        :model-value="generatedTs"
+        aria-label="Generated TypeScript code"
+        disabled
+      />
     </div>
   </section>
 </template>
@@ -295,16 +298,4 @@ function toggleExpand() {
 }
 .diagram-svg-wrapper :deep(svg) { max-width: 100%; max-height: 100%; }
 
-.schema-ts {
-  margin: 0;
-  padding: var(--dbsp-space-sm, 0.5rem);
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--dbsp-radius-sm, 4px);
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
-  color: var(--vp-c-text-1);
-  overflow: auto;
-  max-height: 20rem;
-}
 </style>
