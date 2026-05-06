@@ -100,7 +100,7 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 		// Line comments (--)
 		if (stream.match('--')) {
 			stream.skipToEnd();
-			return 'lineComment';
+			return 'comment';
 		}
 
 		// String literals

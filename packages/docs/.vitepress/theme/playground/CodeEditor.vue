@@ -33,6 +33,13 @@ let view: import('@codemirror/view').EditorView | null = null;
 // Suppress the internal update→emit→prop-update echo that would reset the cursor.
 let ignoreNextUpdate = false;
 
+// Guard: set to true in onBeforeUnmount to abort any in-flight async mount/rebuild.
+const disposed = ref(false);
+
+// Monotonic token: incremented each time rebuildView is called so that stale
+// in-flight rebuilds can detect they've been superseded and bail out.
+let rebuildToken = 0;
+
 // ---------------------------------------------------------------------------
 // Theme helpers
 // ---------------------------------------------------------------------------
@@ -56,7 +63,7 @@ function buildThemeExtension(
 				minHeight: '9rem',
 				caretColor: 'var(--vp-c-brand-1)',
 			},
-			'.cm-focused': {
+			'&.cm-focused': {
 				outline: '2px solid var(--vp-c-brand-1)',
 				outlineOffset: '-2px',
 			},
@@ -103,6 +110,9 @@ onMounted(async () => {
 		import('./nql-mode'),
 	]);
 
+	// Guard: component may have been unmounted while we were awaiting imports.
+	if (disposed.value || !editorRoot.value) return;
+
 	const languageExt =
 		props.language === 'typescript' && langMod.ext
 			? [langMod.ext]
@@ -114,7 +124,13 @@ onMounted(async () => {
 		history(),
 		keymap.of([...defaultKeymap, ...historyKeymap]),
 		EditorView.lineWrapping,
-		EditorView.contentAttributes.of({ 'aria-label': props.ariaLabel }),
+		EditorView.contentAttributes.of({
+			'aria-label': props.ariaLabel,
+			spellcheck: 'false',
+			autocomplete: 'off',
+			autocorrect: 'off',
+			autocapitalize: 'off',
+		}),
 		buildThemeExtension(isDark.value, EditorView),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged) {
@@ -148,6 +164,7 @@ onMounted(async () => {
 });
 
 onBeforeUnmount(() => {
+	disposed.value = true;
 	view?.destroy();
 	view = null;
 });
@@ -179,6 +196,7 @@ watch(isDark, (dark) => {
 
 async function rebuildView(dark: boolean) {
 	if (!view || !editorRoot.value) return;
+	const token = ++rebuildToken;
 	const currentDoc = view.state.doc.toString();
 	view.destroy();
 	view = null;
@@ -201,6 +219,9 @@ async function rebuildView(dark: boolean) {
 		import('./nql-mode'),
 	]);
 
+	// Guard: bail if a newer rebuild was queued or the component was unmounted.
+	if (disposed.value || token !== rebuildToken || !editorRoot.value) return;
+
 	const languageExt =
 		props.language === 'typescript' && langMod.ext
 			? [langMod.ext]
@@ -212,7 +233,13 @@ async function rebuildView(dark: boolean) {
 		history(),
 		keymap.of([...defaultKeymap, ...historyKeymap]),
 		EditorView.lineWrapping,
-		EditorView.contentAttributes.of({ 'aria-label': props.ariaLabel }),
+		EditorView.contentAttributes.of({
+			'aria-label': props.ariaLabel,
+			spellcheck: 'false',
+			autocomplete: 'off',
+			autocorrect: 'off',
+			autocapitalize: 'off',
+		}),
 		buildThemeExtension(dark, EditorView),
 		EditorView.updateListener.of((update) => {
 			if (update.docChanged) {

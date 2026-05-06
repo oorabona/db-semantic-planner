@@ -11,17 +11,17 @@
 		"test": "vitest run --passWithNoTests"
 	},
 	"dependencies": {
+		"@dbsp/adapter-pgsql": "workspace:*",
+		"@dbsp/core": "workspace:*"
+	},
+	"devDependencies": {
 		"@codemirror/autocomplete": "^6.20.2",
 		"@codemirror/commands": "^6.10.3",
 		"@codemirror/lang-javascript": "^6.2.5",
 		"@codemirror/language": "^6.12.3",
 		"@codemirror/state": "^6.6.0",
 		"@codemirror/view": "^6.42.0",
-		"@dbsp/adapter-pgsql": "workspace:*",
-		"@dbsp/core": "workspace:*",
-		"codemirror": "^6.0.2"
-	},
-	"devDependencies": {
+		"codemirror": "^6.0.2",
 		"mermaid": "^11.14.0",
 		"vite-plugin-robots-txt": "^0.2.0",
 		"vitepress": "^1.6.4",

@@ -243,6 +243,13 @@ importers:
 
   packages/docs:
     dependencies:
+      '@dbsp/adapter-pgsql':
+        specifier: workspace:*
+        version: link:../adapter-pgsql
+      '@dbsp/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
       '@codemirror/autocomplete':
         specifier: ^6.20.2
         version: 6.20.2
@@ -261,16 +268,9 @@ importers:
       '@codemirror/view':
         specifier: ^6.42.0
         version: 6.42.0
-      '@dbsp/adapter-pgsql':
-        specifier: workspace:*
-        version: link:../adapter-pgsql
-      '@dbsp/core':
-        specifier: workspace:*
-        version: link:../core
       codemirror:
         specifier: ^6.0.2
         version: 6.0.2
-    devDependencies:
       mermaid:
         specifier: ^11.14.0
         version: 11.14.0

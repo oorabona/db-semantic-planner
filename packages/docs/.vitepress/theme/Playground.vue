@@ -221,6 +221,12 @@ const ready = computed(
 	() => !disposed && nqlTagReady.value && !schemaError.value,
 );
 
+const hasChanges = computed(
+	() =>
+		schemaDsl.value !== DEFAULT_SCHEMA_DSL ||
+		nqlCode.value !== (ALL_EXAMPLES[0]?.code ?? ''),
+);
+
 // ---------------------------------------------------------------------------
 // Schema DSL parser (migrated verbatim from old Playground.vue)
 // ---------------------------------------------------------------------------
@@ -933,6 +939,7 @@ onBeforeUnmount(() => {
       :generated-ts="generatedTs"
       :schema-error="schemaError"
       :expanded="schemaExpanded"
+      :has-changes="hasChanges"
       @update:dsl="schemaDsl = $event"
       @update:expanded="schemaExpanded = $event"
       @reset="softResetUrl"

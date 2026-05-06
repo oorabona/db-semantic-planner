@@ -9,6 +9,7 @@ const props = defineProps<{
 	generatedTs: string;
 	schemaError: string | null;
 	expanded: boolean;
+	hasChanges?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -86,7 +87,7 @@ function toggleExpand() {
         <span class="schema-tables">{{ tableCount }} tables</span>
         {{ expanded ? 'Hide schema' : 'Show schema' }}
       </button>
-      <div class="schema-actions" v-show="expanded">
+      <div class="schema-actions" v-show="hasChanges">
         <button
           type="button"
           class="schema-action-btn"
