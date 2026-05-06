@@ -2,11 +2,41 @@
 /**
  * CodeEditor — reusable CodeMirror 6 editor component.
  *
- * Supports TypeScript and NQL syntax highlighting. Lazy-loads CodeMirror
+ * Supports schema DSL and NQL syntax highlighting. Lazy-loads CodeMirror
  * only when mounted to avoid bloating the initial bundle. Follows VitePress
  * dark-mode via the `isDark` ref from useData(). Two-way binding via
  * v-model (modelValue / update:modelValue).
+ *
+ * The `language="typescript"` prop value routes to the schema DSL tokenizer
+ * (schema-mode.ts) rather than @codemirror/lang-javascript for backward
+ * compatibility with SchemaSection.vue's existing prop.
  */
+
+import { HighlightStyle, syntaxHighlighting } from '@codemirror/language';
+import { tags } from '@lezer/highlight';
+
+// Module-level constant — defined once, reused in onMounted and rebuildView.
+// Colors use VitePress CSS variables that auto-flip between light/dark mode.
+const cmHighlightStyle = HighlightStyle.define([
+	{ tag: tags.keyword, color: 'var(--vp-c-brand-1)' },
+	{ tag: tags.controlKeyword, color: 'var(--vp-c-brand-1)' },
+	{ tag: tags.operatorKeyword, color: 'var(--vp-c-brand-1)' },
+	{ tag: tags.string, color: 'var(--vp-c-success-1, #18794e)' },
+	{ tag: tags.comment, color: 'var(--vp-c-text-3)', fontStyle: 'italic' },
+	{ tag: tags.lineComment, color: 'var(--vp-c-text-3)', fontStyle: 'italic' },
+	{ tag: tags.blockComment, color: 'var(--vp-c-text-3)', fontStyle: 'italic' },
+	{ tag: tags.number, color: 'var(--vp-c-warning-1, #b07d48)' },
+	{ tag: tags.bool, color: 'var(--vp-c-brand-1)' },
+	{ tag: tags.null, color: 'var(--vp-c-brand-1)' },
+	{ tag: tags.operator, color: 'var(--vp-c-text-2)' },
+	{ tag: tags.punctuation, color: 'var(--vp-c-text-2)' },
+	{ tag: tags.variableName, color: 'var(--vp-c-text-1)' },
+	{ tag: tags.propertyName, color: 'var(--vp-c-text-1)' },
+	{ tag: tags.typeName, color: 'var(--vp-c-success-1, #16a34a)' },
+	{ tag: tags.className, color: 'var(--vp-c-success-1, #16a34a)' },
+	{ tag: tags.definition(tags.variableName), color: 'var(--vp-c-text-1)' },
+	{ tag: tags.atom, color: 'var(--vp-c-brand-1)' },
+]);
 
 import { useData } from 'vitepress';
 import { onBeforeUnmount, onMounted, ref, watch } from 'vue';
@@ -68,17 +98,6 @@ function buildThemeExtension(
 				outlineOffset: '-2px',
 			},
 			'.cm-placeholder': { color: 'var(--vp-c-text-3)' },
-			// Syntax tokens — use VitePress colour tokens for WCAG AA contrast
-			'.cm-keyword': { color: dark ? '#a8b1ff' : '#3451b2', fontWeight: '600' },
-			'.cm-string': { color: dark ? '#89ddc0' : '#137752' },
-			'.cm-number': { color: dark ? '#e9b96e' : '#7c5000' },
-			'.cm-comment': {
-				color: dark ? '#8b8b99' : '#6c7280',
-				fontStyle: 'italic',
-			},
-			'.cm-variableName': { color: 'var(--vp-c-text-1)' },
-			'.cm-operator': { color: dark ? '#c0c0cc' : '#555566' },
-			'.cm-punctuation': { color: 'var(--vp-c-text-2)' },
 		},
 		{ dark },
 	);
@@ -102,10 +121,10 @@ onMounted(async () => {
 		import('@codemirror/view'),
 		import('@codemirror/state'),
 		import('@codemirror/commands'),
+		// 'typescript' prop value kept for backward compat with SchemaSection.vue;
+		// internally loads the schema DSL tokenizer instead of @codemirror/lang-javascript.
 		props.language === 'typescript'
-			? import('@codemirror/lang-javascript').then((m) => ({
-					ext: m.javascript({ typescript: true }),
-				}))
+			? import('./schema-mode').then((m) => ({ ext: m.schemaDsl() }))
 			: Promise.resolve({ ext: null }),
 		import('./nql-mode'),
 	]);
@@ -142,6 +161,7 @@ onMounted(async () => {
 			}
 		}),
 		...languageExt,
+		syntaxHighlighting(cmHighlightStyle),
 	];
 
 	if (props.placeholder) {
@@ -188,8 +208,8 @@ watch(
 );
 
 // Re-apply the theme when VitePress dark mode toggles.
-// Destroy + recreate is the cleanest approach since we have hardcoded hex
-// colours in the theme object (keyword, string, etc.) that need flipping.
+// Destroy + recreate is the cleanest approach for toggling the dark param
+// in the EditorView.theme() call (there is no reconfigure shortcut for it).
 watch(isDark, (dark) => {
 	rebuildView(dark);
 });
@@ -215,10 +235,10 @@ async function rebuildView(dark: boolean) {
 		import('@codemirror/view'),
 		import('@codemirror/state'),
 		import('@codemirror/commands'),
+		// 'typescript' prop value kept for backward compat with SchemaSection.vue;
+		// internally loads the schema DSL tokenizer instead of @codemirror/lang-javascript.
 		props.language === 'typescript'
-			? import('@codemirror/lang-javascript').then((m) => ({
-					ext: m.javascript({ typescript: true }),
-				}))
+			? import('./schema-mode').then((m) => ({ ext: m.schemaDsl() }))
 			: Promise.resolve({ ext: null }),
 		import('./nql-mode'),
 	]);
@@ -255,6 +275,7 @@ async function rebuildView(dark: boolean) {
 			}
 		}),
 		...languageExt,
+		syntaxHighlighting(cmHighlightStyle),
 	];
 
 	if (props.placeholder) {
