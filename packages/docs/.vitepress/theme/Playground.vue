@@ -11,6 +11,7 @@
  */
 
 import type { Dump } from '@dbsp/core';
+import { useData } from 'vitepress';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import ErrorBanner from './playground/ErrorBanner.vue';
@@ -148,6 +149,12 @@ type NqlTag = (
 	strings: TemplateStringsArray,
 	...values: unknown[]
 ) => NqlBuilder;
+
+// ---------------------------------------------------------------------------
+// VitePress theme integration
+// ---------------------------------------------------------------------------
+
+const { isDark } = useData();
 
 // ---------------------------------------------------------------------------
 // Module-scope state (single-instance)
@@ -514,6 +521,27 @@ async function rebuildOrm(dsl: string): Promise<void> {
 	}
 }
 
+function getMermaidThemeVariables(dark: boolean): Record<string, string> {
+	if (dark) {
+		return {
+			primaryColor: '#1b1b1f',
+			primaryTextColor: '#dfdfd6',
+			primaryBorderColor: '#a8b1ff',
+			lineColor: '#dfdfd6',
+			textColor: '#dfdfd6',
+			nodeBkg: '#1b1b1f',
+		};
+	}
+	return {
+		primaryColor: '#ffffff',
+		primaryTextColor: '#1a1a1a',
+		primaryBorderColor: '#3451b2',
+		lineColor: '#1a1a1a',
+		textColor: '#1a1a1a',
+		nodeBkg: '#ffffff',
+	};
+}
+
 async function ensureMermaid() {
 	if (mermaidInstance) return;
 	const m = await import('mermaid');
@@ -521,7 +549,8 @@ async function ensureMermaid() {
 	mermaidInstance = m.default;
 	mermaidInstance.initialize({
 		startOnLoad: false,
-		theme: 'dark',
+		theme: 'base',
+		themeVariables: getMermaidThemeVariables(isDark.value),
 		er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
 	});
 }
@@ -806,6 +835,26 @@ watch(schemaExpanded, async (expanded) => {
 			} catch {
 				/* schema error already surfaced */
 			}
+		}
+	}
+});
+
+watch(isDark, async (dark) => {
+	if (!mermaidInstance) return;
+	mermaidInstance.initialize({
+		startOnLoad: false,
+		theme: 'base',
+		themeVariables: getMermaidThemeVariables(dark),
+		er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
+	});
+	// Re-render the diagram with the new theme if the schema panel is open
+	if (schemaExpanded.value) {
+		try {
+			const parsed = parseSchemaDsl(schemaDsl.value);
+			const myGen = ++rebuildGeneration;
+			await renderDiagram(parsed, myGen);
+		} catch {
+			/* schema error already surfaced */
 		}
 	}
 });

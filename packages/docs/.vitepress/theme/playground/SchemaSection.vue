@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import CodeEditor from './CodeEditor.vue';
 
 const props = defineProps<{
 	dsl: string;
@@ -72,21 +73,20 @@ function toggleExpand() {
 
 <template>
   <section class="schema-section" :data-expanded="expanded">
-    <div
-      class="schema-bar"
-      role="button"
-      tabindex="0"
-      :aria-expanded="expanded"
-      aria-controls="schema-body"
-      @click="toggleExpand"
-      @keydown.enter.prevent="toggleExpand"
-      @keydown.space.prevent="toggleExpand"
-    >
-      <span class="schema-chev" aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
-      <span class="schema-label">Schema</span>
-      <span class="schema-tables">{{ tableCount }} tables</span>
-      <span class="schema-spacer"></span>
-      <span class="schema-actions" @click.stop @keydown.stop>
+    <header class="schema-bar">
+      <button
+        type="button"
+        class="schema-toggle-btn"
+        :aria-expanded="expanded"
+        aria-controls="schema-body"
+        @click="toggleExpand"
+      >
+        <span aria-hidden="true">{{ expanded ? '▾' : '▸' }}</span>
+        <span class="schema-label">Schema</span>
+        <span class="schema-tables">{{ tableCount }} tables</span>
+        {{ expanded ? 'Hide schema' : 'Show schema' }}
+      </button>
+      <div class="schema-actions" v-show="expanded">
         <button
           type="button"
           class="schema-action-btn"
@@ -95,9 +95,8 @@ function toggleExpand() {
         >
           Reset
         </button>
-        <span class="schema-action-edit">{{ expanded ? 'Collapse ↑' : 'Edit ↗' }}</span>
-      </span>
-    </div>
+      </div>
+    </header>
 
     <div v-show="expanded" id="schema-body" class="schema-body">
       <div role="group" aria-label="Schema view" class="schema-tabs">
@@ -132,16 +131,12 @@ function toggleExpand() {
         <pre>{{ schemaError }}</pre>
       </div>
 
-      <textarea
+      <CodeEditor
         v-show="activeTab === 'editor'"
-        :value="dsl"
-        class="schema-dsl"
-        spellcheck="false"
-        autocomplete="off"
-        autocorrect="off"
-        autocapitalize="off"
+        :model-value="dsl"
+        language="typescript"
         aria-label="Schema DSL"
-        @input="emit('update:dsl', ($event.target as HTMLTextAreaElement).value)"
+        @update:model-value="emit('update:dsl', $event)"
       />
 
       <div
@@ -185,26 +180,30 @@ function toggleExpand() {
 .schema-bar {
   display: flex;
   align-items: center;
-  gap: var(--dbsp-space-sm, 0.5rem);
-  width: 100%;
+  justify-content: space-between;
   padding: var(--dbsp-space-md, 0.75rem) var(--dbsp-space-lg, 1rem);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(34, 211, 238, 0.04) 100%);
-  border: 0;
   border-bottom: 1px solid var(--vp-c-divider);
-  cursor: pointer;
-  font: inherit;
-  color: inherit;
-  text-align: left;
-  transition: background 0.15s;
 }
 
-.schema-bar:hover { background: linear-gradient(135deg, rgba(99, 102, 241, 0.10) 0%, rgba(34, 211, 238, 0.07) 100%); }
-.schema-bar:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: -2px; }
+.schema-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--dbsp-space-sm, 0.5rem);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
 
-.schema-chev { color: var(--vp-c-brand-1); font-weight: 700; width: 1rem; display: inline-block; }
+.schema-toggle-btn:hover { color: var(--vp-c-brand-1); }
+.schema-toggle-btn:focus-visible { outline: 2px solid var(--vp-c-brand-1); outline-offset: 2px; border-radius: 2px; }
+
 .schema-label { font-weight: 600; }
 .schema-tables { color: var(--vp-c-text-3); font-size: 0.8rem; }
-.schema-spacer { flex: 1; }
 .schema-actions { display: flex; align-items: center; gap: var(--dbsp-space-sm, 0.5rem); }
 
 .schema-action-btn {
@@ -219,7 +218,6 @@ function toggleExpand() {
 }
 
 .schema-action-btn:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-brand-1); }
-.schema-action-edit { font-size: 0.8rem; color: var(--vp-c-brand-1); cursor: pointer; }
 
 .schema-body { padding: var(--dbsp-space-lg, 1rem); }
 .schema-tabs { display: flex; gap: 2px; margin-bottom: var(--dbsp-space-sm, 0.5rem); align-items: center; }
@@ -258,18 +256,6 @@ function toggleExpand() {
 }
 .schema-error pre { margin: 0; white-space: pre-wrap; }
 
-.schema-dsl {
-  width: 100%;
-  min-height: 12rem;
-  padding: var(--dbsp-space-sm, 0.5rem);
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.85rem;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--dbsp-radius-sm, 4px);
-  color: var(--vp-c-text-1);
-  resize: vertical;
-}
 
 .schema-diagram {
   position: relative;
