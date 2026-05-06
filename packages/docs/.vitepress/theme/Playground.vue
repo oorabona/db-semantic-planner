@@ -379,6 +379,21 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 
 function generateTypeScript(parsed: ParsedSchema): string {
 	const lines: string[] = [];
+	lines.push('// NOTE: this code is auto-generated from the playground DSL.');
+	lines.push('// The playground DSL is a teaching subset — it does NOT cover');
+	lines.push(
+		'// indexes, enums, composite keys, CHECK constraints, RLS policies,',
+	);
+	lines.push(
+		'// computed columns, schema scoping, and more. Tracking the gaps:',
+	);
+	lines.push('// https://github.com/oorabona/db-semantic-planner/issues/116');
+	lines.push('//');
+	lines.push(
+		'// The real @dbsp/core schema() API supports all of those — see the',
+	);
+	lines.push('// schema guide in the docs for the full surface.');
+	lines.push('');
 	lines.push("import { schema, ref } from '@dbsp/core';");
 	lines.push('');
 	lines.push('const db = schema({');
