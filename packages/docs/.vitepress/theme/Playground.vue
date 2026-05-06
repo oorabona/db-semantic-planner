@@ -1,285 +1,33 @@
-<template>
-  <div class="playground">
-    <!-- Section 1: Schema (collapsible) -->
-    <div class="section-header" @click="schemaOpen = !schemaOpen">
-      <span class="section-toggle">{{ schemaOpen ? '▾' : '▸' }}</span>
-      <span class="section-title">Schema</span>
-      <span v-if="schemaError" class="schema-status error">Parse error</span>
-      <span v-else-if="tableCount > 0" class="schema-status ok">{{ tableCount }} tables</span>
-    </div>
-
-    <div v-show="schemaOpen" class="schema-panels">
-      <div class="schema-editor">
-        <textarea
-          v-model="schemaDsl"
-          class="schema-textarea"
-          spellcheck="false"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          placeholder="Define your schema..."
-          aria-label="Schema definition (custom DSL)"
-        />
-      </div>
-      <div class="schema-output">
-        <div class="schema-tabs">
-          <button class="tab-btn" :class="{ active: schemaTab === 'diagram' }" @click="schemaTab = 'diagram'">Diagram</button>
-          <button class="tab-btn" :class="{ active: schemaTab === 'typescript' }" @click="schemaTab = 'typescript'">TypeScript</button>
-          <button v-if="schemaTab === 'typescript'" class="copy-btn" @click="copyTypeScript">{{ copied ? 'Copied' : 'Copy' }}</button>
-        </div>
-
-        <div v-if="schemaError" class="diagram-error">
-          <pre>{{ schemaError }}</pre>
-        </div>
-
-        <template v-else-if="schemaTab === 'diagram'">
-          <div
-            v-if="mermaidSvg"
-            class="mermaid-viewport"
-            @wheel.prevent="onDiagramWheel"
-            @mousedown="onDiagramDragStart"
-            @mousemove="onDiagramDrag"
-            @mouseup="onDiagramDragEnd"
-            @mouseleave="onDiagramDragEnd"
-          >
-            <div class="mermaid-canvas" :style="diagramTransform" v-html="mermaidSvg" />
-            <div class="zoom-controls">
-              <button class="zoom-btn" @click="diagramZoom = Math.min(3, diagramZoom + 0.2)" title="Zoom in">+</button>
-              <button class="zoom-btn" @click="diagramZoom = Math.max(0.3, diagramZoom - 0.2)" title="Zoom out">-</button>
-              <button class="zoom-btn" @click="resetDiagramView" title="Reset view">R</button>
-            </div>
-          </div>
-          <div v-else class="diagram-placeholder">Rendering diagram...</div>
-        </template>
-
-        <template v-else>
-          <pre class="generated-pre"><code v-html="highlightTS(generatedTs)"></code></pre>
-        </template>
-      </div>
-    </div>
-
-    <!-- Section 2: Query (always visible) -->
-    <div class="section-header query-section-header">
-      <span class="section-title">Query</span>
-    </div>
-
-    <div class="query-panels">
-      <div class="playground-input">
-        <div class="panel-header">
-          <label for="example-select" class="panel-label">Example</label>
-          <select
-            id="example-select"
-            v-model="selectedExampleIndex"
-            class="example-select"
-            @change="loadExample"
-          >
-            <option v-for="(ex, i) in visibleExamples" :key="i" :value="i">
-              {{ ex.name }}
-            </option>
-          </select>
-        </div>
-        <textarea
-          v-model="nqlCode"
-          class="nql-textarea"
-          spellcheck="false"
-          autocomplete="off"
-          autocorrect="off"
-          autocapitalize="off"
-          placeholder="Enter NQL query..."
-          aria-label="NQL query"
-          @keydown.ctrl.enter.prevent="compile"
-          @keydown.meta.enter.prevent="compile"
-        />
-        <div class="compile-row">
-          <button class="compile-btn" @click="compile">Compile</button>
-          <span class="hint">Ctrl+Enter / Cmd+Enter</span>
-        </div>
-      </div>
-
-      <div class="playground-output">
-        <div class="tabs" role="group" aria-label="Query output format">
-          <button
-            v-for="tab in tabs"
-            :key="tab"
-            class="tab-btn"
-            :class="{ active: activeTab === tab }"
-            type="button"
-            @click="activeTab = tab"
-          >
-            {{ tab }}
-          </button>
-        </div>
-
-        <div v-if="error" class="output-error">
-          <pre>{{ error }}</pre>
-        </div>
-
-        <div v-else-if="result" class="output-content">
-          <div v-if="activeTab === 'SQL'" class="output-pane">
-            <button
-              type="button"
-              class="output-copy-btn"
-              :aria-label="sqlCopied ? 'SQL copied to clipboard' : 'Copy SQL to clipboard'"
-              @click="copySQL"
-            >
-              {{ sqlCopied ? 'Copied' : 'Copy' }}
-            </button>
-            <pre><code v-html="highlightSQL(result.sql)"></code></pre>
-          </div>
-          <div v-else-if="activeTab === 'Parameters'" class="output-pane">
-            <button
-              type="button"
-              class="output-copy-btn"
-              :aria-label="paramsCopied ? 'Parameters copied to clipboard' : 'Copy parameters to clipboard'"
-              @click="copyParams"
-            >
-              {{ paramsCopied ? 'Copied' : 'Copy' }}
-            </button>
-            <pre><code>{{ formatParams(result.params) }}</code></pre>
-          </div>
-          <div v-else-if="activeTab === 'Plan'" class="plan-pane">
-            <div v-if="planMeta || planRootTable" class="plan-meta">
-              <span v-if="planRootTable" class="plan-meta-item">
-                <span class="plan-meta-label">Root</span>
-                <span class="plan-meta-value">{{ planRootTable }}</span>
-              </span>
-              <span v-if="planMeta" class="plan-meta-item">
-                <span class="plan-meta-label">Planned in</span>
-                <span class="plan-meta-value">{{ planMeta.planningTimeMs.toFixed(2) }}ms</span>
-              </span>
-              <span v-if="planMeta" class="plan-meta-item">
-                <span class="plan-meta-label">Relations</span>
-                <span class="plan-meta-value">{{ planMeta.relationsAnalyzed }}</span>
-              </span>
-              <span v-if="planMeta?.isAmbiguous" class="plan-meta-item plan-meta-warn">
-                Ambiguous plan
-              </span>
-            </div>
-
-            <div v-if="planWarnings.length > 0" class="plan-warnings">
-              <div class="plan-section-title">Warnings ({{ planWarnings.length }})</div>
-              <div
-                v-for="(w, i) in planWarnings"
-                :key="i"
-                class="plan-warning-card"
-              >
-                <div class="plan-warning-code">{{ w.code }}</div>
-                <div class="plan-warning-message">{{ w.message }}</div>
-                <div v-if="w.suggestion" class="plan-warning-suggestion">
-                  → {{ w.suggestion }}
-                </div>
-              </div>
-            </div>
-
-            <div v-if="planCtes.length > 0" class="plan-ctes">
-              <div class="plan-section-title">CTEs ({{ planCtes.length }})</div>
-              <div
-                v-for="cte in planCtes"
-                :key="cte.name"
-                class="plan-cte-card"
-              >
-                <div class="plan-cte-header">
-                  <span class="plan-cte-name">{{ cte.name }}</span>
-                  <span v-if="cte.recursive" class="plan-cte-recursive">
-                    WITH RECURSIVE
-                  </span>
-                  <span
-                    v-if="cte.referencedBy.length > 0"
-                    class="plan-cte-refs"
-                  >
-                    referenced by {{ cte.referencedBy.join(', ') }}
-                  </span>
-                </div>
-                <div class="plan-cte-purpose">{{ cte.purpose }}</div>
-              </div>
-            </div>
-
-            <div v-if="planDecisions.length > 0" class="plan-decisions">
-              <div class="plan-section-title">
-                Decisions ({{ planDecisions.length }})
-              </div>
-              <div
-                v-for="d in planDecisions"
-                :key="d.id"
-                class="plan-decision-card"
-                :class="`plan-decision-card--${d.type}`"
-              >
-                <button
-                  type="button"
-                  class="plan-decision-header"
-                  :aria-expanded="isDecisionExpanded(d.id)"
-                  :aria-controls="`plan-decision-body-${d.id}`"
-                  @click="toggleDecision(d.id)"
-                >
-                  <span class="plan-decision-type">
-                    {{ formatDecisionType(d.type) }}
-                  </span>
-                  <span class="plan-decision-context">
-                    {{ formatDecisionContext(d.context) }}
-                  </span>
-                  <span class="plan-decision-choice">{{ d.choice }}</span>
-                  <span
-                    class="plan-decision-chevron"
-                    :class="{ open: isDecisionExpanded(d.id) }"
-                    aria-hidden="true"
-                  >▸</span>
-                </button>
-                <div
-                  v-show="isDecisionExpanded(d.id)"
-                  :id="`plan-decision-body-${d.id}`"
-                  class="plan-decision-body"
-                >
-                  <div class="plan-decision-row">
-                    <span class="plan-decision-label">Reasoning</span>
-                    <span class="plan-decision-value">{{ d.reasoning }}</span>
-                  </div>
-                  <div v-if="d.alternatives.length > 0" class="plan-decision-row">
-                    <span class="plan-decision-label">Alternatives considered</span>
-                    <ul class="plan-decision-alternatives">
-                      <li v-for="(alt, j) in d.alternatives" :key="j">{{ alt }}</li>
-                    </ul>
-                  </div>
-                  <div v-if="d.joinType" class="plan-decision-row">
-                    <span class="plan-decision-label">Join type</span>
-                    <span class="plan-decision-value">{{ d.joinType }}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div
-              v-else-if="planWarnings.length === 0"
-              class="plan-empty"
-            >
-              <span>No planning decisions for this query.</span>
-            </div>
-          </div>
-        </div>
-
-        <div v-else class="output-placeholder">
-          <span>Click "Compile" to see the output.</span>
-        </div>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import type {
-	CTEDefinition,
-	Dump,
-	PlanDecision,
-	PlanWarning,
-} from '@dbsp/core';
-import { computed, onMounted, ref, watch } from 'vue';
+/**
+ * Playground orchestrator.
+ *
+ * Owns all stateful refs and the lifecycle. Sub-components in
+ * theme/playground/ are presentational — they receive data via props and
+ * signal user gestures via emits. Module-scope `let` state means this
+ * component is single-instance per page; that is an accepted v1 limitation.
+ * If a future requirement embeds the playground in guides, refactor the
+ * `let` declarations into a `useState`-style composable.
+ */
+
+import type { Dump } from '@dbsp/core';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+
+import ErrorBanner from './playground/ErrorBanner.vue';
+import {
+	decodeHash,
+	encodeHash,
+	isHashLengthOk,
+} from './playground/hash-codec';
+import OutputSection from './playground/OutputSection.vue';
+import PlanSection from './playground/PlanSection.vue';
+import QuerySection from './playground/QuerySection.vue';
+import SchemaSection from './playground/SchemaSection.vue';
+import type { ErrorBannerData } from './playground/types';
 
 // ---------------------------------------------------------------------------
-// Types
+// Local interfaces (migrated from old Playground.vue)
 // ---------------------------------------------------------------------------
-
-// Re-export the upstream Dump shape locally so call sites read naturally.
-// `plan` is optional in Dump — every access goes through optional chaining.
-type CompileResult = Dump;
 
 interface ParsedColumn {
 	name: string;
@@ -305,7 +53,7 @@ interface ParsedSchema {
 }
 
 // ---------------------------------------------------------------------------
-// Default schema DSL
+// Default schema + examples (migrated verbatim from old Playground.vue)
 // ---------------------------------------------------------------------------
 
 const DEFAULT_SCHEMA_DSL = [
@@ -351,8 +99,123 @@ const DEFAULT_SCHEMA_DSL = [
 	'}',
 ].join('\n');
 
+const ALL_EXAMPLES: ReadonlyArray<{
+	name: string;
+	code: string;
+	requires: readonly string[];
+}> = [
+	{
+		name: 'Simple query',
+		code: 'users | where active = true | select id, name',
+		requires: ['users'],
+	},
+	{
+		name: 'With relations',
+		code: 'posts | where published = true | select title, author.*',
+		requires: ['posts'],
+	},
+	{
+		name: 'Aggregation',
+		code: 'orders | group by status | select status, count(*), sum(amount)',
+		requires: ['orders'],
+	},
+	{
+		name: 'Pagination',
+		code: 'users | where active = true | order by created_at desc | limit 10 offset 20',
+		requires: ['users'],
+	},
+	{
+		name: 'Window function',
+		code: 'products | select name, rank() over (partition by category order by price) as price_rank',
+		requires: ['products'],
+	},
+	{
+		name: 'Insert',
+		code: "insert into users set name = 'Alice', email = 'alice@example.com'",
+		requires: ['users'],
+	},
+	{
+		name: 'Update',
+		code: "update users set active = false where last_login < '2024-01-01'",
+		requires: ['users'],
+	},
+];
+
+interface NqlBuilder {
+	dump(): Dump;
+}
+type NqlTag = (
+	strings: TemplateStringsArray,
+	...values: unknown[]
+) => NqlBuilder;
+
 // ---------------------------------------------------------------------------
-// Schema DSL parser
+// Module-scope state (single-instance)
+// ---------------------------------------------------------------------------
+
+let coreModule: typeof import('@dbsp/core') | null = null;
+let adapterModule: typeof import('@dbsp/adapter-pgsql') | null = null;
+let mermaidInstance: typeof import('mermaid').default | null = null;
+let nqlTag: NqlTag | null = null;
+const nqlTagReady = ref(false);
+
+let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let hashWriteTimer: ReturnType<typeof setTimeout> | null = null;
+
+let suppressNextNqlWatch = false;
+let isHydrating = false;
+let pendingManualCompile = false;
+let rebuildGeneration = 0;
+let lastEmittedHash: string | null = null;
+let disposed = false;
+
+// ---------------------------------------------------------------------------
+// Reactive state (parent owns)
+// ---------------------------------------------------------------------------
+
+const schemaDsl = ref(DEFAULT_SCHEMA_DSL);
+const schemaError = ref<string | null>(null);
+const tableCount = ref(0);
+const mermaidSvg = ref('');
+const generatedTs = ref('');
+const schemaExpanded = ref(false);
+
+const nqlCode = ref(ALL_EXAMPLES[0]?.code ?? '');
+const selectedExampleIndex = ref(0);
+const queryMode = ref<'nql'>('nql'); // 'ts' lands in v2 with T3.
+
+const result = ref<Dump | null>(null);
+const compileError = ref<string | null>(null);
+
+const errorBanner = ref<ErrorBannerData | null>(null);
+const isInitializing = ref(true);
+const initFatal = ref(false);
+
+const tsCopied = ref(false);
+let tsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+
+// ---------------------------------------------------------------------------
+// Computed
+// ---------------------------------------------------------------------------
+
+const visibleExamples = computed(() => {
+	if (schemaError.value) return [];
+	const tableNames = new Set<string>();
+	for (const m of schemaDsl.value.matchAll(/^\s*table\s+(\w+)/gm)) {
+		tableNames.add(m[1]);
+	}
+	return ALL_EXAMPLES.filter((ex) =>
+		ex.requires.every((t) => tableNames.has(t)),
+	);
+});
+
+const ready = computed(
+	() => !disposed && nqlTagReady.value && !schemaError.value,
+);
+
+// ---------------------------------------------------------------------------
+// Schema DSL parser (migrated verbatim from old Playground.vue)
 // ---------------------------------------------------------------------------
 
 function stripLineComments(text: string): string {
@@ -449,194 +312,11 @@ function parseSchemaDsl(text: string): ParsedSchema {
 }
 
 // ---------------------------------------------------------------------------
-// Mermaid ER generation
-// ---------------------------------------------------------------------------
-
-function buildMermaidCode(parsed: ParsedSchema): string {
-	const lines: string[] = ['erDiagram'];
-
-	for (const table of parsed.tables) {
-		lines.push(`    ${table.name} {`);
-		for (const col of table.columns) {
-			const type = col.type.replace(/[^a-zA-Z0-9_]/g, '_');
-			const suffix = col.pk ? ' PK' : col.unique ? ' UK' : '';
-			lines.push(`        ${type} ${col.name}${suffix}`);
-		}
-		lines.push('    }');
-	}
-
-	for (const rel of parsed.relations) {
-		lines.push(`    ${rel.to} ||--o{ ${rel.from} : ""`);
-	}
-
-	return lines.join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// NQL tag type
-// ---------------------------------------------------------------------------
-
-type NqlTag = (
-	strings: TemplateStringsArray,
-	...values: unknown[]
-) => { dump(): CompileResult };
-
-// ---------------------------------------------------------------------------
-// All examples (filtered by available tables)
-// ---------------------------------------------------------------------------
-
-const ALL_EXAMPLES = [
-	{
-		name: 'Simple query',
-		code: 'users | where active = true | select id, name',
-		requires: ['users'],
-	},
-	{
-		name: 'With relations',
-		code: 'posts | where published = true | select title, author.*',
-		requires: ['posts'],
-	},
-	{
-		name: 'Aggregation',
-		code: 'orders | group by status | select status, count(*), sum(amount)',
-		requires: ['orders'],
-	},
-	{
-		name: 'Pagination',
-		code: 'users | where active = true | order by created_at desc | limit 10 offset 20',
-		requires: ['users'],
-	},
-	{
-		name: 'Window function',
-		code: 'products | select name, rank() over (partition by category order by price) as price_rank',
-		requires: ['products'],
-	},
-	{
-		name: 'Insert',
-		code: "insert into users set name = 'Alice', email = 'alice@example.com'",
-		requires: ['users'],
-	},
-	{
-		name: 'Update',
-		code: "update users set active = false where last_login < '2024-01-01'",
-		requires: ['users'],
-	},
-];
-
-// ---------------------------------------------------------------------------
-// Reactive state
-// ---------------------------------------------------------------------------
-
-const tabs = ['SQL', 'Parameters', 'Plan'] as const;
-type Tab = (typeof tabs)[number];
-
-const schemaOpen = ref(true);
-const schemaTab = ref<'diagram' | 'typescript'>('diagram');
-const schemaDsl = ref(DEFAULT_SCHEMA_DSL);
-const schemaError = ref<string | null>(null);
-const mermaidSvg = ref<string>('');
-const tableCount = ref(0);
-
-// Diagram pan/zoom state
-const diagramZoom = ref(1);
-const diagramPanX = ref(0);
-const diagramPanY = ref(0);
-let isDragging = false;
-let dragStartX = 0;
-let dragStartY = 0;
-let panStartX = 0;
-let panStartY = 0;
-
-const diagramTransform = computed(() => ({
-	transform:
-		'translate(' +
-		diagramPanX.value +
-		'px, ' +
-		diagramPanY.value +
-		'px) scale(' +
-		diagramZoom.value +
-		')',
-	transformOrigin: 'center center',
-	cursor: isDragging ? 'grabbing' : 'grab',
-}));
-
-function onDiagramWheel(e: WheelEvent) {
-	const delta = e.deltaY > 0 ? -0.1 : 0.1;
-	diagramZoom.value = Math.max(0.3, Math.min(3, diagramZoom.value + delta));
-}
-
-function onDiagramDragStart(e: MouseEvent) {
-	isDragging = true;
-	dragStartX = e.clientX;
-	dragStartY = e.clientY;
-	panStartX = diagramPanX.value;
-	panStartY = diagramPanY.value;
-}
-
-function onDiagramDrag(e: MouseEvent) {
-	if (!isDragging) return;
-	diagramPanX.value = panStartX + (e.clientX - dragStartX);
-	diagramPanY.value = panStartY + (e.clientY - dragStartY);
-}
-
-function onDiagramDragEnd() {
-	isDragging = false;
-}
-
-function resetDiagramView() {
-	diagramZoom.value = 1;
-	diagramPanX.value = 0;
-	diagramPanY.value = 0;
-}
-
-const selectedExampleIndex = ref(0);
-const nqlCode = ref(ALL_EXAMPLES[0].code);
-const activeTab = ref<Tab>('SQL');
-const result = ref<CompileResult | null>(null);
-const error = ref<string | null>(null);
-
-// ---------------------------------------------------------------------------
-// Computed: visible examples based on available tables
-// ---------------------------------------------------------------------------
-
-const availableTableNames = computed<Set<string>>(() => {
-	if (schemaError.value) return new Set<string>();
-	try {
-		const parsed = parseSchemaDsl(schemaDsl.value);
-		return new Set(parsed.tables.map((t) => t.name));
-	} catch {
-		return new Set<string>();
-	}
-});
-
-const visibleExamples = computed(() => {
-	const names = availableTableNames.value;
-	return ALL_EXAMPLES.filter((ex) => ex.requires.every((t) => names.has(t)));
-});
-
-// ---------------------------------------------------------------------------
-// Module references (populated on mount)
-// ---------------------------------------------------------------------------
-
-// biome-ignore lint/suspicious/noExplicitAny: dynamic import reference
-let coreModule: any = null;
-// biome-ignore lint/suspicious/noExplicitAny: dynamic import reference
-let adapterModule: any = null;
-// biome-ignore lint/suspicious/noExplicitAny: mermaid dynamic import
-let mermaidInstance: any = null;
-let nqlTag: NqlTag | null = null;
-
-let schemaDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let nqlDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-let suppressNextNqlWatch = false;
-let pendingManualCompile = false;
-
-// ---------------------------------------------------------------------------
-// Schema rebuild logic
+// Schema-derived generators (migrated verbatim from old Playground.vue)
 // ---------------------------------------------------------------------------
 
 function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
-	const { schema, ref: dbRef } = coreModule;
+	const { schema, ref: dbRef } = coreModule!;
 	const tableDefs: Record<string, Record<string, unknown>> = {};
 
 	for (const table of parsed.tables) {
@@ -665,353 +345,6 @@ function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
 
 	return schema(tableDefs);
 }
-
-let rebuildGeneration = 0;
-
-async function renderDiagram(parsed: ParsedSchema, gen: number): Promise<void> {
-	if (!mermaidInstance) return;
-	try {
-		const code = buildMermaidCode(parsed);
-		const id = `er-${Date.now()}`;
-		const { svg } = await mermaidInstance.render(id, code);
-		// A newer rebuild has started; bail before overwriting the latest svg.
-		if (gen !== rebuildGeneration) return;
-		mermaidSvg.value = svg;
-	} catch {
-		if (gen !== rebuildGeneration) return;
-		mermaidSvg.value = '';
-	}
-}
-
-async function rebuildOrm(dsl: string): Promise<void> {
-	if (!coreModule || !adapterModule) return;
-	const myGen = ++rebuildGeneration;
-
-	schemaError.value = null;
-
-	let parsed: ParsedSchema;
-	try {
-		parsed = parseSchemaDsl(dsl);
-	} catch (e) {
-		schemaError.value = e instanceof Error ? e.message : String(e);
-		tableCount.value = 0;
-		mermaidSvg.value = '';
-		nqlTag = null;
-		return;
-	}
-
-	if (parsed.tables.length === 0) {
-		schemaError.value = 'No tables defined';
-		tableCount.value = 0;
-		mermaidSvg.value = '';
-		nqlTag = null;
-		return;
-	}
-
-	tableCount.value = parsed.tables.length;
-	generatedTs.value = generateTypeScript(parsed);
-
-	try {
-		const builtSchema = buildSchemaFromParsed(parsed);
-		const orm = coreModule.createOrm({
-			schema: builtSchema,
-			adapter: adapterModule.createPgsqlCompileOnlyAdapter(),
-		});
-		nqlTag = orm.nql as NqlTag;
-	} catch (e) {
-		schemaError.value = `Schema error: ${e instanceof Error ? e.message : String(e)}`;
-		nqlTag = null;
-	}
-
-	await renderDiagram(parsed, myGen);
-}
-
-// ---------------------------------------------------------------------------
-// Mount
-// ---------------------------------------------------------------------------
-
-onMounted(async () => {
-	try {
-		const [core, adapter, mermaidLib] = await Promise.all([
-			import('@dbsp/core'),
-			import('@dbsp/adapter-pgsql'),
-			import('mermaid'),
-		]);
-
-		coreModule = core;
-		adapterModule = adapter;
-
-		mermaidLib.default.initialize({
-			startOnLoad: false,
-			theme: 'dark',
-			er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
-		});
-		mermaidInstance = mermaidLib.default;
-
-		await rebuildOrm(schemaDsl.value);
-	} catch (e) {
-		error.value = `Initialization error: ${e instanceof Error ? e.message : String(e)}`;
-	}
-});
-
-// ---------------------------------------------------------------------------
-// Watchers
-// ---------------------------------------------------------------------------
-
-watch(schemaDsl, (newDsl) => {
-	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
-	const myTimer: ReturnType<typeof setTimeout> = setTimeout(async () => {
-		await rebuildOrm(newDsl);
-		// If a newer rebuild was scheduled while we were awaiting, leave the
-		// state to that callback — clearing here would mask the pending timer
-		// from the NQL watcher and let stale-schema compiles slip through.
-		if (schemaDebounceTimer !== myTimer) return;
-		schemaDebounceTimer = null;
-		// A manual gesture queued during the rebuild gets manual semantics
-		// (resets tab to SQL) and runs unconditionally so the empty-query
-		// error path still fires — silently dropping the click would leave
-		// stale output on screen with no feedback. Auto path stays gated.
-		if (pendingManualCompile) {
-			pendingManualCompile = false;
-			performCompile({ resetTab: true });
-		} else if (nqlCode.value.trim()) {
-			performCompile({ resetTab: false });
-		}
-	}, 500);
-	schemaDebounceTimer = myTimer;
-});
-
-// Auto-compile on NQL textarea change. Preserves activeTab (no reset) so the
-// user can stay on Plan tab while iterating. Manual button + Ctrl/Cmd+Enter
-// + example dropdown keep the reset-to-SQL behaviour.
-watch(nqlCode, () => {
-	// loadExample() sets the textarea content programmatically and compiles
-	// synchronously — skip the watcher's debounced compile in that case.
-	if (suppressNextNqlWatch) {
-		suppressNextNqlWatch = false;
-		return;
-	}
-	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
-	nqlDebounceTimer = setTimeout(() => {
-		nqlDebounceTimer = null;
-		// If a schema rebuild is pending or in flight, defer to it — the
-		// schema watcher will recompile once the new nqlTag is ready.
-		if (schemaDebounceTimer !== null) return;
-		performCompile({ resetTab: false });
-	}, 300);
-});
-
-// Reset the "Copied" feedback when a fresh compile result arrives so the
-// button text doesn't keep claiming the previous SQL/params are still on
-// the clipboard after the displayed output changed.
-watch(result, () => {
-	if (sqlCopiedTimer !== null) {
-		clearTimeout(sqlCopiedTimer);
-		sqlCopiedTimer = null;
-	}
-	if (paramsCopiedTimer !== null) {
-		clearTimeout(paramsCopiedTimer);
-		paramsCopiedTimer = null;
-	}
-	sqlCopied.value = false;
-	paramsCopied.value = false;
-});
-
-// ---------------------------------------------------------------------------
-// Actions
-// ---------------------------------------------------------------------------
-
-function loadExample(): void {
-	const ex = visibleExamples.value[selectedExampleIndex.value];
-	if (ex) {
-		// Only arm the watcher-suppress flag when the assignment will actually
-		// trigger the watcher — Vue refs short-circuit on `===` so re-picking
-		// the currently-active example would leave the flag set and silently
-		// swallow the next real keystroke's auto-compile.
-		if (nqlCode.value !== ex.code) {
-			suppressNextNqlWatch = true;
-			nqlCode.value = ex.code;
-		}
-		compile();
-	}
-}
-
-function performCompile(opts: { resetTab: boolean }): void {
-	if (!nqlTag) {
-		error.value = schemaError.value
-			? `Schema error: ${schemaError.value}`
-			: 'Compiler not ready — please wait a moment and try again.';
-		result.value = null;
-		return;
-	}
-
-	const query = nqlCode.value.trim();
-	if (!query) {
-		error.value = 'Please enter an NQL query.';
-		result.value = null;
-		return;
-	}
-
-	try {
-		const builder = nqlTag`${query}`;
-		result.value = builder.dump();
-		error.value = null;
-		if (opts.resetTab) activeTab.value = 'SQL';
-	} catch (e) {
-		error.value = e instanceof Error ? e.message : String(e);
-		result.value = null;
-	}
-}
-
-function compile(): void {
-	// Cancel any in-flight auto-compile so loadExample/Ctrl+Enter/button click
-	// don't trigger a redundant performCompile 300ms later.
-	if (nqlDebounceTimer !== null) {
-		clearTimeout(nqlDebounceTimer);
-		nqlDebounceTimer = null;
-	}
-	// If a schema rebuild is pending or in flight, queue this manual gesture
-	// so the click/shortcut compiles against the new nqlTag (not the stale
-	// one). The schema watcher fires the queued compile once the rebuild
-	// settles.
-	if (schemaDebounceTimer !== null) {
-		pendingManualCompile = true;
-		return;
-	}
-	performCompile({ resetTab: true });
-}
-
-// ---------------------------------------------------------------------------
-// Formatting helpers
-// ---------------------------------------------------------------------------
-
-function formatParams(params: readonly unknown[]): string {
-	if (params.length === 0) return '(no parameters)';
-	return params.map((p, i) => `$${i + 1}: ${JSON.stringify(p)}`).join('\n');
-}
-
-// ---------------------------------------------------------------------------
-// Plan tab — structured rendering
-// ---------------------------------------------------------------------------
-
-const planDecisions = computed<readonly PlanDecision[]>(
-	() => result.value?.plan?.decisions ?? [],
-);
-const planWarnings = computed<readonly PlanWarning[]>(
-	() => result.value?.plan?.warnings ?? [],
-);
-const planMeta = computed(() => result.value?.plan?.metadata);
-const planRootTable = computed(() => result.value?.plan?.rootTable);
-const planCtes = computed<readonly CTEDefinition[]>(
-	() => result.value?.plan?.ctes ?? [],
-);
-
-const expandedDecisions = ref<Set<string>>(new Set());
-
-// Track each decision's structural signature by id so we can preserve the
-// user's collapse state across content-only edits (filter literal, select
-// list, param values) and across additive plan changes (one new decision)
-// while still resetting cleanly when the planner reuses an id for a
-// structurally-different decision (per-plan counters collide across queries).
-function decisionSignature(d: PlanDecision): string {
-	const c = d.context;
-	const target = c.relation ?? c.target ?? '';
-	const path = c.relationPath ?? c.intentPath ?? '';
-	const alias = c.includeAlias ?? '';
-	const join = d.joinType ?? '';
-	return `${d.type}:${c.sourceTable}:${target}:${path}:${alias}:${join}:${d.choice}`;
-}
-
-let lastDecisionSignatures = new Map<string, string>();
-
-watch(planDecisions, (decisions) => {
-	// Empty decisions are usually transient (compile error in flight); leaving
-	// state alone avoids a flash-of-default-expanded when the next compile
-	// succeeds.
-	if (decisions.length === 0) return;
-
-	const currentSigs = new Map<string, string>();
-	for (const d of decisions) {
-		currentSigs.set(d.id, decisionSignature(d));
-	}
-
-	// No structural change at all? Nothing to update.
-	let unchanged = currentSigs.size === lastDecisionSignatures.size;
-	if (unchanged) {
-		for (const [id, sig] of currentSigs) {
-			if (lastDecisionSignatures.get(id) !== sig) {
-				unchanged = false;
-				break;
-			}
-		}
-	}
-	if (unchanged) return;
-
-	// Keep the collapse choice for ids whose semantic signature still matches;
-	// default-expand ids that are new OR whose id was reused with different
-	// semantics (cross-query reuse of per-plan counters).
-	const next = new Set<string>();
-	for (const [id, sig] of currentSigs) {
-		if (lastDecisionSignatures.get(id) === sig) {
-			if (expandedDecisions.value.has(id)) next.add(id);
-		} else {
-			next.add(id);
-		}
-	}
-	expandedDecisions.value = next;
-	lastDecisionSignatures = currentSigs;
-});
-
-function isDecisionExpanded(id: string): boolean {
-	return expandedDecisions.value.has(id);
-}
-
-function toggleDecision(id: string): void {
-	const next = new Set(expandedDecisions.value);
-	if (next.has(id)) next.delete(id);
-	else next.add(id);
-	expandedDecisions.value = next;
-}
-
-function formatDecisionType(type: string): string {
-	return type.replace(/-/g, ' ').toUpperCase();
-}
-
-function formatDecisionContext(ctx: PlanDecision['context']): string {
-	const parts: string[] = [ctx.sourceTable];
-	const target = ctx.relation ?? ctx.target;
-	if (target) parts.push(`→ ${target}`);
-	return parts.join(' ');
-}
-
-// SQL_KEYWORDS regex — kept as a variable to avoid repeating the long pattern
-const SQL_KEYWORDS = new RegExp(
-	'\\b(SELECT|FROM|WHERE|JOIN|LEFT|RIGHT|INNER|OUTER|CROSS|LATERAL|ON|AND|OR|NOT|IN|EXISTS|AS' +
-		'|ORDER\\s+BY|GROUP\\s+BY|HAVING|LIMIT|OFFSET|INSERT\\s+INTO|VALUES|UPDATE|SET|DELETE|RETURNING' +
-		'|WITH|RECURSIVE|UNION|ALL|INTERSECT|EXCEPT|DISTINCT|CASE|WHEN|THEN|ELSE|END' +
-		'|IS|NULL|TRUE|FALSE|ASC|DESC|BETWEEN|LIKE|ILIKE|CAST|OVER|PARTITION\\s+BY' +
-		'|CONFLICT|DO|NOTHING|FETCH|FIRST|NEXT|ROWS|ONLY|FOR|SHARE|SKIP|LOCKED|NOWAIT)\\b',
-	'g',
-);
-
-function highlightSQL(sql: string): string {
-	const escaped = sql
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;');
-	return (
-		escaped
-			.replace(/("(?:[^"\\]|\\.)*")/g, '\x00IDENT$1\x00')
-			.replace(SQL_KEYWORDS, '<span class="sql-kw">$1</span>')
-			.replace(/(\$\d+)/g, '<span class="sql-param">$1</span>')
-			// biome-ignore lint/suspicious/noControlCharactersInRegex: \x00 sentinel removal — matches the insertion two lines above
-			.replace(/\x00IDENT(.*?)\x00/g, '<span class="sql-ident">$1</span>')
-	);
-}
-
-// ---------------------------------------------------------------------------
-// TypeScript code generation
-// ---------------------------------------------------------------------------
 
 function generateTypeScript(parsed: ParsedSchema): string {
 	const lines: string[] = [];
@@ -1060,838 +393,587 @@ function generateTypeScript(parsed: ParsedSchema): string {
 	return lines.join('\n');
 }
 
-function highlightTS(code: string): string {
-	const escaped = code
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;');
-	return escaped
-		.replace(
-			/\b(import|from|const|true|false)\b/g,
-			'<span class="ts-kw">$1</span>',
-		)
-		.replace(/(schema|ref|createOrm)\b/g, '<span class="ts-fn">$1</span>')
-		.replace(/('(?:[^'\\]|\\.)*')/g, '<span class="ts-str">$1</span>');
-}
+function buildMermaidCode(parsed: ParsedSchema): string {
+	const lines: string[] = ['erDiagram'];
 
-// ---------------------------------------------------------------------------
-// Generated TypeScript reactive state
-// ---------------------------------------------------------------------------
-
-const generatedTs = ref('');
-const copied = ref(false);
-const sqlCopied = ref(false);
-const paramsCopied = ref(false);
-
-let copiedTimer: ReturnType<typeof setTimeout> | null = null;
-
-async function copyTypeScript() {
-	await navigator.clipboard.writeText(generatedTs.value);
-	copied.value = true;
-	if (copiedTimer !== null) clearTimeout(copiedTimer);
-	copiedTimer = setTimeout(() => {
-		copied.value = false;
-		copiedTimer = null;
-	}, 2000);
-}
-
-// Reset the "Copy TypeScript" feedback when the schema edit produces a new
-// generated TS source — keeps the parallel with the SQL/params buttons.
-watch(generatedTs, () => {
-	if (copiedTimer !== null) {
-		clearTimeout(copiedTimer);
-		copiedTimer = null;
+	for (const table of parsed.tables) {
+		lines.push(`    ${table.name} {`);
+		for (const col of table.columns) {
+			const type = col.type.replace(/[^a-zA-Z0-9_]/g, '_');
+			const suffix = col.pk ? ' PK' : col.unique ? ' UK' : '';
+			lines.push(`        ${type} ${col.name}${suffix}`);
+		}
+		lines.push('    }');
 	}
-	copied.value = false;
+
+	for (const rel of parsed.relations) {
+		lines.push(`    ${rel.to} ||--o{ ${rel.from} : ""`);
+	}
+
+	return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// Compile flow
+// ---------------------------------------------------------------------------
+
+function performCompile(opts: { resetTab: boolean }) {
+	if (!nqlTag) {
+		compileError.value = schemaError.value
+			? `Schema error: ${schemaError.value}`
+			: 'Compiler not ready — please wait a moment and try again.';
+		result.value = null;
+		return;
+	}
+	const query = nqlCode.value.trim();
+	if (!query) {
+		compileError.value = 'Please enter an NQL query.';
+		result.value = null;
+		return;
+	}
+	try {
+		const builder = nqlTag`${query}`;
+		result.value = builder.dump();
+		compileError.value = null;
+		void opts; // resetTab reserved for future TS-mode wiring.
+	} catch (e) {
+		compileError.value = e instanceof Error ? e.message : String(e);
+		result.value = null;
+	}
+}
+
+function compile() {
+	if (nqlDebounceTimer !== null) {
+		clearTimeout(nqlDebounceTimer);
+		nqlDebounceTimer = null;
+	}
+	if (schemaDebounceTimer !== null) {
+		pendingManualCompile = true;
+		return;
+	}
+	performCompile({ resetTab: true });
+}
+
+// ---------------------------------------------------------------------------
+// Schema rebuild
+// ---------------------------------------------------------------------------
+
+async function rebuildOrm(dsl: string): Promise<void> {
+	if (!coreModule || !adapterModule) return;
+	const myGen = ++rebuildGeneration;
+	schemaError.value = null;
+
+	let parsed: ParsedSchema;
+	try {
+		parsed = parseSchemaDsl(dsl);
+	} catch (e) {
+		if (myGen !== rebuildGeneration || disposed) return;
+		schemaError.value = e instanceof Error ? e.message : String(e);
+		tableCount.value = 0;
+		mermaidSvg.value = '';
+		generatedTs.value = '';
+		nqlTag = null;
+		nqlTagReady.value = false;
+		return;
+	}
+
+	if (parsed.tables.length === 0) {
+		if (myGen !== rebuildGeneration || disposed) return;
+		schemaError.value = 'No tables defined';
+		tableCount.value = 0;
+		mermaidSvg.value = '';
+		generatedTs.value = '';
+		nqlTag = null;
+		nqlTagReady.value = false;
+		return;
+	}
+
+	if (myGen !== rebuildGeneration || disposed) return;
+	tableCount.value = parsed.tables.length;
+	generatedTs.value = generateTypeScript(parsed);
+
+	try {
+		const builtSchema = buildSchemaFromParsed(parsed);
+		const orm = coreModule.createOrm({
+			schema: builtSchema,
+			adapter: adapterModule.createPgsqlCompileOnlyAdapter(),
+		});
+		nqlTag = orm.nql as NqlTag;
+		nqlTagReady.value = true;
+	} catch (e) {
+		if (myGen !== rebuildGeneration || disposed) return;
+		schemaError.value = `Schema error: ${e instanceof Error ? e.message : String(e)}`;
+		nqlTag = null;
+		nqlTagReady.value = false;
+		return;
+	}
+
+	if (schemaExpanded.value) {
+		await ensureMermaid();
+		await renderDiagram(parsed, myGen);
+	}
+}
+
+async function ensureMermaid() {
+	if (mermaidInstance) return;
+	const m = await import('mermaid');
+	if (disposed) return;
+	mermaidInstance = m.default;
+	mermaidInstance.initialize({
+		startOnLoad: false,
+		theme: 'dark',
+		er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
+	});
+}
+
+async function renderDiagram(parsed: ParsedSchema, gen: number): Promise<void> {
+	if (!mermaidInstance) return;
+	try {
+		const code = buildMermaidCode(parsed);
+		const id = `er-${gen}-${Date.now()}`;
+		const { svg } = await mermaidInstance.render(id, code);
+		if (gen !== rebuildGeneration || disposed) return;
+		mermaidSvg.value = svg;
+	} catch {
+		if (gen !== rebuildGeneration || disposed) return;
+		mermaidSvg.value = '';
+	}
+}
+
+// ---------------------------------------------------------------------------
+// URL hash sync
+// ---------------------------------------------------------------------------
+
+async function syncUrlHash() {
+	if (disposed) return;
+	if (!('CompressionStream' in window)) return;
+	try {
+		const encoded = await encodeHash({
+			v: 1,
+			s: schemaDsl.value,
+			n: nqlCode.value,
+			m: 'nql',
+		});
+		const nextHash = `#${encoded}`;
+		if (!isHashLengthOk(encoded)) {
+			if (errorBanner.value?.title !== 'URL sharing paused') {
+				showOversizeBanner();
+			}
+			return;
+		}
+		if (nextHash === lastEmittedHash) return;
+		lastEmittedHash = nextHash;
+		const nextUrl =
+			window.location.pathname + window.location.search + nextHash;
+		history.replaceState(history.state ?? {}, '', nextUrl);
+	} catch {
+		// Encoding failed (validation rejected). Schema error already surfaces.
+	}
+}
+
+function scheduleHashSync() {
+	if (hashWriteTimer !== null) clearTimeout(hashWriteTimer);
+	hashWriteTimer = setTimeout(() => {
+		hashWriteTimer = null;
+		void syncUrlHash();
+	}, 500);
+}
+
+function clearHashFromUrl() {
+	const nextUrl = window.location.pathname + window.location.search;
+	history.replaceState(history.state ?? {}, '', nextUrl);
+	lastEmittedHash = null;
+}
+
+// ---------------------------------------------------------------------------
+// Banner factories
+// ---------------------------------------------------------------------------
+
+function showVersionBanner(reason: 'version' | 'unknown'): void {
+	errorBanner.value = {
+		severity: 'warn',
+		title:
+			reason === 'version'
+				? 'Shared link from a newer version'
+				: "Couldn't restore the shared link",
+		message:
+			reason === 'version'
+				? "This link uses a version of the playground hash format that isn't supported here. Loaded the default state."
+				: 'The URL hash is corrupt, oversized, or contains unsupported content. Loaded the default playground instead.',
+		actions: [
+			{ label: 'Reset URL', handler: () => softResetUrl() },
+			{ label: 'Got it', handler: () => (errorBanner.value = null) },
+		],
+	};
+}
+
+function showNoCompressionStreamBanner(): void {
+	errorBanner.value = {
+		severity: 'warn',
+		title: "Couldn't restore the shared link",
+		message:
+			'This link needs CompressionStream (Firefox 113+, Safari 16.4+, Chrome 80+). Loaded the default state.',
+		actions: [
+			{ label: 'Reset URL', handler: () => softResetUrl() },
+			{ label: 'Got it', handler: () => (errorBanner.value = null) },
+		],
+	};
+}
+
+function showOversizeBanner(): void {
+	errorBanner.value = {
+		severity: 'warn',
+		title: 'URL sharing paused',
+		message:
+			'The current playground state is too large to share via URL. The page still works locally; URL sharing will resume when state shrinks below the limit.',
+		actions: [{ label: 'Got it', handler: () => (errorBanner.value = null) }],
+	};
+}
+
+function showFatalBanner(error: unknown): void {
+	const detail = error instanceof Error ? error.message : String(error);
+	initFatal.value = true;
+	errorBanner.value = {
+		severity: 'fatal',
+		title: "Couldn't load the playground",
+		message: `A network issue prevented the playground modules from loading. (${detail})`,
+		actions: [
+			{ label: 'Reload', handler: () => window.location.reload() },
+			{
+				label: 'Reset URL',
+				handler: () =>
+					window.location.assign(
+						window.location.pathname + window.location.search,
+					),
+			},
+		],
+	};
+}
+
+function softResetUrl(): void {
+	isHydrating = true;
+	try {
+		clearHashFromUrl();
+		schemaDsl.value = DEFAULT_SCHEMA_DSL;
+		selectedExampleIndex.value = 0;
+		suppressNextNqlWatch = true;
+		nqlCode.value = ALL_EXAMPLES[0]?.code ?? '';
+		queryMode.value = 'nql';
+		errorBanner.value = null;
+	} finally {
+		isHydrating = false;
+	}
+	void rebuildOrm(schemaDsl.value).then(() => {
+		if (!disposed && ready.value) compile();
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Init flow
+// ---------------------------------------------------------------------------
+
+async function runInitFlow(): Promise<void> {
+	isInitializing.value = true;
+	isHydrating = true;
+	try {
+		await _runInitFlowInner();
+	} finally {
+		isHydrating = false;
+	}
+}
+
+function applyDefaults(): void {
+	schemaDsl.value = DEFAULT_SCHEMA_DSL;
+	nqlCode.value = ALL_EXAMPLES[0]?.code ?? '';
+	selectedExampleIndex.value = 0;
+	queryMode.value = 'nql';
+	lastEmittedHash = null;
+}
+
+async function _runInitFlowInner(): Promise<void> {
+	if (window.location.hash) {
+		const decoded = await decodeHash(window.location.hash);
+		if (disposed) return;
+		if (decoded.ok) {
+			schemaDsl.value = decoded.payload.s;
+			nqlCode.value = decoded.payload.n;
+			queryMode.value = decoded.payload.m;
+			lastEmittedHash = window.location.hash;
+		} else if (decoded.reason === 'no-compression-stream') {
+			applyDefaults();
+			showNoCompressionStreamBanner();
+		} else if (decoded.reason === 'version') {
+			applyDefaults();
+			showVersionBanner('version');
+		} else if (
+			decoded.reason === 'decode-error' ||
+			decoded.reason === 'shape' ||
+			decoded.reason === 'size' ||
+			decoded.reason === 'identifier'
+		) {
+			applyDefaults();
+			showVersionBanner('unknown');
+		}
+	}
+
+	try {
+		const [core, adapter] = await Promise.all([
+			import('@dbsp/core'),
+			import('@dbsp/adapter-pgsql'),
+		]);
+		if (disposed) return;
+		coreModule = core;
+		adapterModule = adapter;
+	} catch (e) {
+		if (disposed) return;
+		showFatalBanner(e);
+		isInitializing.value = false;
+		return;
+	}
+
+	await rebuildOrm(schemaDsl.value);
+	if (disposed) return;
+
+	if (!schemaError.value && nqlTag && nqlCode.value.trim()) {
+		if (nqlDebounceTimer !== null) {
+			clearTimeout(nqlDebounceTimer);
+			nqlDebounceTimer = null;
+		}
+		performCompile({ resetTab: false });
+	}
+
+	isInitializing.value = false;
+}
+
+async function onHashChange() {
+	if (disposed) return;
+	if (window.location.hash === lastEmittedHash) return;
+	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
+	nqlDebounceTimer = null;
+	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
+	schemaDebounceTimer = null;
+	rebuildGeneration += 1;
+	pendingManualCompile = false;
+	errorBanner.value = null;
+	await runInitFlow();
+}
+
+// ---------------------------------------------------------------------------
+// Watchers
+// ---------------------------------------------------------------------------
+
+watch(schemaDsl, (newDsl) => {
+	if (isHydrating) return;
+	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
+	const myTimer: ReturnType<typeof setTimeout> = setTimeout(async () => {
+		await rebuildOrm(newDsl);
+		if (schemaDebounceTimer !== myTimer || disposed) return;
+		schemaDebounceTimer = null;
+		if (pendingManualCompile) {
+			pendingManualCompile = false;
+			performCompile({ resetTab: true });
+		} else if (nqlCode.value.trim()) {
+			performCompile({ resetTab: false });
+		}
+		scheduleHashSync();
+	}, 500);
+	schemaDebounceTimer = myTimer;
 });
 
-let sqlCopiedTimer: ReturnType<typeof setTimeout> | null = null;
-let paramsCopiedTimer: ReturnType<typeof setTimeout> | null = null;
+watch(nqlCode, () => {
+	if (isHydrating) return;
+	if (suppressNextNqlWatch) {
+		suppressNextNqlWatch = false;
+		return;
+	}
+	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
+	nqlDebounceTimer = setTimeout(() => {
+		nqlDebounceTimer = null;
+		if (schemaDebounceTimer !== null) return;
+		performCompile({ resetTab: false });
+		scheduleHashSync();
+	}, 300);
+});
 
-async function copySQL(): Promise<void> {
-	if (!result.value) return;
-	await navigator.clipboard.writeText(result.value.sql);
-	sqlCopied.value = true;
-	// Cancel any pending reset so two quick clicks don't end the feedback
-	// window early on the most recent click.
-	if (sqlCopiedTimer !== null) clearTimeout(sqlCopiedTimer);
-	sqlCopiedTimer = setTimeout(() => {
-		sqlCopied.value = false;
-		sqlCopiedTimer = null;
+watch(schemaExpanded, async (expanded) => {
+	if (expanded && !mermaidInstance) {
+		await ensureMermaid();
+		if (!disposed) {
+			try {
+				const parsed = parseSchemaDsl(schemaDsl.value);
+				const myGen = ++rebuildGeneration;
+				await renderDiagram(parsed, myGen);
+			} catch {
+				/* schema error already surfaced */
+			}
+		}
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Sub-component event handlers
+// ---------------------------------------------------------------------------
+
+function onLoadExample(index: number): void {
+	const ex = visibleExamples.value[index];
+	if (!ex) return;
+	selectedExampleIndex.value = index;
+	if (nqlCode.value !== ex.code) {
+		suppressNextNqlWatch = true;
+		nqlCode.value = ex.code;
+	}
+	compile();
+}
+
+async function onCopyTs() {
+	try {
+		await navigator.clipboard.writeText(generatedTs.value);
+	} catch (e) {
+		console.warn('Playground: clipboard write failed', e);
+		return;
+	}
+	tsCopied.value = true;
+	if (tsCopiedTimer !== null) clearTimeout(tsCopiedTimer);
+	tsCopiedTimer = setTimeout(() => {
+		tsCopied.value = false;
+		tsCopiedTimer = null;
 	}, 2000);
 }
 
-async function copyParams(): Promise<void> {
-	if (!result.value) return;
-	await navigator.clipboard.writeText(formatParams(result.value.params));
-	paramsCopied.value = true;
-	if (paramsCopiedTimer !== null) clearTimeout(paramsCopiedTimer);
-	paramsCopiedTimer = setTimeout(() => {
-		paramsCopied.value = false;
-		paramsCopiedTimer = null;
-	}, 2000);
-}
+watch(generatedTs, () => {
+	if (tsCopiedTimer !== null) clearTimeout(tsCopiedTimer);
+	tsCopiedTimer = null;
+	tsCopied.value = false;
+});
+
+// ---------------------------------------------------------------------------
+// Lifecycle
+// ---------------------------------------------------------------------------
+
+onMounted(async () => {
+	disposed = false;
+	await runInitFlow();
+	if (!disposed) {
+		window.addEventListener('hashchange', onHashChange);
+	}
+});
+
+onBeforeUnmount(() => {
+	disposed = true;
+	window.removeEventListener('hashchange', onHashChange);
+	if (schemaDebounceTimer !== null) clearTimeout(schemaDebounceTimer);
+	if (nqlDebounceTimer !== null) clearTimeout(nqlDebounceTimer);
+	if (hashWriteTimer !== null) clearTimeout(hashWriteTimer);
+	if (tsCopiedTimer !== null) clearTimeout(tsCopiedTimer);
+	rebuildGeneration += 1;
+	pendingManualCompile = false;
+	suppressNextNqlWatch = false;
+	nqlTag = null;
+	nqlTagReady.value = false;
+});
 </script>
 
+<template>
+  <div class="playground" :aria-busy="isInitializing">
+    <ErrorBanner :data="errorBanner" @dismiss="errorBanner = null" />
+
+    <SchemaSection
+      :dsl="schemaDsl"
+      :table-count="tableCount"
+      :mermaid-svg="mermaidSvg"
+      :generated-ts="generatedTs"
+      :schema-error="schemaError"
+      :expanded="schemaExpanded"
+      @update:dsl="schemaDsl = $event"
+      @update:expanded="schemaExpanded = $event"
+      @reset="softResetUrl"
+      @copy-ts="onCopyTs"
+    />
+
+    <QuerySection
+      :nql-code="nqlCode"
+      :query-mode="queryMode"
+      :examples="visibleExamples"
+      :selected-example-index="selectedExampleIndex"
+      :ready="ready"
+      @update:nql-code="nqlCode = $event"
+      @update:selected-example-index="onLoadExample"
+      @compile="compile"
+    />
+
+    <div v-if="!initFatal" class="playground-output">
+      <div v-if="isInitializing" class="output-skeleton" aria-live="polite">
+        <span>Loading playground…</span>
+      </div>
+      <div v-else-if="compileError" class="output-error" role="alert">
+        <pre>{{ compileError }}</pre>
+      </div>
+      <template v-else-if="result">
+        <PlanSection :result="result" />
+        <OutputSection :result="result" />
+      </template>
+      <div v-else class="output-placeholder">
+        <span>Click "Compile" to see the output.</span>
+      </div>
+    </div>
+  </div>
+</template>
+
 <style scoped>
-/* ============================================================
-   Container
-   ============================================================ */
 .playground {
-  margin: var(--dbsp-space-xl) 0;
+  margin: var(--dbsp-space-2xl, 2rem) 0;
+  padding: var(--dbsp-space-xl, 1.5rem);
   border: 1px solid var(--vp-c-brand-soft);
-  border-radius: var(--dbsp-radius-lg);
-  overflow: hidden;
-  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.12);
+  border-radius: var(--dbsp-radius-lg, 12px);
   background: var(--vp-c-bg-soft);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
-/* ============================================================
-   Section headers
-   ============================================================ */
-.section-header {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.6rem 1rem;
-  background: var(--vp-c-bg);
-  background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.06) 0%, rgba(34, 211, 238, 0.04) 100%);
-  border-bottom: 1px solid var(--vp-c-divider);
-  cursor: pointer;
-  user-select: none;
-}
-
-.section-header.query-section-header {
-  cursor: default;
-  border-top: 1px solid var(--vp-c-divider);
-}
-
-.section-toggle {
-  font-size: 0.75rem;
-  color: var(--vp-c-text-3);
-  line-height: 1;
-  width: 12px;
-  text-align: center;
-}
-
-.section-title {
-  font-size: 0.78rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  color: var(--vp-c-text-2);
-}
-
-.schema-status {
-  font-size: 0.72rem;
-  font-family: var(--vp-font-family-mono);
-  padding: 0.1rem 0.5rem;
-  border-radius: 999px;
-}
-
-.schema-status.ok {
-  background: rgba(34, 197, 94, 0.12);
-  color: #4ade80;
-}
-
-.schema-status.error {
-  background: rgba(248, 113, 113, 0.12);
-  color: #f87171;
-}
-
-/* ============================================================
-   Schema panels (two-column)
-   ============================================================ */
-.schema-panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  height: 320px;
-  overflow: hidden;
-  border-bottom: 1px solid var(--vp-c-divider);
-}
-
-@media (max-width: 900px) {
-  .schema-panels {
-    grid-template-columns: 1fr;
-    height: auto;
-    max-height: 500px;
-  }
-
-  .schema-editor {
-    border-right: none;
-    border-bottom: 1px solid var(--vp-c-divider);
-  }
-}
-
-.schema-editor {
-  border-right: 1px solid var(--vp-c-divider);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.schema-textarea {
-  flex: 1;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--vp-c-text-1);
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.82rem;
-  line-height: 1.65;
-  padding: 1rem;
-  min-height: 0;
-  height: 100%;
-  caret-color: var(--vp-c-brand-1);
-  overflow-y: auto;
-}
-
-.schema-textarea:focus {
-  box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.25);
-}
-
-.schema-textarea::placeholder {
-  color: var(--vp-c-text-3);
-}
-
-/* ============================================================
-   Mermaid diagram
-   ============================================================ */
-.schema-output {
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--vp-c-bg-alt, var(--vp-c-bg));
-}
-
-.schema-tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0.4rem 0.75rem 0;
-  border-bottom: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg);
-  align-items: center;
-}
-
-.schema-tabs .copy-btn {
-  margin-left: auto;
-  font-size: 0.72rem;
-  padding: 0.15rem 0.5rem;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-2);
-  cursor: pointer;
-  transition: all 0.15s;
-}
-
-.schema-tabs .copy-btn:hover {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-}
-
-.mermaid-viewport {
-  width: 100%;
-  height: 100%;
-  overflow: hidden;
+.output-skeleton {
   position: relative;
-  user-select: none;
-}
-
-.mermaid-canvas {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: transform 0.05s linear;
-}
-
-.mermaid-canvas :deep(svg) {
-  max-width: none;
-  height: auto;
-  display: block;
-}
-
-.zoom-controls {
-  position: absolute;
-  bottom: 8px;
-  right: 8px;
-  display: flex;
-  gap: 4px;
-}
-
-.zoom-btn {
-  width: 28px;
-  height: 28px;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 4px;
-  background: var(--vp-c-bg);
-  color: var(--vp-c-text-2);
-  font-size: 0.85rem;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-  opacity: 0.7;
-}
-
-.zoom-btn:hover {
-  opacity: 1;
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-}
-
-.diagram-error {
-  width: 100%;
-  padding: 0.75rem;
-}
-
-.diagram-error pre {
-  color: #f87171;
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.8rem;
-  white-space: pre-wrap;
-  word-break: break-word;
-  margin: 0;
-}
-
-.diagram-placeholder {
-  color: var(--vp-c-text-3);
-  font-size: 0.8rem;
-}
-
-/* ============================================================
-   Query panels (two-column)
-   ============================================================ */
-.query-panels {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  min-height: 360px;
-}
-
-@media (max-width: 900px) {
-  .query-panels {
-    grid-template-columns: 1fr;
-  }
-
-  .playground-input {
-    border-right: none;
-    border-bottom: 1px solid var(--vp-c-divider);
-  }
-}
-
-/* ============================================================
-   Left panel (NQL input)
-   ============================================================ */
-.playground-input {
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--vp-c-divider);
-}
-
-.panel-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg);
-  background-image: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, rgba(34, 211, 238, 0.04) 100%);
-}
-
-.panel-label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--vp-c-text-2);
-  white-space: nowrap;
-}
-
-.example-select {
-  flex: 1;
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: 6px;
-  padding: 0.35rem 0.6rem;
-  font-size: 0.85rem;
-  font-family: var(--vp-font-family-mono);
-  color: var(--vp-c-text-1);
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.example-select:hover {
-  border-color: var(--vp-c-brand-soft);
-}
-
-.example-select:focus {
-  outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: 1px;
-}
-
-.nql-textarea {
-  flex: 1;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--vp-c-text-1);
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.9rem;
-  line-height: 1.7;
-  padding: 1.25rem;
-  min-height: 180px;
-  letter-spacing: 0.02em;
-  caret-color: var(--vp-c-brand-1);
-  transition: box-shadow 0.2s;
-}
-
-.nql-textarea:focus {
-  box-shadow: inset 0 0 0 2px rgba(99, 102, 241, 0.3);
-}
-
-.nql-textarea::placeholder {
-  color: var(--vp-c-text-3);
-}
-
-.compile-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem 1rem;
-  border-top: 1px solid var(--vp-c-divider);
-  background: var(--vp-c-bg);
-}
-
-.compile-btn {
-  background: linear-gradient(135deg, #6366F1 0%, #4F46E5 100%);
-  color: #fff;
-  border: none;
-  border-radius: 6px; /* between radius-sm 4px and radius-md 8px */
-  padding: var(--dbsp-space-sm) 1.4rem;
-  font-size: var(--dbsp-text-sm);
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
-  letter-spacing: 0.02em;
-}
-
-.compile-btn:hover {
-  background: linear-gradient(135deg, #818CF8 0%, #6366F1 100%);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
-  transform: translateY(-1px);
-}
-
-.compile-btn:active {
-  transform: translateY(0);
-  box-shadow: 0 1px 4px rgba(99, 102, 241, 0.3);
-}
-
-.hint {
-  font-size: 0.72rem;
-  color: var(--vp-c-text-3);
-  font-family: var(--vp-font-family-mono);
-  opacity: 0.7;
-}
-
-/* ============================================================
-   Right panel (output)
-   ============================================================ */
-.playground-output {
-  display: flex;
-  flex-direction: column;
-}
-
-.tabs {
-  display: flex;
-  gap: 2px;
-  padding: 0.5rem 0.75rem 0;
-  background: var(--vp-c-bg);
-}
-
-.tab-btn {
-  padding: 0.5rem 1rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  background: transparent;
-  border: none;
-  border-radius: 6px 6px 0 0;
-  color: var(--vp-c-text-3);
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.tab-btn:hover {
-  color: var(--vp-c-text-1);
-  background: var(--vp-c-bg-soft);
-}
-
-.tab-btn.active {
-  color: var(--vp-c-brand-1);
-  background: var(--vp-c-bg-soft);
-  border-bottom: 2px solid var(--vp-c-brand-1);
-}
-
-.output-content,
-.output-error,
-.output-placeholder {
-  flex: 1;
-  overflow: auto;
-  padding: 1.25rem; /* between space-lg 1rem and space-xl 1.5rem */
-  background: transparent;
-  animation: fadeIn 0.2s ease;
-}
-
-.output-pane {
-  position: relative;
-  /* Reserve a top gutter so the absolutely-positioned copy button doesn't
-     overlap the first line of <pre> content. */
-  padding-top: var(--dbsp-space-xl);
-}
-
-.output-copy-btn {
-  position: absolute;
-  top: 0;
-  right: 0;
-  font-size: 0.72rem;
-  padding: 0.15rem 0.5rem;
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--dbsp-radius-sm);
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-2);
-  cursor: pointer;
-  transition: all 0.15s;
-  z-index: 1;
-}
-
-.output-copy-btn:hover {
-  border-color: var(--vp-c-brand-1);
-  color: var(--vp-c-brand-1);
-}
-
-.output-copy-btn:focus-visible {
-  outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: 2px;
-}
-
-/* ============================================================
-   Plan tab — structured decision cards
-   ============================================================ */
-.plan-pane {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dbsp-space-lg);
-}
-
-.plan-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--dbsp-space-md);
-  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
-  background: var(--vp-c-bg-soft);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--dbsp-radius-md);
-  font-size: var(--dbsp-text-sm);
-}
-
-.plan-meta-item {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--dbsp-space-xs);
-}
-
-.plan-meta-label {
-  color: var(--vp-c-text-3);
-}
-
-.plan-meta-value {
-  color: var(--vp-c-text-1);
-  font-family: var(--vp-font-family-mono);
-  font-weight: 600;
-}
-
-.plan-meta-warn {
-  color: var(--dbsp-c-warning);
-  font-weight: 600;
-}
-
-.plan-section-title {
-  font-size: 0.72rem; /* between text-xs 0.75rem and the inline 0.7rem chip */
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--vp-c-text-2);
-  margin-bottom: var(--dbsp-space-sm);
-}
-
-.plan-warnings,
-.plan-ctes,
-.plan-decisions {
-  display: flex;
-  flex-direction: column;
-}
-
-.plan-warnings > .plan-warning-card + .plan-warning-card,
-.plan-ctes > .plan-cte-card + .plan-cte-card,
-.plan-decisions > .plan-decision-card + .plan-decision-card {
-  margin-top: var(--dbsp-space-sm);
-}
-
-.plan-cte-card {
-  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  border-left: 3px solid var(--dbsp-c-cyan);
-  border-radius: var(--dbsp-radius-sm);
-  font-size: var(--dbsp-text-sm);
-}
-
-.plan-cte-header {
-  display: flex;
-  align-items: baseline;
-  gap: var(--dbsp-space-md);
-  flex-wrap: wrap;
-}
-
-.plan-cte-name {
-  font-family: var(--vp-font-family-mono);
-  font-weight: 700;
-  color: var(--dbsp-c-cyan);
-}
-
-.plan-cte-recursive {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.7rem; /* between text-xs 0.75rem and decoration baseline */
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--dbsp-radius-sm);
-  background: color-mix(in srgb, var(--dbsp-c-warning) 12%, transparent);
-  color: var(--dbsp-c-warning);
-}
-
-.plan-cte-refs {
-  font-size: 0.72rem;
-  color: var(--vp-c-text-3);
-}
-
-.plan-cte-purpose {
-  margin-top: var(--dbsp-space-xs);
-  color: var(--vp-c-text-2);
-  line-height: 1.5;
-}
-
-.plan-warning-card {
-  padding: var(--dbsp-space-md);
-  background: var(--vp-c-bg-soft);
-  border-left: 3px solid var(--dbsp-c-warning);
-  border-radius: var(--dbsp-radius-sm);
-  font-size: var(--dbsp-text-sm);
-  line-height: 1.5;
-}
-
-.plan-warning-code {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--dbsp-c-warning);
-  margin-bottom: var(--dbsp-space-xs);
-}
-
-.plan-warning-message {
-  color: var(--vp-c-text-1);
-}
-
-.plan-warning-suggestion {
-  margin-top: var(--dbsp-space-xs);
-  color: var(--vp-c-text-2);
-  font-style: italic;
-}
-
-.plan-decision-card {
-  border: 1px solid var(--vp-c-divider);
-  border-left: 3px solid var(--dbsp-c-cyan);
-  border-radius: var(--dbsp-radius-sm);
-  background: var(--vp-c-bg);
-  overflow: hidden;
-  transition: border-color 0.15s;
-}
-
-.plan-decision-card--ambiguity {
-  border-left-color: var(--dbsp-c-warning);
-}
-
-.plan-decision-header {
-  display: flex;
-  align-items: center;
-  gap: var(--dbsp-space-md);
-  width: 100%;
-  padding: var(--dbsp-space-sm) var(--dbsp-space-md);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-  font-size: var(--dbsp-text-sm);
-  color: inherit;
-  transition: background 0.15s;
-}
-
-.plan-decision-header:hover {
-  background: var(--vp-c-bg-soft);
-}
-
-.plan-decision-header:focus-visible {
-  outline: 2px solid var(--vp-c-brand-1);
-  outline-offset: -2px;
-}
-
-.plan-decision-type {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.7rem; /* between text-xs 0.75rem and chip baseline */
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: var(--dbsp-c-cyan);
-  flex-shrink: 0;
-}
-
-.plan-decision-card--ambiguity .plan-decision-type {
-  color: var(--dbsp-c-warning);
-}
-
-.plan-decision-context {
-  font-family: var(--vp-font-family-mono);
-  color: var(--vp-c-text-2);
-  flex-shrink: 0;
-}
-
-.plan-decision-choice {
-  flex: 1;
-  font-weight: 600;
-  color: var(--vp-c-text-1);
-}
-
-.plan-decision-chevron {
-  color: var(--vp-c-text-3);
-  transition: transform 0.15s;
-  flex-shrink: 0;
-}
-
-.plan-decision-chevron.open {
-  transform: rotate(90deg);
-}
-
-.plan-decision-body {
-  padding: var(--dbsp-space-sm) var(--dbsp-space-md) var(--dbsp-space-md);
-  border-top: 1px solid var(--vp-c-divider);
-  font-size: var(--dbsp-text-sm);
-  display: flex;
-  flex-direction: column;
-  gap: var(--dbsp-space-sm);
-}
-
-.plan-decision-row {
-  display: flex;
-  flex-direction: column;
-  gap: var(--dbsp-space-xs);
-}
-
-.plan-decision-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--vp-c-text-3);
-}
-
-.plan-decision-value {
-  color: var(--vp-c-text-1);
-  line-height: 1.5;
-}
-
-.plan-decision-alternatives {
-  margin: 0;
-  padding-left: var(--dbsp-space-lg);
-  color: var(--vp-c-text-2);
-}
-
-.plan-decision-alternatives li {
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.82rem; /* between text-sm 0.875rem and 0.75rem for compact list */
-  line-height: 1.6;
-}
-
-.plan-empty {
-  padding: var(--dbsp-space-xl);
-  text-align: center;
-  color: var(--vp-c-text-3);
-  font-size: var(--dbsp-text-sm);
-}
-
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.output-content pre,
-.output-error pre {
-  margin: 0;
-  font-family: var(--vp-font-family-mono);
-  font-size: var(--dbsp-text-sm);
-  line-height: 1.7;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.output-content code {
-  color: var(--vp-c-text-1);
-}
-
-/* SQL highlighting — WCAG AA contrast for both modes */
-.dark .output-content :deep(.sql-kw) { color: #A5B4FC; font-weight: 600; }
-.dark .output-content :deep(.sql-param) { color: #67E8F9; }
-.dark .output-content :deep(.sql-ident) { color: #86EFAC; }
-
-.output-content :deep(.sql-kw) { color: #4338CA; font-weight: 600; }
-.output-content :deep(.sql-param) { color: #0E7490; }
-.output-content :deep(.sql-ident) { color: #15803D; }
-
-.output-error pre {
-  color: #F87171;
-}
-
-.output-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-3);
-  font-size: 0.875rem;
   min-height: 200px;
+  border-radius: var(--dbsp-radius-md, 8px);
+  background: linear-gradient(
+    90deg,
+    var(--vp-c-bg-soft) 0%,
+    var(--vp-c-bg) 50%,
+    var(--vp-c-bg-soft) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s ease-in-out infinite;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vp-c-text-3);
+  font-size: 0.85rem;
 }
 
-/* ============================================================
-   Generated TypeScript (in schema-output tab)
-   ============================================================ */
-.generated-pre {
-  margin: 0;
-  padding: 1rem;
+@keyframes skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.output-error {
+  background: color-mix(in srgb, var(--dbsp-c-error) 8%, transparent);
+  border-left: 3px solid var(--dbsp-c-error);
+  border-radius: var(--dbsp-radius-sm, 4px);
+  padding: var(--dbsp-space-md, 0.75rem);
   font-family: var(--vp-font-family-mono);
-  font-size: 0.82rem;
-  line-height: 1.65;
-  overflow: auto;
-  flex: 1;
+  font-size: 0.85rem;
+  color: var(--dbsp-c-error);
+  white-space: pre-wrap;
 }
 
-/* WCAG AA contrast — dark mode: light on dark, light mode: dark on light */
-.dark .generated-pre :deep(.ts-kw) { color: #A5B4FC; font-weight: 600; }
-.dark .generated-pre :deep(.ts-fn) { color: #67E8F9; }
-.dark .generated-pre :deep(.ts-str) { color: #86EFAC; }
-
-.generated-pre :deep(.ts-kw) { color: #4338CA; font-weight: 600; }
-.generated-pre :deep(.ts-fn) { color: #0E7490; }
-.generated-pre :deep(.ts-str) { color: #15803D; }
+.output-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-3);
+  font-size: 0.85rem;
+  min-height: 200px;
+  padding: var(--dbsp-space-md, 0.75rem);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: var(--dbsp-radius-md, 8px);
+}
 </style>
