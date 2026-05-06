@@ -69,8 +69,9 @@ temp/
 .superpowers/
 
 # Process / backlog artifacts (internal, never committed)
-TODO.md
-TODO_*.md
+# CLAUDE.md § TODO.local.md — privacy & routing convention:
+# all *.local.md files are private working memory, never committed.
+*.local.md
 BACKLOG_STUDY.md
 .workflow-state.json
 
