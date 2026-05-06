@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { PropType } from 'vue';
+import CodeEditor from './CodeEditor.vue';
 
 defineProps({
 	nqlCode: { type: String, required: true },
@@ -23,10 +24,6 @@ const emit = defineEmits<{
 function onExampleChange(e: Event) {
 	const target = e.target as HTMLSelectElement;
 	emit('update:selectedExampleIndex', Number(target.value));
-}
-
-function onTextareaInput(e: Event) {
-	emit('update:nqlCode', (e.target as HTMLTextAreaElement).value);
 }
 
 function onCompileShortcut(e: KeyboardEvent) {
@@ -71,18 +68,15 @@ function onCompileShortcut(e: KeyboardEvent) {
       </select>
     </div>
 
-    <textarea
-      :value="nqlCode"
-      class="nql-textarea"
-      spellcheck="false"
-      autocomplete="off"
-      autocorrect="off"
-      autocapitalize="off"
-      placeholder="Enter NQL query..."
-      aria-label="NQL query"
-      @input="onTextareaInput"
-      @keydown="onCompileShortcut"
-    />
+    <div @keydown="onCompileShortcut">
+      <CodeEditor
+        :model-value="nqlCode"
+        language="nql"
+        placeholder="Enter NQL query..."
+        aria-label="NQL query"
+        @update:model-value="emit('update:nqlCode', $event)"
+      />
+    </div>
 
     <div class="query-actions">
       <button
@@ -134,18 +128,6 @@ function onCompileShortcut(e: KeyboardEvent) {
   width: 100%;
 }
 
-.nql-textarea {
-  width: 100%;
-  min-height: 9rem;
-  padding: var(--dbsp-space-md, 0.75rem);
-  font-family: var(--vp-font-family-mono);
-  font-size: 0.85rem;
-  background: var(--vp-c-bg);
-  border: 1px solid var(--vp-c-divider);
-  border-radius: var(--dbsp-radius-sm, 4px);
-  color: var(--vp-c-text-1);
-  resize: vertical;
-}
 
 .query-actions { display: flex; align-items: center; gap: var(--dbsp-space-md, 0.75rem); margin-top: var(--dbsp-space-sm, 0.5rem); }
 
