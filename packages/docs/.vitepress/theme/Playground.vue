@@ -163,6 +163,7 @@ const { isDark } = useData();
 let coreModule: typeof import('@dbsp/core') | null = null;
 let adapterModule: typeof import('@dbsp/adapter-pgsql') | null = null;
 let mermaidInstance: typeof import('mermaid').default | null = null;
+let mermaidThemeDirty = false;
 let nqlTag: NqlTag | null = null;
 const nqlTagReady = ref(false);
 
@@ -831,16 +832,26 @@ watch(nqlCode, () => {
 });
 
 watch(schemaExpanded, async (expanded) => {
-	if (expanded && !mermaidInstance) {
+	if (!expanded) return;
+	if (!mermaidInstance) {
 		await ensureMermaid();
-		if (!disposed) {
-			try {
-				const parsed = parseSchemaDsl(schemaDsl.value);
-				const myGen = ++rebuildGeneration;
-				await renderDiagram(parsed, myGen);
-			} catch {
-				/* schema error already surfaced */
-			}
+	} else if (mermaidThemeDirty) {
+		// Theme changed while panel was collapsed — re-initialize with current theme
+		mermaidInstance.initialize({
+			startOnLoad: false,
+			theme: 'base',
+			themeVariables: getMermaidThemeVariables(isDark.value),
+			er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
+		});
+		mermaidThemeDirty = false;
+	}
+	if (!disposed) {
+		try {
+			const parsed = parseSchemaDsl(schemaDsl.value);
+			const myGen = ++rebuildGeneration;
+			await renderDiagram(parsed, myGen);
+		} catch {
+			/* schema error already surfaced */
 		}
 	}
 });
@@ -853,7 +864,9 @@ watch(isDark, async (dark) => {
 		themeVariables: getMermaidThemeVariables(dark),
 		er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
 	});
-	// Re-render the diagram with the new theme if the schema panel is open
+	// Re-render the diagram with the new theme if the schema panel is open;
+	// otherwise mark the theme as dirty so the schemaExpanded watcher will
+	// force a re-render when the panel is next expanded.
 	if (schemaExpanded.value) {
 		try {
 			const parsed = parseSchemaDsl(schemaDsl.value);
@@ -862,6 +875,8 @@ watch(isDark, async (dark) => {
 		} catch {
 			/* schema error already surfaced */
 		}
+	} else {
+		mermaidThemeDirty = true;
 	}
 });
 

@@ -5,35 +5,70 @@
 
 import { StreamLanguage, type StringStream } from '@codemirror/language';
 
-// All NQL keywords (case-insensitive) from packages/nql/src/lexer/tokens.ts
+// ---------------------------------------------------------------------------
+// Keyword set — source of truth: packages/nql/src/lexer/tokens.ts
+//
+// Single-word keywords extracted from createToken({ pattern: /word\b/i }) calls:
+//   with, select, where, flat, via, bind, limit, offset, distinct, ascendant,
+//   descendant, parent, child, asc, as, on, and, or, not, all, some, none,
+//   nowait, every, intersect, insert, into, in, any, between, like, overlaps,
+//   containedby, contains, is, exists, update, delete, from, set, upsert,
+//   values, true, false, null, desc, over, row_number, rank, dense_rank, lag,
+//   lead, case, when, then, else, end, union, except
+//
+// Multi-word tokens (group by, order by, partition by) matched word-by-word:
+//   → add: group, by, order, partition
+//
+// NOT in lexer (removed): ilike, join, having, contained_by (underscore form)
+// ---------------------------------------------------------------------------
 const NQL_KEYWORDS = new Set([
+	// Core query keywords
 	'select',
 	'from',
 	'where',
+	'with',
+	'flat',
+	'via',
+	'bind',
+	'distinct',
+	'limit',
+	'offset',
+	// Multi-word components (group by / order by / partition by)
+	'group',
+	'order',
+	'partition',
+	'by',
+	// Boolean operators
 	'and',
 	'or',
 	'not',
+	// Comparison & predicate keywords
 	'in',
 	'is',
+	'between',
+	'like',
+	'exists',
+	// Quantifiers
+	'all',
+	'any',
+	'some',
+	'none',
+	'every',
+	// Sort direction
+	'asc',
+	'desc',
+	// Alias / join keyword
+	'as',
+	'on',
+	// Range operators (PostgreSQL) — from ContainedBy, Contains, Overlaps tokens
+	'overlaps',
+	'contains',
+	'containedby',
+	// Literals
 	'null',
 	'true',
 	'false',
-	'asc',
-	'desc',
-	'order',
-	'by',
-	'limit',
-	'offset',
-	'group',
-	'having',
-	'join',
-	'on',
-	'with',
-	'as',
-	'exists',
-	'between',
-	'like',
-	'ilike',
+	// Mutation keywords
 	'insert',
 	'into',
 	'set',
@@ -41,36 +76,30 @@ const NQL_KEYWORDS = new Set([
 	'update',
 	'delete',
 	'upsert',
-	'distinct',
-	'all',
-	// Additional NQL-specific keywords from lexer
-	'any',
+	// Window function keywords
+	'over',
+	'row_number',
+	'rank',
+	'dense_rank',
+	'lag',
+	'lead',
+	// CASE expression keywords
 	'case',
 	'when',
 	'then',
 	'else',
 	'end',
+	// Set operations
 	'union',
 	'intersect',
 	'except',
-	'count',
-	'sum',
-	'avg',
-	'min',
-	'max',
-	'for',
-	'no',
-	'key',
-	'share',
-	'skip',
-	'locked',
-	'row_number',
-	'dense_rank',
-	'partition',
-	'over',
-	'overlaps',
-	'contains',
-	'contained_by',
+	// Lock clause (single-word)
+	'nowait',
+	// Pseudo-column traversal
+	'parent',
+	'child',
+	'ascendant',
+	'descendant',
 ]);
 
 interface NqlState {
@@ -83,13 +112,21 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 	},
 
 	token(stream: StringStream, state: NqlState): string | null {
-		// Continue string literals
+		// Continue string literals — handle SQL doubled-quote escape ('' or "")
 		if (state.inString !== null) {
-			if (stream.skipTo(state.inString)) {
-				stream.next(); // consume closing quote
-				state.inString = null;
-			} else {
-				stream.skipToEnd();
+			const quoteChar = state.inString;
+			while (!stream.eol()) {
+				const ch = stream.next();
+				if (ch === quoteChar) {
+					if (stream.peek() === quoteChar) {
+						// SQL escape: '' inside 'string' — consume second quote, stay in string
+						stream.next();
+					} else {
+						// Closing quote — end string state
+						state.inString = null;
+						break;
+					}
+				}
 			}
 			return 'string';
 		}
@@ -97,22 +134,47 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 		// Skip whitespace
 		if (stream.eatSpace()) return null;
 
-		// Line comments (--)
-		if (stream.match('--')) {
+		// Line comments — NQL uses '#' (see packages/nql/src/lexer/tokens.ts:13-17)
+		if (stream.eat('#')) {
 			stream.skipToEnd();
 			return 'comment';
 		}
 
-		// String literals
+		// String literals (single-quoted, SQL '' escape)
 		const ch = stream.peek();
-		if (ch === "'" || ch === '"') {
-			stream.next();
-			if (!stream.skipTo(ch)) {
-				stream.skipToEnd();
-				state.inString = ch;
-			} else {
-				stream.next();
+		if (ch === "'") {
+			stream.next(); // consume opening quote
+			// Inline scan: handle '' escape, stop at unescaped ' or EOL
+			while (!stream.eol()) {
+				const c = stream.next();
+				if (c === "'") {
+					if (stream.peek() === "'") {
+						stream.next(); // consume doubled quote, stay in string
+					} else {
+						// Closing quote
+						return 'string';
+					}
+				}
 			}
+			// EOL hit before closing quote — enter multi-line continuation state
+			state.inString = "'";
+			return 'string';
+		}
+
+		// Double-quoted identifiers ("ident" with "" escape)
+		if (ch === '"') {
+			stream.next();
+			while (!stream.eol()) {
+				const c = stream.next();
+				if (c === '"') {
+					if (stream.peek() === '"') {
+						stream.next();
+					} else {
+						return 'string';
+					}
+				}
+			}
+			state.inString = '"';
 			return 'string';
 		}
 
@@ -126,8 +188,8 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 			return 'variableName';
 		}
 
-		// Operators
-		if (stream.match(/^(<=|>=|<>|!=|[<>=!@])/)) {
+		// Operators (multi-char before single-char — longest match first)
+		if (stream.match(/^(->>|->|@>|<@|<=|>=|<>|!=|[<>=!@?|])/)) {
 			return 'operator';
 		}
 
@@ -146,7 +208,8 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 	},
 
 	languageData: {
-		commentTokens: { line: '--' },
+		// NQL line comment delimiter is '#' (see packages/nql/src/lexer/tokens.ts:13-17)
+		commentTokens: { line: '#' },
 	},
 });
 
