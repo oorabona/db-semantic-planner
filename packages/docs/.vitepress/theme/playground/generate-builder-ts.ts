@@ -172,7 +172,7 @@ function buildSelectCall(
 		case 'fields': {
 			const sf = select as SelectFieldsIntent;
 			const arr = sf.fields.map((f) => `'${f}'`).join(', ');
-			return `  .select([${arr}])`;
+			return `  .columns([${arr}])`;
 		}
 
 		case 'aggregate': {
@@ -220,7 +220,7 @@ function buildAggregateSelect(
 	}
 
 	if (entries.length === 0) return '  /* empty aggregate select */';
-	return `  .select({\n${entries.join(',\n')},\n  })`;
+	return `  .columns({\n${entries.join(',\n')},\n  })`;
 }
 
 function buildExpressionsSelect(
@@ -234,12 +234,20 @@ function buildExpressionsSelect(
 		const arr = se.columns
 			.map((c) => `'${(c as { kind: string; column: string }).column}'`)
 			.join(', ');
-		return `  .select([${arr}])`;
+		return `  .columns([${arr}])`;
 	}
 
-	// Mixed: emit object form
+	// Mixed: emit object form — skip raw entries to avoid syntactically broken output
 	const entries: string[] = [];
+	const rawWarnings: string[] = [];
 	for (const col of se.columns) {
+		if (col.kind === 'raw') {
+			// raw() entries cannot safely be inlined as object keys — emit top-level comment
+			rawWarnings.push(
+				`// NOTE: raw expression "${(col as { kind: string; sql: string }).sql}" omitted — use raw() from @dbsp/core directly`,
+			);
+			continue;
+		}
 		const entry = buildExpressionEntry(col, imports);
 		if (entry !== null) {
 			entries.push(`    ${entry}`);
@@ -247,10 +255,17 @@ function buildExpressionsSelect(
 	}
 
 	if (entries.length === 0) {
-		return '  /* complex expressions — see Dump tab for IR */';
+		return [
+			...rawWarnings,
+			'  /* complex expressions — see Dump tab for IR */',
+		].join('\n');
 	}
 
-	return `  .select({\n${entries.join(',\n')},\n  })`;
+	const objectExpr = `  .columns({\n${entries.join(',\n')},\n  })`;
+	if (rawWarnings.length > 0) {
+		return [...rawWarnings, objectExpr].join('\n');
+	}
+	return objectExpr;
 }
 
 function buildExpressionEntry(
@@ -280,7 +295,8 @@ function buildExpressionEntry(
 			return `${alias}: count()`;
 		}
 		case 'raw':
-			return `/* raw: ${expr.sql} */`;
+			// raw() entries are handled at the buildExpressionsSelect level — never inline
+			return null;
 		case 'relationColumn':
 			return `'${expr.as}': '${expr.relation}.${expr.column}'`;
 		default:
@@ -310,7 +326,8 @@ function buildIncludeCall(inc: IncludeIntent, imports: Set<string>): string {
 		const fields = (inc.select as SelectFieldsIntent).fields
 			.map((f) => `'${f}'`)
 			.join(', ');
-		opts.push(`select: [${fields}]`);
+		// IncludeOptions.select is a SelectIntent — emit the structured object form
+		opts.push(`select: { type: 'fields', fields: [${fields}] }`);
 	} else if (hasSelect) {
 		opts.push('/* select: complex — see Dump */');
 	}
@@ -337,18 +354,23 @@ function buildWhereExpr(where: WhereIntent, imports: Set<string>): string {
 
 		case 'like': {
 			const wl = where as WhereLikeIntent;
-			// No dedicated like() helper in @dbsp/core public API — emit comment
-			return `/* like('${wl.field}', '${wl.pattern}') — use WhereLike intent */`;
+			imports.add('like');
+			if (wl.caseInsensitive) {
+				return `like('${wl.field}', '${wl.pattern}', true)`;
+			}
+			return `like('${wl.field}', '${wl.pattern}')`;
 		}
 
 		case 'in': {
 			const wi = where as import('@dbsp/core').WhereInIntent;
-			// inArray isn't a named export in core; emit as comment
-			if (wi.values.length > 0) {
-				const vals = wi.values.map(formatValue).join(', ');
-				return `/* in('${wi.field}', [${vals}]) */`;
+			if (wi.subquery) {
+				// inSubquery — emit a comment since we can't reconstruct the subquery builder
+				imports.add('inSubquery');
+				return `/* inSubquery('${wi.field}', subquery(...)) — see Dump tab for IR */`;
 			}
-			return `/* in('${wi.field}', subquery) */`;
+			imports.add('inArray');
+			const vals = wi.values.map(formatValue).join(', ');
+			return `inArray('${wi.field}', [${vals}])`;
 		}
 
 		case 'null': {
@@ -397,11 +419,12 @@ function buildWhereExpr(where: WhereIntent, imports: Set<string>): string {
 
 const COMPARISON_HELPERS: Record<string, string> = {
 	eq: 'eq',
-	ne: 'ne',
+	neq: 'neq',
 	gt: 'gt',
 	lt: 'lt',
 	gte: 'gte',
 	lte: 'lte',
+	isDistinctFrom: 'isDistinctFrom',
 };
 
 function formatValue(val: unknown): string {
