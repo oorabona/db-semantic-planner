@@ -15,6 +15,7 @@ import { useData } from 'vitepress';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import ErrorBanner from './playground/ErrorBanner.vue';
+import { generateBuilderTs } from './playground/generate-builder-ts';
 import {
 	decodeHash,
 	encodeHash,
@@ -161,6 +162,7 @@ const ALL_EXAMPLES: ReadonlyArray<{
 
 interface NqlBuilder {
 	dump(): Dump;
+	toIntentIR(): import('@dbsp/core').QueryIntent;
 }
 type NqlTag = (
 	strings: TemplateStringsArray,
@@ -212,6 +214,7 @@ const queryMode = ref<'nql'>('nql'); // 'ts' lands in v2 with T3.
 
 const result = ref<Dump | null>(null);
 const compileError = ref<string | null>(null);
+const generatedBuilderTs = ref('');
 
 const errorBanner = ref<ErrorBannerData | null>(null);
 const isInitializing = ref(true);
@@ -482,9 +485,19 @@ function performCompile(opts: { resetTab: boolean }) {
 		result.value = builder.dump();
 		compileError.value = null;
 		void opts; // resetTab reserved for future TS-mode wiring.
+		// Generate the builder TS preview from the IntentAST
+		try {
+			const intent = builder.toIntentIR();
+			generatedBuilderTs.value = generateBuilderTs(intent);
+		} catch (e) {
+			generatedBuilderTs.value =
+				'// Could not generate builder TS for this query.\n' +
+				`// Reason: ${e instanceof Error ? e.message : String(e)}`;
+		}
 	} catch (e) {
 		compileError.value = e instanceof Error ? e.message : String(e);
 		result.value = null;
+		generatedBuilderTs.value = '';
 	}
 }
 
@@ -995,7 +1008,6 @@ onBeforeUnmount(() => {
 
     <QuerySection
       :nql-code="nqlCode"
-      :query-mode="queryMode"
       :examples="visibleExamples"
       :selected-example-index="selectedExampleIndex"
       :ready="ready"
@@ -1013,7 +1025,7 @@ onBeforeUnmount(() => {
       </div>
       <template v-else-if="result">
         <PlanSection :result="result" />
-        <OutputSection :result="result" />
+        <OutputSection :result="result" :generated-builder-ts="generatedBuilderTs" />
       </template>
       <div v-else class="output-placeholder">
         <span>Click "Compile" to see the output.</span>

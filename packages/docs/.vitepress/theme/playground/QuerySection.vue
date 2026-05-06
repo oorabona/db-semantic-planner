@@ -4,7 +4,6 @@ import CodeEditor from './CodeEditor.vue';
 
 defineProps({
 	nqlCode: { type: String, required: true },
-	queryMode: { type: String as PropType<'nql'>, required: true },
 	examples: {
 		type: Array as PropType<
 			readonly { readonly name: string; readonly code: string }[]
@@ -38,20 +37,6 @@ function onCompileShortcut(e: KeyboardEvent) {
   <section class="query-section">
     <div class="query-header">
       <span class="query-label">Query</span>
-      <div class="query-mode" role="group" aria-label="Query syntax">
-        <button
-          type="button"
-          class="mode-btn active"
-          :aria-pressed="queryMode === 'nql'"
-        >NQL</button>
-        <button
-          type="button"
-          class="mode-btn"
-          aria-pressed="false"
-          disabled
-          title="TypeScript ORM mode coming in a future release"
-        >TypeScript</button>
-      </div>
     </div>
 
     <div class="query-examples">
@@ -100,20 +85,6 @@ function onCompileShortcut(e: KeyboardEvent) {
 
 .query-header { display: flex; align-items: center; gap: var(--dbsp-space-md, 0.75rem); margin-bottom: var(--dbsp-space-sm, 0.5rem); }
 .query-label { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--vp-c-text-2); }
-.query-mode { display: inline-flex; gap: 2px; padding: 2px; background: var(--vp-c-bg-soft); border-radius: var(--dbsp-radius-sm, 4px); }
-
-.mode-btn {
-  font-size: 0.75rem;
-  padding: 0.25rem 0.6rem;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  border-radius: 3px;
-  cursor: pointer;
-  font-family: var(--vp-font-family-mono);
-}
-.mode-btn.active { background: var(--vp-c-bg); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06); }
-.mode-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
 .query-examples { margin-bottom: var(--dbsp-space-sm, 0.5rem); }
 
