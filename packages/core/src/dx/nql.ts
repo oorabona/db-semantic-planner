@@ -135,10 +135,20 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			undefined,
 			compilerOptions,
 		);
-		if (!result.success || !result.ast?.query) {
+		if (!result.success) {
 			const errors =
 				result.errors?.map((e) => e.message).join(', ') ?? 'Unknown error';
 			throw new Error(`NQL compilation failed: ${errors}`);
+		}
+		if (result.ast?.mutation && !result.ast?.query) {
+			throw new Error(
+				'INSERT/UPDATE/DELETE/UPSERT not yet supported via the nql`...` tagged template. ' +
+					'Use orm.insert(table, data) / orm.update(table, set) / orm.delete(table) / orm.upsert(table, data) instead. ' +
+					'Tracking: https://github.com/oorabona/db-semantic-planner/issues/113',
+			);
+		}
+		if (!result.ast?.query) {
+			throw new Error('NQL compilation failed: no query AST produced');
 		}
 
 		// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
