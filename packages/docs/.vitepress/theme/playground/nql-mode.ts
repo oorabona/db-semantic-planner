@@ -179,7 +179,7 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 		}
 
 		// Numbers
-		if (stream.match(/^-?\d+(\.\d+)?/)) {
+		if (stream.match(/^\d+(\.\d+)?/)) {
 			return 'number';
 		}
 
@@ -189,7 +189,7 @@ const nqlLanguage = StreamLanguage.define<NqlState>({
 		}
 
 		// Operators (multi-char before single-char — longest match first)
-		if (stream.match(/^(->>|->|@>|<@|<=|>=|<>|!=|[<>=!@?|])/)) {
+		if (stream.match(/^(->>|->|@>|<@|<=|>=|<>|!=|[<>=!@?])/)) {
 			return 'operator';
 		}
 

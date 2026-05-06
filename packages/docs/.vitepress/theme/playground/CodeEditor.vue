@@ -195,11 +195,15 @@ watch(isDark, (dark) => {
 });
 
 async function rebuildView(dark: boolean) {
-	if (!view || !editorRoot.value) return;
+	if (disposed.value || !editorRoot.value) return;
 	const token = ++rebuildToken;
-	const currentDoc = view.state.doc.toString();
-	view.destroy();
-	view = null;
+	const currentDoc = view
+		? view.state.doc.toString()
+		: (props.modelValue ?? '');
+	if (view) {
+		view.destroy();
+		view = null;
+	}
 
 	const [
 		{ EditorView, keymap, placeholder: cmPlaceholder },
