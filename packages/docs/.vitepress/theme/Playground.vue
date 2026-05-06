@@ -98,6 +98,13 @@ const DEFAULT_SCHEMA_DSL = [
 	'  category: string',
 	'  price: integer',
 	'}',
+	'',
+	'table order_items {',
+	'  id: uuid pk',
+	'  order_id: -> orders',
+	'  product_id: -> products',
+	'  quantity: integer',
+	'}',
 ].join('\n');
 
 const ALL_EXAMPLES: ReadonlyArray<{
@@ -139,6 +146,16 @@ const ALL_EXAMPLES: ReadonlyArray<{
 		name: 'Update',
 		code: "update users set active = false where last_login < '2024-01-01'",
 		requires: ['users'],
+	},
+	{
+		name: 'M-N relation',
+		code: 'order_items | select product.name, product.price, quantity, order.status',
+		requires: ['order_items'],
+	},
+	{
+		name: 'Top products sold',
+		code: 'order_items | group by product_id | select product.name, sum(quantity) as total_sold | order by total_sold desc',
+		requires: ['order_items'],
 	},
 ];
 
