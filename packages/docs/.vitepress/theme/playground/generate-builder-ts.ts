@@ -275,15 +275,6 @@ function buildSelectEntries(
  *
  * Non-aggregate fields go into `.columns([...fields])`.
  * Each aggregate becomes its own chained method:
- *   `.count()`, `.sum('field', 'alias')`, `.avg(...)`, etc.
- * Aggregates are chained builder methods — they do NOT appear inside
- * `.columns([...])` and do NOT require any helper imports.
- */
-/**
- * Aggregate select → multiple chain entries.
- *
- * Non-aggregate fields go into `.columns([...fields])`.
- * Each aggregate becomes its own chained method:
  *   `.count()`, `.count({ as: 'alias' })`, `.count('field', 'alias')`, etc.
  * Aggregates are chained builder methods — they do NOT appear inside
  * `.columns([...])` and do NOT require any helper imports.
@@ -331,35 +322,51 @@ function buildAggregateEntries(
 				break;
 			}
 			case 'sum': {
-				if (agg.distinct && agg.field) {
+				if (!agg.field || agg.field === '*') {
+					entries.push(`  /* unsupported sum aggregate: missing field */`);
+					break;
+				}
+				if (agg.distinct) {
 					imports.add('distinct');
 					const aliasArg = alias ? `, ${tsString(alias)}` : '';
 					entries.push(`  .sum(distinct(${tsString(agg.field)})${aliasArg})`);
 				} else {
 					const aliasArg = alias ? `, ${tsString(alias)}` : '';
-					entries.push(`  .sum(${tsString(agg.field ?? '*')}${aliasArg})`);
+					entries.push(`  .sum(${tsString(agg.field)}${aliasArg})`);
 				}
 				break;
 			}
 			case 'avg': {
-				if (agg.distinct && agg.field) {
+				if (!agg.field || agg.field === '*') {
+					entries.push(`  /* unsupported avg aggregate: missing field */`);
+					break;
+				}
+				if (agg.distinct) {
 					imports.add('distinct');
 					const aliasArg = alias ? `, ${tsString(alias)}` : '';
 					entries.push(`  .avg(distinct(${tsString(agg.field)})${aliasArg})`);
 				} else {
 					const aliasArg = alias ? `, ${tsString(alias)}` : '';
-					entries.push(`  .avg(${tsString(agg.field ?? '*')}${aliasArg})`);
+					entries.push(`  .avg(${tsString(agg.field)}${aliasArg})`);
 				}
 				break;
 			}
 			case 'min': {
+				if (!agg.field || agg.field === '*') {
+					entries.push(`  /* unsupported min aggregate: missing field */`);
+					break;
+				}
 				const aliasArg = alias ? `, ${tsString(alias)}` : '';
-				entries.push(`  .min(${tsString(agg.field ?? '*')}${aliasArg})`);
+				entries.push(`  .min(${tsString(agg.field)}${aliasArg})`);
 				break;
 			}
 			case 'max': {
+				if (!agg.field || agg.field === '*') {
+					entries.push(`  /* unsupported max aggregate: missing field */`);
+					break;
+				}
 				const aliasArg = alias ? `, ${tsString(alias)}` : '';
-				entries.push(`  .max(${tsString(agg.field ?? '*')}${aliasArg})`);
+				entries.push(`  .max(${tsString(agg.field)}${aliasArg})`);
 				break;
 			}
 			default:
@@ -440,17 +447,20 @@ function buildExpressionArrayItem(
 			}
 			return tsString(expr.column);
 		}
-		case 'columnAlias':
-			return tsString(expr.column);
+		case 'columnAlias': {
+			// col(column, alias) — type-safe column alias helper (filters.ts:834)
+			imports.add('col');
+			return `col(${tsString(expr.column)}, ${tsString(expr.as)})`;
+		}
 		case 'aggregate': {
 			// Aggregates in expressions select — point user to chained method form
 			const ae = expr as AggregateExpressionIntent;
 			const fn = ae.function;
 			const alias = ae.as ?? fn;
 			if (fn === 'count' && (!ae.field || ae.field === '*')) {
-				return `/* use .count('${alias}') as a chained method instead */`;
+				return `/* use .count({ as: ${tsString(alias)} }) as a chained method instead */`;
 			}
-			return `/* use .${fn}('${ae.field}', '${alias}') as a chained method instead */`;
+			return `/* use .${fn}(${tsString(ae.field)}, ${tsString(alias)}) as a chained method instead */`;
 		}
 		case 'raw':
 			// raw() entries are handled at the buildExpressionsSelect level — never inline
@@ -630,7 +640,12 @@ function formatValue(val: unknown): string {
 	if (val === null) return 'null';
 	if (val === undefined) return 'undefined';
 	if (typeof val === 'string')
-		return `'${val.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+		return `'${val
+			.replace(/\\/g, '\\\\')
+			.replace(/'/g, "\\'")
+			.replace(/\n/g, '\\n')
+			.replace(/\r/g, '\\r')
+			.replace(/\t/g, '\\t')}'`;
 	if (typeof val === 'boolean' || typeof val === 'number') return String(val);
 	return JSON.stringify(val);
 }
