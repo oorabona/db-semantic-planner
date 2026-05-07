@@ -39,7 +39,7 @@ After a lock method, chain a wait policy. Without one, the default is to block u
 
 Source: `packages/core/src/dx/query-builder-types.ts:401` (skipLocked) and `:410` (noWait).
 
-Both methods must be called after a lock method. Calling them without a preceding lock method compiles to invalid SQL.
+Both methods must be called after a lock method. Calling them without a preceding lock method throws immediately at builder time: `Error: skipLocked() requires a preceding lock method (forUpdate, forShare, etc.)`. Source: `packages/core/src/dx/query-builder.ts:442`.
 
 ---
 
@@ -176,7 +176,7 @@ Two transactions can deadlock if they each hold a lock the other wants. Rules to
 
 ### Do not FOR UPDATE on JOIN targets
 
-Applying `FOR UPDATE` to a query that joins another table locks rows in *both* tables. Use the `OF table` clause (via [Expression Primitives](./expression-primitives)) if you need to lock only specific tables in a join.
+Applying `FOR UPDATE` to a query that joins another table locks rows in *both* tables. `LockIntent` only carries `strength` and `waitPolicy` — there is no `OF table` parameter in the builder, so you cannot target a single table in a join using the built-in lock helpers. To lock only specific rows in a join context, restructure the query: issue a separate locking `SELECT` on the target table first, then join the already-locked IDs.
 
 ### Locks and set operations
 
@@ -188,4 +188,4 @@ Lock clauses cannot be combined with set operations (`UNION`, `INTERSECT`, `EXCE
 
 - [Transactions](./transactions) — required wrapper for all locking patterns
 - [Queries](./queries) — base query builder reference
-- [Expression Primitives](./expression-primitives) — for advanced lock targeting (`OF table`)
+- [Expression Primitives](./expression-primitives) — for custom SQL expressions in query columns and filters

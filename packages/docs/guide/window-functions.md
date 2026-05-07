@@ -72,7 +72,7 @@ Builder methods available on all of the above:
 | `.orderBy('col', 'asc'\|'desc')` | Adds an ORDER BY column (chainable, appends) |
 | `.as('alias')` | Finalizes — returns `ExpressionSpec` for `.columns([...])` |
 
-> **Note:** `firstValue()` and `lastValue()` are not yet exposed as helpers. Use `op('first_value', ref('col'))` via [Expression Primitives](./expression-primitives) for those functions.
+> **Note:** `firstValue()` and `lastValue()` are not yet exposed as helpers. Use `fn('first_value', ref('col'))` via [Expression Primitives](./expression-primitives) for those functions. (`op()` is a binary operator and requires three arguments — it cannot be used for function calls.)
 
 ---
 

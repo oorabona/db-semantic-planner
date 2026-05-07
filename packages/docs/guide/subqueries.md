@@ -136,7 +136,7 @@ orm.select('products')
 Source: `packages/core/src/dx/subquery-builder.ts:288` — `outerRef(column)` returns a `SubqueryRefIntent`.
 
 ::: warning Correlated subqueries via `rawExists()` are not yet supported
-The `rawExists()` tagged-template path does not yet wire `outerRef()` through the SubLink correlation pipeline. Passing `outerRef()` inside a `rawExists()` call will silently serialize the reference as a SQL parameter (an object), producing invalid SQL. Use the `exists()` builder (FK-correlated) or expression-primitive `op()` patterns instead. Tracked as a known limitation.
+The `rawExists()` path does not yet wire `outerRef()` through the SubLink correlation pipeline. Since `packages/adapter-pgsql/src/intent-to-decisions.ts:609`, passing `outerRef()` inside a `rawExists()` call is detected at decision time and throws a clear error: `"rawExists: correlated subqueries (outerRef inside the inner WHERE) are not yet supported."` Use the `exists()` builder (FK-correlated) or expression-primitive `op()` patterns instead. Tracked as a known limitation.
 :::
 
 ---

@@ -5,7 +5,9 @@ description: Query, filter, and aggregate JSONB columns in PostgreSQL using @dbs
 
 # JSONB Queries
 
-PostgreSQL's `jsonb` type stores semi-structured data as a binary-parsed JSON document, enabling flexible schemas, sparse attribute storage, and efficient operator-based querying. `@dbsp/core` does not ship dedicated JSONB helpers, but every PostgreSQL JSONB operator is reachable through the [Expression Primitives](./expression-primitives) layer (`op()`, `exprRef()`, `param()`, `literal()`, `cast()`).
+PostgreSQL's `jsonb` type stores semi-structured data as a binary-parsed JSON document, enabling flexible schemas, sparse attribute storage, and efficient operator-based querying. `@dbsp/core` does not ship dedicated JSONB helpers, but most PostgreSQL JSONB operators are reachable through the [Expression Primitives](./expression-primitives) layer (`op()`, `exprRef()`, `param()`, `literal()`, `cast()`).
+
+> **Note:** `op()` validates operator tokens against `OPERATOR_PATTERN = /^[a-zA-Z_<>=!@#%^&|~*+\-/.]+$/`. The `?` character is not in this set, so the `?`, `?|`, and `?&` key-existence operators are **not** available via `op()` — they throw `Error: Invalid operator`. Use the dedicated `jsonb_exists(field, key)` SQL function via `fn('jsonb_exists', ...)`, or rely on built-in `WhereJsonExistsIntent` (`{ kind: 'jsonExists', field, key }`) in your WHERE clause instead.
 
 ## Why this matters
 
@@ -170,7 +172,7 @@ orm.select('profiles')
     'userId',
     fn('jsonb_agg', exprRef('data')).as('allData'),
   ])
-  .groupBy('userId')
+  .groupBy(['userId'])
   .dump();
 // SQL: SELECT "userId", jsonb_agg("data") AS "allData"
 // FROM "profiles" GROUP BY "userId"

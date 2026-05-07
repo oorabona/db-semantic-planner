@@ -151,36 +151,43 @@ The correlation ID appears in `dump.meta.correlationId` and is not sent to Postg
 
 ## Query Hooks
 
-The adapter supports `onQuery` and `onQueryComplete` lifecycle hooks for cross-cutting concerns such as logging, metrics, and slow-query detection:
+`@dbsp/core` provides lifecycle hooks at the ORM instance via `createHookManager()`. Use `beforeQuery` / `afterQuery` for cross-cutting concerns such as logging, metrics, and slow-query detection:
 
 ```typescript
+// doctest: skip — requires real PostgreSQL pool
+import { createOrm, createHookManager, schema } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
-const adapter = createPgsqlAdapter(pool, {
-  onQuery(dump) {
-    logger.debug({ sql: dump.sql, params: dump.params }, 'query start');
-  },
-  onQueryComplete(dump, durationMs) {
-    metrics.histogram('db.query.duration', durationMs);
-    if (durationMs > 1000) {
-      logger.warn({ sql: dump.sql, durationMs }, 'slow query');
+const db = schema({ users: { id: 'integer', name: 'string' } } as const);
+
+const hooks = createHookManager()
+  .beforeQuery((ctx) => {
+    logger.debug({ sql: ctx.intent }, 'query start');
+    return ctx;
+  })
+  .afterQuery((ctx, results) => {
+    if (ctx.duration && ctx.duration > 1000) {
+      logger.warn({ durationMs: ctx.duration }, 'slow query');
     }
-  },
-});
+    metrics.histogram('db.query.duration', ctx.duration ?? 0);
+    return results;
+  });
+
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 ```
 
-| Hook | Signature | When called |
-|------|-----------|-------------|
-| `onQuery` | `(dump: Dump) => void` | Before the query executes |
-| `onQueryComplete` | `(dump: Dump, durationMs: number) => void` | After the query returns (success or error) |
+| Hook | Type | When called |
+|------|------|-------------|
+| `beforeQuery` | `BeforeQueryHook` | Before the query executes |
+| `afterQuery` | `AfterQueryHook` | After the query returns (success or error) |
 
-Both hooks receive the full `Dump` object, including SQL, parameters, and the plan report.
+`PgsqlAdapterOptions` (the second argument to `createPgsqlAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
 
 ---
 
 ## ORM-instance hooks
 
-Beyond adapter-level callbacks, `@dbsp/core` provides a lifecycle hook system at the ORM instance. These hooks let you compose cross-cutting concerns — soft-delete default filters, audit trails, per-request metrics — as reusable units that attach to the ORM at creation time.
+`@dbsp/core` provides a lifecycle hook system at the ORM instance. These hooks let you compose cross-cutting concerns — soft-delete default filters, audit trails, per-request metrics — as reusable units that attach to the ORM at creation time.
 
 ### Hook registration
 
@@ -254,12 +261,10 @@ Each hook receives a **frozen** context object (`Object.freeze` is applied at co
 For a SELECT query, hooks fire in this order:
 
 1. ORM `beforeQuery` hooks (in registration order — FIFO)
-2. Adapter `onQuery` callback
-3. PostgreSQL executes the query
-4. Adapter `onQueryComplete` callback
-5. ORM `afterQuery` hooks (in reverse registration order — LIFO, middleware semantics)
+2. PostgreSQL executes the query
+3. ORM `afterQuery` hooks (in reverse registration order — LIFO, middleware semantics)
 
-For mutations, replace `beforeQuery`/`afterQuery` with `beforeMutation`/`afterMutation` — the same ordering applies: before-hooks FIFO, after-hooks LIFO. The adapter `onQuery`/`onQueryComplete` fire between ORM before and after hooks in all cases.
+For mutations, replace `beforeQuery`/`afterQuery` with `beforeMutation`/`afterMutation` — the same ordering applies: before-hooks FIFO, after-hooks LIFO.
 
 ### Pattern: soft-delete default WHERE filter
 
@@ -282,11 +287,8 @@ const hooks = createHookManager()
         ...ctx,
         intent: {
           ...ctx.intent,
-          where: {
-            ...ctx.intent.where,
-            // In practice, merge with the dbsp filter helpers
-            deletedAt: null,
-          },
+          // WhereIntent is a discriminated union — use the 'null' variant
+          where: { kind: 'null', field: 'deletedAt', operator: 'isNull' },
         },
       };
     }
@@ -296,7 +298,15 @@ const hooks = createHookManager()
 const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 ```
 
-> **Note:** `createOrm()` also accepts a `defaultFilters` option for table-level default WHERE clauses. Use `defaultFilters` for simple equality/null checks — it is more idiomatic than a manual `beforeQuery` hook for this pattern.
+> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use `defaultFilters` for simple equality/null checks — it is more idiomatic than a manual `beforeQuery` hook for this pattern:
+>
+> ```typescript
+> const db = schema(
+>   { posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' } } as const,
+>   undefined,
+>   { defaultFilters: { posts: { deletedAt: null } } },
+> );
+> ```
 
 ### Pattern: audit log on mutations
 

@@ -146,7 +146,7 @@ const hooks = createHookManager()
 const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 ```
 
-Adapter-level `onQuery` / `onQueryComplete` callbacks also fire per-statement inside the transaction. If you need post-commit semantics (e.g. publishing an event only after the transaction succeeds), do that after `await orm.transaction(...)` returns.
+ORM-level `beforeQuery` / `afterQuery` hooks also fire per-statement inside the transaction. If you need post-commit semantics (e.g. publishing an event only after the transaction succeeds), do that after `await orm.transaction(...)` returns.
 
 ---
 

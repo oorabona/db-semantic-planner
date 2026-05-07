@@ -243,14 +243,14 @@ These rules prevent silent data loss from forgotten filter conditions.
 All mutation builders support `.dump()` — inspect the SQL and parameters without executing:
 
 ```typescript
-const { sql, params } = orm.insert('users')
+const { sql, parameters } = orm.insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .dump();
 
 console.log(sql);
 // INSERT INTO "users" ("name", "email") VALUES ($1, $2)
 
-console.log(params);
+console.log(parameters);
 // ['Alice', 'alice@example.com']
 ```
 
