@@ -599,6 +599,18 @@ The CLI looks for schema files in this order:
 
 ## Batch Mode Examples
 
+The repository ships [`examples/`](https://github.com/oorabona/db-semantic-planner/tree/main/examples) — eight runnable schemas (blog, ecommerce, iam, hierarchy, scheduling, pimdam, advanced-patterns, minimal) with full `.dbsp` sessions and `.assert.dbsp` assertion files. Pick the one closest to your domain and run :
+
+```bash
+pnpm dbsp repl \
+  --schema ./examples/blog.schema.ts \
+  --db postgresql://postgres:demo@localhost:5432/postgres \
+  --input ./examples/blog.dbsp \
+  --assert ./examples/blog.assert.dbsp
+```
+
+The session executes every NQL line and the assertion file verifies SQL, parameters, and (for DB-backed assertions) the rows returned. See [`examples/README.md`](https://github.com/oorabona/db-semantic-planner/tree/main/examples/README.md) for the catalog.
+
 ### CI/CD Integration
 
 ```bash
