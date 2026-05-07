@@ -1143,7 +1143,7 @@ const page = await orm.select('users')
 // doctest: real-db-only — requires a live PostgreSQL connection
 const page = await orm.select('users')
   .orderBy('createdAt', 'desc')
-  .cursorPaginate({ first: 25 });
+  .cursorPaginate({ limit: 25 });
 
 // page.data       — User[]
 // page.nextCursor — 'eyJ...' (opaque cursor string)
@@ -1152,7 +1152,7 @@ const page = await orm.select('users')
 // Next page:
 const next = await orm.select('users')
   .orderBy('createdAt', 'desc')
-  .cursorPaginate({ first: 25, after: page.nextCursor });
+  .cursorPaginate({ cursor: page.nextCursor, limit: 25 });
 ```
 
 ### Observability

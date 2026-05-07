@@ -106,7 +106,7 @@ const page = await orm.select('posts')
   .dump();
 ```
 
-For pagination use cases, prefer `.paginate()` or `.cursorPaginate()` — see [Getting Started](./getting-started).
+For pagination use cases, prefer `.paginate()` or `.cursorPaginate()` — see [Pagination](./pagination) for the full pattern guide.
 
 ---
 
