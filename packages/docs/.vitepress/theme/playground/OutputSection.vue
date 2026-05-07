@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import type { Dump } from '@dbsp/core';
 import { type PropType, ref, watch } from 'vue';
+import CodeEditor from './CodeEditor.vue';
 
 const props = defineProps({
 	result: { type: Object as PropType<Dump | null>, default: null },
+	generatedBuilderTs: { type: String, default: '' },
 });
 
 const emit = defineEmits<{
@@ -11,12 +13,14 @@ const emit = defineEmits<{
 	'copy-params': [];
 }>();
 
-const activeTab = ref<'sql' | 'params'>('sql');
+const activeTab = ref<'sql' | 'params' | 'typescript'>('sql');
 const sqlCopied = ref(false);
 const paramsCopied = ref(false);
+const tsCopied = ref(false);
 
 let sqlTimer: ReturnType<typeof setTimeout> | null = null;
 let paramsTimer: ReturnType<typeof setTimeout> | null = null;
+let tsTimer: ReturnType<typeof setTimeout> | null = null;
 
 // Reset copied feedback when result changes — clipboard is now stale.
 watch(
@@ -26,8 +30,11 @@ watch(
 		sqlTimer = null;
 		if (paramsTimer !== null) clearTimeout(paramsTimer);
 		paramsTimer = null;
+		if (tsTimer !== null) clearTimeout(tsTimer);
+		tsTimer = null;
 		sqlCopied.value = false;
 		paramsCopied.value = false;
+		tsCopied.value = false;
 	},
 );
 
@@ -63,6 +70,22 @@ async function copyParams() {
 		paramsTimer = null;
 	}, 2000);
 	emit('copy-params');
+}
+
+async function copyBuilderTs() {
+	if (!props.generatedBuilderTs) return;
+	try {
+		await navigator.clipboard.writeText(props.generatedBuilderTs);
+	} catch (e) {
+		console.warn('Playground: TypeScript clipboard write failed', e);
+		return;
+	}
+	tsCopied.value = true;
+	if (tsTimer !== null) clearTimeout(tsTimer);
+	tsTimer = setTimeout(() => {
+		tsCopied.value = false;
+		tsTimer = null;
+	}, 2000);
 }
 
 function formatParams(params: readonly unknown[]): string {
@@ -110,6 +133,12 @@ function highlightSQL(sql: string): string {
         :class="{ active: activeTab === 'params' }"
         @click="activeTab = 'params'"
       >Parameters</button>
+      <button
+        type="button"
+        class="output-tab-btn"
+        :class="{ active: activeTab === 'typescript' }"
+        @click="activeTab = 'typescript'"
+      >TypeScript</button>
 
       <button
         v-if="activeTab === 'sql'"
@@ -119,16 +148,30 @@ function highlightSQL(sql: string): string {
         @click="copySQL"
       >{{ sqlCopied ? 'Copied' : 'Copy' }}</button>
       <button
-        v-else
+        v-else-if="activeTab === 'params'"
         type="button"
         class="output-copy-btn"
         :aria-label="paramsCopied ? 'Parameters copied to clipboard' : 'Copy parameters to clipboard'"
         @click="copyParams"
       >{{ paramsCopied ? 'Copied' : 'Copy' }}</button>
+      <button
+        v-else
+        type="button"
+        class="output-copy-btn"
+        :aria-label="tsCopied ? 'TypeScript copied to clipboard' : 'Copy TypeScript to clipboard'"
+        @click="copyBuilderTs"
+      >{{ tsCopied ? 'Copied' : 'Copy' }}</button>
     </div>
 
-    <pre v-if="activeTab === 'sql'" class="output-pre"><code v-html="highlightSQL(result.sql)"></code></pre>
-    <pre v-else class="output-pre"><code>{{ formatParams(result.params) }}</code></pre>
+    <pre v-show="activeTab === 'sql'" class="output-pre"><code v-html="highlightSQL(result.sql)"></code></pre>
+    <pre v-show="activeTab === 'params'" class="output-pre"><code>{{ formatParams(result.params) }}</code></pre>
+    <CodeEditor
+      v-show="activeTab === 'typescript'"
+      language="ts"
+      :model-value="generatedBuilderTs"
+      aria-label="Generated TypeScript builder code"
+      :disabled="true"
+    />
   </section>
 </template>
 
