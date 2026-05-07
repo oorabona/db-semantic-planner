@@ -52,7 +52,7 @@ orm.select('users')
 Embed an aggregate from a related table as a column in the outer SELECT:
 
 ```typescript
-import { schema, createOrm, subquery } from '@dbsp/core';
+import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
@@ -65,11 +65,14 @@ orm.select('symbols')
   .columns([
     'id',
     'name',
-    subquery('calls').count().asExpr('callCount'),
+    subquery('calls')
+      .where(eq('symbolId', outerRef('id')))
+      .count()
+      .asExpr('callCount'),
   ])
   .dump();
 // SQL: SELECT "id", "name",
-//   (SELECT COUNT(*) FROM "calls") AS "callCount"
+//   (SELECT COUNT(*) FROM "calls" WHERE "symbolId" = "symbols"."id") AS "callCount"
 // FROM "symbols"
 ```
 

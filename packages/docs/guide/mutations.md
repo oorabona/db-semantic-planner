@@ -176,26 +176,30 @@ orm.upsert('users')
 
 Source: `packages/core/src/dx/mutation-builders.ts:870` — `onConflictConstraint(constraintName: string)`.
 
-#### Conditional updates with a WHERE clause on DO UPDATE
+#### Partial-index conflict targets with a WHERE clause
 
-`doUpdate()` accepts an optional second argument for a WHERE condition on the conflict update. Only rows matching that condition are updated; conflicting rows that do not match are effectively skipped:
+PostgreSQL partial indexes restrict conflict detection to rows that satisfy a condition. When your `UNIQUE` index has a `WHERE` clause (a partial index), pass a matching condition to `.onConflict()` via the `where` option:
 
 ```typescript
-// doctest: skip — conditional update pattern
-import { gt } from '@dbsp/core';
+// doctest: skip — partial-index conflict; index must exist in the DB
+import { eq } from '@dbsp/core';
 
-// Only update the price if the incoming value is higher than the stored one
+// Partial unique index: CREATE UNIQUE INDEX ON "products" ("sku") WHERE "active" = true
 orm.upsert('products')
-  .values({ sku: 'ABC', price: 99.99 })
-  .onConflict(['sku'])
-  .doUpdate(
-    { price: 99.99 },
-    gt('products.price', 50) // WHERE condition on the existing row
-  )
+  .values({ sku: 'ABC', price: 99.99, active: true })
+  .onConflict({ columns: ['sku'], where: [eq('active', true)] })
+  .doUpdate({ price: 99.99 })
   .dump();
+// SQL: INSERT INTO "products" ("sku", "price", "active") VALUES ($1, $2, $3)
+// ON CONFLICT ("sku") WHERE "active" = $4
+// DO UPDATE SET "price" = $5
 ```
 
-Source: `packages/core/src/dx/mutation-builders.ts:887` — `doUpdate(set?, where?)`.
+> **Note:** The `WHERE` here is on the **conflict target** (the partial index predicate), not on the UPDATE action. It tells PostgreSQL which index to use for conflict detection.
+
+> **Not yet supported:** The second argument to `doUpdate(set, where)` is accepted by the TypeScript API but is **silently ignored** by the PostgreSQL compiler — the WHERE is not emitted in `DO UPDATE SET ... WHERE ...`. Do not use `doUpdate(set, whereCondition)` to conditionally apply updates; the condition will have no effect.
+
+Source: `packages/core/src/dx/mutation-builders.ts:887` — `doUpdate(set?, where?)`; `packages/adapter-pgsql/src/mutations/upsert.ts:116` — partial-index `WHERE` on conflict target.
 
 #### Multi-column conflict targets
 
@@ -219,7 +223,7 @@ orm.upsert('user_roles')
 | Idempotent insert: ignore if already exists | `.doNothing()` |
 | Upsert: create if new, update if exists | `.doUpdate()` (no args = auto-update all non-conflict columns) |
 | Selective upsert: update only specific fields | `.doUpdate({ col: value })` |
-| Conditional upsert: only update if a condition holds | `.doUpdate(set, whereCondition)` |
+| Conditional upsert: only update if a condition holds | Not yet supported (see note above) |
 
 `.doNothing()` compiles to `ON CONFLICT DO NOTHING` — the entire row is left unchanged on a conflict. It is the correct choice for "insert if not exists" patterns where updating the existing row would be incorrect (e.g., first-write-wins semantics).
 

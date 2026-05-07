@@ -162,7 +162,7 @@ const db = schema({ users: { id: 'integer', name: 'string' } } as const);
 
 const hooks = createHookManager()
   .beforeQuery((ctx) => {
-    logger.debug({ sql: ctx.intent }, 'query start');
+    logger.debug({ intent: ctx.intent }, 'query start'); // ctx.intent is the QueryIntent AST; SQL is only available in afterQuery
     return ctx;
   })
   .afterQuery((ctx, results) => {
@@ -179,7 +179,8 @@ const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 | Hook | Type | When called |
 |------|------|-------------|
 | `beforeQuery` | `BeforeQueryHook` | Before the query executes |
-| `afterQuery` | `AfterQueryHook` | After the query returns (success or error) |
+| `afterQuery` | `AfterQueryHook` | After successful query execution only |
+| `onError` | `OnErrorHook` | When the query throws (errors bypass `afterQuery`) |
 
 `PgsqlAdapterOptions` (the second argument to `createPgsqlAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
 
