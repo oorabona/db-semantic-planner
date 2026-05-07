@@ -130,7 +130,7 @@ const ALL_EXAMPLES: ReadonlyArray<{
 	},
 	{
 		name: 'Pagination',
-		code: 'users | where active = true | order by created_at desc | limit 10 offset 20',
+		code: 'users | where active = true | order by created_at desc | limit 10 | offset 20',
 		requires: ['users'],
 	},
 	{
