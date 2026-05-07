@@ -104,6 +104,7 @@ export default withMermaid(
 						items: [
 							{ text: 'Schema Definition', link: '/guide/schema' },
 							{ text: 'Queries', link: '/guide/queries' },
+							{ text: 'Pagination', link: '/guide/pagination' },
 							{ text: 'Relations & Includes', link: '/guide/includes' },
 							{ text: 'Result Hydration', link: '/guide/result-hydration' },
 							{ text: 'Mutations', link: '/guide/mutations' },

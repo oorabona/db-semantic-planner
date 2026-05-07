@@ -338,6 +338,8 @@ const users = await orm.select('users')
 
 ## Streaming Large Results
 
+See also: the [Pagination guide](./pagination) covers `stream()` alongside `paginate()` and `cursorPaginate()` with a pattern-selection matrix.
+
 For large result sets, use streaming to avoid memory exhaustion:
 
 ```typescript

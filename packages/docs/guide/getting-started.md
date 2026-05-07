@@ -335,17 +335,20 @@ const page = await orm.select('posts')
 // Cursor-based pagination (stable under concurrent inserts)
 const first = await orm.select('posts')
   .orderBy('createdAt', 'desc')
-  .cursorPaginate({ first: 20 });
+  .cursorPaginate({ limit: 20 });
 
 // first.data       — Post[]
 // first.nextCursor — opaque cursor string
+// first.hasNextPage — boolean
 
 const second = await orm.select('posts')
   .orderBy('createdAt', 'desc')
-  .cursorPaginate({ first: 20, after: first.nextCursor });
+  .cursorPaginate({ cursor: first.nextCursor, limit: 20 });
 ```
 
 Prefer cursor pagination for feeds and infinite scroll — it remains stable when rows are inserted between pages. Offset pagination is simpler to expose in REST APIs.
+
+For derivable-builder loops, cursor vs offset trade-offs, streaming, and common pitfalls, see the [Pagination guide](./pagination).
 
 ---
 
