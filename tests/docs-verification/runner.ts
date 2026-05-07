@@ -113,6 +113,7 @@ import {
 \trangeContainedBy,
 \trangeContains,
 \trangeOverlaps,
+	exprRef,
 } from '@dbsp/core';
 
 // === PG-specific helpers (live in the adapter, not core) ===
@@ -224,6 +225,7 @@ import {
 \trangeContainedBy,
 \trangeContains,
 \trangeOverlaps,
+	exprRef,
 } from '@dbsp/core';
 
 // === PG-specific helpers ===

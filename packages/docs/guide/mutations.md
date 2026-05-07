@@ -154,6 +154,75 @@ const { sql: resultSql } = orm.upsert('users')
   .dump();
 ```
 
+### Advanced ON CONFLICT patterns
+
+The basic upsert patterns above cover most use cases. The following patterns handle edge cases you will encounter in production schemas.
+
+#### Selecting a specific constraint
+
+When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a named constraint instead of listing columns:
+
+```typescript
+// doctest: skip — constraint names are DB-specific
+orm.upsert('users')
+  .values({ name: 'Alice', email: 'alice@example.com', externalId: 'ext-001' })
+  .onConflictConstraint('users_email_unique')
+  .doUpdate({ name: 'Alice Updated' })
+  .dump();
+// SQL: INSERT INTO "users" (...) VALUES ($1, $2, $3)
+// ON CONFLICT ON CONSTRAINT "users_email_unique"
+// DO UPDATE SET "name" = $4
+```
+
+Source: `packages/core/src/dx/mutation-builders.ts:870` — `onConflictConstraint(constraintName: string)`.
+
+#### Conditional updates with a WHERE clause on DO UPDATE
+
+`doUpdate()` accepts an optional second argument for a WHERE condition on the conflict update. Only rows matching that condition are updated; conflicting rows that do not match are effectively skipped:
+
+```typescript
+// doctest: skip — conditional update pattern
+import { gt } from '@dbsp/core';
+
+// Only update the price if the incoming value is higher than the stored one
+orm.upsert('products')
+  .values({ sku: 'ABC', price: 99.99 })
+  .onConflict(['sku'])
+  .doUpdate(
+    { price: 99.99 },
+    gt('products.price', 50) // WHERE condition on the existing row
+  )
+  .dump();
+```
+
+Source: `packages/core/src/dx/mutation-builders.ts:887` — `doUpdate(set?, where?)`.
+
+#### Multi-column conflict targets
+
+List all columns that compose the unique constraint when the conflict target spans multiple columns:
+
+```typescript
+orm.upsert('user_roles')
+  .values({ userId: 1, roleId: 3, grantedAt: new Date() })
+  .onConflict(['userId', 'roleId'])
+  .doUpdate({ grantedAt: new Date() })
+  .dump();
+// SQL: INSERT INTO "user_roles" (...) VALUES ($1, $2, $3)
+// ON CONFLICT ("userId", "roleId")
+// DO UPDATE SET "grantedAt" = $4
+```
+
+#### DO NOTHING vs DO UPDATE — when to use each
+
+| Need | Use |
+|------|-----|
+| Idempotent insert: ignore if already exists | `.doNothing()` |
+| Upsert: create if new, update if exists | `.doUpdate()` (no args = auto-update all non-conflict columns) |
+| Selective upsert: update only specific fields | `.doUpdate({ col: value })` |
+| Conditional upsert: only update if a condition holds | `.doUpdate(set, whereCondition)` |
+
+`.doNothing()` compiles to `ON CONFLICT DO NOTHING` — the entire row is left unchanged on a conflict. It is the correct choice for "insert if not exists" patterns where updating the existing row would be incorrect (e.g., first-write-wins semantics).
+
 ---
 
 ## Safety Rules
