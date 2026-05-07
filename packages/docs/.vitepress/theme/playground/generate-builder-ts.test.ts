@@ -479,7 +479,7 @@ describe('generateBuilderTs — include() extra fields', () => {
 		expect(out).toContain("join: 'inner'");
 	});
 
-	it('emits recursive: true option when recursive is set', () => {
+	it('bails with comment when recursive include is set (real API requires direction)', () => {
 		const intent = makeSelectIntent('categories', {
 			include: [
 				{
@@ -491,7 +491,8 @@ describe('generateBuilderTs — include() extra fields', () => {
 			],
 		});
 		const out = generateBuilderTs(intent);
-		expect(out).toContain('recursive: true');
+		expect(out).toContain('/* recursive:');
+		expect(out).not.toContain('recursive: true');
 	});
 });
 

@@ -104,7 +104,9 @@ const HEADER = `// NOTE: this code is auto-generated from your NQL query.
  * and is NOT a complete @dbsp/core substitute — it is meant for display only.
  */
 export function generateBuilderTs(intent: QueryIntent): string {
-	// Guard: only select intents are supported at this level.
+	// Defensive: QueryIntent.type is always 'select' today, but the union may widen
+	// in the future to include MutationIntent. The guard is a no-op for current
+	// callers but makes evolution safer.
 	if (intent.type !== 'select') {
 		return [HEADER, '// Mutation builder TS view not yet implemented.'].join(
 			'\n',
@@ -525,7 +527,9 @@ function buildIncludeCall(inc: IncludeIntent, imports: Set<string>): string {
 	}
 
 	if (hasRecursive) {
-		opts.push('recursive: true');
+		opts.push(
+			'/* recursive: see IncludeOptions docs for required direction field */',
+		);
 	}
 
 	if (hasNestedInclude && inc.include) {
@@ -647,7 +651,13 @@ function formatValue(val: unknown): string {
 			.replace(/\r/g, '\\r')
 			.replace(/\t/g, '\\t')}'`;
 	if (typeof val === 'boolean' || typeof val === 'number') return String(val);
-	return JSON.stringify(val);
+	if (typeof val === 'bigint') return `${val}n`;
+	try {
+		return JSON.stringify(val);
+	} catch {
+		// Circular structure or other JSON-unfriendly value — emit safe fallback
+		return `/* unserializable value */ undefined`;
+	}
 }
 
 /**
