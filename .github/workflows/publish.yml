@@ -41,6 +41,6 @@ jobs:
       - run: pnpm -C packages/cli publish --no-git-checks
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/mcp-server publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # mcp-server publish skipped — package is currently a scaffold
+      # (no MCP tools registered yet, see issue 112). Re-enable once
+      # the first tool ships.
