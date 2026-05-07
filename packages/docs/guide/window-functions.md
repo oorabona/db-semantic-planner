@@ -72,7 +72,7 @@ Builder methods available on all of the above:
 | `.orderBy('col', 'asc'\|'desc')` | Adds an ORDER BY column (chainable, appends) |
 | `.as('alias')` | Finalizes — returns `ExpressionSpec` for `.columns([...])` |
 
-> **Note:** `firstValue()` and `lastValue()` are not yet exposed as helpers. Use `fn('first_value', ref('col'))` via [Expression Primitives](./expression-primitives) for those functions. (`op()` is a binary operator and requires three arguments — it cannot be used for function calls.)
+> **Note:** `firstValue()` and `lastValue()` are not yet exposed as helpers. Use `fn('first_value', exprRef('col'))` via [Expression Primitives](./expression-primitives) for those functions. (`ref` from `@dbsp/core` is the schema FK helper and is not valid in expression position — use `exprRef` instead. `op()` is a binary operator and requires three arguments — it cannot be used for function calls.)
 
 ---
 
@@ -208,9 +208,22 @@ rowNumber().as('rn')        // non-deterministic: ORDER BY missing
 rowNumber().orderBy('id').as('rn')  // correct
 ```
 
-### Aggregate window functions and GROUP BY conflict
+### Aggregate window functions and GROUP BY
 
-You cannot mix window aggregates with `GROUP BY` in the same SELECT. Use a CTE or subquery to first group, then apply window functions on the aggregated output.
+Window functions are applied by PostgreSQL **after** aggregation, so you can mix them with `GROUP BY` in the same query — `SUM(SUM(amount)) OVER ()` (a window over a grouped aggregate) is valid PostgreSQL SQL.
+
+The actual restrictions are:
+
+- Window function calls cannot appear inside a `GROUP BY` or `WHERE` clause.
+- Window function calls cannot appear inside another aggregate call.
+- When you need window functions over both pre-aggregated and per-row data you may need to layer the operations: compute the grouping result in a CTE or subquery, then apply window functions in the outer SELECT.
+
+```typescript
+// doctest: skip — illustrates CTE layering for pre-aggregation windows
+// Step 1 (CTE): aggregate per region
+// Step 2 (outer): apply window over aggregated rows
+// Use orm.with(...) to build the CTE layer.
+```
 
 ### NULL ordering in `lag()` / `lead()`
 

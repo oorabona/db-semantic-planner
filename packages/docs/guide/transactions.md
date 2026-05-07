@@ -193,11 +193,13 @@ Passing the `tx` reference to an external function that stores it and uses it la
 
 ```typescript
 // doctest: skip — illustrates the wrong pattern
-let storedTx: typeof tx;
+import type { OrmInstance } from '@dbsp/core';
+
+let storedTx: OrmInstance<typeof db> | undefined;
 await orm.transaction(async (tx) => {
   storedTx = tx; // ← never do this
 });
-await storedTx.select('users').all(); // ← undefined behavior: connection released
+await storedTx!.select('users').all(); // ← undefined behavior: connection released
 ```
 
 ---

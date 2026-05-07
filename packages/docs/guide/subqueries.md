@@ -113,7 +113,7 @@ The correlation predicate (`author_id = users.id`) is resolved automatically fro
 `outerRef(column)` creates a reference to a column in the outer query for use in a subquery's WHERE condition:
 
 ```typescript
-import { schema, createOrm, subquery, outerRef } from '@dbsp/core';
+import { schema, createOrm, subquery, outerRef, eq } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({
@@ -126,7 +126,7 @@ orm.select('products')
   .where({
     price: {
       $gt: subquery('products')
-        .where({ categoryId: outerRef('categoryId') })
+        .where(eq('categoryId', outerRef('categoryId')))
         .avg('price'),
     },
   })
@@ -149,7 +149,7 @@ If you reference the same table in both the outer query and the subquery, Postgr
 
 ### Performance: subquery vs JOIN
 
-An uncorrelated `IN` subquery is typically rewritten to a hash semi-join by PostgreSQL and performs similarly to an explicit JOIN. A correlated subquery (one that re-references an outer column) re-executes for every outer row — this is O(n) database round-trips at the planner level. For large datasets with a correlated scalar subquery, consider a lateral join or a CTE materialisation.
+An uncorrelated `IN` subquery is typically rewritten to a hash semi-join by PostgreSQL and performs similarly to an explicit JOIN. A correlated subquery (one that re-references an outer column) re-evaluates the inner query for each outer row inside the database — it is still a single SQL statement with no extra client/server round-trips, but the database cost can multiply if the planner cannot rewrite the correlated scan (nested-loop semantics). For large datasets with a correlated scalar subquery, consider a lateral join or a CTE materialisation.
 
 ### Subquery builders do not execute alone
 

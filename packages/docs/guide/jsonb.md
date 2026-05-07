@@ -111,22 +111,23 @@ The `cast(..., 'jsonb')` is necessary because `$N` parameters are untyped — Po
 Check whether a specific key is present in the document:
 
 ```typescript
-// doctest: skip — '?' operator not in the static operator allowlist; valid at PostgreSQL runtime
-import { schema, createOrm, op, exprRef, literal } from '@dbsp/core';
+import { schema, createOrm, fn, exprRef, literal } from '@dbsp/core';
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 
 const db = schema({ profiles: { id: 'integer', userId: 'integer', data: 'jsonb' } } as const);
 const orm = createOrm({ schema: db, adapter: createPgsqlCompileOnlyAdapter() });
 
-// WHERE data ? 'phone'
+// WHERE jsonb_exists(data, 'phone')
 orm.select('profiles')
-  .where(op('?', exprRef('data'), literal('phone')))
+  .where(fn('jsonb_exists', exprRef('data'), literal('phone')))
   .dump();
 // SQL: SELECT ... FROM "profiles"
-// WHERE "data" ? 'phone'
+// WHERE jsonb_exists("data", 'phone')
 ```
 
-Use `?|` or `?&` (note: in TypeScript string literals, write `'?|'` and `'?&'`) for array key-existence checks.
+As noted in the introduction, `op('?', ...)` throws at compile time because `?` is not in the static operator allowlist. `fn('jsonb_exists', ...)` is the equivalent — it calls the PostgreSQL built-in that backs the `?` operator.
+
+For array key-existence use `fn('jsonb_exists_any', ...)` (`?|`) or `fn('jsonb_exists_all', ...)` (`?&`).
 
 ---
 
