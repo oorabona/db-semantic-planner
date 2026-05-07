@@ -82,7 +82,6 @@ export default withMermaid(
 			logo: '/logo.svg',
 			nav: [
 				{ text: 'Guide', link: '/guide/getting-started' },
-				{ text: 'Demo', link: '/demo' },
 				{ text: 'API', link: '/api/' },
 				{ text: 'Patterns', link: '/patterns' },
 				{ text: 'NQL', link: '/nql/' },
