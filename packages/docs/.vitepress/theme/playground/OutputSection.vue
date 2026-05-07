@@ -163,10 +163,10 @@ function highlightSQL(sql: string): string {
       >{{ tsCopied ? 'Copied' : 'Copy' }}</button>
     </div>
 
-    <pre v-if="activeTab === 'sql'" class="output-pre"><code v-html="highlightSQL(result.sql)"></code></pre>
-    <pre v-else-if="activeTab === 'params'" class="output-pre"><code>{{ formatParams(result.params) }}</code></pre>
+    <pre v-show="activeTab === 'sql'" class="output-pre"><code v-html="highlightSQL(result.sql)"></code></pre>
+    <pre v-show="activeTab === 'params'" class="output-pre"><code>{{ formatParams(result.params) }}</code></pre>
     <CodeEditor
-      v-else
+      v-show="activeTab === 'typescript'"
       language="ts"
       :model-value="generatedBuilderTs"
       aria-label="Generated TypeScript builder code"

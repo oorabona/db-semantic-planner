@@ -5,9 +5,60 @@
  * @dbsp/core builder code. Used by the Playground TypeScript output tab
  * to show users the ORM API equivalent of their NQL query.
  *
+ * This generator produces a complete, await-able assignment block that
+ * includes an import line (when helpers are used), the `const result =
+ * await orm` chain, and a terminating `.all();`. Content is rendered
+ * read-only inside the playground TypeScript output tab. Some intent
+ * shapes (correlated subqueries, batch values, raw expressions) fall back
+ * to commented placeholders rather than crashing.
+ *
  * Coverage targets: the 9 example queries in ALL_EXAMPLES. Mutations
  * (insert/update/delete) currently fail at the NQL tagged-template level
  * and never reach this generator.
+ *
+ * ---------------------------------------------------------------------------
+ * API SURFACE REFERENCE (verified 2026-05-07 from sources cited below)
+ *
+ * Source files:
+ *   packages/core/src/dx/query-builder.ts
+ *   packages/core/src/dx/filters.ts
+ *   packages/core/src/dx/expressions.ts
+ *   packages/core/src/dx/index.ts
+ *   packages/types/src/intent/select-intent.ts
+ *   packages/types/src/intent/query-intent.ts
+ *
+ * QueryBuilderImpl methods (all return QueryBuilder<TResult>):
+ *   .columns(columns: readonly ColumnSpec[])              // :185 — array ONLY
+ *   .groupBy(fields: readonly string[])                   // :354 — array form
+ *   .count(field?: string|DistinctField|AggregateOptions, as?: string) // :268
+ *   .sum(field: string|DistinctField, as?: string)        // :304
+ *   .avg(field: string|DistinctField, as?: string)        // :319
+ *   .min(field: string, as?: string)                      // :334
+ *   .max(field: string, as?: string)                      // :344
+ *   .having(condition: WhereIntent)                       // :360
+ *   .distinctOn(...columns: string[])                     // :387 — spread args
+ *   .include(relation: string, options?)                  // :137
+ *
+ * Helpers exported from @dbsp/core (filters.ts):
+ *   eq, neq, gt, gte, lt, lte, isDistinctFrom            // comparison
+ *   and, or, not                                          // logical
+ *   like(field, pattern, opts?)                           // string; opts: { caseInsensitive?, escape? }
+ *   inArray(field, values[])                              // array
+ *   isNull(field), isNotNull(field)                       // null
+ *   col(column, alias)                                    // :834 — column alias helper
+ *   distinct(field)                                       // :102 — DISTINCT modifier for aggregates
+ *   relationColumn(relation, column, as)                  // :876 — all 3 args required
+ *
+ * Aggregation pattern (IMPORTANT):
+ *   Aggregates are CHAINED builder methods, NOT entries in .columns([...]).
+ *   Group-by fields → .columns(['field1', 'field2'])
+ *   COUNT(*) no alias → .count()
+ *   COUNT(*) AS alias → .count({ as: 'alias' })   ← options-object form
+ *   COUNT(col) → .count('col', 'alias')
+ *   COUNT(DISTINCT col) → .count(distinct('col'), 'alias')
+ *   SUM(col) → .sum('col', 'alias')
+ *   SUM(DISTINCT col) → .sum(distinct('col'), 'alias')
+ * ---------------------------------------------------------------------------
  */
 
 import type {
@@ -41,8 +92,16 @@ const HEADER = `// NOTE: this code is auto-generated from your NQL query.
 
 /**
  * Walk a QueryIntent and emit equivalent @dbsp/core fluent builder code.
- * Returns a string of TypeScript source (no trailing newline after the last
- * chain call so callers can append `.all()` or a semicolon).
+ *
+ * Returns a complete TypeScript code block that:
+ * - Starts with an import line (when filter helpers are used)
+ * - Declares `const result = await orm`
+ * - Chains all builder methods mirroring the intent
+ * - Terminates with `.all();`
+ *
+ * Unsupported intent shapes (correlated subqueries, batch values, etc.) are
+ * emitted as inline comments rather than crashing. The output is read-only
+ * and is NOT a complete @dbsp/core substitute — it is meant for display only.
  */
 export function generateBuilderTs(intent: QueryIntent): string {
 	// Guard: only select intents are supported at this level.
@@ -59,11 +118,11 @@ export function generateBuilderTs(intent: QueryIntent): string {
 	const chain: string[] = [];
 
 	// Entry call
-	chain.push(`  .select('${intent.from}')`);
+	chain.push(`  .select(${tsString(intent.from)})`);
 
 	// distinct / distinctOn
 	if (intent.distinctOn && intent.distinctOn.length > 0) {
-		const cols = intent.distinctOn.map((c) => `'${c}'`).join(', ');
+		const cols = intent.distinctOn.map((c) => tsString(c)).join(', ');
 		chain.push(`  .distinctOn(${cols})`);
 	} else if (intent.distinct) {
 		chain.push('  .distinct()');
@@ -87,10 +146,10 @@ export function generateBuilderTs(intent: QueryIntent): string {
 		chain.push(`  .where(${whereStr})`);
 	}
 
-	// groupBy
+	// groupBy — takes an array, not spread args
 	if (intent.groupBy && intent.groupBy.length > 0) {
-		const fields = intent.groupBy.map((f) => `'${f}'`).join(', ');
-		chain.push(`  .groupBy(${fields})`);
+		const fields = intent.groupBy.map((f) => tsString(f)).join(', ');
+		chain.push(`  .groupBy([${fields}])`);
 	}
 
 	// having
@@ -99,18 +158,33 @@ export function generateBuilderTs(intent: QueryIntent): string {
 		chain.push(`  .having(${havingStr})`);
 	}
 
-	// select
+	// select — may push multiple chain entries (one .columns() + N aggregate methods)
 	if (intent.select) {
-		const selectStr = buildSelectCall(intent.select, imports);
-		if (selectStr !== null) {
-			chain.push(selectStr);
+		const selectEntries = buildSelectEntries(intent.select, imports);
+		for (const entry of selectEntries) {
+			chain.push(entry);
 		}
 	}
 
 	// orderBy
 	if (intent.orderBy && intent.orderBy.length > 0) {
 		for (const ob of intent.orderBy) {
-			chain.push(`  .orderBy('${ob.field}', '${ob.direction}')`);
+			if (ob.expression) {
+				// Expression-form orderBy — too complex to reconstruct faithfully
+				chain.push(
+					`  /* .orderBy(<expression>, ${tsString(ob.direction)}) — see Dump tab for IR */`,
+				);
+			} else if (!ob.field) {
+				// Neither field nor expression — emit safe comment
+				chain.push(
+					'  /* unsupported orderBy intent — neither field nor expression */',
+				);
+			} else {
+				const nullsArg = ob.nulls ? `, { nulls: ${tsString(ob.nulls)} }` : '';
+				chain.push(
+					`  .orderBy(${tsString(ob.field)}, ${tsString(ob.direction)}${nullsArg})`,
+				);
+			}
 		}
 	}
 
@@ -158,147 +232,235 @@ export function generateBuilderTs(intent: QueryIntent): string {
 // SELECT clause builder
 // ---------------------------------------------------------------------------
 
-function buildSelectCall(
+/**
+ * Returns zero or more chain entries for the SELECT clause.
+ * Aggregate intents produce multiple entries: one .columns() for non-aggregate
+ * fields, then one chained aggregate method per aggregate.
+ */
+function buildSelectEntries(
 	select: QueryIntent['select'],
 	imports: Set<string>,
-): string | null {
-	if (!select) return null;
+): string[] {
+	if (!select) return [];
 
 	switch (select.type) {
 		case 'all':
-			// Default — no explicit .select() needed
-			return null;
+			// Default — no explicit .columns() needed
+			return [];
 
 		case 'fields': {
 			const sf = select as SelectFieldsIntent;
-			const arr = sf.fields.map((f) => `'${f}'`).join(', ');
-			return `  .columns([${arr}])`;
+			const arr = sf.fields.map((f) => tsString(f)).join(', ');
+			return [`  .columns([${arr}])`];
 		}
 
 		case 'aggregate': {
 			const sa = select as SelectAggregateIntent;
-			return buildAggregateSelect(sa, imports);
+			return buildAggregateEntries(sa, imports);
 		}
 
 		case 'expressions': {
 			const se = select as SelectWithExpressionsIntent;
-			return buildExpressionsSelect(se, imports);
+			const entry = buildExpressionsSelect(se, imports);
+			return entry !== null ? [entry] : [];
 		}
 
 		default:
-			return '  /* unsupported select type — see Dump tab for IR */';
+			return ['  /* unsupported select type — see Dump tab for IR */'];
 	}
 }
 
-function buildAggregateSelect(
+/**
+ * Aggregate select → multiple chain entries.
+ *
+ * Non-aggregate fields go into `.columns([...fields])`.
+ * Each aggregate becomes its own chained method:
+ *   `.count()`, `.sum('field', 'alias')`, `.avg(...)`, etc.
+ * Aggregates are chained builder methods — they do NOT appear inside
+ * `.columns([...])` and do NOT require any helper imports.
+ */
+/**
+ * Aggregate select → multiple chain entries.
+ *
+ * Non-aggregate fields go into `.columns([...fields])`.
+ * Each aggregate becomes its own chained method:
+ *   `.count()`, `.count({ as: 'alias' })`, `.count('field', 'alias')`, etc.
+ * Aggregates are chained builder methods — they do NOT appear inside
+ * `.columns([...])` and do NOT require any helper imports.
+ *
+ * COUNT(*) with alias uses the options-object form: `.count({ as: 'alias' })`
+ * COUNT(field) uses: `.count('field', 'alias')`
+ * COUNT(DISTINCT field) uses: `.count(distinct('field'), 'alias')`
+ */
+function buildAggregateEntries(
 	sa: SelectAggregateIntent,
 	imports: Set<string>,
-): string {
+): string[] {
 	const entries: string[] = [];
 
-	// Non-aggregate fields first
-	if (sa.fields) {
-		for (const f of sa.fields) {
-			entries.push(`    '${f}': true`);
-		}
+	// Non-aggregate fields first → .columns([...fields])
+	if (sa.fields && sa.fields.length > 0) {
+		const arr = sa.fields.map((f) => tsString(f)).join(', ');
+		entries.push(`  .columns([${arr}])`);
 	}
 
+	// Each aggregate → separate chained method call
 	for (const agg of sa.aggregates) {
 		const fn = agg.function;
-		const alias = agg.as ?? fn;
+		const alias = agg.as;
 
-		if (fn === 'count' && (!agg.field || agg.field === '*')) {
-			imports.add('count');
-			entries.push(`    ${alias}: count()`);
-		} else if (agg.field && agg.field !== '*') {
-			imports.add(fn);
-			entries.push(`    ${alias}: ${fn}('${agg.field}')`);
-		} else {
-			imports.add('count');
-			entries.push(`    ${alias}: count()`);
+		switch (fn) {
+			case 'count': {
+				if (!agg.field || agg.field === '*') {
+					// COUNT(*) — no field argument
+					if (alias) {
+						// COUNT(*) AS alias — use options-object form: .count({ as: 'alias' })
+						entries.push(`  .count({ as: ${tsString(alias)} })`);
+					} else {
+						entries.push('  .count()');
+					}
+				} else if (agg.distinct) {
+					// COUNT(DISTINCT field)
+					imports.add('distinct');
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .count(distinct(${tsString(agg.field)})${aliasArg})`);
+				} else {
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .count(${tsString(agg.field)}${aliasArg})`);
+				}
+				break;
+			}
+			case 'sum': {
+				if (agg.distinct && agg.field) {
+					imports.add('distinct');
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .sum(distinct(${tsString(agg.field)})${aliasArg})`);
+				} else {
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .sum(${tsString(agg.field ?? '*')}${aliasArg})`);
+				}
+				break;
+			}
+			case 'avg': {
+				if (agg.distinct && agg.field) {
+					imports.add('distinct');
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .avg(distinct(${tsString(agg.field)})${aliasArg})`);
+				} else {
+					const aliasArg = alias ? `, ${tsString(alias)}` : '';
+					entries.push(`  .avg(${tsString(agg.field ?? '*')}${aliasArg})`);
+				}
+				break;
+			}
+			case 'min': {
+				const aliasArg = alias ? `, ${tsString(alias)}` : '';
+				entries.push(`  .min(${tsString(agg.field ?? '*')}${aliasArg})`);
+				break;
+			}
+			case 'max': {
+				const aliasArg = alias ? `, ${tsString(alias)}` : '';
+				entries.push(`  .max(${tsString(agg.field ?? '*')}${aliasArg})`);
+				break;
+			}
+			default:
+				entries.push(
+					`  /* unsupported aggregate function: ${fn} — see Dump tab */`,
+				);
 		}
 	}
 
-	if (entries.length === 0) return '  /* empty aggregate select */';
-	return `  .columns({\n${entries.join(',\n')},\n  })`;
+	if (entries.length === 0) return ['  /* empty aggregate select */'];
+	return entries;
 }
 
 function buildExpressionsSelect(
 	se: SelectWithExpressionsIntent,
 	imports: Set<string>,
-): string {
-	// If all columns are plain column refs, emit as array
+): string | null {
+	// If all columns are plain column refs with no alias, emit as string array
 	const allSimple = se.columns.every((c) => c.kind === 'column' && !c.as);
 
 	if (allSimple) {
 		const arr = se.columns
-			.map((c) => `'${(c as { kind: string; column: string }).column}'`)
+			.map((c) => tsString((c as { kind: string; column: string }).column))
 			.join(', ');
 		return `  .columns([${arr}])`;
 	}
 
-	// Mixed: emit object form — skip raw entries to avoid syntactically broken output
-	const entries: string[] = [];
+	// Mixed: emit array form with each item serialized as appropriate
 	const rawWarnings: string[] = [];
+	const arrayItems: string[] = [];
+
 	for (const col of se.columns) {
 		if (col.kind === 'raw') {
-			// raw() entries cannot safely be inlined as object keys — emit top-level comment
 			rawWarnings.push(
 				`// NOTE: raw expression "${(col as { kind: string; sql: string }).sql}" omitted — use raw() from @dbsp/core directly`,
 			);
 			continue;
 		}
-		const entry = buildExpressionEntry(col, imports);
-		if (entry !== null) {
-			entries.push(`    ${entry}`);
+		const item = buildExpressionArrayItem(col, imports);
+		if (item !== null) {
+			arrayItems.push(`    ${item}`);
 		}
 	}
 
-	if (entries.length === 0) {
+	if (arrayItems.length === 0) {
 		return [
 			...rawWarnings,
 			'  /* complex expressions — see Dump tab for IR */',
 		].join('\n');
 	}
 
-	const objectExpr = `  .columns({\n${entries.join(',\n')},\n  })`;
+	const arrayExpr = `  .columns([\n${arrayItems.join(',\n')},\n  ])`;
 	if (rawWarnings.length > 0) {
-		return [...rawWarnings, objectExpr].join('\n');
+		return [...rawWarnings, arrayExpr].join('\n');
 	}
-	return objectExpr;
+	return arrayExpr;
 }
 
-function buildExpressionEntry(
+/**
+ * Build a single array item for `.columns([...])`.
+ *
+ * - Plain column ref → `'colName'`
+ * - relationColumn intent → `relationColumn('rel', 'col', 'alias')`
+ *   (all 3 args required — alias is mandatory per filters.ts:876)
+ * - Aggregate inside expressions → comment (use chained methods instead)
+ * - Other → comment fallback
+ */
+function buildExpressionArrayItem(
 	expr: ExpressionIntent,
 	imports: Set<string>,
 ): string | null {
 	switch (expr.kind) {
 		case 'column': {
-			const alias = expr.as ?? expr.column;
-			return `${alias}: '${expr.column}'`;
+			if (expr.as) {
+				// col(column, alias) — type-safe column alias helper (filters.ts:834)
+				imports.add('col');
+				return `col(${tsString(expr.column)}, ${tsString(expr.as)})`;
+			}
+			return tsString(expr.column);
 		}
 		case 'columnAlias':
-			return `${expr.alias}: '${expr.column}'`;
+			return tsString(expr.column);
 		case 'aggregate': {
+			// Aggregates in expressions select — point user to chained method form
 			const ae = expr as AggregateExpressionIntent;
 			const fn = ae.function;
 			const alias = ae.as ?? fn;
 			if (fn === 'count' && (!ae.field || ae.field === '*')) {
-				imports.add('count');
-				return `${alias}: count()`;
+				return `/* use .count('${alias}') as a chained method instead */`;
 			}
-			if (ae.field && ae.field !== '*') {
-				imports.add(fn);
-				return `${alias}: ${fn}('${ae.field}')`;
-			}
-			imports.add('count');
-			return `${alias}: count()`;
+			return `/* use .${fn}('${ae.field}', '${alias}') as a chained method instead */`;
 		}
 		case 'raw':
 			// raw() entries are handled at the buildExpressionsSelect level — never inline
 			return null;
-		case 'relationColumn':
-			return `'${expr.as}': '${expr.relation}.${expr.column}'`;
+		case 'relationColumn': {
+			// relationColumn(relation, column, as) — all 3 args required (filters.ts:876)
+			const alias = expr.as ?? `${expr.relation}.${expr.column}`;
+			imports.add('relationColumn');
+			return `relationColumn(${tsString(expr.relation)}, ${tsString(expr.column)}, ${tsString(alias)})`;
+		}
 		default:
 			return `/* complex expr(${expr.kind}) — see Dump */`;
 	}
@@ -309,22 +471,34 @@ function buildExpressionEntry(
 // ---------------------------------------------------------------------------
 
 function buildIncludeCall(inc: IncludeIntent, imports: Set<string>): string {
-	// Simple include with no extra options
 	const hasWhere = !!inc.where;
 	const hasSelect = !!inc.select;
+	const hasVia = !!inc.via;
+	const hasJoin = !!inc.join;
+	const hasRecursive = !!inc.recursive;
+	const hasNestedInclude = !!(inc.include && inc.include.length > 0);
 
-	if (!hasWhere && !hasSelect) {
-		return `  .include('${inc.relation}')`;
+	if (
+		!hasWhere &&
+		!hasSelect &&
+		!hasVia &&
+		!hasJoin &&
+		!hasRecursive &&
+		!hasNestedInclude
+	) {
+		return `  .include(${tsString(inc.relation)})`;
 	}
 
 	// Build options object
 	const opts: string[] = [];
+
 	if (hasWhere && inc.where) {
 		opts.push(`where: ${buildWhereExpr(inc.where, imports)}`);
 	}
+
 	if (hasSelect && inc.select?.type === 'fields') {
 		const fields = (inc.select as SelectFieldsIntent).fields
-			.map((f) => `'${f}'`)
+			.map((f) => tsString(f))
 			.join(', ');
 		// IncludeOptions.select is a SelectIntent — emit the structured object form
 		opts.push(`select: { type: 'fields', fields: [${fields}] }`);
@@ -332,7 +506,25 @@ function buildIncludeCall(inc: IncludeIntent, imports: Set<string>): string {
 		opts.push('/* select: complex — see Dump */');
 	}
 
-	return `  .include('${inc.relation}', { ${opts.join(', ')} })`;
+	if (hasVia && inc.via) {
+		opts.push(`via: ${tsString(inc.via)}`);
+	}
+
+	if (hasJoin && inc.join) {
+		opts.push(`join: ${tsString(inc.join)}`);
+	}
+
+	if (hasRecursive) {
+		opts.push('recursive: true');
+	}
+
+	if (hasNestedInclude && inc.include) {
+		// Serialize nested includes as a comment — full recursion is too verbose for display
+		const names = inc.include.map((ni) => tsString(ni.relation)).join(', ');
+		opts.push(`/* nested includes: [${names}] — see Dump tab for IR */`);
+	}
+
+	return `  .include(${tsString(inc.relation)}, { ${opts.join(', ')} })`;
 }
 
 // ---------------------------------------------------------------------------
@@ -349,38 +541,45 @@ function buildWhereExpr(where: WhereIntent, imports: Set<string>): string {
 			}
 			imports.add(helper);
 			const val = formatValue(wc.value);
-			return `${helper}('${wc.field}', ${val})`;
+			return `${helper}(${tsString(wc.field)}, ${val})`;
 		}
 
 		case 'like': {
 			const wl = where as WhereLikeIntent;
 			imports.add('like');
-			if (wl.caseInsensitive) {
-				return `like('${wl.field}', '${wl.pattern}', true)`;
+			// Use formatValue so single quotes in pattern are properly escaped
+			const escapedPattern = formatValue(wl.pattern);
+			// Build options object for caseInsensitive / escape (filters.ts:230-250)
+			const likeOpts: string[] = [];
+			if (wl.caseInsensitive) likeOpts.push('caseInsensitive: true');
+			if (wl.escape !== undefined)
+				likeOpts.push(`escape: ${formatValue(wl.escape)}`);
+			if (likeOpts.length > 0) {
+				return `like(${tsString(wl.field)}, ${escapedPattern}, { ${likeOpts.join(', ')} })`;
 			}
-			return `like('${wl.field}', '${wl.pattern}')`;
+			return `like(${tsString(wl.field)}, ${escapedPattern})`;
 		}
 
 		case 'in': {
 			const wi = where as import('@dbsp/core').WhereInIntent;
 			if (wi.subquery) {
-				// inSubquery — emit a comment since we can't reconstruct the subquery builder
-				imports.add('inSubquery');
-				return `/* inSubquery('${wi.field}', subquery(...)) — see Dump tab for IR */`;
+				// inSubquery — emit a comment since we can't reconstruct the subquery builder.
+				// Do NOT add inSubquery to imports — the output does not actually call it.
+				return `/* inSubquery(${tsString(wi.field)}, subquery(...)) — see Dump tab for IR */`;
 			}
 			imports.add('inArray');
 			const vals = wi.values.map(formatValue).join(', ');
-			return `inArray('${wi.field}', [${vals}])`;
+			return `inArray(${tsString(wi.field)}, [${vals}])`;
 		}
 
 		case 'null': {
 			const wn = where as import('@dbsp/core').WhereNullIntent;
 			if (wn.operator === 'isNull') {
 				imports.add('isNull');
-				return `isNull('${wn.field}')`;
+				return `isNull(${tsString(wn.field)})`;
 			}
 			imports.add('isNotNull');
-			return `isNotNull('${wn.field}')`;
+			return `isNotNull(${tsString(wn.field)})`;
 		}
 
 		case 'and': {
@@ -430,7 +629,27 @@ const COMPARISON_HELPERS: Record<string, string> = {
 function formatValue(val: unknown): string {
 	if (val === null) return 'null';
 	if (val === undefined) return 'undefined';
-	if (typeof val === 'string') return `'${val.replace(/'/g, "\\'")}'`;
+	if (typeof val === 'string')
+		return `'${val.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
 	if (typeof val === 'boolean' || typeof val === 'number') return String(val);
 	return JSON.stringify(val);
+}
+
+/**
+ * Emit a string as a safe TypeScript single-quoted literal.
+ *
+ * Used for IDENTIFIER positions (table names, field names, relation names,
+ * aliases, group/order columns) where the value is a known string but
+ * must be defence-in-depth escaped against control characters.
+ *
+ * In practice, identifier validation restricts names to safe chars, but
+ * consistent use of this helper prevents any control-char injection.
+ */
+function tsString(s: string): string {
+	return `'${s
+		.replace(/\\/g, '\\\\')
+		.replace(/'/g, "\\'")
+		.replace(/\n/g, '\\n')
+		.replace(/\r/g, '\\r')
+		.replace(/\t/g, '\\t')}'`;
 }
