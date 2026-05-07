@@ -154,6 +154,79 @@ const { sql: resultSql } = orm.upsert('users')
   .dump();
 ```
 
+### Advanced ON CONFLICT patterns
+
+The basic upsert patterns above cover most use cases. The following patterns handle edge cases you will encounter in production schemas.
+
+#### Selecting a specific constraint
+
+When a table has multiple unique constraints, specify which one governs conflict detection. Use `.onConflictConstraint(name)` to target a named constraint instead of listing columns:
+
+```typescript
+// doctest: skip — constraint names are DB-specific
+orm.upsert('users')
+  .values({ name: 'Alice', email: 'alice@example.com', externalId: 'ext-001' })
+  .onConflictConstraint('users_email_unique')
+  .doUpdate({ name: 'Alice Updated' })
+  .dump();
+// SQL: INSERT INTO "users" (...) VALUES ($1, $2, $3)
+// ON CONFLICT ON CONSTRAINT "users_email_unique"
+// DO UPDATE SET "name" = $4
+```
+
+Source: `packages/core/src/dx/mutation-builders.ts:870` — `onConflictConstraint(constraintName: string)`.
+
+#### Partial-index conflict targets with a WHERE clause
+
+PostgreSQL partial indexes restrict conflict detection to rows that satisfy a condition. When your `UNIQUE` index has a `WHERE` clause (a partial index), pass a matching condition to `.onConflict()` via the `where` option:
+
+```typescript
+// doctest: skip — partial-index conflict; index must exist in the DB
+import { eq } from '@dbsp/core';
+
+// Partial unique index: CREATE UNIQUE INDEX ON "products" ("sku") WHERE "active" = true
+orm.upsert('products')
+  .values({ sku: 'ABC', price: 99.99, active: true })
+  .onConflict({ columns: ['sku'], where: [eq('active', true)] })
+  .doUpdate({ price: 99.99 })
+  .dump();
+// SQL: INSERT INTO "products" ("sku", "price", "active") VALUES ($1, $2, $3)
+// ON CONFLICT ("sku") WHERE "active" = $4
+// DO UPDATE SET "price" = $5
+```
+
+> **Note:** The `WHERE` here is on the **conflict target** (the partial index predicate), not on the UPDATE action. It tells PostgreSQL which index to use for conflict detection.
+
+> **Not yet supported:** The second argument to `doUpdate(set, where)` is accepted by the TypeScript API but is **silently ignored** by the PostgreSQL compiler — the WHERE is not emitted in `DO UPDATE SET ... WHERE ...`. Do not use `doUpdate(set, whereCondition)` to conditionally apply updates; the condition will have no effect.
+
+Source: `packages/core/src/dx/mutation-builders.ts:887` — `doUpdate(set?, where?)`; `packages/adapter-pgsql/src/mutations/upsert.ts:116` — partial-index `WHERE` on conflict target.
+
+#### Multi-column conflict targets
+
+List all columns that compose the unique constraint when the conflict target spans multiple columns:
+
+```typescript
+orm.upsert('user_roles')
+  .values({ userId: 1, roleId: 3, grantedAt: new Date() })
+  .onConflict(['userId', 'roleId'])
+  .doUpdate({ grantedAt: new Date() })
+  .dump();
+// SQL: INSERT INTO "user_roles" (...) VALUES ($1, $2, $3)
+// ON CONFLICT ("userId", "roleId")
+// DO UPDATE SET "grantedAt" = $4
+```
+
+#### DO NOTHING vs DO UPDATE — when to use each
+
+| Need | Use |
+|------|-----|
+| Idempotent insert: ignore if already exists | `.doNothing()` |
+| Upsert: create if new, update if exists | `.doUpdate()` (no args = auto-update all non-conflict columns) |
+| Selective upsert: update only specific fields | `.doUpdate({ col: value })` |
+| Conditional upsert: only update if a condition holds | Not yet supported (see note above) |
+
+`.doNothing()` compiles to `ON CONFLICT DO NOTHING` — the entire row is left unchanged on a conflict. It is the correct choice for "insert if not exists" patterns where updating the existing row would be incorrect (e.g., first-write-wins semantics).
+
 ---
 
 ## Safety Rules
@@ -174,14 +247,14 @@ These rules prevent silent data loss from forgotten filter conditions.
 All mutation builders support `.dump()` — inspect the SQL and parameters without executing:
 
 ```typescript
-const { sql, params } = orm.insert('users')
+const { sql, parameters } = orm.insert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
   .dump();
 
 console.log(sql);
 // INSERT INTO "users" ("name", "email") VALUES ($1, $2)
 
-console.log(params);
+console.log(parameters);
 // ['Alice', 'alice@example.com']
 ```
 

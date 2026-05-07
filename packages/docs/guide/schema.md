@@ -137,3 +137,99 @@ parentId: ref('categories', {
 | `roles` | Required for self-referential tables: `{ parent, children }` |
 
 The planner uses these relations to auto-resolve `.include()` calls and choose optimal join strategies.
+
+---
+
+## Type safety guarantees
+
+The schema you pass to `createOrm()` drives full TypeScript inference from schema definition to query result. Understanding how this inference works helps you avoid the subtle type loss patterns that defeat it.
+
+### Schema() vs ResolvedSchema vs GeneratedSchema
+
+`@dbsp/core` works with three related schema shapes:
+
+| Shape | Created by | Purpose |
+|-------|------------|---------|
+| `Schema<T>` | `schema({ ... })` call in your code | User-facing DSL — the object you write |
+| `GeneratedSchema` | Internal format expected by `createOrm({ schema })` | Normalized flat structure consumed by the planner |
+| `ResolvedSchema` | External `@dbsp/schema` package or migration tools | PostgreSQL-specific column types (`jsonb`, `tstzrange`, etc.) that differ from `@dbsp/core` types |
+
+When you call `schema({ ... })`, the result is a `Schema<T>` that wraps both the original definition and a compiled `ModelIR`. `createOrm({ schema })` accepts this object directly.
+
+If you receive a schema from an external source (e.g. an introspection tool, `@dbsp/schema`), use `resolvedSchemaToGeneratedSchema()` to validate and convert it before passing to `createOrm()`. Source: `packages/core/src/dx/schema-bridge.ts:1186`.
+
+```typescript
+// doctest: skip — illustrative external schema conversion
+import { resolvedSchemaToGeneratedSchema, createOrm } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const externalSchema = loadSchemaFromFile('./schema.json');
+const result = resolvedSchemaToGeneratedSchema(externalSchema);
+
+if (!result.success) {
+  console.error('Schema validation failed:', result.errors);
+  process.exit(1);
+}
+
+const orm = createOrm({ schema: result.schema, adapter: createPgsqlAdapter(pool) });
+```
+
+Use `assertResolvedSchemaToGeneratedSchema(input)` for a throwing variant when you are certain the input is valid.
+
+Use `isResolvedSchema(value)` to check at runtime whether an unknown object is a ResolvedSchema (detects PostgreSQL-specific types not present in the core schema DSL). Source: `packages/core/src/dx/schema-bridge.ts:682`.
+
+### TypeScript inference flow
+
+The `schema()` function is generic over `T` (the definition object). This allows TypeScript to:
+
+1. Infer the row type `UserRow` from the column definitions
+2. Narrow the return type of `orm.select('users')` to `QueryBuilder<UserRow>`
+3. Narrow `.columns(['id', 'name'])` to `QueryBuilder<Pick<UserRow, 'id' | 'name'>>`
+
+The key requirement is that the schema definition is passed **with `as const`** to preserve the literal types that TypeScript needs for the inference chain:
+
+```typescript
+// doctest: skip — illustrative type inference note
+const db = schema({
+  users: { id: 'uuid', name: 'string', email: 'string' },
+} as const);  // ← as const is required for full inference
+
+const orm = createOrm({ schema: db, adapter });
+
+// TypeScript infers: QueryBuilder<{ id: string; name: string; email: string }>
+const q = orm.select('users');
+
+// TypeScript infers: QueryBuilder<{ id: string; name: string }>
+const narrow = q.columns(['id', 'name']);
+```
+
+Without `as const`, TypeScript widens string literals to `string`, losing the column-level type information that makes `.columns()` narrowing work.
+
+### Strict mode
+
+Pass `strictMode: true` to `createOrm()` to enable additional runtime checks. In strict mode, referencing a column or table name that does not exist in the schema throws at query-build time rather than at SQL execution time:
+
+```typescript
+// doctest: skip — strict mode behavior
+const orm = createOrm({ schema: db, adapter, strictMode: true });
+
+// Throws at build time in strict mode: "Column 'nonexistent' does not exist on table 'users'"
+orm.select('users').where(eq('nonexistent', 'value'));
+```
+
+Strict mode is recommended for development and CI. You can disable it in production if you have validated all query paths in tests.
+
+### Type safety across `withSchema()`
+
+`orm.withSchema('tenant_123')` returns a new `OrmInstance` with the same type inference as the original. All builders derived from the scoped ORM carry the schema name through to the SQL compiler:
+
+```typescript
+// doctest: skip — withSchema type safety
+const tenantOrm = orm.withSchema('tenant_123');
+
+// Same type inference as orm.select('users')
+const users = await tenantOrm.select('users').all();
+// SQL: SELECT ... FROM "tenant_123"."users"
+```
+
+Type inference is not narrowed by schema name — the TypeScript row types are identical whether or not a schema prefix is applied.

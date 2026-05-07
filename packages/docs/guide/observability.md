@@ -151,27 +151,199 @@ The correlation ID appears in `dump.meta.correlationId` and is not sent to Postg
 
 ## Query Hooks
 
-The adapter supports `onQuery` and `onQueryComplete` lifecycle hooks for cross-cutting concerns such as logging, metrics, and slow-query detection:
+`@dbsp/core` provides lifecycle hooks at the ORM instance via `createHookManager()`. Use `beforeQuery` / `afterQuery` for cross-cutting concerns such as logging, metrics, and slow-query detection:
 
 ```typescript
+// doctest: skip — requires real PostgreSQL pool
+import { createOrm, createHookManager, schema } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
-const adapter = createPgsqlAdapter(pool, {
-  onQuery(dump) {
-    logger.debug({ sql: dump.sql, params: dump.params }, 'query start');
-  },
-  onQueryComplete(dump, durationMs) {
-    metrics.histogram('db.query.duration', durationMs);
-    if (durationMs > 1000) {
-      logger.warn({ sql: dump.sql, durationMs }, 'slow query');
+const db = schema({ users: { id: 'integer', name: 'string' } } as const);
+
+const hooks = createHookManager()
+  .beforeQuery((ctx) => {
+    logger.debug({ intent: ctx.intent }, 'query start'); // ctx.intent is the QueryIntent AST; SQL is only available in afterQuery
+    return ctx;
+  })
+  .afterQuery((ctx, results) => {
+    if (ctx.duration && ctx.duration > 1000) {
+      logger.warn({ durationMs: ctx.duration }, 'slow query');
     }
-  },
-});
+    metrics.histogram('db.query.duration', ctx.duration ?? 0);
+    return results;
+  });
+
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
 ```
 
-| Hook | Signature | When called |
-|------|-----------|-------------|
-| `onQuery` | `(dump: Dump) => void` | Before the query executes |
-| `onQueryComplete` | `(dump: Dump, durationMs: number) => void` | After the query returns (success or error) |
+| Hook | Type | When called |
+|------|------|-------------|
+| `beforeQuery` | `BeforeQueryHook` | Before the query executes |
+| `afterQuery` | `AfterQueryHook` | After successful query execution only |
+| `onError` | `OnErrorHook` | When the query throws (errors bypass `afterQuery`) |
 
-Both hooks receive the full `Dump` object, including SQL, parameters, and the plan report.
+`PgsqlAdapterOptions` (the second argument to `createPgsqlAdapter`) does not accept query callbacks — use ORM-level hooks via `createHookManager()` instead.
+
+---
+
+## ORM-instance hooks
+
+`@dbsp/core` provides a lifecycle hook system at the ORM instance. These hooks let you compose cross-cutting concerns — soft-delete default filters, audit trails, per-request metrics — as reusable units that attach to the ORM at creation time.
+
+### Hook registration
+
+Create a `HookManager` with `createHookManager()` and chain your hooks before passing it to `createOrm()`. Hooks are **frozen on ORM creation** — no new hooks can be registered after `createOrm()` is called.
+
+```typescript
+// doctest: skip — requires real PostgreSQL pool; illustrates hook registration pattern
+import { createOrm, createHookManager, schema } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({ users: { id: 'integer', name: 'string', deletedAt: 'timestamp' } } as const);
+
+const hooks = createHookManager()
+  .beforeQuery((ctx) => {
+    console.log(`[${ctx.table}] ${ctx.operation} starting`);
+    return ctx; // return ctx (or undefined) to continue; the returned value becomes the new ctx
+  })
+  .afterQuery((ctx, results) => {
+    console.log(`[${ctx.table}] returned ${Array.isArray(results) ? results.length : 1} row(s) in ${ctx.duration}ms`);
+    return results; // return results (or undefined) to pass them through unchanged
+  });
+
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+```
+
+Source: `packages/core/src/dx/hooks.ts:523` — `createHookManager()` returns a `HookManager`.
+
+### Hook types
+
+Five hook types are available. All are defined in `packages/core/src/dx/hooks.ts`.
+
+| Hook | Type | Context | Can transform |
+|------|------|---------|---------------|
+| `beforeQuery` | `BeforeQueryHook` | `QueryHookContext` | Yes — return modified ctx |
+| `afterQuery` | `AfterQueryHook` | `QueryHookContext` | Yes — return modified results |
+| `beforeMutation` | `BeforeMutationHook` | `MutationHookContext<T>` | Yes — return modified ctx |
+| `afterMutation` | `AfterMutationHook` | `MutationHookContext<T>` | Yes — return modified results array |
+| `onError` | `OnErrorHook` | Error + context | No |
+
+Each hook receives a **frozen** context object (`Object.freeze` is applied at construction time). To modify the context, return a new object from the hook. Returning `undefined` passes the original context unchanged.
+
+### Hook context fields
+
+**`QueryHookContext`** (beforeQuery / afterQuery):
+
+| Field | Available in | Description |
+|-------|-------------|-------------|
+| `table` | both | Root table name |
+| `operation` | both | Always `'select'` |
+| `intent` | both | Full `QueryIntent` AST |
+| `schemaName` | both | Schema if `withSchema()` was used |
+| `inTransaction` | both | Whether inside `orm.transaction()` |
+| `correlationId` | both | Correlation ID from `.dump()` options |
+| `resultType` | both | `'all'`, `'first'`, `'count'`, etc. |
+| `sql` | afterQuery only | Compiled SQL string |
+| `parameters` | afterQuery only | Bound parameters (may contain PII) |
+| `duration` | afterQuery only | Execution time in ms |
+
+**`MutationHookContext<T>`** (beforeMutation / afterMutation) adds:
+
+| Field | Description |
+|-------|-------------|
+| `operation` | `'insert'`, `'update'`, `'delete'`, `'upsert'` |
+| `intent` | The mutation intent AST |
+| `cardinality` | `'single'` or `'bulk'` |
+| `data` | The values being written |
+| `affectedRows` | afterMutation only — row count |
+
+### Lifecycle order
+
+For a SELECT query, hooks fire in this order:
+
+1. ORM `beforeQuery` hooks (in registration order — FIFO)
+2. PostgreSQL executes the query
+3. ORM `afterQuery` hooks (in reverse registration order — LIFO, middleware semantics)
+
+For mutations, replace `beforeQuery`/`afterQuery` with `beforeMutation`/`afterMutation` — the same ordering applies: before-hooks FIFO, after-hooks LIFO.
+
+### Pattern: soft-delete default WHERE filter
+
+Use `beforeQuery` to inject a `deletedAt IS NULL` filter on every SELECT without requiring every call site to remember it:
+
+```typescript
+// doctest: skip — requires real PostgreSQL connection
+import { createHookManager, createOrm, schema } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+
+const db = schema({
+  posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' },
+} as const);
+
+const hooks = createHookManager()
+  .beforeQuery((ctx) => {
+    // Inject soft-delete filter for posts table
+    if (ctx.table === 'posts') {
+      return {
+        ...ctx,
+        intent: {
+          ...ctx.intent,
+          // WhereIntent is a discriminated union — use the 'null' variant
+          where: { kind: 'null', field: 'deletedAt', operator: 'isNull' },
+        },
+      };
+    }
+    return ctx;
+  });
+
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+```
+
+> **Note:** `schema()` accepts a `defaultFilters` option as its third argument for table-level default WHERE clauses. Use `defaultFilters` for simple equality/null checks — it is more idiomatic than a manual `beforeQuery` hook for this pattern:
+>
+> ```typescript
+> const db = schema(
+>   { posts: { id: 'integer', title: 'string', deletedAt: 'timestamp' } } as const,
+>   undefined,
+>   { defaultFilters: { posts: { deletedAt: null } } },
+> );
+> ```
+
+### Pattern: audit log on mutations
+
+Use `afterMutation` to record every write to a separate audit table:
+
+```typescript
+// doctest: skip — requires real PostgreSQL connection
+import { createHookManager } from '@dbsp/core';
+
+const hooks = createHookManager()
+  .afterMutation(async (ctx, results) => {
+    if (ctx.operation === 'update' || ctx.operation === 'delete') {
+      // Fire-and-forget — don't await to avoid slowing the main path
+      auditLogger.log({
+        table: ctx.table,
+        operation: ctx.operation,
+        affectedRows: ctx.affectedRows,
+        at: new Date(),
+      }).catch(console.error);
+    }
+    return results;
+  });
+```
+
+### Composability and ordering
+
+`before*` hooks run in **registration order (FIFO)**; `after*` hooks run in **reverse registration order (LIFO)** — this mirrors standard middleware stacking where the last-registered wrapper is the outermost layer. Each hook in the chain receives the output of the previous hook:
+
+```typescript
+// doctest: skip — illustrative chaining; hookA/hookB/hookC are user-defined functions
+const hooks = createHookManager()
+  .beforeQuery(hookA)  // receives original ctx, returns ctx1 (runs first)
+  .beforeQuery(hookB)  // receives ctx1, returns ctx2
+  .beforeQuery(hookC); // receives ctx2 (runs last before query)
+// afterQuery hooks fire in reverse: hookC → hookB → hookA
+```
+
+If a hook returns `undefined`, the previous ctx/results are forwarded unchanged. Hooks cannot be added after `createOrm()` — the manager is frozen internally at that point. Attempting to add hooks to a frozen manager throws:
+`HookManager is frozen — hooks cannot be added after ORM creation.`
