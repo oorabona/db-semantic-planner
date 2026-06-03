@@ -359,4 +359,5 @@ For derivable-builder loops, cursor vs offset trade-offs, streaming, and common 
 - **DDL helpers** — `truncate`, `vacuum`, `alterColumn`, index management: [DDL Helpers](./ddl-helpers)
 - **Recursive CTEs** — tree traversal with ancestors/descendants: [Recursive CTEs](./recursive-cte)
 - **Full API reference** — complete method listing with all options: [API Reference](/api/)
+- **Runnable examples** — eight realistic schemas (blog, ecommerce, iam, hierarchy, scheduling…) with `.dbsp` sessions and `.assert.dbsp` assertions: [examples/](https://github.com/oorabona/db-semantic-planner/tree/main/examples)
 

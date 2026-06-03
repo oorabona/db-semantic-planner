@@ -25,22 +25,14 @@ jobs:
       - run: pnpm -C packages/core build
       - run: pnpm -C packages/adapter-pgsql build
       - run: pnpm -C packages/cli build
-      - run: pnpm -C packages/mcp-server build
-      - run: pnpm -C packages/types publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/nql publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/core publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/adapter-pgsql publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/cli publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      - run: pnpm -C packages/mcp-server publish --no-git-checks
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # OIDC trusted publishing: --provenance attaches the GHA OIDC
+      # token to each upload; npm validates it against the trusted-publisher
+      # config registered for each @dbsp/* package. No NPM_TOKEN required.
+      - run: pnpm -C packages/types publish --no-git-checks --provenance
+      - run: pnpm -C packages/nql publish --no-git-checks --provenance
+      - run: pnpm -C packages/core publish --no-git-checks --provenance
+      - run: pnpm -C packages/adapter-pgsql publish --no-git-checks --provenance
+      - run: pnpm -C packages/cli publish --no-git-checks --provenance
+      # @dbsp/mcp-server publish skipped — package is currently a
+      # scaffold (no MCP tools registered yet, see issue 112).
+      # Re-enable once the first tool ships.

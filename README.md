@@ -289,6 +289,7 @@ Full documentation is published at **[dbsp.dev](https://oorabona.github.io/db-se
 | [Full-text Search](https://oorabona.github.io/db-semantic-planner/guide/full-text-search) | pgvector and ParadeDB BM25 |
 | [Recursive CTEs](https://oorabona.github.io/db-semantic-planner/guide/recursive-cte) | Tree traversal with `include()` |
 | [Comparison](https://oorabona.github.io/db-semantic-planner/comparison) | dbsp vs 16 query libraries |
+| [Examples](./examples) | Eight runnable schemas (blog, ecommerce, iam, hierarchy…) with assertions, DDL, seed, and TypeScript schema files |
 
 ---
 
