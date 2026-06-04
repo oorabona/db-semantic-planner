@@ -12,6 +12,8 @@
  */
 
 import {
+	and,
+	eq,
 	inSubquery,
 	not,
 	POSTGRESQL_CAPABILITIES,
@@ -601,5 +603,123 @@ describe('simple top-level IN→EXISTS still works (non-regression)', () => {
 		expect(sql).toContain('approved');
 		expect(params).toHaveLength(1);
 		expect(params[0]).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Defect 1 regression tests: NULL-safety under nested negation (Issue #130-H)
+//
+// SQL three-valued logic: `x NOT IN (SELECT y ...)` is UNKNOWN (row excluded)
+// when y can be NULL.  `NOT EXISTS` is always two-valued, so the rewrite
+// broadens the filter for nullable FKs.  A positive IN inside a negated
+// context (e.g. not(and(inSubquery(...), eq(...)))) must NOT be rewritten to
+// EXISTS when the FK is nullable.
+// ---------------------------------------------------------------------------
+
+describe('NULL-safety under negation: not(and(inSubquery(nullable FK), eq)) keeps IN', () => {
+	it('not(and(inSubquery(nullable FK), eq)) SQL keeps = ANY (not EXISTS)', () => {
+		// nullable FK: posts.authorId is nullable → rewrite is unsafe under negation
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: not(
+				and(
+					inSubquery('id', subquery('posts').select('authorId')),
+					eq('name', 'Alice'),
+				),
+			),
+		};
+
+		const planReport = plan(queryIntent, schemaWithNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner must NOT emit a filter-strategy (nullable IN under negation is kept as-is)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+
+		const { sql, params } = compileIntent(
+			queryIntent,
+			schemaWithNullableFK.model,
+		);
+
+		// SQL must NOT contain EXISTS — the IN must be preserved as = ANY
+		expect(sql).not.toContain('exists');
+		expect(sql).toContain('= any');
+		// name condition also present
+		expect(sql).toContain('name');
+		// params: $1='Alice'
+		expect(params).toHaveLength(1);
+		expect(params[0]).toBe('Alice');
+	});
+});
+
+describe('NULL-safety under negation: not(and(inSubquery(non-nullable FK), eq)) rewrites', () => {
+	it('not(and(inSubquery(non-nullable FK), eq)) SQL uses NOT(EXISTS(...) AND name=$N)', () => {
+		// non-nullable FK: posts_nn.authorId is NOT NULL → rewrite is safe
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: not(
+				and(
+					inSubquery('id', subquery('posts_nn').select('authorId')),
+					eq('name', 'Bob'),
+				),
+			),
+		};
+
+		const planReport = plan(queryIntent, schemaWithNonNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner emits filter-strategy (safe to rewrite)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		const { sql, params } = compileIntent(
+			queryIntent,
+			schemaWithNonNullableFK.model,
+		);
+
+		// SQL uses NOT(EXISTS(...) AND ...) — EXISTS is inside the NOT
+		expect(sql).toContain('not');
+		expect(sql).toContain('exists');
+		expect(sql).not.toContain('= any');
+		// FK correlation present
+		expect(sql).toContain('"authorid"');
+		// name condition inside the NOT
+		expect(sql).toContain('name');
+		expect(params).toHaveLength(1);
+		expect(params[0]).toBe('Bob');
+	});
+});
+
+describe('NULL-safety: positive inSubquery on nullable FK still rewrites to EXISTS', () => {
+	it('positive inSubquery (non-negated) on nullable FK still compiles to EXISTS', () => {
+		// Positive context is null-safe: IN → EXISTS does not change semantics
+		// (EXISTS is true whenever a matching row exists, same as IN ignoring NULL values)
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: inSubquery('id', subquery('posts').select('authorId')),
+		};
+
+		const planReport = plan(queryIntent, schemaWithNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner emits a filter-strategy — positive IN is rewritten to EXISTS
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		const { sql } = compileIntent(queryIntent, schemaWithNullableFK.model);
+		expect(sql).toContain('exists');
+		expect(sql).not.toContain('= any');
 	});
 });

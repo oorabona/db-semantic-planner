@@ -624,6 +624,15 @@ function optimizeInToExists(
 	where: WhereIntent,
 	sourceTable: string,
 	model: ModelIR,
+	// negated tracks whether this node is under an odd number of NOT wrappers.
+	// An IN→EXISTS rewrite is NULL-unsafe under negation when the FK is nullable:
+	// SQL's three-valued logic makes `NOT IN` return UNKNOWN (excludes row) when
+	// the subquery produces a NULL, whereas `NOT EXISTS` always returns TRUE for
+	// an empty subquery — so the rewrite would BROADEN the filter.
+	// We therefore only rewrite a positive IN to EXISTS when:
+	//   • the context is not negated, OR
+	//   • the FK column is provably non-nullable (rewrite is semantically safe).
+	negated = false,
 ): WhereIntent {
 	switch (where.kind) {
 		case 'in': {
@@ -702,7 +711,22 @@ function optimizeInToExists(
 
 			if (!matchedRelation) return where;
 
-			// Rewrite to EXISTS (NOT IN is handled by the 'not' case below)
+			// When this IN is under a negation context (odd number of NOT wrappers),
+			// rewriting to EXISTS changes NULL semantics: `x NOT IN (SELECT y ...)` is
+			// UNKNOWN when y can be NULL (row excluded), but `NOT EXISTS(...)` is always
+			// two-valued (row included when subquery is empty).  Guard: skip rewrite if
+			// the FK column is nullable in the model (conservative — prefer correctness).
+			if (negated) {
+				const existsIntent = { relation: matchedRelation };
+				if (
+					!isSubquerySelectedColumnNonNullable(existsIntent, sourceTable, model)
+				) {
+					// Nullable FK under negation — keep original IN (correct SQL semantics)
+					return where;
+				}
+			}
+
+			// Rewrite to EXISTS
 			const existsWhere: WhereExistsIntent = {
 				kind: 'exists',
 				relation: matchedRelation,
@@ -716,7 +740,7 @@ function optimizeInToExists(
 		case 'and': {
 			const andWhere = where as WhereAndIntent;
 			const optimized = andWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model),
+				optimizeInToExists(c, sourceTable, model, negated),
 			);
 			if (optimized.every((c, i) => c === andWhere.conditions[i])) return where;
 			return { kind: 'and', conditions: optimized } as WhereAndIntent;
@@ -729,7 +753,7 @@ function optimizeInToExists(
 			// becomes a whereOr stub that is enriched in-place, preserving OR semantics.
 			const orWhere = where as WhereOrIntent;
 			const optimized = orWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model),
+				optimizeInToExists(c, sourceTable, model, negated),
 			);
 			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
 			return { kind: 'or', conditions: optimized } as WhereOrIntent;
@@ -737,10 +761,14 @@ function optimizeInToExists(
 
 		case 'not': {
 			const notWhere = where as WhereNotIntent;
+			// Flip negation parity for the child — this subsumes the dedicated
+			// not(in)→notExists handling: the child 'in' case now sees negated=true
+			// and applies the nullable guard before deciding whether to rewrite.
 			const optimized = optimizeInToExists(
 				notWhere.condition,
 				sourceTable,
 				model,
+				!negated,
 			);
 			if (optimized === notWhere.condition) return where;
 			// NOT(EXISTS) → notExists (direct, no wrapper)
@@ -749,6 +777,10 @@ function optimizeInToExists(
 			// when the subquery can produce NULLs, whereas NOT EXISTS always
 			// returns TRUE for an empty subquery.  The rewrite is only valid when
 			// the selected column is NOT NULL.
+			// NOTE: When the child 'in' was rewritten to 'exists' here, it means
+			// the nullable guard in the 'in' case already confirmed non-nullable
+			// (negated=true path).  The check below is therefore redundant for that
+			// path but is kept as a safety net for any future exists-producing paths.
 			if (optimized.kind === 'exists') {
 				if (
 					!isSubquerySelectedColumnNonNullable(

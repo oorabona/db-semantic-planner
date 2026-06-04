@@ -599,6 +599,13 @@ function buildEnrichedExistsDecision(
  * Collect all stub exists/notExists decisions from a decision tree in depth-first order.
  * A stub is produced by intentToDecisions — it has the relation name as targetTable
  * (possibly as a string[] from NQL's relationFilter intent) and may lack foreignKey.
+ *
+ * Pre-resolved decisions (produced by convertDottedFieldsToExists) are identified by
+ * their `foreignKey` field already being populated.  They are NOT stubs: their
+ * conditions are already correct and must not be overwritten by the enricher.
+ * Skipping them here prevents the enricher from accidentally replacing a dotted-field
+ * EXISTS decision's conditions with those from a different exists intent on the same
+ * relation.
  */
 function collectExistsStubs(
 	decisions: PlanDecision[],
@@ -616,6 +623,11 @@ function collectExistsStubs(
 				d.operator === 'notExists' ||
 				d.operator === 'every')
 		) {
+			// Skip pre-resolved decisions: those produced by convertDottedFieldsToExists
+			// already carry the correct foreignKey and conditions; they do not need
+			// enrichment and must not be confused with unresolved stubs from
+			// convertExistsLike (which never sets foreignKey).
+			if (d.foreignKey) return;
 			out.push({ decision: d, container: decisions, index: i });
 		} else if (
 			(d.type === 'whereAnd' ||
