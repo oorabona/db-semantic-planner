@@ -810,10 +810,11 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		expect(report.intent.where?.kind).toBe('in');
 	});
 
-	it('IN inside OR: report.intent.where stays as OR with kind=in (no EXISTS rewrite)', () => {
-		// Regression gate (OR boolean corruption): if the IN inside an OR were rewritten
-		// to EXISTS, extractExistsDecisions would re-add it as a top-level AND term,
-		// silently changing OR semantics to AND.
+	it('IN inside OR: the IN branch is rewritten to exists inside the OR', () => {
+		// The adapter now compiles EXISTS inline at its boolean tree position rather than
+		// hoisting to top-level AND, so it is safe to optimize an IN inside an OR.
+		// This test confirms the planner does recurse into OR branches and rewrites the
+		// IN branch to exists — the OR structure is preserved in executableIntent.
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -848,22 +849,22 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 
 		const report = plan(intent, testSchema.model);
 
-		// No filter-strategy decision (OR subtree must not be rewritten)
+		// A filter-strategy decision is emitted (the IN inside OR was optimized)
 		const filterDecision = report.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
-		expect(filterDecision).toBeUndefined();
+		expect(filterDecision?.choice).toBe('exists');
 
-		// report.intent must be the original object (entire OR preserved)
+		// report.intent stays the original (unchanged)
 		expect(report.intent).toBe(intent);
-		expect(report.intent.where?.kind).toBe('or');
 
-		// The IN branch inside the OR must still be IN
-		const orWhere = report.intent.where as {
+		// executableIntent carries the optimized OR (with exists inside)
+		expect(report.executableIntent?.where?.kind).toBe('or');
+		const orWhere = report.executableIntent?.where as {
 			kind: 'or';
 			conditions: { kind: string }[];
 		};
-		expect(orWhere.conditions[1]?.kind).toBe('in');
+		expect(orWhere.conditions[1]?.kind).toBe('exists');
 	});
 
 	it('simple IN (no modifiers, top-level): still rewrites to EXISTS', () => {

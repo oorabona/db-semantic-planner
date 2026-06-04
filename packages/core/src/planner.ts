@@ -32,6 +32,7 @@ import {
 	type WhereInIntent,
 	type WhereIntent,
 	type WhereNotIntent,
+	type WhereOrIntent,
 } from './intent-ast.js';
 import type { ModelIR, RelationIR } from './model-ir.js';
 
@@ -721,14 +722,18 @@ function optimizeInToExists(
 			return { kind: 'and', conditions: optimized } as WhereAndIntent;
 		}
 
-		case 'or':
-			// Do NOT recurse into OR branches. The adapter's extractExistsDecisions
-			// appends EXISTS decisions as flat top-level AND terms. If an IN inside
-			// an OR were rewritten to EXISTS, stripExistsFromDecision would remove it
-			// from the OR container and extractExistsDecisions would re-add it as a
-			// top-level AND term — silently changing OR semantics to AND.
-			// Safe fallback: keep the entire OR subtree unchanged (IN stays IN).
-			return where;
+		case 'or': {
+			// The adapter now compiles EXISTS inline at its boolean tree position
+			// (enrichExistsDecisionsInPlace replaces stubs in-place rather than hoisting
+			// to top-level AND).  Recursing here is safe: an exists inside an OR
+			// becomes a whereOr stub that is enriched in-place, preserving OR semantics.
+			const orWhere = where as WhereOrIntent;
+			const optimized = orWhere.conditions.map((c) =>
+				optimizeInToExists(c, sourceTable, model),
+			);
+			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
+			return { kind: 'or', conditions: optimized } as WhereOrIntent;
+		}
 
 		case 'not': {
 			const notWhere = where as WhereNotIntent;

@@ -355,13 +355,16 @@ describe('Non-simple subquery: compilation throws for modifiers that would be si
 });
 
 // ---------------------------------------------------------------------------
-// Suite: OR-position guard (SQL-level verification)
+// Suite: IN→EXISTS inside OR — EXISTS compiled inline, OR semantics preserved
 // ---------------------------------------------------------------------------
-describe('OR-position guard: IN inside OR stays IN, SQL is OR not AND', () => {
-	it('or(eq(...), inSubquery(...)): SQL emits OR combination, not AND', () => {
-		// Regression gate (OR boolean corruption): if the IN inside an OR were
-		// rewritten to EXISTS, extractExistsDecisions would re-add it as a top-level
-		// AND term, silently changing OR semantics to AND.
+// Note: schemaWithNonNullableFK is declared at module scope above (line ~63)
+
+describe('IN→EXISTS inside OR: EXISTS compiled inline, OR semantics preserved', () => {
+	it('or(eq(...), inSubquery(...)): SQL is OR-combined with EXISTS and FK correlation', () => {
+		// The optimizer recurses into OR branches; the adapter compiles EXISTS inline
+		// at its boolean tree position so the result is name=$1 OR EXISTS(...),
+		// not name=$1 AND EXISTS(...).
+		// Also verifies: FK correlation is present and inner WHERE is preserved.
 		const queryIntent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -398,23 +401,205 @@ describe('OR-position guard: IN inside OR stays IN, SQL is OR not AND', () => {
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 
-		// No filter-strategy (OR subtree not rewritten)
+		// Filter-strategy decision is emitted (IN inside OR is now optimized)
 		const filterDecision = planReport.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
-		expect(filterDecision).toBeUndefined();
+		expect(filterDecision?.choice).toBe('exists');
 
-		// plan.intent must be unchanged
+		// plan.intent stays the original
 		expect(planReport.intent).toBe(queryIntent);
 
-		// SQL must contain OR combining the two conditions
-		const { sql } = compileIntent(queryIntent, testSchema.model);
+		// executableIntent carries the optimized OR (exists inside)
+		expect(planReport.executableIntent?.where?.kind).toBe('or');
+		const orWhere = planReport.executableIntent?.where as {
+			kind: 'or';
+			conditions: { kind: string }[];
+		};
+		expect(orWhere.conditions[1]?.kind).toBe('exists');
+
+		// SQL: exists is OR-combined, not AND-combined
+		// normalizeSQL lowercases output
+		const { sql, params } = compileIntent(queryIntent, testSchema.model);
+
 		expect(sql).toContain('or');
+		expect(sql).toContain('exists');
 
-		// The IN must not have been turned into a top-level AND EXISTS
-		expect(sql).not.toContain('exists');
+		// EXISTS must be OR-combined — must NOT be an AND at the top WHERE level
+		expect(sql).not.toMatch(/where .+ and exists/i);
 
-		// The IN stays as IN inside the OR
-		expect(sql).toContain('= any (select');
+		// FK correlation must be present: products.id = alias."productId"
+		expect(sql).toContain('"productid"');
+
+		// Inner WHERE condition (approved) must be in SQL (not dropped)
+		expect(sql).toContain('approved');
+
+		// Both parameters: $1=Widget, $2=true
+		expect(params).toHaveLength(2);
+		expect(params[0]).toBe('Widget');
+		expect(params[1]).toBe(true);
+	});
+});
+
+describe('NOT(AND(inSubquery, eq)): EXISTS compiled inline inside NOT/AND', () => {
+	it('not(and(inSubquery, eq)): SQL is NOT(EXISTS(...) AND name=$N)', () => {
+		// When NOT wraps an AND containing an IN-subquery, the IN is rewritten to
+		// EXISTS inside the AND, which stays inside the NOT.
+		// The adapter compiles it as NOT (EXISTS(...) AND name=$N).
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'not',
+				condition: {
+					kind: 'and',
+					conditions: [
+						{
+							kind: 'in',
+							field: 'id',
+							values: [],
+							subquery: {
+								type: 'select',
+								from: 'productImages',
+								select: { type: 'fields', fields: ['productId'] },
+								where: {
+									kind: 'comparison',
+									field: 'approved',
+									operator: 'eq',
+									value: true,
+								},
+							},
+						},
+						{ kind: 'comparison', field: 'name', operator: 'eq', value: 'W' },
+					],
+				},
+			},
+		};
+
+		const planReport = plan(queryIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Filter-strategy decision is emitted (IN inside NOT/AND is optimized)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		// SQL: NOT (EXISTS(...) AND name=$N)
+		const { sql, params } = compileIntent(queryIntent, testSchema.model);
+
+		// normalizeSQL lowercases
+		expect(sql).toContain('not');
+		expect(sql).toContain('exists');
+
+		// EXISTS must be inside the NOT, not appended as top-level AND after the NOT
+		expect(sql).toMatch(/not\s*\(/i);
+
+		// FK correlation and inner WHERE are present
+		expect(sql).toContain('"productid"');
+		expect(sql).toContain('approved');
+
+		// name condition is also inside the NOT
+		expect(sql).toContain('name');
+
+		// params: $1=true (approved), $2='W' (name)
+		expect(params).toHaveLength(2);
+		expect(params[0]).toBe(true);
+		expect(params[1]).toBe('W');
+	});
+});
+
+describe('NOT IN under OR (non-nullable FK): NOT EXISTS inline under OR', () => {
+	it('or(eq, not(inSubquery)) on non-nullable FK: SQL is name=$1 OR NOT EXISTS(...)', () => {
+		// A NOT IN under OR on a non-nullable FK becomes NOT EXISTS inline under OR,
+		// not hoisted to a top-level AND.
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'or',
+				conditions: [
+					{ kind: 'comparison', field: 'name', operator: 'eq', value: 'Alice' },
+					{
+						kind: 'not',
+						condition: {
+							kind: 'in',
+							field: 'id',
+							values: [],
+							subquery: {
+								type: 'select',
+								from: 'posts_nn',
+								select: { type: 'fields', fields: ['authorId'] },
+							},
+						},
+					},
+				],
+			},
+		};
+
+		const planReport = plan(queryIntent, schemaWithNonNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Filter-strategy decision is emitted
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeDefined();
+
+		// SQL: name=$1 OR NOT EXISTS(...)
+		const { sql, params } = compileIntent(
+			queryIntent,
+			schemaWithNonNullableFK.model,
+		);
+
+		expect(sql).toContain('or');
+		expect(sql).toContain('not');
+		expect(sql).toContain('exists');
+
+		// NOT EXISTS must be OR-combined — verify no top-level AND NOT EXISTS
+		expect(sql).not.toMatch(/where .+ and not .+exists/i);
+
+		// FK correlation present
+		expect(sql).toContain('"authorid"');
+
+		// Only the name param
+		expect(params).toHaveLength(1);
+		expect(params[0]).toBe('Alice');
+	});
+});
+
+describe('simple top-level IN→EXISTS still works (non-regression)', () => {
+	it('simple inSubquery at top level still compiles to EXISTS', () => {
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			},
+		};
+
+		const { sql, params } = compileIntent(queryIntent, testSchema.model);
+
+		expect(sql).toContain('exists');
+		expect(sql).not.toContain('= any (select');
+		expect(sql).toContain('"productid"');
+		expect(sql).toContain('approved');
+		expect(params).toHaveLength(1);
+		expect(params[0]).toBe(true);
 	});
 });
