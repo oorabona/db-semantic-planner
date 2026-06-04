@@ -567,21 +567,22 @@ export function extractExistsDecisions(
  * Build a nested EXISTS chain for a multi-hop relation path.
  *
  * For a 2-hop path ['posts','comments'] from 'users' with where eq('body','hi'):
- *   Outer decision: targetTable='posts', operator='exists',
+ *   Outer decision: targetTable='posts', operator=<outerOperator>,
  *                   conditions=[inner decision]
- *   Inner decision: targetTable='comments', operator=<innerOperator>,
+ *   Inner decision: targetTable='comments', operator='exists',
  *                   sourceTable='posts', conditions=[userWhere decisions]
  *
  * Each hop's correlation is: previous_alias.pk = current_table.fk (or fk = pk
  * depending on relationType), resolved via ModelIR.
  *
- * The innermost hop carries the user's where conditions and the mode operator
- * (exists/notExists/every).  All intermediate hops use plain 'exists'.
+ * The OUTERMOST hop (i=0) carries outerOperator; all inner hops use 'exists'.
+ * For mode='every' the caller must pre-wrap innerConditions in NOT before
+ * calling this function and pass outerOperator='notExists'.
  */
 function buildMultiHopExistsChain(
 	hops: readonly string[],
 	rootTable: string,
-	innerOperator: string,
+	outerOperator: string,
 	innerConditions: PlanDecision[] | undefined,
 	model: ModelIR,
 ): PlanDecision {
@@ -629,14 +630,18 @@ function buildMultiHopExistsChain(
 	for (let i = hopRelations.length - 1; i >= 0; i--) {
 		const hop = hopRelations[i];
 		if (!hop) continue;
-		const isInnermost = i === hopRelations.length - 1;
-		const operator = isInnermost ? innerOperator : 'exists';
+		// outerOperator applies at the outermost hop (i=0); all inner hops use 'exists'.
+		// NOT EXISTS must wrap the outermost hop to cover the full path for mode='none'.
+		// For mode='every' the caller pre-wraps innerConditions in NOT before calling us.
+		const isOutermost = i === 0;
+		const operator = isOutermost ? outerOperator : 'exists';
 
 		// Conditions for this hop:
-		// - innermost: user's where conditions (may be wrapped by everyHandler later)
-		// - intermediate: the next (inner) decision
+		// - innermost (i === hopRelations.length - 1): user's where conditions
+		// - intermediate/outermost when >1 hop: the already-built inner decision
 		let conditions: PlanDecision[] | undefined;
-		if (isInnermost) {
+		if (i === hopRelations.length - 1) {
+			// Innermost hop: carries user's conditions (possibly NOT-wrapped for 'every')
 			conditions = innerConditions;
 		} else if (innerDecision) {
 			conditions = [innerDecision];
@@ -1019,18 +1024,22 @@ export function enrichExistsDecisionsInPlace(
 
 			let enriched: PlanDecision;
 			if (isMultiHop && matchingIntent && model) {
-				// Determine innerOperator from mode
+				// Determine outerOperator from mode.
+				// The quantifier scopes the WHOLE path → belongs at the OUTERMOST hop:
+				//   some  → exists at outermost, exists at inner hops
+				//   none  → notExists at outermost, exists at inner hops
+				//   every → notExists at outermost, exists at inner hops,
+				//            innermost conditions are pre-wrapped in NOT
 				const mode = matchingIntent.mode ?? 'some';
-				const innerOperator =
-					matchingIntent.kind === 'notExists' || mode === 'none'
+				const isEvery = matchingIntent.kind !== 'notExists' && mode === 'every';
+				const outerOperator =
+					matchingIntent.kind === 'notExists' || mode === 'none' || isEvery
 						? 'notExists'
-						: mode === 'every'
-							? 'every'
-							: 'exists';
+						: 'exists';
 
 				// Build inner conditions from the user's where clause (on the innermost table)
 				const lastHopTarget = context.target as string;
-				const innerConditions = matchingIntent.where
+				const rawInnerConditions = matchingIntent.where
 					? (() => {
 							const c = convertWhereToDecisions(
 								matchingIntent.where,
@@ -1045,10 +1054,23 @@ export function enrichExistsDecisionsInPlace(
 						})()
 					: undefined;
 
+				// For 'every', wrap the innermost conditions in NOT so that the compiled
+				// SQL becomes: NOT EXISTS(outer ... EXISTS(inner ... NOT(cond)))
+				const innerConditions =
+					isEvery && rawInnerConditions
+						? ([
+								{
+									type: 'logical',
+									operator: 'not',
+									conditions: rawInnerConditions,
+								} as PlanDecision,
+							] as PlanDecision[])
+						: rawInnerConditions;
+
 				enriched = buildMultiHopExistsChain(
 					matchingIntent.relation as string[],
 					plan.rootTable,
-					innerOperator,
+					outerOperator,
 					innerConditions,
 					model,
 				);

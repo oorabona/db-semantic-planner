@@ -484,11 +484,22 @@ describe('6. multi-hop nested under OR — nested chain + inline position (Item 
 });
 
 // ---------------------------------------------------------------------------
-// 7. notExists / every mode on multi-hop — applied at innermost hop
+// 7. notExists / every mode on multi-hop — quantifier at OUTERMOST hop
+//
+// Correctness fix: the quantifier must scope the FULL path, so NOT EXISTS must
+// wrap the outermost hop (posts), not the innermost (comments).
+//
+// OLD (buggy): NOT EXISTS(users WHERE EXISTS(posts WHERE NOT EXISTS(comments ...)))
+//   — a user with one clean post and one spammed post wrongly matched mode:none
+//   because "some posts have no spam comment" is true even when spam exists elsewhere.
+//
+// CORRECT:
+//   none  → NOT EXISTS(posts WHERE corr AND EXISTS(comments WHERE corr AND body=))
+//   every → NOT EXISTS(posts WHERE corr AND EXISTS(comments WHERE corr AND NOT(body=)))
 // ---------------------------------------------------------------------------
 
-describe('7. mode notExists/every on multi-hop — applied at innermost hop (Item B fix)', () => {
-	it('mode:none (notExists) on multi-hop produces NOT EXISTS at innermost', () => {
+describe('7. mode notExists/every on multi-hop — quantifier at OUTERMOST hop (defect fix)', () => {
+	it('mode:none — NOT EXISTS wraps outermost (posts) hop', () => {
 		const planReport = plan(
 			{
 				type: 'select',
@@ -512,7 +523,9 @@ describe('7. mode notExists/every on multi-hop — applied at innermost hop (Ite
 			model: testSchema.model,
 		});
 		const normalized = ws(sql);
-		// NOT EXISTS must appear (for the innermost hop)
+
+		// The deparser emits NOT (EXISTS (...)) for the notExists operator.
+		// Correct structure: NOT (EXISTS (SELECT 1 FROM posts ... AND EXISTS (SELECT 1 FROM comments ...)))
 		expect(normalized).toContain('NOT');
 		expect(normalized).toContain('EXISTS');
 		// Both hops present
@@ -520,9 +533,22 @@ describe('7. mode notExists/every on multi-hop — applied at innermost hop (Ite
 		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
 		// Inner filter preserved
 		expect(parameters).toContain('spam');
+
+		// Key structural assertion: the NOT must wrap the OUTERMOST (posts) hop.
+		// NOT(EXISTS(posts ...)) pattern — NOT appears BEFORE FROM posts
+		const notIdx = normalized.indexOf('NOT');
+		const postsFromIdx = normalized.search(/FROM\s+"?posts"?/i);
+		const commentsFromIdx = normalized.search(/FROM\s+"?comments"?/i);
+		// NOT appears before FROM posts (wraps posts — outermost)
+		expect(notIdx).toBeLessThan(postsFromIdx);
+		// FROM posts appears before FROM comments (correct nesting)
+		expect(postsFromIdx).toBeLessThan(commentsFromIdx);
+		// Inner subquery (comments) uses positive EXISTS: no NOT between posts FROM and comments FROM
+		const betweenHops = normalized.slice(postsFromIdx, commentsFromIdx);
+		expect(betweenHops).not.toMatch(/NOT/i);
 	});
 
-	it('mode:every on multi-hop produces NOT EXISTS (NOT condition) at innermost', () => {
+	it('mode:every — NOT EXISTS at outermost, NOT wraps innermost condition', () => {
 		const planReport = plan(
 			{
 				type: 'select',
@@ -546,14 +572,128 @@ describe('7. mode notExists/every on multi-hop — applied at innermost hop (Ite
 			model: testSchema.model,
 		});
 		const normalized = ws(sql);
-		// every = NOT EXISTS(...WHERE NOT condition)
+
+		// The deparser emits NOT (EXISTS (...)) for notExists operator — outermost
 		expect(normalized).toContain('NOT');
-		expect(normalized).toContain('EXISTS');
-		// Inner filter present
-		expect(parameters).toContain('approved');
 		// Both hops present
 		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
 		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+		// Condition parameter preserved
+		expect(parameters).toContain('approved');
+		// NOT must appear AT LEAST TWICE: once for outer NOT(EXISTS), once for NOT(cond)
+		const notCount = (normalized.match(/NOT/gi) ?? []).length;
+		expect(notCount).toBeGreaterThanOrEqual(2);
+
+		// Structural: the first NOT wraps the OUTERMOST (posts) hop
+		const notIdx = normalized.indexOf('NOT');
+		const postsFromIdx = normalized.search(/FROM\s+"?posts"?/i);
+		const commentsFromIdx = normalized.search(/FROM\s+"?comments"?/i);
+		expect(notIdx).toBeLessThan(postsFromIdx);
+		expect(postsFromIdx).toBeLessThan(commentsFromIdx);
+		// Inner EXISTS (posts hop's conditions) is positive — no NOT EXISTS between posts and comments
+		const betweenHops = normalized.slice(postsFromIdx, commentsFromIdx);
+		expect(betweenHops).not.toMatch(/NOT\s+EXISTS/i);
+		// NOT(condition) appears after comments FROM
+		const afterComments = normalized.slice(commentsFromIdx);
+		expect(afterComments).toContain('NOT');
+	});
+
+	it('mode:some on multi-hop is UNCHANGED — positive EXISTS at outermost', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts', 'comments'],
+					where: {
+						kind: 'comparison',
+						field: 'body',
+						operator: 'eq',
+						value: 'hello',
+					},
+					mode: 'some',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// Positive EXISTS — no NOT
+		expect(normalized).not.toContain('NOT EXISTS');
+		// Both hops present
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+		expect(parameters).toContain('hello');
+	});
+
+	it('single-hop mode:none is UNCHANGED — NOT EXISTS wraps single hop (regression lock)', () => {
+		// Single-hop: outermost === innermost, so outerOperator on i=0 is identical
+		// to the old innerOperator on the single isInnermost hop.
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts'],
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: false,
+					},
+					mode: 'none',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		expect(normalized).toContain('NOT');
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(parameters).toContain(false);
+		// No comments table
+		expect(normalized).not.toMatch(/FROM\s+"?comments"?/i);
+	});
+
+	it('single-hop mode:every is UNCHANGED (regression lock)', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts'],
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: true,
+					},
+					mode: 'every',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// NOT (EXISTS (...)) + NOT condition
+		expect(normalized).toContain('NOT');
+		const notCount = (normalized.match(/NOT/gi) ?? []).length;
+		expect(notCount).toBeGreaterThanOrEqual(2);
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(parameters).toContain(true);
+		expect(normalized).not.toMatch(/FROM\s+"?comments"?/i);
 	});
 });
 

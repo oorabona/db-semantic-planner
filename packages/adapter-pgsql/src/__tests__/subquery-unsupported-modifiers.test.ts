@@ -687,3 +687,148 @@ describe('scalar subquery — multi-field projection guard (GAP-2)', () => {
 		).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// DEFECT 2: rawExists/rawNotExists unsupported subquery modifiers
+//
+// buildSubqueryFromIntent (used by rawExistsHandler) only emits from/select/where.
+// Modifiers limit, offset, groupBy, having, joins, include, distinct, distinctOn
+// are SILENTLY DROPPED, which changes which rows match.
+// The guard in convertWhereCondition must THROW a clear error for each of these.
+// ---------------------------------------------------------------------------
+
+describe('rawExists/rawNotExists — fail-loud guard for dropped subquery modifiers', () => {
+	// Helper: build a minimal rawExists intent with extra fields on the subquery
+	function makeRawExistsIntent(extraSubqueryFields: Record<string, unknown>) {
+		return {
+			kind: 'rawExists' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'files',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				...extraSubqueryFields,
+			},
+		};
+	}
+
+	function makeRawNotExistsIntent(
+		extraSubqueryFields: Record<string, unknown>,
+	) {
+		return {
+			kind: 'rawNotExists' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'files',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				...extraSubqueryFields,
+			},
+		};
+	}
+
+	// --- REJECT cases ---
+
+	it('rawExists with LIMIT throws (buildSubqueryFromIntent does not emit LIMIT)', () => {
+		const intent = makeRawExistsIntent({ limit: 0 });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/LIMIT.*not supported|not supported.*LIMIT/i,
+		);
+	});
+
+	it('rawNotExists with LIMIT throws', () => {
+		const intent = makeRawNotExistsIntent({ limit: 0 });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/LIMIT.*not supported|not supported.*LIMIT/i,
+		);
+	});
+
+	it('rawExists with OFFSET throws', () => {
+		const intent = makeRawExistsIntent({ offset: 5 });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/OFFSET.*not supported|not supported.*OFFSET/i,
+		);
+	});
+
+	it('rawExists with GROUP BY throws', () => {
+		const intent = makeRawExistsIntent({ groupBy: ['size'] });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/GROUP BY.*not supported|not supported.*GROUP BY/i,
+		);
+	});
+
+	it('rawExists with HAVING throws', () => {
+		const intent = makeRawExistsIntent({
+			having: { kind: 'comparison', field: 'count', operator: 'gt', value: 1 },
+		});
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/HAVING.*not supported|not supported.*HAVING/i,
+		);
+	});
+
+	it('rawExists with joins throws', () => {
+		const intent = makeRawExistsIntent({
+			joins: [{ table: 'other', on: 'other.id = files.otherId' }],
+		});
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/joins.*not supported|not supported.*joins/i,
+		);
+	});
+
+	it('rawExists with include throws', () => {
+		const intent = makeRawExistsIntent({ include: ['something'] });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/include.*not supported|not supported.*include/i,
+		);
+	});
+
+	it('rawExists with DISTINCT throws', () => {
+		const intent = makeRawExistsIntent({ distinct: true });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/DISTINCT.*not supported|not supported.*DISTINCT/i,
+		);
+	});
+
+	it('rawExists with DISTINCT ON throws', () => {
+		const intent = makeRawExistsIntent({ distinctOn: ['size'] });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/DISTINCT ON.*not supported|not supported.*DISTINCT ON/i,
+		);
+	});
+
+	// --- PASS cases (modifiers buildSubqueryFromIntent DOES emit) ---
+
+	it('rawExists with only WHERE does NOT throw (plain usage)', () => {
+		const intent = makeRawExistsIntent({
+			where: {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			},
+		});
+		expect(() => convertWhereCondition(intent as any, 'users')).not.toThrow();
+	});
+
+	it('rawNotExists with only WHERE does NOT throw (plain usage)', () => {
+		const intent = makeRawNotExistsIntent({
+			where: {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			},
+		});
+		expect(() => convertWhereCondition(intent as any, 'users')).not.toThrow();
+	});
+
+	it('rawExists with no modifiers at all does NOT throw', () => {
+		const intent = makeRawExistsIntent({});
+		expect(() => convertWhereCondition(intent as any, 'users')).not.toThrow();
+	});
+
+	it('error message identifies the context as rawExists', () => {
+		const intent = makeRawExistsIntent({ limit: 1 });
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/rawExists subquery with LIMIT/,
+		);
+	});
+});

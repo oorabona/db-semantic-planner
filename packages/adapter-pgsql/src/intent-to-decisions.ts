@@ -252,7 +252,7 @@ interface FlatWhereFields {
  * Per-field classification (QueryIntent):
  *
  * FAITHFULLY COMPILED — leave:
- *   from, where, limit (IN + scalar), orderBy field-based (IN + scalar)
+ *   from, where, limit (IN + scalar only), orderBy field-based (IN + scalar)
  *   select.type:'fields' (IN: exactly 1 field; scalar: first field)
  *   select.type:'aggregate' (scalar only — aggregate + selectColumn)
  *
@@ -268,10 +268,11 @@ interface FlatWhereFields {
  *   select:undefined on IN path (must specify exactly one column)
  *   select.type:'fields' with 0 fields on IN path (no column to match against)
  *   orderBy with expression-based entries on both paths (.field is never → undefined)
+ *   limit (rawExists path only) — buildSubqueryFromIntent does not emit limitCount
  */
 function assertNoUnsupportedSubqueryModifiers(
 	subquery: QueryIntent,
-	context: 'IN' | 'scalar',
+	context: 'IN' | 'scalar' | 'rawExists',
 ): void {
 	const unsupported: string[] = [];
 
@@ -291,6 +292,14 @@ function assertNoUnsupportedSubqueryModifiers(
 	if (subquery.existsWrap) unsupported.push('existsWrap');
 	if (subquery.lock) unsupported.push('lock');
 	if (subquery.batchValuesSource) unsupported.push('batchValuesSource');
+
+	// rawExists-specific: buildSubqueryFromIntent does not emit LIMIT (unlike
+	// scalar subqueries where limit IS propagated).  A rawExists(subquery.limit(0))
+	// silently compiles as an unrestricted existence check — producing a result
+	// broader than the caller intended (limit(0) should always be FALSE).
+	if (context === 'rawExists') {
+		if (subquery.limit != null) unsupported.push('LIMIT');
+	}
 
 	// Expression-based orderBy entries: OrderByExpressionIntent has field:never,
 	// so convertIn's `o.field` yields undefined → columnRef(undefined,...) produces
@@ -371,8 +380,14 @@ function assertNoUnsupportedSubqueryModifiers(
 	}
 
 	if (unsupported.length > 0) {
+		const label =
+			context === 'IN'
+				? 'IN'
+				: context === 'rawExists'
+					? 'rawExists'
+					: 'scalar';
 		throw new Error(
-			`${context === 'IN' ? 'IN' : 'scalar'} subquery with ${unsupported.join(', ')} is not supported — ` +
+			`${label} subquery with ${unsupported.join(', ')} is not supported — ` +
 				'it would silently change which rows match; restructure the query or use a CTE.',
 		);
 	}
@@ -755,6 +770,13 @@ export function convertWhereCondition(
 					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
 				);
 			}
+			// Guard: reject subquery modifiers that buildSubqueryFromIntent silently
+			// drops — limit, offset, groupBy, having, joins, include, distinct,
+			// distinctOn are not emitted by buildSubqueryFromIntent (it only emits
+			// from/select/where).  Silently dropping them changes which rows match
+			// (e.g. rawExists(subquery.limit(0)) must always be FALSE but without the
+			// guard compiles as an unrestricted existence check — silent broadening).
+			assertNoUnsupportedSubqueryModifiers(sub, 'rawExists');
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
 			// supported on the rawExists/rawNotExists path: buildSubqueryFromIntent
 			// builds a fresh WhereCompilerCtx with no outerAlias, so SubqueryRefIntent
