@@ -115,6 +115,15 @@ export class NqlCompiler {
 		const recursiveKeywords = new Set(recursive.map((k) => k.toLowerCase()));
 		const validator = schema ? new ColumnValidator(schema) : null;
 
+		const maxAnyItemsRaw = options?.maxAnyItems;
+		if (maxAnyItemsRaw !== undefined) {
+			if (!Number.isSafeInteger(maxAnyItemsRaw) || maxAnyItemsRaw <= 0) {
+				throw new Error(
+					`Invalid maxAnyItems: ${maxAnyItemsRaw}. Must be a positive integer.`,
+				);
+			}
+		}
+
 		this.ctx = {
 			currentFromTable: undefined,
 			currentRelationTarget: undefined,
@@ -122,7 +131,7 @@ export class NqlCompiler {
 			recursiveKeywords,
 			validator,
 			params: options?.params ?? {},
-			maxAnyItems: options?.maxAnyItems ?? MAX_ANY_ITEMS,
+			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 		};
 
 		// Wire up cross-module function references

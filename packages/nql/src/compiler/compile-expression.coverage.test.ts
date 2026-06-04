@@ -1167,3 +1167,89 @@ describe('compile-expression: ANY(:param) — maxAnyItems unset still uses MAX_A
 		expect(where.values).toHaveLength(3);
 	});
 });
+
+describe('compile-expression: ANY(:param) — maxAnyItems invalid values are rejected at construction', () => {
+	it('rejects NaN (key case: without the guard, NaN silently disables the cap)', () => {
+		// Mutation caught: removing the !Number.isSafeInteger guard makes NaN pass validation;
+		// rawValues.length > NaN is always false so ANY accepts unbounded arrays silently.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: Number.NaN },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.message).toContain('maxAnyItems');
+		expect(result.errors[0]?.message).toContain('positive integer');
+	});
+
+	it('rejects Infinity (Infinity is not a safe integer)', () => {
+		// Mutation caught: without the guard, Infinity passes and the cap is never triggered
+		// (no array is ever longer than Infinity).
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: Infinity },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.message).toContain('maxAnyItems');
+		expect(result.errors[0]?.message).toContain('positive integer');
+	});
+
+	it('rejects 0 (zero is not a positive integer; would reject all arrays including empty)', () => {
+		// Mutation caught: removing the <= 0 branch of the guard allows 0 through;
+		// rawValues.length > 0 would then reject even empty arrays, breaking the invariant.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: 0 },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.message).toContain('maxAnyItems');
+		expect(result.errors[0]?.message).toContain('positive integer');
+	});
+
+	it('rejects -1 (negative integer is not positive)', () => {
+		// Mutation caught: removing the <= 0 branch allows negative values through;
+		// rawValues.length > -1 is always true so every array (even empty) would be capped.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: -1 },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.message).toContain('maxAnyItems');
+		expect(result.errors[0]?.message).toContain('positive integer');
+	});
+
+	it('rejects 2.5 (non-integer number is not a safe integer)', () => {
+		// Mutation caught: without the isSafeInteger check, 2.5 would pass; then
+		// rawValues.length > 2.5 would silently truncate the cap to floor(2.5) = 2.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: 2.5 },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.message).toContain('maxAnyItems');
+		expect(result.errors[0]?.message).toContain('positive integer');
+	});
+
+	it('accepts a valid positive integer override (validation passes, cap applied correctly)', () => {
+		// Mutation caught: if the validation guard threw even for valid inputs, this would fail —
+		// confirming the guard only rejects, not over-rejects.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: 5 },
+		);
+		expect(result.success).toBe(true);
+		const where = result.ast!.query!.where as WhereAnyIntent;
+		expect(where.kind).toBe('any');
+		expect(where.values).toHaveLength(3);
+	});
+});
