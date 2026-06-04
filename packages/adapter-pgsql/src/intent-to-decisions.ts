@@ -399,7 +399,7 @@ export function assertNoUnsupportedSubqueryModifiers(
  * correlated subqueries inside rawExists/rawNotExists, which the current
  * pipeline does not support — we throw rather than emit broken SQL.
  */
-function containsOuterRef(where: unknown): boolean {
+export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
 	const w = where as Record<string, unknown>;
 	if (isSubqueryRef(w)) return true;

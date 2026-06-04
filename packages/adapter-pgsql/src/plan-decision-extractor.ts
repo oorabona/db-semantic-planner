@@ -713,20 +713,30 @@ function enrichExistsStubsInConditions(
 
 			// Resolve the FK and type from the OUTER exists's target table.
 			const rel = model.getRelation(`${sourceTable}.${relation}`);
-			const foreignKey = rel
-				? typeof rel.foreignKey === 'string'
+			// DEFECT-2 FIX: fail-closed for undeclared inner relations.
+			// Previously, when rel was undefined, we silently fell back to
+			// `targetTable = relation` (convention-compile), producing guessed SQL
+			// instead of a clear error. Callers must use rawExists(subquery(...))
+			// for undeclared or uncorrelated subqueries.
+			if (!rel) {
+				throw new Error(
+					`exists('${relation}'): no relation '${relation}' is declared on table '${sourceTable}'. ` +
+						`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+				);
+			}
+			const foreignKey =
+				typeof rel.foreignKey === 'string'
 					? rel.foreignKey
-					: rel.foreignKey?.[0]
-				: undefined;
+					: rel.foreignKey?.[0];
 			const relationType =
-				rel?.type === 'belongsTo'
+				rel.type === 'belongsTo'
 					? ('belongsTo' as const)
-					: rel?.type === 'hasMany' || rel?.type === 'hasOne'
+					: rel.type === 'hasMany' || rel.type === 'hasOne'
 						? (rel.type as 'hasMany' | 'hasOne')
 						: undefined;
 			const parentKey =
-				relationType === 'belongsTo' ? rel?.targetKey : rel?.sourceKey;
-			const targetTable = rel ? rel.target : relation;
+				relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
+			const targetTable = rel.target;
 
 			// Build inner conditions from the raw where intent (if any).
 			// `_rawWhere` is attached by convertWhereToDecisions for exists stubs.
@@ -881,6 +891,49 @@ function buildEnrichedExistsDecision(
 }
 
 /**
+ * Collect the set of relation names (string) that appear as NESTED exists/notExists
+ * inside another exists's `where` clause.  These relations are enriched inline by
+ * enrichExistsStubsInConditions (called from buildEnrichedExistsDecision) rather
+ * than by stub-matching in the main filter-strategy loop.
+ *
+ * Used by enrichExistsDecisionsInPlace to skip the top-level APPEND fallback for
+ * filter-strategy decisions whose relation was already handled inline — preventing
+ * the "emit twice" DEFECT 1 where a nested exists produced an extra AND EXISTS at
+ * the root of the decision tree.
+ *
+ * @param where      The raw WhereIntent tree to scan.
+ * @param insideExists  True when the caller is already inside an exists's where.
+ * @param out        Accumulator for nested relation names.
+ */
+function collectNestedExistsTargets(
+	where: unknown,
+	insideExists: boolean,
+	out: Set<string>,
+): void {
+	if (!where || typeof where !== 'object') return;
+	const w = where as Record<string, unknown>;
+	if (
+		w.kind === 'exists' ||
+		w.kind === 'notExists' ||
+		w.kind === 'relationFilter'
+	) {
+		if (insideExists && typeof w.relation === 'string') {
+			out.add(w.relation);
+		}
+		// Recurse into the inner where with insideExists=true (one level deeper).
+		if (w.where) collectNestedExistsTargets(w.where, true, out);
+		return;
+	}
+	// Recurse into logical containers (and/or/not).
+	if (w.conditions && Array.isArray(w.conditions)) {
+		for (const c of w.conditions) {
+			collectNestedExistsTargets(c, insideExists, out);
+		}
+	}
+	if (w.condition) collectNestedExistsTargets(w.condition, insideExists, out);
+}
+
+/**
  * Collect all stub exists/notExists decisions from a decision tree in depth-first order.
  * A stub is produced by intentToDecisions — it has the relation name as targetTable
  * (possibly as a string[] from NQL's relationFilter intent) and may lack foreignKey.
@@ -983,6 +1036,15 @@ export function enrichExistsDecisionsInPlace(
 		index: number;
 	}> = [];
 	collectExistsStubs(decisions, stubs);
+
+	// Collect relation names that are nested inside another exists's where clause.
+	// These are enriched inline by enrichExistsStubsInConditions (called from
+	// buildEnrichedExistsDecision) and must NOT be re-appended at the top level
+	// when the filter-strategy loop finds no matching top-level stub.
+	const nestedExistsTargets = new Set<string>();
+	if (plan.intent?.where) {
+		collectNestedExistsTargets(plan.intent.where, false, nestedExistsTargets);
+	}
 
 	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
 	const filterDecisions = plan.decisions.filter(
@@ -1146,10 +1208,20 @@ export function enrichExistsDecisionsInPlace(
 					placedDecisions.push(enriched);
 				}
 			} else {
-				// No matching stub in the tree — append at top level as fallback
-				// (handles cases where the intent came from planner optimization that added
-				// a filter-strategy without a corresponding exists() call in the WHERE tree,
-				// e.g. IN→EXISTS conversion where the original intent was an 'in', not 'exists').
+				// No matching stub in the tree.
+				// If this filter-strategy targets a relation that is nested inside
+				// another exists's where clause, it was already enriched inline by
+				// enrichExistsStubsInConditions.  Appending it again here would produce
+				// a duplicate top-level AND EXISTS that is both wrong and redundant.
+				const targetName = context.target as string;
+				if (nestedExistsTargets.has(targetName)) {
+					// Already handled inline — skip the append.
+					continue;
+				}
+				// Otherwise: append at top level as fallback (handles cases where the
+				// intent came from planner optimisation that added a filter-strategy
+				// without a corresponding exists() call in the WHERE tree, e.g.
+				// IN→EXISTS conversion where the original intent was an 'in', not 'exists').
 				decisions.push(enriched);
 				placedDecisions.push(enriched);
 			}

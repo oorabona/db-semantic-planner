@@ -54,7 +54,10 @@ import { buildColumnRef } from './handlers/where/utils.js';
 // DEFECT-2 FIX: import the modifier guard so the direct compileWhereIntent path
 // (used by compileBatchUpdate and other mutation callers) enforces the same
 // rawExists modifier restrictions as the decisions path (convertWhereCondition).
-import { assertNoUnsupportedSubqueryModifiers } from './intent-to-decisions.js';
+import {
+	assertNoUnsupportedSubqueryModifiers,
+	containsOuterRef,
+} from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -491,6 +494,23 @@ function handleRawExistsIntent(
 	// compileBatchUpdate) silently compiles as an unrestricted EXISTS — always
 	// true — broadening the mutation guard contrary to the caller's intent.
 	assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
+	// DEFECT-3 FIX: reject correlated subqueries (outerRef inside inner WHERE) on
+	// the direct compile-where path, matching the decisions-path guard in
+	// convertWhereCondition (intent-to-decisions.ts).  Without this guard,
+	// rawExists(subquery(... outerRef(...))) on the direct path (used by
+	// compileBatchUpdate) silently serialises the outerRef object as a $N
+	// parameter (an object literal!) — producing wrong SQL or a runtime error.
+	const subIntentTyped = subIntent as QueryIntent;
+	if (subIntentTyped.where && containsOuterRef(subIntentTyped.where)) {
+		const kindLabel =
+			(intent as { kind?: string }).kind === 'rawNotExists'
+				? 'rawNotExists'
+				: 'rawExists';
+		throw new Error(
+			`${kindLabel}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
+				'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+		);
+	}
 	const {
 		sql: subNode,
 		paramCount,
