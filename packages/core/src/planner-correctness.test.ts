@@ -430,7 +430,7 @@ describe('FIND-015: Lenient ambiguity resolution is alphabetically deterministic
 //                      plan.decisions so dump().plan and dump().sql agree
 // ============================================================================
 
-describe('FIND-130: IN→EXISTS optimization aligns report.intent with plan.decisions', () => {
+describe('FIND-130: IN→EXISTS optimization: intent stays original; executableIntent carries optimized WHERE', () => {
 	/**
 	 * Schema: products --(hasMany)--> productImages
 	 * The hasMany relation means:
@@ -453,15 +453,12 @@ describe('FIND-130: IN→EXISTS optimization aligns report.intent with plan.deci
 		},
 	});
 
-	it('report.intent.where has kind=exists after IN→EXISTS optimization', () => {
-		// Regression gate: before the fix, report.intent retained the original kind='in'
-		// while plan.decisions recorded an EXISTS filter-strategy. The adapter's
-		// extractExistsDecisions searched plan.intent.where for 'exists' intents,
-		// found 'in' instead → match failed → adapter emitted both IN and EXISTS in SQL
-		// while plan claimed only EXISTS (plan/SQL mismatch, issue #130 item 1).
-		//
-		// After the fix, plan.intent is updated to carry the optimized WHERE (kind='exists'),
-		// so plan.decisions and plan.intent agree on EXISTS.
+	it('report.intent stays kind=in; report.executableIntent carries kind=exists after IN→EXISTS optimization', () => {
+		// Contract (FIND-130 correct design):
+		//   - report.intent = original submitted intent (kind='in') — observable via dump()
+		//   - report.executableIntent = optimized form (kind='exists') — adapter compiles from this
+		//   - plan.decisions records EXISTS filter-strategy (built from optimized WHERE)
+		// All three are consistent: intent shows what the user wrote; SQL uses EXISTS.
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -491,11 +488,14 @@ describe('FIND-130: IN→EXISTS optimization aligns report.intent with plan.deci
 		);
 		expect(filterDecision?.choice).toBe('exists');
 
-		// report.intent.where must also be exists (not the original 'in') so that
-		// the adapter's extractExistsDecisions can match and SQL agrees with plan.
-		expect(report.intent.where?.kind).toBe('exists');
+		// report.intent.where must stay kind='in' — the original submitted intent is preserved
+		expect(report.intent.where?.kind).toBe('in');
 
-		// The original intent must NOT be mutated
+		// report.executableIntent.where must be kind='exists' — the optimized form for SQL
+		expect(report.executableIntent).toBeDefined();
+		expect(report.executableIntent?.where?.kind).toBe('exists');
+
+		// The original intent object must NOT be mutated
 		expect(intent.where?.kind).toBe('in');
 	});
 
@@ -595,9 +595,12 @@ describe('FIND-130: IN→EXISTS optimization aligns report.intent with plan.deci
 		);
 		expect(filterDecision).toBeDefined();
 
-		// report.intent.where must reflect the rewritten NOT EXISTS form
-		// (NOT wrapping was converted to notExists during optimizeInToExists)
-		expect(report.intent.where?.kind).toBe('notExists');
+		// report.intent.where must stay kind='not' — the original submitted intent is preserved
+		expect(report.intent.where?.kind).toBe('not');
+
+		// report.executableIntent.where must be kind='notExists' — the rewritten form for SQL
+		expect(report.executableIntent).toBeDefined();
+		expect(report.executableIntent?.where?.kind).toBe('notExists');
 
 		// Original intent must not be mutated
 		expect(intent.where?.kind).toBe('not');
@@ -892,7 +895,10 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			(d) => d.type === 'filter-strategy',
 		);
 		expect(filterDecision?.choice).toBe('exists');
-		expect(report.intent.where?.kind).toBe('exists');
+		// report.intent.where stays kind='in' — original intent preserved
+		expect(report.intent.where?.kind).toBe('in');
+		// report.executableIntent.where is kind='exists' — the optimized form for SQL
+		expect(report.executableIntent?.where?.kind).toBe('exists');
 	});
 
 	it('simple IN inside AND: still rewrites to EXISTS', () => {
@@ -924,11 +930,17 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 			(d) => d.type === 'filter-strategy',
 		);
 		expect(filterDecision?.choice).toBe('exists');
-		// The AND's second condition must have been rewritten to exists
-		const andWhere = report.intent.where as {
+		// report.intent stays original — the AND's second condition keeps kind='in'
+		const originalAndWhere = report.intent.where as {
 			kind: 'and';
 			conditions: { kind: string }[];
 		};
-		expect(andWhere.conditions[1]?.kind).toBe('exists');
+		expect(originalAndWhere.conditions[1]?.kind).toBe('in');
+		// report.executableIntent carries the rewritten AND — second condition is kind='exists'
+		const execAndWhere = report.executableIntent?.where as {
+			kind: 'and';
+			conditions: { kind: string }[];
+		};
+		expect(execAndWhere?.conditions[1]?.kind).toBe('exists');
 	});
 });

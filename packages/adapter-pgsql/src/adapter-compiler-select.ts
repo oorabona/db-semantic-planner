@@ -630,11 +630,26 @@ export function compileSelect<T = unknown>(
 	// The core's plan.decisions contain observability data, not SQL instructions.
 	// The actual query structure is in plan.intent (QueryIntent).
 	// Note: For unit tests with mock plans (no intent), fall back to plan.decisions directly.
+	//
+	// execIntent: the intent the adapter should compile from.
+	// When the planner ran the IN→EXISTS optimization, plan.executableIntent holds the
+	// rewritten WHERE (EXISTS form); plan.intent retains the original submitted intent
+	// (observable via dump()). All SQL-generation paths below use execIntent so that
+	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
+	const execIntent = plan.executableIntent ?? plan.intent;
+	// planForCompilation: a view of the plan where .intent is the executable intent.
+	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
+	// extractAllIncludeDecisions) so they read the correct WHERE for SQL generation.
+	// buildSimplifiedPlanReport also uses it for batchValuesSource / existsWrap / lock.
+	const planForCompilation: PlanReport =
+		plan.executableIntent !== undefined
+			? { ...plan, intent: plan.executableIntent }
+			: plan;
 	let simplifiedPlan: SimplifiedPlanReport;
 
-	if (plan.intent) {
+	if (execIntent) {
 		// Real usage: convert intent to decisions
-		let decisions = intentToDecisions(plan.intent, plan.rootTable);
+		let decisions = intentToDecisions(execIntent, plan.rootTable);
 
 		// Strip exists/notExists decisions from intentToDecisions — they use the
 		// relation name as targetTable (unresolved). extractExistsDecisions (below)
@@ -657,12 +672,17 @@ export function compileSelect<T = unknown>(
 		}
 
 		// Add correct EXISTS decisions from planner's filter-strategy decisions
-		// (they have the actual target table in context.target)
-		const existsDecisions = extractExistsDecisions(plan, options?.model);
+		// (they have the actual target table in context.target).
+		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
+		// so extractExistsDecisions finds 'exists' intents rather than the original 'in'.
+		const existsDecisions = extractExistsDecisions(
+			planForCompilation,
+			options?.model,
+		);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(
-			plan,
+			planForCompilation,
 			deps.defaultPk,
 			deps.deriveFk,
 		);
@@ -678,7 +698,7 @@ export function compileSelect<T = unknown>(
 		const synthesizedModel = options?.model ?? deps.model;
 		const synthesizedJoins = synthesizedModel
 			? synthesizeMissingJoinDecisions(
-					plan,
+					planForCompilation,
 					coveredByPlanner,
 					synthesizedModel,
 					deps.defaultPk,
@@ -701,7 +721,9 @@ export function compileSelect<T = unknown>(
 		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
 		// GROUP BY, or explicit column selection is active. Keeps the JOIN for
 		// filtering/inner join semantics but prevents invalid SELECT column lists.
-		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, plan.intent);
+		// select/distinct/groupBy fields are unchanged by the IN→EXISTS WHERE optimization,
+		// so execIntent and plan.intent are equivalent here; execIntent is used for consistency.
+		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, execIntent);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
@@ -747,12 +769,14 @@ export function compileSelect<T = unknown>(
 					})
 				: decisions;
 
-		// Compile explicit JoinIntent[] from plan.intent.joins into 'join' decisions.
+		// Compile explicit JoinIntent[] from execIntent.joins into 'join' decisions.
 		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
+		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
+		// plan.intent carry the same joins value.
 		const joinIntentDecisions =
-			plan.intent?.joins && (plan.intent.joins as JoinIntent[]).length > 0
+			execIntent?.joins && (execIntent.joins as JoinIntent[]).length > 0
 				? compileJoinIntents(
-						plan.intent.joins as JoinIntent[],
+						execIntent.joins as JoinIntent[],
 						plan.rootTable,
 						schemaName,
 						deps,
@@ -772,7 +796,14 @@ export function compileSelect<T = unknown>(
 		const rangeModel = options?.model ?? deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
 
-		simplifiedPlan = buildSimplifiedPlanReport(plan, allDecisions, schemaName);
+		// planForCompilation carries executableIntent as .intent, so
+		// buildSimplifiedPlanReport reads batchValuesSource / existsWrap / lock
+		// from the executable intent rather than the original.
+		simplifiedPlan = buildSimplifiedPlanReport(
+			planForCompilation,
+			allDecisions,
+			schemaName,
+		);
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).
 		// Tests supply adapter-format PlanDecisions inside a core PlanReport,

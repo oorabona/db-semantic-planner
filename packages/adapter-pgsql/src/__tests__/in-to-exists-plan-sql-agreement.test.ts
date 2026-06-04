@@ -1,14 +1,14 @@
 /**
  * Regression tests: IN→EXISTS optimization must produce consistent plan/SQL output.
  *
- * Before issue #130 item 1 was fixed, the planner optimized WHERE IN (subquery) to EXISTS
- * in plan.decisions but left plan.intent.where as the original 'in' kind. The adapter's
- * extractExistsDecisions searched plan.intent.where for 'exists' intents, found 'in'
- * instead, and the match failed. The result was that the adapter emitted both
- * IN (SELECT ...) and EXISTS (SELECT ...) in SQL while plan.decisions claimed only EXISTS.
+ * Correct design (FIND-130):
+ *   - plan.intent  = the ORIGINAL submitted intent (kind='in') — observable via dump()
+ *   - plan.executableIntent = the OPTIMIZED form (kind='exists') — what the adapter compiles
+ *   - plan.decisions records an EXISTS filter-strategy (built from the optimized WHERE)
+ *   - compiled SQL uses EXISTS — matching plan.decisions and plan.executableIntent
  *
- * This file pins the corrected behavior: for any query where the planner emits an
- * EXISTS filter-strategy decision, the compiled SQL must use EXISTS, not IN.
+ * This file pins the corrected three-way consistency: intent shows what the user wrote,
+ * executableIntent carries the rewritten form, and SQL agrees with both decisions and executableIntent.
  */
 
 import {
@@ -129,8 +129,11 @@ describe('IN→EXISTS: plan and SQL both use EXISTS for optimizable IN subquery'
 		);
 		expect(filterDecision?.choice).toBe('exists');
 
-		// plan.intent.where must be exists (so adapter can match correctly)
-		expect(planReport.intent.where?.kind).toBe('exists');
+		// plan.intent.where must stay kind='in' — the original submitted intent is preserved
+		expect(planReport.intent.where?.kind).toBe('in');
+		// plan.executableIntent.where must be kind='exists' — the optimized form the adapter compiles
+		expect(planReport.executableIntent).toBeDefined();
+		expect(planReport.executableIntent?.where?.kind).toBe('exists');
 
 		// SQL must use EXISTS, not IN (...) — normalizeSQL lowercases, so match lowercase
 		const { sql } = compileIntent(intent, testSchema.model);
@@ -228,8 +231,11 @@ describe('NOT IN→NOT EXISTS: SQL uses NOT EXISTS for non-nullable FK', () => {
 		);
 		expect(filterDecision).toBeDefined();
 
-		// plan.intent.where must be notExists
-		expect(planReport.intent.where?.kind).toBe('notExists');
+		// plan.intent.where must stay kind='not' — the original submitted intent is preserved
+		expect(planReport.intent.where?.kind).toBe('not');
+		// plan.executableIntent.where must be kind='notExists' — the rewritten form for SQL
+		expect(planReport.executableIntent).toBeDefined();
+		expect(planReport.executableIntent?.where?.kind).toBe('notExists');
 
 		const { sql } = compileIntent(queryIntent, schemaWithNonNullableFK.model);
 		// normalizeSQL lowercases output; PostgreSQL emits NOT EXISTS or NOT (EXISTS ...)

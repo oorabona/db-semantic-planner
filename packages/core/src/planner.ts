@@ -295,19 +295,15 @@ export function plan(
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 
-	// Optimize IN-subquery → EXISTS when relation is known in schema.
-	// `plannedIntent` carries the optimized WHERE so that both report.intent
-	// (consumed by extractExistsDecisions / intentToDecisions in the adapter)
-	// and report.decisions agree on whether IN or EXISTS is used.  Without this,
-	// extractExistsDecisions searched plan.intent.where for 'exists' intents but
-	// found 'in' → match failed → adapter emitted both IN and EXISTS in SQL while
-	// plan claimed only EXISTS (plan/SQL mismatch, item 1 of issue #130).
+	// Optimize IN-subquery → EXISTS when the relation is known in schema.
+	// The optimized WHERE goes into `executableIntent` (adapter compiles from it),
+	// while `intent` stays as the original submitted intent (observable via dump()).
+	// `plannedIntent` is only used locally to decide whether to emit executableIntent.
 	const optimizedWhere = intent.where
 		? optimizeInToExists(intent.where, intent.from, model)
 		: undefined;
 
-	// When the optimizer rewrote the WHERE (different object reference), surface
-	// the result in the emitted intent so the adapter sees the EXISTS form.
+	// Build the post-optimization intent (used as executableIntent when optimization ran)
 	const plannedIntent: QueryIntent =
 		optimizedWhere !== undefined && optimizedWhere !== intent.where
 			? { ...intent, where: optimizedWhere }
@@ -370,10 +366,13 @@ export function plan(
 		decisions: Object.freeze(state.decisions.slice()),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
-		// Use plannedIntent (carries optimized WHERE when IN→EXISTS ran) so that
-		// the adapter's extractExistsDecisions and intentToDecisions both operate on
-		// the EXISTS form — aligning plan.intent with plan.decisions and emitted SQL.
-		intent: plannedIntent,
+		// intent is ALWAYS the original submitted intent (contract: observable via dump()).
+		// executableIntent carries the optimized WHERE (e.g. IN→EXISTS) when the
+		// optimizer rewrote it, so the adapter compiles the correct SQL from that field.
+		// When no optimization applies, executableIntent is left undefined and the
+		// adapter falls back to intent.
+		intent,
+		...(plannedIntent !== intent && { executableIntent: plannedIntent }),
 		metadata,
 	};
 
