@@ -579,3 +579,200 @@ describe('scalar subquery modifier guard on direct compileWhereIntent path', () 
 		).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Bounded refinement 1 — scalar-direct rejects limit/orderBy; decisions-path
+//   scalar still allows them (regression guard for propagation).
+// ---------------------------------------------------------------------------
+
+describe('scalar-direct guard: limit and orderBy rejected on direct path', () => {
+	function makeScalarCtx(): WhereCompilerCtx {
+		const paramState = createCompilerState();
+		return {
+			rootTable: 'users',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: (subIntent, paramOffset) =>
+				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+		};
+	}
+
+	it('scalar subquery with LIMIT on direct path throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: {
+					type: 'aggregate' as const,
+					fn: 'count' as const,
+					field: 'id',
+				},
+				limit: 0,
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/LIMIT.*not supported|not supported.*LIMIT/i,
+		);
+	});
+
+	it('scalar subquery with field ORDER BY on direct path throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				orderBy: [{ field: 'id', direction: 'asc' }],
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/ORDER BY.*not supported|not supported.*ORDER BY/i,
+		);
+	});
+
+	it('decisions-path scalar with LIMIT does not throw (propagation regression)', () => {
+		const orm = buildOrm();
+		const withLimit = {
+			buildIntent: () =>
+				({
+					type: 'select' as const,
+					from: 'posts',
+					select: {
+						type: 'aggregate' as const,
+						fn: 'count' as const,
+						field: 'id',
+					},
+					limit: 1,
+				}) as any,
+		};
+		expect(() => {
+			(orm as any)
+				.select('users')
+				.where(eq('id', withLimit as any))
+				.dump();
+		}).not.toThrow();
+	});
+
+	it('decisions-path scalar with field ORDER BY does not throw (propagation regression)', () => {
+		const orm = buildOrm();
+		const withOrder = {
+			buildIntent: () =>
+				({
+					type: 'select' as const,
+					from: 'posts',
+					select: { type: 'fields' as const, fields: ['id'] as const },
+					orderBy: [{ field: 'id', direction: 'asc' as const }],
+				}) as any,
+		};
+		expect(() => {
+			(orm as any)
+				.select('users')
+				.where(eq('id', withOrder as any))
+				.dump();
+		}).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Bounded refinement 2 — nested multi-hop fail-closed: undeclared hop throws
+// ---------------------------------------------------------------------------
+
+describe('nested multi-hop fail-closed for undeclared hops', () => {
+	it('exists(posts) wrapping relationFilter([comments,undeclared]) throws at undeclared hop', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter',
+						relation: ['comments', 'undeclared'] as unknown as string,
+						where: {
+							kind: 'comparison',
+							field: 'body',
+							operator: 'eq',
+							value: 'x',
+						},
+						mode: 'some',
+					},
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		expect(() =>
+			adapter.compile(planReport, { model: testSchema.model }),
+		).toThrow(/no relation 'undeclared' is declared on table 'comments'/i);
+	});
+
+	it('exists(posts) wrapping relationFilter([undeclared]) throws on first hop', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter',
+						relation: ['undeclared'] as unknown as string,
+						where: {
+							kind: 'comparison',
+							field: 'col',
+							operator: 'eq',
+							value: 1,
+						},
+						mode: 'some',
+					},
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		expect(() =>
+			adapter.compile(planReport, { model: testSchema.model }),
+		).toThrow(/no relation 'undeclared' is declared on table 'posts'/i);
+	});
+
+	it('exists(posts) wrapping inner relationFilter(["comments"]) — fully-declared does not throw (regression)', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter',
+						relation: ['comments'] as unknown as string,
+						where: {
+							kind: 'comparison',
+							field: 'body',
+							operator: 'eq',
+							value: 'ok',
+						},
+						mode: 'some',
+					},
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		expect(() =>
+			adapter.compile(planReport, { model: testSchema.model }),
+		).not.toThrow();
+		const { sql } = adapter.compile(planReport, { model: testSchema.model });
+		expect(ws(sql)).toMatch(/EXISTS.*EXISTS/i);
+	});
+});

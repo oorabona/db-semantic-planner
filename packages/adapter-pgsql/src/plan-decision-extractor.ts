@@ -725,8 +725,22 @@ function enrichExistsStubsInConditions(
 			const rawWhere = (d as unknown as Record<string, unknown>)._rawWhere;
 
 			if (hops.length > 1) {
-				// Multi-hop nested path: delegate to buildMultiHopExistsChain, which
-				// resolves each hop from sourceTable, exactly like a top-level multi-hop.
+				// Multi-hop nested path: delegate to buildMultiHopExistsChain.
+				// Fail-closed first: validate every hop against the model from
+				// sourceTable (the outer exists's resolved target).  An undeclared
+				// intermediate or final hop must throw — not convention-compile.
+				let hopCheckSource = sourceTable;
+				for (const hop of hops) {
+					const hopRel = model.getRelation(`${hopCheckSource}.${hop}`);
+					if (!hopRel) {
+						throw new Error(
+							`exists('${hops.join('.')}'): no relation '${hop}' is declared on table '${hopCheckSource}'. ` +
+								`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+						);
+					}
+					hopCheckSource = hopRel.target;
+				}
+
 				const mode =
 					d.operator === 'notExists'
 						? 'none'
@@ -739,12 +753,8 @@ function enrichExistsStubsInConditions(
 						? 'notExists'
 						: 'exists';
 
-				// Walk to the final hop's target to build inner conditions.
-				let finalTarget = sourceTable;
-				for (const hop of hops) {
-					const rel = model.getRelation(`${finalTarget}.${hop}`);
-					finalTarget = rel ? rel.target : hop;
-				}
+				// hopCheckSource now points to the final hop's resolved target.
+				const finalTarget = hopCheckSource;
 
 				let rawInnerConditions: PlanDecision[] | undefined;
 				if (rawWhere) {

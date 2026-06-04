@@ -203,3 +203,35 @@ describe('DEFECT-2: batchSet().where(rawExists with LIMIT) throws (mutation guar
 		).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// rawExists + field-based ORDER BY rejected on direct path.
+// buildSubqueryFromIntent drops orderBy entirely (no sortClause emitted),
+// so field-orderBy must also throw — not just expression-orderBy.
+// ---------------------------------------------------------------------------
+
+describe('rawExists: field-based ORDER BY rejected on direct path', () => {
+	it('rawExists with field ORDER BY throws on compileWhereIntent path', () => {
+		const intent = {
+			kind: 'rawExists' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'files',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				orderBy: [{ field: 'id', direction: 'asc' as const }],
+			},
+		};
+		const paramState = createCompilerState();
+		const ctx = {
+			rootTable: 'users',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: (subIntent: any, paramOffset: number) =>
+				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+		};
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/ORDER BY.*not supported|not supported.*ORDER BY/i,
+		);
+	});
+});

@@ -416,12 +416,16 @@ function handleSubqueryIntent(
 	};
 
 	// Guard: reject scalar subqueries with modifiers that buildSubqueryFromIntent
-	// silently drops (groupBy, having, offset, distinct, etc.).  The decisions path
-	// (convertSubquery in intent-to-decisions.ts) already guards these; this call
-	// ensures the same check fires on the direct compile-where path used by
-	// compileBatchUpdate, so `batchSet().where(eq('x', subquery(...).limit(0).asExpr()))`
-	// throws instead of silently dropping LIMIT and updating more rows than intended.
-	assertNoUnsupportedSubqueryModifiers(subquery as QueryIntent, 'scalar');
+	// silently drops.  The decisions path (convertSubquery in intent-to-decisions.ts)
+	// uses 'scalar' which allows limit/orderBy because that path faithfully emits them.
+	// This direct path uses buildSubqueryFromIntent which emits ONLY SELECT/FROM/WHERE
+	// — limit, orderBy, groupBy, having, offset, distinct, joins, include are all
+	// dropped. Use 'scalar-direct' to reject the full dropped set, including limit and
+	// orderBy that 'scalar' allows.
+	assertNoUnsupportedSubqueryModifiers(
+		subquery as QueryIntent,
+		'scalar-direct',
+	);
 
 	const {
 		sql: subqueryNode,

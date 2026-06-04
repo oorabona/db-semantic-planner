@@ -272,11 +272,11 @@ interface FlatWhereFields {
  */
 export function assertNoUnsupportedSubqueryModifiers(
 	subquery: QueryIntent,
-	context: 'IN' | 'scalar' | 'rawExists',
+	context: 'IN' | 'scalar' | 'scalar-direct' | 'rawExists',
 ): void {
 	const unsupported: string[] = [];
 
-	// Structural modifiers already guarded in the previous pass
+	// Structural modifiers silently dropped on ALL subquery paths.
 	if (subquery.groupBy && subquery.groupBy.length > 0)
 		unsupported.push('GROUP BY');
 	if (subquery.having) unsupported.push('HAVING');
@@ -288,23 +288,31 @@ export function assertNoUnsupportedSubqueryModifiers(
 		unsupported.push('include (relation hydration)');
 	if (subquery.joins && subquery.joins.length > 0) unsupported.push('joins');
 
-	// Additional structural modifiers that have no path through buildScalarSubquery
+	// Additional structural modifiers that have no path through buildSubqueryFromIntent.
 	if (subquery.existsWrap) unsupported.push('existsWrap');
 	if (subquery.lock) unsupported.push('lock');
 	if (subquery.batchValuesSource) unsupported.push('batchValuesSource');
 
-	// rawExists-specific: buildSubqueryFromIntent does not emit LIMIT (unlike
-	// scalar subqueries where limit IS propagated).  A rawExists(subquery.limit(0))
-	// silently compiles as an unrestricted existence check — producing a result
-	// broader than the caller intended (limit(0) should always be FALSE).
-	if (context === 'rawExists') {
+	// rawExists and scalar-direct: buildSubqueryFromIntent emits ONLY
+	// SELECT/FROM/WHERE — it does NOT emit sortClause or limitCount.
+	// The decisions-path scalar context allows limit/orderBy because convertSubquery
+	// faithfully propagates them via buildScalarSubquery; the direct path cannot.
+	if (context === 'rawExists' || context === 'scalar-direct') {
 		if (subquery.limit != null) unsupported.push('LIMIT');
 	}
 
-	// Expression-based orderBy entries: OrderByExpressionIntent has field:never,
-	// so convertIn's `o.field` yields undefined → columnRef(undefined,...) produces
-	// broken SQL. Reject whenever any entry uses an expression.
-	if (subquery.orderBy && subquery.orderBy.length > 0) {
+	// rawExists and scalar-direct: buildSubqueryFromIntent also drops orderBy
+	// entirely (no sortClause emitted), so both field-based and expression-based
+	// ORDER BY produce silently wrong results on the direct path.
+	// The decisions-path scalar context allows field-orderBy because that path
+	// emits it; the direct path cannot.
+	if (context === 'rawExists' || context === 'scalar-direct') {
+		if (subquery.orderBy && subquery.orderBy.length > 0) {
+			unsupported.push('ORDER BY');
+		}
+	} else if (subquery.orderBy && subquery.orderBy.length > 0) {
+		// On the decisions / IN path: only expression-based orderBy is unsupported
+		// (field references are faithfully emitted there).
 		const hasExpressionSort = subquery.orderBy.some(
 			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
 		);
