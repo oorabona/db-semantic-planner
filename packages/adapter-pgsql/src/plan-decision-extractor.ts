@@ -323,6 +323,44 @@ export function convertWhereToDecisions(
 					table,
 				},
 			];
+		case 'exists':
+			// Produce an unenriched exists stub (relation name as targetTable).
+			// Inner `where` is preserved raw so enrichExistsStubsInConditions can
+			// resolve the correct FK from the outer exists's target table context.
+			return [
+				{
+					type: 'where',
+					operator: 'exists',
+					targetTable: w.relation as string,
+					// Store the raw inner where intent for enrichment.
+					// Cast needed: PlanDecision has no typed `_rawWhere` field but the
+					// enricher reads it by name before it compiles.
+					...(w.where ? { _rawWhere: w.where } : {}),
+				} as PlanDecision,
+			];
+		case 'notExists':
+			return [
+				{
+					type: 'where',
+					operator: 'notExists',
+					targetTable: w.relation as string,
+					...(w.where ? { _rawWhere: w.where } : {}),
+				} as PlanDecision,
+			];
+		case 'relationFilter': {
+			// Treat a nested relationFilter as exists/notExists/every stub.
+			const mode = (w.mode as string | undefined) ?? 'some';
+			const rfOperator =
+				mode === 'none' ? 'notExists' : mode === 'every' ? 'every' : 'exists';
+			return [
+				{
+					type: 'where',
+					operator: rfOperator,
+					targetTable: w.relation as string,
+					...(w.where ? { _rawWhere: w.where } : {}),
+				} as PlanDecision,
+			];
+		}
 		default:
 			return [];
 	}
@@ -626,6 +664,109 @@ function buildMultiHopExistsChain(
 }
 
 /**
+ * Recursively enrich exists/notExists stubs that appear inside an already-built
+ * `conditions` array (i.e. stubs produced by convertWhereToDecisions when it
+ * encounters a nested `exists()`/`notExists()` in the outer exists's where clause).
+ *
+ * Problem: `buildEnrichedExistsDecision` calls `convertWhereToDecisions` to turn
+ * `matchingIntent.where` into `conditions`.  When that where clause itself contains
+ * `exists('comments', { where: ... })`, `convertWhereToDecisions` now emits a stub
+ * decision `{ type:'where', operator:'exists', targetTable:'comments', _rawWhere }`.
+ * That stub was never in the pre-pass `stubs` array, so the outer enrichment loop
+ * never touches it.  Without enrichment it reaches the compiler with no FK metadata
+ * and falls back to convention against the wrong source table.
+ *
+ * Fix: after building conditions, walk them and for every unresolved exists stub:
+ *   1. Resolve the FK from `model.getRelation(sourceTable.relation)` — where
+ *      `sourceTable` is the OUTER exists's targetTable (the correct correlation source
+ *      for the inner hop, NOT the root table).
+ *   2. Convert `_rawWhere` into inner conditions via `convertWhereToDecisions`.
+ *   3. Replace the stub in-place with a fully-enriched decision.
+ *   4. Recurse into the new conditions to handle arbitrarily deep nesting.
+ *
+ * This is analogous to `buildMultiHopExistsChain` but for explicit exists-in-where
+ * nesting rather than relation-path arrays.
+ */
+function enrichExistsStubsInConditions(
+	conditions: PlanDecision[],
+	sourceTable: string,
+	model: ModelIR,
+): void {
+	for (let i = 0; i < conditions.length; i++) {
+		const d = conditions[i];
+		if (!d) continue;
+
+		if (
+			d.type === 'where' &&
+			(d.operator === 'exists' ||
+				d.operator === 'notExists' ||
+				d.operator === 'every') &&
+			!d.foreignKey // unenriched stub: no FK yet
+		) {
+			const relation = d.targetTable as string;
+			if (!relation) continue;
+
+			// Resolve the FK and type from the OUTER exists's target table.
+			const rel = model.getRelation(`${sourceTable}.${relation}`);
+			const foreignKey = rel
+				? typeof rel.foreignKey === 'string'
+					? rel.foreignKey
+					: rel.foreignKey?.[0]
+				: undefined;
+			const relationType =
+				rel?.type === 'belongsTo'
+					? ('belongsTo' as const)
+					: rel?.type === 'hasMany' || rel?.type === 'hasOne'
+						? (rel.type as 'hasMany' | 'hasOne')
+						: undefined;
+			const parentKey =
+				relationType === 'belongsTo' ? rel?.targetKey : rel?.sourceKey;
+			const targetTable = rel ? rel.target : relation;
+
+			// Build inner conditions from the raw where intent (if any).
+			// `_rawWhere` is attached by convertWhereToDecisions for exists stubs.
+			const rawWhere = (d as unknown as Record<string, unknown>)._rawWhere;
+			let innerConditions: PlanDecision[] | undefined;
+			if (rawWhere) {
+				const c = convertWhereToDecisions(rawWhere, targetTable);
+				if (c.length > 0) innerConditions = c;
+			}
+
+			// Build the enriched decision in-place.
+			const enriched: PlanDecision = {
+				type: 'where',
+				operator: d.operator,
+				targetTable,
+				sourceTable,
+				...(foreignKey ? { foreignKey } : {}),
+				...(relationType ? { relationType } : {}),
+				...(parentKey ? { parentKey } : {}),
+				...(innerConditions ? { conditions: innerConditions } : {}),
+			};
+
+			conditions[i] = enriched;
+
+			// Recurse into the newly-built conditions to handle deeper nesting.
+			if (innerConditions && innerConditions.length > 0) {
+				enrichExistsStubsInConditions(innerConditions, targetTable, model);
+			}
+		} else if (
+			(d.type === 'whereAnd' ||
+				d.type === 'whereOr' ||
+				d.type === 'whereNot') &&
+			d.conditions
+		) {
+			// Recurse into boolean containers.
+			enrichExistsStubsInConditions(
+				d.conditions as PlanDecision[],
+				sourceTable,
+				model,
+			);
+		}
+	}
+}
+
+/**
  * Build a fully-enriched exists decision from a filter-strategy planner decision
  * and the matching intent.  Shared by extractExistsDecisions (top-level) and
  * enrichExistsDecisionsInPlace (inline tree walk).
@@ -648,6 +789,13 @@ function buildEnrichedExistsDecision(
 		);
 		if (nestedDecisions.length > 0) {
 			conditions = nestedDecisions;
+			// Enrich any exists/notExists stubs that convertWhereToDecisions produced
+			// for nested exists() calls inside the outer's where clause.
+			// The inner stubs must correlate against the OUTER's targetTable (e.g. 'posts'),
+			// not the root table — so we pass targetTable as the sourceTable context.
+			if (model) {
+				enrichExistsStubsInConditions(conditions, targetTable, model);
+			}
 		}
 	}
 
@@ -888,6 +1036,11 @@ export function enrichExistsDecisionsInPlace(
 								matchingIntent.where,
 								lastHopTarget,
 							);
+							// Enrich any nested exists stubs in the innermost conditions.
+							// sourceTable = lastHopTarget (the innermost hop's table).
+							if (c.length > 0) {
+								enrichExistsStubsInConditions(c, lastHopTarget, model);
+							}
 							return c.length > 0 ? c : undefined;
 						})()
 					: undefined;

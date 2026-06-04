@@ -556,3 +556,173 @@ describe('7. mode notExists/every on multi-hop — applied at innermost hop (Ite
 		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 8. Nested exists-in-where: exists("posts", { where: exists("comments", ...) })
+//
+// Structurally different from multi-hop relationFilter(["posts","comments"]):
+// the user writes explicit nested exists() calls inside the outer where.
+//   Correct SQL:
+//     EXISTS(SELECT 1 FROM posts WHERE users.id=posts.authorId
+//              AND EXISTS(SELECT 1 FROM comments WHERE posts_alias.id=comments.postId
+//                           AND comments.body=$1))
+//
+// Root cause (fixed):
+//   1. convertWhereToDecisions had no handler for exists/notExists kinds
+//      -> fell through to default:[] -> inner exists silently dropped entirely.
+//   2. enrichExistsStubsInConditions now resolves the inner stub using the OUTER
+//      targetTable (posts) as sourceTable - NOT the root table (users) - so
+//      model.getRelation(posts.comments) is used for the inner FK, not
+//      model.getRelation(users.comments).
+// ---------------------------------------------------------------------------
+
+describe('8. nested exists-in-where — correct inner FK correlation (nested-exists fix)', () => {
+	it('exists(posts,{where:exists(comments,{where:eq(body,x)})}) produces two nested EXISTS', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'exists',
+						relation: 'comments',
+						where: {
+							kind: 'comparison',
+							field: 'body',
+							operator: 'eq',
+							value: 'x',
+						},
+					},
+				},
+			} as any,
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// Two nested EXISTS
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+		// Both tables present
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+		// Outer FK (users->posts hasMany, FK=authorId on posts)
+		expect(normalized).toContain('authorId');
+		// Inner FK (posts->comments hasMany, FK=postId on comments)
+		expect(normalized).toContain('postId');
+		// Inner filter NOT dropped
+		expect(normalized).toMatch(/body\s*=\s*\$1/i);
+		expect(parameters).toContain('x');
+	});
+
+	it('inner correlation is posts->comments NOT users->comments (key correctness check)', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'exists',
+						relation: 'comments',
+					},
+				} as any,
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql } = adapter.compile(planReport, { model: testSchema.model });
+		const normalized = ws(sql);
+		// authorId (outer posts correlation) before postId (inner comments correlation)
+		const authorIdPos = normalized.indexOf('authorId');
+		const postIdPos = normalized.indexOf('postId');
+		expect(authorIdPos).toBeGreaterThan(-1);
+		expect(postIdPos).toBeGreaterThan(-1);
+		expect(authorIdPos).toBeLessThan(postIdPos);
+	});
+
+	it('exists-in-where under OR — inline position preserved, both FKs correct', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'or',
+					conditions: [
+						{
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+						{
+							kind: 'exists',
+							relation: 'posts',
+							where: {
+								kind: 'exists',
+								relation: 'comments',
+								where: {
+									kind: 'comparison',
+									field: 'body',
+									operator: 'eq',
+									value: 'y',
+								},
+							},
+						},
+					],
+				} as any,
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		expect(normalized).toContain('OR');
+		expect(normalized).toContain('authorId');
+		expect(normalized).toContain('postId');
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+		expect(parameters).toContain('y');
+	});
+
+	it('single-level exists (no nesting) is UNCHANGED — zero regression', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: true,
+					},
+				} as any,
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// Single EXISTS only
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBe(1);
+		// Correct outer FK
+		expect(normalized).toContain('authorId');
+		// Filter present
+		expect(parameters).toContain(true);
+		// No comments table leaked in
+		expect(normalized).not.toMatch(/FROM\s+"?comments"?/i);
+	});
+});
