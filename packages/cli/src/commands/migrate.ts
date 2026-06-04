@@ -119,6 +119,20 @@ async function runMigrateAction(fn: () => Promise<void>): Promise<void> {
 	}
 }
 
+/**
+ * Returns true if a migration statement contains at least one executable SQL
+ * line (non-empty, not a comment). Statements that consist entirely of blank
+ * lines and `--` comment lines are skipped; statements that begin with a
+ * comment header but also contain real SQL are kept (PostgreSQL ignores the
+ * comment, so the header is harmless and preserves intent).
+ */
+export function hasExecutableSql(stmt: string): boolean {
+	return stmt.split('\n').some((line) => {
+		const t = line.trim();
+		return t.length > 0 && !t.startsWith('--');
+	});
+}
+
 // ============================================================================
 // Subcommands
 // ============================================================================
@@ -279,9 +293,7 @@ const applyCommand = new Command('apply')
 
 						// Parse UP section from file
 						const parsed = parseMigrationFile(file.content);
-						const statements = parsed.upStatements.filter(
-							(s) => s.length > 0 && !s.startsWith('-- '),
-						);
+						const statements = parsed.upStatements.filter(hasExecutableSql);
 
 						// Determine version and destructive flag before the transaction
 						// (read from the lock-held client so we see a consistent view)
@@ -414,9 +426,7 @@ const rollbackCommand = new Command('rollback')
 							}
 
 							// SC-11/ERR-04: Empty DOWN section
-							const downStmts = parsed.downStatements.filter(
-								(s) => s.length > 0 && !s.startsWith('-- '),
-							);
+							const downStmts = parsed.downStatements.filter(hasExecutableSql);
 							if (downStmts.length === 0 && !options.force) {
 								throw new MigrationError(
 									`Migration ${record.name} has an empty DOWN section\n` +

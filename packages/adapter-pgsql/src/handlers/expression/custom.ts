@@ -151,6 +151,11 @@ export function compileExpressionIntent(
 		}
 
 		case 'literal': {
+			// Literal values are emitted as escaped SQL constants — string values
+			// have single quotes doubled (via quoteString()), integers/booleans as
+			// typed constants — NOT bound $N parameters. They are therefore safe for
+			// developer-controlled literal constants; callers should prefer bound
+			// parameters (the 'param' case) for any user-supplied data.
 			const i = intent as LiteralExpressionIntent;
 			if (i.value === null || i.value === undefined) {
 				return nullConstNode();

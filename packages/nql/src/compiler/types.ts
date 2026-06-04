@@ -60,6 +60,8 @@ export interface NqlCompilerOptions {
 	readonly recursiveKeywords?: readonly string[];
 	/** BATCH-001: Named parameters for ANY(:param) expressions */
 	readonly params?: Readonly<Record<string, unknown>>;
+	/** Maximum number of items allowed in an ANY(:param) array. Defaults to MAX_ANY_ITEMS (10000). */
+	readonly maxAnyItems?: number;
 }
 
 /**
@@ -74,6 +76,8 @@ export interface CompilerContext {
 	readonly validator: ColumnValidator | null;
 	/** BATCH-001: Named parameters for ANY(:param) expressions */
 	readonly params: Readonly<Record<string, unknown>>;
+	/** Maximum number of items allowed in an ANY(:param) array. Resolved by constructor (never undefined). */
+	readonly maxAnyItems: number;
 }
 
 /**

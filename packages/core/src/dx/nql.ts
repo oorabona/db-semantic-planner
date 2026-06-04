@@ -6,6 +6,12 @@
  * const users = await orm.nql<{ name: string; email: string }>`users | select name, email`.all();
  * ```
  *
+ * Each `${value}` interpolation is escaped into a safe NQL literal (string/number/boolean/null).
+ * Untrusted string input cannot inject NQL structure because it is always quoted and
+ * single-quotes inside are doubled (`''`). For dynamic structural fragments (table names,
+ * column names, ORDER BY direction) use the builder API (`orm.select()`). See #134 for
+ * upcoming `:param` binding and a `nqlRaw()` escape hatch.
+ *
  * @module nql
  * @since DX-040
  */
@@ -58,7 +64,92 @@ export type NqlTag = <T>(
 // ============================================================================
 
 /**
+ * Convert a JS value into a safe NQL literal token string.
+ *
+ * Supported types:
+ * - `string`  → single-quoted NQL string literal; embedded single-quotes are doubled (`''`),
+ *               matching the NQL StringLiteral token pattern `/'(?:[^']|'')*'/`.
+ *               Values containing a raw newline are rejected (Chevrotain StringLiteral
+ *               has no `line_breaks: true`, so newlines would produce a lex error).
+ * - finite, non-exponential `number` → bare numeric literal (e.g. `42`, `3.14`, `-5`).
+ *               Negative numbers are emitted as a leading minus followed by the absolute
+ *               value, which NQL parses as unary-minus + number. Note: negative numbers
+ *               are only valid in comparison/value positions — `limit`/`offset` expect a
+ *               bare NumberLiteral and will parse-error on a leading minus.
+ *               `NaN`, `Infinity`, and numbers whose JS string form uses exponential
+ *               notation (magnitude ≥ 1e21 or absolute value < ~1e-6, e.g. `1e21`,
+ *               `1e-7`) are rejected — NQL NumberLiteral is `/\d+(\.\d+)?/` (no exponent).
+ * - `boolean` → `true` or `false` (matches NQL True/False tokens, case-insensitive).
+ * - `null`    → `null` (matches NQL Null token).
+ * - All other types throw a descriptive Error.
+ *
+ * @param value - The JS value to convert
+ * @param index - Zero-based interpolation position (for error messages)
+ * @returns Safe NQL literal string
+ * @internal
+ */
+export function toNqlLiteral(value: unknown, index: number): string {
+	if (value === null) {
+		return 'null';
+	}
+	switch (typeof value) {
+		case 'boolean':
+			return value ? 'true' : 'false';
+		case 'number': {
+			if (!Number.isFinite(value)) {
+				throw new Error(
+					`nql\`...\`: cannot interpolate non-finite number (${value}) at position ${index}. ` +
+						'Only finite numbers are supported. ' +
+						'For dynamic NQL structure use the builder API (orm.select()). See issue #134.',
+				);
+			}
+			// NQL NumberLiteral is digits-only; negatives are parsed as unary minus + number.
+			// Emit the minus separately so the lexer tokenises it correctly.
+			const s = value < 0 ? `-${Math.abs(value)}` : String(value);
+			// Reject any value whose string form uses exponential notation (e.g. 1e21, 1e-7).
+			// NQL NumberLiteral pattern /\d+(\.\d+)?/ has no exponent support; emitting
+			// such a token produces an opaque downstream parse error.
+			if (/[eE]/.test(s)) {
+				throw new Error(
+					`nql\`...\`: number ${value} at position ${index} has no exact NQL numeric literal form (exponential notation). ` +
+						'Convert it yourself or use the builder API (orm.select()). See issue #134.',
+				);
+			}
+			return s;
+		}
+		case 'string': {
+			if (value.includes('\n') || value.includes('\r')) {
+				throw new Error(
+					`nql\`...\`: cannot interpolate a string containing a newline at position ${index}. ` +
+						'NQL string literals do not support raw newline characters. ' +
+						'For dynamic NQL structure use the builder API (orm.select()). See issue #134.',
+				);
+			}
+			// SQL-style quoting: wrap in single-quotes, double any embedded single-quote.
+			// Matches NQL StringLiteral pattern: /'(?:[^']|'')*'/
+			const escaped = value.replaceAll("'", "''");
+			return `'${escaped}'`;
+		}
+		default: {
+			const typeName = value === undefined ? 'undefined' : typeof value;
+			throw new Error(
+				`nql\`...\`: cannot interpolate value of type "${typeName}" at position ${index}. ` +
+					'Only string, number, boolean, and null are supported; ' +
+					'for dynamic NQL fragments use the builder API (orm.select()). See issue #134.',
+			);
+		}
+	}
+}
+
+/**
  * Create an NQL template tag function.
+ *
+ * Each `${value}` in the template is escaped into a safe NQL literal before parsing.
+ * Supported interpolation types: `string`, `number`, `boolean`, `null`.
+ * Untrusted string input is therefore safe from NQL-syntax injection — it is always
+ * wrapped in single-quotes with embedded quotes doubled (`''`).
+ * For dynamic structural fragments (table names, column names, ORDER BY direction)
+ * use the builder API (`orm.select()`). See issue #134 for upcoming `:param` binding.
  *
  * @param schemaDefinition - Schema definition for validation
  * @param model - ModelIR for plan execution
@@ -76,11 +167,12 @@ export function createNqlTag(
 		strings: TemplateStringsArray,
 		...values: unknown[]
 	): NqlBuilder<T> {
-		// Reconstruct the query string from template literal
-		// Note: strings[0] is always defined for template literals
+		// Reconstruct the query string from template literal, escaping each
+		// interpolated value into a safe NQL literal via toNqlLiteral.
+		// Note: strings[0] is always defined for template literals.
 		let query: string = strings[0] ?? '';
 		for (let i = 0; i < values.length; i++) {
-			query += String(values[i]) + (strings[i + 1] ?? '');
+			query += toNqlLiteral(values[i], i) + (strings[i + 1] ?? '');
 		}
 
 		return new NqlBuilderImpl<T>(

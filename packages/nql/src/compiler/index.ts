@@ -68,7 +68,7 @@ import type {
 // Domain modules
 import { ColumnValidator } from './column-validator.js';
 import { compileWithQuery } from './compile-cte.js';
-import { compileExpression } from './compile-expression.js';
+import { compileExpression, MAX_ANY_ITEMS } from './compile-expression.js';
 import {
 	compileMutationPipeline,
 	extractBindName,
@@ -115,6 +115,15 @@ export class NqlCompiler {
 		const recursiveKeywords = new Set(recursive.map((k) => k.toLowerCase()));
 		const validator = schema ? new ColumnValidator(schema) : null;
 
+		const maxAnyItemsRaw = options?.maxAnyItems;
+		if (maxAnyItemsRaw !== undefined) {
+			if (!Number.isSafeInteger(maxAnyItemsRaw) || maxAnyItemsRaw <= 0) {
+				throw new Error(
+					`Invalid maxAnyItems: ${maxAnyItemsRaw}. Must be a positive integer.`,
+				);
+			}
+		}
+
 		this.ctx = {
 			currentFromTable: undefined,
 			currentRelationTarget: undefined,
@@ -122,6 +131,7 @@ export class NqlCompiler {
 			recursiveKeywords,
 			validator,
 			params: options?.params ?? {},
+			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 		};
 
 		// Wire up cross-module function references

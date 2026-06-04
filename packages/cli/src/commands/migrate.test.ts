@@ -7,7 +7,8 @@
  */
 
 import type { SchemaDiff } from '@dbsp/adapter-pgsql';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { hasExecutableSql, migrateCommand } from './migrate.js';
 
 // ============================================================================
 // Mock adapter
@@ -51,6 +52,25 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	withMigrationLock: (...args: unknown[]) => mockWithMigrationLock(...args),
 	parseMigrationFile: (...args: unknown[]) => mockParseMigrationFile(...args),
 	isDestructiveDown: (...args: unknown[]) => mockIsDestructiveDown(...args),
+}));
+
+// ============================================================================
+// Additional mocks — for e2e applyCommand tests
+// ============================================================================
+
+const mockCreateDbConnection = vi.fn();
+const mockScanMigrationFiles = vi.fn();
+
+vi.mock('../utils/db-utils.js', () => ({
+	createDbConnection: (...args: unknown[]) => mockCreateDbConnection(...args),
+	redactDbUrl: (s: string) => s,
+}));
+
+vi.mock('../migration-file.js', () => ({
+	DEFAULT_MIGRATIONS_DIR: './migrations',
+	generateMigrationFilename: vi.fn(),
+	scanMigrationFiles: (...args: unknown[]) => mockScanMigrationFiles(...args),
+	writeMigrationFile: vi.fn(),
 }));
 
 // ============================================================================
@@ -276,6 +296,167 @@ describe('migrate apply — statement splitting', () => {
 			.filter((s) => s.length > 0);
 
 		expect(statements).toEqual([]);
+	});
+
+	// hasExecutableSql regression: a statement that STARTS with a comment header
+	// but contains real SQL must be KEPT (the old `!s.startsWith('-- ')` predicate
+	// dropped the entire statement, silently skipping the DDL while still recording
+	// the migration as applied).
+	//
+	// These tests import the PRODUCTION hasExecutableSql from migrate.ts — reverting
+	// the function or its callers in migrate.ts turns these RED immediately.
+	it('hasExecutableSql: keeps a statement that begins with a comment header followed by real SQL', () => {
+		// Shape produced by generateMigrationFile: comment header on the same
+		// element as the DDL (splitter splits on /;\s*\n/, not on comment lines).
+		const stmt = '-- Migration: create users\nCREATE TABLE users (id integer)';
+		expect(hasExecutableSql(stmt)).toBe(true);
+	});
+
+	it('hasExecutableSql: drops a statement that contains only blank lines and comments', () => {
+		const stmt = '-- only a comment\n-- another comment\n';
+		expect(hasExecutableSql(stmt)).toBe(false);
+	});
+
+	// Mutation guard: documents that the old startsWith predicate drops the same
+	// input that hasExecutableSql correctly keeps.  If the production function is
+	// reverted to `!s.startsWith('-- ')`, the first assertion below turns RED.
+	it('hasExecutableSql: production predicate keeps comment-headed DDL; old startsWith predicate would drop it (mutation guard)', () => {
+		const stmt = '-- Migration: create users\nCREATE TABLE users (id integer)';
+
+		// Production function (imported from migrate.ts) must keep the statement:
+		expect(hasExecutableSql(stmt)).toBe(true);
+
+		// The old broken predicate (reverting the fix) would drop it:
+		const oldPredicate = (s: string) => s.length > 0 && !s.startsWith('-- ');
+		expect(oldPredicate(stmt)).toBe(false);
+	});
+});
+
+// ============================================================================
+// Tests: applyCommand e2e — comment-headed DDL reaches DB (regression lock)
+// ============================================================================
+//
+// These tests drive migrateCommand.parseAsync('apply ...') end-to-end through
+// the mocked adapter + pool so that reverting hasExecutableSql (or its callers
+// in applyCommand) turns THIS suite RED — not just the unit predicate tests above.
+//
+// The critical assertion: the mocked client.query must be called with the
+// CREATE TABLE statement even when it is preceded by a `-- comment` header
+// in the same migration statement element.
+
+describe('migrate apply — comment-headed DDL reaches DB client (e2e regression lock)', () => {
+	// Mock client that records every SQL string sent to it
+	let executedSql: string[];
+	let mockClient: {
+		query: ReturnType<typeof vi.fn>;
+	};
+
+	beforeEach(() => {
+		executedSql = [];
+
+		mockClient = {
+			query: vi.fn().mockImplementation((sql: string) => {
+				executedSql.push(sql);
+				// getNextSchemaVersion needs a rows result
+				if (typeof sql === 'string' && sql.includes('MAX(')) {
+					return Promise.resolve({ rows: [{ max_version: 0 }] });
+				}
+				return Promise.resolve({ rows: [] });
+			}),
+		};
+
+		// withMigrationLock: invoke the callback immediately with the mock client
+		mockWithMigrationLock.mockImplementation(
+			async (_pool: unknown, fn: (client: unknown) => Promise<void>) => {
+				await fn(mockClient);
+			},
+		);
+
+		// ensureMigrationsTable: no-op
+		mockEnsureMigrationsTable.mockResolvedValue(undefined);
+
+		// getAppliedMigrations: nothing applied yet → all files are pending
+		mockGetAppliedMigrations.mockResolvedValue([]);
+
+		// getNextSchemaVersion: return version 1
+		mockGetNextSchemaVersion.mockResolvedValue(1);
+
+		// isDestructiveDown: non-destructive
+		mockIsDestructiveDown.mockReturnValue(false);
+
+		// recordMigration: no-op
+		mockRecordMigration.mockResolvedValue(undefined);
+
+		// createDbConnection: return a fake pool (withMigratePool just calls fn(pool))
+		const fakePool = { end: vi.fn().mockResolvedValue(undefined) };
+		mockCreateDbConnection.mockResolvedValue({ pool: fakePool });
+	});
+
+	it('comment-headed DDL (-- header + CREATE TABLE) is executed against DB client', async () => {
+		// A migration statement as generateMigrationFile produces it:
+		// the comment header and the DDL are in the SAME split element.
+		const commentHeadedStatement =
+			'-- Migration: 0001_create_users\nCREATE TABLE "users" ("id" serial PRIMARY KEY)';
+
+		// parseMigrationFile returns the comment-headed statement as an upStatement
+		mockParseMigrationFile.mockReturnValue({
+			upStatements: [commentHeadedStatement],
+			downStatements: ['DROP TABLE IF EXISTS "users"'],
+			hasDown: true,
+		});
+
+		// scanMigrationFiles returns one pending migration file
+		mockScanMigrationFiles.mockReturnValue([
+			{
+				name: '0001_create_users.sql',
+				content: 'irrelevant — parseMigrationFile is mocked',
+				checksum: 'abc123',
+			},
+		]);
+
+		// Drive applyCommand end-to-end
+		await migrateCommand.parseAsync(
+			['apply', '--db', 'postgres://localhost/test'],
+			{ from: 'user' },
+		);
+
+		// The CREATE TABLE must have been sent to client.query.
+		// If hasExecutableSql is reverted to `!s.startsWith('-- ')`, the
+		// comment-headed statement is dropped and this assertion fails.
+		const ddlCall = executedSql.find((sql) =>
+			sql.includes('CREATE TABLE "users"'),
+		);
+		expect(ddlCall).toBeDefined();
+	});
+
+	it('pure-comment statement (no DDL) is NOT sent to DB client', async () => {
+		// A statement that is entirely a comment — must be filtered out.
+		const commentOnlyStatement = '-- This migration is intentionally a no-op';
+
+		mockParseMigrationFile.mockReturnValue({
+			upStatements: [commentOnlyStatement],
+			downStatements: [],
+			hasDown: false,
+		});
+
+		mockScanMigrationFiles.mockReturnValue([
+			{
+				name: '0001_noop.sql',
+				content: 'irrelevant',
+				checksum: 'def456',
+			},
+		]);
+
+		await migrateCommand.parseAsync(
+			['apply', '--db', 'postgres://localhost/test'],
+			{ from: 'user' },
+		);
+
+		// The comment-only string must NOT have reached client.query as a statement.
+		const commentCall = executedSql.find((sql) =>
+			sql.startsWith('-- This migration'),
+		);
+		expect(commentCall).toBeUndefined();
 	});
 });
 

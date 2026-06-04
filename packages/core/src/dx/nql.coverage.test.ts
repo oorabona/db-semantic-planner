@@ -99,27 +99,36 @@ describe('NqlBuilder template interpolation (coverage)', () => {
 		const s = createTestSchema();
 		const nql = createNqlTag(s.definition, s.model);
 
-		const table = 'users';
+		// Table names are structural identifiers — toNqlLiteral would produce 'users' (string literal)
+		// which the parser rejects in the table-name position. Use a literal table name in the template.
+		// Only value positions (limit, where operands) accept toNqlLiteral output.
 		const limit = 10;
-		const builder = nql<unknown>`${table} | limit ${limit}`;
+		const builder = nql<unknown>`users | limit ${limit}`;
 		const intent = builder.toIntentIR();
 
 		expect(intent.from).toBe('users');
 		expect(intent.limit).toBe(10);
 	});
 
-	it('handles template with three interpolated segments', () => {
+	it('handles template with multiple interpolated value positions', () => {
 		const s = createTestSchema();
 		const nql = createNqlTag(s.definition, s.model);
 
-		const table = 'users';
-		const field = 'active';
+		// Column names are structural identifiers — use literal field names in the template.
+		// Only value operands (right-hand side of comparisons, limit/offset) accept toNqlLiteral.
+		const name = 'Alice';
 		const limit = 5;
-		const builder = nql<unknown>`${table} | where ${field} = true | limit ${limit}`;
+		const builder = nql<unknown>`users | where name = ${name} | limit ${limit}`;
 		const intent = builder.toIntentIR();
 
 		expect(intent.from).toBe('users');
 		expect(intent.limit).toBe(5);
+		expect(intent.where).toEqual({
+			kind: 'comparison',
+			field: 'name',
+			operator: 'eq',
+			value: 'Alice',
+		});
 	});
 });
 
