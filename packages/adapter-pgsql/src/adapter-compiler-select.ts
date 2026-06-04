@@ -319,13 +319,13 @@ function collectEnrichedExistsDecisions(
 	out: PlanDecision[],
 ): void {
 	for (const d of decisions) {
-		if (
-			d.type === 'where' &&
-			(d.operator === 'exists' ||
-				d.operator === 'notExists' ||
-				d.operator === 'every') &&
-			d.targetTable
-		) {
+		// DEFECT-1 FIX: collect ONLY positive 'exists' decisions for include propagation.
+		// notExists/every describe absence or universal quantification — their conditions
+		// must NOT be applied as a positive filter on the include subquery.
+		// Example: notExists('posts', { where: eq('published', false) }) selects users
+		// with NO unpublished posts; propagating that condition would wrongly restrict
+		// included posts to published=false (empty result when no unpublished posts exist).
+		if (d.type === 'where' && d.operator === 'exists' && d.targetTable) {
 			out.push(d);
 		}
 		// Only recurse into AND conjunctions — OR/NOT are not conjunctive positions.
@@ -354,10 +354,13 @@ function propagateExistsConditions(
 	return includeDecisions.map((jd) => {
 		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
+		// DEFECT-1 FIX: match ONLY positive 'exists' decisions (notExists/every are
+		// already excluded by collectEnrichedExistsDecisions, but be explicit here
+		// so the predicate is self-documenting and safe against future refactors).
 		const matchingExists = existsDecisions.find(
 			(ed) =>
 				ed.type === 'where' &&
-				(ed.operator === 'exists' || ed.operator === 'notExists') &&
+				ed.operator === 'exists' &&
 				(ed.relationName === jd.relationName ||
 					ed.targetTable === jd.targetTable) &&
 				ed.conditions &&

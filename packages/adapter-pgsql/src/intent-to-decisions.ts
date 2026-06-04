@@ -270,7 +270,7 @@ interface FlatWhereFields {
  *   orderBy with expression-based entries on both paths (.field is never → undefined)
  *   limit (rawExists path only) — buildSubqueryFromIntent does not emit limitCount
  */
-function assertNoUnsupportedSubqueryModifiers(
+export function assertNoUnsupportedSubqueryModifiers(
 	subquery: QueryIntent,
 	context: 'IN' | 'scalar' | 'rawExists',
 ): void {

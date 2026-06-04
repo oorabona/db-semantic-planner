@@ -51,6 +51,10 @@ import type {
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
 import { buildColumnRef } from './handlers/where/utils.js';
+// DEFECT-2 FIX: import the modifier guard so the direct compileWhereIntent path
+// (used by compileBatchUpdate and other mutation callers) enforces the same
+// rawExists modifier restrictions as the decisions path (convertWhereCondition).
+import { assertNoUnsupportedSubqueryModifiers } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -481,6 +485,12 @@ function handleRawExistsIntent(
 ): Node {
 	const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent)
 		.subquery;
+	// DEFECT-2 FIX: enforce the same modifier guard as the decisions path
+	// (convertWhereCondition in intent-to-decisions.ts).  Without this guard,
+	// rawExists(subquery.limit(0)) on the direct compile-where path (used by
+	// compileBatchUpdate) silently compiles as an unrestricted EXISTS — always
+	// true — broadening the mutation guard contrary to the caller's intent.
+	assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
 	const {
 		sql: subNode,
 		paramCount,

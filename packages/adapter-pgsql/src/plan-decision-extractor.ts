@@ -926,15 +926,33 @@ function collectExistsStubs(
 }
 
 /**
- * Normalize a stub's targetTable to a string.
+ * Normalize a stub's targetTable to a string (last hop only).
  * NQL's relationFilter intent sets relation as string[] (e.g. ['children']).
  * convertExistsLike casts it as string, but the runtime value stays an array.
+ *
+ * Used for single-hop matching (context.relationPath absent).
+ * For multi-hop disambiguation use normalizeStubRelationPath instead.
  */
 function normalizeStubRelation(targetTable: unknown): string | undefined {
 	if (Array.isArray(targetTable) && targetTable.length > 0)
 		// Return LAST hop: planner filter-strategy context.relation = last hop name.
 		// For single-hop ['posts'], last === first (no regression).
 		return targetTable[targetTable.length - 1] as string;
+	if (typeof targetTable === 'string') return targetTable;
+	return undefined;
+}
+
+/**
+ * Normalize a stub's targetTable to a dot-joined path string.
+ * Returns 'posts.comments' for ['posts','comments'], 'posts' for ['posts'] or 'posts'.
+ *
+ * DEFECT-3 FIX: used for full-path matching when context.relationPath is present,
+ * so two multi-hop paths ending in the same last-hop name ('comments') are
+ * disambiguated by their full path ('posts.comments' vs 'articles.comments').
+ */
+function normalizeStubRelationPath(targetTable: unknown): string | undefined {
+	if (Array.isArray(targetTable) && targetTable.length > 0)
+		return (targetTable as string[]).join('.');
 	if (typeof targetTable === 'string') return targetTable;
 	return undefined;
 }
@@ -993,10 +1011,24 @@ export function enrichExistsDecisionsInPlace(
 			if (!context.target) continue;
 
 			// Find the matching intent (consume-once).
-			// For multi-hop array paths (e.g. ['posts','comments']), the planner
-			// records context.relation = last hop name ('comments').  We must
-			// match against the LAST element of i.relation[], not the first.
+			// DEFECT-3 FIX: when the planner recorded a full relationPath (multi-hop,
+			// e.g. context.relationPath = 'posts.comments'), match the intent's full
+			// relation array as a dot-joined path so two paths ending in the SAME last-hop
+			// name ('posts.comments' vs 'articles.comments') are not cross-wired.
+			// For single-hop (context.relationPath absent) fall back to last-hop matching.
+			const contextRelationPath = context.relationPath as string | undefined;
 			const matchIdx = existsIntents.findIndex((i) => {
+				if (contextRelationPath) {
+					// Full-path match: compare intent.relation[] joined as 'a.b.c'
+					// against the planner's context.relationPath.
+					const intentPath = Array.isArray(i.relation)
+						? (i.relation as string[]).join('.')
+						: typeof i.relation === 'string'
+							? i.relation
+							: undefined;
+					return intentPath === contextRelationPath;
+				}
+				// Single-hop fallback: match by last hop name (existing behaviour).
 				const rel = Array.isArray(i.relation)
 					? i.relation.length > 0
 						? i.relation[i.relation.length - 1]
@@ -1086,8 +1118,17 @@ export function enrichExistsDecisionsInPlace(
 			// Find the stub in the tree that corresponds to this filter-strategy.
 			// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])
 			// that convertExistsLike stores as targetTable via `cond.relation as string`.
+			// DEFECT-3 FIX: when context.relationPath is set (multi-hop), compare the
+			// stub's FULL path (dot-joined array) against context.relationPath so two
+			// stubs with the same last-hop name are matched to the correct filter-strategy.
 			const stubIdx = stubs.findIndex((s, idx) => {
 				if (consumedStubIndices.has(idx)) return false;
+				if (contextRelationPath) {
+					// Full-path match: compare stub's targetTable[] joined as 'a.b.c'.
+					const stubPath = normalizeStubRelationPath(s.decision.targetTable);
+					return stubPath === contextRelationPath;
+				}
+				// Single-hop fallback: last-hop name match (existing behaviour).
 				const stubRelation = normalizeStubRelation(s.decision.targetTable);
 				return (
 					stubRelation === context.relation ||
