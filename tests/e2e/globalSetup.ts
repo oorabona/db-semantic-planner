@@ -54,9 +54,12 @@ export async function setup(): Promise<void> {
 		process.env.TESTCONTAINERS_HOST_OVERRIDE = 'localhost';
 	}
 
-	// Allow custom PostgreSQL image via environment variable
-	// Supports: docker.io/oorabona/postgres:16-full-alpine, docker.io/oorabona/postgres:17-full-alpine
-	const pgImage = process.env.POSTGRES_IMAGE ?? 'postgres:16-alpine';
+	// Default: ghcr.io/oorabona/postgres:18-alpine-full (matches the doctest-real-db CI image).
+	// The full image bundles pgvector + pg_search/ParadeDB, needed for the advanced-feature
+	// e2e tests tracked in #150 (the stock postgres image lacks them). Override via POSTGRES_IMAGE.
+	const pgImage =
+		process.env.POSTGRES_IMAGE ?? 'ghcr.io/oorabona/postgres:18-alpine-full';
+
 	console.log(`\n🐘 Starting PostgreSQL container (${pgImage})...`);
 
 	try {
