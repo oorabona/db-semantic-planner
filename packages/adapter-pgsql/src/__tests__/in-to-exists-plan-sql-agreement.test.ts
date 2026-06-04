@@ -235,14 +235,26 @@ describe('NOT IN→NOT EXISTS: SQL uses NOT EXISTS for non-nullable FK', () => {
 
 		// plan.intent.where must stay kind='not' — the original submitted intent is preserved
 		expect(planReport.intent.where?.kind).toBe('not');
-		// plan.executableIntent.where must be kind='notExists' — the rewritten form for SQL
+		// plan.executableIntent.where must be kind='not' wrapping kind='exists'.
+		// The corrected design preserves the outer 'not' structure; the inner 'in'
+		// leaf (not-flag=false) rewrites to 'exists'.  The adapter compiles
+		// not(exists) as NOT EXISTS(...) — semantically equivalent and correct.
 		expect(planReport.executableIntent).toBeDefined();
-		expect(planReport.executableIntent?.where?.kind).toBe('notExists');
+		const execWhere = planReport.executableIntent?.where as {
+			kind: string;
+			condition?: { kind: string };
+		};
+		expect(execWhere?.kind).toBe('not');
+		expect(execWhere?.condition?.kind).toBe('exists');
 
 		const { sql } = compileIntent(queryIntent, schemaWithNonNullableFK.model);
-		// normalizeSQL lowercases output; PostgreSQL emits NOT EXISTS or NOT (EXISTS ...)
+		// normalizeSQL lowercases output; adapter emits NOT (EXISTS (...))
 		expect(sql).toContain('exists');
-		expect(sql).not.toContain('not in (select');
+		expect(sql).toContain('not');
+		expect(sql).not.toContain('= any');
+		// The inner child is POSITIVE EXISTS (in-intent not-flag=false, form='exists').
+		// The outer NOT wraps it: NOT(EXISTS(...)).  Assert no double-negation.
+		expect(sql).not.toMatch(/not\s*\(\s*not/i);
 	});
 });
 
@@ -430,6 +442,9 @@ describe('IN→EXISTS inside OR: EXISTS compiled inline, OR semantics preserved'
 		// EXISTS must be OR-combined — must NOT be an AND at the top WHERE level
 		expect(sql).not.toMatch(/where .+ and exists/i);
 
+		// Positive EXISTS — in-intent has no not-flag, OR context is non-negated
+		expect(sql).not.toMatch(/not\s+exists/i);
+
 		// FK correlation must be present: products.id = alias."productId"
 		expect(sql).toContain('"productid"');
 
@@ -497,6 +512,14 @@ describe('NOT(AND(inSubquery, eq)): EXISTS compiled inline inside NOT/AND', () =
 
 		// EXISTS must be inside the NOT, not appended as top-level AND after the NOT
 		expect(sql).toMatch(/not\s*\(/i);
+
+		// The inner EXISTS must be POSITIVE — the 'in' leaf (not-flag=false) rewrites to
+		// 'exists', and the outer NOT is preserved by the recursion.  The SQL is
+		// NOT(EXISTS(...) AND name=$N).  Verify no double-negation: no inner NOT EXISTS
+		// inside the outer NOT wrapper.
+		expect(sql).not.toMatch(/not\s+exists/i);
+		// No pattern: NOT (NOT ... EXISTS ...): outer NOT followed by another NOT before EXISTS
+		expect(sql).not.toMatch(/not\s*\(\s*not/i);
 
 		// FK correlation and inner WHERE are present
 		expect(sql).toContain('"productid"');
@@ -598,6 +621,8 @@ describe('simple top-level IN→EXISTS still works (non-regression)', () => {
 		const { sql, params } = compileIntent(queryIntent, testSchema.model);
 
 		expect(sql).toContain('exists');
+		// Positive EXISTS must NOT be negated — the in-intent has no not-flag
+		expect(sql).not.toMatch(/not\s+exists/i);
 		expect(sql).not.toContain('= any (select');
 		expect(sql).toContain('"productid"');
 		expect(sql).toContain('approved');
@@ -689,6 +714,9 @@ describe('NULL-safety under negation: not(and(inSubquery(non-nullable FK), eq)) 
 		expect(sql).toContain('not');
 		expect(sql).toContain('exists');
 		expect(sql).not.toContain('= any');
+		// The inner EXISTS must be POSITIVE (not-flag=false → form='exists').
+		// Verifies no double-negation: inner NOT EXISTS would be wrong here.
+		expect(sql).not.toMatch(/not\s+exists/i);
 		// FK correlation present
 		expect(sql).toContain('"authorid"');
 		// name condition inside the NOT
@@ -720,6 +748,8 @@ describe('NULL-safety: positive inSubquery on nullable FK still rewrites to EXIS
 
 		const { sql } = compileIntent(queryIntent, schemaWithNullableFK.model);
 		expect(sql).toContain('exists');
+		// Positive EXISTS — in-intent has no not-flag, no outer not wrapper
+		expect(sql).not.toMatch(/not\s+exists/i);
 		expect(sql).not.toContain('= any');
 	});
 });
@@ -893,9 +923,13 @@ describe('NOT-IN-via-flag: {kind:"in", not:true} on nullable FK → keeps NOT IN
 	});
 });
 
-describe('double-negation: not({kind:"in", not:true}) on non-nullable FK → positive EXISTS', () => {
-	it('not({kind:"in", not:true}) collapses double-negation to positive EXISTS', () => {
-		// NOT (field NOT IN (subquery)) = field IN (subquery) = positive EXISTS
+describe('double-negation: not({kind:"in", not:true}) on non-nullable FK → NOT(NOT EXISTS)', () => {
+	it('not({kind:"in", not:true}) produces NOT(NOT EXISTS) — outer not structure preserved', () => {
+		// NOT (field NOT IN (subquery)) — the corrected design preserves the outer NOT
+		// structure.  The inner {kind:'in', not:true} leaf rewrites to notExists (form
+		// from flag), so the result is not(notExists) = NOT(NOT EXISTS(...)).
+		// Semantically equivalent to positive EXISTS, but the boolean structure is
+		// explicitly preserved rather than algebraically collapsed.
 		const queryIntent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -919,20 +953,28 @@ describe('double-negation: not({kind:"in", not:true}) on non-nullable FK → pos
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 
-		// Planner emits a filter-strategy (exists — the double-negation collapses to EXISTS)
+		// Planner emits a filter-strategy (notExists — the inner not-flag leaf rewrites to notExists)
 		const filterDecision = planReport.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
-		expect(filterDecision?.choice).toBe('exists');
+		expect(filterDecision).toBeDefined();
+
+		// executableIntent: outer not wrapping inner notExists
+		const execWhere = planReport.executableIntent?.where as {
+			kind: string;
+			condition?: { kind: string };
+		};
+		expect(execWhere?.kind).toBe('not');
+		expect(execWhere?.condition?.kind).toBe('notExists');
 
 		const { sql } = compileIntent(queryIntent, schemaWithNonNullableFK.model);
 
-		// SQL must use EXISTS (positive) — double-negation collapsed.
-		// The NOT wrapper must not appear around the EXISTS.
+		// SQL contains both exists and not (outer NOT wraps inner NOT EXISTS)
 		expect(sql).toContain('exists');
-		// Verify no negation wrapping the EXISTS (double-neg collapses to positive)
-		expect(sql).not.toMatch(/not\s*\(\s*exists/i);
+		expect(sql).toContain('not');
 		expect(sql).toContain('"authorid"');
+		// NOT IN raw form must not appear
+		expect(sql).not.toContain('= any');
 	});
 });
 

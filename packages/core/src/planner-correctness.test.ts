@@ -598,9 +598,19 @@ describe('FIND-130: IN→EXISTS optimization: intent stays original; executableI
 		// report.intent.where must stay kind='not' — the original submitted intent is preserved
 		expect(report.intent.where?.kind).toBe('not');
 
-		// report.executableIntent.where must be kind='notExists' — the rewritten form for SQL
+		// report.executableIntent.where must be kind='not' wrapping kind='exists'.
+		// The corrected design preserves the outer 'not' structure and rewrites the
+		// inner 'in' leaf to 'exists' (form from the in-intent's own not-flag=false).
+		// The adapter compiles not(exists) as NOT EXISTS(...) — semantically correct.
+		// (Previously this was kind='notExists' directly; the new form is structurally
+		// equivalent and keeps the boolean tree intact for nested contexts.)
 		expect(report.executableIntent).toBeDefined();
-		expect(report.executableIntent?.where?.kind).toBe('notExists');
+		const execWhere = report.executableIntent?.where as {
+			kind: string;
+			condition?: { kind: string };
+		};
+		expect(execWhere?.kind).toBe('not');
+		expect(execWhere?.condition?.kind).toBe('exists');
 
 		// Original intent must not be mutated
 		expect(intent.where?.kind).toBe('not');
