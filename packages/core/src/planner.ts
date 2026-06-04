@@ -296,10 +296,23 @@ export function plan(
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 
-	// Optimize IN-subquery → EXISTS when relation is known in schema
+	// Optimize IN-subquery → EXISTS when relation is known in schema.
+	// `plannedIntent` carries the optimized WHERE so that both report.intent
+	// (consumed by extractExistsDecisions / intentToDecisions in the adapter)
+	// and report.decisions agree on whether IN or EXISTS is used.  Without this,
+	// extractExistsDecisions searched plan.intent.where for 'exists' intents but
+	// found 'in' → match failed → adapter emitted both IN and EXISTS in SQL while
+	// plan claimed only EXISTS (plan/SQL mismatch, item 1 of issue #130).
 	const optimizedWhere = intent.where
 		? optimizeInToExists(intent.where, intent.from, model)
 		: undefined;
+
+	// When the optimizer rewrote the WHERE (different object reference), surface
+	// the result in the emitted intent so the adapter sees the EXISTS form.
+	const plannedIntent: QueryIntent =
+		optimizedWhere !== undefined && optimizedWhere !== intent.where
+			? { ...intent, where: optimizedWhere }
+			: intent;
 
 	// Process where clause
 	if (optimizedWhere) {
@@ -358,7 +371,10 @@ export function plan(
 		decisions: Object.freeze(state.decisions.slice()),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
-		intent,
+		// Use plannedIntent (carries optimized WHERE when IN→EXISTS ran) so that
+		// the adapter's extractExistsDecisions and intentToDecisions both operate on
+		// the EXISTS form — aligning plan.intent with plan.decisions and emitted SQL.
+		intent: plannedIntent,
 		metadata,
 	};
 
@@ -614,6 +630,14 @@ function optimizeInToExists(
 		case 'in': {
 			const inWhere = where as WhereInIntent;
 			if (!inWhere.subquery) return where;
+
+			// Do not optimize when the subquery has a LIMIT or ORDER BY.
+			// EXISTS (SELECT 1 FROM t WHERE ... LIMIT n) is NOT equivalent to
+			// id IN (SELECT fk FROM t WHERE ... LIMIT n): the LIMIT restricts which
+			// rows satisfy the IN check, which cannot be expressed in EXISTS form.
+			if (inWhere.subquery.limit != null || inWhere.subquery.orderBy?.length) {
+				return where;
+			}
 
 			// Extract the single column from the subquery's select
 			const subSelect = inWhere.subquery.select;
