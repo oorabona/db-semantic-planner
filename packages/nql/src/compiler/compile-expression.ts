@@ -44,6 +44,9 @@ import type { CompilerContext, CompilerFns } from './types.js';
 // Handler functions (extracted from switch cases)
 // ---------------------------------------------------------------------------
 
+/** Maximum number of items allowed in an ANY(:param) array to prevent memory pressure. */
+export const MAX_ANY_ITEMS = 10000;
+
 function compileLogical(
 	expr: NqlExpression,
 	ctx: CompilerContext,
@@ -283,9 +286,19 @@ function compileMembership(
 		/* v8 ignore stop -- @preserve */
 		validateWhereField(ctx, field, aliasContext, anyExpr.column);
 		const rawValues = ctx.params[anyExpr.paramName];
-		const values: readonly unknown[] = Array.isArray(rawValues)
-			? rawValues
-			: [];
+		if (!Array.isArray(rawValues)) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`ANY(:${anyExpr.paramName}) requires an array argument but received ${rawValues === undefined ? 'undefined (parameter not bound)' : typeof rawValues}`,
+			);
+		}
+		if (rawValues.length > ctx.maxAnyItems) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`ANY(:${anyExpr.paramName}) array length ${rawValues.length} exceeds maximum of ${ctx.maxAnyItems}`,
+			);
+		}
+		const values: readonly unknown[] = rawValues;
 		return { kind: 'any', field, values } satisfies WhereAnyIntent;
 	}
 

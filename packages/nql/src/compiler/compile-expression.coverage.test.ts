@@ -12,6 +12,7 @@
 
 import type {
 	WhereAndIntent,
+	WhereAnyIntent,
 	WhereComparisonIntent,
 	WhereInIntent,
 	WhereIntent,
@@ -25,6 +26,7 @@ import type {
 import { describe, expect, it } from 'vitest';
 import { NqlErrorCodes } from '../errors/types.js';
 import { compile } from '../index.js';
+import { MAX_ANY_ITEMS } from './compile-expression.js';
 import type { CompileResult } from './index.js';
 
 // ---------------------------------------------------------------------------
@@ -1013,5 +1015,155 @@ describe('compile-expression: M-4 — error code preserved through compile() cat
 		// Must be SEM_INVALID_SYNTAX — NOT SEM_UNKNOWN_COLUMN (that was the M-4 bug)
 		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
 		expect(result.errors[0]?.code).not.toBe(NqlErrorCodes.SEM_UNKNOWN_COLUMN);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// ANY(:param) validation — BATCH-001 correctness guards
+// ---------------------------------------------------------------------------
+// Helper: compile NQL with named params, return raw ParseResult (never throws).
+function compileWithParams(input: string, params: Record<string, unknown>) {
+	return compile(input, null, undefined, { params });
+}
+
+describe('compile-expression: ANY(:param) — missing param throws', () => {
+	it('throws SEM_INVALID_SYNTAX when the bound parameter is not provided', () => {
+		// Mutation caught: removing the `!Array.isArray(rawValues)` guard makes this pass silently.
+		const result = compileWithParams('users | where id = ANY(:ids)', {});
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ids');
+		expect(result.errors[0]?.message).toContain('array');
+	});
+});
+
+describe('compile-expression: ANY(:param) — non-array param throws', () => {
+	it('throws SEM_INVALID_SYNTAX when the bound parameter is a string (not an array)', () => {
+		// Mutation caught: removing the `!Array.isArray(rawValues)` guard makes this pass silently.
+		const result = compileWithParams('users | where id = ANY(:ids)', {
+			ids: 'not-an-array',
+		});
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ids');
+		expect(result.errors[0]?.message).toContain('array');
+	});
+
+	it('throws SEM_INVALID_SYNTAX when the bound parameter is a number (not an array)', () => {
+		// Mutation caught: same guard; ensures the check is not accidentally string-specific.
+		const result = compileWithParams('users | where id = ANY(:ids)', {
+			ids: 42,
+		});
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ids');
+	});
+});
+
+describe('compile-expression: ANY(:param) — valid array param compiles successfully', () => {
+	it('returns WhereAnyIntent with the correct field and values', () => {
+		// Mutation caught: if values were hardcoded to [] the length and content assertions would fail.
+		const result = compileWithParams('users | where id = ANY(:ids)', {
+			ids: [1, 2, 3],
+		});
+		expect(result.success).toBe(true);
+		const where = result.ast!.query!.where as WhereAnyIntent;
+		expect(where.kind).toBe('any');
+		expect(where.field).toBe('id');
+		expect(where.values).toHaveLength(3);
+		expect(where.values).toEqual([1, 2, 3]);
+	});
+});
+
+describe('compile-expression: ANY(:param) — array exceeding MAX_ANY_ITEMS cap throws', () => {
+	it('throws SEM_INVALID_SYNTAX when array length is MAX_ANY_ITEMS + 1', () => {
+		// Mutation caught: removing the `rawValues.length > MAX_ANY_ITEMS` guard makes this pass.
+		const oversized = Array.from({ length: MAX_ANY_ITEMS + 1 }, (_, i) => i);
+		const result = compileWithParams('users | where id = ANY(:ids)', {
+			ids: oversized,
+		});
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ids');
+		expect(result.errors[0]?.message).toContain(String(MAX_ANY_ITEMS));
+	});
+});
+
+describe('compile-expression: ANY(:param) — array at exactly MAX_ANY_ITEMS compiles successfully', () => {
+	it('accepts an array of exactly MAX_ANY_ITEMS items (boundary — inclusive cap)', () => {
+		// Mutation caught: changing > to >= would make this fail; confirms cap is inclusive.
+		const atLimit = Array.from({ length: MAX_ANY_ITEMS }, (_, i) => i);
+		const result = compileWithParams('users | where id = ANY(:ids)', {
+			ids: atLimit,
+		});
+		expect(result.success).toBe(true);
+		const where = result.ast!.query!.where as WhereAnyIntent;
+		expect(where.kind).toBe('any');
+		expect(where.values).toHaveLength(MAX_ANY_ITEMS);
+	});
+});
+
+// Helper: compile NQL with named params AND compiler options (e.g. maxAnyItems override).
+function compileWithParamsAndOptions(
+	input: string,
+	params: Record<string, unknown>,
+	compilerOptions: { maxAnyItems?: number },
+) {
+	return compile(input, null, undefined, { params, ...compilerOptions });
+}
+
+describe('compile-expression: ANY(:param) — maxAnyItems override rejects array exceeding custom cap', () => {
+	it('throws SEM_INVALID_SYNTAX when array length exceeds the overridden cap (override+1 items)', () => {
+		// Mutation caught: if compileMembership ignored ctx.maxAnyItems and always used the
+		// MAX_ANY_ITEMS constant (10000), an array of 3 items would compile fine instead of throwing.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{ maxAnyItems: 2 },
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ids');
+		expect(result.errors[0]?.message).toContain('3');
+		expect(result.errors[0]?.message).toContain('2');
+	});
+});
+
+describe('compile-expression: ANY(:param) — maxAnyItems override accepts array at exactly custom cap', () => {
+	it('compiles successfully when array length equals the overridden cap (exactly override items)', () => {
+		// Mutation caught: if ctx.maxAnyItems were ignored (always MAX_ANY_ITEMS), this test still
+		// passes — BUT the companion "rejects override+1" test above would fail, collectively
+		// proving the override is wired end-to-end. Here we confirm the boundary is inclusive.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [10, 20] },
+			{ maxAnyItems: 2 },
+		);
+		expect(result.success).toBe(true);
+		const where = result.ast!.query!.where as WhereAnyIntent;
+		expect(where.kind).toBe('any');
+		expect(where.field).toBe('id');
+		expect(where.values).toHaveLength(2);
+		expect(where.values).toEqual([10, 20]);
+	});
+});
+
+describe('compile-expression: ANY(:param) — maxAnyItems unset still uses MAX_ANY_ITEMS default', () => {
+	it('compiles a small array without specifying maxAnyItems (default cap unchanged)', () => {
+		// Mutation caught: if the default were changed from MAX_ANY_ITEMS to a smaller value
+		// (e.g. 1), this would fail because a 3-element array would be rejected.
+		const result = compileWithParamsAndOptions(
+			'users | where id = ANY(:ids)',
+			{ ids: [1, 2, 3] },
+			{},
+		);
+		expect(result.success).toBe(true);
+		const where = result.ast!.query!.where as WhereAnyIntent;
+		expect(where.kind).toBe('any');
+		expect(where.values).toHaveLength(3);
 	});
 });

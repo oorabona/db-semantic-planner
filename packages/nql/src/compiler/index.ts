@@ -68,7 +68,7 @@ import type {
 // Domain modules
 import { ColumnValidator } from './column-validator.js';
 import { compileWithQuery } from './compile-cte.js';
-import { compileExpression } from './compile-expression.js';
+import { compileExpression, MAX_ANY_ITEMS } from './compile-expression.js';
 import {
 	compileMutationPipeline,
 	extractBindName,
@@ -122,6 +122,7 @@ export class NqlCompiler {
 			recursiveKeywords,
 			validator,
 			params: options?.params ?? {},
+			maxAnyItems: options?.maxAnyItems ?? MAX_ANY_ITEMS,
 		};
 
 		// Wire up cross-module function references
