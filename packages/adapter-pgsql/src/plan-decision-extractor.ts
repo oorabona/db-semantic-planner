@@ -959,23 +959,25 @@ function buildEnrichedExistsDecision(
 }
 
 /**
- * Collect the set of RESOLVED identity keys for exists/notExists/relationFilter
- * intents that appear NESTED inside another exists's `where` clause.  These are
- * enriched inline by enrichExistsStubsInConditions and must NOT be re-appended at
- * the top level by the filter-strategy loop.
+ * Collect COMPOUND identity keys — "sourceTable:resolvedTarget" — for
+ * exists/notExists/relationFilter intents that appear NESTED inside another
+ * exists's `where` clause.  These are enriched inline by enrichExistsStubsInConditions
+ * and must NOT be re-appended at the top level by the filter-strategy loop.
  *
- * Identity key = the value the filter-strategy decision exposes:
- *   - Single-hop: `context.target` (resolved table name, e.g. 'posts')
- *   - Multi-hop:  `context.relationPath` (dot-joined path, e.g. 'comments.authors')
+ * Compound key format: `<contextSourceTable>:<resolvedTargetOrPath>`
+ *   - Single-hop: `"posts:comments"` (source=posts, resolved target=comments)
+ *   - Multi-hop:  `"users:posts.comments"` (source=users, dot-joined path)
  *
- * Storing bare relation names (aliases) would fail when relation name != table name
- * because the filter-strategy always stores the RESOLVED target, not the alias.
+ * Bare target names (without source) fail when two relations share the same target
+ * table name but originate from DIFFERENT source tables (e.g. users→comments via
+ * user_id AND posts→comments via post_id both resolve to target='comments').
+ * The compound key uniquely identifies which (source, relation) pair is nested.
  *
  * @param where           The raw WhereIntent tree to scan.
  * @param insideExists    True when the caller is inside an exists's where clause.
- * @param sourceTable     The resolved target of the enclosing exists (used for FK lookup).
+ * @param sourceTable     The resolved target of the enclosing exists (FK lookup source).
  * @param model           ModelIR — required for resolving relation names to target tables.
- * @param out             Accumulator; receives both resolved targets and relation paths.
+ * @param out             Accumulator of compound keys.
  */
 function collectNestedExistsTargets(
 	where: unknown,
@@ -1000,31 +1002,26 @@ function collectNestedExistsTargets(
 					: [];
 
 			if (hops.length === 1) {
-				// Single-hop: resolve to target table to match context.target.
+				// Single-hop: compound key = "sourceTable:resolvedTarget"
 				const singleHop = hops[0] ?? '';
 				const rel = model.getRelation(`${sourceTable}.${singleHop}`);
 				const resolvedTarget = rel ? rel.target : singleHop;
-				out.add(resolvedTarget);
+				out.add(`${sourceTable}:${resolvedTarget}`);
 			} else if (hops.length > 1) {
-				// Multi-hop: store the dot-joined hop array to match context.relationPath.
-				out.add(hops.join('.'));
-				// Also walk to the final resolved target and store it so both forms match.
+				// Multi-hop: compound key = "sourceTable:hop1.hop2..." (matches context.relationPath)
+				out.add(`${sourceTable}:${hops.join('.')}`);
+				// Also store "sourceTable:finalTarget" so both target and path forms match.
 				let cur = sourceTable;
 				for (const hop of hops) {
 					const rel = model.getRelation(`${cur}.${hop}`);
 					cur = rel ? rel.target : hop;
 				}
-				out.add(cur);
+				out.add(`${sourceTable}:${cur}`);
 			}
 
-			// Resolve the immediate target for recursion into inner where.
+			// Resolve next source for recursion into inner where.
 			let nextSource = sourceTable;
 			if (hops.length >= 1) {
-				const rel = model.getRelation(`${sourceTable}.${hops[0]}`);
-				nextSource = rel ? rel.target : (hops[0] ?? sourceTable);
-			}
-			// For multi-hop, walk to the final target for the recursive source.
-			if (hops.length > 1) {
 				let cur = sourceTable;
 				for (const hop of hops) {
 					const rel = model.getRelation(`${cur}.${hop}`);
@@ -1221,37 +1218,49 @@ export function enrichExistsDecisionsInPlace(
 			if (!context.target) continue;
 
 			// Find the matching intent (consume-once).
-			// DEFECT-3 FIX: when the planner recorded a full relationPath (multi-hop,
-			// e.g. context.relationPath = 'posts.comments'), match the intent's full
-			// relation array as a dot-joined path so two paths ending in the SAME last-hop
-			// name ('posts.comments' vs 'articles.comments') are not cross-wired.
-			// For single-hop (context.relationPath absent) fall back to last-hop matching.
+			// findExistsIntents returns ONLY top-level exists intents (it does not
+			// descend into an exists's own .where).  Therefore existsIntents contains
+			// only root-level intents whose effective source = plan.rootTable.
+			// A filter-strategy for a nested relation (context.sourceTable !== rootTable)
+			// must NOT consume a top-level intent — it gets its where clause via the
+			// inline enrichExistsStubsInConditions path instead.
+			// Multi-hop intermediate filter-strategies (context.relationPath set) also
+			// all originate from the root chain and have matching top-level intents.
 			const contextRelationPath = context.relationPath as string | undefined;
-			const matchIdx = existsIntents.findIndex((i) => {
-				if (contextRelationPath) {
-					// Full-path match: compare intent.relation[] joined as 'a.b.c'
-					// against the planner's context.relationPath.
-					const intentPath = Array.isArray(i.relation)
-						? (i.relation as string[]).join('.')
-						: typeof i.relation === 'string'
-							? i.relation
-							: undefined;
-					return intentPath === contextRelationPath;
-				}
-				// Single-hop fallback: match by last hop name (existing behaviour).
-				const rel = Array.isArray(i.relation)
-					? i.relation.length > 0
-						? i.relation[i.relation.length - 1]
-						: undefined
-					: typeof i.relation === 'string'
-						? i.relation
-						: undefined;
-				return (
-					rel === context.relation ||
-					rel === context.target ||
-					rel === context.includeAlias
-				);
-			});
+			const contextSourceTableForIntent = context.sourceTable as
+				| string
+				| undefined;
+			const isNestedRelation =
+				contextSourceTableForIntent !== undefined &&
+				contextSourceTableForIntent !== plan.rootTable &&
+				!contextRelationPath; // single-hop nested (multi-hop uses path-match, keep)
+			const matchIdx = isNestedRelation
+				? -1
+				: existsIntents.findIndex((i) => {
+						if (contextRelationPath) {
+							// Full-path match: compare intent.relation[] joined as 'a.b.c'
+							// against the planner's context.relationPath.
+							const intentPath = Array.isArray(i.relation)
+								? (i.relation as string[]).join('.')
+								: typeof i.relation === 'string'
+									? i.relation
+									: undefined;
+							return intentPath === contextRelationPath;
+						}
+						// Single-hop fallback: match by last hop name.
+						const rel = Array.isArray(i.relation)
+							? i.relation.length > 0
+								? i.relation[i.relation.length - 1]
+								: undefined
+							: typeof i.relation === 'string'
+								? i.relation
+								: undefined;
+						return (
+							rel === context.relation ||
+							rel === context.target ||
+							rel === context.includeAlias
+						);
+					});
 			const matchingIntent =
 				matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
 			if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
@@ -1328,17 +1337,34 @@ export function enrichExistsDecisionsInPlace(
 			// Find the stub in the tree that corresponds to this filter-strategy.
 			// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])
 			// that convertExistsLike stores as targetTable via `cond.relation as string`.
-			// DEFECT-3 FIX: when context.relationPath is set (multi-hop), compare the
-			// stub's FULL path (dot-joined array) against context.relationPath so two
-			// stubs with the same last-hop name are matched to the correct filter-strategy.
+			//
+			// Full-identity matching: (sourceTable, relation/target/path).
+			// Multi-hop (contextRelationPath set): the full path already disambiguates
+			//   'posts.comments' from 'articles.comments' — no extra source guard needed.
+			// Single-hop (no contextRelationPath): guard on sourceTable so a nested
+			//   posts→comments filter-strategy (sourceTable='posts') does not consume
+			//   a top-level users→comments stub when both have target='comments'.
+			//   Top-level stubs in stubs[] always have effective source = plan.rootTable.
+			const contextSourceTable = context.sourceTable as string | undefined;
 			const stubIdx = stubs.findIndex((s, idx) => {
 				if (consumedStubIndices.has(idx)) return false;
 				if (contextRelationPath) {
-					// Full-path match: compare stub's targetTable[] joined as 'a.b.c'.
+					// Full-path match: dot-joined path already distinguishes paths.
+					// No extra sourceTable guard: multi-hop stubs with the same full path
+					// from a different source don't exist in the top-level stubs array.
 					const stubPath = normalizeStubRelationPath(s.decision.targetTable);
 					return stubPath === contextRelationPath;
 				}
-				// Single-hop fallback: last-hop name match (existing behaviour).
+				// Single-hop fallback: sourceTable guard + last-hop name match.
+				// A filter-strategy whose sourceTable !== plan.rootTable is for a nested
+				// or intermediate relation — it must never consume a top-level stub even
+				// when target names collide (users→comments vs posts→comments).
+				if (
+					contextSourceTable !== undefined &&
+					contextSourceTable !== plan.rootTable
+				) {
+					return false;
+				}
 				const stubRelation = normalizeStubRelation(s.decision.targetTable);
 				return (
 					stubRelation === context.relation ||
@@ -1362,15 +1388,20 @@ export function enrichExistsDecisionsInPlace(
 				// enrichExistsStubsInConditions.  Appending it again here would produce
 				// a duplicate top-level AND EXISTS that is both wrong and redundant.
 				//
-				// Use the same identity keys the filter-strategy exposes:
-				//   - context.target     (resolved table) for single-hop
-				//   - context.relationPath (dot-joined)   for multi-hop
-				// Both are stored in nestedExistsTargets by collectNestedExistsTargets.
+				// Use COMPOUND identity keys "sourceTable:resolvedTarget" or
+				// "sourceTable:relationPath" — the same compound keys stored by
+				// collectNestedExistsTargets.  Bare target names alone are insufficient:
+				// users→comments and posts→comments both have target='comments' but
+				// different source tables; without the source prefix, the top-level
+				// users.comments would be wrongly suppressed by the nested posts.comments.
+				const srcForKey = (context.sourceTable as string | undefined) ?? '';
 				const targetName = context.target as string | undefined;
 				const relationPath = contextRelationPath;
+				const compoundTarget = targetName ? `${srcForKey}:${targetName}` : '';
+				const compoundPath = relationPath ? `${srcForKey}:${relationPath}` : '';
 				if (
-					(targetName && nestedExistsTargets.has(targetName)) ||
-					(relationPath && nestedExistsTargets.has(relationPath))
+					(compoundTarget && nestedExistsTargets.has(compoundTarget)) ||
+					(compoundPath && nestedExistsTargets.has(compoundPath))
 				) {
 					// Already handled inline — skip the append.
 					continue;
