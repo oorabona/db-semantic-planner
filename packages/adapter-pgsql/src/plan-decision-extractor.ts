@@ -551,15 +551,42 @@ function buildEnrichedExistsDecision(
 		}
 	}
 
-	// Resolve FK from model relation if available
-	const foreignKey =
+	// Resolve the full relation from the model when available.
+	// We need relationType to set the correct FK correlation direction:
+	//   belongsTo  → sourceColumn = foreignKey (on outer table), targetColumn = pk (on inner table)
+	//   hasMany/hasOne → sourceColumn = pk (on outer table), targetColumn = foreignKey (on inner table)
+	// Without relationType, mapToHandlerDecision/deriveFkColumns defaults to the hasMany direction,
+	// which is wrong for belongsTo relations (e.g. posts.author_id → users.id).
+	// parentKey provides the explicit PK override when the relation uses a non-default PK column.
+	//   belongsTo:  parentKey = inner table's PK (RelationIR.targetKey, usually 'id')
+	//   hasMany/hasOne: parentKey = outer table's PK (RelationIR.sourceKey, usually 'id')
+	const sourceTableForRelation =
+		(context.sourceTable as string | undefined) || rootTable;
+	const relIR =
 		model && context.relation
-			? resolveRelation(
-					model,
-					(context.sourceTable as string | undefined) || rootTable,
-					context.relation as string,
-				)?.foreignKey
+			? model.getRelation(
+					`${sourceTableForRelation}.${context.relation as string}`,
+				)
 			: undefined;
+	const foreignKey = relIR
+		? typeof relIR.foreignKey === 'string'
+			? relIR.foreignKey
+			: relIR.foreignKey?.[0]
+		: undefined;
+	// PlanDecision.relationType only supports 'belongsTo' | 'hasMany' | 'hasOne'.
+	// 'belongsToMany' (M:N via junction table) is excluded — its EXISTS path is handled
+	// separately upstream, so if it reaches here we fall back to the hasMany default.
+	const relationType =
+		relIR?.type === 'belongsTo'
+			? 'belongsTo'
+			: relIR?.type === 'hasMany' || relIR?.type === 'hasOne'
+				? relIR.type
+				: undefined;
+	// parentKey: the "other side's" PK column when it differs from DEFAULT_PK_COLUMN.
+	// For belongsTo: the inner (target) table's PK override (RelationIR.targetKey).
+	// For hasMany/hasOne: the outer (source) table's PK override (RelationIR.sourceKey).
+	const parentKey =
+		relationType === 'belongsTo' ? relIR?.targetKey : relIR?.sourceKey;
 
 	// Determine operator
 	let operator: string = 'exists';
@@ -588,6 +615,11 @@ function buildEnrichedExistsDecision(
 		operator,
 		targetTable,
 		...(foreignKey ? { foreignKey } : {}),
+		// relationType is required so deriveFkColumns (called by mapToHandlerDecision) can
+		// set sourceColumn/targetColumn in the correct direction for the EXISTS correlation.
+		...(relationType ? { relationType } : {}),
+		// parentKey provides the explicit PK override for non-default PK columns.
+		...(parentKey ? { parentKey } : {}),
 		...(conditions ? { conditions } : {}),
 		...(d.choice === 'join' ? { choice: 'join' } : {}),
 		...(relationName ? { relationName } : {}),
