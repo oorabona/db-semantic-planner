@@ -28,11 +28,26 @@ jobs:
       # OIDC trusted publishing: --provenance attaches the GHA OIDC
       # token to each upload; npm validates it against the trusted-publisher
       # config registered for each @dbsp/* package. No NPM_TOKEN required.
-      - run: pnpm -C packages/types publish --no-git-checks --provenance
-      - run: pnpm -C packages/nql publish --no-git-checks --provenance
-      - run: pnpm -C packages/core publish --no-git-checks --provenance
-      - run: pnpm -C packages/adapter-pgsql publish --no-git-checks --provenance
-      - run: pnpm -C packages/cli publish --no-git-checks --provenance
+      #
+      # Idempotent: skip any package whose version is already on npm. A
+      # release-please release may bump only some packages (e.g. types stays
+      # put while core/cli go to the next patch), and it can fire this workflow
+      # more than once (one GitHub Release per component). Publishing in dependency
+      # order, guarded by an existence check, makes partial releases, re-runs,
+      # and multi-trigger events all safe — never failing on "cannot publish
+      # over previously published version".
+      - name: Publish changed packages
+        run: |
+          for p in types nql core adapter-pgsql cli; do
+            name=$(jq -r .name "packages/$p/package.json")
+            ver=$(jq -r .version "packages/$p/package.json")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "$name@$ver already on npm — skipping"
+            else
+              echo "Publishing $name@$ver"
+              pnpm -C "packages/$p" publish --no-git-checks --provenance
+            fi
+          done
       # @dbsp/mcp-server publish skipped — package is currently a
       # scaffold (no MCP tools registered yet, see issue 112).
       # Re-enable once the first tool ships.
