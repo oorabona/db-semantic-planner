@@ -679,7 +679,9 @@ function collectExistsStubs(
  */
 function normalizeStubRelation(targetTable: unknown): string | undefined {
 	if (Array.isArray(targetTable) && targetTable.length > 0)
-		return targetTable[0] as string;
+		// Return LAST hop: planner filter-strategy context.relation = last hop name.
+		// For single-hop ['posts'], last === first (no regression).
+		return targetTable[targetTable.length - 1] as string;
 	if (typeof targetTable === 'string') return targetTable;
 	return undefined;
 }
@@ -807,25 +809,51 @@ export function enrichExistsDecisionsInPlace(
 		if (consumedStubIndices.has(i)) continue;
 		const stub = stubs[i];
 		if (!stub) continue;
-		const relationName = normalizeStubRelation(stub.decision.targetTable);
-		if (!relationName) continue;
+
+		// Get the full targetTable value (may be an array for multi-hop paths like ['posts','comments']).
+		const rawTargetTable = stub.decision.targetTable;
+		const relationPath = Array.isArray(rawTargetTable)
+			? rawTargetTable
+			: [rawTargetTable];
+		// Display name for error messages: 'posts.comments' for multi-hop, 'auditLog' for single.
+		const displayName = Array.isArray(rawTargetTable)
+			? rawTargetTable.join('.')
+			: String(rawTargetTable ?? '');
+		if (!displayName) continue;
 
 		if (!model) {
 			throw new Error(
-				`exists('${relationName}'): cannot resolve relation '${relationName}' on table '${plan.rootTable}' — no model is configured. ` +
+				`exists('${displayName}'): cannot resolve relation '${displayName}' on table '${plan.rootTable}' — no model is configured. ` +
 					`Use rawExists(subquery(...)) for an EXISTS over an uncorrelated or undeclared subquery.`,
 			);
 		}
 
-		// Check whether the relation is declared for the source table.
-		// We check the rootTable (and context.sourceTable if available in the stub,
-		// though stubs don't carry it — rootTable is the correct source for top-level filters).
-		const declaredRelation = model.getRelation(
-			`${plan.rootTable}.${relationName}`,
-		);
-		if (!declaredRelation) {
+		// Validate that every hop in the relation path is declared.
+		// For multi-hop ['posts','comments'] from 'users':
+		//   hop 0: model.getRelation('users.posts') must exist
+		//   hop 1: model.getRelation(posts.target + '.comments') must exist
+		// If ALL hops are declared, it is a valid multi-hop path (even if the stub
+		// was not matched to a filter-strategy — e.g. edge case where planner produced
+		// no filter-strategy). We skip the throw.
+		let currentSource = plan.rootTable;
+		let allHopsDeclared = true;
+		for (const hop of relationPath) {
+			if (!hop) {
+				allHopsDeclared = false;
+				break;
+			}
+			const rel = model.getRelation(`${currentSource}.${hop}`);
+			if (!rel) {
+				allHopsDeclared = false;
+				break;
+			}
+			currentSource = rel.target;
+		}
+
+		if (!allHopsDeclared) {
+			// Report the first undeclared hop in the path
 			throw new Error(
-				`exists('${relationName}'): no relation '${relationName}' is declared on table '${plan.rootTable}'. ` +
+				`exists('${displayName}'): no relation '${displayName}' is declared on table '${plan.rootTable}'. ` +
 					`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 			);
 		}
