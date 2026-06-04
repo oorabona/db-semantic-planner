@@ -29,6 +29,10 @@ jobs:
           node-version: 22
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
+      # OIDC tokenless ("trusted") publishing requires npm >= 11.5.1; Node 22
+      # ships npm 10.x, which can sign provenance but cannot authenticate the
+      # registry PUT via OIDC, so the publish would fail with a 404.
+      - run: npm install -g npm@latest
       - run: pnpm install --frozen-lockfile
       # Decide whether anything needs publishing BEFORE building, so the common
       # case (a release-please run that only refreshes the release PR, no version
