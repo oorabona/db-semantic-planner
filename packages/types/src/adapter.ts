@@ -32,6 +32,7 @@ import type {
 	ModelIR,
 	PartitionIR,
 	SequenceIR,
+	TableIR,
 } from './model-ir.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
@@ -697,7 +698,8 @@ export type DDLFeature =
 	| 'indexOpclass'
 	| 'indexInclude'
 	| 'partialIndex'
-	| 'expressionIndex';
+	| 'expressionIndex'
+	| 'rowLevelSecurity';
 
 /** Version range for a DDL feature — resolved at createDialectCapabilities() time */
 export interface DDLFeatureVersionRange {
@@ -744,6 +746,8 @@ export interface DDLFeatureElementMap {
 	indexInclude: IndexIR;
 	partialIndex: IndexIR;
 	expressionIndex: IndexIR;
+	/** Table with rlsEnabled and/or policies (ENABLE ROW LEVEL SECURITY + CREATE POLICY) */
+	rowLevelSecurity: TableIR;
 }
 
 /**

@@ -55,7 +55,7 @@ export interface FeatureUsage {
 // ---------------------------------------------------------------------------
 
 /**
- * Default feature checkers -- mirrors the 15 supportsDDL* flags that
+ * Default feature checkers -- mirrors the 16 supportsDDL* flags that
  * negotiateFeatures() previously checked inline.
  *
  * Each checker preserves exactly the same detection logic (same guards,
@@ -316,6 +316,24 @@ export const DEFAULT_FEATURE_CHECKERS: readonly FeatureChecker[] =
 							const idxName = idx.name ?? `idx on ${tableName}`;
 							usages.push({ table: tableName, detail: idxName });
 						}
+					}
+				}
+				return usages;
+			},
+		},
+
+		// -----------------------------------------------------------------------
+		// Row-Level Security
+		// -----------------------------------------------------------------------
+		{
+			capability: 'supportsDDLRowLevelSecurity',
+			feature: 'rowLevelSecurity',
+			detectUsage(model) {
+				if (!model.tables) return [];
+				const usages: FeatureUsage[] = [];
+				for (const [tableName, table] of model.tables) {
+					if (table.rlsEnabled || table.policies?.length) {
+						usages.push({ table: tableName, detail: tableName });
 					}
 				}
 				return usages;
