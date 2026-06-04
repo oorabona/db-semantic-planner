@@ -8,7 +8,7 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
-import type { ModelIR, PlanReport } from '@dbsp/types';
+import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
 import { isSubqueryRef } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -17,6 +17,7 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
+import { convertWhereCondition } from './intent-to-decisions.js';
 
 // ============================================================================
 // Types
@@ -256,16 +257,25 @@ export function convertWhereToDecisions(
 					table,
 				},
 			];
-		case 'in':
+		case 'in': {
+			// When a subquery is present, delegate to convertWhereCondition so the
+			// IN-subquery modifier guard (assertNoUnsupportedSubqueryModifiers 'IN') and
+			// correct inSubquery decision shape are applied.  Values-only IN uses the
+			// simple literal path.
+			if (w.subquery) {
+				const d = convertWhereCondition(where as WhereIntent, table);
+				return d !== null ? [d] : [];
+			}
 			return [
 				{
 					type: 'where',
 					column: w.field as string,
 					operator: 'in',
-					value: w.values ?? w.subquery,
+					value: w.values,
 					table,
 				},
 			];
+		}
 		case 'range':
 			return [
 				{
@@ -361,8 +371,31 @@ export function convertWhereToDecisions(
 				} as PlanDecision,
 			];
 		}
-		default:
-			return [];
+		// For all remaining kinds, delegate to convertWhereCondition which handles
+		// every WhereIntent kind with the correct guards (modifier checks, outerRef
+		// rejection, etc.).  This covers: rawExists, rawNotExists, subquery (scalar),
+		// jsonContains, jsonExists, any — and any future kinds added to the switch
+		// in convertWhereCondition.  A null result means the kind was genuinely
+		// invalid (malformed intent) and is safely omitted from the conditions array.
+		case 'rawExists':
+		case 'rawNotExists':
+		case 'subquery':
+		case 'jsonContains':
+		case 'jsonExists':
+		case 'any': {
+			const d = convertWhereCondition(where as WhereIntent, table);
+			return d !== null ? [d] : [];
+		}
+		default: {
+			// Exhaustive fail-closed: a WhereIntent kind that is not handled here
+			// silently disappearing from a nested exists where clause is a security
+			// defect (broadened filter).  Throw loudly so it is caught at dev time.
+			const unhandled = (w.kind as string | undefined) ?? '(unknown)';
+			throw new Error(
+				`convertWhereToDecisions: unhandled predicate kind '${unhandled}' in nested exists where clause. ` +
+					'Add a case for this kind to keep nested exists predicates exhaustive.',
+			);
+		}
 	}
 }
 
