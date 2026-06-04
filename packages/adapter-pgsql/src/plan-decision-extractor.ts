@@ -945,6 +945,11 @@ function buildEnrichedExistsDecision(
 		type: 'where',
 		operator,
 		targetTable,
+		// sourceTable: the table this EXISTS is resolved FROM (the relation's source).
+		// Required by propagateExistsConditions's (sourceTable, relationName) identity
+		// guard — without it the guard is a no-op and cross-source propagation can occur
+		// when two relations share a name but originate from different tables.
+		sourceTable: sourceTableForRelation,
 		...(foreignKey ? { foreignKey } : {}),
 		// relationType is required so deriveFkColumns (called by mapToHandlerDecision) can
 		// set sourceColumn/targetColumn in the correct direction for the EXISTS correlation.

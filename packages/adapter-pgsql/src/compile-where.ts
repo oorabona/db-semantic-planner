@@ -807,6 +807,19 @@ export function compileWhereIntent(
 		if (exprRefResult !== null) return exprRefResult;
 	}
 
+	// IN-subquery guard: the dispatcher normalises the subquery by copying only
+	// from/select/where/limit/orderBy — GROUP BY, HAVING, OFFSET, DISTINCT,
+	// include, and joins are silently dropped before the handler sees the intent.
+	// For mutation guards that reach this path (compileBatchUpdate → compileWhereIntent
+	// for the WHERE clause), silent truncation can broaden the affected rows.
+	// Mirror the guard on the decisions path (convertIn in intent-to-decisions.ts).
+	if (intent.kind === 'in') {
+		const inSub = (intent as { subquery?: unknown }).subquery;
+		if (inSub) {
+			assertNoUnsupportedSubqueryModifiers(inSub as QueryIntent, 'IN');
+		}
+	}
+
 	// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,
 	// jsonContains, jsonExists — plus pass-through for unknown kinds.
 	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
