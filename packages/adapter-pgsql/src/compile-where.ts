@@ -44,6 +44,7 @@ import { createWhereDispatcher } from './handlers/index.js';
 // Called once at module-load time (safe: no circular calls, just stores the factory ref).
 registerWhereDispatcherFactory(createWhereDispatcher);
 
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -526,9 +527,13 @@ function handleRelationFilterIntent(
 	}
 	const model = ctx.model;
 
-	// Validate all hops upfront and collect resolved targets.
+	// Validate all hops upfront and collect resolved targets + FK metadata.
 	let currentSource = ctx.rootTable;
 	const hopTargets: string[] = [];
+	// Per-hop FK columns so the EXISTS handler uses model-declared FKs instead
+	// of convention fallback (fixes the DEFECT-2 wrong-correlation bug).
+	const hopSourceColumns: string[] = [];
+	const hopTargetColumns: string[] = [];
 	for (const hop of hops) {
 		const rel = model.getRelation(`${currentSource}.${hop}`);
 		if (!rel) {
@@ -538,12 +543,34 @@ function handleRelationFilterIntent(
 			);
 		}
 		hopTargets.push(rel.target);
+		// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
+		// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
+		// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
+		const fk =
+			typeof rel.foreignKey === 'string'
+				? rel.foreignKey
+				: Array.isArray(rel.foreignKey)
+					? (rel.foreignKey as readonly string[])[0]
+					: undefined;
+		const defaultPk = DEFAULT_PK_COLUMN;
+		if (rel.type === 'belongsTo') {
+			hopSourceColumns.push(fk ?? defaultFkDerivation(rel.target, defaultPk));
+			hopTargetColumns.push(rel.targetKey ?? defaultPk);
+		} else {
+			// hasMany / hasOne: FK lives on the target table
+			hopSourceColumns.push(rel.sourceKey ?? defaultPk);
+			hopTargetColumns.push(
+				fk ?? defaultFkDerivation(currentSource, defaultPk),
+			);
+		}
 		currentSource = rel.target;
 	}
 
 	// Build the nested WhereIntent chain from innermost to outermost.
 	// innermost hop: carries the user's where clause.
 	// Each outer hop wraps the previous as its where clause.
+	// Per-hop FK columns are threaded in so the EXISTS handler emits the correct
+	// correlation predicate (e.g. users.id = posts.author_id, not posts.user_id).
 	let innerIntent: WhereIntent | undefined = innermostWhere;
 	for (let i = hops.length - 1; i >= 0; i--) {
 		const hop = hops[i] ?? '';
@@ -554,6 +581,8 @@ function handleRelationFilterIntent(
 			kind: hopKind,
 			relation: hop,
 			targetTable,
+			sourceColumn: hopSourceColumns[i],
+			targetColumn: hopTargetColumns[i],
 			where: innerIntent,
 		} as unknown as WhereIntent;
 	}

@@ -732,21 +732,18 @@ describe('join(batchValuesRef) — identifier validation (GAP-1)', () => {
 	});
 
 	it('throws InvalidOperationError when bv.alias contains SQL-injection characters', () => {
-		const bv = batchValues([[1]], ['id'], ['integer'], {
-			alias: 'bad"; DROP',
-		});
-		expect(() => o.select('users').join(bv, { on: eq('users.id', 1) })).toThrow(
-			InvalidOperationError,
-		);
+		// Validation now fires in batchValues() at construction time (central guard),
+		// so the construction call must be inside the expect() block.
+		expect(() =>
+			batchValues([[1]], ['id'], ['integer'], { alias: 'bad"; DROP' }),
+		).toThrow(InvalidOperationError);
 	});
 
 	it('throws InvalidOperationError when a batch column name contains SQL-injection characters', () => {
-		const bv = batchValues([[1]], ['id"; DROP'], ['integer'], {
-			alias: 'batch',
-		});
-		expect(() => o.select('users').join(bv, { on: eq('users.id', 1) })).toThrow(
-			InvalidOperationError,
-		);
+		// Validation now fires in batchValues() at construction time (central guard).
+		expect(() =>
+			batchValues([[1]], ['id"; DROP'], ['integer'], { alias: 'batch' }),
+		).toThrow(InvalidOperationError);
 	});
 
 	it('does not throw for a valid opts.as alias', () => {

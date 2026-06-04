@@ -238,3 +238,88 @@ describe('FR-3: batchValues()', () => {
 		expect(dump.params).toEqual([ids]);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Security / injection tests (DEFECT-1 fix)
+// ---------------------------------------------------------------------------
+
+describe('batchValues() SQL injection prevention (DEFECT-1)', () => {
+	it('T-SEC-1: malicious column name throws at construction — SQL injection prevented', () => {
+		// A column name containing SQL metacharacters must be rejected at batchValues()
+		// construction time, BEFORE any SQL is emitted.
+		expect(() =>
+			batchValues([[1]], ['a"); DROP TABLE x; --'], ['integer']),
+		).toThrow(/column name contains invalid characters/i);
+	});
+
+	it('T-SEC-2: malicious alias throws at construction', () => {
+		expect(() =>
+			batchValues([[1]], ['id'], ['integer'], {
+				alias: 'a"); DROP TABLE x; --',
+			}),
+		).toThrow(/alias name contains invalid characters/i);
+	});
+
+	it('T-SEC-3: empty column name is rejected', () => {
+		expect(() => batchValues([[1]], [''], ['integer'])).toThrow(
+			/column name must not be empty/i,
+		);
+	});
+
+	it('T-SEC-4: column name starting with a digit is rejected', () => {
+		expect(() => batchValues([[1]], ['1col'], ['integer'])).toThrow(
+			/column name contains invalid characters/i,
+		);
+	});
+
+	it('T-SEC-5: valid column names still work after validation', () => {
+		// Regression: ensure valid names are not incorrectly rejected
+		const batch = batchValues(
+			[
+				[1, 2],
+				['a', 'b'],
+			],
+			['user_id', 'name_$'],
+			['integer', 'text'],
+			{ alias: 'my_batch' },
+		);
+		expect(batch.alias).toBe('my_batch');
+		expect(batch.columns).toEqual(['user_id', 'name_$']);
+	});
+
+	it('T-SEC-6: deparser quotes mixed-case column names (defense-in-depth)', () => {
+		// A column name with uppercase letters passes validateIdentifier (allowed)
+		// but the deparser must still quote it to be safe.
+		const orm = buildOrm();
+		const batch = batchValues([[1, 2]], ['UserId'], ['integer'], {
+			alias: 'MyBatch',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		// Deparser quoteIdent wraps mixed-case names in double-quotes
+		expect(sql).toContain('"MyBatch"');
+		expect(sql).toContain('"UserId"');
+	});
+
+	it('T-SEC-7: deparser quotes column names in JOIN unnest (defense-in-depth)', () => {
+		const usersSchema = schema({
+			users: { id: 'uuid', name: 'string' },
+		} as const);
+		const adapter = createPgsqlCompileOnlyAdapter({ model: usersSchema.model });
+		const orm = createOrm({ model: usersSchema.model, adapter });
+		const batch = batchValues(
+			[['11111111-1111-1111-1111-111111111111']],
+			['MyId'],
+			['uuid'],
+			{ alias: 'FilterSet' },
+		);
+		const dump = orm
+			.select('users')
+			.join(batch, { on: eq('users.id', ref('FilterSet.MyId')), type: 'inner' })
+			.dump();
+		const sql = ws(dump.sql);
+		// Both alias and column must be double-quoted in the AS clause
+		expect(sql).toContain('"FilterSet"');
+		expect(sql).toContain('"MyId"');
+	});
+});

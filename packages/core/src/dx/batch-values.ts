@@ -1,3 +1,5 @@
+import { validateIdentifier } from './errors.js';
+
 /**
  * BatchValuesRef — a virtual batch data source backed by unnest($1::type[], ...).
  *
@@ -103,12 +105,21 @@ export function batchValues(
 				'Type names must contain only letters, digits, and underscores.',
 		);
 	}
+	// Security: validate alias and column names centrally so BOTH the
+	// orm.from(batchValues(...)) and orm...join(batchValues(...)) paths are
+	// protected at the source.  The deparser emits these as SQL identifiers
+	// in AS alias(col1, col2) — an unvalidated name could inject SQL.
+	const alias = opts?.alias ?? 'batch';
+	validateIdentifier(alias, 'alias');
+	for (const col of columns) {
+		validateIdentifier(col, 'column');
+	}
 	return {
 		__kind: 'batchValues',
 		data,
 		columns,
 		types,
-		alias: opts?.alias ?? 'batch',
+		alias,
 		ordinality: opts?.ordinality ?? false,
 	};
 }
