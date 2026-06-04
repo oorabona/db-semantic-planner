@@ -55,9 +55,15 @@ jobs:
           pnpm -C packages/core build
           pnpm -C packages/adapter-pgsql build
           pnpm -C packages/cli build
-      # OIDC trusted publishing: --provenance attaches the GHA OIDC token to
-      # each upload; npm validates it against the trusted-publisher config
-      # registered for each @dbsp/* package. No NPM_TOKEN required.
+      # Publish via `pnpm pack` + `npm publish <tarball>`:
+      #   - pnpm pack resolves workspace:/catalog: protocols into real versions
+      #     inside the tarball's package.json (the marker-leak that broke 1.0.0
+      #     when published with plain npm), so the tarball is self-contained.
+      #   - npm publish then uploads that finished tarball with --provenance via
+      #     OIDC trusted publishing (no NPM_TOKEN). npm validates provenance
+      #     against the trusted-publisher config for each @dbsp/* package.
+      # Why not `pnpm publish --provenance`: pnpm forwards --no-git-checks to the
+      # npm process it delegates provenance to, and npm rejects it (EUSAGE).
       #
       # Idempotent: skip any package already on npm. release-please bumps only
       # changed packages (types may stay put while core/cli advance). Publishing
@@ -74,7 +80,8 @@ jobs:
               echo "$name@$ver already on npm — skipping"
             else
               echo "Publishing $name@$ver"
-              pnpm -C "packages/$p" publish --no-git-checks --provenance
+              tgz=$(cd "packages/$p" && pnpm pack | tail -1)
+              npm publish "packages/$p/$tgz" --provenance --access public
             fi
           done
       # @dbsp/mcp-server publish skipped — scaffold only (no MCP tools yet,
