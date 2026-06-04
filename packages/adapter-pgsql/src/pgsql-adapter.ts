@@ -609,6 +609,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: AdapterStreamOptions,
 	): AsyncIterableIterator<T> {
 		const chunkSize = options?.chunkSize ?? 100;
+		if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0) {
+			throw new Error(
+				`Invalid stream chunkSize: ${chunkSize}. Must be a positive integer.`,
+			);
+		}
 		const adapter = this;
 
 		// Use a wrapper to create the async generator

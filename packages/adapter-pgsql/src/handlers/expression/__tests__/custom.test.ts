@@ -96,6 +96,39 @@ describe('compileExpressionIntent', () => {
 			expect(normalizeSQL(result.sql)).toBe('select null from items');
 			expect(result.parameters).toHaveLength(0);
 		});
+
+		it('escapes single quotes in string literals — SQL injection attempt doubled (FIX-4b)', () => {
+			// The value below contains a SQL injection attempt with an embedded
+			// single quote that would break out of a naive string literal.
+			// The deparser must double the quote ('' not ') so the output is a
+			// syntactically valid, self-contained SQL string constant.
+			//
+			// Mutation this test catches: if quoteString() stops doubling single
+			// quotes (e.g. reverts to raw interpolation), the output would contain
+			// the unescaped sequence `');` which breaks the string boundary.
+			const injectionAttempt = "a'); DROP TABLE users; --";
+			const result = compileCustomExpr({
+				kind: 'literal',
+				value: injectionAttempt,
+			});
+
+			// normalizeSQL lower-cases but does not strip quotes.
+			const sql = normalizeSQL(result.sql);
+
+			// Assert the doubled-quote form IS present — single quotes doubled to ''.
+			expect(sql).toContain("'a''); drop table users; --'");
+
+			// Assert the UNESCAPED break-out pattern is NOT present.
+			// The injection value `a'); DROP TABLE users; --` must be rendered with
+			// the single quote doubled: `a'')`, NOT as a raw `');`.
+			// A lone `');` (quote not preceded by another quote) means the string
+			// boundary was broken. The regex matches `');` only when not preceded
+			// by another `'` (i.e. the unescaped, dangerous form).
+			expect(sql).not.toMatch(/(?<!')'(\);)/);
+
+			// Confirm it is emitted as a SQL constant, not a bound parameter.
+			expect(result.parameters).toHaveLength(0);
+		});
 	});
 
 	describe('cast kind', () => {

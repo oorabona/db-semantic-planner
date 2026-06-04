@@ -921,3 +921,103 @@ describe('PgsqlAdapter [P2-T5e]: defaultPkColumnName + deriveFkColumnName propag
 		expect(capturedSql).toContain('z_users_custom_pk');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// [FIX-4a] stream() chunkSize validation guard
+//
+// Mutation caught by each test:
+//  - chunkSize 0 / negative: removing `chunkSize <= 0` branch → test passes
+//    invalid value to `FETCH FORWARD 0 FROM …` without rejection.
+//  - chunkSize 1.5: removing `Number.isSafeInteger` check → `FETCH FORWARD 1.5
+//    FROM …` reaches the DB without rejection.
+//  - chunkSize NaN: same — NaN passes neither isSafeInteger nor <= 0 as a
+//    guard alone; without isSafeInteger the condition `NaN <= 0` is false and
+//    the NaN would silently reach the FETCH statement.
+//  - valid chunkSize 100: proves the guard is not over-eager (happy path still
+//    works end-to-end through the full stream iteration cycle).
+// ---------------------------------------------------------------------------
+
+describe('PgsqlAdapter.stream — chunkSize validation (FIX-4a)', () => {
+	it('rejects chunkSize 0 before issuing any FETCH', () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() =>
+			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: 0 }),
+		).toThrow('Invalid stream chunkSize: 0. Must be a positive integer.');
+
+		// Pool.connect must NOT have been called — guard fires before any I/O.
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('rejects chunkSize -1 before issuing any FETCH', () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() =>
+			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: -1 }),
+		).toThrow('Invalid stream chunkSize: -1. Must be a positive integer.');
+
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('rejects chunkSize 1.5 (non-integer) before issuing any FETCH', () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() =>
+			adapter.stream({ sql: 'SELECT 1', parameters: [] }, { chunkSize: 1.5 }),
+		).toThrow('Invalid stream chunkSize: 1.5. Must be a positive integer.');
+
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('rejects chunkSize NaN before issuing any FETCH', () => {
+		const pool = makePool();
+		const adapter = createPgsqlAdapter(pool);
+
+		expect(() =>
+			adapter.stream(
+				{ sql: 'SELECT 1', parameters: [] },
+				{ chunkSize: Number.NaN },
+			),
+		).toThrow('Invalid stream chunkSize: NaN. Must be a positive integer.');
+
+		expect(pool.connect).not.toHaveBeenCalled();
+	});
+
+	it('accepts default chunkSize (100) and streams rows successfully', async () => {
+		const rows: Record<string, unknown>[] = [{ id: 1 }];
+		let callIdx = 0;
+		const streamClient = makeClient(async () => {
+			callIdx++;
+			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
+			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
+			if (callIdx === 3) return { rows, rowCount: 1 } as QueryResult; // FETCH → 1 row
+			if (callIdx === 4) return { rows: [], rowCount: 0 } as QueryResult; // FETCH → done
+			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } as QueryResult; // COMMIT
+		});
+
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const collected: unknown[] = [];
+		// No chunkSize option → uses default 100, must not throw.
+		for await (const row of adapter.stream({
+			sql: 'SELECT 1',
+			parameters: [],
+		})) {
+			collected.push(row);
+		}
+
+		expect(collected).toEqual([{ id: 1 }]);
+
+		// Verify the FETCH statement used the correct default chunk size.
+		const queryCalls: string[] = (
+			streamClient.query as ReturnType<typeof vi.fn>
+		).mock.calls.map((c) => c[0] as string);
+		const fetchCall = queryCalls.find((q) => q.startsWith('FETCH FORWARD'));
+		expect(fetchCall).toMatch(/^FETCH FORWARD 100 FROM /);
+	});
+});
