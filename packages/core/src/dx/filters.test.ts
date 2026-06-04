@@ -557,13 +557,20 @@ describe('Feature 8: Expression Helpers', () => {
 
 		it('should throw on empty alias', () => {
 			expect(() => raw('SELECT 1', '')).toThrow(
-				'raw() requires a non-empty alias',
+				'column name must not be empty',
 			);
 		});
 
 		it('should throw on whitespace-only alias', () => {
 			expect(() => raw('SELECT 1', '  ')).toThrow(
-				'raw() requires a non-empty alias',
+				'column name contains invalid characters',
+			);
+		});
+
+		it('should reject invalid alias identifier on raw() (SQL injection attempt)', () => {
+			// FIND-008: validateIdentifier now applied to raw() alias only; fragment stays raw
+			expect(() => raw('NOW()', 'a"; DROP TABLE users; --')).toThrow(
+				'column name contains invalid characters',
 			);
 		});
 
@@ -608,24 +615,36 @@ describe('Feature 8: Expression Helpers', () => {
 		});
 
 		it('should throw on empty column name', () => {
-			expect(() => col('', 'alias')).toThrow(
-				'col() requires a non-empty column name',
-			);
+			expect(() => col('', 'alias')).toThrow('column name must not be empty');
 		});
 
 		it('should throw on whitespace-only column name', () => {
 			expect(() => col('  ', 'alias')).toThrow(
-				'col() requires a non-empty column name',
+				'column name contains invalid characters',
 			);
 		});
 
 		it('should throw on empty alias', () => {
-			expect(() => col('name', '')).toThrow('col() requires a non-empty alias');
+			expect(() => col('name', '')).toThrow('column name must not be empty');
 		});
 
 		it('should throw on whitespace-only alias', () => {
 			expect(() => col('name', '  ')).toThrow(
-				'col() requires a non-empty alias',
+				'column name contains invalid characters',
+			);
+		});
+
+		it('should reject invalid column name identifier (SQL injection attempt)', () => {
+			// FIND-008: validateIdentifier now applied to col() column and alias
+			expect(() => col('a"; DROP TABLE users; --', 'alias')).toThrow(
+				'column name contains invalid characters',
+			);
+		});
+
+		it('should reject invalid alias identifier (SQL injection attempt)', () => {
+			// FIND-008: validateIdentifier now applied to col() alias
+			expect(() => col('name', 'a b')).toThrow(
+				'column name contains invalid characters',
 			);
 		});
 	});
@@ -718,32 +737,39 @@ describe('relationColumn() helper', () => {
 
 		it('should throw on whitespace-only relation', () => {
 			expect(() => relationColumn('  ', 'name', 'alias')).toThrow(
-				'relationColumn() requires a non-empty relation path',
+				'relation name contains invalid characters',
 			);
 		});
 
 		it('should throw on empty column', () => {
 			expect(() => relationColumn('category', '', 'alias')).toThrow(
-				'relationColumn() requires a non-empty column name',
+				'column name must not be empty',
 			);
 		});
 
 		it('should throw on whitespace-only column', () => {
 			expect(() => relationColumn('category', '  ', 'alias')).toThrow(
-				'relationColumn() requires a non-empty column name',
+				'column name contains invalid characters',
 			);
 		});
 
 		it('should throw on empty alias', () => {
 			expect(() => relationColumn('category', 'name', '')).toThrow(
-				'relationColumn() requires a non-empty alias',
+				'column name must not be empty',
 			);
 		});
 
 		it('should throw on whitespace-only alias', () => {
 			expect(() => relationColumn('category', 'name', '  ')).toThrow(
-				'relationColumn() requires a non-empty alias',
+				'column name contains invalid characters',
 			);
+		});
+
+		it('should reject invalid relation segment identifier (SQL injection attempt)', () => {
+			// FIND-008: each dot-separated segment of relation is now validated via validateIdentifier
+			expect(() =>
+				relationColumn('cat"; DROP TABLE users; --', 'name', 'alias'),
+			).toThrow('relation name contains invalid characters');
 		});
 	});
 });

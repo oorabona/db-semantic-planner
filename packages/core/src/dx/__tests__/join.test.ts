@@ -161,4 +161,13 @@ describe('QueryBuilder.join() — FR-10', () => {
 			expect(intent.joins).toBeUndefined();
 		});
 	});
+
+	describe('alias validation', () => {
+		it('should reject invalid as alias identifier (SQL injection attempt)', () => {
+			// FIND-008: validateIdentifier now applied to join() as alias
+			expect(() =>
+				orm.select('calls').join('caller', { as: 'a"; DROP TABLE users; --' }),
+			).toThrow('alias name contains invalid characters');
+		});
+	});
 });

@@ -797,9 +797,8 @@ export function coalesce(
  * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
  */
 export function raw(sqlFragment: string, as: string): ExpressionSpec {
-	if (!as || as.trim() === '') {
-		throw new Error('raw() requires a non-empty alias');
-	}
+	// FIND-008: Validate the alias as a SQL identifier; sqlFragment is an intentional raw escape hatch
+	validateIdentifier(as, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'raw', sql: sqlFragment, as },
@@ -831,12 +830,9 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
  * ```
  */
 export function col(column: string, alias: string): ExpressionSpec {
-	if (!column || column.trim() === '') {
-		throw new Error('col() requires a non-empty column name');
-	}
-	if (!alias || alias.trim() === '') {
-		throw new Error('col() requires a non-empty alias');
-	}
+	// FIND-008: Validate column name and alias as SQL identifiers (same strictness as coalesce)
+	validateIdentifier(column, 'column');
+	validateIdentifier(alias, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'columnAlias', column, alias },
@@ -877,15 +873,18 @@ export function relationColumn<A extends string>(
 	column: string,
 	as: A,
 ): AliasedExprColumn<A> {
-	if (!relation || relation.trim() === '') {
+	// FIND-008: Validate relation path segments, column, and alias as SQL identifiers.
+	// relation may be dot-separated (e.g. 'category.parent') — validate each segment individually.
+	// Keep the explicit empty guard so callers get the descriptive "relation path" message for ''.
+	// Non-empty but invalid strings (whitespace, injection chars) are caught by validateIdentifier.
+	if (!relation) {
 		throw new Error('relationColumn() requires a non-empty relation path');
 	}
-	if (!column || column.trim() === '') {
-		throw new Error('relationColumn() requires a non-empty column name');
+	for (const segment of relation.split('.')) {
+		validateIdentifier(segment, 'relation');
 	}
-	if (!as || (as as string).trim() === '') {
-		throw new Error('relationColumn() requires a non-empty alias');
-	}
+	validateIdentifier(column, 'column');
+	validateIdentifier(as as string, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'relationColumn', relation, column, as },

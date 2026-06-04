@@ -603,6 +603,10 @@ export class QueryBuilderImpl<TResult = unknown>
 		} else {
 			// FIND-011: Validate string table/relation argument
 			validateIdentifier(relationOrTableOrBatch, 'table');
+			// FIND-008: Validate the as alias when provided
+			if (opts?.as !== undefined) {
+				validateIdentifier(opts.as, 'alias');
+			}
 			const joinIntent: JoinIntent = opts?.on
 				? {
 						table: relationOrTableOrBatch,
