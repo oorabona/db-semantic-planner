@@ -691,7 +691,11 @@ export function compileSelect<T = unknown>(
 		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
 		// so findExistsIntents finds 'exists' intents rather than the original 'in'.
 		// Side-effect: modifies `decisions` in-place (stub → enriched for each match).
-		enrichExistsDecisionsInPlace(decisions, planForCompilation, options?.model);
+		enrichExistsDecisionsInPlace(
+			decisions,
+			planForCompilation,
+			options?.model ?? deps.model,
+		);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(

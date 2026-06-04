@@ -664,6 +664,8 @@ function optimizeInToExists(
 				sq.joins?.length ||
 				sq.include?.length ||
 				sq.batchValuesSource != null ||
+				sq.existsWrap ||
+				sq.lock != null ||
 				(sq.select != null && sq.select.type !== 'fields')
 			) {
 				return where;

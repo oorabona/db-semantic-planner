@@ -944,4 +944,64 @@ describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR po
 		};
 		expect(execAndWhere?.conditions[1]?.kind).toBe('exists');
 	});
+
+	it('IN with lock subquery: report.intent.where stays kind=in (lock guard)', () => {
+		// Regression gate (FIX 1 — FIND-130): an IN subquery with a row lock (FOR UPDATE)
+		// must NOT be rewritten to EXISTS — the adapter would silently drop the lock clause.
+		// Guard: sq.lock != null blocks the rewrite.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					lock: { strength: 'forUpdate', waitPolicy: 'block' },
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with existsWrap subquery: report.intent.where stays kind=in (existsWrap guard)', () => {
+		// Regression gate (FIX 1 — FIND-130): an IN subquery with existsWrap=true
+		// must NOT be rewritten to EXISTS — rewriting would silently drop the existsWrap
+		// semantics. Guard: sq.existsWrap blocks the rewrite.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					existsWrap: true,
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
 });

@@ -723,3 +723,80 @@ describe('NULL-safety: positive inSubquery on nullable FK still rewrites to EXIS
 		expect(sql).not.toContain('= any');
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Suite: FIX 2 — enrichExistsDecisionsInPlace uses constructor model fallback
+// ---------------------------------------------------------------------------
+describe('enrichExistsDecisionsInPlace: constructor model used when compile options omit model', () => {
+	// Schema: posts --(belongsTo users via authorId)
+	// When the adapter is created with { model } at construction time and
+	// compile(plan) is called WITHOUT { model } in compile options, the EXISTS
+	// subquery must still resolve the belongsTo FK direction correctly:
+	//   outer.author_id = inner.id   (belongsTo: FK on the outer posts table)
+	// NOT:
+	//   outer.id = inner.author_id   (wrong has-many direction fallback)
+	//
+	// The exists() inside or() forces the planner to emit filter-strategy: 'exists'
+	// (not 'join'), so enrichExistsDecisionsInPlace processes it.
+	const belongsToSchema = schemaWithNullableFK; // posts.authorId → users (belongsTo)
+
+	it('belongsTo exists filter compiled with constructor model: FK direction matches compile-with-options', () => {
+		// Regression gate (FIX 2 — FIND-130): enrichExistsDecisionsInPlace previously
+		// received only options?.model (undefined when compile options omit it), so the
+		// constructor-configured model was never used for FK direction resolution.
+		// This caused belongsTo EXISTS filters to fall back to the has-many FK direction.
+		//
+		// Test: a plan containing an OR exists filter (which forces exists strategy, not join)
+		// compiled via adapter constructed with model but compile() called without model option.
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			where: {
+				kind: 'or',
+				conditions: [
+					{ kind: 'comparison', field: 'title', operator: 'eq', value: 'x' },
+					{ kind: 'exists', relation: 'author' },
+				],
+			},
+		};
+
+		const planReport = plan(queryIntent, belongsToSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Verify the plan has a filter-strategy decision (choice may be 'join' or 'exists'
+		// depending on relation cardinality — either way enrichExistsDecisionsInPlace runs).
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeDefined();
+
+		// Reference: compile with model in OPTIONS (the currently-working path)
+		const adapterNoCtorModel = createPgsqlCompileOnlyAdapter();
+		const sqlWithOptionsModel = normalizeSQL(
+			adapterNoCtorModel.compile(planReport, { model: belongsToSchema.model })
+				.sql,
+		);
+
+		// Under test: compile with model in CONSTRUCTOR, no model in compile options.
+		// Before FIX 2: enrichExistsDecisionsInPlace received undefined model →
+		//   relationType not resolved → hasMany fallback → wrong FK direction.
+		// After FIX 2: deps.model (= constructor model) is used → belongsTo resolved →
+		//   correct FK direction.
+		const adapterWithCtorModel = createPgsqlCompileOnlyAdapter({
+			model: belongsToSchema.model,
+		});
+		const sqlWithCtorModel = normalizeSQL(
+			adapterWithCtorModel.compile(planReport).sql,
+		);
+
+		// SQL must contain EXISTS (or-position: planner emits EXISTS subquery for both
+		// choice='join' and choice='exists' when the filter is in OR position)
+		expect(sqlWithCtorModel).toContain('exists');
+		// belongsTo direction: the FK (authorId) on the outer (posts) side must appear in
+		// the EXISTS correlation — NOT the has-many direction (posts.id = inner.authorId).
+		expect(sqlWithCtorModel).toContain('authorid'); // normalizeSQL lowercases identifiers
+		// Both paths must produce identical SQL (constructor model = options model)
+		expect(sqlWithCtorModel).toBe(sqlWithOptionsModel);
+	});
+});
