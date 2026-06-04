@@ -54,11 +54,114 @@ describe('isValidSchema', () => {
 		).toBe(false);
 	});
 
-	it('returns true for a valid schema shape', () => {
+	it('returns false when model has tables+relations but is missing required ModelIR methods', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: { tables: {}, relations: {} },
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when model is missing getTable method', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {
+					tables: new Map(),
+					relations: new Map(),
+					getRelation: () => undefined,
+					getRelationsFrom: () => [],
+					getRelationsTo: () => [],
+					isAmbiguous: () => ({ ambiguous: false }),
+				},
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when model is missing getRelation method', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {
+					tables: new Map(),
+					relations: new Map(),
+					getTable: () => undefined,
+					getRelationsFrom: () => [],
+					getRelationsTo: () => [],
+					isAmbiguous: () => ({ ambiguous: false }),
+				},
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when model is missing getRelationsFrom method', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {
+					tables: new Map(),
+					relations: new Map(),
+					getTable: () => undefined,
+					getRelation: () => undefined,
+					getRelationsTo: () => [],
+					isAmbiguous: () => ({ ambiguous: false }),
+				},
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when model is missing getRelationsTo method', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {
+					tables: new Map(),
+					relations: new Map(),
+					getTable: () => undefined,
+					getRelation: () => undefined,
+					getRelationsFrom: () => [],
+					isAmbiguous: () => ({ ambiguous: false }),
+				},
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns false when model is missing isAmbiguous method', () => {
+		expect(
+			isValidSchema({
+				definition: {},
+				model: {
+					tables: new Map(),
+					relations: new Map(),
+					getTable: () => undefined,
+					getRelation: () => undefined,
+					getRelationsFrom: () => [],
+					getRelationsTo: () => [],
+				},
+				tableNames: [],
+			}),
+		).toBe(false);
+	});
+
+	it('returns true for a full ModelIR-conformant schema shape', () => {
 		const valid = {
 			definition: {},
-			model: { tables: {}, relations: {} },
-			tableNames: [],
+			model: {
+				tables: new Map(),
+				relations: new Map(),
+				getTable: () => undefined,
+				getRelation: () => undefined,
+				getRelationsFrom: () => [],
+				getRelationsTo: () => [],
+				isAmbiguous: () => ({ ambiguous: false as const }),
+			},
+			tableNames: [] as string[],
 		};
 		expect(isValidSchema(valid)).toBe(true);
 	});
@@ -66,7 +169,15 @@ describe('isValidSchema', () => {
 	it('narrows the type — .model.tables is accessible after guard', () => {
 		const x: unknown = {
 			definition: {},
-			model: { tables: { users: {} }, relations: {} },
+			model: {
+				tables: new Map([['users', {}]]),
+				relations: new Map(),
+				getTable: () => undefined,
+				getRelation: () => undefined,
+				getRelationsFrom: () => [],
+				getRelationsTo: () => [],
+				isAmbiguous: () => ({ ambiguous: false as const }),
+			},
 			tableNames: ['users'],
 		};
 		if (isValidSchema(x)) {

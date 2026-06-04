@@ -231,6 +231,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			const intent = getWindowIntent(spec);
 
 			expect(intent.function).toBe('count');
+			// COUNT(*) OVER(...) — field is absent; SQL compiler emits COUNT(*) when field is undefined
 			expect(intent.field).toBeUndefined();
 			expect(intent.alias).toBe('total');
 			expect(intent.over.partitionBy).toEqual(['project_id']);
@@ -241,6 +242,7 @@ describe('DX-021: Window Functions Builder Pattern', () => {
 			const intent = getWindowIntent(spec);
 
 			expect(intent.function).toBe('count');
+			// COUNT(*) OVER() — field is absent; SQL compiler emits COUNT(*) when field is undefined
 			expect(intent.field).toBeUndefined();
 			expect(intent.over.partitionBy).toBeUndefined();
 			expect(intent.over.orderBy).toBeUndefined();

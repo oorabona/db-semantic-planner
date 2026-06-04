@@ -232,6 +232,7 @@ const FEATURE_TO_FLAG: Record<DDLFeature, string> = {
 	indexInclude: 'supportsDDLIndexInclude',
 	partialIndex: 'supportsDDLPartialIndexes',
 	expressionIndex: 'supportsDDLExpressionIndexes',
+	rowLevelSecurity: 'supportsDDLRowLevelSecurity',
 };
 
 /**

@@ -6,7 +6,21 @@ import type {
 	ModelIR,
 	UnsupportedFeatureBehavior,
 } from '@dbsp/types';
-import { UnsupportedFeatureError } from '@dbsp/types';
+
+/** Error thrown when behavior = 'error' and unsupported feature detected */
+export class UnsupportedFeatureError extends Error {
+	constructor(
+		readonly feature: string,
+		readonly adapter: string,
+		readonly element: string,
+	) {
+		super(
+			`Unsupported feature "${feature}" on adapter "${adapter}" for "${element}"`,
+		);
+		this.name = 'UnsupportedFeatureError';
+	}
+}
+
 import {
 	DEFAULT_FEATURE_CHECKERS,
 	type FeatureChecker,

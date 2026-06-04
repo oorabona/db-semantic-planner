@@ -54,7 +54,7 @@ export function levenshtein(a: string, b: string): number {
  */
 export function suggestClosestMatch(
 	input: string,
-	candidates: string[],
+	candidates: readonly string[],
 	maxDistance = 3,
 ): string | null {
 	if (!input || candidates.length === 0) return null;
@@ -76,8 +76,8 @@ export function suggestClosestMatch(
  */
 export function enhanceErrorWithSuggestion(
 	error: string,
-	tableNames: string[],
-	columnNames: string[] = [],
+	tableNames: readonly string[],
+	columnNames: readonly string[] = [],
 ): string {
 	// Check for unknown table error
 	const tableMatch = error.match(/Unknown table:\s*(\w+)/i);

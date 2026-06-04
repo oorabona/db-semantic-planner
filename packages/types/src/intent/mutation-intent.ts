@@ -244,10 +244,10 @@ export interface BatchUpdateIntent {
 	readonly matchColumns: readonly string[];
 
 	/** Array of row objects containing match + update column values */
-	readonly updates: readonly Record<string, unknown>[];
+	readonly updates: readonly Readonly<Record<string, unknown>>[];
 
 	/** Optional scalar values applied to ALL rows (non-array SET clause) */
-	readonly scalarSet?: Record<string, unknown>;
+	readonly scalarSet?: Readonly<Record<string, unknown>>;
 
 	/** Columns to return from updated rows (RETURNING clause) */
 	readonly returning?: readonly string[];

@@ -7,7 +7,7 @@
 
 import type { DialectCapabilities } from './dialects.js';
 import type { QueryIntent, RecursiveIntent } from './intent-ast.js';
-import type { IncludeStrategy } from './model-ir.js';
+import type { IncludeStrategy, RelationType } from './model-ir.js';
 
 // ============================================================================
 // Decision Types
@@ -44,8 +44,8 @@ export interface PlanDecision {
 		readonly target?: string;
 		/** Relation name if applicable */
 		readonly relation?: string;
-		/** Relation type (belongsTo, hasMany, hasOne, manyToMany) */
-		readonly relationType?: string;
+		/** Relation type (belongsTo, hasMany, hasOne, belongsToMany) */
+		readonly relationType?: RelationType;
 		/** Intent path (e.g., "where.exists.posts") */
 		readonly intentPath?: string;
 		/** Full relation path for multi-hop (SPEC-002), e.g., "author.company" */

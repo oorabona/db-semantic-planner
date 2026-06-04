@@ -298,7 +298,6 @@ export function inSubquery(
 	return {
 		kind: 'in',
 		field: getColumnName(field),
-		values: [],
 		subquery: expr.toIntent(),
 	};
 }
@@ -349,9 +348,9 @@ export function isNull(
  * Range value for PostgreSQL range types.
  * @see WhereRangeIntent
  */
-import type { RangeValue } from '@dbsp/types';
+import type { RangeOperand, RangeValue } from '@dbsp/types';
 
-export type { RangeValue } from '@dbsp/types';
+export type { RangeOperand, RangeValue } from '@dbsp/types';
 
 /**
  * Range OVERLAPS check: field && range (PostgreSQL)
@@ -384,7 +383,7 @@ export function rangeOverlaps(
  */
 export function rangeContains(
 	field: string,
-	value: RangeValue | unknown,
+	value: RangeOperand,
 ): WhereRangeIntent {
 	return { kind: 'range', field, operator: 'contains', value };
 }

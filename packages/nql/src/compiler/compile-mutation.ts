@@ -17,6 +17,7 @@ import type {
 	WhereAndIntent,
 	WhereInIntent,
 	WhereIntent,
+	WhereInValueIntent,
 	WhereNotIntent,
 	WhereOrIntent,
 } from '@dbsp/types';
@@ -295,9 +296,13 @@ function resolveBindingsInWhere(
 	if (!bindings || bindings.size === 0) return where;
 
 	if (where.kind === 'in') {
+		// Narrow to the values branch before accessing .values (XOR: subquery branch has values?: never)
 		const inWhere = where as WhereInIntent;
-		if (inWhere.values && inWhere.values.length === 1) {
-			const val = inWhere.values[0];
+		const inValues = inWhere.subquery
+			? undefined
+			: (inWhere as WhereInValueIntent).values;
+		if (inValues && inValues.length === 1) {
+			const val = inValues[0];
 			if (
 				val &&
 				typeof val === 'object' &&
@@ -322,10 +327,10 @@ function resolveBindingsInWhere(
 							},
 						}),
 					};
+					// Subquery branch: omit `values` per XOR constraint on WhereInIntent
 					return {
 						kind: 'in',
 						field: inWhere.field,
-						values: [],
 						subquery: cteRef,
 					} as WhereInIntent;
 				}

@@ -6,7 +6,6 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { UnsupportedFeatureError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { ModelIRImpl } from '../model-impl.js';
@@ -15,6 +14,7 @@ import {
 	type FeatureChecker,
 	type FeatureUsage,
 	negotiateFeatures,
+	UnsupportedFeatureError,
 } from './negotiate-features.js';
 
 // ============================================================================
@@ -676,6 +676,106 @@ describe('negotiateFeatures (CAPS-003)', () => {
 		});
 	});
 
+	describe('table-level: row-level security', () => {
+		it('should detect rlsEnabled when unsupported', () => {
+			// Arrange
+			const table: TableIR = {
+				name: 'users',
+				columns: [{ name: 'id', type: 'number', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				rlsEnabled: true,
+			};
+			const model = makeModel(new Map([['users', table]]));
+			const caps = noDDLCaps();
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning');
+
+			// Assert
+			expect(result.warnings).toHaveLength(1);
+			expect(result.warnings[0].feature).toBe('rowLevelSecurity');
+			expect(result.warnings[0].element).toBe('users');
+		});
+
+		it('should detect policies array when unsupported', () => {
+			// Arrange
+			const table: TableIR = {
+				name: 'posts',
+				columns: [{ name: 'id', type: 'number', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				policies: [
+					{
+						name: 'tenant_isolation',
+						using: "tenant_id = current_setting('app.tenant')::uuid",
+					},
+				],
+			};
+			const model = makeModel(new Map([['posts', table]]));
+			const caps = noDDLCaps();
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning');
+
+			// Assert
+			expect(result.warnings).toHaveLength(1);
+			expect(result.warnings[0].feature).toBe('rowLevelSecurity');
+			expect(result.warnings[0].element).toBe('posts');
+		});
+
+		it('should produce no warnings when supportsDDLRowLevelSecurity is true', () => {
+			// Arrange
+			const table: TableIR = {
+				name: 'users',
+				columns: [{ name: 'id', type: 'number', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				rlsEnabled: true,
+				policies: [{ name: 'tenant_policy' }],
+			};
+			const model = makeModel(new Map([['users', table]]));
+			const caps: DialectCapabilities = {
+				...noDDLCaps(),
+				supportsDDLRowLevelSecurity: true,
+			};
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning');
+
+			// Assert
+			expect(result.warnings).toHaveLength(0);
+		});
+
+		it('should throw in error mode when RLS is unsupported', () => {
+			// Arrange
+			const table: TableIR = {
+				name: 'orders',
+				columns: [{ name: 'id', type: 'number', nullable: false }],
+				foreignKeys: [],
+				indexes: [],
+				rlsEnabled: true,
+			};
+			const model = makeModel(new Map([['orders', table]]));
+			const caps = noDDLCaps();
+
+			// Act + Assert
+			expect(() => negotiateFeatures(model, caps, 'error')).toThrow();
+		});
+
+		it('should produce no warnings for a table without RLS', () => {
+			// Arrange: MINIMAL_TABLE has no rlsEnabled and no policies
+			const model = makeModel(new Map([['users', MINIMAL_TABLE]]));
+			const caps = noDDLCaps();
+
+			// Act
+			const result = negotiateFeatures(model, caps, 'warning');
+
+			// Assert
+			expect(result.warnings).toHaveLength(0);
+		});
+	});
+
 	describe('no modifications to ModelIR (INV-06)', () => {
 		it('should not mutate the model object', () => {
 			// Arrange
@@ -782,8 +882,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			expect(result.warnings).toHaveLength(0);
 		});
 
-		it('DEFAULT_FEATURE_CHECKERS should have exactly 15 entries (one per DDLFeature)', () => {
-			expect(DEFAULT_FEATURE_CHECKERS).toHaveLength(15);
+		it('DEFAULT_FEATURE_CHECKERS should have exactly 16 entries (one per DDLFeature)', () => {
+			expect(DEFAULT_FEATURE_CHECKERS).toHaveLength(16);
 		});
 
 		it('every DEFAULT_FEATURE_CHECKER entry should have unique capability + feature pair', () => {
@@ -793,8 +893,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const featureSet = new Set(
 				DEFAULT_FEATURE_CHECKERS.map((c) => c.feature),
 			);
-			expect(capabilitySet.size).toBe(15);
-			expect(featureSet.size).toBe(15);
+			expect(capabilitySet.size).toBe(16);
+			expect(featureSet.size).toBe(16);
 		});
 	});
 });

@@ -340,10 +340,10 @@ function compileMembership(
 		// Subqueries in IN clauses are always simple queries, never set operations
 		const subquery = fns.compileQuery(inExpr.values.query, ctx) as QueryIntent;
 
+		// Subquery branch: omit `values` per XOR constraint on WhereInIntent
 		const result: WhereInIntent = {
 			kind: 'in',
 			field,
-			values: [],
 			subquery,
 		};
 
@@ -359,6 +359,7 @@ function compileMembership(
 		values = [];
 	}
 
+	// Values branch: omit `subquery` per XOR constraint on WhereInIntent
 	const result: WhereInIntent = {
 		kind: 'in',
 		field,

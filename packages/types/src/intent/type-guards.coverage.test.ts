@@ -605,7 +605,15 @@ describe('isUpsertIntent', () => {
 });
 
 describe('isMutationIntent', () => {
-	const mutationTypes = ['insert', 'update', 'delete', 'upsert'] as const;
+	const mutationTypes = [
+		'insert',
+		'insert_from',
+		'upsert_from',
+		'update',
+		'batchUpdate',
+		'delete',
+		'upsert',
+	] as const;
 
 	for (const type of mutationTypes) {
 		it(`returns true for type === '${type}'`, () => {
@@ -615,12 +623,7 @@ describe('isMutationIntent', () => {
 		});
 	}
 
-	const nonMutationTypes = [
-		'select',
-		'recursive',
-		'insert_from',
-		'upsert_from',
-	] as const;
+	const nonMutationTypes = ['select', 'recursive'] as const;
 
 	for (const type of nonMutationTypes) {
 		it(`returns false for type === '${type}'`, () => {
