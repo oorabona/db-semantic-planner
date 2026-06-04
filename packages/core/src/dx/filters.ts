@@ -549,15 +549,20 @@ export function notExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
+ * are NOT supported and will throw at compile time. For correlated EXISTS over an
+ * FK-declared relation, use `exists('relation', { where: ... outerRef(...) })` instead.
+ *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
  * @example
- * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_id = users.id)
- * rawExists(subquery('audit_log').select('id').where(eq('entityId', outerRef('id'))))
+ * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_type = 'login')
+ * // Uncorrelated: no reference to the outer row — inner filter is a plain value.
+ * rawExists(subquery('audit_log').select('id').where(eq('entityType', 'login')))
  *
  * @example
- * // EXISTS with a full query builder
- * rawExists(orm.select('sessions').where(and(eq('userId', outerRef('id')), gt('expiresAt', new Date()))))
+ * // EXISTS with a full query builder — polymorphic table, no FK to source
+ * rawExists(orm.select('sessions').where(and(eq('status', 'active'), gt('expiresAt', new Date()))))
  */
 export function rawExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
@@ -576,11 +581,16 @@ export function rawExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
+ * are NOT supported and will throw at compile time. For correlated NOT EXISTS over an
+ * FK-declared relation, use `notExists('relation', { where: ... outerRef(...) })` instead.
+ *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
  * @example
- * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.user_id = users.id)
- * rawNotExists(subquery('bans').select('id').where(eq('userId', outerRef('id'))))
+ * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.reason = 'spam')
+ * // Uncorrelated: inner filter is a plain value, no reference to the outer row.
+ * rawNotExists(subquery('bans').select('id').where(eq('reason', 'spam')))
  */
 export function rawNotExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
