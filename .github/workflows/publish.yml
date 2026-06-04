@@ -1,12 +1,22 @@
 name: Publish
+# Triggered AFTER release-please completes (workflow_run), because the tags and
+# GitHub Releases that release-please creates with GITHUB_TOKEN do NOT, by
+# design, trigger other workflows (push/release events). workflow_run is the
+# supported way to chain a workflow after a GITHUB_TOKEN-driven one.
+# workflow_dispatch allows manual re-publishing / recovery.
+#
+# The file path is unchanged on purpose: npm OIDC trusted publishing is
+# registered against this workflow file, so it must keep publishing.
 on:
-  push:
-    tags: ["v*"]
-  release:
-    types: [published]
+  workflow_run:
+    workflows: ["release-please"]
+    types: [completed]
+  workflow_dispatch:
 
 jobs:
   publish:
+    # Manual dispatch always runs; the chained run only when release-please succeeded.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -20,23 +30,42 @@ jobs:
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -C packages/types build
-      - run: pnpm -C packages/nql build
-      - run: pnpm -C packages/core build
-      - run: pnpm -C packages/adapter-pgsql build
-      - run: pnpm -C packages/cli build
-      # OIDC trusted publishing: --provenance attaches the GHA OIDC
-      # token to each upload; npm validates it against the trusted-publisher
-      # config registered for each @dbsp/* package. No NPM_TOKEN required.
+      # Decide whether anything needs publishing BEFORE building, so the common
+      # case (a release-please run that only refreshes the release PR, no version
+      # change) exits cheaply without a full build.
+      - id: check
+        run: |
+          need=0
+          for p in types nql core adapter-pgsql cli; do
+            name=$(jq -r .name "packages/$p/package.json")
+            ver=$(jq -r .version "packages/$p/package.json")
+            if npm view "$name@$ver" version >/dev/null 2>&1; then
+              echo "$name@$ver already on npm"
+            else
+              echo "$name@$ver needs publishing"
+              need=1
+            fi
+          done
+          echo "need=$need" >> "$GITHUB_OUTPUT"
+      - if: steps.check.outputs.need == '1'
+        name: Build packages
+        run: |
+          pnpm -C packages/types build
+          pnpm -C packages/nql build
+          pnpm -C packages/core build
+          pnpm -C packages/adapter-pgsql build
+          pnpm -C packages/cli build
+      # OIDC trusted publishing: --provenance attaches the GHA OIDC token to
+      # each upload; npm validates it against the trusted-publisher config
+      # registered for each @dbsp/* package. No NPM_TOKEN required.
       #
-      # Idempotent: skip any package whose version is already on npm. A
-      # release-please release may bump only some packages (e.g. types stays
-      # put while core/cli go to the next patch), and it can fire this workflow
-      # more than once (one GitHub Release per component). Publishing in dependency
-      # order, guarded by an existence check, makes partial releases, re-runs,
-      # and multi-trigger events all safe — never failing on "cannot publish
-      # over previously published version".
-      - name: Publish changed packages
+      # Idempotent: skip any package already on npm. release-please bumps only
+      # changed packages (types may stay put while core/cli advance). Publishing
+      # in dependency order, guarded by an existence check, makes partial
+      # releases and re-runs safe — never failing on "cannot publish over
+      # previously published version".
+      - if: steps.check.outputs.need == '1'
+        name: Publish changed packages
         run: |
           for p in types nql core adapter-pgsql cli; do
             name=$(jq -r .name "packages/$p/package.json")
@@ -48,6 +77,5 @@ jobs:
               pnpm -C "packages/$p" publish --no-git-checks --provenance
             fi
           done
-      # @dbsp/mcp-server publish skipped — package is currently a
-      # scaffold (no MCP tools registered yet, see issue 112).
-      # Re-enable once the first tool ships.
+      # @dbsp/mcp-server publish skipped — scaffold only (no MCP tools yet,
+      # see issue 112). Re-enable once the first tool ships.
