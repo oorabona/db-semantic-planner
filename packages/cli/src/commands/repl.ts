@@ -8,6 +8,7 @@
 import { readFileSync } from 'node:fs';
 import { Command } from 'commander';
 import { config } from '../config.js';
+import { validateIdentifier } from '../utils/identifier-validation.js';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
 export interface ReplOptions {
@@ -107,6 +108,13 @@ export const replCommand = new Command('repl')
 			// Note: --use, --parse, --exec work in interactive mode (REPL state setup)
 			if (options.import && !options.eval && !options.input) {
 				throw new Error('--import requires batch mode (--eval or --input)');
+			}
+
+			// SEC: Validate --use schema name at the entry point so both the batch path
+			// (which injects `.use <schema>`) and the interactive path (which passes
+			// initialSchemaName) are protected against SQL injection.
+			if (options.use) {
+				validateIdentifier(options.use, 'schema');
 			}
 
 			// CLI-CASING: Map --casing flag to dbCasing (intuitive: describes DB columns)
