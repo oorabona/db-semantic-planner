@@ -587,6 +587,16 @@ export class QueryBuilderImpl<TResult = unknown>
 					'join(batchValuesRef): an `on` condition is required for BatchValues joins',
 				);
 			}
+			// Validate all identifiers that reach SQL as quoted names in the
+			// unnest() RangeFunction: source alias, column aliases, and the
+			// explicit join alias override (opts.as).
+			validateIdentifier(bv.alias, 'alias');
+			for (const col of bv.columns) {
+				validateIdentifier(col, 'column');
+			}
+			if (opts.as !== undefined) {
+				validateIdentifier(opts.as, 'alias');
+			}
 			const joinIntent: JoinIntent = {
 				batchValues: {
 					data: bv.data,

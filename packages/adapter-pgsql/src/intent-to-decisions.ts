@@ -350,10 +350,23 @@ function assertNoUnsupportedSubqueryModifiers(
 
 	// Scalar-subquery-specific SELECT validation
 	if (context === 'scalar') {
-		const select = subquery.select as { type?: string } | undefined;
+		const select = subquery.select as
+			| { type?: string; fields?: readonly string[] }
+			| undefined;
 		if (select?.type === 'expressions') {
 			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
 			unsupported.push('expressions SELECT (not supported in scalar subquery)');
+		} else if (
+			select?.type === 'fields' &&
+			select.fields != null &&
+			select.fields.length > 1
+		) {
+			// Multi-field projection is silently truncated to fields[0] —
+			// the extra columns are dropped without error, producing incorrect SQL
+			// (the scalar comparison uses only the first column).
+			unsupported.push(
+				`multi-field projection [${select.fields.join(', ')}] (scalar subquery must project exactly one column — use a single field)`,
+			);
 		}
 	}
 

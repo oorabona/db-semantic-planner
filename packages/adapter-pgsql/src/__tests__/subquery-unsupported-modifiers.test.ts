@@ -643,3 +643,47 @@ describe('IN/scalar subquery: expression-based orderBy throws', () => {
 		).not.toThrow();
 	});
 });
+
+// ---------------------------------------------------------------------------
+// GAP 2: scalar subquery with multi-field projection rejects (silent truncation)
+// ---------------------------------------------------------------------------
+
+describe('scalar subquery — multi-field projection guard (GAP-2)', () => {
+	it('throws when scalar subquery has a 2-field projection (would silently drop second column)', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'price',
+			operator: 'gt' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'products',
+				select: {
+					type: 'fields' as const,
+					fields: ['price', 'cost'] as const,
+				},
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
+			/scalar subquery with multi-field projection \[price, cost\].*is not supported/,
+		);
+	});
+
+	it('does not throw for a scalar subquery with a single-field projection', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'price',
+			operator: 'gt' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'products',
+				select: {
+					type: 'fields' as const,
+					fields: ['price'] as const,
+				},
+			},
+		};
+		expect(() =>
+			convertWhereCondition(intent as any, 'products'),
+		).not.toThrow();
+	});
+});
