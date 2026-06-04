@@ -708,62 +708,120 @@ function enrichExistsStubsInConditions(
 				d.operator === 'every') &&
 			!d.foreignKey // unenriched stub: no FK yet
 		) {
-			const relation = d.targetTable as string;
-			if (!relation) continue;
+			const rawTargetTable = d.targetTable;
 
-			// Resolve the FK and type from the OUTER exists's target table.
-			const rel = model.getRelation(`${sourceTable}.${relation}`);
-			// DEFECT-2 FIX: fail-closed for undeclared inner relations.
-			// Previously, when rel was undefined, we silently fell back to
-			// `targetTable = relation` (convention-compile), producing guessed SQL
-			// instead of a clear error. Callers must use rawExists(subquery(...))
-			// for undeclared or uncorrelated subqueries.
-			if (!rel) {
-				throw new Error(
-					`exists('${relation}'): no relation '${relation}' is declared on table '${sourceTable}'. ` +
-						`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
-				);
-			}
-			const foreignKey =
-				typeof rel.foreignKey === 'string'
-					? rel.foreignKey
-					: rel.foreignKey?.[0];
-			const relationType =
-				rel.type === 'belongsTo'
-					? ('belongsTo' as const)
-					: rel.type === 'hasMany' || rel.type === 'hasOne'
-						? (rel.type as 'hasMany' | 'hasOne')
-						: undefined;
-			const parentKey =
-				relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
-			const targetTable = rel.target;
+			// Normalise to a hops array.  A nested relationFilter with a multi-hop
+			// path stores targetTable as string[] (same as a top-level multi-hop stub).
+			// Never coerce an array to a string — that would produce a mis-resolved key.
+			const hops: string[] = Array.isArray(rawTargetTable)
+				? (rawTargetTable as string[])
+				: typeof rawTargetTable === 'string'
+					? [rawTargetTable]
+					: [];
+			if (hops.length === 0) continue;
 
 			// Build inner conditions from the raw where intent (if any).
 			// `_rawWhere` is attached by convertWhereToDecisions for exists stubs.
 			const rawWhere = (d as unknown as Record<string, unknown>)._rawWhere;
-			let innerConditions: PlanDecision[] | undefined;
-			if (rawWhere) {
-				const c = convertWhereToDecisions(rawWhere, targetTable);
-				if (c.length > 0) innerConditions = c;
-			}
 
-			// Build the enriched decision in-place.
-			const enriched: PlanDecision = {
-				type: 'where',
-				operator: d.operator,
-				targetTable,
-				sourceTable,
-				...(foreignKey ? { foreignKey } : {}),
-				...(relationType ? { relationType } : {}),
-				...(parentKey ? { parentKey } : {}),
-				...(innerConditions ? { conditions: innerConditions } : {}),
-			};
+			if (hops.length > 1) {
+				// Multi-hop nested path: delegate to buildMultiHopExistsChain, which
+				// resolves each hop from sourceTable, exactly like a top-level multi-hop.
+				const mode =
+					d.operator === 'notExists'
+						? 'none'
+						: d.operator === 'every'
+							? 'every'
+							: 'some';
+				const isEvery = mode === 'every';
+				const outerOperator =
+					d.operator === 'notExists' || mode === 'none' || isEvery
+						? 'notExists'
+						: 'exists';
 
-			conditions[i] = enriched;
+				// Walk to the final hop's target to build inner conditions.
+				let finalTarget = sourceTable;
+				for (const hop of hops) {
+					const rel = model.getRelation(`${finalTarget}.${hop}`);
+					finalTarget = rel ? rel.target : hop;
+				}
 
-			// Recurse into the newly-built conditions to handle deeper nesting.
-			if (innerConditions && innerConditions.length > 0) {
-				enrichExistsStubsInConditions(innerConditions, targetTable, model);
+				let rawInnerConditions: PlanDecision[] | undefined;
+				if (rawWhere) {
+					const c = convertWhereToDecisions(rawWhere, finalTarget);
+					if (c.length > 0) {
+						enrichExistsStubsInConditions(c, finalTarget, model);
+						rawInnerConditions = c;
+					}
+				}
+				const innerConditions =
+					isEvery && rawInnerConditions
+						? ([
+								{
+									type: 'logical',
+									operator: 'not',
+									conditions: rawInnerConditions,
+								} as PlanDecision,
+							] as PlanDecision[])
+						: rawInnerConditions;
+
+				const enriched = buildMultiHopExistsChain(
+					hops,
+					sourceTable,
+					outerOperator,
+					innerConditions,
+					model,
+				);
+				conditions[i] = enriched;
+			} else {
+				// Single-hop: resolve the one relation from sourceTable.
+				const relation = hops[0] as string;
+
+				const rel = model.getRelation(`${sourceTable}.${relation}`);
+				// Fail-closed: an undeclared inner relation must not convention-compile.
+				if (!rel) {
+					throw new Error(
+						`exists('${relation}'): no relation '${relation}' is declared on table '${sourceTable}'. ` +
+							`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+					);
+				}
+				const foreignKey =
+					typeof rel.foreignKey === 'string'
+						? rel.foreignKey
+						: rel.foreignKey?.[0];
+				const relationType =
+					rel.type === 'belongsTo'
+						? ('belongsTo' as const)
+						: rel.type === 'hasMany' || rel.type === 'hasOne'
+							? (rel.type as 'hasMany' | 'hasOne')
+							: undefined;
+				const parentKey =
+					relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
+				const targetTable = rel.target;
+
+				let innerConditions: PlanDecision[] | undefined;
+				if (rawWhere) {
+					const c = convertWhereToDecisions(rawWhere, targetTable);
+					if (c.length > 0) innerConditions = c;
+				}
+
+				const enriched: PlanDecision = {
+					type: 'where',
+					operator: d.operator,
+					targetTable,
+					sourceTable,
+					...(foreignKey ? { foreignKey } : {}),
+					...(relationType ? { relationType } : {}),
+					...(parentKey ? { parentKey } : {}),
+					...(innerConditions ? { conditions: innerConditions } : {}),
+				};
+
+				conditions[i] = enriched;
+
+				// Recurse into newly-built conditions to handle deeper nesting.
+				if (innerConditions && innerConditions.length > 0) {
+					enrichExistsStubsInConditions(innerConditions, targetTable, model);
+				}
 			}
 		} else if (
 			(d.type === 'whereAnd' ||
@@ -891,23 +949,29 @@ function buildEnrichedExistsDecision(
 }
 
 /**
- * Collect the set of relation names (string) that appear as NESTED exists/notExists
- * inside another exists's `where` clause.  These relations are enriched inline by
- * enrichExistsStubsInConditions (called from buildEnrichedExistsDecision) rather
- * than by stub-matching in the main filter-strategy loop.
+ * Collect the set of RESOLVED identity keys for exists/notExists/relationFilter
+ * intents that appear NESTED inside another exists's `where` clause.  These are
+ * enriched inline by enrichExistsStubsInConditions and must NOT be re-appended at
+ * the top level by the filter-strategy loop.
  *
- * Used by enrichExistsDecisionsInPlace to skip the top-level APPEND fallback for
- * filter-strategy decisions whose relation was already handled inline — preventing
- * the "emit twice" DEFECT 1 where a nested exists produced an extra AND EXISTS at
- * the root of the decision tree.
+ * Identity key = the value the filter-strategy decision exposes:
+ *   - Single-hop: `context.target` (resolved table name, e.g. 'posts')
+ *   - Multi-hop:  `context.relationPath` (dot-joined path, e.g. 'comments.authors')
  *
- * @param where      The raw WhereIntent tree to scan.
- * @param insideExists  True when the caller is already inside an exists's where.
- * @param out        Accumulator for nested relation names.
+ * Storing bare relation names (aliases) would fail when relation name != table name
+ * because the filter-strategy always stores the RESOLVED target, not the alias.
+ *
+ * @param where           The raw WhereIntent tree to scan.
+ * @param insideExists    True when the caller is inside an exists's where clause.
+ * @param sourceTable     The resolved target of the enclosing exists (used for FK lookup).
+ * @param model           ModelIR — required for resolving relation names to target tables.
+ * @param out             Accumulator; receives both resolved targets and relation paths.
  */
 function collectNestedExistsTargets(
 	where: unknown,
 	insideExists: boolean,
+	sourceTable: string,
+	model: ModelIR,
 	out: Set<string>,
 ): void {
 	if (!where || typeof where !== 'object') return;
@@ -917,20 +981,88 @@ function collectNestedExistsTargets(
 		w.kind === 'notExists' ||
 		w.kind === 'relationFilter'
 	) {
-		if (insideExists && typeof w.relation === 'string') {
-			out.add(w.relation);
+		if (insideExists) {
+			const rawRelation = w.relation;
+			const hops: string[] = Array.isArray(rawRelation)
+				? (rawRelation as string[])
+				: typeof rawRelation === 'string'
+					? [rawRelation]
+					: [];
+
+			if (hops.length === 1) {
+				// Single-hop: resolve to target table to match context.target.
+				const singleHop = hops[0] ?? '';
+				const rel = model.getRelation(`${sourceTable}.${singleHop}`);
+				const resolvedTarget = rel ? rel.target : singleHop;
+				out.add(resolvedTarget);
+			} else if (hops.length > 1) {
+				// Multi-hop: store the dot-joined hop array to match context.relationPath.
+				out.add(hops.join('.'));
+				// Also walk to the final resolved target and store it so both forms match.
+				let cur = sourceTable;
+				for (const hop of hops) {
+					const rel = model.getRelation(`${cur}.${hop}`);
+					cur = rel ? rel.target : hop;
+				}
+				out.add(cur);
+			}
+
+			// Resolve the immediate target for recursion into inner where.
+			let nextSource = sourceTable;
+			if (hops.length >= 1) {
+				const rel = model.getRelation(`${sourceTable}.${hops[0]}`);
+				nextSource = rel ? rel.target : (hops[0] ?? sourceTable);
+			}
+			// For multi-hop, walk to the final target for the recursive source.
+			if (hops.length > 1) {
+				let cur = sourceTable;
+				for (const hop of hops) {
+					const rel = model.getRelation(`${cur}.${hop}`);
+					cur = rel ? rel.target : hop;
+				}
+				nextSource = cur;
+			}
+			if (w.where) {
+				collectNestedExistsTargets(w.where, true, nextSource, model, out);
+			}
+		} else {
+			// Not yet inside an exists — resolve source for the next level.
+			const rawRelation = w.relation;
+			const hops: string[] = Array.isArray(rawRelation)
+				? (rawRelation as string[])
+				: typeof rawRelation === 'string'
+					? [rawRelation]
+					: [];
+			let nextSource = sourceTable;
+			if (hops.length >= 1) {
+				let cur = sourceTable;
+				for (const hop of hops) {
+					const rel = model.getRelation(`${cur}.${hop}`);
+					cur = rel ? rel.target : hop;
+				}
+				nextSource = cur;
+			}
+			if (w.where) {
+				collectNestedExistsTargets(w.where, true, nextSource, model, out);
+			}
 		}
-		// Recurse into the inner where with insideExists=true (one level deeper).
-		if (w.where) collectNestedExistsTargets(w.where, true, out);
 		return;
 	}
-	// Recurse into logical containers (and/or/not).
+	// Recurse into logical containers (and/or/not) — source table is unchanged.
 	if (w.conditions && Array.isArray(w.conditions)) {
 		for (const c of w.conditions) {
-			collectNestedExistsTargets(c, insideExists, out);
+			collectNestedExistsTargets(c, insideExists, sourceTable, model, out);
 		}
 	}
-	if (w.condition) collectNestedExistsTargets(w.condition, insideExists, out);
+	if (w.condition) {
+		collectNestedExistsTargets(
+			w.condition,
+			insideExists,
+			sourceTable,
+			model,
+			out,
+		);
+	}
 }
 
 /**
@@ -1042,8 +1174,14 @@ export function enrichExistsDecisionsInPlace(
 	// buildEnrichedExistsDecision) and must NOT be re-appended at the top level
 	// when the filter-strategy loop finds no matching top-level stub.
 	const nestedExistsTargets = new Set<string>();
-	if (plan.intent?.where) {
-		collectNestedExistsTargets(plan.intent.where, false, nestedExistsTargets);
+	if (plan.intent?.where && model) {
+		collectNestedExistsTargets(
+			plan.intent.where,
+			false,
+			plan.rootTable,
+			model,
+			nestedExistsTargets,
+		);
 	}
 
 	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
@@ -1213,8 +1351,17 @@ export function enrichExistsDecisionsInPlace(
 				// another exists's where clause, it was already enriched inline by
 				// enrichExistsStubsInConditions.  Appending it again here would produce
 				// a duplicate top-level AND EXISTS that is both wrong and redundant.
-				const targetName = context.target as string;
-				if (nestedExistsTargets.has(targetName)) {
+				//
+				// Use the same identity keys the filter-strategy exposes:
+				//   - context.target     (resolved table) for single-hop
+				//   - context.relationPath (dot-joined)   for multi-hop
+				// Both are stored in nestedExistsTargets by collectNestedExistsTargets.
+				const targetName = context.target as string | undefined;
+				const relationPath = contextRelationPath;
+				if (
+					(targetName && nestedExistsTargets.has(targetName)) ||
+					(relationPath && nestedExistsTargets.has(relationPath))
+				) {
 					// Already handled inline — skip the append.
 					continue;
 				}

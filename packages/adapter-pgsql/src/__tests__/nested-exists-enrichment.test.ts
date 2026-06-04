@@ -22,11 +22,13 @@ import {
 	exists,
 	or,
 	outerRef,
+	plan,
 	rawExists,
 	ref,
 	schema,
 	subquery,
 } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
 	buildSubqueryFromIntent,
@@ -327,5 +329,253 @@ describe('regression: single-level exists unchanged', () => {
 			'SELECT users.* FROM users WHERE users.name = $1 OR EXISTS (SELECT 1 FROM posts AS posts_exists_0 WHERE users.id = posts_exists_0.author_id)',
 		);
 		expect(params).toEqual(['Alice']);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Defect 1 identity drift — relation alias != resolved table name
+// ---------------------------------------------------------------------------
+
+describe('nested exists — relation alias != table name (identity drift)', () => {
+	// posts.author_id = ref('users', { as: 'author', inverse: 'posts' })
+	// From posts: relation name 'author', resolved target = 'users'.
+	// filter-strategy context.target = 'users', context.relation = 'author'.
+	// collectNestedExistsTargets must store 'users' (resolved), not 'author' (alias).
+	it('exists(posts, { where: exists(author) }) — no duplicate EXISTS (alias != table)', () => {
+		const orm = buildOrm();
+		// 'author' is the relation alias on posts → users (belongsTo).
+		const { sql, params } = (orm as any)
+			.select('users')
+			.where(
+				exists('posts', {
+					where: (exists as any)('author', { where: eq('name', 'Bob') }),
+				}),
+			)
+			.dump();
+		const normalized = ws(sql);
+
+		// Exactly 2 EXISTS — outer (posts) + inner (author → users).
+		const existsMatches = normalized.match(/\bEXISTS\b/g);
+		expect(
+			existsMatches?.length,
+			`Expected exactly 2 EXISTS, got: ${normalized}`,
+		).toBe(2);
+
+		// Inner existence resolved to users table, not appended as a third EXISTS.
+		expect(normalized).toContain('users');
+		expect(params).toEqual(['Bob']);
+	});
+
+	it('nested exists alias under OR — no spurious top-level AND EXISTS', () => {
+		const orm = buildOrm();
+		const { sql, params } = (orm as any)
+			.select('users')
+			.where(
+				or(
+					eq('active', true),
+					exists('posts', {
+						where: (exists as any)('author', { where: eq('name', 'Carol') }),
+					}),
+				),
+			)
+			.dump();
+		const normalized = ws(sql);
+
+		const existsMatches = normalized.match(/\bEXISTS\b/g);
+		expect(
+			existsMatches?.length,
+			`Expected exactly 2 EXISTS, got: ${normalized}`,
+		).toBe(2);
+
+		// Top-level boolean is OR — not contaminated by a spurious AND EXISTS.
+		expect(normalized).toMatch(/WHERE.*OR.*EXISTS/i);
+		expect(params).toEqual([true, 'Carol']);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Defect 2 — nested string[] relationFilter inside exists (array form of relation)
+// ---------------------------------------------------------------------------
+
+describe('nested exists — string[] relationFilter inside outer exists', () => {
+	// Simulate what NQL produces: a nested relationFilter with relation as string[]
+	// (even single-element arrays).  enrichExistsStubsInConditions must walk each
+	// hop from the correct source table, not coerce the array to a mis-resolved string.
+
+	it('exists(posts) wrapping inner relationFilter(["comments"]) — no error, exactly 2 EXISTS', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter',
+						// Single-element string[] — NQL's canonical form for a single hop.
+						relation: ['comments'] as unknown as string,
+						where: {
+							kind: 'comparison',
+							field: 'body',
+							operator: 'eq',
+							value: 'hi',
+						},
+						mode: 'some',
+					},
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+
+		const existsMatches = normalized.match(/\bEXISTS\b/g);
+		expect(
+			existsMatches?.length,
+			`Expected exactly 2 EXISTS, got: ${normalized}`,
+		).toBe(2);
+
+		// Inner EXISTS targets comments table.
+		expect(normalized).toMatch(/FROM\s+"?comments"?\s+AS/i);
+		// Inner filter present.
+		expect(normalized).toMatch(/body\s*=\s*\$1/i);
+		expect(parameters).toContain('hi');
+	});
+
+	it('exists(posts) wrapping inner relationFilter(["comments"], mode=every) — no throw', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'exists',
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter',
+						relation: ['comments'] as unknown as string,
+						where: {
+							kind: 'comparison',
+							field: 'body',
+							operator: 'eq',
+							value: 'bad',
+						},
+						mode: 'every',
+					},
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		// mode='every' produces a NOT-wrapped inner condition — must not throw.
+		expect(() =>
+			adapter.compile(planReport, { model: testSchema.model }),
+		).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Defect 3 — scalar subquery modifier guard on direct compileWhereIntent path
+// ---------------------------------------------------------------------------
+
+describe('scalar subquery modifier guard on direct compileWhereIntent path', () => {
+	function makeScalarCtx(): WhereCompilerCtx {
+		const paramState = createCompilerState();
+		return {
+			rootTable: 'users',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: (subIntent, paramOffset) =>
+				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+		};
+	}
+
+	it('scalar subquery with GROUP BY on direct path → throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: {
+					type: 'aggregate' as const,
+					fn: 'count' as const,
+					field: 'id',
+				},
+				groupBy: ['author_id'],
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/GROUP BY.*not supported|not supported.*GROUP BY/i,
+		);
+	});
+
+	it('scalar subquery with HAVING on direct path → throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: {
+					type: 'aggregate' as const,
+					fn: 'count' as const,
+					field: 'id',
+				},
+				having: {
+					kind: 'comparison',
+					field: 'id',
+					operator: 'gt',
+					value: 5,
+				},
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/HAVING.*not supported|not supported.*HAVING/i,
+		);
+	});
+
+	it('scalar subquery with OFFSET on direct path → throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				offset: 5,
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/OFFSET.*not supported|not supported.*OFFSET/i,
+		);
+	});
+
+	it('plain scalar subquery (no forbidden modifiers) on direct path → does NOT throw', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: {
+					type: 'aggregate' as const,
+					fn: 'count' as const,
+					field: 'id',
+				},
+			},
+		};
+		expect(() =>
+			compileWhereIntent(intent as any, makeScalarCtx()),
+		).not.toThrow();
 	});
 });
