@@ -473,7 +473,7 @@ export async function runAfterMutationHooks<T>(
 					error as Error,
 					hook.name || 'anonymous',
 					frozen,
-					'beforeMutation',
+					'afterMutation',
 				);
 				if (action === 'continue') continue;
 			}

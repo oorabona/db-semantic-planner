@@ -817,6 +817,42 @@ function processWhere(
 
 		case 'expression':
 			break; // Custom expression — no relation analysis, pass through
+
+		// Adapter-only kinds: planner records no decisions; the adapter compiles
+		// them directly from the intent. Explicit cases here prevent silent
+		// fallthrough and keep the switch exhaustive.
+
+		case 'rawExists':
+		case 'rawNotExists':
+			// The subquery is an arbitrary QueryIntent — no FK-based relation
+			// resolution to perform at plan time. The adapter handles compilation.
+			break;
+
+		case 'subquery':
+			// Scalar subquery comparison — the adapter resolves the inner
+			// QueryIntent directly; no planner-level relation analysis needed.
+			break;
+
+		case 'range':
+			// PostgreSQL range operator — scalar field check, no relation
+			// analysis required; adapter emits the range SQL.
+			break;
+
+		case 'jsonContains':
+		case 'jsonExists':
+			// JSON containment / key-existence operators — scalar field checks
+			// compiled entirely by the adapter.
+			break;
+
+		default: {
+			// Exhaustiveness guard: if a new WhereIntent kind is added to the
+			// union without a matching case here, TypeScript will flag this as
+			// a type error at compile time, preventing silent no-ops.
+			const _exhaustive: never = where;
+			throw new Error(
+				`processWhere: unhandled WhereIntent kind '${(_exhaustive as { kind: string }).kind}'`,
+			);
+		}
 	}
 }
 

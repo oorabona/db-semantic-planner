@@ -1471,3 +1471,86 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 		});
 	});
 });
+
+// ============================================================================
+// ITEM 5: runAfterMutationHooks reports correct phase on error
+// ============================================================================
+
+describe('runAfterMutationHooks phase reporting', () => {
+	it('should report afterMutation phase (not beforeMutation) when hook throws', async () => {
+		// Arrange — afterMutation hook that throws; onHookError captures the phase
+		let capturedPhase: string | undefined;
+		const ctx = makeMutationContext();
+		const throwingHook = ((_ctx: MutationHookContext, _r: unknown[]) => {
+			throw new Error('afterMutation hook failed');
+		}) as never;
+		const onHookError = (
+			_err: Error,
+			_name: string,
+			_hookCtx: unknown,
+			phase: string,
+		): 'continue' => {
+			capturedPhase = phase;
+			return 'continue';
+		};
+
+		// Act
+		await runAfterMutationHooks(
+			[throwingHook],
+			ctx,
+			[{ id: 1 }],
+			onHookError as never,
+		);
+
+		// Assert — phase must be 'afterMutation', not 'beforeMutation'
+		expect(capturedPhase).toBe('afterMutation');
+	});
+});
+
+// ============================================================================
+// ITEM 4: stream before-hook wrapped in re-entrancy guard
+// ============================================================================
+
+describe('SC-23: stream beforeQuery wrapped in re-entrancy guard', () => {
+	it('should fire stream beforeQuery hook exactly once (no recursion when hook issues query)', async () => {
+		// Arrange — create ORM; register a beforeQuery hook that itself calls orm.select().all().
+		// Without the re-entrancy guard, the inner all() would also trigger hooks → infinite loop.
+		// With the guard, hasHooks() returns false inside the hook execution, so the inner
+		// query runs without hooks and the outer hook fires exactly once.
+		const adapter = createSpyAdapterForHooks([{ id: 1 }]);
+		async function* asyncGen() {
+			yield { id: 1 };
+		}
+		(adapter as unknown as Record<string, unknown>).stream = vi.fn(() => {
+			const gen = asyncGen();
+			return {
+				[Symbol.asyncIterator]() {
+					return this;
+				},
+				next: () => gen.next(),
+				return: async () => ({ done: true as const, value: undefined }),
+				throw: async (e: unknown) => {
+					throw e;
+				},
+			};
+		});
+
+		let outerCallCount = 0;
+		// ORM reference captured after creation (closed over in the hook below)
+		let orm: ReturnType<typeof createOrm<typeof testSchema>>;
+		const hooks = createHookManager().beforeQuery((ctx) => {
+			outerCallCount++;
+			// Intentional re-entrant query — should NOT recurse into hooks
+			void orm.select('users').all();
+			return ctx;
+		});
+		orm = createOrm({ schema: testSchema, adapter, hooks });
+
+		// Act — consume first item, which triggers hook on first next()
+		const iterator = orm.select('users').stream();
+		await iterator.next();
+
+		// Assert — outer hook fires once; inner all() does not recurse
+		expect(outerCallCount).toBe(1);
+	});
+});
