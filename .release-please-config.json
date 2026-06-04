@@ -4,6 +4,7 @@
 	"pull-request-title-pattern": "chore: release ${component} ${version}",
 	"separate-pull-requests": false,
 	"include-component-in-tag": true,
+	"last-release-sha": "f748b2eeb140b016335333a576dd6cfb9f66ace4",
 	"plugins": [{ "type": "node-workspace" }, { "type": "sentence-case" }],
 	"packages": {
 		"packages/types": { "package-name": "@dbsp/types" },
