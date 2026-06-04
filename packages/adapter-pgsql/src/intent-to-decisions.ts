@@ -365,13 +365,19 @@ export function assertNoUnsupportedSubqueryModifiers(
 		}
 	}
 
-	// Scalar-subquery-specific SELECT validation
-	if (context === 'scalar') {
+	// Scalar SELECT validation — applies to both the decisions path ('scalar') and
+	// the direct compile-where path ('scalar-direct').  buildSubqueryFromIntent
+	// (used by the direct path) emits only fields[0] from a multi-field list,
+	// silently truncating the projection; expressions SELECT is not emitted at all.
+	// 'scalar-direct' must be at least as strict as 'scalar' on projection checks.
+	const isScalarContext = context === 'scalar' || context === 'scalar-direct';
+	if (isScalarContext) {
 		const select = subquery.select as
 			| { type?: string; fields?: readonly string[] }
 			| undefined;
 		if (select?.type === 'expressions') {
-			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
+			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
+			// buildSubqueryFromIntent — dropped on both scalar paths.
 			unsupported.push('expressions SELECT (not supported in scalar subquery)');
 		} else if (
 			select?.type === 'fields' &&

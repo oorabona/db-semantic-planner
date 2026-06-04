@@ -776,3 +776,69 @@ describe('nested multi-hop fail-closed for undeclared hops', () => {
 		expect(ws(sql)).toMatch(/EXISTS.*EXISTS/i);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// scalar-direct projection validation inherits all scalar checks
+// ---------------------------------------------------------------------------
+
+describe('scalar-direct projection validation on direct compileWhereIntent path', () => {
+	function makeScalarCtx() {
+		const paramState = createCompilerState();
+		return {
+			rootTable: 'users',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: (subIntent: any, paramOffset: number) =>
+				buildSubqueryFromIntent(subIntent, paramOffset, identityNaming),
+		};
+	}
+
+	it('scalar subquery with 2-field projection on direct path throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: { type: 'fields' as const, fields: ['id', 'title'] as const },
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/multi-field projection.*scalar subquery must project exactly one column/i,
+		);
+	});
+
+	it('scalar subquery with expressions projection on direct path throws', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: { type: 'expressions' as const },
+			},
+		};
+		expect(() => compileWhereIntent(intent as any, makeScalarCtx())).toThrow(
+			/expressions SELECT.*not supported in scalar subquery/i,
+		);
+	});
+
+	it('scalar subquery with single-field projection on direct path does NOT throw', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'posts',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+			},
+		};
+		expect(() =>
+			compileWhereIntent(intent as any, makeScalarCtx()),
+		).not.toThrow();
+	});
+});
