@@ -1100,11 +1100,18 @@ function collectExistsStubs(
 				d.operator === 'notExists' ||
 				d.operator === 'every')
 		) {
-			// Skip pre-resolved decisions: those produced by convertDottedFieldsToExists
-			// already carry the correct foreignKey and conditions; they do not need
-			// enrichment and must not be confused with unresolved stubs from
-			// convertExistsLike (which never sets foreignKey).
-			if (d.foreignKey) return;
+			// Skip pre-resolved decisions produced by convertDottedFieldsToExists.
+			// Those decisions are already fully enriched (FK resolved, conditions built)
+			// and must not be overwritten by the stub-enrichment path.
+			//
+			// Reliable marker: convertDottedFieldsToExists always sets `relationName`
+			// on the decisions it emits. Stub-producing functions (convertExistsLike,
+			// convertWhereToDecisions) never set relationName.  This is safer than
+			// keying on `foreignKey` presence, because a relation without an explicit
+			// foreignKey (convention-derived FK) still produces a valid dotted-field
+			// decision with no foreignKey field — using foreignKey as the skip marker
+			// would cause that decision to be re-collected and overwritten.
+			if (d.relationName) return;
 			out.push({ decision: d, container: decisions, index: i });
 		} else if (
 			(d.type === 'whereAnd' ||

@@ -484,34 +484,82 @@ function handleRelationFilterIntent(
 	ctx: WhereCompilerCtx,
 ): Node {
 	const rf = intent as WhereRelationFilterIntent;
-	const relation = Array.isArray(rf.relation)
-		? (rf.relation[0] as string)
-		: (rf.relation as string);
+	const hops: string[] = Array.isArray(rf.relation)
+		? (rf.relation as string[])
+		: [rf.relation as string];
 
 	// mode:'some'  → EXISTS         (at least one matches)
 	// mode:'none'  → NOT EXISTS     (none match)
 	// mode:'every' → NOT EXISTS WHERE NOT condition (all match)
 	const existsKind =
 		rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
-	const innerWhere: WhereIntent =
+	const innermostWhere: WhereIntent | undefined =
 		rf.mode === 'every'
 			? ({ kind: 'not', condition: rf.where } as WhereIntent)
 			: rf.where;
 
-	const resolvedRelation = ctx.model?.getRelation(
-		`${ctx.rootTable}.${relation}`,
-	);
-	const targetTable = resolvedRelation?.target ?? relation;
+	if (hops.length <= 1) {
+		// Single-hop: existing behaviour.
+		const relation = hops[0] ?? (rf.relation as string);
+		const resolvedRelation = ctx.model?.getRelation(
+			`${ctx.rootTable}.${relation}`,
+		);
+		const targetTable = resolvedRelation?.target ?? relation;
+		return compileWhereIntent(
+			{
+				kind: existsKind,
+				relation,
+				targetTable,
+				where: innermostWhere,
+			} as unknown as WhereIntent,
+			ctx,
+		);
+	}
 
-	return compileWhereIntent(
-		{
-			kind: existsKind,
-			relation,
+	// Multi-hop: build a nested EXISTS chain from outermost to innermost.
+	// Each hop must be declared in the model; fail-closed on undeclared hops.
+	if (!ctx.model) {
+		throw new Error(
+			`relationFilter(${JSON.stringify(hops)}): multi-hop relation paths require a model on the direct compile path. ` +
+				'Provide a model via WhereCompilerCtx or use the decisions path.',
+		);
+	}
+	const model = ctx.model;
+
+	// Validate all hops upfront and collect resolved targets.
+	let currentSource = ctx.rootTable;
+	const hopTargets: string[] = [];
+	for (const hop of hops) {
+		const rel = model.getRelation(`${currentSource}.${hop}`);
+		if (!rel) {
+			throw new Error(
+				`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
+					'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+			);
+		}
+		hopTargets.push(rel.target);
+		currentSource = rel.target;
+	}
+
+	// Build the nested WhereIntent chain from innermost to outermost.
+	// innermost hop: carries the user's where clause.
+	// Each outer hop wraps the previous as its where clause.
+	let innerIntent: WhereIntent | undefined = innermostWhere;
+	for (let i = hops.length - 1; i >= 0; i--) {
+		const hop = hops[i] ?? '';
+		const targetTable = hopTargets[i] ?? hop;
+		// All inner hops use 'exists'; outermost uses existsKind.
+		const hopKind = i === 0 ? existsKind : 'exists';
+		innerIntent = {
+			kind: hopKind,
+			relation: hop,
 			targetTable,
-			where: innerWhere,
-		} as unknown as WhereIntent,
-		ctx,
-	);
+			where: innerIntent,
+		} as unknown as WhereIntent;
+	}
+
+	// Compile the outermost intent in the chain.
+	return compileWhereIntent(innerIntent as WhereIntent, ctx);
 }
 
 /**
