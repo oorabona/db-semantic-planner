@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.0.3](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.0.2...adapter-pgsql-v1.0.3) (2026-06-04)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.0.3
+    * @dbsp/types bumped to 1.0.2
+
 ## [1.0.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.0.1...adapter-pgsql-v1.0.2) (2026-06-04)
 
 
