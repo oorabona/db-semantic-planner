@@ -169,6 +169,31 @@ export function buildSubqueryFromIntent(
 	naming: NamingPlugin = identityNaming,
 	schemaName?: string,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
+	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
+	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
+	// JOINs, or relation hydration (include). Any caller passing an intent with those
+	// modifiers would get silently-wrong SQL (broader or semantically-different matches).
+	//
+	// This guard fires regardless of which call path reaches this function:
+	//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — no prior guard
+	//   • handleRawExistsIntent     (compile-where.ts)             — also guards there
+	//   • handleSubqueryIntent      (compile-where.ts)             — also guards there
+	//   • adapter-compiler-mutations compileSubquery callback       — no prior guard
+	//
+	// The call-site guards in handleRawExistsIntent/handleSubqueryIntent are retained
+	// for defense-in-depth (earlier, more specific error messages). This chokepoint
+	// guarantees any future caller without a call-site guard is still protected.
+	assertNoUnsupportedSubqueryModifiers(intent, 'rawExists');
+	// Correlated subqueries (outerRef inside the inner WHERE) are not supported:
+	// buildSubqueryFromIntent builds a fresh inner WhereCompilerCtx with no outer alias,
+	// so SubqueryRefIntent values fall back to being serialized as object $N parameters,
+	// producing invalid SQL at best and a runtime panic at worst.
+	if (intent.where && containsOuterRef(intent.where)) {
+		throw new Error(
+			'buildSubqueryFromIntent: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ' +
+				'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline.',
+		);
+	}
 	const targetTable = intent.from;
 	const innerAlias = `${targetTable}_sq`;
 

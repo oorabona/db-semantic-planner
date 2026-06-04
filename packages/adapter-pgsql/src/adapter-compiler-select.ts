@@ -354,18 +354,35 @@ function propagateExistsConditions(
 	return includeDecisions.map((jd) => {
 		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
-		// DEFECT-1 FIX: match ONLY positive 'exists' decisions (notExists/every are
-		// already excluded by collectEnrichedExistsDecisions, but be explicit here
-		// so the predicate is self-documenting and safe against future refactors).
-		const matchingExists = existsDecisions.find(
-			(ed) =>
-				ed.type === 'where' &&
-				ed.operator === 'exists' &&
-				(ed.relationName === jd.relationName ||
-					ed.targetTable === jd.targetTable) &&
-				ed.conditions &&
-				(ed.conditions as PlanDecision[]).length > 0,
-		);
+		// Match the exists decision to the include decision by RELATION IDENTITY:
+		// - When both decisions carry relationName, match only on relationName.
+		//   This prevents cross-wiring when two relations target the same table
+		//   (e.g. 'authoredPosts' and 'reviewedPosts' both targeting 'posts').
+		// - Fall back to targetTable only when neither decision has a relationName,
+		//   preserving the original same-table match for legacy/unaliased cases.
+		// - If the match is ambiguous (one has relationName, the other doesn't),
+		//   do NOT propagate — safer to skip than to cross-wire.
+		const matchingExists = existsDecisions.find((ed) => {
+			if (ed.type !== 'where' || ed.operator !== 'exists') return false;
+			if (!ed.conditions || (ed.conditions as PlanDecision[]).length === 0)
+				return false;
+			const edRel = (ed as unknown as Record<string, unknown>).relationName as
+				| string
+				| undefined;
+			const jdRel = (jd as unknown as Record<string, unknown>).relationName as
+				| string
+				| undefined;
+			// Both have relationName → match by identity only.
+			if (edRel !== undefined && jdRel !== undefined) {
+				return edRel === jdRel;
+			}
+			// Neither has relationName → fall back to targetTable (legacy path).
+			if (edRel === undefined && jdRel === undefined) {
+				return ed.targetTable === jd.targetTable;
+			}
+			// One has, the other doesn't → ambiguous, do NOT propagate.
+			return false;
+		});
 
 		if (matchingExists?.conditions) {
 			return { ...jd, conditions: matchingExists.conditions };
