@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/adapter-pgsql",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "PostgreSQL adapter for db-semantic-planner — compiles query intents to optimized parameterized SQL",
 	"author": "Olivier Orabona <oorabona@users.noreply.github.com>",
 	"license": "MIT",

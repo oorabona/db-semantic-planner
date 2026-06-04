@@ -1,6 +1,6 @@
 {
 	"name": "@dbsp/nql",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "NQL (Natural Query Language) - A human and LLM-friendly query language for databases",
 	"type": "module",
 	"main": "./dist/index.js",
