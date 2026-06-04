@@ -312,6 +312,12 @@ function compileJoinIntents(
  * guaranteed to hold for every selected row, so its conditions must NOT be
  * propagated to include subqueries.
  *
+ * Critically, does NOT descend into an exists/notExists decision's own
+ * `conditions` array.  Those conditions belong to the EXISTS subquery rooted
+ * at a DIFFERENT source table (e.g. posts.comments inside users→posts exists),
+ * and collecting them here would cross-wire a nested relation's filter into
+ * a same-named root-level include (e.g. users.comments).
+ *
  * Used by propagateExistsConditions to find filter conditions for include propagation.
  */
 function collectEnrichedExistsDecisions(
@@ -319,19 +325,25 @@ function collectEnrichedExistsDecisions(
 	out: PlanDecision[],
 ): void {
 	for (const d of decisions) {
-		// DEFECT-1 FIX: collect ONLY positive 'exists' decisions for include propagation.
-		// notExists/every describe absence or universal quantification — their conditions
-		// must NOT be applied as a positive filter on the include subquery.
-		// Example: notExists('posts', { where: eq('published', false) }) selects users
-		// with NO unpublished posts; propagating that condition would wrongly restrict
-		// included posts to published=false (empty result when no unpublished posts exist).
 		if (d.type === 'where' && d.operator === 'exists' && d.targetTable) {
+			// DEFECT-1 FIX: collect ONLY positive 'exists' decisions for include propagation.
+			// notExists/every describe absence or universal quantification — their conditions
+			// must NOT be applied as a positive filter on the include subquery.
+			// Example: notExists('posts', { where: eq('published', false) }) selects users
+			// with NO unpublished posts; propagating that condition would wrongly restrict
+			// included posts to published=false (empty result when no unpublished posts exist).
 			out.push(d);
-		}
-		// Only recurse into AND conjunctions — OR/NOT are not conjunctive positions.
-		if (d.type === 'whereAnd' && d.conditions) {
+			// SOURCE BOUNDARY: do NOT recurse into this exists's own conditions.
+			// The conditions array belongs to a nested subquery whose source table is
+			// d.targetTable (e.g. 'posts'), NOT the root table.  Descending would collect
+			// inner exists decisions (e.g. posts→comments) that share a relation name with
+			// a root include (e.g. users.comments) but have a different source — causing
+			// cross-source propagation of the wrong filter into the root include.
+		} else if (d.type === 'whereAnd' && d.conditions) {
+			// Only recurse into AND conjunctions — OR/NOT are not conjunctive positions.
 			collectEnrichedExistsDecisions(d.conditions as PlanDecision[], out);
 		}
+		// whereOr, whereNot, and all other types are deliberately NOT recursed into.
 	}
 }
 
@@ -340,6 +352,11 @@ function collectEnrichedExistsDecisions(
  * When a relation is both filtered (EXISTS) and included, the filter appears in both
  * the EXISTS subquery AND the include subquery.
  *
+ * Matching is by full RELATION IDENTITY: (sourceTable, relationName) when both are
+ * available.  This prevents two relations that share a name but originate from different
+ * source tables (e.g. users.comments via user_id vs posts.comments via post_id) from
+ * cross-wiring: the nested posts→comments filter must not propagate to users.comments.
+ *
  * Exists decisions may be nested anywhere in the decision tree (inside OR/AND/NOT)
  * so this function collects them from the entire tree before matching.
  */
@@ -347,14 +364,19 @@ function propagateExistsConditions(
 	includeDecisions: readonly PlanDecision[],
 	allDecisions: readonly PlanDecision[],
 ): PlanDecision[] {
-	// Collect all exists decisions from anywhere in the full decision tree
+	// Collect root-level exists decisions (collectEnrichedExistsDecisions stops at
+	// exists boundaries — it never descends into an exists's own conditions, so
+	// only same-source-level exists decisions are considered for propagation).
 	const existsDecisions: PlanDecision[] = [];
 	collectEnrichedExistsDecisions(allDecisions, existsDecisions);
 
 	return includeDecisions.map((jd) => {
 		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
-		// Match the exists decision to the include decision by RELATION IDENTITY:
+		// Match the exists decision to the include decision by full RELATION IDENTITY:
+		// - sourceTable guard (when both carry sourceTable): cross-source protection.
+		//   users.comments (sourceTable='users') must NOT match posts.comments
+		//   (sourceTable='posts') even when both have relationName='comments'.
 		// - When both decisions carry relationName, match only on relationName.
 		//   This prevents cross-wiring when two relations target the same table
 		//   (e.g. 'authoredPosts' and 'reviewedPosts' both targeting 'posts').
@@ -366,6 +388,25 @@ function propagateExistsConditions(
 			if (ed.type !== 'where' || ed.operator !== 'exists') return false;
 			if (!ed.conditions || (ed.conditions as PlanDecision[]).length === 0)
 				return false;
+
+			// Cross-source guard: reject when sourceTable is known on both sides
+			// and they differ.  enrichExistsStubsInConditions sets sourceTable on
+			// nested exists; buildEnrichedExistsDecision now also sets sourceTable.
+			// When the field is absent on one side (legacy path), skip the guard.
+			const edSource = (ed as unknown as Record<string, unknown>).sourceTable as
+				| string
+				| undefined;
+			const jdSource = (jd as unknown as Record<string, unknown>).sourceTable as
+				| string
+				| undefined;
+			if (
+				edSource !== undefined &&
+				jdSource !== undefined &&
+				edSource !== jdSource
+			) {
+				return false;
+			}
+
 			const edRel = (ed as unknown as Record<string, unknown>).relationName as
 				| string
 				| undefined;
