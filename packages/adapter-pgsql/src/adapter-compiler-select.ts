@@ -304,9 +304,15 @@ function compileJoinIntents(
 // ============================================================================
 
 /**
- * Collect all fully-enriched exists/notExists decisions from any position in a
- * decision tree (top-level and nested inside whereAnd/whereOr/whereNot).
- * Used by propagateExistsConditions to find filter conditions regardless of nesting.
+ * Collect fully-enriched exists/notExists decisions that are in an AND-REQUIRED
+ * (conjunctive) position — i.e. they MUST hold for every selected row.
+ *
+ * Only descends into `whereAnd` branches (top-level conjunction).  Does NOT
+ * descend into `whereOr` or `whereNot`: an EXISTS under OR or NOT is not
+ * guaranteed to hold for every selected row, so its conditions must NOT be
+ * propagated to include subqueries.
+ *
+ * Used by propagateExistsConditions to find filter conditions for include propagation.
  */
 function collectEnrichedExistsDecisions(
 	decisions: readonly PlanDecision[],
@@ -318,21 +324,12 @@ function collectEnrichedExistsDecisions(
 			(d.operator === 'exists' ||
 				d.operator === 'notExists' ||
 				d.operator === 'every') &&
-			d.targetTable &&
-			// Only fully-enriched decisions have targetTable that differs from the
-			// relation name OR carry foreignKey/conditions — stub decisions have
-			// targetTable === relation name and no foreignKey.
-			// We include all of them; propagation only acts when conditions exist.
-			true
+			d.targetTable
 		) {
 			out.push(d);
 		}
-		if (
-			(d.type === 'whereAnd' ||
-				d.type === 'whereOr' ||
-				d.type === 'whereNot') &&
-			d.conditions
-		) {
+		// Only recurse into AND conjunctions — OR/NOT are not conjunctive positions.
+		if (d.type === 'whereAnd' && d.conditions) {
 			collectEnrichedExistsDecisions(d.conditions as PlanDecision[], out);
 		}
 	}

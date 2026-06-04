@@ -526,6 +526,106 @@ export function extractExistsDecisions(
 // ============================================================================
 
 /**
+ * Build a nested EXISTS chain for a multi-hop relation path.
+ *
+ * For a 2-hop path ['posts','comments'] from 'users' with where eq('body','hi'):
+ *   Outer decision: targetTable='posts', operator='exists',
+ *                   conditions=[inner decision]
+ *   Inner decision: targetTable='comments', operator=<innerOperator>,
+ *                   sourceTable='posts', conditions=[userWhere decisions]
+ *
+ * Each hop's correlation is: previous_alias.pk = current_table.fk (or fk = pk
+ * depending on relationType), resolved via ModelIR.
+ *
+ * The innermost hop carries the user's where conditions and the mode operator
+ * (exists/notExists/every).  All intermediate hops use plain 'exists'.
+ */
+function buildMultiHopExistsChain(
+	hops: readonly string[],
+	rootTable: string,
+	innerOperator: string,
+	innerConditions: PlanDecision[] | undefined,
+	model: ModelIR,
+): PlanDecision {
+	// Build from innermost to outermost.
+	// innermost hop: the last element in hops, correlated against hops[hops.length-2] (or root for 1-hop).
+	// For each hop i, source = hops[i-1] (or rootTable for i=0), target = hops[i].
+	let currentSource = rootTable;
+	// Collect per-hop relation info
+	const hopRelations: Array<{
+		source: string;
+		target: string;
+		foreignKey: string | undefined;
+		relationType: 'belongsTo' | 'hasMany' | 'hasOne' | undefined;
+		parentKey: string | undefined;
+	}> = [];
+
+	for (const hop of hops) {
+		const rel = model.getRelation(`${currentSource}.${hop}`);
+		const foreignKey = rel
+			? typeof rel.foreignKey === 'string'
+				? rel.foreignKey
+				: rel.foreignKey?.[0]
+			: undefined;
+		const relationType =
+			rel?.type === 'belongsTo'
+				? ('belongsTo' as const)
+				: rel?.type === 'hasMany' || rel?.type === 'hasOne'
+					? (rel.type as 'hasMany' | 'hasOne')
+					: undefined;
+		const parentKey =
+			relationType === 'belongsTo' ? rel?.targetKey : rel?.sourceKey;
+		const target = rel ? rel.target : hop;
+		hopRelations.push({
+			source: currentSource,
+			target,
+			foreignKey,
+			relationType,
+			parentKey,
+		});
+		currentSource = target;
+	}
+
+	// Build from last hop inward
+	let innerDecision: PlanDecision | undefined;
+	for (let i = hopRelations.length - 1; i >= 0; i--) {
+		const hop = hopRelations[i];
+		if (!hop) continue;
+		const isInnermost = i === hopRelations.length - 1;
+		const operator = isInnermost ? innerOperator : 'exists';
+
+		// Conditions for this hop:
+		// - innermost: user's where conditions (may be wrapped by everyHandler later)
+		// - intermediate: the next (inner) decision
+		let conditions: PlanDecision[] | undefined;
+		if (isInnermost) {
+			conditions = innerConditions;
+		} else if (innerDecision) {
+			conditions = [innerDecision];
+		}
+
+		innerDecision = {
+			type: 'where',
+			operator,
+			targetTable: hop.target,
+			sourceTable: hop.source,
+			...(hop.foreignKey ? { foreignKey: hop.foreignKey } : {}),
+			...(hop.relationType ? { relationType: hop.relationType } : {}),
+			...(hop.parentKey ? { parentKey: hop.parentKey } : {}),
+			...(conditions ? { conditions } : {}),
+		};
+	}
+
+	// innerDecision is now the outermost hop (i=0)
+	if (!innerDecision) {
+		throw new Error(
+			`buildMultiHopExistsChain: empty hops array for root table '${rootTable}'`,
+		);
+	}
+	return innerDecision;
+}
+
+/**
  * Build a fully-enriched exists decision from a filter-strategy planner decision
  * and the matching intent.  Shared by extractExistsDecisions (top-level) and
  * enrichExistsDecisionsInPlace (inline tree walk).
@@ -739,14 +839,18 @@ export function enrichExistsDecisionsInPlace(
 			const context = d.context as Record<string, unknown>;
 			if (!context.target) continue;
 
-			// Find the matching intent (consume-once) — same matching logic as extractExistsDecisions
+			// Find the matching intent (consume-once).
+			// For multi-hop array paths (e.g. ['posts','comments']), the planner
+			// records context.relation = last hop name ('comments').  We must
+			// match against the LAST element of i.relation[], not the first.
 			const matchIdx = existsIntents.findIndex((i) => {
-				const rel =
-					Array.isArray(i.relation) && i.relation.length > 0
-						? i.relation[0]
-						: typeof i.relation === 'string'
-							? i.relation
-							: undefined;
+				const rel = Array.isArray(i.relation)
+					? i.relation.length > 0
+						? i.relation[i.relation.length - 1]
+						: undefined
+					: typeof i.relation === 'string'
+						? i.relation
+						: undefined;
 				return (
 					rel === context.relation ||
 					rel === context.target ||
@@ -757,12 +861,52 @@ export function enrichExistsDecisionsInPlace(
 				matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
 			if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
 
-			const enriched = buildEnrichedExistsDecision(
-				d as { choice: string; context: Record<string, unknown> },
-				matchingIntent,
-				plan.rootTable,
-				model,
-			);
+			// For multi-hop paths (array relation with length > 1), build a nested
+			// EXISTS chain rather than a single flat EXISTS on the last hop.
+			const isMultiHop =
+				matchingIntent &&
+				Array.isArray(matchingIntent.relation) &&
+				matchingIntent.relation.length > 1 &&
+				model;
+
+			let enriched: PlanDecision;
+			if (isMultiHop && matchingIntent && model) {
+				// Determine innerOperator from mode
+				const mode = matchingIntent.mode ?? 'some';
+				const innerOperator =
+					matchingIntent.kind === 'notExists' || mode === 'none'
+						? 'notExists'
+						: mode === 'every'
+							? 'every'
+							: 'exists';
+
+				// Build inner conditions from the user's where clause (on the innermost table)
+				const lastHopTarget = context.target as string;
+				const innerConditions = matchingIntent.where
+					? (() => {
+							const c = convertWhereToDecisions(
+								matchingIntent.where,
+								lastHopTarget,
+							);
+							return c.length > 0 ? c : undefined;
+						})()
+					: undefined;
+
+				enriched = buildMultiHopExistsChain(
+					matchingIntent.relation as string[],
+					plan.rootTable,
+					innerOperator,
+					innerConditions,
+					model,
+				);
+			} else {
+				enriched = buildEnrichedExistsDecision(
+					d as { choice: string; context: Record<string, unknown> },
+					matchingIntent,
+					plan.rootTable,
+					model,
+				);
+			}
 
 			// Find the stub in the tree that corresponds to this filter-strategy.
 			// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])

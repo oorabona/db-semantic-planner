@@ -123,20 +123,22 @@ describe('1. multi-hop relationFilter — no malformed SQL, no error', () => {
 		expect(normalized).toContain('postId');
 	});
 
-	it('SQL matches the baseline from main (single EXISTS on comments via FK postId)', () => {
-		// Baseline SQL from old top-level path: EXISTS on comments with postId FK.
-		// The correlation uses the outer root table alias (users.id), because the
-		// planner's filter-strategy has sourceTable='posts' but buildExistsSubquery
-		// uses ctx.rootTable as the outer alias.
-		// This test locks that no regression from the multi-hop fix.
+	it('SQL uses nested EXISTS chain (updated: old single-EXISTS assertion locked the pre-existing bug)', () => {
+		// The old assertion was: WHERE EXISTS count === 1 (single flat EXISTS on
+		// last hop only, wrong correlation against users.id instead of posts_alias.id).
+		// That locked a known bug — the nested-chain fix (Item B) changes the output
+		// to a proper 2-level nested EXISTS.  This test is updated to assert the
+		// new correct behavior.
 		const { sql } = compileMultiHop(['posts', 'comments']);
 		const normalized = ws(sql);
-		// Single WHERE EXISTS clause (not nested) — 'comments_exists_0' alias doesn't count
-		const existsCount = (normalized.match(/WHERE EXISTS/gi) ?? []).length;
-		expect(existsCount).toBe(1);
-		// Targets comments table
+		// Nested chain: >= 2 EXISTS subqueries
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+		// Targets both intermediate (posts) and last (comments) tables
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
 		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
-		// Uses the FK
+		// Uses the FK columns for each hop
+		expect(normalized).toContain('authorId');
 		expect(normalized).toContain('postId');
 	});
 });
@@ -324,5 +326,233 @@ describe('4. single-hop exists — no regression', () => {
 		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
 		expect(normalized).toContain('postId');
 		expect(parameters).toContain('%hi%');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 5. Nested-EXISTS chain: the correct target SQL (Item B fix)
+//
+// Prior to this fix (old single-EXISTS path), the adapter produced:
+//   EXISTS (SELECT 1 FROM "comments" WHERE users.id = comments."postId")
+// — wrong correlation (users.id instead of posts_alias.id) and dropped inner
+// where filter (because intent matching used i.relation[0]='posts' against
+// context.relation='comments' → no match → conditions undefined).
+//
+// The fix builds a nested EXISTS chain:
+//   EXISTS (SELECT 1 FROM "posts" AS posts_exists_0
+//           WHERE <users.id = posts_exists_0.authorId>
+//             AND EXISTS (SELECT 1 FROM "comments" AS comments_exists_1
+//                         WHERE <posts_exists_0.id = comments_exists_1.postId>
+//                           AND comments_exists_1.body = $1))
+//
+// The old test in describe('1') that asserted "single WHERE EXISTS"
+// (existsCount === 1) is updated here because it locked the pre-existing
+// bug (single flat EXISTS on last hop only, wrong correlation).
+// ---------------------------------------------------------------------------
+
+describe('5. nested-EXISTS chain — correct correlations and inner where (Item B fix)', () => {
+	it('produces TWO nested EXISTS subqueries (not one flat EXISTS)', () => {
+		const { sql } = compileMultiHop(['posts', 'comments'], 'hello');
+		const normalized = ws(sql);
+		// Count EXISTS( occurrences: should be >= 2 (outer + inner)
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+	});
+
+	it('outer EXISTS targets posts', () => {
+		const { sql } = compileMultiHop(['posts', 'comments'], 'hello');
+		const normalized = ws(sql);
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+	});
+
+	it('inner EXISTS targets comments', () => {
+		const { sql } = compileMultiHop(['posts', 'comments'], 'hello');
+		const normalized = ws(sql);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+	});
+
+	it('inner where filter (body condition) is NOT dropped', () => {
+		// compileMultiHop with a body string uses operator 'like', producing body LIKE $1.
+		// The assertion checks that body appears in the innermost subquery and the
+		// parameter is bound — verifying the user's where clause is NOT silently dropped.
+		const { sql, parameters } = compileMultiHop(['posts', 'comments'], 'hello');
+		const normalized = ws(sql);
+		// body must appear in the inner subquery (comments level)
+		expect(normalized).toMatch(/body\s+(=|LIKE|ILIKE)\s+\$\d/i);
+		expect(parameters).toContain('%hello%');
+	});
+
+	it('outer correlation uses authorId (users hasMany posts, FK on posts side)', () => {
+		// users → posts: hasMany, FK=authorId on posts side
+		// Outer correlation: <sourceAlias>.id = <postsAlias>.authorId
+		const { sql } = compileMultiHop(['posts', 'comments']);
+		const normalized = ws(sql);
+		expect(normalized).toContain('authorId');
+	});
+
+	it('inner correlation uses postId (posts hasMany comments, FK on comments side)', () => {
+		// posts → comments: hasMany, FK=postId on comments side
+		// Inner correlation: <postsAlias>.id = <commentsAlias>.postId
+		const { sql } = compileMultiHop(['posts', 'comments']);
+		const normalized = ws(sql);
+		expect(normalized).toContain('postId');
+	});
+
+	it('single-hop still produces ONE EXISTS (zero regression)', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts'],
+					where: {
+						kind: 'comparison',
+						field: 'published',
+						operator: 'eq',
+						value: true,
+					},
+					mode: 'some',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		// Single-hop: exactly 1 EXISTS
+		expect(existsCount).toBe(1);
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(parameters).toContain(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 6. Multi-hop under OR — nested chain preserved, inline position preserved
+// ---------------------------------------------------------------------------
+
+describe('6. multi-hop nested under OR — nested chain + inline position (Item B fix)', () => {
+	it('or(eq, relationFilter([posts,comments])) — produces nested EXISTS + OR', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'or',
+					conditions: [
+						{
+							kind: 'comparison',
+							field: 'active',
+							operator: 'eq',
+							value: true,
+						},
+						{
+							kind: 'relationFilter',
+							relation: ['posts', 'comments'],
+							where: {
+								kind: 'comparison',
+								field: 'body',
+								operator: 'like',
+								value: '%hi%',
+							},
+							mode: 'some',
+						},
+					],
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// OR must appear (inline position preserved)
+		expect(normalized).toContain('OR');
+		// Nested EXISTS chain: >= 2 EXISTS
+		const existsCount = (normalized.match(/EXISTS\s*\(/gi) ?? []).length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+		// Both hops present
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+		// Inner filter preserved
+		expect(parameters).toContain('%hi%');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 7. notExists / every mode on multi-hop — applied at innermost hop
+// ---------------------------------------------------------------------------
+
+describe('7. mode notExists/every on multi-hop — applied at innermost hop (Item B fix)', () => {
+	it('mode:none (notExists) on multi-hop produces NOT EXISTS at innermost', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts', 'comments'],
+					where: {
+						kind: 'comparison',
+						field: 'body',
+						operator: 'eq',
+						value: 'spam',
+					},
+					mode: 'none',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// NOT EXISTS must appear (for the innermost hop)
+		expect(normalized).toContain('NOT');
+		expect(normalized).toContain('EXISTS');
+		// Both hops present
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
+		// Inner filter preserved
+		expect(parameters).toContain('spam');
+	});
+
+	it('mode:every on multi-hop produces NOT EXISTS (NOT condition) at innermost', () => {
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts', 'comments'],
+					where: {
+						kind: 'comparison',
+						field: 'body',
+						operator: 'eq',
+						value: 'approved',
+					},
+					mode: 'every',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// every = NOT EXISTS(...WHERE NOT condition)
+		expect(normalized).toContain('NOT');
+		expect(normalized).toContain('EXISTS');
+		// Inner filter present
+		expect(parameters).toContain('approved');
+		// Both hops present
+		expect(normalized).toMatch(/FROM\s+"?posts"?/i);
+		expect(normalized).toMatch(/FROM\s+"?comments"?/i);
 	});
 });
