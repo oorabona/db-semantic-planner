@@ -11,7 +11,7 @@ import type { ModelIR } from './model-ir.js';
 export interface LoadedSchema {
 	readonly definition: Record<string, unknown>;
 	readonly model: ModelIR;
-	readonly tableNames: string[];
+	readonly tableNames: readonly string[];
 }
 
 /**
@@ -36,5 +36,11 @@ export function isValidSchema(schema: unknown): schema is LoadedSchema {
 	if (typeof s.model !== 'object' || s.model === null) return false;
 	if (!('tables' in s.model) || !('relations' in s.model)) return false;
 	if (!Array.isArray(s.tableNames)) return false;
+	// Validate required ModelIR methods are present
+	if (typeof s.model.getTable !== 'function') return false;
+	if (typeof s.model.getRelation !== 'function') return false;
+	if (typeof s.model.getRelationsFrom !== 'function') return false;
+	if (typeof s.model.getRelationsTo !== 'function') return false;
+	if (typeof s.model.isAmbiguous !== 'function') return false;
 	return true;
 }

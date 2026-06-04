@@ -6,7 +6,6 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { UnsupportedFeatureError } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { POSTGRESQL_CAPABILITIES } from '../dialects/index.js';
 import { ModelIRImpl } from '../model-impl.js';
@@ -15,6 +14,7 @@ import {
 	type FeatureChecker,
 	type FeatureUsage,
 	negotiateFeatures,
+	UnsupportedFeatureError,
 } from './negotiate-features.js';
 
 // ============================================================================

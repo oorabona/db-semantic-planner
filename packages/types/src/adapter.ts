@@ -460,53 +460,53 @@ export type IndexColumnDef =
 
 /** Options for CREATE INDEX. */
 export type CreateIndexOptions = {
-	name: string;
-	columns: IndexColumnDef[];
-	method?: IndexMethod;
-	opclass?: Record<string, string>;
-	include?: string[];
-	with?: Record<string, unknown>;
-	where?: string;
-	unique?: boolean;
-	ifNotExists?: boolean;
-	concurrently?: boolean;
+	readonly name: string;
+	readonly columns: readonly IndexColumnDef[];
+	readonly method?: IndexMethod;
+	readonly opclass?: Readonly<Record<string, string>>;
+	readonly include?: readonly string[];
+	readonly with?: Readonly<Record<string, unknown>>;
+	readonly where?: string;
+	readonly unique?: boolean;
+	readonly ifNotExists?: boolean;
+	readonly concurrently?: boolean;
 };
 
 /** Options for DROP INDEX. */
 export type DropIndexOptions = {
-	ifExists?: boolean;
-	cascade?: boolean;
-	concurrently?: boolean;
-	schema?: string;
+	readonly ifExists?: boolean;
+	readonly cascade?: boolean;
+	readonly concurrently?: boolean;
+	readonly schema?: string;
 };
 
 /** Options for VACUUM. */
 export type VacuumOptions = {
-	full?: boolean;
-	analyze?: boolean;
+	readonly full?: boolean;
+	readonly analyze?: boolean;
 };
 
 /** Options for TRUNCATE. */
 export type TruncateOptions = {
-	cascade?: boolean;
-	restartIdentity?: boolean;
+	readonly cascade?: boolean;
+	readonly restartIdentity?: boolean;
 };
 
 /** Options for ALTER COLUMN. */
 export type AlterColumnOptions = {
-	type?: string;
-	using?: string;
-	setNotNull?: boolean;
-	setDefault?: unknown;
-	dropDefault?: boolean;
+	readonly type?: string;
+	readonly using?: string;
+	readonly setNotNull?: boolean;
+	readonly setDefault?: unknown;
+	readonly dropDefault?: boolean;
 };
 
 /** Index metadata returned by listIndexes(). */
 export type IndexInfo = {
-	name: string;
-	definition: string;
-	unique: boolean;
-	method: string;
+	readonly name: string;
+	readonly definition: string;
+	readonly unique: boolean;
+	readonly method: string;
 };
 
 // ============================================================================
@@ -713,20 +713,6 @@ export interface FeatureBehaviorConfig {
 	readonly default: UnsupportedFeatureBehavior;
 	/** Per-feature overrides */
 	readonly overrides?: Partial<Record<DDLFeature, UnsupportedFeatureBehavior>>;
-}
-
-/** Error thrown when behavior = 'error' and unsupported feature detected */
-export class UnsupportedFeatureError extends Error {
-	constructor(
-		readonly feature: string,
-		readonly adapter: string,
-		readonly element: string,
-	) {
-		super(
-			`Unsupported feature "${feature}" on adapter "${adapter}" for "${element}"`,
-		);
-		this.name = 'UnsupportedFeatureError';
-	}
 }
 
 /** Warning emitted when behavior = 'warning' */

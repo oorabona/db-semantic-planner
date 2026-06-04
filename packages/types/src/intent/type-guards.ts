@@ -395,7 +395,10 @@ export function isMutationIntent(
 ): intent is MutationIntent {
 	return (
 		intent.type === 'insert' ||
+		intent.type === 'insert_from' ||
+		intent.type === 'upsert_from' ||
 		intent.type === 'update' ||
+		intent.type === 'batchUpdate' ||
 		intent.type === 'delete' ||
 		intent.type === 'upsert'
 	);

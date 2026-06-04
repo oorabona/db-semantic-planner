@@ -369,6 +369,7 @@ export {
 // ============================================================================
 
 export * from './dx/index.js';
+export { UnsupportedFeatureError } from './dx/negotiate-features.js';
 
 // ============================================================================
 // Dialect Capabilities (CORE-004)
