@@ -521,6 +521,241 @@ export function extractExistsDecisions(
 	return results;
 }
 
+// ============================================================================
+// In-place exists enrichment
+// ============================================================================
+
+/**
+ * Build a fully-enriched exists decision from a filter-strategy planner decision
+ * and the matching intent.  Shared by extractExistsDecisions (top-level) and
+ * enrichExistsDecisionsInPlace (inline tree walk).
+ */
+function buildEnrichedExistsDecision(
+	d: { choice: string; context: Record<string, unknown> },
+	matchingIntent: ExistsIntent | undefined,
+	rootTable: string,
+	model?: ModelIR,
+): PlanDecision {
+	const context = d.context;
+	const targetTable = context.target as string;
+
+	// Build nested conditions with correct target table
+	let conditions: PlanDecision[] | undefined;
+	if (matchingIntent?.where) {
+		const nestedDecisions = convertWhereToDecisions(
+			matchingIntent.where,
+			targetTable,
+		);
+		if (nestedDecisions.length > 0) {
+			conditions = nestedDecisions;
+		}
+	}
+
+	// Resolve FK from model relation if available
+	const foreignKey =
+		model && context.relation
+			? resolveRelation(
+					model,
+					(context.sourceTable as string | undefined) || rootTable,
+					context.relation as string,
+				)?.foreignKey
+			: undefined;
+
+	// Determine operator
+	let operator: string = 'exists';
+	if (matchingIntent?.kind === 'notExists') {
+		operator = 'notExists';
+	} else if (matchingIntent?.kind === 'relationFilter') {
+		const mode = matchingIntent.mode ?? 'some';
+		if (mode === 'none') operator = 'notExists';
+		else if (mode === 'every') operator = 'every';
+	}
+
+	// Extract include declarations from the matching intent (JOIN inside subquery).
+	const includeIntent = (matchingIntent as Record<string, unknown> | undefined)
+		?.include as Record<string, { join?: 'inner' | 'left' }> | undefined;
+	const includeDecisions: PlanDecision[] | undefined = includeIntent
+		? Object.entries(includeIntent).map(([rel, opts]) => ({
+				type: 'existsInclude',
+				relation: rel,
+				joinType: opts.join ?? 'inner',
+			}))
+		: undefined;
+
+	const relationName = context.relation as string | undefined;
+	return {
+		type: 'where',
+		operator,
+		targetTable,
+		...(foreignKey ? { foreignKey } : {}),
+		...(conditions ? { conditions } : {}),
+		...(d.choice === 'join' ? { choice: 'join' } : {}),
+		...(relationName ? { relationName } : {}),
+		...(includeDecisions ? { include: includeDecisions } : {}),
+	};
+}
+
+/**
+ * Collect all stub exists/notExists decisions from a decision tree in depth-first order.
+ * A stub is produced by intentToDecisions — it has the relation name as targetTable
+ * (possibly as a string[] from NQL's relationFilter intent) and may lack foreignKey.
+ */
+function collectExistsStubs(
+	decisions: PlanDecision[],
+	out: Array<{
+		decision: PlanDecision;
+		container: PlanDecision[];
+		index: number;
+	}>,
+): void {
+	decisions.forEach((d, i) => {
+		if (!d) return;
+		if (
+			d.type === 'where' &&
+			(d.operator === 'exists' ||
+				d.operator === 'notExists' ||
+				d.operator === 'every')
+		) {
+			out.push({ decision: d, container: decisions, index: i });
+		} else if (
+			(d.type === 'whereAnd' ||
+				d.type === 'whereOr' ||
+				d.type === 'whereNot') &&
+			d.conditions
+		) {
+			collectExistsStubs(d.conditions as PlanDecision[], out);
+		}
+	});
+}
+
+/**
+ * Normalize a stub's targetTable to a string.
+ * NQL's relationFilter intent sets relation as string[] (e.g. ['children']).
+ * convertExistsLike casts it as string, but the runtime value stays an array.
+ */
+function normalizeStubRelation(targetTable: unknown): string | undefined {
+	if (Array.isArray(targetTable) && targetTable.length > 0)
+		return targetTable[0] as string;
+	if (typeof targetTable === 'string') return targetTable;
+	return undefined;
+}
+
+/**
+ * Walk the decision tree (in-place) and enrich each stub exists/notExists decision
+ * with the fully-resolved targetTable, foreignKey, conditions, and include from the
+ * matching planner filter-strategy decision.
+ *
+ * This replaces the "strip + re-append at top level" pattern so that EXISTS subqueries
+ * remain at their exact position in the boolean tree (inside OR/AND/NOT containers).
+ *
+ * Returns the list of enriched decisions that were placed inline (used by
+ * propagateExistsConditions to couple includes with their filter conditions).
+ */
+export function enrichExistsDecisionsInPlace(
+	decisions: PlanDecision[],
+	plan: PlanReport,
+	model?: ModelIR,
+): PlanDecision[] {
+	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
+	const filterDecisions = plan.decisions.filter(
+		(d) =>
+			d.type === 'filter-strategy' &&
+			(d.choice === 'exists' ||
+				d.choice === 'notExists' ||
+				d.choice === 'join'),
+	);
+
+	if (filterDecisions.length === 0) {
+		return [];
+	}
+
+	// Find all exists intents from the plan's where clause (same as extractExistsDecisions).
+	// Clone so we can consume (splice) matches without mutating the plan.
+	const existsIntents = plan.intent?.where
+		? findExistsIntents(plan.intent.where)
+		: [];
+
+	// Collect all stub exists positions in depth-first order from the decision tree.
+	const stubs: Array<{
+		decision: PlanDecision;
+		container: PlanDecision[];
+		index: number;
+	}> = [];
+	collectExistsStubs(decisions, stubs);
+
+	// For each filter-strategy decision, find the matching stub (by relation name)
+	// and replace it with the enriched decision.
+	// Use consume-once semantics on stubs to handle duplicate relations correctly.
+	const placedDecisions: PlanDecision[] = [];
+	const consumedStubIndices = new Set<number>();
+
+	for (const d of filterDecisions) {
+		const context = d.context as Record<string, unknown>;
+		if (!context.target) continue;
+
+		// Find the matching intent (consume-once) — same matching logic as extractExistsDecisions
+		const matchIdx = existsIntents.findIndex((i) => {
+			const rel =
+				Array.isArray(i.relation) && i.relation.length > 0
+					? i.relation[0]
+					: typeof i.relation === 'string'
+						? i.relation
+						: undefined;
+			return (
+				rel === context.relation ||
+				rel === context.target ||
+				rel === context.includeAlias
+			);
+		});
+		const matchingIntent = matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
+		if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
+
+		const enriched = buildEnrichedExistsDecision(
+			d as { choice: string; context: Record<string, unknown> },
+			matchingIntent,
+			plan.rootTable,
+			model,
+		);
+
+		// Find the stub in the tree that corresponds to this filter-strategy.
+		// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])
+		// that convertExistsLike stores as targetTable via `cond.relation as string`.
+		const stubIdx = stubs.findIndex((s, idx) => {
+			if (consumedStubIndices.has(idx)) return false;
+			const stubRelation = normalizeStubRelation(s.decision.targetTable);
+			return (
+				stubRelation === context.relation ||
+				stubRelation === context.target ||
+				stubRelation === context.includeAlias
+			);
+		});
+
+		if (stubIdx >= 0) {
+			// Replace the stub in-place in its container
+			const stub = stubs[stubIdx];
+			if (stub) {
+				stub.container[stub.index] = enriched;
+				consumedStubIndices.add(stubIdx);
+				placedDecisions.push(enriched);
+			}
+		} else {
+			// No matching stub in the tree — append at top level as fallback
+			// (handles cases where the intent came from planner optimization that added
+			// a filter-strategy without a corresponding exists() call in the WHERE tree,
+			// e.g. IN→EXISTS conversion where the original intent was an 'in', not 'exists').
+			decisions.push(enriched);
+			placedDecisions.push(enriched);
+		}
+	}
+
+	return placedDecisions;
+}
+
+/**
+ * Extract EXISTS/NOT EXISTS subquery decisions from filter-strategy plan decisions.
+ * @deprecated Use enrichExistsDecisionsInPlace for new code — it preserves inline
+ * boolean position. This function remains for direct-call tests in coverage tests.
+ */
 /**
  * Extract ALL include decisions from include-strategy plan decisions.
  * Produces decisions with type 'includeStrategy' for all strategies:

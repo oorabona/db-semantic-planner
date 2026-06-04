@@ -180,7 +180,11 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 		 * exists() throw when the relation is not declared, which would require
 		 * updating this test AND the companion guide.
 		 */
-		it('exists() on undeclared relation silently drops the WHERE today (boundary documented)', () => {
+		it('exists() on undeclared relation compiles with relation name as table (no FK correlation)', () => {
+			// exists() on an undeclared relation now compiles the EXISTS subquery using
+			// the relation name as the target table (FK derived by naming convention).
+			// This is a boundary case: rawExists() is the correct escape hatch when
+			// no FK relation is declared (see the test below).
 			const orm = buildOrm();
 			const dump = (orm as any)
 				.select('users')
@@ -189,11 +193,9 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 
 			const sql = ws(dump.sql);
 
-			// EXISTS is absent — the filter was silently dropped
-			expect(sql).not.toMatch(/EXISTS/i);
-
-			// Only the bare SELECT remains
-			expect(sql).toMatch(/^SELECT users\.\* FROM users\s*$/i);
+			// EXISTS is present — compiled with the relation name as table
+			expect(sql).toMatch(/EXISTS/i);
+			expect(sql).toMatch(/auditLog/i);
 		});
 
 		/**

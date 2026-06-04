@@ -125,16 +125,16 @@ describe('3. op() expression in WHERE with gte', () => {
 // ---------------------------------------------------------------------------
 
 describe('4. or(eq, exists) - both branches survive', () => {
-	it('extracts exists to AND and keeps eq condition', () => {
-		// Note: the planner extracts exists/notExists from OR and combines as AND.
-		// This is documented behavior. The test asserts both eq and EXISTS appear.
+	it('compiles exists inline at its OR position', () => {
+		// EXISTS is now compiled inline at its exact boolean tree position.
+		// or(eq(...), exists(...)) produces "kind = $1 OR EXISTS(...)" — not AND.
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('symbols')
 			.where(or(eq('kind', 'function'), exists('callee_calls')))
 			.dump();
 		expect(ws(dump.sql)).toEqual(
-			'SELECT symbols.* FROM symbols WHERE symbols.kind = $1 AND EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0.callee_id)',
+			'SELECT symbols.* FROM symbols WHERE symbols.kind = $1 OR EXISTS (SELECT 1 FROM calls AS calls_exists_0 WHERE symbols.id = calls_exists_0.callee_id)',
 		);
 		expect(dump.params).toEqual(['function']);
 	});

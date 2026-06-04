@@ -32,8 +32,8 @@ import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
+	enrichExistsDecisionsInPlace,
 	extractAllIncludeDecisions,
-	extractExistsDecisions,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 
@@ -46,31 +46,8 @@ import {
  * Used only in the legacy/test path where mock plans carry adapter-format decisions
  * inside a core PlanReport. At runtime the data is already in adapter format.
  */
-/**
- * Recursively strip exists/notExists decisions from a decision tree.
- * Handles top-level decisions and those nested inside whereAnd/whereOr/whereNot.
- * Returns null when the decision itself should be removed.
- * Containers (whereAnd/whereOr/whereNot) that become empty after stripping are also removed.
- */
-function stripExistsFromDecision(d: PlanDecision): PlanDecision | null {
-	if (
-		d.type === 'where' &&
-		(d.operator === 'exists' || d.operator === 'notExists')
-	) {
-		return null;
-	}
-	if (
-		(d.type === 'whereAnd' || d.type === 'whereOr' || d.type === 'whereNot') &&
-		d.conditions
-	) {
-		const stripped = (d.conditions as PlanDecision[])
-			.map(stripExistsFromDecision)
-			.filter((c): c is PlanDecision => c !== null);
-		if (stripped.length === 0) return null;
-		return { ...d, conditions: stripped };
-	}
-	return d;
-}
+// stripExistsFromDecision removed — exists decisions are now enriched in-place
+// by enrichExistsDecisionsInPlace() instead of being stripped and re-appended at top level.
 
 export function bridgeLegacyDecisions(
 	decisions: readonly unknown[],
@@ -327,14 +304,56 @@ function compileJoinIntents(
 // ============================================================================
 
 /**
+ * Collect all fully-enriched exists/notExists decisions from any position in a
+ * decision tree (top-level and nested inside whereAnd/whereOr/whereNot).
+ * Used by propagateExistsConditions to find filter conditions regardless of nesting.
+ */
+function collectEnrichedExistsDecisions(
+	decisions: readonly PlanDecision[],
+	out: PlanDecision[],
+): void {
+	for (const d of decisions) {
+		if (
+			d.type === 'where' &&
+			(d.operator === 'exists' ||
+				d.operator === 'notExists' ||
+				d.operator === 'every') &&
+			d.targetTable &&
+			// Only fully-enriched decisions have targetTable that differs from the
+			// relation name OR carry foreignKey/conditions — stub decisions have
+			// targetTable === relation name and no foreignKey.
+			// We include all of them; propagation only acts when conditions exist.
+			true
+		) {
+			out.push(d);
+		}
+		if (
+			(d.type === 'whereAnd' ||
+				d.type === 'whereOr' ||
+				d.type === 'whereNot') &&
+			d.conditions
+		) {
+			collectEnrichedExistsDecisions(d.conditions as PlanDecision[], out);
+		}
+	}
+}
+
+/**
  * Propagate filter conditions from EXISTS decisions to matching includeStrategy decisions.
  * When a relation is both filtered (EXISTS) and included, the filter appears in both
  * the EXISTS subquery AND the include subquery.
+ *
+ * Exists decisions may be nested anywhere in the decision tree (inside OR/AND/NOT)
+ * so this function collects them from the entire tree before matching.
  */
 function propagateExistsConditions(
 	includeDecisions: readonly PlanDecision[],
-	existsDecisions: readonly PlanDecision[],
+	allDecisions: readonly PlanDecision[],
 ): PlanDecision[] {
+	// Collect all exists decisions from anywhere in the full decision tree
+	const existsDecisions: PlanDecision[] = [];
+	collectEnrichedExistsDecisions(allDecisions, existsDecisions);
+
 	return includeDecisions.map((jd) => {
 		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
 
@@ -651,15 +670,6 @@ export function compileSelect<T = unknown>(
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
 
-		// Strip exists/notExists decisions from intentToDecisions — they use the
-		// relation name as targetTable (unresolved). extractExistsDecisions (below)
-		// provides the correct decisions with the actual table name from the planner.
-		// Must recurse into whereAnd/whereOr/whereNot to catch nested occurrences
-		// (e.g. notExists inside and() produces a whereAnd containing a notExists).
-		decisions = decisions
-			.map(stripExistsFromDecision)
-			.filter((d): d is PlanDecision => d !== null);
-
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
 		const resolvedModel = options?.model ?? deps.model;
@@ -671,14 +681,17 @@ export function compileSelect<T = unknown>(
 			);
 		}
 
-		// Add correct EXISTS decisions from planner's filter-strategy decisions
-		// (they have the actual target table in context.target).
+		// Enrich exists/notExists stub decisions in-place within their boolean tree
+		// position.  The stubs produced by intentToDecisions use the relation name as
+		// targetTable (unresolved); enrichExistsDecisionsInPlace replaces each stub with
+		// the fully-resolved version (real targetTable, foreignKey, conditions, include)
+		// from the planner's filter-strategy decisions — WITHOUT moving them to top level.
+		// This preserves OR/AND/NOT structure, so "x=1 OR exists('posts')" compiles as
+		// "x=1 OR EXISTS(...)" instead of "x=1 AND EXISTS(...)".
 		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
-		// so extractExistsDecisions finds 'exists' intents rather than the original 'in'.
-		const existsDecisions = extractExistsDecisions(
-			planForCompilation,
-			options?.model,
-		);
+		// so findExistsIntents finds 'exists' intents rather than the original 'in'.
+		// Side-effect: modifies `decisions` in-place (stub → enriched for each match).
+		enrichExistsDecisionsInPlace(decisions, planForCompilation, options?.model);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(
@@ -713,9 +726,11 @@ export function compileSelect<T = unknown>(
 		// Propagate filter conditions from EXISTS to matching include decisions.
 		// When a relation is both filtered and included, the filter appears in both
 		// the EXISTS subquery AND the include subquery.
+		// Pass the full decisions tree so propagateExistsConditions can find exists
+		// decisions wherever they sit (top-level or nested inside OR/AND/NOT).
 		const enrichedUnifiedDecisions = propagateExistsConditions(
 			allUnifiedIncludeDecisions,
-			existsDecisions,
+			decisions,
 		);
 
 		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
@@ -783,9 +798,10 @@ export function compileSelect<T = unknown>(
 					)
 				: [];
 
+		// exists decisions are now inline inside deduplicatedDecisions (in their boolean
+		// tree position), so we no longer spread them separately here.
 		const allDecisions = [
 			...deduplicatedDecisions,
-			...existsDecisions,
 			...enrichedUnifiedDecisions,
 			...joinIntentDecisions,
 		];
