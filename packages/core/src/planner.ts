@@ -625,13 +625,16 @@ function optimizeInToExists(
 	sourceTable: string,
 	model: ModelIR,
 	// negated tracks whether this node is under an odd number of NOT wrappers.
-	// An IN→EXISTS rewrite is NULL-unsafe under negation when the FK is nullable:
-	// SQL's three-valued logic makes `NOT IN` return UNKNOWN (excludes row) when
-	// the subquery produces a NULL, whereas `NOT EXISTS` always returns TRUE for
-	// an empty subquery — so the rewrite would BROADEN the filter.
-	// We therefore only rewrite a positive IN to EXISTS when:
-	//   • the context is not negated, OR
-	//   • the FK column is provably non-nullable (rewrite is semantically safe).
+	// Combined with a WhereInSubqueryIntent's own `not` flag it determines the
+	// EFFECTIVE negation parity at the 'in' leaf (see effectiveNegated below).
+	// An IN→EXISTS rewrite is NULL-unsafe under effective negation when the FK is
+	// nullable: SQL's three-valued logic makes `NOT IN` return UNKNOWN (excludes
+	// row) when the subquery produces a NULL, whereas `NOT EXISTS` always returns
+	// TRUE for an empty subquery — so the rewrite would BROADEN the filter.
+	// We therefore:
+	//   • rewrite to positive EXISTS when effectiveNegated is false (null-safe).
+	//   • rewrite to notExists when effectiveNegated is true AND FK is non-nullable.
+	//   • leave the in-intent unchanged when effectiveNegated is true AND nullable.
 	negated = false,
 ): WhereIntent {
 	switch (where.kind) {
@@ -713,22 +716,33 @@ function optimizeInToExists(
 
 			if (!matchedRelation) return where;
 
-			// When this IN is under a negation context (odd number of NOT wrappers),
-			// rewriting to EXISTS changes NULL semantics: `x NOT IN (SELECT y ...)` is
-			// UNKNOWN when y can be NULL (row excluded), but `NOT EXISTS(...)` is always
-			// two-valued (row included when subquery is empty).  Guard: skip rewrite if
-			// the FK column is nullable in the model (conservative — prefer correctness).
-			if (negated) {
+			// Effective negation: XOR of the outer context parity (negated) and the
+			// in-intent's own `not` flag.  Examples:
+			//   • inSubquery(...)                  → negated=false, not=false → effectiveNegated=false → EXISTS
+			//   • {kind:'in', not:true}             → negated=false, not=true  → effectiveNegated=true  → NOT EXISTS / keep
+			//   • not(inSubquery(...))              → negated=true,  not=false → effectiveNegated=true  → NOT EXISTS / keep
+			//   • not({kind:'in', not:true})        → negated=true,  not=true  → effectiveNegated=false → EXISTS (double-neg)
+			const effectiveNegated = negated !== Boolean(inWhere.not);
+
+			if (effectiveNegated) {
+				// Under effective negation, rewriting changes NULL semantics for nullable FKs.
+				// Only rewrite when the FK column is provably non-nullable.
 				const existsIntent = { relation: matchedRelation };
 				if (
 					!isSubquerySelectedColumnNonNullable(existsIntent, sourceTable, model)
 				) {
-					// Nullable FK under negation — keep original IN (correct SQL semantics)
+					// Nullable FK under effective negation — keep original IN (correct SQL semantics)
 					return where;
 				}
+				// Non-nullable FK — safe to rewrite NOT IN → NOT EXISTS
+				return {
+					kind: 'notExists',
+					relation: matchedRelation,
+					...(inWhere.subquery.where && { where: inWhere.subquery.where }),
+				} as unknown as WhereIntent;
 			}
 
-			// Rewrite to EXISTS
+			// Positive context — rewrite IN → EXISTS (always null-safe)
 			const existsWhere: WhereExistsIntent = {
 				kind: 'exists',
 				relation: matchedRelation,
@@ -763,9 +777,18 @@ function optimizeInToExists(
 
 		case 'not': {
 			const notWhere = where as WhereNotIntent;
-			// Flip negation parity for the child — this subsumes the dedicated
-			// not(in)→notExists handling: the child 'in' case now sees negated=true
-			// and applies the nullable guard before deciding whether to rewrite.
+			// Flip negation parity for the child.
+			// The 'in' case now handles the full effectiveNegated logic, producing
+			// either 'exists' or 'notExists' (or leaving the in-intent unchanged).
+			//
+			// When the child 'in' returns 'exists' or 'notExists', it has already
+			// incorporated the NOT wrapper's negation signal (via the negated=!negated
+			// context) — so the outer 'not' case must NOT add another not() around it:
+			//
+			//   not(in_not=false, non-nullable) → 'in' returns 'notExists' → return notExists directly
+			//   not(in_not=false, nullable)     → 'in' returns 'where' unchanged → return original not(in)
+			//   not(in_not=true,  non-nullable) → effectiveNegated=false → 'in' returns 'exists' (double-neg) → return exists
+			//   not(in_not=true,  nullable)     → effectiveNegated=false → 'in' returns 'exists' → return exists
 			const optimized = optimizeInToExists(
 				notWhere.condition,
 				sourceTable,
@@ -773,31 +796,11 @@ function optimizeInToExists(
 				!negated,
 			);
 			if (optimized === notWhere.condition) return where;
-			// NOT(EXISTS) → notExists (direct, no wrapper)
-			// Guard: only convert when the FK column is provably non-nullable.
-			// SQL's three-valued logic means NOT IN returns UNKNOWN (excludes row)
-			// when the subquery can produce NULLs, whereas NOT EXISTS always
-			// returns TRUE for an empty subquery.  The rewrite is only valid when
-			// the selected column is NOT NULL.
-			// NOTE: When the child 'in' was rewritten to 'exists' here, it means
-			// the nullable guard in the 'in' case already confirmed non-nullable
-			// (negated=true path).  The check below is therefore redundant for that
-			// path but is kept as a safety net for any future exists-producing paths.
-			if (optimized.kind === 'exists') {
-				if (
-					!isSubquerySelectedColumnNonNullable(
-						optimized as { relation: string },
-						sourceTable,
-						model,
-					)
-				) {
-					// Column is nullable or unknown — preserve NOT(IN) semantics
-					return where;
-				}
-				return {
-					...optimized,
-					kind: 'notExists',
-				} as unknown as WhereIntent;
+			// The child 'in' case fully computed the correct EXISTS kind (incorporating
+			// both the outer 'not' negation parity and the in-intent's own not-flag).
+			// Return the result directly without any further not() wrapping.
+			if (optimized.kind === 'exists' || optimized.kind === 'notExists') {
+				return optimized;
 			}
 			return { kind: 'not', condition: optimized } as WhereNotIntent;
 		}

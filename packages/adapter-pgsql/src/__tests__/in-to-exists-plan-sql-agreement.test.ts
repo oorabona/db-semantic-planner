@@ -800,3 +800,166 @@ describe('enrichExistsDecisionsInPlace: constructor model used when compile opti
 		expect(sqlWithCtorModel).toBe(sqlWithOptionsModel);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Defect: NOT-IN-via-flag ({kind:'in', not:true}) is the second form of NOT IN.
+// The optimizer must handle it with the same NULL-safety as not(in(...)).
+//
+// The `not` flag is set by the NQL compiler and by the adapter's convertIn()
+// when cond.not is true (operator: 'notInSubquery').  The planner's
+// optimizeInToExists must use effectiveNegated = negated XOR Boolean(inWhere.not)
+// to correctly guard the IN→EXISTS rewrite for this form too.
+// ---------------------------------------------------------------------------
+
+describe('NOT-IN-via-flag: {kind:"in", not:true} on non-nullable FK → NOT EXISTS', () => {
+	it('{kind:"in", not:true} with non-nullable FK compiles to NOT EXISTS', () => {
+		// Build the intent directly using the not-flag form.
+		// semantically: id NOT IN (SELECT authorId FROM posts_nn) → NOT EXISTS(...)
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				not: true,
+				subquery: {
+					type: 'select',
+					from: 'posts_nn',
+					select: { type: 'fields', fields: ['authorId'] },
+				},
+			},
+		};
+
+		const planReport = plan(queryIntent, schemaWithNonNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner emits a filter-strategy (notExists rewrite applied)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeDefined();
+
+		const { sql } = compileIntent(queryIntent, schemaWithNonNullableFK.model);
+
+		// SQL must use NOT … EXISTS — NOT IN was rewritten.
+		// The adapter may produce either `NOT EXISTS(...)` or `NOT (EXISTS(...))` —
+		// both forms are semantically equivalent; check both markers are present.
+		expect(sql).toContain('not');
+		expect(sql).toContain('exists');
+		// Must NOT fall back to the NOT IN scalar form
+		expect(sql).not.toContain('= any');
+		// FK correlation present
+		expect(sql).toContain('"authorid"');
+	});
+});
+
+describe('NOT-IN-via-flag: {kind:"in", not:true} on nullable FK → keeps NOT IN', () => {
+	it('{kind:"in", not:true} with nullable FK keeps NOT IN (SQL semantics preserved)', () => {
+		// nullable FK: posts.authorId is nullable → rewrite would be NULL-unsafe
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				not: true,
+				subquery: {
+					type: 'select',
+					from: 'posts',
+					select: { type: 'fields', fields: ['authorId'] },
+				},
+			},
+		};
+
+		const planReport = plan(queryIntent, schemaWithNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner must NOT emit a filter-strategy (nullable FK blocks rewrite)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+
+		const { sql } = compileIntent(queryIntent, schemaWithNullableFK.model);
+
+		// SQL must NOT contain EXISTS — original NOT IN form must be preserved
+		expect(sql).not.toContain('exists');
+		// The NOT IN form uses != ALL or <> ALL or NOT IN depending on the compiler
+		// — at minimum, no EXISTS must appear
+	});
+});
+
+describe('double-negation: not({kind:"in", not:true}) on non-nullable FK → positive EXISTS', () => {
+	it('not({kind:"in", not:true}) collapses double-negation to positive EXISTS', () => {
+		// NOT (field NOT IN (subquery)) = field IN (subquery) = positive EXISTS
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'not',
+				condition: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					not: true,
+					subquery: {
+						type: 'select',
+						from: 'posts_nn',
+						select: { type: 'fields', fields: ['authorId'] },
+					},
+				},
+			},
+		};
+
+		const planReport = plan(queryIntent, schemaWithNonNullableFK.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// Planner emits a filter-strategy (exists — the double-negation collapses to EXISTS)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		const { sql } = compileIntent(queryIntent, schemaWithNonNullableFK.model);
+
+		// SQL must use EXISTS (positive) — double-negation collapsed.
+		// The NOT wrapper must not appear around the EXISTS.
+		expect(sql).toContain('exists');
+		// Verify no negation wrapping the EXISTS (double-neg collapses to positive)
+		expect(sql).not.toMatch(/not\s*\(\s*exists/i);
+		expect(sql).toContain('"authorid"');
+	});
+});
+
+describe('positive inSubquery (non-negated) — non-regression for not-flag fix', () => {
+	it('plain inSubquery (no not flag) on non-nullable FK still rewrites to EXISTS', () => {
+		const { sql } = compileIntent(
+			{
+				type: 'select',
+				from: 'users',
+				where: inSubquery('id', subquery('posts_nn').select('authorId')),
+			},
+			schemaWithNonNullableFK.model,
+		);
+		expect(sql).toContain('exists');
+		expect(sql).not.toContain('not exists');
+	});
+
+	it('plain inSubquery (no not flag) on nullable FK still rewrites to EXISTS', () => {
+		const { sql } = compileIntent(
+			{
+				type: 'select',
+				from: 'users',
+				where: inSubquery('id', subquery('posts').select('authorId')),
+			},
+			schemaWithNullableFK.model,
+		);
+		expect(sql).toContain('exists');
+		expect(sql).not.toContain('not exists');
+	});
+});
