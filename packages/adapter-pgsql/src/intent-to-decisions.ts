@@ -249,10 +249,25 @@ interface FlatWhereFields {
  * that the current compilation path silently drops, which would produce SQL
  * that matches MORE rows than the caller intended (silent filter broadening).
  *
- * Modifiers that ARE faithfully emitted (no throw): `where`, `limit`, `orderBy`.
- * Modifiers that are DROPPED and therefore guarded: `groupBy`, `having`,
- * `offset`, `distinct`, `distinctOn`, `include` (relation hydration),
- * `joins` (explicit JOINs), and an aggregate SELECT intent.
+ * Per-field classification (QueryIntent):
+ *
+ * FAITHFULLY COMPILED — leave:
+ *   from, where, limit (IN + scalar), orderBy field-based (IN + scalar)
+ *   select.type:'fields' (IN: exactly 1 field; scalar: first field)
+ *   select.type:'aggregate' (scalar only — aggregate + selectColumn)
+ *
+ * PROPAGATE — wired through in convertSubquery:
+ *   limit, orderBy (scalar path — previously missing, fixed here)
+ *
+ * REJECT — throw:
+ *   groupBy, having, offset, distinct, distinctOn, include, joins
+ *   existsWrap, lock, batchValuesSource — not representable in a subquery context
+ *   select.type:'aggregate' on IN path (silently ignored → wrong projection)
+ *   select.type:'expressions' on both paths (expressions not emitted)
+ *   select.type:'all' on IN path (SELECT * in ANY subquery is invalid SQL)
+ *   select:undefined on IN path (must specify exactly one column)
+ *   select.type:'fields' with 0 fields on IN path (no column to match against)
+ *   orderBy with expression-based entries on both paths (.field is never → undefined)
  */
 function assertNoUnsupportedSubqueryModifiers(
 	subquery: QueryIntent,
@@ -260,6 +275,7 @@ function assertNoUnsupportedSubqueryModifiers(
 ): void {
 	const unsupported: string[] = [];
 
+	// Structural modifiers already guarded in the previous pass
 	if (subquery.groupBy && subquery.groupBy.length > 0)
 		unsupported.push('GROUP BY');
 	if (subquery.having) unsupported.push('HAVING');
@@ -271,18 +287,68 @@ function assertNoUnsupportedSubqueryModifiers(
 		unsupported.push('include (relation hydration)');
 	if (subquery.joins && subquery.joins.length > 0) unsupported.push('joins');
 
-	// An aggregate SELECT (type: 'aggregate') inside an IN-subquery is silently
-	// ignored in the IN path (only `fields` is extracted). Guard it here so the
-	// caller gets an explicit error instead of a semantically-wrong query.
-	if (
-		context === 'IN' &&
-		subquery.select &&
-		'type' in subquery.select &&
-		(subquery.select as { type: string }).type === 'aggregate'
-	) {
-		unsupported.push(
-			'aggregate SELECT (use a scalar subquery comparison instead)',
+	// Additional structural modifiers that have no path through buildScalarSubquery
+	if (subquery.existsWrap) unsupported.push('existsWrap');
+	if (subquery.lock) unsupported.push('lock');
+	if (subquery.batchValuesSource) unsupported.push('batchValuesSource');
+
+	// Expression-based orderBy entries: OrderByExpressionIntent has field:never,
+	// so convertIn's `o.field` yields undefined → columnRef(undefined,...) produces
+	// broken SQL. Reject whenever any entry uses an expression.
+	if (subquery.orderBy && subquery.orderBy.length > 0) {
+		const hasExpressionSort = subquery.orderBy.some(
+			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
 		);
+		if (hasExpressionSort)
+			unsupported.push(
+				'orderBy with expression (only field-based ORDER BY is supported)',
+			);
+	}
+
+	// IN-subquery-specific SELECT validation
+	if (context === 'IN') {
+		const select = subquery.select as
+			| { type?: string; fields?: readonly string[] }
+			| undefined;
+		if (!select) {
+			// No select clause — would compile to SELECT * which is invalid inside
+			// an ANY subquery (PostgreSQL requires a single column expression).
+			unsupported.push(
+				'missing select (IN subquery must project exactly one named column)',
+			);
+		} else if (select.type === 'aggregate') {
+			// Aggregate SELECT is silently ignored in the IN path (only fields are
+			// extracted); use a scalar subquery comparison instead.
+			unsupported.push(
+				'aggregate SELECT (use a scalar subquery comparison instead)',
+			);
+		} else if (select.type === 'expressions') {
+			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
+			unsupported.push('expressions SELECT (not supported in IN subquery)');
+		} else if (select.type === 'all') {
+			// SELECT * inside ANY(...) is rejected by PostgreSQL (cannot compare
+			// a row value to a scalar lhs).
+			unsupported.push(
+				'SELECT * / all (IN subquery must project exactly one named column)',
+			);
+		} else if (
+			select.type === 'fields' &&
+			(!select.fields || select.fields.length === 0)
+		) {
+			// Empty fields list falls back to '*' — same problem as 'all'.
+			unsupported.push(
+				'empty fields list (IN subquery must project exactly one named column)',
+			);
+		}
+	}
+
+	// Scalar-subquery-specific SELECT validation
+	if (context === 'scalar') {
+		const select = subquery.select as { type?: string } | undefined;
+		if (select?.type === 'expressions') {
+			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
+			unsupported.push('expressions SELECT (not supported in scalar subquery)');
+		}
 	}
 
 	if (unsupported.length > 0) {
@@ -582,6 +648,13 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		if (innerWhere) subConditions.push(innerWhere);
 	}
 
+	// Propagate limit and orderBy into the decision so buildScalarSubquery emits them.
+	// (Previously these were silently dropped from scalar subqueries.)
+	const rawLimit = subquery.limit;
+	const rawOrderBy = subquery.orderBy as
+		| readonly { field: string; direction?: string }[]
+		| undefined;
+
 	const opMap: Record<string, string> = {
 		eq: '=',
 		neq: '!=',
@@ -599,7 +672,15 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		subqueryOperator: opMap[operator] ?? '=',
 		...(aggregate && { aggregate }),
 		...(subConditions.length > 0 && { conditions: subConditions }),
-	};
+		...(rawLimit != null && { limit: rawLimit }),
+		...(rawOrderBy &&
+			rawOrderBy.length > 0 && {
+				orderBy: rawOrderBy.map((o) => ({
+					column: o.field,
+					direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+				})),
+			}),
+	} as unknown as PlanDecision;
 }
 
 // ============================================================================
