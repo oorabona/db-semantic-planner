@@ -64,6 +64,49 @@ function createScalarSubLink(
 }
 
 /**
+ * Guard: throw a clear error if the decision carries query modifiers that
+ * this compilation path does not faithfully emit (GROUP BY, HAVING, OFFSET,
+ * DISTINCT, joins, includes). These fields do not exist on the `Decision` type,
+ * but a caller constructing a raw decision object could include them, and they
+ * would be silently dropped — broadening the filter in ways the caller did not
+ * intend. The primary guard lives in `assertNoUnsupportedSubqueryModifiers`
+ * (intent-to-decisions.ts); this is defense-in-depth for direct Decision callers.
+ */
+function assertNoDroppedDecisionModifiers(decision: Decision): void {
+	// Cast through unknown to inspect extra fields not in the typed interface.
+	const d = decision as unknown as Record<string, unknown>;
+	const unsupported: string[] = [];
+
+	if (Array.isArray(d['groupBy']) && (d['groupBy'] as unknown[]).length > 0)
+		unsupported.push('GROUP BY');
+	if (d['having'] != null) unsupported.push('HAVING');
+	if (d['offset'] != null) unsupported.push('OFFSET');
+	if (d['distinct'] === true) unsupported.push('DISTINCT');
+	if (
+		Array.isArray(d['distinctOn']) &&
+		(d['distinctOn'] as unknown[]).length > 0
+	)
+		unsupported.push('DISTINCT ON');
+	if (Array.isArray(d['include']) && (d['include'] as unknown[]).length > 0)
+		unsupported.push('include (relation hydration)');
+	if (Array.isArray(d['joins']) && (d['joins'] as unknown[]).length > 0)
+		unsupported.push('joins');
+
+	if (unsupported.length > 0) {
+		const operator =
+			typeof d['operator'] === 'string' ? d['operator'] : 'subquery';
+		const kind =
+			operator === 'inSubquery' || operator === 'notInSubquery'
+				? 'IN'
+				: 'scalar';
+		throw new Error(
+			`${kind} subquery with ${unsupported.join(', ')} is not supported — ` +
+				'it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	}
+}
+
+/**
  * Build a simple SELECT subquery from a table
  *
  * SELECT aggregate(column) FROM table [WHERE conditions]
@@ -74,6 +117,7 @@ function buildScalarSubquery(
 	state: CompilerState,
 	dispatch: WhereDispatcher,
 ): Node {
+	assertNoDroppedDecisionModifiers(decision);
 	const targetTable = decision.targetTable ?? decision.relation;
 	const selectColumn = decision.selectColumn ?? '*';
 	const aggregate = decision.aggregate;

@@ -273,11 +273,12 @@ describe('NOT IN preserved: SQL keeps NOT IN when FK is nullable', () => {
 // ---------------------------------------------------------------------------
 // Suite: non-simple subquery guards (SQL-level verification)
 // ---------------------------------------------------------------------------
-describe('Non-simple subquery: SQL keeps IN when subquery has modifiers', () => {
-	it('IN with groupBy/having subquery: SQL keeps IN, no EXISTS', () => {
-		// Regression gate (filter broadening): EXISTS would silently drop GROUP BY /
-		// HAVING constraints, broadening the filter to match more rows than the
-		// original IN form.
+describe('Non-simple subquery: compilation throws for modifiers that would be silently dropped', () => {
+	it('IN with groupBy/having subquery: planner succeeds, compilation throws (filter-broadening guard)', () => {
+		// Issue #130: before the guard, GROUP BY / HAVING were silently dropped from
+		// the compiled SQL, broadening the filter to match more rows. The fix throws
+		// a clear error so callers restructure the query (e.g. use a CTE) rather
+		// than get a semantically-wrong result.
 		const queryIntent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -304,7 +305,8 @@ describe('Non-simple subquery: SQL keeps IN when subquery has modifiers', () => 
 			dialectCapabilities: POSTGRESQL_CAPABILITIES,
 		});
 
-		// No filter-strategy (optimization blocked)
+		// Planner still succeeds: no filter-strategy optimization is attempted
+		// (the modifier check is in the adapter compilation layer, not the planner).
 		const filterDecision = planReport.decisions.find(
 			(d) => d.type === 'filter-strategy',
 		);
@@ -313,13 +315,17 @@ describe('Non-simple subquery: SQL keeps IN when subquery has modifiers', () => 
 		// plan.intent unchanged
 		expect(planReport.intent).toBe(queryIntent);
 
-		// SQL must use IN form, no EXISTS
-		const { sql } = compileIntent(queryIntent, testSchema.model);
-		expect(sql).not.toContain('exists');
-		expect(sql).toContain('= any (select');
+		// Compilation must throw — GROUP BY / HAVING would otherwise be silently dropped.
+		expect(() => compileIntent(queryIntent, testSchema.model)).toThrow(
+			/IN subquery with GROUP BY, HAVING is not supported/,
+		);
+		expect(() => compileIntent(queryIntent, testSchema.model)).toThrow(
+			/restructure the query or use a CTE/,
+		);
 	});
 
-	it('IN with offset subquery: SQL keeps IN, no EXISTS', () => {
+	it('IN with offset subquery: compilation throws (filter-broadening guard)', () => {
+		// Issue #130: OFFSET was silently dropped, returning the wrong rows.
 		const queryIntent: QueryIntent = {
 			type: 'select',
 			from: 'products',
@@ -336,9 +342,9 @@ describe('Non-simple subquery: SQL keeps IN when subquery has modifiers', () => 
 			},
 		};
 
-		const { sql } = compileIntent(queryIntent, testSchema.model);
-		expect(sql).not.toContain('exists');
-		expect(sql).toContain('= any (select');
+		expect(() => compileIntent(queryIntent, testSchema.model)).toThrow(
+			/IN subquery with OFFSET is not supported/,
+		);
 	});
 });
 

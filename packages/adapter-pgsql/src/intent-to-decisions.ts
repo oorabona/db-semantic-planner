@@ -245,6 +245,55 @@ interface FlatWhereFields {
 // ============================================================================
 
 /**
+ * Guard: throw a clear error when a subquery (IN or scalar) carries modifiers
+ * that the current compilation path silently drops, which would produce SQL
+ * that matches MORE rows than the caller intended (silent filter broadening).
+ *
+ * Modifiers that ARE faithfully emitted (no throw): `where`, `limit`, `orderBy`.
+ * Modifiers that are DROPPED and therefore guarded: `groupBy`, `having`,
+ * `offset`, `distinct`, `distinctOn`, `include` (relation hydration),
+ * `joins` (explicit JOINs), and an aggregate SELECT intent.
+ */
+function assertNoUnsupportedSubqueryModifiers(
+	subquery: QueryIntent,
+	context: 'IN' | 'scalar',
+): void {
+	const unsupported: string[] = [];
+
+	if (subquery.groupBy && subquery.groupBy.length > 0)
+		unsupported.push('GROUP BY');
+	if (subquery.having) unsupported.push('HAVING');
+	if (subquery.offset != null) unsupported.push('OFFSET');
+	if (subquery.distinct) unsupported.push('DISTINCT');
+	if (subquery.distinctOn && subquery.distinctOn.length > 0)
+		unsupported.push('DISTINCT ON');
+	if (subquery.include && subquery.include.length > 0)
+		unsupported.push('include (relation hydration)');
+	if (subquery.joins && subquery.joins.length > 0) unsupported.push('joins');
+
+	// An aggregate SELECT (type: 'aggregate') inside an IN-subquery is silently
+	// ignored in the IN path (only `fields` is extracted). Guard it here so the
+	// caller gets an explicit error instead of a semantically-wrong query.
+	if (
+		context === 'IN' &&
+		subquery.select &&
+		'type' in subquery.select &&
+		(subquery.select as { type: string }).type === 'aggregate'
+	) {
+		unsupported.push(
+			'aggregate SELECT (use a scalar subquery comparison instead)',
+		);
+	}
+
+	if (unsupported.length > 0) {
+		throw new Error(
+			`${context === 'IN' ? 'IN' : 'scalar'} subquery with ${unsupported.join(', ')} is not supported — ` +
+				'it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	}
+}
+
+/**
  * Recursively walk a WhereIntent looking for a SubqueryRefIntent
  * (`{ kind: 'ref', column }` produced by `outerRef()`). Used to detect
  * correlated subqueries inside rawExists/rawNotExists, which the current
@@ -314,6 +363,7 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	// We cannot rely on normalizeToDecision's `case 'in'` branch because that
 	// function short-circuits via early-return when `column` is already set.
 	if (rawSubquery) {
+		assertNoUnsupportedSubqueryModifiers(rawSubquery, 'IN');
 		const selectField = rawSubquery.select;
 		const selectColumn: string =
 			selectField &&
@@ -503,6 +553,8 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const operator = cond.operator as string;
 	const subquery = cond.subquery as QueryIntent | undefined;
 	if (!subquery || !field) return null;
+
+	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
 
 	const targetTable = subquery.from;
 	let selectColumn = '*';
