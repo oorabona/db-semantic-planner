@@ -9,10 +9,36 @@
  * Modifiers that ARE faithfully emitted (no throw): where, limit, orderBy.
  */
 
-import { createOrm, eq, inSubquery, schema, subquery } from '@dbsp/core';
+import {
+	createOrm,
+	eq,
+	inSubquery,
+	POSTGRESQL_CAPABILITIES,
+	plan,
+	type QueryIntent,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { normalizeSQL } from '../ast-helpers.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+
+// ---------------------------------------------------------------------------
+// Helper: compile a full QueryIntent to SQL string (same pattern as
+// in-to-exists-plan-sql-agreement.test.ts)
+// ---------------------------------------------------------------------------
+function compileIntent(
+	intent: QueryIntent,
+	model: ReturnType<typeof schema>['model'],
+): { sql: string; params: readonly unknown[] } {
+	const planReport = plan(intent, model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model });
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
 
 // ---------------------------------------------------------------------------
 // Schema
@@ -377,6 +403,26 @@ describe('IN-subquery: non-fields SELECT projection is rejected (gap #1)', () =>
 		);
 	});
 
+	it('throws when subquery has select: { type: "fields", fields: ["a","b"] } (multi-field, defect #2)', () => {
+		// Multi-field projection is silently truncated to fields[0] — the extra
+		// column is dropped, producing semantically-wrong SQL. Must throw clearly.
+		const intent = {
+			kind: 'in' as const,
+			field: 'id',
+			subquery: {
+				type: 'select' as const,
+				from: 'images',
+				select: {
+					type: 'fields' as const,
+					fields: ['product_id', 'category_id'] as const,
+				},
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
+			/IN subquery with multi-field projection \[product_id, category_id\].*is not supported/,
+		);
+	});
+
 	it('compiles correctly with select: { type: "fields", fields: ["product_id"] } (exactly 1 field)', () => {
 		const intent = {
 			kind: 'in' as const,
@@ -443,7 +489,10 @@ describe('scalar subquery: LIMIT and ORDER BY are propagated through to SQL (gap
 		expect((result as any).limit).toBe(1);
 	});
 
-	it('emits ORDER BY in the scalar subquery SQL', () => {
+	it('propagates ORDER BY to PlanDecision with correct PlanDecision shape', () => {
+		// PlanDecision.orderBy uses { field, direction: 'asc'|'desc' } (lowercase).
+		// mapToHandlerDecision reads o.field → column for buildScalarSubquery.
+		// Key fix: must NOT use { column, direction: 'ASC' } (wrong shape).
 		const intent = {
 			kind: 'subquery' as const,
 			field: 'price',
@@ -457,40 +506,38 @@ describe('scalar subquery: LIMIT and ORDER BY are propagated through to SQL (gap
 		};
 		const result = convertWhereCondition(intent as any, 'orders');
 		expect(result).not.toBeNull();
-		// orderBy is propagated onto the decision
+		// PlanDecision.orderBy shape: { field, direction: lowercase }
 		expect((result as any).orderBy).toEqual([
-			{ column: 'price', direction: 'DESC' },
+			{ field: 'price', direction: 'desc' },
 		]);
 	});
 
-	it('emits both LIMIT and ORDER BY in compiled SQL via end-to-end ORM', () => {
-		const orm = buildOrm();
-		// Use the query builder approach: scalar subquery with order + limit
-		// Build the intent manually and compile via convertWhereCondition + the handler chain
-		const intent = {
-			kind: 'subquery' as const,
-			field: 'price',
-			operator: 'eq' as const,
-			subquery: {
-				type: 'select' as const,
-				from: 'products',
-				select: { type: 'fields' as const, fields: ['price'] as const },
-				where: {
-					kind: 'comparison' as const,
-					field: 'active',
-					operator: 'eq' as const,
-					value: true,
+	it('emits ORDER BY and LIMIT in compiled SQL (end-to-end proof, gap #2)', () => {
+		// This is the proof test: the ORDER BY column must actually appear in SQL.
+		// Before the fix, orderBy entries were built with { column } not { field },
+		// so mapToHandlerDecision read o.field = undefined → column: undefined →
+		// buildScalarSubquery emitted sortBy(columnRef(undefined,...)) → lost sort.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'subquery',
+				field: 'price',
+				operator: 'eq',
+				subquery: {
+					type: 'select',
+					from: 'products',
+					select: { type: 'fields', fields: ['price'] },
+					orderBy: [{ field: 'price', direction: 'asc' }],
+					limit: 1,
 				},
-				orderBy: [{ field: 'price', direction: 'asc' as const }],
-				limit: 1,
-			},
+			} as any,
 		};
-		// Verify via convertWhereCondition that both fields survive to the decision
-		const decision = convertWhereCondition(intent as any, 'products');
-		expect((decision as any).limit).toBe(1);
-		expect((decision as any).orderBy).toEqual([
-			{ column: 'price', direction: 'ASC' },
-		]);
+		const { sql } = compileIntent(intent, testSchema.model);
+		// ORDER BY and LIMIT must be present in the subquery clause
+		expect(sql).toMatch(/order by/i);
+		expect(sql).toMatch(/price/i);
+		expect(sql).toMatch(/limit/i);
 	});
 
 	it('scalar subquery without limit/orderBy still compiles fine (regression guard)', () => {

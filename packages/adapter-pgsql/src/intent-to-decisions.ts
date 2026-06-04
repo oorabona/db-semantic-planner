@@ -331,14 +331,20 @@ function assertNoUnsupportedSubqueryModifiers(
 			unsupported.push(
 				'SELECT * / all (IN subquery must project exactly one named column)',
 			);
-		} else if (
-			select.type === 'fields' &&
-			(!select.fields || select.fields.length === 0)
-		) {
-			// Empty fields list falls back to '*' — same problem as 'all'.
-			unsupported.push(
-				'empty fields list (IN subquery must project exactly one named column)',
-			);
+		} else if (select.type === 'fields') {
+			if (!select.fields || select.fields.length === 0) {
+				// Empty fields list falls back to '*' — same problem as 'all'.
+				unsupported.push(
+					'empty fields list (IN subquery must project exactly one named column)',
+				);
+			} else if (select.fields.length > 1) {
+				// Multi-field projection is silently truncated to fields[0] — the
+				// extra columns are dropped without error, producing incorrect SQL
+				// (the IN matches only the first column, silently ignoring the rest).
+				unsupported.push(
+					`multi-field projection [${select.fields.join(', ')}] (IN subquery must project exactly one named column — use a single field)`,
+				);
+			}
 		}
 	}
 
@@ -446,7 +452,9 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 					return converted ? [converted] : [];
 				})()
 			: [];
-		// Propagate limit and orderBy from QueryIntent (e.g. from NQL `| limit N | order by col`)
+		// Propagate limit and orderBy from QueryIntent (e.g. from NQL `| limit N | order by col`).
+		// PlanDecision.orderBy entries use { field, direction: 'asc'|'desc' } (lowercase).
+		// mapToHandlerDecision converts field → column and uppercases direction for handlers.
 		const rawLimit = rawSubquery.limit;
 		const rawOrderBy = rawSubquery.orderBy as
 			| readonly { field: string; direction?: string }[]
@@ -462,8 +470,8 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 			...(rawLimit != null && { limit: rawLimit }),
 			...(rawOrderBy && {
 				orderBy: rawOrderBy.map((o) => ({
-					column: o.field,
-					direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+					field: o.field,
+					direction: (o.direction?.toLowerCase() ?? 'asc') as 'asc' | 'desc',
 				})),
 			}),
 		} as unknown as PlanDecision;
@@ -650,6 +658,8 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 
 	// Propagate limit and orderBy into the decision so buildScalarSubquery emits them.
 	// (Previously these were silently dropped from scalar subqueries.)
+	// PlanDecision.orderBy entries use { field, direction: 'asc'|'desc' } (lowercase).
+	// mapToHandlerDecision converts field → column and uppercases direction for handlers.
 	const rawLimit = subquery.limit;
 	const rawOrderBy = subquery.orderBy as
 		| readonly { field: string; direction?: string }[]
@@ -676,8 +686,8 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		...(rawOrderBy &&
 			rawOrderBy.length > 0 && {
 				orderBy: rawOrderBy.map((o) => ({
-					column: o.field,
-					direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+					field: o.field,
+					direction: (o.direction?.toLowerCase() ?? 'asc') as 'asc' | 'desc',
 				})),
 			}),
 	} as unknown as PlanDecision;
