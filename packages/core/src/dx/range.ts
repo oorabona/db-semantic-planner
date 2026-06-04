@@ -23,11 +23,11 @@
  * ```
  */
 
-import type { RangeValue } from '@dbsp/types';
+import type { RangeOperand, RangeValue } from '@dbsp/types';
 import type { WhereRangeIntent } from '../intent-ast.js';
 import { type ExpressionRef, fn, op, param, ref } from './expressions.js';
 
-export type { RangeValue } from '@dbsp/types';
+export type { RangeOperand, RangeValue } from '@dbsp/types';
 
 // ============================================================================
 // RangeType
@@ -106,7 +106,7 @@ export function rangeOverlaps(
 
 export function rangeOverlaps(
 	fieldOrColumn: string,
-	valueOrRange: RangeValue | readonly [unknown, unknown],
+	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
@@ -118,7 +118,8 @@ export function rangeOverlaps(
 		kind: 'range',
 		field: fieldOrColumn,
 		operator: 'overlaps',
-		value: valueOrRange,
+		// Cast: non-array branch is RangeOperand (tuple path already returned above)
+		value: valueOrRange as RangeOperand,
 	};
 }
 
@@ -150,7 +151,7 @@ export function rangeContains(
 
 export function rangeContains(
 	fieldOrColumn: string,
-	valueOrRange: RangeValue | readonly [unknown, unknown],
+	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
@@ -162,7 +163,7 @@ export function rangeContains(
 		kind: 'range',
 		field: fieldOrColumn,
 		operator: 'contains',
-		value: valueOrRange,
+		value: valueOrRange as RangeOperand,
 	};
 }
 
@@ -194,7 +195,7 @@ export function rangeContainedBy(
 
 export function rangeContainedBy(
 	fieldOrColumn: string,
-	valueOrRange: RangeValue | readonly [unknown, unknown],
+	valueOrRange: RangeOperand | readonly [unknown, unknown],
 	rangeType: RangeType = 'daterange',
 ): ExpressionRef | WhereRangeIntent {
 	if (Array.isArray(valueOrRange)) {
@@ -206,6 +207,6 @@ export function rangeContainedBy(
 		kind: 'range',
 		field: fieldOrColumn,
 		operator: 'containedBy',
-		value: valueOrRange,
+		value: valueOrRange as RangeOperand,
 	};
 }

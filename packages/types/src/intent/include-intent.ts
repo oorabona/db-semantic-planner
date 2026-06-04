@@ -141,19 +141,40 @@ export interface IncludeIntent {
 /**
  * OrderBy intent - sort results
  */
-export interface OrderByIntent {
+/**
+ * OrderBy intent (field branch): sort by a named column.
+ */
+export interface OrderByFieldIntent {
 	/** Field name to sort by */
-	readonly field?: string;
-
-	/** Expression to sort by (alternative to field) */
-	readonly expression?: ExpressionIntent;
-
+	readonly field: string;
+	readonly expression?: never;
 	/** Sort direction */
 	readonly direction: SortDirection;
-
 	/**
 	 * Where to place NULL values
 	 * @default 'last' for 'asc', 'first' for 'desc' (database default)
 	 */
 	readonly nulls?: NullsPosition;
 }
+
+/**
+ * OrderBy intent (expression branch): sort by an arbitrary expression.
+ */
+export interface OrderByExpressionIntent {
+	readonly field?: never;
+	/** Expression to sort by */
+	readonly expression: ExpressionIntent;
+	/** Sort direction */
+	readonly direction: SortDirection;
+	/**
+	 * Where to place NULL values
+	 * @default 'last' for 'asc', 'first' for 'desc' (database default)
+	 */
+	readonly nulls?: NullsPosition;
+}
+
+/**
+ * OrderBy intent - sort results.
+ * XOR: exactly one of `field` or `expression` must be present.
+ */
+export type OrderByIntent = OrderByFieldIntent | OrderByExpressionIntent;

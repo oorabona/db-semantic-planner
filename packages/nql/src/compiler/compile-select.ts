@@ -6,12 +6,16 @@
 
 import type {
 	AggregateFunction,
+	AggregateWindowIntent,
 	ExpressionIntent,
+	OffsetWindowIntent,
 	PseudoColumnTraversal,
 	QueryIntent,
+	RankingWindowIntent,
 	SelectIntent,
 	WindowFunction,
 } from '@dbsp/types';
+import { isRankingWindowFunction } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBooleanLiteral,
@@ -217,18 +221,42 @@ function compileSelectExpression(
 					})
 				: undefined;
 
+		const over = {
+			...(partitionBy && { partitionBy }),
+			...(orderBy && { orderBy }),
+		} as const;
+		const alias = exprItem.alias ?? fn;
+
+		if (isRankingWindowFunction(fn)) {
+			return {
+				kind: 'window',
+				function: fn,
+				alias,
+				over,
+			} satisfies RankingWindowIntent;
+		}
+
+		if (fn === 'lag' || fn === 'lead') {
+			return {
+				kind: 'window',
+				function: fn,
+				field: field ?? '',
+				alias,
+				...(offset !== undefined && { offset }),
+				...(defaultValue !== undefined && { defaultValue }),
+				over,
+			} satisfies OffsetWindowIntent;
+		}
+
+		// aggregate branch: sum / avg / count / min / max
+		// COUNT(*) omits field (undefined); others always have a field from the parser
 		return {
 			kind: 'window',
 			function: fn,
 			...(field !== undefined && { field }),
-			alias: exprItem.alias ?? fn,
-			...(offset !== undefined && { offset }),
-			...(defaultValue !== undefined && { defaultValue }),
-			over: {
-				...(partitionBy && { partitionBy }),
-				...(orderBy && { orderBy }),
-			},
-		};
+			alias,
+			over,
+		} satisfies AggregateWindowIntent;
 	}
 
 	// Subquery in SELECT (scalar subquery)

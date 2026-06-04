@@ -45,10 +45,14 @@ export type AggregateFunction =
  * @example { function: 'count' } → COUNT(*)
  * @example { function: 'sum', field: 'price' } → SUM(price)
  */
-export interface AggregateIntent {
-	/** Aggregate function */
-	readonly function: AggregateFunction;
-	/** Field to aggregate (optional for count without field) */
+/**
+ * Aggregate operation intent (count branch): COUNT(*) — field is '*', may be omitted in builders.
+ * @example { function: 'count' } → COUNT(*)
+ * @example { function: 'count', field: '*', as: 'total' } → COUNT(*) AS total
+ */
+export interface AggregateCountIntent {
+	readonly function: 'count';
+	/** Field to aggregate; use '*' for COUNT(*) */
 	readonly field?: string;
 	/** Alias for result column */
 	readonly as?: string;
@@ -57,6 +61,28 @@ export interface AggregateIntent {
 	/** FILTER (WHERE ...) clause for conditional aggregation */
 	readonly filter?: import('./where-intent.js').WhereIntent;
 }
+
+/**
+ * Aggregate operation intent (field-required branch): SUM / AVG / MIN / MAX / ARRAY_AGG / STRING_AGG.
+ * @example { function: 'sum', field: 'price' } → SUM(price)
+ */
+export interface AggregateFieldIntent {
+	readonly function: Exclude<AggregateFunction, 'count'>;
+	/** Field to aggregate (required for all non-count aggregates) */
+	readonly field: string;
+	/** Alias for result column */
+	readonly as?: string;
+	/** Whether to apply DISTINCT to the aggregate (e.g., COUNT(DISTINCT field)) */
+	readonly distinct?: boolean;
+	/** FILTER (WHERE ...) clause for conditional aggregation */
+	readonly filter?: import('./where-intent.js').WhereIntent;
+}
+
+/**
+ * Aggregate operation intent.
+ * XOR: `count` may omit field (defaults to '*'); all other aggregates require `field`.
+ */
+export type AggregateIntent = AggregateCountIntent | AggregateFieldIntent;
 
 /**
  * Select with aggregate functions

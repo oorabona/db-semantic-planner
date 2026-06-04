@@ -17,7 +17,12 @@
  */
 
 import type { Mutable } from '@dbsp/types/internal';
-import type { WindowFunction, WindowIntent } from '../intent-ast.js';
+import type {
+	AggregateWindowIntent,
+	OffsetWindowIntent,
+	RankingWindowIntent,
+	WindowIntent,
+} from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
 import type { ColumnRef } from './table-ref.js';
 import type { ExpressionSpec } from './types.js';
@@ -170,16 +175,13 @@ export class WindowBuilder {
 	}
 
 	/**
-	 * Convert builder state to WindowIntent
+	 * Convert builder state to WindowIntent — produces the correct discriminated branch.
+	 * - ranking → RankingWindowIntent (no field)
+	 * - aggregate → AggregateWindowIntent (field required; COUNT uses '*' when omitted)
+	 * - offset → OffsetWindowIntent (field required)
 	 */
 	private toWindowIntent(alias: string): WindowIntent {
-		const fn = this.fnKind.fn as WindowFunction;
-		const field =
-			this.fnKind.type === 'aggregate' || this.fnKind.type === 'offset'
-				? this.fnKind.field
-				: undefined;
-
-		const over: Mutable<WindowIntent['over']> = {};
+		const over: Mutable<RankingWindowIntent['over']> = {};
 		if (this.partitions.length > 0) {
 			over.partitionBy = this.partitions;
 		}
@@ -187,17 +189,34 @@ export class WindowBuilder {
 			over.orderBy = this.orders;
 		}
 
-		const intent: WindowIntent = {
+		if (this.fnKind.type === 'ranking') {
+			return {
+				kind: 'window',
+				function: this.fnKind.fn,
+				alias,
+				over,
+			} satisfies RankingWindowIntent;
+		}
+
+		if (this.fnKind.type === 'offset') {
+			return {
+				kind: 'window',
+				function: this.fnKind.fn,
+				field: this.fnKind.field,
+				alias,
+				over,
+			} satisfies OffsetWindowIntent;
+		}
+
+		// aggregate — COUNT(*) omits field (undefined); sum/avg/min/max always have a field
+		const { field } = this.fnKind;
+		return {
 			kind: 'window',
-			function: fn,
+			function: this.fnKind.fn,
+			...(field !== undefined && { field }),
 			alias,
 			over,
-		};
-
-		if (field !== undefined) {
-			return { ...intent, field };
-		}
-		return intent;
+		} satisfies AggregateWindowIntent;
 	}
 }
 

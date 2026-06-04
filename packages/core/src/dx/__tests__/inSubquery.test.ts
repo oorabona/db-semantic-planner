@@ -3,7 +3,7 @@ import { eq, inSubquery, not } from '../filters.js';
 import { subquery } from '../subquery-builder.js';
 
 describe('inSubquery', () => {
-	it('creates WhereInIntent with empty values and subquery field', () => {
+	it('creates WhereInSubqueryIntent: values absent, subquery present', () => {
 		const sub = subquery('posts')
 			.select('userId')
 			.where(eq('status', 'published'));
@@ -11,7 +11,8 @@ describe('inSubquery', () => {
 
 		expect(result.kind).toBe('in');
 		expect(result.field).toBe('id');
-		expect(result.values).toEqual([]);
+		// XOR: subquery branch must NOT have values (WhereInSubqueryIntent)
+		expect(result.values).toBeUndefined();
 		expect(result.subquery).toBeDefined();
 		expect(result.subquery!.from).toBe('posts');
 	});

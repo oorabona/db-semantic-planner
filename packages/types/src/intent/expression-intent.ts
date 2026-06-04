@@ -441,32 +441,96 @@ export interface WindowOrderBy {
  *   over: { partitionBy: ['account_id'], orderBy: [{ field: 'date' }] }
  * }
  */
-export interface WindowIntent {
+/**
+ * Window function intent (ranking branch): ROW_NUMBER / RANK / DENSE_RANK — no field required.
+ *
+ * @example
+ * { kind: 'window', function: 'row_number', alias: 'rn', over: { orderBy: [{ field: 'created_at', direction: 'desc' }] } }
+ */
+export interface RankingWindowIntent {
 	readonly kind: 'window';
-
-	/** Window function to apply */
-	readonly function: WindowFunction;
-
-	/** Field for aggregate/offset functions (required for sum/avg/count/min/max/lag/lead) */
-	readonly field?: string | undefined;
-
+	readonly function: RankingWindowFunction;
+	readonly field?: never;
 	/** Result column alias (required) */
 	readonly alias: string;
-
-	/** Offset for lag/lead (default: 1 in PostgreSQL) */
-	readonly offset?: number | undefined;
-
-	/** Default value for lag/lead when row doesn't exist */
-	readonly defaultValue?: unknown;
-
+	readonly offset?: never;
+	readonly defaultValue?: never;
 	/** OVER clause specification */
 	readonly over: {
-		/** PARTITION BY columns (optional) */
 		readonly partitionBy?: readonly string[] | undefined;
-		/** ORDER BY specification (optional but recommended for ranking) */
 		readonly orderBy?: readonly WindowOrderBy[] | undefined;
 	};
 }
+
+/**
+ * Window function intent (aggregate branch): SUM / AVG / COUNT / MIN / MAX — field required.
+ *
+ * @example
+ * { kind: 'window', function: 'sum', field: 'amount', alias: 'running_total', over: { partitionBy: ['account_id'] } }
+ */
+/**
+ * Window function intent (aggregate branch): SUM / AVG / COUNT / MIN / MAX.
+ * Field is required for sum/avg/min/max; COUNT omits field to produce COUNT(*) OVER (...).
+ *
+ * @example SUM with field
+ * { kind: 'window', function: 'sum', field: 'amount', alias: 'running_total', over: { partitionBy: ['account_id'] } }
+ * @example COUNT(*)
+ * { kind: 'window', function: 'count', alias: 'total', over: {} }
+ */
+export interface AggregateWindowIntent {
+	readonly kind: 'window';
+	readonly function: AggregateWindowFunction;
+	/**
+	 * Field to aggregate over.
+	 * Required for sum/avg/min/max. Omit (or undefined) for COUNT(*) OVER (...).
+	 */
+	readonly field?: string | undefined;
+	/** Result column alias (required) */
+	readonly alias: string;
+	readonly offset?: never;
+	readonly defaultValue?: never;
+	/** OVER clause specification */
+	readonly over: {
+		readonly partitionBy?: readonly string[] | undefined;
+		readonly orderBy?: readonly WindowOrderBy[] | undefined;
+	};
+}
+
+/**
+ * Window function intent (offset branch): LAG / LEAD — field required, offset optional.
+ *
+ * @example
+ * { kind: 'window', function: 'lag', field: 'salary', alias: 'prev_salary', over: { orderBy: [{ field: 'date', direction: 'asc' }] } }
+ */
+export interface OffsetWindowIntent {
+	readonly kind: 'window';
+	readonly function: OffsetWindowFunction;
+	/** Field to access from the offset row (required for lag/lead) */
+	readonly field: string;
+	/** Result column alias (required) */
+	readonly alias: string;
+	/** Offset for lag/lead (default: 1 in PostgreSQL) */
+	readonly offset?: number | undefined;
+	/** Default value for lag/lead when row doesn't exist */
+	readonly defaultValue?: unknown;
+	/** OVER clause specification */
+	readonly over: {
+		readonly partitionBy?: readonly string[] | undefined;
+		readonly orderBy?: readonly WindowOrderBy[] | undefined;
+	};
+}
+
+/**
+ * Window function intent for analytics over partitions.
+ * Discriminated by function group:
+ * - RankingWindowIntent: row_number / rank / dense_rank (no field)
+ * - AggregateWindowIntent: sum / avg / count / min / max (field required)
+ * - OffsetWindowIntent: lag / lead (field required, offset optional)
+ */
+export type WindowIntent =
+	| RankingWindowIntent
+	| AggregateWindowIntent
+	| OffsetWindowIntent;
 
 /**
  * Ranking window functions (no field required)

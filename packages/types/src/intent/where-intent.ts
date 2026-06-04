@@ -74,13 +74,33 @@ export interface WhereLikeIntent {
 /**
  * Array filter: field in [values]
  */
-export interface WhereInIntent {
+/**
+ * Array filter (values branch): field IN (v1, v2, ...)
+ */
+export interface WhereInValueIntent {
 	readonly kind: 'in';
 	readonly field: string;
 	readonly values: readonly unknown[];
-	/** Optional subquery producing the value set (when present, values is empty) */
-	readonly subquery?: QueryIntent;
+	readonly subquery?: never;
+	readonly not?: boolean;
 }
+
+/**
+ * Array filter (subquery branch): field IN (SELECT ...)
+ */
+export interface WhereInSubqueryIntent {
+	readonly kind: 'in';
+	readonly field: string;
+	readonly subquery: QueryIntent;
+	readonly values?: never;
+	readonly not?: boolean;
+}
+
+/**
+ * Array filter: field in [values] OR field IN (subquery)
+ * XOR: exactly one of `values` or `subquery` must be present.
+ */
+export type WhereInIntent = WhereInValueIntent | WhereInSubqueryIntent;
 
 /**
  * Array membership filter using PostgreSQL ANY() operator.
@@ -91,6 +111,15 @@ export interface WhereAnyIntent {
 	readonly field: string;
 	readonly values: readonly unknown[];
 }
+
+/**
+ * Operand accepted by range WHERE filters.
+ * - RangeValue: for range-to-range operators (overlaps, contains, containedBy)
+ * - string: ISO date/timestamp literals (e.g. '2025-01-15', '2025-01-15T08:00:00Z')
+ * - number: integer/numeric point values (e.g. 50000 for salary_range @> 50000)
+ * - boolean: rarely used but valid PostgreSQL range operand
+ */
+export type RangeOperand = RangeValue | string | number | boolean;
 
 /**
  * Range operator for PostgreSQL range types.
@@ -111,12 +140,23 @@ export type RangeOperator = 'overlaps' | 'contains' | 'containedBy' | 'between';
  * // Check if salary range contains a value
  * { kind: 'range', field: 'salary_range', operator: 'contains', value: 50000 }
  */
+/**
+ * Range filter: field overlaps/contains/containedBy range value
+ * PostgreSQL range types: daterange, tsrange, tstzrange, int4range, int8range, numrange
+ *
+ * @example
+ * // Check if booking dates overlap a period
+ * { kind: 'range', field: 'dates', operator: 'overlaps', value: { lower: '2025-01-15', upper: '2025-01-20' } }
+ *
+ * // Check if salary range contains a value
+ * { kind: 'range', field: 'salary_range', operator: 'contains', value: 50000 }
+ */
 export interface WhereRangeIntent {
 	readonly kind: 'range';
 	readonly field: string;
 	readonly operator: RangeOperator;
-	/** Can be a RangeValue (for range-to-range ops) or scalar (for contains/containedBy with point) */
-	readonly value: RangeValue | unknown;
+	/** Operand: RangeValue for range-to-range ops, or a scalar (string | number | boolean) for point-in-range ops */
+	readonly value: RangeOperand;
 }
 
 /**

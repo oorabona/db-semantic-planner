@@ -407,20 +407,29 @@ export class IntentBuilder<TResult = unknown> {
 		field?: string,
 		options?: AggregateOptions & { distinct?: boolean },
 	): void {
-		const agg: Mutable<AggregateIntent> = { function: func };
-		if (field !== undefined) {
-			agg.field = field;
-		} else if (options?.field !== undefined) {
-			agg.field = options.field;
+		const resolvedField = field ?? options?.field;
+		const as = options?.as;
+		const distinct = options?.distinct ? true : undefined;
+
+		let agg: AggregateIntent;
+		if (func === 'count') {
+			// count may omit field (defaults to '*')
+			agg = {
+				function: 'count',
+				...(resolvedField !== undefined && { field: resolvedField }),
+				...(as !== undefined && { as }),
+				...(distinct !== undefined && { distinct }),
+			};
+		} else {
+			// all other aggregates require field
+			agg = {
+				function: func,
+				field: resolvedField ?? '',
+				...(as !== undefined && { as }),
+				...(distinct !== undefined && { distinct }),
+			};
 		}
-		if (options?.as !== undefined) {
-			agg.as = options.as;
-		}
-		// DX-034: Support distinct aggregates
-		if (options?.distinct) {
-			agg.distinct = true;
-		}
-		this.state.aggregates.push(agg as AggregateIntent);
+		this.state.aggregates.push(agg);
 	}
 
 	/**

@@ -270,34 +270,33 @@ export class QueryBuilderImpl<TResult = unknown>
 		as?: string,
 	): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: Mutable<AggregateIntent> = { function: 'count' };
+
+		let field: string | undefined;
+		let alias: string | undefined = as;
+		let distinct: boolean | undefined;
 
 		if (fieldOrOptions === undefined) {
 			// count() - COUNT(*)
 		} else if (typeof fieldOrOptions === 'string') {
 			// count('field', 'alias') - COUNT(field)
-			agg.field = fieldOrOptions;
-			if (as !== undefined) {
-				agg.as = as;
-			}
+			field = fieldOrOptions;
 		} else if (isDistinctField(fieldOrOptions)) {
 			// count(distinct('field'), 'alias') - COUNT(DISTINCT field)
-			agg.field = fieldOrOptions.field;
-			agg.distinct = true;
-			if (as !== undefined) {
-				agg.as = as;
-			}
+			field = fieldOrOptions.field;
+			distinct = true;
 		} else {
 			// count({ field, as }) - AggregateOptions
-			if (fieldOrOptions.field !== undefined) {
-				agg.field = fieldOrOptions.field;
-			}
-			if (fieldOrOptions.as !== undefined) {
-				agg.as = fieldOrOptions.as;
-			}
+			field = fieldOrOptions.field;
+			alias = fieldOrOptions.as ?? as;
 		}
 
-		builder.aggregates.push(agg as AggregateIntent);
+		const agg: AggregateIntent = {
+			function: 'count',
+			...(field !== undefined && { field }),
+			...(alias !== undefined && { as: alias }),
+			...(distinct !== undefined && { distinct }),
+		};
+		builder.aggregates.push(agg);
 		return builder;
 	}
 
@@ -305,14 +304,13 @@ export class QueryBuilderImpl<TResult = unknown>
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
 		const fieldName = isDistinct ? field.field : field;
-		const agg: Mutable<AggregateIntent> = { function: 'sum', field: fieldName };
-		if (isDistinct) {
-			agg.distinct = true;
-		}
-		if (as !== undefined) {
-			agg.as = as;
-		}
-		builder.aggregates.push(agg as AggregateIntent);
+		const agg: AggregateIntent = {
+			function: 'sum',
+			field: fieldName,
+			...(isDistinct && { distinct: true }),
+			...(as !== undefined && { as }),
+		};
+		builder.aggregates.push(agg);
 		return builder;
 	}
 
@@ -320,34 +318,35 @@ export class QueryBuilderImpl<TResult = unknown>
 		const builder = this.clone();
 		const isDistinct = isDistinctField(field);
 		const fieldName = isDistinct ? field.field : field;
-		const agg: Mutable<AggregateIntent> = { function: 'avg', field: fieldName };
-		if (isDistinct) {
-			agg.distinct = true;
-		}
-		if (as !== undefined) {
-			agg.as = as;
-		}
-		builder.aggregates.push(agg as AggregateIntent);
+		const agg: AggregateIntent = {
+			function: 'avg',
+			field: fieldName,
+			...(isDistinct && { distinct: true }),
+			...(as !== undefined && { as }),
+		};
+		builder.aggregates.push(agg);
 		return builder;
 	}
 
 	min(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: Mutable<AggregateIntent> = { function: 'min', field };
-		if (as !== undefined) {
-			agg.as = as;
-		}
-		builder.aggregates.push(agg as AggregateIntent);
+		const agg: AggregateIntent = {
+			function: 'min',
+			field,
+			...(as !== undefined && { as }),
+		};
+		builder.aggregates.push(agg);
 		return builder;
 	}
 
 	max(field: string, as?: string): QueryBuilder<TResult> {
 		const builder = this.clone();
-		const agg: Mutable<AggregateIntent> = { function: 'max', field };
-		if (as !== undefined) {
-			agg.as = as;
-		}
-		builder.aggregates.push(agg as AggregateIntent);
+		const agg: AggregateIntent = {
+			function: 'max',
+			field,
+			...(as !== undefined && { as }),
+		};
+		builder.aggregates.push(agg);
 		return builder;
 	}
 
@@ -1645,7 +1644,9 @@ export class QueryBuilderImpl<TResult = unknown>
 		const builder = new QueryBuilderImpl<TResult>(
 			{ ...this.ctx, ...ctxOverride },
 			this.from,
-			{ ...this.relationHints },
+			{
+				...this.relationHints,
+			},
 		);
 		// Clone array state
 		builder.includes.push(...this.includes);
