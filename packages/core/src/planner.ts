@@ -32,7 +32,6 @@ import {
 	type WhereInIntent,
 	type WhereIntent,
 	type WhereNotIntent,
-	type WhereOrIntent,
 } from './intent-ast.js';
 import type { ModelIR, RelationIR } from './model-ir.js';
 
@@ -631,11 +630,33 @@ function optimizeInToExists(
 			const inWhere = where as WhereInIntent;
 			if (!inWhere.subquery) return where;
 
-			// Do not optimize when the subquery has a LIMIT or ORDER BY.
-			// EXISTS (SELECT 1 FROM t WHERE ... LIMIT n) is NOT equivalent to
-			// id IN (SELECT fk FROM t WHERE ... LIMIT n): the LIMIT restricts which
-			// rows satisfy the IN check, which cannot be expressed in EXISTS form.
-			if (inWhere.subquery.limit != null || inWhere.subquery.orderBy?.length) {
+			// Only rewrite when the subquery is SIMPLE: single source table, one
+			// selected column (the FK), and NO modifiers that change the result set.
+			// Any of the following make the subquery non-simple — keep IN unchanged:
+			//   limit / orderBy   — LIMIT n restricts which rows satisfy IN, can't be
+			//                       expressed in EXISTS form
+			//   offset             — similar row-restriction semantics
+			//   groupBy / having   — HAVING count(*)>1 restricts to duplicates etc.;
+			//                       EXISTS (SELECT 1 ... GROUP BY x HAVING ...) drops
+			//                       the HAVING restriction and matches MORE rows
+			//   distinct / distinctOn — deduplicate semantics lost in EXISTS
+			//   joins / include    — extra tables in the subquery aren't propagated
+			//   batchValuesSource  — unnest() source, not a real table
+			//   aggregate select   — SELECT max(price) is not a simple FK projection
+			const sq = inWhere.subquery;
+			if (
+				sq.limit != null ||
+				sq.orderBy?.length ||
+				sq.offset != null ||
+				sq.groupBy?.length ||
+				sq.having != null ||
+				sq.distinct ||
+				sq.distinctOn?.length ||
+				sq.joins?.length ||
+				sq.include?.length ||
+				sq.batchValuesSource != null ||
+				(sq.select != null && sq.select.type !== 'fields')
+			) {
 				return where;
 			}
 
@@ -701,14 +722,14 @@ function optimizeInToExists(
 			return { kind: 'and', conditions: optimized } as WhereAndIntent;
 		}
 
-		case 'or': {
-			const orWhere = where as WhereOrIntent;
-			const optimized = orWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model),
-			);
-			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
-			return { kind: 'or', conditions: optimized } as WhereOrIntent;
-		}
+		case 'or':
+			// Do NOT recurse into OR branches. The adapter's extractExistsDecisions
+			// appends EXISTS decisions as flat top-level AND terms. If an IN inside
+			// an OR were rewritten to EXISTS, stripExistsFromDecision would remove it
+			// from the OR container and extractExistsDecisions would re-add it as a
+			// top-level AND term — silently changing OR semantics to AND.
+			// Safe fallback: keep the entire OR subtree unchanged (IN stays IN).
+			return where;
 
 		case 'not': {
 			const notWhere = where as WhereNotIntent;

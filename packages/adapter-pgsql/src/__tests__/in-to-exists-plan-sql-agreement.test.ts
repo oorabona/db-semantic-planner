@@ -135,7 +135,7 @@ describe('IN→EXISTS: plan and SQL both use EXISTS for optimizable IN subquery'
 		// SQL must use EXISTS, not IN (...) — normalizeSQL lowercases, so match lowercase
 		const { sql } = compileIntent(intent, testSchema.model);
 		expect(sql).toContain('exists');
-		expect(sql).not.toContain('in (select');
+		expect(sql).not.toContain('= any (select');
 		// SQL must contain exactly one EXISTS clause (no duplication)
 		const existsCount = (sql.match(/\bexists\b/g) ?? []).length;
 		expect(existsCount).toBe(1);
@@ -203,7 +203,7 @@ describe('IN→EXISTS: plan and SQL both use EXISTS for optimizable IN subquery'
 		const { sql } = compileIntent(queryIntent, testSchema.model);
 		// normalizeSQL lowercases output
 		expect(sql).toContain('exists');
-		expect(sql).not.toContain('in (select');
+		expect(sql).not.toContain('= any (select');
 	});
 });
 
@@ -267,5 +267,142 @@ describe('NOT IN preserved: SQL keeps NOT IN when FK is nullable', () => {
 		// normalizeSQL lowercases output; optimization was blocked → no EXISTS in SQL
 		const { sql } = compileIntent(queryIntent, schemaWithNullableFK.model);
 		expect(sql).not.toContain('exists');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Suite: non-simple subquery guards (SQL-level verification)
+// ---------------------------------------------------------------------------
+describe('Non-simple subquery: SQL keeps IN when subquery has modifiers', () => {
+	it('IN with groupBy/having subquery: SQL keeps IN, no EXISTS', () => {
+		// Regression gate (filter broadening): EXISTS would silently drop GROUP BY /
+		// HAVING constraints, broadening the filter to match more rows than the
+		// original IN form.
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					groupBy: ['productId'],
+					having: {
+						kind: 'comparison',
+						field: 'count',
+						operator: 'gt',
+						value: 1,
+					},
+				},
+			},
+		};
+
+		const planReport = plan(queryIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// No filter-strategy (optimization blocked)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+
+		// plan.intent unchanged
+		expect(planReport.intent).toBe(queryIntent);
+
+		// SQL must use IN form, no EXISTS
+		const { sql } = compileIntent(queryIntent, testSchema.model);
+		expect(sql).not.toContain('exists');
+		expect(sql).toContain('= any (select');
+	});
+
+	it('IN with offset subquery: SQL keeps IN, no EXISTS', () => {
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					offset: 10,
+				},
+			},
+		};
+
+		const { sql } = compileIntent(queryIntent, testSchema.model);
+		expect(sql).not.toContain('exists');
+		expect(sql).toContain('= any (select');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Suite: OR-position guard (SQL-level verification)
+// ---------------------------------------------------------------------------
+describe('OR-position guard: IN inside OR stays IN, SQL is OR not AND', () => {
+	it('or(eq(...), inSubquery(...)): SQL emits OR combination, not AND', () => {
+		// Regression gate (OR boolean corruption): if the IN inside an OR were
+		// rewritten to EXISTS, extractExistsDecisions would re-add it as a top-level
+		// AND term, silently changing OR semantics to AND.
+		const queryIntent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'or',
+				conditions: [
+					{
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Widget',
+					},
+					{
+						kind: 'in',
+						field: 'id',
+						values: [],
+						subquery: {
+							type: 'select',
+							from: 'productImages',
+							select: { type: 'fields', fields: ['productId'] },
+							where: {
+								kind: 'comparison',
+								field: 'approved',
+								operator: 'eq',
+								value: true,
+							},
+						},
+					},
+				],
+			},
+		};
+
+		const planReport = plan(queryIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+
+		// No filter-strategy (OR subtree not rewritten)
+		const filterDecision = planReport.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+
+		// plan.intent must be unchanged
+		expect(planReport.intent).toBe(queryIntent);
+
+		// SQL must contain OR combining the two conditions
+		const { sql } = compileIntent(queryIntent, testSchema.model);
+		expect(sql).toContain('or');
+
+		// The IN must not have been turned into a top-level AND EXISTS
+		expect(sql).not.toContain('exists');
+
+		// The IN stays as IN inside the OR
+		expect(sql).toContain('= any (select');
 	});
 });
