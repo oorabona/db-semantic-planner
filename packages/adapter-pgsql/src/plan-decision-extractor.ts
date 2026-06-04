@@ -700,6 +700,17 @@ export function enrichExistsDecisionsInPlace(
 	plan: PlanReport,
 	model?: ModelIR,
 ): PlanDecision[] {
+	// Collect all stub exists positions in depth-first order from the decision tree.
+	// Must happen BEFORE the filterDecisions early-return so that unresolved stubs
+	// (no matching filter-strategy) are detected and thrown on even when the planner
+	// produced zero filter-strategy decisions.
+	const stubs: Array<{
+		decision: PlanDecision;
+		container: PlanDecision[];
+		index: number;
+	}> = [];
+	collectExistsStubs(decisions, stubs);
+
 	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
 	const filterDecisions = plan.decisions.filter(
 		(d) =>
@@ -709,86 +720,114 @@ export function enrichExistsDecisionsInPlace(
 				d.choice === 'join'),
 	);
 
-	if (filterDecisions.length === 0) {
-		return [];
-	}
-
-	// Find all exists intents from the plan's where clause (same as extractExistsDecisions).
-	// Clone so we can consume (splice) matches without mutating the plan.
-	const existsIntents = plan.intent?.where
-		? findExistsIntents(plan.intent.where)
-		: [];
-
-	// Collect all stub exists positions in depth-first order from the decision tree.
-	const stubs: Array<{
-		decision: PlanDecision;
-		container: PlanDecision[];
-		index: number;
-	}> = [];
-	collectExistsStubs(decisions, stubs);
-
 	// For each filter-strategy decision, find the matching stub (by relation name)
 	// and replace it with the enriched decision.
 	// Use consume-once semantics on stubs to handle duplicate relations correctly.
 	const placedDecisions: PlanDecision[] = [];
 	const consumedStubIndices = new Set<number>();
 
-	for (const d of filterDecisions) {
-		const context = d.context as Record<string, unknown>;
-		if (!context.target) continue;
+	if (filterDecisions.length > 0) {
+		// Find all exists intents from the plan's where clause (same as extractExistsDecisions).
+		// Clone so we can consume (splice) matches without mutating the plan.
+		const existsIntents = plan.intent?.where
+			? findExistsIntents(plan.intent.where)
+			: [];
 
-		// Find the matching intent (consume-once) — same matching logic as extractExistsDecisions
-		const matchIdx = existsIntents.findIndex((i) => {
-			const rel =
-				Array.isArray(i.relation) && i.relation.length > 0
-					? i.relation[0]
-					: typeof i.relation === 'string'
-						? i.relation
-						: undefined;
-			return (
-				rel === context.relation ||
-				rel === context.target ||
-				rel === context.includeAlias
+		for (const d of filterDecisions) {
+			const context = d.context as Record<string, unknown>;
+			if (!context.target) continue;
+
+			// Find the matching intent (consume-once) — same matching logic as extractExistsDecisions
+			const matchIdx = existsIntents.findIndex((i) => {
+				const rel =
+					Array.isArray(i.relation) && i.relation.length > 0
+						? i.relation[0]
+						: typeof i.relation === 'string'
+							? i.relation
+							: undefined;
+				return (
+					rel === context.relation ||
+					rel === context.target ||
+					rel === context.includeAlias
+				);
+			});
+			const matchingIntent =
+				matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
+			if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
+
+			const enriched = buildEnrichedExistsDecision(
+				d as { choice: string; context: Record<string, unknown> },
+				matchingIntent,
+				plan.rootTable,
+				model,
 			);
-		});
-		const matchingIntent = matchIdx >= 0 ? existsIntents[matchIdx] : undefined;
-		if (matchIdx >= 0) existsIntents.splice(matchIdx, 1);
 
-		const enriched = buildEnrichedExistsDecision(
-			d as { choice: string; context: Record<string, unknown> },
-			matchingIntent,
-			plan.rootTable,
-			model,
-		);
+			// Find the stub in the tree that corresponds to this filter-strategy.
+			// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])
+			// that convertExistsLike stores as targetTable via `cond.relation as string`.
+			const stubIdx = stubs.findIndex((s, idx) => {
+				if (consumedStubIndices.has(idx)) return false;
+				const stubRelation = normalizeStubRelation(s.decision.targetTable);
+				return (
+					stubRelation === context.relation ||
+					stubRelation === context.target ||
+					stubRelation === context.includeAlias
+				);
+			});
 
-		// Find the stub in the tree that corresponds to this filter-strategy.
-		// normalizeStubRelation handles NQL's array-typed relation (e.g. ['children'])
-		// that convertExistsLike stores as targetTable via `cond.relation as string`.
-		const stubIdx = stubs.findIndex((s, idx) => {
-			if (consumedStubIndices.has(idx)) return false;
-			const stubRelation = normalizeStubRelation(s.decision.targetTable);
-			return (
-				stubRelation === context.relation ||
-				stubRelation === context.target ||
-				stubRelation === context.includeAlias
-			);
-		});
-
-		if (stubIdx >= 0) {
-			// Replace the stub in-place in its container
-			const stub = stubs[stubIdx];
-			if (stub) {
-				stub.container[stub.index] = enriched;
-				consumedStubIndices.add(stubIdx);
+			if (stubIdx >= 0) {
+				// Replace the stub in-place in its container
+				const stub = stubs[stubIdx];
+				if (stub) {
+					stub.container[stub.index] = enriched;
+					consumedStubIndices.add(stubIdx);
+					placedDecisions.push(enriched);
+				}
+			} else {
+				// No matching stub in the tree — append at top level as fallback
+				// (handles cases where the intent came from planner optimization that added
+				// a filter-strategy without a corresponding exists() call in the WHERE tree,
+				// e.g. IN→EXISTS conversion where the original intent was an 'in', not 'exists').
+				decisions.push(enriched);
 				placedDecisions.push(enriched);
 			}
-		} else {
-			// No matching stub in the tree — append at top level as fallback
-			// (handles cases where the intent came from planner optimization that added
-			// a filter-strategy without a corresponding exists() call in the WHERE tree,
-			// e.g. IN→EXISTS conversion where the original intent was an 'in', not 'exists').
-			decisions.push(enriched);
-			placedDecisions.push(enriched);
+		}
+	}
+
+	// Fail-closed: any stub not consumed by a matching filter-strategy is an
+	// unresolved exists() call — either the relation is not declared in the schema,
+	// or there is no model to resolve it with.  Compiling it by guessing (using the
+	// relation name as a table name with a convention-derived FK) produces silently
+	// wrong SQL and violates model boundaries.
+	//
+	// exists('rel') requires a declared FK relation.  For an uncorrelated or
+	// undeclared EXISTS the caller must use rawExists(subquery(...)), which
+	// compiles inline without relying on the schema.
+	for (let i = 0; i < stubs.length; i++) {
+		if (consumedStubIndices.has(i)) continue;
+		const stub = stubs[i];
+		if (!stub) continue;
+		const relationName = normalizeStubRelation(stub.decision.targetTable);
+		if (!relationName) continue;
+
+		if (!model) {
+			throw new Error(
+				`exists('${relationName}'): cannot resolve relation '${relationName}' on table '${plan.rootTable}' — no model is configured. ` +
+					`Use rawExists(subquery(...)) for an EXISTS over an uncorrelated or undeclared subquery.`,
+			);
+		}
+
+		// Check whether the relation is declared for the source table.
+		// We check the rootTable (and context.sourceTable if available in the stub,
+		// though stubs don't carry it — rootTable is the correct source for top-level filters).
+		const declaredRelation = model.getRelation(
+			`${plan.rootTable}.${relationName}`,
+		);
+		if (!declaredRelation) {
+			throw new Error(
+				`exists('${relationName}'): no relation '${relationName}' is declared on table '${plan.rootTable}'. ` +
+					`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
+			);
 		}
 	}
 

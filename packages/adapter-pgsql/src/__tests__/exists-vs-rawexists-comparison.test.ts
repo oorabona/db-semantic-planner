@@ -17,15 +17,12 @@
  *
  *   Case 2: Undeclared relation (polymorphic table, no FK)
  *     → exists('auditLog', { where: eq('entityType', 'login') }) from 'users'
- *       silently drops the WHERE today — relation not declared on users.
- *       This test locks that behavior so a future fix is loud.
+ *       throws with a clear error — relation not declared on users.
+ *       rawExists(subquery(...)) is the correct tool here.
  *     → rawExists(subquery('auditLog').select('id').where(eq('entityType', 'login')))
  *       produces correct EXISTS SQL — rawExists is the right tool here.
  *
- * These tests are the regression lock.  If a future change makes exists()
- * throw on undeclared relations (which would be the preferred behavior),
- * Case 2 / test 3 will fail loudly, prompting an update to both this file
- * and the companion guide (packages/docs/guide/exists-vs-rawexists.md).
+ * These tests are the regression lock.
  */
 
 import {
@@ -173,29 +170,24 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 		 * exists('auditLog', { where: eq('entityType', 'login') }) from users.
 		 *
 		 * 'auditLog' has no ref() to 'users', so the planner cannot resolve the
-		 * FK-based correlated subquery.  Today it silently drops the WHERE and
-		 * emits a plain SELECT.
+		 * FK-based correlated subquery.  The adapter now THROWS with a clear error
+		 * rather than guessing (using the relation name as table name with a
+		 * convention-derived FK), which would produce silently wrong SQL.
 		 *
-		 * This test locks that current behavior.  A future improvement should make
-		 * exists() throw when the relation is not declared, which would require
-		 * updating this test AND the companion guide.
+		 * This is the fail-closed contract: exists() requires a declared FK relation.
+		 * Use rawExists(subquery(...)) for polymorphic or ad-hoc join targets.
 		 */
-		it('exists() on undeclared relation compiles with relation name as table (no FK correlation)', () => {
-			// exists() on an undeclared relation now compiles the EXISTS subquery using
-			// the relation name as the target table (FK derived by naming convention).
-			// This is a boundary case: rawExists() is the correct escape hatch when
-			// no FK relation is declared (see the test below).
+		it('exists() on undeclared relation THROWS with a clear error', () => {
 			const orm = buildOrm();
-			const dump = (orm as any)
-				.select('users')
-				.where(exists('auditLog', { where: eq('entityType', 'login') }))
-				.dump();
 
-			const sql = ws(dump.sql);
-
-			// EXISTS is present — compiled with the relation name as table
-			expect(sql).toMatch(/EXISTS/i);
-			expect(sql).toMatch(/auditLog/i);
+			expect(() =>
+				(orm as any)
+					.select('users')
+					.where(exists('auditLog', { where: eq('entityType', 'login') }))
+					.dump(),
+			).toThrow(
+				/exists\('auditLog'\).*no relation 'auditLog'.*declared on table 'users'/i,
+			);
 		});
 
 		/**
@@ -236,6 +228,53 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 
 			// Parameter value bound
 			expect(dump.params).toEqual(['login']);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Case 3: Fail-closed contract regression locks
+	// ---------------------------------------------------------------------------
+
+	describe('case 3: fail-closed — declared relation compiles, undeclared throws', () => {
+		it('exists() on a DECLARED relation still compiles (no regression)', () => {
+			// FK declared: files.communityId → communities.id
+			// This must NOT throw even though the table name differs from the relation name.
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('communities')
+				.where(exists('files'))
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toContain('EXISTS');
+			// FK column from the declared relation
+			expect(sql).toContain('communityId');
+		});
+
+		it('rawExists() on an arbitrary subquery is unaffected by the fail-closed check', () => {
+			// rawExists uses operator 'rawExists', not 'exists' — collectExistsStubs
+			// skips it so the fail-closed guard never fires.
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('users')
+				.where(
+					rawExists(
+						subquery('auditLog').select('id').where(eq('entityType', 'login')),
+					),
+				)
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toContain('EXISTS');
+			expect(sql).toContain('auditLog_sq');
+		});
+
+		it('exists() on undeclared relation throws the exact error message', () => {
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any).select('users').where(exists('auditLog')).dump(),
+			).toThrow(
+				"exists('auditLog'): no relation 'auditLog' is declared on table 'users'. " +
+					'Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.',
+			);
 		});
 	});
 });

@@ -2567,8 +2567,13 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 	});
 
-	describe('compile — filter EXISTS decisions from intent', () => {
-		it('filters out broken exists decisions from intentToDecisions', () => {
+	describe('compile — unresolved exists() throws fail-closed', () => {
+		it('throws when exists() relation cannot be resolved (no model configured)', () => {
+			// exists() requires a declared FK relation in the schema.
+			// When no model is configured and a filter-strategy was not produced
+			// (planner could not resolve the relation), the adapter throws rather than
+			// guessing (using the relation name as a table name with a derived FK),
+			// which would produce silently wrong SQL.
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan = {
 				rootTable: 'posts',
@@ -2590,9 +2595,11 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 				},
 			} as any;
 
-			// Should not throw — exists decisions from intent are filtered
-			const result = adapter.compile(plan);
-			expect(result.sql).toContain('SELECT');
+			// Without a model the adapter cannot resolve 'author' — it must throw.
+			// Use rawExists(subquery(...)) for EXISTS over uncorrelated/undeclared targets.
+			expect(() => adapter.compile(plan)).toThrow(
+				/exists\('author'\).*cannot resolve relation 'author'.*no model/i,
+			);
 		});
 	});
 
