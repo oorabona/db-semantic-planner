@@ -441,21 +441,25 @@ function handleSubqueryIntent(
 		subquery: Parameters<WhereCompilerCtx['compileSubquery']>[0];
 	};
 
-	// Use buildSubqueryFromIntent directly with 'scalar-direct' so validation is
-	// applied with the correct use context (rejects LIMIT + ORDER BY, which the
-	// decisions path 'scalar' allows because that path faithfully emits them).
-	// Validation is now delegated to buildSubqueryFromIntent (the direct-path chokepoint).
+	// Guard: reject scalar subqueries with modifiers that the direct path does not
+	// faithfully emit (LIMIT, ORDER BY, GROUP BY, etc.). This runs BEFORE the
+	// ctx.compileSubquery callback so the modifier error fires first, regardless
+	// of which callback is injected (e.g. the JOIN ON override that throws a
+	// different error).
+	assertNoUnsupportedSubqueryModifiers(
+		subquery as QueryIntent,
+		'scalar-direct',
+	);
+
+	// Route through ctx.compileSubquery so caller-injected overrides are honoured.
+	// Specifically, JOIN ON compilation injects a throw-callback so a scalar subquery
+	// in a JOIN ON condition is correctly rejected (not silently compiled).
+	// This was the original design intent (point 6 of the spec).
 	const {
 		sql: subqueryNode,
 		paramCount,
 		parameters: innerParams,
-	} = buildSubqueryFromIntent(
-		subquery as QueryIntent,
-		ctx.paramState.paramIndex,
-		ctx.naming,
-		ctx.schemaName,
-		'scalar-direct',
-	);
+	} = ctx.compileSubquery(subquery, ctx.paramState.paramIndex);
 
 	if (innerParams) {
 		for (const p of innerParams) {

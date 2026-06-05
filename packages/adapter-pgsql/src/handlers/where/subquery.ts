@@ -68,6 +68,46 @@ function createScalarSubLink(
 }
 
 // ============================================================================
+// Helper: detect lowered outerRef in decision conditions
+// ============================================================================
+
+/**
+ * Recursively walk Decision conditions looking for a FieldRef with scope:'outer'.
+ *
+ * When `convertSubquery` lowered a `subquery` WhereIntent to a Decision, any
+ * `outerRef()` node in the inner WHERE was converted to
+ * `{ kind: 'fieldRef', scope: 'outer', column }` by `convertComparison`.
+ * `buildPredicateSubquerySelect` builds its inner subCtx with no `outerAlias`, so
+ * a scope:'outer' FieldRef would bind to the inner alias — producing wrong SQL.
+ *
+ * This check covers the case where `decision.subqueryIntent` is absent (a
+ * directly-constructed handler decision) so `buildPredicateSubquerySelect`'s
+ * `containsOuterRef(sourceIntent.where)` check cannot see the correlation.
+ *
+ * @internal
+ */
+function conditionsContainOuterFieldRef(
+	conditions: readonly unknown[],
+): boolean {
+	for (const cond of conditions) {
+		if (!cond || typeof cond !== 'object') continue;
+		const c = cond as Record<string, unknown>;
+		// Check this Decision's value for a fieldRef with scope:'outer'
+		const val = c.value;
+		if (val && typeof val === 'object') {
+			const v = val as Record<string, unknown>;
+			if (v.kind === 'fieldRef' && v.scope === 'outer') return true;
+		}
+		// Recurse into nested conditions (and/or/not groups)
+		if (Array.isArray(c.conditions)) {
+			if (conditionsContainOuterFieldRef(c.conditions as unknown[]))
+				return true;
+		}
+	}
+	return false;
+}
+
+// ============================================================================
 // Thin wrapper — delegates to buildPredicateSubquerySelect (chokepoint)
 // ============================================================================
 
@@ -81,16 +121,17 @@ function createScalarSubLink(
  * - inSubquery / notInSubquery → 'IN'
  * - scalarSubquery / subqueryEq / … → 'scalar'
  *
- * Validation (assertNoUnsupportedSubqueryModifiers + outerRef check) is performed
- * inside `buildPredicateSubquerySelect` against `sourceIntent` — NOT against the
- * stripped lowered decision fields.
+ * Validation runs at two levels:
+ * 1. `buildPredicateSubquerySelect` validates `sourceIntent` modifiers and
+ *    checks `sourceIntent.where` for `outerRef()` nodes.
+ * 2. This wrapper also checks the LOWERED `decision.conditions` for a
+ *    `fieldRef(scope:'outer')` — covering the case where `subqueryIntent` is
+ *    absent (directly-constructed decision) and the correlation is only visible
+ *    in the post-lowering conditions, not in `sourceIntent.where`.
  *
  * DEFENSE-IN-DEPTH: when `decision.subqueryIntent` is absent (directly-constructed
  * Decision without provenance), we synthesize a minimal QueryIntent from the lowered
- * fields so the chokepoint can still validate.  This is intentionally less precise
- * than the full original intent but still catches structural modifier violations
- * (GROUP BY / HAVING / OFFSET / DISTINCT / joins / include).  The remapping +
- * backstop guards at other sites remain in place as defense-in-depth.
+ * fields so the chokepoint can still validate structural modifier violations.
  */
 function buildScalarSubquery(
 	decision: Decision,
@@ -99,6 +140,23 @@ function buildScalarSubquery(
 	state: CompilerState,
 	dispatch: WhereDispatcher,
 ): Node {
+	// DEFECT 2 FIX (defense-in-depth, decisions handler path):
+	// Check the LOWERED decision.conditions for a fieldRef with scope:'outer'.
+	// This fires when convertSubquery (decisions path entry) already threw for
+	// outerRef() in the intent; this guard catches manually-constructed Decisions
+	// that bypass the entry point (directly-constructed handler decisions whose
+	// subqueryIntent is absent).
+	if (
+		decision.conditions &&
+		conditionsContainOuterFieldRef(decision.conditions as unknown[])
+	) {
+		throw new Error(
+			'scalar subquery with correlated outerRef() is not yet supported — ' +
+				'use exists("relation", { where: ... }) when a schema relation exists, ' +
+				'or restructure the query to avoid the correlation.',
+		);
+	}
+
 	// Resolve source intent: prefer the carried provenance; synthesize from
 	// lowered fields as fallback for directly-constructed decisions.
 	const sourceIntent: import('@dbsp/types').QueryIntent =

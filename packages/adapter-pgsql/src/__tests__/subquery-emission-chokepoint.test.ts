@@ -588,3 +588,308 @@ describe('SUMMARY: buildPredicateSubquerySelect routes all handler-path emission
 		).not.toThrow();
 	});
 });
+
+// ============================================================================
+// REGRESSION LOCK — DEFECT 1: JOIN ON scalar subquery must still throw
+// ============================================================================
+
+describe('DEFECT 1 regression: scalar subquery in JOIN ON condition is rejected', () => {
+	/**
+	 * adapter-compiler-select.ts injects a throw-callback for ctx.compileSubquery
+	 * when building JOIN ON conditions (two sites: table-mode and BatchValues-mode).
+	 * Before the fix, handleSubqueryIntent bypassed ctx.compileSubquery and called
+	 * buildSubqueryFromIntent directly — so a scalar subquery in a JOIN ON would
+	 * silently compile instead of throwing.
+	 *
+	 * Fix: handleSubqueryIntent routes through ctx.compileSubquery so the override
+	 * throw fires.  The per-site 'scalar-direct' modifier guard still runs FIRST so
+	 * modifier errors are reported before the JOIN ON error.
+	 */
+	it('scalar subquery in JOIN ON condition throws (table-mode join, injected ctx)', () => {
+		// Simulate the WhereCompilerCtx that adapter-compiler-select.ts builds for
+		// table-mode JOIN ON compilation — compileSubquery is overridden to throw.
+		const paramState = createCompilerState();
+		const ctx: WhereCompilerCtx = {
+			rootTable: 'orders',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			// Exact override used in adapter-compiler-select.ts ~387
+			compileSubquery: () => {
+				throw new Error('Subquery in JOIN ON condition is not supported.');
+			},
+		};
+
+		const subqueryIntent = {
+			kind: 'subquery' as const,
+			field: 'customer_id',
+			operator: 'eq' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+			},
+		};
+
+		expect(() => compileWhereIntent(subqueryIntent as any, ctx)).toThrow(
+			'Subquery in JOIN ON condition is not supported.',
+		);
+	});
+
+	it('scalar subquery in BatchValues JOIN ON condition throws (injected ctx)', () => {
+		// Simulate the BatchValues JOIN ON WhereCompilerCtx from
+		// adapter-compiler-select.ts ~331.
+		const paramState = createCompilerState();
+		const ctx: WhereCompilerCtx = {
+			rootTable: 'orders',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			// Exact override used in adapter-compiler-select.ts ~331
+			compileSubquery: () => {
+				throw new Error(
+					'Subquery in BatchValues JOIN ON condition is not supported.',
+				);
+			},
+		};
+
+		const subqueryIntent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+			},
+		};
+
+		expect(() => compileWhereIntent(subqueryIntent as any, ctx)).toThrow(
+			'Subquery in BatchValues JOIN ON condition is not supported.',
+		);
+	});
+
+	it('modifier guard fires before JOIN ON throw (scalar-direct rejects LIMIT first)', () => {
+		// A scalar subquery with LIMIT in a JOIN ON context: the 'scalar-direct'
+		// modifier guard must fire BEFORE ctx.compileSubquery so the caller sees
+		// the modifier error, not the JOIN ON override error.
+		const paramState = createCompilerState();
+		const ctx: WhereCompilerCtx = {
+			rootTable: 'orders',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: () => {
+				throw new Error(
+					'SENTINEL: compileSubquery reached — guard did NOT fire first',
+				);
+			},
+		};
+
+		const subqueryIntentWithLimit = {
+			kind: 'subquery' as const,
+			field: 'customer_id',
+			operator: 'eq' as const,
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: ['id'] as const },
+				limit: 1,
+			},
+		};
+
+		// Must throw the LIMIT guard error, NOT the sentinel.
+		expect(() =>
+			compileWhereIntent(subqueryIntentWithLimit as any, ctx),
+		).toThrow(/LIMIT.*not supported/i);
+	});
+
+	it('non-subquery WHERE condition in JOIN ON still compiles (no false positive)', () => {
+		// A plain comparison in a JOIN ON must compile normally — the fix must not
+		// break the common case.
+		const paramState = createCompilerState();
+		const ctx: WhereCompilerCtx = {
+			rootTable: 'orders',
+			aliases: new Map(),
+			paramState,
+			naming: identityNaming,
+			compileSubquery: () => {
+				throw new Error('SENTINEL: should not be called for plain comparisons');
+			},
+		};
+
+		// Plain comparison — no subquery kind
+		const plainComparison = {
+			kind: 'comparison' as const,
+			field: 'customer_id',
+			operator: 'eq' as const,
+			value: 42,
+		};
+
+		expect(() => compileWhereIntent(plainComparison as any, ctx)).not.toThrow();
+	});
+});
+
+// ============================================================================
+// REGRESSION LOCK — DEFECT 2: lowered outerRef in decision.conditions throws
+// ============================================================================
+
+describe('DEFECT 2 regression: directly-constructed decision with lowered outerRef throws', () => {
+	/**
+	 * When convertSubquery lowered a WhereSubqueryIntent to a Decision, any
+	 * outerRef() node in the inner WHERE became { kind:'fieldRef', scope:'outer' }
+	 * in the lowered Decision.conditions.  buildPredicateSubquerySelect only checks
+	 * sourceIntent.where (via containsOuterRef); when subqueryIntent is absent
+	 * (directly-constructed decision), the synthesized sourceIntent has no .where,
+	 * so the correlated reference was silently compiled against the wrong alias.
+	 *
+	 * Fix: buildScalarSubquery now checks decision.conditions recursively for
+	 * { kind:'fieldRef', scope:'outer' } before calling buildPredicateSubquerySelect.
+	 */
+	it('scalarSubquery decision with outer fieldRef in conditions → throws', () => {
+		// Directly-constructed handler Decision simulating a correlated scalar subquery
+		// whose outerRef was already lowered by convertComparison.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					// subqueryIntent absent — directly-constructed decision
+					conditions: [
+						{
+							// Lowered outerRef: convertComparison turns outerRef('id') into
+							// { kind: 'fieldRef', scope: 'outer', column: 'id' }
+							type: 'where',
+							column: 'user_id',
+							operator: '=',
+							value: { kind: 'fieldRef', scope: 'outer', column: 'id' },
+							table: 'products',
+						},
+					],
+				},
+			],
+		};
+
+		expect(() => compilePlan(plan)).toThrow(
+			/correlated outerRef.*not yet supported/i,
+		);
+	});
+
+	it('inSubquery decision with outer fieldRef in conditions → throws', () => {
+		// Same scenario for an IN subquery.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					// subqueryIntent absent — directly-constructed decision
+					conditions: [
+						{
+							type: 'where',
+							column: 'id',
+							operator: '=',
+							value: {
+								kind: 'fieldRef',
+								scope: 'outer',
+								column: 'customer_id',
+							},
+							table: 'customers',
+						},
+					],
+				},
+			],
+		};
+
+		expect(() => compilePlan(plan)).toThrow(
+			/correlated outerRef.*not yet supported/i,
+		);
+	});
+
+	it('outerRef nested in AND inside decision.conditions → throws', () => {
+		// The check must recurse into nested conditions (whereAnd etc.).
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					conditions: [
+						{
+							type: 'whereAnd',
+							conditions: [
+								{
+									type: 'where',
+									column: 'active',
+									operator: '=',
+									value: true,
+									table: 'products',
+								},
+								{
+									type: 'where',
+									column: 'user_id',
+									operator: '=',
+									// Correlated reference nested inside AND
+									value: { kind: 'fieldRef', scope: 'outer', column: 'id' },
+									table: 'products',
+								},
+							],
+						},
+					],
+				},
+			],
+		};
+
+		expect(() => compilePlan(plan)).toThrow(
+			/correlated outerRef.*not yet supported/i,
+		);
+	});
+
+	it('non-correlated lowered decision (no outer fieldRef) compiles correctly', () => {
+		// A directly-constructed decision with no correlated reference must still
+		// compile — the check must not produce false positives.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					conditions: [
+						{
+							type: 'where',
+							column: 'active',
+							operator: '=',
+							value: true,
+							table: 'customers',
+						},
+					],
+				},
+			],
+		};
+
+		expect(() => compilePlan(plan)).not.toThrow();
+		const result = compilePlan(plan);
+		expect(normalizeSQL(result.sql)).toMatch(
+			/customer_id\s*=\s*any\s*\(\s*select/i,
+		);
+	});
+});
