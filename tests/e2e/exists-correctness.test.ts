@@ -499,3 +499,106 @@ describe('Case 10: every-quantifier — users whose every post is published', ()
 		expect(sortedNames(rows)).toEqual(['Alice', 'Bob', 'Carol', 'Dave', 'Eve']);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Case 11 — DEFECT 1 regression: inSubquery + include must NOT leak optimizer
+// EXISTS predicate into the include subquery.
+//
+// Seed recap for this case:
+//   Alice: p1(published=T), p2(published=F)   — 2 posts total
+//   Bob:   p3(published=T), p4(published=T)   — 2 posts total
+//   Carol: p5(published=T), p6(published=F)   — 2 posts total
+//
+// Query: inSubquery('id', posts.select('authorId').where(published=T)).include('posts')
+//   Matched users (have ≥1 published post): Alice, Bob, Carol.
+//   Their include must return ALL their posts, not just the published ones.
+//   Bug: the optimizer rewrites inSubquery → EXISTS; if that optimizer-generated
+//   EXISTS drives propagateExistsConditions, the include wrongly inherits
+//   published=true and returns only p1, p3+p4, p5 (missing p2 and p6).
+// ---------------------------------------------------------------------------
+describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the include', () => {
+	it('Alice has ALL 2 posts included (not just published) after inSubquery match', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		const rows = (await orm
+			.withSchema(SCHEMA)
+			.select('users')
+			.where(
+				inSubquery(
+					'id',
+					subquery('posts').select('authorId').where(eq('published', true)),
+				),
+			)
+			.include('posts')
+			.columns(['id', 'name'])
+			.execute()) as Array<{
+			id: number;
+			name: string;
+			posts: Array<{ id: number; published: boolean }>;
+		}>;
+
+		// Only users who authored ≥1 published post are in the result set
+		expect(sortedNames(rows)).toEqual(['Alice', 'Bob', 'Carol']);
+
+		const alice = rows.find((r) => r.name === 'Alice');
+		expect(alice).toBeDefined();
+		// Alice has p1(published=T) AND p2(published=F).
+		// The include must return BOTH — the inSubquery predicate must NOT filter
+		// the include to only published posts (that would be the bug).
+		expect(alice!.posts).toHaveLength(2);
+
+		const carol = rows.find((r) => r.name === 'Carol');
+		expect(carol).toBeDefined();
+		// Carol has p5(published=T) and p6(published=F) — include must return both.
+		expect(carol!.posts).toHaveLength(2);
+
+		const bob = rows.find((r) => r.name === 'Bob');
+		expect(bob).toBeDefined();
+		// Bob has p3 and p4, both published=T — include returns 2 (unchanged either way,
+		// but confirms Bob's posts are all included).
+		expect(bob!.posts).toHaveLength(2);
+	});
+
+	it('Case 11 vs Case 8 contrast: inSubquery include is wider than exists include', async () => {
+		// Case 8: exists(published=T) + include → include is FILTERED (2 users with 1 post each)
+		// Case 11: inSubquery(published=T) + include → include is UNFILTERED (all posts returned)
+		// The two must produce DIFFERENT include counts for Alice and Carol.
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		const [existsRows, inSubqueryRows] = await Promise.all([
+			orm
+				.withSchema(SCHEMA)
+				.select('users')
+				.where(exists('posts', { where: eq('published', true) }))
+				.include('posts')
+				.columns(['id', 'name'])
+				.execute() as Promise<
+				Array<{ name: string; posts: Array<{ published: boolean }> }>
+			>,
+			orm
+				.withSchema(SCHEMA)
+				.select('users')
+				.where(
+					inSubquery(
+						'id',
+						subquery('posts').select('authorId').where(eq('published', true)),
+					),
+				)
+				.include('posts')
+				.columns(['id', 'name'])
+				.execute() as Promise<
+				Array<{ name: string; posts: Array<{ published: boolean }> }>
+			>,
+		]);
+
+		const aliceExists = existsRows.find((r) => r.name === 'Alice');
+		const aliceInSub = inSubqueryRows.find((r) => r.name === 'Alice');
+
+		// exists() propagates: Alice has 1 included post (only published)
+		expect(aliceExists!.posts).toHaveLength(1);
+		// inSubquery does NOT propagate: Alice has 2 included posts (all)
+		expect(aliceInSub!.posts).toHaveLength(2);
+	});
+});

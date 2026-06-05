@@ -443,6 +443,15 @@ function collectEnrichedExistsDecisions(
 			// Example: notExists('posts', { where: eq('published', false) }) selects users
 			// with NO unpublished posts; propagating that condition would wrongly restrict
 			// included posts to published=false (empty result when no unpublished posts exist).
+			//
+			// IN→EXISTS OPTIMIZER GUARD: skip decisions flagged as optimizer-generated.
+			// The user wrote inSubquery(), NOT exists(), so they did not opt into
+			// include-filter coupling.  The optimizer-generated exists still compiles
+			// correctly in the WHERE clause; it must not drive include propagation.
+			if ((d as unknown as Record<string, unknown>)._fromInToExists) {
+				// Do NOT recurse — skip entirely (optimizer-rewrite, no propagation).
+				continue;
+			}
 			out.push(d);
 			// SOURCE BOUNDARY: do NOT recurse into this exists's own conditions.
 			// The conditions array belongs to a nested subquery whose source table is

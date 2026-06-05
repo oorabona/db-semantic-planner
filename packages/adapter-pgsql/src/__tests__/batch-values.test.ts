@@ -578,4 +578,36 @@ describe('batchValues() exact CAST SQL for array types (DEFECT-2 fix)', () => {
 		expect(sql).toContain('CAST($1 AS text[])');
 		expect(sql).not.toContain('text[][]');
 	});
+
+	it('T-ARR-5: " int4[] " (surrounding spaces) compiles to CAST($N AS int4[]) and stored descriptor is trimmed', () => {
+		// DEFECT-2 trim regression lock: validateTypeName trims before validating, but
+		// the descriptor used to store the UNTRIMMED string.  The adapter then checked
+		// rawType.endsWith('[]') without trimming — trailing space caused it to fall
+		// through the array branch and emit the wrong CAST shape (int4 [] instead of int4[]).
+		// Fix: normalize (trim) at construction time so the stored descriptor is clean.
+		const batch = batchValues([[1, 2, 3]], ['n'], [' int4[] '], {
+			alias: 'src',
+		});
+
+		// Stored descriptor must hold the trimmed value
+		expect(batch.types[0]).toBe('int4[]');
+
+		const orm = buildOrm();
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		// Correct cast shape: CAST($1 AS int4[]) — single array, no double-array
+		expect(sql).toContain('CAST($1 AS int4[])');
+		expect(sql).not.toContain('int4[][]');
+	});
+
+	it('T-ARR-6: " int4 " (spaces around plain type) compiles to CAST($N AS int4[])', () => {
+		// Spaces around a plain type name must also be trimmed before storage and use.
+		const batch = batchValues([[1, 2]], ['n'], [' int4 '], { alias: 'src' });
+		expect(batch.types[0]).toBe('int4');
+
+		const orm = buildOrm();
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS int4[])');
+	});
 });

@@ -216,7 +216,11 @@ export function batchValues(
 	// Uses the type-name-safe validator (allows spaces, parens, brackets, dots)
 	// so that complex types like 'varchar(255)', 'numeric(10,2)', 'int4[]',
 	// and 'timestamp with time zone' are accepted while injection chars are rejected.
-	for (const t of types) {
+	// Normalize (trim) each type name before validation so that the stored descriptor
+	// holds clean values — the adapter's compile-time array check (endsWith('[]'))
+	// must see a trimmed string or it produces the wrong cast shape.
+	const normalizedTypes = types.map((t) => t.trim());
+	for (const t of normalizedTypes) {
 		validateTypeName(t);
 	}
 	// Security: validate alias and column names centrally so BOTH the
@@ -239,7 +243,9 @@ export function batchValues(
 		data.map((row) => Object.freeze([...row]) as unknown[]),
 	);
 	const frozenColumns: readonly string[] = Object.freeze([...columns]);
-	const frozenTypes: readonly string[] = Object.freeze([...types]);
+	// Store normalized (trimmed) type names so the adapter's compile-time checks
+	// (e.g. endsWith('[]')) work correctly without re-trimming at every call site.
+	const frozenTypes: readonly string[] = Object.freeze([...normalizedTypes]);
 	return Object.freeze({
 		__kind: 'batchValues',
 		data: frozenData,
