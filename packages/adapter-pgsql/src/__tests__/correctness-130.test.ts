@@ -1322,3 +1322,233 @@ describe('NEW-DEFECT-3 (SubqueryRefIntent outer field): outerRef is type-safe an
 		});
 	});
 });
+
+// ============================================================================
+// NEW DEFECT 4 (PR #130 correctness suite)
+// Single-hop non-vacuous relationFilter: fail-closed when model present but
+// relation is undeclared.
+//
+// Before this fix, a typoed/undeclared single-hop relation with a model present
+// fell through to the convention-fallback path — compiling EXISTS against an
+// unintended table with guessed FK columns instead of throwing fail-closed.
+// This is INCONSISTENT with the multi-hop path and the vacuous-every path (both
+// throw on undeclared relations when a model is present).
+//
+// Fix: after resolving the relation from the model, if the model is present but
+// the relation is NOT declared, throw the same clear error the multi-hop path uses.
+// ============================================================================
+
+describe('NEW DEFECT 4 (single-hop undeclared relation fail-closed)', () => {
+	it('single-hop with model + typo relation → throws fail-closed error', () => {
+		// 'typoNotARelation' is not declared on 'users' in testSchema.
+		// With a model present, this must throw instead of compiling against a
+		// convention-derived fallback table.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'typoNotARelation',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq',
+				value: true,
+			},
+			mode: 'some' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'typoNotARelation' declared on table 'users'/,
+		);
+	});
+
+	it('single-hop with model + typo relation (mode:none) → throws fail-closed error', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'doesNotExist',
+			where: {
+				kind: 'comparison' as const,
+				field: 'title',
+				operator: 'eq',
+				value: 'hello',
+			},
+			mode: 'none' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'doesNotExist' declared on table 'users'/,
+		);
+	});
+
+	it('single-hop with model + declared relation (posts) → compiles correctly (unchanged)', () => {
+		// Regression lock: a declared relation must still compile without throwing.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq',
+				value: true,
+			},
+			mode: 'some' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
+		expect(ctx.paramState.parameters).toContain(true);
+	});
+
+	it('single-hop WITHOUT model + undeclared relation → still falls back to convention (no throw)', () => {
+		// Without a model, FK resolution is impossible; the convention-fallback path
+		// is the only option. This must NOT throw — behavior unchanged.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'anyTable',
+			where: {
+				kind: 'comparison' as const,
+				field: 'col',
+				operator: 'eq',
+				value: 42,
+			},
+			mode: 'some' as const,
+		};
+		const ctx = makeCtx('users', { model: undefined });
+		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
+	});
+});
+
+// ============================================================================
+// NEW DEFECT 5 (PR #130 correctness suite)
+// Correlated scalar subquery: fail-closed on both decisions and direct paths.
+//
+// An outerRef() inside a scalar subquery's WHERE is NOT supported. Previously:
+//   - decisions path: outerRef was lowered to a fieldRef(scope:'outer') in the
+//     Decision, then dispatched against a subCtx with no outerAlias — so it bound
+//     to the inner alias instead of the outer query, producing WRONG SQL silently.
+//   - direct path: already guarded by buildSubqueryFromIntent (containsOuterRef).
+//
+// Fix: detect outerRef in scalar subquery WHERE before lowering (decisions path)
+// and throw the same "correlated subqueries not supported" error. The
+// buildScalarSubquery handler also throws as defense-in-depth.
+// A NON-correlated scalar subquery (no outerRef) still compiles normally.
+// ============================================================================
+
+describe('NEW DEFECT 5 (correlated scalar subquery fail-closed)', () => {
+	it('decisions path: scalar subquery with outerRef in WHERE → throws', () => {
+		// outerRef('userId') in the inner WHERE: correlated scalar subquery.
+		// convertSubquery must throw before emitting the Decision.
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'orders',
+				select: { fields: ['user_id'] },
+				where: {
+					kind: 'comparison' as const,
+					field: 'user_id',
+					operator: 'eq',
+					value: outerRef('id'),
+				},
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/correlated outerRef.*not yet supported/i,
+		);
+	});
+
+	it('direct path (compile-where): scalar subquery with outerRef in WHERE → throws', () => {
+		// The direct path (handleSubqueryIntent → ctx.compileSubquery →
+		// buildSubqueryFromIntent) already has the containsOuterRef guard.
+		// This test locks that behaviour.
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'orders',
+				select: { fields: ['user_id'] },
+				where: {
+					kind: 'comparison' as const,
+					field: 'user_id',
+					operator: 'eq',
+					value: outerRef('id'),
+				},
+			},
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/correlated.*not.*supported/i,
+		);
+	});
+
+	it('decisions path: non-correlated scalar subquery → compiles correctly (unchanged)', () => {
+		// No outerRef: a plain subquery must still work.
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'price',
+			operator: 'gt',
+			subquery: {
+				type: 'select' as const,
+				from: 'products',
+				select: {
+					type: 'aggregate' as const,
+					aggregates: [{ function: 'avg', field: 'price' }],
+				},
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'orders')).not.toThrow();
+	});
+
+	it('direct path: non-correlated scalar subquery → compiles correctly (unchanged)', () => {
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'price',
+			operator: 'gt',
+			subquery: {
+				type: 'select' as const,
+				from: 'products',
+				select: {
+					type: 'aggregate' as const,
+					aggregates: [{ function: 'avg', field: 'price' }],
+				},
+			},
+		};
+		const ctx = makeCtx('orders');
+		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
+	});
+
+	it('decisions path: outerRef in nested AND inside scalar subquery WHERE → throws', () => {
+		// outerRef inside a nested logical group must also be detected.
+		const intent = {
+			kind: 'subquery' as const,
+			field: 'id',
+			operator: 'eq',
+			subquery: {
+				type: 'select' as const,
+				from: 'orders',
+				select: { fields: ['user_id'] },
+				where: {
+					kind: 'and' as const,
+					conditions: [
+						{
+							kind: 'comparison' as const,
+							field: 'status',
+							operator: 'eq',
+							value: 'active',
+						},
+						{
+							kind: 'comparison' as const,
+							field: 'user_id',
+							operator: 'eq',
+							value: outerRef('id'),
+						},
+					],
+				},
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'users')).toThrow(
+			/correlated outerRef.*not yet supported/i,
+		);
+	});
+});

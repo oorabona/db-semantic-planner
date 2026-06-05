@@ -574,6 +574,19 @@ function handleRelationFilterIntent(
 		const resolvedRelation = ctx.model?.getRelation(
 			`${ctx.rootTable}.${relation}`,
 		);
+
+		// DEFECT 1 FIX (new): when a model IS present but the relation is NOT declared,
+		// fail closed — consistent with the multi-hop path and the vacuous-every path.
+		// Without this guard, a typoed relation name compiled against the convention-derived
+		// FK columns of an unintended table instead of throwing.
+		// KEEP the no-model path unchanged: no model → cannot validate → convention fallback.
+		if (ctx.model && !resolvedRelation) {
+			throw new Error(
+				`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
+					'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+			);
+		}
+
 		const targetTable = resolvedRelation?.target ?? relation;
 
 		// Thread FK metadata when the model is available and the relation is declared.

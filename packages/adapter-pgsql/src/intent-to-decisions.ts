@@ -731,6 +731,19 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 
 	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
 
+	// DEFECT 2 FIX (decisions path): detect outerRef() inside a scalar subquery's WHERE.
+	// Correlated scalar subqueries are not yet supported — the decisions path lowers the
+	// inner WHERE to Decision[] without forwarding the outer alias, so outerRef() nodes
+	// bind to the inner alias instead of the outer query, producing wrong SQL silently.
+	// Throw here (before emitting the decision) instead of producing broken SQL.
+	if (subquery.where && containsOuterRef(subquery.where)) {
+		throw new Error(
+			'scalar subquery with correlated outerRef() is not yet supported — ' +
+				'use exists("relation", { where: ... }) when a schema relation exists, ' +
+				'or restructure the query to avoid the correlation.',
+		);
+	}
+
 	const targetTable = subquery.from;
 	let selectColumn = '*';
 	let aggregate: string | undefined;
