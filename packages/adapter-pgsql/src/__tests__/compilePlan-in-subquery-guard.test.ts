@@ -724,4 +724,258 @@ describe('compilePlan: typeless { fields: [...] } select shape — assertNoUnsup
 			/IN subquery with multi-field projection \[id, region\].*is not supported/,
 		);
 	});
+
+	it('typeless { fields: undefined } select → throws (undefined fields key present)', () => {
+		// { fields: undefined } has the key present — isSelectWithFields in the compiler
+		// matches it and falls back to '*', producing invalid ANY(*) SQL.
+		// assertNoUnsupportedSubqueryModifiers must catch it.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { fields: undefined } as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with empty fields list.*is not supported/,
+		);
+	});
+
+	it('typeless { fields: [] } select → throws (empty array)', () => {
+		// Empty array also triggers the '*' fallback — must be rejected.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { fields: [] } as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with empty fields list.*is not supported/,
+		);
+	});
+
+	it('typeless { fields: ["id"] } select → compiles correctly (single field, no type key)', () => {
+		// A single-field typeless shape must be accepted — it is valid.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { fields: ['id'] } as any,
+					} as any,
+				},
+			],
+		};
+		const result = compilePlan(plan);
+		expect(normalizeSQL(result.sql)).toContain('= any');
+		expect(normalizeSQL(result.sql)).toContain('customers');
+	});
+});
+
+// ============================================================================
+// 6. DEFECT 1 — logical group wrapping in inner WHERE
+// ============================================================================
+
+describe('compilePlan: IN subquery with logical group (whereAnd/whereOr) wrapping child IN — DEFECT 1 recursion guard', () => {
+	/**
+	 * Outer IN subquery's `where` is a whereAnd group. One child of the group is
+	 * itself an IN-subquery carrying a forbidden modifier (GROUP BY).
+	 * mapInSubqueryCondition must recurse into the group's children and fire the
+	 * guard, rather than letting mapToHandlerDecision silently drop the subquery
+	 * and fall through to the plain-in handler.
+	 */
+	it('outer IN whose inner WHERE is whereAnd( eq, in+groupBy ) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						// inner WHERE is a logical AND group, one child carries GROUP BY
+						where: {
+							type: 'whereAnd',
+							conditions: [
+								{
+									type: 'where',
+									column: 'active',
+									operator: '=',
+									value: true,
+									table: 'customers',
+								},
+								{
+									type: 'where',
+									column: 'id',
+									operator: 'in',
+									subquery: {
+										from: 'preferred',
+										select: 'customer_id',
+										groupBy: ['tier'], // forbidden modifier — must be caught
+									},
+								},
+							],
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with GROUP BY is not supported/,
+		);
+	});
+
+	it('outer IN whose inner WHERE is whereOr( eq, in+having ) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'whereOr',
+							conditions: [
+								{
+									type: 'where',
+									column: 'region',
+									operator: '=',
+									value: 'EU',
+									table: 'customers',
+								},
+								{
+									type: 'where',
+									column: 'id',
+									operator: 'in',
+									subquery: {
+										from: 'preferred',
+										select: 'customer_id',
+										having: {
+											kind: 'comparison',
+											field: 'id',
+											operator: 'gt',
+											value: 0,
+										},
+									},
+								},
+							],
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with HAVING is not supported/,
+		);
+	});
+
+	it('outer IN whose inner WHERE is whereAnd( eq, in+plain ) → compiles correctly (no false positive)', () => {
+		// A logical group whose IN-subquery child is valid (no forbidden modifiers)
+		// must compile without error and produce correct SQL.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'whereAnd',
+							conditions: [
+								{
+									type: 'where',
+									column: 'active',
+									operator: '=',
+									value: true,
+									table: 'customers',
+								},
+								{
+									type: 'where',
+									column: 'id',
+									operator: 'in',
+									subquery: {
+										from: 'preferred',
+										select: 'customer_id',
+										// No forbidden modifiers — valid plain subquery
+									},
+								},
+							],
+						} as any,
+					} as any,
+				},
+			],
+		};
+		const result = compilePlan(plan);
+		expect(normalizeSQL(result.sql)).toContain('= any');
+		expect(normalizeSQL(result.sql)).toContain('preferred');
+	});
+
+	it('outer IN whose inner WHERE is whereNot wrapping in+distinct → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'whereNot',
+							conditions: [
+								{
+									type: 'where',
+									column: 'id',
+									operator: 'in',
+									subquery: {
+										from: 'preferred',
+										select: 'customer_id',
+										distinct: true, // forbidden
+									},
+								},
+							],
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with DISTINCT is not supported/,
+		);
+	});
 });

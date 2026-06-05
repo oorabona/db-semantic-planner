@@ -347,14 +347,30 @@ export function assertNoUnsupportedSubqueryModifiers(
 			unsupported.push(
 				'SELECT * / all (IN subquery must project exactly one named column)',
 			);
-		} else if (select.type === 'fields' || Array.isArray(select.fields)) {
+		} else if (
+			select.type === 'fields' ||
+			Array.isArray(select.fields) ||
+			// Also catch the typeless `{ fields: undefined | null }` shape: the
+			// `fields` key is present (triggering isSelectWithFields in the compiler)
+			// but the value is not a non-empty array.  Without this branch,
+			// `{ fields: undefined }` falls through all checks and the compiler
+			// silently falls back to SELECT *, producing wrong SQL.
+			// Guard: `in` operator crashes on primitives; a string select like 'id'
+			// is a valid single-column selector — only check for the `fields` key on
+			// actual objects.
+			(typeof select === 'object' &&
+				select !== null &&
+				'fields' in (select as object))
+		) {
 			// Both the typed shape `{ type: 'fields', fields: [...] }` and the
 			// typeless shape `{ fields: [...] }` (no `type` property) are accepted
 			// by the compiler via `isSelectWithFields`.  The guard must cover both
-			// so that a typeless multi-field select is caught here rather than
-			// silently truncated to `fields[0]` by the compiler.
+			// so that a typeless multi-field select (or a typeless select with
+			// undefined/empty fields) is caught here rather than silently falling
+			// back to SELECT * in the compiler.
 			if (!select.fields || select.fields.length === 0) {
-				// Empty fields list falls back to '*' — same problem as 'all'.
+				// undefined, null, or empty fields list falls back to '*' in the
+				// compiler — same problem as 'all'.
 				unsupported.push(
 					'empty fields list (IN subquery must project exactly one named column)',
 				);

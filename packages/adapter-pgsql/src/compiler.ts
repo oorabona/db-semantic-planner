@@ -561,26 +561,55 @@ export class PlanCompiler {
 	}
 
 	/**
-	 * Recursively convert a PlanDecision (potentially with nested in+subquery)
-	 * into a HandlerDecision suitable for the WHERE dispatcher.
+	 * Recursively convert a PlanDecision (potentially with nested in+subquery
+	 * or a logical group whose children contain in+subquery nodes) into a
+	 * HandlerDecision suitable for the WHERE dispatcher.
 	 *
 	 * When a PlanDecision has operator='in'/'notIn' with a subquery object,
 	 * mapToHandlerDecision loses the subquery because HandlerDecision has no
 	 * `subquery` field. This method detects that pattern and converts it to the
 	 * inSubquery/notInSubquery form that buildScalarSubquery expects.
 	 *
-	 * Called recursively so 2+ levels of nested IN subqueries all work.
+	 * When the node is a logical group (whereAnd / whereOr / whereNot), each
+	 * child in `conditions` / `condition` is mapped recursively so that nested
+	 * IN+subquery nodes at any depth are guarded and remapped correctly, rather
+	 * than falling through to mapToHandlerDecision which would silently drop the
+	 * subquery and produce a malformed plain-IN binding.
+	 *
+	 * Called recursively so 2+ levels of nesting all work.
 	 */
 	private mapInSubqueryCondition(
 		pd: PlanDecision,
 		rootTable: string,
 	): HandlerDecision {
+		// -----------------------------------------------------------------------
+		// Logical group: whereAnd / whereOr / whereNot
+		// Recurse into each child so nested IN+subquery nodes are detected and
+		// guarded instead of falling through to mapToHandlerDecision.
+		// -----------------------------------------------------------------------
+		if (
+			pd.type === 'whereAnd' ||
+			pd.type === 'whereOr' ||
+			pd.type === 'whereNot'
+		) {
+			const mappedConditions = (pd.conditions ?? []).map((child) =>
+				this.mapInSubqueryCondition(child, rootTable),
+			);
+			return {
+				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
+				conditions: mappedConditions,
+			} as HandlerDecision;
+		}
+
+		// -----------------------------------------------------------------------
+		// IN / NOT IN with subquery
 		// Mirror dispatchWhere's dual-source detection: subquery can be in
 		// `pd.subquery` (direct PlanDecision shape) OR `pd.value` (from the
 		// plan-decision-extractor which stores it in `value`).  Only checking
 		// `pd.subquery` would let a value-shaped nested IN bypass the guard and
 		// fall through to the plain inHandler which binds the whole object as a
 		// scalar ANY($n) parameter — producing structurally wrong SQL.
+		// -----------------------------------------------------------------------
 		const sub = (pd.subquery ??
 			(pd.value &&
 			typeof pd.value === 'object' &&
@@ -603,7 +632,7 @@ export class PlanCompiler {
 						? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			// Recursively apply: the inner subquery's WHERE may itself be
-			// another in+subquery (the NESTED-INSUBQUERY case)
+			// another in+subquery (or a logical group containing one).
 			const subConditions: HandlerDecision[] = sub.where
 				? [this.mapInSubqueryCondition(sub.where, sub.from)]
 				: [];
@@ -624,7 +653,7 @@ export class PlanCompiler {
 				}),
 			} as HandlerDecision;
 		}
-		// Non-subquery case: plain mapToHandlerDecision suffices
+		// Non-subquery, non-logical-group: plain mapToHandlerDecision suffices
 		return mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk);
 	}
 
