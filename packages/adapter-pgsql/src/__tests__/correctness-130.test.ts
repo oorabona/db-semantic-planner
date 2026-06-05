@@ -14,7 +14,7 @@
  *             for both 'scalar' and 'scalar-direct' contexts.
  */
 
-import { createOrm, eq, exists, plan, ref, schema } from '@dbsp/core';
+import { createOrm, eq, exists, outerRef, plan, ref, schema } from '@dbsp/core';
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
@@ -25,9 +25,10 @@ import {
 	type WhereCompilerCtx,
 } from '../compile-where.js';
 import { createCompilerState } from '../handlers/types.js';
-import { convertWhereCondition } from '../intent-to-decisions.js';
+import { convertWhereCondition, isOuterRef } from '../intent-to-decisions.js';
 import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import { convertWhereToDecisions } from '../plan-decision-extractor.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -917,5 +918,279 @@ describe('FIX 4 (suppression key): nested multi-hop — no extra root-level EXIS
 		// NO extra root-level AND EXISTS appended after the outer EXISTS clause
 		// Root WHERE must start with EXISTS (not AND/OR with extra terms)
 		expect(normalized).toMatch(/WHERE\s+EXISTS/i);
+	});
+});
+
+// ============================================================================
+// NEW DEFECT 1 (PR #130 correctness suite)
+//
+// FAIL-OPEN security regression: vacuous every on an UNDECLARED/typoed relation
+// must THROW fail-closed, not silently return all-rows TRUE.
+//
+// Invariant: vacuous every returns TRUE *only* when the relation/path is VALID.
+// An undeclared relation throws even for the vacuous (no-predicate) case.
+// ============================================================================
+
+describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation throws fail-closed', () => {
+	it('single-hop vacuous every with typoed/undeclared relation throws', () => {
+		// 'typoNotARelation' is not declared on the 'users' table in testSchema.
+		// The vacuous-every short-circuit must validate the relation BEFORE returning
+		// the all-rows TRUE literal; otherwise this silently produces a fail-open guard.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'typoNotARelation',
+			where: undefined as any, // vacuous
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'typoNotARelation' declared on table 'users'/,
+		);
+	});
+
+	it('multi-hop vacuous every with bad hop throws at the invalid hop', () => {
+		// First hop 'posts' is valid, second hop 'typoHop' is not declared on 'posts'.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: ['posts', 'typoHop'] as unknown as string,
+			where: undefined as any, // vacuous
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'typoHop' declared on table 'posts'/,
+		);
+	});
+
+	it('multi-hop vacuous every where first hop is bad throws at first hop', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: ['badFirstHop', 'comments'] as unknown as string,
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'badFirstHop' declared on table 'users'/,
+		);
+	});
+
+	it('vacuous every on a VALID single-hop relation still returns TRUE (no regression)', () => {
+		// 'posts' IS declared on 'users' — vacuous every must still compile to TRUE.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		const node = compileWhereIntent(intent as any, ctx);
+		const sql = nodeToSql(node);
+		// Must produce a TRUE-cast, not EXISTS
+		expect(sql.toUpperCase()).not.toContain('EXISTS');
+		expect(sql.toLowerCase()).toMatch(/cast|true/);
+	});
+
+	it('vacuous every on a VALID multi-hop relation still returns TRUE (no regression)', () => {
+		// 'posts' → 'comments' both declared — vacuous every must still return TRUE.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: ['posts', 'comments'] as unknown as string,
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		const node = compileWhereIntent(intent as any, ctx);
+		const sql = nodeToSql(node);
+		expect(sql.toUpperCase()).not.toContain('EXISTS');
+		expect(sql.toLowerCase()).toMatch(/cast|true/);
+	});
+
+	it('vacuous every without a model does NOT throw (convention-fallback path)', () => {
+		// No model → cannot validate → must fall through without throwing (unchanged
+		// behaviour when no model is supplied; model is required for validation).
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'anyRelation',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users', { model: undefined });
+		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
+	});
+});
+
+// ============================================================================
+// NEW DEFECT 2 (PR #130 correctness suite)
+//
+// Nested range/between in plan-decision-extractor convertWhereToDecisions was
+// hand-rolling the value conversion, passing the { lower, upper } object
+// unchanged into a decision that the BETWEEN handler requires to be a
+// [min, max] two-element array — causing a runtime throw or wrong SQL inside
+// a nested exists where clause.
+//
+// Fix: delegate to convertWhereCondition (the central converter) which handles
+// all range sub-shapes correctly.
+// ============================================================================
+
+describe('NEW-DEFECT-2 (nested range/between delegation): nested between in exists where compiles correctly', () => {
+	it('convertWhereToDecisions with range kind { lower, upper } produces correct BETWEEN decision', () => {
+		// This is the shape produced by the NQL BETWEEN compiler:
+		//   { kind: 'range', field: 'views', operator: 'between', value: { lower: 10, upper: 100 } }
+		// Before fix: value passed as-is → BETWEEN handler received { lower, upper } object
+		//             and threw "requires [min, max] array".
+		// After fix:  delegated to convertWhereCondition → [10, 100] array.
+		const rangeIntent = {
+			kind: 'range' as const,
+			field: 'views',
+			operator: 'between' as const,
+			value: { lower: 10, upper: 100 },
+		};
+		const decisions = convertWhereToDecisions(rangeIntent, 'posts');
+		expect(decisions).toHaveLength(1);
+		const d = decisions[0];
+		expect(d?.type).toBe('where');
+		expect(d?.operator).toBe('between');
+		// CRITICAL: value must be a two-element array, not a { lower, upper } object
+		expect(Array.isArray(d?.value)).toBe(true);
+		expect(d?.value).toEqual([10, 100]);
+		expect(d?.column).toBe('views');
+	});
+
+	it('nested between inside exists where compiles to correct SQL via compile-only ORM', () => {
+		// Exercises the full pipeline: orm.select → plan → compiler.
+		// Before fix: the nested BETWEEN crashed or produced wrong SQL.
+		// After fix: correctly emits col BETWEEN $1 AND $2 inside the EXISTS subquery.
+		const nestedBetweenSchema = schema({
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				views: { type: 'integer' },
+				author_id: { type: 'integer' },
+			},
+			comments: {
+				id: { type: 'integer', primaryKey: true },
+				score: { type: 'integer' },
+				post_id: ref('posts', { as: 'post', inverse: 'comments' }),
+			},
+		} as const);
+
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: nestedBetweenSchema.model,
+		});
+		const orm = createOrm({
+			model: nestedBetweenSchema.model,
+			adapter: adapter as any,
+		});
+
+		// Build the exists intent with a nested range BETWEEN directly
+		const nestedRangeIntent = {
+			kind: 'range' as const,
+			field: 'score',
+			operator: 'between' as const,
+			value: { lower: 10, upper: 100 },
+		};
+
+		const { sql, params } = orm
+			.select('posts')
+			.where(
+				exists('comments', {
+					where: nestedRangeIntent as any,
+				}),
+			)
+			.dump();
+
+		const normalized = sql.replace(/\s+/g, ' ').trim();
+
+		// Must contain BETWEEN keyword
+		expect(normalized.toUpperCase()).toContain('BETWEEN');
+		// Must contain EXISTS
+		expect(normalized.toUpperCase()).toContain('EXISTS');
+		// Parameters must include the lower and upper bounds
+		expect(Array.from(params)).toContain(10);
+		expect(Array.from(params)).toContain(100);
+	});
+
+	it('range operator:gte with scalar value passes through unchanged (regression lock)', () => {
+		// The { operator:'gte', value:100 } shape is handled by the pass-through path —
+		// the BETWEEN handler never sees it; the gte/lte handler does.
+		// Regression lock: convertWhereToDecisions must NOT corrupt this shape.
+		const singleSideRange = {
+			kind: 'range' as const,
+			field: 'price',
+			operator: 'gte' as const,
+			value: 100,
+		};
+		const decisions = convertWhereToDecisions(singleSideRange, 'products');
+		expect(decisions).toHaveLength(1);
+		const d = decisions[0];
+		expect(d?.operator).toBe('gte');
+		expect(d?.value).toBe(100);
+	});
+});
+
+// ============================================================================
+// NEW DEFECT 3 (PR #130 correctness suite)
+//
+// outerRef() emitted { kind:'ref', column, outer:true } via `as unknown as`
+// cast because SubqueryRefIntent did not declare the `outer` field.
+// After adding `readonly outer?: true` to SubqueryRefIntent in @dbsp/types:
+//   • outerRef() returns a properly typed SubqueryRefIntent (no cast needed)
+//   • The converters still detect outer===true correctly
+//   • A raw intent { kind:'ref', column:'x', outer:true } built per the
+//     exported type is also recognized as an outer ref
+// ============================================================================
+
+describe('NEW-DEFECT-3 (SubqueryRefIntent outer field): outerRef is type-safe and recognized by converters', () => {
+	it('outerRef() returns { kind:"ref", column, outer:true } — correctly typed, no cast', () => {
+		const result = outerRef('userId');
+		expect(result.kind).toBe('ref');
+		expect(result.column).toBe('userId');
+		// The outer field must be present and true — this is now type-safe
+		// (SubqueryRefIntent declares readonly outer?: true)
+		expect((result as Record<string, unknown>).outer).toBe(true);
+	});
+
+	it('outerRef() result is recognized by isOuterRef() as a correlation marker', () => {
+		const ref = outerRef('file_id');
+		expect(isOuterRef(ref)).toBe(true);
+	});
+
+	it('a raw intent { kind:"ref", column, outer:true } is also recognized as an outer ref', () => {
+		// An intent built directly per the exported SubqueryRefIntent type
+		// (without going through outerRef()) must also be recognized.
+		// This validates the API-compatibility contract: serialized/deserialized
+		// intents with the outer field work correctly end-to-end.
+		const rawRef = {
+			kind: 'ref' as const,
+			column: 'parentId',
+			outer: true as const,
+		};
+		expect(isOuterRef(rawRef)).toBe(true);
+	});
+
+	it('an inner ref() without outer is NOT recognized as an outer ref', () => {
+		// A plain { kind:'ref', column } without outer must NOT be misidentified.
+		const innerRef = { kind: 'ref' as const, column: 'someColumn' };
+		expect(isOuterRef(innerRef)).toBe(false);
+	});
+
+	it('convertWhereToDecisions recognizes outer:true on a comparison value as a FieldRef', () => {
+		// A comparison where the value is an outerRef must produce a FieldRef decision
+		// (scope:'outer'), not a parameter — regression lock for the correlated-value path.
+		const comparisonIntent = {
+			kind: 'comparison' as const,
+			field: 'post_id',
+			operator: 'eq',
+			value: outerRef('id'),
+		};
+		const decisions = convertWhereToDecisions(comparisonIntent, 'comments');
+		expect(decisions).toHaveLength(1);
+		const d = decisions[0];
+		// Value must be converted to a FieldRef (not the raw outerRef object)
+		expect(d?.value).toMatchObject({
+			kind: 'fieldRef',
+			scope: 'outer',
+			column: 'id',
+		});
 	});
 });

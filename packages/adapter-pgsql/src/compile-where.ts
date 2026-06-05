@@ -511,6 +511,43 @@ function handleRelationFilterIntent(
 				Array.isArray(rfWhere.conditions) &&
 				(rfWhere.conditions as unknown[]).length === 0));
 	if (isVacuousEvery) {
+		// DEFECT 1 FIX (new): validate the relation/path BEFORE returning vacuous-true.
+		// Without this, a typoed/undeclared relation short-circuits to all-rows TRUE
+		// (fail-open security regression) instead of throwing fail-closed.
+		// The invariant: vacuous TRUE is only correct when the relation is VALID.
+		if (hops.length <= 1) {
+			// Single-hop: validate only when a model is present.
+			// Without a model, convention-fallback is the expected behaviour (no throw).
+			const relation = hops[0] ?? (rf.relation as string);
+			if (ctx.model) {
+				const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
+				if (!resolved) {
+					throw new Error(
+						`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
+							'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+					);
+				}
+			}
+		} else {
+			// Multi-hop: validate ALL hops upfront (same guard as the non-vacuous path).
+			if (!ctx.model) {
+				throw new Error(
+					`relationFilter(${JSON.stringify(hops)}): multi-hop relation paths require a model on the direct compile path. ` +
+						'Provide a model via WhereCompilerCtx or use the decisions path.',
+				);
+			}
+			let currentSource = ctx.rootTable;
+			for (const hop of hops) {
+				const rel = ctx.model.getRelation(`${currentSource}.${hop}`);
+				if (!rel) {
+					throw new Error(
+						`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
+							'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+					);
+				}
+				currentSource = rel.target;
+			}
+		}
 		return {
 			TypeCast: {
 				arg: { Integer: { ival: 1 } },

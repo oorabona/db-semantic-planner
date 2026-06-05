@@ -278,7 +278,33 @@ export function convertWhereToDecisions(
 				},
 			];
 		}
-		case 'range':
+		case 'range': {
+			// DEFECT 2 FIX: the NQL BETWEEN compiler produces
+			//   { kind:'range', operator:'between', value:{ lower, upper } }
+			// but the BETWEEN handler (handlers/where/between.ts) requires a two-element
+			// [min, max] array.  The old hand-rolled path passed `w.value` through
+			// unchanged, so the { lower, upper } object reached the BETWEEN handler and
+			// triggered "requires [min, max] array".
+			//
+			// For the operator:'between' + { lower, upper } shape, delegate to
+			// convertWhereCondition (the central converter in intent-to-decisions.ts)
+			// which correctly normalises the shape to [lower, upper].
+			//
+			// All other range sub-shapes (operator:'gte'/'lte'/… with a scalar value,
+			// no-operator with an already-array value, PostgreSQL range type operators)
+			// are passed through unchanged — the BETWEEN/gte/lte handlers accept them
+			// as-is, and the existing tests lock this behaviour.
+			if (
+				(w.operator as string | undefined) === 'between' &&
+				w.value !== null &&
+				typeof w.value === 'object' &&
+				!Array.isArray(w.value) &&
+				'lower' in (w.value as object) &&
+				'upper' in (w.value as object)
+			) {
+				const d = convertWhereCondition(where as WhereIntent, table);
+				return d !== null ? [d] : [];
+			}
 			return [
 				{
 					type: 'where',
@@ -288,6 +314,7 @@ export function convertWhereToDecisions(
 					table,
 				},
 			];
+		}
 		case 'null':
 			return [
 				{
