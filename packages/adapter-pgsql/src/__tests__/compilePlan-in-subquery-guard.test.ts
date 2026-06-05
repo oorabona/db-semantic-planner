@@ -464,3 +464,264 @@ describe('compilePlan: valid IN-subquery still compiles (no false positives)', (
 		expect(normalizeSQL(result.sql)).toContain('preferred');
 	});
 });
+
+// ============================================================================
+// 4. Nested IN with subquery in `value` (not `subquery`) — DEFECT 1 guard
+// ============================================================================
+
+describe('compilePlan: nested IN with subquery in pd.value — mapInSubqueryCondition guard', () => {
+	/**
+	 * Outer IN uses `subquery` (normal shape).
+	 * Inner WHERE uses `value` instead of `subquery` to carry the nested subquery
+	 * (the shape the plan-decision-extractor produces).
+	 * The inner value-shape subquery carries GROUP BY — must be caught.
+	 */
+	it('nested IN with value-shape subquery carrying GROUP BY → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'where',
+							column: 'id',
+							operator: 'in',
+							// value-shape: subquery in `value`, not `subquery`
+							value: {
+								from: 'preferred',
+								select: 'customer_id',
+								groupBy: ['tier'],
+							},
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with GROUP BY is not supported/,
+		);
+	});
+
+	it('nested IN with value-shape subquery carrying HAVING → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'where',
+							column: 'id',
+							operator: 'in',
+							value: {
+								from: 'preferred',
+								select: 'customer_id',
+								having: {
+									kind: 'comparison',
+									field: 'count',
+									operator: 'gt',
+									value: 0,
+								},
+							},
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with HAVING is not supported/,
+		);
+	});
+
+	it('nested IN with value-shape subquery carrying OFFSET → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'where',
+							column: 'id',
+							operator: 'in',
+							value: {
+								from: 'preferred',
+								select: 'customer_id',
+								offset: 5,
+							},
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with OFFSET is not supported/,
+		);
+	});
+
+	it('nested IN with value-shape subquery carrying DISTINCT → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'where',
+							column: 'id',
+							operator: 'in',
+							value: {
+								from: 'preferred',
+								select: 'customer_id',
+								distinct: true,
+							},
+						} as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with DISTINCT is not supported/,
+		);
+	});
+
+	it('nested IN with value-shape plain subquery (no modifiers) → compiles as real subquery, NOT bound param', () => {
+		// This is the primary regression test for DEFECT 1:
+		// a value-shape nested IN with a valid plain subquery must compile to
+		// a real IN (SELECT ...) subquery, NOT bind the object as a $n parameter.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: 'id',
+						where: {
+							type: 'where',
+							column: 'id',
+							operator: 'in',
+							// value-shape: plain subquery (valid — no forbidden modifiers)
+							value: {
+								from: 'preferred',
+								select: 'customer_id',
+							},
+						} as any,
+					} as any,
+				},
+			],
+		};
+		const result = compilePlan(plan);
+		// Must contain the inner table name (proves the subquery was compiled, not bound)
+		expect(normalizeSQL(result.sql)).toContain('preferred');
+		// The outer IN subquery must be present
+		expect(normalizeSQL(result.sql)).toContain('= any');
+		// No parameter should be a subquery object (the inner subquery must not appear in params)
+		for (const p of result.parameters) {
+			const isSubqueryObject =
+				p !== null &&
+				typeof p === 'object' &&
+				!Array.isArray(p) &&
+				'from' in (p as object);
+			expect(isSubqueryObject).toBe(false);
+		}
+	});
+});
+
+// ============================================================================
+// 5. Typeless { fields: [...] } shape — DEFECT 2 guard
+// ============================================================================
+
+describe('compilePlan: typeless { fields: [...] } select shape — assertNoUnsupportedSubqueryModifiers guard', () => {
+	it('typeless multi-field select { fields: ["id", "region"] } → throws', () => {
+		// Previously: assertNoUnsupportedSubqueryModifiers only checked select.type === 'fields'.
+		// A typeless { fields: ['id', 'region'] } (no `type` property) silently slipped through
+		// and the compiler truncated to fields[0], producing wrong SQL.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { fields: ['id', 'region'] } as any, // typeless, no `type`
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with multi-field projection \[id, region\].*is not supported/,
+		);
+	});
+
+	it('typeless single-field select { fields: ["id"] } → compiles correctly', () => {
+		// Single-field typeless shape is valid and must not be rejected.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { fields: ['id'] } as any, // typeless, no `type`, single field
+					} as any,
+				},
+			],
+		};
+		const result = compilePlan(plan);
+		expect(normalizeSQL(result.sql)).toContain('= any');
+		expect(normalizeSQL(result.sql)).toContain('customers');
+	});
+
+	it('typed { type: "fields", fields: ["id", "region"] } still throws (no regression)', () => {
+		// Existing behaviour: typed multi-field must still be caught.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'in',
+					subquery: {
+						from: 'customers',
+						select: { type: 'fields', fields: ['id', 'region'] } as any,
+					} as any,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with multi-field projection \[id, region\].*is not supported/,
+		);
+	});
+});

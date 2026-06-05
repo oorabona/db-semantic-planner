@@ -575,7 +575,18 @@ export class PlanCompiler {
 		pd: PlanDecision,
 		rootTable: string,
 	): HandlerDecision {
-		const sub = pd.subquery as
+		// Mirror dispatchWhere's dual-source detection: subquery can be in
+		// `pd.subquery` (direct PlanDecision shape) OR `pd.value` (from the
+		// plan-decision-extractor which stores it in `value`).  Only checking
+		// `pd.subquery` would let a value-shaped nested IN bypass the guard and
+		// fall through to the plain inHandler which binds the whole object as a
+		// scalar ANY($n) parameter — producing structurally wrong SQL.
+		const sub = (pd.subquery ??
+			(pd.value &&
+			typeof pd.value === 'object' &&
+			'from' in (pd.value as object)
+				? (pd.value as PlanDecision['subquery'])
+				: undefined)) as
 			| (PlanDecision['subquery'] & { where?: PlanDecision })
 			| undefined;
 		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {

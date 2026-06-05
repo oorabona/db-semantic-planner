@@ -85,6 +85,24 @@ export const inHandler: WhereHandler = {
 			throw new Error('In handler requires a column');
 		}
 
+		// Defensive: if `value` is a subquery-shaped object (has a `from` key),
+		// that indicates a compiler bug — the IN+subquery path should have already
+		// remapped this decision to inSubquery/notInSubquery before dispatching here.
+		// Binding a subquery object as a scalar ANY($n) parameter produces structurally
+		// wrong SQL (the object is serialized as a parameter, not a subquery).
+		if (
+			value !== null &&
+			typeof value === 'object' &&
+			!Array.isArray(value) &&
+			'from' in (value as object)
+		) {
+			throw new Error(
+				`[in handler] Received a subquery-shaped object in 'value' for operator '${operator}' on column '${column}'. ` +
+					`This is a compiler bug: IN+subquery decisions must be remapped to inSubquery/notInSubquery ` +
+					`before reaching the in handler. File a bug report.`,
+			);
+		}
+
 		// Handle empty arrays
 		const values = Array.isArray(value) ? value : [value];
 		if (values.length === 0) {

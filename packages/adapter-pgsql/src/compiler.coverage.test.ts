@@ -2027,8 +2027,32 @@ describe('PlanCompiler - Coverage Tests', () => {
 			expect(sql).toContain('limit');
 		});
 
-		it('handles IN subquery with SelectIntent-style select (fields)', () => {
-			const plan: SimplifiedPlanReport = {
+		it('handles IN subquery with SelectIntent-style select (fields) — single field compiles, multi-field throws', () => {
+			// Single-field typeless shape is valid: the compiler uses isSelectWithFields
+			// which accepts { fields: ['id'] } without a `type` key.
+			const planSingle: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*' },
+					{
+						type: 'where',
+						column: 'user_id',
+						operator: 'in',
+						subquery: {
+							from: 'users',
+							select: { fields: ['id'] },
+						},
+					},
+				],
+			};
+			const compiler = new PlanCompiler();
+			const resultSingle = compiler.compile(planSingle);
+			expect(normalizeSQL(resultSingle.sql)).toContain('any');
+
+			// Multi-field typeless shape is invalid: the guard now catches it the same
+			// way it catches typed { type: 'fields', fields: ['id', 'name'] }.
+			// Previously this silently truncated to fields[0] (the bug).
+			const planMulti: SimplifiedPlanReport = {
 				rootTable: 'orders',
 				decisions: [
 					{ type: 'select', column: '*' },
@@ -2043,10 +2067,9 @@ describe('PlanCompiler - Coverage Tests', () => {
 					},
 				],
 			};
-			const compiler = new PlanCompiler();
-			const result = compiler.compile(plan);
-			const sql = normalizeSQL(result.sql);
-			expect(sql).toContain('any');
+			expect(() => compiler.compile(planMulti)).toThrow(
+				/IN subquery with multi-field projection \[id, name\].*is not supported/,
+			);
 		});
 	});
 

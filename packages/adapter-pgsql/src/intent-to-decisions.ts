@@ -347,7 +347,12 @@ export function assertNoUnsupportedSubqueryModifiers(
 			unsupported.push(
 				'SELECT * / all (IN subquery must project exactly one named column)',
 			);
-		} else if (select.type === 'fields') {
+		} else if (select.type === 'fields' || Array.isArray(select.fields)) {
+			// Both the typed shape `{ type: 'fields', fields: [...] }` and the
+			// typeless shape `{ fields: [...] }` (no `type` property) are accepted
+			// by the compiler via `isSelectWithFields`.  The guard must cover both
+			// so that a typeless multi-field select is caught here rather than
+			// silently truncated to `fields[0]` by the compiler.
 			if (!select.fields || select.fields.length === 0) {
 				// Empty fields list falls back to '*' — same problem as 'all'.
 				unsupported.push(
