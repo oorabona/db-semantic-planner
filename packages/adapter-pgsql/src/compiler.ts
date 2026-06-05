@@ -7,7 +7,7 @@
  * that builds PostgreSQL AST nodes and deparses them to SQL.
  */
 
-import type { ExpressionIntent } from '@dbsp/types';
+import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -65,6 +65,7 @@ import type {
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
 import {
+	assertNoUnsupportedSubqueryModifiers,
 	convertWhereCondition,
 	intentToDecisions,
 } from './intent-to-decisions.js';
@@ -513,6 +514,13 @@ export class PlanCompiler {
 				? (decision.value as PlanDecision['subquery'])
 				: undefined);
 		if (sub && (decision.operator === 'in' || decision.operator === 'notIn')) {
+			// Guard: throw if the subquery carries modifiers that compilation would
+			// silently drop (GROUP BY, HAVING, OFFSET, DISTINCT, joins, includes,
+			// invalid projections), which would broaden the result set.
+			// This covers directly-constructed SimplifiedPlanReport plans that bypass
+			// the intentToDecisions pipeline (the decisions/SELECT path guards earlier
+			// in convertIn; normalizeToDecision guards the WhereIntent/mutation path).
+			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = decision.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			// Extract selectColumn: may be a string or a SelectIntent with fields
 			const rawSelect = sub.select as unknown;
@@ -571,6 +579,10 @@ export class PlanCompiler {
 			| (PlanDecision['subquery'] & { where?: PlanDecision })
 			| undefined;
 		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {
+			// Guard: same fail-closed check as dispatchWhere and normalizeToDecision.
+			// Nested IN subqueries (IN inside EXISTS where, or nested IN) reach this
+			// path rather than dispatchWhere, so the guard must also live here.
+			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = pd.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			const rawSelect = sub.select as unknown;
 			const selectColumn =
