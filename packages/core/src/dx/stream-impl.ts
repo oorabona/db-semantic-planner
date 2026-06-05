@@ -12,7 +12,12 @@ import type { Dump } from '../adapter.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { QueryHookContext } from './hooks.js';
-import { hasHooks, runBeforeQueryHooks, runOnErrorHooks } from './hooks.js';
+import {
+	hasHooks,
+	runBeforeQueryHooks,
+	runOnErrorHooks,
+	withReentrancyGuard,
+} from './hooks.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { StreamOptions } from './types.js';
 
@@ -85,10 +90,9 @@ export function stream<TResult>(
 
 					let hookIntent = rawIntent;
 					try {
-						const afterHookCtx = await runBeforeQueryHooks(
-							hookStore.beforeQuery,
-							ctx,
-							onHookError,
+						// INV-07: Re-entrancy guard — prevent infinite loops from hooks issuing queries
+						const afterHookCtx = await withReentrancyGuard(hookStore, (s) =>
+							runBeforeQueryHooks(s.beforeQuery, ctx, onHookError),
 						);
 						hookIntent = afterHookCtx.intent;
 					} catch (error) {

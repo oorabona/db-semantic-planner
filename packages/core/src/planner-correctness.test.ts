@@ -5,6 +5,7 @@
  * - FIND-012: NOT IN on nullable FK preserves NOT IN semantics (no NOT EXISTS rewrite)
  * - FIND-013: Recursive includes on dialect without supportsRecursiveCTE throw
  * - FIND-014: include.limit with join strategy throws InvalidOperationError
+ * - FIND-130 (item 1): IN→EXISTS optimization aligns report.intent with plan.decisions
  * - FIND-015: Lenient ambiguity resolution is alphabetically deterministic
  *
  * Regression gate: each test is designed so removing the corresponding fix
@@ -421,5 +422,596 @@ describe('FIND-015: Lenient ambiguity resolution is alphabetically deterministic
 		);
 		// The message should mention alphabetical tie-break (documents the contract)
 		expect(warning?.message).toMatch(/alphabetical/i);
+	});
+});
+
+// ============================================================================
+// FIND-130 (item 1) — IN→EXISTS optimization must align report.intent with
+//                      plan.decisions so dump().plan and dump().sql agree
+// ============================================================================
+
+describe('FIND-130: IN→EXISTS optimization: intent stays original; executableIntent carries optimized WHERE', () => {
+	/**
+	 * Schema: products --(hasMany)--> productImages
+	 * The hasMany relation means:
+	 *   products.id IN (SELECT productId FROM productImages WHERE ...)
+	 * can be rewritten to:
+	 *   EXISTS (SELECT 1 FROM productImages WHERE productId = products.id AND ...)
+	 */
+	const testSchema = schema({
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'string',
+		},
+		productImages: {
+			id: { type: 'integer', primaryKey: true },
+			productId: ref('products', {
+				as: 'product',
+				inverse: 'images',
+			}),
+			approved: 'boolean',
+		},
+	});
+
+	it('report.intent stays kind=in; report.executableIntent carries kind=exists after IN→EXISTS optimization', () => {
+		// Contract (FIND-130 correct design):
+		//   - report.intent = original submitted intent (kind='in') — observable via dump()
+		//   - report.executableIntent = optimized form (kind='exists') — adapter compiles from this
+		//   - plan.decisions records EXISTS filter-strategy (built from optimized WHERE)
+		// All three are consistent: intent shows what the user wrote; SQL uses EXISTS.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		// The filter-strategy decision must claim EXISTS
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		// report.intent.where must stay kind='in' — the original submitted intent is preserved
+		expect(report.intent.where?.kind).toBe('in');
+
+		// report.executableIntent.where must be kind='exists' — the optimized form for SQL
+		expect(report.executableIntent).toBeDefined();
+		expect(report.executableIntent?.where?.kind).toBe('exists');
+
+		// The original intent object must NOT be mutated
+		expect(intent.where?.kind).toBe('in');
+	});
+
+	it('report.intent is not mutated — original intent retains kind=in', () => {
+		// Regression gate: plannedIntent must be a new object when optimization runs;
+		// the caller's original intent must be unchanged.
+		const originalWhere = {
+			kind: 'in' as const,
+			field: 'id',
+			values: [] as unknown[],
+			subquery: {
+				type: 'select' as const,
+				from: 'productImages',
+				select: { type: 'fields' as const, fields: ['productId'] },
+			},
+		};
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: originalWhere,
+		};
+
+		plan(intent, testSchema.model);
+
+		// Original intent must be unchanged (no in-place mutation)
+		expect(intent.where).toBe(originalWhere);
+		expect(intent.where?.kind).toBe('in');
+	});
+
+	it('report.intent.where retains kind=in when optimization does not apply (unknown relation)', () => {
+		// When optimization does not trigger, report.intent must be the same object
+		// as the original intent (no unnecessary wrapping).
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'unknownTable',
+					select: { type: 'fields', fields: ['productId'] },
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		// No optimization: report.intent must still be the original object
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('NOT IN on non-nullable FK: report.intent.where.kind is notExists after rewrite', () => {
+		// When NOT IN → NOT EXISTS rewrite applies (non-nullable FK), the optimized
+		// intent must also flow through so plan and SQL agree on NOT EXISTS.
+		const schemaWithNonNullableFK = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+			posts_nn: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', {
+					as: 'author',
+					inverse: 'posts_nn',
+					// nullable omitted → defaults to false (NOT NULL)
+				}),
+				title: 'string',
+			},
+		});
+
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'not',
+				condition: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					subquery: {
+						type: 'select',
+						from: 'posts_nn',
+						select: { type: 'fields', fields: ['authorId'] },
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, schemaWithNonNullableFK.model);
+
+		// plan.decisions must record a filter-strategy (notExists reached processRelationFilter)
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeDefined();
+
+		// report.intent.where must stay kind='not' — the original submitted intent is preserved
+		expect(report.intent.where?.kind).toBe('not');
+
+		// report.executableIntent.where must be kind='not' wrapping kind='exists'.
+		// The corrected design preserves the outer 'not' structure and rewrites the
+		// inner 'in' leaf to 'exists' (form from the in-intent's own not-flag=false).
+		// The adapter compiles not(exists) as NOT EXISTS(...) — semantically correct.
+		// (Previously this was kind='notExists' directly; the new form is structurally
+		// equivalent and keeps the boolean tree intact for nested contexts.)
+		expect(report.executableIntent).toBeDefined();
+		const execWhere = report.executableIntent?.where as {
+			kind: string;
+			condition?: { kind: string };
+		};
+		expect(execWhere?.kind).toBe('not');
+		expect(execWhere?.condition?.kind).toBe('exists');
+
+		// Original intent must not be mutated
+		expect(intent.where?.kind).toBe('not');
+	});
+
+	it('NOT IN on nullable FK: report.intent unchanged (optimization blocked by null guard)', () => {
+		// When nullable FK blocks the NOT IN → NOT EXISTS rewrite,
+		// report.intent must remain the original intent (kind='not' wrapping 'in').
+		const schemaWithNullableFK = schema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string',
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				authorId: ref('users', {
+					as: 'author',
+					inverse: 'posts',
+					nullable: true,
+				}),
+				title: 'string',
+			},
+		});
+
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'not',
+				condition: {
+					kind: 'in',
+					field: 'id',
+					values: [],
+					subquery: {
+						type: 'select',
+						from: 'posts',
+						select: { type: 'fields', fields: ['authorId'] },
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, schemaWithNullableFK.model);
+
+		// Nullable FK blocks NOT IN → NOT EXISTS: no filter-strategy decision
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+
+		// report.intent must be identical to original (optimization did not apply)
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('not');
+	});
+});
+
+// ============================================================================
+// Conservative IN→EXISTS guards: non-simple subqueries + OR-position
+// ============================================================================
+
+describe('IN→EXISTS: conservative guard blocks non-simple subqueries and OR position', () => {
+	/**
+	 * Schema: products --(hasMany productImages via productId FK)
+	 */
+	const testSchema = schema({
+		products: {
+			id: { type: 'integer', primaryKey: true },
+			name: 'string',
+		},
+		productImages: {
+			id: { type: 'integer', primaryKey: true },
+			productId: ref('products', {
+				as: 'product',
+				inverse: 'images',
+			}),
+			approved: 'boolean',
+		},
+	});
+
+	it('IN with groupBy subquery: report.intent.where stays kind=in (optimization blocked)', () => {
+		// Regression gate (filter broadening): EXISTS drops GROUP BY/HAVING constraints,
+		// causing the rewritten query to match more rows than the original IN form.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					groupBy: ['productId'],
+					having: {
+						kind: 'comparison',
+						field: 'count',
+						operator: 'gt',
+						value: 1,
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with having-only subquery: report.intent.where stays kind=in', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					having: {
+						kind: 'comparison',
+						field: 'count',
+						operator: 'gt',
+						value: 1,
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with offset subquery: report.intent.where stays kind=in', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					offset: 5,
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with distinctOn subquery: report.intent.where stays kind=in', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					distinctOn: ['productId'],
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with aggregate select subquery: report.intent.where stays kind=in', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: {
+						type: 'aggregate',
+						aggregates: [{ function: 'count', field: 'productId' }],
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN inside OR: the IN branch is rewritten to exists inside the OR', () => {
+		// The adapter now compiles EXISTS inline at its boolean tree position rather than
+		// hoisting to top-level AND, so it is safe to optimize an IN inside an OR.
+		// This test confirms the planner does recurse into OR branches and rewrites the
+		// IN branch to exists — the OR structure is preserved in executableIntent.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'or',
+				conditions: [
+					{
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Widget',
+					},
+					{
+						kind: 'in',
+						field: 'id',
+						values: [],
+						subquery: {
+							type: 'select',
+							from: 'productImages',
+							select: { type: 'fields', fields: ['productId'] },
+							where: {
+								kind: 'comparison',
+								field: 'approved',
+								operator: 'eq',
+								value: true,
+							},
+						},
+					},
+				],
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		// A filter-strategy decision is emitted (the IN inside OR was optimized)
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+
+		// report.intent stays the original (unchanged)
+		expect(report.intent).toBe(intent);
+
+		// executableIntent carries the optimized OR (with exists inside)
+		expect(report.executableIntent?.where?.kind).toBe('or');
+		const orWhere = report.executableIntent?.where as {
+			kind: 'or';
+			conditions: { kind: string }[];
+		};
+		expect(orWhere.conditions[1]?.kind).toBe('exists');
+	});
+
+	it('simple IN (no modifiers, top-level): still rewrites to EXISTS', () => {
+		// Non-regression: the conservative guard must not block the simple case.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					where: {
+						kind: 'comparison',
+						field: 'approved',
+						operator: 'eq',
+						value: true,
+					},
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+		// report.intent.where stays kind='in' — original intent preserved
+		expect(report.intent.where?.kind).toBe('in');
+		// report.executableIntent.where is kind='exists' — the optimized form for SQL
+		expect(report.executableIntent?.where?.kind).toBe('exists');
+	});
+
+	it('simple IN inside AND: still rewrites to EXISTS', () => {
+		// Non-regression: AND recursion must still produce EXISTS for the IN branch.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'and',
+				conditions: [
+					{ kind: 'comparison', field: 'name', operator: 'eq', value: 'W' },
+					{
+						kind: 'in',
+						field: 'id',
+						values: [],
+						subquery: {
+							type: 'select',
+							from: 'productImages',
+							select: { type: 'fields', fields: ['productId'] },
+						},
+					},
+				],
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision?.choice).toBe('exists');
+		// report.intent stays original — the AND's second condition keeps kind='in'
+		const originalAndWhere = report.intent.where as {
+			kind: 'and';
+			conditions: { kind: string }[];
+		};
+		expect(originalAndWhere.conditions[1]?.kind).toBe('in');
+		// report.executableIntent carries the rewritten AND — second condition is kind='exists'
+		const execAndWhere = report.executableIntent?.where as {
+			kind: 'and';
+			conditions: { kind: string }[];
+		};
+		expect(execAndWhere?.conditions[1]?.kind).toBe('exists');
+	});
+
+	it('IN with lock subquery: report.intent.where stays kind=in (lock guard)', () => {
+		// Regression gate (FIX 1 — FIND-130): an IN subquery with a row lock (FOR UPDATE)
+		// must NOT be rewritten to EXISTS — the adapter would silently drop the lock clause.
+		// Guard: sq.lock != null blocks the rewrite.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					lock: { strength: 'forUpdate', waitPolicy: 'block' },
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
+	});
+
+	it('IN with existsWrap subquery: report.intent.where stays kind=in (existsWrap guard)', () => {
+		// Regression gate (FIX 1 — FIND-130): an IN subquery with existsWrap=true
+		// must NOT be rewritten to EXISTS — rewriting would silently drop the existsWrap
+		// semantics. Guard: sq.existsWrap blocks the rewrite.
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'products',
+			where: {
+				kind: 'in',
+				field: 'id',
+				values: [],
+				subquery: {
+					type: 'select',
+					from: 'productImages',
+					select: { type: 'fields', fields: ['productId'] },
+					existsWrap: true,
+				},
+			},
+		};
+
+		const report = plan(intent, testSchema.model);
+
+		const filterDecision = report.decisions.find(
+			(d) => d.type === 'filter-strategy',
+		);
+		expect(filterDecision).toBeUndefined();
+		expect(report.intent).toBe(intent);
+		expect(report.intent.where?.kind).toBe('in');
 	});
 });

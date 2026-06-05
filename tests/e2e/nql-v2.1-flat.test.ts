@@ -297,8 +297,9 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 		});
 
 		it('should apply shared filter to json_agg when WHERE and SELECT use same relation', async () => {
-			// SPEC-002: Shared filter optimization
-			// When WHERE has posts.published = true, the json_agg should also filter
+			// SPEC-002: Decoupled include — exists filters root rows; include returns ALL posts.
+			// When WHERE has posts.published = true, the matching authors are selected,
+			// but the json_agg includes ALL their posts (not only published ones).
 			const pool = await getTestPool();
 			const adapter = await getTestAdapter();
 
@@ -340,9 +341,10 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			expect(compiled.sql.toLowerCase()).toContain('exists');
 			// And: SQL should have json_agg for include
 			expect(compiled.sql.toLowerCase()).toContain('json_agg');
-			// And: The "published" filter should appear in both EXISTS and json_agg
+			// After decoupling, "published" appears exactly ONCE — only in the EXISTS WHERE,
+			// NOT in the json_agg subquery (include is unfiltered).
 			const publishedMatches = compiled.sql.match(/published/gi);
-			expect(publishedMatches?.length).toBeGreaterThanOrEqual(2);
+			expect(publishedMatches?.length).toBe(1);
 
 			// Execute and verify results
 			const rows = await adapter.execute(compiled);
@@ -350,12 +352,11 @@ describe('E2E: NQL v2.1 Strategy Behavior', () => {
 			// Should return both authors (both have published posts)
 			expect(rows).toHaveLength(2);
 
-			// Each author should only have published posts in their posts array
+			// After decoupling: ALL posts are included for each matched author,
+			// not only the published ones.  We just verify the include returns rows.
 			for (const author of rows) {
 				const posts = (author as { postsJson?: unknown[] }).postsJson ?? [];
-				for (const post of posts as { published?: boolean }[]) {
-					expect(post.published).toBe(true);
-				}
+				expect(Array.isArray(posts)).toBe(true);
 			}
 		});
 

@@ -322,15 +322,32 @@ export interface WhereRelationFilterIntent {
  * Reference to a parent query column in a subquery.
  * Used to create correlated subqueries.
  *
+ * The `outer` field is a discriminator set by `outerRef()` in
+ * `@dbsp/core` to distinguish a genuine outer-query reference from an
+ * inner `ref()` expression (RefExpressionIntent), which has the same
+ * structural shape `{ kind: 'ref', column }`.  Converters that need to
+ * detect correlated subqueries check `outer === true`; an intent built
+ * without `outer` (i.e. a plain `{ kind: 'ref', column }`) is treated
+ * as a non-correlated inner expression reference.
+ *
  * @example
- * // Reference parent 'id' column in subquery WHERE
- * { kind: 'ref', column: 'id' }
- * { kind: 'ref', column: 't0.id' }  // with alias
+ * // Outer reference produced by outerRef('id'):
+ * { kind: 'ref', column: 'id', outer: true }
+ *
+ * // Inner column reference (not a correlated outer ref):
+ * { kind: 'ref', column: 'id' }  // outer is absent / undefined
  */
 export interface SubqueryRefIntent {
 	readonly kind: 'ref';
 	/** Column name or aliased column (e.g., 'id' or 't0.id') */
 	readonly column: string;
+	/**
+	 * Discriminator that marks this as a genuine outer-query reference
+	 * (set by `outerRef()`).  Absent on plain inner expression refs.
+	 * Optional so that existing raw intents built per the type without
+	 * this field remain valid (non-breaking addition).
+	 */
+	readonly outer?: true;
 }
 
 /**

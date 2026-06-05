@@ -17,21 +17,19 @@
  *
  *   Case 2: Undeclared relation (polymorphic table, no FK)
  *     → exists('auditLog', { where: eq('entityType', 'login') }) from 'users'
- *       silently drops the WHERE today — relation not declared on users.
- *       This test locks that behavior so a future fix is loud.
+ *       throws with a clear error — relation not declared on users.
+ *       rawExists(subquery(...)) is the correct tool here.
  *     → rawExists(subquery('auditLog').select('id').where(eq('entityType', 'login')))
  *       produces correct EXISTS SQL — rawExists is the right tool here.
  *
- * These tests are the regression lock.  If a future change makes exists()
- * throw on undeclared relations (which would be the preferred behavior),
- * Case 2 / test 3 will fail loudly, prompting an update to both this file
- * and the companion guide (packages/docs/guide/exists-vs-rawexists.md).
+ * These tests are the regression lock.
  */
 
 import {
 	createOrm,
 	eq,
 	exists,
+	exprRef,
 	gt,
 	outerRef,
 	rawExists,
@@ -173,27 +171,24 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 		 * exists('auditLog', { where: eq('entityType', 'login') }) from users.
 		 *
 		 * 'auditLog' has no ref() to 'users', so the planner cannot resolve the
-		 * FK-based correlated subquery.  Today it silently drops the WHERE and
-		 * emits a plain SELECT.
+		 * FK-based correlated subquery.  The adapter now THROWS with a clear error
+		 * rather than guessing (using the relation name as table name with a
+		 * convention-derived FK), which would produce silently wrong SQL.
 		 *
-		 * This test locks that current behavior.  A future improvement should make
-		 * exists() throw when the relation is not declared, which would require
-		 * updating this test AND the companion guide.
+		 * This is the fail-closed contract: exists() requires a declared FK relation.
+		 * Use rawExists(subquery(...)) for polymorphic or ad-hoc join targets.
 		 */
-		it('exists() on undeclared relation silently drops the WHERE today (boundary documented)', () => {
+		it('exists() on undeclared relation THROWS with a clear error', () => {
 			const orm = buildOrm();
-			const dump = (orm as any)
-				.select('users')
-				.where(exists('auditLog', { where: eq('entityType', 'login') }))
-				.dump();
 
-			const sql = ws(dump.sql);
-
-			// EXISTS is absent — the filter was silently dropped
-			expect(sql).not.toMatch(/EXISTS/i);
-
-			// Only the bare SELECT remains
-			expect(sql).toMatch(/^SELECT users\.\* FROM users\s*$/i);
+			expect(() =>
+				(orm as any)
+					.select('users')
+					.where(exists('auditLog', { where: eq('entityType', 'login') }))
+					.dump(),
+			).toThrow(
+				/exists\('auditLog'\).*no relation 'auditLog'.*declared on table 'users'/i,
+			);
 		});
 
 		/**
@@ -234,6 +229,117 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 
 			// Parameter value bound
 			expect(dump.params).toEqual(['login']);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// Case 3: Fail-closed contract regression locks
+	// ---------------------------------------------------------------------------
+
+	describe('case 3: fail-closed — declared relation compiles, undeclared throws', () => {
+		it('exists() on a DECLARED relation still compiles (no regression)', () => {
+			// FK declared: files.communityId → communities.id
+			// This must NOT throw even though the table name differs from the relation name.
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('communities')
+				.where(exists('files'))
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toContain('EXISTS');
+			// FK column from the declared relation
+			expect(sql).toContain('communityId');
+		});
+
+		it('rawExists() on an arbitrary subquery is unaffected by the fail-closed check', () => {
+			// rawExists uses operator 'rawExists', not 'exists' — collectExistsStubs
+			// skips it so the fail-closed guard never fires.
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('users')
+				.where(
+					rawExists(
+						subquery('auditLog').select('id').where(eq('entityType', 'login')),
+					),
+				)
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toContain('EXISTS');
+			expect(sql).toContain('auditLog_sq');
+		});
+
+		it('exists() on undeclared relation throws the exact error message', () => {
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any).select('users').where(exists('auditLog')).dump(),
+			).toThrow(
+				"exists('auditLog'): no relation 'auditLog' is declared on table 'users'. " +
+					'Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.',
+			);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// DEFECT-1 regression lock: rawExists with inner ref() must NOT be rejected
+	// ---------------------------------------------------------------------------
+	// Previously, `containsOuterRef()` used `isSubqueryRef()` (only checks
+	// `kind === 'ref'`) which matched BOTH outerRef() nodes AND RefExpressionIntent
+	// nodes (produced by the expression builder's `ref()`).  A rawExists subquery
+	// using `ref('a').gt(ref('b'))` to compare two inner columns was falsely
+	// rejected with "correlated subqueries not supported".
+	//
+	// Fix: `outerRef()` now stamps `outer: true`; `containsOuterRef()` checks for
+	// that marker.  `ref()` does not set `outer`, so it is never caught.
+	describe('case 4: DEFECT-1 — rawExists with inner ref() is NOT a correlated subquery', () => {
+		it('rawExists with ref().gt(ref()) comparing inner columns compiles without throwing', () => {
+			// rawExists(subquery('files').where(exprRef('id').gt(0)))
+			// exprRef('id') creates a RefExpressionIntent { kind: 'ref', column: 'id' }
+			// which has the SAME shape as outerRef() MINUS the `outer:true` marker.
+			// Without the fix this was falsely rejected as "correlated subquery".
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any)
+					.select('communities')
+					.where(
+						rawExists(
+							subquery('files').select('id').where(exprRef('id').gt(0)),
+						),
+					)
+					.dump(),
+			).not.toThrow();
+		});
+
+		it('rawExists with exprRef(col).gt(value) produces valid SQL with EXISTS', () => {
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('communities')
+				.where(
+					rawExists(subquery('files').select('id').where(exprRef('id').gt(0))),
+				)
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toMatch(/WHERE\s+EXISTS\s*\(/i);
+			expect(sql).toMatch(/FROM\s+"?files"?/i);
+			// The comparison value 0 is bound as a parameter
+			expect(dump.params).toEqual([0]);
+		});
+
+		it('rawExists with genuine outerRef() STILL throws today (boundary preserved)', () => {
+			// This is the documented boundary: rawExists + outerRef is not yet
+			// supported.  Ensures the fix did not accidentally allow correlated subqueries.
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any)
+					.select('communities')
+					.where(
+						rawExists(
+							subquery('files')
+								.select('id')
+								.where(gt('lastParsed', outerRef('createdAt'))),
+						),
+					)
+					.dump(),
+			).toThrow(/correlated subqueries.*not yet supported/i);
 		});
 	});
 });

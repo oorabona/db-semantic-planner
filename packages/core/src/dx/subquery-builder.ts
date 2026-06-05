@@ -286,9 +286,18 @@ export function subquery(table: string): SubqueryBuilder {
  * subquery('reviews').where({ productId: outerRef('id') })
  */
 export function outerRef(column: string): SubqueryRefIntent {
+	// `outer: true` is the discriminator that distinguishes this genuine
+	// outer-query reference from an inner `ref()` (RefExpressionIntent), which
+	// has the same structural shape `{ kind: 'ref', column }`.  Without the
+	// marker, any subquery using `ref('a').gt(ref('b'))` as an inner WHERE
+	// condition would be falsely rejected as "correlated subquery not supported".
+	//
+	// `SubqueryRefIntent` now declares `readonly outer?: true` so the object
+	// literal is type-safe and no cast is needed.
 	return {
 		kind: 'ref',
 		column,
+		outer: true,
 	};
 }
 

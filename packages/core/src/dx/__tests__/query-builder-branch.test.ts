@@ -15,8 +15,10 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { Adapter, Dump } from '../../adapter.js';
+import { batchValues } from '../batch-values.js';
 import { InvalidOperationError } from '../errors.js';
 import { ref as exprRef } from '../expressions.js';
+import { eq } from '../filters.js';
 import { createOrm } from '../orm.js';
 import { QueryBuilderImpl } from '../query-builder.js';
 import { ref, schema } from '../schema.js';
@@ -709,5 +711,54 @@ describe('QueryBuilderImpl.paginate branches', () => {
 		const result = await o.select('users').paginate({ page: 1, perPage: 10 });
 		expect(result.pagination.total).toBe(50);
 		expect(result.pagination.totalPages).toBe(5);
+	});
+});
+
+// ============================================================================
+// GAP 1: identifier validation on the batch-values join path (query-builder.ts)
+// ============================================================================
+
+describe('join(batchValuesRef) — identifier validation (GAP-1)', () => {
+	const { adapter: spyAdapter } = createSpyAdapter();
+	const o = createOrm({ adapter: spyAdapter, schema: testSchema });
+
+	it('throws InvalidOperationError when opts.as contains SQL-injection characters', () => {
+		const bv = batchValues([[1]], ['id'], ['integer'], { alias: 'batch' });
+		expect(() =>
+			o
+				.select('users')
+				.join(bv, { on: eq('users.id', 1), as: 'a"; DROP TABLE users;--' }),
+		).toThrow(InvalidOperationError);
+	});
+
+	it('throws InvalidOperationError when bv.alias contains SQL-injection characters', () => {
+		// Validation now fires in batchValues() at construction time (central guard),
+		// so the construction call must be inside the expect() block.
+		expect(() =>
+			batchValues([[1]], ['id'], ['integer'], { alias: 'bad"; DROP' }),
+		).toThrow(InvalidOperationError);
+	});
+
+	it('throws InvalidOperationError when a batch column name contains SQL-injection characters', () => {
+		// Validation now fires in batchValues() at construction time (central guard).
+		expect(() =>
+			batchValues([[1]], ['id"; DROP'], ['integer'], { alias: 'batch' }),
+		).toThrow(InvalidOperationError);
+	});
+
+	it('does not throw for a valid opts.as alias', () => {
+		const bv = batchValues([[1]], ['id'], ['integer'], { alias: 'batch' });
+		expect(() =>
+			o.select('users').join(bv, { on: eq('users.id', 1), as: 'valid_alias' }),
+		).not.toThrow();
+	});
+
+	it('does not throw when bv.alias and columns are valid identifiers', () => {
+		const bv = batchValues([[1, 2]], ['user_id'], ['integer'], {
+			alias: 'my_batch',
+		});
+		expect(() =>
+			o.select('users').join(bv, { on: eq('users.id', 1) }),
+		).not.toThrow();
 	});
 });

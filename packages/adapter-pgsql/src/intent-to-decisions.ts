@@ -11,7 +11,6 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { isSubqueryRef } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
@@ -245,15 +244,220 @@ interface FlatWhereFields {
 // ============================================================================
 
 /**
- * Recursively walk a WhereIntent looking for a SubqueryRefIntent
- * (`{ kind: 'ref', column }` produced by `outerRef()`). Used to detect
- * correlated subqueries inside rawExists/rawNotExists, which the current
- * pipeline does not support — we throw rather than emit broken SQL.
+ * Guard: throw a clear error when a subquery (IN or scalar) carries modifiers
+ * that the current compilation path silently drops, which would produce SQL
+ * that matches MORE rows than the caller intended (silent filter broadening).
+ *
+ * Per-field classification (QueryIntent):
+ *
+ * FAITHFULLY COMPILED — leave:
+ *   from, where, limit (IN + scalar only), orderBy field-based (IN + scalar)
+ *   select.type:'fields' (IN: exactly 1 field; scalar: first field)
+ *   select.type:'aggregate' (scalar only — aggregate + selectColumn)
+ *
+ * PROPAGATE — wired through in convertSubquery:
+ *   limit, orderBy (scalar path — previously missing, fixed here)
+ *
+ * REJECT — throw:
+ *   groupBy, having, offset, distinct, distinctOn, include, joins
+ *   existsWrap, lock, batchValuesSource — not representable in a subquery context
+ *   select.type:'aggregate' on IN path (silently ignored → wrong projection)
+ *   select.type:'expressions' on both paths (expressions not emitted)
+ *   select.type:'all' on IN path (SELECT * in ANY subquery is invalid SQL)
+ *   select:undefined on IN path (must specify exactly one column)
+ *   select.type:'fields' with 0 fields on IN path (no column to match against)
+ *   orderBy with expression-based entries on both paths (.field is never → undefined)
+ *   limit (rawExists path only) — buildSubqueryFromIntent does not emit limitCount
  */
-function containsOuterRef(where: unknown): boolean {
+export function assertNoUnsupportedSubqueryModifiers(
+	subquery: QueryIntent,
+	context: 'IN' | 'scalar' | 'scalar-direct' | 'rawExists',
+): void {
+	const unsupported: string[] = [];
+
+	// Structural modifiers silently dropped on ALL subquery paths.
+	if (subquery.groupBy && subquery.groupBy.length > 0)
+		unsupported.push('GROUP BY');
+	if (subquery.having) unsupported.push('HAVING');
+	if (subquery.offset != null) unsupported.push('OFFSET');
+	if (subquery.distinct) unsupported.push('DISTINCT');
+	if (subquery.distinctOn && subquery.distinctOn.length > 0)
+		unsupported.push('DISTINCT ON');
+	if (subquery.include && subquery.include.length > 0)
+		unsupported.push('include (relation hydration)');
+	if (subquery.joins && subquery.joins.length > 0) unsupported.push('joins');
+
+	// Additional structural modifiers that have no path through buildSubqueryFromIntent.
+	if (subquery.existsWrap) unsupported.push('existsWrap');
+	if (subquery.lock) unsupported.push('lock');
+	if (subquery.batchValuesSource) unsupported.push('batchValuesSource');
+
+	// rawExists and scalar-direct: buildSubqueryFromIntent emits ONLY
+	// SELECT/FROM/WHERE — it does NOT emit sortClause or limitCount.
+	// The decisions-path scalar context allows limit/orderBy because convertSubquery
+	// faithfully propagates them via buildScalarSubquery; the direct path cannot.
+	if (context === 'rawExists' || context === 'scalar-direct') {
+		if (subquery.limit != null) unsupported.push('LIMIT');
+	}
+
+	// rawExists and scalar-direct: buildSubqueryFromIntent also drops orderBy
+	// entirely (no sortClause emitted), so both field-based and expression-based
+	// ORDER BY produce silently wrong results on the direct path.
+	// The decisions-path scalar context allows field-orderBy because that path
+	// emits it; the direct path cannot.
+	if (context === 'rawExists' || context === 'scalar-direct') {
+		if (subquery.orderBy && subquery.orderBy.length > 0) {
+			unsupported.push('ORDER BY');
+		}
+	} else if (subquery.orderBy && subquery.orderBy.length > 0) {
+		// On the decisions / IN path: only expression-based orderBy is unsupported
+		// (field references are faithfully emitted there).
+		const hasExpressionSort = subquery.orderBy.some(
+			(o) => !('field' in o) || (o as { field?: unknown }).field == null,
+		);
+		if (hasExpressionSort)
+			unsupported.push(
+				'orderBy with expression (only field-based ORDER BY is supported)',
+			);
+	}
+
+	// IN-subquery-specific SELECT validation
+	if (context === 'IN') {
+		const select = subquery.select as
+			| { type?: string; fields?: readonly string[] }
+			| undefined;
+		if (!select) {
+			// No select clause — would compile to SELECT * which is invalid inside
+			// an ANY subquery (PostgreSQL requires a single column expression).
+			unsupported.push(
+				'missing select (IN subquery must project exactly one named column)',
+			);
+		} else if (select.type === 'aggregate') {
+			// Aggregate SELECT is silently ignored in the IN path (only fields are
+			// extracted); use a scalar subquery comparison instead.
+			unsupported.push(
+				'aggregate SELECT (use a scalar subquery comparison instead)',
+			);
+		} else if (select.type === 'expressions') {
+			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery.
+			unsupported.push('expressions SELECT (not supported in IN subquery)');
+		} else if (select.type === 'all') {
+			// SELECT * inside ANY(...) is rejected by PostgreSQL (cannot compare
+			// a row value to a scalar lhs).
+			unsupported.push(
+				'SELECT * / all (IN subquery must project exactly one named column)',
+			);
+		} else if (select.type === 'fields') {
+			if (!select.fields || select.fields.length === 0) {
+				// Empty fields list falls back to '*' — same problem as 'all'.
+				unsupported.push(
+					'empty fields list (IN subquery must project exactly one named column)',
+				);
+			} else if (select.fields.length > 1) {
+				// Multi-field projection is silently truncated to fields[0] — the
+				// extra columns are dropped without error, producing incorrect SQL
+				// (the IN matches only the first column, silently ignoring the rest).
+				unsupported.push(
+					`multi-field projection [${select.fields.join(', ')}] (IN subquery must project exactly one named column — use a single field)`,
+				);
+			}
+		}
+	}
+
+	// Scalar SELECT validation — applies to both the decisions path ('scalar') and
+	// the direct compile-where path ('scalar-direct').  buildSubqueryFromIntent
+	// (used by the direct path) emits only fields[0] from a multi-field list,
+	// silently truncating the projection; expressions SELECT is not emitted at all.
+	// 'scalar-direct' must be at least as strict as 'scalar' on projection checks.
+	const isScalarContext = context === 'scalar' || context === 'scalar-direct';
+	if (isScalarContext) {
+		const select = subquery.select as
+			| {
+					type?: string;
+					fields?: readonly string[];
+					aggregates?: readonly unknown[];
+			  }
+			| undefined;
+		if (select?.type === 'expressions') {
+			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
+			// buildSubqueryFromIntent — dropped on both scalar paths.
+			unsupported.push('expressions SELECT (not supported in scalar subquery)');
+		} else if (
+			select?.type === 'fields' &&
+			select.fields != null &&
+			select.fields.length > 1
+		) {
+			// Multi-field projection is silently truncated to fields[0] —
+			// the extra columns are dropped without error, producing incorrect SQL
+			// (the scalar comparison uses only the first column).
+			unsupported.push(
+				`multi-field projection [${select.fields.join(', ')}] (scalar subquery must project exactly one column — use a single field)`,
+			);
+		} else if (
+			select?.type === 'aggregate' &&
+			select.aggregates != null &&
+			select.aggregates.length > 1
+		) {
+			// DEFECT 3 FIX: a scalar subquery must project exactly ONE column.
+			// The decisions path takes only aggregates[0] — extra aggregates are
+			// silently dropped. The direct compile-where path (buildSubqueryFromIntent)
+			// emits ALL aggregates as separate ResTarget nodes, producing a multi-column
+			// scalar subquery that PostgreSQL rejects at runtime.
+			// Reject early on both paths so callers get a clear error.
+			unsupported.push(
+				`multi-aggregate projection (scalar subquery must project exactly one column — use a single aggregate)`,
+			);
+		}
+	}
+
+	if (unsupported.length > 0) {
+		const label =
+			context === 'IN'
+				? 'IN'
+				: context === 'rawExists'
+					? 'rawExists'
+					: 'scalar';
+		throw new Error(
+			`${label} subquery with ${unsupported.join(', ')} is not supported — ` +
+				'it would silently change which rows match; restructure the query or use a CTE.',
+		);
+	}
+}
+
+/**
+ * Type predicate for a genuine `outerRef()` node.
+ *
+ * `SubqueryRefIntent` (kind:'ref', column) and `RefExpressionIntent`
+ * (kind:'ref', column) are structurally identical.  `outerRef()` adds an
+ * `outer: true` discriminator so we can distinguish the two without touching
+ * the @dbsp/types package.  `isSubqueryRef` cannot be used here because it
+ * only checks `kind === 'ref'` — matching inner `ref()` nodes too.
+ *
+ * @internal — exported for use in plan-decision-extractor.ts only.
+ */
+export function isOuterRef(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return v.kind === 'ref' && v.outer === true;
+}
+
+/**
+ * Recursively walk a WhereIntent looking for a genuine `outerRef()` node
+ * (discriminated by `{ kind: 'ref', outer: true }` — set by `outerRef()` in
+ * subquery-builder.ts).  Used to detect correlated subqueries inside
+ * rawExists/rawNotExists, which the current pipeline does not support — we
+ * throw rather than emit broken SQL.
+ *
+ * NOTE: we do NOT use `isSubqueryRef` here because that predicate only checks
+ * `kind === 'ref'`, which also matches inner `ref()` column references
+ * (RefExpressionIntent) used in expression-based WHERE conditions such as
+ * `ref('a').gt(ref('b'))`.  Those inner refs must NOT trigger the correlated
+ * subquery guard.
+ */
+export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
 	const w = where as Record<string, unknown>;
-	if (isSubqueryRef(w)) return true;
+	if (isOuterRef(w)) return true;
 	for (const value of Object.values(w)) {
 		if (Array.isArray(value)) {
 			for (const item of value) {
@@ -272,9 +476,13 @@ function convertComparison(
 	rootTable: string,
 ): PlanDecision {
 	const rawValue = cond.value;
-	// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef so that
-	// compileValueOrFieldRef() treats it as a column reference, not a parameter.
-	const resolvedValue = isSubqueryRef(rawValue)
+	// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
+	// FieldRef so that compileValueOrFieldRef() treats it as a column reference,
+	// not a parameter.  We use isOuterRef() (checks outer:true) rather than
+	// isSubqueryRef() (only checks kind:'ref') so that an ExpressionRef.intent
+	// like { kind: 'ref', column } from ref() is NOT misidentified as an outer
+	// reference.
+	const resolvedValue = isOuterRef(rawValue)
 		? {
 				kind: 'fieldRef' as const,
 				scope: 'outer' as const,
@@ -314,6 +522,7 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	// We cannot rely on normalizeToDecision's `case 'in'` branch because that
 	// function short-circuits via early-return when `column` is already set.
 	if (rawSubquery) {
+		assertNoUnsupportedSubqueryModifiers(rawSubquery, 'IN');
 		const selectField = rawSubquery.select;
 		const selectColumn: string =
 			selectField &&
@@ -330,7 +539,9 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 					return converted ? [converted] : [];
 				})()
 			: [];
-		// Propagate limit and orderBy from QueryIntent (e.g. from NQL `| limit N | order by col`)
+		// Propagate limit and orderBy from QueryIntent (e.g. from NQL `| limit N | order by col`).
+		// PlanDecision.orderBy entries use { field, direction: 'asc'|'desc' } (lowercase).
+		// mapToHandlerDecision converts field → column and uppercases direction for handlers.
 		const rawLimit = rawSubquery.limit;
 		const rawOrderBy = rawSubquery.orderBy as
 			| readonly { field: string; direction?: string }[]
@@ -346,8 +557,8 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 			...(rawLimit != null && { limit: rawLimit }),
 			...(rawOrderBy && {
 				orderBy: rawOrderBy.map((o) => ({
-					column: o.field,
-					direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+					field: o.field,
+					direction: (o.direction?.toLowerCase() ?? 'asc') as 'asc' | 'desc',
 				})),
 			}),
 		} as unknown as PlanDecision;
@@ -484,12 +695,15 @@ function convertNot(
 	return { type: 'whereNot', conditions: [subDecision] };
 }
 
-/** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS */
+/** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS / EVERY */
 function convertExistsLike(
 	cond: FlatWhereFields,
-	operator: 'exists' | 'notExists',
+	operator: 'exists' | 'notExists' | 'every',
 ): PlanDecision {
 	const targetTable = cond.relation as string;
+	// For 'every', pass the raw conditions un-negated — everyHandler wraps them in
+	// NOT internally.  When conditions is empty/undefined, everyHandler returns the
+	// vacuous-true literal (TRUE) instead of emitting a subquery.
 	const subDecisions: PlanDecision[] = cond.where
 		? convertWhere(cond.where as WhereIntent, targetTable)
 		: [];
@@ -503,6 +717,21 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const operator = cond.operator as string;
 	const subquery = cond.subquery as QueryIntent | undefined;
 	if (!subquery || !field) return null;
+
+	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
+
+	// DEFECT 2 FIX (decisions path): detect outerRef() inside a scalar subquery's WHERE.
+	// Correlated scalar subqueries are not yet supported — the decisions path lowers the
+	// inner WHERE to Decision[] without forwarding the outer alias, so outerRef() nodes
+	// bind to the inner alias instead of the outer query, producing wrong SQL silently.
+	// Throw here (before emitting the decision) instead of producing broken SQL.
+	if (subquery.where && containsOuterRef(subquery.where)) {
+		throw new Error(
+			'scalar subquery with correlated outerRef() is not yet supported — ' +
+				'use exists("relation", { where: ... }) when a schema relation exists, ' +
+				'or restructure the query to avoid the correlation.',
+		);
+	}
 
 	const targetTable = subquery.from;
 	let selectColumn = '*';
@@ -530,6 +759,15 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		if (innerWhere) subConditions.push(innerWhere);
 	}
 
+	// Propagate limit and orderBy into the decision so buildScalarSubquery emits them.
+	// (Previously these were silently dropped from scalar subqueries.)
+	// PlanDecision.orderBy entries use { field, direction: 'asc'|'desc' } (lowercase).
+	// mapToHandlerDecision converts field → column and uppercases direction for handlers.
+	const rawLimit = subquery.limit;
+	const rawOrderBy = subquery.orderBy as
+		| readonly { field: string; direction?: string }[]
+		| undefined;
+
 	const opMap: Record<string, string> = {
 		eq: '=',
 		neq: '!=',
@@ -547,7 +785,15 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		subqueryOperator: opMap[operator] ?? '=',
 		...(aggregate && { aggregate }),
 		...(subConditions.length > 0 && { conditions: subConditions }),
-	};
+		...(rawLimit != null && { limit: rawLimit }),
+		...(rawOrderBy &&
+			rawOrderBy.length > 0 && {
+				orderBy: rawOrderBy.map((o) => ({
+					field: o.field,
+					direction: (o.direction?.toLowerCase() ?? 'asc') as 'asc' | 'desc',
+				})),
+			}),
+	} as unknown as PlanDecision;
 }
 
 // ============================================================================
@@ -583,7 +829,16 @@ export function convertWhereCondition(
 			return convertExistsLike(cond, 'notExists');
 		case 'relationFilter': {
 			const mode = (cond.mode as string) || 'some';
-			return convertExistsLike(cond, mode === 'none' ? 'notExists' : 'exists');
+			// mode:'every' must route to everyHandler (NOT EXISTS WHERE NOT cond).
+			// Passing 'exists' here was Bug #1 — it silently dropped the universal-
+			// quantifier semantics and routed to the plain EXISTS handler instead.
+			const operator =
+				mode === 'none'
+					? ('notExists' as const)
+					: mode === 'every'
+						? ('every' as const)
+						: ('exists' as const);
+			return convertExistsLike(cond, operator);
 		}
 		case 'subquery':
 			return convertSubquery(cond);
@@ -599,6 +854,13 @@ export function convertWhereCondition(
 					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
 				);
 			}
+			// Guard: reject subquery modifiers that buildSubqueryFromIntent silently
+			// drops — limit, offset, groupBy, having, joins, include, distinct,
+			// distinctOn are not emitted by buildSubqueryFromIntent (it only emits
+			// from/select/where).  Silently dropping them changes which rows match
+			// (e.g. rawExists(subquery.limit(0)) must always be FALSE but without the
+			// guard compiles as an unrestricted existence check — silent broadening).
+			assertNoUnsupportedSubqueryModifiers(sub, 'rawExists');
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
 			// supported on the rawExists/rawNotExists path: buildSubqueryFromIntent
 			// builds a fresh WhereCompilerCtx with no outerAlias, so SubqueryRefIntent

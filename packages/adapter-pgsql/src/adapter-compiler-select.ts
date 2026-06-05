@@ -32,10 +32,107 @@ import { createTypeCastParamRef } from './param-ref.js';
 import {
 	convertDottedFieldsToExists,
 	deriveForeignKey,
+	enrichExistsDecisionsInPlace,
 	extractAllIncludeDecisions,
-	extractExistsDecisions,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
+
+// ============================================================================
+// Compile-time type-name safety guard (covers forged BatchValuesRef vector)
+// ============================================================================
+
+/**
+ * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
+ * Mirrors the constant in @dbsp/core `batch-values.ts`.
+ */
+const ADAPTER_MULTIWORD_BASE_TYPES: readonly string[] = [
+	'timestamp with time zone',
+	'timestamp without time zone',
+	'time with time zone',
+	'time without time zone',
+	'double precision',
+	'character varying',
+	'bit varying',
+];
+
+/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
+const ADAPTER_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Validate a PostgreSQL type name at compile time using the structured grammar.
+ *
+ * Mirrors the construction-time check in @dbsp/core `batchValues()` exactly,
+ * so that a forged `BatchValuesRef` constructed directly (bypassing `batchValues()`)
+ * still cannot inject SQL via the type cast.
+ *
+ * Accepted grammar:
+ *   typeName = trim(base [modifier] [arraySuffix])
+ *   arraySuffix = "[]"          — at most ONE level
+ *   modifier    = "(" digits ")" | "(" digits "," digits ")"
+ *   base        = multiWordType | ident | ident "." ident
+ *
+ * Anything outside this grammar throws, including injection strings like
+ * "int[])) AS b(id) JOIN users ON true" or "int4) ; DROP TABLE x; --".
+ */
+function assertSafeTypeName(typeName: string, colIndex: number): void {
+	const raw = typeName.trim();
+	if (raw.length === 0) {
+		throw new Error(
+			`BatchValues compile error: type name at column index ${colIndex} must not be empty.`,
+		);
+	}
+
+	let rest = raw;
+
+	// Step 1: strip at most ONE trailing "[]"
+	if (rest.endsWith('[]')) {
+		rest = rest.slice(0, -2);
+		if (rest.endsWith('[]')) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					'At most one array suffix "[]" is allowed as a raw type-name input.',
+			);
+		}
+	}
+
+	// Step 2: strip optional modifier "(N)" or "(N,M)"
+	const modifierMatch = rest.match(/\(([^)]*)\)$/);
+	if (modifierMatch) {
+		const inner = modifierMatch[1] ?? '';
+		if (!/^\d+(?:,\d+)?$/.test(inner)) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
+			);
+		}
+		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
+	}
+
+	// Step 3: validate the base type
+	const baseLower = rest.toLowerCase();
+
+	// (a) Multi-word allowlist
+	if (ADAPTER_MULTIWORD_BASE_TYPES.includes(baseLower)) {
+		return;
+	}
+
+	// (b) Strict identifier, optionally schema-qualified
+	const parts = rest.split('.');
+	if (parts.length > 2) {
+		throw new Error(
+			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+				'Schema-qualified types allow at most one dot (schema.type).',
+		);
+	}
+	for (const part of parts) {
+		if (!ADAPTER_IDENT_RE.test(part)) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					`Base type "${part}" is not a valid SQL identifier and is not in the multi-word type allowlist.`,
+			);
+		}
+	}
+}
 
 // ============================================================================
 // Internal: legacy bridge
@@ -46,31 +143,8 @@ import {
  * Used only in the legacy/test path where mock plans carry adapter-format decisions
  * inside a core PlanReport. At runtime the data is already in adapter format.
  */
-/**
- * Recursively strip exists/notExists decisions from a decision tree.
- * Handles top-level decisions and those nested inside whereAnd/whereOr/whereNot.
- * Returns null when the decision itself should be removed.
- * Containers (whereAnd/whereOr/whereNot) that become empty after stripping are also removed.
- */
-function stripExistsFromDecision(d: PlanDecision): PlanDecision | null {
-	if (
-		d.type === 'where' &&
-		(d.operator === 'exists' || d.operator === 'notExists')
-	) {
-		return null;
-	}
-	if (
-		(d.type === 'whereAnd' || d.type === 'whereOr' || d.type === 'whereNot') &&
-		d.conditions
-	) {
-		const stripped = (d.conditions as PlanDecision[])
-			.map(stripExistsFromDecision)
-			.filter((c): c is PlanDecision => c !== null);
-		if (stripped.length === 0) return null;
-		return { ...d, conditions: stripped };
-	}
-	return d;
-}
+// stripExistsFromDecision removed — exists decisions are now enriched in-place
+// by enrichExistsDecisionsInPlace() instead of being stripped and re-appended at top level.
 
 export function bridgeLegacyDecisions(
 	decisions: readonly unknown[],
@@ -118,13 +192,31 @@ function buildBatchValuesRangeFn(
 	let paramIdx = startParamIndex - 1;
 	const effectiveAlias = aliasOverride ?? bv.alias;
 
+	// Compile-time revalidation: covers the forged-ref vector where a
+	// BatchValuesRef is constructed directly without going through batchValues().
+	for (let ci = 0; ci < bv.columns.length; ci++) {
+		const rawType = bv.types[ci];
+		if (rawType) assertSafeTypeName(rawType, ci);
+	}
+
 	const unnestArgs: Node[] = bv.columns.map((col, i) => {
 		const colArray: unknown[] = (bv.data[i] as unknown[]) ?? [];
-		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
-		const colTypes: Record<string, string> = {};
-		if (bv.types[i]) colTypes[col] = bv.types[i] as string;
-		const pgArrayType = inferPgArrayType(col, colTypes, sampleValue);
-		const pgBaseType = stripArraySuffix(pgArrayType);
+
+		let pgBaseType: string;
+		if (bv.types[i]) {
+			// Explicit type provided by caller: preserve faithfully — do NOT route
+			// through mapToPgBaseType() which normalises numeric→float8, varchar→text,
+			// etc.  Only strip a single trailing "[]" the user may have written (the
+			// cast layer appends exactly one "[]" via createTypeCastParamRef isArray=true),
+			// so "int4[]" → base "int4" → emits CAST($N AS int4[]) not int4[][].
+			const rawType = bv.types[i] as string;
+			pgBaseType = rawType.endsWith('[]') ? rawType.slice(0, -2) : rawType;
+		} else {
+			// No explicit type: infer from the schema or sample value (existing behavior).
+			const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+			const pgArrayType = inferPgArrayType(col, {}, sampleValue);
+			pgBaseType = stripArraySuffix(pgArrayType);
+		}
 
 		params.push(colArray);
 		paramIdx++;
@@ -325,35 +417,6 @@ function compileJoinIntents(
 // ============================================================================
 // Phase helpers — extracted from compileSelect for CC reduction
 // ============================================================================
-
-/**
- * Propagate filter conditions from EXISTS decisions to matching includeStrategy decisions.
- * When a relation is both filtered (EXISTS) and included, the filter appears in both
- * the EXISTS subquery AND the include subquery.
- */
-function propagateExistsConditions(
-	includeDecisions: readonly PlanDecision[],
-	existsDecisions: readonly PlanDecision[],
-): PlanDecision[] {
-	return includeDecisions.map((jd) => {
-		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
-
-		const matchingExists = existsDecisions.find(
-			(ed) =>
-				ed.type === 'where' &&
-				(ed.operator === 'exists' || ed.operator === 'notExists') &&
-				(ed.relationName === jd.relationName ||
-					ed.targetTable === jd.targetTable) &&
-				ed.conditions &&
-				(ed.conditions as PlanDecision[]).length > 0,
-		);
-
-		if (matchingExists?.conditions) {
-			return { ...jd, conditions: matchingExists.conditions };
-		}
-		return jd;
-	});
-}
 
 /**
  * Strip auto-selected columns from join includeStrategy decisions when the query
@@ -630,20 +693,26 @@ export function compileSelect<T = unknown>(
 	// The core's plan.decisions contain observability data, not SQL instructions.
 	// The actual query structure is in plan.intent (QueryIntent).
 	// Note: For unit tests with mock plans (no intent), fall back to plan.decisions directly.
+	//
+	// execIntent: the intent the adapter should compile from.
+	// When the planner ran the IN→EXISTS optimization, plan.executableIntent holds the
+	// rewritten WHERE (EXISTS form); plan.intent retains the original submitted intent
+	// (observable via dump()). All SQL-generation paths below use execIntent so that
+	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
+	const execIntent = plan.executableIntent ?? plan.intent;
+	// planForCompilation: a view of the plan where .intent is the executable intent.
+	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
+	// extractAllIncludeDecisions) so they read the correct WHERE for SQL generation.
+	// buildSimplifiedPlanReport also uses it for batchValuesSource / existsWrap / lock.
+	const planForCompilation: PlanReport =
+		plan.executableIntent !== undefined
+			? { ...plan, intent: plan.executableIntent }
+			: plan;
 	let simplifiedPlan: SimplifiedPlanReport;
 
-	if (plan.intent) {
+	if (execIntent) {
 		// Real usage: convert intent to decisions
-		let decisions = intentToDecisions(plan.intent, plan.rootTable);
-
-		// Strip exists/notExists decisions from intentToDecisions — they use the
-		// relation name as targetTable (unresolved). extractExistsDecisions (below)
-		// provides the correct decisions with the actual table name from the planner.
-		// Must recurse into whereAnd/whereOr/whereNot to catch nested occurrences
-		// (e.g. notExists inside and() produces a whereAnd containing a notExists).
-		decisions = decisions
-			.map(stripExistsFromDecision)
-			.filter((d): d is PlanDecision => d !== null);
+		let decisions = intentToDecisions(execIntent, plan.rootTable);
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
@@ -656,13 +725,25 @@ export function compileSelect<T = unknown>(
 			);
 		}
 
-		// Add correct EXISTS decisions from planner's filter-strategy decisions
-		// (they have the actual target table in context.target)
-		const existsDecisions = extractExistsDecisions(plan, options?.model);
+		// Enrich exists/notExists stub decisions in-place within their boolean tree
+		// position.  The stubs produced by intentToDecisions use the relation name as
+		// targetTable (unresolved); enrichExistsDecisionsInPlace replaces each stub with
+		// the fully-resolved version (real targetTable, foreignKey, conditions, include)
+		// from the planner's filter-strategy decisions — WITHOUT moving them to top level.
+		// This preserves OR/AND/NOT structure, so "x=1 OR exists('posts')" compiles as
+		// "x=1 OR EXISTS(...)" instead of "x=1 AND EXISTS(...)".
+		// planForCompilation has .intent = executableIntent (post-optimization WHERE)
+		// so findExistsIntents finds 'exists' intents rather than the original 'in'.
+		// Side-effect: modifies `decisions` in-place (stub → enriched for each match).
+		enrichExistsDecisionsInPlace(
+			decisions,
+			planForCompilation,
+			options?.model ?? deps.model,
+		);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
 		const unifiedIncludeDecisions = extractAllIncludeDecisions(
-			plan,
+			planForCompilation,
 			deps.defaultPk,
 			deps.deriveFk,
 		);
@@ -678,7 +759,7 @@ export function compileSelect<T = unknown>(
 		const synthesizedModel = options?.model ?? deps.model;
 		const synthesizedJoins = synthesizedModel
 			? synthesizeMissingJoinDecisions(
-					plan,
+					planForCompilation,
 					coveredByPlanner,
 					synthesizedModel,
 					deps.defaultPk,
@@ -690,18 +771,20 @@ export function compileSelect<T = unknown>(
 				? [...unifiedIncludeDecisions, ...synthesizedJoins]
 				: unifiedIncludeDecisions;
 
-		// Propagate filter conditions from EXISTS to matching include decisions.
-		// When a relation is both filtered and included, the filter appears in both
-		// the EXISTS subquery AND the include subquery.
-		const enrichedUnifiedDecisions = propagateExistsConditions(
-			allUnifiedIncludeDecisions,
-			existsDecisions,
-		);
+		// Include decisions are independent of any sibling exists() filter.
+		// The exists() only filters which root rows are selected; the include
+		// subquery correlates on the FK only and returns ALL related rows.
+		// Spread to mutable array — downstream helpers mutate in-place.
+		const enrichedUnifiedDecisions: PlanDecision[] = [
+			...allUnifiedIncludeDecisions,
+		];
 
 		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
 		// GROUP BY, or explicit column selection is active. Keeps the JOIN for
 		// filtering/inner join semantics but prevents invalid SELECT column lists.
-		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, plan.intent);
+		// select/distinct/groupBy fields are unchanged by the IN→EXISTS WHERE optimization,
+		// so execIntent and plan.intent are equivalent here; execIntent is used for consistency.
+		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, execIntent);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.
@@ -747,21 +830,24 @@ export function compileSelect<T = unknown>(
 					})
 				: decisions;
 
-		// Compile explicit JoinIntent[] from plan.intent.joins into 'join' decisions.
+		// Compile explicit JoinIntent[] from execIntent.joins into 'join' decisions.
 		// These are non-hydrating SQL JOINs (flat result, no relation columns added).
+		// joins are not affected by the IN→EXISTS WHERE optimization; execIntent and
+		// plan.intent carry the same joins value.
 		const joinIntentDecisions =
-			plan.intent?.joins && (plan.intent.joins as JoinIntent[]).length > 0
+			execIntent?.joins && (execIntent.joins as JoinIntent[]).length > 0
 				? compileJoinIntents(
-						plan.intent.joins as JoinIntent[],
+						execIntent.joins as JoinIntent[],
 						plan.rootTable,
 						schemaName,
 						deps,
 					)
 				: [];
 
+		// exists decisions are now inline inside deduplicatedDecisions (in their boolean
+		// tree position), so we no longer spread them separately here.
 		const allDecisions = [
 			...deduplicatedDecisions,
-			...existsDecisions,
 			...enrichedUnifiedDecisions,
 			...joinIntentDecisions,
 		];
@@ -772,7 +858,14 @@ export function compileSelect<T = unknown>(
 		const rangeModel = options?.model ?? deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
 
-		simplifiedPlan = buildSimplifiedPlanReport(plan, allDecisions, schemaName);
+		// planForCompilation carries executableIntent as .intent, so
+		// buildSimplifiedPlanReport reads batchValuesSource / existsWrap / lock
+		// from the executable intent rather than the original.
+		simplifiedPlan = buildSimplifiedPlanReport(
+			planForCompilation,
+			allDecisions,
+			schemaName,
+		);
 	} else {
 		// Unit test with mock data: use decisions directly (legacy format).
 		// Tests supply adapter-format PlanDecisions inside a core PlanReport,

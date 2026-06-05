@@ -1281,7 +1281,9 @@ function deparseRangeFunction(node: Record<string, unknown>): string {
 			const cols = colnames.map((c) => {
 				const cr = c as Record<string, unknown>;
 				if ('String' in cr) {
-					return String((cr.String as Record<string, unknown>).sval ?? '');
+					return quoteIdent(
+						String((cr.String as Record<string, unknown>).sval ?? ''),
+					);
 				}
 				return deparse(c);
 			});

@@ -1602,3 +1602,135 @@ describe('planner coverage', () => {
 		expect(bidiDecision?.choice).toBe('union-all');
 	});
 });
+
+// ============================================================================
+// ITEM 6: processWhere exhaustiveness — previously-missing WhereIntent kinds
+// ============================================================================
+
+describe('processWhere handles all WhereIntent kinds (exhaustiveness)', () => {
+	it('should not throw for rawExists WhereIntent (adapter-only kind)', () => {
+		// rawExists carries a subquery QueryIntent; planner defers entirely to adapter
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'rawExists',
+				subquery: { type: 'select', from: 'posts' },
+			} as never,
+		};
+
+		// Should not throw — planner passes through to adapter without relation analysis
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should not throw for rawNotExists WhereIntent (adapter-only kind)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'rawNotExists',
+				subquery: { type: 'select', from: 'posts' },
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should not throw for subquery WhereIntent (adapter-only kind)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'subquery',
+				field: 'id',
+				operator: 'eq',
+				subquery: {
+					type: 'select',
+					from: 'posts',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'column', column: 'authorId' }],
+					},
+				},
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should not throw for range WhereIntent (adapter-only kind)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'range',
+				field: 'id',
+				operator: 'overlaps',
+				value: { lower: 1, upper: 100 },
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should not throw for jsonContains WhereIntent (adapter-only kind)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'jsonContains',
+				field: 'name',
+				value: { active: true },
+				reversed: false,
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should not throw for jsonExists WhereIntent (adapter-only kind)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'jsonExists',
+				field: 'name',
+				key: 'email',
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+
+	it('should throw for a completely unknown WhereIntent kind (exhaustiveness guard)', () => {
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'unknownFutureKind',
+			} as never,
+		};
+
+		// The default: never branch should throw rather than silently no-op
+		expect(() => plan(intent, testSchema)).toThrow(
+			/unhandled WhereIntent kind/,
+		);
+	});
+
+	it('should handle rawExists nested inside and (recurse)', () => {
+		// Verifies the recursive processWhere calls also reach rawExists correctly
+		const intent: QueryIntent = {
+			type: 'select',
+			from: 'users',
+			where: {
+				kind: 'and',
+				conditions: [
+					{ kind: 'rawExists', subquery: { type: 'select', from: 'posts' } },
+					{ kind: 'rawNotExists', subquery: { type: 'select', from: 'posts' } },
+				],
+			} as never,
+		};
+
+		expect(() => plan(intent, testSchema)).not.toThrow();
+	});
+});

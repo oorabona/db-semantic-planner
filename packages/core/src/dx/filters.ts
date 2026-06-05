@@ -549,15 +549,20 @@ export function notExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
+ * are NOT supported and will throw at compile time. For correlated EXISTS over an
+ * FK-declared relation, use `exists('relation', { where: ... outerRef(...) })` instead.
+ *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
  * @example
- * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_id = users.id)
- * rawExists(subquery('audit_log').select('id').where(eq('entityId', outerRef('id'))))
+ * // EXISTS (SELECT 1 FROM audit_log WHERE audit_log.entity_type = 'login')
+ * // Uncorrelated: no reference to the outer row — inner filter is a plain value.
+ * rawExists(subquery('audit_log').select('id').where(eq('entityType', 'login')))
  *
  * @example
- * // EXISTS with a full query builder
- * rawExists(orm.select('sessions').where(and(eq('userId', outerRef('id')), gt('expiresAt', new Date()))))
+ * // EXISTS with a full query builder — polymorphic table, no FK to source
+ * rawExists(orm.select('sessions').where(and(eq('status', 'active'), gt('expiresAt', new Date()))))
  */
 export function rawExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
@@ -576,11 +581,16 @@ export function rawExists(
  * Accepts a SubqueryBuilder (must have `.build()`) or any builder
  * exposing `buildIntent(): QueryIntent` (e.g. QueryBuilder).
  *
+ * **Limitation:** correlated subqueries (using `outerRef()` inside the inner WHERE)
+ * are NOT supported and will throw at compile time. For correlated NOT EXISTS over an
+ * FK-declared relation, use `notExists('relation', { where: ... outerRef(...) })` instead.
+ *
  * @param subquery - A SubqueryBuilder or any object with buildIntent()
  *
  * @example
- * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.user_id = users.id)
- * rawNotExists(subquery('bans').select('id').where(eq('userId', outerRef('id'))))
+ * // NOT EXISTS (SELECT 1 FROM bans WHERE bans.reason = 'spam')
+ * // Uncorrelated: inner filter is a plain value, no reference to the outer row.
+ * rawNotExists(subquery('bans').select('id').where(eq('reason', 'spam')))
  */
 export function rawNotExists(
 	sq: SubqueryBuilder | { buildIntent(): QueryIntent },
@@ -797,9 +807,8 @@ export function coalesce(
  * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
  */
 export function raw(sqlFragment: string, as: string): ExpressionSpec {
-	if (!as || as.trim() === '') {
-		throw new Error('raw() requires a non-empty alias');
-	}
+	// FIND-008: Validate the alias as a SQL identifier; sqlFragment is an intentional raw escape hatch
+	validateIdentifier(as, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'raw', sql: sqlFragment, as },
@@ -831,12 +840,9 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
  * ```
  */
 export function col(column: string, alias: string): ExpressionSpec {
-	if (!column || column.trim() === '') {
-		throw new Error('col() requires a non-empty column name');
-	}
-	if (!alias || alias.trim() === '') {
-		throw new Error('col() requires a non-empty alias');
-	}
+	// FIND-008: Validate column name and alias as SQL identifiers (same strictness as coalesce)
+	validateIdentifier(column, 'column');
+	validateIdentifier(alias, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'columnAlias', column, alias },
@@ -877,15 +883,23 @@ export function relationColumn<A extends string>(
 	column: string,
 	as: A,
 ): AliasedExprColumn<A> {
-	if (!relation || relation.trim() === '') {
+	// FIND-008: Validate relation path segments, column, and alias as SQL identifiers.
+	// relation may be dot-separated (e.g. 'category.parent') — validate each segment individually.
+	// Keep the explicit empty guard so callers get the descriptive "relation path" message for ''.
+	// Non-empty but invalid strings (whitespace, injection chars) are caught by validateIdentifier.
+	if (!relation) {
 		throw new Error('relationColumn() requires a non-empty relation path');
 	}
-	if (!column || column.trim() === '') {
-		throw new Error('relationColumn() requires a non-empty column name');
+	for (const segment of relation.split('.')) {
+		validateIdentifier(segment, 'relation');
 	}
-	if (!as || (as as string).trim() === '') {
-		throw new Error('relationColumn() requires a non-empty alias');
+	// Allow the wildcard '*' as a valid column value — the adapter compiler
+	// handles it as A_Star (unquoted star) for relation.* expansion.
+	// Any other column value must pass identifier validation.
+	if (column !== '*') {
+		validateIdentifier(column, 'column');
 	}
+	validateIdentifier(as as string, 'column');
 	return {
 		__expr: true,
 		intent: { kind: 'relationColumn', relation, column, as },

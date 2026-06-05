@@ -35,11 +35,15 @@ describe('subquery factory', () => {
 // ============================================================================
 
 describe('outerRef function', () => {
-	it('should create a SubqueryRefIntent', () => {
+	it('should create a SubqueryRefIntent with outer:true discriminator', () => {
 		const refIntent = outerRef('parentId');
+		// outer:true is the discriminator that distinguishes outerRef() from an
+		// inner ref() (RefExpressionIntent) which has the same { kind:'ref', column }
+		// shape.  containsOuterRef() checks outer===true to avoid false positives.
 		expect(refIntent).toEqual({
 			kind: 'ref',
 			column: 'parentId',
+			outer: true,
 		});
 	});
 
@@ -48,6 +52,7 @@ describe('outerRef function', () => {
 		expect(refIntent).toEqual({
 			kind: 'ref',
 			column: 't0.categoryId',
+			outer: true,
 		});
 	});
 });
@@ -105,7 +110,7 @@ describe('SubqueryBuilder', () => {
 				kind: 'comparison',
 				field: 'orderId',
 				operator: 'eq',
-				value: { kind: 'ref', column: 'id' },
+				value: { kind: 'ref', column: 'id', outer: true },
 			});
 		});
 
@@ -182,7 +187,7 @@ describe('SubqueryBuilder', () => {
 					kind: 'comparison',
 					field: 'productId',
 					operator: 'eq',
-					value: { kind: 'ref', column: 'id' },
+					value: { kind: 'ref', column: 'id', outer: true },
 				},
 			});
 		});
@@ -350,7 +355,7 @@ describe('SubqueryExpression', () => {
 						kind: 'comparison',
 						field: 'productId',
 						operator: 'eq',
-						value: { kind: 'ref', column: 'id' },
+						value: { kind: 'ref', column: 'id', outer: true },
 					},
 				},
 			});
@@ -564,7 +569,7 @@ describe('chaining and immutability', () => {
 				kind: 'comparison',
 				field: 'orderId',
 				operator: 'eq',
-				value: { kind: 'ref', column: 'id' },
+				value: { kind: 'ref', column: 'id', outer: true },
 			},
 		});
 	});

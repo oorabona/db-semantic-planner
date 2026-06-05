@@ -44,6 +44,7 @@ import { createWhereDispatcher } from './handlers/index.js';
 // Called once at module-load time (safe: no circular calls, just stores the factory ref).
 registerWhereDispatcherFactory(createWhereDispatcher);
 
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -51,6 +52,13 @@ import type {
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
 import { buildColumnRef } from './handlers/where/utils.js';
+// DEFECT-2 FIX: import the modifier guard so the direct compileWhereIntent path
+// (used by compileBatchUpdate and other mutation callers) enforces the same
+// rawExists modifier restrictions as the decisions path (convertWhereCondition).
+import {
+	assertNoUnsupportedSubqueryModifiers,
+	containsOuterRef,
+} from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
@@ -162,6 +170,31 @@ export function buildSubqueryFromIntent(
 	naming: NamingPlugin = identityNaming,
 	schemaName?: string,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
+	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
+	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
+	// JOINs, or relation hydration (include). Any caller passing an intent with those
+	// modifiers would get silently-wrong SQL (broader or semantically-different matches).
+	//
+	// This guard fires regardless of which call path reaches this function:
+	//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — no prior guard
+	//   • handleRawExistsIntent     (compile-where.ts)             — also guards there
+	//   • handleSubqueryIntent      (compile-where.ts)             — also guards there
+	//   • adapter-compiler-mutations compileSubquery callback       — no prior guard
+	//
+	// The call-site guards in handleRawExistsIntent/handleSubqueryIntent are retained
+	// for defense-in-depth (earlier, more specific error messages). This chokepoint
+	// guarantees any future caller without a call-site guard is still protected.
+	assertNoUnsupportedSubqueryModifiers(intent, 'rawExists');
+	// Correlated subqueries (outerRef inside the inner WHERE) are not supported:
+	// buildSubqueryFromIntent builds a fresh inner WhereCompilerCtx with no outer alias,
+	// so SubqueryRefIntent values fall back to being serialized as object $N parameters,
+	// producing invalid SQL at best and a runtime panic at worst.
+	if (intent.where && containsOuterRef(intent.where)) {
+		throw new Error(
+			'buildSubqueryFromIntent: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ' +
+				'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline.',
+		);
+	}
 	const targetTable = intent.from;
 	const innerAlias = `${targetTable}_sq`;
 
@@ -408,6 +441,18 @@ function handleSubqueryIntent(
 		subquery: Parameters<WhereCompilerCtx['compileSubquery']>[0];
 	};
 
+	// Guard: reject scalar subqueries with modifiers that buildSubqueryFromIntent
+	// silently drops.  The decisions path (convertSubquery in intent-to-decisions.ts)
+	// uses 'scalar' which allows limit/orderBy because that path faithfully emits them.
+	// This direct path uses buildSubqueryFromIntent which emits ONLY SELECT/FROM/WHERE
+	// — limit, orderBy, groupBy, having, offset, distinct, joins, include are all
+	// dropped. Use 'scalar-direct' to reject the full dropped set, including limit and
+	// orderBy that 'scalar' allows.
+	assertNoUnsupportedSubqueryModifiers(
+		subquery as QueryIntent,
+		'scalar-direct',
+	);
+
 	const {
 		sql: subqueryNode,
 		paramCount,
@@ -440,34 +485,226 @@ function handleRelationFilterIntent(
 	ctx: WhereCompilerCtx,
 ): Node {
 	const rf = intent as WhereRelationFilterIntent;
-	const relation = Array.isArray(rf.relation)
-		? (rf.relation[0] as string)
-		: (rf.relation as string);
+	const hops: string[] = Array.isArray(rf.relation)
+		? (rf.relation as string[])
+		: [rf.relation as string];
 
 	// mode:'some'  → EXISTS         (at least one matches)
 	// mode:'none'  → NOT EXISTS     (none match)
 	// mode:'every' → NOT EXISTS WHERE NOT condition (all match)
 	const existsKind =
 		rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
-	const innerWhere: WhereIntent =
+
+	// DEFECT 2 FIX: mode:'every' with no/undefined where OR an empty logical
+	// group (and() with zero conditions) is vacuously true.
+	// every(TRUE) over any path is trivially satisfied for all rows.
+	// NOT EXISTS(path WHERE NOT TRUE) = NOT EXISTS(path WHERE FALSE) = TRUE.
+	// Building `{ kind: 'not', condition: undefined }` and recursing would crash
+	// on the undefined path; the empty-and path produces the right answer but
+	// emits an unnecessary NOT EXISTS subquery — short-circuit here instead.
+	const rfWhere = rf.where as unknown as Record<string, unknown> | undefined;
+	const isVacuousEvery =
+		rf.mode === 'every' &&
+		(!rfWhere ||
+			(typeof rfWhere === 'object' &&
+				rfWhere.kind === 'and' &&
+				Array.isArray(rfWhere.conditions) &&
+				(rfWhere.conditions as unknown[]).length === 0));
+	if (isVacuousEvery) {
+		// Validate the relation/path BEFORE returning vacuous-true.
+		// Without this, a typoed/undeclared relation short-circuits to all-rows TRUE
+		// (fail-open security regression) instead of throwing fail-closed.
+		// The invariant: vacuous TRUE is only correct when the relation is VALID.
+		if (hops.length <= 1) {
+			const relation = hops[0] ?? (rf.relation as string);
+			// DEFECT 3 FIX: a vacuous every with NO model must fail closed — the adapter
+			// cannot validate the relation at all, so returning TRUE would match ALL rows
+			// regardless of whether the relation exists.  Throw to protect mutation guards.
+			if (!ctx.model) {
+				throw new Error(
+					`every relation filter requires a model to validate the relation '${relation}'. ` +
+						'Provide a model via WhereCompilerCtx or use the decisions path.',
+				);
+			}
+			const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
+			if (!resolved) {
+				throw new Error(
+					`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
+						'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+				);
+			}
+		} else {
+			// Multi-hop: validate ALL hops upfront (same guard as the non-vacuous path).
+			if (!ctx.model) {
+				throw new Error(
+					`relationFilter(${JSON.stringify(hops)}): multi-hop relation paths require a model on the direct compile path. ` +
+						'Provide a model via WhereCompilerCtx or use the decisions path.',
+				);
+			}
+			let currentSource = ctx.rootTable;
+			for (const hop of hops) {
+				const rel = ctx.model.getRelation(`${currentSource}.${hop}`);
+				if (!rel) {
+					throw new Error(
+						`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
+							'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+					);
+				}
+				currentSource = rel.target;
+			}
+		}
+		// DEFECT 2 FIX: return the identical TRUE literal that everyHandler (handlers/where/exists.ts)
+		// emits for its empty-conditions vacuous-true branch — { A_Const: { boolval: { boolval: true } } }.
+		// The previous TypeCast node had a mis-nested typeName (TypeName wrapped inside { TypeName: ... })
+		// which caused deparseTypeName() to emit "CAST(1 AS )" — invalid SQL.
+		return { A_Const: { boolval: { boolval: true } } };
+	}
+
+	const innermostWhere: WhereIntent | undefined =
 		rf.mode === 'every'
 			? ({ kind: 'not', condition: rf.where } as WhereIntent)
 			: rf.where;
 
-	const resolvedRelation = ctx.model?.getRelation(
-		`${ctx.rootTable}.${relation}`,
-	);
-	const targetTable = resolvedRelation?.target ?? relation;
+	if (hops.length <= 1) {
+		// Single-hop: resolve FK metadata from the model so the EXISTS handler
+		// uses the declared FK columns instead of the convention fallback.
+		// (DEFECT 1 FIX: before this fix, single-hop always fell back to convention,
+		//  so e.g. posts.author_id was correlated as posts.user_id — wrong.)
+		const relation = hops[0] ?? (rf.relation as string);
+		const resolvedRelation = ctx.model?.getRelation(
+			`${ctx.rootTable}.${relation}`,
+		);
 
-	return compileWhereIntent(
-		{
-			kind: existsKind,
-			relation,
+		// DEFECT 1 FIX (new): when a model IS present but the relation is NOT declared,
+		// fail closed — consistent with the multi-hop path and the vacuous-every path.
+		// Without this guard, a typoed relation name compiled against the convention-derived
+		// FK columns of an unintended table instead of throwing.
+		// KEEP the no-model path unchanged: no model → cannot validate → convention fallback.
+		if (ctx.model && !resolvedRelation) {
+			throw new Error(
+				`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
+					'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+			);
+		}
+
+		const targetTable = resolvedRelation?.target ?? relation;
+
+		// Thread FK metadata when the model is available and the relation is declared.
+		// When the model is absent we keep the current convention-fallback path
+		// (no model = no FK resolution possible, the exists handler will fall back too).
+		let singleHopSourceColumn: string | undefined;
+		let singleHopTargetColumn: string | undefined;
+		if (resolvedRelation) {
+			const rel = resolvedRelation;
+			const fk =
+				typeof rel.foreignKey === 'string'
+					? rel.foreignKey
+					: Array.isArray(rel.foreignKey)
+						? (rel.foreignKey as readonly string[])[0]
+						: undefined;
+			const defaultPk = DEFAULT_PK_COLUMN;
+			if (rel.type === 'belongsTo') {
+				// FK is on the source side: sourceTable.fkCol → targetTable.pk
+				singleHopSourceColumn =
+					fk ?? defaultFkDerivation(rel.target, defaultPk);
+				singleHopTargetColumn = rel.targetKey ?? defaultPk;
+			} else {
+				// hasMany / hasOne: FK is on the target side: targetTable.fkCol → sourceTable.pk
+				singleHopSourceColumn = rel.sourceKey ?? defaultPk;
+				singleHopTargetColumn =
+					fk ?? defaultFkDerivation(ctx.rootTable, defaultPk);
+			}
+		}
+
+		return compileWhereIntent(
+			{
+				kind: existsKind,
+				relation,
+				targetTable,
+				...(singleHopSourceColumn !== undefined && {
+					sourceColumn: singleHopSourceColumn,
+				}),
+				...(singleHopTargetColumn !== undefined && {
+					targetColumn: singleHopTargetColumn,
+				}),
+				where: innermostWhere,
+			} as unknown as WhereIntent,
+			ctx,
+		);
+	}
+
+	// Multi-hop: build a nested EXISTS chain from outermost to innermost.
+	// Each hop must be declared in the model; fail-closed on undeclared hops.
+	if (!ctx.model) {
+		throw new Error(
+			`relationFilter(${JSON.stringify(hops)}): multi-hop relation paths require a model on the direct compile path. ` +
+				'Provide a model via WhereCompilerCtx or use the decisions path.',
+		);
+	}
+	const model = ctx.model;
+
+	// Validate all hops upfront and collect resolved targets + FK metadata.
+	let currentSource = ctx.rootTable;
+	const hopTargets: string[] = [];
+	// Per-hop FK columns so the EXISTS handler uses model-declared FKs instead
+	// of convention fallback (fixes the DEFECT-2 wrong-correlation bug).
+	const hopSourceColumns: string[] = [];
+	const hopTargetColumns: string[] = [];
+	for (const hop of hops) {
+		const rel = model.getRelation(`${currentSource}.${hop}`);
+		if (!rel) {
+			throw new Error(
+				`relationFilter(${JSON.stringify(hops)}): no relation '${hop}' declared on table '${currentSource}'. ` +
+					'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+			);
+		}
+		hopTargets.push(rel.target);
+		// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
+		// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
+		// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
+		const fk =
+			typeof rel.foreignKey === 'string'
+				? rel.foreignKey
+				: Array.isArray(rel.foreignKey)
+					? (rel.foreignKey as readonly string[])[0]
+					: undefined;
+		const defaultPk = DEFAULT_PK_COLUMN;
+		if (rel.type === 'belongsTo') {
+			hopSourceColumns.push(fk ?? defaultFkDerivation(rel.target, defaultPk));
+			hopTargetColumns.push(rel.targetKey ?? defaultPk);
+		} else {
+			// hasMany / hasOne: FK lives on the target table
+			hopSourceColumns.push(rel.sourceKey ?? defaultPk);
+			hopTargetColumns.push(
+				fk ?? defaultFkDerivation(currentSource, defaultPk),
+			);
+		}
+		currentSource = rel.target;
+	}
+
+	// Build the nested WhereIntent chain from innermost to outermost.
+	// innermost hop: carries the user's where clause.
+	// Each outer hop wraps the previous as its where clause.
+	// Per-hop FK columns are threaded in so the EXISTS handler emits the correct
+	// correlation predicate (e.g. users.id = posts.author_id, not posts.user_id).
+	let innerIntent: WhereIntent | undefined = innermostWhere;
+	for (let i = hops.length - 1; i >= 0; i--) {
+		const hop = hops[i] ?? '';
+		const targetTable = hopTargets[i] ?? hop;
+		// All inner hops use 'exists'; outermost uses existsKind.
+		const hopKind = i === 0 ? existsKind : 'exists';
+		innerIntent = {
+			kind: hopKind,
+			relation: hop,
 			targetTable,
-			where: innerWhere,
-		} as unknown as WhereIntent,
-		ctx,
-	);
+			sourceColumn: hopSourceColumns[i],
+			targetColumn: hopTargetColumns[i],
+			where: innerIntent,
+		} as unknown as WhereIntent;
+	}
+
+	// Compile the outermost intent in the chain.
+	return compileWhereIntent(innerIntent as WhereIntent, ctx);
 }
 
 /**
@@ -481,6 +718,29 @@ function handleRawExistsIntent(
 ): Node {
 	const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent)
 		.subquery;
+	// DEFECT-2 FIX: enforce the same modifier guard as the decisions path
+	// (convertWhereCondition in intent-to-decisions.ts).  Without this guard,
+	// rawExists(subquery.limit(0)) on the direct compile-where path (used by
+	// compileBatchUpdate) silently compiles as an unrestricted EXISTS — always
+	// true — broadening the mutation guard contrary to the caller's intent.
+	assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
+	// DEFECT-3 FIX: reject correlated subqueries (outerRef inside inner WHERE) on
+	// the direct compile-where path, matching the decisions-path guard in
+	// convertWhereCondition (intent-to-decisions.ts).  Without this guard,
+	// rawExists(subquery(... outerRef(...))) on the direct path (used by
+	// compileBatchUpdate) silently serialises the outerRef object as a $N
+	// parameter (an object literal!) — producing wrong SQL or a runtime error.
+	const subIntentTyped = subIntent as QueryIntent;
+	if (subIntentTyped.where && containsOuterRef(subIntentTyped.where)) {
+		const kindLabel =
+			(intent as { kind?: string }).kind === 'rawNotExists'
+				? 'rawNotExists'
+				: 'rawExists';
+		throw new Error(
+			`${kindLabel}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
+				'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
+		);
+	}
 	const {
 		sql: subNode,
 		paramCount,
@@ -661,6 +921,19 @@ export function compileWhereIntent(
 	if (intent.kind === 'comparison') {
 		const exprRefResult = handleComparisonWithExprRef(intent, ctx, handlerCtx);
 		if (exprRefResult !== null) return exprRefResult;
+	}
+
+	// IN-subquery guard: the dispatcher normalises the subquery by copying only
+	// from/select/where/limit/orderBy — GROUP BY, HAVING, OFFSET, DISTINCT,
+	// include, and joins are silently dropped before the handler sees the intent.
+	// For mutation guards that reach this path (compileBatchUpdate → compileWhereIntent
+	// for the WHERE clause), silent truncation can broaden the affected rows.
+	// Mirror the guard on the decisions path (convertIn in intent-to-decisions.ts).
+	if (intent.kind === 'in') {
+		const inSub = (intent as { subquery?: unknown }).subquery;
+		if (inSub) {
+			assertNoUnsupportedSubqueryModifiers(inSub as QueryIntent, 'IN');
+		}
 	}
 
 	// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,

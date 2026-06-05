@@ -28,7 +28,6 @@ import {
 	type QueryIntent,
 	type RecursiveIntent,
 	type WhereAndIntent,
-	type WhereExistsIntent,
 	type WhereInIntent,
 	type WhereIntent,
 	type WhereNotIntent,
@@ -296,10 +295,19 @@ export function plan(
 		throw new Error(`Unknown table: ${intent.from}`);
 	}
 
-	// Optimize IN-subquery → EXISTS when relation is known in schema
+	// Optimize IN-subquery → EXISTS when the relation is known in schema.
+	// The optimized WHERE goes into `executableIntent` (adapter compiles from it),
+	// while `intent` stays as the original submitted intent (observable via dump()).
+	// `plannedIntent` is only used locally to decide whether to emit executableIntent.
 	const optimizedWhere = intent.where
 		? optimizeInToExists(intent.where, intent.from, model)
 		: undefined;
+
+	// Build the post-optimization intent (used as executableIntent when optimization ran)
+	const plannedIntent: QueryIntent =
+		optimizedWhere !== undefined && optimizedWhere !== intent.where
+			? { ...intent, where: optimizedWhere }
+			: intent;
 
 	// Process where clause
 	if (optimizedWhere) {
@@ -358,7 +366,13 @@ export function plan(
 		decisions: Object.freeze(state.decisions.slice()),
 		warnings: Object.freeze(state.warnings.slice()),
 		ctes: Object.freeze(state.ctes.slice()),
+		// intent is ALWAYS the original submitted intent (contract: observable via dump()).
+		// executableIntent carries the optimized WHERE (e.g. IN→EXISTS) when the
+		// optimizer rewrote it, so the adapter compiles the correct SQL from that field.
+		// When no optimization applies, executableIntent is left undefined and the
+		// adapter falls back to intent.
 		intent,
+		...(plannedIntent !== intent && { executableIntent: plannedIntent }),
 		metadata,
 	};
 
@@ -609,11 +623,63 @@ function optimizeInToExists(
 	where: WhereIntent,
 	sourceTable: string,
 	model: ModelIR,
+	// negated tracks whether this node is under an odd number of NOT wrappers.
+	// It is used ONLY for the NULL-safety guard — it never determines the rewrite
+	// form (exists vs notExists).
+	//
+	// The rewrite form is determined solely by the in-intent's OWN `not` flag:
+	//   • inWhere.not === false → rewrite to { kind: 'exists' }
+	//   • inWhere.not === true  → rewrite to { kind: 'notExists' }
+	//
+	// The outer boolean structure (not/and/or wrappers) is PRESERVED by recursion,
+	// so the form must mirror only the in-intent's own polarity.  The `negated`
+	// parity is XOR'd with `inWhere.not` to compute whether the rewrite would
+	// occur in a negated context — used ONLY to block rewrites where the FK is
+	// nullable (NULL-unsafe under effective negation).
+	//
+	// Examples at the 'in' leaf:
+	//   • inSubquery(...)  at negated=false  → effectiveNeg=false, form=exists     → exists
+	//   • inSubquery(...)  at negated=true   → effectiveNeg=true,  nullable?keep:form=exists  → exists (outer not preserved)
+	//   • {not:true}       at negated=false  → effectiveNeg=true,  nullable?keep:form=notExists
+	//   • {not:true}       at negated=true   → effectiveNeg=false, form=exists (double-neg, outer not preserved)
+	negated = false,
 ): WhereIntent {
 	switch (where.kind) {
 		case 'in': {
 			const inWhere = where as WhereInIntent;
 			if (!inWhere.subquery) return where;
+
+			// Only rewrite when the subquery is SIMPLE: single source table, one
+			// selected column (the FK), and NO modifiers that change the result set.
+			// Any of the following make the subquery non-simple — keep IN unchanged:
+			//   limit / orderBy   — LIMIT n restricts which rows satisfy IN, can't be
+			//                       expressed in EXISTS form
+			//   offset             — similar row-restriction semantics
+			//   groupBy / having   — HAVING count(*)>1 restricts to duplicates etc.;
+			//                       EXISTS (SELECT 1 ... GROUP BY x HAVING ...) drops
+			//                       the HAVING restriction and matches MORE rows
+			//   distinct / distinctOn — deduplicate semantics lost in EXISTS
+			//   joins / include    — extra tables in the subquery aren't propagated
+			//   batchValuesSource  — unnest() source, not a real table
+			//   aggregate select   — SELECT max(price) is not a simple FK projection
+			const sq = inWhere.subquery;
+			if (
+				sq.limit != null ||
+				sq.orderBy?.length ||
+				sq.offset != null ||
+				sq.groupBy?.length ||
+				sq.having != null ||
+				sq.distinct ||
+				sq.distinctOn?.length ||
+				sq.joins?.length ||
+				sq.include?.length ||
+				sq.batchValuesSource != null ||
+				sq.existsWrap ||
+				sq.lock != null ||
+				(sq.select != null && sq.select.type !== 'fields')
+			) {
+				return where;
+			}
 
 			// Extract the single column from the subquery's select
 			const subSelect = inWhere.subquery.select;
@@ -657,30 +723,54 @@ function optimizeInToExists(
 
 			if (!matchedRelation) return where;
 
-			// Rewrite to EXISTS (NOT IN is handled by the 'not' case below)
-			const existsWhere: WhereExistsIntent = {
-				kind: 'exists',
-				relation: matchedRelation,
-				// Forward the subquery's inner WHERE conditions
-				...(inWhere.subquery.where && { where: inWhere.subquery.where }),
-			} as WhereExistsIntent;
+			// NULL-safety guard: compute effective negation (XOR of outer context parity
+			// and the in-intent's own `not` flag) to determine whether this rewrite
+			// occurs under effective negation.  Under effective negation with a nullable
+			// FK, `x NOT IN (SELECT y ...)` returns UNKNOWN (row excluded) when y is NULL,
+			// whereas `NOT EXISTS` always returns TRUE — so the rewrite would BROADEN the
+			// filter.  Block the rewrite in that case.
+			const effectiveNegated = negated !== Boolean(inWhere.not);
+			if (effectiveNegated) {
+				const existsIntent = { relation: matchedRelation };
+				if (
+					!isSubquerySelectedColumnNonNullable(existsIntent, sourceTable, model)
+				) {
+					// Nullable FK under effective negation — keep original IN (correct SQL semantics)
+					return where;
+				}
+			}
 
-			return existsWhere;
+			// Rewrite form is determined SOLELY by the in-intent's own `not` flag,
+			// NOT by `effectiveNegated`.  The outer boolean structure (not/and/or
+			// wrappers) is preserved by the recursion, so the form must mirror only
+			// the in-intent's own polarity:
+			//   • inWhere.not === false → { kind: 'exists'    } — outer NOT wraps it if present
+			//   • inWhere.not === true  → { kind: 'notExists' } — outer NOT wraps it if present
+			const targetKind = inWhere.not ? 'notExists' : 'exists';
+			return {
+				kind: targetKind,
+				relation: matchedRelation,
+				...(inWhere.subquery.where && { where: inWhere.subquery.where }),
+			} as unknown as WhereIntent;
 		}
 
 		case 'and': {
 			const andWhere = where as WhereAndIntent;
 			const optimized = andWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model),
+				optimizeInToExists(c, sourceTable, model, negated),
 			);
 			if (optimized.every((c, i) => c === andWhere.conditions[i])) return where;
 			return { kind: 'and', conditions: optimized } as WhereAndIntent;
 		}
 
 		case 'or': {
+			// The adapter now compiles EXISTS inline at its boolean tree position
+			// (enrichExistsDecisionsInPlace replaces stubs in-place rather than hoisting
+			// to top-level AND).  Recursing here is safe: an exists inside an OR
+			// becomes a whereOr stub that is enriched in-place, preserving OR semantics.
 			const orWhere = where as WhereOrIntent;
 			const optimized = orWhere.conditions.map((c) =>
-				optimizeInToExists(c, sourceTable, model),
+				optimizeInToExists(c, sourceTable, model, negated),
 			);
 			if (optimized.every((c, i) => c === orWhere.conditions[i])) return where;
 			return { kind: 'or', conditions: optimized } as WhereOrIntent;
@@ -688,34 +778,19 @@ function optimizeInToExists(
 
 		case 'not': {
 			const notWhere = where as WhereNotIntent;
+			// Flip negation parity for the child (used only for the null-safety guard
+			// inside 'case in').  The outer 'not' wrapper is ALWAYS preserved: after
+			// the child rewrites its 'in' leaf to 'exists' or 'notExists', the outer
+			// not() remains to produce the correct SQL structure:
+			//   not(in_not=false) → child becomes exists    → not(exists)    = NOT EXISTS   ✓
+			//   not(in_not=true)  → child becomes notExists → not(notExists) = NOT NOT EXISTS = EXISTS  (adapter compiles correctly)
 			const optimized = optimizeInToExists(
 				notWhere.condition,
 				sourceTable,
 				model,
+				!negated,
 			);
 			if (optimized === notWhere.condition) return where;
-			// NOT(EXISTS) → notExists (direct, no wrapper)
-			// Guard: only convert when the FK column is provably non-nullable.
-			// SQL's three-valued logic means NOT IN returns UNKNOWN (excludes row)
-			// when the subquery can produce NULLs, whereas NOT EXISTS always
-			// returns TRUE for an empty subquery.  The rewrite is only valid when
-			// the selected column is NOT NULL.
-			if (optimized.kind === 'exists') {
-				if (
-					!isSubquerySelectedColumnNonNullable(
-						optimized as { relation: string },
-						sourceTable,
-						model,
-					)
-				) {
-					// Column is nullable or unknown — preserve NOT(IN) semantics
-					return where;
-				}
-				return {
-					...optimized,
-					kind: 'notExists',
-				} as unknown as WhereIntent;
-			}
 			return { kind: 'not', condition: optimized } as WhereNotIntent;
 		}
 
@@ -817,6 +892,42 @@ function processWhere(
 
 		case 'expression':
 			break; // Custom expression — no relation analysis, pass through
+
+		// Adapter-only kinds: planner records no decisions; the adapter compiles
+		// them directly from the intent. Explicit cases here prevent silent
+		// fallthrough and keep the switch exhaustive.
+
+		case 'rawExists':
+		case 'rawNotExists':
+			// The subquery is an arbitrary QueryIntent — no FK-based relation
+			// resolution to perform at plan time. The adapter handles compilation.
+			break;
+
+		case 'subquery':
+			// Scalar subquery comparison — the adapter resolves the inner
+			// QueryIntent directly; no planner-level relation analysis needed.
+			break;
+
+		case 'range':
+			// PostgreSQL range operator — scalar field check, no relation
+			// analysis required; adapter emits the range SQL.
+			break;
+
+		case 'jsonContains':
+		case 'jsonExists':
+			// JSON containment / key-existence operators — scalar field checks
+			// compiled entirely by the adapter.
+			break;
+
+		default: {
+			// Exhaustiveness guard: if a new WhereIntent kind is added to the
+			// union without a matching case here, TypeScript will flag this as
+			// a type error at compile time, preventing silent no-ops.
+			const _exhaustive: never = where;
+			throw new Error(
+				`processWhere: unhandled WhereIntent kind '${(_exhaustive as { kind: string }).kind}'`,
+			);
+		}
 	}
 }
 
