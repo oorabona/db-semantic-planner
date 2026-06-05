@@ -304,22 +304,26 @@ describe('plan-decision-extractor - coverage', () => {
 			]);
 		});
 
-		it('converts in condition with subquery', () => {
+		it('converts in condition with subquery (delegates to convertWhereCondition for correct inSubquery shape)', () => {
+			// OLD behavior (locked a bug): passed the subquery object as a raw `value`
+			// producing operator:'in' with value:{from,select,...} — never a valid Decision.
+			// NEW correct behavior: delegates to convertIn which builds operator:'inSubquery'
+			// with targetTable, selectColumn, and conditions, matching the decisions path.
 			const subquery = {
 				type: 'select',
 				from: 'active',
 				select: { fields: ['id'] },
 			};
 			const where = { kind: 'in', field: 'id', subquery };
-			expect(convertWhereToDecisions(where, 'users')).toEqual([
-				{
-					type: 'where',
-					column: 'id',
-					operator: 'in',
-					value: subquery,
-					table: 'users',
-				},
-			]);
+			const result = convertWhereToDecisions(where, 'users');
+			expect(result).toHaveLength(1);
+			expect(result[0]).toMatchObject({
+				type: 'where',
+				column: 'id',
+				operator: 'inSubquery',
+				targetTable: 'active',
+				selectColumn: 'id',
+			});
 		});
 
 		it('converts range condition with explicit operator', () => {
@@ -444,14 +448,24 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(result[0].conditions).toHaveLength(1);
 		});
 
-		it('converts NOT with empty condition', () => {
+		it('converts NOT with unknown inner kind — now throws (was silent-drop, locked the broadening bug)', () => {
+			// OLD behavior (locked the silent-drop bug): unknown kind inside 'not' silently
+			// returned [] causing the not to collapse — predicate vanished from SQL.
+			// NEW behavior: exhaustive default throws, preventing silent filter broadening.
 			const where = { kind: 'not', condition: { kind: 'unknown' } };
-			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+			expect(() => convertWhereToDecisions(where, 'users')).toThrow(
+				/unhandled predicate kind 'unknown'/,
+			);
 		});
 
-		it('returns empty for unknown kind', () => {
+		it('unknown top-level kind — now throws (was silent-drop, locked the broadening bug)', () => {
+			// OLD behavior (locked the silent-drop bug): unknown top-level kind returned []
+			// — predicate vanished from SQL of any nested exists that used it.
+			// NEW behavior: exhaustive default throws, preventing silent filter broadening.
 			const where = { kind: 'unknownType', field: 'x' };
-			expect(convertWhereToDecisions(where, 'users')).toEqual([]);
+			expect(() => convertWhereToDecisions(where, 'users')).toThrow(
+				/unhandled predicate kind 'unknownType'/,
+			);
 		});
 
 		it('returns empty for null/undefined where', () => {

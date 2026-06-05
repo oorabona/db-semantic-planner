@@ -293,7 +293,11 @@ describe('scalarSubqueryHandler', () => {
 		expect(node).toHaveProperty('A_Expr');
 	});
 
-	it('strips schema from nested condition context', () => {
+	it('propagates schema into nested condition context (regression lock for schema-scoping bug)', () => {
+		// Schema must NOT be stripped from subCtx — nested conditions need the schema
+		// to qualify their own FROM tables if they dispatch nested EXISTS or subquery.
+		// Previously schema was stripped here which would cause inner FROM tables to be
+		// unqualified when a schema-scoped query was composed.
 		const state = createCompilerState();
 		const ctxWithSchema = makeCtx({ schema: 'public' });
 		let capturedCtx: CompilerContext | undefined;
@@ -327,7 +331,8 @@ describe('scalarSubqueryHandler', () => {
 		);
 
 		expect(capturedCtx).toBeDefined();
-		expect(capturedCtx!.schema).toBeUndefined();
+		// Schema is propagated — nested dispatch receives the same schema
+		expect(capturedCtx!.schema).toBe('public');
 	});
 
 	it('builds subquery with ORDER BY', () => {

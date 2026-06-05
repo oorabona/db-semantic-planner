@@ -167,10 +167,12 @@ function buildScalarSubquery(
 	// Build WHERE clause if conditions exist
 	let whereClause: Node | undefined;
 	if (decision.conditions && decision.conditions.length > 0) {
-		// Strip schema — nested conditions reference the aliased table
-		const { schema: _schema, ...ctxWithoutSchema } = ctx;
+		// NOTE: schema is intentionally KEPT in subCtx so any nested EXISTS or
+		// subquery conditions can qualify their FROM tables with the schema name.
+		// Column references are alias-prefixed (not schema-qualified) regardless —
+		// columnRef always passes undefined for schema.
 		const subCtx: CompilerContext = {
-			...ctxWithoutSchema,
+			...ctx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 		};

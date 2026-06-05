@@ -211,7 +211,11 @@ describe('existsHandler', () => {
 		expect(node).toHaveProperty('SubLink');
 	});
 
-	it('strips schema from nested condition context', () => {
+	it('propagates schema into nested condition context (regression lock for schema-scoping bug)', () => {
+		// Schema must NOT be stripped from subCtx — nested conditions (e.g. a nested
+		// EXISTS) need schema to qualify their own FROM tables via rangeVar.
+		// Previously schema was stripped here which caused inner FROM tables to be
+		// unqualified when a schema-scoped query was used.
 		const state = createCompilerState();
 		const ctxWithSchema = makeCtx({ schema: 'public' });
 		let capturedCtx: CompilerContext | undefined;
@@ -240,7 +244,8 @@ describe('existsHandler', () => {
 		existsHandler.compile(decision, ctxWithSchema, state, inspectDispatch);
 
 		expect(capturedCtx).toBeDefined();
-		expect(capturedCtx!.schema).toBeUndefined();
+		// Schema is propagated — nested dispatch receives the same schema
+		expect(capturedCtx!.schema).toBe('public');
 	});
 
 	it('sets outerAlias in nested condition context', () => {

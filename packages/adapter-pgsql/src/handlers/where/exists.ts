@@ -114,11 +114,15 @@ function buildExistsSubquery(
 	let whereClause = correlation;
 	if (decision.conditions && decision.conditions.length > 0) {
 		// Create context for subquery with target alias.
-		// Schema is stripped because nested conditions reference the aliased table,
-		// and aliases are query-scoped (not schema-qualified).
-		const { schema: _schema, ...ctxWithoutSchema } = ctx;
+		// NOTE: schema is intentionally KEPT in subCtx so that any nested EXISTS
+		// conditions can qualify their own FROM tables (rangeVar) with the schema
+		// name.  Column references are always query-scoped (alias-prefixed, no
+		// schema) — buildCorrelation and columnRef already pass undefined for schema
+		// independently of the context.  Stripping schema here was the root cause of
+		// the nested-exists schema-scoping bug: the inner rangeVar would receive
+		// undefined as schema and emit an unqualified table name.
 		const subCtx: CompilerContext = {
-			...ctxWithoutSchema,
+			...ctx,
 			rootTable: targetTable,
 			currentAlias: targetAlias,
 			outerAlias: sourceAlias,

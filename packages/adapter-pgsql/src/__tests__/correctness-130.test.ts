@@ -14,7 +14,7 @@
  *             for both 'scalar' and 'scalar-direct' contexts.
  */
 
-import { ref, schema } from '@dbsp/core';
+import { createOrm, eq, exists, ref, schema } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
@@ -26,6 +26,7 @@ import {
 import { createCompilerState } from '../handlers/types.js';
 import { convertWhereCondition } from '../intent-to-decisions.js';
 import { identityNaming } from '../naming-plugin.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -442,5 +443,143 @@ describe('DEFECT 3: scalar subquery with multiple aggregates is rejected', () =>
 		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
 			/restructure the query or use a CTE/,
 		);
+	});
+});
+
+// ============================================================================
+// SCHEMA-SCOPING BUG — nested EXISTS inner FROM must be schema-qualified
+//
+// Root cause: in handlers/where/exists.ts, when building `subCtx` for the
+// nested conditions dispatch, the schema was stripped from ctx.  Any nested
+// EXISTS condition then built its rangeVar (FROM clause) without a schema
+// qualifier, producing `FROM comments` instead of `FROM s.comments`.
+// The fix keeps `schema` in `subCtx`; column references are query-scoped
+// (alias-prefixed) already and are not affected.
+// ============================================================================
+
+function ws130(sql: string): string {
+	return sql.replace(/\s+/g, ' ').trim();
+}
+
+// Schema shared by all cases below: users → posts → comments
+const schemaScoped = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: { type: 'text' },
+		published: { type: 'boolean' },
+		author_id: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		body: { type: 'text' },
+		flagged: { type: 'boolean' },
+		post_id: ref('posts', { as: 'post', inverse: 'comments' }),
+	},
+} as const);
+
+function buildScopedOrm() {
+	const adapter = createPgsqlCompileOnlyAdapter({ model: schemaScoped.model });
+	return createOrm({ model: schemaScoped.model, adapter: adapter as any });
+}
+
+describe('SCHEMA-SCOPING: nested exists — inner FROM must be schema-qualified', () => {
+	it('single-hop exists: outer FROM is schema-qualified', () => {
+		const orm = buildScopedOrm();
+		const { sql } = orm
+			.withSchema('s')
+			.select('users')
+			.where(exists('posts', { where: eq('published', true) }))
+			.columns(['id', 'name'])
+			.dump();
+		const normalized = ws130(sql);
+
+		// Root table is qualified
+		expect(normalized).toContain('s.users');
+		// Outer exists FROM is qualified
+		expect(normalized).toContain('s.posts');
+		// No bare unqualified posts in FROM position
+		expect(normalized).not.toMatch(/FROM posts\b/);
+	});
+
+	it('nested exists: INNER FROM (comments) is schema-qualified — regression lock for the schema-scoping bug', () => {
+		// This is the exact bug case: inner exists subquery used to emit
+		// `FROM comments` (unqualified) because schema was stripped from subCtx.
+		// After the fix it must emit `FROM s.comments`.
+		const orm = buildScopedOrm();
+		const { sql } = orm
+			.withSchema('s')
+			.select('users')
+			.where(
+				exists('posts', {
+					where: exists('comments', { where: eq('flagged', true) }),
+				}),
+			)
+			.columns(['id', 'name'])
+			.dump();
+		const normalized = ws130(sql);
+
+		// Root table
+		expect(normalized).toContain('s.users');
+		// Outer exists FROM
+		expect(normalized).toContain('s.posts');
+		// Inner exists FROM — this is the regression lock: must be qualified
+		expect(normalized).toContain('s.comments');
+		// No unqualified FROM positions for either table
+		expect(normalized).not.toMatch(/FROM posts\b(?! AS)/);
+		expect(normalized).not.toMatch(/FROM comments\b(?! AS)/);
+		// Both EXISTS keywords must appear (outer + inner)
+		const existsCount = (normalized.toUpperCase().match(/\bEXISTS\b/g) ?? [])
+			.length;
+		expect(existsCount).toBeGreaterThanOrEqual(2);
+	});
+
+	it('nested exists without schema: all FROMs are unqualified (control case)', () => {
+		// Without .withSchema(), no qualifiers expected — confirms the fix is
+		// conditional on schema presence and does not break the no-schema path.
+		const orm = buildScopedOrm();
+		const { sql } = orm
+			.select('users')
+			.where(
+				exists('posts', {
+					where: exists('comments', { where: eq('flagged', true) }),
+				}),
+			)
+			.columns(['id', 'name'])
+			.dump();
+		const normalized = ws130(sql);
+
+		// No schema-qualified FROM: the pattern `FROM <schema>.` must not appear.
+		// (We cannot use `not.toContain('s.')` because table.column refs like
+		//  `users.id` contain the substring `s.` — check FROM positions explicitly.)
+		expect(normalized).not.toMatch(/FROM \w+\./);
+		// Both tables appear unqualified in FROM positions
+		expect(normalized).toContain('FROM posts');
+		expect(normalized).toContain('FROM comments');
+	});
+
+	it('multi-hop: inner hop FROM is schema-qualified', () => {
+		// Multi-hop: users → posts → comments (expressed as nested exists).
+		// Every hop must produce a qualified FROM when schema is set.
+		const orm = buildScopedOrm();
+		const { sql } = orm
+			.withSchema('tenant')
+			.select('users')
+			.where(
+				exists('posts', {
+					where: exists('comments', { where: eq('flagged', true) }),
+				}),
+			)
+			.columns(['id'])
+			.dump();
+		const normalized = ws130(sql);
+
+		// All three table references in FROM positions must carry the schema
+		expect(normalized).toContain('tenant.users');
+		expect(normalized).toContain('tenant.posts');
+		expect(normalized).toContain('tenant.comments');
 	});
 });
