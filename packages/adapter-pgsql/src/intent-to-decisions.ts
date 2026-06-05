@@ -372,7 +372,11 @@ export function assertNoUnsupportedSubqueryModifiers(
 	const isScalarContext = context === 'scalar' || context === 'scalar-direct';
 	if (isScalarContext) {
 		const select = subquery.select as
-			| { type?: string; fields?: readonly string[] }
+			| {
+					type?: string;
+					fields?: readonly string[];
+					aggregates?: readonly unknown[];
+			  }
 			| undefined;
 		if (select?.type === 'expressions') {
 			// SelectWithExpressionsIntent is not emitted by buildScalarSubquery or
@@ -388,6 +392,20 @@ export function assertNoUnsupportedSubqueryModifiers(
 			// (the scalar comparison uses only the first column).
 			unsupported.push(
 				`multi-field projection [${select.fields.join(', ')}] (scalar subquery must project exactly one column — use a single field)`,
+			);
+		} else if (
+			select?.type === 'aggregate' &&
+			select.aggregates != null &&
+			select.aggregates.length > 1
+		) {
+			// DEFECT 3 FIX: a scalar subquery must project exactly ONE column.
+			// The decisions path takes only aggregates[0] — extra aggregates are
+			// silently dropped. The direct compile-where path (buildSubqueryFromIntent)
+			// emits ALL aggregates as separate ResTarget nodes, producing a multi-column
+			// scalar subquery that PostgreSQL rejects at runtime.
+			// Reject early on both paths so callers get a clear error.
+			unsupported.push(
+				`multi-aggregate projection (scalar subquery must project exactly one column — use a single aggregate)`,
 			);
 		}
 	}

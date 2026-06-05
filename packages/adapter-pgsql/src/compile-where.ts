@@ -494,23 +494,77 @@ function handleRelationFilterIntent(
 	// mode:'every' → NOT EXISTS WHERE NOT condition (all match)
 	const existsKind =
 		rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
+
+	// DEFECT 2 FIX: mode:'every' with no/undefined where is vacuously true.
+	// every(TRUE) over any path is trivially satisfied for all rows.
+	// NOT EXISTS(path WHERE NOT TRUE) = NOT EXISTS(path WHERE FALSE) = TRUE.
+	// Building `{ kind: 'not', condition: undefined }` and recursing would crash,
+	// so return the TRUE literal directly here — before building innermostWhere.
+	if (rf.mode === 'every' && !rf.where) {
+		return {
+			TypeCast: {
+				arg: { Integer: { ival: 1 } },
+				typeName: {
+					TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
+				},
+			},
+		} as unknown as Node;
+	}
+
 	const innermostWhere: WhereIntent | undefined =
 		rf.mode === 'every'
 			? ({ kind: 'not', condition: rf.where } as WhereIntent)
 			: rf.where;
 
 	if (hops.length <= 1) {
-		// Single-hop: existing behaviour.
+		// Single-hop: resolve FK metadata from the model so the EXISTS handler
+		// uses the declared FK columns instead of the convention fallback.
+		// (DEFECT 1 FIX: before this fix, single-hop always fell back to convention,
+		//  so e.g. posts.author_id was correlated as posts.user_id — wrong.)
 		const relation = hops[0] ?? (rf.relation as string);
 		const resolvedRelation = ctx.model?.getRelation(
 			`${ctx.rootTable}.${relation}`,
 		);
 		const targetTable = resolvedRelation?.target ?? relation;
+
+		// Thread FK metadata when the model is available and the relation is declared.
+		// When the model is absent we keep the current convention-fallback path
+		// (no model = no FK resolution possible, the exists handler will fall back too).
+		let singleHopSourceColumn: string | undefined;
+		let singleHopTargetColumn: string | undefined;
+		if (resolvedRelation) {
+			const rel = resolvedRelation;
+			const fk =
+				typeof rel.foreignKey === 'string'
+					? rel.foreignKey
+					: Array.isArray(rel.foreignKey)
+						? (rel.foreignKey as readonly string[])[0]
+						: undefined;
+			const defaultPk = DEFAULT_PK_COLUMN;
+			if (rel.type === 'belongsTo') {
+				// FK is on the source side: sourceTable.fkCol → targetTable.pk
+				singleHopSourceColumn =
+					fk ?? defaultFkDerivation(rel.target, defaultPk);
+				singleHopTargetColumn = rel.targetKey ?? defaultPk;
+			} else {
+				// hasMany / hasOne: FK is on the target side: targetTable.fkCol → sourceTable.pk
+				singleHopSourceColumn = rel.sourceKey ?? defaultPk;
+				singleHopTargetColumn =
+					fk ?? defaultFkDerivation(ctx.rootTable, defaultPk);
+			}
+		}
+
 		return compileWhereIntent(
 			{
 				kind: existsKind,
 				relation,
 				targetTable,
+				...(singleHopSourceColumn !== undefined && {
+					sourceColumn: singleHopSourceColumn,
+				}),
+				...(singleHopTargetColumn !== undefined && {
+					targetColumn: singleHopTargetColumn,
+				}),
 				where: innermostWhere,
 			} as unknown as WhereIntent,
 			ctx,
