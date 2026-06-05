@@ -300,6 +300,14 @@ export function handleJsonPathExtractExpression(
  * customOp / customFn / ref / param / cast / unary — custom expression in SELECT.
  * The expression intent is stored as-is in a 'selectCustomExpression' decision.
  * Compilation is deferred to compileExpressionIntent in compiler.ts.
+ *
+ * Implicit alias rule for cast():
+ *   When no explicit .as() alias is set, a cast() wrapping a ref() derives its
+ *   implicit alias from the source column name (the last segment of a dotted ref).
+ *   Examples:
+ *     cast(ref('created_at'), 'text')          → alias 'created_at'
+ *     cast(ref('t.score'), 'float4')           → alias 'score'
+ *     cast(ref('created_at'), 'text').as('ts') → alias 'ts' (explicit wins)
  */
 export function handleCustomExpressionSelect(
 	expr: Record<string, unknown>,
@@ -311,8 +319,18 @@ export function handleCustomExpressionSelect(
 		expressionIntent: expr,
 		table: rootTable,
 	};
-	const alias = expr.as as string | undefined;
-	if (alias) decision.alias = alias;
+	const explicitAlias = expr.as as string | undefined;
+	if (explicitAlias) {
+		decision.alias = explicitAlias;
+	} else if (expr.kind === 'cast') {
+		// Derive implicit alias from the inner ref's column name (last dot-segment)
+		const inner = expr.expr as Record<string, unknown> | undefined;
+		if (inner?.kind === 'ref') {
+			const col = inner.column as string;
+			const dotIdx = col.lastIndexOf('.');
+			decision.alias = dotIdx !== -1 ? col.slice(dotIdx + 1) : col;
+		}
+	}
 	decisions.push(decision);
 }
 
