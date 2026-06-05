@@ -1,6 +1,50 @@
 import { validateIdentifier } from './errors.js';
 
 /**
+ * Validate a PostgreSQL type name for use in CAST($N AS type[]).
+ *
+ * Type names are not plain SQL identifiers: they may contain spaces
+ * (e.g. `timestamp with time zone`), parenthesised modifiers (e.g.
+ * `varchar(255)`, `numeric(10,2)`), array brackets (`int4[]`), and
+ * schema qualification (`myschema.myenum`).
+ *
+ * Allowed characters: letters, digits, underscore, space, dot,
+ * parentheses, comma, and square brackets.
+ *
+ * Rejected: quotes (`"`, `'`), semicolons, backslashes, comment
+ * sequences (`--`, `/*`), and the empty string.
+ *
+ * @internal — exported for adapter compile-time revalidation only.
+ */
+export function validateTypeName(typeName: string): void {
+	if (!typeName || typeName.length === 0) {
+		throw new Error(
+			`batchValues: invalid type name '${typeName}'. Type names must not be empty.`,
+		);
+	}
+	// Reject dangerous characters that can break out of a TypeName context
+	if (
+		/["';\\]/.test(typeName) ||
+		/--/.test(typeName) ||
+		/\/\*/.test(typeName)
+	) {
+		throw new Error(
+			`batchValues: invalid type name '${typeName}'. ` +
+				'Type names must not contain quotes, semicolons, backslashes, or comment sequences.',
+		);
+	}
+	// Allow only safe characters: letters, digits, underscore, space, dot,
+	// parentheses, comma, square brackets
+	if (!/^[a-zA-Z0-9_\s.()[\],]+$/.test(typeName)) {
+		throw new Error(
+			`batchValues: invalid type name '${typeName}'. ` +
+				'Type names may only contain letters, digits, underscores, spaces, dots, ' +
+				'parentheses, commas, and square brackets.',
+		);
+	}
+}
+
+/**
  * BatchValuesRef — a virtual batch data source backed by unnest($1::type[], ...).
  *
  * Created via `orm.batchValues(data, columns, types, opts?)`.
@@ -97,13 +141,11 @@ export function batchValues(
 		throw new Error('batchValues: at least one column is required');
 	}
 	// Security: validate type names to prevent SQL injection via CAST($N AS type[]).
-	// Only allow identifier characters: letters, digits, underscore.
-	const invalidType = types.find((t) => !/^[a-zA-Z0-9_]+$/.test(t));
-	if (invalidType !== undefined) {
-		throw new Error(
-			`batchValues: invalid type name '${invalidType}'. ` +
-				'Type names must contain only letters, digits, and underscores.',
-		);
+	// Uses the type-name-safe validator (allows spaces, parens, brackets, dots)
+	// so that complex types like 'varchar(255)', 'numeric(10,2)', 'int4[]',
+	// and 'timestamp with time zone' are accepted while injection chars are rejected.
+	for (const t of types) {
+		validateTypeName(t);
 	}
 	// Security: validate alias and column names centrally so BOTH the
 	// orm.from(batchValues(...)) and orm...join(batchValues(...)) paths are
@@ -114,12 +156,24 @@ export function batchValues(
 	for (const col of columns) {
 		validateIdentifier(col, 'column');
 	}
-	return {
+	// Defensive copies: freeze all returned arrays so post-construction mutation
+	// of the caller's arrays cannot change what gets compiled.
+	// Vector 1 (mutation): caller mutates original arrays after batchValues() returns.
+	// Each data row is also copied so the caller cannot mutate individual arrays.
+	// The inner Object.freeze returns `readonly unknown[]` but BatchValuesRef.data
+	// declares `readonly unknown[][]` (inner arrays typed as mutable unknown[]).
+	// The cast is safe: callers only read from data[], never write to inner arrays.
+	const frozenData: readonly unknown[][] = Object.freeze(
+		data.map((row) => Object.freeze([...row]) as unknown[]),
+	);
+	const frozenColumns: readonly string[] = Object.freeze([...columns]);
+	const frozenTypes: readonly string[] = Object.freeze([...types]);
+	return Object.freeze({
 		__kind: 'batchValues',
-		data,
-		columns,
-		types,
+		data: frozenData,
+		columns: frozenColumns,
+		types: frozenTypes,
 		alias,
 		ordinality: opts?.ordinality ?? false,
-	};
+	});
 }

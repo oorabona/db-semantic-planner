@@ -144,19 +144,41 @@ describe('FR-3: batchValues()', () => {
 		).toThrow(/invalid type name/);
 	});
 
-	it('T7: batchValues() rejects type names with spaces', () => {
-		expect(() => batchValues([[1]], ['id'], ['character varying'])).toThrow(
+	it('T7: batchValues() rejects type names with quotes or semicolons', () => {
+		// Injection via quotes/semicolons must be rejected
+		expect(() =>
+			batchValues([[1]], ['id'], ["int4'; DROP TABLE x; --"]),
+		).toThrow(/invalid type name/);
+		expect(() => batchValues([[1]], ['id'], ['int4"; --'])).toThrow(
 			/invalid type name/,
 		);
+		// Space alone is NOT rejected: 'character varying' is a valid PG type
+		expect(() =>
+			batchValues([[1]], ['id'], ['character varying']),
+		).not.toThrow();
 	});
 
-	it('T8: batchValues() accepts valid type names', () => {
-		// All of these must pass validation
+	it('T8: batchValues() accepts valid type names including complex forms', () => {
+		// Simple base types
 		expect(() => batchValues([[1]], ['id'], ['integer'])).not.toThrow();
 		expect(() => batchValues([[1]], ['id'], ['int4'])).not.toThrow();
 		expect(() => batchValues([['/a']], ['path'], ['text'])).not.toThrow();
 		expect(() => batchValues([[true]], ['active'], ['bool'])).not.toThrow();
 		expect(() => batchValues([[1.5]], ['score'], ['float8'])).not.toThrow();
+		// Complex types with modifiers
+		expect(() =>
+			batchValues([[1.5]], ['val'], ['numeric(10,2)']),
+		).not.toThrow();
+		expect(() => batchValues([[1]], ['n'], ['varchar(255)'])).not.toThrow();
+		expect(() =>
+			batchValues([[new Date()]], ['ts'], ['timestamp with time zone']),
+		).not.toThrow();
+		// Array types
+		expect(() => batchValues([[1]], ['n'], ['int4[]'])).not.toThrow();
+		// Schema-qualified types
+		expect(() =>
+			batchValues([[null]], ['e'], ['myschema.myenum']),
+		).not.toThrow();
 	});
 
 	it('T9: ref() in batchValues join ON clause compiles as column reference, not literal', () => {
@@ -321,5 +343,88 @@ describe('batchValues() SQL injection prevention (DEFECT-1)', () => {
 		// Both alias and column must be double-quoted in the AS clause
 		expect(sql).toContain('"FilterSet"');
 		expect(sql).toContain('"MyId"');
+	});
+
+	// -----------------------------------------------------------------------
+	// DEFECT-1 defense-in-depth: mutation vector + forged-ref vector
+	// -----------------------------------------------------------------------
+
+	it('T-SEC-8: mutating caller types array after batchValues() does NOT change compiled SQL', () => {
+		// Vector 1: post-construction mutation of the original arrays must be
+		// inert because batchValues() defensively copies and freezes them.
+		const orm = buildOrm();
+		const types = ['text', 'text'];
+		const columns = ['path', 'name'];
+		const data: unknown[][] = [
+			['/a', '/b'],
+			['a.ts', 'b.ts'],
+		];
+		const batch = batchValues(data, columns, types, { alias: 'requested' });
+
+		// Compile baseline before mutation
+		const dumpBefore = ws((orm as any).from(batch).dump().sql);
+		expect(dumpBefore).toContain('CAST($1 AS text[])');
+
+		// Mutate all three caller arrays
+		types[0] = 'int) ; DROP TABLE x; --';
+		columns[0] = 'injected';
+		data[0] = [999, 888];
+
+		// Compiled SQL must be unchanged — the frozen copies inside batch are untouched
+		const dumpAfter = ws((orm as any).from(batch).dump().sql);
+		expect(dumpAfter).toBe(dumpBefore);
+		expect(dumpAfter).toContain('CAST($1 AS text[])');
+		expect(dumpAfter).not.toContain('DROP TABLE');
+	});
+
+	it('T-SEC-9: forged BatchValuesRef with malicious type name throws at compile time', () => {
+		// Vector 2: a forged structural BatchValuesRef bypasses batchValues() validation.
+		// The adapter compiler must revalidate and throw before emitting any SQL.
+		const orm = buildOrm();
+		const forged = {
+			__kind: 'batchValues' as const,
+			data: [[1, 2]],
+			columns: ['id'],
+			types: ['int) ; DROP TABLE x; --'],
+			alias: 'batch',
+			ordinality: false,
+		};
+		expect(() => (orm as any).from(forged).dump()).toThrow(
+			/BatchValues compile error.*unsafe type name/i,
+		);
+	});
+
+	it('T-SEC-10: complex valid types compile without error', () => {
+		// Regression guard: widened validator must accept complex PG type names
+		// that were previously rejected by the narrow /^[a-zA-Z0-9_]+$/ check.
+		const orm = buildOrm();
+
+		// numeric(10,2)
+		expect(() => {
+			const batch = batchValues([[1.5]], ['val'], ['numeric(10,2)']);
+			(orm as any).from(batch).dump();
+		}).not.toThrow();
+
+		// int4[]
+		expect(() => {
+			const batch = batchValues([[1]], ['n'], ['int4[]']);
+			(orm as any).from(batch).dump();
+		}).not.toThrow();
+
+		// varchar(255)
+		expect(() => {
+			const batch = batchValues([['hello']], ['s'], ['varchar(255)']);
+			(orm as any).from(batch).dump();
+		}).not.toThrow();
+
+		// timestamp with time zone
+		expect(() => {
+			const batch = batchValues(
+				[[new Date()]],
+				['ts'],
+				['timestamp with time zone'],
+			);
+			(orm as any).from(batch).dump();
+		}).not.toThrow();
 	});
 });

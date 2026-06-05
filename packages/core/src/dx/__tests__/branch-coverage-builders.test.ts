@@ -1007,9 +1007,10 @@ describe('batchValues — error branches', () => {
 		);
 	});
 
-	it('should throw when a type name contains a space', () => {
-		expect(() => batchValues([[1]], ['id'], ['not valid'])).toThrow(
-			"batchValues: invalid type name 'not valid'",
+	it('should throw when a type name contains a backslash', () => {
+		// Spaces are allowed (e.g. 'timestamp with time zone') but backslashes are not.
+		expect(() => batchValues([[1]], ['id'], ['int4\\injection'])).toThrow(
+			/invalid type name/,
 		);
 	});
 

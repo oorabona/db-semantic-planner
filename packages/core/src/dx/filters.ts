@@ -893,7 +893,12 @@ export function relationColumn<A extends string>(
 	for (const segment of relation.split('.')) {
 		validateIdentifier(segment, 'relation');
 	}
-	validateIdentifier(column, 'column');
+	// Allow the wildcard '*' as a valid column value — the adapter compiler
+	// handles it as A_Star (unquoted star) for relation.* expansion.
+	// Any other column value must pass identifier validation.
+	if (column !== '*') {
+		validateIdentifier(column, 'column');
+	}
 	validateIdentifier(as as string, 'column');
 	return {
 		__expr: true,

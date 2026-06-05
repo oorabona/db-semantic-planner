@@ -771,6 +771,31 @@ describe('relationColumn() helper', () => {
 				relationColumn('cat"; DROP TABLE users; --', 'name', 'alias'),
 			).toThrow('relation name contains invalid characters');
 		});
+
+		// DEFECT-2: wildcard column allowance
+		it('should NOT throw for wildcard column "*"', () => {
+			// relation.* is a valid select expression handled as A_Star by the adapter compiler.
+			// validateIdentifier rejects "*" (not a valid SQL identifier), but it must be allowed here.
+			expect(() => relationColumn('user', '*', 'user_data')).not.toThrow();
+		});
+
+		it('should return correct intent for wildcard column "*"', () => {
+			const result = relationColumn('user', '*', 'user_data');
+			expect(result.__expr).toBe(true);
+			expect(result.intent.kind).toBe('relationColumn');
+			if (result.intent.kind === 'relationColumn') {
+				expect(result.intent.relation).toBe('user');
+				expect(result.intent.column).toBe('*');
+				expect(result.intent.as).toBe('user_data');
+			}
+		});
+
+		it('should still validate non-wildcard column values', () => {
+			// Malicious column still throws — wildcard allowance is '*' only
+			expect(() =>
+				relationColumn('user', 'col"; DROP TABLE t; --', 'alias'),
+			).toThrow('column name contains invalid characters');
+		});
 	});
 });
 

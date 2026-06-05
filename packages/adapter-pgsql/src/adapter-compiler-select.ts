@@ -38,6 +38,45 @@ import {
 } from './plan-decision-extractor.js';
 
 // ============================================================================
+// Compile-time type-name safety guard (covers forged BatchValuesRef vector)
+// ============================================================================
+
+/**
+ * Validate a PostgreSQL type name at compile time.
+ *
+ * Mirrors the construction-time check in @dbsp/core `batchValues()`, but runs
+ * inside the adapter compiler so that a forged `BatchValuesRef` constructed
+ * directly (bypassing `batchValues()`) still cannot inject SQL via the type cast.
+ *
+ * Allowed: letters, digits, underscore, space, dot, parentheses, comma, brackets.
+ * Rejected: quotes, semicolons, backslash, comment starters (`--`, `/*`), empty.
+ */
+function assertSafeTypeName(typeName: string, colIndex: number): void {
+	if (!typeName || typeName.length === 0) {
+		throw new Error(
+			`BatchValues compile error: type name at column index ${colIndex} must not be empty.`,
+		);
+	}
+	if (
+		/["';\\]/.test(typeName) ||
+		/--/.test(typeName) ||
+		/\/\*/.test(typeName)
+	) {
+		throw new Error(
+			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+				'Type names must not contain quotes, semicolons, backslashes, or comment sequences.',
+		);
+	}
+	if (!/^[a-zA-Z0-9_\s.()[\],]+$/.test(typeName)) {
+		throw new Error(
+			`BatchValues compile error: invalid type name '${typeName}' at column index ${colIndex}. ` +
+				'Type names may only contain letters, digits, underscores, spaces, dots, ' +
+				'parentheses, commas, and square brackets.',
+		);
+	}
+}
+
+// ============================================================================
 // Internal: legacy bridge
 // ============================================================================
 
@@ -94,6 +133,13 @@ function buildBatchValuesRangeFn(
 	const params: unknown[] = [];
 	let paramIdx = startParamIndex - 1;
 	const effectiveAlias = aliasOverride ?? bv.alias;
+
+	// Compile-time revalidation: covers the forged-ref vector where a
+	// BatchValuesRef is constructed directly without going through batchValues().
+	for (let ci = 0; ci < bv.columns.length; ci++) {
+		const rawType = bv.types[ci];
+		if (rawType) assertSafeTypeName(rawType, ci);
+	}
 
 	const unnestArgs: Node[] = bv.columns.map((col, i) => {
 		const colArray: unknown[] = (bv.data[i] as unknown[]) ?? [];
