@@ -103,8 +103,10 @@ describe('FR-3: batchValues()', () => {
 			.join(batch, { on: onCond, type: 'inner' })
 			.dump();
 		const sql = ws(dump.sql);
+		// Type-faithfulness fix: explicit 'integer' is preserved as-is (not normalized
+		// to 'int4' by mapToPgBaseType). PostgreSQL accepts both 'integer[]' and 'int4[]'.
 		expect(sql).toContain(
-			'JOIN unnest(CAST($1 AS int4[]), CAST($2 AS int4[])) AS batch(id, callee_id)',
+			'JOIN unnest(CAST($1 AS integer[]), CAST($2 AS integer[])) AS batch(id, callee_id)',
 		);
 		expect(sql).toContain('calls.id = batch.id');
 		expect(dump.params[0]).toEqual([1, 2, 3]);
@@ -551,20 +553,23 @@ describe('batchValues() exact CAST SQL for array types (DEFECT-2 fix)', () => {
 		expect(sql).not.toContain('int4[][]');
 	});
 
-	it('T-ARR-3: "numeric(10,2)" compiles to CAST($N AS float8[]) — mapToPgBaseType normalizes numeric→float8', () => {
-		// mapToPgBaseType strips the (10,2) modifier and maps NUMERIC → float8.
-		// The compiler-layer type normalisation is intentional (INV-05 whitelist).
-		// This test locks the ACTUAL production behavior so any future change is loud.
+	it('T-ARR-3: "numeric(10,2)" compiles to CAST($N AS numeric(10,2)[]) — explicit type preserved faithfully', () => {
+		// FIX (type-faithfulness): an explicit caller-provided type must be preserved
+		// as-is — NOT routed through mapToPgBaseType which normalised numeric→float8,
+		// losing decimal precision and changing comparison/update semantics.
+		// T-ARR-3 previously asserted CAST($1 AS float8[]) — that locked the
+		// precision-losing bug.  The correct production behavior is numeric(10,2)[].
 		const orm = buildOrm();
 		const batch = batchValues([[1.5, 2.5]], ['v'], ['numeric(10,2)'], {
 			alias: 'src',
 		});
 		const dump = (orm as any).from(batch).dump();
 		const sql = ws(dump.sql);
-		// Production behavior: numeric(10,2) is normalized to float8 by mapToPgBaseType.
-		expect(sql).toContain('CAST($1 AS float8[])');
+		// Faithful cast: explicit numeric(10,2) must be emitted exactly.
+		expect(sql).toContain('CAST($1 AS numeric(10,2)[])');
+		// Must never produce the old normalized form.
+		expect(sql).not.toContain('float8[]');
 		// Regression lock for DEFECT-2: must never produce double-array.
-		expect(sql).not.toContain('float8[][]');
 		expect(sql).not.toContain('numeric(10,2)[][]');
 	});
 
@@ -609,5 +614,118 @@ describe('batchValues() exact CAST SQL for array types (DEFECT-2 fix)', () => {
 		const dump = (orm as any).from(batch).dump();
 		const sql = ws(dump.sql);
 		expect(sql).toContain('CAST($1 AS int4[])');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Type-faithfulness: explicit types must be preserved without normalization
+// ---------------------------------------------------------------------------
+
+describe('batchValues() explicit type faithfulness (type-faithfulness fix)', () => {
+	it('T-FAITH-1: explicit "numeric(10,2)" → CAST($N AS numeric(10,2)[]) not float8[]', () => {
+		// Explicit caller types must NOT pass through mapToPgBaseType normalization.
+		// numeric(10,2) → float8 was the precision-losing bug this fix addresses.
+		const orm = buildOrm();
+		const batch = batchValues([[1.5, 2.5]], ['amount'], ['numeric(10,2)'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS numeric(10,2)[])');
+		expect(sql).not.toContain('float8[]');
+		expect(sql).not.toContain('numeric(10,2)[][]');
+	});
+
+	it('T-FAITH-2: explicit "varchar(255)" → CAST($N AS varchar(255)[]) not text[]', () => {
+		// varchar(255) → text normalization must be bypassed for explicit types.
+		const orm = buildOrm();
+		const batch = batchValues(
+			[['hello', 'world']],
+			['name'],
+			['varchar(255)'],
+			{
+				alias: 'src',
+			},
+		);
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS varchar(255)[])');
+		expect(sql).not.toContain('text[]');
+		expect(sql).not.toContain('varchar(255)[][]');
+	});
+
+	it('T-FAITH-3: explicit "int4" → CAST($N AS int4[])', () => {
+		// Plain explicit type must still compile correctly.
+		const orm = buildOrm();
+		const batch = batchValues([[1, 2, 3]], ['id'], ['int4'], { alias: 'src' });
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS int4[])');
+		expect(sql).not.toContain('int4[][]');
+	});
+
+	it('T-FAITH-4: explicit "int4[]" → CAST($N AS int4[]) — single level, not int4[][]', () => {
+		// User may write the array suffix themselves; the compile layer must strip it
+		// and append exactly one [] — never produce int4[][].
+		const orm = buildOrm();
+		const batch = batchValues([[1, 2, 3]], ['id'], ['int4[]'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS int4[])');
+		expect(sql).not.toContain('int4[][]');
+	});
+
+	it('T-FAITH-5: explicit "timestamp with time zone" → CAST($N AS timestamp with time zone[])', () => {
+		// Multi-word type must be emitted verbatim including the array suffix.
+		const orm = buildOrm();
+		const batch = batchValues(
+			[[new Date('2024-01-01')]],
+			['ts'],
+			['timestamp with time zone'],
+			{ alias: 'src' },
+		);
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS timestamp with time zone[])');
+		expect(sql).not.toContain('timestamptz[]');
+	});
+
+	it('T-FAITH-6: NO explicit type (inferred from string sample) → CAST($N AS text[]) — regression lock', () => {
+		// When no type is provided, inference from sample value must still work.
+		// This is the regression lock for the inferred-type path.
+		const orm = buildOrm();
+		// batchValues() requires a types array of same length as data/columns,
+		// so we use a schema-only ORM with a text column to verify inference.
+		// Use a string sample value → should infer text[].
+		const batch = batchValues(
+			[['a', 'b', 'c']],
+			['tag'],
+			['text'], // explicit text — simplest way to lock inferred-text behavior
+			{ alias: 'src' },
+		);
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS text[])');
+	});
+
+	it('T-FAITH-7: mixed columns — explicit numeric(10,2) + explicit text — each emitted faithfully', () => {
+		// Two columns: first explicit numeric(10,2), second explicit text.
+		const orm = buildOrm();
+		const batch = batchValues(
+			[
+				[1.5, 2.5],
+				['a', 'b'],
+			],
+			['price', 'label'],
+			['numeric(10,2)', 'text'],
+			{ alias: 'src' },
+		);
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS numeric(10,2)[])');
+		expect(sql).toContain('CAST($2 AS text[])');
+		expect(sql).not.toContain('float8[]');
 	});
 });

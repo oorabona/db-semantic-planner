@@ -201,18 +201,22 @@ function buildBatchValuesRangeFn(
 
 	const unnestArgs: Node[] = bv.columns.map((col, i) => {
 		const colArray: unknown[] = (bv.data[i] as unknown[]) ?? [];
-		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
-		const colTypes: Record<string, string> = {};
+
+		let pgBaseType: string;
 		if (bv.types[i]) {
-			// DEFECT-2 FIX: strip a user-supplied trailing "[]" before passing to
-			// inferPgArrayType.  The user may write "int4[]" to mean "array of int4";
-			// inferPgArrayType appends its own "[]" suffix, so the base type must not
-			// already end in "[]" or the cast becomes "int4[][]" (double-array).
+			// Explicit type provided by caller: preserve faithfully — do NOT route
+			// through mapToPgBaseType() which normalises numeric→float8, varchar→text,
+			// etc.  Only strip a single trailing "[]" the user may have written (the
+			// cast layer appends exactly one "[]" via createTypeCastParamRef isArray=true),
+			// so "int4[]" → base "int4" → emits CAST($N AS int4[]) not int4[][].
 			const rawType = bv.types[i] as string;
-			colTypes[col] = rawType.endsWith('[]') ? rawType.slice(0, -2) : rawType;
+			pgBaseType = rawType.endsWith('[]') ? rawType.slice(0, -2) : rawType;
+		} else {
+			// No explicit type: infer from the schema or sample value (existing behavior).
+			const sampleValue = colArray.find((v) => v !== null && v !== undefined);
+			const pgArrayType = inferPgArrayType(col, {}, sampleValue);
+			pgBaseType = stripArraySuffix(pgArrayType);
 		}
-		const pgArrayType = inferPgArrayType(col, colTypes, sampleValue);
-		const pgBaseType = stripArraySuffix(pgArrayType);
 
 		params.push(colArray);
 		paramIdx++;
