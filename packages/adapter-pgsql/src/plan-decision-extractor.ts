@@ -366,6 +366,9 @@ export function convertWhereToDecisions(
 			// Produce an unenriched exists stub (relation name as targetTable).
 			// Inner `where` is preserved raw so enrichExistsStubsInConditions can
 			// resolve the correct FK from the outer exists's target table context.
+			// DEFECT 1 FIX: also preserve `include` so the enricher can translate it
+			// into existsInclude decisions and the handler emits the JOIN inside the
+			// subquery.
 			return [
 				{
 					type: 'where',
@@ -375,6 +378,8 @@ export function convertWhereToDecisions(
 					// Cast needed: PlanDecision has no typed `_rawWhere` field but the
 					// enricher reads it by name before it compiles.
 					...(w.where ? { _rawWhere: w.where } : {}),
+					// Store the raw include map for enrichment (_rawInclude mirrors _rawWhere).
+					...(w.include ? { _rawInclude: w.include } : {}),
 				} as PlanDecision,
 			];
 		case 'notExists':
@@ -384,6 +389,7 @@ export function convertWhereToDecisions(
 					operator: 'notExists',
 					targetTable: w.relation as string,
 					...(w.where ? { _rawWhere: w.where } : {}),
+					...(w.include ? { _rawInclude: w.include } : {}),
 				} as PlanDecision,
 			];
 		case 'relationFilter': {
@@ -397,6 +403,7 @@ export function convertWhereToDecisions(
 					operator: rfOperator,
 					targetTable: w.relation as string,
 					...(w.where ? { _rawWhere: w.where } : {}),
+					...(w.include ? { _rawInclude: w.include } : {}),
 				} as PlanDecision,
 			];
 		}
@@ -785,6 +792,11 @@ function enrichExistsStubsInConditions(
 			// Build inner conditions from the raw where intent (if any).
 			// `_rawWhere` is attached by convertWhereToDecisions for exists stubs.
 			const rawWhere = (d as unknown as Record<string, unknown>)._rawWhere;
+			// `_rawInclude` carries the include map from the original exists() intent
+			// (DEFECT 1 FIX): translate it into existsInclude decisions so the handler
+			// emits the JOIN inside the subquery.
+			const rawInclude = (d as unknown as Record<string, unknown>)
+				._rawInclude as Record<string, { join?: 'inner' | 'left' }> | undefined;
 
 			if (hops.length > 1) {
 				// Multi-hop nested path: delegate to buildMultiHopExistsChain.
@@ -902,6 +914,16 @@ function enrichExistsStubsInConditions(
 					if (c.length > 0) innerConditions = c;
 				}
 
+				// DEFECT 1 FIX: translate the raw include map into existsInclude decisions
+				// so the EXISTS handler emits the declared JOIN inside the subquery.
+				const includeDecisions: PlanDecision[] | undefined = rawInclude
+					? Object.entries(rawInclude).map(([rel, opts]) => ({
+							type: 'existsInclude' as const,
+							relation: rel,
+							joinType: opts.join ?? 'inner',
+						}))
+					: undefined;
+
 				const enriched: PlanDecision = {
 					type: 'where',
 					operator: d.operator,
@@ -911,6 +933,7 @@ function enrichExistsStubsInConditions(
 					...(relationType ? { relationType } : {}),
 					...(parentKey ? { parentKey } : {}),
 					...(innerConditions ? { conditions: innerConditions } : {}),
+					...(includeDecisions ? { include: includeDecisions } : {}),
 				};
 
 				conditions[i] = enriched;

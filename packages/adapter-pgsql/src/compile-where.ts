@@ -511,22 +511,27 @@ function handleRelationFilterIntent(
 				Array.isArray(rfWhere.conditions) &&
 				(rfWhere.conditions as unknown[]).length === 0));
 	if (isVacuousEvery) {
-		// DEFECT 1 FIX (new): validate the relation/path BEFORE returning vacuous-true.
+		// Validate the relation/path BEFORE returning vacuous-true.
 		// Without this, a typoed/undeclared relation short-circuits to all-rows TRUE
 		// (fail-open security regression) instead of throwing fail-closed.
 		// The invariant: vacuous TRUE is only correct when the relation is VALID.
 		if (hops.length <= 1) {
-			// Single-hop: validate only when a model is present.
-			// Without a model, convention-fallback is the expected behaviour (no throw).
 			const relation = hops[0] ?? (rf.relation as string);
-			if (ctx.model) {
-				const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
-				if (!resolved) {
-					throw new Error(
-						`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
-							'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
-					);
-				}
+			// DEFECT 3 FIX: a vacuous every with NO model must fail closed — the adapter
+			// cannot validate the relation at all, so returning TRUE would match ALL rows
+			// regardless of whether the relation exists.  Throw to protect mutation guards.
+			if (!ctx.model) {
+				throw new Error(
+					`every relation filter requires a model to validate the relation '${relation}'. ` +
+						'Provide a model via WhereCompilerCtx or use the decisions path.',
+				);
+			}
+			const resolved = ctx.model.getRelation(`${ctx.rootTable}.${relation}`);
+			if (!resolved) {
+				throw new Error(
+					`relationFilter('${relation}'): no relation '${relation}' declared on table '${ctx.rootTable}'. ` +
+						'Use rawExists(subquery(...)) for an uncorrelated or undeclared subquery.',
+				);
 			}
 		} else {
 			// Multi-hop: validate ALL hops upfront (same guard as the non-vacuous path).
@@ -548,14 +553,11 @@ function handleRelationFilterIntent(
 				currentSource = rel.target;
 			}
 		}
-		return {
-			TypeCast: {
-				arg: { Integer: { ival: 1 } },
-				typeName: {
-					TypeName: { names: [{ String: { sval: 'bool' } }], typemod: -1 },
-				},
-			},
-		} as unknown as Node;
+		// DEFECT 2 FIX: return the identical TRUE literal that everyHandler (handlers/where/exists.ts)
+		// emits for its empty-conditions vacuous-true branch — { A_Const: { boolval: { boolval: true } } }.
+		// The previous TypeCast node had a mis-nested typeName (TypeName wrapped inside { TypeName: ... })
+		// which caused deparseTypeName() to emit "CAST(1 AS )" — invalid SQL.
+		return { A_Const: { boolval: { boolval: true } } };
 	}
 
 	const innermostWhere: WhereIntent | undefined =

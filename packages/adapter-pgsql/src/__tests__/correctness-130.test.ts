@@ -214,14 +214,85 @@ describe('DEFECT 1: single-hop relationFilter threads declared FK columns', () =
 		expect(sql).toMatch(/users\.id\s*=\s*posts_exists_\d+\.author_id/);
 		expect(sql).not.toContain('user_id');
 	});
+
+	// -------------------------------------------------------------------------
+	// NEW: DEFECT 1 — nested exists drops its include joins
+	//
+	// Before the fix, convertWhereToDecisions created exists stubs with _rawWhere
+	// but silently dropped w.include.  enrichExistsStubsInConditions never saw the
+	// include so the EXISTS handler never emitted the JOIN inside the subquery,
+	// producing broadened / missing-alias SQL.
+	//
+	// Fix: preserve _rawInclude on the stub; the enricher converts it to
+	// existsInclude decisions; the EXISTS handler emits the JOIN.
+	// -------------------------------------------------------------------------
+	it('DEFECT-1 (nested include JOIN): inner exists with include emits JOIN inside subquery', () => {
+		// Schema for this case: users → posts → comments, comments belongsTo posts (via post_id)
+		// We test: EXISTS (SELECT 1 FROM comments ... JOIN posts AS post ON ...) inside
+		// an outer SELECT context.
+		// The inner exists('comments', { include: { post: { join: 'inner' } }, where: ... })
+		// must emit the JOIN on `post` inside the comments subquery.
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: testSchema.model as any,
+		});
+		const orm = createOrm({
+			model: testSchema.model as any,
+			adapter: adapter as any,
+		});
+
+		// Nested exists: users who have a post that has a comment joined to its post.
+		// The include: { post: ... } adds an INNER JOIN to the inner subquery.
+		const nestedIntent = exists('posts', {
+			where: exists('comments', {
+				include: { post: { join: 'inner' as const } },
+				where: eq('post.published', true),
+			}),
+		});
+
+		const { sql } = orm.select('users').where(nestedIntent).dump();
+		const normalized = sql.replace(/\s+/g, ' ').trim();
+
+		// The inner EXISTS subquery must contain a JOIN keyword
+		expect(normalized.toUpperCase()).toContain('JOIN');
+		// The JOIN must reference the 'post' alias (the include relation)
+		expect(normalized.toLowerCase()).toContain('post');
+		// There must still be an outer EXISTS for posts
+		expect(normalized.toUpperCase()).toContain('EXISTS');
+	});
+
+	it('DEFECT-1 (nested include JOIN — no include baseline): inner exists WITHOUT include has NO JOIN', () => {
+		// Baseline: a nested exists without include must NOT add a JOIN.
+		// This validates that adding the fix does not accidentally inject joins.
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: testSchema.model as any,
+		});
+		const orm = createOrm({
+			model: testSchema.model as any,
+			adapter: adapter as any,
+		});
+
+		const nestedNoInclude = exists('posts', {
+			where: exists('comments', {
+				where: eq('flagged', true),
+			}),
+		});
+
+		const { sql } = orm.select('users').where(nestedNoInclude).dump();
+		const normalized = sql.replace(/\s+/g, ' ').trim();
+
+		// Without include there must be NO JOIN inside the inner subquery
+		expect(normalized.toUpperCase()).not.toContain('JOIN');
+		// But EXISTS should still be present
+		expect(normalized.toUpperCase()).toContain('EXISTS');
+	});
 });
 
 // ============================================================================
 // DEFECT 2 — mode:'every' with undefined/omitted where → vacuous TRUE (no crash)
 // ============================================================================
 
-describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE', () => {
-	it('single-hop every with no where does not crash and returns truthy SQL', () => {
+describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE (valid SQL — not CAST(1 AS ))', () => {
+	it('single-hop every with no where does not crash and returns TRUE literal SQL', () => {
 		const intent = {
 			kind: 'relationFilter' as const,
 			relation: 'posts',
@@ -234,17 +305,20 @@ describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE', () =>
 		expect(() => {
 			node = compileWhereIntent(intent as any, ctx);
 		}).not.toThrow();
-		// vacuous-true: should produce a TRUE cast, not EXISTS.
-		// The deparser renders the TypeCast as "cast(1 as )" or similar — the key
-		// property is that the output does NOT contain EXISTS (which would mean the
-		// vacuous-true optimisation is missing).
+		// vacuous-true: must produce a valid TRUE boolean literal, NOT an EXISTS subquery
+		// and NOT the malformed CAST(1 AS ) that the previous mis-nested TypeCast emitted.
+		// everyHandler uses { A_Const: { boolval: { boolval: true } } } — same shape here.
 		const sql = nodeToSql(node!);
 		expect(sql.toUpperCase()).not.toContain('EXISTS');
-		// The cast expression should be present (TypeCast { arg: 1, typeName: bool })
-		expect(sql.toLowerCase()).toMatch(/cast/);
+		// Must NOT emit the malformed "CAST(1 AS )" — deparsed as "cast(1 as )" previously
+		expect(sql.toLowerCase()).not.toMatch(/cast\s*\(\s*1\s+as\s*\)/);
+		// Must contain a valid TRUE literal (PostgreSQL deparsed as "true")
+		expect(sql.toLowerCase()).toContain('true');
+		// Struct-level: A_Const boolval must be present on the returned node
+		expect((node! as any).A_Const?.boolval?.boolval).toBe(true);
 	});
 
-	it('multi-hop every with no where does not crash and returns truthy SQL', () => {
+	it('multi-hop every with no where does not crash and returns TRUE literal SQL', () => {
 		const intent = {
 			kind: 'relationFilter' as const,
 			relation: ['posts', 'comments'] as unknown as string,
@@ -258,7 +332,9 @@ describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE', () =>
 		}).not.toThrow();
 		const sql = nodeToSql(node!);
 		expect(sql.toUpperCase()).not.toContain('EXISTS');
-		expect(sql.toLowerCase()).toMatch(/cast/);
+		expect(sql.toLowerCase()).not.toMatch(/cast\s*\(\s*1\s+as\s*\)/);
+		expect(sql.toLowerCase()).toContain('true');
+		expect((node! as any).A_Const?.boolval?.boolval).toBe(true);
 	});
 
 	it('mode:every with a real where still compiles NOT EXISTS correctly', () => {
@@ -313,6 +389,53 @@ describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE', () =>
 		};
 		// convertWhereCondition should not throw — it converts to an exists decision
 		expect(() => convertWhereCondition(intent as any, 'users')).not.toThrow();
+	});
+
+	it('DEFECT-3 FIX: vacuous every with no model throws (fail-closed, not fail-open)', () => {
+		// Without a model, the adapter cannot validate the relation at all.
+		// Returning vacuous TRUE here would match ALL rows regardless of whether
+		// the relation exists — a silent security regression in mutation guards.
+		// Fix: throw a clear error when model is absent on the vacuous every path.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users', { model: undefined });
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/every relation filter requires a model to validate the relation/,
+		);
+	});
+
+	it('DEFECT-3 FIX: vacuous every with a valid model and declared relation returns TRUE (not throw)', () => {
+		// Vacuous every on a KNOWN relation with a model is safe vacuous-truth.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users'); // has model with posts declared
+		let node: Node;
+		expect(() => {
+			node = compileWhereIntent(intent as any, ctx);
+		}).not.toThrow();
+		expect((node! as any).A_Const?.boolval?.boolval).toBe(true);
+	});
+
+	it('DEFECT-3 FIX: vacuous every with a model on a typoed relation throws (invalid relation)', () => {
+		// An undeclared/typoed relation with a model must throw — not return vacuous TRUE.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'nonexistent_table',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users'); // model doesn't have 'nonexistent_table'
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'nonexistent_table' declared on table 'users'/,
+		);
 	});
 });
 
@@ -1006,9 +1129,12 @@ describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation 
 		expect(sql.toLowerCase()).toMatch(/cast|true/);
 	});
 
-	it('vacuous every without a model does NOT throw (convention-fallback path)', () => {
-		// No model → cannot validate → must fall through without throwing (unchanged
-		// behaviour when no model is supplied; model is required for validation).
+	it('vacuous every without a model THROWS (DEFECT 3 FIX: fail-closed, not fail-open)', () => {
+		// DEFECT 3 FIX: vacuous every with no model now throws fail-closed.
+		// Without a model the adapter cannot validate the relation at all — returning
+		// vacuous TRUE would match ALL rows regardless of whether the relation exists,
+		// which is a silent security regression in mutation guards (DELETE/UPDATE).
+		// The old behaviour (no-throw, convention-fallback) is intentionally replaced.
 		const intent = {
 			kind: 'relationFilter' as const,
 			relation: 'anyRelation',
@@ -1016,7 +1142,9 @@ describe('NEW-DEFECT-1 (vacuous-every relation validation): undeclared relation 
 			mode: 'every' as const,
 		};
 		const ctx = makeCtx('users', { model: undefined });
-		expect(() => compileWhereIntent(intent as any, ctx)).not.toThrow();
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/every relation filter requires a model to validate the relation/,
+		);
 	});
 });
 
