@@ -5,7 +5,9 @@
  * Handlers are registered at module initialization and looked up by operator/type.
  */
 
+import type { QueryIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
+import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -16,7 +18,6 @@ import type {
 	WhereHandler,
 } from './types.js';
 import { isSelectWithFields } from './types.js';
-
 import { registerAllWhereHandlers } from './where/index.js';
 
 // Re-export types
@@ -299,6 +300,20 @@ function normalizeToDecision(input: Decision): Decision {
 		case 'in': {
 			const sub = raw.subquery as Record<string, unknown> | undefined;
 			if (sub) {
+				// Guard: throw if the subquery carries modifiers that normalisation
+				// would silently drop (GROUP BY, HAVING, OFFSET, DISTINCT, joins,
+				// includes, etc.), which would broaden UPDATE/DELETE mutations.
+				// This is the chokepoint for the mutation path — compileUpdate and
+				// compileDelete both route their WhereIntent through here via
+				// whereIntentAsDecision → createWhereDispatcher → normalizeToDecision.
+				// The decisions/SELECT path guards earlier (convertIn calls
+				// assertNoUnsupportedSubqueryModifiers before reaching here), so this
+				// guard is idempotent on that path — it throws on the same bad input
+				// and is a no-op on valid input.
+				assertNoUnsupportedSubqueryModifiers(
+					sub as unknown as QueryIntent,
+					'IN',
+				);
 				// IN/NOT IN with subquery → route to inSubquery/notInSubquery handler
 				const rawSelect = sub.select as unknown;
 				const selectColumn =

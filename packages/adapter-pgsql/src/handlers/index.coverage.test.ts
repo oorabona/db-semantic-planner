@@ -622,21 +622,25 @@ describe('handlers/index - Coverage Tests', () => {
 			expect(node).toBeDefined();
 		});
 
-		it('normalizes in subquery with select as non-string non-fields object', () => {
+		it('normalizes in subquery with select as non-string non-fields object → throws (SELECT * inside ANY is invalid SQL)', () => {
+			// select: { type: 'all' } produces SELECT * inside ANY(...), which PostgreSQL
+			// rejects — it would silently change which rows match.  The guard now throws
+			// clearly instead of compiling broken SQL.
 			const s = state();
-			const node = dispatch(
-				{
-					kind: 'in',
-					field: 'id',
-					subquery: {
-						from: 'users',
-						select: { type: 'all' },
-					},
-				} as any,
-				ctx,
-				s,
-			);
-			expect(node).toBeDefined();
+			expect(() =>
+				dispatch(
+					{
+						kind: 'in',
+						field: 'id',
+						subquery: {
+							from: 'users',
+							select: { type: 'all' },
+						},
+					} as any,
+					ctx,
+					s,
+				),
+			).toThrow(/IN subquery with SELECT \* \/ all.*is not supported/);
 		});
 	});
 
