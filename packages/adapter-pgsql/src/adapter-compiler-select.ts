@@ -42,37 +42,95 @@ import {
 // ============================================================================
 
 /**
- * Validate a PostgreSQL type name at compile time.
+ * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
+ * Mirrors the constant in @dbsp/core `batch-values.ts`.
+ */
+const ADAPTER_MULTIWORD_BASE_TYPES: readonly string[] = [
+	'timestamp with time zone',
+	'timestamp without time zone',
+	'time with time zone',
+	'time without time zone',
+	'double precision',
+	'character varying',
+	'bit varying',
+];
+
+/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
+const ADAPTER_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Validate a PostgreSQL type name at compile time using the structured grammar.
  *
- * Mirrors the construction-time check in @dbsp/core `batchValues()`, but runs
- * inside the adapter compiler so that a forged `BatchValuesRef` constructed
- * directly (bypassing `batchValues()`) still cannot inject SQL via the type cast.
+ * Mirrors the construction-time check in @dbsp/core `batchValues()` exactly,
+ * so that a forged `BatchValuesRef` constructed directly (bypassing `batchValues()`)
+ * still cannot inject SQL via the type cast.
  *
- * Allowed: letters, digits, underscore, space, dot, parentheses, comma, brackets.
- * Rejected: quotes, semicolons, backslash, comment starters (`--`, `/*`), empty.
+ * Accepted grammar:
+ *   typeName = trim(base [modifier] [arraySuffix])
+ *   arraySuffix = "[]"          — at most ONE level
+ *   modifier    = "(" digits ")" | "(" digits "," digits ")"
+ *   base        = multiWordType | ident | ident "." ident
+ *
+ * Anything outside this grammar throws, including injection strings like
+ * "int[])) AS b(id) JOIN users ON true" or "int4) ; DROP TABLE x; --".
  */
 function assertSafeTypeName(typeName: string, colIndex: number): void {
-	if (!typeName || typeName.length === 0) {
+	const raw = typeName.trim();
+	if (raw.length === 0) {
 		throw new Error(
 			`BatchValues compile error: type name at column index ${colIndex} must not be empty.`,
 		);
 	}
-	if (
-		/["';\\]/.test(typeName) ||
-		/--/.test(typeName) ||
-		/\/\*/.test(typeName)
-	) {
+
+	let rest = raw;
+
+	// Step 1: strip at most ONE trailing "[]"
+	if (rest.endsWith('[]')) {
+		rest = rest.slice(0, -2);
+		if (rest.endsWith('[]')) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					'At most one array suffix "[]" is allowed as a raw type-name input.',
+			);
+		}
+	}
+
+	// Step 2: strip optional modifier "(N)" or "(N,M)"
+	const modifierMatch = rest.match(/\(([^)]*)\)$/);
+	if (modifierMatch) {
+		const inner = modifierMatch[1] ?? '';
+		if (!/^\d+(?:,\d+)?$/.test(inner)) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
+			);
+		}
+		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
+	}
+
+	// Step 3: validate the base type
+	const baseLower = rest.toLowerCase();
+
+	// (a) Multi-word allowlist
+	if (ADAPTER_MULTIWORD_BASE_TYPES.includes(baseLower)) {
+		return;
+	}
+
+	// (b) Strict identifier, optionally schema-qualified
+	const parts = rest.split('.');
+	if (parts.length > 2) {
 		throw new Error(
 			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-				'Type names must not contain quotes, semicolons, backslashes, or comment sequences.',
+				'Schema-qualified types allow at most one dot (schema.type).',
 		);
 	}
-	if (!/^[a-zA-Z0-9_\s.()[\],]+$/.test(typeName)) {
-		throw new Error(
-			`BatchValues compile error: invalid type name '${typeName}' at column index ${colIndex}. ` +
-				'Type names may only contain letters, digits, underscores, spaces, dots, ' +
-				'parentheses, commas, and square brackets.',
-		);
+	for (const part of parts) {
+		if (!ADAPTER_IDENT_RE.test(part)) {
+			throw new Error(
+				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
+					`Base type "${part}" is not a valid SQL identifier and is not in the multi-word type allowlist.`,
+			);
+		}
 	}
 }
 
@@ -145,7 +203,14 @@ function buildBatchValuesRangeFn(
 		const colArray: unknown[] = (bv.data[i] as unknown[]) ?? [];
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const colTypes: Record<string, string> = {};
-		if (bv.types[i]) colTypes[col] = bv.types[i] as string;
+		if (bv.types[i]) {
+			// DEFECT-2 FIX: strip a user-supplied trailing "[]" before passing to
+			// inferPgArrayType.  The user may write "int4[]" to mean "array of int4";
+			// inferPgArrayType appends its own "[]" suffix, so the base type must not
+			// already end in "[]" or the cast becomes "int4[][]" (double-array).
+			const rawType = bv.types[i] as string;
+			colTypes[col] = rawType.endsWith('[]') ? rawType.slice(0, -2) : rawType;
+		}
 		const pgArrayType = inferPgArrayType(col, colTypes, sampleValue);
 		const pgBaseType = stripArraySuffix(pgArrayType);
 

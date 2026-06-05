@@ -138,14 +138,16 @@ describe('FR-3: batchValues()', () => {
 	});
 
 	it('T6: batchValues() rejects type names with SQL-injection characters', () => {
-		// Bug 1 fix: type names like 'int4); DROP TABLE x; --' must be rejected
+		// Structured grammar: the injection suffix "); DROP TABLE x; --" cannot
+		// pass the base-type identifier check — the semicolon and space after the
+		// closing paren ensure the modifier parser rejects it.
 		expect(() =>
 			batchValues([[1]], ['id'], ['int4); DROP TABLE x; --']),
 		).toThrow(/invalid type name/);
 	});
 
 	it('T7: batchValues() rejects type names with quotes or semicolons', () => {
-		// Injection via quotes/semicolons must be rejected
+		// Injection via quotes/semicolons must be rejected (not valid identifiers)
 		expect(() =>
 			batchValues([[1]], ['id'], ["int4'; DROP TABLE x; --"]),
 		).toThrow(/invalid type name/);
@@ -173,7 +175,7 @@ describe('FR-3: batchValues()', () => {
 		expect(() =>
 			batchValues([[new Date()]], ['ts'], ['timestamp with time zone']),
 		).not.toThrow();
-		// Array types
+		// Array types (single level)
 		expect(() => batchValues([[1]], ['n'], ['int4[]'])).not.toThrow();
 		// Schema-qualified types
 		expect(() =>
@@ -426,5 +428,154 @@ describe('batchValues() SQL injection prevention (DEFECT-1)', () => {
 			);
 			(orm as any).from(batch).dump();
 		}).not.toThrow();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// DEFECT-1 structured grammar: injection-rejection tests
+// ---------------------------------------------------------------------------
+
+describe('batchValues() structured type-name grammar (DEFECT-1 fix)', () => {
+	it('T-GRAM-1: JOIN-injection string throws at construction time', () => {
+		// The classic injection: closing a cast and appending a JOIN.
+		// The structured grammar rejects this because "int[])) AS b(id) JOIN..."
+		// is not a valid base identifier and the double-array "[][]" is also rejected.
+		expect(() =>
+			batchValues(
+				[[1]],
+				['id'],
+				['int[])) AS b(id) JOIN users u ON true JOIN unnest(CAST(NULL AS int'],
+			),
+		).toThrow(/invalid type name/i);
+	});
+
+	it('T-GRAM-2: "int4) ; DROP TABLE x; --" throws', () => {
+		// Semicolon in modifier position is not valid (only digits allowed inside parens).
+		expect(() =>
+			batchValues([[1]], ['id'], ['int4) ; DROP TABLE x; --']),
+		).toThrow(/invalid type name/i);
+	});
+
+	it('T-GRAM-3: "foo\'bar" throws (single quote is not a valid identifier char)', () => {
+		expect(() => batchValues([[1]], ['id'], ["foo'bar"])).toThrow(
+			/invalid type name/i,
+		);
+	});
+
+	it('T-GRAM-4: "int4[][]" (double array as raw type string) throws', () => {
+		// The grammar allows at most one "[]" suffix; double-array must be rejected
+		// so the batch-values layer can safely append its own "[]".
+		expect(() => batchValues([[1]], ['id'], ['int4[][]'])).toThrow(
+			/invalid type name/i,
+		);
+	});
+
+	it('T-GRAM-5: valid simple types pass the structured grammar', () => {
+		expect(() => batchValues([[1]], ['id'], ['int4'])).not.toThrow();
+		expect(() => batchValues([['']], ['s'], ['text'])).not.toThrow();
+		expect(() =>
+			batchValues([[crypto.randomUUID()]], ['u'], ['uuid']),
+		).not.toThrow();
+	});
+
+	it('T-GRAM-6: numeric(10,2) passes the structured grammar', () => {
+		expect(() => batchValues([[1.5]], ['v'], ['numeric(10,2)'])).not.toThrow();
+	});
+
+	it('T-GRAM-7: varchar(255) passes the structured grammar', () => {
+		expect(() => batchValues([['x']], ['s'], ['varchar(255)'])).not.toThrow();
+	});
+
+	it('T-GRAM-8: "timestamp with time zone" passes the multi-word allowlist', () => {
+		expect(() =>
+			batchValues([[new Date()]], ['ts'], ['timestamp with time zone']),
+		).not.toThrow();
+	});
+
+	it('T-GRAM-9: schema-qualified type "myschema.myenum" passes', () => {
+		expect(() =>
+			batchValues([[null]], ['e'], ['myschema.myenum']),
+		).not.toThrow();
+	});
+
+	it('T-GRAM-10: "int4[]" passes (single array suffix)', () => {
+		expect(() => batchValues([[1]], ['n'], ['int4[]'])).not.toThrow();
+	});
+
+	it('T-GRAM-11: forged-ref with JOIN-injection string throws at compile time', () => {
+		// Defense-in-depth: assertSafeTypeName in the adapter must also reject
+		// the injection string even when batchValues() was bypassed.
+		const orm = buildOrm();
+		const forged = {
+			__kind: 'batchValues' as const,
+			data: [[1]],
+			columns: ['id'],
+			types: [
+				'int[])) AS b(id) JOIN users u ON true JOIN unnest(CAST(NULL AS int',
+			],
+			alias: 'batch',
+			ordinality: false,
+		};
+		expect(() => (orm as any).from(forged).dump()).toThrow(
+			/BatchValues compile error.*unsafe type name/i,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// DEFECT-2 fix: exact SQL cast assertions for array types
+// ---------------------------------------------------------------------------
+
+describe('batchValues() exact CAST SQL for array types (DEFECT-2 fix)', () => {
+	it('T-ARR-1: plain "int4" compiles to CAST($N AS int4[])', () => {
+		const orm = buildOrm();
+		const batch = batchValues([[1, 2, 3]], ['n'], ['int4'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS int4[])');
+		expect(sql).not.toContain('int4[][]');
+	});
+
+	it('T-ARR-2: "int4[]" compiles to CAST($N AS int4[]) — NOT int4[][]', () => {
+		// DEFECT-2 regression lock: user-supplied "int4[]" must NOT produce
+		// "CAST($N AS int4[][])" after the fix.
+		const orm = buildOrm();
+		const batch = batchValues([[1, 2, 3]], ['n'], ['int4[]'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS int4[])');
+		expect(sql).not.toContain('int4[][]');
+	});
+
+	it('T-ARR-3: "numeric(10,2)" compiles to CAST($N AS float8[]) — mapToPgBaseType normalizes numeric→float8', () => {
+		// mapToPgBaseType strips the (10,2) modifier and maps NUMERIC → float8.
+		// The compiler-layer type normalisation is intentional (INV-05 whitelist).
+		// This test locks the ACTUAL production behavior so any future change is loud.
+		const orm = buildOrm();
+		const batch = batchValues([[1.5, 2.5]], ['v'], ['numeric(10,2)'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		// Production behavior: numeric(10,2) is normalized to float8 by mapToPgBaseType.
+		expect(sql).toContain('CAST($1 AS float8[])');
+		// Regression lock for DEFECT-2: must never produce double-array.
+		expect(sql).not.toContain('float8[][]');
+		expect(sql).not.toContain('numeric(10,2)[][]');
+	});
+
+	it('T-ARR-4: "text" compiles to CAST($N AS text[])', () => {
+		const orm = buildOrm();
+		const batch = batchValues([['a', 'b']], ['s'], ['text'], {
+			alias: 'src',
+		});
+		const dump = (orm as any).from(batch).dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain('CAST($1 AS text[])');
+		expect(sql).not.toContain('text[][]');
 	});
 });

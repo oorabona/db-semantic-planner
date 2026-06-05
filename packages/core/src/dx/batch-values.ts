@@ -1,46 +1,118 @@
 import { validateIdentifier } from './errors.js';
 
+// ============================================================================
+// Structured PostgreSQL type-name grammar
+// ============================================================================
+
+/**
+ * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
+ * These are the only multi-word base types accepted by the structured grammar;
+ * all other base types must be strict SQL identifiers (optionally schema-qualified).
+ */
+const MULTIWORD_BASE_TYPES: readonly string[] = [
+	'timestamp with time zone',
+	'timestamp without time zone',
+	'time with time zone',
+	'time without time zone',
+	'double precision',
+	'character varying',
+	'bit varying',
+];
+
+/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
+const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
 /**
  * Validate a PostgreSQL type name for use in CAST($N AS type[]).
  *
- * Type names are not plain SQL identifiers: they may contain spaces
- * (e.g. `timestamp with time zone`), parenthesised modifiers (e.g.
- * `varchar(255)`, `numeric(10,2)`), array brackets (`int4[]`), and
- * schema qualification (`myschema.myenum`).
+ * Accepted grammar (structured, not a broad character-class):
+ *   typeName = trim(base [modifier] [arraySuffix])
  *
- * Allowed characters: letters, digits, underscore, space, dot,
- * parentheses, comma, and square brackets.
+ *   arraySuffix = "[]"          — at most ONE level; "int4[][]" is rejected as a
+ *                                  raw type-name input (array-ness is handled by the
+ *                                  batch-values layer which appends its own "[]").
+ *   modifier    = "(" digits ")" | "(" digits "," digits ")"
+ *                                — e.g. "(255)", "(10,2)"; any other parenthesised
+ *                                  content is rejected.
+ *   base        = multiWordType | ident | ident "." ident
+ *   multiWordType = one of: "timestamp with time zone",
+ *                           "timestamp without time zone",
+ *                           "time with time zone",
+ *                           "time without time zone",
+ *                           "double precision",
+ *                           "character varying",
+ *                           "bit varying"
+ *   ident       = [A-Za-z_][A-Za-z0-9_]*
  *
- * Rejected: quotes (`"`, `'`), semicolons, backslashes, comment
- * sequences (`--`, `/*`), and the empty string.
+ * Examples that pass: int4, text, uuid, numeric(10,2), varchar(255),
+ *   timestamp with time zone, myschema.myenum, int4[].
+ * Examples that throw: empty string, int4[][], int4) ; DROP TABLE x; --,
+ *   foo'bar, int4)); JOIN users ON true.
  *
  * @internal — exported for adapter compile-time revalidation only.
  */
 export function validateTypeName(typeName: string): void {
-	if (!typeName || typeName.length === 0) {
+	const raw = typeName.trim();
+	if (raw.length === 0) {
 		throw new Error(
 			`batchValues: invalid type name '${typeName}'. Type names must not be empty.`,
 		);
 	}
-	// Reject dangerous characters that can break out of a TypeName context
-	if (
-		/["';\\]/.test(typeName) ||
-		/--/.test(typeName) ||
-		/\/\*/.test(typeName)
-	) {
+
+	let rest = raw;
+
+	// ── Step 1: strip at most ONE trailing array suffix "[]" ─────────────────
+	// More than one "[]" (e.g. "int4[][]") is rejected by the grammar: after
+	// stripping one, the remaining rest must NOT end in "[]" again.
+	if (rest.endsWith('[]')) {
+		rest = rest.slice(0, -2);
+		if (rest.endsWith('[]')) {
+			throw new Error(
+				`batchValues: invalid type name '${typeName}'. ` +
+					'At most one array suffix "[]" is allowed as a raw type-name input. ' +
+					'Use "int4[]" not "int4[][]".',
+			);
+		}
+	}
+
+	// ── Step 2: strip optional modifier "(N)" or "(N,M)" ─────────────────────
+	// Only digits inside parens; any other parenthesised content is rejected.
+	const modifierMatch = rest.match(/\(([^)]*)\)$/);
+	if (modifierMatch) {
+		const inner = modifierMatch[1] ?? '';
+		if (!/^\d+(?:,\d+)?$/.test(inner)) {
+			throw new Error(
+				`batchValues: invalid type name '${typeName}'. ` +
+					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
+			);
+		}
+		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
+	}
+
+	// ── Step 3: validate the base type ───────────────────────────────────────
+	const baseLower = rest.toLowerCase();
+
+	// (a) Multi-word allowlist (case-insensitive)
+	if (MULTIWORD_BASE_TYPES.includes(baseLower)) {
+		return; // valid
+	}
+
+	// (b) Strict identifier, optionally schema-qualified: ident | ident.ident
+	const parts = rest.split('.');
+	if (parts.length > 2) {
 		throw new Error(
 			`batchValues: invalid type name '${typeName}'. ` +
-				'Type names must not contain quotes, semicolons, backslashes, or comment sequences.',
+				'Schema-qualified types allow at most one dot (schema.type).',
 		);
 	}
-	// Allow only safe characters: letters, digits, underscore, space, dot,
-	// parentheses, comma, square brackets
-	if (!/^[a-zA-Z0-9_\s.()[\],]+$/.test(typeName)) {
-		throw new Error(
-			`batchValues: invalid type name '${typeName}'. ` +
-				'Type names may only contain letters, digits, underscores, spaces, dots, ' +
-				'parentheses, commas, and square brackets.',
-		);
+	for (const part of parts) {
+		if (!IDENT_RE.test(part)) {
+			throw new Error(
+				`batchValues: invalid type name '${typeName}'. ` +
+					`Base type "${part}" is not a valid SQL identifier ` +
+					'([A-Za-z_][A-Za-z0-9_]*) and is not in the multi-word type allowlist.',
+			);
+		}
 	}
 }
 
