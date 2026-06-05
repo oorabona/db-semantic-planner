@@ -305,7 +305,7 @@ db.rows.equals: 4
 # ─────────────────────────────────────────
 --- query: 34
 success: true
-sql.equals: SELECT roles.* FROM iam_example.roles WHERE roles.id = ANY (SELECT user_roles_subq_0.role_id FROM iam_example.user_roles AS user_roles_subq_0 WHERE user_roles_subq_0.user_id = $1) AND EXISTS (SELECT 1 FROM iam_example.user_roles AS user_roles_exists_1 WHERE roles.id = user_roles_exists_1.role_id)
+sql.equals: SELECT roles.* FROM iam_example.roles WHERE EXISTS (SELECT 1 FROM iam_example.user_roles AS user_roles_exists_0 WHERE roles.id = user_roles_exists_0.role_id AND user_roles_exists_0.user_id = $1)
 params.equals: [1]
 db.rows.equals: 1
 

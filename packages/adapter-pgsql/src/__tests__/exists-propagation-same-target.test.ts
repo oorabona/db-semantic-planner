@@ -38,7 +38,7 @@ function ws(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
-describe('propagateExistsConditions: relation-identity match prevents cross-wiring', () => {
+describe('decoupled include: exists filter never propagates to any include subquery', () => {
 	it('exists(authoredPosts, where=published:true) does NOT contaminate include(reviewedPosts)', () => {
 		const orm = buildOrm() as any;
 		const dump = orm
@@ -48,21 +48,20 @@ describe('propagateExistsConditions: relation-identity match prevents cross-wiri
 			.dump();
 		const sql = ws(dump.sql);
 
-		// The filter on authored posts must be in the top-level WHERE (EXISTS subquery)
-		// but must NOT appear inside the reviewed-posts include subquery.
+		// EXISTS must appear in the WHERE
 		expect(sql).toContain('EXISTS');
 
 		// The filter (published=true) must appear exactly once — only in the EXISTS subquery,
-		// NOT propagated into the reviewedPosts include subquery (cross-wire prevented).
+		// NOT propagated into the reviewedPosts include subquery.
 		const trueCount = (dump.params as unknown[]).filter(
 			(p) => p === true,
 		).length;
 		expect(trueCount).toBe(1);
 	});
 
-	it('exists(authoredPosts, where=published:true) + include(authoredPosts) DOES propagate correctly', () => {
-		// The matching-relation case: same relation in both exists and include.
-		// The filter condition SHOULD be propagated into the include subquery.
+	it('exists(authoredPosts, where=published:true) + include(authoredPosts) — include NOT filtered (decoupled)', () => {
+		// After decoupling, even when exists and include target the same relation,
+		// the filter does NOT propagate into the include subquery.
 		const orm = buildOrm() as any;
 		const dump = orm
 			.select('users')
@@ -71,13 +70,13 @@ describe('propagateExistsConditions: relation-identity match prevents cross-wiri
 			.dump();
 		const sql = ws(dump.sql);
 
-		// Both the EXISTS subquery and the include subquery should be filtered.
-		// params must contain true at least twice: once for EXISTS, once for include.
+		// EXISTS must appear in WHERE
 		expect(sql).toContain('EXISTS');
+		// published=true must appear exactly ONCE — in the WHERE EXISTS only, NOT in include.
 		const trueCount = (dump.params as unknown[]).filter(
 			(p) => p === true,
 		).length;
-		expect(trueCount).toBeGreaterThanOrEqual(2);
+		expect(trueCount).toBe(1);
 	});
 
 	it('exists(reviewedPosts, where=published:false) does NOT contaminate include(authoredPosts)', () => {

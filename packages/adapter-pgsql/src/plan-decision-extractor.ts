@@ -1467,18 +1467,6 @@ export function enrichExistsDecisionsInPlace(
 				// Replace the stub in-place in its container
 				const stub = stubs[stubIdx];
 				if (stub) {
-					// Carry the optimizer-generated flag from the stub to the enriched
-					// decision.  convertExistsLike sets _fromInToExists on stubs that were
-					// produced by the IN→EXISTS rewrite; buildEnrichedExistsDecision constructs
-					// a fresh object and would otherwise drop the flag.  propagateExistsConditions
-					// checks the flag to skip include propagation for optimizer-generated nodes.
-					if (
-						(stub.decision as unknown as Record<string, unknown>)
-							._fromInToExists
-					) {
-						(enriched as unknown as Record<string, unknown>)._fromInToExists =
-							true;
-					}
 					stub.container[stub.index] = enriched;
 					consumedStubIndices.add(stubIdx);
 					placedDecisions.push(enriched);

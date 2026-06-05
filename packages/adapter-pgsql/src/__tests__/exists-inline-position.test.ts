@@ -155,17 +155,13 @@ describe('4. top-level exists (AND semantics unchanged)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. Relation that is both EXISTS-filtered (nested) and included
-//    Item A fix: OR-branch exists must NOT propagate conditions to include.
+// 5. Relation that is both EXISTS-filtered and included
+//    Decoupled semantics: include is NEVER filtered by a sibling exists.
 // ---------------------------------------------------------------------------
 
-describe('5. include + nested exists (propagateExistsConditions AND-only propagation)', () => {
-	it('include(posts) with exists(posts,{where}) nested in OR — include does NOT inherit filter (Item A fix)', () => {
-		// Before Item A fix, collectEnrichedExistsDecisions descended into whereOr,
-		// so `exists('posts', { where: eq('published', true) })` under OR would
-		// propagate `published = true` into the include subquery.  That was wrong:
-		// a row selected by `active = true` would have ALL its posts included, not
-		// only published ones.
+describe('5. include + exists — decoupled: include never inherits exists filter', () => {
+	it('include(posts) with exists(posts,{where}) nested in OR — include does NOT inherit filter', () => {
+		// Exists under OR: include must not inherit the OR-branch filter.
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('users')
@@ -182,17 +178,14 @@ describe('5. include + nested exists (propagateExistsConditions AND-only propaga
 		expect(normalized).toContain('OR');
 		// Include subquery must appear
 		expect(normalized).toMatch(/json_agg|lateral|posts/i);
-		// `published` must appear EXACTLY ONCE in the full SQL:
-		// - once inside the EXISTS subquery in the WHERE clause
-		// - NOT a second time inside the include (json_agg) subquery
-		// If it appears twice, the include erroneously inherited the OR-branch filter.
+		// `published` must appear EXACTLY ONCE (in the EXISTS WHERE only, not in include).
 		const publishedCount = (normalized.match(/published/gi) ?? []).length;
 		expect(publishedCount).toBe(1);
 	});
 
-	it('include(posts) with top-level AND exists(posts,{where}) — include DOES inherit filter (AND-required)', () => {
-		// Top-level exists in AND position: the condition IS AND-required for every
-		// selected row, so the include should inherit the filter.
+	it('include(posts) with top-level AND exists(posts,{where}) — include NOT filtered (decoupled)', () => {
+		// After decoupling, even AND-position exists does not propagate to include.
+		// The EXISTS filters which root rows are selected; the include returns ALL rows.
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('users')
@@ -202,8 +195,11 @@ describe('5. include + nested exists (propagateExistsConditions AND-only propaga
 		const normalized = ws(dump.sql);
 		// Include must appear
 		expect(normalized).toMatch(/json_agg|lateral|posts/i);
-		// published condition must appear (propagated to include)
-		expect(normalized).toContain('published');
+		// EXISTS must be in WHERE
+		expect(normalized).toContain('EXISTS');
+		// published must appear EXACTLY ONCE — in the WHERE EXISTS only, NOT in include.
+		const publishedCount = (normalized.match(/published/gi) ?? []).length;
+		expect(publishedCount).toBe(1);
 	});
 });
 

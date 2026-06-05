@@ -237,9 +237,6 @@ interface FlatWhereFields {
 	readonly escape?: string;
 	// Custom expression WHERE (kind: 'expression')
 	readonly expr?: unknown;
-	// Optimizer-generated flag (IN→EXISTS rewrite): must NOT drive include propagation.
-	// Set by planner.ts optimizeInToExists; threaded onto the decision by convertExistsLike.
-	readonly _fromInToExists?: boolean;
 }
 
 // ============================================================================
@@ -711,15 +708,7 @@ function convertExistsLike(
 		? convertWhere(cond.where as WhereIntent, targetTable)
 		: [];
 	const base: PlanDecision = { type: 'where', operator, targetTable };
-	const decision =
-		subDecisions.length > 0 ? { ...base, conditions: subDecisions } : base;
-	// Thread the optimizer-generated flag onto the decision so that
-	// propagateExistsConditions can skip it during include propagation.
-	// The user wrote inSubquery(), NOT exists() — they did not opt into include-filter coupling.
-	if (cond._fromInToExists) {
-		(decision as unknown as Record<string, unknown>)._fromInToExists = true;
-	}
-	return decision;
+	return subDecisions.length > 0 ? { ...base, conditions: subDecisions } : base;
 }
 
 /** Handle kind: 'subquery' — field OP (SELECT col FROM table WHERE ...) */

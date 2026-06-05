@@ -309,7 +309,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 28
 success: true
-sql.equals: SELECT departments.* FROM test_strategies.departments WHERE departments.id = ANY (SELECT employees_subq_0.department_id FROM test_strategies.employees AS employees_subq_0 WHERE employees_subq_0.active = $1) AND EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_1 WHERE departments.id = employees_exists_1.department_id)
+sql.equals: SELECT departments.* FROM test_strategies.departments WHERE EXISTS (SELECT 1 FROM test_strategies.employees AS employees_exists_0 WHERE departments.id = employees_exists_0.department_id AND employees_exists_0.active = $1)
 params.equals: [true]
 
 # ─────────────────────────────────────────

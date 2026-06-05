@@ -747,16 +747,10 @@ function optimizeInToExists(
 			//   • inWhere.not === false → { kind: 'exists'    } — outer NOT wraps it if present
 			//   • inWhere.not === true  → { kind: 'notExists' } — outer NOT wraps it if present
 			const targetKind = inWhere.not ? 'notExists' : 'exists';
-			// Mark this node as optimizer-generated (IN→EXISTS rewrite).
-			// The adapter's propagateExistsConditions must skip these nodes —
-			// the user wrote inSubquery(), NOT exists(), so they did NOT opt into
-			// include-filter coupling.  The node still compiles correctly in WHERE;
-			// it just must not drive include propagation.
 			return {
 				kind: targetKind,
 				relation: matchedRelation,
 				...(inWhere.subquery.where && { where: inWhere.subquery.where }),
-				_fromInToExists: true,
 			} as unknown as WhereIntent;
 		}
 

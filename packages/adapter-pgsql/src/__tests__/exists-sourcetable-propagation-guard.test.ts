@@ -1,22 +1,11 @@
 /**
- * Regression tests for sourceTable on enriched exists decisions and the
- * propagateExistsConditions sourceTable guard.
- *
- * Before the fix, buildEnrichedExistsDecision did not set sourceTable on the
- * returned decision, making the sourceTable guard in propagateExistsConditions
- * a no-op (both sides would be undefined, skipping the guard entirely).
- * The cross-source protection came solely from collectEnrichedExistsDecisions
- * not descending into nested exists conditions.
- *
- * Fix: buildEnrichedExistsDecision now sets sourceTable = sourceTableForRelation
- * (plan.rootTable for top-level filter-strategy decisions).  This makes the
- * (sourceTable, relationName) guard in propagateExistsConditions meaningful.
+ * Decoupled include: exists() filter never propagates into a sibling include subquery.
  *
  * Tests verify:
  *   1. Cross-source: nested posts.comments EXISTS does NOT propagate to
- *      users.comments include (now guarded by BOTH don't-descend AND sourceTable).
- *   2. Same-source: top-level users.comments EXISTS DOES propagate to
- *      users.comments include (sourceTable matches → propagation fires correctly).
+ *      users.comments include — the include correlates on user_id only.
+ *   2. Top-level users.comments EXISTS + include(comments) — include is also
+ *      NOT filtered (decoupled: exists only picks root rows; include returns all).
  *
  * Schema: users → posts (FK author_id)
  *         users → comments (FK user_id, relation 'comments')
@@ -58,7 +47,7 @@ function ws(sql: string): string {
 // Cross-source: nested posts.comments must NOT propagate to users.comments include
 // ---------------------------------------------------------------------------
 
-describe('sourceTable guard on propagateExistsConditions', () => {
+describe('decoupled include: exists filter never propagates regardless of source table', () => {
 	it('nested posts.comments exists does NOT propagate to users.comments include', () => {
 		const orm = buildOrm();
 		const dump = orm
@@ -88,7 +77,9 @@ describe('sourceTable guard on propagateExistsConditions', () => {
 		).not.toContain('__t__.flag');
 	});
 
-	it('top-level users.comments exists DOES propagate to users.comments include (sourceTable matches)', () => {
+	it('top-level users.comments exists does NOT propagate to users.comments include (decoupled)', () => {
+		// After decoupling, include is never filtered by a sibling exists — even when
+		// the exists and include target the same relation on the same source table.
 		const orm = buildOrm();
 		const dump = orm
 			.select('users')
@@ -97,26 +88,26 @@ describe('sourceTable guard on propagateExistsConditions', () => {
 			.dump();
 		const sql = ws(dump.sql);
 
-		// flag=true must appear at least twice: once in the WHERE EXISTS and once
-		// propagated into the include subquery.
+		// flag=true must appear exactly ONCE — only in the WHERE EXISTS, NOT in the include.
 		const trueCount = (dump.params as unknown[]).filter(
 			(p) => p === true,
 		).length;
 		expect(
 			trueCount,
-			`flag=true must appear at least twice when propagated into the include. Got ${trueCount}. SQL: ${sql}`,
-		).toBeGreaterThanOrEqual(2);
+			`flag=true must appear exactly once (only in the WHERE EXISTS). Got ${trueCount}. SQL: ${sql}`,
+		).toBe(1);
 
-		// The include subquery must contain the flag predicate.
+		// The include subquery must NOT contain the flag predicate.
 		expect(
 			sql,
-			`Include subquery must carry flag predicate when same-source exists propagates. SQL: ${sql}`,
-		).toContain('__t__.flag');
+			`Include subquery must NOT carry flag predicate after decoupling. SQL: ${sql}`,
+		).not.toContain('__t__.flag');
 	});
 
-	it('cross-source: and(exists(posts, nested-comments), exists(comments,flag)) + include(comments) — only root exists propagates', () => {
-		// Both users.comments (top-level) and posts.comments (nested) share the
-		// 'comments' relation name.  Only users.comments must propagate.
+	it('cross-source: exists(posts,{where:exists(comments,flag)}) + include(comments) — flag NOT in include', () => {
+		// Both users.comments (top-level include) and posts.comments (nested exists)
+		// share the 'comments' relation name.  After decoupling, neither propagates
+		// into the include subquery.
 		const orm = buildOrm();
 		const dump = orm
 			.select('users')
@@ -129,15 +120,13 @@ describe('sourceTable guard on propagateExistsConditions', () => {
 			.dump();
 		const sql = ws(dump.sql);
 
-		// The nested EXISTS has flag=false; it must NOT appear in the include.
-		// The include has no top-level users.comments exists here, so flag should
-		// not appear in the include subquery at all.
+		// The include subquery must not carry the flag predicate.
 		expect(
 			sql,
-			`Include subquery must not contain __t__.flag (no top-level users.comments exists to propagate). SQL: ${sql}`,
+			`Include subquery must not contain __t__.flag. SQL: ${sql}`,
 		).not.toContain('__t__.flag');
 
-		// The value false must appear exactly once (in the nested EXISTS).
+		// The value false must appear exactly once (in the nested EXISTS only).
 		const falseCount = (dump.params as unknown[]).filter(
 			(p) => p === false,
 		).length;

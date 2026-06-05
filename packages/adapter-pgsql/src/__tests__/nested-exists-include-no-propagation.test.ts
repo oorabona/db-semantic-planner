@@ -1,23 +1,9 @@
 /**
- * Regression tests for cross-source include-filter propagation with nested exists.
+ * Regression tests: include is never filtered by a sibling exists (decoupled semantics).
  *
- * Bug: collectEnrichedExistsDecisions + propagateExistsConditions matched exists
- * decisions to include decisions by relationName alone.  When a nested exists
- * `exists('posts', { where: exists('comments', { where: eq('flag', true) }) })`
- * is combined with `.include('comments')`, the inner posts→comments exists shares
- * the relation name 'comments' with the root users→comments include.  Descending
- * into the outer exists's own conditions (or failing the source guard) could
- * propagate the `flag = true` filter into the root users.comments include,
- * producing wrongly-filtered include results.
- *
- * Fix:
- *   1. collectEnrichedExistsDecisions stops at exists boundaries — it never
- *      descends into an exists's own conditions (those belong to a nested subquery
- *      on a different source table).
- *   2. propagateExistsConditions adds a sourceTable guard: when both the exists
- *      decision and the include decision carry sourceTable, they must match.
- *      A posts→comments exists (sourceTable='posts') must not match a
- *      users.comments include (sourceTable='users').
+ * With nested exists, the inner posts→comments exists shares the 'comments' relation
+ * name with the root users→comments include.  The include must correlate on user_id
+ * only and return ALL users→comments rows regardless of the nested exists filter.
  *
  * Schema: users → posts (FK author_id)
  *         users → comments (FK user_id, relation 'comments')
@@ -136,11 +122,13 @@ describe('nested exists cross-source: inner posts.comments filter must NOT propa
 });
 
 // ---------------------------------------------------------------------------
-// Regression: top-level same-relation exists STILL propagates (must not break)
+// Decoupled: top-level same-relation exists + include — include NOT filtered
 // ---------------------------------------------------------------------------
 
-describe('same-relation top-level exists + include — propagation is preserved', () => {
-	it('exists(comments,{where:eq(flag,true)}) + include(comments) — flag IS in include subquery (same source)', () => {
+describe('decoupled include: top-level same-relation exists does NOT filter the include', () => {
+	it('exists(comments,{where:eq(flag,true)}) + include(comments) — flag NOT in include subquery', () => {
+		// After decoupling, even when exists and include target the same relation on the
+		// same source table, the filter does NOT propagate into the include subquery.
 		const orm = buildOrm();
 		const dump = orm
 			.select('users')
@@ -150,22 +138,25 @@ describe('same-relation top-level exists + include — propagation is preserved'
 
 		const sql = ws(dump.sql);
 
-		// Both the EXISTS subquery and the include subquery are users→comments.
-		// The flag predicate must appear twice: once in the WHERE EXISTS clause,
-		// and once in the include subquery (propagated by propagateExistsConditions).
+		// EXISTS must appear in the WHERE
+		expect(sql, `WHERE must contain EXISTS. SQL: ${sql}`).toMatch(
+			/WHERE\s+EXISTS/i,
+		);
+
+		// flag=true must appear exactly ONCE — in the WHERE EXISTS only, NOT in include.
 		const trueCount = (dump.params as unknown[]).filter(
 			(p) => p === true,
 		).length;
 		expect(
 			trueCount,
-			`flag=true must appear at least twice when propagated into include. Got ${trueCount}. SQL: ${sql}`,
-		).toBeGreaterThanOrEqual(2);
+			`flag=true must appear exactly once (only in WHERE EXISTS). Got ${trueCount}. SQL: ${sql}`,
+		).toBe(1);
 
-		// The include subquery must reference flag — confirming propagation occurred.
+		// The include subquery must NOT reference flag — decoupled from the sibling exists.
 		expect(
 			sql,
-			`Include subquery must carry flag predicate when same-source exists propagates. SQL: ${sql}`,
-		).toContain('__t__.flag');
+			`Include subquery must NOT carry flag predicate after decoupling. SQL: ${sql}`,
+		).not.toContain('__t__.flag');
 	});
 });
 

@@ -295,27 +295,18 @@ describe('Case 7: multi-hop relationFilter posts → comments{flagged=true}', ()
 });
 
 // ---------------------------------------------------------------------------
-// Case 8 — include + exists: propagateExistsConditions filters the include
+// Case 8 — include + exists: decoupled — include returns ALL posts
 //
-// DESIGN NOTE: when a top-level (AND-position) exists() filter is combined
-// with an include() on the same relation, the planner intentionally propagates
-// the exists filter conditions into the include subquery
-// (propagateExistsConditions in adapter-compiler-select.ts).  This is the
-// designed behaviour documented in exists-inline-position.test.ts § 5
-// ("include(posts) with top-level AND exists — include DOES inherit filter").
+// DESIGN NOTE: the exists() filter controls WHICH root rows are selected.
+// The include() is independent: it correlates on the FK only and returns ALL
+// related rows for each matched root row (standard ORM semantics).
 //
-// Consequence: the include returns only posts that satisfied the exists
-// predicate (published=true), NOT all posts for the matching user.
-//
-//   Alice: p1 (published=T) → 1 included post
-//   Bob:   p3, p4 (both published=T) → 2 included posts
-//   Carol: p5 (published=T) → 1 included post
-//
-// The original e2e expectation (all 2 posts per user) was wrong — it
-// contradicted the designed propagation behaviour.
+//   Alice: p1 (published=T), p2 (published=F) → 2 included posts
+//   Bob:   p3 (published=T), p4 (published=T) → 2 included posts
+//   Carol: p5 (published=T), p6 (published=F) → 2 included posts
 // ---------------------------------------------------------------------------
-describe('Case 8: include posts after exists posts{published=true} — include IS filtered (propagation)', () => {
-	it('matching users have only published posts included (exists filter propagated to include)', async () => {
+describe('Case 8: include posts after exists posts{published=true} — include returns ALL posts (decoupled)', () => {
+	it('matching users have ALL their posts included (exists filter does NOT propagate to include)', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: existsCorrectnessModel, adapter });
 
@@ -337,23 +328,18 @@ describe('Case 8: include posts after exists posts{published=true} — include I
 		const alice = rows.find((r) => r.name === 'Alice');
 		expect(alice).toBeDefined();
 		// Alice has p1(published=T) and p2(published=F).
-		// propagateExistsConditions propagates published=true into the include subquery,
-		// so only p1 is returned (the published post).
-		expect(alice!.posts).toHaveLength(1);
-		expect(alice!.posts[0]).toMatchObject({ published: true });
+		// The include returns BOTH posts — the exists filter does not restrict the include.
+		expect(alice!.posts).toHaveLength(2);
 
 		const bob = rows.find((r) => r.name === 'Bob');
 		expect(bob).toBeDefined();
 		// Bob has p3 and p4, both published=T → both included.
 		expect(bob!.posts).toHaveLength(2);
-		expect(bob!.posts.every((p) => p.published)).toBe(true);
 
 		const carol = rows.find((r) => r.name === 'Carol');
 		expect(carol).toBeDefined();
-		// Carol has p5(published=T) and p6(published=F).
-		// Only p5 is returned (published post).
-		expect(carol!.posts).toHaveLength(1);
-		expect(carol!.posts[0]).toMatchObject({ published: true });
+		// Carol has p5(published=T) and p6(published=F) — include returns both.
+		expect(carol!.posts).toHaveLength(2);
 	});
 });
 
@@ -560,10 +546,10 @@ describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the
 		expect(bob!.posts).toHaveLength(2);
 	});
 
-	it('Case 11 vs Case 8 contrast: inSubquery include is wider than exists include', async () => {
-		// Case 8: exists(published=T) + include → include is FILTERED (2 users with 1 post each)
-		// Case 11: inSubquery(published=T) + include → include is UNFILTERED (all posts returned)
-		// The two must produce DIFFERENT include counts for Alice and Carol.
+	it('Case 11 vs Case 8 consistency: both exists and inSubquery return all posts (decoupled)', async () => {
+		// After decoupling, both exists(published=T) + include and
+		// inSubquery(published=T) + include return ALL posts for matched users.
+		// The two must produce EQUAL include counts for Alice (both = 2).
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: existsCorrectnessModel, adapter });
 
@@ -596,9 +582,8 @@ describe('Case 11: inSubquery + include — optimizer EXISTS must NOT filter the
 		const aliceExists = existsRows.find((r) => r.name === 'Alice');
 		const aliceInSub = inSubqueryRows.find((r) => r.name === 'Alice');
 
-		// exists() propagates: Alice has 1 included post (only published)
-		expect(aliceExists!.posts).toHaveLength(1);
-		// inSubquery does NOT propagate: Alice has 2 included posts (all)
+		// Both must return ALL of Alice's posts (p1 and p2) — decoupled from the filter.
+		expect(aliceExists!.posts).toHaveLength(2);
 		expect(aliceInSub!.posts).toHaveLength(2);
 	});
 });

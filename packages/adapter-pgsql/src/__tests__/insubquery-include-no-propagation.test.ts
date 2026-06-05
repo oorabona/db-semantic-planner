@@ -1,18 +1,11 @@
 /**
- * DEFECT 1 regression: IN→EXISTS optimizer MUST NOT propagate the rewritten
- * exists condition into a same-relation include.
+ * Decoupled include: neither IN→EXISTS optimizer-generated exists nor user-authored
+ * exists propagate their filter into a sibling include subquery.
  *
- * The user wrote inSubquery(), NOT exists() — they did not opt into include-filter
- * coupling.  The optimizer-generated exists still compiles in the WHERE (correct)
- * but its conditions must be invisible to propagateExistsConditions (include must
- * return ALL rows for the matched parent, not only the filtered subset).
- *
- * Oracle: when propagation leaks, `published = $N` appears in BOTH the WHERE EXISTS
- * subquery AND the include subquery's WHERE clause — two parameter bindings for `true`.
- * Without the leak, only one binding (just the WHERE EXISTS).
- *
- * Contrast: a user-authored exists() + include() DOES inherit the filter
- * (that is the designed propagation behaviour — see exists-inline-position.test.ts § 5).
+ * Oracle: published = $N must appear exactly ONCE in params regardless of whether
+ * the WHERE filter came from inSubquery() (optimizer-rewritten) or exists().
+ * Without the decoupling, a user-authored exists() + include() would bind published
+ * twice (WHERE EXISTS once, include once).  After decoupling, always once.
  */
 
 import {
@@ -136,15 +129,15 @@ describe('inSubquery + include: optimizer-generated EXISTS must NOT propagate to
 });
 
 // ---------------------------------------------------------------------------
-// 2. User-authored exists() + include — include DOES inherit the filter (baseline)
-//    Oracle: 2 `true` params when propagation correctly fires.
+// 2. User-authored exists() + include — include is also NOT filtered (decoupled)
+//    Oracle: 1 `true` param for both inSubquery and exists cases.
 // ---------------------------------------------------------------------------
 
-describe('user-authored exists() + include: propagation still works (baseline)', () => {
-	it('params contain true TWICE when root WHERE is exists() — propagation fires', () => {
-		// User-authored exists('posts', { where: eq('published', true) }) + include('posts')
-		// → propagateExistsConditions DOES propagate the condition.
-		// → include subquery adds WHERE published = $N → 2 true params total.
+describe('user-authored exists() + include: include NOT filtered after decoupling', () => {
+	it('params contain true ONCE when root WHERE is exists() — no propagation', () => {
+		// After decoupling, user-authored exists('posts', { where: eq('published', true) })
+		// + include('posts') — the include does NOT inherit the filter.
+		// Oracle: exactly 1 true param (only the WHERE EXISTS, not the include).
 		const orm = buildOrm();
 		const dump = (orm as any)
 			.select('users')
@@ -154,12 +147,13 @@ describe('user-authored exists() + include: propagation still works (baseline)',
 
 		expect(ws(dump.sql)).toContain('EXISTS');
 
-		// Two `true` bindings: one in the WHERE EXISTS, one in the include subquery WHERE.
+		// Exactly ONE true binding: only in the WHERE EXISTS.
+		// If the include were still filtered, there would be 2.
 		const trueParams = dump.params.filter((p: unknown) => p === true);
-		expect(trueParams).toHaveLength(2);
+		expect(trueParams).toHaveLength(1);
 	});
 
-	it('direct compileIntent: user-authored exists + include propagates — 2 true params', () => {
+	it('direct compileIntent: user-authored exists + include — 1 true param (decoupled)', () => {
 		const intent: QueryIntent = {
 			type: 'select',
 			from: 'users',
@@ -178,7 +172,8 @@ describe('user-authored exists() + include: propagation still works (baseline)',
 
 		const { params } = compileIntent(intent);
 
+		// Exactly 1 true binding — the WHERE EXISTS only.
 		const trueBindings = params.filter((p) => p === true);
-		expect(trueBindings).toHaveLength(2);
+		expect(trueBindings).toHaveLength(1);
 	});
 });

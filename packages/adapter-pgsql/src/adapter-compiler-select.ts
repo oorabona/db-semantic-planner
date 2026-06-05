@@ -419,144 +419,6 @@ function compileJoinIntents(
 // ============================================================================
 
 /**
- * Collect fully-enriched exists/notExists decisions that are in an AND-REQUIRED
- * (conjunctive) position — i.e. they MUST hold for every selected row.
- *
- * Only descends into `whereAnd` branches (top-level conjunction).  Does NOT
- * descend into `whereOr` or `whereNot`: an EXISTS under OR or NOT is not
- * guaranteed to hold for every selected row, so its conditions must NOT be
- * propagated to include subqueries.
- *
- * Critically, does NOT descend into an exists/notExists decision's own
- * `conditions` array.  Those conditions belong to the EXISTS subquery rooted
- * at a DIFFERENT source table (e.g. posts.comments inside users→posts exists),
- * and collecting them here would cross-wire a nested relation's filter into
- * a same-named root-level include (e.g. users.comments).
- *
- * Used by propagateExistsConditions to find filter conditions for include propagation.
- */
-function collectEnrichedExistsDecisions(
-	decisions: readonly PlanDecision[],
-	out: PlanDecision[],
-): void {
-	for (const d of decisions) {
-		if (d.type === 'where' && d.operator === 'exists' && d.targetTable) {
-			// DEFECT-1 FIX: collect ONLY positive 'exists' decisions for include propagation.
-			// notExists/every describe absence or universal quantification — their conditions
-			// must NOT be applied as a positive filter on the include subquery.
-			// Example: notExists('posts', { where: eq('published', false) }) selects users
-			// with NO unpublished posts; propagating that condition would wrongly restrict
-			// included posts to published=false (empty result when no unpublished posts exist).
-			//
-			// IN→EXISTS OPTIMIZER GUARD: skip decisions flagged as optimizer-generated.
-			// The user wrote inSubquery(), NOT exists(), so they did not opt into
-			// include-filter coupling.  The optimizer-generated exists still compiles
-			// correctly in the WHERE clause; it must not drive include propagation.
-			if ((d as unknown as Record<string, unknown>)._fromInToExists) {
-				// Do NOT recurse — skip entirely (optimizer-rewrite, no propagation).
-				continue;
-			}
-			out.push(d);
-			// SOURCE BOUNDARY: do NOT recurse into this exists's own conditions.
-			// The conditions array belongs to a nested subquery whose source table is
-			// d.targetTable (e.g. 'posts'), NOT the root table.  Descending would collect
-			// inner exists decisions (e.g. posts→comments) that share a relation name with
-			// a root include (e.g. users.comments) but have a different source — causing
-			// cross-source propagation of the wrong filter into the root include.
-		} else if (d.type === 'whereAnd' && d.conditions) {
-			// Only recurse into AND conjunctions — OR/NOT are not conjunctive positions.
-			collectEnrichedExistsDecisions(d.conditions as PlanDecision[], out);
-		}
-		// whereOr, whereNot, and all other types are deliberately NOT recursed into.
-	}
-}
-
-/**
- * Propagate filter conditions from EXISTS decisions to matching includeStrategy decisions.
- * When a relation is both filtered (EXISTS) and included, the filter appears in both
- * the EXISTS subquery AND the include subquery.
- *
- * Matching is by full RELATION IDENTITY: (sourceTable, relationName) when both are
- * available.  This prevents two relations that share a name but originate from different
- * source tables (e.g. users.comments via user_id vs posts.comments via post_id) from
- * cross-wiring: the nested posts→comments filter must not propagate to users.comments.
- *
- * Exists decisions may be nested anywhere in the decision tree (inside OR/AND/NOT)
- * so this function collects them from the entire tree before matching.
- */
-function propagateExistsConditions(
-	includeDecisions: readonly PlanDecision[],
-	allDecisions: readonly PlanDecision[],
-): PlanDecision[] {
-	// Collect root-level exists decisions (collectEnrichedExistsDecisions stops at
-	// exists boundaries — it never descends into an exists's own conditions, so
-	// only same-source-level exists decisions are considered for propagation).
-	const existsDecisions: PlanDecision[] = [];
-	collectEnrichedExistsDecisions(allDecisions, existsDecisions);
-
-	return includeDecisions.map((jd) => {
-		if (jd.type !== 'includeStrategy' || !jd.relationName) return jd;
-
-		// Match the exists decision to the include decision by full RELATION IDENTITY:
-		// - sourceTable guard (when both carry sourceTable): cross-source protection.
-		//   users.comments (sourceTable='users') must NOT match posts.comments
-		//   (sourceTable='posts') even when both have relationName='comments'.
-		// - When both decisions carry relationName, match only on relationName.
-		//   This prevents cross-wiring when two relations target the same table
-		//   (e.g. 'authoredPosts' and 'reviewedPosts' both targeting 'posts').
-		// - Fall back to targetTable only when neither decision has a relationName,
-		//   preserving the original same-table match for legacy/unaliased cases.
-		// - If the match is ambiguous (one has relationName, the other doesn't),
-		//   do NOT propagate — safer to skip than to cross-wire.
-		const matchingExists = existsDecisions.find((ed) => {
-			if (ed.type !== 'where' || ed.operator !== 'exists') return false;
-			if (!ed.conditions || (ed.conditions as PlanDecision[]).length === 0)
-				return false;
-
-			// Cross-source guard: reject when sourceTable is known on both sides
-			// and they differ.  enrichExistsStubsInConditions sets sourceTable on
-			// nested exists; buildEnrichedExistsDecision now also sets sourceTable.
-			// When the field is absent on one side (legacy path), skip the guard.
-			const edSource = (ed as unknown as Record<string, unknown>).sourceTable as
-				| string
-				| undefined;
-			const jdSource = (jd as unknown as Record<string, unknown>).sourceTable as
-				| string
-				| undefined;
-			if (
-				edSource !== undefined &&
-				jdSource !== undefined &&
-				edSource !== jdSource
-			) {
-				return false;
-			}
-
-			const edRel = (ed as unknown as Record<string, unknown>).relationName as
-				| string
-				| undefined;
-			const jdRel = (jd as unknown as Record<string, unknown>).relationName as
-				| string
-				| undefined;
-			// Both have relationName → match by identity only.
-			if (edRel !== undefined && jdRel !== undefined) {
-				return edRel === jdRel;
-			}
-			// Neither has relationName → fall back to targetTable (legacy path).
-			if (edRel === undefined && jdRel === undefined) {
-				return ed.targetTable === jd.targetTable;
-			}
-			// One has, the other doesn't → ambiguous, do NOT propagate.
-			return false;
-		});
-
-		if (matchingExists?.conditions) {
-			return { ...jd, conditions: matchingExists.conditions };
-		}
-		return jd;
-	});
-}
-
-/**
  * Strip auto-selected columns from join includeStrategy decisions when the query
  * uses aggregation, DISTINCT, GROUP BY, or explicit column selection.
  *
@@ -909,15 +771,13 @@ export function compileSelect<T = unknown>(
 				? [...unifiedIncludeDecisions, ...synthesizedJoins]
 				: unifiedIncludeDecisions;
 
-		// Propagate filter conditions from EXISTS to matching include decisions.
-		// When a relation is both filtered and included, the filter appears in both
-		// the EXISTS subquery AND the include subquery.
-		// Pass the full decisions tree so propagateExistsConditions can find exists
-		// decisions wherever they sit (top-level or nested inside OR/AND/NOT).
-		const enrichedUnifiedDecisions = propagateExistsConditions(
-			allUnifiedIncludeDecisions,
-			decisions,
-		);
+		// Include decisions are independent of any sibling exists() filter.
+		// The exists() only filters which root rows are selected; the include
+		// subquery correlates on the FK only and returns ALL related rows.
+		// Spread to mutable array — downstream helpers mutate in-place.
+		const enrichedUnifiedDecisions: PlanDecision[] = [
+			...allUnifiedIncludeDecisions,
+		];
 
 		// Strip auto-selected columns from join includes when aggregation, DISTINCT,
 		// GROUP BY, or explicit column selection is active. Keeps the JOIN for
