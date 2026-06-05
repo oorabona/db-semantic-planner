@@ -119,6 +119,17 @@ export interface CompareSchemataOptions {
 	dbCasing?: DbCasing;
 	/** Dialect capabilities — comparisons for unsupported features will be skipped */
 	readonly dialectCapabilities?: DialectCapabilities;
+	/**
+	 * When `true`, extensions present in the live DB but absent from the model
+	 * schema are silently ignored — no `drop_extension` change is emitted for them.
+	 * Only extensions explicitly declared in the model are managed (created if missing).
+	 *
+	 * Use this when the database image pre-installs extensions that the application
+	 * schema does not own (e.g. pgvector, pg_search bundled in a custom Postgres image).
+	 * Default: `false` (full-sync behaviour — unmanaged DB extensions produce a
+	 * `drop_extension` entry).
+	 */
+	readonly ignoreUnmanagedExtensions?: boolean;
 }
 
 // ============================================================================
@@ -167,7 +178,9 @@ export function compareSchemata(
 
 	// 0a. Compare extensions (schema-level)
 	if (sup(caps?.supportsDDLExtensions)) {
-		compareExtensions(schema, db, changes);
+		compareExtensions(schema, db, changes, {
+			ignoreUnmanaged: options?.ignoreUnmanagedExtensions ?? false,
+		});
 	}
 
 	// 0b. Compare sequences (schema-level, before tables)
@@ -1067,6 +1080,7 @@ function compareExtensions(
 	schema: ModelIR,
 	db: ModelIR,
 	changes: SchemaChange[],
+	opts: { ignoreUnmanaged: boolean } = { ignoreUnmanaged: false },
 ): void {
 	const schemaExts = new Set(schema.extensions ?? []);
 	const dbExts = new Set(db.extensions ?? []);
@@ -1083,15 +1097,17 @@ function compareExtensions(
 		}
 	}
 
-	for (const ext of dbExts) {
-		if (!schemaExts.has(ext)) {
-			changes.push({
-				kind: 'drop_extension',
-				table: '',
-				destructive: true,
-				details: `Drop extension "${ext}"`,
-				meta: { extension: ext },
-			});
+	if (!opts.ignoreUnmanaged) {
+		for (const ext of dbExts) {
+			if (!schemaExts.has(ext)) {
+				changes.push({
+					kind: 'drop_extension',
+					table: '',
+					destructive: true,
+					details: `Drop extension "${ext}"`,
+					meta: { extension: ext },
+				});
+			}
 		}
 	}
 }

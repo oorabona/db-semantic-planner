@@ -2078,6 +2078,55 @@ describe('Extensions', () => {
 		expect(kinds).toContain('create_extension'); // uuid-ossp to add
 		expect(kinds).toContain('drop_extension'); // hstore to drop
 	});
+
+	describe('ignoreUnmanagedExtensions', () => {
+		it('should not emit drop_extension for unmanaged DB extensions when option is true', () => {
+			// schema declares nothing; DB has image-bundled extensions
+			const schema = makeModel([]);
+			const db = makeModelWithExtensions([
+				'pgvector',
+				'pg_search',
+				'uuid-ossp',
+			]);
+			const diff = compareSchemata(schema, db, {
+				ignoreUnmanagedExtensions: true,
+			});
+			const extChanges = diff.changes.filter(
+				(c) => c.kind === 'create_extension' || c.kind === 'drop_extension',
+			);
+			expect(extChanges).toHaveLength(0);
+		});
+
+		it('should still emit create_extension for extensions in schema but missing from DB', () => {
+			const schema = makeModelWithExtensions(['pgcrypto']);
+			const db = makeModelWithExtensions(['pgvector', 'pg_search']); // pgcrypto absent
+			const diff = compareSchemata(schema, db, {
+				ignoreUnmanagedExtensions: true,
+			});
+			const creates = diff.changes.filter((c) => c.kind === 'create_extension');
+			const drops = diff.changes.filter((c) => c.kind === 'drop_extension');
+			expect(creates).toHaveLength(1);
+			expect(creates[0]?.meta?.extension).toBe('pgcrypto');
+			// pgvector and pg_search are unmanaged — must NOT be dropped
+			expect(drops).toHaveLength(0);
+		});
+
+		it('should default to full-sync behaviour (drop unmanaged) when option is false', () => {
+			const schema = makeModel([]);
+			const db = makeModelWithExtensions(['pgvector']);
+			const diff = compareSchemata(schema, db, {
+				ignoreUnmanagedExtensions: false,
+			});
+			expect(changeKinds(diff.changes)).toContain('drop_extension');
+		});
+
+		it('should default to full-sync behaviour when option is omitted', () => {
+			const schema = makeModel([]);
+			const db = makeModelWithExtensions(['pgvector']);
+			const diff = compareSchemata(schema, db);
+			expect(changeKinds(diff.changes)).toContain('drop_extension');
+		});
+	});
 });
 
 // ============================================================================

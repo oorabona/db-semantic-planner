@@ -136,7 +136,12 @@ describe('DDL Provisioning E2E', () => {
 		it('should be idempotent — no changes when schema matches', async () => {
 			const schemaModel = schemaV1.model;
 			const dbModel = await introspect(pool, { schema: SCHEMA });
-			const diff = compareSchemata(schemaModel, dbModel);
+			// ignoreUnmanagedExtensions: true — the test schema declares no extensions;
+			// image-bundled extensions (pgvector, pg_search, etc.) must not be counted
+			// as managed objects so they don't produce spurious drop_extension diffs.
+			const diff = compareSchemata(schemaModel, dbModel, {
+				ignoreUnmanagedExtensions: true,
+			});
 
 			expect(diff.changes).toHaveLength(0);
 		});
