@@ -893,3 +893,304 @@ describe('DEFECT 2 regression: directly-constructed decision with lowered outerR
 		);
 	});
 });
+
+// ============================================================================
+// REGRESSION LOCK — DEFECT 3: decision-level guard catches directly-constructed
+// compilePlan inSubquery/scalarSubquery decisions with no subqueryIntent
+// ============================================================================
+
+describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModifiers)', () => {
+	/**
+	 * When a caller constructs a SimplifiedPlanReport directly with
+	 * operator:'inSubquery' or 'scalarSubquery' and no subqueryIntent, the
+	 * chokepoint (buildPredicateSubquerySelect) synthesizes a minimal sourceIntent
+	 * (from/select only) — so Layer 1 (sourceIntent validation) passes vacuously.
+	 *
+	 * Layer 2 (assertNoDroppedDecisionModifiers) now validates the Decision's OWN
+	 * fields unconditionally so GROUP BY / HAVING / OFFSET / DISTINCT / include
+	 * carried directly on the decision are still caught.
+	 *
+	 * mapToHandlerDecision (compiler.ts ~131) preserves `include` through the mapper,
+	 * so `include` on a directly-constructed decision WOULD reach SQL emission unless
+	 * caught here.
+	 */
+
+	it('directly-constructed inSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					// No subqueryIntent — directly constructed
+					// @ts-expect-error: injecting forbidden modifier for guard test
+					groupBy: ['region'],
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with GROUP BY is not supported/,
+		);
+	});
+
+	it('directly-constructed inSubquery decision with HAVING (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					// @ts-expect-error
+					having: {
+						kind: 'comparison',
+						field: 'count',
+						operator: 'gt',
+						value: 0,
+					},
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with HAVING is not supported/,
+		);
+	});
+
+	it('directly-constructed inSubquery decision with include (no subqueryIntent) → throws', () => {
+		// include is preserved by mapToHandlerDecision (~131) and WOULD be silently
+		// emitted inside the IN subquery if not caught by the decision-level guard.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					include: [
+						{
+							type: 'includeStrategy',
+							choice: 'join',
+							relation: 'orders',
+						},
+					],
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with include \(relation hydration\) is not supported/,
+		);
+	});
+
+	it('directly-constructed inSubquery decision with OFFSET (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+					offset: 5,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with OFFSET is not supported/,
+		);
+	});
+
+	it('directly-constructed scalarSubquery decision with GROUP BY (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					// @ts-expect-error
+					groupBy: ['category'],
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/scalar subquery with GROUP BY is not supported/,
+		);
+	});
+
+	it('directly-constructed scalarSubquery decision with DISTINCT (no subqueryIntent) → throws', () => {
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					// @ts-expect-error
+					distinct: true,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/scalar subquery with DISTINCT is not supported/,
+		);
+	});
+
+	it('valid directly-constructed inSubquery decision (with subqueryIntent) still compiles', () => {
+		// Regression guard: a valid lowered decision with subqueryIntent must still work.
+		const orm = buildOrm();
+		expect(() =>
+			orm
+				.select('orders')
+				.where(inSubquery('customer_id', subquery('customers').select('id')))
+				.dump(),
+		).not.toThrow();
+	});
+
+	it('valid directly-constructed inSubquery decision (no subqueryIntent, named column) still compiles', () => {
+		// A directly-constructed plan with no forbidden modifiers and a valid selectColumn.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: 'id',
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).not.toThrow();
+		const result = compilePlan(plan);
+		expect(normalizeSQL(result.sql)).toMatch(/customer_id\s*=\s*any\s*\(/i);
+	});
+});
+
+// ============================================================================
+// REGRESSION LOCK — malformed select.fields bypass
+// ============================================================================
+
+describe('malformed select.fields IN-subquery guard', () => {
+	/**
+	 * A single-element `fields` array whose element is NOT a string bypassed the
+	 * previous guard (which only checked length, not element type).  The lowering
+	 * in convertIn produces `selectColumn = fields[0] ?? '*'` — when fields[0] is
+	 * an object the selectColumn becomes that object, not a string, producing a
+	 * broken column reference or falling back to SELECT *.
+	 *
+	 * Fix: `assertNoUnsupportedSubqueryModifiers` now checks
+	 * `typeof fields[0] !== 'string'` and rejects non-string elements.
+	 *
+	 * Additionally, `assertNoDroppedDecisionModifiers` rejects a decision whose
+	 * `selectColumn` is not a plain string (after lowering from a malformed intent).
+	 */
+
+	it('select.fields: [ { non-string object } ] → throws at intent validation', () => {
+		const intent = {
+			kind: 'in' as const,
+			field: 'id',
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: [{ col: 'id' }] },
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
+			/non-string field element|IN subquery.*must project exactly one named column/i,
+		);
+	});
+
+	it('select.fields: [ 42 ] (number, not string) → throws at intent validation', () => {
+		const intent = {
+			kind: 'in' as const,
+			field: 'id',
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: [42] },
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
+			/non-string field element|IN subquery.*must project exactly one named column/i,
+		);
+	});
+
+	it('select.fields: [ null ] → throws at intent validation', () => {
+		const intent = {
+			kind: 'in' as const,
+			field: 'id',
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: [null] },
+			},
+		};
+		expect(() => convertWhereCondition(intent as any, 'orders')).toThrow(
+			/non-string field element|empty fields list|IN subquery.*must project exactly one named column/i,
+		);
+	});
+
+	it('directly-constructed inSubquery decision with selectColumn = wildcard → throws at decision guard', () => {
+		// A directly-constructed decision where the malformed intent already lowered
+		// fields[0] to '*' (e.g. via the `?? '*'` fallback in convertIn).
+		// The decision-level guard catches this case.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'customer_id',
+					operator: 'inSubquery',
+					targetTable: 'customers',
+					selectColumn: '*', // wildcard — would emit SELECT * inside ANY(...)
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/IN subquery with missing or wildcard selectColumn.*is not supported/,
+		);
+	});
+
+	it('valid select.fields: ["id"] (plain string) still compiles correctly', () => {
+		const intent = {
+			kind: 'in' as const,
+			field: 'customer_id',
+			subquery: {
+				type: 'select' as const,
+				from: 'customers',
+				select: { type: 'fields' as const, fields: ['id'] },
+			},
+		};
+		const orm = buildOrm();
+		expect(() =>
+			orm
+				.select('orders')
+				.where(inSubquery('customer_id', subquery('customers').select('id')))
+				.dump(),
+		).not.toThrow();
+		// Also verify intent conversion doesn't throw
+		expect(() => convertWhereCondition(intent as any, 'orders')).not.toThrow();
+	});
+});

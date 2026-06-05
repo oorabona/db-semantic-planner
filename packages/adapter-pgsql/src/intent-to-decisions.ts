@@ -381,6 +381,16 @@ export function assertNoUnsupportedSubqueryModifiers(
 				unsupported.push(
 					`multi-field projection [${select.fields.join(', ')}] (IN subquery must project exactly one named column — use a single field)`,
 				);
+			} else if (typeof select.fields[0] !== 'string') {
+				// A single-element fields array whose element is not a string (e.g.
+				// an object, number, or null) bypasses the length checks above and
+				// produces `selectColumn = <object>` after lowering — which compiles
+				// as a broken column reference or falls back to SELECT *.
+				// Explicitly reject any non-string element so the caller gets a clear
+				// error instead of invalid SQL.
+				unsupported.push(
+					`non-string field element ${JSON.stringify(select.fields[0])} (IN subquery fields must contain a plain column name string)`,
+				);
 			}
 		}
 	}
