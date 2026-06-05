@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.3](https://github.com/oorabona/db-semantic-planner/compare/types-v1.0.2...types-v1.0.3) (2026-06-05)
+
+
+### Bug Fixes
+
+* **core:** IN-to-EXISTS done properly + inline-EXISTS refactor ([db38526](https://github.com/oorabona/db-semantic-planner/commit/db3852655e870e328a23dee3c1eb117e252474d7))
+
 ## [1.0.2](https://github.com/oorabona/db-semantic-planner/compare/types-v1.0.1...types-v1.0.2) (2026-06-04)
 
 
