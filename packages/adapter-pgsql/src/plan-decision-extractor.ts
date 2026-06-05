@@ -16,7 +16,7 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
-import { convertWhereCondition, isOuterRef } from './intent-to-decisions.js';
+import { convertWhereCondition } from './intent-to-decisions.js';
 
 // ============================================================================
 // Types
@@ -225,75 +225,43 @@ export function convertWhereToDecisions(
 	const w = where as Record<string, unknown>;
 
 	switch (w.kind) {
-		case 'comparison': {
-			// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
-			// FieldRef so that compileValueOrFieldRef() treats it as a column reference.
-			// We use isOuterRef() (checks outer:true) rather than isSubqueryRef() (only
-			// checks kind:'ref') so that an inner ref() expression is NOT mistaken for a
-			// correlated reference.
-			const rawValue = w.value;
-			const resolvedValue = isOuterRef(rawValue)
-				? {
-						kind: 'fieldRef' as const,
-						scope: 'outer' as const,
-						column: (rawValue as { column: string }).column,
-					}
-				: rawValue;
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: w.operator as string,
-					value: resolvedValue,
-					table,
-				},
-			];
-		}
+		// ── Leaf predicates — delegated to the canonical converter ────────────
+		// convertWhereCondition (intent-to-decisions.ts) is the single source of
+		// truth for every leaf predicate.  Delegating here ensures fields that only
+		// convertWhereCondition reads (caseInsensitive on 'like', not on 'in',
+		// jsonPath/jsonMode on 'comparison') are honoured identically, closing the
+		// divergence class that caused the NOT IN bug.
+		//
+		// NOT delegated:
+		//   • 'and' / 'or' / 'not'      — must recurse via convertWhereToDecisions so
+		//                                  nested exists/notExists stubs are produced
+		//   • 'exists' / 'notExists' /
+		//     'relationFilter'           — produce unenriched stubs (_rawWhere/_rawInclude)
+		//                                  that the enricher resolves later; convertExistsLike
+		//                                  in intent-to-decisions.ts does NOT produce stubs
+		//   • 'range'                   — convertRange reads cond.gte/lte/gt/lt fields, not
+		//                                  cond.value, so its pass-through path handles the
+		//                                  { operator:'gte', value:100 } shape explicitly here
+		//   • 'null'                    — convertNull omits value:null from the decision;
+		//                                  the existing pass-through preserves the locked shape
+		case 'comparison':
 		case 'like':
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'like',
-					value: w.pattern,
-					table,
-				},
-			];
-		case 'in': {
-			// When a subquery is present, delegate to convertWhereCondition so the
-			// IN-subquery modifier guard (assertNoUnsupportedSubqueryModifiers 'IN') and
-			// correct inSubquery decision shape are applied.  Values-only IN uses the
-			// simple literal path.
-			if (w.subquery) {
-				const d = convertWhereCondition(where as WhereIntent, table);
-				return d !== null ? [d] : [];
-			}
-			return [
-				{
-					type: 'where',
-					column: w.field as string,
-					operator: 'in',
-					value: w.values,
-					table,
-				},
-			];
+		case 'in':
+		case 'expression':
+		case 'rawExists':
+		case 'rawNotExists':
+		case 'subquery':
+		case 'jsonContains':
+		case 'jsonExists':
+		case 'any': {
+			const d = convertWhereCondition(where as WhereIntent, table);
+			return d !== null ? [d] : [];
 		}
 		case 'range': {
-			// DEFECT 2 FIX: the NQL BETWEEN compiler produces
-			//   { kind:'range', operator:'between', value:{ lower, upper } }
-			// but the BETWEEN handler (handlers/where/between.ts) requires a two-element
-			// [min, max] array.  The old hand-rolled path passed `w.value` through
-			// unchanged, so the { lower, upper } object reached the BETWEEN handler and
-			// triggered "requires [min, max] array".
-			//
-			// For the operator:'between' + { lower, upper } shape, delegate to
-			// convertWhereCondition (the central converter in intent-to-decisions.ts)
-			// which correctly normalises the shape to [lower, upper].
-			//
-			// All other range sub-shapes (operator:'gte'/'lte'/… with a scalar value,
-			// no-operator with an already-array value, PostgreSQL range type operators)
-			// are passed through unchanged — the BETWEEN/gte/lte handlers accept them
-			// as-is, and the existing tests lock this behaviour.
+			// Delegate the between+{lower,upper} shape (NQL BETWEEN) — convertRange
+			// normalises it to [lower, upper].  All other shapes pass through
+			// unchanged so that the { operator:'gte'/'lte'/…, value:scalar } and
+			// { value:[min,max] } forms remain unaffected.
 			if (
 				(w.operator as string | undefined) === 'between' &&
 				w.value !== null &&
@@ -348,20 +316,6 @@ export function convertWhereToDecisions(
 			if (subDecisions.length === 0) return [];
 			return [{ type: 'whereNot', conditions: subDecisions }];
 		}
-		// Custom expression: { kind: 'expression', expr, operator, value }
-		// Produced by ExpressionRef.eq(), .neq(), .gt(), etc.
-		// e.g. op('~', ref('path'), param(regex)).eq(true)
-		case 'expression':
-			return [
-				{
-					type: 'where',
-					operator: 'expression',
-					expressionIntent: w.expr,
-					value: w.value,
-					subqueryOperator: w.operator as string,
-					table,
-				},
-			];
 		case 'exists':
 			// Produce an unenriched exists stub (relation name as targetTable).
 			// Inner `where` is preserved raw so enrichExistsStubsInConditions can
@@ -406,21 +360,6 @@ export function convertWhereToDecisions(
 					...(w.include ? { _rawInclude: w.include } : {}),
 				} as PlanDecision,
 			];
-		}
-		// For all remaining kinds, delegate to convertWhereCondition which handles
-		// every WhereIntent kind with the correct guards (modifier checks, outerRef
-		// rejection, etc.).  This covers: rawExists, rawNotExists, subquery (scalar),
-		// jsonContains, jsonExists, any — and any future kinds added to the switch
-		// in convertWhereCondition.  A null result means the kind was genuinely
-		// invalid (malformed intent) and is safely omitted from the conditions array.
-		case 'rawExists':
-		case 'rawNotExists':
-		case 'subquery':
-		case 'jsonContains':
-		case 'jsonExists':
-		case 'any': {
-			const d = convertWhereCondition(where as WhereIntent, table);
-			return d !== null ? [d] : [];
 		}
 		default: {
 			// Exhaustive fail-closed: a WhereIntent kind that is not handled here
