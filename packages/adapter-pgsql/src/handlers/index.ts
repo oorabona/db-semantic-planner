@@ -6,6 +6,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -16,7 +17,6 @@ import type {
 	WhereHandler,
 } from './types.js';
 import { isSelectWithFields } from './types.js';
-
 import { registerAllWhereHandlers } from './where/index.js';
 
 // Re-export types
@@ -299,6 +299,13 @@ function normalizeToDecision(input: Decision): Decision {
 		case 'in': {
 			const sub = raw.subquery as Record<string, unknown> | undefined;
 			if (sub) {
+				// Early validation at lowering time (defense-in-depth before emission chokepoint).
+				// This is the chokepoint for the mutation path — compileUpdate/compileDelete
+				// route their WhereIntent through here via createWhereDispatcher → normalizeToDecision.
+				assertNoUnsupportedSubqueryModifiers(
+					sub as unknown as import('@dbsp/types').QueryIntent,
+					'IN',
+				);
 				// IN/NOT IN with subquery → route to inSubquery/notInSubquery handler
 				const rawSelect = sub.select as unknown;
 				const selectColumn =
@@ -321,6 +328,8 @@ function normalizeToDecision(input: Decision): Decision {
 					targetTable: sub.from as string,
 					selectColumn,
 					conditions: subConditions,
+					// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
+					subqueryIntent: sub as unknown as import('@dbsp/types').QueryIntent,
 					...(rawLimit != null && { limit: rawLimit }),
 					...(rawOrderBy && {
 						orderBy: rawOrderBy.map((o) => ({

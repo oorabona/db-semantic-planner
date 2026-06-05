@@ -7,7 +7,7 @@
  * that builds PostgreSQL AST nodes and deparses them to SQL.
  */
 
-import type { ExpressionIntent } from '@dbsp/types';
+import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -65,12 +65,14 @@ import type {
 import { isSelectWithFields } from './handlers/types.js';
 import { compileValue } from './handlers/where/utils.js';
 import {
+	assertNoUnsupportedSubqueryModifiers,
 	convertWhereCondition,
 	intentToDecisions,
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
+import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 
 // ============================================================================
 // PlanDecision → HandlerDecision mapper
@@ -143,6 +145,7 @@ function mapToHandlerDecision(
 		aggregate: pd.aggregate,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
+		subqueryIntent: pd.subqueryIntent,
 	} as HandlerDecision;
 }
 
@@ -259,6 +262,16 @@ export interface PlanDecision {
 	// When set, these are spliced into this.state.parameters BEFORE other query params.
 	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
 	readonly batchValuesParams?: readonly unknown[];
+	/**
+	 * Provenance: the ORIGINAL QueryIntent before lowering.
+	 * Carried through every lowering site (convertIn, convertSubquery,
+	 * normalizeToDecision, dispatchWhere, mapInSubqueryCondition) so that
+	 * `buildPredicateSubquerySelect` can validate the true caller intent.
+	 *
+	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
+	 * Optional on other decision types.
+	 */
+	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
 }
 
 // ============================================================================
@@ -496,6 +509,36 @@ export class PlanCompiler {
 		ctxOverrides?: Partial<HandlerCompilerContext>,
 	): Node {
 		const dispatcher = createWhereDispatcher();
+
+		// Decision-level guard for already-lowered predicate-subquery decisions
+		// (operator already 'inSubquery'/'notInSubquery'/'scalarSubquery'/...).
+		// These bypass the 'in'→remap branch below, so mapToHandlerDecision strips
+		// groupBy/having/distinct/include/joins before the handler sees them.
+		// We must validate BEFORE mapToHandlerDecision removes those extra fields.
+		// This is defense-in-depth for directly-constructed SimplifiedPlanReport
+		// decisions that have no subqueryIntent provenance.
+		{
+			const op = decision.operator;
+			if (
+				op === 'inSubquery' ||
+				op === 'notInSubquery' ||
+				op === 'scalarSubquery' ||
+				op === 'subqueryEq' ||
+				op === 'subqueryNeq' ||
+				op === 'subqueryLt' ||
+				op === 'subqueryLte' ||
+				op === 'subqueryGt' ||
+				op === 'subqueryGte'
+			) {
+				const use =
+					op === 'inSubquery' || op === 'notInSubquery' ? 'IN' : 'scalar';
+				assertNoDroppedDecisionModifiers(
+					decision as unknown as import('./handlers/types.js').Decision,
+					use,
+				);
+			}
+		}
+
 		const mapped = mapToHandlerDecision(
 			decision,
 			this.currentRootTable,
@@ -513,6 +556,9 @@ export class PlanCompiler {
 				? (decision.value as PlanDecision['subquery'])
 				: undefined);
 		if (sub && (decision.operator === 'in' || decision.operator === 'notIn')) {
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
+			// Covers directly-constructed SimplifiedPlanReport plans that bypass intentToDecisions.
+			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = decision.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			// Extract selectColumn: may be a string or a SelectIntent with fields
 			const rawSelect = sub.select as unknown;
@@ -533,6 +579,10 @@ export class PlanCompiler {
 				targetTable: sub.from,
 				selectColumn,
 				conditions: subConditions,
+				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
+				// to sub cast as QueryIntent for directly-constructed plans.
+				subqueryIntent:
+					decision.subqueryIntent ?? (sub as unknown as QueryIntent),
 				...(rawLimit != null && { limit: rawLimit }),
 				...(rawOrderBy && {
 					orderBy: rawOrderBy.map((o) => ({
@@ -553,24 +603,91 @@ export class PlanCompiler {
 	}
 
 	/**
-	 * Recursively convert a PlanDecision (potentially with nested in+subquery)
-	 * into a HandlerDecision suitable for the WHERE dispatcher.
+	 * Recursively convert a PlanDecision (potentially with nested in+subquery
+	 * or a logical group whose children contain in+subquery nodes) into a
+	 * HandlerDecision suitable for the WHERE dispatcher.
 	 *
 	 * When a PlanDecision has operator='in'/'notIn' with a subquery object,
 	 * mapToHandlerDecision loses the subquery because HandlerDecision has no
 	 * `subquery` field. This method detects that pattern and converts it to the
 	 * inSubquery/notInSubquery form that buildScalarSubquery expects.
 	 *
-	 * Called recursively so 2+ levels of nested IN subqueries all work.
+	 * When the node is a logical group (whereAnd / whereOr / whereNot), each
+	 * child in `conditions` / `condition` is mapped recursively so that nested
+	 * IN+subquery nodes at any depth are guarded and remapped correctly, rather
+	 * than falling through to mapToHandlerDecision which would silently drop the
+	 * subquery and produce a malformed plain-IN binding.
+	 *
+	 * Called recursively so 2+ levels of nesting all work.
 	 */
 	private mapInSubqueryCondition(
 		pd: PlanDecision,
 		rootTable: string,
 	): HandlerDecision {
-		const sub = pd.subquery as
+		// -----------------------------------------------------------------------
+		// Logical group: whereAnd / whereOr / whereNot
+		// Recurse into each child so nested IN+subquery nodes are detected and
+		// guarded instead of falling through to mapToHandlerDecision.
+		// -----------------------------------------------------------------------
+		if (
+			pd.type === 'whereAnd' ||
+			pd.type === 'whereOr' ||
+			pd.type === 'whereNot'
+		) {
+			const mappedConditions = (pd.conditions ?? []).map((child) =>
+				this.mapInSubqueryCondition(child, rootTable),
+			);
+			return {
+				...mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk),
+				conditions: mappedConditions,
+			} as HandlerDecision;
+		}
+
+		// -----------------------------------------------------------------------
+		// IN / NOT IN with subquery
+		// Mirror dispatchWhere's dual-source detection: subquery can be in
+		// `pd.subquery` (direct PlanDecision shape) OR `pd.value` (from the
+		// plan-decision-extractor which stores it in `value`).  Only checking
+		// `pd.subquery` would let a value-shaped nested IN bypass the guard and
+		// fall through to the plain inHandler which binds the whole object as a
+		// scalar ANY($n) parameter — producing structurally wrong SQL.
+		// -----------------------------------------------------------------------
+		const sub = (pd.subquery ??
+			(pd.value &&
+			typeof pd.value === 'object' &&
+			'from' in (pd.value as object)
+				? (pd.value as PlanDecision['subquery'])
+				: undefined)) as
 			| (PlanDecision['subquery'] & { where?: PlanDecision })
 			| undefined;
+		// Decision-level guard for already-lowered predicate-subquery decisions
+		// nested inside logical groups. Same as the check in dispatchWhere — must
+		// fire BEFORE mapToHandlerDecision strips the extra fields.
+		{
+			const op = pd.operator;
+			if (
+				op === 'inSubquery' ||
+				op === 'notInSubquery' ||
+				op === 'scalarSubquery' ||
+				op === 'subqueryEq' ||
+				op === 'subqueryNeq' ||
+				op === 'subqueryLt' ||
+				op === 'subqueryLte' ||
+				op === 'subqueryGt' ||
+				op === 'subqueryGte'
+			) {
+				const use =
+					op === 'inSubquery' || op === 'notInSubquery' ? 'IN' : 'scalar';
+				assertNoDroppedDecisionModifiers(
+					pd as unknown as import('./handlers/types.js').Decision,
+					use,
+				);
+			}
+		}
+
 		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
+			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = pd.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			const rawSelect = sub.select as unknown;
 			const selectColumn =
@@ -580,7 +697,7 @@ export class PlanCompiler {
 						? (rawSelect.fields?.[0] ?? '*')
 						: '*';
 			// Recursively apply: the inner subquery's WHERE may itself be
-			// another in+subquery (the NESTED-INSUBQUERY case)
+			// another in+subquery (or a logical group containing one).
 			const subConditions: HandlerDecision[] = sub.where
 				? [this.mapInSubqueryCondition(sub.where, sub.from)]
 				: [];
@@ -592,6 +709,9 @@ export class PlanCompiler {
 				targetTable: sub.from,
 				selectColumn,
 				conditions: subConditions,
+				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
+				// to sub cast as QueryIntent for directly-constructed plans.
+				subqueryIntent: pd.subqueryIntent ?? (sub as unknown as QueryIntent),
 				...(rawLimit != null && { limit: rawLimit }),
 				...(rawOrderBy && {
 					orderBy: rawOrderBy.map((o) => ({
@@ -601,7 +721,7 @@ export class PlanCompiler {
 				}),
 			} as HandlerDecision;
 		}
-		// Non-subquery case: plain mapToHandlerDecision suffices
+		// Non-subquery, non-logical-group: plain mapToHandlerDecision suffices
 		return mapToHandlerDecision(pd, rootTable, this.defaultPk, this.deriveFk);
 	}
 

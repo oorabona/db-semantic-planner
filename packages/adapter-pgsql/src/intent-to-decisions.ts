@@ -347,9 +347,30 @@ export function assertNoUnsupportedSubqueryModifiers(
 			unsupported.push(
 				'SELECT * / all (IN subquery must project exactly one named column)',
 			);
-		} else if (select.type === 'fields') {
+		} else if (
+			select.type === 'fields' ||
+			Array.isArray(select.fields) ||
+			// Also catch the typeless `{ fields: undefined | null }` shape: the
+			// `fields` key is present (triggering isSelectWithFields in the compiler)
+			// but the value is not a non-empty array.  Without this branch,
+			// `{ fields: undefined }` falls through all checks and the compiler
+			// silently falls back to SELECT *, producing wrong SQL.
+			// Guard: `in` operator crashes on primitives; a string select like 'id'
+			// is a valid single-column selector — only check for the `fields` key on
+			// actual objects.
+			(typeof select === 'object' &&
+				select !== null &&
+				'fields' in (select as object))
+		) {
+			// Both the typed shape `{ type: 'fields', fields: [...] }` and the
+			// typeless shape `{ fields: [...] }` (no `type` property) are accepted
+			// by the compiler via `isSelectWithFields`.  The guard must cover both
+			// so that a typeless multi-field select (or a typeless select with
+			// undefined/empty fields) is caught here rather than silently falling
+			// back to SELECT * in the compiler.
 			if (!select.fields || select.fields.length === 0) {
-				// Empty fields list falls back to '*' — same problem as 'all'.
+				// undefined, null, or empty fields list falls back to '*' in the
+				// compiler — same problem as 'all'.
 				unsupported.push(
 					'empty fields list (IN subquery must project exactly one named column)',
 				);
@@ -359,6 +380,16 @@ export function assertNoUnsupportedSubqueryModifiers(
 				// (the IN matches only the first column, silently ignoring the rest).
 				unsupported.push(
 					`multi-field projection [${select.fields.join(', ')}] (IN subquery must project exactly one named column — use a single field)`,
+				);
+			} else if (typeof select.fields[0] !== 'string') {
+				// A single-element fields array whose element is not a string (e.g.
+				// an object, number, or null) bypasses the length checks above and
+				// produces `selectColumn = <object>` after lowering — which compiles
+				// as a broken column reference or falls back to SELECT *.
+				// Explicitly reject any non-string element so the caller gets a clear
+				// error instead of invalid SQL.
+				unsupported.push(
+					`non-string field element ${JSON.stringify(select.fields[0])} (IN subquery fields must contain a plain column name string)`,
 				);
 			}
 		}
@@ -522,6 +553,7 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	// We cannot rely on normalizeToDecision's `case 'in'` branch because that
 	// function short-circuits via early-return when `column` is already set.
 	if (rawSubquery) {
+		// Early validation at lowering time (defense-in-depth before emission chokepoint).
 		assertNoUnsupportedSubqueryModifiers(rawSubquery, 'IN');
 		const selectField = rawSubquery.select;
 		const selectColumn: string =
@@ -554,6 +586,8 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 			selectColumn,
 			conditions: subConditions,
 			table: rootTable,
+			// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
+			subqueryIntent: rawSubquery,
 			...(rawLimit != null && { limit: rawLimit }),
 			...(rawOrderBy && {
 				orderBy: rawOrderBy.map((o) => ({
@@ -718,6 +752,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const subquery = cond.subquery as QueryIntent | undefined;
 	if (!subquery || !field) return null;
 
+	// Early validation at lowering time (defense-in-depth before emission chokepoint).
 	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
 
 	// DEFECT 2 FIX (decisions path): detect outerRef() inside a scalar subquery's WHERE.
@@ -783,6 +818,8 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		targetTable,
 		selectColumn,
 		subqueryOperator: opMap[operator] ?? '=',
+		// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
+		subqueryIntent: subquery,
 		...(aggregate && { aggregate }),
 		...(subConditions.length > 0 && { conditions: subConditions }),
 		...(rawLimit != null && { limit: rawLimit }),
@@ -854,20 +891,10 @@ export function convertWhereCondition(
 					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
 				);
 			}
-			// Guard: reject subquery modifiers that buildSubqueryFromIntent silently
-			// drops — limit, offset, groupBy, having, joins, include, distinct,
-			// distinctOn are not emitted by buildSubqueryFromIntent (it only emits
-			// from/select/where).  Silently dropping them changes which rows match
-			// (e.g. rawExists(subquery.limit(0)) must always be FALSE but without the
-			// guard compiles as an unrestricted existence check — silent broadening).
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
 			assertNoUnsupportedSubqueryModifiers(sub, 'rawExists');
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
-			// supported on the rawExists/rawNotExists path: buildSubqueryFromIntent
-			// builds a fresh WhereCompilerCtx with no outerAlias, so SubqueryRefIntent
-			// values fall back to being parameterized as $N (an object literal!) which
-			// produces wrong SQL at best and a runtime error at worst. Detect this
-			// case at decision-time and throw a clear "not yet supported" error so
-			// callers don't get silently-broken queries.
+			// supported on the rawExists/rawNotExists path.
 			if (sub.where && containsOuterRef(sub.where)) {
 				throw new Error(
 					`${cond.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
