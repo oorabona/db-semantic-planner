@@ -203,6 +203,30 @@ await recordMigration(pool, 'custom_001.sql', checksum, nextVersion, diff.hasDes
 When `meta.fromType` or `meta.oldDefault` is missing (manual edit, older migration),
 the DOWN SQL falls back to a `-- WARNING:` comment.
 
+### 7. Extension reconciliation: full-sync vs managed
+
+By default, `compareSchemata` treats the model as the **full source of truth** for extensions: an extension present in the live database but **not** declared in the model produces a `drop_extension` change (full-sync semantics — declare what you depend on, reconcile the rest).
+
+This is usually what you want. But in a **shared or managed environment** — for example a PostgreSQL image that pre-installs extensions you do not manage (`pgvector`, `pg_search`, …) — full-sync would propose dropping infrastructure extensions your schema never declared. Pass `ignoreUnmanagedExtensions: true` so undeclared extensions are **left alone**:
+
+```typescript
+// doctest: skip — illustrative; compareSchemata needs two introspected ModelIR instances
+import { compareSchemata } from '@dbsp/adapter-pgsql';
+
+// Full-sync (default): undeclared DB extensions → drop_extension
+const strict = compareSchemata(schemaModel, dbModel);
+
+// Managed: only diff extensions the model declares; leave the rest untouched
+const managed = compareSchemata(schemaModel, dbModel, { ignoreUnmanagedExtensions: true });
+```
+
+| Mode | `ignoreUnmanagedExtensions` | Undeclared DB extension | Use when |
+|------|----------------------------|-------------------------|----------|
+| Full-sync (default) | `false` | Emits `drop_extension` | Your model owns the whole database |
+| Managed | `true` | Left alone (no diff) | The database hosts extensions outside your model's scope |
+
+`create_extension` for an extension the model **declares** but the database lacks is still emitted in both modes — the option only suppresses *drops* of *undeclared* extensions, never additions of declared ones.
+
 ## Gotchas
 
 - **Advisory lock uses a dedicated client** — `withMigrationLock()` calls `pool.connect()`, not
