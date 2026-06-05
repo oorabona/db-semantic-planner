@@ -9,7 +9,6 @@
  */
 
 import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
-import { isSubqueryRef } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -17,7 +16,7 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import type { PlanDecision, SimplifiedPlanReport } from './compiler.js';
-import { convertWhereCondition } from './intent-to-decisions.js';
+import { convertWhereCondition, isOuterRef } from './intent-to-decisions.js';
 
 // ============================================================================
 // Types
@@ -227,10 +226,13 @@ export function convertWhereToDecisions(
 
 	switch (w.kind) {
 		case 'comparison': {
-			// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef { kind: 'fieldRef', scope: 'outer', column }
-			// so that compileValueOrFieldRef() treats it as a column reference, not a parameter.
+			// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
+			// FieldRef so that compileValueOrFieldRef() treats it as a column reference.
+			// We use isOuterRef() (checks outer:true) rather than isSubqueryRef() (only
+			// checks kind:'ref') so that an inner ref() expression is NOT mistaken for a
+			// correlated reference.
 			const rawValue = w.value;
-			const resolvedValue = isSubqueryRef(rawValue)
+			const resolvedValue = isOuterRef(rawValue)
 				? {
 						kind: 'fieldRef' as const,
 						scope: 'outer' as const,
@@ -1350,26 +1352,48 @@ export function enrichExistsDecisionsInPlace(
 						})()
 					: undefined;
 
-				// For 'every', wrap the innermost conditions in NOT so that the compiled
-				// SQL becomes: NOT EXISTS(outer ... EXISTS(inner ... NOT(cond)))
-				const innerConditions =
-					isEvery && rawInnerConditions
-						? ([
-								{
-									type: 'logical',
-									operator: 'not',
-									conditions: rawInnerConditions,
-								} as PlanDecision,
-							] as PlanDecision[])
-						: rawInnerConditions;
+				// Vacuous truth: every(TRUE) over any path is trivially satisfied for all
+				// rows (even those with no related rows in the path).
+				// NOT EXISTS(path WHERE NOT TRUE) = NOT EXISTS(path WHERE FALSE) = TRUE.
+				//
+				// When the inner predicate is empty (rawInnerConditions===undefined), the
+				// multi-hop NOT EXISTS + no inner condition instead produces:
+				//   NOT EXISTS(posts WHERE corr)
+				// which means "user has NO posts" — the opposite of vacuous truth.
+				//
+				// Fix: fall through to buildEnrichedExistsDecision (the single-hop path).
+				// That function sets operator:'every' with conditions:undefined, which
+				// everyHandler (handlers/where/exists.ts) catches and returns TRUE literal.
+				if (isEvery && !rawInnerConditions) {
+					enriched = buildEnrichedExistsDecision(
+						d as { choice: string; context: Record<string, unknown> },
+						matchingIntent,
+						plan.rootTable,
+						model,
+					);
+				} else {
+					// For 'every' with a real predicate, wrap the innermost conditions in NOT
+					// so that the compiled SQL becomes:
+					//   NOT EXISTS(outer ... EXISTS(inner ... NOT(cond)))
+					const innerConditions =
+						isEvery && rawInnerConditions
+							? ([
+									{
+										type: 'logical',
+										operator: 'not',
+										conditions: rawInnerConditions,
+									} as PlanDecision,
+								] as PlanDecision[])
+							: rawInnerConditions;
 
-				enriched = buildMultiHopExistsChain(
-					matchingIntent.relation as string[],
-					plan.rootTable,
-					outerOperator,
-					innerConditions,
-					model,
-				);
+					enriched = buildMultiHopExistsChain(
+						matchingIntent.relation as string[],
+						plan.rootTable,
+						outerOperator,
+						innerConditions,
+						model,
+					);
+				}
 			} else {
 				enriched = buildEnrichedExistsDecision(
 					d as { choice: string; context: Record<string, unknown> },

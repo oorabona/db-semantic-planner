@@ -20,7 +20,7 @@
  * no thrown error for a declared-relation multi-hop path.
  */
 
-import { plan, ref, schema } from '@dbsp/core';
+import { and, plan, ref, schema } from '@dbsp/core';
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -864,5 +864,103 @@ describe('8. nested exists-in-where — correct inner FK correlation (nested-exi
 		expect(parameters).toContain(true);
 		// No comments table leaked in
 		expect(normalized).not.toMatch(/FROM\s+"?comments"?/i);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 9. DEFECT-2 — multi-hop mode:every with EMPTY predicate is vacuously true
+//
+// `every(TRUE)` = ∀ row . TRUE = TRUE.  Semantically this holds even for
+// users who have no posts or comments: "every post of mine has every comment
+// that satisfies TRUE" is trivially satisfied.
+//
+// Before the fix, an empty predicate (e.g. and() with no conditions) caused
+// `rawInnerConditions = undefined`, so the multi-hop branch called
+// `buildMultiHopExistsChain` with operator='notExists' and no inner
+// conditions, producing: NOT EXISTS(posts WHERE correlation).
+// That is "user has NO posts at all" — the opposite of vacuous truth.
+//
+// Fix: when isEvery && !rawInnerConditions, fall through to
+// buildEnrichedExistsDecision (single-hop path, operator:'every'), which
+// routes to everyHandler that returns TRUE literal when conditions is empty.
+// ---------------------------------------------------------------------------
+
+describe('9. DEFECT-2 — multi-hop mode:every with empty predicate is vacuously true', () => {
+	it('mode:every with empty and() predicate does NOT produce "no posts" SQL', () => {
+		// The bug: empty predicate → NOT EXISTS(posts ...) → "user has no posts"
+		// The fix: empty predicate → vacuously TRUE (not NOT EXISTS)
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts', 'comments'],
+					// and() with zero conditions = logically TRUE
+					where: and(),
+					mode: 'every',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql } = adapter.compile(planReport, { model: testSchema.model });
+		const normalized = ws(sql);
+		// Must NOT produce a NOT EXISTS that filters rows based on the path.
+		// The everyHandler short-circuits to a bare TRUE constant when conditions
+		// is empty — no subquery at all.
+		expect(normalized).not.toMatch(/NOT\s+EXISTS/i);
+		// The users query itself should still compile (no error, valid SQL)
+		expect(normalized).toMatch(/FROM\s+"?users"?/i);
+	});
+
+	it('mode:every with empty and() predicate compiles without throwing', () => {
+		expect(() =>
+			plan(
+				{
+					type: 'select',
+					from: 'users',
+					where: {
+						kind: 'relationFilter',
+						relation: ['posts', 'comments'],
+						where: and(),
+						mode: 'every',
+					},
+				},
+				testSchema.model,
+				{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+			),
+		).not.toThrow();
+	});
+
+	it('mode:every with a REAL predicate still uses NOT EXISTS (regression lock)', () => {
+		// Verify the non-vacuous path is unchanged after the fix.
+		const planReport = plan(
+			{
+				type: 'select',
+				from: 'users',
+				where: {
+					kind: 'relationFilter',
+					relation: ['posts', 'comments'],
+					where: {
+						kind: 'comparison',
+						field: 'body',
+						operator: 'eq',
+						value: 'approved',
+					},
+					mode: 'every',
+				},
+			},
+			testSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: testSchema.model,
+		});
+		const normalized = ws(sql);
+		// Non-vacuous every: still produces NOT ... EXISTS (the deparser may emit
+		// NOT (EXISTS ...) or NOT EXISTS — both are acceptable).
+		expect(normalized).toMatch(/NOT\s*\(?.*EXISTS/i);
+		expect(parameters).toContain('approved');
 	});
 });

@@ -286,10 +286,23 @@ export function subquery(table: string): SubqueryBuilder {
  * subquery('reviews').where({ productId: outerRef('id') })
  */
 export function outerRef(column: string): SubqueryRefIntent {
+	// Add `outer: true` as a discriminator so that `containsOuterRef()` (in
+	// intent-to-decisions.ts) can distinguish a genuine outer-query reference
+	// from an inner `ref()` (RefExpressionIntent) that has the same structural
+	// shape `{ kind: 'ref', column }`.  Without the marker, any subquery that
+	// uses `ref('a').gt(ref('b'))` as an inner WHERE condition is falsely
+	// rejected as "correlated subquery not supported".
+	//
+	// The cast is necessary because SubqueryRefIntent (in @dbsp/types) does not
+	// declare the `outer` field — adding it there would be the ideal long-term
+	// fix, but that is out of scope for this block.  The extra property is safe
+	// because all consumers of SubqueryRefIntent only read `kind` and `column`;
+	// `containsOuterRef` now additionally reads `outer` via an `unknown` cast.
 	return {
 		kind: 'ref',
 		column,
-	};
+		outer: true,
+	} as unknown as SubqueryRefIntent;
 }
 
 // ============================================================================

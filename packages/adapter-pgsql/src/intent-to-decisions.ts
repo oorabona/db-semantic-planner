@@ -11,7 +11,6 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import { isSubqueryRef } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
@@ -408,15 +407,39 @@ export function assertNoUnsupportedSubqueryModifiers(
 }
 
 /**
- * Recursively walk a WhereIntent looking for a SubqueryRefIntent
- * (`{ kind: 'ref', column }` produced by `outerRef()`). Used to detect
- * correlated subqueries inside rawExists/rawNotExists, which the current
- * pipeline does not support — we throw rather than emit broken SQL.
+ * Type predicate for a genuine `outerRef()` node.
+ *
+ * `SubqueryRefIntent` (kind:'ref', column) and `RefExpressionIntent`
+ * (kind:'ref', column) are structurally identical.  `outerRef()` adds an
+ * `outer: true` discriminator so we can distinguish the two without touching
+ * the @dbsp/types package.  `isSubqueryRef` cannot be used here because it
+ * only checks `kind === 'ref'` — matching inner `ref()` nodes too.
+ *
+ * @internal — exported for use in plan-decision-extractor.ts only.
+ */
+export function isOuterRef(value: unknown): boolean {
+	if (typeof value !== 'object' || value === null) return false;
+	const v = value as Record<string, unknown>;
+	return v.kind === 'ref' && v.outer === true;
+}
+
+/**
+ * Recursively walk a WhereIntent looking for a genuine `outerRef()` node
+ * (discriminated by `{ kind: 'ref', outer: true }` — set by `outerRef()` in
+ * subquery-builder.ts).  Used to detect correlated subqueries inside
+ * rawExists/rawNotExists, which the current pipeline does not support — we
+ * throw rather than emit broken SQL.
+ *
+ * NOTE: we do NOT use `isSubqueryRef` here because that predicate only checks
+ * `kind === 'ref'`, which also matches inner `ref()` column references
+ * (RefExpressionIntent) used in expression-based WHERE conditions such as
+ * `ref('a').gt(ref('b'))`.  Those inner refs must NOT trigger the correlated
+ * subquery guard.
  */
 export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
 	const w = where as Record<string, unknown>;
-	if (isSubqueryRef(w)) return true;
+	if (isOuterRef(w)) return true;
 	for (const value of Object.values(w)) {
 		if (Array.isArray(value)) {
 			for (const item of value) {
@@ -435,9 +458,13 @@ function convertComparison(
 	rootTable: string,
 ): PlanDecision {
 	const rawValue = cond.value;
-	// Convert SubqueryRefIntent { kind: 'ref', column } to FieldRef so that
-	// compileValueOrFieldRef() treats it as a column reference, not a parameter.
-	const resolvedValue = isSubqueryRef(rawValue)
+	// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
+	// FieldRef so that compileValueOrFieldRef() treats it as a column reference,
+	// not a parameter.  We use isOuterRef() (checks outer:true) rather than
+	// isSubqueryRef() (only checks kind:'ref') so that an ExpressionRef.intent
+	// like { kind: 'ref', column } from ref() is NOT misidentified as an outer
+	// reference.
+	const resolvedValue = isOuterRef(rawValue)
 		? {
 				kind: 'fieldRef' as const,
 				scope: 'outer' as const,

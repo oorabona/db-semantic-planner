@@ -29,6 +29,7 @@ import {
 	createOrm,
 	eq,
 	exists,
+	exprRef,
 	gt,
 	outerRef,
 	rawExists,
@@ -275,6 +276,70 @@ describe('exists() vs rawExists() — API comparison TNR', () => {
 				"exists('auditLog'): no relation 'auditLog' is declared on table 'users'. " +
 					'Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.',
 			);
+		});
+	});
+
+	// ---------------------------------------------------------------------------
+	// DEFECT-1 regression lock: rawExists with inner ref() must NOT be rejected
+	// ---------------------------------------------------------------------------
+	// Previously, `containsOuterRef()` used `isSubqueryRef()` (only checks
+	// `kind === 'ref'`) which matched BOTH outerRef() nodes AND RefExpressionIntent
+	// nodes (produced by the expression builder's `ref()`).  A rawExists subquery
+	// using `ref('a').gt(ref('b'))` to compare two inner columns was falsely
+	// rejected with "correlated subqueries not supported".
+	//
+	// Fix: `outerRef()` now stamps `outer: true`; `containsOuterRef()` checks for
+	// that marker.  `ref()` does not set `outer`, so it is never caught.
+	describe('case 4: DEFECT-1 — rawExists with inner ref() is NOT a correlated subquery', () => {
+		it('rawExists with ref().gt(ref()) comparing inner columns compiles without throwing', () => {
+			// rawExists(subquery('files').where(exprRef('id').gt(0)))
+			// exprRef('id') creates a RefExpressionIntent { kind: 'ref', column: 'id' }
+			// which has the SAME shape as outerRef() MINUS the `outer:true` marker.
+			// Without the fix this was falsely rejected as "correlated subquery".
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any)
+					.select('communities')
+					.where(
+						rawExists(
+							subquery('files').select('id').where(exprRef('id').gt(0)),
+						),
+					)
+					.dump(),
+			).not.toThrow();
+		});
+
+		it('rawExists with exprRef(col).gt(value) produces valid SQL with EXISTS', () => {
+			const orm = buildOrm();
+			const dump = (orm as any)
+				.select('communities')
+				.where(
+					rawExists(subquery('files').select('id').where(exprRef('id').gt(0))),
+				)
+				.dump();
+			const sql = ws(dump.sql);
+			expect(sql).toMatch(/WHERE\s+EXISTS\s*\(/i);
+			expect(sql).toMatch(/FROM\s+"?files"?/i);
+			// The comparison value 0 is bound as a parameter
+			expect(dump.params).toEqual([0]);
+		});
+
+		it('rawExists with genuine outerRef() STILL throws today (boundary preserved)', () => {
+			// This is the documented boundary: rawExists + outerRef is not yet
+			// supported.  Ensures the fix did not accidentally allow correlated subqueries.
+			const orm = buildOrm();
+			expect(() =>
+				(orm as any)
+					.select('communities')
+					.where(
+						rawExists(
+							subquery('files')
+								.select('id')
+								.where(gt('lastParsed', outerRef('createdAt'))),
+						),
+					)
+					.dump(),
+			).toThrow(/correlated subqueries.*not yet supported/i);
 		});
 	});
 });
