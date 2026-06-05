@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.0.4](https://github.com/oorabona/db-semantic-planner/compare/core-v1.0.3...core-v1.0.4) (2026-06-05)
+
+
+### Bug Fixes
+
+* **core:** IN-to-EXISTS done properly + inline-EXISTS refactor ([db38526](https://github.com/oorabona/db-semantic-planner/commit/db3852655e870e328a23dee3c1eb117e252474d7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.0.4
+    * @dbsp/types bumped to 1.0.3
+
 ## [1.0.3](https://github.com/oorabona/db-semantic-planner/compare/core-v1.0.2...core-v1.0.3) (2026-06-04)
 
 
