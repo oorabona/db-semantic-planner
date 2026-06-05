@@ -799,6 +799,31 @@ function enrichExistsStubsInConditions(
 						rawInnerConditions = c;
 					}
 				}
+
+				// Vacuous truth: every(TRUE) over any multi-hop path is trivially
+				// satisfied for all rows.  When the inner predicate is absent or
+				// empty (rawInnerConditions===undefined), building
+				// `buildMultiHopExistsChain` with outerOperator='notExists' and no
+				// inner conditions would produce NOT EXISTS(path WHERE corr) — "source
+				// has NO related rows at all" — the opposite of vacuous truth.
+				// Short-circuit: replace the stub with operator:'every' + no conditions.
+				// The everyHandler (handlers/where/exists.ts) detects the empty-conditions
+				// case and returns the A_Const TRUE literal, same as the top-level path.
+				if (isEvery && !rawInnerConditions) {
+					// Use targetTable from the first-hop relation (the outer EXISTS table).
+					// All we need is a valid targetTable so mapToHandlerDecision resolves;
+					// everyHandler returns TRUE before touching FK or the subquery.
+					const firstHop = hops[0] as string;
+					const firstRel = model.getRelation(`${sourceTable}.${firstHop}`);
+					conditions[i] = {
+						type: 'where',
+						operator: 'every',
+						targetTable: firstRel?.target ?? firstHop,
+						sourceTable,
+					} as PlanDecision;
+					continue;
+				}
+
 				const innerConditions =
 					isEvery && rawInnerConditions
 						? ([
@@ -1048,15 +1073,22 @@ function collectNestedExistsTargets(
 				const resolvedTarget = rel ? rel.target : singleHop;
 				out.add(`${sourceTable}:${resolvedTarget}`);
 			} else if (hops.length > 1) {
-				// Multi-hop: compound key = "sourceTable:hop1.hop2..." (matches context.relationPath)
-				out.add(`${sourceTable}:${hops.join('.')}`);
-				// Also store "sourceTable:finalTarget" so both target and path forms match.
-				let cur = sourceTable;
-				for (const hop of hops) {
-					const rel = model.getRelation(`${cur}.${hop}`);
-					cur = rel ? rel.target : hop;
+				// Multi-hop suppression key MUST match what the suppression check builds.
+				// The check uses context.sourceTable (the planner's currentSource at the
+				// last hop) = the resolved target of all hops EXCEPT the last one.
+				// Walk hops[0..n-2] from sourceTable to find the penultimate target.
+				let penultimate = sourceTable;
+				for (let hi = 0; hi < hops.length - 1; hi++) {
+					const hr = model.getRelation(`${penultimate}.${hops[hi] ?? ''}`);
+					penultimate = hr ? hr.target : (hops[hi] ?? penultimate);
 				}
-				out.add(`${sourceTable}:${cur}`);
+				// Store "penultimate:hop1.hop2..." (matches context.sourceTable:context.relationPath)
+				out.add(`${penultimate}:${hops.join('.')}`);
+				// Also store "penultimate:finalTarget" (matches context.sourceTable:context.target)
+				const lastHop = hops[hops.length - 1] ?? '';
+				const lastRel = model.getRelation(`${penultimate}.${lastHop}`);
+				const finalTarget = lastRel ? lastRel.target : lastHop;
+				out.add(`${penultimate}:${finalTarget}`);
 			}
 
 			// Resolve next source for recursion into inner where.

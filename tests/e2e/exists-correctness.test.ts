@@ -420,3 +420,82 @@ describe('Case 9: exists comments via direct user_id FK — different set from C
 		expect(intersection).toEqual([]);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Case 10 — every-quantifier correctness (PR #130 fix verification)
+//
+// Seed recap:
+//   Alice (u1): p1(published=T), p2(published=F) — MIXED → NOT every-published
+//   Bob   (u2): p3(published=T), p4(published=T) — ALL published → every-published
+//   Carol (u3): p5(published=T), p6(published=F) — MIXED → NOT every-published
+//   Dave  (u4): NO posts → vacuously TRUE → every-published
+//   Eve   (u5): NO posts → vacuously TRUE → every-published
+//
+// Expected for every(posts, p → eq(p.published, true)):
+//   INCLUDED: Bob (all published), Dave (vacuous), Eve (vacuous)
+//   EXCLUDED: Alice (has p2 draft), Carol (has p6 draft)
+//
+// Discrimination power:
+//   — A plain EXISTS would include Alice/Carol/Bob but exclude Dave/Eve (wrong).
+//   — A bare NOT EXISTS without inner WHERE would include only Dave/Eve (wrong "no posts").
+//   — The correct NOT EXISTS(posts WHERE NOT published=T) includes Bob/Dave/Eve exactly.
+// ---------------------------------------------------------------------------
+describe('Case 10: every-quantifier — users whose every post is published', () => {
+	it('returns Bob, Dave, Eve — excludes Alice and Carol who have unpublished posts', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		// Build the every-quantifier intent directly (the typed every() helper requires
+		// a RelationRef from the schema DSL which is not easily composable in e2e tests;
+		// the raw intent is the same wire format the NQL compiler and planner emit).
+		const everyIntent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: eq('published', true),
+			mode: 'every' as const,
+		};
+
+		const rows = (await orm
+			.withSchema(SCHEMA)
+			.select('users')
+			.where(everyIntent as any)
+			.columns(['id', 'name'])
+			.execute()) as Array<{ id: number; name: string }>;
+
+		// INCLUDED: Bob (p3+p4 both published), Dave (no posts → vacuous), Eve (same)
+		// EXCLUDED: Alice (p2 unpublished), Carol (p6 unpublished)
+		expect(sortedNames(rows)).toEqual(['Bob', 'Dave', 'Eve']);
+
+		// Sanity-check against the "bugs this fix prevents" polarity:
+		// — If compiled as plain EXISTS: Alice/Carol would appear (wrong inclusion)
+		expect(sortedNames(rows)).not.toContain('Alice');
+		expect(sortedNames(rows)).not.toContain('Carol');
+		// — If compiled as bare NOT EXISTS (vacuous-true bug): Dave/Eve would be absent
+		expect(sortedNames(rows)).toContain('Dave');
+		expect(sortedNames(rows)).toContain('Eve');
+	});
+
+	it('every with vacuous condition (no where) returns ALL users — vacuous truth', async () => {
+		// every(relation, TRUE) = NOT EXISTS(path WHERE NOT TRUE) = TRUE for all rows
+		// All 5 users should be returned.
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: existsCorrectnessModel, adapter });
+
+		const everyVacuous = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			// no where clause — every(TRUE) = vacuously true for all rows
+			mode: 'every' as const,
+		};
+
+		const rows = (await orm
+			.withSchema(SCHEMA)
+			.select('users')
+			.where(everyVacuous as any)
+			.columns(['id', 'name'])
+			.execute()) as Array<{ id: number; name: string }>;
+
+		// Vacuous every is TRUE for everyone — all 5 users returned
+		expect(sortedNames(rows)).toEqual(['Alice', 'Bob', 'Carol', 'Dave', 'Eve']);
+	});
+});

@@ -14,7 +14,8 @@
  *             for both 'scalar' and 'scalar-direct' contexts.
  */
 
-import { createOrm, eq, exists, ref, schema } from '@dbsp/core';
+import { createOrm, eq, exists, plan, ref, schema } from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
@@ -581,5 +582,340 @@ describe('SCHEMA-SCOPING: nested exists — inner FROM must be schema-qualified'
 		expect(normalized).toContain('tenant.users');
 		expect(normalized).toContain('tenant.posts');
 		expect(normalized).toContain('tenant.comments');
+	});
+});
+
+// ============================================================================
+// EVERY-QUANTIFIER CONSISTENCY (PR #130 correctness suite)
+//
+// The `every` quantifier must compile to NOT EXISTS(path WHERE NOT cond) on
+// ALL three paths:
+//   1. Direct compile-where path (compileWhereIntent / handleRelationFilterIntent)
+//   2. Intent-to-decisions path (convertWhereCondition → everyHandler)
+//   3. Nested multi-hop path (enrichExistsStubsInConditions)
+//
+// Invariant: every(cond) = NOT EXISTS(path WHERE NOT cond)
+//            every(vacuous) = TRUE   — never a bare NOT EXISTS
+// ============================================================================
+
+// Schema for every-quantifier tests: users → posts (hasMany via author_id)
+//                                     posts → comments (hasMany via post_id)
+const everySchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		published: { type: 'boolean' },
+		author_id: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		body: { type: 'text' },
+		post_id: ref('posts', { as: 'post', inverse: 'comments' }),
+	},
+} as const);
+
+function buildEveryOrm() {
+	const adapter = createPgsqlCompileOnlyAdapter({ model: everySchema.model });
+	return createOrm({ model: everySchema.model, adapter });
+}
+
+// ---------------------------------------------------------------------------
+// FIX 1: intent-to-decisions path — convertWhereCondition emits operator:'every'
+// ---------------------------------------------------------------------------
+
+describe('FIX 1 (intent-to-decisions): mode:every emits operator:every NOT operator:exists', () => {
+	it('convertWhereCondition with mode:every emits operator:"every", not "exists"', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq' as const,
+				value: true,
+			},
+			mode: 'every' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision).not.toBeNull();
+		// INVARIANT: must route to everyHandler, NOT existsHandler
+		expect(decision?.operator).toBe('every');
+		expect(decision?.operator).not.toBe('exists');
+	});
+
+	it('convertWhereCondition mode:every with no where emits operator:"every" with no conditions', () => {
+		// Vacuous: everyHandler returns TRUE when conditions is empty
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: undefined as any,
+			mode: 'every' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision).not.toBeNull();
+		expect(decision?.operator).toBe('every');
+		// No conditions → everyHandler returns TRUE literal
+		expect(decision?.conditions ?? []).toHaveLength(0);
+	});
+
+	it('convertWhereCondition mode:every with empty and() emits operator:"every" with no conditions', () => {
+		// Vacuous via empty-and: same as undefined — must still emit operator:'every'
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: { kind: 'and' as const, conditions: [] as any[] },
+			mode: 'every' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision).not.toBeNull();
+		expect(decision?.operator).toBe('every');
+		// convertExistsLike converts and([]) to [] subDecisions → no conditions on decision
+		expect(decision?.conditions ?? []).toHaveLength(0);
+	});
+
+	it('convertWhereCondition mode:every with real predicate emits conditions (NOT pre-negated)', () => {
+		// The raw conditions are passed as-is; everyHandler wraps them in NOT internally.
+		// Regression lock: conditions must NOT already be wrapped in a 'not' decision.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq' as const,
+				value: true,
+			},
+			mode: 'every' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision?.operator).toBe('every');
+		expect(decision?.conditions).toHaveLength(1);
+		// Conditions must be the raw comparison, NOT wrapped in 'whereNot'
+		expect(decision?.conditions?.[0]?.type).not.toBe('whereNot');
+		expect(decision?.conditions?.[0]?.operator).toBe('eq');
+	});
+
+	it('mode:some still emits operator:exists (regression lock)', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq' as const,
+				value: true,
+			},
+			mode: 'some' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision?.operator).toBe('exists');
+	});
+
+	it('mode:none still emits operator:notExists (regression lock)', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq' as const,
+				value: false,
+			},
+			mode: 'none' as const,
+		};
+		const decision = convertWhereCondition(intent as any, 'users');
+		expect(decision?.operator).toBe('notExists');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// FIX 2 (compile-where direct path): empty-and → vacuous TRUE (no EXISTS emitted)
+// ---------------------------------------------------------------------------
+
+describe('FIX 2 (compile-where direct): mode:every with empty-and is vacuously true', () => {
+	it('single-hop every with and() emits TypeCast(1 as bool) — no EXISTS', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: { kind: 'and' as const, conditions: [] as any[] },
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		const node = compileWhereIntent(intent as any, ctx);
+		const sql = nodeToSql(node);
+		// Vacuous every: must NOT produce an EXISTS subquery
+		expect(sql.toUpperCase()).not.toContain('EXISTS');
+		// Must produce a true-cast (CAST(1 AS bool) or TRUE literal)
+		expect(sql.toLowerCase()).toMatch(/cast|true/);
+	});
+
+	it('multi-hop every with and() emits TypeCast(1 as bool) — no EXISTS', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: ['posts', 'comments'] as unknown as string,
+			where: { kind: 'and' as const, conditions: [] as any[] },
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		const node = compileWhereIntent(intent as any, ctx);
+		const sql = nodeToSql(node);
+		expect(sql.toUpperCase()).not.toContain('EXISTS');
+		expect(sql.toLowerCase()).toMatch(/cast|true/);
+	});
+
+	it('single-hop every with real predicate still produces NOT EXISTS (regression)', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'posts',
+			where: {
+				kind: 'comparison' as const,
+				field: 'published',
+				operator: 'eq' as const,
+				value: true,
+			},
+			mode: 'every' as const,
+		};
+		const ctx = makeCtx('users');
+		const node = compileWhereIntent(intent as any, ctx);
+		const sql = nodeToSql(node);
+		expect(sql.toUpperCase()).toContain('NOT');
+		expect(sql.toUpperCase()).toContain('EXISTS');
+		expect(ctx.paramState.parameters).toContain(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// FIX 3 (plan-decision-extractor nested multi-hop): vacuous every → TRUE
+// ---------------------------------------------------------------------------
+
+describe('FIX 3 (nested multi-hop enrichExistsStubs): mode:every vacuous → TRUE in nested chain', () => {
+	it('exists(posts WHERE every(comments, vacuous)) does NOT produce inner NOT EXISTS', () => {
+		// Nested: users → posts → comments, where the inner every has no predicate.
+		// Before fix: produced NOT EXISTS(comments WHERE corr) inside the posts chain
+		// After fix:  vacuous every resolves to TRUE → no inner NOT EXISTS
+		const planReport = plan(
+			{
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'exists' as const,
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter' as const,
+						relation: ['comments'] as unknown as string,
+						mode: 'every' as const,
+						// No where clause — vacuous true
+					} as any,
+				} as any,
+			},
+			everySchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+		const adapter = createPgsqlCompileOnlyAdapter({ model: everySchema.model });
+		const { sql } = adapter.compile(planReport, { model: everySchema.model });
+		const normalized = sql.replace(/\s+/g, ' ').trim();
+
+		// The outer EXISTS (posts) must be present
+		expect(normalized.toUpperCase()).toContain('EXISTS');
+		// The inner vacuous every must NOT produce NOT EXISTS(comments ...)
+		// (it should either vanish or become TRUE)
+		expect(normalized.toUpperCase()).not.toMatch(/NOT\s*\(?EXISTS.*comments/i);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// FIX 4 (suppression key): nested multi-hop no double-emit
+//
+// Scenario: exists('posts', { where: <multi-hop relation filter> })
+// Before fix: collectNestedExistsTargets stored "posts:comments.post_id_path" with
+//             the ENCLOSING sourceTable (posts), but the no-stub suppression check
+//             used context.sourceTable (comments — the penultimate hop's target),
+//             producing a key mismatch → the filter-strategy decision was re-appended
+//             at the root level as an extra AND EXISTS.
+// After fix:  both sides use the penultimate-hop target as the key prefix.
+// ---------------------------------------------------------------------------
+
+// Extended schema for 4-table nested multi-hop test:
+// users → posts (hasMany via author_id) → comments (hasMany via post_id)
+const nestedMultiHopSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		published: { type: 'boolean' },
+		author_id: ref('users', { as: 'author', inverse: 'posts' }),
+	},
+	comments: {
+		id: { type: 'integer', primaryKey: true },
+		body: { type: 'text' },
+		post_id: ref('posts', { as: 'post', inverse: 'comments' }),
+	},
+} as const);
+
+describe('FIX 4 (suppression key): nested multi-hop — no extra root-level EXISTS', () => {
+	it('exists(posts, { where: relationFilter([comments], eq) }) → exactly 2 EXISTS, no root duplicate', () => {
+		// This exercises the exact scenario: outer exists('posts') + inner multi-hop
+		// relationFilter(['comments']) with a real predicate.
+		// Before fix: the filter-strategy for comments was not suppressed → extra
+		//   AND EXISTS(comments ...) appended at root level (3 EXISTS total).
+		// After fix: exactly 2 EXISTS (one for posts, one for comments inside posts).
+		const planReport = plan(
+			{
+				type: 'select' as const,
+				from: 'users',
+				where: {
+					kind: 'exists' as const,
+					relation: 'posts',
+					where: {
+						kind: 'relationFilter' as const,
+						relation: ['comments'] as unknown as string,
+						where: {
+							kind: 'comparison' as const,
+							field: 'body',
+							operator: 'eq' as const,
+							value: 'hello',
+						},
+						mode: 'some' as const,
+					} as any,
+				} as any,
+			},
+			nestedMultiHopSchema.model,
+			{ dialectCapabilities: POSTGRESQL_CAPABILITIES },
+		);
+
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: nestedMultiHopSchema.model,
+		});
+		const { sql, parameters } = adapter.compile(planReport, {
+			model: nestedMultiHopSchema.model,
+		});
+		const normalized = sql.replace(/\s+/g, ' ').trim();
+
+		// Exactly 2 EXISTS: outer for posts, inner for comments
+		const existsMatches = normalized.match(/\bEXISTS\b/gi);
+		expect(
+			existsMatches?.length,
+			`Expected exactly 2 EXISTS, got ${existsMatches?.length ?? 0}: ${normalized}`,
+		).toBe(2);
+
+		// Outer correlation: users.id = posts_exists_N.author_id
+		expect(normalized).toMatch(/users\.id\s*=\s*posts_exists_\d+\.author_id/);
+
+		// Inner correlation: posts_exists_N.id = comments_exists_M.post_id
+		expect(normalized).toMatch(
+			/posts_exists_\d+\.id\s*=\s*comments_exists_\d+\.post_id/,
+		);
+
+		// Inner filter preserved
+		expect(parameters).toContain('hello');
+
+		// NO extra root-level AND EXISTS appended after the outer EXISTS clause
+		// Root WHERE must start with EXISTS (not AND/OR with extra terms)
+		expect(normalized).toMatch(/WHERE\s+EXISTS/i);
 	});
 });

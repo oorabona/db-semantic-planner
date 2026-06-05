@@ -495,12 +495,22 @@ function handleRelationFilterIntent(
 	const existsKind =
 		rf.mode === 'none' || rf.mode === 'every' ? 'notExists' : 'exists';
 
-	// DEFECT 2 FIX: mode:'every' with no/undefined where is vacuously true.
+	// DEFECT 2 FIX: mode:'every' with no/undefined where OR an empty logical
+	// group (and() with zero conditions) is vacuously true.
 	// every(TRUE) over any path is trivially satisfied for all rows.
 	// NOT EXISTS(path WHERE NOT TRUE) = NOT EXISTS(path WHERE FALSE) = TRUE.
-	// Building `{ kind: 'not', condition: undefined }` and recursing would crash,
-	// so return the TRUE literal directly here — before building innermostWhere.
-	if (rf.mode === 'every' && !rf.where) {
+	// Building `{ kind: 'not', condition: undefined }` and recursing would crash
+	// on the undefined path; the empty-and path produces the right answer but
+	// emits an unnecessary NOT EXISTS subquery — short-circuit here instead.
+	const rfWhere = rf.where as unknown as Record<string, unknown> | undefined;
+	const isVacuousEvery =
+		rf.mode === 'every' &&
+		(!rfWhere ||
+			(typeof rfWhere === 'object' &&
+				rfWhere.kind === 'and' &&
+				Array.isArray(rfWhere.conditions) &&
+				(rfWhere.conditions as unknown[]).length === 0));
+	if (isVacuousEvery) {
 		return {
 			TypeCast: {
 				arg: { Integer: { ival: 1 } },

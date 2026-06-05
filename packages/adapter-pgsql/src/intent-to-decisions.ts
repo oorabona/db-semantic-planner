@@ -695,12 +695,15 @@ function convertNot(
 	return { type: 'whereNot', conditions: [subDecision] };
 }
 
-/** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS */
+/** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS / EVERY */
 function convertExistsLike(
 	cond: FlatWhereFields,
-	operator: 'exists' | 'notExists',
+	operator: 'exists' | 'notExists' | 'every',
 ): PlanDecision {
 	const targetTable = cond.relation as string;
+	// For 'every', pass the raw conditions un-negated — everyHandler wraps them in
+	// NOT internally.  When conditions is empty/undefined, everyHandler returns the
+	// vacuous-true literal (TRUE) instead of emitting a subquery.
 	const subDecisions: PlanDecision[] = cond.where
 		? convertWhere(cond.where as WhereIntent, targetTable)
 		: [];
@@ -813,7 +816,16 @@ export function convertWhereCondition(
 			return convertExistsLike(cond, 'notExists');
 		case 'relationFilter': {
 			const mode = (cond.mode as string) || 'some';
-			return convertExistsLike(cond, mode === 'none' ? 'notExists' : 'exists');
+			// mode:'every' must route to everyHandler (NOT EXISTS WHERE NOT cond).
+			// Passing 'exists' here was Bug #1 — it silently dropped the universal-
+			// quantifier semantics and routed to the plain EXISTS handler instead.
+			const operator =
+				mode === 'none'
+					? ('notExists' as const)
+					: mode === 'every'
+						? ('every' as const)
+						: ('exists' as const);
+			return convertExistsLike(cond, operator);
 		}
 		case 'subquery':
 			return convertSubquery(cond);
