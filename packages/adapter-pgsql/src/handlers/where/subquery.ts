@@ -4,16 +4,15 @@
  * Handles scalar subquery comparisons like:
  * - WHERE price > (SELECT AVG(price) FROM products)
  * - WHERE id IN (SELECT user_id FROM active_users)
+ *
+ * SQL emission is delegated to `buildPredicateSubquerySelect` (subquery-emission.ts),
+ * the single chokepoint that validates the original QueryIntent (via
+ * `decision.subqueryIntent` provenance) before building the SelectStmt.
  */
 
-import type {
-	A_Expr,
-	A_Expr_Kind,
-	Node,
-	SelectStmt,
-	SubLink,
-} from '@pgsql/types';
-import { columnRef, integerNode, rangeVar, sortBy } from '../../ast-helpers.js';
+import type { A_Expr, A_Expr_Kind, Node, SubLink } from '@pgsql/types';
+import { columnRef } from '../../ast-helpers.js';
+import { buildPredicateSubquerySelect } from '../../subquery-emission.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -22,9 +21,10 @@ import type {
 	WhereHandler,
 } from '../types.js';
 
-/**
- * Map comparison operators to their PostgreSQL equivalents
- */
+// ============================================================================
+// Map comparison operators to their PostgreSQL equivalents
+// ============================================================================
+
 const PG_OPERATOR_MAP: Record<string, string> = {
 	'=': '=',
 	'!=': '<>',
@@ -33,6 +33,10 @@ const PG_OPERATOR_MAP: Record<string, string> = {
 	'>': '>',
 	'>=': '>=',
 };
+
+// ============================================================================
+// Scalar SubLink builder
+// ============================================================================
 
 /**
  * Create an A_Expr node for scalar subquery comparison.
@@ -63,216 +67,67 @@ function createScalarSubLink(
 	return { A_Expr: expr };
 }
 
-/**
- * Guard: throw a clear error if the decision carries query modifiers that
- * this compilation path does not faithfully emit (GROUP BY, HAVING, OFFSET,
- * DISTINCT, joins, includes). These fields do not exist on the `Decision` type,
- * but a caller constructing a raw decision object could include them, and they
- * would be silently dropped — broadening the filter in ways the caller did not
- * intend. The primary guard lives in `assertNoUnsupportedSubqueryModifiers`
- * (intent-to-decisions.ts); this is defense-in-depth for direct Decision callers.
- */
-function assertNoDroppedDecisionModifiers(decision: Decision): void {
-	// Cast through unknown to inspect extra fields not in the typed interface.
-	const d = decision as unknown as Record<string, unknown>;
-	const unsupported: string[] = [];
-
-	if (Array.isArray(d.groupBy) && (d.groupBy as unknown[]).length > 0)
-		unsupported.push('GROUP BY');
-	if (d.having != null) unsupported.push('HAVING');
-	if (d.offset != null) unsupported.push('OFFSET');
-	if (d.distinct === true) unsupported.push('DISTINCT');
-	if (Array.isArray(d.distinctOn) && (d.distinctOn as unknown[]).length > 0)
-		unsupported.push('DISTINCT ON');
-	if (Array.isArray(d.include) && (d.include as unknown[]).length > 0)
-		unsupported.push('include (relation hydration)');
-	if (Array.isArray(d.joins) && (d.joins as unknown[]).length > 0)
-		unsupported.push('joins');
-
-	if (unsupported.length > 0) {
-		const operator = typeof d.operator === 'string' ? d.operator : 'subquery';
-		const kind =
-			operator === 'inSubquery' || operator === 'notInSubquery'
-				? 'IN'
-				: 'scalar';
-		throw new Error(
-			`${kind} subquery with ${unsupported.join(', ')} is not supported — ` +
-				'it would silently change which rows match; restructure the query or use a CTE.',
-		);
-	}
-}
+// ============================================================================
+// Thin wrapper — delegates to buildPredicateSubquerySelect (chokepoint)
+// ============================================================================
 
 /**
- * Recursively walk Decision conditions looking for a FieldRef with scope:'outer'.
+ * Build a SELECT subquery AST node from a lowered Decision.
  *
- * When `convertSubquery` lowered a `subquery` WhereIntent to a Decision, any
- * `outerRef()` node in the inner WHERE was converted to
- * `{ kind: 'fieldRef', scope: 'outer', column }` by `convertComparison`.
- * `buildScalarSubquery` builds its inner subCtx with no `outerAlias`, so a
- * scope:'outer' FieldRef would bind to the inner alias — producing wrong SQL.
+ * Thin wrapper over `buildPredicateSubquerySelect` — uses `decision.subqueryIntent`
+ * (the original QueryIntent set during lowering) as provenance for validation.
  *
- * This helper detects the post-lowering form so `buildScalarSubquery` can throw
- * fail-closed before emitting incorrect SQL.
- */
-function conditionsContainOuterFieldRef(
-	conditions: readonly unknown[],
-): boolean {
-	for (const cond of conditions) {
-		if (!cond || typeof cond !== 'object') continue;
-		const c = cond as Record<string, unknown>;
-		// Check this Decision's value for a fieldRef with scope:'outer'
-		const val = c.value;
-		if (val && typeof val === 'object') {
-			const v = val as Record<string, unknown>;
-			if (v.kind === 'fieldRef' && v.scope === 'outer') return true;
-		}
-		// Recurse into nested conditions (and/or groups)
-		if (Array.isArray(c.conditions)) {
-			if (conditionsContainOuterFieldRef(c.conditions as unknown[]))
-				return true;
-		}
-	}
-	return false;
-}
-
-/**
- * Build a simple SELECT subquery from a table
+ * The `use` parameter is derived from the calling handler's operator:
+ * - inSubquery / notInSubquery → 'IN'
+ * - scalarSubquery / subqueryEq / … → 'scalar'
  *
- * SELECT aggregate(column) FROM table [WHERE conditions]
+ * Validation (assertNoUnsupportedSubqueryModifiers + outerRef check) is performed
+ * inside `buildPredicateSubquerySelect` against `sourceIntent` — NOT against the
+ * stripped lowered decision fields.
+ *
+ * DEFENSE-IN-DEPTH: when `decision.subqueryIntent` is absent (directly-constructed
+ * Decision without provenance), we synthesize a minimal QueryIntent from the lowered
+ * fields so the chokepoint can still validate.  This is intentionally less precise
+ * than the full original intent but still catches structural modifier violations
+ * (GROUP BY / HAVING / OFFSET / DISTINCT / joins / include).  The remapping +
+ * backstop guards at other sites remain in place as defense-in-depth.
  */
 function buildScalarSubquery(
 	decision: Decision,
+	use: 'IN' | 'scalar',
 	ctx: CompilerContext,
 	state: CompilerState,
 	dispatch: WhereDispatcher,
 ): Node {
-	assertNoDroppedDecisionModifiers(decision);
+	// Resolve source intent: prefer the carried provenance; synthesize from
+	// lowered fields as fallback for directly-constructed decisions.
+	const sourceIntent: import('@dbsp/types').QueryIntent =
+		decision.subqueryIntent ??
+		(decision.selectColumn
+			? ({
+					from: decision.targetTable ?? decision.relation ?? '',
+					select: {
+						type: 'fields',
+						fields: [decision.selectColumn],
+					} as import('@dbsp/types').SelectIntent,
+				} as import('@dbsp/types').QueryIntent)
+			: ({
+					from: decision.targetTable ?? decision.relation ?? '',
+				} as import('@dbsp/types').QueryIntent));
 
-	// DEFECT 2 FIX (defense-in-depth, decisions handler path):
-	// A scalar subquery with an outer-scoped FieldRef in its conditions means the
-	// caller used outerRef() inside the scalar subquery's WHERE. The inner subCtx
-	// has no outerAlias, so the fieldRef would bind to the inner alias — wrong SQL.
-	// `convertSubquery` (decisions path entry) already throws for this case; this
-	// guard catches manually-constructed Decisions that bypass the entry point.
-	if (
-		decision.conditions &&
-		conditionsContainOuterFieldRef(decision.conditions as unknown[])
-	) {
-		throw new Error(
-			'scalar subquery with correlated outerRef() is not yet supported — ' +
-				'use exists("relation", { where: ... }) when a schema relation exists, ' +
-				'or restructure the query to avoid the correlation.',
-		);
-	}
-	const targetTable = decision.targetTable ?? decision.relation;
-	const selectColumn = decision.selectColumn ?? '*';
-	const aggregate = decision.aggregate;
-
-	if (!targetTable) {
-		throw new Error('Subquery handler requires targetTable');
-	}
-
-	// Generate unique alias
-	const existingAliases = state.aliases.size;
-	const targetAlias = `${targetTable}_subq_${existingAliases}`;
-	state.aliases.set(`subquery_${targetTable}`, targetAlias);
-
-	// Build target list (what to select)
-	let targetVal: Node;
-	if (aggregate) {
-		// SELECT COUNT(*), AVG(column), etc.
-		if (selectColumn === '*') {
-			// Aggregate with star (e.g., COUNT(*))
-			targetVal = {
-				FuncCall: {
-					funcname: [{ String: { sval: aggregate.toLowerCase() } }],
-					agg_star: true,
-				},
-			};
-		} else {
-			// Aggregate with column (e.g., AVG(price))
-			// Alias is query-scoped, not schema-qualified
-			const aggArg = columnRef(
-				selectColumn,
-				targetAlias,
-				undefined,
-				ctx.naming,
-			);
-			targetVal = {
-				FuncCall: {
-					funcname: [{ String: { sval: aggregate.toLowerCase() } }],
-					args: [aggArg],
-				},
-			};
-		}
-	} else {
-		// SELECT column — alias is query-scoped, not schema-qualified
-		targetVal = columnRef(selectColumn, targetAlias, undefined, ctx.naming);
-	}
-
-	// Build WHERE clause if conditions exist
-	let whereClause: Node | undefined;
-	if (decision.conditions && decision.conditions.length > 0) {
-		// NOTE: schema is intentionally KEPT in subCtx so any nested EXISTS or
-		// subquery conditions can qualify their FROM tables with the schema name.
-		// Column references are alias-prefixed (not schema-qualified) regardless —
-		// columnRef always passes undefined for schema.
-		const subCtx: CompilerContext = {
-			...ctx,
-			rootTable: targetTable,
-			currentAlias: targetAlias,
-		};
-
-		if (decision.conditions.length === 1) {
-			whereClause = dispatch(decision.conditions[0]!, subCtx, state);
-		} else {
-			const compiledConditions = decision.conditions.map((cond) =>
-				dispatch(cond, subCtx, state),
-			);
-			whereClause = {
-				BoolExpr: {
-					boolop: 'AND_EXPR',
-					args: compiledConditions,
-				},
-			};
-		}
-	}
-
-	const stmt: SelectStmt = {
-		targetList: [{ ResTarget: { val: targetVal } }],
-		fromClause: [rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming)],
-		...(whereClause && { whereClause }),
-	};
-
-	// Add ORDER BY if present
-	if (decision.orderBy && decision.orderBy.length > 0) {
-		stmt.sortClause = decision.orderBy.map((o) =>
-			sortBy(
-				columnRef(o.column, targetAlias, undefined, ctx.naming),
-				o.direction ?? 'ASC',
-				'DEFAULT',
-			),
-		);
-	}
-
-	// Add LIMIT if present
-	if (decision.limit != null) {
-		if (typeof decision.limit === 'number') {
-			stmt.limitCount = integerNode(decision.limit);
-		} else {
-			const limitObj = decision.limit as Record<string, unknown>;
-			if (typeof limitObj.paramIndex !== 'number') {
-				throw new Error('limit.paramIndex must be a number');
-			}
-			// Emit a parameter reference ($N) not the literal index integer
-			stmt.limitCount = {
-				ParamRef: { number: limitObj.paramIndex },
-			} as unknown as Node;
-		}
-	}
-
-	return { SelectStmt: stmt };
+	return buildPredicateSubquerySelect(
+		use,
+		sourceIntent,
+		decision,
+		ctx,
+		state,
+		dispatch,
+	);
 }
+
+// ============================================================================
+// Handlers
+// ============================================================================
 
 /**
  * Scalar subquery comparison handler
@@ -306,7 +161,13 @@ export const scalarSubqueryHandler: WhereHandler = {
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
-		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
+		const subquery = buildScalarSubquery(
+			decision,
+			'scalar',
+			ctx,
+			state,
+			dispatch,
+		);
 
 		return createScalarSubLink(subquery, operator, leftOperand);
 	},
@@ -334,7 +195,7 @@ export const inSubqueryHandler: WhereHandler = {
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
-		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
+		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {
 			subLinkType: 'ANY_SUBLINK',
@@ -369,7 +230,7 @@ export const notInSubqueryHandler: WhereHandler = {
 
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 		const leftOperand = columnRef(column, sourceAlias, undefined, ctx.naming);
-		const subquery = buildScalarSubquery(decision, ctx, state, dispatch);
+		const subquery = buildScalarSubquery(decision, 'IN', ctx, state, dispatch);
 
 		const subLink: SubLink = {
 			subLinkType: 'ALL_SUBLINK',

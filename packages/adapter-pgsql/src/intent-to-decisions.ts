@@ -543,6 +543,7 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	// We cannot rely on normalizeToDecision's `case 'in'` branch because that
 	// function short-circuits via early-return when `column` is already set.
 	if (rawSubquery) {
+		// Early validation at lowering time (defense-in-depth before emission chokepoint).
 		assertNoUnsupportedSubqueryModifiers(rawSubquery, 'IN');
 		const selectField = rawSubquery.select;
 		const selectColumn: string =
@@ -575,6 +576,8 @@ function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 			selectColumn,
 			conditions: subConditions,
 			table: rootTable,
+			// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
+			subqueryIntent: rawSubquery,
 			...(rawLimit != null && { limit: rawLimit }),
 			...(rawOrderBy && {
 				orderBy: rawOrderBy.map((o) => ({
@@ -739,6 +742,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const subquery = cond.subquery as QueryIntent | undefined;
 	if (!subquery || !field) return null;
 
+	// Early validation at lowering time (defense-in-depth before emission chokepoint).
 	assertNoUnsupportedSubqueryModifiers(subquery, 'scalar');
 
 	// DEFECT 2 FIX (decisions path): detect outerRef() inside a scalar subquery's WHERE.
@@ -804,6 +808,8 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		targetTable,
 		selectColumn,
 		subqueryOperator: opMap[operator] ?? '=',
+		// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
+		subqueryIntent: subquery,
 		...(aggregate && { aggregate }),
 		...(subConditions.length > 0 && { conditions: subConditions }),
 		...(rawLimit != null && { limit: rawLimit }),
@@ -875,20 +881,10 @@ export function convertWhereCondition(
 					`${cond.kind}: missing subquery — pass the result of subquery(table).select(...) or a builder with buildIntent()`,
 				);
 			}
-			// Guard: reject subquery modifiers that buildSubqueryFromIntent silently
-			// drops — limit, offset, groupBy, having, joins, include, distinct,
-			// distinctOn are not emitted by buildSubqueryFromIntent (it only emits
-			// from/select/where).  Silently dropping them changes which rows match
-			// (e.g. rawExists(subquery.limit(0)) must always be FALSE but without the
-			// guard compiles as an unrestricted existence check — silent broadening).
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
 			assertNoUnsupportedSubqueryModifiers(sub, 'rawExists');
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
-			// supported on the rawExists/rawNotExists path: buildSubqueryFromIntent
-			// builds a fresh WhereCompilerCtx with no outerAlias, so SubqueryRefIntent
-			// values fall back to being parameterized as $N (an object literal!) which
-			// produces wrong SQL at best and a runtime error at worst. Detect this
-			// case at decision-time and throw a clear "not yet supported" error so
-			// callers don't get silently-broken queries.
+			// supported on the rawExists/rawNotExists path.
 			if (sub.where && containsOuterRef(sub.where)) {
 				throw new Error(
 					`${cond.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +

@@ -144,6 +144,7 @@ function mapToHandlerDecision(
 		aggregate: pd.aggregate,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
+		subqueryIntent: pd.subqueryIntent,
 	} as HandlerDecision;
 }
 
@@ -260,6 +261,16 @@ export interface PlanDecision {
 	// When set, these are spliced into this.state.parameters BEFORE other query params.
 	// The joinRarg contains ParamRefs ($1, $2, ...) aligned with these values.
 	readonly batchValuesParams?: readonly unknown[];
+	/**
+	 * Provenance: the ORIGINAL QueryIntent before lowering.
+	 * Carried through every lowering site (convertIn, convertSubquery,
+	 * normalizeToDecision, dispatchWhere, mapInSubqueryCondition) so that
+	 * `buildPredicateSubquerySelect` can validate the true caller intent.
+	 *
+	 * Required for IN / scalar / inSubquery / notInSubquery decisions.
+	 * Optional on other decision types.
+	 */
+	readonly subqueryIntent?: import('@dbsp/types').QueryIntent;
 }
 
 // ============================================================================
@@ -514,12 +525,8 @@ export class PlanCompiler {
 				? (decision.value as PlanDecision['subquery'])
 				: undefined);
 		if (sub && (decision.operator === 'in' || decision.operator === 'notIn')) {
-			// Guard: throw if the subquery carries modifiers that compilation would
-			// silently drop (GROUP BY, HAVING, OFFSET, DISTINCT, joins, includes,
-			// invalid projections), which would broaden the result set.
-			// This covers directly-constructed SimplifiedPlanReport plans that bypass
-			// the intentToDecisions pipeline (the decisions/SELECT path guards earlier
-			// in convertIn; normalizeToDecision guards the WhereIntent/mutation path).
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
+			// Covers directly-constructed SimplifiedPlanReport plans that bypass intentToDecisions.
 			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = decision.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			// Extract selectColumn: may be a string or a SelectIntent with fields
@@ -541,6 +548,10 @@ export class PlanCompiler {
 				targetTable: sub.from,
 				selectColumn,
 				conditions: subConditions,
+				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
+				// to sub cast as QueryIntent for directly-constructed plans.
+				subqueryIntent:
+					decision.subqueryIntent ?? (sub as unknown as QueryIntent),
 				...(rawLimit != null && { limit: rawLimit }),
 				...(rawOrderBy && {
 					orderBy: rawOrderBy.map((o) => ({
@@ -619,9 +630,7 @@ export class PlanCompiler {
 			| (PlanDecision['subquery'] & { where?: PlanDecision })
 			| undefined;
 		if (sub && (pd.operator === 'in' || pd.operator === 'notIn')) {
-			// Guard: same fail-closed check as dispatchWhere and normalizeToDecision.
-			// Nested IN subqueries (IN inside EXISTS where, or nested IN) reach this
-			// path rather than dispatchWhere, so the guard must also live here.
+			// Early validation at lowering time (defense-in-depth before emission chokepoint).
 			assertNoUnsupportedSubqueryModifiers(sub as unknown as QueryIntent, 'IN');
 			const op = pd.operator === 'notIn' ? 'notInSubquery' : 'inSubquery';
 			const rawSelect = sub.select as unknown;
@@ -644,6 +653,9 @@ export class PlanCompiler {
 				targetTable: sub.from,
 				selectColumn,
 				conditions: subConditions,
+				// Provenance: use already-set subqueryIntent from PlanDecision, or fall back
+				// to sub cast as QueryIntent for directly-constructed plans.
+				subqueryIntent: pd.subqueryIntent ?? (sub as unknown as QueryIntent),
 				...(rawLimit != null && { limit: rawLimit }),
 				...(rawOrderBy && {
 					orderBy: rawOrderBy.map((o) => ({

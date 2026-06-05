@@ -52,9 +52,8 @@ import type {
 } from './handlers/types.js';
 import { createCompilerState } from './handlers/types.js';
 import { buildColumnRef } from './handlers/where/utils.js';
-// DEFECT-2 FIX: import the modifier guard so the direct compileWhereIntent path
-// (used by compileBatchUpdate and other mutation callers) enforces the same
-// rawExists modifier restrictions as the decisions path (convertWhereCondition).
+// Modifier guard and outerRef check used by buildSubqueryFromIntent (direct-path
+// chokepoint for rawExists / scalar-direct predicate subqueries).
 import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
@@ -169,22 +168,23 @@ export function buildSubqueryFromIntent(
 	paramOffset: number,
 	naming: NamingPlugin = identityNaming,
 	schemaName?: string,
+	use: 'rawExists' | 'scalar-direct' = 'rawExists',
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
 	// JOINs, or relation hydration (include). Any caller passing an intent with those
 	// modifiers would get silently-wrong SQL (broader or semantically-different matches).
 	//
-	// This guard fires regardless of which call path reaches this function:
-	//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — no prior guard
-	//   • handleRawExistsIntent     (compile-where.ts)             — also guards there
-	//   • handleSubqueryIntent      (compile-where.ts)             — also guards there
-	//   • adapter-compiler-mutations compileSubquery callback       — no prior guard
+	// The `use` parameter lets each call site specify the right validation context:
+	//   • rawExists / rawNotExists → 'rawExists'   (also rejects LIMIT + ORDER BY)
+	//   • scalar-direct            → 'scalar-direct' (also rejects LIMIT + ORDER BY)
 	//
-	// The call-site guards in handleRawExistsIntent/handleSubqueryIntent are retained
-	// for defense-in-depth (earlier, more specific error messages). This chokepoint
-	// guarantees any future caller without a call-site guard is still protected.
-	assertNoUnsupportedSubqueryModifiers(intent, 'rawExists');
+	// Callers:
+	//   • handleRawExistsIntent     (compile-where.ts)             — use='rawExists'
+	//   • handleSubqueryIntent      (compile-where.ts)             — use='scalar-direct'
+	//   • rawExistsHandler.compile  (handlers/where/raw-exists.ts) — use='rawExists'
+	//   • adapter-compiler-mutations compileSubquery callback       — use='rawExists'
+	assertNoUnsupportedSubqueryModifiers(intent, use);
 	// Correlated subqueries (outerRef inside the inner WHERE) are not supported:
 	// buildSubqueryFromIntent builds a fresh inner WhereCompilerCtx with no outer alias,
 	// so SubqueryRefIntent values fall back to being serialized as object $N parameters,
@@ -441,23 +441,21 @@ function handleSubqueryIntent(
 		subquery: Parameters<WhereCompilerCtx['compileSubquery']>[0];
 	};
 
-	// Guard: reject scalar subqueries with modifiers that buildSubqueryFromIntent
-	// silently drops.  The decisions path (convertSubquery in intent-to-decisions.ts)
-	// uses 'scalar' which allows limit/orderBy because that path faithfully emits them.
-	// This direct path uses buildSubqueryFromIntent which emits ONLY SELECT/FROM/WHERE
-	// — limit, orderBy, groupBy, having, offset, distinct, joins, include are all
-	// dropped. Use 'scalar-direct' to reject the full dropped set, including limit and
-	// orderBy that 'scalar' allows.
-	assertNoUnsupportedSubqueryModifiers(
-		subquery as QueryIntent,
-		'scalar-direct',
-	);
-
+	// Use buildSubqueryFromIntent directly with 'scalar-direct' so validation is
+	// applied with the correct use context (rejects LIMIT + ORDER BY, which the
+	// decisions path 'scalar' allows because that path faithfully emits them).
+	// Validation is now delegated to buildSubqueryFromIntent (the direct-path chokepoint).
 	const {
 		sql: subqueryNode,
 		paramCount,
 		parameters: innerParams,
-	} = ctx.compileSubquery(subquery, ctx.paramState.paramIndex);
+	} = buildSubqueryFromIntent(
+		subquery as QueryIntent,
+		ctx.paramState.paramIndex,
+		ctx.naming,
+		ctx.schemaName,
+		'scalar-direct',
+	);
 
 	if (innerParams) {
 		for (const p of innerParams) {
@@ -718,20 +716,17 @@ function handleRawExistsIntent(
 ): Node {
 	const subIntent = (intent as WhereRawExistsIntent | WhereRawNotExistsIntent)
 		.subquery;
-	// DEFECT-2 FIX: enforce the same modifier guard as the decisions path
-	// (convertWhereCondition in intent-to-decisions.ts).  Without this guard,
-	// rawExists(subquery.limit(0)) on the direct compile-where path (used by
-	// compileBatchUpdate) silently compiles as an unrestricted EXISTS — always
-	// true — broadening the mutation guard contrary to the caller's intent.
+	// Guard fires here before ctx.compileSubquery so that the modifier check
+	// fires on the direct compileWhereIntent path (used by compileBatchUpdate)
+	// regardless of which compileSubquery callback is injected.
+	// This is defense-in-depth: buildSubqueryFromIntent also validates when used
+	// as the compileSubquery callback, but tests that inject a sentinel callback
+	// need the guard to fire here first.
 	assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
-	// DEFECT-3 FIX: reject correlated subqueries (outerRef inside inner WHERE) on
-	// the direct compile-where path, matching the decisions-path guard in
-	// convertWhereCondition (intent-to-decisions.ts).  Without this guard,
-	// rawExists(subquery(... outerRef(...))) on the direct path (used by
-	// compileBatchUpdate) silently serialises the outerRef object as a $N
-	// parameter (an object literal!) — producing wrong SQL or a runtime error.
-	const subIntentTyped = subIntent as QueryIntent;
-	if (subIntentTyped.where && containsOuterRef(subIntentTyped.where)) {
+	if (
+		(subIntent as QueryIntent).where &&
+		containsOuterRef((subIntent as QueryIntent).where!)
+	) {
 		const kindLabel =
 			(intent as { kind?: string }).kind === 'rawNotExists'
 				? 'rawNotExists'
@@ -921,19 +916,6 @@ export function compileWhereIntent(
 	if (intent.kind === 'comparison') {
 		const exprRefResult = handleComparisonWithExprRef(intent, ctx, handlerCtx);
 		if (exprRefResult !== null) return exprRefResult;
-	}
-
-	// IN-subquery guard: the dispatcher normalises the subquery by copying only
-	// from/select/where/limit/orderBy — GROUP BY, HAVING, OFFSET, DISTINCT,
-	// include, and joins are silently dropped before the handler sees the intent.
-	// For mutation guards that reach this path (compileBatchUpdate → compileWhereIntent
-	// for the WHERE clause), silent truncation can broaden the affected rows.
-	// Mirror the guard on the decisions path (convertIn in intent-to-decisions.ts).
-	if (intent.kind === 'in') {
-		const inSub = (intent as { subquery?: unknown }).subquery;
-		if (inSub) {
-			assertNoUnsupportedSubqueryModifiers(inSub as QueryIntent, 'IN');
-		}
 	}
 
 	// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,
