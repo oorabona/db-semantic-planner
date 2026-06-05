@@ -244,6 +244,7 @@ type Dump = {
 - **Patterns:** `docs/PATTERNS.md` — recommended query patterns and best practices
 - **Production:** `docs/PRODUCTION.md` — deployment, connection pooling, schema scoping for multi-tenancy
 - **CLI usage:** `docs/CLI_USAGE.md` — command-line interface reference
+- **E2E / integration tests:** `docs/guides/how-to-write-e2e-integration-tests.md` — real-DB row-asserting tests (`pnpm test:e2e`, testcontainers harness)
 
 ## Build Order
 
