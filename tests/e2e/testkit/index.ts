@@ -29,6 +29,13 @@ export {
 	getTestAdapter,
 	getTestPool,
 } from './db.js';
+// EXISTS-correctness (regression suite for fix/core-correctness-130)
+export {
+	createExistsCorrectnessSchema,
+	dropExistsCorrectnessSchema,
+} from './exists-correctness.ddl.js';
+export { existsCorrectnessModel } from './exists-correctness.model.js';
+export { seedExistsCorrectnessData } from './exists-correctness.seed.js';
 // IAM/RBAC
 export { createIamSchema, dropIamSchema } from './iam.ddl.js';
 export { iamModel } from './iam.model.js';
