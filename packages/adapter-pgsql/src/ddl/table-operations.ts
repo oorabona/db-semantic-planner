@@ -9,7 +9,7 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { validateDbTypeName } from '../validate.js';
+import { validateDbTypeName, validateSqlExpression } from '../validate.js';
 import { formatSqlDefault, quoteIdent } from './phases/utils.js';
 
 // S-2: quoteIdentifier now delegates to quoteIdent (validates + double-quotes).
@@ -66,8 +66,22 @@ export function generateAlterColumnSQL(
 	const statements: string[] = [];
 	if (options.type !== undefined) {
 		const safeType = validateDbTypeName(options.type);
-		const using = options.using !== undefined ? ` USING ${options.using}` : '';
-		statements.push(`${prefix} TYPE ${safeType}${using}`);
+		// Snapshot-once: read 'using' EXACTLY ONCE into a local const BEFORE the undefined
+		// check. Any subsequent conditional or render uses only the snapshot, never re-reads
+		// options.using. A getter-backed forged object could return a safe value on the first
+		// read and a malicious value on every subsequent read.
+		const using = options.using;
+		if (using !== undefined) {
+			if (typeof using !== 'string') {
+				throw new Error(
+					`ALTER COLUMN USING: expression must be a plain string, got ${typeof using}.`,
+				);
+			}
+			validateSqlExpression(using, 'ALTER COLUMN USING expression');
+			statements.push(`${prefix} TYPE ${safeType} USING ${using}`);
+		} else {
+			statements.push(`${prefix} TYPE ${safeType}`);
+		}
 	}
 	if (options.setNotNull === true) {
 		statements.push(`${prefix} SET NOT NULL`);

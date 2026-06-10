@@ -19,6 +19,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import { assertPartitionStrategy } from './ddl-generator.js';
 import {
 	formatSqlDefault,
 	quoteCollation,
@@ -86,10 +87,37 @@ function buildPolicySQL(
 ): string {
 	const policyName = quoteIdent(policy.name, 'alias');
 	const qt = qualifyTable(tableName, schemaName);
-	const forClause =
-		policy.command && policy.command !== 'ALL'
-			? ` FOR ${policy.command}`
-			: ' FOR ALL';
+	const ALLOWED_RLS_COMMANDS = [
+		'ALL',
+		'SELECT',
+		'INSERT',
+		'UPDATE',
+		'DELETE',
+	] as const;
+	// Snapshot-once: read command ONCE before typeof guard + toUpperCase so a
+	// getter-backed forged value cannot switch between the guard and the render.
+	const rawCommand = policy.command;
+	if (
+		rawCommand !== undefined &&
+		rawCommand !== null &&
+		typeof rawCommand !== 'string'
+	) {
+		throw new Error(
+			`RLS policy command must be a string, got ${typeof rawCommand}.`,
+		);
+	}
+	const rlsCommand = rawCommand ? rawCommand.toUpperCase() : 'ALL';
+	if (
+		!ALLOWED_RLS_COMMANDS.includes(
+			rlsCommand as (typeof ALLOWED_RLS_COMMANDS)[number],
+		)
+	) {
+		throw new Error(
+			`Invalid RLS policy command "${rawCommand}". ` +
+				`Must be one of: ${ALLOWED_RLS_COMMANDS.join(', ')}.`,
+		);
+	}
+	const forClause = rlsCommand !== 'ALL' ? ` FOR ${rlsCommand}` : ' FOR ALL';
 	const asClause =
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
 	// M-4: role names use quoteRoleName() (allows spaces, blocks injection vectors)
@@ -98,13 +126,33 @@ function buildPolicySQL(
 		policy.roles && policy.roles.length > 0
 			? ` TO ${policy.roles.map((r) => quoteRoleName(r)).join(', ')}`
 			: '';
-	if (policy.using) validateSqlExpression(policy.using, 'USING expression');
-	if (policy.withCheck)
-		validateSqlExpression(policy.withCheck, 'WITH CHECK expression');
-	const usingClause = policy.using ? ` USING (${policy.using})` : '';
-	const withCheckClause = policy.withCheck
-		? ` WITH CHECK (${policy.withCheck})`
-		: '';
+	// Snapshot-once: read each field EXACTLY ONCE into a local const, validate and render
+	// only that local. A getter-backed forged object could return a safe value on the
+	// first read (validation) and a malicious value on the second read (render).
+	const usingExpr = policy.using;
+	if (usingExpr !== undefined && usingExpr !== null && usingExpr !== '') {
+		if (typeof usingExpr !== 'string') {
+			throw new Error(
+				`RLS policy USING: expression must be a plain string, got ${typeof usingExpr}.`,
+			);
+		}
+		validateSqlExpression(usingExpr, 'USING expression');
+	}
+	const withCheckExpr = policy.withCheck;
+	if (
+		withCheckExpr !== undefined &&
+		withCheckExpr !== null &&
+		withCheckExpr !== ''
+	) {
+		if (typeof withCheckExpr !== 'string') {
+			throw new Error(
+				`RLS policy WITH CHECK: expression must be a plain string, got ${typeof withCheckExpr}.`,
+			);
+		}
+		validateSqlExpression(withCheckExpr, 'WITH CHECK expression');
+	}
+	const usingClause = usingExpr ? ` USING (${usingExpr})` : '';
+	const withCheckClause = withCheckExpr ? ` WITH CHECK (${withCheckExpr})` : '';
 	return `CREATE POLICY ${policyName} ON ${qt}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
 }
 
@@ -1183,10 +1231,11 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	const body = elements.map((el) => `  ${el}`).join(',\n');
 	let sql = `CREATE TABLE ${qualTable} (\n${body}\n)`;
 	if (table.partition) {
+		const strategy = assertPartitionStrategy(table.partition.strategy);
 		const partCols = table.partition.columns
 			.map((n) => quoteIdent(n, 'alias'))
 			.join(', ');
-		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+		sql += ` PARTITION BY ${strategy} (${partCols})`;
 	}
 	sql += ';';
 	return sql;

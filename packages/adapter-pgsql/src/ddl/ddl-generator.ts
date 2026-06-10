@@ -58,6 +58,38 @@ export interface GenerateDDLOptions {
 }
 
 // ============================================================================
+// Shared Validation Helpers
+// ============================================================================
+
+/**
+ * Valid PostgreSQL table partitioning strategies.
+ * Used in PARTITION BY <strategy> clauses.
+ */
+const ALLOWED_PARTITION_STRATEGIES = ['RANGE', 'LIST', 'HASH'] as const;
+type PartitionStrategy = (typeof ALLOWED_PARTITION_STRATEGIES)[number];
+
+/**
+ * Assert that a partition strategy string is one of the allowed values.
+ * Normalises to uppercase. Throws on invalid input.
+ *
+ * Exported so that migration-sql.ts can reuse the same guard without
+ * duplicating the allowlist.
+ *
+ * @security Defense-in-depth: prevents raw strategy strings from being
+ *   interpolated into SQL without allowlist validation.
+ */
+export function assertPartitionStrategy(value: string): PartitionStrategy {
+	const upper = value.toUpperCase() as PartitionStrategy;
+	if (!ALLOWED_PARTITION_STRATEGIES.includes(upper)) {
+		throw new Error(
+			`Invalid partition strategy "${value}". ` +
+				`Must be one of: ${ALLOWED_PARTITION_STRATEGIES.join(', ')}.`,
+		);
+	}
+	return upper;
+}
+
+// ============================================================================
 // Main DDL Generation
 // ============================================================================
 
@@ -204,10 +236,11 @@ export function generateCreateTable(
 	const elementsStr = elements.map((el) => `  ${el}`).join(',\n');
 	let sql = `CREATE TABLE ${qualifiedTable} (\n${elementsStr}\n)`;
 	if (table.partition) {
+		const strategy = assertPartitionStrategy(table.partition.strategy);
 		const partCols = table.partition.columns
 			.map((col) => quoteIdentifier(naming.toDatabase(col)))
 			.join(', ');
-		sql += ` PARTITION BY ${table.partition.strategy} (${partCols})`;
+		sql += ` PARTITION BY ${strategy} (${partCols})`;
 	}
 	sql += ';';
 	return sql;
@@ -385,10 +418,37 @@ export function generateCreatePolicy(
 ): string {
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
 	const policyName = quoteIdentifier(policy.name);
-	const forClause =
-		policy.command && policy.command !== 'ALL'
-			? ` FOR ${policy.command}`
-			: ' FOR ALL';
+	const ALLOWED_RLS_COMMANDS = [
+		'ALL',
+		'SELECT',
+		'INSERT',
+		'UPDATE',
+		'DELETE',
+	] as const;
+	// Snapshot-once: read command ONCE before typeof guard + toUpperCase so a
+	// getter-backed forged value cannot switch between the guard and the render.
+	const rawCommand = policy.command;
+	if (
+		rawCommand !== undefined &&
+		rawCommand !== null &&
+		typeof rawCommand !== 'string'
+	) {
+		throw new Error(
+			`RLS policy command must be a string, got ${typeof rawCommand}.`,
+		);
+	}
+	const rlsCommand = rawCommand ? rawCommand.toUpperCase() : 'ALL';
+	if (
+		!ALLOWED_RLS_COMMANDS.includes(
+			rlsCommand as (typeof ALLOWED_RLS_COMMANDS)[number],
+		)
+	) {
+		throw new Error(
+			`Invalid RLS policy command "${rawCommand}". ` +
+				`Must be one of: ${ALLOWED_RLS_COMMANDS.join(', ')}.`,
+		);
+	}
+	const forClause = rlsCommand !== 'ALL' ? ` FOR ${rlsCommand}` : ' FOR ALL';
 	const asClause =
 		policy.permissive === false ? ' AS RESTRICTIVE' : ' AS PERMISSIVE';
 	// M-4: role names use quoteRoleName() (allows spaces/hyphens, blocks injection vectors)
@@ -397,15 +457,32 @@ export function generateCreatePolicy(
 		policy.roles && policy.roles.length > 0
 			? ` TO ${policy.roles.map((r) => quoteRoleName(r)).join(', ')}`
 			: '';
-	if (policy.using) {
-		validateSqlExpression(policy.using, 'policy USING expression');
+	// Snapshot-once: read each field EXACTLY ONCE into a local const, validate and render
+	// only that local. A getter-backed forged object could return a safe value on the
+	// first read (validation) and a malicious value on the second read (render).
+	const usingExpr = policy.using;
+	if (usingExpr !== undefined && usingExpr !== null && usingExpr !== '') {
+		if (typeof usingExpr !== 'string') {
+			throw new Error(
+				`RLS policy USING: expression must be a plain string, got ${typeof usingExpr}.`,
+			);
+		}
+		validateSqlExpression(usingExpr, 'policy USING expression');
 	}
-	if (policy.withCheck) {
-		validateSqlExpression(policy.withCheck, 'policy WITH CHECK expression');
+	const withCheckExpr = policy.withCheck;
+	if (
+		withCheckExpr !== undefined &&
+		withCheckExpr !== null &&
+		withCheckExpr !== ''
+	) {
+		if (typeof withCheckExpr !== 'string') {
+			throw new Error(
+				`RLS policy WITH CHECK: expression must be a plain string, got ${typeof withCheckExpr}.`,
+			);
+		}
+		validateSqlExpression(withCheckExpr, 'policy WITH CHECK expression');
 	}
-	const usingClause = policy.using ? ` USING (${policy.using})` : '';
-	const withCheckClause = policy.withCheck
-		? ` WITH CHECK (${policy.withCheck})`
-		: '';
+	const usingClause = usingExpr ? ` USING (${usingExpr})` : '';
+	const withCheckClause = withCheckExpr ? ` WITH CHECK (${withCheckExpr})` : '';
 	return `CREATE POLICY ${policyName} ON ${qualifiedTable}${forClause}${asClause}${toClause}${usingClause}${withCheckClause};`;
 }

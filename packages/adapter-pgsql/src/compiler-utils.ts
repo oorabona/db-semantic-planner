@@ -1,11 +1,10 @@
 /**
  * Shared compiler utilities for unnest-based batch operations.
  *
- * Used by batch INSERT (Block 2), batch UPDATE (Block 3), batch UPSERT (Block 4),
- * and CTE unnest builder (Block 5).
+ * Used by batch INSERT, batch UPDATE, batch UPSERT, and the CTE unnest builder.
  */
 
-import { InvalidOperationError } from '@dbsp/core';
+import { InvalidOperationError, validateTypeName } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { parseExpression } from './raw-expression-parser.js';
 
@@ -112,9 +111,16 @@ function mapToPgBaseType(pgType: string): string {
 			return 'timestamptz';
 		case 'DATE':
 			return 'date';
-		default:
-			// Pass through for custom types (DX-050 dbType) — lowercase for consistency
-			return pgType.toLowerCase();
+		default: {
+			// Pass through for custom types (DX-050 dbType) — validate before use
+			// to prevent injection via schema-defined originalDbType values.
+			// Use validateTypeName (from @dbsp/core) to accept schema-qualified
+			// "schema.type" forms and multi-word PostgreSQL base types that
+			// batch/unnest types legitimately carry.
+			const customType = pgType.toLowerCase();
+			validateTypeName(customType);
+			return customType;
+		}
 	}
 }
 
