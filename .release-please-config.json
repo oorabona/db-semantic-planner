@@ -7,7 +7,7 @@
 	"plugins": [{ "type": "node-workspace" }, { "type": "sentence-case" }],
 	"packages": {
 		"packages/types": { "package-name": "@dbsp/types" },
-		"packages/nql": { "package-name": "@dbsp/nql", "release-as": "1.1.0" },
+		"packages/nql": { "package-name": "@dbsp/nql" },
 		"packages/core": { "package-name": "@dbsp/core" },
 		"packages/adapter-pgsql": { "package-name": "@dbsp/adapter-pgsql" },
 		"packages/cli": { "package-name": "@dbsp/cli" },
