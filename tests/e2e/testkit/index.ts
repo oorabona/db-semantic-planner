@@ -40,6 +40,13 @@ export { seedExistsCorrectnessData } from './exists-correctness.seed.js';
 export { createIamSchema, dropIamSchema } from './iam.ddl.js';
 export { iamModel } from './iam.model.js';
 export { iamTestData, seedIamData } from './iam.seed.js';
+// Issue 154 invalid-SQL regression domain
+export {
+	createIssue154Schema,
+	dropIssue154Schema,
+} from './issue-154.ddl.js';
+export { issue154Model, issue154Schema } from './issue-154.model.js';
+export { seedIssue154Data } from './issue-154.seed.js';
 // PIM/DAM (base)
 export { createPimdamSchema, dropPimdamSchema } from './pimdam.ddl.js';
 export { pimdamModel } from './pimdam.model.js';

@@ -124,6 +124,8 @@ export interface Decision {
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
 	readonly relationName?: string;
+	readonly relationPath?: string;
+	readonly hydrationPrefix?: string;
 	readonly include?: readonly Decision[];
 	// Relation metadata (for json_agg nesting)
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';

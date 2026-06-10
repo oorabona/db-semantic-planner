@@ -7,6 +7,7 @@
  * that builds PostgreSQL AST nodes and deparses them to SQL.
  */
 
+import { InvalidOperationError } from '@dbsp/core';
 import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -73,6 +74,7 @@ import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
+import { validateIdentifier } from './validate.js';
 
 // ============================================================================
 // PlanDecision → HandlerDecision mapper
@@ -115,6 +117,8 @@ function mapToHandlerDecision(
 			: pd.choice) as HandlerDecision['strategy'],
 		relation: pd.relation ?? pd.relationName,
 		relationName: pd.relationName,
+		relationPath: pd.relationPath,
+		hydrationPrefix: pd.hydrationPrefix,
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
@@ -208,6 +212,8 @@ export interface PlanDecision {
 	// JSON aggregation (include strategy: 'json_agg')
 	readonly sourceTable?: string;
 	readonly relationName?: string;
+	readonly relationPath?: string;
+	readonly hydrationPrefix?: string;
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: string;
 	readonly parentKey?: string;
@@ -335,6 +341,37 @@ export function isBatchValuesJoinDecision(
 	d: PlanDecision,
 ): d is BatchValuesJoinDecision {
 	return isPrecompiledJoinDecision(d) && d.batchValuesParams !== undefined;
+}
+
+type JoinAliasEntry = {
+	readonly alias: string;
+	readonly joinType: 'inner' | 'left';
+	readonly targetTable?: string;
+};
+
+function getRelationIdentityPath(
+	decision: PlanDecision,
+	rootTable: string,
+): string | undefined {
+	if (decision.relationPath) return decision.relationPath;
+	const relationName = decision.relationName ?? decision.relation;
+	if (!relationName && !decision.targetTable) return undefined;
+
+	// Legacy direct compilePlan() tests may construct includeStrategy decisions
+	// without relationPath. Keep those distinct by FK/source instead of treating
+	// repeated relation names as duplicate include paths.
+	const source = decision.sourceTable ?? rootTable;
+	const target = decision.targetTable ?? '';
+	const sourceColumn = decision.sourceColumn ?? decision.foreignKey ?? '';
+	return `__legacy__:${source}:${relationName ?? target}:${sourceColumn}:${target}`;
+}
+
+function getParentRelationPath(
+	relationPath: string | undefined,
+): string | undefined {
+	if (!relationPath || relationPath.startsWith('__legacy__:')) return undefined;
+	const lastDot = relationPath.lastIndexOf('.');
+	return lastDot > 0 ? relationPath.slice(0, lastDot) : undefined;
 }
 
 /**
@@ -468,11 +505,11 @@ export class PlanCompiler {
 	/** CTE nodes from include handlers (e.g., CTE strategy) */
 	private pendingCtes: Node[] = [];
 	/**
-	 * Maps joined targetTable → alias for multi-hop FK resolution.
-	 * Populated as join decisions are compiled so later hops can find
-	 * the correct source alias (e.g., 'symbols' → 'callee').
+	 * Maps relation-dotted include path → JOIN alias for multi-hop FK resolution.
+	 * Populated as join decisions are compiled so later hops can find the
+	 * correct source alias (e.g., 'callee.file' reads parent path 'callee').
 	 */
-	private joinAliasMap: Map<string, string> = new Map();
+	private joinAliasMap: Map<string, JoinAliasEntry> = new Map();
 	/**
 	 * Tracks all join aliases in use for the current query.
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
@@ -498,6 +535,16 @@ export class PlanCompiler {
 			...(this.schema != null && { schema: this.schema }),
 			...(this.model != null && { model: this.model }),
 		} as HandlerCompilerContext;
+	}
+
+	private findAliasForLegacySourceTable(
+		sourceTable: string,
+	): string | undefined {
+		let alias: string | undefined;
+		for (const entry of this.joinAliasMap.values()) {
+			if (entry.targetTable === sourceTable) alias = entry.alias;
+		}
+		return alias;
 	}
 
 	/**
@@ -789,14 +836,38 @@ export class PlanCompiler {
 			)._compiledFilterWhere = combined;
 		}
 
+		const relationIdentityPath =
+			decision.choice === 'join'
+				? getRelationIdentityPath(decision, plan.rootTable)
+				: undefined;
+		const requestedJoinType = decision.joinType ?? 'left';
+		const existingJoin = relationIdentityPath
+			? this.joinAliasMap.get(relationIdentityPath)
+			: undefined;
+		if (existingJoin) {
+			if (existingJoin.joinType !== requestedJoinType) {
+				throw new InvalidOperationError(
+					'include',
+					`Conflicting join options for relation path '${relationIdentityPath}'. ` +
+						`Already registered as ${existingJoin.joinType}, got ${requestedJoinType}.`,
+				);
+			}
+			return {};
+		}
+
 		// Bridge compiler context for include handler.
-		// For multi-hop flat joins the sourceTable differs from the root table —
-		// resolve the alias of that intermediate table from the registry so the
+		// For multi-hop flat joins, resolve the parent include path's alias so the
 		// ON clause references the right prefix (e.g., callee.file_id, not calls.file_id).
+		const parentRelationPath = getParentRelationPath(relationIdentityPath);
+		const parentAlias = parentRelationPath
+			? this.joinAliasMap.get(parentRelationPath)?.alias
+			: undefined;
 		const sourceAlias =
-			decision.sourceTable && decision.sourceTable !== plan.rootTable
-				? (this.joinAliasMap.get(decision.sourceTable) ?? decision.sourceTable)
-				: plan.rootTable;
+			parentAlias ??
+			(decision.sourceTable && decision.sourceTable !== plan.rootTable
+				? (this.findAliasForLegacySourceTable(decision.sourceTable) ??
+					decision.sourceTable)
+				: plan.rootTable);
 		const ctx = {
 			...this.handlerCtx(),
 			currentAlias: sourceAlias,
@@ -826,6 +897,7 @@ export class PlanCompiler {
 				while (this.usedJoinAliases.has(alias)) {
 					alias = `${candidateAlias}_${counter++}`;
 				}
+				validateIdentifier(alias, 'alias');
 				this.usedJoinAliases.add(alias);
 				finalJoinAlias = alias;
 				// Inject the deduplicated alias so the handler uses it
@@ -840,18 +912,13 @@ export class PlanCompiler {
 		// Sync parameters back
 		this.state.paramIndex = handlerState.paramIndex;
 
-		// Register targetTable → alias for multi-hop FK resolution.
-		// Later join decisions whose sourceTable matches this targetTable
-		// will use the alias (e.g., relationName) as their sourceAlias.
-		if (
-			decision.choice === 'join' &&
-			decision.targetTable &&
-			(finalJoinAlias ?? decision.relationName)
-		) {
-			this.joinAliasMap.set(
-				decision.targetTable,
-				finalJoinAlias ?? decision.relationName!,
-			);
+		// Register relation path → alias for multi-hop FK resolution.
+		if (decision.choice === 'join' && relationIdentityPath && finalJoinAlias) {
+			this.joinAliasMap.set(relationIdentityPath, {
+				alias: finalJoinAlias,
+				joinType: requestedJoinType,
+				...(decision.targetTable && { targetTable: decision.targetTable }),
+			});
 		}
 
 		const out: {
@@ -884,6 +951,7 @@ export class PlanCompiler {
 		this.rawJoins = [];
 		this.pendingCtes = [];
 		this.joinAliasMap = new Map();
+		this.usedJoinAliases = new Set();
 
 		// Determine query type from decisions
 		const queryType = this.detectQueryType(plan.decisions);
@@ -1375,7 +1443,14 @@ export class PlanCompiler {
 		) {
 			return where;
 		}
-		const joinAlias = decision.relationName as string | undefined;
+		const relationIdentityPath = getRelationIdentityPath(
+			decision,
+			this.currentRootTable,
+		);
+		const joinAlias =
+			(relationIdentityPath
+				? this.joinAliasMap.get(relationIdentityPath)?.alias
+				: undefined) ?? (decision.relationName as string | undefined);
 		for (const cond of decision.conditions as PlanDecision[]) {
 			const condExpr = this.dispatchWhere(
 				cond,

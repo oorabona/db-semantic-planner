@@ -142,6 +142,46 @@ function resolveIncludeByPath(
 }
 
 /**
+ * Derive the canonical relation-dotted include path from the include tree.
+ *
+ * `intentPath` is positional (`include[1].include[0]`) and is not itself stable
+ * identity. It is only used to walk `plan.intent.include` and recover the
+ * relation-name chain (`definition.file`), which is the join/column identity.
+ */
+function resolveRelationPathByIntentPath(
+	includes:
+		| Array<{
+				relation: string;
+				include?: unknown[];
+		  }>
+		| undefined,
+	intentPath: string | undefined,
+	relationName: string,
+): string {
+	if (includes && intentPath) {
+		const indexPattern = /include\[(\d+)\]/g;
+		let current: unknown[] = includes;
+		const path: string[] = [];
+		let execResult = indexPattern.exec(intentPath);
+
+		while (execResult !== null) {
+			const idx = parseInt(execResult[1]!, 10);
+			const item = current[idx] as
+				| { relation: string; include?: unknown[] }
+				| undefined;
+			if (!item) break;
+			path.push(item.relation);
+			current = (item.include as unknown[]) ?? [];
+			execResult = indexPattern.exec(intentPath);
+		}
+
+		if (path.length > 0) return path.join('.');
+	}
+
+	return relationName;
+}
+
+/**
  * Derive foreign key from planner decision context.
  * Uses explicit FK if available, otherwise derives from table name
  * using the configurable FK derivation convention.
@@ -1673,6 +1713,13 @@ function toIncludeDecision(
 		type: 'includeStrategy',
 		choice: effectiveChoice,
 		relationName,
+		relationPath: resolveRelationPathByIntentPath(
+			plan.intent?.include as
+				| Array<{ relation: string; include?: unknown[] }>
+				| undefined,
+			context.intentPath,
+			relationName,
+		),
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
@@ -1702,6 +1749,13 @@ function toJoinIncludeDecision(
 	// would miss nested include intents that carry their own { where } conditions.
 	const intentPath = (context as unknown as Record<string, unknown>)
 		?.intentPath as string | undefined;
+	const relationPath = resolveRelationPathByIntentPath(
+		plan.intent?.include as
+			| Array<{ relation: string; include?: unknown[] }>
+			| undefined,
+		intentPath,
+		relationName as string,
+	);
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
 			| Array<{
@@ -1761,6 +1815,7 @@ function toJoinIncludeDecision(
 		type: 'includeStrategy',
 		choice: 'join',
 		relationName,
+		relationPath,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
@@ -1866,6 +1921,7 @@ export function synthesizeMissingJoinDecisions(
 			type: 'includeStrategy',
 			choice: 'join',
 			relationName: alias,
+			relationPath: alias,
 			targetTable: rel.target,
 			sourceTable,
 			...(rel.type && {
