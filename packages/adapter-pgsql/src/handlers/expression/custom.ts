@@ -5,6 +5,7 @@
  * Core function: compileExpressionIntent — recursive dispatcher used by SELECT, WHERE, ORDER BY.
  */
 
+import { validateTypeName } from '@dbsp/core';
 import type {
 	AggOrderByArg,
 	ArrayExpressionIntent,
@@ -31,6 +32,7 @@ import {
 	typeCast,
 } from '../../ast-helpers.js';
 import { createParamRef } from '../../param-ref.js';
+import { validateIdentifier } from '../../validate.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -70,6 +72,73 @@ function _createWhereDispatcher(): WhereDispatcher {
 	return _whereDispatcherFactory();
 }
 
+// ---------------------------------------------------------------------------
+// Operator validation helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared defense-in-depth guard for SQL operator tokens.
+ *
+ * Two independent rules, both must pass:
+ *
+ * Rule 1 — charset: the operator must match the symbolic-chars-only pattern
+ * ([-+* /\/<>=~!@#%^&|?]+) OR be one of opts.allowWords (case-insensitive,
+ * e.g. NOT for unary). Rejects letters, spaces, semicolons, parens.
+ *
+ * Rule 2 — no comment sequences: must not contain --, /*, or star-slash.
+ * PostgreSQL forbids these inside operator names (they start comments).
+ * Without this rule, '--' would render 'a -- $1' and comment out the right
+ * operand plus any following WHERE predicates on the same generated SQL line.
+ *
+ * @param op - The operator string to validate.
+ * @param opts.allowWords - Case-insensitive word operators to accept in
+ *   addition to the symbolic charset (e.g. ['NOT'] for unary).
+ *
+ * @security Defense-in-depth — op() in at-dbsp/core already validates via
+ * OPERATOR_PATTERN. This adapter-side guard covers direct intent construction
+ * that bypasses the builder API.
+ */
+function assertSafeOperator(
+	op: string,
+	opts?: { readonly allowWords?: readonly string[] },
+): void {
+	// Reject non-strings FIRST to prevent validate-coerce / render-original confusion:
+	// a forged object whose toString() returns a safe token but whose valueOf() or
+	// a second property read returns a different SQL fragment would bypass regex
+	// validation and inject at the render site. After this guard, `op` is a
+	// guaranteed primitive string for all subsequent checks and the render call.
+	if (typeof op !== 'string') {
+		throw new Error(
+			`Invalid operator: expected a string, got ${typeof op}. ` +
+				'Operator must be a plain string value.',
+		);
+	}
+	if (!op) {
+		throw new Error(`Invalid operator "${op}". Operator must not be empty.`);
+	}
+	const SYMBOLIC_RE = /^[-+*/<>=~!@#%^&|?]+$/;
+	const isSymbolic = SYMBOLIC_RE.test(op);
+	const isAllowedWord =
+		opts?.allowWords?.some((w) => w.toLowerCase() === op.toLowerCase()) ??
+		false;
+	if (!isSymbolic && !isAllowedWord) {
+		throw new Error(
+			`Invalid operator "${op}". ` +
+				`Operator must consist only of symbolic characters (e.g. <=>, <->, @@, @>, <@, &&, ||, ~)` +
+				(opts?.allowWords?.length
+					? ` or one of the allowed words: ${opts.allowWords.join(', ')}.`
+					: '.'),
+		);
+	}
+	// Rule 2: reject SQL comment sequences regardless of charset match.
+	// PostgreSQL forbids these inside operator names (they start comments).
+	if (op.includes('--') || op.includes('/*') || op.includes('*/')) {
+		throw new Error(
+			`Invalid operator "${op}" — must not contain SQL comment sequences (-- /* */).`,
+		);
+	}
+}
+
 /**
  * Recursively compile an ExpressionIntent into a PostgreSQL AST Node.
  *
@@ -86,12 +155,17 @@ export function compileExpressionIntent(
 	switch (kind) {
 		case 'customOp': {
 			const i = intent as CustomOpExpressionIntent;
+			// Snapshot-once: read operator EXACTLY ONCE into a local const, validate and render
+			// only that local. A getter-backed forged object could return a safe value on the
+			// first read (assertSafeOperator) and a malicious value on the second read (render).
+			const operator = i.operator;
+			assertSafeOperator(operator);
 			const leftNode = compileExpressionIntent(i.left, ctx, state);
 			const rightNode = compileExpressionIntent(i.right, ctx, state);
 			return {
 				A_Expr: {
 					kind: 'AEXPR_OP',
-					name: [{ String: { sval: i.operator } }],
+					name: [{ String: { sval: operator } }],
 					lexpr: leftNode,
 					rexpr: rightNode,
 				},
@@ -146,16 +220,33 @@ export function compileExpressionIntent(
 
 		case 'cast': {
 			const i = intent as CastExpressionIntent;
+			// Snapshot-once: read typeName EXACTLY ONCE into a local const, validate and render
+			// only that local. See customOp case above for rationale.
+			const typeName = i.typeName;
+			if (typeof typeName !== 'string') {
+				throw new Error(
+					`cast(): typeName must be a plain string, got ${typeof typeName}.`,
+				);
+			}
+			// Use validateTypeName (from @dbsp/core) rather than validateDbTypeName so that
+			// schema-qualified types (e.g. 'audit.status_enum') and multi-word base types
+			// (e.g. 'timestamp without time zone') are accepted. validateTypeName's typmod
+			// grammar is digits-only, so word-typmods like PostGIS 'geometry(Point,4326)'
+			// are not yet supported and will be rejected.
+			validateTypeName(typeName);
 			const argNode = compileExpressionIntent(i.expr, ctx, state);
-			return typeCast(argNode, i.typeName);
+			return typeCast(argNode, typeName);
 		}
 
 		case 'literal': {
 			// Literal values are emitted as escaped SQL constants — string values
-			// have single quotes doubled (via quoteString()), integers/booleans as
-			// typed constants — NOT bound $N parameters. They are therefore safe for
-			// developer-controlled literal constants; callers should prefer bound
-			// parameters (the 'param' case) for any user-supplied data.
+			// have single quotes doubled (via quoteString() in the deparser),
+			// integers/booleans as typed constants — NOT bound $N parameters.
+			// They are therefore safe for developer-controlled literal constants;
+			// callers MUST use the 'param' case for any user-supplied data.
+			//
+			// Non-primitive types (objects, arrays, etc.) are rejected to prevent
+			// accidental exposure via String() coercion (e.g. "[object Object]").
 			const i = intent as LiteralExpressionIntent;
 			if (i.value === null || i.value === undefined) {
 				return nullConstNode();
@@ -164,6 +255,11 @@ export function compileExpressionIntent(
 				return booleanConstNode(i.value);
 			}
 			if (typeof i.value === 'number') {
+				if (!Number.isFinite(i.value)) {
+					throw new Error(
+						`literal(): numeric value must be finite; got ${i.value}. Use param() for computed values.`,
+					);
+				}
 				if (Number.isInteger(i.value)) {
 					return integerNode(i.value);
 				}
@@ -174,19 +270,26 @@ export function compileExpressionIntent(
 					A_Const: { sval: { sval: i.value } },
 				};
 			}
-			// Fallback: convert to string literal
-			return {
-				A_Const: { sval: { sval: String(i.value) } },
-			};
+			// Reject all other types (objects, arrays, bigint, Symbol, etc.) —
+			// String() coercion is not safe for SQL emission.
+			throw new Error(
+				`literal(): unsupported value type "${typeof i.value}". ` +
+					'Only null, boolean, number, and string are allowed. ' +
+					'Use param() to bind computed or user-supplied values.',
+			);
 		}
 
 		case 'unary': {
 			const i = intent as UnaryExpressionIntent;
+			// Snapshot-once: read operator EXACTLY ONCE into a local const, validate and render
+			// only that local. See customOp case above for rationale.
+			const operator = i.operator;
+			assertSafeOperator(operator, { allowWords: ['NOT'] });
 			const operandNode = compileExpressionIntent(i.operand, ctx, state);
 			return {
 				A_Expr: {
 					kind: 'AEXPR_OP',
-					name: [{ String: { sval: i.operator } }],
+					name: [{ String: { sval: operator } }],
 					rexpr: operandNode,
 				},
 			};
@@ -194,13 +297,22 @@ export function compileExpressionIntent(
 
 		case 'namedArg': {
 			const nae = intent as NamedArgExpressionIntent;
+			// Snapshot-once: read name EXACTLY ONCE into a local const, validate and render
+			// only that local. See customOp case above for rationale.
+			const name = nae.name;
+			if (typeof name !== 'string') {
+				throw new Error(
+					`namedArg(): name must be a plain string, got ${typeof name}.`,
+				);
+			}
+			validateIdentifier(name, 'alias');
 			const argNode = compileExpressionIntent(nae.value, ctx, state);
 			// NamedArgExpr is a valid PostgreSQL AST node but not included in @pgsql/types Node union.
 			// The internal deparser handles it correctly. Cast through unknown is safe here.
 			return {
 				NamedArgExpr: {
 					arg: argNode,
-					name: nae.name,
+					name: name,
 					argnumber: -1,
 				},
 			} as unknown as Node;

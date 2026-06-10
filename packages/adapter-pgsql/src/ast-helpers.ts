@@ -33,6 +33,7 @@ import type {
 
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
+import { validateIdentifier } from './validate.js';
 
 // Re-export normalizeSQL from core (canonical location since A-9 DRY refactor)
 export { normalizeSQL } from '@dbsp/core';
@@ -117,12 +118,27 @@ export function columnRef(
 	const fields: Node[] = [];
 
 	if (schema) {
-		fields.push(stringNode(naming.toDatabase(schema)));
+		const dbSchema = naming.toDatabase(schema);
+		validateIdentifier(dbSchema, 'schema');
+		fields.push(stringNode(dbSchema));
 	}
 	if (table) {
-		fields.push(stringNode(naming.toDatabase(table)));
+		const dbTable = naming.toDatabase(table);
+		validateIdentifier(dbTable, 'table');
+		fields.push(stringNode(dbTable));
 	}
-	fields.push(stringNode(naming.toDatabase(column)));
+	const dbColumn = naming.toDatabase(column);
+	// Defense-in-depth: validate that the column is a safe SQL identifier.
+	// Skip validation for the two internal compiler escape hatches:
+	//   '*'  — SELECT * wildcard (callers should prefer columnRefStar(); legacy path)
+	//   /^\d+$/ — integer literal used as a SELECT column (e.g. SELECT 1)
+	// All other values must be valid PostgreSQL identifiers.
+	if (dbColumn !== '*' && !/^\d+$/.test(dbColumn)) {
+		// column must be pre-split — a `rel.col` dotted ref is decomposed upstream;
+		// a raw dotted string here is rejected by design.
+		validateIdentifier(dbColumn, 'column');
+	}
+	fields.push(stringNode(dbColumn));
 
 	return { ColumnRef: { fields } };
 }
@@ -153,18 +169,24 @@ export function rangeVar(
 	schema?: string,
 	naming: NamingPlugin = identityNaming,
 ): Node {
+	const dbTable = naming.toDatabase(table);
+	validateIdentifier(dbTable, 'table');
 	const rv: RangeVar = {
-		relname: naming.toDatabase(table),
+		relname: dbTable,
 		inh: true,
 		relpersistence: 'p',
 	};
 
 	if (schema) {
-		rv.schemaname = naming.toDatabase(schema);
+		const dbSchema = naming.toDatabase(schema);
+		validateIdentifier(dbSchema, 'schema');
+		rv.schemaname = dbSchema;
 	}
 
 	if (alias) {
-		rv.alias = { aliasname: naming.toDatabase(alias) };
+		const dbAlias = naming.toDatabase(alias);
+		validateIdentifier(dbAlias, 'alias');
+		rv.alias = { aliasname: dbAlias };
 	}
 
 	return { RangeVar: rv };

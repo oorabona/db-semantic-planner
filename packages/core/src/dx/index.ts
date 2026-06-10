@@ -11,6 +11,8 @@ export {
 	type BatchValuesRef,
 	batchValues,
 	isBatchValuesRef,
+	// @internal — exported for adapter compile-time type-name revalidation
+	validateTypeName,
 } from './batch-values.js';
 // CASE WHEN expression builder (FR-6)
 export {
