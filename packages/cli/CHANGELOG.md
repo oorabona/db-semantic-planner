@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.0.5](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.0.4...cli-v1.0.5) (2026-06-10)
+
+
+### Bug Fixes
+
+* **cli:** Correctness sweep — batch exit code, introspect interop, FK escape ([a2ab2fb](https://github.com/oorabona/db-semantic-planner/commit/a2ab2fb6589d385c71c125e5fff9645b0257ac56))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 1.1.1
+    * @dbsp/core bumped to 1.0.5
+    * @dbsp/nql bumped to 1.1.0
+
 ## [1.0.4](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.0.3...cli-v1.0.4) (2026-06-05)
 
 

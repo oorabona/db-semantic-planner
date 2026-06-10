@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.0.4...nql-v1.1.0) (2026-06-10)
+
+
+### ⚠ Behavior Changes
+
+* **A where-less `update`/`delete` now throws by default.** It previously compiled silently to an unfiltered, all-rows mutation. Pass `{ allowUnfilteredMutations: true }` to the compiler to emit an unfiltered mutation deliberately.
+* **Multiple top-level statements now require an explicit `| bind <name>` that materializes a result.** Previously, extra statements were silently dropped and only the last one's result was returned. A non-last mutation used as a binding must include a `returning` clause.
+* **Clauses after a set operation (`union`/`intersect`/`except`) now throw** instead of being silently discarded — including a trailing `| bind` directly on a set-operation result (previously an inert no-op).
+* **`upsert ... where` now throws a clear "not yet supported" error** instead of silently ignoring the predicate (the SQL generator has no `ON CONFLICT DO UPDATE ... WHERE` yet — tracked in [#160](https://github.com/oorabona/db-semantic-planner/issues/160)).
+
+
+### Bug Fixes
+
+* **nql:** Correctness sweep — bounded ANY, context isolation, mutation safety guards ([e9d4325](https://github.com/oorabona/db-semantic-planner/commit/e9d4325bc768a3b1e1c7c20271b01a221f340b04))
+
 ## [1.0.4](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.0.3...nql-v1.0.4) (2026-06-05)
 
 
