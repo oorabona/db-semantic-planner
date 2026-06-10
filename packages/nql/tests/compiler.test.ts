@@ -36,8 +36,11 @@ import type { NqlWarning } from '../src/errors/types.js';
 import { compile } from '../src/index.js';
 
 // Helper to compile NQL and return the result
-function compileNql(input: string) {
-	const result = compile(input, null);
+function compileNql(
+	input: string,
+	compilerOptions?: Parameters<typeof compile>[3],
+) {
+	const result = compile(input, null, undefined, compilerOptions);
 	if (!result.success) {
 		throw new Error(`Compile error: ${result.errors[0]?.message}`);
 	}
@@ -746,7 +749,9 @@ describe('NQL Compiler - UPDATE', () => {
 	});
 
 	it('compiles update without where (allowAll required)', () => {
-		const result = compileNql('update users set status = "archived"');
+		const result = compileNql('update users set status = "archived"', {
+			allowUnfilteredMutations: true,
+		});
 
 		const update = result.mutation as UpdateIntent;
 		expect(update.where).toBeUndefined();
@@ -778,7 +783,9 @@ describe('NQL Compiler - DELETE', () => {
 	});
 
 	it('compiles delete without where (allowAll required)', () => {
-		const result = compileNql('delete from users');
+		const result = compileNql('delete from users', {
+			allowUnfilteredMutations: true,
+		});
 
 		const del = result.mutation as DeleteIntent;
 		expect(del.where).toBeUndefined();

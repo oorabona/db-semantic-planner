@@ -7,7 +7,7 @@
 import type { CteQueryIntent, QueryIntent, SimpleCteIntent } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type { NqlWithQuery } from '../parser/ast.js';
-import { compileQuery } from './compile-query.js';
+import { compileNestedQuery, compileQuery } from './compile-query.js';
 import type { CompileResult, CompilerContext, CompilerFns } from './types.js';
 
 /**
@@ -45,7 +45,7 @@ export function compileWithQuery(
 		// 3. Compile each CTE body
 		const ctes: SimpleCteIntent[] = [];
 		for (const cte of astNode.ctes) {
-			const bodyResult = compileQuery(cte.query, ctx, fns);
+			const bodyResult = compileNestedQuery(cte.query, ctx, fns);
 			// Set operations in CTE body not supported in v1
 			if ('kind' in bodyResult && bodyResult.kind === 'setOperation') {
 				throw new NqlSemanticException(

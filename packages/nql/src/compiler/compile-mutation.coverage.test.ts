@@ -29,8 +29,11 @@ type MutationWithWhere = UpdateIntent | DeleteIntent;
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
-function compileNql(input: string): CompileResult {
-	const result = compile(input, null);
+function compileNql(
+	input: string,
+	compilerOptions?: Parameters<typeof compile>[3],
+): CompileResult {
+	const result = compile(input, null, undefined, compilerOptions);
 	if (!result.success) {
 		throw new Error(`Compile error: ${result.errors[0]?.message}`);
 	}
@@ -155,7 +158,9 @@ describe('compile-mutation: UPDATE', () => {
 	});
 
 	it('update without WHERE sets allowAll', () => {
-		const result = compileNql("update users set status = 'archived'");
+		const result = compileNql("update users set status = 'archived'", {
+			allowUnfilteredMutations: true,
+		});
 
 		const update = result.mutation as UpdateIntent;
 		expect(update.type).toBe('update');
@@ -198,7 +203,9 @@ describe('compile-mutation: DELETE', () => {
 	});
 
 	it('delete without WHERE sets allowAll', () => {
-		const result = compileNql('delete from users');
+		const result = compileNql('delete from users', {
+			allowUnfilteredMutations: true,
+		});
 
 		const del = result.mutation as DeleteIntent;
 		expect(del.type).toBe('delete');

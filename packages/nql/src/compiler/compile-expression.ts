@@ -29,6 +29,7 @@ import type {
 	NqlRelationFilterExpression,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
+import { compileNestedQuery } from './compile-query.js';
 import { expandDateRange, isDateRangePattern } from './date-range-patterns.js';
 import {
 	coerceToStringKey,
@@ -337,8 +338,12 @@ function compileMembership(
 		}
 	} else if ('type' in inExpr.values && inExpr.values.type === 'subquery') {
 		// Subquery is a full QueryIntent — contextual validation at adapter level
-		// Subqueries in IN clauses are always simple queries, never set operations
-		const subquery = fns.compileQuery(inExpr.values.query, ctx) as QueryIntent;
+		// Subqueries in IN clauses are always simple queries, never set operations.
+		const subquery = compileNestedQuery(
+			inExpr.values.query,
+			ctx,
+			fns,
+		) as QueryIntent;
 
 		// Subquery branch: omit `values` per XOR constraint on WhereInIntent
 		const result: WhereInIntent = {
