@@ -15,7 +15,6 @@ import type {
 import type { CstContext, VisitFn } from './helpers.js';
 import {
 	asCstNode,
-	getImage,
 	requireFields,
 	requireFirst,
 	unreachable,
@@ -115,8 +114,8 @@ export function visitInsertFromStmt(
 		table: target,
 		source,
 		where: ctx.booleanExpr ? visit(asCstNode(ctx.booleanExpr[0]!)) : undefined,
-		limit: ctx.NumberLiteral
-			? parseInt(getImage(ctx.NumberLiteral[0]!), 10)
+		limit: ctx.numericValueAtom
+			? visit(asCstNode(ctx.numericValueAtom[0]!))
 			: undefined,
 	};
 }
@@ -208,8 +207,8 @@ export function visitUpsertFromStmt(
 		conflictColumns,
 		source,
 		where: ctx.booleanExpr ? visit(asCstNode(ctx.booleanExpr[0]!)) : undefined,
-		limit: ctx.NumberLiteral
-			? parseInt(getImage(ctx.NumberLiteral[0]!), 10)
+		limit: ctx.numericValueAtom
+			? visit(asCstNode(ctx.numericValueAtom[0]!))
 			: undefined,
 	};
 }

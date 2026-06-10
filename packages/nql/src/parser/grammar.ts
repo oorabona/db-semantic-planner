@@ -280,13 +280,13 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * limit_clause = "limit" [ident_segment ("." ident_segment)*] NUMBER ;
+	 * limit_clause = "limit" [ident_segment ("." ident_segment)*] (NUMBER | NAMED_PARAM) ;
 	 */
 	private limitClause = this.RULE('limitClause', () => {
 		this.CONSUME(Limit);
 		// Per-include limit: limit <relation> <N>
 		// Outer limit:       limit <N>
-		// LL(1): IDENTIFIER → per-include, NUMBER → outer
+		// LL(1): IDENTIFIER → per-include, NUMBER/NAMED_PARAM → outer
 		this.OPTION(() => {
 			this.SUBRULE(this.identSegment);
 			this.MANY(() => {
@@ -294,15 +294,31 @@ export class NqlParser extends CstParser {
 				this.SUBRULE2(this.identSegment);
 			});
 		});
-		this.CONSUME(NumberLiteral);
+		this.SUBRULE(this.numericValueAtom);
 	});
 
 	/**
-	 * offset_clause = "offset" NUMBER ;
+	 * offset_clause = "offset" (NUMBER | NAMED_PARAM) ;
 	 */
 	private offsetClause = this.RULE('offsetClause', () => {
 		this.CONSUME(Offset);
-		this.CONSUME(NumberLiteral);
+		this.SUBRULE(this.numericValueAtom);
+	});
+
+	/**
+	 * numeric_value_atom = NUMBER | NAMED_PARAM ;
+	 *
+	 * Structural-position durability rule: value positions that consume scalar
+	 * values may add `NamedParam` here and validate the resolved value in the
+	 * compiler. Structural positions such as identifiers, directions, lock modes,
+	 * and traversal depth hints must not consume this helper; use nqlRaw()/builder
+	 * APIs for trusted dynamic structure.
+	 */
+	private numericValueAtom = this.RULE('numericValueAtom', () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(NumberLiteral) },
+			{ ALT: () => this.CONSUME(NamedParam) },
+		]);
 	});
 
 	/**
@@ -599,7 +615,7 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * range_op_suffix = range_op (range_literal | literal) ;
+	 * range_op_suffix = range_op (range_literal | literal | named_param_expr) ;
 	 * Example: overlaps [1,10) or contains (0,100) or contains 25
 	 * Note: contains can take a scalar value (e.g., contains 25 checks if range contains the value)
 	 */
@@ -608,6 +624,7 @@ export class NqlParser extends CstParser {
 		this.OR([
 			{ ALT: () => this.SUBRULE(this.rangeLiteral) },
 			{ ALT: () => this.SUBRULE2(this.literal) },
+			{ ALT: () => this.SUBRULE(this.namedParamExpr) },
 		]);
 	});
 
@@ -873,10 +890,12 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * primary_expr = literal | case_expr | path_expr | func_call | "(" expr ")" | "(" scalar_subquery ")" ;
+	 * primary_expr = named_param_expr | literal | case_expr | path_expr | func_call | "(" expr ")" | "(" scalar_subquery ")" ;
 	 */
 	private primaryExpr = this.RULE('primaryExpr', () => {
 		this.OR([
+			// Bound value parameter: :paramName
+			{ ALT: () => this.SUBRULE(this.namedParamExpr) },
 			// Range literal in value context (unambiguous: starts with '[')
 			{
 				GATE: () => this.LA(1).tokenType === LBracket,
@@ -921,6 +940,13 @@ export class NqlParser extends CstParser {
 				},
 			},
 		]);
+	});
+
+	/**
+	 * named_param_expr = NAMED_PARAM ;
+	 */
+	private namedParamExpr = this.RULE('namedParamExpr', () => {
+		this.CONSUME(NamedParam);
 	});
 
 	/**
@@ -1319,7 +1345,7 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * insert_from_stmt = "insert" "into" ident_segment "from" ident_segment [ "where" boolean_expr ] [ "limit" number ] ;
+	 * insert_from_stmt = "insert" "into" ident_segment "from" ident_segment [ "where" boolean_expr ] [ "limit" numeric_value_atom ] ;
 	 * @example insert into archived_users from users where active = false limit 100
 	 */
 	private insertFromStmt = this.RULE('insertFromStmt', () => {
@@ -1334,7 +1360,7 @@ export class NqlParser extends CstParser {
 		});
 		this.OPTION2(() => {
 			this.CONSUME(Limit);
-			this.CONSUME(NumberLiteral);
+			this.SUBRULE(this.numericValueAtom);
 		});
 	});
 
@@ -1398,7 +1424,7 @@ export class NqlParser extends CstParser {
 	});
 
 	/**
-	 * upsert_from_stmt = "upsert" "into" ident_segment "on" ( "(" ident_list ")" | ident_segment ) "from" ident_segment [ "where" boolean_expr ] [ "limit" number ] ;
+	 * upsert_from_stmt = "upsert" "into" ident_segment "on" ( "(" ident_list ")" | ident_segment ) "from" ident_segment [ "where" boolean_expr ] [ "limit" numeric_value_atom ] ;
 	 * @example upsert into authors on id from counts
 	 * @example upsert into authors on (id, email) from counts where active = true
 	 */
@@ -1429,7 +1455,7 @@ export class NqlParser extends CstParser {
 		});
 		this.OPTION2(() => {
 			this.CONSUME(Limit);
-			this.CONSUME(NumberLiteral);
+			this.SUBRULE(this.numericValueAtom);
 		});
 	});
 

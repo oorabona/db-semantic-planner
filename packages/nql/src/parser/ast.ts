@@ -117,14 +117,16 @@ export interface NqlOrderByClause {
 
 export interface NqlLimitClause {
 	type: 'limit';
-	count: number;
+	count: NqlLimitCount;
 	relation?: string;
 }
 
 export interface NqlOffsetClause {
 	type: 'offset';
-	count: number;
+	count: NqlLimitCount;
 }
+
+export type NqlLimitCount = number | NqlNamedParamExpr;
 
 /**
  * Capture mutation result into a variable (for chained mutations)
@@ -231,7 +233,8 @@ export type NqlExpression =
 	| NqlJsonComparisonExpression
 	| NqlLiteral
 	| NqlSubquery
-	| NqlVariableRef;
+	| NqlVariableRef
+	| NqlNamedParamExpr;
 
 export interface NqlBinaryExpression {
 	type: 'binary';
@@ -262,7 +265,7 @@ export interface NqlRangeOpExpression {
 	operator: 'overlaps' | 'contains' | 'containedBy';
 	left: NqlExpression;
 	range?: NqlRangeLiteral;
-	scalar?: NqlLiteral;
+	scalar?: NqlLiteral | NqlNamedParamExpr;
 }
 
 export interface NqlInExpression {
@@ -412,6 +415,16 @@ export interface NqlVariableRef {
 	name: string;
 }
 
+/**
+ * Bound parameter reference (e.g. `:tenantId`).
+ * The leading colon is not part of `name`; compiler resolution uses
+ * `CompilerContext.params`.
+ */
+export interface NqlNamedParamExpr {
+	type: 'namedParam';
+	name: string;
+}
+
 // ============================================================
 // LITERALS
 // ============================================================
@@ -491,7 +504,7 @@ export interface NqlInsertFrom {
 	/** WHERE clause to filter source rows */
 	where?: NqlExpression | undefined;
 	/** LIMIT clause to restrict rows */
-	limit?: number | undefined;
+	limit?: NqlLimitCount | undefined;
 }
 
 export interface NqlUpdate {
@@ -526,7 +539,7 @@ export interface NqlUpsertFrom {
 	source: string;
 	columns?: string[] | undefined;
 	where?: NqlExpression | undefined;
-	limit?: number | undefined;
+	limit?: NqlLimitCount | undefined;
 }
 
 export interface NqlAssignment {

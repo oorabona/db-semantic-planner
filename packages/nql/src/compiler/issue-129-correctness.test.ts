@@ -96,7 +96,7 @@ describe('item 1 — ANY(:param) validation', () => {
 		});
 		expect(r.success).toBe(false);
 		expect(r.errors[0]?.message).toMatch(/ids/i);
-		expect(r.errors[0]?.message).toMatch(/array/i);
+		expect(r.errors[0]?.message).toMatch(/not bound/i);
 	});
 
 	it('throws when param is a non-array (string)', () => {

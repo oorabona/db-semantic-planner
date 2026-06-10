@@ -37,6 +37,7 @@ import {
 	expressionToRangeValue,
 	mapComparisonOperator,
 	resolveFilterValue,
+	resolveNamedParamArray,
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
@@ -286,13 +287,7 @@ function compileMembership(
 		}
 		/* v8 ignore stop -- @preserve */
 		validateWhereField(ctx, field, aliasContext, anyExpr.column);
-		const rawValues = ctx.params[anyExpr.paramName];
-		if (!Array.isArray(rawValues)) {
-			throw new NqlSemanticException(
-				NqlErrorCodes.SEM_INVALID_SYNTAX,
-				`ANY(:${anyExpr.paramName}) requires an array argument but received ${rawValues === undefined ? 'undefined (parameter not bound)' : typeof rawValues}`,
-			);
-		}
+		const rawValues = resolveNamedParamArray(ctx, anyExpr.paramName);
 		if (rawValues.length > ctx.maxAnyItems) {
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,

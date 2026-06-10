@@ -75,6 +75,7 @@ import {
 } from './compile-mutation.js';
 import { compileQuery } from './compile-query.js';
 import { compileSelectClause } from './compile-select.js';
+import { validateParamsMap } from './expression-utils.js';
 
 // Re-export public types
 export type {
@@ -123,6 +124,9 @@ export class NqlCompiler {
 				);
 			}
 		}
+		const params = options?.params ?? {};
+		const allowInternalParams = options?.allowInternalParams ?? false;
+		validateParamsMap(params, { allowInternalParams });
 
 		this.ctx = {
 			currentFromTable: undefined,
@@ -130,9 +134,10 @@ export class NqlCompiler {
 			pseudoColumnKeywords,
 			recursiveKeywords,
 			validator,
-			params: options?.params ?? {},
+			params,
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
+			allowInternalParams,
 		};
 
 		// Wire up cross-module function references

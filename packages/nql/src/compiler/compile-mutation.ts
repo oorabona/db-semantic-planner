@@ -33,7 +33,11 @@ import type {
 	NqlUpsert,
 	NqlUpsertFrom,
 } from '../parser/ast.js';
-import { expressionToField, expressionToValue } from './expression-utils.js';
+import {
+	expressionToField,
+	expressionToValue,
+	resolveIntegerCount,
+} from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
 /**
@@ -110,7 +114,7 @@ function compileInsert(insert: NqlInsert, ctx: CompilerContext): InsertIntent {
 		const rowColumns = new Set<string>();
 		for (const assignment of row) {
 			rowColumns.add(assignment.column);
-			rowValues[assignment.column] = expressionToValue(assignment.value);
+			rowValues[assignment.column] = expressionToValue(assignment.value, ctx);
 		}
 		for (const col of allColumns) {
 			if (!rowColumns.has(col)) {
@@ -152,7 +156,9 @@ function compileInsertFrom(
 		...(insertFrom.where !== undefined && {
 			where: fns.compileExpression(insertFrom.where, ctx, fns),
 		}),
-		...(insertFrom.limit !== undefined && { limit: insertFrom.limit }),
+		...(insertFrom.limit !== undefined && {
+			limit: resolveIntegerCount(insertFrom.limit, ctx, 'insert-from limit'),
+		}),
 	};
 }
 
@@ -167,7 +173,7 @@ function compileUpdate(
 	const set: Record<string, unknown> = {};
 	for (const assignment of update.assignments) {
 		ctx.validator?.validateColumn(update.table, assignment.column);
-		set[assignment.column] = expressionToValue(assignment.value);
+		set[assignment.column] = expressionToValue(assignment.value, ctx);
 	}
 
 	if (update.where) {
@@ -233,7 +239,7 @@ function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
 	const values: Record<string, unknown> = {};
 	for (const assignment of upsert.assignments) {
 		ctx.validator?.validateColumn(upsert.table, assignment.column);
-		values[assignment.column] = expressionToValue(assignment.value);
+		values[assignment.column] = expressionToValue(assignment.value, ctx);
 	}
 
 	for (const col of upsert.conflictColumns) {
@@ -288,7 +294,9 @@ function compileUpsertFrom(
 		...(upsertFrom.where !== undefined && {
 			where: fns.compileExpression(upsertFrom.where, ctx, fns),
 		}),
-		...(upsertFrom.limit !== undefined && { limit: upsertFrom.limit }),
+		...(upsertFrom.limit !== undefined && {
+			limit: resolveIntegerCount(upsertFrom.limit, ctx, 'upsert-from limit'),
+		}),
 	};
 }
 

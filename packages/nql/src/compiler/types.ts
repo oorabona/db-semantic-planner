@@ -64,6 +64,8 @@ export interface NqlCompilerOptions {
 	readonly maxAnyItems?: number;
 	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
 	readonly allowUnfilteredMutations?: boolean;
+	/** @internal Allow the core nql tag to pass generated __pN params after it has scanned raw/static source. */
+	readonly allowInternalParams?: boolean;
 }
 
 /**
@@ -82,6 +84,8 @@ export interface CompilerContext {
 	readonly maxAnyItems: number;
 	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
 	readonly allowUnfilteredMutations: boolean;
+	/** @internal Allows generated __pN params from the core nql tag only. */
+	readonly allowInternalParams: boolean;
 }
 
 /**

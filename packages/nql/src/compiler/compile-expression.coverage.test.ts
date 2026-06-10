@@ -1028,13 +1028,13 @@ function compileWithParams(input: string, params: Record<string, unknown>) {
 
 describe('compile-expression: ANY(:param) — missing param throws', () => {
 	it('throws SEM_INVALID_SYNTAX when the bound parameter is not provided', () => {
-		// Mutation caught: removing the `!Array.isArray(rawValues)` guard makes this pass silently.
+		// FEAT-134: missing binding is reported before array-shape validation.
 		const result = compileWithParams('users | where id = ANY(:ids)', {});
 		expect(result.success).toBe(false);
 		expect(result.errors).toHaveLength(1);
 		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
 		expect(result.errors[0]?.message).toContain('ids');
-		expect(result.errors[0]?.message).toContain('array');
+		expect(result.errors[0]?.message).toContain('not bound');
 	});
 });
 

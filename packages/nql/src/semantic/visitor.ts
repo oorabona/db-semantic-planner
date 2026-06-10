@@ -33,6 +33,7 @@ import {
 	visitJsonAccessExpr,
 	visitJsonComparisonSuffix,
 	visitMulExpr,
+	visitNamedParamExpr,
 	visitNotExpr,
 	visitOrExpr,
 	visitPathExpr,
@@ -92,6 +93,7 @@ import {
 	visitGroupClause,
 	visitLimitClause,
 	visitLockClause,
+	visitNumericValueAtom,
 	visitOffsetClause,
 	visitOrderClause,
 	visitOrderItem,
@@ -165,7 +167,10 @@ export class NqlCstVisitor extends BaseCstVisitor {
 		return visitLimitClause(ctx, this.v);
 	}
 	offsetClause(ctx: CstContext) {
-		return visitOffsetClause(ctx);
+		return visitOffsetClause(ctx, this.v);
+	}
+	numericValueAtom(ctx: CstContext) {
+		return visitNumericValueAtom(ctx);
 	}
 	selectList(ctx: CstContext) {
 		return visitSelectList(ctx, this.v);
@@ -250,6 +255,9 @@ export class NqlCstVisitor extends BaseCstVisitor {
 	}
 	primaryExpr(ctx: CstContext) {
 		return visitPrimaryExpr(ctx, this.v);
+	}
+	namedParamExpr(ctx: CstContext) {
+		return visitNamedParamExpr(ctx);
 	}
 
 	// -- CASE --

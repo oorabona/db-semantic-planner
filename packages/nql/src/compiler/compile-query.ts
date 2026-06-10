@@ -27,7 +27,11 @@ import type {
 	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
-import { expressionToField, expressionToSql } from './expression-utils.js';
+import {
+	expressionToField,
+	expressionToSql,
+	resolveIntegerCount,
+} from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
@@ -150,15 +154,24 @@ export function compileQuery(
 				break;
 			case 'limit': {
 				const lc = clause as NqlLimitClause;
+				const count = resolveIntegerCount(
+					lc.count,
+					ctx,
+					lc.relation ? 'per-include limit' : 'limit',
+				);
 				if (lc.relation) {
-					includeLimits.set(lc.relation, lc.count);
+					includeLimits.set(lc.relation, count);
 				} else {
-					limit = lc.count;
+					limit = count;
 				}
 				break;
 			}
 			case 'offset':
-				offset = (clause as NqlOffsetClause).count;
+				offset = resolveIntegerCount(
+					(clause as NqlOffsetClause).count,
+					ctx,
+					'offset',
+				);
 				break;
 			case 'lock': {
 				const lc = clause as NqlLockClause;

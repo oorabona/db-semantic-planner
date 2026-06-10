@@ -127,6 +127,13 @@ function compileSelectExpression(
 	const exprItem = item as NqlSelectExpression;
 	const expr = exprItem.expression;
 
+	const expressionToSelectValue = (valueExpr: NqlExpression): unknown => {
+		if (valueExpr.type === 'namedParam') {
+			return { kind: 'param', value: expressionToValue(valueExpr, ctx) };
+		}
+		return expressionToValue(valueExpr, ctx);
+	};
+
 	// Check for functions (aggregate or regular)
 	if (expr.type === 'function') {
 		const fn = expr.name.toLowerCase();
@@ -151,7 +158,7 @@ function compileSelectExpression(
 				expr.args.length > 1
 					? expr.args
 							.slice(1)
-							.map((a) => expressionToField(a) ?? expressionToValue(a))
+							.map((a) => expressionToField(a) ?? expressionToSelectValue(a))
 					: undefined;
 			return {
 				kind: 'aggregate',
@@ -170,7 +177,7 @@ function compileSelectExpression(
 		return {
 			kind: 'function',
 			name: expr.name,
-			args: expr.args.map((a) => expressionToField(a) ?? expressionToValue(a)),
+			args: expr.args.map((a) => expressionToField(a) ?? expressionToSelectValue(a)),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -192,10 +199,10 @@ function compileSelectExpression(
 		let defaultValue: unknown;
 		if (fn === 'lag' || fn === 'lead') {
 			if (windowExpr.args.length > 1) {
-				offset = expressionToValue(windowExpr.args[1]!) as number;
+				offset = expressionToValue(windowExpr.args[1]!, ctx) as number;
 			}
 			if (windowExpr.args.length > 2) {
-				defaultValue = expressionToValue(windowExpr.args[2]!);
+				defaultValue = expressionToValue(windowExpr.args[2]!, ctx);
 			}
 		}
 
@@ -295,9 +302,9 @@ function compileSelectExpression(
 		const rightField = expressionToField(expr.right);
 		return {
 			kind: 'arithmetic',
-			left: leftField ?? expressionToValue(expr.left),
+			left: leftField ?? expressionToSelectValue(expr.left),
 			operator: expr.operator as '+' | '-' | '*' | '/' | '%',
-			right: rightField ?? expressionToValue(expr.right),
+			right: rightField ?? expressionToSelectValue(expr.right),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -311,7 +318,7 @@ function compileSelectExpression(
 				kind: 'arithmetic',
 				left: -1,
 				operator: '*',
-				right: operandField ?? expressionToValue(unary.operand),
+				right: operandField ?? expressionToSelectValue(unary.operand),
 				...(exprItem.alias !== undefined && { as: exprItem.alias }),
 			};
 		}
@@ -467,7 +474,7 @@ function compileCaseExpression(
 					kind: 'comparison' as const,
 					field: subjectField,
 					operator: 'eq',
-					value: expressionToValue(wc.condition),
+					value: expressionToValue(wc.condition, ctx),
 				},
 				result: compileExpressionToIntent(wc.result, ctx, fns),
 			})),
@@ -511,7 +518,7 @@ function compileExpressionToIntent(
 		}
 		/* v8 ignore stop -- @preserve */
 		const column = (cmp.left as NqlPathExpression).segments.join('.');
-		const value = expressionToValue(cmp.right);
+		const value = expressionToValue(cmp.right, ctx);
 		return {
 			kind: 'comparison',
 			column,
@@ -525,16 +532,20 @@ function compileExpressionToIntent(
 		expr.type === 'string' ||
 		expr.type === 'number' ||
 		expr.type === 'boolean' ||
-		expr.type === 'null'
+		expr.type === 'null' ||
+		expr.type === 'namedParam'
 	) {
 		const value =
 			expr.type === 'null'
 				? null
-				: (expr as NqlStringLiteral | NqlNumberLiteral | NqlBooleanLiteral)
-						.value;
+				: expr.type === 'namedParam'
+					? expressionToValue(expr, ctx)
+					: (expr as NqlStringLiteral | NqlNumberLiteral | NqlBooleanLiteral)
+							.value;
 		return {
-			kind: 'literal',
-			value,
+			...(expr.type === 'namedParam'
+				? { kind: 'param' as const, value }
+				: { kind: 'literal' as const, value }),
 		};
 	}
 

@@ -51,11 +51,30 @@ orders | group customerId | select customerId, sum(total) as revenue
 
 - **Pipe syntax** — Readable left-to-right data flow (`table | filter | select | order`)
 - **SQL-style literals** — Single-quoted strings (`'value'`), not double-quoted
+- **Named parameters** — Bind runtime values with `:name` in expression positions
 - **CTE support** — `WITH name AS (subquery)` for named subqueries
 - **Schema-aware** — Validates column names and relation paths against `ModelIR` at parse time
 - **LLM-friendly** — Concise syntax designed for AI-generated queries
 - **Chevrotain-based** — Robust lexer + parser with structured error recovery
 - **Composable** — Output `IntentAST` is the same type used by the TypeScript fluent builders
+
+## Named parameters
+
+Use `:name` placeholders for runtime values and pass a `params` map to the compiler:
+
+```typescript
+// doctest: skip — illustrative direct compiler params example
+import { compile } from '@dbsp/nql';
+
+const result = compile(
+  'users | where id = :id and active = :active | limit :limit',
+  db.definition,
+  undefined,
+  { params: { id: 42, active: true, limit: 10 } },
+);
+```
+
+Missing params fail compilation. `null` binds SQL `NULL`; `undefined`, `NaN`, and `Infinity` are rejected. The `@dbsp/core` `orm.nql` template tag builds on the same mechanism for `${value}` interpolation. See [Named Parameters and Template Binding](https://oorabona.github.io/db-semantic-planner/nql/#named-parameters-and-template-binding) for the full contract.
 
 ## Documentation
 
