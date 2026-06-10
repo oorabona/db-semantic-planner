@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.0.4...nql-v1.1.0) (2026-06-10)
+
+
+### Bug Fixes
+
+* **nql:** Correctness sweep — bounded ANY, context isolation, mutation safety guards ([e9d4325](https://github.com/oorabona/db-semantic-planner/commit/e9d4325bc768a3b1e1c7c20271b01a221f340b04))
+
 ## [1.0.4](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.0.3...nql-v1.0.4) (2026-06-05)
 
 

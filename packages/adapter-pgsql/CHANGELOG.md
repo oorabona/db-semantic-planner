@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.1.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.1.0...adapter-pgsql-v1.1.1) (2026-06-10)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Validate escape-hatch and DDL token surfaces against injection ([7487b7b](https://github.com/oorabona/db-semantic-planner/commit/7487b7b0f681c51984186c91b5aef63737ae15a8))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.0.5
+
 ## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.0.3...adapter-pgsql-v1.1.0) (2026-06-05)
 
 
