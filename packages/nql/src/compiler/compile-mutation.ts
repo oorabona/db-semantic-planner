@@ -133,7 +133,13 @@ function compileInsertFrom(
 	fns: CompilerFns,
 	bindings?: Map<string, QueryIntent>,
 ): InsertFromIntent {
+	// Validate target table unconditionally
+	ctx.validator?.validateTable(insertFrom.table);
 	const sourceQuery = bindings?.get(insertFrom.source);
+	// Validate source table only when it is not already a bound/known reference
+	if (!sourceQuery) {
+		ctx.validator?.validateTable(insertFrom.source);
+	}
 	ctx.currentFromTable = insertFrom.source;
 
 	return {
@@ -176,6 +182,12 @@ function compileUpdate(
 		};
 	}
 
+	if (!ctx.allowUnfilteredMutations) {
+		throw new Error(
+			'update without a where clause would affect all rows; pass { allowUnfilteredMutations: true } to the compiler to allow an unfiltered update',
+		);
+	}
+
 	return {
 		type: 'update',
 		table: update.table,
@@ -203,6 +215,12 @@ function compileDelete(
 		};
 	}
 
+	if (!ctx.allowUnfilteredMutations) {
+		throw new Error(
+			'delete without a where clause would affect all rows; pass { allowUnfilteredMutations: true } to the compiler to allow an unfiltered delete',
+		);
+	}
+
 	return {
 		type: 'delete',
 		table: del.table,
@@ -222,6 +240,12 @@ function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
 		ctx.validator?.validateColumn(upsert.table, col);
 	}
 
+	if (upsert.where) {
+		throw new Error(
+			'conditional upsert is not yet supported: a WHERE clause on `upsert` (ON CONFLICT DO UPDATE ... WHERE) is parsed but cannot be honored by the SQL generator yet. Remove the WHERE, or use a plain conditional update. Tracked for a future release.',
+		);
+	}
+
 	return {
 		type: 'upsert',
 		table: upsert.table,
@@ -237,7 +261,17 @@ function compileUpsertFrom(
 	fns: CompilerFns,
 	bindings?: Map<string, QueryIntent>,
 ): UpsertFromIntent {
+	// Validate target table unconditionally
+	ctx.validator?.validateTable(upsertFrom.table);
 	const sourceQuery = bindings?.get(upsertFrom.source);
+	// Validate source table only when it is not already a bound/known reference
+	if (!sourceQuery) {
+		ctx.validator?.validateTable(upsertFrom.source);
+	}
+	// Validate conflict columns against the target table schema
+	for (const col of upsertFrom.conflictColumns) {
+		ctx.validator?.validateColumn(upsertFrom.table, col);
+	}
 	ctx.currentFromTable = upsertFrom.source;
 
 	return {

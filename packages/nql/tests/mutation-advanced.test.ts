@@ -526,18 +526,14 @@ describe('F16: Mutation bind with RETURNING', () => {
 		expect(mutationBinding.returning).toEqual(['id', 'email']);
 	});
 
-	it('F16d: mutation without RETURNING + bind does NOT populate bindings', () => {
-		const result = compileNql(
-			"insert into users set name = 'Alice' | bind newUser\nusers | select id",
+	it('F16d: mutation without RETURNING + bind is rejected', () => {
+		expect(() =>
+			compileNql(
+				"insert into users set name = 'Alice' | bind newUser\nusers | select id",
+			),
+		).toThrowError(
+			"Compile error: statement 1 of 2 binds 'newUser' but produces no referenceable result — a mutation used as a binding must include a `returning` clause.",
 		);
-
-		// No RETURNING → bind is silently ignored (nothing to reference)
-		// The final statement is the query
-		expect(result.query).toBeDefined();
-
-		// No bindings should be created for a mutation without RETURNING
-		expect(result.bindings).toBeUndefined();
-		expect(result.mutationBindings).toBeUndefined();
 	});
 
 	it('F16e: mutation bind resolves in subsequent mutation WHERE subquery', () => {

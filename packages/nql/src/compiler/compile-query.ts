@@ -32,6 +32,32 @@ import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
 /**
+ * Compile a nested query without leaking the nested query's mutable context
+ * back into the parent compiler scope.
+ */
+export function compileNestedQuery(
+	query: NqlQuery,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	bindings?: ReadonlyMap<string, QueryIntent>,
+): QueryIntent | SetOperationIntent {
+	const savedContext = {
+		currentFromTable: ctx.currentFromTable,
+		currentRelationTarget: ctx.currentRelationTarget,
+	};
+
+	try {
+		if (bindings) {
+			return compileQuery(query, ctx, fns, bindings);
+		}
+		return fns.compileQuery(query, ctx);
+	} finally {
+		ctx.currentFromTable = savedContext.currentFromTable;
+		ctx.currentRelationTarget = savedContext.currentRelationTarget;
+	}
+}
+
+/**
  * Compile a full NQL query to a QueryIntent or SetOperationIntent.
  * When the query contains a set clause (UNION/INTERSECT/EXCEPT),
  * the result is a SetOperationIntent wrapping the left and right queries.
@@ -272,6 +298,20 @@ function compileSetOperation(
 ): SetOperationIntent {
 	const setClause = query.clauses[setClauseIndex] as NqlSetClause;
 
+	// Detect clauses following the set operation clause and throw rather than silently drop them.
+	// Modeling outer ORDER BY / LIMIT on a set operation result requires wrapping the set op in a
+	// subquery, which is a larger structural change. Fail-loud is safer than silent data loss.
+	if (setClauseIndex < query.clauses.length - 1) {
+		const trailingTypes = query.clauses
+			.slice(setClauseIndex + 1)
+			.map((c) => c.type)
+			.join(', ');
+		throw new Error(
+			`Clauses after a set operation are not supported (found: ${trailingTypes}). ` +
+				'Wrap the set operation in a subquery or move the clause before the set operation.',
+		);
+	}
+
 	// Left side: all clauses before the set operation
 	const leftQuery: NqlQuery = {
 		type: 'query',
@@ -280,10 +320,10 @@ function compileSetOperation(
 	};
 	const left = compileQuery(leftQuery, ctx, fns, bindings) as QueryIntent;
 
-	// Right side: inline sub-query or bound name reference
+	// Right side: inline sub-query or bound name reference.
 	let right: QueryIntent | SetOperationIntent;
 	if (setClause.right) {
-		right = compileQuery(setClause.right, ctx, fns, bindings);
+		right = compileNestedQuery(setClause.right, ctx, fns, bindings);
 	} else if (setClause.boundName) {
 		const bound = bindings?.get(setClause.boundName);
 		if (!bound) {

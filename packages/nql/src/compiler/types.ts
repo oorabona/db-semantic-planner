@@ -62,6 +62,8 @@ export interface NqlCompilerOptions {
 	readonly params?: Readonly<Record<string, unknown>>;
 	/** Maximum number of items allowed in an ANY(:param) array. Defaults to MAX_ANY_ITEMS (10000). */
 	readonly maxAnyItems?: number;
+	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
+	readonly allowUnfilteredMutations?: boolean;
 }
 
 /**
@@ -78,6 +80,8 @@ export interface CompilerContext {
 	readonly params: Readonly<Record<string, unknown>>;
 	/** Maximum number of items allowed in an ANY(:param) array. Resolved by constructor (never undefined). */
 	readonly maxAnyItems: number;
+	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
+	readonly allowUnfilteredMutations: boolean;
 }
 
 /**

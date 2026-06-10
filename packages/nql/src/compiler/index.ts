@@ -132,6 +132,7 @@ export class NqlCompiler {
 			validator,
 			params: options?.params ?? {},
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
+			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
 		};
 
 		// Wire up cross-module function references
@@ -159,18 +160,37 @@ export class NqlCompiler {
 			return this.compileSingleStatement(program.statements[0]!);
 		}
 
+		// Multi-statement: require that every statement except the last is explicitly bound
+		// via `| bind <name>`. Without this, trailing text that parses as a new statement
+		// silently replaces the intended result (item 7 — silent statement replacement).
+		// BEHAVIOR CHANGE: previously the last result was silently returned; now the second
+		// statement must either carry a `| bind` clause OR this is treated as an error.
+		for (let i = 0; i < program.statements.length - 1; i++) {
+			const stmt = program.statements[i]!;
+			const bindName = extractBindName(stmt);
+			if (!bindName) {
+				throw new Error(
+					`Multiple statements require explicit binding: statement ${i + 1} of ${program.statements.length} has no '| bind <name>' clause. ` +
+						'Add a `| bind <name>` clause to each statement except the last, or pass a single statement.',
+				);
+			}
+		}
+
 		// Multi-statement: build bindings map, resolve references
 		const bindings = new Map<string, QueryIntent>();
 		const mutationBindings = new Map<string, MutationIntent>();
+		const materializedBindStatements = new Set<number>();
 		let lastResult: CompileResult = {};
 
-		for (const stmt of program.statements) {
+		for (let i = 0; i < program.statements.length; i++) {
+			const stmt = program.statements[i]!;
 			lastResult = this.compileSingleStatement(stmt, bindings);
 
 			const bindName = extractBindName(stmt);
 			if (bindName) {
 				if (lastResult.query) {
 					bindings.set(bindName, lastResult.query);
+					materializedBindStatements.add(i);
 				} else if (lastResult.mutation?.returning?.length) {
 					// Mutation with RETURNING: store the original mutation for CTE compilation
 					// and a synthetic QueryIntent for reference resolution in WHERE clauses
@@ -183,9 +203,19 @@ export class NqlCompiler {
 							fields: [...lastResult.mutation.returning],
 						},
 					});
+					materializedBindStatements.add(i);
 				}
 				// Note: set operations cannot currently be bound as CTE sources
 				// Note: mutations without RETURNING cannot be bound (no output to reference)
+			}
+		}
+
+		for (let i = 0; i < program.statements.length - 1; i++) {
+			const bindName = extractBindName(program.statements[i]!);
+			if (bindName && !materializedBindStatements.has(i)) {
+				throw new Error(
+					`statement ${i + 1} of ${program.statements.length} binds '${bindName}' but produces no referenceable result — a mutation used as a binding must include a \`returning\` clause.`,
+				);
 			}
 		}
 

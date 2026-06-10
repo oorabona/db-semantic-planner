@@ -31,6 +31,7 @@ import type {
 	NqlUnaryExpression,
 	NqlWindowExpression,
 } from '../parser/ast.js';
+import { compileNestedQuery } from './compile-query.js';
 import {
 	coerceToStringKey,
 	expressionToField,
@@ -263,7 +264,7 @@ function compileSelectExpression(
 	if (expr.type === 'subquery') {
 		return {
 			kind: 'subquery',
-			query: fns.compileQuery(expr.query, ctx) as QueryIntent,
+			query: compileNestedQuery(expr.query, ctx, fns) as QueryIntent,
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
