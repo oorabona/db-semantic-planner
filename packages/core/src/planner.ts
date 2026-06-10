@@ -1082,7 +1082,8 @@ function processInclude(
 
 	// Check for circular includes
 	const includePath = `${sourceTable}.${relation.name}`;
-	if (state.visitedIncludes.has(includePath)) {
+	const isSelfReferentialRelation = relation.source === relation.target;
+	if (!isSelfReferentialRelation && state.visitedIncludes.has(includePath)) {
 		state.warnings.push({
 			code: 'CIRCULAR_INCLUDE',
 			message: `Circular include detected: ${includePath}`,
@@ -1090,7 +1091,7 @@ function processInclude(
 		});
 		return;
 	}
-	state.visitedIncludes.add(includePath);
+	if (!isSelfReferentialRelation) state.visitedIncludes.add(includePath);
 
 	// Track relation access for CTE extraction
 	const relationPath = `${sourceTable}.${relation.name}`;
@@ -1100,8 +1101,7 @@ function processInclude(
 
 	// CLI-012c: Check for recursive include on self-referential relations
 	const isRecursiveInclude =
-		(!!include.recursive || !!relation.recursive) &&
-		relation.source === relation.target;
+		(!!include.recursive || !!relation.recursive) && isSelfReferentialRelation;
 
 	// Determine include strategy
 	// Priority: 1) recursive → cte (if dialect supports it), 2) include.join → forces join strategy, 3) include.strategy override, 4) auto-detect
@@ -1290,7 +1290,7 @@ function processInclude(
 	}
 
 	// Remove from visited after processing (allow same relation at different depths)
-	state.visitedIncludes.delete(includePath);
+	if (!isSelfReferentialRelation) state.visitedIncludes.delete(includePath);
 }
 
 // ============================================================================

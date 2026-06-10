@@ -667,6 +667,98 @@ describe('ResultHydrator', () => {
 			expect(results[0].category).toEqual({ id: 5, label: 'Tech' });
 		});
 
+		it('hydrates nested join fallback keys using the same prefix emitted by the compiler', () => {
+			const model = createMockModel();
+			const hydrator = new ResultHydrator(model as any, 'uses');
+			const results = [
+				{
+					id: 1000,
+					'definition.id': 100,
+					'file.id': 10,
+					'file.path': '/def.ts',
+				},
+			];
+			const report = makePlanReport([
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'definition',
+						intentPath: 'include[0]',
+					},
+				},
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'file',
+						intentPath: 'include[0].include[0]',
+					},
+				},
+			]);
+			report.intent = {
+				include: [
+					{
+						relation: 'definition',
+						include: [{ relation: 'file' }],
+					},
+				],
+			} as any;
+
+			hydrator.hydrateJoinIncludes(results, report);
+
+			expect(results[0]).toEqual({
+				id: 1000,
+				definition: {
+					id: 100,
+					file: { id: 10, path: '/def.ts' },
+				},
+			});
+			expect(results[0]).not.toHaveProperty('file.id');
+			expect(results[0]).not.toHaveProperty('file.path');
+		});
+
+		it('keeps a null parent when deeper fallback keys are present', () => {
+			const model = createMockModel();
+			const hydrator = new ResultHydrator(model as any, 'uses');
+			const results = [
+				{
+					id: 1000,
+					'definition.id': null,
+					'definition.file.id': 10,
+					'definition.file.path': '/orphaned-child.ts',
+				},
+			];
+			const report = makePlanReport([
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'definition',
+						relationPath: 'definition',
+					},
+				},
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'file',
+						relationPath: 'definition.file',
+						hydrationPrefix: 'definition.file',
+					},
+				},
+			]);
+
+			hydrator.hydrateJoinIncludes(results, report);
+
+			expect(results[0]).toEqual({
+				id: 1000,
+				definition: null,
+			});
+			expect(results[0]).not.toHaveProperty('definition.file.id');
+			expect(results[0]).not.toHaveProperty('definition.file.path');
+		});
+
 		it('does not touch rows without matching prefixed keys', () => {
 			const model = createMockModel();
 			const hydrator = new ResultHydrator(model as any, 'posts');

@@ -5,6 +5,7 @@
  * @internal
  */
 
+import { countDistinctRelationPathsByName } from '@dbsp/core';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -512,22 +513,6 @@ function buildRelationColumnsMap(
 }
 
 /**
- * Find the map key for a given includeStrategy relationName.
- * Exact match first (1-hop); then suffix match '.relationName' (2-hop+).
- */
-function findRelationMapKey(
-	map: Map<string, RelationColumnEntry[]>,
-	relationName: string,
-): string | undefined {
-	if (map.has(relationName)) return relationName;
-	const suffix = `.${relationName}`;
-	for (const key of map.keys()) {
-		if (key.endsWith(suffix)) return key;
-	}
-	return undefined;
-}
-
-/**
  * Inject user-specified columns from relationColumnsMap into matching
  * includeStrategy decisions, then validate them against the model schema.
  */
@@ -541,10 +526,7 @@ function injectAndValidateRelationColumns(
 	// Inject collected columns and aliases into matching includeStrategy decisions
 	for (const d of enrichedUnifiedDecisions) {
 		if (d.type === 'includeStrategy' && d.relationName) {
-			const mapKey = findRelationMapKey(
-				relationColumnsMap,
-				d.relationName as string,
-			);
+			const mapKey = (d.relationPath as string | undefined) ?? d.relationName;
 			const entries = mapKey ? relationColumnsMap.get(mapKey) : undefined;
 			if (entries) {
 				const mut = d as Mutable<PlanDecision>;
@@ -591,6 +573,47 @@ function injectAndValidateRelationColumns(
 				}
 			}
 		}
+	}
+}
+
+/**
+ * Set the auto-hydration prefix for join includes.
+ *
+ * Explicit relationColumn(..., as) aliases are preserved by columnAliases. For
+ * fallback aliases, keep the historical relation-name prefix when that relation
+ * name appears through a single include path; use the full relation-dotted path
+ * when the same relation name appears through multiple paths.
+ */
+function applyJoinHydrationPrefixes(decisions: PlanDecision[]): void {
+	const usages: Array<{ relationName: string; relationPath: string }> = [];
+	for (const d of decisions) {
+		if (
+			d.type !== 'includeStrategy' ||
+			d.choice !== 'join' ||
+			!d.relationName
+		) {
+			continue;
+		}
+		const relationName = d.relationName as string;
+		const relationPath = (d.relationPath as string | undefined) ?? relationName;
+		usages.push({ relationName, relationPath });
+	}
+
+	const pathCountsByRelation = countDistinctRelationPathsByName(usages);
+	for (const d of decisions) {
+		if (
+			d.type !== 'includeStrategy' ||
+			d.choice !== 'join' ||
+			!d.relationName
+		) {
+			continue;
+		}
+		const relationName = d.relationName as string;
+		const relationPath = (d.relationPath as string | undefined) ?? relationName;
+		const usesFullPath = (pathCountsByRelation.get(relationName) ?? 0) > 1;
+		(d as Mutable<PlanDecision>).hydrationPrefix = usesFullPath
+			? relationPath
+			: relationName;
 	}
 }
 
@@ -785,6 +808,7 @@ export function compileSelect<T = unknown>(
 		// select/distinct/groupBy fields are unchanged by the IN→EXISTS WHERE optimization,
 		// so execIntent and plan.intent are equivalent here; execIntent is used for consistency.
 		stripJoinColumnsForAggregation(enrichedUnifiedDecisions, execIntent);
+		applyJoinHydrationPrefixes(enrichedUnifiedDecisions);
 
 		// Deduplicate: remove selectRelationColumn decisions for relations
 		// already covered by an include strategy.

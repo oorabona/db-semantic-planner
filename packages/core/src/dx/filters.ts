@@ -45,7 +45,7 @@ import type {
 	WhereRelationFilterIntent,
 } from '../intent-ast.js';
 import { getColumnName } from './column-utils.js';
-import { validateIdentifier } from './errors.js';
+import { InvalidOperationError, validateIdentifier } from './errors.js';
 import type {
 	SubqueryBuilder,
 	SubqueryExpression,
@@ -807,6 +807,12 @@ export function coalesce(
  * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Query_Parameterization_Cheat_Sheet.html | OWASP Parameterization}
  */
 export function raw(sqlFragment: string, as: string): ExpressionSpec {
+	if (typeof as !== 'string' || as.trim().length === 0) {
+		throw new InvalidOperationError(
+			'raw',
+			"raw() requires an alias as second argument, e.g. raw('COUNT(*)', 'count')",
+		);
+	}
 	// FIND-008: Validate the alias as a SQL identifier; sqlFragment is an intentional raw escape hatch
 	validateIdentifier(as, 'column');
 	return {

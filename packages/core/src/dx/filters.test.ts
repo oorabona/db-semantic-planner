@@ -557,13 +557,19 @@ describe('Feature 8: Expression Helpers', () => {
 
 		it('should throw on empty alias', () => {
 			expect(() => raw('SELECT 1', '')).toThrow(
-				'column name must not be empty',
+				"raw() requires an alias as second argument, e.g. raw('COUNT(*)', 'count')",
 			);
 		});
 
 		it('should throw on whitespace-only alias', () => {
 			expect(() => raw('SELECT 1', '  ')).toThrow(
-				'column name contains invalid characters',
+				"raw() requires an alias as second argument, e.g. raw('COUNT(*)', 'count')",
+			);
+		});
+
+		it('should throw a raw()-specific message when alias is missing at runtime', () => {
+			expect(() => (raw as any)('COUNT(*)')).toThrow(
+				"raw() requires an alias as second argument, e.g. raw('COUNT(*)', 'count')",
 			);
 		});
 

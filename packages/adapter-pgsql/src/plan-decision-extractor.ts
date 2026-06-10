@@ -8,6 +8,7 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
+import { deriveRelationPathFromIntentPath } from '@dbsp/core';
 import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -103,6 +104,7 @@ function resolveIncludeByPath(
 	includes:
 		| Array<{
 				relation: string;
+				via?: string;
 				limit?: number;
 				select?: unknown;
 				where?: unknown;
@@ -127,7 +129,12 @@ function resolveIncludeByPath(
 		while (execResult !== null) {
 			const idx = parseInt(execResult[1]!, 10);
 			const item = current[idx] as
-				| { relation: string; limit?: number; include?: unknown[] }
+				| {
+						relation: string;
+						via?: string;
+						limit?: number;
+						include?: unknown[];
+				  }
 				| undefined;
 			if (!item) break;
 			resolved = item;
@@ -138,7 +145,9 @@ function resolveIncludeByPath(
 	}
 
 	// Fallback: flat search by relation name (top-level only)
-	return includes.find((i) => i.relation === relationName);
+	return includes.find(
+		(i) => i.relation === relationName || i.via === relationName,
+	);
 }
 
 /**
@@ -1658,6 +1667,7 @@ function toIncludeDecision(
 		plan.intent?.include as
 			| Array<{
 					relation: string;
+					via?: string;
 					limit?: number;
 					select?: unknown;
 					where?: unknown;
@@ -1673,6 +1683,14 @@ function toIncludeDecision(
 		type: 'includeStrategy',
 		choice: effectiveChoice,
 		relationName,
+		relationPath:
+			deriveRelationPathFromIntentPath(
+				Array.isArray(plan.intent?.include)
+					? (plan.intent.include as readonly unknown[])
+					: undefined,
+				context.intentPath,
+				relationName,
+			) ?? relationName,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
@@ -1702,10 +1720,19 @@ function toJoinIncludeDecision(
 	// would miss nested include intents that carry their own { where } conditions.
 	const intentPath = (context as unknown as Record<string, unknown>)
 		?.intentPath as string | undefined;
+	const relationPath =
+		deriveRelationPathFromIntentPath(
+			Array.isArray(plan.intent?.include)
+				? (plan.intent.include as readonly unknown[])
+				: undefined,
+			intentPath,
+			relationName as string,
+		) ?? (relationName as string);
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
 			| Array<{
 					relation: string;
+					via?: string;
 					select?: { type: string; fields?: readonly string[] };
 					where?: unknown;
 					include?: unknown[];
@@ -1761,6 +1788,7 @@ function toJoinIncludeDecision(
 		type: 'includeStrategy',
 		choice: 'join',
 		relationName,
+		relationPath,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
@@ -1866,6 +1894,7 @@ export function synthesizeMissingJoinDecisions(
 			type: 'includeStrategy',
 			choice: 'join',
 			relationName: alias,
+			relationPath: alias,
 			targetTable: rel.target,
 			sourceTable,
 			...(rel.type && {
