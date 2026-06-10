@@ -9,7 +9,8 @@ export async function seedIssue154Data(schemaName: string): Promise<void> {
 		INSERT INTO ${s}.files (id, path)
 		VALUES
 			(10, '/def.ts'),
-			(20, '/use.ts')
+			(20, '/use.ts'),
+			(30, '/alt.ts')
 	`.execute(pool);
 
 	await sql`
@@ -20,10 +21,10 @@ export async function seedIssue154Data(schemaName: string): Promise<void> {
 	`.execute(pool);
 
 	await sql`
-		INSERT INTO ${s}.uses (id, def_id, file_id)
+		INSERT INTO ${s}.uses (id, def_id, file_id, alt_file_id)
 		VALUES
-			(1000, 100, 20),
-			(1001, 100, 20)
+			(1000, 100, 20, 30),
+			(1001, 100, 20, 30)
 	`.execute(pool);
 
 	await sql`

@@ -25,7 +25,8 @@ export async function createIssue154Schema(schemaName: string): Promise<void> {
 		CREATE TABLE ${s}.uses (
 			id INTEGER PRIMARY KEY,
 			def_id INTEGER REFERENCES ${s}.definitions(id),
-			file_id INTEGER REFERENCES ${s}.files(id)
+			file_id INTEGER REFERENCES ${s}.files(id),
+			alt_file_id INTEGER REFERENCES ${s}.files(id)
 		)
 	`.execute(pool);
 

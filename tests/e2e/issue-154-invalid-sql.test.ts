@@ -104,6 +104,52 @@ describe('FIX-154 invalid SQL regressions', () => {
 		]);
 	});
 
+	it('hydrates full relation-dotted fallback keys without clobbering sibling relations', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: issue154Model, adapter });
+		const query = orm
+			.withSchema(SCHEMA)
+			.select('uses')
+			.include('definition', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['id'] },
+			})
+			.include('definition.file', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['path'] },
+			})
+			.include('file', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['path'] },
+			})
+			.columns(['id'])
+			.orderBy('id');
+
+		const dump = query.dump();
+		const sql = normalizeSql(dump.sql);
+		expect(sql).toContain('file.path AS "definition.file.path"');
+		expect(sql).toContain('file_1.path AS "file.path"');
+		expect(sql).not.toContain('AS "file_1.path"');
+
+		const rows = (await query.execute()) as Array<{
+			id: number;
+			definition: { id: number; file: { id: number; path: string } };
+			file: { id: number; path: string };
+		}>;
+		expect(rows).toEqual([
+			{
+				id: 1000,
+				definition: { id: 100, file: { id: 10, path: '/def.ts' } },
+				file: { id: 20, path: '/use.ts' },
+			},
+			{
+				id: 1001,
+				definition: { id: 100, file: { id: 10, path: '/def.ts' } },
+				file: { id: 20, path: '/use.ts' },
+			},
+		]);
+	});
+
 	it('S3 locks raw() in columns with an explicit alias', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: issue154Model, adapter });

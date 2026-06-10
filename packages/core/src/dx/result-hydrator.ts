@@ -54,6 +54,121 @@ export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
  */
 const COMPOSITE_KEY_SEP = '\0';
 
+type JoinHydrationInfo = {
+	readonly path: string;
+	readonly segments: readonly string[];
+	readonly prefix: string;
+};
+
+function resolveJoinIncludePath(
+	planReport: PlanReport,
+	decision: PlanReport['decisions'][number],
+): string | undefined {
+	const context = decision.context;
+	const fallbackRelation =
+		typeof context?.relation === 'string' ? context.relation : undefined;
+	const intentPath =
+		typeof context?.intentPath === 'string' ? context.intentPath : undefined;
+
+	if (Array.isArray(planReport.intent?.include) && intentPath) {
+		const indexPattern = /include\[(\d+)\]/g;
+		let current: unknown[] = planReport.intent.include as unknown[];
+		const path: string[] = [];
+		let execResult = indexPattern.exec(intentPath);
+
+		while (execResult !== null) {
+			const rawIndex = execResult[1];
+			if (rawIndex === undefined) break;
+			const idx = parseInt(rawIndex, 10);
+			const item = current[idx] as
+				| { relation?: unknown; via?: unknown; include?: unknown[] }
+				| undefined;
+			if (!item) break;
+			const segment =
+				typeof item.via === 'string'
+					? item.via
+					: typeof item.relation === 'string'
+						? item.relation
+						: undefined;
+			if (!segment) break;
+			path.push(segment);
+			current = item.include ?? [];
+			execResult = indexPattern.exec(intentPath);
+		}
+
+		if (path.length > 0) return path.join('.');
+	}
+
+	return fallbackRelation;
+}
+
+function collectJoinHydrationInfos(
+	planReport: PlanReport,
+): JoinHydrationInfo[] {
+	const infosByPath = new Map<string, JoinHydrationInfo>();
+
+	for (const decision of planReport.decisions) {
+		if (decision.type !== 'include-strategy' || decision.choice !== 'join') {
+			continue;
+		}
+		const path = resolveJoinIncludePath(planReport, decision);
+		if (!path || infosByPath.has(path)) continue;
+
+		infosByPath.set(path, {
+			path,
+			segments: path.split('.'),
+			prefix: `${path}.`,
+		});
+	}
+
+	return [...infosByPath.values()];
+}
+
+function findLongestJoinInfo(
+	key: string,
+	infos: readonly JoinHydrationInfo[],
+): JoinHydrationInfo | undefined {
+	let best: JoinHydrationInfo | undefined;
+	for (const info of infos) {
+		if (!key.startsWith(info.prefix)) continue;
+		if (!best || info.path.length > best.path.length) best = info;
+	}
+	return best;
+}
+
+function assignNestedValue(
+	target: Record<string, unknown>,
+	path: readonly string[],
+	value: unknown,
+): void {
+	let cursor = target;
+	for (let i = 0; i < path.length - 1; i++) {
+		const segment = path[i];
+		if (!segment) return;
+		const existing = cursor[segment];
+		if (existing === null) {
+			if (value === null) return;
+			cursor[segment] = {};
+		} else if (typeof existing !== 'object' || Array.isArray(existing)) {
+			cursor[segment] = {};
+		}
+		cursor = cursor[segment] as Record<string, unknown>;
+	}
+
+	const leaf = path[path.length - 1];
+	if (leaf) cursor[leaf] = value;
+}
+
+function assignColumnValue(
+	target: Record<string, unknown>,
+	columnPath: string,
+	value: unknown,
+): void {
+	const segments = columnPath.split('.').filter(Boolean);
+	if (segments.length === 0) return;
+	assignNestedValue(target, segments, value);
+}
+
 export class ResultHydrator<TResult = unknown> {
 	private readonly model: ModelIR;
 	private readonly from: string;
@@ -159,53 +274,11 @@ export class ResultHydrator<TResult = unknown> {
 	 * E2E-004: JOIN strategy for to-one relations returns columns like "author.id", "author.name".
 	 */
 	hydrateJoinIncludes(results: TResult[], planReport: PlanReport): void {
-		// Find all JOIN include decisions (to-one relations)
-		const joinDecisions = planReport.decisions.filter(
-			(d) => d.type === 'include-strategy' && d.choice === 'join',
+		const joinInfos = collectJoinHydrationInfos(planReport);
+		if (joinInfos.length === 0) return;
+		const infosByDepth = [...joinInfos].sort(
+			(a, b) => a.segments.length - b.segments.length,
 		);
-
-		if (joinDecisions.length === 0) {
-			return;
-		}
-
-		// Get relation names from decisions
-		const joinInfos = joinDecisions
-			.map((d) => d.context?.relation)
-			.filter((r): r is string => typeof r === 'string')
-			.map((relation) => ({ relation, prefix: `${relation}.` }));
-
-		if (joinInfos.length === 0) {
-			return;
-		}
-
-		// PERF (FIND-050): build the key index ONCE per relation from the first valid row,
-		// rather than scanning Object.keys() on every row × every relation (O(N×R×K)).
-		// Assumption: all rows share the same projection (fixed SELECT list) — safe for
-		// SQL queries where the column set is determined at compile time.
-		// Guard: if a key from the cache is absent on a given row, it is silently skipped.
-		type JoinInfo = {
-			relation: string;
-			prefix: string;
-			cachedKeys: string[] | null;
-		};
-		const joinInfosWithCache: JoinInfo[] = joinInfos.map((info) => ({
-			...info,
-			cachedKeys: null,
-		}));
-
-		if (results.length > 0) {
-			// Find first non-null row to build the key cache
-			const firstRow = results.find(
-				(r): r is TResult & object => typeof r === 'object' && r !== null,
-			);
-			if (firstRow) {
-				const firstRecord = firstRow as Record<string, unknown>;
-				const allKeys = Object.keys(firstRecord);
-				for (const info of joinInfosWithCache) {
-					info.cachedKeys = allKeys.filter((k) => k.startsWith(info.prefix));
-				}
-			}
-		}
 
 		// Process each result row
 		for (const row of results) {
@@ -214,33 +287,34 @@ export class ResultHydrator<TResult = unknown> {
 			}
 
 			const record = row as Record<string, unknown>;
+			const valuesByPath = new Map<
+				string,
+				{ values: Record<string, unknown>; allNull: boolean }
+			>();
 
-			for (const info of joinInfosWithCache) {
-				// Use cached keys; fall back to live scan if cache is empty (heterogeneous rows)
-				const keys =
-					info.cachedKeys && info.cachedKeys.length > 0
-						? info.cachedKeys
-						: Object.keys(record).filter((k) => k.startsWith(info.prefix));
+			for (const key of Object.keys(record)) {
+				const info = findLongestJoinInfo(key, joinInfos);
+				if (!info) continue;
 
-				if (keys.length === 0) continue;
-
-				const nestedObj: Record<string, unknown> = {};
-				let allNull = true;
-
-				// Build nested object and delete prefixed keys in a single pass —
-				// no keysToDelete array needed.
-				for (const key of keys) {
-					const val = record[key];
-					if (val !== undefined) {
-						// Guard: key present on this row
-						nestedObj[key.slice(info.prefix.length)] = val;
-						delete record[key];
-						if (val !== null) allNull = false;
-					}
+				const value = record[key];
+				let entry = valuesByPath.get(info.path);
+				if (!entry) {
+					entry = { values: {}, allNull: true };
+					valuesByPath.set(info.path, entry);
 				}
+				assignColumnValue(entry.values, key.slice(info.prefix.length), value);
+				if (value !== null && value !== undefined) entry.allNull = false;
+				delete record[key];
+			}
 
-				// If all values are null, the related entity doesn't exist (LEFT JOIN returned no match)
-				record[info.relation] = allNull ? null : nestedObj;
+			for (const info of infosByDepth) {
+				const entry = valuesByPath.get(info.path);
+				if (!entry) continue;
+				assignNestedValue(
+					record,
+					info.segments,
+					entry.allNull ? null : entry.values,
+				);
 			}
 		}
 	}

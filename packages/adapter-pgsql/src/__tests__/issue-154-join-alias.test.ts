@@ -1,5 +1,6 @@
 import {
 	createOrm,
+	eq,
 	InvalidOperationError,
 	ref,
 	relationColumn,
@@ -221,6 +222,60 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 				.include('definition', { join: 'left' })
 				.dump(),
 		).toThrow(/definition/);
+	});
+
+	it('same path twice with same join type merges selected columns', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.include('definition', {
+					join: 'inner',
+					select: { type: 'fields', fields: ['id'] },
+				})
+				.include('definition', {
+					join: 'inner',
+					select: { type: 'fields', fields: ['file_id'] },
+				})
+				.dump().sql,
+		);
+
+		expect(joinCount(sql)).toBe(1);
+		expect(sql).toContain('definition.id AS "definition.id"');
+		expect(sql).toContain('definition.file_id AS "definition.file_id"');
+	});
+
+	it('via-disambiguated includes are distinct paths with scoped filters', () => {
+		const orm = buildOrm();
+		const dump = orm
+			.select('uses')
+			.include('files', {
+				via: 'file',
+				join: 'inner',
+				where: eq('path', '/use.ts'),
+			})
+			.include('files', {
+				via: 'file_1',
+				join: 'inner',
+				where: eq('path', '/alt.ts'),
+			})
+			.columns([
+				relationColumn('file', 'path', 'use_file'),
+				relationColumn('file_1', 'path', 'alt_file'),
+			])
+			.dump();
+		const sql = compact(dump.sql);
+
+		expect(joinCount(sql)).toBe(2);
+		expect(sql).toContain('JOIN files AS file ON uses.file_id = file.id');
+		expect(sql).toContain(
+			'JOIN files AS file_1 ON uses.alt_file_id = file_1.id',
+		);
+		expect(sql).toContain('file.path AS use_file');
+		expect(sql).toContain('file_1.path AS alt_file');
+		expect(sql).toContain('file.path = $1');
+		expect(sql).toContain('file_1.path = $2');
+		expect(dump.params).toEqual(['/use.ts', '/alt.ts']);
 	});
 
 	it('implicit intermediate and later explicit intermediate share one join', () => {

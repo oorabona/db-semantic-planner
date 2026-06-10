@@ -374,6 +374,89 @@ function getParentRelationPath(
 	return lastDot > 0 ? relationPath.slice(0, lastDot) : undefined;
 }
 
+function mergeColumnLists(
+	current: readonly string[] | undefined,
+	next: readonly string[] | undefined,
+): readonly string[] | undefined {
+	if (!current) return next ? [...next] : undefined;
+	if (!next) return current;
+	if (current.includes('*') || next.includes('*')) return ['*'];
+
+	const merged = [...current];
+	for (const column of next) {
+		if (!merged.includes(column)) merged.push(column);
+	}
+	return merged;
+}
+
+function mergeDuplicateJoinIncludeDecisions(
+	decisions: readonly PlanDecision[],
+	rootTable: string,
+): PlanDecision[] {
+	const merged: PlanDecision[] = [];
+	const seenByPath = new Map<string, PlanDecision>();
+
+	for (const decision of decisions) {
+		const identityPath =
+			decision.type === 'includeStrategy' && decision.choice === 'join'
+				? getRelationIdentityPath(decision, rootTable)
+				: undefined;
+		if (!identityPath) {
+			merged.push(decision);
+			continue;
+		}
+
+		const existing = seenByPath.get(identityPath);
+		if (!existing) {
+			const copy: PlanDecision = {
+				...decision,
+				...(decision.columns ? { columns: [...decision.columns] } : {}),
+				...(decision.columnAliases
+					? { columnAliases: { ...decision.columnAliases } }
+					: {}),
+				...(decision.conditions
+					? { conditions: [...decision.conditions] }
+					: {}),
+			};
+			seenByPath.set(identityPath, copy);
+			merged.push(copy);
+			continue;
+		}
+
+		const existingJoinType = existing.joinType ?? 'left';
+		const nextJoinType = decision.joinType ?? 'left';
+		if (existingJoinType !== nextJoinType) {
+			throw new InvalidOperationError(
+				'include',
+				`Conflicting join options for relation path '${identityPath}'. ` +
+					`Already registered as ${existingJoinType}, got ${nextJoinType}.`,
+			);
+		}
+
+		const mutable = existing as {
+			columns?: readonly string[];
+			columnAliases?: Readonly<Record<string, string>>;
+			conditions?: readonly PlanDecision[];
+		};
+		const columns = mergeColumnLists(existing.columns, decision.columns);
+		if (columns) mutable.columns = columns;
+		if (decision.columnAliases) {
+			mutable.columnAliases = {
+				...decision.columnAliases,
+				...(existing.columnAliases ?? {}),
+			};
+		}
+		if (decision.conditions && decision.conditions.length > 0) {
+			mutable.conditions = [
+				...(existing.conditions ?? []),
+				...decision.conditions,
+			];
+		}
+	}
+
+	return merged;
+}
+
 /**
  * Simplified PlanReport for the spike
  */
@@ -1618,6 +1701,10 @@ export class PlanCompiler {
 	}
 
 	private compileSelect(plan: SimplifiedPlanReport): Node {
+		const decisions = mergeDuplicateJoinIncludeDecisions(
+			plan.decisions,
+			plan.rootTable,
+		);
 		const targetList: Node[] = [];
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
@@ -1628,7 +1715,7 @@ export class PlanCompiler {
 		let offset: Node | undefined;
 		let distinct: boolean | Node[] = false;
 
-		for (const decision of plan.decisions) {
+		for (const decision of decisions) {
 			switch (decision.type) {
 				case 'select':
 				case 'selectFunction':

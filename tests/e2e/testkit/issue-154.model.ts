@@ -13,6 +13,7 @@ export const issue154Schema = schema({
 		id: { type: 'integer', primaryKey: true },
 		def_id: ref('definitions', { as: 'definition', inverse: 'uses' }),
 		file_id: ref('files', { as: 'file', inverse: 'uses' }),
+		alt_file_id: ref('files', { as: 'file_1', inverse: 'alt_uses' }),
 	},
 	dependencies: {
 		id: { type: 'integer', primaryKey: true },

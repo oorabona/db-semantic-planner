@@ -103,6 +103,7 @@ function resolveIncludeByPath(
 	includes:
 		| Array<{
 				relation: string;
+				via?: string;
 				limit?: number;
 				select?: unknown;
 				where?: unknown;
@@ -127,7 +128,12 @@ function resolveIncludeByPath(
 		while (execResult !== null) {
 			const idx = parseInt(execResult[1]!, 10);
 			const item = current[idx] as
-				| { relation: string; limit?: number; include?: unknown[] }
+				| {
+						relation: string;
+						via?: string;
+						limit?: number;
+						include?: unknown[];
+				  }
 				| undefined;
 			if (!item) break;
 			resolved = item;
@@ -138,7 +144,9 @@ function resolveIncludeByPath(
 	}
 
 	// Fallback: flat search by relation name (top-level only)
-	return includes.find((i) => i.relation === relationName);
+	return includes.find(
+		(i) => i.relation === relationName || i.via === relationName,
+	);
 }
 
 /**
@@ -152,6 +160,7 @@ function resolveRelationPathByIntentPath(
 	includes:
 		| Array<{
 				relation: string;
+				via?: string;
 				include?: unknown[];
 		  }>
 		| undefined,
@@ -167,10 +176,10 @@ function resolveRelationPathByIntentPath(
 		while (execResult !== null) {
 			const idx = parseInt(execResult[1]!, 10);
 			const item = current[idx] as
-				| { relation: string; include?: unknown[] }
+				| { relation: string; via?: string; include?: unknown[] }
 				| undefined;
 			if (!item) break;
-			path.push(item.relation);
+			path.push(item.via ?? item.relation);
 			current = (item.include as unknown[]) ?? [];
 			execResult = indexPattern.exec(intentPath);
 		}
@@ -1698,6 +1707,7 @@ function toIncludeDecision(
 		plan.intent?.include as
 			| Array<{
 					relation: string;
+					via?: string;
 					limit?: number;
 					select?: unknown;
 					where?: unknown;
@@ -1715,7 +1725,7 @@ function toIncludeDecision(
 		relationName,
 		relationPath: resolveRelationPathByIntentPath(
 			plan.intent?.include as
-				| Array<{ relation: string; include?: unknown[] }>
+				| Array<{ relation: string; via?: string; include?: unknown[] }>
 				| undefined,
 			context.intentPath,
 			relationName,
@@ -1751,7 +1761,7 @@ function toJoinIncludeDecision(
 		?.intentPath as string | undefined;
 	const relationPath = resolveRelationPathByIntentPath(
 		plan.intent?.include as
-			| Array<{ relation: string; include?: unknown[] }>
+			| Array<{ relation: string; via?: string; include?: unknown[] }>
 			| undefined,
 		intentPath,
 		relationName as string,
@@ -1760,6 +1770,7 @@ function toJoinIncludeDecision(
 		plan.intent?.include as
 			| Array<{
 					relation: string;
+					via?: string;
 					select?: { type: string; fields?: readonly string[] };
 					where?: unknown;
 					include?: unknown[];
