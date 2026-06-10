@@ -55,20 +55,37 @@ export type HydrateOptions = Omit<CompileOptions, 'model'> & { model: ModelIR };
 const COMPOSITE_KEY_SEP = '\0';
 
 type JoinHydrationInfo = {
-	readonly path: string;
+	readonly relationPath: string;
 	readonly segments: readonly string[];
-	readonly prefix: string;
+	readonly keyPrefix: string;
+	readonly keyPrefixWithDot: string;
 };
+
+function stringProp(
+	source: Record<string, unknown> | undefined,
+	key: string,
+): string | undefined {
+	const value = source?.[key];
+	return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
 
 function resolveJoinIncludePath(
 	planReport: PlanReport,
 	decision: PlanReport['decisions'][number],
 ): string | undefined {
 	const context = decision.context;
+	const decisionRecord = decision as unknown as Record<string, unknown>;
+	const contextRecord = context as Record<string, unknown> | undefined;
+	const explicitRelationPath =
+		stringProp(decisionRecord, 'relationPath') ??
+		stringProp(contextRecord, 'relationPath');
+	if (explicitRelationPath) return explicitRelationPath;
+
 	const fallbackRelation =
-		typeof context?.relation === 'string' ? context.relation : undefined;
-	const intentPath =
-		typeof context?.intentPath === 'string' ? context.intentPath : undefined;
+		stringProp(contextRecord, 'relation') ??
+		stringProp(contextRecord, 'includeAlias') ??
+		stringProp(decisionRecord, 'relationName');
+	const intentPath = stringProp(contextRecord, 'intentPath');
 
 	if (Array.isArray(planReport.intent?.include) && intentPath) {
 		const indexPattern = /include\[(\d+)\]/g;
@@ -102,22 +119,78 @@ function resolveJoinIncludePath(
 	return fallbackRelation;
 }
 
+function lastRelationSegment(path: string): string {
+	const segments = path.split('.');
+	return segments[segments.length - 1] ?? path;
+}
+
+function resolveJoinRelationName(
+	decision: PlanReport['decisions'][number],
+	relationPath: string,
+): string {
+	const context = decision.context as Record<string, unknown> | undefined;
+	const decisionRecord = decision as unknown as Record<string, unknown>;
+	return (
+		stringProp(context, 'relation') ??
+		stringProp(context, 'includeAlias') ??
+		stringProp(decisionRecord, 'relationName') ??
+		lastRelationSegment(relationPath)
+	);
+}
+
 function collectJoinHydrationInfos(
 	planReport: PlanReport,
 ): JoinHydrationInfo[] {
-	const infosByPath = new Map<string, JoinHydrationInfo>();
+	const candidates: Array<{
+		relationName: string;
+		relationPath: string;
+		hydrationPrefix?: string;
+	}> = [];
+	const pathsByRelationName = new Map<string, Set<string>>();
 
 	for (const decision of planReport.decisions) {
 		if (decision.type !== 'include-strategy' || decision.choice !== 'join') {
 			continue;
 		}
-		const path = resolveJoinIncludePath(planReport, decision);
-		if (!path || infosByPath.has(path)) continue;
+		const relationPath = resolveJoinIncludePath(planReport, decision);
+		if (!relationPath) continue;
 
-		infosByPath.set(path, {
-			path,
-			segments: path.split('.'),
-			prefix: `${path}.`,
+		const relationName = resolveJoinRelationName(decision, relationPath);
+		const decisionRecord = decision as unknown as Record<string, unknown>;
+		const contextRecord = decision.context as
+			| Record<string, unknown>
+			| undefined;
+		const hydrationPrefix =
+			stringProp(decisionRecord, 'hydrationPrefix') ??
+			stringProp(contextRecord, 'hydrationPrefix');
+
+		candidates.push({
+			relationName,
+			relationPath,
+			...(hydrationPrefix && { hydrationPrefix }),
+		});
+
+		const paths = pathsByRelationName.get(relationName) ?? new Set<string>();
+		paths.add(relationPath);
+		pathsByRelationName.set(relationName, paths);
+	}
+
+	const infosByPath = new Map<string, JoinHydrationInfo>();
+	for (const candidate of candidates) {
+		if (infosByPath.has(candidate.relationPath)) continue;
+
+		const usesFullPath =
+			(pathsByRelationName.get(candidate.relationName)?.size ?? 0) > 1;
+		const keyPrefix =
+			candidate.hydrationPrefix ??
+			(usesFullPath ? candidate.relationPath : candidate.relationName);
+		if (!keyPrefix) continue;
+
+		infosByPath.set(candidate.relationPath, {
+			relationPath: candidate.relationPath,
+			segments: candidate.relationPath.split('.'),
+			keyPrefix,
+			keyPrefixWithDot: `${keyPrefix}.`,
 		});
 	}
 
@@ -130,8 +203,10 @@ function findLongestJoinInfo(
 ): JoinHydrationInfo | undefined {
 	let best: JoinHydrationInfo | undefined;
 	for (const info of infos) {
-		if (!key.startsWith(info.prefix)) continue;
-		if (!best || info.path.length > best.path.length) best = info;
+		if (!key.startsWith(info.keyPrefixWithDot)) continue;
+		if (!best || info.keyPrefixWithDot.length > best.keyPrefixWithDot.length) {
+			best = info;
+		}
 	}
 	return best;
 }
@@ -297,18 +372,22 @@ export class ResultHydrator<TResult = unknown> {
 				if (!info) continue;
 
 				const value = record[key];
-				let entry = valuesByPath.get(info.path);
+				let entry = valuesByPath.get(info.relationPath);
 				if (!entry) {
 					entry = { values: {}, allNull: true };
-					valuesByPath.set(info.path, entry);
+					valuesByPath.set(info.relationPath, entry);
 				}
-				assignColumnValue(entry.values, key.slice(info.prefix.length), value);
+				assignColumnValue(
+					entry.values,
+					key.slice(info.keyPrefixWithDot.length),
+					value,
+				);
 				if (value !== null && value !== undefined) entry.allNull = false;
 				delete record[key];
 			}
 
 			for (const info of infosByDepth) {
-				const entry = valuesByPath.get(info.path);
+				const entry = valuesByPath.get(info.relationPath);
 				if (!entry) continue;
 				assignNestedValue(
 					record,

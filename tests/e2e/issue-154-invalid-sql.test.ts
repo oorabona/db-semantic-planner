@@ -150,6 +150,58 @@ describe('FIX-154 invalid SQL regressions', () => {
 		]);
 	});
 
+	it('hydrates a single nested join include without flat file keys', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: issue154Model, adapter });
+		const query = orm
+			.withSchema(SCHEMA)
+			.select('uses')
+			.include('definition.file', {
+				join: 'inner',
+				select: { type: 'fields', fields: ['path'] },
+			})
+			.columns(['id', 'def_id', 'file_id', 'alt_file_id'])
+			.orderBy('id');
+
+		const rows = (await query.execute()) as Array<{
+			id: number;
+			defId: number;
+			fileId: number;
+			altFileId: number;
+			definition: {
+				id: number;
+				file: { id: number; path: string };
+			};
+		}>;
+		expect(rows).toEqual([
+			{
+				id: 1000,
+				defId: 100,
+				fileId: 20,
+				altFileId: 30,
+				definition: {
+					id: 100,
+					file: { id: 10, path: '/def.ts' },
+				},
+			},
+			{
+				id: 1001,
+				defId: 100,
+				fileId: 20,
+				altFileId: 30,
+				definition: {
+					id: 100,
+					file: { id: 10, path: '/def.ts' },
+				},
+			},
+		]);
+		for (const row of rows) {
+			expect(row.definition.file.path).toBe('/def.ts');
+			expect(row).not.toHaveProperty('file.id');
+			expect(row).not.toHaveProperty('file.path');
+		}
+	});
+
 	it('S3 locks raw() in columns with an explicit alias', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: issue154Model, adapter });
