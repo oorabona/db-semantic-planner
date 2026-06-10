@@ -4,6 +4,7 @@
  * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
  */
 
+import type { ModelIR, TableIR } from '@dbsp/core';
 import { ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
@@ -852,5 +853,141 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain('nullable: true');
 			expect(result).toContain("onDelete: 'CASCADE'");
 		});
+	});
+});
+
+// ============================================================================
+// Item 4: generated output must be loadable by schema-loader (default export)
+// ============================================================================
+//
+// schema-loader.loadSchema() accepts module.schema || module.default.
+// generateSchemaFile() previously only emitted `export const dbSchema = ...`
+// which satisfies neither — the generated file could NOT be loaded by other
+// commands.  The fix adds `export default dbSchema`.
+
+describe('generateSchemaFile — schema-loader interoperability (item 4)', () => {
+	it('emits "export default dbSchema" so schema-loader can load via module.default', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+				name: { type: 'string' },
+			},
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		// schema-loader does: const schema = module.schema ?? module.default
+		// The generated file must satisfy at least module.default.
+		expect(result).toContain('export default dbSchema');
+	});
+
+	it('mutation guard: without default export the generated file has no loadable export', () => {
+		// Documents what the old code produced — only export const dbSchema.
+		// schema-loader's module.schema and module.default were both undefined,
+		// so loadSchema() would throw 'Schema file must export schema or default'.
+		const oldOutput = 'export const dbSchema = schema({ users: {} });\n';
+
+		// Old output has no 'export default' line — loader would fail.
+		expect(oldOutput).not.toContain('export default');
+
+		// New output (from generateSchemaFile) includes it.
+		const model = schema({
+			users: { id: { type: 'uuid', primaryKey: true } },
+		}).model;
+		const newOutput = generateSchemaFile(model);
+		expect(newOutput).toContain('export default dbSchema');
+	});
+
+	it('retains the export const dbSchema named export for direct consumer use', () => {
+		// Consumers that import { dbSchema } directly must not be broken.
+		const model = schema({
+			users: { id: { type: 'uuid', primaryKey: true } },
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		expect(result).toContain('export const dbSchema = schema({');
+		expect(result).toContain('export default dbSchema');
+	});
+});
+
+// ============================================================================
+// Item 6: FK target table names and self-ref roles must be escaped (item 6)
+// ============================================================================
+//
+// ref('${refTable}') without singleQuoteEscape produces a syntax error when
+// refTable contains a single-quote, backslash, or newline.
+
+describe('generateSchemaFile — FK target name escaping (item 6)', () => {
+	it('generates valid output for a normal FK target (smoke test, no regression)', () => {
+		const model = schema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				authorId: ref('users'),
+			},
+		}).model;
+
+		const result = generateSchemaFile(model);
+
+		// Standard table name should still appear as a properly quoted string.
+		expect(result).toContain("ref('users')");
+	});
+
+	it('mutation guard: FK target name containing a single-quote is escaped (revert this fix → RED)', () => {
+		// This test FAILS if generateRefCode reverts to bare interpolation:
+		//   code = `ref('${refTable}')` → produces ref('o'brien') — invalid TS syntax.
+		// With singleQuoteEscape it produces ref('o\'brien') — valid TS.
+		//
+		// We bypass schema() (which validates identifiers) and pass a ModelIR-shaped
+		// object directly so we can inject an arbitrarily-named FK target table.
+		const quotedTable = "o'brien"; // contains a literal single-quote
+
+		// Minimal TableIR for the referencing table
+		const postsTable: TableIR = {
+			name: 'posts',
+			columns: [
+				{ name: 'id', type: 'uuid', nullable: false },
+				{ name: 'clientId', type: 'string', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [
+				{
+					columns: ['clientId'],
+					references: { table: quotedTable, columns: ['id'] },
+				},
+			],
+			indexes: [],
+		};
+
+		// Minimal referenced table (no FK of its own)
+		const obriensTable: TableIR = {
+			name: quotedTable,
+			columns: [{ name: 'id', type: 'uuid', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+
+		// Build a ModelIR-shaped object.  generateSchemaFile only reads
+		// model.tables.values() and model.relations.values(), so a plain Map suffices.
+		const model = {
+			tables: new Map<string, TableIR>([
+				[obriensTable.name, obriensTable],
+				[postsTable.name, postsTable],
+			]),
+			relations: new Map(),
+			getTable: (name: string) =>
+				(model.tables as Map<string, TableIR>).get(name),
+			getRelation: () => undefined,
+		} as unknown as ModelIR;
+
+		const result = generateSchemaFile(model);
+
+		// Must contain the properly escaped form — NOT the broken bare form.
+		expect(result).toContain("ref('o\\'brien')"); // escaped ✓
+		expect(result).not.toContain("ref('o'brien')"); // bare interpolation ✗
 	});
 });

@@ -235,21 +235,24 @@ function generateRefCode(
 		// Infer role names from column name
 		// e.g., 'parentId' → parent: 'parent', children: 'children'
 		const baseName = column.name.replace(/_?[iI]d$/, '');
+		const childrenName = baseName === 'parent' ? 'children' : `${baseName}s`;
 		refOptions.push(
-			`roles: { parent: '${baseName}', children: '${baseName === 'parent' ? 'children' : `${baseName}s`}' }`,
+			`roles: { parent: ${singleQuoteEscape(baseName)}, children: ${singleQuoteEscape(childrenName)} }`,
 		);
 	}
 
-	// Build the ref() call — table name converted if dbCasing applies
+	// Build the ref() call — table name converted if dbCasing applies.
+	// Route through singleQuoteEscape so a table name containing a single quote,
+	// backslash, or newline produces valid TypeScript instead of a syntax error.
 	const refTable =
 		options.dbCasing === 'snake_case'
 			? snakeToCamelCase(fkInfo.table)
 			: fkInfo.table;
 	let code: string;
 	if (refOptions.length === 0) {
-		code = `ref('${refTable}')`;
+		code = `ref(${singleQuoteEscape(refTable)})`;
 	} else {
-		code = `ref('${refTable}', { ${refOptions.join(', ')} })`;
+		code = `ref(${singleQuoteEscape(refTable)}, { ${refOptions.join(', ')} })`;
 	}
 
 	// Add comment for original DB type if requested
@@ -428,6 +431,13 @@ export function generateSchemaFile(
 	lines.push(tableLines.join(',\n\n'));
 
 	lines.push('});');
+	lines.push('');
+
+	// Add a default export so schema-loader can load generated files directly.
+	// schema-loader accepts module.schema || module.default; the named dbSchema
+	// export is the canonical API, but the default export allows `loadSchema()`
+	// to round-trip without the caller knowing the internal export name.
+	lines.push('export default dbSchema;');
 	lines.push('');
 
 	// Usage hint with dbCasing
