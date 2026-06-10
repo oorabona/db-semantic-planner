@@ -591,3 +591,95 @@ describe('isInsideStringLiteral', () => {
 		).toBe(false);
 	});
 });
+
+// ============================================================================
+// Item 3 regression: failing dot-commands must emit 'error' event, not 'info'
+// ============================================================================
+//
+// Handlers that return { output: '❌ ...' } without setting success/error used
+// to cause the engine to emit 'info' → batch mapEventsToBatchResult → success:true
+// → process.exit(0) even though the command failed.
+//
+// The fix in processDotCommand (repl-engine.ts) detects '❌'-prefixed output and
+// emits 'error' so mapEventsToBatchResult sets success:false → process.exit(1).
+
+describe('ReplEngine dot-command error propagation — batch exit-code regression (item 3)', () => {
+	function createEngine(overrides = {}) {
+		const model = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [{ name: 'id', type: 'integer', nullable: false }],
+						primaryKey: ['id'],
+					},
+				],
+			]),
+			relations: new Map(),
+		};
+		const schema = {
+			model: model as any,
+			tableNames: ['users'],
+			schemaPath: 'test.schema.ts',
+		};
+		return new ReplEngine({
+			schema: schema as any,
+			schemaPath: 'test.schema.ts',
+			...overrides,
+		});
+	}
+
+	function collectEvents(engine: ReplEngine): EngineEvent[] {
+		const events: EngineEvent[] = [];
+		engine.on((e) => events.push(e));
+		return events;
+	}
+
+	it('emits error event for a failing .import (no argument) so batch mode exits non-zero', async () => {
+		// .import without an argument returns { output: '❌ Usage: .import <file.sql>' }
+		// — no `error` or `success` field set. Before the fix the engine emitted 'info'
+		// (success:true); after the fix it emits 'error' (success:false).
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.import');
+
+		const errorEvent = events.find((e) => e.type === 'error');
+		const infoEvent = events.find(
+			(e) => e.type === 'info' && 'message' in e && e.message.startsWith('❌'),
+		);
+
+		expect(errorEvent).toBeDefined();
+		expect(infoEvent).toBeUndefined();
+	});
+
+	it('illustration (not a regression lock): old predicate would emit info for ❌ output', () => {
+		// This test is DOCUMENTATION only — it reimplements both predicates inline
+		// and stays GREEN on revert. The actual regression locks are the async
+		// .import→error test above and the two flipped assertions in
+		// repl-engine.coverage.test.ts (lines ~762 and ~900).
+		const result = { output: '❌ Usage: .import <file.sql>' };
+
+		// Old condition: only checks result.error — would be false → 'info' (the bug)
+		const oldEmitsError = !!result.error;
+		expect(oldEmitsError).toBe(false);
+
+		// New condition: also checks output prefix — is true → 'error' (the fix)
+		const newEmitsError = !!result.error || result.output.startsWith('❌');
+		expect(newEmitsError).toBe(true);
+	});
+
+	it('does not emit error for a successful dot-command', async () => {
+		// .tables succeeds — must still emit 'info', not 'error'
+		const engine = createEngine();
+		const events = collectEvents(engine);
+
+		await engine.submit('.tables');
+
+		const errorEvent = events.find((e) => e.type === 'error');
+		expect(errorEvent).toBeUndefined();
+		const infoEvent = events.find((e) => e.type === 'info');
+		expect(infoEvent).toBeDefined();
+	});
+});

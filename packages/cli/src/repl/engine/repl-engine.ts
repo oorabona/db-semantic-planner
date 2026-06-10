@@ -342,7 +342,18 @@ export class ReplEngine {
 		const result = await processDotCommand(input, this.schema, batchState);
 		this.applyDotCommandStateChange(result.stateChange);
 
-		if (result.error) {
+		// Treat the result as an error when:
+		//   1. result.error is a non-empty string (explicit error from the handler), OR
+		//   2. result.success is explicitly false (handler signals failure), OR
+		//   3. the output starts with '❌' (handlers that return a failure message
+		//      without setting error/success still need to propagate to batch exit-code).
+		// All three cases emit an 'error' event so mapEventsToBatchResult sets
+		// success:false and batch mode exits non-zero.
+		const isFailure =
+			!!result.error ||
+			result.success === false ||
+			result.output.startsWith('❌');
+		if (isFailure) {
 			this.emit({ type: 'error', message: result.output });
 		} else {
 			this.emit({ type: 'info', message: result.output });

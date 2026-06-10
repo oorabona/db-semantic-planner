@@ -768,7 +768,7 @@ describe('ReplEngine — coverage', () => {
 			expect(engine.getState().execMode).toBe(false);
 			const info = events.find(
 				(e) =>
-					e.type === 'info' && e.message.includes('No database connection'),
+					e.type === 'error' && e.message.includes('No database connection'),
 			);
 			expect(info).toBeDefined();
 		});
@@ -897,16 +897,16 @@ describe('ReplEngine — coverage', () => {
 			}
 		});
 
-		it('emits info event when dot command result has no error', async () => {
+		it('emits error event when dot command output signals failure (no DB connection)', async () => {
 			const engine = createEngine();
 			const events = collectEvents(engine);
 
-			// .begin without connection returns output without error field
+			// .begin without connection returns a ❌-prefixed output → error event
 			await engine.submit('.begin');
 
 			const info = events.find(
 				(e) =>
-					e.type === 'info' && e.message.includes('No database connection'),
+					e.type === 'error' && e.message.includes('No database connection'),
 			);
 			expect(info).toBeDefined();
 		});
