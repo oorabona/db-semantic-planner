@@ -1230,11 +1230,21 @@ orm.select('posts').withStrictMode(false).include('users')
 Use the pipe-based Natural Query Language directly from TypeScript:
 
 ```typescript
-const users = await orm.nql<User[]>`users | where active = true | limit 10`.dump();
-const dump = orm.nql`posts | where published = true | select title, author.*`.dump();
+// doctest: skip — illustrative NQL tag interpolation example
+import { nqlRaw } from '@dbsp/core';
+
+const ids = [1, 2, 3];
+const posts = await orm.nql<PostRow>`posts
+  | where id = ANY(${ids})
+  | ${nqlRaw('order by createdAt desc')}
+  | limit ${10}
+`.all();
+
+const dump = orm.nql`users | where active = ${true}`.dump();
+console.log(dump.params); // [true]
 ```
 
-See the [NQL Reference](../nql/) for full syntax.
+Interpolated values are bound as SQL parameters. Use `nqlRaw()` only for trusted NQL structure. See [Named Parameters and Template Binding](../nql/#named-parameters-and-template-binding) for the detailed binding contract.
 
 ### Hierarchy Shortcuts
 
