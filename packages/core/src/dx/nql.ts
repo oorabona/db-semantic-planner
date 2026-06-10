@@ -6,11 +6,11 @@
  * const users = await orm.nql<{ name: string; email: string }>`users | select name, email`.all();
  * ```
  *
- * Each `${value}` interpolation is escaped into a safe NQL literal (string/number/boolean/null).
- * Untrusted string input cannot inject NQL structure because it is always quoted and
- * single-quotes inside are doubled (`''`). For dynamic structural fragments (table names,
- * column names, ORDER BY direction) use the builder API (`orm.select()`). See #134 for
- * upcoming `:param` binding and a `nqlRaw()` escape hatch.
+ * Each non-raw `${value}` interpolation is converted into a generated NQL named
+ * parameter (`:__p0`, `:__p1`, ...) and forwarded to the compiler through its
+ * params map. Values never touch NQL source text. Use `nqlRaw()` only for trusted
+ * dynamic NQL fragments that must participate in parsing, such as an ORDER BY
+ * clause assembled from application-controlled choices.
  *
  * @module nql
  * @since DX-040
@@ -59,97 +59,146 @@ export type NqlTag = <T>(
 	...values: unknown[]
 ) => NqlBuilder<T>;
 
+declare const NQL_RAW_FRAGMENT_TYPE: unique symbol;
+
+/**
+ * Trusted NQL source fragment for `nql` template interpolation.
+ *
+ * Never wrap untrusted input in `nqlRaw()`: raw fragments are spliced verbatim
+ * into NQL source and parsed as query structure.
+ *
+ * @public
+ */
+export interface NqlRawFragment {
+	readonly fragment: string;
+	readonly [NQL_RAW_FRAGMENT_TYPE]: true;
+}
+
 // ============================================================================
 // Implementation
 // ============================================================================
 
+const NQL_RAW_FRAGMENT = Symbol('NqlRawFragment');
+const RESERVED_INTERNAL_PARAM_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
+
+type RuntimeNqlRawFragment = NqlRawFragment & {
+	readonly [NQL_RAW_FRAGMENT]: true;
+};
+
+interface GeneratedParamRange {
+	readonly start: number;
+	readonly end: number;
+}
+
+interface AssembledNqlTemplate {
+	readonly query: string;
+	readonly params: Readonly<Record<string, unknown>>;
+	readonly hasBoundParams: boolean;
+	readonly sourceError: string | undefined;
+}
+
 /**
- * Convert a JS value into a safe NQL literal token string.
+ * Mark a trusted fragment to splice verbatim into an NQL template.
  *
- * Supported types:
- * - `string`  → single-quoted NQL string literal; embedded single-quotes are doubled (`''`),
- *               matching the NQL StringLiteral token pattern `/'(?:[^']|'')*'/`.
- *               Values containing a raw newline are rejected (Chevrotain StringLiteral
- *               has no `line_breaks: true`, so newlines would produce a lex error).
- * - finite, non-exponential `number` → bare numeric literal (e.g. `42`, `3.14`, `-5`).
- *               Negative numbers are emitted as a leading minus followed by the absolute
- *               value, which NQL parses as unary-minus + number. Note: negative numbers
- *               are only valid in comparison/value positions — `limit`/`offset` expect a
- *               bare NumberLiteral and will parse-error on a leading minus.
- *               `NaN`, `Infinity`, and numbers whose JS string form uses exponential
- *               notation (magnitude ≥ 1e21 or absolute value < ~1e-6, e.g. `1e21`,
- *               `1e-7`) are rejected — NQL NumberLiteral is `/\d+(\.\d+)?/` (no exponent).
- * - `boolean` → `true` or `false` (matches NQL True/False tokens, case-insensitive).
- * - `null`    → `null` (matches NQL Null token).
- * - All other types throw a descriptive Error.
+ * Never pass untrusted input to this function.
  *
- * @param value - The JS value to convert
- * @param index - Zero-based interpolation position (for error messages)
- * @returns Safe NQL literal string
- * @internal
+ * @public
  */
-export function toNqlLiteral(value: unknown, index: number): string {
-	if (value === null) {
-		return 'null';
+export function nqlRaw(fragment: string): NqlRawFragment {
+	if (typeof fragment !== 'string') {
+		throw new TypeError('nqlRaw() expects a string fragment');
 	}
-	switch (typeof value) {
-		case 'boolean':
-			return value ? 'true' : 'false';
-		case 'number': {
-			if (!Number.isFinite(value)) {
-				throw new Error(
-					`nql\`...\`: cannot interpolate non-finite number (${value}) at position ${index}. ` +
-						'Only finite numbers are supported. ' +
-						'For dynamic NQL structure use the builder API (orm.select()). See issue #134.',
-				);
-			}
-			// NQL NumberLiteral is digits-only; negatives are parsed as unary minus + number.
-			// Emit the minus separately so the lexer tokenises it correctly.
-			const s = value < 0 ? `-${Math.abs(value)}` : String(value);
-			// Reject any value whose string form uses exponential notation (e.g. 1e21, 1e-7).
-			// NQL NumberLiteral pattern /\d+(\.\d+)?/ has no exponent support; emitting
-			// such a token produces an opaque downstream parse error.
-			if (/[eE]/.test(s)) {
-				throw new Error(
-					`nql\`...\`: number ${value} at position ${index} has no exact NQL numeric literal form (exponential notation). ` +
-						'Convert it yourself or use the builder API (orm.select()). See issue #134.',
-				);
-			}
-			return s;
+
+	const raw = { fragment } as RuntimeNqlRawFragment;
+	Object.defineProperty(raw, NQL_RAW_FRAGMENT, {
+		value: true,
+		enumerable: false,
+	});
+	return Object.freeze(raw);
+}
+
+function isNqlRawFragment(value: unknown): value is NqlRawFragment {
+	if (typeof value !== 'object' || value === null) {
+		return false;
+	}
+	if (!Object.prototype.hasOwnProperty.call(value, NQL_RAW_FRAGMENT)) {
+		return false;
+	}
+	return (
+		(value as Record<typeof NQL_RAW_FRAGMENT, unknown>)[NQL_RAW_FRAGMENT] ===
+		true
+	);
+}
+
+function isInsideGeneratedRange(
+	start: number,
+	end: number,
+	generatedRanges: readonly GeneratedParamRange[],
+): boolean {
+	return generatedRanges.some(
+		(range) => start >= range.start && end <= range.end,
+	);
+}
+
+function findReservedInternalParamReference(
+	query: string,
+	generatedRanges: readonly GeneratedParamRange[],
+): string | undefined {
+	RESERVED_INTERNAL_PARAM_RE.lastIndex = 0;
+	let match: RegExpExecArray | null;
+	while ((match = RESERVED_INTERNAL_PARAM_RE.exec(query)) !== null) {
+		const name = match[1] ?? '';
+		if (!name.startsWith('__p')) {
+			continue;
 		}
-		case 'string': {
-			if (value.includes('\n') || value.includes('\r')) {
-				throw new Error(
-					`nql\`...\`: cannot interpolate a string containing a newline at position ${index}. ` +
-						'NQL string literals do not support raw newline characters. ' +
-						'For dynamic NQL structure use the builder API (orm.select()). See issue #134.',
-				);
-			}
-			// SQL-style quoting: wrap in single-quotes, double any embedded single-quote.
-			// Matches NQL StringLiteral pattern: /'(?:[^']|'')*'/
-			const escaped = value.replaceAll("'", "''");
-			return `'${escaped}'`;
-		}
-		default: {
-			const typeName = value === undefined ? 'undefined' : typeof value;
-			throw new Error(
-				`nql\`...\`: cannot interpolate value of type "${typeName}" at position ${index}. ` +
-					'Only string, number, boolean, and null are supported; ' +
-					'for dynamic NQL fragments use the builder API (orm.select()). See issue #134.',
-			);
+
+		const start = match.index;
+		const end = start + match[0].length;
+		if (!isInsideGeneratedRange(start, end, generatedRanges)) {
+			return `Reserved NQL parameter namespace "__p" cannot be referenced by user source (${match[0]}).`;
 		}
 	}
+
+	return undefined;
+}
+
+function assembleNqlTemplate(
+	strings: TemplateStringsArray,
+	values: readonly unknown[],
+): AssembledNqlTemplate {
+	const params = Object.create(null) as Record<string, unknown>;
+	const generatedRanges: GeneratedParamRange[] = [];
+	let query = strings[0] ?? '';
+	let boundIndex = 0;
+
+	for (let i = 0; i < values.length; i++) {
+		const value = values[i];
+		if (isNqlRawFragment(value)) {
+			query += value.fragment;
+		} else {
+			const name = `__p${boundIndex++}`;
+			const placeholder = `:${name}`;
+			const start = query.length;
+			query += placeholder;
+			generatedRanges.push({ start, end: start + placeholder.length });
+			params[name] = value;
+		}
+		query += strings[i + 1] ?? '';
+	}
+
+	return {
+		query,
+		params,
+		hasBoundParams: boundIndex > 0,
+		sourceError: findReservedInternalParamReference(query, generatedRanges),
+	};
 }
 
 /**
  * Create an NQL template tag function.
  *
- * Each `${value}` in the template is escaped into a safe NQL literal before parsing.
- * Supported interpolation types: `string`, `number`, `boolean`, `null`.
- * Untrusted string input is therefore safe from NQL-syntax injection — it is always
- * wrapped in single-quotes with embedded quotes doubled (`''`).
- * For dynamic structural fragments (table names, column names, ORDER BY direction)
- * use the builder API (`orm.select()`). See issue #134 for upcoming `:param` binding.
+ * Each non-raw `${value}` in the template is bound as a generated named param.
+ * Use `nqlRaw()` only for trusted dynamic NQL structure.
  *
  * @param schemaDefinition - Schema definition for validation
  * @param model - ModelIR for plan execution
@@ -167,16 +216,13 @@ export function createNqlTag(
 		strings: TemplateStringsArray,
 		...values: unknown[]
 	): NqlBuilder<T> {
-		// Reconstruct the query string from template literal, escaping each
-		// interpolated value into a safe NQL literal via toNqlLiteral.
-		// Note: strings[0] is always defined for template literals.
-		let query: string = strings[0] ?? '';
-		for (let i = 0; i < values.length; i++) {
-			query += toNqlLiteral(values[i], i) + (strings[i + 1] ?? '');
-		}
+		const assembled = assembleNqlTemplate(strings, values);
 
 		return new NqlBuilderImpl<T>(
-			query,
+			assembled.query,
+			assembled.params,
+			assembled.hasBoundParams,
+			assembled.sourceError,
 			schemaDefinition,
 			model,
 			adapter,
@@ -192,6 +238,9 @@ export function createNqlTag(
 class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private _intent: QueryIntent | undefined;
 	private readonly query: string;
+	private readonly params: Readonly<Record<string, unknown>>;
+	private readonly hasBoundParams: boolean;
+	private readonly sourceError: string | undefined;
 	private readonly schemaDefinition: unknown;
 	private readonly model: ModelIR;
 	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: Reserved for future schema-scoping support
@@ -200,12 +249,18 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	constructor(
 		query: string,
+		params: Readonly<Record<string, unknown>>,
+		hasBoundParams: boolean,
+		sourceError: string | undefined,
 		schemaDefinition: unknown,
 		model: ModelIR,
 		adapter: Adapter<unknown> | undefined,
 		schemaName: string | undefined,
 	) {
 		this.query = query;
+		this.params = params;
+		this.hasBoundParams = hasBoundParams;
+		this.sourceError = sourceError;
 		this.schemaDefinition = schemaDefinition;
 		this.model = model;
 		this.adapter = adapter;
@@ -217,8 +272,16 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			return this._intent;
 		}
 
+		if (this.sourceError !== undefined) {
+			throw new Error(`NQL compilation failed: ${this.sourceError}`);
+		}
+
 		// Extract dynamic pseudo-column keywords from model configuration
-		const compilerOptions = extractPseudoColumnKeywords(this.model);
+		const compilerOptions: NqlCompilerOptions = {
+			...(extractPseudoColumnKeywords(this.model) ?? {}),
+			params: this.params,
+			allowInternalParams: true,
+		};
 
 		// Use integrated @dbsp/nql compiler with dynamic keywords
 		const result = nqlCompile(
@@ -230,7 +293,10 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		if (!result.success) {
 			const errors =
 				result.errors?.map((e) => e.message).join(', ') ?? 'Unknown error';
-			throw new Error(`NQL compilation failed: ${errors}`);
+			const rawHint = this.hasBoundParams
+				? ' If an interpolation was intended as NQL structure, wrap a trusted fragment with nqlRaw().'
+				: '';
+			throw new Error(`NQL compilation failed: ${errors}${rawHint}`);
 		}
 		if (result.ast?.mutation && !result.ast?.query) {
 			throw new Error(

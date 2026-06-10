@@ -6,7 +6,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createNqlTag, toNqlLiteral } from './nql.js';
+import { createNqlTag } from './nql.js';
 import { ref, schema } from './schema.js';
 
 // ============================================================================
@@ -237,12 +237,10 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 	});
 
 	describe('Template literal interpolation', () => {
-		it('supports string value interpolation (toNqlLiteral adds quotes automatically)', () => {
+		it('supports string value interpolation through generated params', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			// toNqlLiteral wraps strings in single-quotes automatically.
-			// Do NOT add surrounding quotes in the template — that produced ''Alice'' before.
 			const name = 'Alice';
 			const intent = nql<unknown>`users | where name = ${name}`.toIntentIR();
 
@@ -265,9 +263,8 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 		});
 
 		it('does not support structural interpolation (table names are identifiers, not NQL values)', () => {
-			// Table names are NQL identifiers — toNqlLiteral would emit 'users' (string literal)
-			// which the parser rejects in the table-name position.
-			// Use a literal table name in the template, or the builder API (orm.select('users')).
+			// Table names are NQL identifiers. Use a literal table name in the
+			// template, the builder API, or a trusted nqlRaw() fragment.
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
@@ -280,19 +277,15 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 });
 
 // ============================================================================
-// toNqlLiteral — injection safety and unit tests
+// Template interpolation — binding safety and round-trip correctness
 // ============================================================================
 
-describe('toNqlLiteral', () => {
+describe('nql tag value binding', () => {
 	describe('injection containment', () => {
 		it('contains a hostile string payload as a single literal value — cannot inject NQL structure', () => {
 			const s = createTestSchema();
 			const nql = createNqlTag(s.definition, s.model);
 
-			// If toNqlLiteral reverted to String(value), the payload x' or '1'='1 would
-			// break out of the string context and append an OR condition to the WHERE clause.
-			// With toNqlLiteral the payload is wrapped in single-quotes with the embedded
-			// quote doubled, producing 'x'' or ''1''=''1' — a single literal value, not NQL structure.
 			const payload = "x' or '1'='1";
 			const intent = nql<unknown>`users | where name = ${payload}`.toIntentIR();
 
@@ -394,128 +387,4 @@ describe('toNqlLiteral', () => {
 		});
 	});
 
-	describe('unsupported types throw', () => {
-		it('throws for object interpolation', () => {
-			expect(() => toNqlLiteral({}, 0)).toThrow(
-				'cannot interpolate value of type "object" at position 0',
-			);
-		});
-
-		it('throws for array interpolation', () => {
-			expect(() => toNqlLiteral([], 1)).toThrow(
-				'cannot interpolate value of type "object" at position 1',
-			);
-		});
-
-		it('throws for undefined interpolation', () => {
-			expect(() => toNqlLiteral(undefined, 2)).toThrow(
-				'cannot interpolate value of type "undefined" at position 2',
-			);
-		});
-
-		it('throws for NaN interpolation', () => {
-			expect(() => toNqlLiteral(Number.NaN, 0)).toThrow(
-				'cannot interpolate non-finite number',
-			);
-		});
-
-		it('throws for Infinity interpolation', () => {
-			expect(() => toNqlLiteral(Infinity, 0)).toThrow(
-				'cannot interpolate non-finite number',
-			);
-		});
-
-		it('throws for negative Infinity interpolation', () => {
-			expect(() => toNqlLiteral(-Infinity, 3)).toThrow(
-				'cannot interpolate non-finite number',
-			);
-		});
-
-		it('throws for 1e21 (exponential notation, magnitude ≥ 1e21)', () => {
-			// String(1e21) === '1e+21' — no exponent in NQL NumberLiteral pattern
-			expect(() => toNqlLiteral(1e21, 0)).toThrow(
-				'has no exact NQL numeric literal form (exponential notation)',
-			);
-		});
-
-		it('throws for 1e-7 (exponential notation, magnitude < ~1e-6)', () => {
-			// String(1e-7) === '1e-7'
-			expect(() => toNqlLiteral(1e-7, 1)).toThrow(
-				'has no exact NQL numeric literal form (exponential notation)',
-			);
-		});
-
-		it('throws for 1.5e-300 (deeply sub-normal exponential)', () => {
-			expect(() => toNqlLiteral(1.5e-300, 2)).toThrow(
-				'has no exact NQL numeric literal form (exponential notation)',
-			);
-		});
-
-		it('throws for string with raw newline', () => {
-			expect(() => toNqlLiteral('line1\nline2', 0)).toThrow(
-				'cannot interpolate a string containing a newline',
-			);
-		});
-
-		it('throws for string with carriage return', () => {
-			expect(() => toNqlLiteral('line1\rline2', 0)).toThrow(
-				'cannot interpolate a string containing a newline',
-			);
-		});
-	});
-
-	describe('direct unit tests', () => {
-		it('returns null for null', () => {
-			expect(toNqlLiteral(null, 0)).toBe('null');
-		});
-
-		it('returns true for boolean true', () => {
-			expect(toNqlLiteral(true, 0)).toBe('true');
-		});
-
-		it('returns false for boolean false', () => {
-			expect(toNqlLiteral(false, 0)).toBe('false');
-		});
-
-		it('returns bare integer string for positive number', () => {
-			expect(toNqlLiteral(42, 0)).toBe('42');
-		});
-
-		it('returns decimal string for float', () => {
-			expect(toNqlLiteral(3.14, 0)).toBe('3.14');
-		});
-
-		it('returns minus-prefixed literal for negative number', () => {
-			expect(toNqlLiteral(-5, 0)).toBe('-5');
-		});
-
-		it('returns minus-prefixed literal for negative float', () => {
-			expect(toNqlLiteral(-2.5, 0)).toBe('-2.5');
-		});
-
-		it('accepts 1e20 (stringifies as "100000000000000000000", no exponent)', () => {
-			// 1e20 is the last power-of-10 that JS stringifies without exponent notation
-			expect(toNqlLiteral(1e20, 0)).toBe('100000000000000000000');
-		});
-
-		it('accepts 0.5 (small non-exponential decimal)', () => {
-			expect(toNqlLiteral(0.5, 0)).toBe('0.5');
-		});
-
-		it('accepts 1000000 (large integer without exponent)', () => {
-			expect(toNqlLiteral(1000000, 0)).toBe('1000000');
-		});
-
-		it('wraps a plain string in single-quotes', () => {
-			expect(toNqlLiteral('hello', 0)).toBe("'hello'");
-		});
-
-		it('doubles embedded single-quotes', () => {
-			expect(toNqlLiteral("it's", 0)).toBe("'it''s'");
-		});
-
-		it('returns empty string literal for empty string', () => {
-			expect(toNqlLiteral('', 0)).toBe("''");
-		});
-	});
 });

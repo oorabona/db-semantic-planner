@@ -229,7 +229,9 @@ export {
 	createNqlTag,
 	extractPseudoColumnKeywords,
 	type NqlBuilder,
+	type NqlRawFragment,
 	type NqlTag,
+	nqlRaw,
 } from './nql.js';
 // Object Filter Syntax (DX-012)
 export {
