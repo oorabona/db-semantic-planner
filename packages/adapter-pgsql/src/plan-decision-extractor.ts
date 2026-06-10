@@ -8,6 +8,7 @@
  * All functions are stateless pure functions operating on PlanReport data.
  */
 
+import { deriveRelationPathFromIntentPath } from '@dbsp/core';
 import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
@@ -147,47 +148,6 @@ function resolveIncludeByPath(
 	return includes.find(
 		(i) => i.relation === relationName || i.via === relationName,
 	);
-}
-
-/**
- * Derive the canonical relation-dotted include path from the include tree.
- *
- * `intentPath` is positional (`include[1].include[0]`) and is not itself stable
- * identity. It is only used to walk `plan.intent.include` and recover the
- * relation-name chain (`definition.file`), which is the join/column identity.
- */
-function resolveRelationPathByIntentPath(
-	includes:
-		| Array<{
-				relation: string;
-				via?: string;
-				include?: unknown[];
-		  }>
-		| undefined,
-	intentPath: string | undefined,
-	relationName: string,
-): string {
-	if (includes && intentPath) {
-		const indexPattern = /include\[(\d+)\]/g;
-		let current: unknown[] = includes;
-		const path: string[] = [];
-		let execResult = indexPattern.exec(intentPath);
-
-		while (execResult !== null) {
-			const idx = parseInt(execResult[1]!, 10);
-			const item = current[idx] as
-				| { relation: string; via?: string; include?: unknown[] }
-				| undefined;
-			if (!item) break;
-			path.push(item.via ?? item.relation);
-			current = (item.include as unknown[]) ?? [];
-			execResult = indexPattern.exec(intentPath);
-		}
-
-		if (path.length > 0) return path.join('.');
-	}
-
-	return relationName;
 }
 
 /**
@@ -1723,13 +1683,14 @@ function toIncludeDecision(
 		type: 'includeStrategy',
 		choice: effectiveChoice,
 		relationName,
-		relationPath: resolveRelationPathByIntentPath(
-			plan.intent?.include as
-				| Array<{ relation: string; via?: string; include?: unknown[] }>
-				| undefined,
-			context.intentPath,
-			relationName,
-		),
+		relationPath:
+			deriveRelationPathFromIntentPath(
+				Array.isArray(plan.intent?.include)
+					? (plan.intent.include as readonly unknown[])
+					: undefined,
+				context.intentPath,
+				relationName,
+			) ?? relationName,
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
@@ -1759,13 +1720,14 @@ function toJoinIncludeDecision(
 	// would miss nested include intents that carry their own { where } conditions.
 	const intentPath = (context as unknown as Record<string, unknown>)
 		?.intentPath as string | undefined;
-	const relationPath = resolveRelationPathByIntentPath(
-		plan.intent?.include as
-			| Array<{ relation: string; via?: string; include?: unknown[] }>
-			| undefined,
-		intentPath,
-		relationName as string,
-	);
+	const relationPath =
+		deriveRelationPathFromIntentPath(
+			Array.isArray(plan.intent?.include)
+				? (plan.intent.include as readonly unknown[])
+				: undefined,
+			intentPath,
+			relationName as string,
+		) ?? (relationName as string);
 	const includeIntent = resolveIncludeByPath(
 		plan.intent?.include as
 			| Array<{

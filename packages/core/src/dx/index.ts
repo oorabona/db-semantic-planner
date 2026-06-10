@@ -272,6 +272,13 @@ export type {
 	SelectField,
 	TraversalDirection,
 } from './recursive-query-builder.js';
+// Relation path identity helpers shared by planner/adapter/hydration code.
+export {
+	countDistinctRelationPathsByName,
+	deriveRelationPathFromIntentPath,
+	type RelationPathIncludeNode,
+	type RelationPathUsage,
+} from './relation-paths.js';
 // ResultHydrator - handles result hydration and recursive include processing
 export {
 	type HydrateOptions,

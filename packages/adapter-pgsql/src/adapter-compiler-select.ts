@@ -5,6 +5,7 @@
  * @internal
  */
 
+import { countDistinctRelationPathsByName } from '@dbsp/core';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -584,7 +585,7 @@ function injectAndValidateRelationColumns(
  * when the same relation name appears through multiple paths.
  */
 function applyJoinHydrationPrefixes(decisions: PlanDecision[]): void {
-	const pathsByRelation = new Map<string, Set<string>>();
+	const usages: Array<{ relationName: string; relationPath: string }> = [];
 	for (const d of decisions) {
 		if (
 			d.type !== 'includeStrategy' ||
@@ -595,11 +596,10 @@ function applyJoinHydrationPrefixes(decisions: PlanDecision[]): void {
 		}
 		const relationName = d.relationName as string;
 		const relationPath = (d.relationPath as string | undefined) ?? relationName;
-		const paths = pathsByRelation.get(relationName) ?? new Set<string>();
-		paths.add(relationPath);
-		pathsByRelation.set(relationName, paths);
+		usages.push({ relationName, relationPath });
 	}
 
+	const pathCountsByRelation = countDistinctRelationPathsByName(usages);
 	for (const d of decisions) {
 		if (
 			d.type !== 'includeStrategy' ||
@@ -610,7 +610,7 @@ function applyJoinHydrationPrefixes(decisions: PlanDecision[]): void {
 		}
 		const relationName = d.relationName as string;
 		const relationPath = (d.relationPath as string | undefined) ?? relationName;
-		const usesFullPath = (pathsByRelation.get(relationName)?.size ?? 0) > 1;
+		const usesFullPath = (pathCountsByRelation.get(relationName) ?? 0) > 1;
 		(d as Mutable<PlanDecision>).hydrationPrefix = usesFullPath
 			? relationPath
 			: relationName;

@@ -32,6 +32,19 @@ const issue154Schema = schema({
 	},
 });
 
+const employeeSchema = schema({
+	employees: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		manager_id: ref('employees', {
+			as: 'manager',
+			inverse: 'reports',
+			nullable: true,
+			roles: { parent: 'manager', children: 'reports' },
+		}),
+	},
+});
+
 function buildOrm(model = issue154Schema.model) {
 	const adapter = createPgsqlCompileOnlyAdapter({ model });
 	return createOrm({ model, adapter });
@@ -197,6 +210,32 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		expect(sql).toContain('manager_1.name AS grandmanager_name');
 	});
 
+	it('builder-driven self-referential chain keeps the second hop anchored to the first', () => {
+		const orm = buildOrm(employeeSchema.model);
+		const sql = compact(
+			orm
+				.select('employees')
+				.include('manager', {
+					join: 'left',
+					select: { type: 'fields', fields: ['name'] },
+				})
+				.include('manager.manager', {
+					join: 'left',
+					select: { type: 'fields', fields: ['name'] },
+				})
+				.columns(['id'])
+				.dump().sql,
+		);
+
+		expect(joinCount(sql)).toBe(2);
+		expect(sql).toMatch(/LEFT JOIN employees AS manager\b/);
+		expect(sql).toMatch(/LEFT JOIN employees AS manager_1\b/);
+		expect(sql).toContain('employees.manager_id = manager.id');
+		expect(sql).toContain('manager.manager_id = manager_1.id');
+		expect(sql).toContain('manager.name AS "manager.name"');
+		expect(sql).toContain('manager_1.name AS "manager.manager.name"');
+	});
+
 	it('same path twice with identical options dedupes, but conflicting join types throw', () => {
 		const orm = buildOrm();
 		const identical = compact(
@@ -243,6 +282,28 @@ describe('FIX-154: path-based join identity for multi-path includes', () => {
 		expect(joinCount(sql)).toBe(1);
 		expect(sql).toContain('definition.id AS "definition.id"');
 		expect(sql).toContain('definition.file_id AS "definition.file_id"');
+	});
+
+	it('same path twice with same join type merges where conditions with AND', () => {
+		const orm = buildOrm();
+		const dump = orm
+			.select('uses')
+			.include('definition', {
+				join: 'inner',
+				where: eq('id', 100),
+			})
+			.include('definition', {
+				join: 'inner',
+				where: eq('file_id', 10),
+			})
+			.dump();
+		const sql = compact(dump.sql);
+
+		expect(joinCount(sql)).toBe(1);
+		expect(sql).toContain(
+			'WHERE definition.id = $1 AND definition.file_id = $2',
+		);
+		expect(dump.params).toEqual([100, 10]);
 	});
 
 	it('via-disambiguated includes are distinct paths with scoped filters', () => {

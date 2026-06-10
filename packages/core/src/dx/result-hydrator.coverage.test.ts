@@ -718,6 +718,47 @@ describe('ResultHydrator', () => {
 			expect(results[0]).not.toHaveProperty('file.path');
 		});
 
+		it('keeps a null parent when deeper fallback keys are present', () => {
+			const model = createMockModel();
+			const hydrator = new ResultHydrator(model as any, 'uses');
+			const results = [
+				{
+					id: 1000,
+					'definition.id': null,
+					'definition.file.id': 10,
+					'definition.file.path': '/orphaned-child.ts',
+				},
+			];
+			const report = makePlanReport([
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'definition',
+						relationPath: 'definition',
+					},
+				},
+				{
+					type: 'include-strategy',
+					choice: 'join',
+					context: {
+						relation: 'file',
+						relationPath: 'definition.file',
+						hydrationPrefix: 'definition.file',
+					},
+				},
+			]);
+
+			hydrator.hydrateJoinIncludes(results, report);
+
+			expect(results[0]).toEqual({
+				id: 1000,
+				definition: null,
+			});
+			expect(results[0]).not.toHaveProperty('definition.file.id');
+			expect(results[0]).not.toHaveProperty('definition.file.path');
+		});
+
 		it('does not touch rows without matching prefixed keys', () => {
 			const model = createMockModel();
 			const hydrator = new ResultHydrator(model as any, 'posts');

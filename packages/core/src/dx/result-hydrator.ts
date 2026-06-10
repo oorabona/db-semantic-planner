@@ -20,6 +20,10 @@ import { planRecursive } from '../planner.js';
 import { RelationNotFoundError } from './errors.js';
 import { hydrateJsonAggIncludes as hydrateJsonAggIncludesShared } from './hydration-utils.js';
 import type { RecursiveIncludeConfig } from './intent-builder.js';
+import {
+	countDistinctRelationPathsByName,
+	deriveRelationPathFromIntentPath,
+} from './relation-paths.js';
 
 // ============================================================================
 // Helper Types
@@ -87,36 +91,13 @@ function resolveJoinIncludePath(
 		stringProp(decisionRecord, 'relationName');
 	const intentPath = stringProp(contextRecord, 'intentPath');
 
-	if (Array.isArray(planReport.intent?.include) && intentPath) {
-		const indexPattern = /include\[(\d+)\]/g;
-		let current: unknown[] = planReport.intent.include as unknown[];
-		const path: string[] = [];
-		let execResult = indexPattern.exec(intentPath);
-
-		while (execResult !== null) {
-			const rawIndex = execResult[1];
-			if (rawIndex === undefined) break;
-			const idx = parseInt(rawIndex, 10);
-			const item = current[idx] as
-				| { relation?: unknown; via?: unknown; include?: unknown[] }
-				| undefined;
-			if (!item) break;
-			const segment =
-				typeof item.via === 'string'
-					? item.via
-					: typeof item.relation === 'string'
-						? item.relation
-						: undefined;
-			if (!segment) break;
-			path.push(segment);
-			current = item.include ?? [];
-			execResult = indexPattern.exec(intentPath);
-		}
-
-		if (path.length > 0) return path.join('.');
-	}
-
-	return fallbackRelation;
+	return deriveRelationPathFromIntentPath(
+		Array.isArray(planReport.intent?.include)
+			? (planReport.intent.include as readonly unknown[])
+			: undefined,
+		intentPath,
+		fallbackRelation,
+	);
 }
 
 function lastRelationSegment(path: string): string {
@@ -146,7 +127,6 @@ function collectJoinHydrationInfos(
 		relationPath: string;
 		hydrationPrefix?: string;
 	}> = [];
-	const pathsByRelationName = new Map<string, Set<string>>();
 
 	for (const decision of planReport.decisions) {
 		if (decision.type !== 'include-strategy' || decision.choice !== 'join') {
@@ -169,18 +149,15 @@ function collectJoinHydrationInfos(
 			relationPath,
 			...(hydrationPrefix && { hydrationPrefix }),
 		});
-
-		const paths = pathsByRelationName.get(relationName) ?? new Set<string>();
-		paths.add(relationPath);
-		pathsByRelationName.set(relationName, paths);
 	}
 
+	const pathCountsByRelationName = countDistinctRelationPathsByName(candidates);
 	const infosByPath = new Map<string, JoinHydrationInfo>();
 	for (const candidate of candidates) {
 		if (infosByPath.has(candidate.relationPath)) continue;
 
 		const usesFullPath =
-			(pathsByRelationName.get(candidate.relationName)?.size ?? 0) > 1;
+			(pathCountsByRelationName.get(candidate.relationName) ?? 0) > 1;
 		const keyPrefix =
 			candidate.hydrationPrefix ??
 			(usesFullPath ? candidate.relationPath : candidate.relationName);
@@ -222,8 +199,9 @@ function assignNestedValue(
 		if (!segment) return;
 		const existing = cursor[segment];
 		if (existing === null) {
-			if (value === null) return;
-			cursor[segment] = {};
+			// Parent-null precedence: a LEFT JOIN miss for an ancestor must not be
+			// resurrected by deeper fallback keys from the same flat row.
+			return;
 		} else if (typeof existing !== 'object' || Array.isArray(existing)) {
 			cursor[segment] = {};
 		}
