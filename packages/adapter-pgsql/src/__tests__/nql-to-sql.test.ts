@@ -663,6 +663,41 @@ describe('NQL → SQL compile-only pipeline', () => {
 		]);
 	});
 
+	it('binds named-param null in comparisons instead of emitting literal SQL NULL', () => {
+		const { sql, params } = nqlToSQLWithNamedParams('users | where name = :p', {
+			p: null,
+		});
+
+		expect(sql).toContain('users.name = $1');
+		expect(sql).not.toContain('users.name = null');
+		expect(params).toEqual([null]);
+	});
+
+	it('keeps source literal null comparisons as SQL NULL literals', () => {
+		const { sql, params } = nqlToSQLWithParams('users | where name = null');
+
+		expect(sql).toContain('users.name = null');
+		expect(params).toEqual([]);
+	});
+
+	it('binds globally forged expression-value brands intact in NQL CASE params', () => {
+		const forgedMarker = Symbol.for('@dbsp/internal/expression-value-intent');
+		const forged = {
+			kind: 'literal',
+			value: 'UNWRAPPED',
+			[forgedMarker]: true,
+		};
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :forged else :fallback end as marker',
+			{ forged, fallback: 'FALLBACK' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('$2');
+		expect(params).toEqual([true, forged, 'FALLBACK']);
+		expect(params).not.toContain('UNWRAPPED');
+	});
+
 	it('throws a structured error for unknown SELECT expression kinds', () => {
 		expect(() =>
 			intentToDecisions(

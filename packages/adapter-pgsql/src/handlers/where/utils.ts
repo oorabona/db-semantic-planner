@@ -4,6 +4,7 @@
  */
 
 import { isFieldRef } from '@dbsp/types';
+import { isParamExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
@@ -36,6 +37,11 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
  * If value has a pre-assigned `paramIndex` (from PlanDecision), use it directly.
  */
 export function buildParamRef(value: unknown, state: CompilerState): Node {
+	if (isParamExpressionValueIntent(value)) {
+		state.paramIndex++;
+		state.parameters.push(value.value);
+		return createParamRef(state.paramIndex);
+	}
 	if (isParamRef(value)) {
 		state.parameters.push(value.value);
 		return createParamRef(value.paramIndex);
@@ -55,6 +61,14 @@ export function compileValue(
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
 ): Node {
+	if (isParamExpressionValueIntent(value)) {
+		const idx = ++state.paramIndex;
+		state.parameters.push(value.value);
+		return columnType
+			? createTypeCastParamRef(idx, columnType)
+			: createParamRef(idx);
+	}
+
 	if (value === null || value === undefined) {
 		return nullConstNode();
 	}

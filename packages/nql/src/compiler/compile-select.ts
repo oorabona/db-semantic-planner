@@ -22,6 +22,7 @@ import {
 	NQL_SELECT_JSON_FUNCTIONS,
 	NQL_SELECT_SCALAR_FUNCTIONS,
 } from '@dbsp/types';
+import { markExpressionValueIntent } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlCaseExpression,
@@ -44,19 +45,6 @@ import {
 	resolveIntegerCount,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
-
-const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(
-	'@dbsp/internal/expression-value-intent',
-);
-
-function markExpressionValueIntent<T extends Record<string, unknown>>(
-	intent: T,
-): T {
-	Object.defineProperty(intent, EXPRESSION_VALUE_INTENT_MARKER, {
-		value: true,
-	});
-	return intent;
-}
 
 function paramExpressionIntent(
 	value: unknown,

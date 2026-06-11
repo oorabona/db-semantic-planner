@@ -1,10 +1,11 @@
+import {
+	isLiteralExpressionValueIntent,
+	isParamExpressionValueIntent,
+	unwrapExpressionValueIntent,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { createParamRef } from '../../param-ref.js';
 import type { CompilerState } from '../types.js';
-
-const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(
-	'@dbsp/internal/expression-value-intent',
-);
 
 interface ParamExpressionLike {
 	readonly kind: 'param';
@@ -19,33 +20,17 @@ interface LiteralExpressionLike {
 export function isParamExpressionLike(
 	value: unknown,
 ): value is ParamExpressionLike {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		(value as Record<string, unknown>).kind === 'param' &&
-		'value' in value &&
-		(value as Record<PropertyKey, unknown>)[EXPRESSION_VALUE_INTENT_MARKER] ===
-			true
-	);
+	return isParamExpressionValueIntent(value);
 }
 
 export function isLiteralExpressionLike(
 	value: unknown,
 ): value is LiteralExpressionLike {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		(value as Record<string, unknown>).kind === 'literal' &&
-		'value' in value &&
-		(value as Record<PropertyKey, unknown>)[EXPRESSION_VALUE_INTENT_MARKER] ===
-			true
-	);
+	return isLiteralExpressionValueIntent(value);
 }
 
 export function unwrapParamExpression(value: unknown): unknown {
-	return isParamExpressionLike(value) || isLiteralExpressionLike(value)
-		? value.value
-		: value;
+	return unwrapExpressionValueIntent(value);
 }
 
 export function bindParameter(value: unknown, state: CompilerState): Node {

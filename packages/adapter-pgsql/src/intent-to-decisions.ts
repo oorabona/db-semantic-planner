@@ -12,6 +12,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
@@ -517,7 +518,7 @@ function convertComparison(
 	cond: FlatWhereFields,
 	rootTable: string,
 ): PlanDecision {
-	const rawValue = cond.value;
+	const rawValue = wrapParamValueIfProvenanceMarked(cond, cond.value);
 	// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
 	// FieldRef so that compileValueOrFieldRef() treats it as a column reference,
 	// not a parameter.  We use isOuterRef() (checks outer:true) rather than
@@ -926,7 +927,7 @@ export function convertWhereCondition(
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.reversed ? 'jsonContainedBy' : 'jsonContains',
-				value: cond.value,
+				value: wrapParamValueIfProvenanceMarked(cond, cond.value),
 				table: rootTable,
 			};
 		case 'any':

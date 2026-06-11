@@ -5,6 +5,7 @@
  * Handlers are registered at module initialization and looked up by operator/type.
  */
 
+import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import type {
@@ -262,7 +263,7 @@ function normalizeToDecision(input: Decision): Decision {
 					type: 'where',
 					column: raw.field as string,
 					operator: 'jsonComparison',
-					value: raw.value,
+					value: wrapParamValueIfProvenanceMarked(raw, raw.value),
 					jsonPath: raw.jsonPath as readonly string[],
 					jsonMode: (raw.jsonMode as 'json' | 'text') ?? 'text',
 				};
@@ -271,7 +272,7 @@ function normalizeToDecision(input: Decision): Decision {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.operator as string,
-				value: raw.value,
+				value: wrapParamValueIfProvenanceMarked(raw, raw.value),
 			};
 		}
 		case 'and':
@@ -374,7 +375,7 @@ function normalizeToDecision(input: Decision): Decision {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.reversed ? 'jsonContainedBy' : 'jsonContains',
-				value: raw.value,
+				value: wrapParamValueIfProvenanceMarked(raw, raw.value),
 			};
 		case 'jsonExists':
 			return {

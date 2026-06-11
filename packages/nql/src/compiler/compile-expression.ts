@@ -14,6 +14,7 @@ import type {
 	WhereJsonExistsIntent,
 	WhereRangeIntent,
 } from '@dbsp/types';
+import { markParamValueProvenance } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlAnyExpression,
@@ -48,6 +49,15 @@ import type { CompilerContext, CompilerFns } from './types.js';
 
 /** Maximum number of items allowed in an ANY(:param) array to prevent memory pressure. */
 export const MAX_ANY_ITEMS = 10000;
+
+function markIfNamedParamValue<T extends object>(
+	intent: T,
+	valueExpr: NqlExpression,
+): T {
+	return valueExpr.type === 'namedParam'
+		? markParamValueProvenance(intent)
+		: intent;
+}
 
 function compileLogical(
 	expr: NqlExpression,
@@ -134,7 +144,7 @@ function compileComparison(
 			aliasContext,
 			outerAliases,
 		);
-		return {
+		const intent = {
 			kind: 'comparison',
 			field: baseField,
 			operator,
@@ -142,6 +152,7 @@ function compileComparison(
 			jsonPath: jsonLeft.path,
 			jsonMode: jsonLeft.mode,
 		} satisfies WhereComparisonIntent;
+		return markIfNamedParamValue(intent, comp.right);
 	}
 
 	// JSON function on LHS: json_extract_text(data, 'key') = 'val'
@@ -178,7 +189,7 @@ function compileComparison(
 				aliasContext,
 				outerAliases,
 			);
-			return {
+			const intent = {
 				kind: 'comparison',
 				field: baseField,
 				operator,
@@ -186,6 +197,7 @@ function compileComparison(
 				jsonPath: keys,
 				jsonMode: fn === 'json_extract' ? 'json' : 'text',
 			} satisfies WhereComparisonIntent;
+			return markIfNamedParamValue(intent, comp.right);
 		}
 	}
 
@@ -216,12 +228,13 @@ function compileComparison(
 	const operator = mapComparisonOperator(comp.operator);
 	const value = resolveFilterValue(comp.right, ctx, aliasContext, outerAliases);
 
-	return {
+	const intent = {
 		kind: 'comparison',
 		field,
 		operator,
 		value,
-	};
+	} satisfies WhereComparisonIntent;
+	return markIfNamedParamValue(intent, comp.right);
 }
 
 function compileRange(
@@ -501,12 +514,13 @@ function compileJson(
 				aliasContext,
 				outerAliases,
 			);
-			return {
+			const intent = {
 				kind: 'jsonContains',
 				field: jsonField,
 				value: jsonValue,
 				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
+			return markIfNamedParamValue(intent, expr.args[1]!);
 		}
 		if (fn === 'json_exists') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
@@ -573,12 +587,13 @@ function compileJson(
 		aliasContext,
 		outerAliases,
 	);
-	return {
+	const intent = {
 		kind: 'jsonContains',
 		field: jsonField,
 		value: jsonValue,
 		reversed: jsonComp.operator === '<@',
 	} satisfies WhereJsonContainsIntent;
+	return markIfNamedParamValue(intent, jsonComp.right);
 }
 
 function compileRelationFilter(

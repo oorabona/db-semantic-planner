@@ -23,6 +23,7 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
+import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	andExpr,
@@ -925,10 +926,14 @@ export function compileWhereIntent(
 	// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,
 	// jsonContains, jsonExists — plus pass-through for unknown kinds.
 	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
+	const rawIntent = intent as unknown as Record<string, unknown>;
 	const bridged = needsColumn
 		? ({
 				...intent,
-				column: (intent as unknown as Record<string, unknown>).field,
+				column: rawIntent.field,
+				...('value' in rawIntent && {
+					value: wrapParamValueIfProvenanceMarked(intent, rawIntent.value),
+				}),
 			} as unknown as Decision)
 		: (intent as unknown as Decision);
 	return dispatcher(bridged, handlerCtx, ctx.paramState);
