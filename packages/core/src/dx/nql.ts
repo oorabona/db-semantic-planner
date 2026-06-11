@@ -21,6 +21,7 @@ import {
 	NqlLexer,
 	compile as nqlCompile,
 } from '@dbsp/nql';
+import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
 import type { Adapter, Dump } from '../adapter.js';
 import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -343,10 +344,14 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 
 		// Extract dynamic pseudo-column keywords from model configuration
-		const compilerOptions: NqlCompilerOptions = {
+		const compilerOptions = {
 			...(extractPseudoColumnKeywords(this.model) ?? {}),
 			params: this.params,
-			allowInternalParams: true,
+			[NQL_INTERNAL_COMPILER_OPTIONS]: { allowInternalParams: true },
+		} satisfies NqlCompilerOptions & {
+			readonly [NQL_INTERNAL_COMPILER_OPTIONS]: {
+				readonly allowInternalParams: true;
+			};
 		};
 
 		// Use integrated @dbsp/nql compiler with dynamic keywords

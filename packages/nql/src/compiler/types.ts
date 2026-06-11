@@ -9,11 +9,19 @@ import type {
 	SetOperationIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
 import type { NqlExpression } from '../parser/ast.js';
 import type { ColumnValidator } from './column-validator.js';
 
 export type CompileResult = CompiledNqlQuery;
 export type { CompiledNqlQuery };
+
+/** @internal */
+export interface NqlInternalCompilerOptions {
+	readonly [NQL_INTERNAL_COMPILER_OPTIONS]?: {
+		readonly allowInternalParams?: boolean;
+	};
+}
 
 /**
  * Duck-type interface for schema-based column validation.
@@ -47,8 +55,6 @@ export interface NqlCompilerOptions {
 	readonly maxAnyItems?: number;
 	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
 	readonly allowUnfilteredMutations?: boolean;
-	/** @internal Allow the core nql tag to pass generated __pN params after it has scanned raw/static source. */
-	readonly allowInternalParams?: boolean;
 }
 
 /**

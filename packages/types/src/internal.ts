@@ -11,5 +11,15 @@
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
 
+/**
+ * @internal Shared compiler-options marker for trusted NQL package internals.
+ *
+ * Deliberately uses Symbol(), not Symbol.for(), so knowing the description does
+ * not let callers forge the marker through the global symbol registry.
+ */
+export const NQL_INTERNAL_COMPILER_OPTIONS: unique symbol = Symbol(
+	'@dbsp/nql/internalCompilerOptions',
+);
+
 // Re-export all public types for convenience
 export * from './index.js';

@@ -7,6 +7,7 @@ import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-
 import type { Adapter } from '../adapter.js';
 import type { PlanReport } from '../planner.js';
 import { createNqlTag, nqlRaw } from './nql.js';
+import { createOrm } from './orm.js';
 import { schema } from './schema.js';
 
 function createParamTestTag() {
@@ -88,6 +89,24 @@ function findFirstObject(
 }
 
 describe('FEAT-134 NQL tag params', () => {
+	it('compiles public orm.nql tag interpolations through dump', () => {
+		const db = createParamTestSchema();
+		const orm = createOrm({
+			schema: db,
+			adapter: createPgsqlCompileOnlyAdapter(),
+		});
+
+		const dump = orm.nql<{
+			id: number;
+			name: string;
+		}>`users | where id = ${5} and name = ${"O'Brien"}`.dump();
+
+		expect(dump.params).toEqual([5, "O'Brien"]);
+		expect(dump.sql).toMatch(/\$1\b/);
+		expect(dump.sql).toMatch(/\$2\b/);
+		expect(dump.sql).not.toContain("O'Brien");
+	});
+
 	it('binds scalar interpolations as SQL params', () => {
 		const nql = createParamTestTag();
 		const dump = nql<{

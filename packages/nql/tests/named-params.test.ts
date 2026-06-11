@@ -5,6 +5,7 @@ import type {
 	WhereLikeIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import type { NqlCompilerOptions } from '../src/index.js';
 import { compile, parse, parseCst } from '../src/index.js';
 import type {
 	NqlLimitClause,
@@ -221,6 +222,35 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		const keyResult = compileFail('users | where id = :p', { p: 1, __p0: 2 });
 		expect(keyResult.success).toBe(false);
 		expect(keyResult.errors[0]?.message).toContain('__p0');
+
+		const legacyOptionAttempt = {
+			params: { __p0: 1 },
+			// @ts-expect-error allowInternalParams is intentionally not public API.
+			allowInternalParams: true,
+		} satisfies NqlCompilerOptions;
+		const legacyOptionResult = compile(
+			'users | where id = :__p0',
+			null,
+			undefined,
+			legacyOptionAttempt,
+		);
+		expect(legacyOptionResult.success).toBe(false);
+		expect(legacyOptionResult.errors[0]?.message).toContain('__p0');
+
+		const forgedSymbolAttempt = {
+			params: { __p0: 1 },
+			[Symbol.for('@dbsp/nql/internalCompilerOptions')]: {
+				allowInternalParams: true,
+			},
+		};
+		const forgedSymbolResult = compile(
+			'users | where id = :__p0',
+			null,
+			undefined,
+			forgedSymbolAttempt,
+		);
+		expect(forgedSymbolResult.success).toBe(false);
+		expect(forgedSymbolResult.errors[0]?.message).toContain('__p0');
 	});
 
 	it('rejects NaN and Infinity globally, including ANY array elements', () => {
