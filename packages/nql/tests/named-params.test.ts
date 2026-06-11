@@ -323,6 +323,25 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		);
 	});
 
+	it('resolves named params in aggregate function args as bound values', () => {
+		for (const [fn, value] of [
+			['sum', 7],
+			['avg', 3],
+		] as const) {
+			const result = compileOk(`users | select ${fn}(:p) as value`, {
+				p: value,
+			});
+			const aggregate = (
+				result.query!.select as {
+					columns: Array<{ extraArgs?: unknown[]; field?: unknown }>;
+				}
+			).columns[0]!;
+
+			expect(aggregate.field).toBeUndefined();
+			expect(aggregate.extraArgs?.[0]).toEqual({ kind: 'param', value });
+		}
+	});
+
 	it('accepts BigInt named params as BETWEEN bounds', () => {
 		const result = compileOk('users | where age between :lo and :hi', {
 			lo: 1n,

@@ -627,6 +627,22 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual(['x']);
 	});
 
+	it('compiles NQL aggregate named params as bound function args', () => {
+		const sum = nqlToSQLWithNamedParams('users | select sum(:p) as total', {
+			p: 7,
+		});
+		expect(sum.sql).toContain('sum($1)');
+		expect(sum.sql).toContain('as total');
+		expect(sum.params).toEqual([7]);
+
+		const avg = nqlToSQLWithNamedParams('users | select avg(:p) as mean', {
+			p: 3,
+		});
+		expect(avg.sql).toContain('avg($1)');
+		expect(avg.sql).toContain('as mean');
+		expect(avg.params).toEqual([3]);
+	});
+
 	it('binds top-level NQL SELECT named params', () => {
 		const { sql, params } = nqlToSQLWithNamedParams('users | select :p as x', {
 			p: 5,

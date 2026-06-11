@@ -76,8 +76,20 @@ export function handleAggregateExpression(
 	const aggAs = expr.as as string | undefined;
 	const aggDistinct = expr.distinct as boolean | undefined;
 	const aggFilter = expr.filter as WhereIntent | undefined;
+	const aggExtraArgs = Array.isArray(expr.extraArgs)
+		? expr.extraArgs
+		: undefined;
 
-	if (aggFunc === 'count' && !aggField) {
+	if (!aggField && aggExtraArgs?.length) {
+		const decision: Mutable<PlanDecision> = {
+			type: 'selectNqlFunction',
+			function: aggFunc,
+			args: aggExtraArgs,
+			table: rootTable,
+		};
+		if (aggAs) decision.alias = aggAs;
+		decisions.push(decision);
+	} else if (aggFunc === 'count' && !aggField) {
 		const decision: Mutable<PlanDecision> = {
 			type: 'selectFunction',
 			function: 'count',

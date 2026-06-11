@@ -112,6 +112,23 @@ describe('Column Validation', () => {
 			expect(result.success).toBe(true);
 		});
 
+		it('should accept valid SELECT function argument columns', () => {
+			const result = compile('users | select lower(name) as x', schema);
+			expect(result.success).toBe(true);
+		});
+
+		it('should not validate named params in SELECT function args as columns', () => {
+			const result = compile(
+				'users | select lower(:nope) as x',
+				schema,
+				undefined,
+				{
+					params: { nope: 'alice' },
+				},
+			);
+			expect(result.success).toBe(true);
+		});
+
 		it('should accept valid relation path (relation.column)', () => {
 			const result = compile('orders | select id, user.name', schema);
 			expect(result.success).toBe(true);
@@ -225,6 +242,29 @@ describe('Column Validation', () => {
 			expect(result.success).toBe(false);
 			expect(result.errors[0]?.message).toContain(
 				"Column 'totall' does not exist on table 'orders'",
+			);
+		});
+
+		it('should reject non-existent column in SELECT function args', () => {
+			const result = compile('users | select lower(nope) as x', schema);
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.code).toBe('ERR-SEM-001');
+			expect(result.errors[0]?.message).toContain(
+				"Column 'nope' does not exist on table 'users'",
+			);
+		});
+
+		it('should reject non-existent column in nested SELECT function arg expressions', () => {
+			const result = compile(
+				'users | select round(nope + :d) as x',
+				schema,
+				undefined,
+				{ params: { d: 1 } },
+			);
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.code).toBe('ERR-SEM-001');
+			expect(result.errors[0]?.message).toContain(
+				"Column 'nope' does not exist on table 'users'",
 			);
 		});
 

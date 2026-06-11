@@ -97,6 +97,53 @@ const SELECT_SCALAR_FUNCTION_NAMES: ReadonlySet<string> = new Set([
 	...NQL_SELECT_SCALAR_FUNCTIONS,
 ]);
 
+function validateSelectPathExpression(
+	expr: NqlPathExpression,
+	ctx: CompilerContext,
+): void {
+	if (!ctx.currentFromTable || !ctx.validator) return;
+
+	const { segments } = expr;
+	if (segments.length === 1) {
+		ctx.validator.validateColumn(ctx.currentFromTable, segments[0]!);
+		return;
+	}
+
+	const firstSegmentLower = segments[0]!.toLowerCase();
+	if (ctx.pseudoColumnKeywords.has(firstSegmentLower)) {
+		let i = 1;
+		while (
+			i < segments.length &&
+			ctx.pseudoColumnKeywords.has(segments[i]!.toLowerCase())
+		) {
+			i++;
+		}
+		if (i < segments.length) {
+			ctx.validator.validateColumn(ctx.currentFromTable, segments[i]!);
+		}
+		return;
+	}
+
+	const targetTable = ctx.validator.resolveRelationTarget(
+		ctx.currentFromTable,
+		segments[0]!,
+	);
+	if (targetTable) {
+		ctx.validator.validateColumn(targetTable, segments[segments.length - 1]!);
+	}
+}
+
+function expressionToValidatedField(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+): string | null {
+	const field = expressionToField(expr);
+	if (field && expr.type === 'path') {
+		validateSelectPathExpression(expr, ctx);
+	}
+	return field;
+}
+
 /**
  * Compile a SELECT clause to a SelectIntent.
  */
@@ -133,12 +180,7 @@ export function compileSelectClause(
 			const expr = item.expression;
 			if (expr.type === 'path' && expr.segments.length === 1 && !item.alias) {
 				// Simple field reference
-				if (ctx.currentFromTable) {
-					ctx.validator?.validateColumn(
-						ctx.currentFromTable,
-						expr.segments[0]!,
-					);
-				}
+				validateSelectPathExpression(expr, ctx);
 				simpleFields.push(expr.segments[0]!);
 			} else {
 				hasExpressions = true;
@@ -167,7 +209,7 @@ function expressionToSelectValue(
 	ctx: CompilerContext,
 	fns: CompilerFns,
 ): unknown {
-	const field = expressionToField(valueExpr);
+	const field = expressionToValidatedField(valueExpr, ctx);
 	if (field) return field;
 	if (valueExpr.type === 'namedParam') {
 		return expressionToValue(valueExpr, ctx);
@@ -199,7 +241,7 @@ function expressionToFunctionArg(
 	ctx: CompilerContext,
 	fns: CompilerFns,
 ): unknown {
-	const field = expressionToField(valueExpr);
+	const field = expressionToValidatedField(valueExpr, ctx);
 	if (field) return field;
 	if (valueExpr.type === 'namedParam') {
 		return expressionToValue(valueExpr, ctx);
@@ -253,7 +295,8 @@ function compileSelectExpression(
 	if (expr.type === 'function') {
 		const fn = expr.name.toLowerCase();
 		if (isAggregateFunction(fn)) {
-			let field: string;
+			let field: string | undefined;
+			let firstArgAsExtraArg: unknown[] | undefined;
 			if (expr.args.length === 0) {
 				if (fn === 'count') {
 					field = '*';
@@ -263,10 +306,14 @@ function compileSelectExpression(
 					);
 				}
 			} else {
-				field =
-					expressionToField(expr.args[0]!) ?? expressionToSql(expr.args[0]!);
-				if (ctx.currentFromTable && field !== '*' && !field.includes('.')) {
-					ctx.validator?.validateColumn(ctx.currentFromTable, field);
+				const firstArg = expr.args[0]!;
+				const firstField = expressionToValidatedField(firstArg, ctx);
+				if (firstField) {
+					field = firstField;
+				} else if (firstArg.type === 'namedParam') {
+					firstArgAsExtraArg = [expressionToValue(firstArg, ctx)];
+				} else {
+					field = expressionToSql(firstArg);
 				}
 			}
 			const extraArgs =
@@ -275,17 +322,22 @@ function compileSelectExpression(
 							.slice(1)
 							.map(
 								(a) =>
-									expressionToField(a) ?? expressionToSelectValue(a, ctx, fns),
+									expressionToValidatedField(a, ctx) ??
+									expressionToSelectValue(a, ctx, fns),
 							)
 					: undefined;
-			return {
+			const aggregateArgs = firstArgAsExtraArg
+				? [...firstArgAsExtraArg, ...(extraArgs ?? [])]
+				: extraArgs;
+			const aggregateIntent: Record<string, unknown> = {
 				kind: 'aggregate',
 				function: fn as AggregateFunction,
-				field,
+				...(field !== undefined && { field }),
 				...(exprItem.alias !== undefined && { as: exprItem.alias }),
 				...(expr.distinct && { distinct: true }),
-				...(extraArgs && { extraArgs }),
+				...(aggregateArgs && { extraArgs: aggregateArgs }),
 			};
+			return aggregateIntent as unknown as ExpressionIntent;
 		}
 		// JSON function notation → same intent as operator notation
 		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias, ctx);
@@ -315,7 +367,7 @@ function compileSelectExpression(
 		let field: string | undefined;
 		if (windowExpr.args.length > 0) {
 			field =
-				expressionToField(windowExpr.args[0]!) ??
+				expressionToValidatedField(windowExpr.args[0]!, ctx) ??
 				expressionToSql(windowExpr.args[0]!);
 		}
 
@@ -334,7 +386,7 @@ function compileSelectExpression(
 		const partitionBy =
 			windowExpr.partitionBy.length > 0
 				? windowExpr.partitionBy.map((e) => {
-						const f = expressionToField(e) ?? expressionToSql(e);
+						const f = expressionToValidatedField(e, ctx) ?? expressionToSql(e);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
 							ctx.validator?.validateColumn(ctx.currentFromTable, f);
 						}
@@ -346,7 +398,8 @@ function compileSelectExpression(
 			windowExpr.orderBy.length > 0
 				? windowExpr.orderBy.map((o) => {
 						const f =
-							expressionToField(o.expression) ?? expressionToSql(o.expression);
+							expressionToValidatedField(o.expression, ctx) ??
+							expressionToSql(o.expression);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
 							ctx.validator?.validateColumn(ctx.currentFromTable, f);
 						}
@@ -404,9 +457,7 @@ function compileSelectExpression(
 	// Simple path expression (single segment, e.g., "name")
 	if (expr.type === 'path' && expr.segments.length === 1) {
 		const column = expr.segments[0]!;
-		if (ctx.currentFromTable) {
-			ctx.validator?.validateColumn(ctx.currentFromTable, column);
-		}
+		validateSelectPathExpression(expr, ctx);
 		if (exprItem.alias) {
 			return { kind: 'columnAlias', column, alias: exprItem.alias };
 		}
@@ -431,8 +482,8 @@ function compileSelectExpression(
 		expr.type === 'binary' &&
 		['+', '-', '*', '/', '%'].includes(expr.operator)
 	) {
-		const leftField = expressionToField(expr.left);
-		const rightField = expressionToField(expr.right);
+		const leftField = expressionToValidatedField(expr.left, ctx);
+		const rightField = expressionToValidatedField(expr.right, ctx);
 		return {
 			kind: 'arithmetic',
 			left: leftField ?? expressionToSelectValue(expr.left, ctx, fns),
@@ -446,7 +497,7 @@ function compileSelectExpression(
 	if (expr.type === 'unary') {
 		const unary = expr as NqlUnaryExpression;
 		if (unary.operator === '-') {
-			const operandField = expressionToField(unary.operand);
+			const operandField = expressionToValidatedField(unary.operand, ctx);
 			return {
 				kind: 'arithmetic',
 				left: -1,
@@ -465,7 +516,7 @@ function compileSelectExpression(
 
 	// JSON access expression: data->'key'->>'nested' as alias
 	if (expr.type === 'jsonAccess') {
-		const baseField = expressionToField(expr.base);
+		const baseField = expressionToValidatedField(expr.base, ctx);
 		/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
 		if (!baseField) {
 			throw new Error('JSON access base must be a field reference');
@@ -612,7 +663,7 @@ function compileCaseExpression(
 ): ExpressionIntent {
 	if (caseExpr.subject) {
 		// Simple CASE: normalize to searched CASE
-		const subjectField = expressionToField(caseExpr.subject);
+		const subjectField = expressionToValidatedField(caseExpr.subject, ctx);
 		/* v8 ignore start — defensive: simple CASE subject is always a path expression -- @preserve */
 		if (!subjectField) {
 			throw new Error('Simple CASE subject must be a column reference');
@@ -672,6 +723,10 @@ function compileExpressionToIntent(
 			);
 		}
 		/* v8 ignore stop -- @preserve */
+		validateSelectPathExpression(cmp.left as NqlPathExpression, ctx);
+		if (cmp.right.type === 'path') {
+			validateSelectPathExpression(cmp.right, ctx);
+		}
 		const column = (cmp.left as NqlPathExpression).segments.join('.');
 		const value = expressionToValue(cmp.right, ctx);
 		const intent = {
