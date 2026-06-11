@@ -80,6 +80,7 @@ import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
+import { quoteIdent } from './ddl/phases/utils.js';
 import {
 	generateAlterColumnSQL,
 	generateTruncateSQL,
@@ -386,12 +387,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const parameters: unknown[] = [];
 
 		for (const [name, queryIntent] of bundle.bindings ?? []) {
+			const cteName = quoteIdent(name, 'alias');
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
 			const compiled = this.compileNqlBundleLeaf(bindingBundle, options);
 			ctes.push(
-				`"${name}" as (${renumberSqlParams(compiled.sql, parameters.length)})`,
+				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
 		}
