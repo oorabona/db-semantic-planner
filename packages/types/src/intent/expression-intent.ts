@@ -275,8 +275,8 @@ export interface JsonExistsIntent {
 export interface JsonPathExtractIntent {
 	readonly kind: 'jsonPathExtract';
 	readonly field: string;
-	/** PostgreSQL array literal path, e.g. '{a,b,c}' */
-	readonly path: string;
+	/** PostgreSQL JSON path segments. Bound as one text[] parameter by adapters. */
+	readonly path: readonly string[];
 	/** 'json' = returns JSON (#>), 'text' = returns text (#>>) */
 	readonly mode: 'json' | 'text';
 	readonly as?: string | undefined;

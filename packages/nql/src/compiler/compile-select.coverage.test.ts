@@ -439,13 +439,13 @@ describe('compile-select: JSON function notation', () => {
 		expect(col.kind).toBe('jsonPathExtract');
 		if (col.kind === 'jsonPathExtract') {
 			expect(col.field).toBe('data');
-			expect(col.path).toBe('{name,first}');
+			expect(col.path).toEqual(['name', 'first']);
 			expect(col.mode).toBe('text');
 			expect(col.as).toBe('first_name');
 		}
 	});
 
-	it('json_path with multiple separate key arguments builds array literal', () => {
+	it('json_path with multiple separate key arguments preserves path segments', () => {
 		const cols = getSelectColumns(
 			compileNql("users | select json_path(data, 'a', 'b', 'c') as nested"),
 		);
@@ -454,7 +454,7 @@ describe('compile-select: JSON function notation', () => {
 		expect(col.kind).toBe('jsonPathExtract');
 		if (col.kind === 'jsonPathExtract') {
 			expect(col.field).toBe('data');
-			expect(col.path).toBe('{a,b,c}');
+			expect(col.path).toEqual(['a', 'b', 'c']);
 			expect(col.mode).toBe('json');
 		}
 	});
@@ -1305,7 +1305,9 @@ describe('compile-select: M-1 — json function path args coercion (no [object O
 		const col = sel.columns[0];
 		expect(col?.kind).toBe('jsonPathExtract');
 		// Must contain 'someKey', never '[object Object]'
-		expect((col as unknown as { path: string }).path).toContain('someKey');
+		expect((col as unknown as { path: readonly string[] }).path).toContain(
+			'someKey',
+		);
 	});
 
 	it('json_path with dotted path arg throws SEM_INVALID_SYNTAX', () => {

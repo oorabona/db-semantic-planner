@@ -720,6 +720,28 @@ const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set(
 	NQL_SELECT_JSON_FUNCTIONS,
 );
 
+function compileJsonPathArgs(
+	fn: string,
+	args: NqlExpression[],
+	ctx: CompilerContext,
+): string[] {
+	const keys = args
+		.slice(1)
+		.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
+	const firstArg = args[1];
+	const first = keys[0];
+	if (
+		args.length === 2 &&
+		firstArg?.type === 'string' &&
+		first?.startsWith('{') &&
+		first.endsWith('}')
+	) {
+		const inner = first.slice(1, -1);
+		return inner.length === 0 ? [] : inner.split(',');
+	}
+	return keys;
+}
+
 /**
  * Compile JSON function notation to the same intent as operator notation.
  * Returns null if the function is not a known JSON function.
@@ -767,21 +789,15 @@ function compileJsonFunction(
 	}
 
 	if (fn === 'json_path' || fn === 'json_path_text') {
-		// json_path(col, 'a', 'b') → JsonPathExtractIntent with array literal '{a,b}'
-		// Also supports pre-built literal: json_path(col, '{a,b}')
+		// json_path(col, 'a', 'b') → JsonPathExtractIntent with path ['a', 'b'].
+		// Also supports source-literal PostgreSQL array notation:
+		// json_path(col, '{a,b}') → ['a', 'b']. Named params are never split.
 		// M-1: same coercion fix — reject path expressions and non-string args.
-		const keys = args
-			.slice(1)
-			.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
-		const first = keys[0];
-		const pathStr =
-			keys.length === 1 && first?.startsWith('{') && first.endsWith('}')
-				? first
-				: `{${keys.join(',')}}`;
+		const path = compileJsonPathArgs(fn, args, ctx);
 		return {
 			kind: 'jsonPathExtract',
 			field,
-			path: pathStr,
+			path,
 			mode: fn === 'json_path' ? 'json' : 'text',
 			...(alias !== undefined && { as: alias }),
 		};

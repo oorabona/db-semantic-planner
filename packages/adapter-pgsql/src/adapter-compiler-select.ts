@@ -774,6 +774,7 @@ export function compileSelect<T = unknown>(
 			decisions,
 			planForCompilation,
 			options?.model ?? deps.model,
+			options?.paramProvenance,
 		);
 
 		// Phase 3: Extract ALL include decisions (json_agg, join, lateral, cte, subquery)
@@ -781,6 +782,7 @@ export function compileSelect<T = unknown>(
 			planForCompilation,
 			deps.defaultPk,
 			deps.deriveFk,
+			options?.paramProvenance,
 		);
 
 		// Synthesize join decisions for intent-based includes the planner couldn't resolve
@@ -799,6 +801,7 @@ export function compileSelect<T = unknown>(
 					synthesizedModel,
 					deps.defaultPk,
 					deps.deriveFk,
+					options?.paramProvenance,
 				)
 			: [];
 		const allUnifiedIncludeDecisions =

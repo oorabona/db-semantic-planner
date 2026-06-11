@@ -156,6 +156,31 @@ function nqlToSQLWithNamedParams(
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
+function nqlCteToSQLWithNamedParams(
+	nql: string,
+	params: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model, undefined, { params });
+	if (!compiled.success || !compiled.ast?.cteQuery) {
+		throw new Error(
+			`NQL CTE compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
+		model: testSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	});
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
 interface SelectFunctionAuditCase {
 	readonly nql: string;
 	readonly params?: Readonly<Record<string, unknown>>;
@@ -185,7 +210,7 @@ function expectCompilesThroughAdapter(testCase: SelectFunctionAuditCase): void {
 		expect(sql).toContain(expected);
 	}
 	for (const expected of testCase.paramsInclude ?? []) {
-		expect(params).toContain(expected);
+		expect(params).toContainEqual(expected);
 	}
 }
 
@@ -223,12 +248,12 @@ const SCALAR_SELECT_FUNCTION_AUDIT_CASES = {
 	json_path: {
 		nql: "users | select json_path(data, 'a', 'b') as audited",
 		sqlIncludes: ['users.data #>'],
-		paramsInclude: ['{a,b}'],
+		paramsInclude: [['a', 'b']],
 	},
 	json_path_text: {
 		nql: "users | select json_path_text(data, 'name', 'first') as audited",
 		sqlIncludes: ['users.data #>>'],
-		paramsInclude: ['{name,first}'],
+		paramsInclude: [['name', 'first']],
 	},
 	coalesce: {
 		nql: "users | select coalesce(name, 'anon') as audited",
@@ -766,6 +791,46 @@ describe('NQL → SQL compile-only pipeline', () => {
 		});
 		expect(inList.sql).toMatch(/users\.status = any\s*\(\$1\)/);
 		expect(inList.params).toEqual([['active', 'pending']]);
+	});
+
+	it('threads NQL param provenance through CTE body and outer query', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlCteToSQLWithNamedParams(
+			'with subset as (users | where status = :status | select id) subset | where id = :id | select id',
+			{ status: fieldRefShaped, id: null },
+		);
+
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('subset.id = $2');
+		expect(sql).not.toContain('users.status = users.name');
+		expect(sql).not.toContain('subset.id = null');
+		expect(params).toEqual([fieldRefShaped, null]);
+	});
+
+	it('threads NQL param provenance through scalar SELECT subqueries', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select (departments | where name = :dept | select id) as dept_id',
+			{ dept: fieldRefShaped },
+		);
+
+		expect(sql).toContain('select departments.id');
+		expect(sql).toContain('departments.name = $1');
+		expect(sql).not.toContain('departments.name = departments.name');
+		expect(params).toEqual([fieldRefShaped]);
+	});
+
+	it('threads NQL param provenance through relation-filter EXISTS subqueries', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'departments | where some(employees as e, e.name = :needle) | select name',
+			{ needle: fieldRefShaped },
+		);
+
+		expect(sql).toContain('exists');
+		expect(sql).toContain('$1');
+		expect(sql).not.toContain('employees.name = employees.name');
+		expect(params).toEqual([fieldRefShaped]);
 	});
 
 	it('keeps builder-origin outerRef structure unbound', () => {
@@ -1541,7 +1606,22 @@ function mutationToSQL(nql: string): {
 	sql: string;
 	params: readonly unknown[];
 } {
-	const compiled = compile(nql, mutationSchema.model);
+	return mutationToSQLWithNamedParams(nql);
+}
+
+function mutationToSQLWithNamedParams(
+	nql: string,
+	namedParams?: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(
+		nql,
+		mutationSchema.model,
+		undefined,
+		namedParams ? { params: namedParams } : undefined,
+	);
 	if (!compiled.success || !compiled.ast?.mutation) {
 		throw new Error(
 			`NQL mutation compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
@@ -1550,7 +1630,12 @@ function mutationToSQL(nql: string): {
 
 	const mutation = compiled.ast.mutation;
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const opts = { model: mutationSchema.model };
+	const opts = {
+		model: mutationSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	};
 
 	let result: { sql: string; parameters: readonly unknown[] };
 	if (isUpdateIntent(mutation)) {
@@ -1609,6 +1694,20 @@ describe('NQL → SQL mutation E2E', () => {
 		expect(sql).toEqual(
 			'update authors set active = $1 where authors.id = $2 returning authors.id as id, authors.name as name',
 		);
+	});
+
+	it('threads NQL param provenance through mutation values and WHERE', () => {
+		const needle = { kind: 'fieldRef', column: 'active' };
+		const { sql, params } = mutationToSQLWithNamedParams(
+			'update authors set active = :status where name = :needle',
+			{ status: null, needle },
+		);
+
+		expect(sql).toContain('set active = $1');
+		expect(sql).toContain('authors.name = $2');
+		expect(sql).not.toContain('set active = null');
+		expect(sql).not.toContain('authors.name = null');
+		expect(params).toEqual([null, needle]);
 	});
 });
 
@@ -2070,11 +2169,19 @@ function jsonNqlToSQL(nql: string): string {
 	return normalizeSQL(result.sql);
 }
 
-function jsonNqlToSQLWithParams(nql: string): {
+function jsonNqlToSQLWithParams(
+	nql: string,
+	namedParams?: Readonly<Record<string, unknown>>,
+): {
 	sql: string;
 	params: readonly unknown[];
 } {
-	const compiled = compile(nql, jsonSchema.model);
+	const compiled = compile(
+		nql,
+		jsonSchema.model,
+		undefined,
+		namedParams ? { params: namedParams } : undefined,
+	);
 	if (!compiled.success || !compiled.ast?.query) {
 		throw new Error(
 			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
@@ -2084,7 +2191,12 @@ function jsonNqlToSQLWithParams(nql: string): {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: jsonSchema.model });
+	const result = adapter.compile(planReport, {
+		model: jsonSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	});
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
@@ -2212,6 +2324,24 @@ describe('JSONB operators (E13)', () => {
 			);
 			expect(sql).toContain('#>');
 			expect(sql).toContain('as nested');
+		});
+
+		it('binds json_path named-param key with comma as a single path segment', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | select json_path(data, :key) as nested',
+				{ key: 'a,b' },
+			);
+			expect(sql).toContain('data #> $1');
+			expect(params).toEqual([['a,b']]);
+		});
+
+		it('binds json_path_text named-param braced key as a single path segment', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | select json_path_text(data, :key) as nested',
+				{ key: '{a,b}' },
+			);
+			expect(sql).toContain('data #>> $1');
+			expect(params).toEqual([['{a,b}']]);
 		});
 	});
 

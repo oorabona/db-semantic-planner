@@ -55,9 +55,28 @@ export const jsonExtractHandler: ExpressionHandler = {
 };
 
 /**
- * JSON path extract: col#>'{a,b}' or col#>>'{a,b}'
+ * JSON path extract: col#>ARRAY['a','b'] or col#>>ARRAY['a','b}'
  * Produces: "col" #> $1 or "col" #>> $1
  */
+function normalizeJsonPathArgs(args: readonly unknown[] | undefined): string[] {
+	if (!args || args.length === 0) return [];
+	if (args.length === 1) {
+		const first = args[0];
+		if (Array.isArray(first)) {
+			return first.map((item) => String(item));
+		}
+		if (
+			typeof first === 'string' &&
+			first.startsWith('{') &&
+			first.endsWith('}')
+		) {
+			const inner = first.slice(1, -1);
+			return inner.length === 0 ? [] : inner.split(',');
+		}
+	}
+	return args.map((item) => String(item));
+}
+
 export const jsonPathExtractHandler: ExpressionHandler = {
 	types: ['jsonPathExtract'],
 
@@ -72,12 +91,11 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 		}
 
 		const mode = decision.jsonMode ?? 'text';
-		// args[0] is the pre-built PostgreSQL array literal '{a,b}'
-		const arrayLiteral = (decision.args?.[0] as string) ?? '{}';
+		const path = normalizeJsonPathArgs(decision.args);
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
 		const left: Node = columnRef(column, alias, undefined, ctx.naming);
-		const right = compileValue(arrayLiteral, state);
+		const right = compileValue(path, state);
 		const op = mode === 'text' ? '#>>' : '#>';
 
 		return {

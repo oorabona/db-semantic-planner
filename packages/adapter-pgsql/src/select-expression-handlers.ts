@@ -306,7 +306,7 @@ export function handleJsonPathExtractExpression(
 		type: 'selectFunction',
 		function: 'jsonPathExtract',
 		column: expr.field as string,
-		args: [expr.path as string],
+		args: [expr.path],
 		table: rootTable,
 	};
 	if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';

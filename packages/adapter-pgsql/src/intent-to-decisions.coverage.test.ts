@@ -418,7 +418,7 @@ describe('intentToDecisions - coverage', () => {
 						{
 							kind: 'jsonPathExtract',
 							field: 'data',
-							path: '{a,b,c}',
+							path: ['a', 'b', 'c'],
 							mode: 'json',
 							as: 'nested',
 						},
@@ -430,7 +430,7 @@ describe('intentToDecisions - coverage', () => {
 				type: 'selectFunction',
 				function: 'jsonPathExtract',
 				column: 'data',
-				args: ['{a,b,c}'],
+				args: [['a', 'b', 'c']],
 				jsonMode: 'json',
 				alias: 'nested',
 				table: 'users',

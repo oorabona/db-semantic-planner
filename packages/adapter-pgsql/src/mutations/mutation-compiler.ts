@@ -76,6 +76,8 @@ export interface InsertConfig {
 	columns: string[];
 	/** Values for each column (array of rows) */
 	values: unknown[][];
+	/** Parallel flags for values that must bind even when null/undefined. */
+	valueParamFlags?: boolean[][];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	/** Subquery for INSERT ... SELECT */
@@ -91,7 +93,7 @@ export interface UpdateConfig {
 	/** Table to update */
 	table: string;
 	/** Column-value pairs to set */
-	set: { column: string; value: unknown }[];
+	set: { column: string; value: unknown; valueIsParam?: boolean }[];
 	/** WHERE conditions */
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
@@ -166,11 +168,16 @@ export function compileInsert(
 	// Build VALUES as Node[][] (each row is Node[])
 	const columnTypes = config.columnTypes;
 	const columns = config.columns;
-	const valuesRows: Node[][] = config.values.map((row) =>
+	const valuesRows: Node[][] = config.values.map((row, rowIndex) =>
 		row.map((val, i) => {
 			const colName = columns[i];
 			const dbType = colName ? columnTypes?.[colName] : undefined;
-			return valueToNode(val, state, dbType);
+			return valueToNode(
+				val,
+				state,
+				dbType,
+				config.valueParamFlags?.[rowIndex]?.[i] === true,
+			);
 		}),
 	);
 
@@ -298,11 +305,11 @@ export function compileUpdate(
 	// all other values become parameterized $N references.
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
-		({ column, value }) => ({
+		({ column, value, valueIsParam }) => ({
 			column: naming.toDatabase(column),
 			value: isSqlRaw(value)
 				? parseRawExpression(value.sql)
-				: valueToNode(value, state, columnTypes?.[column]),
+				: valueToNode(value, state, columnTypes?.[column], valueIsParam),
 		}),
 	);
 
@@ -806,8 +813,20 @@ function valueToNode(
 	value: unknown,
 	state: CompilerState,
 	dbType?: string,
+	forceParam = false,
 ): Node {
 	if (value === null || value === undefined) {
+		if (forceParam) {
+			state.parameters.push(value);
+			state.paramIndex++;
+			return dbType && RANGE_TYPES.has(dbType)
+				? createTypeCastParamRef(state.paramIndex, dbType)
+				: {
+						ParamRef: {
+							number: state.paramIndex,
+						},
+					};
+		}
 		return { A_Const: { isnull: true } };
 	}
 

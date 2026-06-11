@@ -65,6 +65,32 @@ function setOpToSQL(nql: string): {
 	throw new Error('NQL compilation produced no set operation');
 }
 
+function adapterSetOpToSQLWithParams(
+	nql: string,
+	params: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model, undefined, { params });
+	if (!compiled.success || !compiled.ast?.setOperation) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	return adapter.compileSetOperation(
+		compiled.ast.setOperation,
+		testSchema.model,
+		{
+			...(compiled.ast.paramProvenance && {
+				paramProvenance: compiled.ast.paramProvenance,
+			}),
+		},
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -127,6 +153,23 @@ describe('compileSetOperation', () => {
 			);
 			expect(result.parameters).toEqual([true, false]);
 		});
+
+		for (const op of ['union', 'intersect', 'except'] as const) {
+			it(`threads NQL param provenance through ${op.toUpperCase()} leaves`, () => {
+				const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+				const result = adapterSetOpToSQLWithParams(
+					`employees | where name = :left | select name | ${op} (employees | where name = :right | select name)`,
+					{ left: fieldRefShaped, right: null },
+				);
+				const normalized = normalizeSQL(result.sql);
+
+				expect(normalized).toContain('employees.name = $1');
+				expect(normalized).toContain('employees.name = $2');
+				expect(normalized).not.toContain('employees.name = employees.name');
+				expect(normalized).not.toContain('employees.name = null');
+				expect(result.parameters).toEqual([fieldRefShaped, null]);
+			});
+		}
 
 		it('handles no parameters on either side', () => {
 			const result = setOpToSQL(

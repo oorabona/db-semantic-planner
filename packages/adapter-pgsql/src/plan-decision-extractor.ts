@@ -9,7 +9,12 @@
  */
 
 import { deriveRelationPathFromIntentPath } from '@dbsp/core';
-import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
+import type {
+	ModelIR,
+	ParamValueProvenance,
+	PlanReport,
+	WhereIntent,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -229,6 +234,7 @@ export function valueToNode(value: unknown): Node {
 export function convertWhereToDecisions(
 	where: unknown,
 	table: string,
+	paramProvenance?: ParamValueProvenance,
 ): PlanDecision[] {
 	if (!where || typeof where !== 'object') return [];
 	const w = where as Record<string, unknown>;
@@ -263,7 +269,11 @@ export function convertWhereToDecisions(
 		case 'jsonContains':
 		case 'jsonExists':
 		case 'any': {
-			const d = convertWhereCondition(where as WhereIntent, table);
+			const d = convertWhereCondition(
+				where as WhereIntent,
+				table,
+				paramProvenance !== undefined ? { paramProvenance } : undefined,
+			);
 			return d !== null ? [d] : [];
 		}
 		case 'range': {
@@ -279,7 +289,11 @@ export function convertWhereToDecisions(
 				'lower' in (w.value as object) &&
 				'upper' in (w.value as object)
 			) {
-				const d = convertWhereCondition(where as WhereIntent, table);
+				const d = convertWhereCondition(
+					where as WhereIntent,
+					table,
+					paramProvenance !== undefined ? { paramProvenance } : undefined,
+				);
 				return d !== null ? [d] : [];
 			}
 			return [
@@ -305,7 +319,7 @@ export function convertWhereToDecisions(
 		case 'and': {
 			const conditions = w.conditions as unknown[];
 			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
+				convertWhereToDecisions(c, table, paramProvenance),
 			);
 			if (subDecisions.length === 0) return [];
 			if (subDecisions.length === 1) return subDecisions;
@@ -314,14 +328,18 @@ export function convertWhereToDecisions(
 		case 'or': {
 			const conditions = w.conditions as unknown[];
 			const subDecisions = conditions.flatMap((c) =>
-				convertWhereToDecisions(c, table),
+				convertWhereToDecisions(c, table, paramProvenance),
 			);
 			if (subDecisions.length === 0) return [];
 			if (subDecisions.length === 1) return subDecisions;
 			return [{ type: 'whereOr', conditions: subDecisions }];
 		}
 		case 'not': {
-			const subDecisions = convertWhereToDecisions(w.condition, table);
+			const subDecisions = convertWhereToDecisions(
+				w.condition,
+				table,
+				paramProvenance,
+			);
 			if (subDecisions.length === 0) return [];
 			return [{ type: 'whereNot', conditions: subDecisions }];
 		}
@@ -458,6 +476,7 @@ export function convertDottedFieldsToExists(
 export function extractExistsDecisions(
 	plan: PlanReport,
 	model?: ModelIR,
+	paramProvenance?: ParamValueProvenance,
 ): SimplifiedPlanReport['decisions'] {
 	// Find filter-strategy decisions with choice: 'exists', 'notExists', or 'join'
 	const filterDecisions = plan.decisions.filter(
@@ -514,6 +533,7 @@ export function extractExistsDecisions(
 			const nestedDecisions = convertWhereToDecisions(
 				matchingIntent.where,
 				context.target,
+				paramProvenance,
 			);
 			if (nestedDecisions.length > 0) {
 				conditions = nestedDecisions;
@@ -714,6 +734,7 @@ function enrichExistsStubsInConditions(
 	conditions: PlanDecision[],
 	sourceTable: string,
 	model: ModelIR,
+	paramProvenance?: ParamValueProvenance,
 ): void {
 	for (let i = 0; i < conditions.length; i++) {
 		const d = conditions[i];
@@ -781,9 +802,18 @@ function enrichExistsStubsInConditions(
 
 				let rawInnerConditions: PlanDecision[] | undefined;
 				if (rawWhere) {
-					const c = convertWhereToDecisions(rawWhere, finalTarget);
+					const c = convertWhereToDecisions(
+						rawWhere,
+						finalTarget,
+						paramProvenance,
+					);
 					if (c.length > 0) {
-						enrichExistsStubsInConditions(c, finalTarget, model);
+						enrichExistsStubsInConditions(
+							c,
+							finalTarget,
+							model,
+							paramProvenance,
+						);
 						rawInnerConditions = c;
 					}
 				}
@@ -859,7 +889,11 @@ function enrichExistsStubsInConditions(
 
 				let innerConditions: PlanDecision[] | undefined;
 				if (rawWhere) {
-					const c = convertWhereToDecisions(rawWhere, targetTable);
+					const c = convertWhereToDecisions(
+						rawWhere,
+						targetTable,
+						paramProvenance,
+					);
 					if (c.length > 0) innerConditions = c;
 				}
 
@@ -889,7 +923,12 @@ function enrichExistsStubsInConditions(
 
 				// Recurse into newly-built conditions to handle deeper nesting.
 				if (innerConditions && innerConditions.length > 0) {
-					enrichExistsStubsInConditions(innerConditions, targetTable, model);
+					enrichExistsStubsInConditions(
+						innerConditions,
+						targetTable,
+						model,
+						paramProvenance,
+					);
 				}
 			}
 		} else if (
@@ -903,6 +942,7 @@ function enrichExistsStubsInConditions(
 				d.conditions as PlanDecision[],
 				sourceTable,
 				model,
+				paramProvenance,
 			);
 		}
 	}
@@ -918,6 +958,7 @@ function buildEnrichedExistsDecision(
 	matchingIntent: ExistsIntent | undefined,
 	rootTable: string,
 	model?: ModelIR,
+	paramProvenance?: ParamValueProvenance,
 ): PlanDecision {
 	const context = d.context;
 	const targetTable = context.target as string;
@@ -928,6 +969,7 @@ function buildEnrichedExistsDecision(
 		const nestedDecisions = convertWhereToDecisions(
 			matchingIntent.where,
 			targetTable,
+			paramProvenance,
 		);
 		if (nestedDecisions.length > 0) {
 			conditions = nestedDecisions;
@@ -936,7 +978,12 @@ function buildEnrichedExistsDecision(
 			// The inner stubs must correlate against the OUTER's targetTable (e.g. 'posts'),
 			// not the root table — so we pass targetTable as the sourceTable context.
 			if (model) {
-				enrichExistsStubsInConditions(conditions, targetTable, model);
+				enrichExistsStubsInConditions(
+					conditions,
+					targetTable,
+					model,
+					paramProvenance,
+				);
 			}
 		}
 	}
@@ -1242,6 +1289,7 @@ export function enrichExistsDecisionsInPlace(
 	decisions: PlanDecision[],
 	plan: PlanReport,
 	model?: ModelIR,
+	paramProvenance?: ParamValueProvenance,
 ): PlanDecision[] {
 	// Collect all stub exists positions in depth-first order from the decision tree.
 	// Must happen BEFORE the filterDecisions early-return so that unresolved stubs
@@ -1373,11 +1421,17 @@ export function enrichExistsDecisionsInPlace(
 							const c = convertWhereToDecisions(
 								matchingIntent.where,
 								lastHopTarget,
+								paramProvenance,
 							);
 							// Enrich any nested exists stubs in the innermost conditions.
 							// sourceTable = lastHopTarget (the innermost hop's table).
 							if (c.length > 0) {
-								enrichExistsStubsInConditions(c, lastHopTarget, model);
+								enrichExistsStubsInConditions(
+									c,
+									lastHopTarget,
+									model,
+									paramProvenance,
+								);
 							}
 							return c.length > 0 ? c : undefined;
 						})()
@@ -1401,6 +1455,7 @@ export function enrichExistsDecisionsInPlace(
 						matchingIntent,
 						plan.rootTable,
 						model,
+						paramProvenance,
 					);
 				} else {
 					// For 'every' with a real predicate, wrap the innermost conditions in NOT
@@ -1431,6 +1486,7 @@ export function enrichExistsDecisionsInPlace(
 					matchingIntent,
 					plan.rootTable,
 					model,
+					paramProvenance,
 				);
 			}
 
@@ -1601,6 +1657,7 @@ export function extractAllIncludeDecisions(
 	plan: PlanReport,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
+	paramProvenance?: ParamValueProvenance,
 ): SimplifiedPlanReport['decisions'] {
 	const includeDecisions = plan.decisions.filter(
 		(d) => d.type === 'include-strategy',
@@ -1621,7 +1678,13 @@ export function extractAllIncludeDecisions(
 			if (converted) treeDecisions.push(converted);
 		} else if (choice === 'join') {
 			// Convert to flat join decision
-			const converted = toJoinIncludeDecision(d, plan, defaultPk, deriveFk);
+			const converted = toJoinIncludeDecision(
+				d,
+				plan,
+				defaultPk,
+				deriveFk,
+				paramProvenance,
+			);
 			if (converted) flatDecisions.push(converted);
 		} else if (choice === 'cte') {
 			// CTE: produces WITH clause + LEFT JOIN to CTE
@@ -1710,6 +1773,7 @@ function toJoinIncludeDecision(
 	plan: PlanReport,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
+	paramProvenance?: ParamValueProvenance,
 ): PlanDecision | undefined {
 	const context = d.context;
 	const relationName = context.relation ?? context.includeAlias;
@@ -1772,6 +1836,7 @@ function toJoinIncludeDecision(
 		const converted = convertWhereToDecisions(
 			includeIntent.where,
 			relationName as string,
+			paramProvenance,
 		);
 		if (converted.length > 0) {
 			conditions = converted;
@@ -1833,6 +1898,7 @@ export function synthesizeMissingJoinDecisions(
 	model: ModelIR,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
+	paramProvenance?: ParamValueProvenance,
 ): SimplifiedPlanReport['decisions'] {
 	const includes = plan.intent?.include as
 		| Array<{
@@ -1887,7 +1953,11 @@ export function synthesizeMissingJoinDecisions(
 		// Build WHERE conditions from include intent
 		let conditions: PlanDecision[] | undefined;
 		if (inc.where) {
-			const converted = convertWhereToDecisions(inc.where, alias);
+			const converted = convertWhereToDecisions(
+				inc.where,
+				alias,
+				paramProvenance,
+			);
 			if (converted.length > 0) conditions = converted;
 		}
 

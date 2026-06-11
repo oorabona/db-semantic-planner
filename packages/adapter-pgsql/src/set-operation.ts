@@ -7,6 +7,7 @@
 
 import type { ModelIR } from '@dbsp/core';
 import type {
+	CompileOptions,
 	DialectCapabilities,
 	PlanReport,
 	QueryIntent,
@@ -116,7 +117,7 @@ export function createLeafCompileFn(
 	adapter: {
 		compile(
 			plan: PlanReport,
-			options: { model: ModelIR },
+			options: CompileOptions & { model: ModelIR },
 		): { sql: string; parameters: readonly unknown[] };
 		dialectCapabilities: DialectCapabilities;
 	},
@@ -126,11 +127,12 @@ export function createLeafCompileFn(
 		model: ModelIR,
 		options: { dialectCapabilities: DialectCapabilities },
 	) => PlanReport,
+	options?: CompileOptions,
 ): LeafCompileFn {
 	return (query: QueryIntent) => {
 		const planReport = planFn(query, model, {
 			dialectCapabilities: adapter.dialectCapabilities,
 		});
-		return adapter.compile(planReport, { model });
+		return adapter.compile(planReport, { ...options, model });
 	};
 }

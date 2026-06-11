@@ -1385,7 +1385,11 @@ export class PlanCompiler {
 						{
 							type: 'jsonPathExtract',
 							column: record.field,
-							args: typeof record.path === 'string' ? [record.path] : [],
+							args: Array.isArray(record.path)
+								? [record.path]
+								: typeof record.path === 'string'
+									? [record.path]
+									: [],
 							jsonMode: record.mode,
 						} as HandlerDecision,
 						ctx,

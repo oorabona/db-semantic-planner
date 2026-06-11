@@ -23,6 +23,7 @@ import type {
 } from '@dbsp/types';
 import type {
 	NqlDelete,
+	NqlExpression,
 	NqlInsert,
 	NqlInsertFrom,
 	NqlMutation,
@@ -39,6 +40,18 @@ import {
 	resolveIntegerCount,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function assignMutationValue(
+	target: Record<string, unknown>,
+	column: string,
+	value: NqlExpression,
+	ctx: CompilerContext,
+): void {
+	target[column] = expressionToValue(value, ctx);
+	if (value.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(target, column);
+	}
+}
 
 /**
  * Compile a mutation pipeline (mutation + clauses like RETURNING).
@@ -114,7 +127,7 @@ function compileInsert(insert: NqlInsert, ctx: CompilerContext): InsertIntent {
 		const rowColumns = new Set<string>();
 		for (const assignment of row) {
 			rowColumns.add(assignment.column);
-			rowValues[assignment.column] = expressionToValue(assignment.value, ctx);
+			assignMutationValue(rowValues, assignment.column, assignment.value, ctx);
 		}
 		for (const col of allColumns) {
 			if (!rowColumns.has(col)) {
@@ -173,7 +186,7 @@ function compileUpdate(
 	const set: Record<string, unknown> = {};
 	for (const assignment of update.assignments) {
 		ctx.validator?.validateColumn(update.table, assignment.column);
-		set[assignment.column] = expressionToValue(assignment.value, ctx);
+		assignMutationValue(set, assignment.column, assignment.value, ctx);
 	}
 
 	if (update.where) {
@@ -239,7 +252,7 @@ function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
 	const values: Record<string, unknown> = {};
 	for (const assignment of upsert.assignments) {
 		ctx.validator?.validateColumn(upsert.table, assignment.column);
-		values[assignment.column] = expressionToValue(assignment.value, ctx);
+		assignMutationValue(values, assignment.column, assignment.value, ctx);
 	}
 
 	for (const col of upsert.conflictColumns) {

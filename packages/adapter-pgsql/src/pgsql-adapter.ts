@@ -512,9 +512,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	compileSetOperation(
 		intent: SetOperationIntent,
 		model: ModelIR,
-		_options?: CompileOptions,
+		options?: CompileOptions,
 	): CompiledQuery {
-		const compileFn = createLeafCompileFn(this, model, planFn);
+		const compileFn = createLeafCompileFn(this, model, planFn, options);
 		const result = compileSetOperationImpl(intent, compileFn);
 		return {
 			sql: result.sql,

@@ -2073,7 +2073,7 @@ describe('NQL Compiler - JSONB operators (E13)', () => {
 			expect(col.kind).toBe('jsonPathExtract');
 			if (col.kind === 'jsonPathExtract') {
 				expect(col.field).toBe('data');
-				expect(col.path).toBe('{a,b}');
+				expect(col.path).toEqual(['a', 'b']);
 				expect(col.mode).toBe('json');
 				expect(col.as).toBe('nested');
 			}
