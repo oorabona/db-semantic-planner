@@ -731,6 +731,35 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([null]);
 	});
 
+	it('binds fieldRef-shaped params through direct NQL bundle compile', () => {
+		const fieldRefShaped = {
+			kind: 'fieldRef',
+			column: 'name',
+			scope: 'inner',
+		};
+		const compiled = compile(
+			'users | where id = :p',
+			testSchema.model,
+			undefined,
+			{
+				params: { p: fieldRefShaped },
+			},
+		);
+		if (!compiled.success || !compiled.ast?.query) {
+			throw new Error(
+				`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+			);
+		}
+
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(compiled.ast, { model: testSchema.model });
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('users.id = $1');
+		expect(sql).not.toContain('users.id = users.name');
+		expect(result.parameters).toEqual([fieldRefShaped]);
+	});
+
 	it('keeps source literal null comparisons as SQL NULL literals', () => {
 		const { sql, params } = nqlToSQLWithParams('users | where name = null');
 
@@ -1708,6 +1737,18 @@ describe('NQL → SQL mutation E2E', () => {
 		expect(sql).not.toContain('set active = null');
 		expect(sql).not.toContain('authors.name = null');
 		expect(params).toEqual([null, needle]);
+	});
+
+	it('binds named-param $ref in mutation IN as a value, not a CTE subquery', () => {
+		const refValue = { $ref: 'ids' };
+		const { sql, params } = mutationToSQLWithNamedParams(
+			'posts | select id | bind ids\ndelete from posts where userId in (:p)',
+			{ p: refValue },
+		);
+
+		expect(sql).toContain('posts."userid" = any');
+		expect(sql).not.toContain('select "ids');
+		expect(params).toEqual([[refValue]]);
 	});
 });
 

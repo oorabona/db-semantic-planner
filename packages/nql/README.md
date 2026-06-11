@@ -15,16 +15,22 @@ pnpm add @dbsp/nql
 
 ```typescript
 // doctest: skip — exec-only operation; compile from @dbsp/nql is not in doctest preamble and orm.from(intent).all() requires a real PostgreSQL connection
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
-// Compile an NQL query to IntentAST
-const intent = compile(
+// Compile an NQL query to a bundle carrying the clean intent plus adapter provenance
+const compiled = compile(
   "users | where active = true | select name, email | order name asc | limit 20",
-  schema
+  db.model
 );
 
-// Pass the intent to the ORM
-const users = await orm.from(intent).all();
+if (!compiled.success || !compiled.ast?.query) {
+  throw new Error(compiled.errors.map((e) => e.message).join(', '));
+}
+
+// Pass the whole bundle to the adapter so parameter provenance travels with it
+const adapter = createPgsqlCompileOnlyAdapter();
+const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
 ## Syntax overview
@@ -64,14 +70,22 @@ Use `:name` placeholders for runtime values and pass a `params` map to the compi
 
 ```typescript
 // doctest: skip — illustrative direct compiler params example
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
-const result = compile(
+const compiled = compile(
   'users | where id = :id and active = :active | limit :limit',
-  db.definition,
+  db.model,
   undefined,
   { params: { id: 42, active: true, limit: 10 } },
 );
+
+if (!compiled.success || !compiled.ast?.query) {
+  throw new Error(compiled.errors.map((e) => e.message).join(', '));
+}
+
+const adapter = createPgsqlCompileOnlyAdapter();
+const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
 Missing params fail compilation. `null` binds SQL `NULL`; `undefined`, `NaN`, and `Infinity` are rejected. The `@dbsp/core` `orm.nql` template tag builds on the same mechanism for `${value}` interpolation. See [Named Parameters and Template Binding](https://oorabona.github.io/db-semantic-planner/nql/#named-parameters-and-template-binding) for the full contract.

@@ -154,11 +154,19 @@ NQL supports named value parameters in expression positions. A named parameter i
 
 ```typescript
 // doctest: skip — illustrative direct compiler params example
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
-const result = compile('users | where id = :id and active = :active', db.definition, undefined, {
+const compiled = compile('users | where id = :id and active = :active', db.model, undefined, {
   params: { id: 42, active: true },
 });
+
+if (!compiled.success || !compiled.ast?.query) {
+  throw new Error(compiled.errors.map((e) => e.message).join(', '));
+}
+
+const adapter = createPgsqlCompileOnlyAdapter();
+const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
 Resolution uses own properties on the params object. `{ p: null }` binds SQL `NULL`; a missing `p` fails compilation; `{ p: undefined }`, `NaN`, and `Infinity` are rejected. `Date` and `BigInt` values are passed through to the adapter. Parameter names `__proto__`, `constructor`, and `prototype` are rejected.

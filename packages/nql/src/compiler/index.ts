@@ -81,6 +81,7 @@ import { validateParamsMap } from './expression-utils.js';
 // Re-export public types
 export type {
 	ColumnValidatorSchema,
+	CompiledNqlQuery,
 	CompileResult,
 	NqlCompilerOptions,
 } from './types.js';

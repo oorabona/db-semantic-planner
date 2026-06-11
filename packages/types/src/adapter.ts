@@ -15,6 +15,8 @@ import type {
 	ExpressionIntent,
 	InsertFromIntent,
 	InsertIntent,
+	MutationIntent,
+	QueryIntent,
 	SelectIntent,
 	SetOperationIntent,
 	UpdateIntent,
@@ -129,6 +131,33 @@ export interface CompileOptionsBase {
  */
 export interface ParamValueProvenance {
 	isParamValue(container: object, key: PropertyKey): boolean;
+}
+
+/**
+ * Adapter-facing NQL compile bundle.
+ *
+ * NQL public intents stay clean: named parameter values are stored directly on
+ * the intent tree. This bundle carries the clean compiled result plus the
+ * provenance sidecar needed by adapters to bind parameter-sourced object values
+ * as values rather than reinterpreting them as query structure.
+ */
+export interface CompiledNqlQuery {
+	readonly query?: QueryIntent;
+	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
+	readonly cteQuery?: CteQueryIntent;
+	readonly mutation?: MutationIntent;
+	readonly returning?: readonly string[];
+	/** Named bindings from `| bind X` clauses (CTE source queries) */
+	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+	/** Named mutation bindings from `mutation | select cols | bind X` clauses. */
+	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
+	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
+	readonly setOperation?: SetOperationIntent;
+	/**
+	 * @internal Sidecar metadata marking clean intent value positions that came
+	 * from bound NQL parameters. It is never exposed on the intent tree.
+	 */
+	readonly paramProvenance?: ParamValueProvenance;
 }
 
 /**
@@ -287,7 +316,7 @@ export interface BaseAdapter {
 export interface CompilingAdapter extends BaseAdapter {
 	/** Compile a plan to executable SQL. */
 	compile<T = unknown>(
-		plan: PlanReport,
+		plan: PlanReport | CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T>;
 

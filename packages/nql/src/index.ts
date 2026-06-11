@@ -18,6 +18,7 @@
 // Re-export compiler types
 export type {
 	ColumnValidatorSchema,
+	CompiledNqlQuery,
 	CompileResult,
 	DeleteIntent,
 	ExpressionIntent,
