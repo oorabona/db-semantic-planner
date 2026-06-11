@@ -8,6 +8,7 @@
 
 import type { Node, SortBy, WindowDef } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -152,7 +153,7 @@ export const ntileHandler: ExpressionHandler = {
 		state: CompilerState,
 	): Node {
 		const n = decision.value ?? decision.args?.[0] ?? 4;
-		const nRef = bindParameter(n, state);
+		const nRef = bindParameter(unwrapParamIntent(n), state);
 
 		return buildWindowFunction('ntile', [nRef], decision, ctx);
 	},
@@ -185,11 +186,11 @@ function createLagLeadHandler(
 
 			// Optional offset (default 1)
 			const offset = decision.args?.[0] ?? 1;
-			args.push(bindParameter(offset, state));
+			args.push(bindParameter(unwrapParamIntent(offset), state));
 
 			// Optional default value
 			if (decision.value !== undefined) {
-				args.push(bindParameter(decision.value, state));
+				args.push(bindParameter(unwrapParamIntent(decision.value), state));
 			}
 
 			return buildWindowFunction(funcName, args, decision, ctx);
@@ -290,13 +291,13 @@ export const genericWindowHandler: ExpressionHandler = {
 		// Add other args (e.g., offset for lag/lead)
 		if (decision.args && Array.isArray(decision.args)) {
 			for (const arg of decision.args) {
-				args.push(bindParameter(arg, state));
+				args.push(bindParameter(unwrapParamIntent(arg), state));
 			}
 		}
 
 		// Add default value for lag/lead
 		if (decision.value !== undefined) {
-			args.push(bindParameter(decision.value, state));
+			args.push(bindParameter(unwrapParamIntent(decision.value), state));
 		}
 
 		return buildWindowFunction(funcName, args, decision, ctx);

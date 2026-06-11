@@ -5,6 +5,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -12,7 +13,7 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
-import { buildColumnRef, unwrapParamIntent } from './utils.js';
+import { buildColumnRef } from './utils.js';
 
 /**
  * BETWEEN operator handler
@@ -32,7 +33,7 @@ export const betweenHandler: WhereHandler = {
 			throw new Error('BETWEEN handler requires a column');
 		}
 
-		const range = decision.value as [unknown, unknown];
+		const range = unwrapParamIntent(decision.value) as [unknown, unknown];
 		if (!Array.isArray(range) || range.length !== 2) {
 			throw new Error('BETWEEN condition requires [min, max] array');
 		}

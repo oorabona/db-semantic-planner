@@ -1407,6 +1407,27 @@ describe('Bug regressions', () => {
 			expect(params).toContain(0);
 		});
 
+		it('unwraps named params in lag/lead default values before binding', () => {
+			const leadResult = nqlToSQLWithNamedParams(
+				'employees | select lead(salary, 1, :fallback) over (order by name) as next_salary',
+				{ fallback: 0 },
+			);
+			const lagResult = nqlToSQLWithNamedParams(
+				'employees | select lag(salary, 1, :default) over (order by name) as prev_salary',
+				{ default: -1 },
+			);
+
+			expect(leadResult.sql).toContain('lead(');
+			expect(leadResult.sql).toContain('$1');
+			expect(leadResult.sql).toContain('$2');
+			expect(leadResult.params).toEqual([1, 0]);
+
+			expect(lagResult.sql).toContain('lag(');
+			expect(lagResult.sql).toContain('$1');
+			expect(lagResult.sql).toContain('$2');
+			expect(lagResult.params).toEqual([1, -1]);
+		});
+
 		it('lag without offset omits offset param (PG defaults to 1)', () => {
 			const { sql, params } = nqlToSQLWithParams(
 				'employees | select lag(salary) over (order by name) as prev',

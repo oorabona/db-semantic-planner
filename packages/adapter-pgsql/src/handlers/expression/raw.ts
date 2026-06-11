@@ -12,6 +12,7 @@
 
 import { getLogger } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -116,9 +117,9 @@ export const sqlFunctionHandler: ExpressionHandler = {
 				if (typeof arg === 'object' && arg !== null && 'type' in arg) {
 					// Nested decision - would need recursive compilation
 					// For now, just parameterize
-					argNodes.push(bindParameter(arg, state));
+					argNodes.push(bindParameter(unwrapParamIntent(arg), state));
 				} else {
-					argNodes.push(bindParameter(arg, state));
+					argNodes.push(bindParameter(unwrapParamIntent(arg), state));
 				}
 			}
 		}

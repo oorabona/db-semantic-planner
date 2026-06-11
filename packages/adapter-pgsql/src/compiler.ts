@@ -84,6 +84,7 @@ import {
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
+import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
@@ -2175,7 +2176,7 @@ export class PlanCompiler {
 					if (typeof decision.limit === 'number') {
 						limit = integerNode(decision.limit);
 					} else if (isParamIntent(decision.limit)) {
-						this.state.parameters.push(decision.limit.value);
+						this.state.parameters.push(unwrapParamIntent(decision.limit));
 						this.state.paramIndex++;
 						limit = createParamRef(this.state.paramIndex);
 					} else if (decision.limit?.paramIndex !== undefined) {
@@ -2188,7 +2189,7 @@ export class PlanCompiler {
 					if (typeof decision.offset === 'number') {
 						offset = integerNode(decision.offset);
 					} else if (isParamIntent(decision.offset)) {
-						this.state.parameters.push(decision.offset.value);
+						this.state.parameters.push(unwrapParamIntent(decision.offset));
 						this.state.paramIndex++;
 						offset = createParamRef(this.state.paramIndex);
 					} else if (decision.offset?.paramIndex !== undefined) {

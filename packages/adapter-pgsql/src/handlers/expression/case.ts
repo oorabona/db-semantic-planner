@@ -8,6 +8,7 @@
 
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -125,10 +126,13 @@ export const simpleCaseHandler: ExpressionHandler = {
 			// Build the comparison value — `when` may be a Decision with .value
 			// or a primitive; extract the raw value for parameterization.
 			const whenDecision = cond.when as Decision & { value?: unknown };
-			const whenExpr = bindParameter(whenDecision.value ?? cond.when, state);
+			const whenExpr = bindParameter(
+				unwrapParamIntent(whenDecision.value ?? cond.when),
+				state,
+			);
 
 			// Build the THEN result
-			const thenResult = bindParameter(cond.then, state);
+			const thenResult = bindParameter(unwrapParamIntent(cond.then), state);
 
 			const caseWhen: CaseWhen = {
 				expr: whenExpr,
@@ -141,7 +145,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 		// Build ELSE clause if present
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			defresult = bindParameter(elseValue, state);
+			defresult = bindParameter(unwrapParamIntent(elseValue), state);
 		}
 
 		const caseExpr: CaseExpr = {

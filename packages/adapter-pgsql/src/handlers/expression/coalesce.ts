@@ -8,6 +8,7 @@
 
 import type { CoalesceExpr, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -49,7 +50,7 @@ function buildValueNode(
 	}
 
 	// Otherwise, parameterize it
-	return bindParameter(value, state);
+	return bindParameter(unwrapParamIntent(value), state);
 }
 
 /**
@@ -132,7 +133,7 @@ export const nullIfHandler: ExpressionHandler = {
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-		const valueRef = bindParameter(value, state);
+		const valueRef = bindParameter(unwrapParamIntent(value), state);
 
 		return {
 			NullIfExpr: {

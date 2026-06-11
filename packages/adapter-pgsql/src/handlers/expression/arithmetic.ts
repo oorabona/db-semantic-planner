@@ -7,6 +7,7 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -38,7 +39,7 @@ function resolveOperand(
 		return ctx.compileNqlSelectExpression(operand, ctx, state);
 	}
 	// Numeric or other literal → parametrize
-	return bindParameter(operand, state);
+	return bindParameter(unwrapParamIntent(operand), state);
 }
 
 /**

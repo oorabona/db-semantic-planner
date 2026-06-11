@@ -33,6 +33,7 @@ import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
 import { compileValue } from './handlers/where/utils.js';
+import { unwrapParamIntent } from './param-intent.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
@@ -389,7 +390,7 @@ function buildUnnestCte(
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
 	const unnestArgs: Node[] = columns.map((col) => {
-		const colArray = cte.columns[col] as unknown[];
+		const colArray = (cte.columns[col] as unknown[]).map(unwrapParamIntent);
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const pgArrayType = inferPgArrayType(col, undefined, sampleValue);
 		const pgBaseType = stripArraySuffix(pgArrayType);

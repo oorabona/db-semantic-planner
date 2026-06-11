@@ -9,7 +9,6 @@
  * - WHERE clause for conflict resolution
  */
 
-import { isParamIntent } from '@dbsp/types';
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
 import { columnRef, funcCall } from '../ast-helpers.js';
 import {
@@ -25,6 +24,7 @@ import type {
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
+import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import { buildReturningList } from './mutation-compiler.js';
 
@@ -345,10 +345,6 @@ function valueToParam(state: CompilerState, value?: unknown): Node {
 			number: state.paramIndex,
 		},
 	};
-}
-
-function unwrapParamIntent(value: unknown): unknown {
-	return isParamIntent(value) ? value.value : value;
 }
 
 /**

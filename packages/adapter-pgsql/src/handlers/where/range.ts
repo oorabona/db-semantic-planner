@@ -5,6 +5,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -13,7 +14,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { isRangeValue } from '../types.js';
-import { buildColumnRef, unwrapParamIntent } from './utils.js';
+import { buildColumnRef } from './utils.js';
 
 /** Map operator names to PostgreSQL range operators */
 const RANGE_OP_MAP: Record<string, string> = {

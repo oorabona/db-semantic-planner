@@ -60,6 +60,7 @@ import {
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
+import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 
 // ============================================================================
@@ -420,7 +421,7 @@ function handleExpressionIntent(
 	}
 
 	const idx = ++ctx.paramState.paramIndex;
-	ctx.paramState.parameters.push(exprIntent.value);
+	ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
 	const rightNode = createParamRef(idx);
 	const sqlOp = OP_MAP[exprIntent.operator] ?? '=';
 	return binaryExpr(sqlOp, leftNode, rightNode);

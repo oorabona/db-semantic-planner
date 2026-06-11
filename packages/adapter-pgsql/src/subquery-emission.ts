@@ -54,6 +54,7 @@ import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 } from './intent-to-decisions.js';
+import { unwrapParamIntent } from './param-intent.js';
 
 // ============================================================================
 // Predicate use discriminant
@@ -312,7 +313,7 @@ export function buildPredicateSubquerySelect(
 		if (typeof decision.limit === 'number') {
 			stmt.limitCount = integerNode(decision.limit);
 		} else if (isParamIntent(decision.limit)) {
-			state.parameters.push(decision.limit.value);
+			state.parameters.push(unwrapParamIntent(decision.limit));
 			state.paramIndex++;
 			stmt.limitCount = {
 				ParamRef: { number: state.paramIndex },

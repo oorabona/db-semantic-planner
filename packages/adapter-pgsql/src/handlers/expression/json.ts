@@ -5,13 +5,14 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
-import { compileValue, unwrapParamIntent } from '../where/utils.js';
+import { compileValue } from '../where/utils.js';
 
 /**
  * JSON extract: col->'key' or col->>'key' chains

@@ -38,6 +38,7 @@ import type {
 	Decision,
 	InsertStmtNode,
 } from '../handlers/types.js';
+import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 
 // ============================================================================
@@ -842,13 +843,9 @@ function valueToNode(
 	};
 }
 
-function unwrapParamIntent(value: unknown): unknown {
-	return isParamIntent(value) ? value.value : value;
-}
-
 function limitToNode(limit: number | ParamIntent, state: CompilerState): Node {
 	if (isParamIntent(limit)) {
-		state.parameters.push(limit.value);
+		state.parameters.push(unwrapParamIntent(limit));
 		state.paramIndex++;
 		return {
 			ParamRef: {

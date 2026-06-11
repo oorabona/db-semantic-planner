@@ -6,14 +6,13 @@
 import { isFieldRef, isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import { validateDbTypeName } from '../../validate.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import { isParamRef } from '../types.js';
 
-export function unwrapParamIntent(value: unknown): unknown {
-	return isParamIntent(value) ? value.value : value;
-}
+export { unwrapParamIntent } from '../../param-intent.js';
 
 /**
  * Build column reference from decision column, using current alias or root table.
@@ -61,9 +60,10 @@ export function compileValue(
 	columnType?: string,
 	forceParam = false,
 ): Node {
+	const boundValue = unwrapParamIntent(value);
 	if (isParamIntent(value)) {
 		const idx = ++state.paramIndex;
-		state.parameters.push(value.value);
+		state.parameters.push(boundValue);
 		return columnType
 			? createTypeCastParamRef(idx, columnType)
 			: createParamRef(idx);
@@ -71,7 +71,7 @@ export function compileValue(
 
 	if (forceParam) {
 		const idx = ++state.paramIndex;
-		state.parameters.push(value);
+		state.parameters.push(boundValue);
 		return columnType
 			? createTypeCastParamRef(idx, columnType)
 			: createParamRef(idx);

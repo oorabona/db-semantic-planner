@@ -6,6 +6,7 @@
 
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -14,11 +15,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import {
-	buildColumnRef,
-	resolveColumnPgType,
-	unwrapParamIntent,
-} from './utils.js';
+import { buildColumnRef, resolveColumnPgType } from './utils.js';
 
 /**
  * Create IN expression using = ANY($N)
@@ -83,7 +80,7 @@ export const inHandler: WhereHandler = {
 	): Node {
 		const operator = decision.operator ?? 'in';
 		const column = decision.column;
-		const value = decision.value;
+		const value = unwrapParamIntent(decision.value);
 
 		if (!column) {
 			throw new Error('In handler requires a column');

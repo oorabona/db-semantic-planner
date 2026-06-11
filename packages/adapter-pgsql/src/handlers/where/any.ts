@@ -11,6 +11,7 @@
 
 import type { Node } from '@pgsql/types';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -19,7 +20,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef, unwrapParamIntent } from './utils.js';
+import { buildColumnRef } from './utils.js';
 
 /**
  * Infer PostgreSQL base type from a runtime value sample.
@@ -70,7 +71,9 @@ export const anyHandler: WhereHandler = {
 		}
 
 		const rawValues = unwrapParamIntent(decision.values);
-		const values = Array.isArray(rawValues) ? rawValues : [];
+		const values = Array.isArray(rawValues)
+			? rawValues.map(unwrapParamIntent)
+			: [];
 		const columnNode = buildColumnRef(column, ctx);
 
 		// Determine the PG base type
