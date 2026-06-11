@@ -35,8 +35,25 @@ import {
 	expressionToSql,
 	expressionToValue,
 	isAggregateFunction,
+	resolveIntegerCount,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function resolveLagLeadOffset(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+): number {
+	if (expr.type === 'number') {
+		return resolveIntegerCount(expr.value, ctx, 'lag/lead offset');
+	}
+	if (expr.type === 'namedParam') {
+		return resolveIntegerCount(expr, ctx, 'lag/lead offset');
+	}
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		'lag/lead offset must resolve to a non-negative safe integer',
+	);
+}
 
 /**
  * Compile a SELECT clause to a SelectIntent.
@@ -198,7 +215,7 @@ function compileSelectExpression(
 		let defaultValue: unknown;
 		if (fn === 'lag' || fn === 'lead') {
 			if (windowExpr.args.length > 1) {
-				offset = expressionToValue(windowExpr.args[1]!, ctx) as number;
+				offset = resolveLagLeadOffset(windowExpr.args[1]!, ctx);
 			}
 			if (windowExpr.args.length > 2) {
 				defaultValue = expressionToValue(windowExpr.args[2]!, ctx);

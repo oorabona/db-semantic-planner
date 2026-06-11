@@ -130,6 +130,24 @@ describe('FEAT-134 NQL tag params', () => {
 		}).toThrow(/reserved.*__p/i);
 	});
 
+	it('rejects a generated param swallowed by raw quote fragments', () => {
+		const nql = createParamTestTag();
+
+		expect(() => {
+			nql<unknown>`users | where name = ${nqlRaw("'")}${'Alice'}${nqlRaw("'")}`.toIntentIR();
+		}).toThrow(/:__p0.*raw.*fragment/i);
+	});
+
+	it('rejects a generated param swallowed by a raw comment fragment', () => {
+		const nql = createParamTestTag();
+
+		expect(() => {
+			nql<unknown>`users | where id = 1 ${nqlRaw('#')}${2}${nqlRaw(
+				'\n',
+			)}`.toIntentIR();
+		}).toThrow(/:__p0.*raw.*fragment/i);
+	});
+
 	it('keeps mixed raw and bound slots deterministic', () => {
 		const nql = createParamTestTag();
 		const makeDump = () =>

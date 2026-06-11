@@ -89,6 +89,7 @@ type RuntimeNqlRawFragment = NqlRawFragment & {
 };
 
 interface GeneratedParamRange {
+	readonly name: string;
 	readonly start: number;
 	readonly end: number;
 }
@@ -143,11 +144,40 @@ function isInsideGeneratedRange(
 	);
 }
 
-function findReservedInternalParamReference(
+function findOverlappingGeneratedRange(
+	start: number,
+	end: number,
+	generatedRanges: readonly GeneratedParamRange[],
+): GeneratedParamRange | undefined {
+	return generatedRanges.find(
+		(range) => start < range.end && end > range.start,
+	);
+}
+
+function findExactGeneratedRange(
+	name: string,
+	start: number,
+	end: number,
+	generatedRanges: readonly GeneratedParamRange[],
+): GeneratedParamRange | undefined {
+	return generatedRanges.find(
+		(range) =>
+			range.name === name && range.start === start && range.end === end,
+	);
+}
+
+function generatedParamLexError(name: string): string {
+	return `Generated NQL parameter :${name} was not recognized as exactly one NamedParam token after raw-fragment assembly; check adjacent nqlRaw() fragments for quotes, comments, or identifier text that can swallow the placeholder.`;
+}
+
+function findInternalParamSourceError(
 	query: string,
 	generatedRanges: readonly GeneratedParamRange[],
 ): string | undefined {
 	const lexResult = NqlLexer.tokenize(query);
+	const generatedTokenCounts = new Map<string, number>(
+		generatedRanges.map((range) => [range.name, 0]),
+	);
 
 	for (const token of lexResult.tokens) {
 		if (token.tokenType.name !== 'NamedParam') {
@@ -161,8 +191,37 @@ function findReservedInternalParamReference(
 
 		const start = token.startOffset;
 		const end = (token.endOffset ?? start + token.image.length - 1) + 1;
+		const exactGeneratedRange = findExactGeneratedRange(
+			name,
+			start,
+			end,
+			generatedRanges,
+		);
+		if (exactGeneratedRange) {
+			generatedTokenCounts.set(
+				exactGeneratedRange.name,
+				(generatedTokenCounts.get(exactGeneratedRange.name) ?? 0) + 1,
+			);
+			continue;
+		}
+
+		const overlappingGeneratedRange = findOverlappingGeneratedRange(
+			start,
+			end,
+			generatedRanges,
+		);
+		if (overlappingGeneratedRange) {
+			return generatedParamLexError(overlappingGeneratedRange.name);
+		}
+
 		if (!isInsideGeneratedRange(start, end, generatedRanges)) {
 			return `Reserved NQL parameter namespace "__p" cannot be referenced by user source (${token.image}).`;
+		}
+	}
+
+	for (const range of generatedRanges) {
+		if (generatedTokenCounts.get(range.name) !== 1) {
+			return generatedParamLexError(range.name);
 		}
 	}
 
@@ -187,7 +246,7 @@ function assembleNqlTemplate(
 			const placeholder = `:${name}`;
 			const start = query.length;
 			query += placeholder;
-			generatedRanges.push({ start, end: start + placeholder.length });
+			generatedRanges.push({ name, start, end: start + placeholder.length });
 			params[name] = value;
 		}
 		query += strings[i + 1] ?? '';
@@ -197,7 +256,7 @@ function assembleNqlTemplate(
 		query,
 		params,
 		hasBoundParams: boundIndex > 0,
-		sourceError: findReservedInternalParamReference(query, generatedRanges),
+		sourceError: findInternalParamSourceError(query, generatedRanges),
 	};
 }
 

@@ -338,6 +338,28 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		}
 	});
 
+	it('validates lag/lead named offsets as non-negative safe integers', () => {
+		const ok = compileOk(
+			'orders | select lag(amount, :n) over (order by id) as prev_amount',
+			{ n: 2 },
+		);
+		const win = (
+			ok.query!.select as { columns: Array<{ kind: string; offset?: number }> }
+		).columns[0]!;
+
+		expect(win.kind).toBe('window');
+		expect(win.offset).toBe(2);
+
+		const bad = compileFail(
+			'orders | select lag(amount, :n) over (order by id) as prev_amount',
+			{ n: 'x' },
+		);
+		expect(bad.success).toBe(false);
+		expect(bad.errors[0]?.code).toMatch(/^ERR-SEM-/);
+		expect(bad.errors[0]?.message).toContain('lag/lead offset');
+		expect(bad.errors[0]?.message).toMatch(/integer/i);
+	});
+
 	it('validates named insert-from and upsert-from limits', () => {
 		const insert = compileOk(
 			'insert into archived_users from users limit :limit',
