@@ -234,7 +234,7 @@ export function compileUnnestInsert(
 	const targetList: Node[] = columns.map((col, i) => {
 		// columnArrays[i] is always defined (transposeToColumnArrays maps over columns),
 		// but TypeScript doesn't know that — use a safe fallback.
-		const colArray: unknown[] = (columnArrays[i] ?? []).map(unwrapParamIntent);
+		const colArray: unknown[] = columnArrays[i] ?? [];
 
 		// Find a non-null sample value for runtime type fallback
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
@@ -392,7 +392,7 @@ export function compileUnnestUpdate(
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
 	const unnestArgs: Node[] = allColumns.map((col, i) => {
-		const colArray: unknown[] = (columnArrays[i] ?? []).map(unwrapParamIntent);
+		const colArray: unknown[] = columnArrays[i] ?? [];
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
 		// pgArrayType is already "type[]"; strip [] to get base type for createTypeCastParamRef

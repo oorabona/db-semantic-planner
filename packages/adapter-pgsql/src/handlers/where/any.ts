@@ -71,9 +71,7 @@ export const anyHandler: WhereHandler = {
 		}
 
 		const rawValues = unwrapParamIntent(decision.values);
-		const values = Array.isArray(rawValues)
-			? rawValues.map(unwrapParamIntent)
-			: [];
+		const values = Array.isArray(rawValues) ? rawValues : [];
 		const columnNode = buildColumnRef(column, ctx);
 
 		// Determine the PG base type

@@ -826,6 +826,33 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(inList.params).toEqual([['active', 'pending']]);
 	});
 
+	it('binds ANY(:p) and IN(:p) array elements opaquely', () => {
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const opaqueValues = [paramShaped, literalShaped];
+
+		const anyResult = nqlToSQLWithNamedParams(
+			'users | where id = ANY(:items)',
+			{ items: opaqueValues },
+		);
+		expect(anyResult.sql).toMatch(/users\.id = any\s*\(/);
+		expect(anyResult.params).toEqual([opaqueValues]);
+		expect(anyResult.params).not.toEqual([[7, 'x']]);
+
+		const inResult = nqlToSQLWithNamedParams('users | where id in (:items)', {
+			items: opaqueValues,
+		});
+		expect(inResult.sql).toMatch(/users\.id = any\s*\(/);
+		expect(inResult.params).toEqual([opaqueValues]);
+		expect(inResult.params).not.toEqual([[7, 'x']]);
+
+		const normalAny = nqlToSQLWithNamedParams(
+			'users | where id = ANY(:items)',
+			{ items: [1, 2, 3] },
+		);
+		expect(normalAny.params).toEqual([[1, 2, 3]]);
+	});
+
 	it('binds explicit NQL param nodes through CTE body and outer query', () => {
 		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 		const { sql, params } = nqlCteToSQLWithNamedParams(

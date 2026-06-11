@@ -267,7 +267,7 @@ export function compileUnnestUpsert(
 
 	// Build SELECT target list: unnest($N::type[]) AS "col"
 	const targetList: Node[] = columns.map((col, i) => {
-		const colArray: unknown[] = (columnArrays[i] ?? []).map(unwrapParamIntent);
+		const colArray: unknown[] = columnArrays[i] ?? [];
 
 		// Find a non-null sample value for runtime type fallback
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);

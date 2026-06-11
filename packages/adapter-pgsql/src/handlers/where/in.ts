@@ -4,6 +4,7 @@
  * Handles: in, notIn
  */
 
+import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
@@ -67,6 +68,22 @@ function createNotInExpr(
 	};
 }
 
+function isWholeArrayParamList(value: unknown[]): boolean {
+	return (
+		value.length === 1 &&
+		isParamIntent(value[0]) &&
+		Array.isArray(value[0].value)
+	);
+}
+
+function unwrapCompilerInListValues(value: unknown[]): unknown[] {
+	const values: unknown[] = [];
+	for (const item of value) {
+		values.push(unwrapParamIntent(item));
+	}
+	return values;
+}
+
 /**
  * Collection operators handler (IN, NOT IN)
  */
@@ -110,7 +127,9 @@ export const inHandler: WhereHandler = {
 		}
 
 		// Handle empty arrays
-		const values = value.map((item) => unwrapParamIntent(item));
+		const values = isWholeArrayParamList(value)
+			? (value[0].value as unknown[])
+			: unwrapCompilerInListValues(value);
 		if (values.length === 0) {
 			// Empty IN is always false, empty NOT IN is always true
 			if (operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn') {

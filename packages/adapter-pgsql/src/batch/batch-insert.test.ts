@@ -88,6 +88,33 @@ describe('SC-01: large batch (100 rows) uses unnest', () => {
 		expect(vectors[0]).toBe('v0');
 		expect(vectors[99]).toBe('v99');
 	});
+
+	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const values = Array.from({ length: 100 }, (_, i) => ({
+			symbol_id: i + 1,
+			vector: i === 0 ? paramShaped : i === 1 ? literalShaped : `v${i}`,
+		}));
+
+		const result = adapter.compileInsert({
+			type: 'insert',
+			table: 'embeddings',
+			values,
+		} as any);
+
+		expect(result.parameters[1]).toEqual([
+			paramShaped,
+			literalShaped,
+			...Array.from({ length: 98 }, (_, i) => `v${i + 2}`),
+		]);
+		expect(result.parameters[1]).not.toEqual([
+			7,
+			'x',
+			...Array.from({ length: 98 }, (_, i) => `v${i + 2}`),
+		]);
+	});
 });
 
 // ---------------------------------------------------------------------------
