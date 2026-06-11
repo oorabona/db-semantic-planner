@@ -168,16 +168,43 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('$1');
 	});
 
-	it('does not route NQL function names through builder raw SQL handlers', () => {
-		const { sql, params } = nqlToSQLWithParams(
+	it('rejects raw-family NQL SELECT functions before SQL compilation', () => {
+		const compiled = compile(
 			"users | select raw('1; DROP TABLE users') as x",
+			testSchema.model,
 		);
 
-		expect(sql).toContain('raw($1)');
-		expect(sql).toContain('as x');
-		expect(sql).not.toContain('drop table');
-		expect(sql).not.toContain('1;');
-		expect(params).toEqual(['1; DROP TABLE users']);
+		expect(compiled.success).toBe(false);
+		expect(compiled.ast).toBeUndefined();
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: raw()',
+		);
+		expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+		expect(() =>
+			nqlToSQLWithParams("users | select raw('1; DROP TABLE users') as x"),
+		).toThrow(/Unsupported function in SELECT context: raw\(\)/);
+	});
+
+	it('rejects arbitrary PostgreSQL SELECT functions before SQL compilation', () => {
+		for (const [fn, args] of [
+			['pg_sleep', '1'],
+			['pg_read_file', "'x'"],
+		] as const) {
+			const input = `users | select ${fn}(${args}) as blocked`;
+			const compiled = compile(input, testSchema.model);
+
+			expect(compiled.success).toBe(false);
+			expect(compiled.ast).toBeUndefined();
+			expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+			expect(compiled.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+			expect(() => nqlToSQLWithParams(input)).toThrow(
+				new RegExp(`Unsupported function in SELECT context: ${fn}\\(\\)`),
+			);
+		}
 	});
 
 	it('compiles generic NQL SELECT functions as FuncCall nodes', () => {
@@ -192,16 +219,21 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([]);
 	});
 
-	it('compiles nested generic NQL SELECT functions without reaching raw handlers', () => {
-		const { sql, params } = nqlToSQLWithParams(
-			"users | select upper(lower(name)) as uname, upper(raw('1; DROP TABLE users')) as guarded",
-		);
+	it('rejects nested raw-family NQL SELECT functions before SQL compilation', () => {
+		const input =
+			"users | select upper(lower(name)) as uname, upper(raw('1; DROP TABLE users')) as guarded";
+		const compiled = compile(input, testSchema.model);
 
-		expect(sql).toContain('upper(lower(users.name))');
-		expect(sql).toContain('upper(raw($1))');
-		expect(sql).not.toContain('drop table');
-		expect(sql).not.toContain('1;');
-		expect(params).toEqual(['1; DROP TABLE users']);
+		expect(compiled.success).toBe(false);
+		expect(compiled.ast).toBeUndefined();
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: raw()',
+		);
+		expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+		expect(() => nqlToSQLWithParams(input)).toThrow(
+			/Unsupported function in SELECT context: raw\(\)/,
+		);
 	});
 
 	it('recursively compiles NQL SELECT function arithmetic args with named params', () => {

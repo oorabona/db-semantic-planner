@@ -37,6 +37,11 @@ import {
 	isAggregateFunction,
 	resolveIntegerCount,
 } from './expression-utils.js';
+import {
+	isNqlSelectFunctionAllowed,
+	isNqlSelectWindowFunctionAllowed,
+	NQL_SELECT_JSON_FUNCTIONS,
+} from './select-function-allowlist.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
 const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(
@@ -86,6 +91,13 @@ function resolveLagLeadOffset(
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
 		'lag/lead offset must resolve to a non-negative safe integer',
+	);
+}
+
+function throwUnsupportedSelectFunction(fn: string): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Unsupported function in SELECT context: ${fn}()`,
 	);
 }
 
@@ -284,6 +296,9 @@ function compileSelectExpression(
 		if (jsonIntent) return jsonIntent;
 
 		// Non-aggregate function (e.g., now(), upper(), coalesce())
+		if (!isNqlSelectFunctionAllowed(fn)) {
+			throwUnsupportedSelectFunction(fn);
+		}
 		return {
 			kind: 'function',
 			name: expr.name,
@@ -295,7 +310,11 @@ function compileSelectExpression(
 	// Window expression
 	if (expr.type === 'window') {
 		const windowExpr = expr as NqlWindowExpression;
-		const fn = windowExpr.function.toLowerCase() as WindowFunction;
+		const fn = windowExpr.function.toLowerCase();
+		if (!isNqlSelectWindowFunctionAllowed(fn)) {
+			throwUnsupportedSelectFunction(fn);
+		}
+		const windowFn = fn as WindowFunction;
 
 		let field: string | undefined;
 		if (windowExpr.args.length > 0) {
@@ -307,7 +326,7 @@ function compileSelectExpression(
 		// Extract offset and defaultValue for lag/lead (args[1] and args[2])
 		let offset: number | undefined;
 		let defaultValue: unknown;
-		if (fn === 'lag' || fn === 'lead') {
+		if (windowFn === 'lag' || windowFn === 'lead') {
 			if (windowExpr.args.length > 1) {
 				offset = resolveLagLeadOffset(windowExpr.args[1]!, ctx);
 			}
@@ -343,21 +362,21 @@ function compileSelectExpression(
 			...(partitionBy && { partitionBy }),
 			...(orderBy && { orderBy }),
 		} as const;
-		const alias = exprItem.alias ?? fn;
+		const alias = exprItem.alias ?? windowFn;
 
-		if (isRankingWindowFunction(fn)) {
+		if (isRankingWindowFunction(windowFn)) {
 			return {
 				kind: 'window',
-				function: fn,
+				function: windowFn,
 				alias,
 				over,
 			} satisfies RankingWindowIntent;
 		}
 
-		if (fn === 'lag' || fn === 'lead') {
+		if (windowFn === 'lag' || windowFn === 'lead') {
 			return {
 				kind: 'window',
-				function: fn,
+				function: windowFn,
 				field: field ?? '',
 				alias,
 				...(offset !== undefined && { offset }),
@@ -370,7 +389,7 @@ function compileSelectExpression(
 		// COUNT(*) omits field (undefined); others always have a field from the parser
 		return {
 			kind: 'window',
-			function: fn,
+			function: windowFn,
 			...(field !== undefined && { field }),
 			alias,
 			over,
@@ -689,12 +708,9 @@ function compileExpressionToIntent(
 // JSON Function Notation → Same intents as operator notation
 // ============================================================================
 
-const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set([
-	'json_extract',
-	'json_extract_text',
-	'json_path',
-	'json_path_text',
-]);
+const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set(
+	NQL_SELECT_JSON_FUNCTIONS,
+);
 
 /**
  * Compile JSON function notation to the same intent as operator notation.

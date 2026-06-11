@@ -15,6 +15,7 @@ import type {
 	NqlRangeLiteral,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
+import { NQL_SELECT_AGGREGATE_FUNCTIONS } from './select-function-allowlist.js';
 import type { CompilerContext } from './types.js';
 
 const FORBIDDEN_PARAM_NAMES = new Set([
@@ -383,15 +384,9 @@ export function mapComparisonOperator(
  * Check if a function name is an aggregate function.
  */
 export function isAggregateFunction(name: string): boolean {
-	return [
-		'count',
-		'sum',
-		'avg',
-		'min',
-		'max',
-		'array_agg',
-		'string_agg',
-	].includes(name.toLowerCase());
+	return (NQL_SELECT_AGGREGATE_FUNCTIONS as readonly string[]).includes(
+		name.toLowerCase(),
+	);
 }
 
 /**

@@ -615,6 +615,92 @@ describe('compile-select: non-aggregate function', () => {
 			expect(col.as).toBe('current_time');
 		}
 	});
+
+	it('rejects unsupported SELECT functions with structured SEM_INVALID_SYNTAX', () => {
+		for (const [fn, args] of [
+			['pg_sleep', '1'],
+			['pg_read_file', "'x'"],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
+
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+		}
+	});
+
+	it('rejects unsupported nested SELECT functions before adapter FuncCall emission', () => {
+		const result = compileRawSelect(
+			'users | select upper(pg_sleep(1)) as blocked',
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.ast).toBeUndefined();
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: pg_sleep()',
+		);
+		expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+	});
+
+	it('keeps the empirically-derived SELECT function allowlist compiling', () => {
+		const cases = [
+			'users | select coalesce(name, :fallback) as display',
+			'users | select lower(name) as lower_name',
+			'users | select now() as ts',
+			'users | select round(price) as rounded',
+			'users | select upper(name) as upper_name',
+			'users | select count() as total',
+			'users | select sum(price) as total_price',
+			'users | select avg(price) as avg_price',
+			'users | select min(price) as min_price',
+			'users | select max(price) as max_price',
+			'users | select array_agg(name) as names',
+			"users | select string_agg(name, ',') as names",
+			"users | select json_extract(data, 'meta') as meta",
+			"users | select json_extract_text(data, 'email') as email",
+			"users | select json_path(data, 'a', 'b') as nested",
+			"users | select json_path_text(data, '{name,first}') as first_name",
+			'users | select row_number() over (order by id) as rn',
+			'users | select rank() over (order by price) as rnk',
+			'users | select dense_rank() over (order by price) as dr',
+			'users | select lag(price) over (order by id) as prev_price',
+			'users | select lead(price) over (order by id) as next_price',
+			'users | select count() over () as total_rows',
+			'users | select sum(price) over (order by id) as running_sum',
+			'users | select avg(price) over (order by id) as running_avg',
+			'users | select min(price) over (order by id) as running_min',
+			'users | select max(price) over (order by id) as running_max',
+		] as const;
+
+		for (const input of cases) {
+			const result = compile(input, null, undefined, {
+				params: { fallback: 'anon' },
+			});
+			expect(result.success, input).toBe(true);
+			expect(result.ast?.query).toBeDefined();
+		}
+	});
+
+	it('rejects unsupported window function names with SEM_INVALID_SYNTAX', () => {
+		const result = compileRawSelect(
+			'users | select pg_sleep(1) over () as blocked',
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.ast).toBeUndefined();
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: pg_sleep()',
+		);
+		expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+	});
 });
 
 // ===========================================================================
