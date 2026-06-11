@@ -55,7 +55,7 @@ export type {
 	NqlWarning,
 } from './errors/types.js';
 // Re-export lexer
-export { allTokens, NqlLexer } from './lexer/index.js';
+export { allTokens, NqlLexer, tokenize } from './lexer/index.js';
 // Re-export AST types
 export * from './parser/ast.js';
 // Re-export parser

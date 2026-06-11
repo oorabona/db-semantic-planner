@@ -18,18 +18,16 @@ function createParamTestTag() {
 		},
 	} as const);
 
-	return createNqlTag(
-		db.definition,
-		db.model,
-		createPgsqlCompileOnlyAdapter(),
-	);
+	return createNqlTag(db.definition, db.model, createPgsqlCompileOnlyAdapter());
 }
 
 describe('FEAT-134 NQL tag params', () => {
 	it('binds scalar interpolations as SQL params', () => {
 		const nql = createParamTestTag();
-		const dump =
-			nql<{ id: number; name: string }>`users | where id = ${5} and name = ${"O'Brien"}`.dump();
+		const dump = nql<{
+			id: number;
+			name: string;
+		}>`users | where id = ${5} and name = ${"O'Brien"}`.dump();
 
 		expect(dump.params).toEqual([5, "O'Brien"]);
 		expect(dump.sql).toMatch(/\$1\b/);
@@ -39,8 +37,9 @@ describe('FEAT-134 NQL tag params', () => {
 
 	it('binds tag arrays through ANY', () => {
 		const nql = createParamTestTag();
-		const dump =
-			nql<{ id: number }>`users | where id = ANY(${[1, 2, 3]})`.dump();
+		const dump = nql<{
+			id: number;
+		}>`users | where id = ANY(${[1, 2, 3]})`.dump();
 
 		expect(dump.params).toEqual([[1, 2, 3]]);
 		expect(dump.sql).toMatch(/ANY\s*\(/i);
@@ -55,15 +54,43 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(intent.limit).toBe(10);
 	});
 
+	it('binds interpolated JSON keys in json_exists()', () => {
+		const nql = createParamTestTag();
+		const dump =
+			nql<unknown>`users | where json_exists(profile, ${'email'})`.dump();
+
+		expect(dump.params).toEqual(['email']);
+		expect(dump.sql).toMatch(/\?/);
+		expect(dump.sql).toMatch(/\$1\b/);
+	});
+
+	it('binds interpolated JSON paths in json_extract()', () => {
+		const nql = createParamTestTag();
+		const dump =
+			nql<unknown>`users | where json_extract(profile, ${'role'}) = ${'admin'}`.dump();
+
+		expect(dump.params).toEqual(['role', 'admin']);
+		expect(dump.sql).toMatch(/->/);
+		expect(dump.sql).toMatch(/\$1\b/);
+		expect(dump.sql).toMatch(/\$2\b/);
+	});
+
+	it('binds interpolated JSON keys in ? operator', () => {
+		const nql = createParamTestTag();
+		const dump = nql<unknown>`users | where profile ? ${'timezone'}`.dump();
+
+		expect(dump.params).toEqual(['timezone']);
+		expect(dump.sql).toMatch(/\?/);
+		expect(dump.sql).toMatch(/\$1\b/);
+	});
+
 	it('splices nqlRaw fragments verbatim', () => {
 		const nql = createParamTestTag();
 
 		const intent =
 			nql<unknown>`users | ${nqlRaw('order by createdAt desc')}`.toIntentIR();
 
-		expect(intent.orderBy).toEqual([
-			{ field: 'createdAt', direction: 'desc' },
-		]);
+		expect(intent.orderBy).toEqual([{ field: 'createdAt', direction: 'desc' }]);
 	});
 
 	it('binds plain strings instead of treating them as structure', () => {
@@ -80,6 +107,19 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(() => {
 			nql<unknown>`users | where id = :__p0`.toIntentIR();
 		}).toThrow(/reserved.*__p/i);
+	});
+
+	it('allows reserved-looking text inside string literals', () => {
+		const nql = createParamTestTag();
+
+		const intent = nql<unknown>`users | where name = ':__p0'`.toIntentIR();
+
+		expect(intent.where).toMatchObject({
+			kind: 'comparison',
+			field: 'name',
+			operator: 'eq',
+			value: ':__p0',
+		});
 	});
 
 	it('rejects reserved generated param names inside raw fragments', () => {

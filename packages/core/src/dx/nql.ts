@@ -16,7 +16,11 @@
  * @since DX-040
  */
 
-import { type NqlCompilerOptions, compile as nqlCompile } from '@dbsp/nql';
+import {
+	type NqlCompilerOptions,
+	NqlLexer,
+	compile as nqlCompile,
+} from '@dbsp/nql';
 import type { Adapter, Dump } from '../adapter.js';
 import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -79,7 +83,6 @@ export interface NqlRawFragment {
 // ============================================================================
 
 const NQL_RAW_FRAGMENT = Symbol('NqlRawFragment');
-const RESERVED_INTERNAL_PARAM_RE = /:([A-Za-z_][A-Za-z0-9_]*)/g;
 
 type RuntimeNqlRawFragment = NqlRawFragment & {
 	readonly [NQL_RAW_FRAGMENT]: true;
@@ -121,7 +124,7 @@ function isNqlRawFragment(value: unknown): value is NqlRawFragment {
 	if (typeof value !== 'object' || value === null) {
 		return false;
 	}
-	if (!Object.prototype.hasOwnProperty.call(value, NQL_RAW_FRAGMENT)) {
+	if (!Object.hasOwn(value, NQL_RAW_FRAGMENT)) {
 		return false;
 	}
 	return (
@@ -144,18 +147,22 @@ function findReservedInternalParamReference(
 	query: string,
 	generatedRanges: readonly GeneratedParamRange[],
 ): string | undefined {
-	RESERVED_INTERNAL_PARAM_RE.lastIndex = 0;
-	let match: RegExpExecArray | null;
-	while ((match = RESERVED_INTERNAL_PARAM_RE.exec(query)) !== null) {
-		const name = match[1] ?? '';
+	const lexResult = NqlLexer.tokenize(query);
+
+	for (const token of lexResult.tokens) {
+		if (token.tokenType.name !== 'NamedParam') {
+			continue;
+		}
+
+		const name = token.image.slice(1);
 		if (!name.startsWith('__p')) {
 			continue;
 		}
 
-		const start = match.index;
-		const end = start + match[0].length;
+		const start = token.startOffset;
+		const end = (token.endOffset ?? start + token.image.length - 1) + 1;
 		if (!isInsideGeneratedRange(start, end, generatedRanges)) {
-			return `Reserved NQL parameter namespace "__p" cannot be referenced by user source (${match[0]}).`;
+			return `Reserved NQL parameter namespace "__p" cannot be referenced by user source (${token.image}).`;
 		}
 	}
 

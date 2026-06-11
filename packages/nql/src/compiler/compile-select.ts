@@ -167,7 +167,7 @@ function compileSelectExpression(
 			};
 		}
 		// JSON function notation → same intent as operator notation
-		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias);
+		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias, ctx);
 		if (jsonIntent) return jsonIntent;
 
 		// Non-aggregate function (e.g., now(), upper(), coalesce())
@@ -570,6 +570,7 @@ function compileJsonFunction(
 	fn: string,
 	args: NqlExpression[],
 	alias: string | undefined,
+	ctx: CompilerContext,
 ): ExpressionIntent | null {
 	if (!JSON_FUNCTION_NAMES.has(fn)) return null;
 
@@ -597,7 +598,7 @@ function compileJsonFunction(
 		// treated as string keys; dotted paths and non-string args throw SEM_INVALID_SYNTAX.
 		const keys = args
 			.slice(1)
-			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
+			.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
 		return {
 			kind: 'jsonExtract',
 			field,
@@ -613,7 +614,7 @@ function compileJsonFunction(
 		// M-1: same coercion fix — reject path expressions and non-string args.
 		const keys = args
 			.slice(1)
-			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
+			.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
 		const first = keys[0];
 		const pathStr =
 			keys.length === 1 && first?.startsWith('{') && first.endsWith('}')

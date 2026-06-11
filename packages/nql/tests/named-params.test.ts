@@ -1,6 +1,7 @@
 import type {
 	WhereAndIntent,
 	WhereComparisonIntent,
+	WhereJsonExistsIntent,
 	WhereLikeIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -122,6 +123,40 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		expect(bad.errors[0]?.code).toMatch(/^ERR-SEM-/);
 		expect(bad.errors[0]?.message).toContain(':pattern');
 		expect(bad.errors[0]?.message).toMatch(/string/i);
+	});
+
+	it('resolves JSON key params through shared string-key coercion', () => {
+		const exists = compileOk('users | where json_exists(profile, :key)', {
+			key: 'timezone',
+		});
+		expect((exists.query!.where as WhereJsonExistsIntent).key).toBe('timezone');
+
+		const extract = compileOk(
+			"users | where json_extract(profile, :key) = 'admin'",
+			{ key: 'role' },
+		);
+		expect((extract.query!.where as WhereComparisonIntent).jsonPath).toEqual([
+			'role',
+		]);
+
+		const op = compileOk('users | where profile ? :key', {
+			key: 'email',
+		});
+		expect((op.query!.where as WhereJsonExistsIntent).key).toBe('email');
+	});
+
+	it('rejects non-string JSON key params structurally', () => {
+		for (const input of [
+			'users | where json_exists(profile, :key)',
+			"users | where json_extract(profile, :key) = 'admin'",
+			'users | where profile ? :key',
+		]) {
+			const result = compileFail(input, { key: 42 });
+			expect(result.success).toBe(false);
+			expect(result.errors[0]?.code).toMatch(/^ERR-SEM-/);
+			expect(result.errors[0]?.message).toContain(':key');
+			expect(result.errors[0]?.message).toMatch(/string/i);
+		}
 	});
 
 	it('returns a structured semantic error when a binding is missing', () => {

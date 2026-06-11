@@ -38,7 +38,6 @@ import {
 	mapComparisonOperator,
 	resolveFilterValue,
 	resolveNamedParamArray,
-	resolveNamedStringParam,
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
@@ -171,7 +170,7 @@ function compileComparison(
 			// '[object Object]' for path expressions — use coerceToStringKey instead.
 			const keys = comp.left.args
 				.slice(1)
-				.map((a) => coerceToStringKey(a, `${fn}() path argument`));
+				.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
 			const operator = mapComparisonOperator(comp.operator);
 			const value = resolveFilterValue(
 				comp.right,
@@ -206,10 +205,7 @@ function compileComparison(
 	// Dotted paths and expression nodes are rejected by coerceToStringKey().
 	// String(resolveFilterValue(...)) would silently yield '[object Object]' for path refs.
 	if (comp.operator === 'like') {
-		const pattern =
-			comp.right.type === 'namedParam'
-				? resolveNamedStringParam(ctx, comp.right.name, 'LIKE pattern')
-				: coerceToStringKey(comp.right, 'LIKE pattern');
+		const pattern = coerceToStringKey(comp.right, 'LIKE pattern', ctx);
 		return {
 			kind: 'like',
 			field,
@@ -533,7 +529,7 @@ function compileJson(
 			// Route through coerceToStringKey: handles single-segment path identifiers
 			// (e.g. json_exists(data, email) → key='email') and rejects dotted paths
 			// and non-string values that would silently yield '[object Object]'.
-			const key = coerceToStringKey(expr.args[1]!, `${fn}() key`);
+			const key = coerceToStringKey(expr.args[1]!, `${fn}() key`, ctx);
 			return {
 				kind: 'jsonExists',
 				field: jsonField,
@@ -562,7 +558,7 @@ function compileJson(
 	if (jsonComp.operator === '?') {
 		// S-3: String(resolveFilterValue(...)) would silently yield '[object Object]'
 		// for path expressions — use coerceToStringKey to reject non-string RHS.
-		const key = coerceToStringKey(jsonComp.right, '? operator key');
+		const key = coerceToStringKey(jsonComp.right, '? operator key', ctx);
 		return {
 			kind: 'jsonExists',
 			field: jsonField,

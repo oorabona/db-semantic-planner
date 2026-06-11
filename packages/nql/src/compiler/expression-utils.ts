@@ -94,21 +94,6 @@ export function resolveNamedParam(ctx: CompilerContext, name: string): unknown {
 	return value;
 }
 
-export function resolveNamedStringParam(
-	ctx: CompilerContext,
-	name: string,
-	contextLabel: string,
-): string {
-	const value = resolveNamedParam(ctx, name);
-	if (typeof value !== 'string') {
-		throw new NqlSemanticException(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
-			`${contextLabel} named parameter :${name} must resolve to a string`,
-		);
-	}
-	return value;
-}
-
 /**
  * Resolve `ANY(:name)` and validate it as an array after the shared value checks.
  */
@@ -456,16 +441,19 @@ export function validateWhereField(
  *
  * Dispatch rules:
  *   - string literal → use `.value` directly
+ *   - named parameter → resolve through the shared param resolver and require a string value
  *   - single-segment path → treat the identifier name as the key (prevents `String({$ref:...})` → `'[object Object]'`)
  *   - multi-segment dotted path → throw SEM_INVALID_SYNTAX (ambiguous — caller cannot know which segment to use)
  *   - anything else → throw SEM_INVALID_SYNTAX
  *
  * @param expr - The NQL expression to coerce.
  * @param contextLabel - Human-readable label for the position (e.g. `"LIKE pattern"`, `"json_extract() path argument"`) used in error messages.
+ * @param ctx - Compiler context used to resolve named params through the shared resolver.
  */
 export function coerceToStringKey(
 	expr: NqlExpression,
 	contextLabel: string,
+	ctx: CompilerContext,
 ): string {
 	if (expr.type === 'path') {
 		const segments = (expr as NqlPathExpression).segments;
@@ -488,6 +476,16 @@ export function coerceToStringKey(
 	}
 	if (expr.type === 'string') {
 		return (expr as { type: 'string'; value: string }).value;
+	}
+	if (expr.type === 'namedParam') {
+		const value = resolveNamedParam(ctx, expr.name);
+		if (typeof value !== 'string') {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`${contextLabel} named parameter :${expr.name} must resolve to a string`,
+			);
+		}
+		return value;
 	}
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
