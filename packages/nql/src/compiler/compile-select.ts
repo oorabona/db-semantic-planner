@@ -16,10 +16,11 @@ import type {
 	WindowFunction,
 } from '@dbsp/types';
 import {
-	isNqlSelectFunctionAllowed,
 	isNqlSelectWindowFunctionAllowed,
 	isRankingWindowFunction,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_JSON_FUNCTIONS,
+	NQL_SELECT_SCALAR_FUNCTIONS,
 } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
@@ -100,6 +101,12 @@ function throwUnsupportedSelectFunction(fn: string): never {
 		`Unsupported function in SELECT context: ${fn}()`,
 	);
 }
+
+const SELECT_SCALAR_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	...NQL_SELECT_JSON_FUNCTIONS,
+	...NQL_SELECT_SCALAR_FUNCTIONS,
+]);
 
 /**
  * Compile a SELECT clause to a SelectIntent.
@@ -296,7 +303,7 @@ function compileSelectExpression(
 		if (jsonIntent) return jsonIntent;
 
 		// Non-aggregate function (e.g., now(), upper(), coalesce())
-		if (!isNqlSelectFunctionAllowed(fn)) {
+		if (!SELECT_SCALAR_FUNCTION_NAMES.has(fn)) {
 			throwUnsupportedSelectFunction(fn);
 		}
 		return {

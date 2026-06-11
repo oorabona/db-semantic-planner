@@ -21,7 +21,7 @@ export const NQL_SELECT_JSON_FUNCTIONS = [
 	'json_path_text',
 ] as const;
 
-export const NQL_SELECT_SCALAR_FUNCTIONS = [
+export const NQL_SELECT_VALUE_FUNCTIONS = [
 	'coalesce',
 	'lower',
 	'now',
@@ -29,12 +29,22 @@ export const NQL_SELECT_SCALAR_FUNCTIONS = [
 	'upper',
 ] as const;
 
-export const NQL_SELECT_WINDOW_FUNCTIONS = [
+export const NQL_SELECT_SCALAR_FUNCTIONS = [
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	...NQL_SELECT_JSON_FUNCTIONS,
+	...NQL_SELECT_VALUE_FUNCTIONS,
+] as const;
+
+export const NQL_SELECT_WINDOW_ONLY_FUNCTIONS = [
 	'row_number',
 	'rank',
 	'dense_rank',
 	'lag',
 	'lead',
+] as const;
+
+export const NQL_SELECT_WINDOW_FUNCTIONS = [
+	...NQL_SELECT_WINDOW_ONLY_FUNCTIONS,
 	'count',
 	'sum',
 	'avg',
@@ -42,14 +52,25 @@ export const NQL_SELECT_WINDOW_FUNCTIONS = [
 	'max',
 ] as const;
 
+export const NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST: ReadonlySet<string> =
+	new Set(NQL_SELECT_SCALAR_FUNCTIONS);
+
+export const NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST: ReadonlySet<string> =
+	new Set(NQL_SELECT_WINDOW_FUNCTIONS);
+
 export const NQL_SELECT_FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
-	...NQL_SELECT_AGGREGATE_FUNCTIONS,
-	...NQL_SELECT_JSON_FUNCTIONS,
 	...NQL_SELECT_SCALAR_FUNCTIONS,
 	...NQL_SELECT_WINDOW_FUNCTIONS,
 ]);
 
+type NqlSelectScalarFunction = (typeof NQL_SELECT_SCALAR_FUNCTIONS)[number];
 type NqlSelectWindowFunction = (typeof NQL_SELECT_WINDOW_FUNCTIONS)[number];
+
+export function isNqlSelectScalarFunctionAllowed(
+	name: string,
+): name is NqlSelectScalarFunction {
+	return NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST.has(name.toLowerCase());
+}
 
 export function isNqlSelectFunctionAllowed(name: string): boolean {
 	return NQL_SELECT_FUNCTION_ALLOWLIST.has(name.toLowerCase());
@@ -58,7 +79,5 @@ export function isNqlSelectFunctionAllowed(name: string): boolean {
 export function isNqlSelectWindowFunctionAllowed(
 	name: string,
 ): name is NqlSelectWindowFunction {
-	return (NQL_SELECT_WINDOW_FUNCTIONS as readonly string[]).includes(
-		name.toLowerCase(),
-	);
+	return NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST.has(name.toLowerCase());
 }

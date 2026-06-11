@@ -29,6 +29,10 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../../../nql/src/index.js';
+import {
+	NQL_SELECT_SCALAR_FUNCTIONS,
+	NQL_SELECT_WINDOW_FUNCTIONS,
+} from '../../../types/src/intent/select-function-allowlist.js';
 import { normalizeSQL } from '../ast-helpers.js';
 import { intentToDecisions } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -43,6 +47,7 @@ const testSchema = schema({
 		active: 'boolean',
 		price: 'decimal',
 		status: 'string',
+		data: { type: 'jsonb', nullable: true },
 	},
 	departments: {
 		id: { type: 'integer', primaryKey: true },
@@ -132,6 +137,146 @@ function nqlToSQLWithNamedParams(
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
+
+interface SelectFunctionAuditCase {
+	readonly nql: string;
+	readonly params?: Readonly<Record<string, unknown>>;
+	readonly sqlIncludes: readonly string[];
+	readonly paramsInclude?: readonly unknown[];
+}
+
+type ScalarSelectFunction = (typeof NQL_SELECT_SCALAR_FUNCTIONS)[number];
+type WindowSelectFunction = (typeof NQL_SELECT_WINDOW_FUNCTIONS)[number];
+
+function expectAllowlistCoverage<T extends string>(
+	allowlist: readonly T[],
+	cases: Readonly<Record<T, SelectFunctionAuditCase>>,
+): void {
+	expect(Object.keys(cases).sort()).toEqual([...allowlist].sort());
+}
+
+function expectCompilesThroughAdapter(testCase: SelectFunctionAuditCase): void {
+	const { sql, params } = nqlToSQLWithNamedParams(
+		testCase.nql,
+		testCase.params ?? {},
+	);
+	expect(sql).toContain('select');
+	expect(sql).toContain('as audited');
+	expect(sql).not.toContain('no handler');
+	for (const expected of testCase.sqlIncludes) {
+		expect(sql).toContain(expected);
+	}
+	for (const expected of testCase.paramsInclude ?? []) {
+		expect(params).toContain(expected);
+	}
+}
+
+const SCALAR_SELECT_FUNCTION_AUDIT_CASES = {
+	count: {
+		nql: 'users | select count() as audited',
+		sqlIncludes: ['count(*)'],
+	},
+	sum: {
+		nql: 'users | select sum(price) as audited',
+		sqlIncludes: ['sum(users.price)'],
+	},
+	avg: {
+		nql: 'users | select avg(price) as audited',
+		sqlIncludes: ['avg(users.price)'],
+	},
+	min: {
+		nql: 'users | select min(price) as audited',
+		sqlIncludes: ['min(users.price)'],
+	},
+	max: {
+		nql: 'users | select max(price) as audited',
+		sqlIncludes: ['max(users.price)'],
+	},
+	json_extract: {
+		nql: "users | select json_extract(data, 'meta') as audited",
+		sqlIncludes: ['users.data ->'],
+		paramsInclude: ['meta'],
+	},
+	json_extract_text: {
+		nql: "users | select json_extract_text(data, 'email') as audited",
+		sqlIncludes: ['users.data ->>'],
+		paramsInclude: ['email'],
+	},
+	json_path: {
+		nql: "users | select json_path(data, 'a', 'b') as audited",
+		sqlIncludes: ['users.data #>'],
+		paramsInclude: ['{a,b}'],
+	},
+	json_path_text: {
+		nql: "users | select json_path_text(data, 'name', 'first') as audited",
+		sqlIncludes: ['users.data #>>'],
+		paramsInclude: ['{name,first}'],
+	},
+	coalesce: {
+		nql: "users | select coalesce(name, 'anon') as audited",
+		sqlIncludes: ['coalesce(users.name, $1)'],
+		paramsInclude: ['anon'],
+	},
+	lower: {
+		nql: 'users | select lower(name) as audited',
+		sqlIncludes: ['lower(users.name)'],
+	},
+	now: {
+		nql: 'users | select now() as audited',
+		sqlIncludes: ['now()'],
+	},
+	round: {
+		nql: 'users | select round(price) as audited',
+		sqlIncludes: ['round(users.price)'],
+	},
+	upper: {
+		nql: 'users | select upper(name) as audited',
+		sqlIncludes: ['upper(users.name)'],
+	},
+} satisfies Record<ScalarSelectFunction, SelectFunctionAuditCase>;
+
+const WINDOW_SELECT_FUNCTION_AUDIT_CASES = {
+	row_number: {
+		nql: 'users | select row_number() over (order by id) as audited',
+		sqlIncludes: ['row_number() over', 'order by users.id'],
+	},
+	rank: {
+		nql: 'users | select rank() over (order by price) as audited',
+		sqlIncludes: ['rank() over', 'order by users.price'],
+	},
+	dense_rank: {
+		nql: 'users | select dense_rank() over (order by price) as audited',
+		sqlIncludes: ['dense_rank() over', 'order by users.price'],
+	},
+	lag: {
+		nql: 'users | select lag(price) over (order by id) as audited',
+		sqlIncludes: ['lag(users.price)', 'over', 'order by users.id'],
+	},
+	lead: {
+		nql: 'users | select lead(price) over (order by id) as audited',
+		sqlIncludes: ['lead(users.price)', 'over', 'order by users.id'],
+	},
+	count: {
+		nql: 'users | select count() over () as audited',
+		sqlIncludes: ['count(*) over'],
+	},
+	sum: {
+		nql: 'users | select sum(price) over (order by id) as audited',
+		sqlIncludes: ['sum(users.price) over', 'order by users.id'],
+	},
+	avg: {
+		nql: 'users | select avg(price) over (order by id) as audited',
+		sqlIncludes: ['avg(users.price) over', 'order by users.id'],
+	},
+	min: {
+		nql: 'users | select min(price) over (order by id) as audited',
+		sqlIncludes: ['min(users.price) over', 'order by users.id'],
+	},
+	max: {
+		nql: 'users | select max(price) over (order by id) as audited',
+		sqlIncludes: ['max(users.price) over', 'order by users.id'],
+	},
+} satisfies Record<WindowSelectFunction, SelectFunctionAuditCase>;
 
 // ---------------------------------------------------------------------------
 // Helper: NQL mutation → normalized SQL
@@ -241,6 +386,74 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(emittedSql).toBeUndefined();
 	});
 
+	it('rejects direct QueryIntent window-only names in scalar SELECT function position', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'function',
+						name: 'row_number',
+						args: [],
+						as: 'blocked',
+					},
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'row_number',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
+	it('rejects direct QueryIntent unsupported names in window SELECT position', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'window',
+						function: 'pg_sleep',
+						alias: 'blocked',
+						over: {},
+					} as never,
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'pg_sleep',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
 	it('compiles generic NQL SELECT functions as FuncCall nodes', () => {
 		const { sql, params } = nqlToSQLWithParams(
 			'users | select upper(name) as uname, now() as current_time',
@@ -251,6 +464,28 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('now()');
 		expect(sql).toMatch(/as "?current_time"?/);
 		expect(params).toEqual([]);
+	});
+
+	it('audits every scalar SELECT function allowlist entry end-to-end', () => {
+		expectAllowlistCoverage(
+			NQL_SELECT_SCALAR_FUNCTIONS,
+			SCALAR_SELECT_FUNCTION_AUDIT_CASES,
+		);
+
+		for (const fn of NQL_SELECT_SCALAR_FUNCTIONS) {
+			expectCompilesThroughAdapter(SCALAR_SELECT_FUNCTION_AUDIT_CASES[fn]);
+		}
+	});
+
+	it('audits every window SELECT function allowlist entry end-to-end', () => {
+		expectAllowlistCoverage(
+			NQL_SELECT_WINDOW_FUNCTIONS,
+			WINDOW_SELECT_FUNCTION_AUDIT_CASES,
+		);
+
+		for (const fn of NQL_SELECT_WINDOW_FUNCTIONS) {
+			expectCompilesThroughAdapter(WINDOW_SELECT_FUNCTION_AUDIT_CASES[fn]);
+		}
 	});
 
 	it('rejects nested raw-family NQL SELECT functions before SQL compilation', () => {

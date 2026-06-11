@@ -667,6 +667,28 @@ describe('compile-select: non-aggregate function', () => {
 		expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
 	});
 
+	it('rejects window-only SELECT functions without OVER', () => {
+		for (const [fn, args] of [
+			['row_number', ''],
+			['rank', ''],
+			['dense_rank', ''],
+			['lag', 'id'],
+			['lead', 'id'],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
+
+			expect(result.success, fn).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+		}
+	});
+
 	it('keeps the empirically-derived SELECT function allowlist compiling', () => {
 		const cases = [
 			'users | select coalesce(name, :fallback) as display',

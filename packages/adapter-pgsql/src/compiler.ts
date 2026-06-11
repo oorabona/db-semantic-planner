@@ -10,7 +10,10 @@
 import { InvalidOperationError } from '@dbsp/core';
 import {
 	type ExpressionIntent,
-	isNqlSelectFunctionAllowed,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	NQL_SELECT_JSON_FUNCTIONS,
+	NQL_SELECT_SCALAR_FUNCTIONS,
+	NQL_SELECT_WINDOW_FUNCTIONS,
 	type QueryIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
@@ -100,8 +103,24 @@ export class UnsupportedNqlSelectFunctionError extends Error {
 	}
 }
 
-function assertNqlSelectFunctionAllowed(functionName: string): void {
-	if (!isNqlSelectFunctionAllowed(functionName)) {
+const NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	...NQL_SELECT_JSON_FUNCTIONS,
+	...NQL_SELECT_SCALAR_FUNCTIONS,
+]);
+
+const NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set(
+	NQL_SELECT_WINDOW_FUNCTIONS,
+);
+
+function assertNqlSelectScalarFunctionAllowed(functionName: string): void {
+	if (!NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST.has(functionName.toLowerCase())) {
+		throw new UnsupportedNqlSelectFunctionError(functionName);
+	}
+}
+
+function assertNqlSelectWindowFunctionAllowed(functionName: string): void {
+	if (!NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST.has(functionName.toLowerCase())) {
 		throw new UnsupportedNqlSelectFunctionError(functionName);
 	}
 }
@@ -1181,7 +1200,7 @@ export class PlanCompiler {
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
 	): Node {
-		assertNqlSelectFunctionAllowed(functionName);
+		assertNqlSelectScalarFunctionAllowed(functionName);
 		validateIdentifier(functionName, 'function');
 		const argNodes = args.map((arg) =>
 			this.compileNqlFunctionArg(arg, ctx, state),
@@ -1525,7 +1544,7 @@ export class PlanCompiler {
 				ensureExpressionHandlersRegistered();
 				const funcType = decision.function;
 				if (!funcType) break;
-				assertNqlSelectFunctionAllowed(funcType);
+				assertNqlSelectScalarFunctionAllowed(funcType);
 				const ctx = this.createHandlerContext(
 					plan,
 					decision.table ?? plan.rootTable,
@@ -1688,6 +1707,7 @@ export class PlanCompiler {
 			case 'selectWindow': {
 				const winFuncName = decision.function;
 				if (!winFuncName) break;
+				assertNqlSelectWindowFunctionAllowed(winFuncName);
 				// Always use genericWindowHandler — avoids aggregate handlers
 				// (sumHandler, avgHandler) being picked for names like 'sum', 'avg'
 				// which produce FuncCall WITHOUT OVER clause.
