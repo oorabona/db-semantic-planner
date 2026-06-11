@@ -2,8 +2,11 @@
  * @fileoverview FEAT-134: NQL tag interpolation binds values as compiler params.
  */
 
+import { isParamExpressionValueIntent } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
+import type { Adapter } from '../adapter.js';
+import type { PlanReport } from '../planner.js';
 import { createNqlTag, nqlRaw } from './nql.js';
 import { schema } from './schema.js';
 
@@ -19,6 +22,70 @@ function createParamTestTag() {
 	} as const);
 
 	return createNqlTag(db.definition, db.model, createPgsqlCompileOnlyAdapter());
+}
+
+function createParamTestSchema() {
+	return schema({
+		users: {
+			id: 'integer',
+			name: 'string',
+			active: 'boolean',
+			createdAt: 'timestamp',
+			profile: 'json',
+		},
+	} as const);
+}
+
+function expectNoOwnSymbols(
+	value: unknown,
+	seen = new WeakSet<object>(),
+): void {
+	if (typeof value !== 'object' || value === null || seen.has(value)) {
+		return;
+	}
+
+	seen.add(value);
+	expect(Object.getOwnPropertySymbols(value)).toEqual([]);
+
+	const childValues = Array.isArray(value)
+		? value
+		: Object.values(value as Record<string, unknown>);
+	for (const child of childValues) {
+		expectNoOwnSymbols(child, seen);
+	}
+}
+
+function findObjects(
+	value: unknown,
+	predicate: (value: Record<string, unknown>) => boolean,
+	matches: Record<string, unknown>[] = [],
+	seen = new WeakSet<object>(),
+): Record<string, unknown>[] {
+	if (typeof value !== 'object' || value === null || seen.has(value)) {
+		return matches;
+	}
+
+	seen.add(value);
+	if (!Array.isArray(value) && predicate(value as Record<string, unknown>)) {
+		matches.push(value as Record<string, unknown>);
+	}
+
+	const childValues = Array.isArray(value)
+		? value
+		: Object.values(value as Record<string, unknown>);
+	for (const child of childValues) {
+		findObjects(child, predicate, matches, seen);
+	}
+	return matches;
+}
+
+function findFirstObject(
+	value: unknown,
+	predicate: (value: Record<string, unknown>) => boolean,
+): Record<string, unknown> {
+	const match = findObjects(value, predicate)[0];
+	expect(match).toBeDefined();
+	return match!;
 }
 
 describe('FEAT-134 NQL tag params', () => {
@@ -176,6 +243,106 @@ describe('FEAT-134 NQL tag params', () => {
 		});
 		expect(dump.params).toEqual([[1, 2]]);
 		expect(dump.sql).toMatch(/\$1\b/);
+	});
+
+	it('strips internal param wrappers recursively from public toIntentIR()', () => {
+		const nql = createParamTestTag();
+
+		const intent =
+			nql<unknown>`users | where id = ${5} and id in (${1}, ${2}) and createdAt between ${'2026-01-01'} and ${'2026-12-31'} | select case when active = true then ${'yes'} else ${'no'} end as label, coalesce(name, ${'anon'}) as display`.toIntentIR();
+
+		expectNoOwnSymbols(intent);
+		expect(
+			findFirstObject(
+				intent,
+				(node) => node.kind === 'comparison' && node.field === 'id',
+			).value,
+		).toBe(5);
+		expect(
+			findFirstObject(intent, (node) => node.kind === 'in').values,
+		).toEqual([1, 2]);
+		expect(
+			findFirstObject(intent, (node) => node.kind === 'range').value,
+		).toEqual({
+			lower: '2026-01-01',
+			upper: '2026-12-31',
+		});
+
+		const caseNode = findFirstObject(intent, (node) => node.kind === 'case');
+		expect(
+			(caseNode.when as ReadonlyArray<Record<string, unknown>>)[0]?.result,
+		).toBe('yes');
+		expect(caseNode.else).toBe('no');
+
+		expect(
+			findFirstObject(
+				intent,
+				(node) => node.kind === 'function' && node.name === 'coalesce',
+			).args,
+		).toEqual(['name', 'anon']);
+	});
+
+	it('strips internal param wrappers from dump().plan while keeping SQL params', () => {
+		const nql = createParamTestTag();
+
+		const dump =
+			nql<unknown>`users | where id = ${5} and id in (${1}, ${2})`.dump();
+
+		expect(dump.plan).toBeDefined();
+		expectNoOwnSymbols(dump.plan);
+		expect(
+			findFirstObject(
+				dump.plan,
+				(node) => node.kind === 'comparison' && node.field === 'id',
+			).value,
+		).toBe(5);
+		expect(dump.params).toEqual([5, [1, 2]]);
+	});
+
+	it('strips internal param wrappers from public plan()', () => {
+		const nql = createParamTestTag();
+
+		const plan = nql<unknown>`users | where id = ${5}`.plan();
+
+		expectNoOwnSymbols(plan);
+		expect(
+			findFirstObject(
+				plan,
+				(node) => node.kind === 'comparison' && node.field === 'id',
+			).value,
+		).toBe(5);
+	});
+
+	it('keeps adapter compile on the marked internal plan', () => {
+		const db = createParamTestSchema();
+		const base = createPgsqlCompileOnlyAdapter();
+		let compileValue: unknown;
+		const adapter: Adapter = {
+			...base,
+			compile<T = unknown>(plan: PlanReport, options) {
+				compileValue = findFirstObject(
+					plan.intent,
+					(node) => node.kind === 'comparison' && node.field === 'id',
+				).value;
+				return base.compile<T>(plan, options);
+			},
+			createDump(plan, query, meta) {
+				return base.createDump(plan, query, meta);
+			},
+		};
+		const nql = createNqlTag(db.definition, db.model, adapter);
+
+		const dump = nql<unknown>`users | where id = ${5}`.dump();
+
+		expect(isParamExpressionValueIntent(compileValue)).toBe(true);
+		expect(dump.params).toEqual([5]);
+		expect(
+			findFirstObject(
+				dump.plan,
+				(node) => node.kind === 'comparison' && node.field === 'id',
+			).value,
+		).toBe(5);
+		expectNoOwnSymbols(dump.plan);
 	});
 
 	it('fails cleanly for separator-less adjacent interpolations', () => {

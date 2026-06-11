@@ -26,6 +26,10 @@ import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
+import {
+	stripIntentProvenance,
+	stripPlanReportProvenance,
+} from './intent-provenance.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 
 // ============================================================================
@@ -303,6 +307,7 @@ export function createNqlTag(
  */
 class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private _intent: QueryIntent | undefined;
+	private _publicIntent: QueryIntent | undefined;
 	private readonly query: string;
 	private readonly params: Readonly<Record<string, unknown>>;
 	private readonly hasBoundParams: boolean;
@@ -382,20 +387,28 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	}
 
 	toIntentIR(): QueryIntent {
-		return this.compile();
+		if (!this._publicIntent) {
+			this._publicIntent = stripIntentProvenance(this.compile());
+		}
+		return this._publicIntent;
 	}
 
-	plan(): PlanReport {
+	private planInternal(): PlanReport {
 		const intent = this.compile();
 		return executePlan(intent, this.model);
 	}
 
+	plan(): PlanReport {
+		return stripPlanReportProvenance(this.planInternal());
+	}
+
 	dump(meta?: DumpMetaInput): Dump {
-		const planReport = this.plan();
+		const planReport = this.planInternal();
+		const publicPlanReport = stripPlanReportProvenance(planReport);
 
 		if (!this.adapter) {
 			return {
-				plan: planReport,
+				plan: publicPlanReport,
 				sql: '[No adapter - SQL not available]',
 				params: [],
 				...(meta !== undefined && { meta }),
@@ -405,7 +418,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const compiled = this.adapter.compile<T>(planReport);
 
 		try {
-			return this.adapter.createDump(planReport, compiled, meta);
+			return this.adapter.createDump(publicPlanReport, compiled, meta);
 		} catch (err) {
 			if (
 				err instanceof Error &&
@@ -413,7 +426,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			) {
 				// Fallback for mock adapters that don't implement createDump
 				const base: Dump = {
-					plan: planReport,
+					plan: publicPlanReport,
 					sql: compiled.sql,
 					params: compiled.parameters as readonly unknown[],
 				};
@@ -444,7 +457,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 		}
 
-		const planReport = this.plan();
+		const planReport = this.planInternal();
 		const compiled = this.adapter.compile<T>(planReport);
 		return this.adapter.execute(compiled);
 	}
