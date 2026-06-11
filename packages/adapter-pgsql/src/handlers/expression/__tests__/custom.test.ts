@@ -224,6 +224,18 @@ describe('compileExpressionIntent', () => {
 			);
 			expect(result.parameters).toHaveLength(0);
 		});
+
+		it('preserves intentionally-cased builder custom function names', () => {
+			const result = compileCustomExpr({
+				kind: 'customFn',
+				name: 'ST_DWithin',
+				args: [{ kind: 'ref', column: 'geom' }],
+			});
+			expect(result.sql.replace(/\s+/g, ' ').trim()).toBe(
+				'SELECT "ST_DWithin"(geom) FROM items',
+			);
+			expect(result.parameters).toHaveLength(0);
+		});
 	});
 
 	describe('unary kind', () => {

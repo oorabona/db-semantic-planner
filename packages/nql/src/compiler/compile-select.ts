@@ -308,7 +308,7 @@ function compileSelectExpression(
 		}
 		return {
 			kind: 'function',
-			name: expr.name,
+			name: fn,
 			args: expr.args.map((a) => expressionToFunctionArg(a, ctx, fns)),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};

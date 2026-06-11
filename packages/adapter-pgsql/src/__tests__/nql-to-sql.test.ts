@@ -466,6 +466,23 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([]);
 	});
 
+	it('canonicalizes mixed-case NQL SELECT function names before SQL emission', () => {
+		const upper = nqlToSQLWithParams('users | select UPPER(name) as x');
+		expect(upper.sql).toContain('upper(users.name)');
+		expect(upper.sql).not.toContain('"UPPER"');
+		expect(upper.sql).not.toContain('"upper"');
+		expect(upper.params).toEqual([]);
+
+		const coalesce = nqlToSQLWithNamedParams(
+			'users | select Coalesce(name, :x) as y',
+			{ x: 'anon' },
+		);
+		expect(coalesce.sql).toContain('coalesce(users.name, $1)');
+		expect(coalesce.sql).not.toContain('"Coalesce"');
+		expect(coalesce.sql).not.toContain('"coalesce"');
+		expect(coalesce.params).toEqual(['anon']);
+	});
+
 	it('audits every scalar SELECT function allowlist entry end-to-end', () => {
 		expectAllowlistCoverage(
 			NQL_SELECT_SCALAR_FUNCTIONS,
