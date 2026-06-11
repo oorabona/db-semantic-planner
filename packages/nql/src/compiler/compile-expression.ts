@@ -412,38 +412,8 @@ function compileBetween(
 	const lowerValue = unwrapExpressionValueIntent(lower);
 	const upperValue = unwrapExpressionValueIntent(upper);
 
-	if (
-		lowerValue !== null &&
-		typeof lowerValue !== 'number' &&
-		typeof lowerValue !== 'string' &&
-		!(lowerValue instanceof Date)
-	) {
-		// L-6: actionable message — tell the user what the lower bound was
-		const got =
-			typeof lowerValue === 'object'
-				? 'path reference'
-				: JSON.stringify(lowerValue);
-		throw new NqlSemanticException(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
-			`BETWEEN lower bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
-		);
-	}
-	if (
-		upperValue !== null &&
-		typeof upperValue !== 'number' &&
-		typeof upperValue !== 'string' &&
-		!(upperValue instanceof Date)
-	) {
-		// L-6: actionable message — tell the user what the upper bound was
-		const got =
-			typeof upperValue === 'object'
-				? 'path reference'
-				: JSON.stringify(upperValue);
-		throw new NqlSemanticException(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
-			`BETWEEN upper bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
-		);
-	}
+	assertBetweenBoundValueAllowed('lower', between.low, lowerValue);
+	assertBetweenBoundValueAllowed('upper', between.high, upperValue);
 
 	return {
 		kind: 'range',
@@ -451,6 +421,28 @@ function compileBetween(
 		operator: 'between',
 		value: { lower, upper },
 	};
+}
+
+function assertBetweenBoundValueAllowed(
+	position: 'lower' | 'upper',
+	expr: NqlExpression,
+	value: unknown,
+): void {
+	if (
+		value === null ||
+		typeof value === 'number' ||
+		typeof value === 'string' ||
+		typeof value === 'bigint' ||
+		value instanceof Date
+	) {
+		return;
+	}
+
+	const paramSuffix = expr.type === 'namedParam' ? `; param :${expr.name}` : '';
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`BETWEEN ${position} bound must be a literal number, string, or date, or a bigint param; got type ${typeof value}${paramSuffix}.`,
+	);
 }
 
 function compileNull(

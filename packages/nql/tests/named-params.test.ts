@@ -326,6 +326,36 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		);
 	});
 
+	it('accepts BigInt named params as BETWEEN bounds', () => {
+		const result = compileOk('users | where age between :lo and :hi', {
+			lo: 1n,
+			hi: 10n,
+		});
+		const value = (result.query!.where as { value: unknown }).value as {
+			lower: unknown;
+			upper: unknown;
+		};
+
+		expectParamValue(value.lower, 1n);
+		expectParamValue(value.upper, 10n);
+	});
+
+	it('reports invalid BETWEEN named-param bounds by param position and type only', () => {
+		const result = compileFail('users | where age between :lo and :hi', {
+			lo: { secret: 'do-not-log' },
+			hi: 10,
+		});
+
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toMatch(/^ERR-SEM-/);
+		expect(result.errors[0]?.message).toContain('BETWEEN lower bound');
+		expect(result.errors[0]?.message).toContain(':lo');
+		expect(result.errors[0]?.message).toContain('object');
+		expect(result.errors[0]?.message).not.toContain('secret');
+		expect(result.errors[0]?.message).not.toContain('do-not-log');
+	});
+
 	it('resolves top-level SELECT projection params and reports missing bindings structurally', () => {
 		const result = compileOk('users | select :p as x', { p: 5 });
 		const select = result.query!.select as {

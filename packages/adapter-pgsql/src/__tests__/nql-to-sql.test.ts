@@ -738,6 +738,13 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(between.sql).toContain('users.price between $1 and $2');
 		expect(between.params).toEqual([10, 20]);
 
+		const bigintBetween = nqlToSQLWithNamedParams(
+			'users | where price between :lo and :hi',
+			{ lo: 1n, hi: 10n },
+		);
+		expect(bigintBetween.sql).toContain('users.price between $1 and $2');
+		expect(bigintBetween.params).toEqual([1n, 10n]);
+
 		const inList = nqlToSQLWithNamedParams('users | where status in (:a, :b)', {
 			a: 'active',
 			b: 'pending',
