@@ -5,7 +5,6 @@
  */
 
 import {
-	type ExpressionIntent,
 	type IncludeIntent,
 	isParamIntent,
 	type LockIntent,
@@ -18,6 +17,7 @@ import {
 	type WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlGroupByClause,
 	NqlLimitClause,
@@ -33,7 +33,6 @@ import type {
 import {
 	expressionToField,
 	expressionToSql,
-	expressionToValue,
 	resolveIntegerCount,
 } from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
@@ -423,10 +422,12 @@ function compileOrderItem(
 		return { field, direction: item.direction };
 	}
 	if (item.expression.type === 'namedParam') {
-		return {
-			expression: expressionToValue(item.expression, ctx) as ExpressionIntent,
-			direction: item.direction,
-		};
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${item.expression.name} cannot be used as an ORDER BY expression because ORDER BY is query structure, not a value`,
+			undefined,
+			'Choose a trusted structural path for dynamic ordering, such as nqlRaw("order by ...") or the query builder after validating the requested column and direction.',
+		);
 	}
 	const sqlExpr = expressionToSql(item.expression);
 	return { field: sqlExpr, direction: item.direction };

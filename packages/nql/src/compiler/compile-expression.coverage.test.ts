@@ -26,8 +26,10 @@ import type {
 import { describe, expect, it } from 'vitest';
 import { NqlErrorCodes } from '../errors/types.js';
 import { compile } from '../index.js';
-import { MAX_ANY_ITEMS } from './compile-expression.js';
+import type { NqlAnyExpression } from '../parser/ast.js';
+import { compileExpression, MAX_ANY_ITEMS } from './compile-expression.js';
 import type { CompileResult } from './index.js';
+import type { CompilerContext, CompilerFns } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Helper
@@ -1026,6 +1028,36 @@ function compileWithParams(input: string, params: Record<string, unknown>) {
 	return compile(input, null, undefined, { params });
 }
 
+function compileAnyExpressionWithParams(params: Record<string, unknown>) {
+	const ctx: CompilerContext = {
+		currentFromTable: 'users',
+		currentRelationTarget: undefined,
+		pseudoColumnKeywords: new Set(),
+		recursiveKeywords: new Set(),
+		validator: null,
+		params,
+		maxAnyItems: MAX_ANY_ITEMS,
+		allowUnfilteredMutations: false,
+		allowInternalParams: false,
+	};
+	const fns: CompilerFns = {
+		compileQuery: () => {
+			throw new Error('unused');
+		},
+		compileSelectClause: () => {
+			throw new Error('unused');
+		},
+		compileExpression,
+	};
+	const expr = {
+		type: 'any',
+		column: { type: 'path', segments: ['id'] },
+		paramName: 'ids',
+	} satisfies NqlAnyExpression;
+
+	return compileExpression(expr, ctx, fns);
+}
+
 describe('compile-expression: ANY(:param) — missing param throws', () => {
 	it('throws SEM_INVALID_SYNTAX when the bound parameter is not provided', () => {
 		// FEAT-134: missing binding is reported before array-shape validation.
@@ -1073,6 +1105,47 @@ describe('compile-expression: ANY(:param) — valid array param compiles success
 		expect(where.kind).toBe('any');
 		expect(where.field).toBe('id');
 		expect(where.values).toEqual({ kind: 'param', value: [1, 2, 3] });
+	});
+});
+
+describe('compile-expression: ANY(:param) — accessor params resolve once', () => {
+	it('cannot bypass maxAnyItems by returning an oversized array before a tiny array', () => {
+		const oversized = Array.from({ length: MAX_ANY_ITEMS + 1 }, (_, i) => i);
+		const tiny = [1];
+		let reads = 0;
+		const params = {};
+		Object.defineProperty(params, 'ids', {
+			enumerable: true,
+			get: () => {
+				reads++;
+				return reads === 1 ? oversized : tiny;
+			},
+		});
+
+		expect(() => compileAnyExpressionWithParams(params)).toThrow(
+			`ANY(:ids) array length ${MAX_ANY_ITEMS + 1} exceeds maximum of ${MAX_ANY_ITEMS}`,
+		);
+		expect(reads).toBe(1);
+	});
+
+	it('validates and emits the same tiny snapshot even if a later read would be oversized', () => {
+		const tiny = [1, 2, 3];
+		const oversized = Array.from({ length: MAX_ANY_ITEMS + 1 }, (_, i) => i);
+		let reads = 0;
+		const params = {};
+		Object.defineProperty(params, 'ids', {
+			enumerable: true,
+			get: () => {
+				reads++;
+				return reads === 1 ? tiny : oversized;
+			},
+		});
+
+		const where = compileAnyExpressionWithParams(params) as WhereAnyIntent;
+
+		expect(where.kind).toBe('any');
+		expect(where.values).toEqual({ kind: 'param', value: tiny });
+		expect(reads).toBe(1);
 	});
 });
 

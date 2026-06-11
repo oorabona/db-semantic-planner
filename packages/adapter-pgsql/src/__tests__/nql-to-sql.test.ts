@@ -17,6 +17,7 @@ import {
 	isInsertIntent,
 	isUpdateIntent,
 	isUpsertIntent,
+	nqlRaw,
 	outerRef,
 	POSTGRESQL_CAPABILITIES,
 	plan,
@@ -50,6 +51,7 @@ const testSchema = schema({
 		active: 'boolean',
 		price: 'decimal',
 		status: 'string',
+		createdAt: 'timestamp',
 		data: { type: 'jsonb', nullable: true },
 	},
 	departments: {
@@ -789,20 +791,13 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).not.toContain('UNWRAPPED');
 	});
 
-	it('binds named params in HAVING, ORDER BY, BETWEEN, and IN-list positions', () => {
+	it('binds named params in HAVING, BETWEEN, and IN-list positions', () => {
 		const having = nqlToSQLWithNamedParams(
 			'users | group by status | where status = :s | select status',
 			{ s: 'active' },
 		);
 		expect(having.sql).toContain('having users.status = $1');
 		expect(having.params).toEqual(['active']);
-
-		const orderBy = nqlToSQLWithNamedParams(
-			'users | select id | order by :rank desc',
-			{ rank: 10 },
-		);
-		expect(orderBy.sql).toContain('order by $1 desc');
-		expect(orderBy.params).toEqual([10]);
 
 		const between = nqlToSQLWithNamedParams(
 			'users | where price between :low and :high',
@@ -824,6 +819,43 @@ describe('NQL → SQL compile-only pipeline', () => {
 		});
 		expect(inList.sql).toMatch(/users\.status = any\s*\(\$1\)/);
 		expect(inList.params).toEqual([['active', 'pending']]);
+	});
+
+	it('rejects named params in ORDER BY structure instead of emitting ORDER BY $N', () => {
+		const compiled = compile(
+			'users | select id | order by :rank desc',
+			testSchema.model,
+			undefined,
+			{
+				params: { rank: 10 },
+			},
+		);
+
+		expect(compiled.success).toBe(false);
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toContain('ORDER BY');
+		expect(compiled.errors[0]?.message).toContain('query structure');
+		expect(compiled.errors[0]?.suggestion).toMatch(/nqlRaw|builder/);
+	});
+
+	it('keeps structural ORDER BY columns and trusted nqlRaw ORDER BY fragments working', () => {
+		const structural = nqlToSQLWithNamedParams(
+			'users | select id | order by created_at desc',
+			{},
+		);
+		expect(structural.sql).toContain('order by users.created_at desc');
+		expect(structural.params).toEqual([]);
+
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const rawFragment = orm.nql<{
+			id: number;
+		}>`users | select id | ${nqlRaw('order by created_at desc')}`.dump();
+
+		expect(normalizeSQL(rawFragment.sql)).toContain(
+			'order by users.created_at desc',
+		);
+		expect(rawFragment.params).toEqual([]);
 	});
 
 	it('binds ANY(:p) and IN(:p) array elements opaquely', () => {

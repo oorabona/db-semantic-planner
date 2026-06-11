@@ -5,6 +5,7 @@ import type {
 	WhereLikeIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { NqlErrorCodes } from '../src/errors/types.js';
 import type { NqlCompilerOptions } from '../src/index.js';
 import { compile, parse, parseCst } from '../src/index.js';
 import type {
@@ -282,6 +283,17 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 
 		expectParamValue(idCond!.value, 5n);
 		expectParamValue(atCond!.value, at);
+	});
+
+	it('rejects named params as ORDER BY structure with trusted-structure guidance', () => {
+		const result = compileFail('users | order by :p', { p: 'created_at' });
+
+		expect(result.success).toBe(false);
+		expect(result.errors).toHaveLength(1);
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toContain('ORDER BY');
+		expect(result.errors[0]?.message).toContain('query structure');
+		expect(result.errors[0]?.suggestion).toMatch(/nqlRaw|builder/);
 	});
 
 	it('resolves the same named param at each use-site without deduping the intent tree', () => {

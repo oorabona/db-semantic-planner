@@ -179,16 +179,16 @@ export function compile(
 			warnings: parseResult.warnings,
 		};
 	} catch (err) {
-		const code =
-			err instanceof NqlSemanticException
-				? err.code
-				: NqlErrorCodes.SEM_UNREACHABLE;
+		const semanticError = err instanceof NqlSemanticException;
+		const code = semanticError ? err.code : NqlErrorCodes.SEM_UNREACHABLE;
 		return {
 			success: false,
 			errors: [
 				{
 					code,
 					message: err instanceof Error ? err.message : String(err),
+					location: semanticError ? err.location : undefined,
+					suggestion: semanticError ? err.suggestion : undefined,
 				},
 			],
 			warnings: [],
