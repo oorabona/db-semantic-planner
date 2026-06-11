@@ -16,6 +16,15 @@ import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
 
+export class UnknownSelectExpressionKindError extends Error {
+	readonly code = 'ERR_ADAPTER_UNKNOWN_SELECT_EXPRESSION_KIND';
+
+	constructor(readonly kind: string) {
+		super(`Unknown SELECT expression kind: ${kind}`);
+		this.name = 'UnknownSelectExpressionKindError';
+	}
+}
+
 // ============================================================================
 // Main Converter
 // ============================================================================
@@ -134,17 +143,19 @@ function convertSelect(
 
 		for (const exprUnknown of columns) {
 			const expr = exprUnknown as Record<string, unknown>;
-			const handler = EXPRESSION_HANDLERS[expr.kind as string];
-			if (handler) {
-				handler(
-					expr,
-					rootTable,
-					decisions,
-					applyFilterCondition,
-					convertWhereCondition,
-				);
+			const kind =
+				typeof expr.kind === 'string' ? expr.kind : String(expr.kind);
+			const handler = EXPRESSION_HANDLERS[kind];
+			if (!handler) {
+				throw new UnknownSelectExpressionKindError(kind);
 			}
-			// else: unknown kind (e.g., pseudoColumn) — intentional no-op
+			handler(
+				expr,
+				rootTable,
+				decisions,
+				applyFilterCondition,
+				convertWhereCondition,
+			);
 		}
 
 		return decisions;

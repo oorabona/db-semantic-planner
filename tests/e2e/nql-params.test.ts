@@ -63,4 +63,25 @@ describe('FEAT-134 NQL params E2E', () => {
 		expect(dump.sql).toMatch(/\$1\b/);
 		expect(rows.map((row) => row.id)).toEqual([1, 3, 5]);
 	});
+
+	it('binds tag interpolation inside SELECT coalesce() and returns real rows', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const fallback = 'Unknown author';
+		const query = orm.nql<{ id: number; label: string }>`authors
+			| select id, coalesce(name, ${fallback}) as label
+			| order by id`;
+
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.params).toEqual([fallback]);
+		expect(dump.sql).toMatch(/coalesce/i);
+		expect(dump.sql).toMatch(/\$1\b/);
+		expect(rows).toEqual([
+			{ id: 1, label: 'Alice Johnson' },
+			{ id: 2, label: 'Bob Smith' },
+		]);
+	});
 });

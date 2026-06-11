@@ -8,13 +8,13 @@
 
 import type { CoalesceExpr, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Build a value node from a decision argument
@@ -40,9 +40,7 @@ function buildValueNode(
 	}
 
 	// Otherwise, parameterize it
-	const paramNumber = ++state.paramIndex;
-	state.parameters.push(value);
-	return createParamRef(paramNumber);
+	return bindParameter(value, state);
 }
 
 /**
@@ -124,9 +122,7 @@ export const nullIfHandler: ExpressionHandler = {
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-		const paramNumber = ++state.paramIndex;
-		state.parameters.push(value);
-		const valueRef = createParamRef(paramNumber);
+		const valueRef = bindParameter(value, state);
 
 		return {
 			NullIfExpr: {

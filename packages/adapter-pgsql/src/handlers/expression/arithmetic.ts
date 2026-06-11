@@ -7,13 +7,13 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Resolve an operand to an AST node.
@@ -30,9 +30,7 @@ function resolveOperand(
 		return columnRef(operand, alias, undefined, ctx.naming);
 	}
 	// Numeric or other literal → parametrize
-	const idx = ++state.paramIndex;
-	state.parameters.push(operand);
-	return createParamRef(idx);
+	return bindParameter(operand, state);
 }
 
 /**

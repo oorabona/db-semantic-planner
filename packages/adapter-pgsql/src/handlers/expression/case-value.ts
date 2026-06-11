@@ -14,8 +14,8 @@ import {
 	nullConstNode,
 } from '../../ast-helpers.js';
 import type { NamingPlugin } from '../../naming-plugin.js';
-import { createParamRef } from '../../param-ref.js';
 import type { CompilerState } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Optional handler for nested CASE expressions.
@@ -47,13 +47,14 @@ export function resolveCaseValue(
 	}
 
 	if (typeof value !== 'object') {
-		const idx = ++state.paramIndex;
-		state.parameters.push(value);
-		return createParamRef(idx);
+		return bindParameter(value, state);
 	}
 
 	const expr = value as Record<string, unknown>;
 	switch (expr.kind) {
+		case 'param':
+			return bindParameter(expr.value, state);
+
 		case 'literal':
 			if (expr.value === null || expr.value === undefined)
 				return nullConstNode();
@@ -64,11 +65,7 @@ export function resolveCaseValue(
 					return integerNode(expr.value as number);
 				return floatNode(String(expr.value));
 			}
-			{
-				const idx = ++state.paramIndex;
-				state.parameters.push(expr.value);
-				return createParamRef(idx);
-			}
+			return bindParameter(expr.value, state);
 
 		case 'column':
 			return columnRef(expr.column as string, alias, schema, naming);
@@ -107,9 +104,7 @@ export function resolveCaseValue(
 			}
 		// falls through
 		default: {
-			const idx = ++state.paramIndex;
-			state.parameters.push(value);
-			return createParamRef(idx);
+			return bindParameter(value, state);
 		}
 	}
 }

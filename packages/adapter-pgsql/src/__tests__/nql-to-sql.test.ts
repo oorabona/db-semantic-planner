@@ -28,12 +28,18 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
+import { intentToDecisions } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: departments → employees (1:N)
 // ---------------------------------------------------------------------------
 const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		active: 'boolean',
+	},
 	departments: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
@@ -96,6 +102,33 @@ function nqlToSQLWithParams(nql: string): {
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
+/**
+ * NQL → { sql, params } with named parameter bindings.
+ */
+function nqlToSQLWithNamedParams(
+	nql: string,
+	params: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model, undefined, { params });
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const planReport = plan(compiled.ast.query, testSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, { model: testSchema.model });
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
 // ---------------------------------------------------------------------------
 // Helper: NQL mutation → normalized SQL
 // ---------------------------------------------------------------------------
@@ -129,6 +162,62 @@ describe('NQL → SQL compile-only pipeline', () => {
 		const sql = nqlToSQL("departments | where name = 'Engineering'");
 		expect(sql).toContain('name');
 		expect(sql).toContain('$1');
+	});
+
+	it('compiles NQL function SELECT params through the selectFunction path', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select coalesce(name, :fallback) as label',
+			{ fallback: 'x' },
+		);
+
+		expect(sql).toContain('coalesce');
+		expect(sql).toContain('$1');
+		expect(sql).toContain('as label');
+		expect(sql).not.toMatch(/select\s+\*\s+from/i);
+		expect(params).toEqual(['x']);
+	});
+
+	it('unwraps named params in NQL SELECT arithmetic operands', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select id + :n as total',
+			{ n: 5 },
+		);
+
+		expect(sql).toContain('$1');
+		expect(sql).toContain('as total');
+		expect(params).toEqual([5]);
+	});
+
+	it('unwraps named params in NQL CASE result values', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :yes else :no end as label',
+			{ yes: 'Y', no: 'N' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('as label');
+		expect(params).toEqual([true, 'Y', 'N']);
+	});
+
+	it('throws a structured error for unknown SELECT expression kinds', () => {
+		expect(() =>
+			intentToDecisions(
+				{
+					from: 'employees',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'notARealSelectExpression', as: 'x' }],
+					},
+				} as QueryIntent,
+				'employees',
+			),
+		).toThrowError(
+			expect.objectContaining({
+				name: 'UnknownSelectExpressionKindError',
+				code: 'ERR_ADAPTER_UNKNOWN_SELECT_EXPRESSION_KIND',
+				kind: 'notARealSelectExpression',
+			}),
+		);
 	});
 
 	it('compiles flat include with all columns', () => {

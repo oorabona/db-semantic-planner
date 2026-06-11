@@ -147,6 +147,24 @@ export function handleRawExpression(
 }
 
 /**
+ * function — generic SQL function expression compiled by the selectFunction path.
+ */
+export function handleFunctionExpression(
+	expr: Record<string, unknown>,
+	rootTable: string,
+	decisions: PlanDecision[],
+): void {
+	const decision: Mutable<PlanDecision> = {
+		type: 'selectFunction',
+		function: expr.name as string,
+		args: (expr.args as readonly unknown[] | undefined) ?? [],
+		table: rootTable,
+	};
+	if (expr.as) decision.alias = expr.as as string;
+	decisions.push(decision);
+}
+
+/**
  * window — window function with OVER (PARTITION BY … ORDER BY …).
  */
 export function handleWindowExpression(
@@ -353,6 +371,8 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		handleCoalesceExpression(expr, rootTable, decisions),
 	raw: (expr, rootTable, decisions) =>
 		handleRawExpression(expr, rootTable, decisions),
+	function: (expr, rootTable, decisions) =>
+		handleFunctionExpression(expr, rootTable, decisions),
 	window: (expr, rootTable, decisions) =>
 		handleWindowExpression(expr, rootTable, decisions),
 	case: (expr, rootTable, decisions, applyFilter, convertCondition) =>
@@ -365,7 +385,9 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		),
 	relationColumn: (expr, rootTable, decisions) =>
 		handleRelationColumnExpression(expr, rootTable, decisions),
-	// pseudoColumn: intentional no-op — planner hints, not SQL
+	pseudoColumn: () => {
+		// Planner hint, not SQL.
+	},
 	arithmetic: (expr, rootTable, decisions) =>
 		handleArithmeticExpression(expr, rootTable, decisions),
 	jsonExtract: (expr, rootTable, decisions) =>
@@ -386,5 +408,13 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 	cast: (expr, rootTable, decisions) =>
 		handleCustomExpressionSelect(expr, rootTable, decisions),
 	unary: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	subquery: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	namedArg: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	star: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	array: (expr, rootTable, decisions) =>
 		handleCustomExpressionSelect(expr, rootTable, decisions),
 };

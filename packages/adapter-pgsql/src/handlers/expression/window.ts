@@ -8,13 +8,13 @@
 
 import type { Node, SortBy, WindowDef } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Default window frame options for bare OVER() clause.
@@ -152,9 +152,7 @@ export const ntileHandler: ExpressionHandler = {
 		state: CompilerState,
 	): Node {
 		const n = decision.value ?? decision.args?.[0] ?? 4;
-		const paramNumber = ++state.paramIndex;
-		state.parameters.push(n);
-		const nRef = createParamRef(paramNumber);
+		const nRef = bindParameter(n, state);
 
 		return buildWindowFunction('ntile', [nRef], decision, ctx);
 	},
@@ -187,15 +185,11 @@ function createLagLeadHandler(
 
 			// Optional offset (default 1)
 			const offset = decision.args?.[0] ?? 1;
-			const offsetParamNumber = ++state.paramIndex;
-			state.parameters.push(offset);
-			args.push(createParamRef(offsetParamNumber));
+			args.push(bindParameter(offset, state));
 
 			// Optional default value
 			if (decision.value !== undefined) {
-				const defaultParamNumber = ++state.paramIndex;
-				state.parameters.push(decision.value);
-				args.push(createParamRef(defaultParamNumber));
+				args.push(bindParameter(decision.value, state));
 			}
 
 			return buildWindowFunction(funcName, args, decision, ctx);
@@ -296,17 +290,13 @@ export const genericWindowHandler: ExpressionHandler = {
 		// Add other args (e.g., offset for lag/lead)
 		if (decision.args && Array.isArray(decision.args)) {
 			for (const arg of decision.args) {
-				const paramNumber = ++state.paramIndex;
-				state.parameters.push(arg);
-				args.push(createParamRef(paramNumber));
+				args.push(bindParameter(arg, state));
 			}
 		}
 
 		// Add default value for lag/lead
 		if (decision.value !== undefined) {
-			const defaultParamNumber = ++state.paramIndex;
-			state.parameters.push(decision.value);
-			args.push(createParamRef(defaultParamNumber));
+			args.push(bindParameter(decision.value, state));
 		}
 
 		return buildWindowFunction(funcName, args, decision, ctx);
