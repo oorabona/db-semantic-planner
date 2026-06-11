@@ -307,6 +307,21 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		});
 	});
 
+	it('resolves top-level SELECT projection params and reports missing bindings structurally', () => {
+		const result = compileOk('users | select :p as x', { p: 5 });
+		const select = result.query!.select as {
+			columns: Array<{ kind: string; value: unknown; as?: string }>;
+		};
+
+		expect(select.columns[0]).toEqual({ kind: 'param', value: 5, as: 'x' });
+
+		const missing = compileFail('users | select :p as x', {});
+		expect(missing.success).toBe(false);
+		expect(missing.errors[0]?.code).toMatch(/^ERR-SEM-/);
+		expect(missing.errors[0]?.message).toContain(':p');
+		expect(missing.errors[0]?.message).toContain('not bound');
+	});
+
 	it('resolves params through nested query compilation', () => {
 		const result = compileOk(
 			'users | where id in (orders | where status = :status | select user_id)',

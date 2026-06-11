@@ -190,6 +190,18 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([]);
 	});
 
+	it('compiles nested generic NQL SELECT functions without reaching raw handlers', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"users | select upper(lower(name)) as uname, upper(raw('1; DROP TABLE users')) as guarded",
+		);
+
+		expect(sql).toContain('upper(lower(users.name))');
+		expect(sql).toContain('upper(raw($1))');
+		expect(sql).not.toContain('drop table');
+		expect(sql).not.toContain('1;');
+		expect(params).toEqual(['1; DROP TABLE users']);
+	});
+
 	it('compiles NQL coalesce SELECT params through the NQL-safe handler path', () => {
 		const { sql, params } = nqlToSQLWithNamedParams(
 			'users | select coalesce(name, :fallback) as label',
@@ -201,6 +213,15 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('as label');
 		expect(sql).not.toMatch(/select\s+\*\s+from/i);
 		expect(params).toEqual(['x']);
+	});
+
+	it('binds top-level NQL SELECT named params', () => {
+		const { sql, params } = nqlToSQLWithNamedParams('users | select :p as x', {
+			p: 5,
+		});
+
+		expect(sql).toContain('$1 as x');
+		expect(params).toEqual([5]);
 	});
 
 	it('keeps builder raw() expressions reachable from builder origin', () => {
@@ -237,6 +258,28 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('case');
 		expect(sql).toContain('as label');
 		expect(params).toEqual([true, 'Y', 'N']);
+	});
+
+	it('binds wrapper-shaped NQL SELECT param values intact in CASE, arithmetic, and function args', () => {
+		const literalShaped = { kind: 'literal', value: 5 };
+		const paramShaped = { kind: 'param', value: 'x' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :literalish else :paramish end as marker, id + :literalish as shifted, upper(:paramish) as wrapped',
+			{ literalish: literalShaped, paramish: paramShaped },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('$2');
+		expect(sql).toContain('$3');
+		expect(sql).toContain('users.id + $4');
+		expect(sql).toContain('upper($5)');
+		expect(params).toEqual([
+			true,
+			literalShaped,
+			paramShaped,
+			literalShaped,
+			paramShaped,
+		]);
 	});
 
 	it('throws a structured error for unknown SELECT expression kinds', () => {

@@ -2,6 +2,10 @@ import type { Node } from '@pgsql/types';
 import { createParamRef } from '../../param-ref.js';
 import type { CompilerState } from '../types.js';
 
+const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(
+	'@dbsp/internal/expression-value-intent',
+);
+
 interface ParamExpressionLike {
 	readonly kind: 'param';
 	readonly value: unknown;
@@ -19,7 +23,9 @@ export function isParamExpressionLike(
 		typeof value === 'object' &&
 		value !== null &&
 		(value as Record<string, unknown>).kind === 'param' &&
-		'value' in value
+		'value' in value &&
+		(value as Record<PropertyKey, unknown>)[EXPRESSION_VALUE_INTENT_MARKER] ===
+			true
 	);
 }
 
@@ -30,7 +36,9 @@ export function isLiteralExpressionLike(
 		typeof value === 'object' &&
 		value !== null &&
 		(value as Record<string, unknown>).kind === 'literal' &&
-		'value' in value
+		'value' in value &&
+		(value as Record<PropertyKey, unknown>)[EXPRESSION_VALUE_INTENT_MARKER] ===
+			true
 	);
 }
 

@@ -39,6 +39,37 @@ import {
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
+const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(
+	'@dbsp/internal/expression-value-intent',
+);
+
+function markExpressionValueIntent<T extends Record<string, unknown>>(
+	intent: T,
+): T {
+	Object.defineProperty(intent, EXPRESSION_VALUE_INTENT_MARKER, {
+		value: true,
+	});
+	return intent;
+}
+
+function paramExpressionIntent(
+	value: unknown,
+	alias?: string,
+): ExpressionIntent {
+	const intent: Record<string, unknown> = { kind: 'param', value };
+	if (alias !== undefined) intent.as = alias;
+	return markExpressionValueIntent(intent) as unknown as ExpressionIntent;
+}
+
+function literalExpressionIntent(
+	value: string | number | boolean | null,
+): ExpressionIntent {
+	return markExpressionValueIntent({
+		kind: 'literal',
+		value,
+	}) as unknown as ExpressionIntent;
+}
+
 function resolveLagLeadOffset(
 	expr: NqlExpression,
 	ctx: CompilerContext,
@@ -143,7 +174,7 @@ function compileSelectExpression(
 
 	const expressionToSelectValue = (valueExpr: NqlExpression): unknown => {
 		if (valueExpr.type === 'namedParam') {
-			return { kind: 'param', value: expressionToValue(valueExpr, ctx) };
+			return paramExpressionIntent(expressionToValue(valueExpr, ctx));
 		}
 		return expressionToValue(valueExpr, ctx);
 	};
@@ -152,10 +183,17 @@ function compileSelectExpression(
 		const field = expressionToField(valueExpr);
 		if (field) return field;
 		if (valueExpr.type === 'namedParam') {
-			return { kind: 'param', value: expressionToValue(valueExpr, ctx) };
+			return paramExpressionIntent(expressionToValue(valueExpr, ctx));
 		}
 		if (valueExpr.type === 'string') {
-			return { kind: 'literal', value: valueExpr.value };
+			return literalExpressionIntent(valueExpr.value);
+		}
+		if (valueExpr.type === 'function') {
+			return {
+				kind: 'function',
+				name: valueExpr.name,
+				args: valueExpr.args.map((arg) => expressionToFunctionArg(arg)),
+			};
 		}
 		return expressionToValue(valueExpr, ctx);
 	};
@@ -317,6 +355,11 @@ function compileSelectExpression(
 	// Path expression with multiple segments
 	if (expr.type === 'path' && expr.segments.length > 1) {
 		return compileMultiSegmentPath(expr, exprItem, ctx);
+	}
+
+	// Top-level named parameter projection, e.g. `select :p as x`.
+	if (expr.type === 'namedParam') {
+		return paramExpressionIntent(expressionToValue(expr, ctx), exprItem.alias);
 	}
 
 	// Binary arithmetic expression
@@ -562,12 +605,12 @@ function compileExpressionToIntent(
 		expr.type === 'namedParam'
 	) {
 		if (expr.type === 'namedParam') {
-			return { kind: 'param', value: expressionToValue(expr, ctx) };
+			return paramExpressionIntent(expressionToValue(expr, ctx));
 		}
 		if (expr.type === 'null') {
-			return { kind: 'literal', value: null };
+			return literalExpressionIntent(null);
 		}
-		return { kind: 'literal', value: expr.value };
+		return literalExpressionIntent(expr.value);
 	}
 
 	// For other expressions, wrap and use compileSelectExpression

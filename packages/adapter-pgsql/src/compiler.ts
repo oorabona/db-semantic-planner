@@ -43,6 +43,10 @@ import {
 	registerWhereDispatcherFactory,
 } from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
+import {
+	isLiteralExpressionLike,
+	isParamExpressionLike,
+} from './handlers/expression/param-value.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
@@ -1144,7 +1148,10 @@ export class PlanCompiler {
 				case 'column':
 					return buildColumnRef(String(record.column), ctx);
 				case 'param':
+					if (!isParamExpressionLike(arg)) break;
+					return compileValue(record.value, state);
 				case 'literal':
+					if (!isLiteralExpressionLike(arg)) break;
 					return compileValue(record.value, state);
 				case 'function': {
 					const nestedName = record.name;
