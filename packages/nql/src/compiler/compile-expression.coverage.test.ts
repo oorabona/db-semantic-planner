@@ -1072,8 +1072,7 @@ describe('compile-expression: ANY(:param) — valid array param compiles success
 		const where = result.ast!.query!.where as WhereAnyIntent;
 		expect(where.kind).toBe('any');
 		expect(where.field).toBe('id');
-		expect(where.values).toHaveLength(3);
-		expect(where.values).toEqual([1, 2, 3]);
+		expect(where.values).toEqual({ kind: 'param', value: [1, 2, 3] });
 	});
 });
 
@@ -1102,7 +1101,7 @@ describe('compile-expression: ANY(:param) — array at exactly MAX_ANY_ITEMS com
 		expect(result.success).toBe(true);
 		const where = result.ast!.query!.where as WhereAnyIntent;
 		expect(where.kind).toBe('any');
-		expect(where.values).toHaveLength(MAX_ANY_ITEMS);
+		expect(where.values).toEqual({ kind: 'param', value: atLimit });
 	});
 });
 
@@ -1147,8 +1146,7 @@ describe('compile-expression: ANY(:param) — maxAnyItems override accepts array
 		const where = result.ast!.query!.where as WhereAnyIntent;
 		expect(where.kind).toBe('any');
 		expect(where.field).toBe('id');
-		expect(where.values).toHaveLength(2);
-		expect(where.values).toEqual([10, 20]);
+		expect(where.values).toEqual({ kind: 'param', value: [10, 20] });
 	});
 });
 
@@ -1164,7 +1162,7 @@ describe('compile-expression: ANY(:param) — maxAnyItems unset still uses MAX_A
 		expect(result.success).toBe(true);
 		const where = result.ast!.query!.where as WhereAnyIntent;
 		expect(where.kind).toBe('any');
-		expect(where.values).toHaveLength(3);
+		expect(where.values).toEqual({ kind: 'param', value: [1, 2, 3] });
 	});
 });
 
@@ -1250,6 +1248,6 @@ describe('compile-expression: ANY(:param) — maxAnyItems invalid values are rej
 		expect(result.success).toBe(true);
 		const where = result.ast!.query!.where as WhereAnyIntent;
 		expect(where.kind).toBe('any');
-		expect(where.values).toHaveLength(3);
+		expect(where.values).toEqual({ kind: 'param', value: [1, 2, 3] });
 	});
 });

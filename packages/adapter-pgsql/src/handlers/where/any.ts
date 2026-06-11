@@ -19,7 +19,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef } from './utils.js';
+import { buildColumnRef, unwrapParamIntent } from './utils.js';
 
 /**
  * Infer PostgreSQL base type from a runtime value sample.
@@ -69,7 +69,8 @@ export const anyHandler: WhereHandler = {
 			throw new Error('ANY handler requires a column');
 		}
 
-		const values = Array.isArray(decision.values) ? decision.values : [];
+		const rawValues = unwrapParamIntent(decision.values);
+		const values = Array.isArray(rawValues) ? rawValues : [];
 		const columnNode = buildColumnRef(column, ctx);
 
 		// Determine the PG base type

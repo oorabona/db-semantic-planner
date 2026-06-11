@@ -8,6 +8,7 @@ import {
 	type ComparisonOperator,
 	type FieldRef,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	type ParamIntent,
 } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
@@ -85,7 +86,10 @@ export function validateParamsMap(
 /**
  * Resolve one NQL `:name` bound parameter from the compiler context.
  */
-export function resolveNamedParam(ctx: CompilerContext, name: string): unknown {
+export function resolveNamedParam(
+	ctx: CompilerContext,
+	name: string,
+): ParamIntent {
 	assertParamNameAllowed(name, ctx);
 	if (!Object.hasOwn(ctx.params, name)) {
 		throw new NqlSemanticException(
@@ -95,7 +99,11 @@ export function resolveNamedParam(ctx: CompilerContext, name: string): unknown {
 	}
 	const value = ctx.params[name];
 	assertParamValueAllowed(name, value);
-	return value;
+	return { kind: 'param', value };
+}
+
+function resolveNamedParamValue(ctx: CompilerContext, name: string): unknown {
+	return resolveNamedParam(ctx, name).value;
 }
 
 /**
@@ -105,7 +113,7 @@ export function resolveNamedParamArray(
 	ctx: CompilerContext,
 	name: string,
 ): readonly unknown[] {
-	const value = resolveNamedParam(ctx, name);
+	const value = resolveNamedParamValue(ctx, name);
 	if (!Array.isArray(value)) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
@@ -119,16 +127,16 @@ export function resolveIntegerCount(
 	count: NqlLimitCount,
 	ctx: CompilerContext,
 	label: string,
-): number {
+): number | ParamIntent {
 	const value: unknown =
-		typeof count === 'number' ? count : resolveNamedParam(ctx, count.name);
+		typeof count === 'number' ? count : resolveNamedParamValue(ctx, count.name);
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`${label} must resolve to a non-negative safe integer`,
 		);
 	}
-	return value;
+	return typeof count === 'number' ? value : resolveNamedParam(ctx, count.name);
 }
 
 /**
@@ -452,7 +460,7 @@ export function coerceToStringKey(
 	expr: NqlExpression,
 	contextLabel: string,
 	ctx: CompilerContext,
-): string {
+): string | ParamIntent {
 	if (expr.type === 'path') {
 		const segments = (expr as NqlPathExpression).segments;
 		if (segments.length > 1) {
@@ -476,14 +484,15 @@ export function coerceToStringKey(
 		return (expr as { type: 'string'; value: string }).value;
 	}
 	if (expr.type === 'namedParam') {
-		const value = resolveNamedParam(ctx, expr.name);
+		const param = resolveNamedParam(ctx, expr.name);
+		const value = param.value;
 		if (typeof value !== 'string') {
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,
 				`${contextLabel} named parameter :${expr.name} must resolve to a string`,
 			);
 		}
-		return value;
+		return param;
 	}
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,

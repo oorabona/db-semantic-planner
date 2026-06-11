@@ -194,39 +194,12 @@ interface RawDecisionInput extends Decision {
 	readonly caseInsensitive?: boolean;
 	readonly subquery?: Record<string, unknown>;
 	// JSON-related fields
-	readonly jsonPath?: readonly string[];
+	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';
 	readonly reversed?: boolean;
-	readonly key?: string;
+	readonly key?: unknown;
 	// Exists/NotExists intent fields
 	readonly where?: unknown;
-}
-
-/**
- * Normalize a WhereIntent (IntentAST format) into a Decision (handler format).
- * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
- */
-function isParamValuePosition(
-	ctx: CompilerContext | undefined,
-	container: unknown,
-	key: PropertyKey,
-): boolean {
-	return (
-		typeof container === 'object' &&
-		container !== null &&
-		ctx?.paramProvenance?.isParamValue(container, key) === true
-	);
-}
-
-function markDecisionParamValue(
-	decision: Record<string, unknown>,
-	ctx: CompilerContext | undefined,
-	container: unknown,
-	key: PropertyKey,
-): void {
-	if (isParamValuePosition(ctx, container, key)) {
-		decision.valueIsParam = true;
-	}
 }
 
 function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
@@ -241,7 +214,6 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 				column: input.column,
 				operator: 'jsonComparison',
 				value: input.value,
-				...(input.valueIsParam === true && { valueIsParam: true }),
 				jsonPath: raw.jsonPath,
 				jsonMode: raw.jsonMode ?? 'text',
 			};
@@ -287,20 +259,17 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 					column: raw.field as string,
 					operator: 'jsonComparison',
 					value: raw.value,
-					jsonPath: raw.jsonPath as readonly string[],
+					jsonPath: raw.jsonPath as readonly unknown[],
 					jsonMode: (raw.jsonMode as 'json' | 'text') ?? 'text',
 				};
-				markDecisionParamValue(decision, ctx, raw, 'value');
 				return decision as Decision;
 			}
-			const decision = {
+			return {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.operator as string,
 				value: raw.value,
-			};
-			markDecisionParamValue(decision, ctx, raw, 'value');
-			return decision as Decision;
+			} as Decision;
 		}
 		case 'and':
 			return {
@@ -398,14 +367,12 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 				value: raw.pattern,
 			};
 		case 'jsonContains': {
-			const decision = {
+			return {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.reversed ? 'jsonContainedBy' : 'jsonContains',
 				value: raw.value,
-			};
-			markDecisionParamValue(decision, ctx, raw, 'value');
-			return decision as Decision;
+			} as Decision;
 		}
 		case 'jsonExists':
 			return {

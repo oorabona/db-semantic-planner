@@ -4,16 +4,18 @@
  * Compiles NQL queries to QueryIntent (SELECT statements with clauses).
  */
 
-import type {
-	ExpressionIntent,
-	IncludeIntent,
-	LockIntent,
-	OrderByIntent,
-	QueryIntent,
-	SelectIntent,
-	SetOperationIntent,
-	SetOperationType,
-	WhereIntent,
+import {
+	type ExpressionIntent,
+	type IncludeIntent,
+	isParamIntent,
+	type LockIntent,
+	type OrderByIntent,
+	type ParamIntent,
+	type QueryIntent,
+	type SelectIntent,
+	type SetOperationIntent,
+	type SetOperationType,
+	type WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type {
@@ -102,8 +104,8 @@ export function compileQuery(
 	let currentIncludeBatch: IncludeIntent[] | undefined;
 	let groupBy: readonly string[] | undefined;
 	let orderBy: readonly OrderByIntent[] | undefined;
-	let limit: number | undefined;
-	let offset: number | undefined;
+	let limit: number | ParamIntent | undefined;
+	let offset: number | ParamIntent | undefined;
 	let flatMode = false;
 	let lock: LockIntent | undefined;
 	const includeLimits = new Map<string, number>();
@@ -162,7 +164,10 @@ export function compileQuery(
 					lc.relation ? 'per-include limit' : 'limit',
 				);
 				if (lc.relation) {
-					includeLimits.set(lc.relation, count);
+					includeLimits.set(
+						lc.relation,
+						isParamIntent(count) ? (count.value as number) : count,
+					);
 				} else {
 					limit = count;
 				}
@@ -419,10 +424,7 @@ function compileOrderItem(
 	}
 	if (item.expression.type === 'namedParam') {
 		return {
-			expression: {
-				kind: 'param',
-				value: expressionToValue(item.expression, ctx),
-			} as ExpressionIntent,
+			expression: expressionToValue(item.expression, ctx) as ExpressionIntent,
 			direction: item.direction,
 		};
 	}

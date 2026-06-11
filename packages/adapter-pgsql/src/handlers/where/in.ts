@@ -14,7 +14,11 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { COLLECTION_OPERATORS } from '../types.js';
-import { buildColumnRef, resolveColumnPgType } from './utils.js';
+import {
+	buildColumnRef,
+	resolveColumnPgType,
+	unwrapParamIntent,
+} from './utils.js';
 
 /**
  * Create IN expression using = ANY($N)
@@ -109,7 +113,7 @@ export const inHandler: WhereHandler = {
 		}
 
 		// Handle empty arrays
-		const values = value;
+		const values = value.map((item) => unwrapParamIntent(item));
 		if (values.length === 0) {
 			// Empty IN is always false, empty NOT IN is always true
 			if (operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn') {

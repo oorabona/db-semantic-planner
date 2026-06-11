@@ -18,7 +18,7 @@ pnpm add @dbsp/nql
 import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
 import { compile } from '@dbsp/nql';
 
-// Compile an NQL query to a bundle carrying the clean intent plus adapter provenance
+// Compile an NQL query to a public intent bundle
 const compiled = compile(
   "users | where active = true | select name, email | order name asc | limit 20",
   db.model
@@ -28,7 +28,7 @@ if (!compiled.success || !compiled.ast?.query) {
   throw new Error(compiled.errors.map((e) => e.message).join(', '));
 }
 
-// Pass the whole bundle to the adapter so parameter provenance travels with it
+// Pass the whole bundle to the adapter; bound params are explicit public IR nodes
 const adapter = createPgsqlCompileOnlyAdapter();
 const query = adapter.compile(compiled.ast, { model: db.model });
 ```

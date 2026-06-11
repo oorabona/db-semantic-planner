@@ -7,11 +7,11 @@
 
 import type {
 	OrderByIntent,
-	ParamValueProvenance,
 	QueryIntent,
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
@@ -23,33 +23,6 @@ export class UnknownSelectExpressionKindError extends Error {
 	constructor(readonly kind: string) {
 		super(`Unknown SELECT expression kind: ${kind}`);
 		this.name = 'UnknownSelectExpressionKindError';
-	}
-}
-
-export interface IntentToDecisionOptions {
-	readonly paramProvenance?: ParamValueProvenance;
-}
-
-function isParamValuePosition(
-	provenance: ParamValueProvenance | undefined,
-	container: unknown,
-	key: PropertyKey,
-): boolean {
-	return (
-		typeof container === 'object' &&
-		container !== null &&
-		provenance?.isParamValue(container, key) === true
-	);
-}
-
-function markDecisionParamValue(
-	decision: Mutable<PlanDecision>,
-	options: IntentToDecisionOptions | undefined,
-	container: unknown,
-	key: PropertyKey,
-): void {
-	if (isParamValuePosition(options?.paramProvenance, container, key)) {
-		decision.valueIsParam = true;
 	}
 }
 
@@ -67,13 +40,12 @@ function markDecisionParamValue(
 export function intentToDecisions(
 	intent: QueryIntent,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): PlanDecision[] {
 	const decisions: PlanDecision[] = [];
 
 	// 1. SELECT clause
 	if (intent.select) {
-		decisions.push(...convertSelect(intent.select, rootTable, options));
+		decisions.push(...convertSelect(intent.select, rootTable));
 	} else {
 		// Default to SELECT *
 		decisions.push({ type: 'select', column: '*', table: rootTable });
@@ -81,7 +53,7 @@ export function intentToDecisions(
 
 	// 2. WHERE clause
 	if (intent.where) {
-		decisions.push(...convertWhere(intent.where, rootTable, options));
+		decisions.push(...convertWhere(intent.where, rootTable));
 	}
 
 	// 3. ORDER BY clause
@@ -100,7 +72,7 @@ export function intentToDecisions(
 
 	// 5. HAVING clause
 	if (intent.having) {
-		const havingDecisions = convertWhere(intent.having, rootTable, options);
+		const havingDecisions = convertWhere(intent.having, rootTable);
 		for (const d of havingDecisions) {
 			decisions.push({ ...d, type: 'having' });
 		}
@@ -137,10 +109,9 @@ function applyFilterCondition(
 	decision: Mutable<PlanDecision>,
 	filter: WhereIntent | undefined,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): void {
 	if (filter) {
-		const filterDecision = convertWhereCondition(filter, rootTable, options);
+		const filterDecision = convertWhereCondition(filter, rootTable);
 		if (filterDecision) decision.filterCondition = filterDecision;
 	}
 }
@@ -148,7 +119,6 @@ function applyFilterCondition(
 function convertSelect(
 	select: SelectIntent,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): PlanDecision[] {
 	// Handle different SelectIntent types using discriminator
 	const selectType = 'type' in select ? select.type : undefined;
@@ -185,8 +155,8 @@ function convertSelect(
 				rootTable,
 				decisions,
 				(decision, filter, table) =>
-					applyFilterCondition(decision, filter, table, options),
-				(condition, table) => convertWhereCondition(condition, table, options),
+					applyFilterCondition(decision, filter, table),
+				(condition, table) => convertWhereCondition(condition, table),
 			);
 		}
 
@@ -218,7 +188,7 @@ function convertSelect(
 			if (agg.as) {
 				aggDecision.alias = agg.as;
 			}
-			applyFilterCondition(aggDecision, agg.filter, rootTable, options);
+			applyFilterCondition(aggDecision, agg.filter, rootTable);
 			decisions.push(aggDecision);
 		}
 
@@ -237,12 +207,8 @@ function convertSelect(
  * Convert a WhereIntent (kind-discriminated union) into PlanDecisions.
  * WhereIntent uses 'kind' as the discriminator field.
  */
-function convertWhere(
-	where: WhereIntent,
-	rootTable: string,
-	options?: IntentToDecisionOptions,
-): PlanDecision[] {
-	const decision = convertWhereCondition(where, rootTable, options);
+function convertWhere(where: WhereIntent, rootTable: string): PlanDecision[] {
+	const decision = convertWhereCondition(where, rootTable);
 	return decision ? [decision] : [];
 }
 
@@ -532,23 +498,19 @@ export function isOuterRef(value: unknown): boolean {
  * `ref('a').gt(ref('b'))`.  Those inner refs must NOT trigger the correlated
  * subquery guard.
  */
-export function containsOuterRef(
-	where: unknown,
-	provenance?: ParamValueProvenance,
-): boolean {
+export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
 	const w = where as Record<string, unknown>;
+	if (isParamIntent(w)) return false;
 	if (isOuterRef(w)) return true;
-	for (const [key, value] of Object.entries(w)) {
-		if (isParamValuePosition(provenance, w, key)) continue;
+	for (const value of Object.values(w)) {
 		if (Array.isArray(value)) {
 			for (let i = 0; i < value.length; i++) {
-				if (isParamValuePosition(provenance, value, i)) continue;
 				const item = value[i];
-				if (containsOuterRef(item, provenance)) return true;
+				if (containsOuterRef(item)) return true;
 			}
 		} else if (typeof value === 'object' && value !== null) {
-			if (containsOuterRef(value, provenance)) return true;
+			if (containsOuterRef(value)) return true;
 		}
 	}
 	return false;
@@ -558,13 +520,7 @@ export function containsOuterRef(
 function convertComparison(
 	cond: FlatWhereFields,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): PlanDecision {
-	const valueIsParam = isParamValuePosition(
-		options?.paramProvenance,
-		cond,
-		'value',
-	);
 	const rawValue = cond.value;
 	// Convert a genuine outerRef() node { kind: 'ref', outer: true, column } to a
 	// FieldRef so that compileValueOrFieldRef() treats it as a column reference,
@@ -572,14 +528,13 @@ function convertComparison(
 	// isSubqueryRef() (only checks kind:'ref') so that an ExpressionRef.intent
 	// like { kind: 'ref', column } from ref() is NOT misidentified as an outer
 	// reference.
-	const resolvedValue =
-		!valueIsParam && isOuterRef(rawValue)
-			? {
-					kind: 'fieldRef' as const,
-					scope: 'outer' as const,
-					column: (rawValue as { column: string }).column,
-				}
-			: rawValue;
+	const resolvedValue = isOuterRef(rawValue)
+		? {
+				kind: 'fieldRef' as const,
+				scope: 'outer' as const,
+				column: (rawValue as { column: string }).column,
+			}
+		: rawValue;
 	const result: Mutable<PlanDecision> = {
 		type: 'where',
 		column: cond.field as string,
@@ -587,7 +542,6 @@ function convertComparison(
 		value: resolvedValue,
 		table: rootTable,
 	};
-	if (valueIsParam) result.valueIsParam = true;
 	if (cond.jsonPath) result.jsonPath = cond.jsonPath;
 	if (cond.jsonMode) result.jsonMode = cond.jsonMode as 'json' | 'text';
 	return result;
@@ -607,11 +561,7 @@ function convertLike(cond: FlatWhereFields, rootTable: string): PlanDecision {
 }
 
 /** Handle kind: 'in' — field IN (values) or field IN (subquery) */
-function convertIn(
-	cond: FlatWhereFields,
-	rootTable: string,
-	options?: IntentToDecisionOptions,
-): PlanDecision {
+function convertIn(cond: FlatWhereFields, rootTable: string): PlanDecision {
 	const rawSubquery = cond.subquery;
 
 	// When a subquery is present, build the inSubquery Decision shape directly.
@@ -632,7 +582,6 @@ function convertIn(
 					const converted = convertWhereCondition(
 						rawSubquery.where!,
 						rawSubquery.from,
-						options,
 					);
 					return converted ? [converted] : [];
 				})()
@@ -772,11 +721,10 @@ function convertLogicalGroup(
 	cond: FlatWhereFields,
 	rootTable: string,
 	decisionType: 'whereAnd' | 'whereOr',
-	options?: IntentToDecisionOptions,
 ): PlanDecision | null {
 	const subDecisions: PlanDecision[] = [];
 	for (const sub of cond.conditions as WhereIntent[]) {
-		const subDecision = convertWhereCondition(sub, rootTable, options);
+		const subDecision = convertWhereCondition(sub, rootTable);
 		if (subDecision) subDecisions.push(subDecision);
 	}
 	if (subDecisions.length === 0) return null;
@@ -787,12 +735,10 @@ function convertLogicalGroup(
 function convertNot(
 	cond: FlatWhereFields,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): PlanDecision | null {
 	const subDecision = convertWhereCondition(
 		cond.condition as WhereIntent,
 		rootTable,
-		options,
 	);
 	if (!subDecision) return null;
 	return { type: 'whereNot', conditions: [subDecision] };
@@ -802,24 +748,20 @@ function convertNot(
 function convertExistsLike(
 	cond: FlatWhereFields,
 	operator: 'exists' | 'notExists' | 'every',
-	options?: IntentToDecisionOptions,
 ): PlanDecision {
 	const targetTable = cond.relation as string;
 	// For 'every', pass the raw conditions un-negated — everyHandler wraps them in
 	// NOT internally.  When conditions is empty/undefined, everyHandler returns the
 	// vacuous-true literal (TRUE) instead of emitting a subquery.
 	const subDecisions: PlanDecision[] = cond.where
-		? convertWhere(cond.where as WhereIntent, targetTable, options)
+		? convertWhere(cond.where as WhereIntent, targetTable)
 		: [];
 	const base: PlanDecision = { type: 'where', operator, targetTable };
 	return subDecisions.length > 0 ? { ...base, conditions: subDecisions } : base;
 }
 
 /** Handle kind: 'subquery' — field OP (SELECT col FROM table WHERE ...) */
-function convertSubquery(
-	cond: FlatWhereFields,
-	options?: IntentToDecisionOptions,
-): PlanDecision | null {
+function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const field = cond.field as string;
 	const operator = cond.operator as string;
 	const subquery = cond.subquery as QueryIntent | undefined;
@@ -833,10 +775,7 @@ function convertSubquery(
 	// inner WHERE to Decision[] without forwarding the outer alias, so outerRef() nodes
 	// bind to the inner alias instead of the outer query, producing wrong SQL silently.
 	// Throw here (before emitting the decision) instead of producing broken SQL.
-	if (
-		subquery.where &&
-		containsOuterRef(subquery.where, options?.paramProvenance)
-	) {
+	if (subquery.where && containsOuterRef(subquery.where)) {
 		throw new Error(
 			'scalar subquery with correlated outerRef() is not yet supported — ' +
 				'use exists("relation", { where: ... }) when a schema relation exists, ' +
@@ -866,7 +805,6 @@ function convertSubquery(
 		const innerWhere = convertWhereCondition(
 			subquery.where as WhereIntent,
 			targetTable,
-			options,
 		);
 		if (innerWhere) subConditions.push(innerWhere);
 	}
@@ -917,31 +855,30 @@ function convertSubquery(
 export function convertWhereCondition(
 	condition: WhereIntent,
 	rootTable: string,
-	options?: IntentToDecisionOptions,
 ): PlanDecision | null {
 	const cond = condition as FlatWhereFields;
 
 	switch (cond.kind) {
 		case 'comparison':
-			return convertComparison(cond, rootTable, options);
+			return convertComparison(cond, rootTable);
 		case 'like':
 			return convertLike(cond, rootTable);
 		case 'in':
-			return convertIn(cond, rootTable, options);
+			return convertIn(cond, rootTable);
 		case 'null':
 			return convertNull(cond, rootTable);
 		case 'range':
 			return convertRange(cond, rootTable);
 		case 'and':
-			return convertLogicalGroup(cond, rootTable, 'whereAnd', options);
+			return convertLogicalGroup(cond, rootTable, 'whereAnd');
 		case 'or':
-			return convertLogicalGroup(cond, rootTable, 'whereOr', options);
+			return convertLogicalGroup(cond, rootTable, 'whereOr');
 		case 'not':
-			return convertNot(cond, rootTable, options);
+			return convertNot(cond, rootTable);
 		case 'exists':
-			return convertExistsLike(cond, 'exists', options);
+			return convertExistsLike(cond, 'exists');
 		case 'notExists':
-			return convertExistsLike(cond, 'notExists', options);
+			return convertExistsLike(cond, 'notExists');
 		case 'relationFilter': {
 			const mode = (cond.mode as string) || 'some';
 			// mode:'every' must route to everyHandler (NOT EXISTS WHERE NOT cond).
@@ -953,10 +890,10 @@ export function convertWhereCondition(
 					: mode === 'every'
 						? ('every' as const)
 						: ('exists' as const);
-			return convertExistsLike(cond, operator, options);
+			return convertExistsLike(cond, operator);
 		}
 		case 'subquery':
-			return convertSubquery(cond, options);
+			return convertSubquery(cond);
 		case 'rawExists':
 		case 'rawNotExists': {
 			const sub = (cond as unknown as { subquery: QueryIntent | undefined })
@@ -973,7 +910,7 @@ export function convertWhereCondition(
 			assertNoUnsupportedSubqueryModifiers(sub, 'rawExists');
 			// Correlated subqueries (outerRef inside the inner WHERE) are NOT yet
 			// supported on the rawExists/rawNotExists path.
-			if (sub.where && containsOuterRef(sub.where, options?.paramProvenance)) {
+			if (sub.where && containsOuterRef(sub.where)) {
 				throw new Error(
 					`${cond.kind}: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ` +
 						'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline (tracked in TODO).',
@@ -989,15 +926,13 @@ export function convertWhereCondition(
 			};
 		}
 		case 'jsonContains': {
-			const decision: Mutable<PlanDecision> = {
+			return {
 				type: 'where',
 				column: cond.field as string,
 				operator: cond.reversed ? 'jsonContainedBy' : 'jsonContains',
 				value: cond.value,
 				table: rootTable,
 			};
-			markDecisionParamValue(decision, options, cond, 'value');
-			return decision;
 		}
 		case 'any':
 			return {

@@ -9,7 +9,6 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	MutationIntent,
-	ParamValueProvenance,
 	QueryIntent,
 	SelectFieldsIntent,
 	UpdateIntent,
@@ -22,6 +21,7 @@ import type {
 	WhereNotIntent,
 	WhereOrIntent,
 } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
 import type {
 	NqlDelete,
 	NqlExpression,
@@ -49,9 +49,6 @@ function assignMutationValue(
 	ctx: CompilerContext,
 ): void {
 	target[column] = expressionToValue(value, ctx);
-	if (value.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(target, column);
-	}
 }
 
 /**
@@ -198,7 +195,6 @@ function compileUpdate(
 			where: resolveBindingsInWhere(
 				fns.compileExpression(update.where, ctx, fns),
 				bindings,
-				ctx.paramProvenance,
 			),
 		};
 	}
@@ -232,7 +228,6 @@ function compileDelete(
 			where: resolveBindingsInWhere(
 				fns.compileExpression(del.where, ctx, fns),
 				bindings,
-				ctx.paramProvenance,
 			),
 		};
 	}
@@ -350,7 +345,6 @@ function extractReturningColumns(
 function resolveBindingsInWhere(
 	where: WhereIntent,
 	bindings?: Map<string, QueryIntent>,
-	paramProvenance?: ParamValueProvenance,
 ): WhereIntent {
 	if (!bindings || bindings.size === 0) return where;
 
@@ -363,7 +357,7 @@ function resolveBindingsInWhere(
 		if (inValues && inValues.length === 1) {
 			const val = inValues[0];
 			if (
-				paramProvenance?.isParamValue(inValues, 0) !== true &&
+				!isParamIntent(val) &&
 				val &&
 				typeof val === 'object' &&
 				'$ref' in (val as Record<string, unknown>)
@@ -401,11 +395,7 @@ function resolveBindingsInWhere(
 
 	if (where.kind === 'not') {
 		const notWhere = where as WhereNotIntent;
-		const resolved = resolveBindingsInWhere(
-			notWhere.condition,
-			bindings,
-			paramProvenance,
-		);
+		const resolved = resolveBindingsInWhere(notWhere.condition, bindings);
 		return resolved === notWhere.condition
 			? where
 			: { kind: 'not', condition: resolved };
@@ -414,7 +404,7 @@ function resolveBindingsInWhere(
 	if (where.kind === 'and' || where.kind === 'or') {
 		const compound = where as WhereAndIntent | WhereOrIntent;
 		const resolved = compound.conditions.map((c) =>
-			resolveBindingsInWhere(c, bindings, paramProvenance),
+			resolveBindingsInWhere(c, bindings),
 		);
 		const changed = resolved.some((r, i) => r !== compound.conditions[i]);
 		return changed ? { kind: compound.kind, conditions: resolved } : where;

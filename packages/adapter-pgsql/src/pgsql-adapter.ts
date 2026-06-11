@@ -131,8 +131,7 @@ function isCompiledNqlQuery(
 			'mutation' in input ||
 			'setOperation' in input ||
 			'bindings' in input ||
-			'mutationBindings' in input ||
-			'paramProvenance' in input)
+			'mutationBindings' in input)
 	);
 }
 // ============================================================================
@@ -281,14 +280,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 	}
 
-	private mergeNqlCompileOptions(
-		bundle: CompiledNqlQuery,
-		options?: CompileOptions,
-	): CompileOptions | undefined {
-		if (bundle.paramProvenance === undefined) return options;
-		return { ...options, paramProvenance: bundle.paramProvenance };
-	}
-
 	private requireNqlCompileModel(options?: CompileOptions): ModelIR {
 		const model = options?.model ?? this.model;
 		if (model === undefined) {
@@ -391,7 +382,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
-		const nqlOptions = this.mergeNqlCompileOptions(bundle, options);
 		const ctes: string[] = [];
 		const parameters: unknown[] = [];
 
@@ -399,7 +389,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
-			const compiled = this.compileNqlBundleLeaf(bindingBundle, nqlOptions);
+			const compiled = this.compileNqlBundleLeaf(bindingBundle, options);
 			ctes.push(
 				`"${name}" as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
@@ -414,11 +404,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(bundle.setOperation !== undefined && {
 				setOperation: bundle.setOperation,
 			}),
-			...(bundle.paramProvenance !== undefined && {
-				paramProvenance: bundle.paramProvenance,
-			}),
 		};
-		const compiled = this.compileNqlBundleLeaf<T>(leafBundle, nqlOptions);
+		const compiled = this.compileNqlBundleLeaf<T>(leafBundle, options);
 		if (ctes.length === 0) {
 			return compiled;
 		}

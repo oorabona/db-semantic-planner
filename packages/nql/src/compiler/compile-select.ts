@@ -4,23 +4,23 @@
  * Compiles NQL SELECT clauses to SelectIntent and ExpressionIntent.
  */
 
-import type {
-	AggregateFunction,
-	AggregateWindowIntent,
-	ExpressionIntent,
-	OffsetWindowIntent,
-	PseudoColumnTraversal,
-	QueryIntent,
-	RankingWindowIntent,
-	SelectIntent,
-	WindowFunction,
-} from '@dbsp/types';
 import {
+	type AggregateFunction,
+	type AggregateWindowIntent,
+	type ExpressionIntent,
 	isNqlSelectWindowFunctionAllowed,
+	isParamIntent,
 	isRankingWindowFunction,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_JSON_FUNCTIONS,
 	NQL_SELECT_SCALAR_FUNCTIONS,
+	type OffsetWindowIntent,
+	type ParamIntent,
+	type PseudoColumnTraversal,
+	type QueryIntent,
+	type RankingWindowIntent,
+	type SelectIntent,
+	type WindowFunction,
 } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
@@ -46,13 +46,10 @@ import {
 import type { CompilerContext, CompilerFns } from './types.js';
 
 function paramExpressionIntent(
-	value: unknown,
+	param: ParamIntent,
 	alias?: string,
 ): ExpressionIntent {
-	const intent: Record<string, unknown> = {
-		kind: 'param',
-		value,
-	};
+	const intent: Record<string, unknown> = { ...param };
 	if (alias !== undefined) intent.as = alias;
 	return intent as unknown as ExpressionIntent;
 }
@@ -74,10 +71,12 @@ function resolveLagLeadOffset(
 	ctx: CompilerContext,
 ): number {
 	if (expr.type === 'number') {
-		return resolveIntegerCount(expr.value, ctx, 'lag/lead offset');
+		const resolved = resolveIntegerCount(expr.value, ctx, 'lag/lead offset');
+		return isParamIntent(resolved) ? (resolved.value as number) : resolved;
 	}
 	if (expr.type === 'namedParam') {
-		return resolveIntegerCount(expr, ctx, 'lag/lead offset');
+		const resolved = resolveIntegerCount(expr, ctx, 'lag/lead offset');
+		return isParamIntent(resolved) ? (resolved.value as number) : resolved;
 	}
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
@@ -171,7 +170,7 @@ function expressionToSelectValue(
 	const field = expressionToField(valueExpr);
 	if (field) return field;
 	if (valueExpr.type === 'namedParam') {
-		return paramExpressionIntent(expressionToValue(valueExpr, ctx));
+		return expressionToValue(valueExpr, ctx);
 	}
 	if (
 		valueExpr.type === 'string' ||
@@ -203,7 +202,7 @@ function expressionToFunctionArg(
 	const field = expressionToField(valueExpr);
 	if (field) return field;
 	if (valueExpr.type === 'namedParam') {
-		return paramExpressionIntent(expressionToValue(valueExpr, ctx));
+		return expressionToValue(valueExpr, ctx);
 	}
 	if (
 		valueExpr.type === 'string' ||
@@ -421,7 +420,10 @@ function compileSelectExpression(
 
 	// Top-level named parameter projection, e.g. `select :p as x`.
 	if (expr.type === 'namedParam') {
-		return paramExpressionIntent(expressionToValue(expr, ctx), exprItem.alias);
+		return paramExpressionIntent(
+			expressionToValue(expr, ctx) as ParamIntent,
+			exprItem.alias,
+		);
 	}
 
 	// Binary arithmetic expression
@@ -623,9 +625,6 @@ function compileCaseExpression(
 				operator: 'eq' as const,
 				value: expressionToValue(wc.condition, ctx),
 			};
-			if (wc.condition.type === 'namedParam') {
-				ctx.paramProvenance.markParamValue(condition, 'value');
-			}
 			return {
 				condition,
 				result: compileExpressionToIntent(wc.result, ctx, fns),
@@ -681,9 +680,6 @@ function compileExpressionToIntent(
 			operator: cmp.operator,
 			value,
 		};
-		if (cmp.right.type === 'namedParam') {
-			ctx.paramProvenance.markParamValue(intent, 'value');
-		}
 		return intent;
 	}
 
@@ -696,7 +692,7 @@ function compileExpressionToIntent(
 		expr.type === 'namedParam'
 	) {
 		if (expr.type === 'namedParam') {
-			return paramExpressionIntent(expressionToValue(expr, ctx));
+			return expressionToValue(expr, ctx) as ExpressionIntent;
 		}
 		if (expr.type === 'null') {
 			return literalExpressionIntent(null);
@@ -724,7 +720,7 @@ function compileJsonPathArgs(
 	fn: string,
 	args: NqlExpression[],
 	ctx: CompilerContext,
-): string[] {
+): (string | ParamIntent)[] {
 	const keys = args
 		.slice(1)
 		.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
@@ -733,6 +729,7 @@ function compileJsonPathArgs(
 	if (
 		args.length === 2 &&
 		firstArg?.type === 'string' &&
+		typeof first === 'string' &&
 		first?.startsWith('{') &&
 		first.endsWith('}')
 	) {

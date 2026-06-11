@@ -83,11 +83,7 @@ function adapterSetOpToSQLWithParams(
 	return adapter.compileSetOperation(
 		compiled.ast.setOperation,
 		testSchema.model,
-		{
-			...(compiled.ast.paramProvenance && {
-				paramProvenance: compiled.ast.paramProvenance,
-			}),
-		},
+		{},
 	);
 }
 
@@ -155,7 +151,7 @@ describe('compileSetOperation', () => {
 		});
 
 		for (const op of ['union', 'intersect', 'except'] as const) {
-			it(`threads NQL param provenance through ${op.toUpperCase()} leaves`, () => {
+			it(`binds explicit NQL param nodes through ${op.toUpperCase()} leaves`, () => {
 				const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 				const result = adapterSetOpToSQLWithParams(
 					`employees | where name = :left | select name | ${op} (employees | where name = :right | select name)`,

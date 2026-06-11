@@ -5,7 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
-import type { ModelIR, ParamValueProvenance } from '@dbsp/types';
+import type { ModelIR, ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
@@ -65,8 +65,6 @@ export interface CompilerContext {
 	 * PostgreSQL type inference ambiguity for nullable columns.
 	 */
 	readonly model?: ModelIR;
-	/** Adapter-facing sidecar for NQL bound-param value positions. */
-	readonly paramProvenance?: ParamValueProvenance;
 }
 
 // ============================================================================
@@ -116,7 +114,6 @@ export interface Decision {
 	readonly alias?: string;
 	readonly operator?: string;
 	readonly value?: unknown;
-	readonly valueIsParam?: boolean;
 	readonly paramIndex?: number;
 	readonly dataType?: string;
 	readonly direction?: 'ASC' | 'DESC';
@@ -131,8 +128,8 @@ export interface Decision {
 	readonly columns?: readonly string[];
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
-	readonly limit?: number | { paramIndex: number };
-	readonly offset?: number | { paramIndex: number };
+	readonly limit?: number | ParamIntent | { paramIndex: number };
+	readonly offset?: number | ParamIntent | { paramIndex: number };
 	// Include-specific
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
@@ -173,7 +170,7 @@ export interface Decision {
 	// Populated when selectRelationColumn decisions carry an `alias` field.
 	readonly columnAliases?: Readonly<Record<string, string>>;
 	// JSON-specific
-	readonly jsonPath?: readonly string[];
+	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';
 	// Pre-compiled filter from EXISTS propagation (set by compiler, read by json_agg handler)
 	readonly _compiledFilterWhere?: import('@pgsql/types').Node;

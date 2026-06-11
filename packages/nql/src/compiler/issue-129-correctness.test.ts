@@ -127,10 +127,10 @@ describe('item 1 — ANY(:param) validation', () => {
 		expect(r.success).toBe(true);
 		const where = r.ast!.query!.where as unknown as {
 			kind: string;
-			values: unknown[];
+			values: unknown;
 		};
 		expect(where.kind).toBe('any');
-		expect(where.values).toEqual(ids);
+		expect(where.values).toEqual({ kind: 'param', value: ids });
 	});
 
 	it('MAX_ANY_ITEMS constant is 10000', () => {

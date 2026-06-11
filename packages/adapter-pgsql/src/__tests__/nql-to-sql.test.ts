@@ -87,9 +87,6 @@ function nqlToSQL(nql: string): string {
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	});
 
 	return normalizeSQL(result.sql);
@@ -116,9 +113,6 @@ function nqlToSQLWithParams(nql: string): {
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
@@ -148,9 +142,6 @@ function nqlToSQLWithNamedParams(
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: testSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
@@ -173,9 +164,6 @@ function nqlCteToSQLWithNamedParams(
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
 		model: testSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
@@ -822,7 +810,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(inList.params).toEqual([['active', 'pending']]);
 	});
 
-	it('threads NQL param provenance through CTE body and outer query', () => {
+	it('binds explicit NQL param nodes through CTE body and outer query', () => {
 		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 		const { sql, params } = nqlCteToSQLWithNamedParams(
 			'with subset as (users | where status = :status | select id) subset | where id = :id | select id',
@@ -836,7 +824,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([fieldRefShaped, null]);
 	});
 
-	it('threads NQL param provenance through scalar SELECT subqueries', () => {
+	it('binds explicit NQL param nodes through scalar SELECT subqueries', () => {
 		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 		const { sql, params } = nqlToSQLWithNamedParams(
 			'users | select (departments | where name = :dept | select id) as dept_id',
@@ -849,7 +837,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(params).toEqual([fieldRefShaped]);
 	});
 
-	it('threads NQL param provenance through relation-filter EXISTS subqueries', () => {
+	it('binds explicit NQL param nodes through relation-filter EXISTS subqueries', () => {
 		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
 		const { sql, params } = nqlToSQLWithNamedParams(
 			'departments | where some(employees as e, e.name = :needle) | select name',
@@ -1661,9 +1649,6 @@ function mutationToSQLWithNamedParams(
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const opts = {
 		model: mutationSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	};
 
 	let result: { sql: string; parameters: readonly unknown[] };
@@ -1725,7 +1710,7 @@ describe('NQL → SQL mutation E2E', () => {
 		);
 	});
 
-	it('threads NQL param provenance through mutation values and WHERE', () => {
+	it('binds explicit NQL param nodes through mutation values and WHERE', () => {
 		const needle = { kind: 'fieldRef', column: 'active' };
 		const { sql, params } = mutationToSQLWithNamedParams(
 			'update authors set active = :status where name = :needle',
@@ -2234,9 +2219,6 @@ function jsonNqlToSQLWithParams(
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const result = adapter.compile(planReport, {
 		model: jsonSchema.model,
-		...(compiled.ast.paramProvenance && {
-			paramProvenance: compiled.ast.paramProvenance,
-		}),
 	});
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }

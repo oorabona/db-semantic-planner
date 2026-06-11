@@ -35,11 +35,11 @@ function compileFail(
 }
 
 function expectParamValue(value: unknown, expected: unknown): void {
-	expect(value).toBe(expected);
+	expect(value).toEqual({ kind: 'param', value: expected });
 }
 
 function expectParamValueEqual(value: unknown, expected: unknown): void {
-	expect(value).toEqual(expected);
+	expect(value).toEqual({ kind: 'param', value: expected });
 }
 
 describe('FEAT-134 named parameters — grammar and AST', () => {
@@ -106,7 +106,7 @@ describe('FEAT-134 named parameters — grammar and AST', () => {
 });
 
 describe('FEAT-134 named parameters — compiler resolution', () => {
-	it('resolves scalar comparison params into WhereComparisonIntent.value', () => {
+	it('resolves scalar comparison params into explicit ParamIntent nodes', () => {
 		const result = compileOk('users | where id = :p', { p: 5 });
 		const where = result.query!.where as WhereComparisonIntent;
 
@@ -122,7 +122,7 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 
 		expect(where.kind).toBe('like');
 		expect(where.field).toBe('name');
-		expect(where.pattern).toBe('%admin%');
+		expect(where.pattern).toEqual({ kind: 'param', value: '%admin%' });
 
 		const bad = compileFail('users | where name like :pattern', {
 			pattern: 42,
@@ -137,20 +137,26 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		const exists = compileOk('users | where json_exists(profile, :key)', {
 			key: 'timezone',
 		});
-		expect((exists.query!.where as WhereJsonExistsIntent).key).toBe('timezone');
+		expect((exists.query!.where as WhereJsonExistsIntent).key).toEqual({
+			kind: 'param',
+			value: 'timezone',
+		});
 
 		const extract = compileOk(
 			"users | where json_extract(profile, :key) = 'admin'",
 			{ key: 'role' },
 		);
 		expect((extract.query!.where as WhereComparisonIntent).jsonPath).toEqual([
-			'role',
+			{ kind: 'param', value: 'role' },
 		]);
 
 		const op = compileOk('users | where profile ? :key', {
 			key: 'email',
 		});
-		expect((op.query!.where as WhereJsonExistsIntent).key).toBe('email');
+		expect((op.query!.where as WhereJsonExistsIntent).key).toEqual({
+			kind: 'param',
+			value: 'email',
+		});
 	});
 
 	it('rejects non-string JSON key params structurally', () => {
@@ -378,8 +384,8 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			limit: 10,
 			offset: 5,
 		});
-		expect(ok.query!.limit).toBe(10);
-		expect(ok.query!.offset).toBe(5);
+		expect(ok.query!.limit).toEqual({ kind: 'param', value: 10 });
+		expect(ok.query!.offset).toEqual({ kind: 'param', value: 5 });
 
 		for (const [name, value] of [
 			['limit', -1],
@@ -422,7 +428,10 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 				limit: 25,
 			},
 		);
-		expect(insert.mutation).toMatchObject({ type: 'insert_from', limit: 25 });
+		expect(insert.mutation).toMatchObject({
+			type: 'insert_from',
+			limit: { kind: 'param', value: 25 },
+		});
 
 		const upsert = compileOk(
 			'upsert into users on id from incoming limit :limit',
@@ -430,7 +439,10 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 				limit: 30,
 			},
 		);
-		expect(upsert.mutation).toMatchObject({ type: 'upsert_from', limit: 30 });
+		expect(upsert.mutation).toMatchObject({
+			type: 'upsert_from',
+			limit: { kind: 'param', value: 30 },
+		});
 	});
 
 	it('retrofitted ANY uses hasOwn semantics and rejects non-arrays', () => {

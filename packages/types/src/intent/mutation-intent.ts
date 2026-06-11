@@ -3,6 +3,7 @@
  * Mutation intent types for Insert, Update, Delete, Upsert (DX-010).
  */
 
+import type { ParamIntent } from './expression-intent.js';
 import type { QueryIntent } from './query-intent.js';
 import type { WhereIntent } from './where-intent.js';
 
@@ -54,7 +55,7 @@ export interface InsertFromIntent {
 	readonly where?: WhereIntent | undefined;
 
 	/** Limit number of rows to insert */
-	readonly limit?: number | undefined;
+	readonly limit?: number | ParamIntent | undefined;
 
 	/**
 	 * Columns to return from inserted rows (DX-026).
@@ -91,7 +92,7 @@ export interface UpsertFromIntent {
 	readonly where?: WhereIntent | undefined;
 
 	/** Limit number of rows */
-	readonly limit?: number | undefined;
+	readonly limit?: number | ParamIntent | undefined;
 
 	/**
 	 * Columns to return from affected rows.

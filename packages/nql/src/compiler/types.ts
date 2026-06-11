@@ -9,7 +9,6 @@ import type {
 	SetOperationIntent,
 	WhereIntent,
 } from '@dbsp/types';
-import type { MutableParamValueProvenance } from '@dbsp/types/internal';
 import type { NqlExpression } from '../parser/ast.js';
 import type { ColumnValidator } from './column-validator.js';
 
@@ -70,8 +69,6 @@ export interface CompilerContext {
 	readonly allowUnfilteredMutations: boolean;
 	/** @internal Allows generated __pN params from the core nql tag only. */
 	readonly allowInternalParams: boolean;
-	/** @internal Sidecar provenance for bound named-param value positions. */
-	readonly paramProvenance: MutableParamValueProvenance;
 }
 
 /**

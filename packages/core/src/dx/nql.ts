@@ -21,7 +21,6 @@ import {
 	NqlLexer,
 	compile as nqlCompile,
 } from '@dbsp/nql';
-import type { ParamValueProvenance } from '@dbsp/types';
 import type { Adapter, Dump } from '../adapter.js';
 import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
@@ -304,7 +303,6 @@ export function createNqlTag(
  */
 class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private _intent: QueryIntent | undefined;
-	private _paramProvenance: ParamValueProvenance | undefined;
 	private readonly query: string;
 	private readonly params: Readonly<Record<string, unknown>>;
 	private readonly hasBoundParams: boolean;
@@ -380,7 +378,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
 		// structurally identical to core's re-export.
 		this._intent = result.ast.query as QueryIntent;
-		this._paramProvenance = result.ast.paramProvenance;
 		return this._intent;
 	}
 
@@ -409,12 +406,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			};
 		}
 
-		const compiled = this.adapter.compile<T>(
-			planReport,
-			this._paramProvenance
-				? { paramProvenance: this._paramProvenance }
-				: undefined,
-		);
+		const compiled = this.adapter.compile<T>(planReport);
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -457,12 +449,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 
 		const planReport = this.planInternal();
-		const compiled = this.adapter.compile<T>(
-			planReport,
-			this._paramProvenance
-				? { paramProvenance: this._paramProvenance }
-				: undefined,
-		);
+		const compiled = this.adapter.compile<T>(planReport);
 		return this.adapter.execute(compiled);
 	}
 

@@ -207,9 +207,6 @@ export function compileInsert(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 
@@ -217,14 +214,6 @@ export function compileInsert(
 	const columns = Object.keys(firstRow);
 	const rows = intent.values ?? [];
 	const values = rows.map((row) => columns.map((col) => row[col]));
-	const valueParamFlags =
-		options?.paramProvenance !== undefined
-			? rows.map((row) =>
-					columns.map(
-						(col) => options.paramProvenance?.isParamValue(row, col) === true,
-					),
-				)
-			: undefined;
 
 	const columnTypes = getColumnTypes(intent.table, columns, deps);
 
@@ -232,7 +221,6 @@ export function compileInsert(
 		table: intent.table,
 		columns,
 		values,
-		...(valueParamFlags !== undefined && { valueParamFlags }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
 	};
@@ -274,7 +262,7 @@ export function compileInsert(
  */
 export function compileInsertFrom(
 	intent: InsertFromIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -285,9 +273,6 @@ export function compileInsertFrom(
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 
@@ -319,7 +304,7 @@ export function compileInsertFrom(
  */
 export function compileUpdate(
 	intent: UpdateIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -330,9 +315,6 @@ export function compileUpdate(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 
@@ -344,10 +326,6 @@ export function compileUpdate(
 		set: Object.entries(intent.set ?? {}).map(([column, value]) => ({
 			column,
 			value,
-			...(options?.paramProvenance?.isParamValue(
-				intent.set as Record<string, unknown>,
-				column,
-			) === true && { valueIsParam: true }),
 		})),
 		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
@@ -380,7 +358,7 @@ export function compileUpdate(
  */
 export function compileBatchUpdate(
 	intent: BatchUpdateIntent,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -444,9 +422,6 @@ export function compileBatchUpdate(
 			naming: deps.naming,
 			...(schemaName !== undefined && { schemaName }),
 			...(deps.model !== undefined && { model: deps.model }),
-			...(options?.paramProvenance !== undefined && {
-				paramProvenance: options.paramProvenance,
-			}),
 			compileSubquery: (sqIntent, paramOffset) =>
 				buildSubqueryFromIntent(
 					sqIntent,
@@ -454,7 +429,6 @@ export function compileBatchUpdate(
 					deps.naming,
 					schemaName,
 					'rawExists',
-					options?.paramProvenance,
 				),
 		};
 		whereGuard = compileWhereIntent(intent.where, whereCtx);
@@ -503,9 +477,6 @@ export function compileDelete(
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 
@@ -551,9 +522,6 @@ export function compileUpsert(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 
@@ -683,9 +651,6 @@ export function compileUpsertFrom(
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
 		maxRecursiveDepth: 100,
-		...(options?.paramProvenance !== undefined && {
-			paramProvenance: options.paramProvenance,
-		}),
 	};
 	const state = createCompilerState();
 

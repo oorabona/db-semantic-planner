@@ -41,7 +41,7 @@
  * @internal
  */
 
-import type { QueryIntent } from '@dbsp/types';
+import { isParamIntent, type QueryIntent } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import { columnRef, integerNode, rangeVar, sortBy } from './ast-helpers.js';
 import type {
@@ -209,10 +209,7 @@ export function buildPredicateSubquerySelect(
 	assertNoDroppedDecisionModifiers(decision, use);
 
 	// Correlated subqueries (outerRef inside the inner WHERE) are not supported.
-	if (
-		sourceIntent.where &&
-		containsOuterRef(sourceIntent.where, ctx.paramProvenance)
-	) {
+	if (sourceIntent.where && containsOuterRef(sourceIntent.where)) {
 		const label =
 			use === 'rawExists' ? 'rawExists' : use === 'IN' ? 'IN' : 'scalar';
 		throw new Error(
@@ -314,6 +311,12 @@ export function buildPredicateSubquerySelect(
 	if (decision.limit != null) {
 		if (typeof decision.limit === 'number') {
 			stmt.limitCount = integerNode(decision.limit);
+		} else if (isParamIntent(decision.limit)) {
+			state.parameters.push(decision.limit.value);
+			state.paramIndex++;
+			stmt.limitCount = {
+				ParamRef: { number: state.paramIndex },
+			} as unknown as Node;
 		} else {
 			const limitObj = decision.limit as Record<string, unknown>;
 			if (typeof limitObj.paramIndex !== 'number') {

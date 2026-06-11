@@ -13,7 +13,7 @@ import type {
 	WhereHandler,
 } from '../types.js';
 import { isRangeValue } from '../types.js';
-import { buildColumnRef } from './utils.js';
+import { buildColumnRef, unwrapParamIntent } from './utils.js';
 
 /** Map operator names to PostgreSQL range operators */
 const RANGE_OP_MAP: Record<string, string> = {
@@ -42,13 +42,16 @@ export const rangeHandler: WhereHandler = {
 
 		const operator = decision.operator ?? 'contains';
 		const pgOp = RANGE_OP_MAP[operator] ?? operator;
-		const value = decision.value;
+		const rawValue = decision.value;
+		const value = unwrapParamIntent(rawValue);
 
 		const columnNode = buildColumnRef(column, ctx);
 
 		let paramValue: unknown;
 		let isScalar = false;
-		if (isRangeValue(value)) {
+		if (value !== rawValue) {
+			paramValue = value;
+		} else if (isRangeValue(value)) {
 			const lower = value.lower ?? '';
 			const upper = value.upper ?? '';
 			paramValue = `[${lower},${upper})`;

@@ -122,24 +122,7 @@ export interface CompileOptionsBase {
 }
 
 /**
- * Adapter-facing sidecar metadata for intent positions that originated from
- * bound NQL parameters. The clean public intent carries only the raw value;
- * this sidecar lets adapters distinguish a bound value from a structural node
- * at ambiguous positions such as comparison RHS values.
- *
- * @internal
- */
-export interface ParamValueProvenance {
-	isParamValue(container: object, key: PropertyKey): boolean;
-}
-
-/**
  * Adapter-facing NQL compile bundle.
- *
- * NQL public intents stay clean: named parameter values are stored directly on
- * the intent tree. This bundle carries the clean compiled result plus the
- * provenance sidecar needed by adapters to bind parameter-sourced object values
- * as values rather than reinterpreting them as query structure.
  */
 export interface CompiledNqlQuery {
 	readonly query?: QueryIntent;
@@ -153,11 +136,6 @@ export interface CompiledNqlQuery {
 	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
 	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
 	readonly setOperation?: SetOperationIntent;
-	/**
-	 * @internal Sidecar metadata marking clean intent value positions that came
-	 * from bound NQL parameters. It is never exposed on the intent tree.
-	 */
-	readonly paramProvenance?: ParamValueProvenance;
 }
 
 /**
@@ -195,12 +173,6 @@ export type DbCasing = 'snake_case' | 'camelCase' | 'preserve';
 export interface CompileOptions extends CompileOptionsBase {
 	/** Model IR for relation lookups during compilation */
 	readonly model?: ModelIR;
-	/**
-	 * @internal Sidecar metadata marking clean intent value positions that came
-	 * from bound NQL parameters. Adapters use it only for value-vs-structure
-	 * compilation decisions; it is never exposed on the intent tree.
-	 */
-	readonly paramProvenance?: ParamValueProvenance;
 	/**
 	 * Alias mode for included relation columns.
 	 * @default 'always'

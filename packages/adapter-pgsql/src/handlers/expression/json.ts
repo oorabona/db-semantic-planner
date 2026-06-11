@@ -11,7 +11,7 @@ import type {
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
-import { compileValue } from '../where/utils.js';
+import { compileValue, unwrapParamIntent } from '../where/utils.js';
 
 /**
  * JSON extract: col->'key' or col->>'key' chains
@@ -30,7 +30,7 @@ export const jsonExtractHandler: ExpressionHandler = {
 			throw new Error('JSON extract handler requires a column');
 		}
 
-		const path = (decision.args ?? []) as string[];
+		const path = (decision.args ?? []) as readonly unknown[];
 		const mode = decision.jsonMode ?? 'text';
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
@@ -58,12 +58,16 @@ export const jsonExtractHandler: ExpressionHandler = {
  * JSON path extract: col#>ARRAY['a','b'] or col#>>ARRAY['a','b}'
  * Produces: "col" #> $1 or "col" #>> $1
  */
-function normalizeJsonPathArgs(args: readonly unknown[] | undefined): string[] {
+function normalizeJsonPathArgs(args: readonly unknown[] | undefined): unknown {
 	if (!args || args.length === 0) return [];
 	if (args.length === 1) {
 		const first = args[0];
+		const unwrappedFirst = unwrapParamIntent(first);
+		if (first !== unwrappedFirst) {
+			return unwrappedFirst;
+		}
 		if (Array.isArray(first)) {
-			return first.map((item) => String(item));
+			return first.map(unwrapParamIntent);
 		}
 		if (
 			typeof first === 'string' &&
@@ -74,7 +78,7 @@ function normalizeJsonPathArgs(args: readonly unknown[] | undefined): string[] {
 			return inner.length === 0 ? [] : inner.split(',');
 		}
 	}
-	return args.map((item) => String(item));
+	return args.map(unwrapParamIntent);
 }
 
 export const jsonPathExtractHandler: ExpressionHandler = {

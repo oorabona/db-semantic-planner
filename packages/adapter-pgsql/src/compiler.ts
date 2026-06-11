@@ -10,11 +10,12 @@
 import { InvalidOperationError } from '@dbsp/core';
 import {
 	type ExpressionIntent,
+	isParamIntent,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_JSON_FUNCTIONS,
 	NQL_SELECT_SCALAR_FUNCTIONS,
 	NQL_SELECT_WINDOW_FUNCTIONS,
-	type ParamValueProvenance,
+	type ParamIntent,
 	type QueryIntent,
 } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
@@ -151,7 +152,6 @@ function mapToHandlerDecision(
 		alias: pd.alias,
 		operator: pd.operator,
 		value: pd.value,
-		valueIsParam: pd.valueIsParam,
 		paramIndex: pd.paramIndex,
 		direction: pd.direction,
 		joinType: pd.joinType,
@@ -241,7 +241,6 @@ export interface PlanDecision {
 	readonly field?: string;
 	readonly operator?: string;
 	readonly value?: unknown;
-	readonly valueIsParam?: boolean;
 	readonly paramIndex?: number;
 	readonly direction?: 'ASC' | 'DESC';
 	readonly nulls?: 'FIRST' | 'LAST';
@@ -255,8 +254,8 @@ export interface PlanDecision {
 	readonly columns?: readonly string[];
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
-	readonly limit?: number | { paramIndex: number };
-	readonly offset?: number | { paramIndex: number };
+	readonly limit?: number | ParamIntent | { paramIndex: number };
+	readonly offset?: number | ParamIntent | { paramIndex: number };
 	// Window function properties
 	readonly partitionBy?: readonly string[];
 	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
@@ -280,7 +279,7 @@ export interface PlanDecision {
 		readonly from: string;
 		readonly select: string;
 		readonly where?: PlanDecision;
-		readonly limit?: number;
+		readonly limit?: number | ParamIntent;
 		readonly orderBy?: readonly { field: string; direction?: string }[];
 	};
 	// Expression type discriminator (e.g. 'case' for CASE WHEN)
@@ -594,8 +593,6 @@ export interface CompilerOptions {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 	/** ModelIR for type-aware parameter casting in WHERE clauses */
 	readonly model?: import('@dbsp/types').ModelIR;
-	/** Sidecar for NQL bound-param value positions. */
-	readonly paramProvenance?: ParamValueProvenance;
 }
 
 /**
@@ -621,7 +618,6 @@ export class PlanCompiler {
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
-	private readonly paramProvenance: ParamValueProvenance | undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -661,7 +657,6 @@ export class PlanCompiler {
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
 		this.model = options.model ?? undefined;
-		this.paramProvenance = options.paramProvenance;
 	}
 
 	/** Build immutable context for handler-based WHERE compilation */
@@ -674,9 +669,6 @@ export class PlanCompiler {
 			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
 			...(this.model != null && { model: this.model }),
-			...(this.paramProvenance != null && {
-				paramProvenance: this.paramProvenance,
-			}),
 		} as HandlerCompilerContext;
 	}
 
@@ -1160,9 +1152,6 @@ export class PlanCompiler {
 				? { schema: plan.schema ?? this.schema }
 				: {}),
 			...(this.model != null && { model: this.model }),
-			...(this.paramProvenance != null && {
-				paramProvenance: this.paramProvenance,
-			}),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
 				this.compileExpressionSubquery(query, paramOffset),
 			compileNqlSelectExpression: (
@@ -1198,19 +1187,10 @@ export class PlanCompiler {
 			}),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
-			...(this.paramProvenance !== undefined && {
-				paramProvenance: this.paramProvenance,
-			}),
 		});
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
-			decisions: intentToDecisions(
-				query,
-				query.from,
-				this.paramProvenance !== undefined
-					? { paramProvenance: this.paramProvenance }
-					: undefined,
-			),
+			decisions: intentToDecisions(query, query.from),
 		};
 		const innerResult = innerCompiler.compile(innerPlan);
 		const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
@@ -1467,9 +1447,6 @@ export class PlanCompiler {
 			const conditionDecision = convertWhereCondition(
 				condition as import('@dbsp/types').WhereIntent,
 				ctx.rootTable,
-				this.paramProvenance !== undefined
-					? { paramProvenance: this.paramProvenance }
-					: undefined,
 			);
 			if (!conditionDecision) {
 				throw new Error('NQL CASE WHEN condition could not be compiled');
@@ -1645,19 +1622,10 @@ export class PlanCompiler {
 							}),
 							defaultPkColumnName: outerThis.defaultPk,
 							deriveFkColumnName: outerThis.deriveFk,
-							...(outerThis.paramProvenance !== undefined && {
-								paramProvenance: outerThis.paramProvenance,
-							}),
 						});
 						const innerPlan: SimplifiedPlanReport = {
 							rootTable: query.from,
-							decisions: intentToDecisions(
-								query,
-								query.from,
-								outerThis.paramProvenance !== undefined
-									? { paramProvenance: outerThis.paramProvenance }
-									: undefined,
-							),
+							decisions: intentToDecisions(query, query.from),
 						};
 						const innerResult = innerCompiler.compile(innerPlan);
 						// Renumber ParamRef $N in the inner AST by paramOffset so they
@@ -2206,6 +2174,10 @@ export class PlanCompiler {
 				case 'limit':
 					if (typeof decision.limit === 'number') {
 						limit = integerNode(decision.limit);
+					} else if (isParamIntent(decision.limit)) {
+						this.state.parameters.push(decision.limit.value);
+						this.state.paramIndex++;
+						limit = createParamRef(this.state.paramIndex);
 					} else if (decision.limit?.paramIndex !== undefined) {
 						limit = createParamRef(decision.limit.paramIndex);
 						this.state.parameters.push(undefined); // Placeholder
@@ -2215,6 +2187,10 @@ export class PlanCompiler {
 				case 'offset':
 					if (typeof decision.offset === 'number') {
 						offset = integerNode(decision.offset);
+					} else if (isParamIntent(decision.offset)) {
+						this.state.parameters.push(decision.offset.value);
+						this.state.paramIndex++;
+						offset = createParamRef(this.state.paramIndex);
 					} else if (decision.offset?.paramIndex !== undefined) {
 						offset = createParamRef(decision.offset.paramIndex);
 						this.state.parameters.push(undefined); // Placeholder

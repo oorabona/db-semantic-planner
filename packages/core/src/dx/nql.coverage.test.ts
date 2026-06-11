@@ -106,7 +106,7 @@ describe('NqlBuilder template interpolation (coverage)', () => {
 		const intent = builder.toIntentIR();
 
 		expect(intent.from).toBe('users');
-		expect(intent.limit).toBe(10);
+		expect(intent.limit).toEqual({ kind: 'param', value: 10 });
 	});
 
 	it('handles template with multiple interpolated value positions', () => {
@@ -120,12 +120,12 @@ describe('NqlBuilder template interpolation (coverage)', () => {
 		const intent = builder.toIntentIR();
 
 		expect(intent.from).toBe('users');
-		expect(intent.limit).toBe(5);
+		expect(intent.limit).toEqual({ kind: 'param', value: 5 });
 		expect(intent.where).toEqual({
 			kind: 'comparison',
 			field: 'name',
 			operator: 'eq',
-			value: 'Alice',
+			value: { kind: 'param', value: 'Alice' },
 		});
 	});
 });

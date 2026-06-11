@@ -243,7 +243,7 @@ export interface CaseExpressionIntent {
 export interface JsonExtractIntent {
 	readonly kind: 'jsonExtract';
 	readonly field: string;
-	readonly path: readonly string[];
+	readonly path: readonly (string | ParamIntent)[];
 	/** 'json' = returns JSON value (->), 'text' = returns text (->>) */
 	readonly mode: 'json' | 'text';
 	readonly as?: string | undefined;
@@ -276,7 +276,7 @@ export interface JsonPathExtractIntent {
 	readonly kind: 'jsonPathExtract';
 	readonly field: string;
 	/** PostgreSQL JSON path segments. Bound as one text[] parameter by adapters. */
-	readonly path: readonly string[];
+	readonly path: readonly (string | ParamIntent)[];
 	/** 'json' = returns JSON (#>), 'text' = returns text (#>>) */
 	readonly mode: 'json' | 'text';
 	readonly as?: string | undefined;
@@ -317,10 +317,34 @@ export interface RefExpressionIntent {
 	readonly column: string;
 }
 
-/** Parameterized value with automatic $N binding */
+/**
+ * Public bound-parameter node.
+ *
+ * A value that originated from an NQL named parameter or template binding is
+ * represented explicitly in the public IntentAST. The inner value is opaque:
+ * consumers must bind it as a value and must not inspect its shape to decide
+ * whether it is query structure.
+ *
+ * @public
+ */
 export interface ParamExpressionIntent {
 	readonly kind: 'param';
 	readonly value: unknown;
+	/** Optional alias when used as a SELECT expression. */
+	readonly as?: string | undefined;
+}
+
+/** @public */
+export type ParamIntent = ParamExpressionIntent;
+
+/** @public */
+export function isParamIntent(value: unknown): value is ParamIntent {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		(value as Record<string, unknown>).kind === 'param' &&
+		'value' in (value as Record<string, unknown>)
+	);
 }
 
 /** Type cast expression */

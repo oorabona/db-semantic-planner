@@ -248,7 +248,7 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 				kind: 'comparison',
 				field: 'name',
 				operator: 'eq',
-				value: 'Alice',
+				value: { kind: 'param', value: 'Alice' },
 			});
 		});
 
@@ -259,7 +259,7 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const limit = 5;
 			const intent = nql<unknown>`users | limit ${limit}`.toIntentIR();
 
-			expect(intent.limit).toBe(5);
+			expect(intent.limit).toEqual({ kind: 'param', value: 5 });
 		});
 
 		it('does not support structural interpolation (table names are identifiers, not NQL values)', () => {
@@ -294,7 +294,7 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'name',
 				operator: 'eq',
-				value: "x' or '1'='1",
+				value: { kind: 'param', value: "x' or '1'='1" },
 			});
 
 			// Proof: no extra OR/AND condition injected — where is a single comparison node.
@@ -313,7 +313,7 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'name',
 				operator: 'eq',
-				value: 'Alice',
+				value: { kind: 'param', value: 'Alice' },
 			});
 		});
 
@@ -323,7 +323,7 @@ describe('nql tag value binding', () => {
 
 			const intent = nql<unknown>`users | limit ${30}`.toIntentIR();
 
-			expect(intent.limit).toBe(30);
+			expect(intent.limit).toEqual({ kind: 'param', value: 30 });
 		});
 
 		it('interpolates boolean true as a boolean comparison value', () => {
@@ -336,7 +336,7 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'active',
 				operator: 'eq',
-				value: true,
+				value: { kind: 'param', value: true },
 			});
 		});
 
@@ -350,7 +350,7 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'active',
 				operator: 'eq',
-				value: false,
+				value: { kind: 'param', value: false },
 			});
 		});
 	});
@@ -367,7 +367,7 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'name',
 				operator: 'eq',
-				value: "O'Brien",
+				value: { kind: 'param', value: "O'Brien" },
 			});
 		});
 
@@ -382,9 +382,8 @@ describe('nql tag value binding', () => {
 				kind: 'comparison',
 				field: 'name',
 				operator: 'eq',
-				value: "it's a ''test''",
+				value: { kind: 'param', value: "it's a ''test''" },
 			});
 		});
 	});
-
 });

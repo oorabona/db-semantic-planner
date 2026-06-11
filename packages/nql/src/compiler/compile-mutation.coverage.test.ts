@@ -730,8 +730,7 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		const inWhere = where as WhereInIntent;
 		expect(inWhere.subquery).toBeUndefined();
 		const values = (inWhere as { values: readonly unknown[] }).values;
-		expect(values).toEqual([refValue]);
-		expect(result.paramProvenance?.isParamValue(values, 0)).toBe(true);
+		expect(values).toEqual([{ kind: 'param', value: refValue }]);
 	});
 
 	it('IN with bound ref in update resolves to subquery', () => {

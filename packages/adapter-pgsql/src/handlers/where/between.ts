@@ -12,7 +12,7 @@ import type {
 	Decision,
 	WhereHandler,
 } from '../types.js';
-import { buildColumnRef } from './utils.js';
+import { buildColumnRef, unwrapParamIntent } from './utils.js';
 
 /**
  * BETWEEN operator handler
@@ -38,8 +38,8 @@ export const betweenHandler: WhereHandler = {
 		}
 
 		const columnNode = buildColumnRef(column, ctx);
-		const minValue = range[0];
-		const maxValue = range[1];
+		const minValue = unwrapParamIntent(range[0]);
+		const maxValue = unwrapParamIntent(range[1]);
 
 		const minIdx = ++state.paramIndex;
 		state.parameters.push(minValue);

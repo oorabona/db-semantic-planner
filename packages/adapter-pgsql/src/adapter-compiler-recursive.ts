@@ -52,7 +52,7 @@ import {
 export function compileRecursive(
 	report: RecursivePlanReport,
 	_model: ModelIR,
-	options: CompileOptions | undefined,
+	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -74,9 +74,6 @@ export function compileRecursive(
 			rootTable: table,
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
-			...(options?.paramProvenance !== undefined && {
-				paramProvenance: options.paramProvenance,
-			}),
 		};
 
 		// Get columns to select
@@ -133,9 +130,6 @@ export function compileRecursive(
 			rootTable: table,
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
-			...(options?.paramProvenance !== undefined && {
-				paramProvenance: options.paramProvenance,
-			}),
 		};
 
 		const startSelect = intent.start.select ?? [];

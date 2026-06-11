@@ -3,6 +3,7 @@
  * Query intent - complete query definition, main entry point for the intent AST.
  */
 
+import type { ParamIntent } from './expression-intent.js';
 import type { IncludeIntent, OrderByIntent } from './include-intent.js';
 import type { LockIntent } from './lock-intent.js';
 import type { SelectIntent } from './select-intent.js';
@@ -131,10 +132,10 @@ export interface QueryIntent {
 	readonly distinctOn?: readonly string[];
 
 	/** Maximum number of rows */
-	readonly limit?: number;
+	readonly limit?: number | ParamIntent;
 
 	/** Number of rows to skip */
-	readonly offset?: number;
+	readonly offset?: number | ParamIntent;
 
 	/**
 	 * When true, the adapter wraps the query in SELECT EXISTS(...).

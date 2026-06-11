@@ -11,6 +11,7 @@
  */
 
 import { isSqlRaw } from '@dbsp/core';
+import { isParamIntent, type ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	columnRef,
@@ -76,8 +77,6 @@ export interface InsertConfig {
 	columns: string[];
 	/** Values for each column (array of rows) */
 	values: unknown[][];
-	/** Parallel flags for values that must bind even when null/undefined. */
-	valueParamFlags?: boolean[][];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 	/** Subquery for INSERT ... SELECT */
@@ -93,7 +92,7 @@ export interface UpdateConfig {
 	/** Table to update */
 	table: string;
 	/** Column-value pairs to set */
-	set: { column: string; value: unknown; valueIsParam?: boolean }[];
+	set: { column: string; value: unknown }[];
 	/** WHERE conditions */
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
@@ -127,7 +126,7 @@ export interface InsertFromConfig {
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
-	limit?: number;
+	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 }
@@ -144,7 +143,7 @@ export interface UpsertFromConfig {
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
-	limit?: number;
+	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 }
@@ -168,16 +167,11 @@ export function compileInsert(
 	// Build VALUES as Node[][] (each row is Node[])
 	const columnTypes = config.columnTypes;
 	const columns = config.columns;
-	const valuesRows: Node[][] = config.values.map((row, rowIndex) =>
+	const valuesRows: Node[][] = config.values.map((row) =>
 		row.map((val, i) => {
 			const colName = columns[i];
 			const dbType = colName ? columnTypes?.[colName] : undefined;
-			return valueToNode(
-				val,
-				state,
-				dbType,
-				config.valueParamFlags?.[rowIndex]?.[i] === true,
-			);
+			return valueToNode(val, state, dbType);
 		}),
 	);
 
@@ -239,7 +233,7 @@ export function compileUnnestInsert(
 	const targetList: Node[] = columns.map((col, i) => {
 		// columnArrays[i] is always defined (transposeToColumnArrays maps over columns),
 		// but TypeScript doesn't know that — use a safe fallback.
-		const colArray: unknown[] = columnArrays[i] ?? [];
+		const colArray: unknown[] = (columnArrays[i] ?? []).map(unwrapParamIntent);
 
 		// Find a non-null sample value for runtime type fallback
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
@@ -305,11 +299,11 @@ export function compileUpdate(
 	// all other values become parameterized $N references.
 	const columnTypes = config.columnTypes;
 	const setClause: Array<{ column: string; value: Node }> = config.set.map(
-		({ column, value, valueIsParam }) => ({
+		({ column, value }) => ({
 			column: naming.toDatabase(column),
 			value: isSqlRaw(value)
 				? parseRawExpression(value.sql)
-				: valueToNode(value, state, columnTypes?.[column], valueIsParam),
+				: valueToNode(value, state, columnTypes?.[column]),
 		}),
 	);
 
@@ -397,7 +391,7 @@ export function compileUnnestUpdate(
 
 	// Build unnest arguments: CAST($N AS type[]) for each column
 	const unnestArgs: Node[] = allColumns.map((col, i) => {
-		const colArray: unknown[] = columnArrays[i] ?? [];
+		const colArray: unknown[] = (columnArrays[i] ?? []).map(unwrapParamIntent);
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
 		const pgArrayType = inferPgArrayType(col, columnTypes, sampleValue);
 		// pgArrayType is already "type[]"; strip [] to get base type for createTypeCastParamRef
@@ -590,7 +584,7 @@ export function compileInsertFrom(
 	// Build LIMIT clause if specified
 	let limitCount: Node | undefined;
 	if (config.limit !== undefined) {
-		limitCount = { A_Const: { ival: { ival: config.limit } } };
+		limitCount = limitToNode(config.limit, state);
 	}
 
 	// Build the SELECT query
@@ -701,7 +695,7 @@ export function compileUpsertFrom(
 	// Build LIMIT clause if specified
 	let limitCount: Node | undefined;
 	if (config.limit !== undefined) {
-		limitCount = { A_Const: { ival: { ival: config.limit } } };
+		limitCount = limitToNode(config.limit, state);
 	}
 
 	// Build the SELECT query
@@ -815,9 +809,11 @@ function valueToNode(
 	dbType?: string,
 	forceParam = false,
 ): Node {
-	if (value === null || value === undefined) {
-		if (forceParam) {
-			state.parameters.push(value);
+	const isParam = isParamIntent(value);
+	const boundValue = unwrapParamIntent(value);
+	if (boundValue === null || boundValue === undefined) {
+		if (forceParam || isParam) {
+			state.parameters.push(boundValue);
 			state.paramIndex++;
 			return dbType && RANGE_TYPES.has(dbType)
 				? createTypeCastParamRef(state.paramIndex, dbType)
@@ -831,7 +827,7 @@ function valueToNode(
 	}
 
 	// Add to parameters and return a ParamRef
-	state.parameters.push(value);
+	state.parameters.push(boundValue);
 	state.paramIndex++;
 
 	// Range types require explicit cast ($N::int4range) for PostgreSQL to parse the literal
@@ -844,6 +840,23 @@ function valueToNode(
 			number: state.paramIndex,
 		},
 	};
+}
+
+function unwrapParamIntent(value: unknown): unknown {
+	return isParamIntent(value) ? value.value : value;
+}
+
+function limitToNode(limit: number | ParamIntent, state: CompilerState): Node {
+	if (isParamIntent(limit)) {
+		state.parameters.push(limit.value);
+		state.paramIndex++;
+		return {
+			ParamRef: {
+				number: state.paramIndex,
+			},
+		};
+	}
+	return { A_Const: { ival: { ival: limit } } };
 }
 
 /**

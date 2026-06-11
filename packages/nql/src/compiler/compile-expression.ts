@@ -5,6 +5,7 @@
  */
 
 import type {
+	ParamIntent,
 	QueryIntent,
 	WhereAnyIntent,
 	WhereComparisonIntent,
@@ -37,10 +38,19 @@ import {
 	expressionToRangeValue,
 	mapComparisonOperator,
 	resolveFilterValue,
+	resolveNamedParam,
 	resolveNamedParamArray,
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function paramValue(value: unknown): unknown {
+	return value !== null &&
+		typeof value === 'object' &&
+		(value as Record<string, unknown>).kind === 'param'
+		? (value as ParamIntent).value
+		: value;
+}
 
 // ---------------------------------------------------------------------------
 // Handler functions (extracted from switch cases)
@@ -142,9 +152,6 @@ function compileComparison(
 			jsonPath: jsonLeft.path,
 			jsonMode: jsonLeft.mode,
 		} satisfies WhereComparisonIntent;
-		if (comp.right.type === 'namedParam') {
-			ctx.paramProvenance.markParamValue(intent, 'value');
-		}
 		return intent;
 	}
 
@@ -190,9 +197,6 @@ function compileComparison(
 				jsonPath: keys,
 				jsonMode: fn === 'json_extract' ? 'json' : 'text',
 			} satisfies WhereComparisonIntent;
-			if (comp.right.type === 'namedParam') {
-				ctx.paramProvenance.markParamValue(intent, 'value');
-			}
 			return intent;
 		}
 	}
@@ -230,9 +234,6 @@ function compileComparison(
 		operator,
 		value,
 	};
-	if (comp.right.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(intent, 'value');
-	}
 	return intent;
 }
 
@@ -279,9 +280,6 @@ function compileRange(
 		operator: rangeExpr.operator,
 		value: rangeValue as WhereRangeIntent['value'],
 	};
-	if (rangeExpr.scalar?.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(result, 'value');
-	}
 	return result;
 }
 
@@ -304,6 +302,7 @@ function compileMembership(
 		}
 		/* v8 ignore stop -- @preserve */
 		validateWhereField(ctx, field, aliasContext, anyExpr.column);
+		const valuesParam = resolveNamedParam(ctx, anyExpr.paramName);
 		const rawValues = resolveNamedParamArray(ctx, anyExpr.paramName);
 		if (rawValues.length > ctx.maxAnyItems) {
 			throw new NqlSemanticException(
@@ -311,9 +310,11 @@ function compileMembership(
 				`ANY(:${anyExpr.paramName}) array length ${rawValues.length} exceeds maximum of ${ctx.maxAnyItems}`,
 			);
 		}
-		const values: readonly unknown[] = rawValues;
-		const result = { kind: 'any', field, values } satisfies WhereAnyIntent;
-		ctx.paramProvenance.markParamValue(result, 'values');
+		const result = {
+			kind: 'any',
+			field,
+			values: valuesParam,
+		} satisfies WhereAnyIntent;
 		return result;
 	}
 
@@ -335,11 +336,6 @@ function compileMembership(
 		values = inExpr.values.map((v) =>
 			resolveFilterValue(v, ctx, aliasContext, outerAliases),
 		);
-		for (let i = 0; i < inExpr.values.length; i++) {
-			if (inExpr.values[i]?.type === 'namedParam') {
-				ctx.paramProvenance.markParamValue(values, i);
-			}
-		}
 
 		// Amendment 11: detect if ALL values are date range patterns → expand to OR of ANDs
 		const dateRangeValues = values.filter(
@@ -428,19 +424,13 @@ function compileBetween(
 		aliasContext,
 		outerAliases,
 	);
-	const lowerValue = lower;
-	const upperValue = upper;
+	const lowerValue = paramValue(lower);
+	const upperValue = paramValue(upper);
 
 	assertBetweenBoundValueAllowed('lower', between.low, lowerValue);
 	assertBetweenBoundValueAllowed('upper', between.high, upperValue);
 
 	const value = { lower, upper };
-	if (between.low.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(value, 'lower');
-	}
-	if (between.high.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(value, 'upper');
-	}
 	return {
 		kind: 'range',
 		field,
@@ -535,9 +525,6 @@ function compileJson(
 				value: jsonValue,
 				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
-			if (expr.args[1]?.type === 'namedParam') {
-				ctx.paramProvenance.markParamValue(intent, 'value');
-			}
 			return intent;
 		}
 		if (fn === 'json_exists') {
@@ -611,9 +598,6 @@ function compileJson(
 		value: jsonValue,
 		reversed: jsonComp.operator === '<@',
 	} satisfies WhereJsonContainsIntent;
-	if (jsonComp.right.type === 'namedParam') {
-		ctx.paramProvenance.markParamValue(intent, 'value');
-	}
 	return intent;
 }
 

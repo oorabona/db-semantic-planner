@@ -116,8 +116,11 @@ describe('FEAT-134 NQL tag params', () => {
 		const nql = createParamTestTag();
 
 		const intent = nql<unknown>`users | limit ${10}`.toIntentIR();
+		const dump = nql<unknown>`users | limit ${10}`.dump();
 
-		expect(intent.limit).toBe(10);
+		expect(intent.limit).toEqual({ kind: 'param', value: 10 });
+		expect(dump.sql).toMatch(/limit\s+\$1/i);
+		expect(dump.params).toEqual([10]);
 	});
 
 	it('binds interpolated JSON keys in json_exists()', () => {
@@ -238,13 +241,16 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(intent.where).toMatchObject({
 			kind: 'in',
 			field: 'id',
-			values: [1, 2],
+			values: [
+				{ kind: 'param', value: 1 },
+				{ kind: 'param', value: 2 },
+			],
 		});
 		expect(dump.params).toEqual([[1, 2]]);
 		expect(dump.sql).toMatch(/\$1\b/);
 	});
 
-	it('returns clean public toIntentIR() without value markers', () => {
+	it('returns public toIntentIR() with explicit param nodes and no value markers', () => {
 		const nql = createParamTestTag();
 
 		const intent =
@@ -256,15 +262,18 @@ describe('FEAT-134 NQL tag params', () => {
 				intent,
 				(node) => node.kind === 'comparison' && node.field === 'id',
 			).value,
-		).toBe(5);
+		).toEqual({ kind: 'param', value: 5 });
 		expect(
 			findFirstObject(intent, (node) => node.kind === 'in').values,
-		).toEqual([1, 2]);
+		).toEqual([
+			{ kind: 'param', value: 1 },
+			{ kind: 'param', value: 2 },
+		]);
 		expect(
 			findFirstObject(intent, (node) => node.kind === 'range').value,
 		).toEqual({
-			lower: '2026-01-01',
-			upper: '2026-12-31',
+			lower: { kind: 'param', value: '2026-01-01' },
+			upper: { kind: 'param', value: '2026-12-31' },
 		});
 
 		const caseNode = findFirstObject(intent, (node) => node.kind === 'case');
@@ -281,7 +290,7 @@ describe('FEAT-134 NQL tag params', () => {
 		).toEqual(['name', { kind: 'param', value: 'anon' }]);
 	});
 
-	it('returns clean dump().plan while keeping SQL params', () => {
+	it('returns dump().plan with explicit param nodes while keeping SQL params', () => {
 		const nql = createParamTestTag();
 
 		const dump =
@@ -294,7 +303,7 @@ describe('FEAT-134 NQL tag params', () => {
 				dump.plan,
 				(node) => node.kind === 'comparison' && node.field === 'id',
 			).value,
-		).toBe(5);
+		).toEqual({ kind: 'param', value: 5 });
 		expect(dump.params).toEqual([5, [1, 2]]);
 	});
 
@@ -309,14 +318,14 @@ describe('FEAT-134 NQL tag params', () => {
 				plan,
 				(node) => node.kind === 'comparison' && node.field === 'id',
 			).value,
-		).toBe(5);
+		).toEqual({ kind: 'param', value: 5 });
 	});
 
-	it('passes adapter-only param provenance while keeping plan intent clean', () => {
+	it('passes explicit param nodes to the adapter without sidecar options', () => {
 		const db = createParamTestSchema();
 		const base = createPgsqlCompileOnlyAdapter();
 		let compileValue: unknown;
-		let compileHasProvenance = false;
+		let compileOptions: unknown;
 		const adapter: Adapter = {
 			...base,
 			compile<T = unknown>(plan: PlanReport, options) {
@@ -325,8 +334,7 @@ describe('FEAT-134 NQL tag params', () => {
 					(node) => node.kind === 'comparison' && node.field === 'id',
 				);
 				compileValue = comparison.value;
-				compileHasProvenance =
-					options?.paramProvenance?.isParamValue(comparison, 'value') === true;
+				compileOptions = options;
 				return base.compile<T>(plan, options);
 			},
 			createDump(plan, query, meta) {
@@ -337,15 +345,15 @@ describe('FEAT-134 NQL tag params', () => {
 
 		const dump = nql<unknown>`users | where id = ${5}`.dump();
 
-		expect(compileValue).toBe(5);
-		expect(compileHasProvenance).toBe(true);
+		expect(compileValue).toEqual({ kind: 'param', value: 5 });
+		expect(compileOptions).toBeUndefined();
 		expect(dump.params).toEqual([5]);
 		expect(
 			findFirstObject(
 				dump.plan,
 				(node) => node.kind === 'comparison' && node.field === 'id',
 			).value,
-		).toBe(5);
+		).toEqual({ kind: 'param', value: 5 });
 		expectNoOwnSymbols(dump.plan);
 	});
 
