@@ -15,7 +15,12 @@ import type {
 	SelectIntent,
 	WindowFunction,
 } from '@dbsp/types';
-import { isRankingWindowFunction } from '@dbsp/types';
+import {
+	isNqlSelectFunctionAllowed,
+	isNqlSelectWindowFunctionAllowed,
+	isRankingWindowFunction,
+	NQL_SELECT_JSON_FUNCTIONS,
+} from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlCaseExpression,
@@ -37,11 +42,6 @@ import {
 	isAggregateFunction,
 	resolveIntegerCount,
 } from './expression-utils.js';
-import {
-	isNqlSelectFunctionAllowed,
-	isNqlSelectWindowFunctionAllowed,
-	NQL_SELECT_JSON_FUNCTIONS,
-} from './select-function-allowlist.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
 const EXPRESSION_VALUE_INTENT_MARKER = Symbol.for(

@@ -15,6 +15,7 @@ export * from './intent/operators.js';
 export * from './intent/query-intent.js';
 export * from './intent/recursive-intent.js';
 export * from './intent/recursive-types.js';
+export * from './intent/select-function-allowlist.js';
 export * from './intent/select-intent.js';
 export * from './intent/type-guards.js';
 export * from './intent/where-intent.js';

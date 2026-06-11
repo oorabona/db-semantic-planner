@@ -207,6 +207,40 @@ describe('NQL → SQL compile-only pipeline', () => {
 		}
 	});
 
+	it('rejects direct QueryIntent NQL SELECT functions at adapter emission', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'function',
+						name: 'pg_sleep',
+						args: [1],
+						as: 'blocked',
+					},
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'pg_sleep',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
 	it('compiles generic NQL SELECT functions as FuncCall nodes', () => {
 		const { sql, params } = nqlToSQLWithParams(
 			'users | select upper(name) as uname, now() as current_time',

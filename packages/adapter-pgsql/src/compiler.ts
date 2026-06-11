@@ -8,7 +8,11 @@
  */
 
 import { InvalidOperationError } from '@dbsp/core';
-import type { ExpressionIntent, QueryIntent } from '@dbsp/types';
+import {
+	type ExpressionIntent,
+	isNqlSelectFunctionAllowed,
+	type QueryIntent,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -84,6 +88,21 @@ export class UnhandledNqlSelectExpressionKindError extends Error {
 	constructor(readonly kind: string) {
 		super(`Unhandled NQL SELECT expression intent kind: ${kind}`);
 		this.name = 'UnhandledNqlSelectExpressionKindError';
+	}
+}
+
+export class UnsupportedNqlSelectFunctionError extends Error {
+	readonly code = 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION';
+
+	constructor(readonly functionName: string) {
+		super(`Unsupported function in SELECT context: ${functionName}()`);
+		this.name = 'UnsupportedNqlSelectFunctionError';
+	}
+}
+
+function assertNqlSelectFunctionAllowed(functionName: string): void {
+	if (!isNqlSelectFunctionAllowed(functionName)) {
+		throw new UnsupportedNqlSelectFunctionError(functionName);
 	}
 }
 
@@ -1162,6 +1181,7 @@ export class PlanCompiler {
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
 	): Node {
+		assertNqlSelectFunctionAllowed(functionName);
 		validateIdentifier(functionName, 'function');
 		const argNodes = args.map((arg) =>
 			this.compileNqlFunctionArg(arg, ctx, state),
@@ -1505,6 +1525,7 @@ export class PlanCompiler {
 				ensureExpressionHandlersRegistered();
 				const funcType = decision.function;
 				if (!funcType) break;
+				assertNqlSelectFunctionAllowed(funcType);
 				const ctx = this.createHandlerContext(
 					plan,
 					decision.table ?? plan.rootTable,

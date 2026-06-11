@@ -4,7 +4,11 @@
  * No shared state — all functions are stateless.
  */
 
-import type { ComparisonOperator, FieldRef } from '@dbsp/types';
+import {
+	type ComparisonOperator,
+	type FieldRef,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
+} from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
@@ -15,7 +19,6 @@ import type {
 	NqlRangeLiteral,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
-import { NQL_SELECT_AGGREGATE_FUNCTIONS } from './select-function-allowlist.js';
 import type { CompilerContext } from './types.js';
 
 const FORBIDDEN_PARAM_NAMES = new Set([

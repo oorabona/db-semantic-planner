@@ -1,9 +1,10 @@
 /**
  * NQL-origin SELECT function allowlist.
  *
- * This is the security gate for function names parsed from NQL SELECT text.
- * Extend it only after adding parser/compiler/adapter coverage that proves the
- * function is intentionally supported for NQL-origin SELECT projections.
+ * This is the shared security gate for function names that originated in NQL
+ * SELECT text and later cross the IntentAST-to-SQL adapter boundary. Extend it
+ * only after adding compiler and adapter coverage proving the function is
+ * intentionally supported for NQL-origin SELECT projections.
  */
 export const NQL_SELECT_AGGREGATE_FUNCTIONS = [
 	'count',
@@ -11,8 +12,6 @@ export const NQL_SELECT_AGGREGATE_FUNCTIONS = [
 	'avg',
 	'min',
 	'max',
-	'array_agg',
-	'string_agg',
 ] as const;
 
 export const NQL_SELECT_JSON_FUNCTIONS = [

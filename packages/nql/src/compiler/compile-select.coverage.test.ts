@@ -635,6 +635,24 @@ describe('compile-select: non-aggregate function', () => {
 		}
 	});
 
+	it('rejects array_agg and string_agg until SELECT aggregate projection support exists', () => {
+		for (const [fn, args] of [
+			['array_agg', 'name'],
+			['string_agg', "name, ','"],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
+
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+		}
+	});
+
 	it('rejects unsupported nested SELECT functions before adapter FuncCall emission', () => {
 		const result = compileRawSelect(
 			'users | select upper(pg_sleep(1)) as blocked',
@@ -661,8 +679,6 @@ describe('compile-select: non-aggregate function', () => {
 			'users | select avg(price) as avg_price',
 			'users | select min(price) as min_price',
 			'users | select max(price) as max_price',
-			'users | select array_agg(name) as names',
-			"users | select string_agg(name, ',') as names",
 			"users | select json_extract(data, 'meta') as meta",
 			"users | select json_extract_text(data, 'email') as email",
 			"users | select json_path(data, 'a', 'b') as nested",
@@ -704,35 +720,22 @@ describe('compile-select: non-aggregate function', () => {
 });
 
 // ===========================================================================
-// Aggregate with extraArgs
+// Unsupported aggregate candidates
 // ===========================================================================
-describe('compile-select: aggregate with extraArgs', () => {
-	it('string_agg with separator has extraArgs', () => {
-		const cols = getSelectColumns(
-			compileNql("users | select string_agg(name, ', ') as names"),
-		);
+describe('compile-select: unsupported aggregate candidates', () => {
+	it('does not lower array_agg/string_agg into aggregate intents', () => {
+		for (const input of [
+			'orders | select array_agg(status) as statuses',
+			"users | select string_agg(name, ', ') as names",
+		] as const) {
+			const result = compileRawSelect(input);
 
-		const col = cols[0]!;
-		expect(col.kind).toBe('aggregate');
-		if (col.kind === 'aggregate') {
-			expect(col.function).toBe('string_agg');
-			expect(col.field).toBe('name');
-			expect(col.extraArgs).toEqual([', ']);
-			expect(col.as).toBe('names');
-		}
-	});
-
-	it('array_agg with no extraArgs', () => {
-		const cols = getSelectColumns(
-			compileNql('orders | select array_agg(status) as statuses'),
-		);
-
-		const col = cols[0]!;
-		expect(col.kind).toBe('aggregate');
-		if (col.kind === 'aggregate') {
-			expect(col.function).toBe('array_agg');
-			expect(col.field).toBe('status');
-			expect(col.extraArgs).toBeUndefined();
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toMatch(
+				/^Unsupported function in SELECT context: (array_agg|string_agg)\(\)$/,
+			);
 		}
 	});
 });
