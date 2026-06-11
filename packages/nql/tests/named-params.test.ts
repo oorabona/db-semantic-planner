@@ -1,4 +1,8 @@
-import type { WhereAndIntent, WhereComparisonIntent } from '@dbsp/types';
+import type {
+	WhereAndIntent,
+	WhereComparisonIntent,
+	WhereLikeIntent,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile, parse, parseCst } from '../src/index.js';
 import type {
@@ -22,7 +26,10 @@ function compileOk(input: string, params?: Readonly<Record<string, unknown>>) {
 	return result.ast!;
 }
 
-function compileFail(input: string, params?: Readonly<Record<string, unknown>>) {
+function compileFail(
+	input: string,
+	params?: Readonly<Record<string, unknown>>,
+) {
 	return compile(input, null, undefined, params ? { params } : undefined);
 }
 
@@ -32,7 +39,10 @@ describe('FEAT-134 named parameters — grammar and AST', () => {
 		['IN list value', 'users | where id in (:p, :q)'],
 		['function argument', 'users | select coalesce(name, :fallback) as name'],
 		['BETWEEN lower/upper', 'users | where age between :min and :max'],
-		['CASE result', "users | select case when active = true then :yes else :no end as label"],
+		[
+			'CASE result',
+			'users | select case when active = true then :yes else :no end as label',
+		],
 		['JSON containment RHS', 'users | where profile @> :needle'],
 		['range contains scalar', 'events | where active_range contains :point'],
 		['outer limit', 'users | limit :limit'],
@@ -42,13 +52,12 @@ describe('FEAT-134 named parameters — grammar and AST', () => {
 		['upsert-from limit', 'upsert into users on id from incoming limit :limit'],
 	] as const;
 
-	it.each(acceptedValuePositions)(
-		'accepts NamedParam in %s',
-		(_label, input) => {
-			const result = parseCst(input);
-			expect(result.errors).toHaveLength(0);
-		},
-	);
+	it.each(
+		acceptedValuePositions,
+	)('accepts NamedParam in %s', (_label, input) => {
+		const result = parseCst(input);
+		expect(result.errors).toHaveLength(0);
+	});
 
 	it.each([
 		['table name', ':table | select id'],
@@ -61,7 +70,9 @@ describe('FEAT-134 named parameters — grammar and AST', () => {
 	});
 
 	it('builds namedParam AST nodes and strips the leading colon', () => {
-		const result = parse('users | where id = :p | limit :limit | offset :offset');
+		const result = parse(
+			'users | where id = :p | limit :limit | offset :offset',
+		);
 		expect(result.success).toBe(true);
 		const query = result.ast!.statements[0] as NqlQuery;
 		const where = query.clauses[0] as NqlWhereClause;
@@ -94,6 +105,25 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		expect(where.value).toBe(5);
 	});
 
+	it('resolves LIKE pattern params as strings and rejects non-string values structurally', () => {
+		const ok = compileOk('users | where name like :pattern', {
+			pattern: '%admin%',
+		});
+		const where = ok.query!.where as WhereLikeIntent;
+
+		expect(where.kind).toBe('like');
+		expect(where.field).toBe('name');
+		expect(where.pattern).toBe('%admin%');
+
+		const bad = compileFail('users | where name like :pattern', {
+			pattern: 42,
+		});
+		expect(bad.success).toBe(false);
+		expect(bad.errors[0]?.code).toMatch(/^ERR-SEM-/);
+		expect(bad.errors[0]?.message).toContain(':pattern');
+		expect(bad.errors[0]?.message).toMatch(/string/i);
+	});
+
 	it('returns a structured semantic error when a binding is missing', () => {
 		const result = compileFail('users | where id = :p', {});
 
@@ -110,7 +140,9 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		expect(missing.success).toBe(false);
 		expect(missing.errors[0]?.message).toContain('not bound');
 
-		const undef = compileFail('users | where deleted_at = :p', { p: undefined });
+		const undef = compileFail('users | where deleted_at = :p', {
+			p: undefined,
+		});
 		expect(undef.success).toBe(false);
 		expect(undef.errors[0]?.message).toContain('undefined');
 	});
@@ -162,7 +194,10 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		params.id = 5n;
 		params.at = at;
 
-		const result = compileOk('users | where id = :id and created_at = :at', params);
+		const result = compileOk(
+			'users | where id = :id and created_at = :at',
+			params,
+		);
 		const where = result.query!.where as WhereAndIntent;
 		const [idCond, atCond] = where.conditions as WhereComparisonIntent[];
 
@@ -171,8 +206,13 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 	});
 
 	it('resolves the same named param at each use-site without deduping the intent tree', () => {
-		const result = compileOk('users | where id = :p or parent_id = :p', { p: 7 });
-		const where = result.query!.where as { kind: 'or'; conditions: WhereComparisonIntent[] };
+		const result = compileOk('users | where id = :p or parent_id = :p', {
+			p: 7,
+		});
+		const where = result.query!.where as {
+			kind: 'or';
+			conditions: WhereComparisonIntent[];
+		};
 
 		expect(where.conditions).toHaveLength(2);
 		expect(where.conditions[0]!.value).toBe(7);
@@ -189,10 +229,12 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			min: 18,
 			max: 65,
 		});
-		expect((betweenResult.query!.where as WhereComparisonIntent).value).toEqual({
-			lower: 18,
-			upper: 65,
-		});
+		expect((betweenResult.query!.where as WhereComparisonIntent).value).toEqual(
+			{
+				lower: 18,
+				upper: 65,
+			},
+		);
 
 		const fnResult = compileOk(
 			'users | select coalesce(name, :fallback) as display_name',
@@ -204,21 +246,27 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		).toEqual({ kind: 'param', value: 'unknown' });
 
 		const caseResult = compileOk(
-			"users | select case when active = true then :yes else :no end as label",
+			'users | select case when active = true then :yes else :no end as label',
 			{ yes: 'Y', no: 'N' },
 		);
 		expect(
-			(caseResult.query!.select as { columns: Array<{ when: Array<{ result: unknown }>; else: unknown }> })
-				.columns[0]!.when[0]!.result,
+			(
+				caseResult.query!.select as {
+					columns: Array<{ when: Array<{ result: unknown }>; else: unknown }>;
+				}
+			).columns[0]!.when[0]!.result,
 		).toEqual({ kind: 'param', value: 'Y' });
 		expect(
 			(caseResult.query!.select as { columns: Array<{ else: unknown }> })
 				.columns[0]!.else,
 		).toEqual({ kind: 'param', value: 'N' });
 
-		const jsonResult = compileOk('users | where json_contains(profile, :needle)', {
-			needle: { role: 'admin' },
-		});
+		const jsonResult = compileOk(
+			'users | where json_contains(profile, :needle)',
+			{
+				needle: { role: 'admin' },
+			},
+		);
 		expect((jsonResult.query!.where as { value: unknown }).value).toEqual({
 			role: 'admin',
 		});
@@ -256,14 +304,20 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 	});
 
 	it('validates named insert-from and upsert-from limits', () => {
-		const insert = compileOk('insert into archived_users from users limit :limit', {
-			limit: 25,
-		});
+		const insert = compileOk(
+			'insert into archived_users from users limit :limit',
+			{
+				limit: 25,
+			},
+		);
 		expect(insert.mutation).toMatchObject({ type: 'insert_from', limit: 25 });
 
-		const upsert = compileOk('upsert into users on id from incoming limit :limit', {
-			limit: 30,
-		});
+		const upsert = compileOk(
+			'upsert into users on id from incoming limit :limit',
+			{
+				limit: 30,
+			},
+		);
 		expect(upsert.mutation).toMatchObject({ type: 'upsert_from', limit: 30 });
 	});
 
@@ -272,7 +326,9 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		expect(missing.success).toBe(false);
 		expect(missing.errors[0]?.message).toContain(':ids');
 
-		const undef = compileFail('users | where id = ANY(:ids)', { ids: undefined });
+		const undef = compileFail('users | where id = ANY(:ids)', {
+			ids: undefined,
+		});
 		expect(undef.success).toBe(false);
 		expect(undef.errors[0]?.message).toContain('undefined');
 

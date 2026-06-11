@@ -81,10 +81,7 @@ export function validateParamsMap(
 /**
  * Resolve one NQL `:name` bound parameter from the compiler context.
  */
-export function resolveNamedParam(
-	ctx: CompilerContext,
-	name: string,
-): unknown {
+export function resolveNamedParam(ctx: CompilerContext, name: string): unknown {
 	assertParamNameAllowed(name, ctx);
 	if (!Object.hasOwn(ctx.params, name)) {
 		throw new NqlSemanticException(
@@ -94,6 +91,21 @@ export function resolveNamedParam(
 	}
 	const value = ctx.params[name];
 	assertParamValueAllowed(name, value);
+	return value;
+}
+
+export function resolveNamedStringParam(
+	ctx: CompilerContext,
+	name: string,
+	contextLabel: string,
+): string {
+	const value = resolveNamedParam(ctx, name);
+	if (typeof value !== 'string') {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`${contextLabel} named parameter :${name} must resolve to a string`,
+		);
+	}
 	return value;
 }
 
@@ -119,9 +131,9 @@ export function resolveIntegerCount(
 	ctx: CompilerContext,
 	label: string,
 ): number {
-	const value =
+	const value: unknown =
 		typeof count === 'number' ? count : resolveNamedParam(ctx, count.name);
-	if (!Number.isSafeInteger(value) || value < 0) {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`${label} must resolve to a non-negative safe integer`,

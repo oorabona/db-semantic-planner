@@ -18,16 +18,13 @@ import type {
 import { isRankingWindowFunction } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
-	NqlBooleanLiteral,
 	NqlCaseExpression,
 	NqlComparisonExpression,
 	NqlExpression,
-	NqlNumberLiteral,
 	NqlPathExpression,
 	NqlSelectClause,
 	NqlSelectExpression,
 	NqlSelectItem,
-	NqlStringLiteral,
 	NqlUnaryExpression,
 	NqlWindowExpression,
 } from '../parser/ast.js';
@@ -177,7 +174,9 @@ function compileSelectExpression(
 		return {
 			kind: 'function',
 			name: expr.name,
-			args: expr.args.map((a) => expressionToField(a) ?? expressionToSelectValue(a)),
+			args: expr.args.map(
+				(a) => expressionToField(a) ?? expressionToSelectValue(a),
+			),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -535,18 +534,13 @@ function compileExpressionToIntent(
 		expr.type === 'null' ||
 		expr.type === 'namedParam'
 	) {
-		const value =
-			expr.type === 'null'
-				? null
-				: expr.type === 'namedParam'
-					? expressionToValue(expr, ctx)
-					: (expr as NqlStringLiteral | NqlNumberLiteral | NqlBooleanLiteral)
-							.value;
-		return {
-			...(expr.type === 'namedParam'
-				? { kind: 'param' as const, value }
-				: { kind: 'literal' as const, value }),
-		};
+		if (expr.type === 'namedParam') {
+			return { kind: 'param', value: expressionToValue(expr, ctx) };
+		}
+		if (expr.type === 'null') {
+			return { kind: 'literal', value: null };
+		}
+		return { kind: 'literal', value: expr.value };
 	}
 
 	// For other expressions, wrap and use compileSelectExpression

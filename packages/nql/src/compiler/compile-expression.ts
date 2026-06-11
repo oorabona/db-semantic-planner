@@ -38,6 +38,7 @@ import {
 	mapComparisonOperator,
 	resolveFilterValue,
 	resolveNamedParamArray,
+	resolveNamedStringParam,
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
@@ -205,10 +206,14 @@ function compileComparison(
 	// Dotted paths and expression nodes are rejected by coerceToStringKey().
 	// String(resolveFilterValue(...)) would silently yield '[object Object]' for path refs.
 	if (comp.operator === 'like') {
+		const pattern =
+			comp.right.type === 'namedParam'
+				? resolveNamedStringParam(ctx, comp.right.name, 'LIKE pattern')
+				: coerceToStringKey(comp.right, 'LIKE pattern');
 		return {
 			kind: 'like',
 			field,
-			pattern: coerceToStringKey(comp.right, 'LIKE pattern'),
+			pattern,
 		};
 	}
 
