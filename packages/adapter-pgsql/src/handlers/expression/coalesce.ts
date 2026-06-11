@@ -39,6 +39,15 @@ function buildValueNode(
 		}
 	}
 
+	if (
+		typeof value === 'object' &&
+		value !== null &&
+		'kind' in value &&
+		ctx.compileNqlSelectExpression
+	) {
+		return ctx.compileNqlSelectExpression(value, ctx, state);
+	}
+
 	// Otherwise, parameterize it
 	return bindParameter(value, state);
 }

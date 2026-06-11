@@ -50,6 +50,16 @@ export interface CompilerContext {
 		paramOffset: number,
 	) => { ast: Node; parameters: readonly unknown[] };
 	/**
+	 * Optional recursive compiler for NQL-origin SELECT expression values nested
+	 * inside handler arguments, such as coalesce(upper(name), :fallback) or
+	 * (price + :a) * :b.
+	 */
+	readonly compileNqlSelectExpression?: (
+		value: unknown,
+		ctx: CompilerContext,
+		state: CompilerState,
+	) => Node;
+	/**
 	 * Optional ModelIR for type-aware parameter casting.
 	 * When provided, WHERE comparisons emit `$N::type` to eliminate
 	 * PostgreSQL type inference ambiguity for nullable columns.

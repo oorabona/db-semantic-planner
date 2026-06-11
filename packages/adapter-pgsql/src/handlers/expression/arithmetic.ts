@@ -29,6 +29,14 @@ function resolveOperand(
 		const alias = ctx.currentAlias ?? ctx.rootTable;
 		return columnRef(operand, alias, undefined, ctx.naming);
 	}
+	if (
+		typeof operand === 'object' &&
+		operand !== null &&
+		'kind' in operand &&
+		ctx.compileNqlSelectExpression
+	) {
+		return ctx.compileNqlSelectExpression(operand, ctx, state);
+	}
 	// Numeric or other literal → parametrize
 	return bindParameter(operand, state);
 }

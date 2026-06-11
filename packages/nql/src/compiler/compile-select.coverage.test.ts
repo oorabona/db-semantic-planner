@@ -30,6 +30,17 @@ function compileNql(input: string): CompileResult {
 	return result.ast!;
 }
 
+function compileNqlWithParams(
+	input: string,
+	params: Readonly<Record<string, unknown>>,
+): CompileResult {
+	const result = compile(input, null, undefined, { params });
+	if (!result.success) {
+		throw new Error(`Compile error: ${result.errors[0]?.message}`);
+	}
+	return result.ast!;
+}
+
 function getSelectColumns(result: CompileResult): readonly ExpressionIntent[] {
 	const select = result.query!.select as SelectWithExpressionsIntent;
 	expect(select.type).toBe('expressions');
@@ -522,6 +533,72 @@ describe('compile-select: non-aggregate function', () => {
 			expect(col.args).toContain('name');
 			expect(col.args).toContainEqual({ kind: 'literal', value: 'anon' });
 			expect(col.as).toBe('display');
+		}
+	});
+
+	it('recursively lowers arithmetic function arguments', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams('users | select round(price + :d) as r', { d: 5 }),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('round');
+			expect(col.args[0]).toMatchObject({
+				kind: 'arithmetic',
+				left: 'price',
+				operator: '+',
+				right: { kind: 'param', value: 5 },
+			});
+		}
+	});
+
+	it('recursively lowers nested function arguments in coalesce()', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams(
+				'users | select coalesce(upper(name), :fallback) as display',
+				{ fallback: 'anon' },
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('coalesce');
+			expect(col.args[0]).toMatchObject({
+				kind: 'function',
+				name: 'upper',
+				args: ['name'],
+			});
+			expect(col.args[1]).toMatchObject({
+				kind: 'param',
+				value: 'anon',
+			});
+		}
+	});
+
+	it('recursively lowers CASE function arguments', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams(
+				'users | select upper(case when status = :s then :a else :b end) as label',
+				{ s: 'active', a: 'A', b: 'B' },
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('upper');
+			expect(col.args[0]).toMatchObject({
+				kind: 'case',
+				when: [
+					{
+						result: { kind: 'param', value: 'A' },
+					},
+				],
+				else: { kind: 'param', value: 'B' },
+			});
 		}
 	});
 

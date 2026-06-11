@@ -1105,6 +1105,31 @@ describe('PlanCompiler - Coverage Tests', () => {
 		});
 	});
 
+	describe('selectNqlFunction nested argument dispatch', () => {
+		it('throws a structured error for unknown nested NQL SELECT expression kinds', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'users',
+				decisions: [
+					{
+						type: 'selectNqlFunction',
+						function: 'round',
+						args: [{ kind: 'syntheticNestedSelectExpression' }],
+						alias: 'r',
+					},
+				],
+			};
+			const compiler = new PlanCompiler();
+
+			expect(() => compiler.compile(plan)).toThrowError(
+				expect.objectContaining({
+					name: 'UnhandledNqlSelectExpressionKindError',
+					code: 'ERR_ADAPTER_UNHANDLED_NQL_SELECT_EXPRESSION_KIND',
+					kind: 'syntheticNestedSelectExpression',
+				}),
+			);
+		});
+	});
+
 	describe('selectFunction - AVG, MIN, MAX', () => {
 		it('compiles AVG aggregate', () => {
 			const plan: SimplifiedPlanReport = {

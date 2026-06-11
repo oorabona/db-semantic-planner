@@ -43,10 +43,6 @@ import {
 	registerWhereDispatcherFactory,
 } from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
-import {
-	isLiteralExpressionLike,
-	isParamExpressionLike,
-} from './handlers/expression/param-value.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
@@ -81,6 +77,15 @@ import { identityNaming } from './naming-plugin.js';
 import { createParamRef } from './param-ref.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
+
+export class UnhandledNqlSelectExpressionKindError extends Error {
+	readonly code = 'ERR_ADAPTER_UNHANDLED_NQL_SELECT_EXPRESSION_KIND';
+
+	constructor(readonly kind: string) {
+		super(`Unhandled NQL SELECT expression intent kind: ${kind}`);
+		this.name = 'UnhandledNqlSelectExpressionKindError';
+	}
+}
 
 // ============================================================================
 // PlanDecision → HandlerDecision mapper
@@ -1106,6 +1111,13 @@ export class PlanCompiler {
 				? { schema: plan.schema ?? this.schema }
 				: {}),
 			...(this.model != null && { model: this.model }),
+			compileSubquery: (query: QueryIntent, paramOffset: number) =>
+				this.compileExpressionSubquery(query, paramOffset),
+			compileNqlSelectExpression: (
+				value: unknown,
+				handlerCtx: HandlerCompilerContext,
+				state: HandlerCompilerState,
+			) => this.compileNqlFunctionArg(value, handlerCtx, state),
 		} as HandlerCompilerContext;
 	}
 
@@ -1118,6 +1130,30 @@ export class PlanCompiler {
 			aliases: new Map(),
 			joins: [],
 		};
+	}
+
+	private compileExpressionSubquery(
+		query: QueryIntent,
+		paramOffset: number,
+	): {
+		ast: Node;
+		parameters: readonly unknown[];
+	} {
+		const innerCompiler = new PlanCompiler({
+			naming: this.naming,
+			...(this.schema !== undefined && {
+				schema: this.schema,
+			}),
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+		});
+		const innerPlan: SimplifiedPlanReport = {
+			rootTable: query.from,
+			decisions: intentToDecisions(query, query.from),
+		};
+		const innerResult = innerCompiler.compile(innerPlan);
+		const renumbered = renumberParamRefsInAst(innerResult.ast, paramOffset);
+		return { ast: renumbered, parameters: innerResult.parameters };
 	}
 
 	private compileGenericNqlFunction(
@@ -1144,15 +1180,59 @@ export class PlanCompiler {
 
 		if (typeof arg === 'object' && arg !== null) {
 			const record = arg as Record<string, unknown>;
+
+			if (typeof record.$ref === 'string') {
+				return buildColumnRef(record.$ref, ctx);
+			}
+
+			if (typeof record.kind !== 'string') {
+				const legacyKind =
+					typeof record.$op === 'string'
+						? `$op:${record.$op}`
+						: typeof record.$fn === 'string'
+							? `$fn:${record.$fn}`
+							: 'object';
+				throw new UnhandledNqlSelectExpressionKindError(legacyKind);
+			}
+
 			switch (record.kind) {
 				case 'column':
-					return buildColumnRef(String(record.column), ctx);
+					if (typeof record.column !== 'string') {
+						throw new Error('NQL column expression requires a column name');
+					}
+					return buildColumnRef(record.column, ctx);
+
+				case 'columnAlias':
+					if (typeof record.column !== 'string') {
+						throw new Error(
+							'NQL columnAlias expression requires a column name',
+						);
+					}
+					return buildColumnRef(record.column, ctx);
+
+				case 'relationColumn': {
+					const relation = record.relation;
+					const column = record.column;
+					if (typeof relation !== 'string' || typeof column !== 'string') {
+						throw new Error(
+							'NQL relationColumn expression requires relation and column',
+						);
+					}
+					return buildColumnRef(`${relation}.${column}`, ctx);
+				}
+
 				case 'param':
-					if (!isParamExpressionLike(arg)) break;
+					if (!('value' in record)) {
+						throw new Error('NQL param expression requires a value');
+					}
 					return compileValue(record.value, state);
+
 				case 'literal':
-					if (!isLiteralExpressionLike(arg)) break;
+					if (!('value' in record)) {
+						throw new Error('NQL literal expression requires a value');
+					}
 					return compileValue(record.value, state);
+
 				case 'function': {
 					const nestedName = record.name;
 					const nestedArgs = record.args;
@@ -1166,14 +1246,195 @@ export class PlanCompiler {
 						state,
 					);
 				}
-			}
 
-			if (typeof record.$ref === 'string') {
-				return buildColumnRef(record.$ref, ctx);
+				case 'coalesce': {
+					const handler = getExpressionHandler('coalesce');
+					return handler.compile(
+						{
+							type: 'coalesce',
+							args: Array.isArray(record.fields) ? record.fields : [],
+						} as HandlerDecision,
+						ctx,
+						state,
+					);
+				}
+
+				case 'aggregate': {
+					const fn = record.function;
+					if (typeof fn !== 'string') {
+						throw new Error(
+							'NQL aggregate expression requires a function name',
+						);
+					}
+					const aggregateArgs: unknown[] = [];
+					if (record.field === '*') {
+						aggregateArgs.push({ kind: 'star' });
+					} else if (typeof record.field === 'string') {
+						aggregateArgs.push(record.field);
+					}
+					if (Array.isArray(record.extraArgs)) {
+						aggregateArgs.push(...record.extraArgs);
+					}
+					return this.compileGenericNqlFunction(fn, aggregateArgs, ctx, state);
+				}
+
+				case 'arithmetic': {
+					const operator = record.operator;
+					if (typeof operator !== 'string') {
+						throw new Error('NQL arithmetic expression requires an operator');
+					}
+					if (!('left' in record) || !('right' in record)) {
+						throw new Error(
+							'NQL arithmetic expression requires left and right operands',
+						);
+					}
+					const handler = getExpressionHandler('arithmetic');
+					return handler.compile(
+						{
+							type: 'arithmetic',
+							operator,
+							args: [record.left, record.right],
+						} as HandlerDecision,
+						ctx,
+						state,
+					);
+				}
+
+				case 'case':
+					return this.compileNqlCaseExpressionArg(record, ctx, state);
+
+				case 'jsonExtract': {
+					const handler = getExpressionHandler('jsonExtract');
+					return handler.compile(
+						{
+							type: 'jsonExtract',
+							column: record.field,
+							args: Array.isArray(record.path) ? record.path : [],
+							jsonMode: record.mode,
+						} as HandlerDecision,
+						ctx,
+						state,
+					);
+				}
+
+				case 'jsonPathExtract': {
+					const handler = getExpressionHandler('jsonPathExtract');
+					return handler.compile(
+						{
+							type: 'jsonPathExtract',
+							column: record.field,
+							args: typeof record.path === 'string' ? [record.path] : [],
+							jsonMode: record.mode,
+						} as HandlerDecision,
+						ctx,
+						state,
+					);
+				}
+
+				case 'window':
+					return genericWindowHandler.compile(
+						{
+							type: 'window',
+							function: record.function,
+							column: record.field,
+							args:
+								typeof record.offset === 'number' ? [record.offset] : undefined,
+							value: record.defaultValue,
+							partition: (record.over as { partitionBy?: readonly string[] })
+								?.partitionBy,
+							orderBy: (
+								record.over as {
+									orderBy?: readonly {
+										field: string;
+										direction?: 'asc' | 'desc';
+									}[];
+								}
+							)?.orderBy?.map((item) => ({
+								column: item.field,
+								direction: item.direction?.toUpperCase() as
+									| 'ASC'
+									| 'DESC'
+									| undefined,
+							})),
+						} as HandlerDecision,
+						ctx,
+						state,
+					);
+
+				case 'customOp':
+				case 'customFn':
+				case 'ref':
+				case 'cast':
+				case 'unary':
+				case 'namedArg':
+				case 'star':
+				case 'array':
+				case 'subquery':
+					return compileExpressionIntent(
+						record as unknown as ExpressionIntent,
+						ctx,
+						state,
+					);
+
+				default:
+					throw new UnhandledNqlSelectExpressionKindError(record.kind);
 			}
 		}
 
 		return compileValue(arg, state);
+	}
+
+	private compileNqlCaseExpressionArg(
+		expr: Record<string, unknown>,
+		ctx: HandlerCompilerContext,
+		state: HandlerCompilerState,
+	): Node {
+		const whenClauses = expr.when;
+		if (!Array.isArray(whenClauses) || whenClauses.length === 0) {
+			throw new Error('NQL CASE expression requires at least one WHEN clause');
+		}
+
+		const dispatcher = createWhereDispatcher();
+		const args: Node[] = whenClauses.map((branch) => {
+			const condition = (branch as { condition?: unknown }).condition;
+			const result = (branch as { result?: unknown }).result;
+			const conditionDecision = convertWhereCondition(
+				condition as import('@dbsp/types').WhereIntent,
+				ctx.rootTable,
+			);
+			if (!conditionDecision) {
+				throw new Error('NQL CASE WHEN condition could not be compiled');
+			}
+			const whenNode = dispatcher(
+				mapToHandlerDecision(
+					conditionDecision,
+					ctx.rootTable,
+					this.defaultPk,
+					this.deriveFk,
+				),
+				ctx,
+				state,
+			);
+			const thenNode = this.compileNqlFunctionArg(result, ctx, state);
+			return {
+				CaseWhen: {
+					expr: whenNode,
+					result: thenNode,
+				},
+			} as unknown as Node;
+		});
+
+		const defresult =
+			expr.else !== undefined
+				? this.compileNqlFunctionArg(expr.else, ctx, state)
+				: undefined;
+
+		return {
+			CaseExpr: {
+				args,
+				...(defresult !== undefined ? { defresult } : {}),
+			},
+		} as unknown as Node;
 	}
 
 	/**

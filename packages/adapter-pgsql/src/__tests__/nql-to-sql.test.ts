@@ -22,13 +22,13 @@ import {
 	ref,
 	schema,
 } from '@dbsp/core';
-import { compile } from '@dbsp/nql';
 import type {
 	InsertFromIntent,
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { compile } from '../../../nql/src/index.js';
 import { normalizeSQL } from '../ast-helpers.js';
 import { intentToDecisions } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -41,6 +41,8 @@ const testSchema = schema({
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
 		active: 'boolean',
+		price: 'decimal',
+		status: 'string',
 	},
 	departments: {
 		id: { type: 'integer', primaryKey: true },
@@ -200,6 +202,67 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).not.toContain('drop table');
 		expect(sql).not.toContain('1;');
 		expect(params).toEqual(['1; DROP TABLE users']);
+	});
+
+	it('recursively compiles NQL SELECT function arithmetic args with named params', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select round(price + :d) as r',
+			{ d: 5 },
+		);
+
+		expect(sql).toContain('round(users.price + $1)');
+		expect(sql).toContain('as r');
+		expect(params).toEqual([5]);
+	});
+
+	it('recursively compiles nested NQL SELECT function args in coalesce()', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select coalesce(upper(name), :fallback) as label',
+			{ fallback: 'anon' },
+		);
+
+		expect(sql).toContain('coalesce(upper(users.name), $1)');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['anon']);
+	});
+
+	it('recursively compiles nested NQL SELECT arithmetic operands', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select (price + :a) * :b as t',
+			{ a: 2, b: 3 },
+		);
+
+		expect(sql).toContain('(users.price + $1) * $2');
+		expect(sql).toContain('as t');
+		expect(params).toEqual([2, 3]);
+	});
+
+	it('binds NQL SELECT CASE projection params structurally', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when status = :s then :a else :b end as label',
+			{ s: 'active', a: 'A', b: 'B' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['active', 'A', 'B']);
+	});
+
+	it('recursively compiles NQL SELECT CASE expressions as function args', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select upper(case when status = :s then :a else :b end) as label',
+			{ s: 'active', a: 'A', b: 'B' },
+		);
+
+		expect(sql).toContain('upper(case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['active', 'A', 'B']);
 	});
 
 	it('compiles NQL coalesce SELECT params through the NQL-safe handler path', () => {

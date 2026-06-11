@@ -63,11 +63,14 @@ function paramExpressionIntent(
 
 function literalExpressionIntent(
 	value: string | number | boolean | null,
+	alias?: string,
 ): ExpressionIntent {
-	return markExpressionValueIntent({
+	const intent: Record<string, unknown> = {
 		kind: 'literal',
 		value,
-	}) as unknown as ExpressionIntent;
+	};
+	if (alias !== undefined) intent.as = alias;
+	return markExpressionValueIntent(intent) as unknown as ExpressionIntent;
 }
 
 function resolveLagLeadOffset(
@@ -144,6 +147,72 @@ export function compileSelectClause(
 }
 
 /**
+ * Lower an NQL expression used as a SELECT expression operand.
+ *
+ * Simple path references stay as field strings for compatibility with existing
+ * select-expression handlers. Compound expressions are recursively lowered to
+ * ExpressionIntent objects so they can be reconstructed by the adapter instead
+ * of being bound as opaque values.
+ */
+function expressionToSelectValue(
+	valueExpr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+): unknown {
+	const field = expressionToField(valueExpr);
+	if (field) return field;
+	if (valueExpr.type === 'namedParam') {
+		return paramExpressionIntent(expressionToValue(valueExpr, ctx));
+	}
+	if (
+		valueExpr.type === 'string' ||
+		valueExpr.type === 'number' ||
+		valueExpr.type === 'boolean'
+	) {
+		return valueExpr.value;
+	}
+	if (valueExpr.type === 'null') {
+		return null;
+	}
+	if (valueExpr.type === 'rangeLiteral' || valueExpr.type === 'dateRange') {
+		return valueExpr.value;
+	}
+	return compileExpressionToIntent(valueExpr, ctx, fns);
+}
+
+/**
+ * Lower an NQL expression used as a SELECT function argument.
+ *
+ * This is intentionally recursive. It is the NQL-side half of the adapter's
+ * nested SELECT-expression reconstruction path.
+ */
+function expressionToFunctionArg(
+	valueExpr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+): unknown {
+	const field = expressionToField(valueExpr);
+	if (field) return field;
+	if (valueExpr.type === 'namedParam') {
+		return paramExpressionIntent(expressionToValue(valueExpr, ctx));
+	}
+	if (
+		valueExpr.type === 'string' ||
+		valueExpr.type === 'number' ||
+		valueExpr.type === 'boolean'
+	) {
+		return literalExpressionIntent(valueExpr.value);
+	}
+	if (valueExpr.type === 'null') {
+		return literalExpressionIntent(null);
+	}
+	if (valueExpr.type === 'rangeLiteral' || valueExpr.type === 'dateRange') {
+		return literalExpressionIntent(valueExpr.value);
+	}
+	return compileExpressionToIntent(valueExpr, ctx, fns);
+}
+
+/**
  * Compile a single SELECT item to an ExpressionIntent.
  */
 function compileSelectExpression(
@@ -172,32 +241,6 @@ function compileSelectExpression(
 	const exprItem = item as NqlSelectExpression;
 	const expr = exprItem.expression;
 
-	const expressionToSelectValue = (valueExpr: NqlExpression): unknown => {
-		if (valueExpr.type === 'namedParam') {
-			return paramExpressionIntent(expressionToValue(valueExpr, ctx));
-		}
-		return expressionToValue(valueExpr, ctx);
-	};
-
-	const expressionToFunctionArg = (valueExpr: NqlExpression): unknown => {
-		const field = expressionToField(valueExpr);
-		if (field) return field;
-		if (valueExpr.type === 'namedParam') {
-			return paramExpressionIntent(expressionToValue(valueExpr, ctx));
-		}
-		if (valueExpr.type === 'string') {
-			return literalExpressionIntent(valueExpr.value);
-		}
-		if (valueExpr.type === 'function') {
-			return {
-				kind: 'function',
-				name: valueExpr.name,
-				args: valueExpr.args.map((arg) => expressionToFunctionArg(arg)),
-			};
-		}
-		return expressionToValue(valueExpr, ctx);
-	};
-
 	// Check for functions (aggregate or regular)
 	if (expr.type === 'function') {
 		const fn = expr.name.toLowerCase();
@@ -222,7 +265,10 @@ function compileSelectExpression(
 				expr.args.length > 1
 					? expr.args
 							.slice(1)
-							.map((a) => expressionToField(a) ?? expressionToSelectValue(a))
+							.map(
+								(a) =>
+									expressionToField(a) ?? expressionToSelectValue(a, ctx, fns),
+							)
 					: undefined;
 			return {
 				kind: 'aggregate',
@@ -241,7 +287,7 @@ function compileSelectExpression(
 		return {
 			kind: 'function',
 			name: expr.name,
-			args: expr.args.map((a) => expressionToFunctionArg(a)),
+			args: expr.args.map((a) => expressionToFunctionArg(a, ctx, fns)),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -371,9 +417,9 @@ function compileSelectExpression(
 		const rightField = expressionToField(expr.right);
 		return {
 			kind: 'arithmetic',
-			left: leftField ?? expressionToSelectValue(expr.left),
+			left: leftField ?? expressionToSelectValue(expr.left, ctx, fns),
 			operator: expr.operator as '+' | '-' | '*' | '/' | '%',
-			right: rightField ?? expressionToSelectValue(expr.right),
+			right: rightField ?? expressionToSelectValue(expr.right, ctx, fns),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -387,7 +433,7 @@ function compileSelectExpression(
 				kind: 'arithmetic',
 				left: -1,
 				operator: '*',
-				right: operandField ?? expressionToSelectValue(unary.operand),
+				right: operandField ?? expressionToSelectValue(unary.operand, ctx, fns),
 				...(exprItem.alias !== undefined && { as: exprItem.alias }),
 			};
 		}
@@ -414,6 +460,24 @@ function compileSelectExpression(
 			mode: expr.mode,
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
+	}
+
+	// Literal SELECT projection, e.g. `select 1 as one`.
+	if (
+		expr.type === 'string' ||
+		expr.type === 'number' ||
+		expr.type === 'boolean' ||
+		expr.type === 'null' ||
+		expr.type === 'rangeLiteral' ||
+		expr.type === 'dateRange'
+	) {
+		if (expr.type === 'null') {
+			return literalExpressionIntent(null, exprItem.alias);
+		}
+		if (expr.type === 'rangeLiteral' || expr.type === 'dateRange') {
+			return literalExpressionIntent(expr.value, exprItem.alias);
+		}
+		return literalExpressionIntent(expr.value, exprItem.alias);
 	}
 
 	/* v8 ignore start — defensive: all parser-produced SELECT expression types are handled above -- @preserve */
