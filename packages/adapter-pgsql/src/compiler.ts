@@ -22,6 +22,7 @@ import {
 	columnTarget,
 	deleteStmt,
 	eqExpr,
+	funcCall,
 	innerJoin,
 	insertStmt,
 	integerNode,
@@ -49,6 +50,7 @@ import {
 	createWhereDispatcher,
 	getExpressionHandler,
 	getIncludeHandler,
+	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
 
 // Register createWhereDispatcher with compileExpressionIntent so CASE expressions
@@ -64,7 +66,7 @@ import type {
 	SelectStmtNode,
 } from './handlers/types.js';
 import { isSelectWithFields } from './handlers/types.js';
-import { compileValue } from './handlers/where/utils.js';
+import { buildColumnRef, compileValue } from './handlers/where/utils.js';
 import {
 	assertNoUnsupportedSubqueryModifiers,
 	convertWhereCondition,
@@ -1114,6 +1116,59 @@ export class PlanCompiler {
 		};
 	}
 
+	private compileGenericNqlFunction(
+		functionName: string,
+		args: readonly unknown[],
+		ctx: HandlerCompilerContext,
+		state: HandlerCompilerState,
+	): Node {
+		validateIdentifier(functionName, 'function');
+		const argNodes = args.map((arg) =>
+			this.compileNqlFunctionArg(arg, ctx, state),
+		);
+		return funcCall(functionName, argNodes);
+	}
+
+	private compileNqlFunctionArg(
+		arg: unknown,
+		ctx: HandlerCompilerContext,
+		state: HandlerCompilerState,
+	): Node {
+		if (typeof arg === 'string') {
+			return buildColumnRef(arg, ctx);
+		}
+
+		if (typeof arg === 'object' && arg !== null) {
+			const record = arg as Record<string, unknown>;
+			switch (record.kind) {
+				case 'column':
+					return buildColumnRef(String(record.column), ctx);
+				case 'param':
+				case 'literal':
+					return compileValue(record.value, state);
+				case 'function': {
+					const nestedName = record.name;
+					const nestedArgs = record.args;
+					if (typeof nestedName !== 'string') {
+						throw new Error('NQL function argument requires a function name');
+					}
+					return this.compileGenericNqlFunction(
+						nestedName,
+						Array.isArray(nestedArgs) ? nestedArgs : [],
+						ctx,
+						state,
+					);
+				}
+			}
+
+			if (typeof record.$ref === 'string') {
+				return buildColumnRef(record.$ref, ctx);
+			}
+		}
+
+		return compileValue(arg, state);
+	}
+
 	/**
 	 * Compile a SELECT-list target via expression handler.
 	 * Wraps the node in a ResTarget and pushes it onto targetList.
@@ -1166,6 +1221,45 @@ export class PlanCompiler {
 					? { ...handlerDecision, filterWhere: filterNode }
 					: handlerDecision;
 				const node = handler.compile(hydratedDecision, ctx, state);
+				this.state.paramIndex = state.paramIndex;
+				targetList.push({
+					ResTarget: {
+						val: node,
+						...(decision.alias
+							? { name: this.naming.toDatabase(decision.alias) }
+							: {}),
+					},
+				});
+				break;
+			}
+
+			case 'selectNqlFunction': {
+				ensureExpressionHandlersRegistered();
+				const funcType = decision.function;
+				if (!funcType) break;
+				const ctx = this.createHandlerContext(
+					plan,
+					decision.table ?? plan.rootTable,
+				);
+				const state = this.createHandlerState();
+				const safeHandler = getNqlSafeExpressionHandler(funcType);
+				const node = safeHandler
+					? safeHandler.compile(
+							mapToHandlerDecision(
+								decision,
+								plan.rootTable,
+								this.defaultPk,
+								this.deriveFk,
+							),
+							ctx,
+							state,
+						)
+					: this.compileGenericNqlFunction(
+							funcType,
+							decision.args ?? [],
+							ctx,
+							state,
+						);
 				this.state.paramIndex = state.paramIndex;
 				targetList.push({
 					ResTarget: {
@@ -1719,6 +1813,7 @@ export class PlanCompiler {
 			switch (decision.type) {
 				case 'select':
 				case 'selectFunction':
+				case 'selectNqlFunction':
 				case 'selectExpression':
 				case 'selectRelationColumn':
 				case 'selectPseudoColumn':

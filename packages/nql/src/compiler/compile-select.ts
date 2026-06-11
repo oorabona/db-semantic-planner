@@ -148,6 +148,18 @@ function compileSelectExpression(
 		return expressionToValue(valueExpr, ctx);
 	};
 
+	const expressionToFunctionArg = (valueExpr: NqlExpression): unknown => {
+		const field = expressionToField(valueExpr);
+		if (field) return field;
+		if (valueExpr.type === 'namedParam') {
+			return { kind: 'param', value: expressionToValue(valueExpr, ctx) };
+		}
+		if (valueExpr.type === 'string') {
+			return { kind: 'literal', value: valueExpr.value };
+		}
+		return expressionToValue(valueExpr, ctx);
+	};
+
 	// Check for functions (aggregate or regular)
 	if (expr.type === 'function') {
 		const fn = expr.name.toLowerCase();
@@ -191,9 +203,7 @@ function compileSelectExpression(
 		return {
 			kind: 'function',
 			name: expr.name,
-			args: expr.args.map(
-				(a) => expressionToField(a) ?? expressionToSelectValue(a),
-			),
+			args: expr.args.map((a) => expressionToFunctionArg(a)),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}

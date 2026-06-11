@@ -10,6 +10,7 @@
  */
 
 import {
+	createOrm,
 	isDeleteIntent,
 	isInsertIntent,
 	isUpdateIntent,
@@ -17,6 +18,7 @@ import {
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	type QueryIntent,
+	raw,
 	ref,
 	schema,
 } from '@dbsp/core';
@@ -164,7 +166,31 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('$1');
 	});
 
-	it('compiles NQL function SELECT params through the selectFunction path', () => {
+	it('does not route NQL function names through builder raw SQL handlers', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			"users | select raw('1; DROP TABLE users') as x",
+		);
+
+		expect(sql).toContain('raw($1)');
+		expect(sql).toContain('as x');
+		expect(sql).not.toContain('drop table');
+		expect(sql).not.toContain('1;');
+		expect(params).toEqual(['1; DROP TABLE users']);
+	});
+
+	it('compiles generic NQL SELECT functions as FuncCall nodes', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			'users | select upper(name) as uname, now() as current_time',
+		);
+
+		expect(sql).toContain('upper(users.name)');
+		expect(sql).toContain('as uname');
+		expect(sql).toContain('now()');
+		expect(sql).toMatch(/as "?current_time"?/);
+		expect(params).toEqual([]);
+	});
+
+	it('compiles NQL coalesce SELECT params through the NQL-safe handler path', () => {
 		const { sql, params } = nqlToSQLWithNamedParams(
 			'users | select coalesce(name, :fallback) as label',
 			{ fallback: 'x' },
@@ -175,6 +201,20 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('as label');
 		expect(sql).not.toMatch(/select\s+\*\s+from/i);
 		expect(params).toEqual(['x']);
+	});
+
+	it('keeps builder raw() expressions reachable from builder origin', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const dump = orm
+			.select('users')
+			.columns([raw('COUNT(*)', 'count')])
+			.dump();
+
+		const sql = normalizeSQL(dump.sql);
+		expect(sql).toContain('count(*)');
+		expect(sql).toContain('as count');
+		expect(dump.params).toEqual([]);
 	});
 
 	it('unwraps named params in NQL SELECT arithmetic operands', () => {

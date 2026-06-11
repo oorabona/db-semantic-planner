@@ -51,6 +51,7 @@ function buildValueNode(
  */
 export const coalesceHandler: ExpressionHandler = {
 	types: ['coalesce', 'COALESCE', 'ifNull', 'nvl'],
+	nqlSafe: true,
 
 	compile(
 		decision: Decision,

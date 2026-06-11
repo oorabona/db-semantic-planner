@@ -228,6 +228,13 @@ export type WhereDispatcher = (
 export interface ExpressionHandler {
 	/** Expression type(s) this handler supports */
 	readonly types: readonly string[];
+	/**
+	 * Safe to use when a function name comes from NQL text.
+	 *
+	 * Raw/escape-hatch handlers must not set this. NQL-origin function names use
+	 * this opt-in surface only, then fall back to generic FuncCall emission.
+	 */
+	readonly nqlSafe?: boolean;
 
 	/**
 	 * Compile an expression to AST.

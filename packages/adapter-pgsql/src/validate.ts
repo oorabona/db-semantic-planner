@@ -178,12 +178,12 @@ export class InvalidIdentifierError extends Error {
  * 6. Reserved keywords are allowed (will be quoted)
  *
  * @param value The identifier to validate
- * @param type Type of identifier (for error messages): 'table', 'column', 'schema', 'alias'
+ * @param type Type of identifier (for error messages): 'table', 'column', 'schema', 'alias', 'function'
  * @throws InvalidIdentifierError if validation fails
  */
 export function validateIdentifier(
 	value: string,
-	type: 'table' | 'column' | 'schema' | 'alias',
+	type: 'table' | 'column' | 'schema' | 'alias' | 'function',
 ): void {
 	// Rule 1: Not empty
 	if (!value || value.length === 0) {

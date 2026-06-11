@@ -520,7 +520,7 @@ describe('compile-select: non-aggregate function', () => {
 			// Path args → field names, string literal → value
 			expect(col.args).toContain('nickname');
 			expect(col.args).toContain('name');
-			expect(col.args).toContain('anon');
+			expect(col.args).toContainEqual({ kind: 'literal', value: 'anon' });
 			expect(col.as).toBe('display');
 		}
 	});

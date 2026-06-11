@@ -147,7 +147,7 @@ export function handleRawExpression(
 }
 
 /**
- * function — generic SQL function expression compiled by the selectFunction path.
+ * function — generic SQL function expression from NQL text.
  */
 export function handleFunctionExpression(
 	expr: Record<string, unknown>,
@@ -155,7 +155,7 @@ export function handleFunctionExpression(
 	decisions: PlanDecision[],
 ): void {
 	const decision: Mutable<PlanDecision> = {
-		type: 'selectFunction',
+		type: 'selectNqlFunction',
 		function: expr.name as string,
 		args: (expr.args as readonly unknown[] | undefined) ?? [],
 		table: rootTable,

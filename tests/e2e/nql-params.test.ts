@@ -2,7 +2,7 @@
  * FEAT-134 E2E: NQL tag interpolation binds values as PostgreSQL params.
  */
 
-import { createOrm } from '@dbsp/core';
+import { createOrm, nqlRaw } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogSchema,
@@ -83,5 +83,22 @@ describe('FEAT-134 NQL params E2E', () => {
 			{ id: 1, label: 'Alice Johnson' },
 			{ id: 2, label: 'Bob Smith' },
 		]);
+	});
+
+	it('keeps nqlRaw trusted fragments reachable from NQL tag origin', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number }>`posts
+			| select id
+			| ${nqlRaw('order by id desc')}
+			| limit 1`;
+
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/order by/i);
+		expect(dump.params).toEqual([]);
+		expect(rows).toEqual([{ id: 5 }]);
 	});
 });

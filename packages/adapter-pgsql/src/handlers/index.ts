@@ -101,6 +101,19 @@ export function getExpressionHandler(type: string): ExpressionHandler {
 }
 
 /**
+ * Get an EXPRESSION handler only if it explicitly opted into NQL-origin use.
+ *
+ * This keeps NQL function names away from builder-only escape hatches such as
+ * raw/rawSql/rawExpression by construction.
+ */
+export function getNqlSafeExpressionHandler(
+	type: string,
+): ExpressionHandler | undefined {
+	const handler = expressionHandlers.get(type);
+	return handler?.nqlSafe === true ? handler : undefined;
+}
+
+/**
  * Get INCLUDE handler for a strategy.
  * @throws Error if no handler registered
  */
