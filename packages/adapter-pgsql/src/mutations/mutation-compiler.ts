@@ -11,6 +11,10 @@
  */
 
 import { isSqlRaw } from '@dbsp/core';
+import {
+	isParamExpressionValueIntent,
+	unwrapExpressionValueIntent,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	columnRef,
@@ -232,7 +236,9 @@ export function compileUnnestInsert(
 	const targetList: Node[] = columns.map((col, i) => {
 		// columnArrays[i] is always defined (transposeToColumnArrays maps over columns),
 		// but TypeScript doesn't know that — use a safe fallback.
-		const colArray: unknown[] = columnArrays[i] ?? [];
+		const colArray: unknown[] = (columnArrays[i] ?? []).map((value) =>
+			unwrapExpressionValueIntent(value),
+		);
 
 		// Find a non-null sample value for runtime type fallback
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
@@ -807,12 +813,28 @@ function valueToNode(
 	state: CompilerState,
 	dbType?: string,
 ): Node {
+	if (isParamExpressionValueIntent(value)) {
+		const paramValue = value.value;
+		state.parameters.push(paramValue);
+		state.paramIndex++;
+
+		if (dbType && RANGE_TYPES.has(dbType)) {
+			return createTypeCastParamRef(state.paramIndex, dbType);
+		}
+
+		return {
+			ParamRef: {
+				number: state.paramIndex,
+			},
+		};
+	}
+
 	if (value === null || value === undefined) {
 		return { A_Const: { isnull: true } };
 	}
 
 	// Add to parameters and return a ParamRef
-	state.parameters.push(value);
+	state.parameters.push(unwrapExpressionValueIntent(value));
 	state.paramIndex++;
 
 	// Range types require explicit cast ($N::int4range) for PostgreSQL to parse the literal

@@ -12,7 +12,10 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
-import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
+import {
+	isParamExpressionValueIntent,
+	wrapParamValueIfProvenanceMarked,
+} from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
@@ -499,6 +502,7 @@ export function isOuterRef(value: unknown): boolean {
  */
 export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
+	if (isParamExpressionValueIntent(where)) return false;
 	const w = where as Record<string, unknown>;
 	if (isOuterRef(w)) return true;
 	for (const value of Object.values(w)) {

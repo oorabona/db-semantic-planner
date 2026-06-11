@@ -98,6 +98,9 @@ export function compileValueOrFieldRef(
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
 ): Node {
+	if (isParamExpressionValueIntent(value)) {
+		return compileValue(value, state, columnType);
+	}
 	if (isFieldRef(value)) {
 		const alias =
 			value.scope === 'outer'

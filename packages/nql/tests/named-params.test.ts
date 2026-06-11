@@ -4,6 +4,10 @@ import type {
 	WhereJsonExistsIntent,
 	WhereLikeIntent,
 } from '@dbsp/types';
+import {
+	isParamExpressionValueIntent,
+	unwrapExpressionValueIntent,
+} from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { compile, parse, parseCst } from '../src/index.js';
 import type {
@@ -32,6 +36,16 @@ function compileFail(
 	params?: Readonly<Record<string, unknown>>,
 ) {
 	return compile(input, null, undefined, params ? { params } : undefined);
+}
+
+function expectParamValue(value: unknown, expected: unknown): void {
+	expect(isParamExpressionValueIntent(value)).toBe(true);
+	expect(unwrapExpressionValueIntent(value)).toBe(expected);
+}
+
+function expectParamValueEqual(value: unknown, expected: unknown): void {
+	expect(isParamExpressionValueIntent(value)).toBe(true);
+	expect(unwrapExpressionValueIntent(value)).toEqual(expected);
 }
 
 describe('FEAT-134 named parameters — grammar and AST', () => {
@@ -103,7 +117,7 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		const where = result.query!.where as WhereComparisonIntent;
 
 		expect(where.kind).toBe('comparison');
-		expect(where.value).toBe(5);
+		expectParamValue(where.value, 5);
 	});
 
 	it('resolves LIKE pattern params as strings and rejects non-string values structurally', () => {
@@ -169,7 +183,7 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 
 	it('distinguishes null from missing and rejects explicit undefined', () => {
 		const ok = compileOk('users | where deleted_at = :p', { p: null });
-		expect((ok.query!.where as WhereComparisonIntent).value).toBeNull();
+		expectParamValue((ok.query!.where as WhereComparisonIntent).value, null);
 
 		const missing = compileFail('users | where deleted_at = :p', {});
 		expect(missing.success).toBe(false);
@@ -236,8 +250,8 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		const where = result.query!.where as WhereAndIntent;
 		const [idCond, atCond] = where.conditions as WhereComparisonIntent[];
 
-		expect(idCond!.value).toBe(5n);
-		expect(atCond!.value).toBe(at);
+		expectParamValue(idCond!.value, 5n);
+		expectParamValue(atCond!.value, at);
 	});
 
 	it('resolves the same named param at each use-site without deduping the intent tree', () => {
@@ -250,51 +264,53 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		};
 
 		expect(where.conditions).toHaveLength(2);
-		expect(where.conditions[0]!.value).toBe(7);
-		expect(where.conditions[1]!.value).toBe(7);
+		expectParamValue(where.conditions[0]!.value, 7);
+		expectParamValue(where.conditions[1]!.value, 7);
 	});
 
 	it('resolves params in IN, BETWEEN, function args, CASE results, and JSON args', () => {
 		const inResult = compileOk('users | where id in (:a, :b)', { a: 1, b: 2 });
-		expect((inResult.query!.where as { values: unknown[] }).values).toEqual([
-			1, 2,
-		]);
+		const inValues = (inResult.query!.where as { values: unknown[] }).values;
+		expect(inValues).toHaveLength(2);
+		expectParamValue(inValues[0], 1);
+		expectParamValue(inValues[1], 2);
 
 		const betweenResult = compileOk('users | where age between :min and :max', {
 			min: 18,
 			max: 65,
 		});
-		expect((betweenResult.query!.where as WhereComparisonIntent).value).toEqual(
-			{
-				lower: 18,
-				upper: 65,
-			},
-		);
+		const betweenValue = (betweenResult.query!.where as WhereComparisonIntent)
+			.value as { lower: unknown; upper: unknown };
+		expectParamValue(betweenValue.lower, 18);
+		expectParamValue(betweenValue.upper, 65);
 
 		const fnResult = compileOk(
 			'users | select coalesce(name, :fallback) as display_name',
 			{ fallback: 'unknown' },
 		);
-		expect(
+		expectParamValue(
 			(fnResult.query!.select as { columns: Array<{ args: unknown[] }> })
 				.columns[0]!.args[1],
-		).toEqual({ kind: 'param', value: 'unknown' });
+			'unknown',
+		);
 
 		const caseResult = compileOk(
 			'users | select case when active = true then :yes else :no end as label',
 			{ yes: 'Y', no: 'N' },
 		);
-		expect(
+		expectParamValue(
 			(
 				caseResult.query!.select as {
 					columns: Array<{ when: Array<{ result: unknown }>; else: unknown }>;
 				}
 			).columns[0]!.when[0]!.result,
-		).toEqual({ kind: 'param', value: 'Y' });
-		expect(
+			'Y',
+		);
+		expectParamValue(
 			(caseResult.query!.select as { columns: Array<{ else: unknown }> })
 				.columns[0]!.else,
-		).toEqual({ kind: 'param', value: 'N' });
+			'N',
+		);
 
 		const jsonResult = compileOk(
 			'users | where json_contains(profile, :needle)',
@@ -302,9 +318,12 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 				needle: { role: 'admin' },
 			},
 		);
-		expect((jsonResult.query!.where as { value: unknown }).value).toEqual({
-			role: 'admin',
-		});
+		expectParamValueEqual(
+			(jsonResult.query!.where as { value: unknown }).value,
+			{
+				role: 'admin',
+			},
+		);
 	});
 
 	it('resolves top-level SELECT projection params and reports missing bindings structurally', () => {
@@ -330,7 +349,7 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 		const subquery = (result.query!.where as { subquery: { where: unknown } })
 			.subquery;
 
-		expect((subquery.where as WhereComparisonIntent).value).toBe('paid');
+		expectParamValue((subquery.where as WhereComparisonIntent).value, 'paid');
 	});
 
 	it('validates named limit and offset params as non-negative safe integers', () => {

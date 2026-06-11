@@ -9,6 +9,7 @@
  * - WHERE clause for conflict resolution
  */
 
+import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
 import { columnRef, funcCall } from '../ast-helpers.js';
 import {
@@ -266,7 +267,9 @@ export function compileUnnestUpsert(
 
 	// Build SELECT target list: unnest($N::type[]) AS "col"
 	const targetList: Node[] = columns.map((col, i) => {
-		const colArray: unknown[] = columnArrays[i] ?? [];
+		const colArray: unknown[] = (columnArrays[i] ?? []).map((value) =>
+			unwrapExpressionValueIntent(value),
+		);
 
 		// Find a non-null sample value for runtime type fallback
 		const sampleValue = colArray.find((v) => v !== null && v !== undefined);
@@ -335,7 +338,7 @@ export function compileUnnestUpsert(
  */
 function valueToParam(state: CompilerState, value?: unknown): Node {
 	if (value !== undefined) {
-		state.parameters.push(value);
+		state.parameters.push(unwrapExpressionValueIntent(value));
 	}
 	state.paramIndex++;
 

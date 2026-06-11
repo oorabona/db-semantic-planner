@@ -9,6 +9,10 @@ import {
 	type FieldRef,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 } from '@dbsp/types';
+import {
+	paramExpressionValueIntent,
+	unwrapExpressionValueIntent,
+} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
@@ -95,7 +99,7 @@ export function resolveNamedParam(ctx: CompilerContext, name: string): unknown {
 	}
 	const value = ctx.params[name];
 	assertParamValueAllowed(name, value);
-	return value;
+	return paramExpressionValueIntent(value);
 }
 
 /**
@@ -105,7 +109,7 @@ export function resolveNamedParamArray(
 	ctx: CompilerContext,
 	name: string,
 ): readonly unknown[] {
-	const value = resolveNamedParam(ctx, name);
+	const value = unwrapExpressionValueIntent(resolveNamedParam(ctx, name));
 	if (!Array.isArray(value)) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
@@ -121,7 +125,9 @@ export function resolveIntegerCount(
 	label: string,
 ): number {
 	const value: unknown =
-		typeof count === 'number' ? count : resolveNamedParam(ctx, count.name);
+		typeof count === 'number'
+			? count
+			: unwrapExpressionValueIntent(resolveNamedParam(ctx, count.name));
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
@@ -476,7 +482,9 @@ export function coerceToStringKey(
 		return (expr as { type: 'string'; value: string }).value;
 	}
 	if (expr.type === 'namedParam') {
-		const value = resolveNamedParam(ctx, expr.name);
+		const value = unwrapExpressionValueIntent(
+			resolveNamedParam(ctx, expr.name),
+		);
 		if (typeof value !== 'string') {
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,

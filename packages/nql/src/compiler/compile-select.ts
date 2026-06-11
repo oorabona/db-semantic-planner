@@ -22,7 +22,10 @@ import {
 	NQL_SELECT_JSON_FUNCTIONS,
 	NQL_SELECT_SCALAR_FUNCTIONS,
 } from '@dbsp/types';
-import { markExpressionValueIntent } from '@dbsp/types/internal';
+import {
+	markExpressionValueIntent,
+	unwrapExpressionValueIntent,
+} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlCaseExpression,
@@ -50,7 +53,10 @@ function paramExpressionIntent(
 	value: unknown,
 	alias?: string,
 ): ExpressionIntent {
-	const intent: Record<string, unknown> = { kind: 'param', value };
+	const intent: Record<string, unknown> = {
+		kind: 'param',
+		value: unwrapExpressionValueIntent(value),
+	};
 	if (alias !== undefined) intent.as = alias;
 	return markExpressionValueIntent(intent) as unknown as ExpressionIntent;
 }

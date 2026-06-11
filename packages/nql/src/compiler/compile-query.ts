@@ -5,6 +5,7 @@
  */
 
 import type {
+	ExpressionIntent,
 	IncludeIntent,
 	LockIntent,
 	OrderByIntent,
@@ -30,6 +31,7 @@ import type {
 import {
 	expressionToField,
 	expressionToSql,
+	expressionToValue,
 	resolveIntegerCount,
 } from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
@@ -414,6 +416,12 @@ function compileOrderItem(
 			ctx.validator?.validateColumn(ctx.currentFromTable, field);
 		}
 		return { field, direction: item.direction };
+	}
+	if (item.expression.type === 'namedParam') {
+		return {
+			expression: expressionToValue(item.expression, ctx) as ExpressionIntent,
+			direction: item.direction,
+		};
 	}
 	const sqlExpr = expressionToSql(item.expression);
 	return { field: sqlExpr, direction: item.direction };

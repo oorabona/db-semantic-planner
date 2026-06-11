@@ -14,7 +14,7 @@ import type {
 	WhereJsonExistsIntent,
 	WhereRangeIntent,
 } from '@dbsp/types';
-import { markParamValueProvenance } from '@dbsp/types/internal';
+import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlAnyExpression,
@@ -49,15 +49,6 @@ import type { CompilerContext, CompilerFns } from './types.js';
 
 /** Maximum number of items allowed in an ANY(:param) array to prevent memory pressure. */
 export const MAX_ANY_ITEMS = 10000;
-
-function markIfNamedParamValue<T extends object>(
-	intent: T,
-	valueExpr: NqlExpression,
-): T {
-	return valueExpr.type === 'namedParam'
-		? markParamValueProvenance(intent)
-		: intent;
-}
 
 function compileLogical(
 	expr: NqlExpression,
@@ -152,7 +143,7 @@ function compileComparison(
 			jsonPath: jsonLeft.path,
 			jsonMode: jsonLeft.mode,
 		} satisfies WhereComparisonIntent;
-		return markIfNamedParamValue(intent, comp.right);
+		return intent;
 	}
 
 	// JSON function on LHS: json_extract_text(data, 'key') = 'val'
@@ -197,7 +188,7 @@ function compileComparison(
 				jsonPath: keys,
 				jsonMode: fn === 'json_extract' ? 'json' : 'text',
 			} satisfies WhereComparisonIntent;
-			return markIfNamedParamValue(intent, comp.right);
+			return intent;
 		}
 	}
 
@@ -234,7 +225,7 @@ function compileComparison(
 		operator,
 		value,
 	} satisfies WhereComparisonIntent;
-	return markIfNamedParamValue(intent, comp.right);
+	return intent;
 }
 
 function compileRange(
@@ -418,30 +409,36 @@ function compileBetween(
 		aliasContext,
 		outerAliases,
 	);
+	const lowerValue = unwrapExpressionValueIntent(lower);
+	const upperValue = unwrapExpressionValueIntent(upper);
 
 	if (
-		lower !== null &&
-		typeof lower !== 'number' &&
-		typeof lower !== 'string' &&
-		!(lower instanceof Date)
+		lowerValue !== null &&
+		typeof lowerValue !== 'number' &&
+		typeof lowerValue !== 'string' &&
+		!(lowerValue instanceof Date)
 	) {
 		// L-6: actionable message — tell the user what the lower bound was
 		const got =
-			typeof lower === 'object' ? 'path reference' : JSON.stringify(lower);
+			typeof lowerValue === 'object'
+				? 'path reference'
+				: JSON.stringify(lowerValue);
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`BETWEEN lower bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
 		);
 	}
 	if (
-		upper !== null &&
-		typeof upper !== 'number' &&
-		typeof upper !== 'string' &&
-		!(upper instanceof Date)
+		upperValue !== null &&
+		typeof upperValue !== 'number' &&
+		typeof upperValue !== 'string' &&
+		!(upperValue instanceof Date)
 	) {
 		// L-6: actionable message — tell the user what the upper bound was
 		const got =
-			typeof upper === 'object' ? 'path reference' : JSON.stringify(upper);
+			typeof upperValue === 'object'
+				? 'path reference'
+				: JSON.stringify(upperValue);
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`BETWEEN upper bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
@@ -520,7 +517,7 @@ function compileJson(
 				value: jsonValue,
 				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
-			return markIfNamedParamValue(intent, expr.args[1]!);
+			return intent;
 		}
 		if (fn === 'json_exists') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
@@ -593,7 +590,7 @@ function compileJson(
 		value: jsonValue,
 		reversed: jsonComp.operator === '<@',
 	} satisfies WhereJsonContainsIntent;
-	return markIfNamedParamValue(intent, jsonComp.right);
+	return intent;
 }
 
 function compileRelationFilter(

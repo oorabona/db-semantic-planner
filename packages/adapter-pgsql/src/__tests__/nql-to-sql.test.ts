@@ -11,10 +11,13 @@
 
 import {
 	createOrm,
+	exists,
+	gt,
 	isDeleteIntent,
 	isInsertIntent,
 	isUpdateIntent,
 	isUpsertIntent,
+	outerRef,
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	type QueryIntent,
@@ -663,6 +666,21 @@ describe('NQL → SQL compile-only pipeline', () => {
 		]);
 	});
 
+	it('binds fieldRef-shaped params in simple CASE match values', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'x' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			"users | select case status when :p then 'a' else 'b' end as label",
+			{ p: fieldRefShaped },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).not.toContain('users.x');
+		expect(params).toEqual([fieldRefShaped, 'a', 'b']);
+	});
+
 	it('binds named-param null in comparisons instead of emitting literal SQL NULL', () => {
 		const { sql, params } = nqlToSQLWithNamedParams('users | where name = :p', {
 			p: null,
@@ -696,6 +714,51 @@ describe('NQL → SQL compile-only pipeline', () => {
 		expect(sql).toContain('$2');
 		expect(params).toEqual([true, forged, 'FALLBACK']);
 		expect(params).not.toContain('UNWRAPPED');
+	});
+
+	it('binds named params in HAVING, ORDER BY, BETWEEN, and IN-list positions', () => {
+		const having = nqlToSQLWithNamedParams(
+			'users | group by status | where status = :s | select status',
+			{ s: 'active' },
+		);
+		expect(having.sql).toContain('having users.status = $1');
+		expect(having.params).toEqual(['active']);
+
+		const orderBy = nqlToSQLWithNamedParams(
+			'users | select id | order by :rank desc',
+			{ rank: 10 },
+		);
+		expect(orderBy.sql).toContain('order by $1 desc');
+		expect(orderBy.params).toEqual([10]);
+
+		const between = nqlToSQLWithNamedParams(
+			'users | where price between :low and :high',
+			{ low: 10, high: 20 },
+		);
+		expect(between.sql).toContain('users.price between $1 and $2');
+		expect(between.params).toEqual([10, 20]);
+
+		const inList = nqlToSQLWithNamedParams('users | where status in (:a, :b)', {
+			a: 'active',
+			b: 'pending',
+		});
+		expect(inList.sql).toMatch(/users\.status = any\s*\(\$1\)/);
+		expect(inList.params).toEqual([['active', 'pending']]);
+	});
+
+	it('keeps builder-origin outerRef structure unbound', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const dump = orm
+			.select('departments')
+			.where(exists('employees', { where: gt('salary', outerRef('budget')) }))
+			.dump();
+		const sql = normalizeSQL(dump.sql);
+
+		expect(sql).toContain('exists');
+		expect(sql).toContain('employees_exists_0.salary > departments.budget');
+		expect(sql).not.toContain('$1');
+		expect(dump.params).toEqual([]);
 	});
 
 	it('throws a structured error for unknown SELECT expression kinds', () => {

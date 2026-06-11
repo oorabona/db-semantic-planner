@@ -16,6 +16,7 @@ import {
 	NQL_SELECT_WINDOW_FUNCTIONS,
 	type QueryIntent,
 } from '@dbsp/types';
+import { isParamExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -50,6 +51,7 @@ import {
 	registerWhereDispatcherFactory,
 } from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
+import { bindParameter } from './handlers/expression/param-value.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
@@ -1264,7 +1266,10 @@ export class PlanCompiler {
 					if (!('value' in record)) {
 						throw new Error('NQL param expression requires a value');
 					}
-					return compileValue(record.value, state);
+					return bindParameter(
+						isParamExpressionValueIntent(record) ? record : record.value,
+						state,
+					);
 
 				case 'literal':
 					if (!('value' in record)) {
