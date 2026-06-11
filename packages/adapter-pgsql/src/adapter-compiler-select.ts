@@ -245,6 +245,7 @@ function compileJoinIntents(
 	rootTable: string,
 	schemaName: string | undefined,
 	deps: AdapterCompilerDeps,
+	paramProvenance: CompileOptions['paramProvenance'] | undefined,
 ): PlanDecision[] {
 	if (joins.length === 0) return [];
 
@@ -329,6 +330,7 @@ function compileJoinIntents(
 				outerTable: alias,
 				...(schemaName !== undefined && { schemaName }),
 				...(model !== undefined && { model }),
+				...(paramProvenance !== undefined && { paramProvenance }),
 				compileSubquery: () => {
 					throw new Error(
 						'Subquery in BatchValues JOIN ON condition is not supported.',
@@ -385,6 +387,7 @@ function compileJoinIntents(
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
 				...(model !== undefined && { model }),
+				...(paramProvenance !== undefined && { paramProvenance }),
 				compileSubquery: () => {
 					throw new Error('Subquery in JOIN ON condition is not supported.');
 				},
@@ -707,6 +710,9 @@ export function compileSelect<T = unknown>(
 		...(schemaName && { schema: schemaName }),
 		defaultPkColumnName: deps.defaultPk,
 		deriveFkColumnName: deps.deriveFk,
+		...(options?.paramProvenance !== undefined && {
+			paramProvenance: options.paramProvenance,
+		}),
 		...(resolvedModelForCompiler != null && {
 			model: resolvedModelForCompiler,
 		}),
@@ -735,7 +741,13 @@ export function compileSelect<T = unknown>(
 
 	if (execIntent) {
 		// Real usage: convert intent to decisions
-		let decisions = intentToDecisions(execIntent, plan.rootTable);
+		let decisions = intentToDecisions(
+			execIntent,
+			plan.rootTable,
+			options?.paramProvenance !== undefined
+				? { paramProvenance: options.paramProvenance }
+				: undefined,
+		);
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
@@ -865,6 +877,7 @@ export function compileSelect<T = unknown>(
 						plan.rootTable,
 						schemaName,
 						deps,
+						options?.paramProvenance,
 					)
 				: [];
 

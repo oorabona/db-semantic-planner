@@ -120,6 +120,18 @@ export interface CompileOptionsBase {
 }
 
 /**
+ * Adapter-facing sidecar metadata for intent positions that originated from
+ * bound NQL parameters. The clean public intent carries only the raw value;
+ * this sidecar lets adapters distinguish a bound value from a structural node
+ * at ambiguous positions such as comparison RHS values.
+ *
+ * @internal
+ */
+export interface ParamValueProvenance {
+	isParamValue(container: object, key: PropertyKey): boolean;
+}
+
+/**
  * Options for streaming query results.
  */
 export interface AdapterStreamOptions {
@@ -154,6 +166,12 @@ export type DbCasing = 'snake_case' | 'camelCase' | 'preserve';
 export interface CompileOptions extends CompileOptionsBase {
 	/** Model IR for relation lookups during compilation */
 	readonly model?: ModelIR;
+	/**
+	 * @internal Sidecar metadata marking clean intent value positions that came
+	 * from bound NQL parameters. Adapters use it only for value-vs-structure
+	 * compilation decisions; it is never exposed on the intent tree.
+	 */
+	readonly paramProvenance?: ParamValueProvenance;
 	/**
 	 * Alias mode for included relation columns.
 	 * @default 'always'

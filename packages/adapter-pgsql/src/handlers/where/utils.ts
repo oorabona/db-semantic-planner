@@ -4,7 +4,6 @@
  */
 
 import { isFieldRef } from '@dbsp/types';
-import { isParamExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
@@ -37,11 +36,6 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
  * If value has a pre-assigned `paramIndex` (from PlanDecision), use it directly.
  */
 export function buildParamRef(value: unknown, state: CompilerState): Node {
-	if (isParamExpressionValueIntent(value)) {
-		state.paramIndex++;
-		state.parameters.push(value.value);
-		return createParamRef(state.paramIndex);
-	}
 	if (isParamRef(value)) {
 		state.parameters.push(value.value);
 		return createParamRef(value.paramIndex);
@@ -60,10 +54,11 @@ export function compileValue(
 	value: unknown,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
+	forceParam = false,
 ): Node {
-	if (isParamExpressionValueIntent(value)) {
+	if (forceParam) {
 		const idx = ++state.paramIndex;
-		state.parameters.push(value.value);
+		state.parameters.push(value);
 		return columnType
 			? createTypeCastParamRef(idx, columnType)
 			: createParamRef(idx);
@@ -97,9 +92,10 @@ export function compileValueOrFieldRef(
 	ctx: CompilerContext,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
+	forceParam = false,
 ): Node {
-	if (isParamExpressionValueIntent(value)) {
-		return compileValue(value, state, columnType);
+	if (forceParam) {
+		return compileValue(value, state, columnType, true);
 	}
 	if (isFieldRef(value)) {
 		const alias =

@@ -54,7 +54,13 @@ export const comparisonHandler: WhereHandler = {
 
 		const left = buildColumnRef(column, ctx);
 		const columnType = resolveColumnPgType(column, ctx);
-		const right = compileValueOrFieldRef(value, ctx, state, columnType);
+		const right = compileValueOrFieldRef(
+			value,
+			ctx,
+			state,
+			columnType,
+			decision.valueIsParam === true,
+		);
 
 		switch (operator) {
 			case COMPARISON_OPERATORS.EQ:

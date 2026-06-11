@@ -22,10 +22,6 @@ import {
 	NQL_SELECT_JSON_FUNCTIONS,
 	NQL_SELECT_SCALAR_FUNCTIONS,
 } from '@dbsp/types';
-import {
-	markExpressionValueIntent,
-	unwrapExpressionValueIntent,
-} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlCaseExpression,
@@ -55,10 +51,10 @@ function paramExpressionIntent(
 ): ExpressionIntent {
 	const intent: Record<string, unknown> = {
 		kind: 'param',
-		value: unwrapExpressionValueIntent(value),
+		value,
 	};
 	if (alias !== undefined) intent.as = alias;
-	return markExpressionValueIntent(intent) as unknown as ExpressionIntent;
+	return intent as unknown as ExpressionIntent;
 }
 
 function literalExpressionIntent(
@@ -70,7 +66,7 @@ function literalExpressionIntent(
 		value,
 	};
 	if (alias !== undefined) intent.as = alias;
-	return markExpressionValueIntent(intent) as unknown as ExpressionIntent;
+	return intent as unknown as ExpressionIntent;
 }
 
 function resolveLagLeadOffset(
@@ -620,17 +616,24 @@ function compileCaseExpression(
 			throw new Error('Simple CASE subject must be a column reference');
 		}
 		/* v8 ignore stop -- @preserve */
+		const when = caseExpr.whenClauses.map((wc) => {
+			const condition = {
+				kind: 'comparison' as const,
+				field: subjectField,
+				operator: 'eq' as const,
+				value: expressionToValue(wc.condition, ctx),
+			};
+			if (wc.condition.type === 'namedParam') {
+				ctx.paramProvenance.markParamValue(condition, 'value');
+			}
+			return {
+				condition,
+				result: compileExpressionToIntent(wc.result, ctx, fns),
+			};
+		});
 		return {
 			kind: 'case' as const,
-			when: caseExpr.whenClauses.map((wc) => ({
-				condition: {
-					kind: 'comparison' as const,
-					field: subjectField,
-					operator: 'eq',
-					value: expressionToValue(wc.condition, ctx),
-				},
-				result: compileExpressionToIntent(wc.result, ctx, fns),
-			})),
+			when,
 			...(caseExpr.elseClause && {
 				else: compileExpressionToIntent(caseExpr.elseClause, ctx, fns),
 			}),
@@ -672,12 +675,16 @@ function compileExpressionToIntent(
 		/* v8 ignore stop -- @preserve */
 		const column = (cmp.left as NqlPathExpression).segments.join('.');
 		const value = expressionToValue(cmp.right, ctx);
-		return {
-			kind: 'comparison',
+		const intent = {
+			kind: 'comparison' as const,
 			column,
 			operator: cmp.operator,
 			value,
 		};
+		if (cmp.right.type === 'namedParam') {
+			ctx.paramProvenance.markParamValue(intent, 'value');
+		}
+		return intent;
 	}
 
 	// Handle literal values

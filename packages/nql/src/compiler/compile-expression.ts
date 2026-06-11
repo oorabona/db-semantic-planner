@@ -14,7 +14,6 @@ import type {
 	WhereJsonExistsIntent,
 	WhereRangeIntent,
 } from '@dbsp/types';
-import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlAnyExpression,
@@ -143,6 +142,9 @@ function compileComparison(
 			jsonPath: jsonLeft.path,
 			jsonMode: jsonLeft.mode,
 		} satisfies WhereComparisonIntent;
+		if (comp.right.type === 'namedParam') {
+			ctx.paramProvenance.markParamValue(intent, 'value');
+		}
 		return intent;
 	}
 
@@ -188,6 +190,9 @@ function compileComparison(
 				jsonPath: keys,
 				jsonMode: fn === 'json_extract' ? 'json' : 'text',
 			} satisfies WhereComparisonIntent;
+			if (comp.right.type === 'namedParam') {
+				ctx.paramProvenance.markParamValue(intent, 'value');
+			}
 			return intent;
 		}
 	}
@@ -219,12 +224,15 @@ function compileComparison(
 	const operator = mapComparisonOperator(comp.operator);
 	const value = resolveFilterValue(comp.right, ctx, aliasContext, outerAliases);
 
-	const intent = {
+	const intent: WhereComparisonIntent = {
 		kind: 'comparison',
 		field,
 		operator,
 		value,
-	} satisfies WhereComparisonIntent;
+	};
+	if (comp.right.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(intent, 'value');
+	}
 	return intent;
 }
 
@@ -265,12 +273,16 @@ function compileRange(
 		);
 	}
 	/* v8 ignore stop -- @preserve */
-	return {
+	const result: WhereRangeIntent = {
 		kind: 'range',
 		field,
 		operator: rangeExpr.operator,
-		value: rangeValue,
-	} as WhereRangeIntent;
+		value: rangeValue as WhereRangeIntent['value'],
+	};
+	if (rangeExpr.scalar?.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(result, 'value');
+	}
+	return result;
 }
 
 function compileMembership(
@@ -300,7 +312,9 @@ function compileMembership(
 			);
 		}
 		const values: readonly unknown[] = rawValues;
-		return { kind: 'any', field, values } satisfies WhereAnyIntent;
+		const result = { kind: 'any', field, values } satisfies WhereAnyIntent;
+		ctx.paramProvenance.markParamValue(result, 'values');
+		return result;
 	}
 
 	// in
@@ -321,6 +335,11 @@ function compileMembership(
 		values = inExpr.values.map((v) =>
 			resolveFilterValue(v, ctx, aliasContext, outerAliases),
 		);
+		for (let i = 0; i < inExpr.values.length; i++) {
+			if (inExpr.values[i]?.type === 'namedParam') {
+				ctx.paramProvenance.markParamValue(values, i);
+			}
+		}
 
 		// Amendment 11: detect if ALL values are date range patterns → expand to OR of ANDs
 		const dateRangeValues = values.filter(
@@ -409,17 +428,24 @@ function compileBetween(
 		aliasContext,
 		outerAliases,
 	);
-	const lowerValue = unwrapExpressionValueIntent(lower);
-	const upperValue = unwrapExpressionValueIntent(upper);
+	const lowerValue = lower;
+	const upperValue = upper;
 
 	assertBetweenBoundValueAllowed('lower', between.low, lowerValue);
 	assertBetweenBoundValueAllowed('upper', between.high, upperValue);
 
+	const value = { lower, upper };
+	if (between.low.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(value, 'lower');
+	}
+	if (between.high.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(value, 'upper');
+	}
 	return {
 		kind: 'range',
 		field,
 		operator: 'between',
-		value: { lower, upper },
+		value,
 	};
 }
 
@@ -509,6 +535,9 @@ function compileJson(
 				value: jsonValue,
 				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
+			if (expr.args[1]?.type === 'namedParam') {
+				ctx.paramProvenance.markParamValue(intent, 'value');
+			}
 			return intent;
 		}
 		if (fn === 'json_exists') {
@@ -582,6 +611,9 @@ function compileJson(
 		value: jsonValue,
 		reversed: jsonComp.operator === '<@',
 	} satisfies WhereJsonContainsIntent;
+	if (jsonComp.right.type === 'namedParam') {
+		ctx.paramProvenance.markParamValue(intent, 'value');
+	}
 	return intent;
 }
 

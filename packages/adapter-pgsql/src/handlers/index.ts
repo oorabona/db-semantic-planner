@@ -5,7 +5,6 @@
  * Handlers are registered at module initialization and looked up by operator/type.
  */
 
-import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import type {
@@ -207,7 +206,30 @@ interface RawDecisionInput extends Decision {
  * Normalize a WhereIntent (IntentAST format) into a Decision (handler format).
  * WhereIntent uses `kind` + `field`, Decision uses `type` + `column` + `operator`.
  */
-function normalizeToDecision(input: Decision): Decision {
+function isParamValuePosition(
+	ctx: CompilerContext | undefined,
+	container: unknown,
+	key: PropertyKey,
+): boolean {
+	return (
+		typeof container === 'object' &&
+		container !== null &&
+		ctx?.paramProvenance?.isParamValue(container, key) === true
+	);
+}
+
+function markDecisionParamValue(
+	decision: Record<string, unknown>,
+	ctx: CompilerContext | undefined,
+	container: unknown,
+	key: PropertyKey,
+): void {
+	if (isParamValuePosition(ctx, container, key)) {
+		decision.valueIsParam = true;
+	}
+}
+
+function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 	// If it already has `column`, it's already a Decision.
 	// BUT: if jsonPath is present, reroute to jsonComparison handler
 	// (mapToHandlerDecision sets column but keeps the original operator like 'eq')
@@ -219,6 +241,7 @@ function normalizeToDecision(input: Decision): Decision {
 				column: input.column,
 				operator: 'jsonComparison',
 				value: input.value,
+				...(input.valueIsParam === true && { valueIsParam: true }),
 				jsonPath: raw.jsonPath,
 				jsonMode: raw.jsonMode ?? 'text',
 			};
@@ -242,7 +265,7 @@ function normalizeToDecision(input: Decision): Decision {
 			type: op,
 			operator: op,
 			conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-				normalizeToDecision(c as Decision),
+				normalizeToDecision(c as Decision, ctx),
 			),
 		};
 	}
@@ -259,28 +282,32 @@ function normalizeToDecision(input: Decision): Decision {
 		case 'comparison': {
 			if (raw.jsonPath) {
 				// Route to jsonComparison handler when jsonPath is present
-				return {
+				const decision = {
 					type: 'where',
 					column: raw.field as string,
 					operator: 'jsonComparison',
-					value: wrapParamValueIfProvenanceMarked(raw, raw.value),
+					value: raw.value,
 					jsonPath: raw.jsonPath as readonly string[],
 					jsonMode: (raw.jsonMode as 'json' | 'text') ?? 'text',
 				};
+				markDecisionParamValue(decision, ctx, raw, 'value');
+				return decision as Decision;
 			}
-			return {
+			const decision = {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.operator as string,
-				value: wrapParamValueIfProvenanceMarked(raw, raw.value),
+				value: raw.value,
 			};
+			markDecisionParamValue(decision, ctx, raw, 'value');
+			return decision as Decision;
 		}
 		case 'and':
 			return {
 				type: 'and',
 				operator: 'and',
 				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-					normalizeToDecision(c as Decision),
+					normalizeToDecision(c as Decision, ctx),
 				),
 			};
 		case 'or':
@@ -288,14 +315,14 @@ function normalizeToDecision(input: Decision): Decision {
 				type: 'or',
 				operator: 'or',
 				conditions: ((raw.conditions as unknown[]) ?? []).map((c) =>
-					normalizeToDecision(c as Decision),
+					normalizeToDecision(c as Decision, ctx),
 				),
 			};
 		case 'not':
 			return {
 				type: 'not',
 				operator: 'not',
-				conditions: [normalizeToDecision(raw.condition as Decision)],
+				conditions: [normalizeToDecision(raw.condition as Decision, ctx)],
 			};
 		case 'null':
 			return {
@@ -329,7 +356,7 @@ function normalizeToDecision(input: Decision): Decision {
 							? (rawSelect.fields?.[0] ?? '*')
 							: '*';
 				const subConditions = sub.where
-					? [normalizeToDecision(sub.where as Decision)]
+					? [normalizeToDecision(sub.where as Decision, ctx)]
 					: [];
 				const rawLimit = sub.limit as number | undefined;
 				const rawOrderBy = sub.orderBy as
@@ -370,13 +397,16 @@ function normalizeToDecision(input: Decision): Decision {
 				operator: raw.caseInsensitive ? 'ilike' : 'like',
 				value: raw.pattern,
 			};
-		case 'jsonContains':
-			return {
+		case 'jsonContains': {
+			const decision = {
 				type: 'where',
 				column: raw.field as string,
 				operator: raw.reversed ? 'jsonContainedBy' : 'jsonContains',
-				value: wrapParamValueIfProvenanceMarked(raw, raw.value),
+				value: raw.value,
 			};
+			markDecisionParamValue(decision, ctx, raw, 'value');
+			return decision as Decision;
+		}
 		case 'jsonExists':
 			return {
 				type: 'where',
@@ -391,7 +421,7 @@ function normalizeToDecision(input: Decision): Decision {
 			// through the planner, so we normalize them here for the EXISTS/NOT EXISTS handlers.
 			const relation = raw.relation as string;
 			const conditions = raw.where
-				? [normalizeToDecision(raw.where as Decision)]
+				? [normalizeToDecision(raw.where as Decision, ctx)]
 				: undefined;
 			// Prefer explicit targetTable if already resolved (e.g. by compileDelete's
 			// resolveExistsIntent which maps the logical relation name → real table name).
@@ -440,7 +470,7 @@ export function createWhereDispatcher(): WhereDispatcher {
 		state: CompilerState,
 	): Node => {
 		ensureHandlersRegistered();
-		const normalized = normalizeToDecision(decision);
+		const normalized = normalizeToDecision(decision, ctx);
 		const rawOperator = normalized.operator ?? '=';
 		const operator = OPERATOR_ALIASES[rawOperator] ?? rawOperator;
 		const handler = getWhereHandler(operator);

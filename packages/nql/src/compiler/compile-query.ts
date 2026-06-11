@@ -419,7 +419,10 @@ function compileOrderItem(
 	}
 	if (item.expression.type === 'namedParam') {
 		return {
-			expression: expressionToValue(item.expression, ctx) as ExpressionIntent,
+			expression: {
+				kind: 'param',
+				value: expressionToValue(item.expression, ctx),
+			} as ExpressionIntent,
 			direction: item.direction,
 		};
 	}

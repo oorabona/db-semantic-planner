@@ -85,7 +85,12 @@ function nqlToSQL(nql: string): string {
 	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: testSchema.model });
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	});
 
 	return normalizeSQL(result.sql);
 }
@@ -109,7 +114,12 @@ function nqlToSQLWithParams(nql: string): {
 	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: testSchema.model });
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
@@ -136,7 +146,12 @@ function nqlToSQLWithNamedParams(
 	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: testSchema.model });
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+		...(compiled.ast.paramProvenance && {
+			paramProvenance: compiled.ast.paramProvenance,
+		}),
+	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }

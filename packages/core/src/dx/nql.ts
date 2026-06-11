@@ -21,15 +21,12 @@ import {
 	NqlLexer,
 	compile as nqlCompile,
 } from '@dbsp/nql';
+import type { ParamValueProvenance } from '@dbsp/types';
 import type { Adapter, Dump } from '../adapter.js';
 import type { QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
-import {
-	stripIntentProvenance,
-	stripPlanReportProvenance,
-} from './intent-provenance.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 
 // ============================================================================
@@ -307,7 +304,7 @@ export function createNqlTag(
  */
 class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private _intent: QueryIntent | undefined;
-	private _publicIntent: QueryIntent | undefined;
+	private _paramProvenance: ParamValueProvenance | undefined;
 	private readonly query: string;
 	private readonly params: Readonly<Record<string, unknown>>;
 	private readonly hasBoundParams: boolean;
@@ -383,14 +380,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
 		// structurally identical to core's re-export.
 		this._intent = result.ast.query as QueryIntent;
+		this._paramProvenance = result.ast.paramProvenance;
 		return this._intent;
 	}
 
 	toIntentIR(): QueryIntent {
-		if (!this._publicIntent) {
-			this._publicIntent = stripIntentProvenance(this.compile());
-		}
-		return this._publicIntent;
+		return this.compile();
 	}
 
 	private planInternal(): PlanReport {
@@ -399,26 +394,30 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	}
 
 	plan(): PlanReport {
-		return stripPlanReportProvenance(this.planInternal());
+		return this.planInternal();
 	}
 
 	dump(meta?: DumpMetaInput): Dump {
 		const planReport = this.planInternal();
-		const publicPlanReport = stripPlanReportProvenance(planReport);
 
 		if (!this.adapter) {
 			return {
-				plan: publicPlanReport,
+				plan: planReport,
 				sql: '[No adapter - SQL not available]',
 				params: [],
 				...(meta !== undefined && { meta }),
 			};
 		}
 
-		const compiled = this.adapter.compile<T>(planReport);
+		const compiled = this.adapter.compile<T>(
+			planReport,
+			this._paramProvenance
+				? { paramProvenance: this._paramProvenance }
+				: undefined,
+		);
 
 		try {
-			return this.adapter.createDump(publicPlanReport, compiled, meta);
+			return this.adapter.createDump(planReport, compiled, meta);
 		} catch (err) {
 			if (
 				err instanceof Error &&
@@ -426,7 +425,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			) {
 				// Fallback for mock adapters that don't implement createDump
 				const base: Dump = {
-					plan: publicPlanReport,
+					plan: planReport,
 					sql: compiled.sql,
 					params: compiled.parameters as readonly unknown[],
 				};
@@ -458,7 +457,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 
 		const planReport = this.planInternal();
-		const compiled = this.adapter.compile<T>(planReport);
+		const compiled = this.adapter.compile<T>(
+			planReport,
+			this._paramProvenance
+				? { paramProvenance: this._paramProvenance }
+				: undefined,
+		);
 		return this.adapter.execute(compiled);
 	}
 

@@ -29,7 +29,12 @@ export const jsonContainsHandler: WhereHandler = {
 		}
 
 		const left = buildColumnRef(column, ctx);
-		const right = compileValue(decision.value, state);
+		const right = compileValue(
+			decision.value,
+			state,
+			undefined,
+			decision.valueIsParam === true,
+		);
 		const op = decision.operator === 'jsonContainedBy' ? '<@' : '@>';
 
 		return {
@@ -114,7 +119,12 @@ export const jsonComparisonHandler: WhereHandler = {
 
 		// Now apply the comparison operator
 		const operator = decision.operator;
-		const right = compileValue(decision.value, state);
+		const right = compileValue(
+			decision.value,
+			state,
+			undefined,
+			decision.valueIsParam === true,
+		);
 
 		// Map the intent operator to SQL
 		const opMap: Record<string, string> = {

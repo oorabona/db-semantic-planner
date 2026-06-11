@@ -4,7 +4,6 @@
  * Handles: between
  */
 
-import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { createParamRef } from '../../param-ref.js';
 import type {
@@ -39,8 +38,8 @@ export const betweenHandler: WhereHandler = {
 		}
 
 		const columnNode = buildColumnRef(column, ctx);
-		const minValue = unwrapExpressionValueIntent(range[0]);
-		const maxValue = unwrapExpressionValueIntent(range[1]);
+		const minValue = range[0];
+		const maxValue = range[1];
 
 		const minIdx = ++state.paramIndex;
 		state.parameters.push(minValue);

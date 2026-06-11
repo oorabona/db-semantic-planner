@@ -4,7 +4,6 @@
  * Handles: in, notIn
  */
 
-import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
@@ -27,9 +26,8 @@ function createInExpr(
 	values: unknown[],
 	columnType?: string,
 ): Node {
-	const paramValues = values.map((value) => unwrapExpressionValueIntent(value));
 	state.paramIndex++;
-	state.parameters.push(paramValues);
+	state.parameters.push(values);
 	const paramNode = columnType
 		? createTypeCastParamRef(state.paramIndex, columnType, true)
 		: createParamRef(state.paramIndex);
@@ -53,9 +51,8 @@ function createNotInExpr(
 	values: unknown[],
 	columnType?: string,
 ): Node {
-	const paramValues = values.map((value) => unwrapExpressionValueIntent(value));
 	state.paramIndex++;
-	state.parameters.push(paramValues);
+	state.parameters.push(values);
 	const paramNode = columnType
 		? createTypeCastParamRef(state.paramIndex, columnType, true)
 		: createParamRef(state.paramIndex);

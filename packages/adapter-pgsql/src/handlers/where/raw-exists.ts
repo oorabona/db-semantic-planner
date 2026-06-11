@@ -59,6 +59,8 @@ export const rawExistsHandler: WhereHandler = {
 			state.paramIndex,
 			ctx.naming,
 			ctx.schema,
+			'rawExists',
+			ctx.paramProvenance,
 		);
 
 		if (innerParams) {

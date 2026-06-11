@@ -56,6 +56,7 @@ import type {
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
+import { createParamValueProvenance } from '@dbsp/types/internal';
 import type {
 	NqlMutationPipeline,
 	NqlProgram,
@@ -127,6 +128,7 @@ export class NqlCompiler {
 		const params = options?.params ?? {};
 		const allowInternalParams = options?.allowInternalParams ?? false;
 		validateParamsMap(params, { allowInternalParams });
+		const paramProvenance = createParamValueProvenance();
 
 		this.ctx = {
 			currentFromTable: undefined,
@@ -138,6 +140,7 @@ export class NqlCompiler {
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
 			allowInternalParams,
+			paramProvenance,
 		};
 
 		// Wire up cross-module function references
@@ -162,7 +165,9 @@ export class NqlCompiler {
 		}
 
 		if (program.statements.length === 1) {
-			return this.compileSingleStatement(program.statements[0]!);
+			return this.withParamProvenance(
+				this.compileSingleStatement(program.statements[0]!),
+			);
 		}
 
 		// Multi-statement: require that every statement except the last is explicitly bound
@@ -226,13 +231,19 @@ export class NqlCompiler {
 
 		const hasMutationBindings = mutationBindings.size > 0;
 		if (bindings.size > 0) {
-			return {
+			return this.withParamProvenance({
 				...lastResult,
 				bindings,
 				...(hasMutationBindings && { mutationBindings }),
-			};
+			});
 		}
-		return lastResult;
+		return this.withParamProvenance(lastResult);
+	}
+
+	private withParamProvenance(result: CompileResult): CompileResult {
+		return this.ctx.paramProvenance.hasParamValues()
+			? { ...result, paramProvenance: this.ctx.paramProvenance }
+			: result;
 	}
 
 	private compileSingleStatement(

@@ -6,10 +6,12 @@
 import type {
 	CteQueryIntent,
 	MutationIntent,
+	ParamValueProvenance,
 	QueryIntent,
 	SetOperationIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import type { MutableParamValueProvenance } from '@dbsp/types/internal';
 import type { NqlExpression } from '../parser/ast.js';
 import type { ColumnValidator } from './column-validator.js';
 
@@ -30,6 +32,13 @@ export interface CompileResult {
 	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
 	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
 	readonly setOperation?: SetOperationIntent;
+	/**
+	 * Adapter-facing sidecar for clean intent positions that originated from
+	 * bound named parameters. The intent tree itself contains only raw values.
+	 *
+	 * @internal
+	 */
+	readonly paramProvenance?: ParamValueProvenance;
 }
 
 /**
@@ -86,6 +95,8 @@ export interface CompilerContext {
 	readonly allowUnfilteredMutations: boolean;
 	/** @internal Allows generated __pN params from the core nql tag only. */
 	readonly allowInternalParams: boolean;
+	/** @internal Sidecar provenance for bound named-param value positions. */
+	readonly paramProvenance: MutableParamValueProvenance;
 }
 
 /**

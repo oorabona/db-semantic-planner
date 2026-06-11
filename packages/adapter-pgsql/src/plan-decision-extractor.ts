@@ -444,6 +444,7 @@ export function convertDottedFieldsToExists(
 					column: targetColumn,
 					operator: d.operator,
 					value: d.value,
+					...(d.valueIsParam === true && { valueIsParam: true }),
 					table: resolved.target,
 				},
 			],

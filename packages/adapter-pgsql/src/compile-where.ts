@@ -11,6 +11,7 @@
 import type {
 	ExpressionIntent,
 	ModelIR,
+	ParamValueProvenance,
 	QueryIntent,
 	RefExpressionIntent,
 	WhereAndIntent,
@@ -23,7 +24,6 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
-import { wrapParamValueIfProvenanceMarked } from '@dbsp/types/internal';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	andExpr,
@@ -130,6 +130,8 @@ export type WhereCompilerCtx = {
 	 * Used for JOIN ON conditions where the alias differs from the root table.
 	 */
 	readonly currentAlias?: string;
+	/** Adapter-facing sidecar for NQL bound-param value positions. */
+	readonly paramProvenance?: ParamValueProvenance;
 };
 
 // ============================================================================
@@ -145,6 +147,9 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
+		...(ctx.paramProvenance !== undefined && {
+			paramProvenance: ctx.paramProvenance,
+		}),
 	};
 }
 
@@ -170,6 +175,7 @@ export function buildSubqueryFromIntent(
 	naming: NamingPlugin = identityNaming,
 	schemaName?: string,
 	use: 'rawExists' | 'scalar-direct' = 'rawExists',
+	paramProvenance?: ParamValueProvenance,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
@@ -190,7 +196,7 @@ export function buildSubqueryFromIntent(
 	// buildSubqueryFromIntent builds a fresh inner WhereCompilerCtx with no outer alias,
 	// so SubqueryRefIntent values fall back to being serialized as object $N parameters,
 	// producing invalid SQL at best and a runtime panic at worst.
-	if (intent.where && containsOuterRef(intent.where)) {
+	if (intent.where && containsOuterRef(intent.where, paramProvenance)) {
 		throw new Error(
 			'buildSubqueryFromIntent: correlated subqueries (outerRef inside the inner WHERE) are not yet supported. ' +
 				'Workaround: use exists("relation", { where: ... }) when a schema relation exists, or wait for the rawExists correlation pipeline.',
@@ -269,6 +275,7 @@ export function buildSubqueryFromIntent(
 			aliases: new Map(),
 			paramState: innerState,
 			naming,
+			...(paramProvenance !== undefined && { paramProvenance }),
 			compileSubquery: (_nestedIntent, _nestedOffset) => {
 				throw new Error(
 					'buildSubqueryFromIntent: nested subquery not supported',
@@ -730,7 +737,7 @@ function handleRawExistsIntent(
 	assertNoUnsupportedSubqueryModifiers(subIntent as QueryIntent, 'rawExists');
 	if (
 		(subIntent as QueryIntent).where &&
-		containsOuterRef((subIntent as QueryIntent).where!)
+		containsOuterRef((subIntent as QueryIntent).where!, ctx.paramProvenance)
 	) {
 		const kindLabel =
 			(intent as { kind?: string }).kind === 'rawNotExists'
@@ -840,6 +847,10 @@ function handleComparisonWithExprRef(
 	const cmpIntent = intent as WhereComparisonIntent;
 	const v = cmpIntent.value;
 
+	if (ctx.paramProvenance?.isParamValue(cmpIntent, 'value') === true) {
+		return null;
+	}
+
 	if (v === null || typeof v !== 'object') return null;
 
 	const rec = v as Record<string, unknown>;
@@ -932,7 +943,10 @@ export function compileWhereIntent(
 				...intent,
 				column: rawIntent.field,
 				...('value' in rawIntent && {
-					value: wrapParamValueIfProvenanceMarked(intent, rawIntent.value),
+					value: rawIntent.value,
+					...(ctx.paramProvenance?.isParamValue(intent, 'value') === true && {
+						valueIsParam: true,
+					}),
 				}),
 			} as unknown as Decision)
 		: (intent as unknown as Decision);

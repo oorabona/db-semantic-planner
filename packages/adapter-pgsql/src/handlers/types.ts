@@ -5,7 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
-import type { ModelIR } from '@dbsp/types';
+import type { ModelIR, ParamValueProvenance } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
@@ -65,6 +65,8 @@ export interface CompilerContext {
 	 * PostgreSQL type inference ambiguity for nullable columns.
 	 */
 	readonly model?: ModelIR;
+	/** Adapter-facing sidecar for NQL bound-param value positions. */
+	readonly paramProvenance?: ParamValueProvenance;
 }
 
 // ============================================================================
@@ -114,6 +116,7 @@ export interface Decision {
 	readonly alias?: string;
 	readonly operator?: string;
 	readonly value?: unknown;
+	readonly valueIsParam?: boolean;
 	readonly paramIndex?: number;
 	readonly dataType?: string;
 	readonly direction?: 'ASC' | 'DESC';

@@ -2,7 +2,6 @@
  * @fileoverview FEAT-134: NQL tag interpolation binds values as compiler params.
  */
 
-import { isParamExpressionValueIntent } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter } from '../adapter.js';
@@ -245,7 +244,7 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(dump.sql).toMatch(/\$1\b/);
 	});
 
-	it('strips internal param wrappers recursively from public toIntentIR()', () => {
+	it('returns clean public toIntentIR() without value markers', () => {
 		const nql = createParamTestTag();
 
 		const intent =
@@ -271,18 +270,18 @@ describe('FEAT-134 NQL tag params', () => {
 		const caseNode = findFirstObject(intent, (node) => node.kind === 'case');
 		expect(
 			(caseNode.when as ReadonlyArray<Record<string, unknown>>)[0]?.result,
-		).toBe('yes');
-		expect(caseNode.else).toBe('no');
+		).toEqual({ kind: 'param', value: 'yes' });
+		expect(caseNode.else).toEqual({ kind: 'param', value: 'no' });
 
 		expect(
 			findFirstObject(
 				intent,
 				(node) => node.kind === 'function' && node.name === 'coalesce',
 			).args,
-		).toEqual(['name', 'anon']);
+		).toEqual(['name', { kind: 'param', value: 'anon' }]);
 	});
 
-	it('strips internal param wrappers from dump().plan while keeping SQL params', () => {
+	it('returns clean dump().plan while keeping SQL params', () => {
 		const nql = createParamTestTag();
 
 		const dump =
@@ -299,7 +298,7 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(dump.params).toEqual([5, [1, 2]]);
 	});
 
-	it('strips internal param wrappers from public plan()', () => {
+	it('returns clean public plan()', () => {
 		const nql = createParamTestTag();
 
 		const plan = nql<unknown>`users | where id = ${5}`.plan();
@@ -313,17 +312,21 @@ describe('FEAT-134 NQL tag params', () => {
 		).toBe(5);
 	});
 
-	it('keeps adapter compile on the marked internal plan', () => {
+	it('passes adapter-only param provenance while keeping plan intent clean', () => {
 		const db = createParamTestSchema();
 		const base = createPgsqlCompileOnlyAdapter();
 		let compileValue: unknown;
+		let compileHasProvenance = false;
 		const adapter: Adapter = {
 			...base,
 			compile<T = unknown>(plan: PlanReport, options) {
-				compileValue = findFirstObject(
+				const comparison = findFirstObject(
 					plan.intent,
 					(node) => node.kind === 'comparison' && node.field === 'id',
-				).value;
+				);
+				compileValue = comparison.value;
+				compileHasProvenance =
+					options?.paramProvenance?.isParamValue(comparison, 'value') === true;
 				return base.compile<T>(plan, options);
 			},
 			createDump(plan, query, meta) {
@@ -334,7 +337,8 @@ describe('FEAT-134 NQL tag params', () => {
 
 		const dump = nql<unknown>`users | where id = ${5}`.dump();
 
-		expect(isParamExpressionValueIntent(compileValue)).toBe(true);
+		expect(compileValue).toBe(5);
+		expect(compileHasProvenance).toBe(true);
 		expect(dump.params).toEqual([5]);
 		expect(
 			findFirstObject(
@@ -343,6 +347,39 @@ describe('FEAT-134 NQL tag params', () => {
 			).value,
 		).toBe(5);
 		expectNoOwnSymbols(dump.plan);
+	});
+
+	it('keeps top-level SELECT param projection structure and alias', () => {
+		const nql = createParamTestTag();
+
+		const intent = nql<unknown>`users | select ${5} as x`.toIntentIR();
+		const dump = nql<unknown>`users | select ${5} as x`.dump();
+
+		expectNoOwnSymbols(intent);
+		expect((intent.select as { columns: unknown[] }).columns[0]).toEqual({
+			kind: 'param',
+			value: 5,
+			as: 'x',
+		});
+		expect(dump.params).toEqual([5]);
+		expect(dump.sql).toMatch(/\$1\b/);
+	});
+
+	it('keeps object-shaped SELECT param values as bound values, not structure', () => {
+		const nql = createParamTestTag();
+		const boundValue = { kind: 'column', column: 'name' };
+
+		const intent = nql<unknown>`users | select ${boundValue} as x`.toIntentIR();
+		const dump = nql<unknown>`users | select ${boundValue} as x`.dump();
+
+		expectNoOwnSymbols(intent);
+		expect((intent.select as { columns: unknown[] }).columns[0]).toEqual({
+			kind: 'param',
+			value: boundValue,
+			as: 'x',
+		});
+		expect(dump.params).toEqual([boundValue]);
+		expect(dump.sql).toMatch(/\$1\b/);
 	});
 
 	it('fails cleanly for separator-less adjacent interpolations', () => {

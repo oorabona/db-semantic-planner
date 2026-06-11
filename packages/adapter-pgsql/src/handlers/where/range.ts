@@ -4,7 +4,6 @@
  * Handles: contains (@>), containedBy (<@), overlaps (&&)
  */
 
-import { unwrapExpressionValueIntent } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
@@ -43,7 +42,7 @@ export const rangeHandler: WhereHandler = {
 
 		const operator = decision.operator ?? 'contains';
 		const pgOp = RANGE_OP_MAP[operator] ?? operator;
-		const value = unwrapExpressionValueIntent(decision.value);
+		const value = decision.value;
 
 		const columnNode = buildColumnRef(column, ctx);
 

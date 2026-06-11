@@ -359,7 +359,7 @@ export function compileUpdate(
  */
 export function compileBatchUpdate(
 	intent: BatchUpdateIntent,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
@@ -423,8 +423,18 @@ export function compileBatchUpdate(
 			naming: deps.naming,
 			...(schemaName !== undefined && { schemaName }),
 			...(deps.model !== undefined && { model: deps.model }),
+			...(options?.paramProvenance !== undefined && {
+				paramProvenance: options.paramProvenance,
+			}),
 			compileSubquery: (sqIntent, paramOffset) =>
-				buildSubqueryFromIntent(sqIntent, paramOffset, deps.naming, schemaName),
+				buildSubqueryFromIntent(
+					sqIntent,
+					paramOffset,
+					deps.naming,
+					schemaName,
+					'rawExists',
+					options?.paramProvenance,
+				),
 		};
 		whereGuard = compileWhereIntent(intent.where, whereCtx);
 	}

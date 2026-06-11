@@ -4,10 +4,6 @@ import type {
 	WhereJsonExistsIntent,
 	WhereLikeIntent,
 } from '@dbsp/types';
-import {
-	isParamExpressionValueIntent,
-	unwrapExpressionValueIntent,
-} from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { compile, parse, parseCst } from '../src/index.js';
 import type {
@@ -39,13 +35,11 @@ function compileFail(
 }
 
 function expectParamValue(value: unknown, expected: unknown): void {
-	expect(isParamExpressionValueIntent(value)).toBe(true);
-	expect(unwrapExpressionValueIntent(value)).toBe(expected);
+	expect(value).toBe(expected);
 }
 
 function expectParamValueEqual(value: unknown, expected: unknown): void {
-	expect(isParamExpressionValueIntent(value)).toBe(true);
-	expect(unwrapExpressionValueIntent(value)).toEqual(expected);
+	expect(value).toEqual(expected);
 }
 
 describe('FEAT-134 named parameters — grammar and AST', () => {
@@ -288,29 +282,26 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 			'users | select coalesce(name, :fallback) as display_name',
 			{ fallback: 'unknown' },
 		);
-		expectParamValue(
+		expect(
 			(fnResult.query!.select as { columns: Array<{ args: unknown[] }> })
 				.columns[0]!.args[1],
-			'unknown',
-		);
+		).toEqual({ kind: 'param', value: 'unknown' });
 
 		const caseResult = compileOk(
 			'users | select case when active = true then :yes else :no end as label',
 			{ yes: 'Y', no: 'N' },
 		);
-		expectParamValue(
+		expect(
 			(
 				caseResult.query!.select as {
 					columns: Array<{ when: Array<{ result: unknown }>; else: unknown }>;
 				}
 			).columns[0]!.when[0]!.result,
-			'Y',
-		);
-		expectParamValue(
+		).toEqual({ kind: 'param', value: 'Y' });
+		expect(
 			(caseResult.query!.select as { columns: Array<{ else: unknown }> })
 				.columns[0]!.else,
-			'N',
-		);
+		).toEqual({ kind: 'param', value: 'N' });
 
 		const jsonResult = compileOk(
 			'users | where json_contains(profile, :needle)',

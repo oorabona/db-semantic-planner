@@ -209,7 +209,10 @@ export function buildPredicateSubquerySelect(
 	assertNoDroppedDecisionModifiers(decision, use);
 
 	// Correlated subqueries (outerRef inside the inner WHERE) are not supported.
-	if (sourceIntent.where && containsOuterRef(sourceIntent.where)) {
+	if (
+		sourceIntent.where &&
+		containsOuterRef(sourceIntent.where, ctx.paramProvenance)
+	) {
 		const label =
 			use === 'rawExists' ? 'rawExists' : use === 'IN' ? 'IN' : 'scalar';
 		throw new Error(
