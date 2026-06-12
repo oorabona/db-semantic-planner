@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.2.0...adapter-pgsql-v1.2.1) (2026-06-12)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Reserve manual join aliases to prevent include collision ([#166](https://github.com/oorabona/db-semantic-planner/issues/166)) ([1f53f86](https://github.com/oorabona/db-semantic-planner/commit/1f53f86381214ddfb6f6f5ecf450cceec126ecf4)), closes [#162](https://github.com/oorabona/db-semantic-planner/issues/162)
+
 ## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.1.1...adapter-pgsql-v1.2.0) (2026-06-12)
 
 
