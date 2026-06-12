@@ -2,7 +2,7 @@
 	"packages/types": "1.1.0",
 	"packages/nql": "1.2.0",
 	"packages/core": "1.1.0",
-	"packages/adapter-pgsql": "1.2.0",
-	"packages/cli": "1.0.6",
+	"packages/adapter-pgsql": "1.2.1",
+	"packages/cli": "1.0.7",
 	"packages/mcp-server": "1.0.5"
 }
