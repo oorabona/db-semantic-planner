@@ -26,6 +26,8 @@ export interface CompilerContext {
 	readonly rootTable: string;
 	/** Current table alias (for JOINs) */
 	readonly currentAlias?: string;
+	/** Final relation path/name → SQL join alias map for relation-aware expression contexts */
+	readonly aliases?: ReadonlyMap<string, string>;
 	/** Maximum recursive depth (default: 100) */
 	readonly maxRecursiveDepth: number;
 	/** Optional callback for raw SQL audit trail */

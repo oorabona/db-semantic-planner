@@ -391,6 +391,13 @@ type JoinAliasEntry = {
 	readonly relationName?: string;
 };
 
+type IncludeCompilationResult = {
+	readonly targets?: Node[];
+	readonly rawJoin?: Node;
+	readonly additionalJoins?: Node[];
+	readonly cte?: Node;
+};
+
 function getRelationIdentityPath(
 	decision: PlanDecision,
 	rootTable: string,
@@ -655,6 +662,7 @@ export class PlanCompiler {
 		return {
 			naming: this.naming,
 			rootTable: this.currentRootTable,
+			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: 100,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -931,12 +939,7 @@ export class PlanCompiler {
 	private compileIncludeViaHandler(
 		decision: PlanDecision,
 		plan: SimplifiedPlanReport,
-	): {
-		targets?: Node[];
-		rawJoin?: Node;
-		additionalJoins?: Node[];
-		cte?: Node;
-	} {
+	): IncludeCompilationResult {
 		ensureIncludeHandlersRegistered();
 
 		const strategy = decision.choice as
@@ -1166,6 +1169,7 @@ export class PlanCompiler {
 			naming: this.naming,
 			rootTable: plan.rootTable,
 			currentAlias: currentAlias ?? plan.rootTable,
+			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: 100,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -1770,15 +1774,9 @@ export class PlanCompiler {
 	 * Compile an includeStrategy decision and register its results.
 	 * Pushes targets onto targetList, raw joins / CTEs onto instance collections.
 	 */
-	private compileIncludeDecision(
-		decision: PlanDecision,
-		plan: SimplifiedPlanReport,
-		targetList: Node[],
+	private registerIncludeCompilationResult(
+		includeResult: IncludeCompilationResult,
 	): void {
-		const includeResult = this.compileIncludeViaHandler(decision, plan);
-		if (includeResult.targets) {
-			targetList.push(...includeResult.targets);
-		}
 		if (includeResult.rawJoin) {
 			this.rawJoins.push(includeResult.rawJoin);
 		}
@@ -1788,6 +1786,38 @@ export class PlanCompiler {
 		if (includeResult.cte) {
 			this.pendingCtes.push(includeResult.cte);
 		}
+	}
+
+	private compileIncludeDecision(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+		targetList: Node[],
+		precompiled?: IncludeCompilationResult,
+	): void {
+		const includeResult =
+			precompiled ?? this.compileIncludeViaHandler(decision, plan);
+		if (includeResult.targets) {
+			targetList.push(...includeResult.targets);
+		}
+		if (!precompiled) {
+			this.registerIncludeCompilationResult(includeResult);
+		}
+	}
+
+	private compileJoinIncludeAllocationPass(
+		decisions: readonly PlanDecision[],
+		plan: SimplifiedPlanReport,
+	): Map<PlanDecision, IncludeCompilationResult> {
+		const includeResults = new Map<PlanDecision, IncludeCompilationResult>();
+		for (const decision of decisions) {
+			if (decision.type !== 'includeStrategy' || decision.choice !== 'join') {
+				continue;
+			}
+			const includeResult = this.compileIncludeViaHandler(decision, plan);
+			includeResults.set(decision, includeResult);
+			this.registerIncludeCompilationResult(includeResult);
+		}
+		return includeResults;
 	}
 
 	/**
@@ -2066,14 +2096,11 @@ export class PlanCompiler {
 	 */
 	private compileGroupByDecision(decision: PlanDecision): Node {
 		const gbCol = decision.column as string;
-		const gbDot = gbCol.indexOf('.');
+		const gbDot = gbCol.lastIndexOf('.');
 		if (gbDot !== -1) {
-			return columnRef(
-				gbCol.slice(gbDot + 1),
-				gbCol.slice(0, gbDot),
-				undefined,
-				this.naming,
-			);
+			const relation = gbCol.slice(0, gbDot);
+			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
+			return columnRef(gbCol.slice(gbDot + 1), alias, undefined, this.naming);
 		}
 		return columnRef(gbCol, decision.table, undefined, this.naming);
 	}
@@ -2148,6 +2175,11 @@ export class PlanCompiler {
 			plan.rootTable,
 		);
 		this.reserveManualJoinAliases(decisions);
+		const includeJoinResults = this.compileJoinIncludeAllocationPass(
+			decisions,
+			plan,
+		);
+		this.state.aliases = this.resolvedJoinAliases();
 		const targetList: Node[] = [];
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
@@ -2174,7 +2206,12 @@ export class PlanCompiler {
 					break;
 
 				case 'includeStrategy':
-					this.compileIncludeDecision(decision, plan, targetList);
+					this.compileIncludeDecision(
+						decision,
+						plan,
+						targetList,
+						includeJoinResults.get(decision),
+					);
 					where = this.compileIncludeWhereConditions(decision, where);
 					break;
 

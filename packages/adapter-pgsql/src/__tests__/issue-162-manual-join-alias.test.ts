@@ -2,6 +2,7 @@ import {
 	createOrm,
 	eq,
 	exprRef,
+	fn,
 	ref,
 	relationColumn,
 	schema,
@@ -112,6 +113,76 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).toContain('uses.file_id = file_1.id');
 		expect(sql).toMatch(/ORDER BY file_1\.path ASC\b/);
 		expect(sql).not.toMatch(/ORDER BY file\.path ASC\b/);
+	});
+
+	it('uses the final bumped include alias in SELECT custom expressions', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'file',
+					on: eq('uses.def_id', exprRef('file.id')),
+				})
+				.include('file', { join: 'inner' })
+				.columns([
+					fn('upper', relationColumn('file', 'path', 'file_path')).as(
+						'upper_path',
+					),
+				])
+				.dump().sql,
+		);
+
+		expect(sql).toMatch(/JOIN definitions AS file\b/);
+		expect(sql).toMatch(/JOIN files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toMatch(/upper\(file_1\.path\) AS upper_path\b/);
+		expect(sql).not.toMatch(/upper\(file\.path\) AS upper_path\b/);
+	});
+
+	it('uses the final bumped include alias in GROUP BY relation references', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'file',
+					on: eq('uses.def_id', exprRef('file.id')),
+				})
+				.include('file', { join: 'inner' })
+				.groupBy(['id', 'file.path'])
+				.columns(['id'])
+				.dump().sql,
+		);
+
+		expect(sql).toMatch(/JOIN definitions AS file\b/);
+		expect(sql).toMatch(/JOIN files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toMatch(/GROUP BY uses\.id, file_1\.path\b/);
+		expect(sql).not.toMatch(/GROUP BY uses\.id, file\.path\b/);
+	});
+
+	it('uses the final bumped include alias in HAVING relationColumn expressions', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'file',
+					on: eq('uses.def_id', exprRef('file.id')),
+				})
+				.include('file', { join: 'inner' })
+				.groupBy(['id', 'file.path'])
+				.columns(['id'])
+				.having(fn('length', relationColumn('file', 'path', 'file_path')).gt(3))
+				.dump().sql,
+		);
+
+		expect(sql).toMatch(/JOIN definitions AS file\b/);
+		expect(sql).toMatch(/JOIN files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toMatch(/HAVING length\(file_1\.path\) > \$1\b/);
+		expect(sql).not.toMatch(/HAVING length\(file\.path\) > \$1\b/);
 	});
 
 	it('duplicate manual .join() aliases are preserved as user-authored SQL aliases', () => {
