@@ -393,6 +393,7 @@ All standard filter helpers (`eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `like`, `and
 
 - **Relation mode vs table mode is determined by `opts.on`** — if you pass `on`, it is table mode regardless of whether the first argument matches a relation name. Omit `on` for FK auto-resolution.
 - **`as` does not change FK resolution in relation mode** — `.join('caller', { as: 'c' })` resolves the FK from the `caller` relation, not from `c`. The alias only affects the SQL output name.
+- **Manual join aliases are user-owned** — `.join()` reserves its SQL alias for the query. If a join-backed `include()` would otherwise auto-generate the same alias, the include moves to the next `_N` suffix and the manual alias is preserved. If two manual `.join()` calls use the same alias, the compiler preserves that user-authored SQL and PostgreSQL reports the duplicate alias at execution.
 - **Self-joins require `as`** — without an alias the two references to the same table are ambiguous in SQL. The compiler will produce a valid but potentially confusing query; always pass `as` for self-joins.
 - **Result columns are flat** — `.join()` does not hydrate nested objects. All columns from the joined table appear as top-level keys in the result. Use `include()` for nested hydration.
 - **Right and full outer joins are not supported** — only `'inner'` and `'left'` are valid values for `type`.

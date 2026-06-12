@@ -1943,6 +1943,18 @@ export class PlanCompiler {
 		return where;
 	}
 
+	private reserveManualJoinAliases(decisions: readonly PlanDecision[]): void {
+		for (const decision of decisions) {
+			if (decision.type !== 'join') continue;
+
+			const alias = decision.alias ?? decision.targetTable;
+			if (!alias) continue;
+
+			validateIdentifier(alias, 'alias');
+			this.usedJoinAliases.add(alias);
+		}
+	}
+
 	/**
 	 * Apply a single join decision to the FROM clause in-place.
 	 * Chains multiple joins by wrapping from[0] as the left-arg each time.
@@ -2104,6 +2116,7 @@ export class PlanCompiler {
 			plan.decisions,
 			plan.rootTable,
 		);
+		this.reserveManualJoinAliases(decisions);
 		const targetList: Node[] = [];
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
