@@ -56,6 +56,7 @@ import type {
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
+import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
 import type {
 	NqlMutationPipeline,
 	NqlProgram,
@@ -75,10 +76,12 @@ import {
 } from './compile-mutation.js';
 import { compileQuery } from './compile-query.js';
 import { compileSelectClause } from './compile-select.js';
+import { validateParamsMap } from './expression-utils.js';
 
 // Re-export public types
 export type {
 	ColumnValidatorSchema,
+	CompiledNqlQuery,
 	CompileResult,
 	NqlCompilerOptions,
 } from './types.js';
@@ -93,11 +96,21 @@ import type {
 	CompilerContext,
 	CompilerFns,
 	NqlCompilerOptions,
+	NqlInternalCompilerOptions,
 } from './types.js';
 import {
 	DEFAULT_PSEUDO_COLUMN_KEYWORDS,
 	DEFAULT_RECURSIVE_KEYWORDS,
 } from './types.js';
+
+function allowsInternalParams(
+	options: NqlCompilerOptions | undefined,
+): boolean {
+	const internalOptions = (options as NqlInternalCompilerOptions | undefined)?.[
+		NQL_INTERNAL_COMPILER_OPTIONS
+	];
+	return internalOptions?.allowInternalParams === true;
+}
 
 /**
  * Compiler that transforms NQL AST to IntentAST.
@@ -123,6 +136,9 @@ export class NqlCompiler {
 				);
 			}
 		}
+		const params = options?.params ?? {};
+		const allowInternalParams = allowsInternalParams(options);
+		validateParamsMap(params, { allowInternalParams });
 
 		this.ctx = {
 			currentFromTable: undefined,
@@ -130,9 +146,10 @@ export class NqlCompiler {
 			pseudoColumnKeywords,
 			recursiveKeywords,
 			validator,
-			params: options?.params ?? {},
+			params,
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
+			allowInternalParams,
 		};
 
 		// Wire up cross-module function references

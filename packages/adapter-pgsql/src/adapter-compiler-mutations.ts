@@ -212,9 +212,8 @@ export function compileInsert(
 
 	const firstRow = intent.values?.[0] ?? {};
 	const columns = Object.keys(firstRow);
-	const values = (intent.values ?? []).map((row) =>
-		columns.map((col) => row[col]),
-	);
+	const rows = intent.values ?? [];
+	const values = rows.map((row) => columns.map((col) => row[col]));
 
 	const columnTypes = getColumnTypes(intent.table, columns, deps);
 
@@ -424,7 +423,13 @@ export function compileBatchUpdate(
 			...(schemaName !== undefined && { schemaName }),
 			...(deps.model !== undefined && { model: deps.model }),
 			compileSubquery: (sqIntent, paramOffset) =>
-				buildSubqueryFromIntent(sqIntent, paramOffset, deps.naming, schemaName),
+				buildSubqueryFromIntent(
+					sqIntent,
+					paramOffset,
+					deps.naming,
+					schemaName,
+					'rawExists',
+				),
 		};
 		whereGuard = compileWhereIntent(intent.where, whereCtx);
 	}

@@ -5,6 +5,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -42,13 +43,16 @@ export const rangeHandler: WhereHandler = {
 
 		const operator = decision.operator ?? 'contains';
 		const pgOp = RANGE_OP_MAP[operator] ?? operator;
-		const value = decision.value;
+		const rawValue = decision.value;
+		const value = unwrapParamIntent(rawValue);
 
 		const columnNode = buildColumnRef(column, ctx);
 
 		let paramValue: unknown;
 		let isScalar = false;
-		if (isRangeValue(value)) {
+		if (value !== rawValue) {
+			paramValue = value;
+		} else if (isRangeValue(value)) {
 			const lower = value.lower ?? '';
 			const upper = value.upper ?? '';
 			paramValue = `[${lower},${upper})`;

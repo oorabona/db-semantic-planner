@@ -76,8 +76,20 @@ export function handleAggregateExpression(
 	const aggAs = expr.as as string | undefined;
 	const aggDistinct = expr.distinct as boolean | undefined;
 	const aggFilter = expr.filter as WhereIntent | undefined;
+	const aggExtraArgs = Array.isArray(expr.extraArgs)
+		? expr.extraArgs
+		: undefined;
 
-	if (aggFunc === 'count' && !aggField) {
+	if (!aggField && aggExtraArgs?.length) {
+		const decision: Mutable<PlanDecision> = {
+			type: 'selectNqlFunction',
+			function: aggFunc,
+			args: aggExtraArgs,
+			table: rootTable,
+		};
+		if (aggAs) decision.alias = aggAs;
+		decisions.push(decision);
+	} else if (aggFunc === 'count' && !aggField) {
 		const decision: Mutable<PlanDecision> = {
 			type: 'selectFunction',
 			function: 'count',
@@ -140,6 +152,24 @@ export function handleRawExpression(
 		type: 'selectFunction',
 		function: 'raw',
 		args: [expr.sql as string],
+		table: rootTable,
+	};
+	if (expr.as) decision.alias = expr.as as string;
+	decisions.push(decision);
+}
+
+/**
+ * function — generic SQL function expression from NQL text.
+ */
+export function handleFunctionExpression(
+	expr: Record<string, unknown>,
+	rootTable: string,
+	decisions: PlanDecision[],
+): void {
+	const decision: Mutable<PlanDecision> = {
+		type: 'selectNqlFunction',
+		function: expr.name as string,
+		args: (expr.args as readonly unknown[] | undefined) ?? [],
 		table: rootTable,
 	};
 	if (expr.as) decision.alias = expr.as as string;
@@ -288,7 +318,7 @@ export function handleJsonPathExtractExpression(
 		type: 'selectFunction',
 		function: 'jsonPathExtract',
 		column: expr.field as string,
-		args: [expr.path as string],
+		args: [expr.path],
 		table: rootTable,
 	};
 	if (expr.mode) decision.jsonMode = expr.mode as 'json' | 'text';
@@ -353,6 +383,8 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		handleCoalesceExpression(expr, rootTable, decisions),
 	raw: (expr, rootTable, decisions) =>
 		handleRawExpression(expr, rootTable, decisions),
+	function: (expr, rootTable, decisions) =>
+		handleFunctionExpression(expr, rootTable, decisions),
 	window: (expr, rootTable, decisions) =>
 		handleWindowExpression(expr, rootTable, decisions),
 	case: (expr, rootTable, decisions, applyFilter, convertCondition) =>
@@ -365,7 +397,9 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 		),
 	relationColumn: (expr, rootTable, decisions) =>
 		handleRelationColumnExpression(expr, rootTable, decisions),
-	// pseudoColumn: intentional no-op — planner hints, not SQL
+	pseudoColumn: () => {
+		// Planner hint, not SQL.
+	},
 	arithmetic: (expr, rootTable, decisions) =>
 		handleArithmeticExpression(expr, rootTable, decisions),
 	jsonExtract: (expr, rootTable, decisions) =>
@@ -386,5 +420,13 @@ export const EXPRESSION_HANDLERS: Record<string, SelectExpressionHandler> = {
 	cast: (expr, rootTable, decisions) =>
 		handleCustomExpressionSelect(expr, rootTable, decisions),
 	unary: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	subquery: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	namedArg: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	star: (expr, rootTable, decisions) =>
+		handleCustomExpressionSelect(expr, rootTable, decisions),
+	array: (expr, rootTable, decisions) =>
 		handleCustomExpressionSelect(expr, rootTable, decisions),
 };

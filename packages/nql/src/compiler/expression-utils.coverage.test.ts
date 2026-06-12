@@ -695,12 +695,12 @@ describe('isAggregateFunction', () => {
 		expect(isAggregateFunction('max')).toBe(true);
 	});
 
-	it('returns true for array_agg', () => {
-		expect(isAggregateFunction('array_agg')).toBe(true);
+	it('returns false for array_agg', () => {
+		expect(isAggregateFunction('array_agg')).toBe(false);
 	});
 
-	it('returns true for string_agg', () => {
-		expect(isAggregateFunction('string_agg')).toBe(true);
+	it('returns false for string_agg', () => {
+		expect(isAggregateFunction('string_agg')).toBe(false);
 	});
 
 	it('is case-insensitive', () => {

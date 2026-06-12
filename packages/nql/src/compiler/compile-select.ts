@@ -4,30 +4,33 @@
  * Compiles NQL SELECT clauses to SelectIntent and ExpressionIntent.
  */
 
-import type {
-	AggregateFunction,
-	AggregateWindowIntent,
-	ExpressionIntent,
-	OffsetWindowIntent,
-	PseudoColumnTraversal,
-	QueryIntent,
-	RankingWindowIntent,
-	SelectIntent,
-	WindowFunction,
+import {
+	type AggregateFunction,
+	type AggregateWindowIntent,
+	type ExpressionIntent,
+	isNqlSelectWindowFunctionAllowed,
+	isParamIntent,
+	isRankingWindowFunction,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	NQL_SELECT_JSON_FUNCTIONS,
+	NQL_SELECT_SCALAR_FUNCTIONS,
+	type OffsetWindowIntent,
+	type ParamIntent,
+	type PseudoColumnTraversal,
+	type QueryIntent,
+	type RankingWindowIntent,
+	type SelectIntent,
+	type WindowFunction,
 } from '@dbsp/types';
-import { isRankingWindowFunction } from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
-	NqlBooleanLiteral,
 	NqlCaseExpression,
 	NqlComparisonExpression,
 	NqlExpression,
-	NqlNumberLiteral,
 	NqlPathExpression,
 	NqlSelectClause,
 	NqlSelectExpression,
 	NqlSelectItem,
-	NqlStringLiteral,
 	NqlUnaryExpression,
 	NqlWindowExpression,
 } from '../parser/ast.js';
@@ -38,8 +41,108 @@ import {
 	expressionToSql,
 	expressionToValue,
 	isAggregateFunction,
+	resolveIntegerCount,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function paramExpressionIntent(
+	param: ParamIntent,
+	alias?: string,
+): ExpressionIntent {
+	const intent: Record<string, unknown> = { ...param };
+	if (alias !== undefined) intent.as = alias;
+	return intent as unknown as ExpressionIntent;
+}
+
+function literalExpressionIntent(
+	value: string | number | boolean | null,
+	alias?: string,
+): ExpressionIntent {
+	const intent: Record<string, unknown> = {
+		kind: 'literal',
+		value,
+	};
+	if (alias !== undefined) intent.as = alias;
+	return intent as unknown as ExpressionIntent;
+}
+
+function resolveLagLeadOffset(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+): number {
+	if (expr.type === 'number') {
+		const resolved = resolveIntegerCount(expr.value, ctx, 'lag/lead offset');
+		return isParamIntent(resolved) ? resolved.value : resolved;
+	}
+	if (expr.type === 'namedParam') {
+		const resolved = resolveIntegerCount(expr, ctx, 'lag/lead offset');
+		return isParamIntent(resolved) ? resolved.value : resolved;
+	}
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		'lag/lead offset must resolve to a non-negative safe integer',
+	);
+}
+
+function throwUnsupportedSelectFunction(fn: string): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Unsupported function in SELECT context: ${fn}()`,
+	);
+}
+
+const SELECT_SCALAR_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	...NQL_SELECT_JSON_FUNCTIONS,
+	...NQL_SELECT_SCALAR_FUNCTIONS,
+]);
+
+function validateSelectPathExpression(
+	expr: NqlPathExpression,
+	ctx: CompilerContext,
+): void {
+	if (!ctx.currentFromTable || !ctx.validator) return;
+
+	const { segments } = expr;
+	if (segments.length === 1) {
+		ctx.validator.validateColumn(ctx.currentFromTable, segments[0]!);
+		return;
+	}
+
+	const firstSegmentLower = segments[0]!.toLowerCase();
+	if (ctx.pseudoColumnKeywords.has(firstSegmentLower)) {
+		let i = 1;
+		while (
+			i < segments.length &&
+			ctx.pseudoColumnKeywords.has(segments[i]!.toLowerCase())
+		) {
+			i++;
+		}
+		if (i < segments.length) {
+			ctx.validator.validateColumn(ctx.currentFromTable, segments[i]!);
+		}
+		return;
+	}
+
+	const targetTable = ctx.validator.resolveRelationTarget(
+		ctx.currentFromTable,
+		segments[0]!,
+	);
+	if (targetTable) {
+		ctx.validator.validateColumn(targetTable, segments[segments.length - 1]!);
+	}
+}
+
+function expressionToValidatedField(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+): string | null {
+	const field = expressionToField(expr);
+	if (field && expr.type === 'path') {
+		validateSelectPathExpression(expr, ctx);
+	}
+	return field;
+}
 
 /**
  * Compile a SELECT clause to a SelectIntent.
@@ -77,12 +180,7 @@ export function compileSelectClause(
 			const expr = item.expression;
 			if (expr.type === 'path' && expr.segments.length === 1 && !item.alias) {
 				// Simple field reference
-				if (ctx.currentFromTable) {
-					ctx.validator?.validateColumn(
-						ctx.currentFromTable,
-						expr.segments[0]!,
-					);
-				}
+				validateSelectPathExpression(expr, ctx);
 				simpleFields.push(expr.segments[0]!);
 			} else {
 				hasExpressions = true;
@@ -96,6 +194,72 @@ export function compileSelectClause(
 	}
 
 	return { type: 'expressions', columns: expressions };
+}
+
+/**
+ * Lower an NQL expression used as a SELECT expression operand.
+ *
+ * Simple path references stay as field strings for compatibility with existing
+ * select-expression handlers. Compound expressions are recursively lowered to
+ * ExpressionIntent objects so they can be reconstructed by the adapter instead
+ * of being bound as opaque values.
+ */
+function expressionToSelectValue(
+	valueExpr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+): unknown {
+	const field = expressionToValidatedField(valueExpr, ctx);
+	if (field) return field;
+	if (valueExpr.type === 'namedParam') {
+		return expressionToValue(valueExpr, ctx);
+	}
+	if (
+		valueExpr.type === 'string' ||
+		valueExpr.type === 'number' ||
+		valueExpr.type === 'boolean'
+	) {
+		return valueExpr.value;
+	}
+	if (valueExpr.type === 'null') {
+		return null;
+	}
+	if (valueExpr.type === 'rangeLiteral' || valueExpr.type === 'dateRange') {
+		return valueExpr.value;
+	}
+	return compileExpressionToIntent(valueExpr, ctx, fns);
+}
+
+/**
+ * Lower an NQL expression used as a SELECT function argument.
+ *
+ * This is intentionally recursive. It is the NQL-side half of the adapter's
+ * nested SELECT-expression reconstruction path.
+ */
+function expressionToFunctionArg(
+	valueExpr: NqlExpression,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+): unknown {
+	const field = expressionToValidatedField(valueExpr, ctx);
+	if (field) return field;
+	if (valueExpr.type === 'namedParam') {
+		return expressionToValue(valueExpr, ctx);
+	}
+	if (
+		valueExpr.type === 'string' ||
+		valueExpr.type === 'number' ||
+		valueExpr.type === 'boolean'
+	) {
+		return literalExpressionIntent(valueExpr.value);
+	}
+	if (valueExpr.type === 'null') {
+		return literalExpressionIntent(null);
+	}
+	if (valueExpr.type === 'rangeLiteral' || valueExpr.type === 'dateRange') {
+		return literalExpressionIntent(valueExpr.value);
+	}
+	return compileExpressionToIntent(valueExpr, ctx, fns);
 }
 
 /**
@@ -131,7 +295,8 @@ function compileSelectExpression(
 	if (expr.type === 'function') {
 		const fn = expr.name.toLowerCase();
 		if (isAggregateFunction(fn)) {
-			let field: string;
+			let field: string | undefined;
+			let firstArgAsExtraArg: unknown[] | undefined;
 			if (expr.args.length === 0) {
 				if (fn === 'count') {
 					field = '*';
@@ -141,36 +306,51 @@ function compileSelectExpression(
 					);
 				}
 			} else {
-				field =
-					expressionToField(expr.args[0]!) ?? expressionToSql(expr.args[0]!);
-				if (ctx.currentFromTable && field !== '*' && !field.includes('.')) {
-					ctx.validator?.validateColumn(ctx.currentFromTable, field);
+				const firstArg = expr.args[0]!;
+				const firstField = expressionToValidatedField(firstArg, ctx);
+				if (firstField) {
+					field = firstField;
+				} else if (firstArg.type === 'namedParam') {
+					firstArgAsExtraArg = [expressionToValue(firstArg, ctx)];
+				} else {
+					field = expressionToSql(firstArg);
 				}
 			}
 			const extraArgs =
 				expr.args.length > 1
 					? expr.args
 							.slice(1)
-							.map((a) => expressionToField(a) ?? expressionToValue(a))
+							.map(
+								(a) =>
+									expressionToValidatedField(a, ctx) ??
+									expressionToSelectValue(a, ctx, fns),
+							)
 					: undefined;
-			return {
+			const aggregateArgs = firstArgAsExtraArg
+				? [...firstArgAsExtraArg, ...(extraArgs ?? [])]
+				: extraArgs;
+			const aggregateIntent: Record<string, unknown> = {
 				kind: 'aggregate',
 				function: fn as AggregateFunction,
-				field,
+				...(field !== undefined && { field }),
 				...(exprItem.alias !== undefined && { as: exprItem.alias }),
 				...(expr.distinct && { distinct: true }),
-				...(extraArgs && { extraArgs }),
+				...(aggregateArgs && { extraArgs: aggregateArgs }),
 			};
+			return aggregateIntent as unknown as ExpressionIntent;
 		}
 		// JSON function notation → same intent as operator notation
-		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias);
+		const jsonIntent = compileJsonFunction(fn, expr.args, exprItem.alias, ctx);
 		if (jsonIntent) return jsonIntent;
 
 		// Non-aggregate function (e.g., now(), upper(), coalesce())
+		if (!SELECT_SCALAR_FUNCTION_NAMES.has(fn)) {
+			throwUnsupportedSelectFunction(fn);
+		}
 		return {
 			kind: 'function',
-			name: expr.name,
-			args: expr.args.map((a) => expressionToField(a) ?? expressionToValue(a)),
+			name: fn,
+			args: expr.args.map((a) => expressionToFunctionArg(a, ctx, fns)),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -178,31 +358,35 @@ function compileSelectExpression(
 	// Window expression
 	if (expr.type === 'window') {
 		const windowExpr = expr as NqlWindowExpression;
-		const fn = windowExpr.function.toLowerCase() as WindowFunction;
+		const fn = windowExpr.function.toLowerCase();
+		if (!isNqlSelectWindowFunctionAllowed(fn)) {
+			throwUnsupportedSelectFunction(fn);
+		}
+		const windowFn = fn as WindowFunction;
 
 		let field: string | undefined;
 		if (windowExpr.args.length > 0) {
 			field =
-				expressionToField(windowExpr.args[0]!) ??
+				expressionToValidatedField(windowExpr.args[0]!, ctx) ??
 				expressionToSql(windowExpr.args[0]!);
 		}
 
 		// Extract offset and defaultValue for lag/lead (args[1] and args[2])
 		let offset: number | undefined;
 		let defaultValue: unknown;
-		if (fn === 'lag' || fn === 'lead') {
+		if (windowFn === 'lag' || windowFn === 'lead') {
 			if (windowExpr.args.length > 1) {
-				offset = expressionToValue(windowExpr.args[1]!) as number;
+				offset = resolveLagLeadOffset(windowExpr.args[1]!, ctx);
 			}
 			if (windowExpr.args.length > 2) {
-				defaultValue = expressionToValue(windowExpr.args[2]!);
+				defaultValue = expressionToValue(windowExpr.args[2]!, ctx);
 			}
 		}
 
 		const partitionBy =
 			windowExpr.partitionBy.length > 0
 				? windowExpr.partitionBy.map((e) => {
-						const f = expressionToField(e) ?? expressionToSql(e);
+						const f = expressionToValidatedField(e, ctx) ?? expressionToSql(e);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
 							ctx.validator?.validateColumn(ctx.currentFromTable, f);
 						}
@@ -214,7 +398,8 @@ function compileSelectExpression(
 			windowExpr.orderBy.length > 0
 				? windowExpr.orderBy.map((o) => {
 						const f =
-							expressionToField(o.expression) ?? expressionToSql(o.expression);
+							expressionToValidatedField(o.expression, ctx) ??
+							expressionToSql(o.expression);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
 							ctx.validator?.validateColumn(ctx.currentFromTable, f);
 						}
@@ -226,21 +411,21 @@ function compileSelectExpression(
 			...(partitionBy && { partitionBy }),
 			...(orderBy && { orderBy }),
 		} as const;
-		const alias = exprItem.alias ?? fn;
+		const alias = exprItem.alias ?? windowFn;
 
-		if (isRankingWindowFunction(fn)) {
+		if (isRankingWindowFunction(windowFn)) {
 			return {
 				kind: 'window',
-				function: fn,
+				function: windowFn,
 				alias,
 				over,
 			} satisfies RankingWindowIntent;
 		}
 
-		if (fn === 'lag' || fn === 'lead') {
+		if (windowFn === 'lag' || windowFn === 'lead') {
 			return {
 				kind: 'window',
-				function: fn,
+				function: windowFn,
 				field: field ?? '',
 				alias,
 				...(offset !== undefined && { offset }),
@@ -253,7 +438,7 @@ function compileSelectExpression(
 		// COUNT(*) omits field (undefined); others always have a field from the parser
 		return {
 			kind: 'window',
-			function: fn,
+			function: windowFn,
 			...(field !== undefined && { field }),
 			alias,
 			over,
@@ -272,9 +457,7 @@ function compileSelectExpression(
 	// Simple path expression (single segment, e.g., "name")
 	if (expr.type === 'path' && expr.segments.length === 1) {
 		const column = expr.segments[0]!;
-		if (ctx.currentFromTable) {
-			ctx.validator?.validateColumn(ctx.currentFromTable, column);
-		}
+		validateSelectPathExpression(expr, ctx);
 		if (exprItem.alias) {
 			return { kind: 'columnAlias', column, alias: exprItem.alias };
 		}
@@ -286,18 +469,26 @@ function compileSelectExpression(
 		return compileMultiSegmentPath(expr, exprItem, ctx);
 	}
 
+	// Top-level named parameter projection, e.g. `select :p as x`.
+	if (expr.type === 'namedParam') {
+		return paramExpressionIntent(
+			expressionToValue(expr, ctx) as ParamIntent,
+			exprItem.alias,
+		);
+	}
+
 	// Binary arithmetic expression
 	if (
 		expr.type === 'binary' &&
 		['+', '-', '*', '/', '%'].includes(expr.operator)
 	) {
-		const leftField = expressionToField(expr.left);
-		const rightField = expressionToField(expr.right);
+		const leftField = expressionToValidatedField(expr.left, ctx);
+		const rightField = expressionToValidatedField(expr.right, ctx);
 		return {
 			kind: 'arithmetic',
-			left: leftField ?? expressionToValue(expr.left),
+			left: leftField ?? expressionToSelectValue(expr.left, ctx, fns),
 			operator: expr.operator as '+' | '-' | '*' | '/' | '%',
-			right: rightField ?? expressionToValue(expr.right),
+			right: rightField ?? expressionToSelectValue(expr.right, ctx, fns),
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
 	}
@@ -306,12 +497,12 @@ function compileSelectExpression(
 	if (expr.type === 'unary') {
 		const unary = expr as NqlUnaryExpression;
 		if (unary.operator === '-') {
-			const operandField = expressionToField(unary.operand);
+			const operandField = expressionToValidatedField(unary.operand, ctx);
 			return {
 				kind: 'arithmetic',
 				left: -1,
 				operator: '*',
-				right: operandField ?? expressionToValue(unary.operand),
+				right: operandField ?? expressionToSelectValue(unary.operand, ctx, fns),
 				...(exprItem.alias !== undefined && { as: exprItem.alias }),
 			};
 		}
@@ -325,7 +516,7 @@ function compileSelectExpression(
 
 	// JSON access expression: data->'key'->>'nested' as alias
 	if (expr.type === 'jsonAccess') {
-		const baseField = expressionToField(expr.base);
+		const baseField = expressionToValidatedField(expr.base, ctx);
 		/* v8 ignore start — defensive: jsonAccess base is always a path expression -- @preserve */
 		if (!baseField) {
 			throw new Error('JSON access base must be a field reference');
@@ -338,6 +529,24 @@ function compileSelectExpression(
 			mode: expr.mode,
 			...(exprItem.alias !== undefined && { as: exprItem.alias }),
 		};
+	}
+
+	// Literal SELECT projection, e.g. `select 1 as one`.
+	if (
+		expr.type === 'string' ||
+		expr.type === 'number' ||
+		expr.type === 'boolean' ||
+		expr.type === 'null' ||
+		expr.type === 'rangeLiteral' ||
+		expr.type === 'dateRange'
+	) {
+		if (expr.type === 'null') {
+			return literalExpressionIntent(null, exprItem.alias);
+		}
+		if (expr.type === 'rangeLiteral' || expr.type === 'dateRange') {
+			return literalExpressionIntent(expr.value, exprItem.alias);
+		}
+		return literalExpressionIntent(expr.value, exprItem.alias);
 	}
 
 	/* v8 ignore start — defensive: all parser-produced SELECT expression types are handled above -- @preserve */
@@ -454,23 +663,27 @@ function compileCaseExpression(
 ): ExpressionIntent {
 	if (caseExpr.subject) {
 		// Simple CASE: normalize to searched CASE
-		const subjectField = expressionToField(caseExpr.subject);
+		const subjectField = expressionToValidatedField(caseExpr.subject, ctx);
 		/* v8 ignore start — defensive: simple CASE subject is always a path expression -- @preserve */
 		if (!subjectField) {
 			throw new Error('Simple CASE subject must be a column reference');
 		}
 		/* v8 ignore stop -- @preserve */
+		const when = caseExpr.whenClauses.map((wc) => {
+			const condition = {
+				kind: 'comparison' as const,
+				field: subjectField,
+				operator: 'eq' as const,
+				value: expressionToValue(wc.condition, ctx),
+			};
+			return {
+				condition,
+				result: compileExpressionToIntent(wc.result, ctx, fns),
+			};
+		});
 		return {
 			kind: 'case' as const,
-			when: caseExpr.whenClauses.map((wc) => ({
-				condition: {
-					kind: 'comparison' as const,
-					field: subjectField,
-					operator: 'eq',
-					value: expressionToValue(wc.condition),
-				},
-				result: compileExpressionToIntent(wc.result, ctx, fns),
-			})),
+			when,
 			...(caseExpr.elseClause && {
 				else: compileExpressionToIntent(caseExpr.elseClause, ctx, fns),
 			}),
@@ -510,14 +723,19 @@ function compileExpressionToIntent(
 			);
 		}
 		/* v8 ignore stop -- @preserve */
+		validateSelectPathExpression(cmp.left as NqlPathExpression, ctx);
+		if (cmp.right.type === 'path') {
+			validateSelectPathExpression(cmp.right, ctx);
+		}
 		const column = (cmp.left as NqlPathExpression).segments.join('.');
-		const value = expressionToValue(cmp.right);
-		return {
-			kind: 'comparison',
+		const value = expressionToValue(cmp.right, ctx);
+		const intent = {
+			kind: 'comparison' as const,
 			column,
 			operator: cmp.operator,
 			value,
 		};
+		return intent;
 	}
 
 	// Handle literal values
@@ -525,17 +743,16 @@ function compileExpressionToIntent(
 		expr.type === 'string' ||
 		expr.type === 'number' ||
 		expr.type === 'boolean' ||
-		expr.type === 'null'
+		expr.type === 'null' ||
+		expr.type === 'namedParam'
 	) {
-		const value =
-			expr.type === 'null'
-				? null
-				: (expr as NqlStringLiteral | NqlNumberLiteral | NqlBooleanLiteral)
-						.value;
-		return {
-			kind: 'literal',
-			value,
-		};
+		if (expr.type === 'namedParam') {
+			return expressionToValue(expr, ctx) as ExpressionIntent;
+		}
+		if (expr.type === 'null') {
+			return literalExpressionIntent(null);
+		}
+		return literalExpressionIntent(expr.value);
 	}
 
 	// For other expressions, wrap and use compileSelectExpression
@@ -550,12 +767,32 @@ function compileExpressionToIntent(
 // JSON Function Notation → Same intents as operator notation
 // ============================================================================
 
-const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set([
-	'json_extract',
-	'json_extract_text',
-	'json_path',
-	'json_path_text',
-]);
+const JSON_FUNCTION_NAMES: ReadonlySet<string> = new Set(
+	NQL_SELECT_JSON_FUNCTIONS,
+);
+
+function compileJsonPathArgs(
+	fn: string,
+	args: NqlExpression[],
+	ctx: CompilerContext,
+): (string | ParamIntent)[] {
+	const keys = args
+		.slice(1)
+		.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
+	const firstArg = args[1];
+	const first = keys[0];
+	if (
+		args.length === 2 &&
+		firstArg?.type === 'string' &&
+		typeof first === 'string' &&
+		first?.startsWith('{') &&
+		first.endsWith('}')
+	) {
+		const inner = first.slice(1, -1);
+		return inner.length === 0 ? [] : inner.split(',');
+	}
+	return keys;
+}
 
 /**
  * Compile JSON function notation to the same intent as operator notation.
@@ -565,6 +802,7 @@ function compileJsonFunction(
 	fn: string,
 	args: NqlExpression[],
 	alias: string | undefined,
+	ctx: CompilerContext,
 ): ExpressionIntent | null {
 	if (!JSON_FUNCTION_NAMES.has(fn)) return null;
 
@@ -592,7 +830,7 @@ function compileJsonFunction(
 		// treated as string keys; dotted paths and non-string args throw SEM_INVALID_SYNTAX.
 		const keys = args
 			.slice(1)
-			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
+			.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
 		return {
 			kind: 'jsonExtract',
 			field,
@@ -603,21 +841,15 @@ function compileJsonFunction(
 	}
 
 	if (fn === 'json_path' || fn === 'json_path_text') {
-		// json_path(col, 'a', 'b') → JsonPathExtractIntent with array literal '{a,b}'
-		// Also supports pre-built literal: json_path(col, '{a,b}')
+		// json_path(col, 'a', 'b') → JsonPathExtractIntent with path ['a', 'b'].
+		// Also supports source-literal PostgreSQL array notation:
+		// json_path(col, '{a,b}') → ['a', 'b']. Named params are never split.
 		// M-1: same coercion fix — reject path expressions and non-string args.
-		const keys = args
-			.slice(1)
-			.map((a) => coerceToStringKey(a, `${fn}() path argument`));
-		const first = keys[0];
-		const pathStr =
-			keys.length === 1 && first?.startsWith('{') && first.endsWith('}')
-				? first
-				: `{${keys.join(',')}}`;
+		const path = compileJsonPathArgs(fn, args, ctx);
 		return {
 			kind: 'jsonPathExtract',
 			field,
-			path: pathStr,
+			path,
 			mode: fn === 'json_path' ? 'json' : 'text',
 			...(alias !== undefined && { as: alias }),
 		};

@@ -4,7 +4,7 @@
  */
 
 import type { SortDirection } from '../shared/utils.js';
-import type { ExpressionIntent } from './expression-intent.js';
+import type { ExpressionIntent, ParamIntent } from './expression-intent.js';
 import type { NullsPosition, SelectIntent } from './select-intent.js';
 import type { WhereIntent } from './where-intent.js';
 
@@ -163,7 +163,7 @@ export interface OrderByFieldIntent {
 export interface OrderByExpressionIntent {
 	readonly field?: never;
 	/** Expression to sort by */
-	readonly expression: ExpressionIntent;
+	readonly expression: ExpressionIntent | ParamIntent;
 	/** Sort direction */
 	readonly direction: SortDirection;
 	/**

@@ -979,23 +979,14 @@ describe('NQL Compiler - Bug Fixes', () => {
 		expect(arith.as).toBe('negated');
 	});
 
-	// P2 Fix: Multi-arg aggregates preserve extraArgs
-	it('preserves extra arguments for string_agg', () => {
-		// Arrange: NQL query with multi-arg aggregate
-		const nql = "users | select string_agg(name, ',') as names";
+	it('rejects string_agg until SELECT aggregate projection support exists', () => {
+		const result = compile("users | select string_agg(name, ',') as names");
 
-		// Act: compile to IntentAST
-		const result = compileNql(nql);
-		const query = result.query!;
-		const select = query.select as SelectWithExpressionsIntent;
-		const col = select.columns[0]!;
-
-		// Assert: extra arguments are preserved in extraArgs field
-		expect(col.kind).toBe('aggregate');
-		const agg = col as Extract<typeof col, { kind: 'aggregate' }>;
-		expect(agg.function).toBe('string_agg');
-		expect(agg.field).toBe('name');
-		expect(agg.extraArgs).toEqual([',']);
+		expect(result.success).toBe(false);
+		expect(result.ast).toBeUndefined();
+		expect(result.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: string_agg()',
+		);
 	});
 
 	// P2 Fix: EXISTS gives clear error (error comes from visitor before compiler)
@@ -2082,7 +2073,7 @@ describe('NQL Compiler - JSONB operators (E13)', () => {
 			expect(col.kind).toBe('jsonPathExtract');
 			if (col.kind === 'jsonPathExtract') {
 				expect(col.field).toBe('data');
-				expect(col.path).toBe('{a,b}');
+				expect(col.path).toEqual(['a', 'b']);
 				expect(col.mode).toBe('json');
 				expect(col.as).toBe('nested');
 			}

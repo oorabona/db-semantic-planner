@@ -11,6 +11,7 @@
  */
 
 import { isSqlRaw } from '@dbsp/core';
+import { isParamIntent, type ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	columnRef,
@@ -37,6 +38,7 @@ import type {
 	Decision,
 	InsertStmtNode,
 } from '../handlers/types.js';
+import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 
 // ============================================================================
@@ -125,7 +127,7 @@ export interface InsertFromConfig {
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
-	limit?: number;
+	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 }
@@ -142,7 +144,7 @@ export interface UpsertFromConfig {
 	/** WHERE conditions for source query */
 	where?: Decision[];
 	/** LIMIT for source query */
-	limit?: number;
+	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
 }
@@ -583,7 +585,7 @@ export function compileInsertFrom(
 	// Build LIMIT clause if specified
 	let limitCount: Node | undefined;
 	if (config.limit !== undefined) {
-		limitCount = { A_Const: { ival: { ival: config.limit } } };
+		limitCount = limitToNode(config.limit, state);
 	}
 
 	// Build the SELECT query
@@ -694,7 +696,7 @@ export function compileUpsertFrom(
 	// Build LIMIT clause if specified
 	let limitCount: Node | undefined;
 	if (config.limit !== undefined) {
-		limitCount = { A_Const: { ival: { ival: config.limit } } };
+		limitCount = limitToNode(config.limit, state);
 	}
 
 	// Build the SELECT query
@@ -806,13 +808,27 @@ function valueToNode(
 	value: unknown,
 	state: CompilerState,
 	dbType?: string,
+	forceParam = false,
 ): Node {
-	if (value === null || value === undefined) {
+	const isParam = isParamIntent(value);
+	const boundValue = unwrapParamIntent(value);
+	if (boundValue === null || boundValue === undefined) {
+		if (forceParam || isParam) {
+			state.parameters.push(boundValue);
+			state.paramIndex++;
+			return dbType && RANGE_TYPES.has(dbType)
+				? createTypeCastParamRef(state.paramIndex, dbType)
+				: {
+						ParamRef: {
+							number: state.paramIndex,
+						},
+					};
+		}
 		return { A_Const: { isnull: true } };
 	}
 
 	// Add to parameters and return a ParamRef
-	state.parameters.push(value);
+	state.parameters.push(boundValue);
 	state.paramIndex++;
 
 	// Range types require explicit cast ($N::int4range) for PostgreSQL to parse the literal
@@ -825,6 +841,19 @@ function valueToNode(
 			number: state.paramIndex,
 		},
 	};
+}
+
+function limitToNode(limit: number | ParamIntent, state: CompilerState): Node {
+	if (isParamIntent(limit)) {
+		state.parameters.push(unwrapParamIntent(limit));
+		state.paramIndex++;
+		return {
+			ParamRef: {
+				number: state.paramIndex,
+			},
+		};
+	}
+	return { A_Const: { ival: { ival: limit } } };
 }
 
 /**

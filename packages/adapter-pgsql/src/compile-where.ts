@@ -60,6 +60,7 @@ import {
 } from './intent-to-decisions.js';
 import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
+import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
 
 // ============================================================================
@@ -420,7 +421,7 @@ function handleExpressionIntent(
 	}
 
 	const idx = ++ctx.paramState.paramIndex;
-	ctx.paramState.parameters.push(exprIntent.value);
+	ctx.paramState.parameters.push(unwrapParamIntent(exprIntent.value));
 	const rightNode = createParamRef(idx);
 	const sqlOp = OP_MAP[exprIntent.operator] ?? '=';
 	return binaryExpr(sqlOp, leftNode, rightNode);
@@ -925,10 +926,14 @@ export function compileWhereIntent(
 	// Fallback to dispatcher: comparison, like, in, any, null, exists, notExists,
 	// jsonContains, jsonExists — plus pass-through for unknown kinds.
 	const needsColumn = intent.kind === 'comparison' || intent.kind === 'null';
+	const rawIntent = intent as unknown as Record<string, unknown>;
 	const bridged = needsColumn
 		? ({
 				...intent,
-				column: (intent as unknown as Record<string, unknown>).field,
+				column: rawIntent.field,
+				...('value' in rawIntent && {
+					value: rawIntent.value,
+				}),
 			} as unknown as Decision)
 		: (intent as unknown as Decision);
 	return dispatcher(bridged, handlerCtx, ctx.paramState);

@@ -12,12 +12,14 @@
 
 import { getLogger } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Build a raw SQL expression
@@ -115,17 +117,9 @@ export const sqlFunctionHandler: ExpressionHandler = {
 				if (typeof arg === 'object' && arg !== null && 'type' in arg) {
 					// Nested decision - would need recursive compilation
 					// For now, just parameterize
-					const paramNumber = ++state.paramIndex;
-					state.parameters.push(arg);
-					argNodes.push({
-						ParamRef: { number: paramNumber },
-					});
+					argNodes.push(bindParameter(unwrapParamIntent(arg), state));
 				} else {
-					const paramNumber = ++state.paramIndex;
-					state.parameters.push(arg);
-					argNodes.push({
-						ParamRef: { number: paramNumber },
-					});
+					argNodes.push(bindParameter(unwrapParamIntent(arg), state));
 				}
 			}
 		}

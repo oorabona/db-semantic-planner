@@ -41,7 +41,7 @@
  * @internal
  */
 
-import type { QueryIntent } from '@dbsp/types';
+import { isParamIntent, type QueryIntent } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import { columnRef, integerNode, rangeVar, sortBy } from './ast-helpers.js';
 import type {
@@ -54,6 +54,7 @@ import {
 	assertNoUnsupportedSubqueryModifiers,
 	containsOuterRef,
 } from './intent-to-decisions.js';
+import { unwrapParamIntent } from './param-intent.js';
 
 // ============================================================================
 // Predicate use discriminant
@@ -311,6 +312,12 @@ export function buildPredicateSubquerySelect(
 	if (decision.limit != null) {
 		if (typeof decision.limit === 'number') {
 			stmt.limitCount = integerNode(decision.limit);
+		} else if (isParamIntent(decision.limit)) {
+			state.parameters.push(unwrapParamIntent(decision.limit));
+			state.paramIndex++;
+			stmt.limitCount = {
+				ParamRef: { number: state.paramIndex },
+			} as unknown as Node;
 		} else {
 			const limitObj = decision.limit as Record<string, unknown>;
 			if (typeof limitObj.paramIndex !== 'number') {

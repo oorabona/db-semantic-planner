@@ -65,6 +65,24 @@ describe('SC-05: basic batch update', () => {
 		expect(result.parameters[0]).toEqual([1, 2, 3]);
 		expect(result.parameters[1]).toEqual([100, 200, 300]);
 	});
+
+	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const result = adapter.compileBatchUpdate({
+			type: 'batchUpdate',
+			table: 'calls',
+			matchColumns: ['id'],
+			updates: [
+				{ id: 1, callee_id: paramShaped },
+				{ id: 2, callee_id: literalShaped },
+			],
+		});
+
+		expect(result.parameters[1]).toEqual([paramShaped, literalShaped]);
+		expect(result.parameters[1]).not.toEqual([7, 'x']);
+	});
 });
 
 // ---------------------------------------------------------------------------

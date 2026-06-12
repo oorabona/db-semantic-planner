@@ -96,7 +96,7 @@ describe('item 1 — ANY(:param) validation', () => {
 		});
 		expect(r.success).toBe(false);
 		expect(r.errors[0]?.message).toMatch(/ids/i);
-		expect(r.errors[0]?.message).toMatch(/array/i);
+		expect(r.errors[0]?.message).toMatch(/not bound/i);
 	});
 
 	it('throws when param is a non-array (string)', () => {
@@ -127,10 +127,10 @@ describe('item 1 — ANY(:param) validation', () => {
 		expect(r.success).toBe(true);
 		const where = r.ast!.query!.where as unknown as {
 			kind: string;
-			values: unknown[];
+			values: unknown;
 		};
 		expect(where.kind).toBe('any');
-		expect(where.values).toEqual(ids);
+		expect(where.values).toEqual({ kind: 'param', value: ids });
 	});
 
 	it('MAX_ANY_ITEMS constant is 10000', () => {

@@ -10,30 +10,50 @@
  */
 
 import {
+	createOrm,
+	exists,
+	gt,
 	isDeleteIntent,
 	isInsertIntent,
 	isUpdateIntent,
 	isUpsertIntent,
+	nqlRaw,
+	outerRef,
 	POSTGRESQL_CAPABILITIES,
 	plan,
 	type QueryIntent,
+	raw,
 	ref,
 	schema,
 } from '@dbsp/core';
-import { compile } from '@dbsp/nql';
 import type {
 	InsertFromIntent,
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { compile } from '../../../nql/src/index.js';
+import {
+	NQL_SELECT_SCALAR_FUNCTIONS,
+	NQL_SELECT_WINDOW_FUNCTIONS,
+} from '../../../types/src/intent/select-function-allowlist.js';
 import { normalizeSQL } from '../ast-helpers.js';
+import { intentToDecisions } from '../intent-to-decisions.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ---------------------------------------------------------------------------
 // Test schema: departments → employees (1:N)
 // ---------------------------------------------------------------------------
 const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: 'string',
+		active: 'boolean',
+		price: 'decimal',
+		status: 'string',
+		createdAt: 'timestamp',
+		data: { type: 'jsonb', nullable: true },
+	},
 	departments: {
 		id: { type: 'integer', primaryKey: true },
 		name: 'string',
@@ -67,7 +87,9 @@ function nqlToSQL(nql: string): string {
 	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: testSchema.model });
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+	});
 
 	return normalizeSQL(result.sql);
 }
@@ -91,10 +113,203 @@ function nqlToSQLWithParams(nql: string): {
 	});
 
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: testSchema.model });
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+	});
 
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
+
+/**
+ * NQL → { sql, params } with named parameter bindings.
+ */
+function nqlToSQLWithNamedParams(
+	nql: string,
+	params: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model, undefined, { params });
+	if (!compiled.success || !compiled.ast?.query) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const planReport = plan(compiled.ast.query, testSchema.model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(planReport, {
+		model: testSchema.model,
+	});
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
+function nqlCteToSQLWithNamedParams(
+	nql: string,
+	params: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model, undefined, { params });
+	if (!compiled.success || !compiled.ast?.cteQuery) {
+		throw new Error(
+			`NQL CTE compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compileCteQuery(compiled.ast.cteQuery, {
+		model: testSchema.model,
+	});
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
+interface SelectFunctionAuditCase {
+	readonly nql: string;
+	readonly params?: Readonly<Record<string, unknown>>;
+	readonly sqlIncludes: readonly string[];
+	readonly paramsInclude?: readonly unknown[];
+}
+
+type ScalarSelectFunction = (typeof NQL_SELECT_SCALAR_FUNCTIONS)[number];
+type WindowSelectFunction = (typeof NQL_SELECT_WINDOW_FUNCTIONS)[number];
+
+function expectAllowlistCoverage<T extends string>(
+	allowlist: readonly T[],
+	cases: Readonly<Record<T, SelectFunctionAuditCase>>,
+): void {
+	expect(Object.keys(cases).sort()).toEqual([...allowlist].sort());
+}
+
+function expectCompilesThroughAdapter(testCase: SelectFunctionAuditCase): void {
+	const { sql, params } = nqlToSQLWithNamedParams(
+		testCase.nql,
+		testCase.params ?? {},
+	);
+	expect(sql).toContain('select');
+	expect(sql).toContain('as audited');
+	expect(sql).not.toContain('no handler');
+	for (const expected of testCase.sqlIncludes) {
+		expect(sql).toContain(expected);
+	}
+	for (const expected of testCase.paramsInclude ?? []) {
+		expect(params).toContainEqual(expected);
+	}
+}
+
+const SCALAR_SELECT_FUNCTION_AUDIT_CASES = {
+	count: {
+		nql: 'users | select count() as audited',
+		sqlIncludes: ['count(*)'],
+	},
+	sum: {
+		nql: 'users | select sum(price) as audited',
+		sqlIncludes: ['sum(users.price)'],
+	},
+	avg: {
+		nql: 'users | select avg(price) as audited',
+		sqlIncludes: ['avg(users.price)'],
+	},
+	min: {
+		nql: 'users | select min(price) as audited',
+		sqlIncludes: ['min(users.price)'],
+	},
+	max: {
+		nql: 'users | select max(price) as audited',
+		sqlIncludes: ['max(users.price)'],
+	},
+	json_extract: {
+		nql: "users | select json_extract(data, 'meta') as audited",
+		sqlIncludes: ['users.data ->'],
+		paramsInclude: ['meta'],
+	},
+	json_extract_text: {
+		nql: "users | select json_extract_text(data, 'email') as audited",
+		sqlIncludes: ['users.data ->>'],
+		paramsInclude: ['email'],
+	},
+	json_path: {
+		nql: "users | select json_path(data, 'a', 'b') as audited",
+		sqlIncludes: ['users.data #>'],
+		paramsInclude: [['a', 'b']],
+	},
+	json_path_text: {
+		nql: "users | select json_path_text(data, 'name', 'first') as audited",
+		sqlIncludes: ['users.data #>>'],
+		paramsInclude: [['name', 'first']],
+	},
+	coalesce: {
+		nql: "users | select coalesce(name, 'anon') as audited",
+		sqlIncludes: ['coalesce(users.name, $1)'],
+		paramsInclude: ['anon'],
+	},
+	lower: {
+		nql: 'users | select lower(name) as audited',
+		sqlIncludes: ['lower(users.name)'],
+	},
+	now: {
+		nql: 'users | select now() as audited',
+		sqlIncludes: ['now()'],
+	},
+	round: {
+		nql: 'users | select round(price) as audited',
+		sqlIncludes: ['round(users.price)'],
+	},
+	upper: {
+		nql: 'users | select upper(name) as audited',
+		sqlIncludes: ['upper(users.name)'],
+	},
+} satisfies Record<ScalarSelectFunction, SelectFunctionAuditCase>;
+
+const WINDOW_SELECT_FUNCTION_AUDIT_CASES = {
+	row_number: {
+		nql: 'users | select row_number() over (order by id) as audited',
+		sqlIncludes: ['row_number() over', 'order by users.id'],
+	},
+	rank: {
+		nql: 'users | select rank() over (order by price) as audited',
+		sqlIncludes: ['rank() over', 'order by users.price'],
+	},
+	dense_rank: {
+		nql: 'users | select dense_rank() over (order by price) as audited',
+		sqlIncludes: ['dense_rank() over', 'order by users.price'],
+	},
+	lag: {
+		nql: 'users | select lag(price) over (order by id) as audited',
+		sqlIncludes: ['lag(users.price)', 'over', 'order by users.id'],
+	},
+	lead: {
+		nql: 'users | select lead(price) over (order by id) as audited',
+		sqlIncludes: ['lead(users.price)', 'over', 'order by users.id'],
+	},
+	count: {
+		nql: 'users | select count() over () as audited',
+		sqlIncludes: ['count(*) over'],
+	},
+	sum: {
+		nql: 'users | select sum(price) over (order by id) as audited',
+		sqlIncludes: ['sum(users.price) over', 'order by users.id'],
+	},
+	avg: {
+		nql: 'users | select avg(price) over (order by id) as audited',
+		sqlIncludes: ['avg(users.price) over', 'order by users.id'],
+	},
+	min: {
+		nql: 'users | select min(price) over (order by id) as audited',
+		sqlIncludes: ['min(users.price) over', 'order by users.id'],
+	},
+	max: {
+		nql: 'users | select max(price) over (order by id) as audited',
+		sqlIncludes: ['max(users.price) over', 'order by users.id'],
+	},
+} satisfies Record<WindowSelectFunction, SelectFunctionAuditCase>;
 
 // ---------------------------------------------------------------------------
 // Helper: NQL mutation → normalized SQL
@@ -129,6 +344,621 @@ describe('NQL → SQL compile-only pipeline', () => {
 		const sql = nqlToSQL("departments | where name = 'Engineering'");
 		expect(sql).toContain('name');
 		expect(sql).toContain('$1');
+	});
+
+	it('rejects raw-family NQL SELECT functions before SQL compilation', () => {
+		const compiled = compile(
+			"users | select raw('1; DROP TABLE users') as x",
+			testSchema.model,
+		);
+
+		expect(compiled.success).toBe(false);
+		expect(compiled.ast).toBeUndefined();
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: raw()',
+		);
+		expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+		expect(() =>
+			nqlToSQLWithParams("users | select raw('1; DROP TABLE users') as x"),
+		).toThrow(/Unsupported function in SELECT context: raw\(\)/);
+	});
+
+	it('rejects arbitrary PostgreSQL SELECT functions before SQL compilation', () => {
+		for (const [fn, args] of [
+			['pg_sleep', '1'],
+			['pg_read_file', "'x'"],
+		] as const) {
+			const input = `users | select ${fn}(${args}) as blocked`;
+			const compiled = compile(input, testSchema.model);
+
+			expect(compiled.success).toBe(false);
+			expect(compiled.ast).toBeUndefined();
+			expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+			expect(compiled.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+			expect(() => nqlToSQLWithParams(input)).toThrow(
+				new RegExp(`Unsupported function in SELECT context: ${fn}\\(\\)`),
+			);
+		}
+	});
+
+	it('rejects direct QueryIntent NQL SELECT functions at adapter emission', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'function',
+						name: 'pg_sleep',
+						args: [1],
+						as: 'blocked',
+					},
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'pg_sleep',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
+	it('rejects direct QueryIntent window-only names in scalar SELECT function position', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'function',
+						name: 'row_number',
+						args: [],
+						as: 'blocked',
+					},
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'row_number',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
+	it('rejects direct QueryIntent unsupported names in window SELECT position', () => {
+		const directIntent: QueryIntent = {
+			from: 'users',
+			select: {
+				type: 'expressions',
+				columns: [
+					{
+						kind: 'window',
+						function: 'pg_sleep',
+						alias: 'blocked',
+						over: {},
+					} as never,
+				],
+			},
+		};
+		const planReport = plan(directIntent, testSchema.model, {
+			dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		});
+		const adapter = createPgsqlCompileOnlyAdapter();
+		let emittedSql: string | undefined;
+
+		expect(() => {
+			const result = adapter.compile(planReport, { model: testSchema.model });
+			emittedSql = result.sql;
+		}).toThrowError(
+			expect.objectContaining({
+				name: 'UnsupportedNqlSelectFunctionError',
+				code: 'ERR_ADAPTER_UNSUPPORTED_NQL_SELECT_FUNCTION',
+				functionName: 'pg_sleep',
+			}),
+		);
+		expect(emittedSql).toBeUndefined();
+	});
+
+	it('compiles generic NQL SELECT functions as FuncCall nodes', () => {
+		const { sql, params } = nqlToSQLWithParams(
+			'users | select upper(name) as uname, now() as current_time',
+		);
+
+		expect(sql).toContain('upper(users.name)');
+		expect(sql).toContain('as uname');
+		expect(sql).toContain('now()');
+		expect(sql).toMatch(/as "?current_time"?/);
+		expect(params).toEqual([]);
+	});
+
+	it('canonicalizes mixed-case NQL SELECT function names before SQL emission', () => {
+		const upper = nqlToSQLWithParams('users | select UPPER(name) as x');
+		expect(upper.sql).toContain('upper(users.name)');
+		expect(upper.sql).not.toContain('"UPPER"');
+		expect(upper.sql).not.toContain('"upper"');
+		expect(upper.params).toEqual([]);
+
+		const coalesce = nqlToSQLWithNamedParams(
+			'users | select Coalesce(name, :x) as y',
+			{ x: 'anon' },
+		);
+		expect(coalesce.sql).toContain('coalesce(users.name, $1)');
+		expect(coalesce.sql).not.toContain('"Coalesce"');
+		expect(coalesce.sql).not.toContain('"coalesce"');
+		expect(coalesce.params).toEqual(['anon']);
+	});
+
+	it('audits every scalar SELECT function allowlist entry end-to-end', () => {
+		expectAllowlistCoverage(
+			NQL_SELECT_SCALAR_FUNCTIONS,
+			SCALAR_SELECT_FUNCTION_AUDIT_CASES,
+		);
+
+		for (const fn of NQL_SELECT_SCALAR_FUNCTIONS) {
+			expectCompilesThroughAdapter(SCALAR_SELECT_FUNCTION_AUDIT_CASES[fn]);
+		}
+	});
+
+	it('audits every window SELECT function allowlist entry end-to-end', () => {
+		expectAllowlistCoverage(
+			NQL_SELECT_WINDOW_FUNCTIONS,
+			WINDOW_SELECT_FUNCTION_AUDIT_CASES,
+		);
+
+		for (const fn of NQL_SELECT_WINDOW_FUNCTIONS) {
+			expectCompilesThroughAdapter(WINDOW_SELECT_FUNCTION_AUDIT_CASES[fn]);
+		}
+	});
+
+	it('rejects nested raw-family NQL SELECT functions before SQL compilation', () => {
+		const input =
+			"users | select upper(lower(name)) as uname, upper(raw('1; DROP TABLE users')) as guarded";
+		const compiled = compile(input, testSchema.model);
+
+		expect(compiled.success).toBe(false);
+		expect(compiled.ast).toBeUndefined();
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: raw()',
+		);
+		expect(JSON.stringify(compiled.ast ?? {})).not.toContain('FuncCall');
+		expect(() => nqlToSQLWithParams(input)).toThrow(
+			/Unsupported function in SELECT context: raw\(\)/,
+		);
+	});
+
+	it('recursively compiles NQL SELECT function arithmetic args with named params', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select round(price + :d) as r',
+			{ d: 5 },
+		);
+
+		expect(sql).toContain('round(users.price + $1)');
+		expect(sql).toContain('as r');
+		expect(params).toEqual([5]);
+	});
+
+	it('recursively compiles nested NQL SELECT function args in coalesce()', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select coalesce(upper(name), :fallback) as label',
+			{ fallback: 'anon' },
+		);
+
+		expect(sql).toContain('coalesce(upper(users.name), $1)');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['anon']);
+	});
+
+	it('recursively compiles nested NQL SELECT arithmetic operands', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select (price + :a) * :b as t',
+			{ a: 2, b: 3 },
+		);
+
+		expect(sql).toContain('(users.price + $1) * $2');
+		expect(sql).toContain('as t');
+		expect(params).toEqual([2, 3]);
+	});
+
+	it('binds NQL SELECT CASE projection params structurally', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when status = :s then :a else :b end as label',
+			{ s: 'active', a: 'A', b: 'B' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['active', 'A', 'B']);
+	});
+
+	it('recursively compiles NQL SELECT CASE expressions as function args', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select upper(case when status = :s then :a else :b end) as label',
+			{ s: 'active', a: 'A', b: 'B' },
+		);
+
+		expect(sql).toContain('upper(case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).toContain('as label');
+		expect(params).toEqual(['active', 'A', 'B']);
+	});
+
+	it('compiles NQL coalesce SELECT params through the NQL-safe handler path', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select coalesce(name, :fallback) as label',
+			{ fallback: 'x' },
+		);
+
+		expect(sql).toContain('coalesce');
+		expect(sql).toContain('$1');
+		expect(sql).toContain('as label');
+		expect(sql).not.toMatch(/select\s+\*\s+from/i);
+		expect(params).toEqual(['x']);
+	});
+
+	it('compiles NQL aggregate named params as bound function args', () => {
+		const sum = nqlToSQLWithNamedParams('users | select sum(:p) as total', {
+			p: 7,
+		});
+		expect(sum.sql).toContain('sum($1)');
+		expect(sum.sql).toContain('as total');
+		expect(sum.params).toEqual([7]);
+
+		const avg = nqlToSQLWithNamedParams('users | select avg(:p) as mean', {
+			p: 3,
+		});
+		expect(avg.sql).toContain('avg($1)');
+		expect(avg.sql).toContain('as mean');
+		expect(avg.params).toEqual([3]);
+	});
+
+	it('binds top-level NQL SELECT named params', () => {
+		const { sql, params } = nqlToSQLWithNamedParams('users | select :p as x', {
+			p: 5,
+		});
+
+		expect(sql).toContain('$1 as x');
+		expect(params).toEqual([5]);
+	});
+
+	it('keeps builder raw() expressions reachable from builder origin', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const dump = orm
+			.select('users')
+			.columns([raw('COUNT(*)', 'count')])
+			.dump();
+
+		const sql = normalizeSQL(dump.sql);
+		expect(sql).toContain('count(*)');
+		expect(sql).toContain('as count');
+		expect(dump.params).toEqual([]);
+	});
+
+	it('unwraps named params in NQL SELECT arithmetic operands', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select id + :n as total',
+			{ n: 5 },
+		);
+
+		expect(sql).toContain('$1');
+		expect(sql).toContain('as total');
+		expect(params).toEqual([5]);
+	});
+
+	it('unwraps named params in NQL CASE result values', () => {
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :yes else :no end as label',
+			{ yes: 'Y', no: 'N' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('as label');
+		expect(params).toEqual([true, 'Y', 'N']);
+	});
+
+	it('binds wrapper-shaped NQL SELECT param values intact in CASE, arithmetic, and function args', () => {
+		const literalShaped = { kind: 'literal', value: 5 };
+		const paramShaped = { kind: 'param', value: 'x' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :literalish else :paramish end as marker, id + :literalish as shifted, upper(:paramish) as wrapped',
+			{ literalish: literalShaped, paramish: paramShaped },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('$2');
+		expect(sql).toContain('$3');
+		expect(sql).toContain('users.id + $4');
+		expect(sql).toContain('upper($5)');
+		expect(params).toEqual([
+			true,
+			literalShaped,
+			paramShaped,
+			literalShaped,
+			paramShaped,
+		]);
+	});
+
+	it('binds fieldRef-shaped params in simple CASE match values', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'x' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			"users | select case status when :p then 'a' else 'b' end as label",
+			{ p: fieldRefShaped },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('then $2');
+		expect(sql).toContain('else $3');
+		expect(sql).not.toContain('users.x');
+		expect(params).toEqual([fieldRefShaped, 'a', 'b']);
+	});
+
+	it('binds named-param null in comparisons instead of emitting literal SQL NULL', () => {
+		const { sql, params } = nqlToSQLWithNamedParams('users | where name = :p', {
+			p: null,
+		});
+
+		expect(sql).toContain('users.name = $1');
+		expect(sql).not.toContain('users.name = null');
+		expect(params).toEqual([null]);
+	});
+
+	it('binds fieldRef-shaped params through direct NQL bundle compile', () => {
+		const fieldRefShaped = {
+			kind: 'fieldRef',
+			column: 'name',
+			scope: 'inner',
+		};
+		const compiled = compile(
+			'users | where id = :p',
+			testSchema.model,
+			undefined,
+			{
+				params: { p: fieldRefShaped },
+			},
+		);
+		if (!compiled.success || !compiled.ast?.query) {
+			throw new Error(
+				`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+			);
+		}
+
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(compiled.ast, { model: testSchema.model });
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('users.id = $1');
+		expect(sql).not.toContain('users.id = users.name');
+		expect(result.parameters).toEqual([fieldRefShaped]);
+	});
+
+	it('keeps source literal null comparisons as SQL NULL literals', () => {
+		const { sql, params } = nqlToSQLWithParams('users | where name = null');
+
+		expect(sql).toContain('users.name = null');
+		expect(params).toEqual([]);
+	});
+
+	it('binds globally forged expression-value brands intact in NQL CASE params', () => {
+		const forgedMarker = Symbol.for('@dbsp/internal/expression-value-intent');
+		const forged = {
+			kind: 'literal',
+			value: 'UNWRAPPED',
+			[forgedMarker]: true,
+		};
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select case when active = true then :forged else :fallback end as marker',
+			{ forged, fallback: 'FALLBACK' },
+		);
+
+		expect(sql).toContain('case');
+		expect(sql).toContain('$2');
+		expect(params).toEqual([true, forged, 'FALLBACK']);
+		expect(params).not.toContain('UNWRAPPED');
+	});
+
+	it('binds named params in HAVING, BETWEEN, and IN-list positions', () => {
+		const having = nqlToSQLWithNamedParams(
+			'users | group by status | where status = :s | select status',
+			{ s: 'active' },
+		);
+		expect(having.sql).toContain('having users.status = $1');
+		expect(having.params).toEqual(['active']);
+
+		const between = nqlToSQLWithNamedParams(
+			'users | where price between :low and :high',
+			{ low: 10, high: 20 },
+		);
+		expect(between.sql).toContain('users.price between $1 and $2');
+		expect(between.params).toEqual([10, 20]);
+
+		const bigintBetween = nqlToSQLWithNamedParams(
+			'users | where price between :lo and :hi',
+			{ lo: 1n, hi: 10n },
+		);
+		expect(bigintBetween.sql).toContain('users.price between $1 and $2');
+		expect(bigintBetween.params).toEqual([1n, 10n]);
+
+		const inList = nqlToSQLWithNamedParams('users | where status in (:a, :b)', {
+			a: 'active',
+			b: 'pending',
+		});
+		expect(inList.sql).toMatch(/users\.status = any\s*\(\$1\)/);
+		expect(inList.params).toEqual([['active', 'pending']]);
+	});
+
+	it('rejects named params in ORDER BY structure instead of emitting ORDER BY $N', () => {
+		const compiled = compile(
+			'users | select id | order by :rank desc',
+			testSchema.model,
+			undefined,
+			{
+				params: { rank: 10 },
+			},
+		);
+
+		expect(compiled.success).toBe(false);
+		expect(compiled.errors[0]?.code).toBe('ERR-SEM-007');
+		expect(compiled.errors[0]?.message).toContain('ORDER BY');
+		expect(compiled.errors[0]?.message).toContain('query structure');
+		expect(compiled.errors[0]?.suggestion).toMatch(/nqlRaw|builder/);
+	});
+
+	it('keeps structural ORDER BY columns and trusted nqlRaw ORDER BY fragments working', () => {
+		const structural = nqlToSQLWithNamedParams(
+			'users | select id | order by created_at desc',
+			{},
+		);
+		expect(structural.sql).toContain('order by users.created_at desc');
+		expect(structural.params).toEqual([]);
+
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const rawFragment = orm.nql<{
+			id: number;
+		}>`users | select id | ${nqlRaw('order by created_at desc')}`.dump();
+
+		expect(normalizeSQL(rawFragment.sql)).toContain(
+			'order by users.created_at desc',
+		);
+		expect(rawFragment.params).toEqual([]);
+	});
+
+	it('binds ANY(:p) and IN(:p) array elements opaquely', () => {
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const opaqueValues = [paramShaped, literalShaped];
+
+		const anyResult = nqlToSQLWithNamedParams(
+			'users | where id = ANY(:items)',
+			{ items: opaqueValues },
+		);
+		expect(anyResult.sql).toMatch(/users\.id = any\s*\(/);
+		expect(anyResult.params).toEqual([opaqueValues]);
+		expect(anyResult.params).not.toEqual([[7, 'x']]);
+
+		const inResult = nqlToSQLWithNamedParams('users | where id in (:items)', {
+			items: opaqueValues,
+		});
+		expect(inResult.sql).toMatch(/users\.id = any\s*\(/);
+		expect(inResult.params).toEqual([opaqueValues]);
+		expect(inResult.params).not.toEqual([[7, 'x']]);
+
+		const normalAny = nqlToSQLWithNamedParams(
+			'users | where id = ANY(:items)',
+			{ items: [1, 2, 3] },
+		);
+		expect(normalAny.params).toEqual([[1, 2, 3]]);
+	});
+
+	it('binds explicit NQL param nodes through CTE body and outer query', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlCteToSQLWithNamedParams(
+			'with subset as (users | where status = :status | select id) subset | where id = :id | select id',
+			{ status: fieldRefShaped, id: null },
+		);
+
+		expect(sql).toContain('users.status = $1');
+		expect(sql).toContain('subset.id = $2');
+		expect(sql).not.toContain('users.status = users.name');
+		expect(sql).not.toContain('subset.id = null');
+		expect(params).toEqual([fieldRefShaped, null]);
+	});
+
+	it('binds explicit NQL param nodes through scalar SELECT subqueries', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'users | select (departments | where name = :dept | select id) as dept_id',
+			{ dept: fieldRefShaped },
+		);
+
+		expect(sql).toContain('select departments.id');
+		expect(sql).toContain('departments.name = $1');
+		expect(sql).not.toContain('departments.name = departments.name');
+		expect(params).toEqual([fieldRefShaped]);
+	});
+
+	it('binds explicit NQL param nodes through relation-filter EXISTS subqueries', () => {
+		const fieldRefShaped = { kind: 'fieldRef', column: 'name' };
+		const { sql, params } = nqlToSQLWithNamedParams(
+			'departments | where some(employees as e, e.name = :needle) | select name',
+			{ needle: fieldRefShaped },
+		);
+
+		expect(sql).toContain('exists');
+		expect(sql).toContain('$1');
+		expect(sql).not.toContain('employees.name = employees.name');
+		expect(params).toEqual([fieldRefShaped]);
+	});
+
+	it('keeps builder-origin outerRef structure unbound', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({ model: testSchema.model });
+		const orm = createOrm({ model: testSchema.model, adapter });
+		const dump = orm
+			.select('departments')
+			.where(exists('employees', { where: gt('salary', outerRef('budget')) }))
+			.dump();
+		const sql = normalizeSQL(dump.sql);
+
+		expect(sql).toContain('exists');
+		expect(sql).toContain('employees_exists_0.salary > departments.budget');
+		expect(sql).not.toContain('$1');
+		expect(dump.params).toEqual([]);
+	});
+
+	it('throws a structured error for unknown SELECT expression kinds', () => {
+		expect(() =>
+			intentToDecisions(
+				{
+					from: 'employees',
+					select: {
+						type: 'expressions',
+						columns: [{ kind: 'notARealSelectExpression', as: 'x' }],
+					},
+				} as QueryIntent,
+				'employees',
+			),
+		).toThrowError(
+			expect.objectContaining({
+				name: 'UnknownSelectExpressionKindError',
+				code: 'ERR_ADAPTER_UNKNOWN_SELECT_EXPRESSION_KIND',
+				kind: 'notARealSelectExpression',
+			}),
+		);
 	});
 
 	it('compiles flat include with all columns', () => {
@@ -652,6 +1482,27 @@ describe('Bug regressions', () => {
 			expect(params).toContain(0);
 		});
 
+		it('unwraps named params in lag/lead default values before binding', () => {
+			const leadResult = nqlToSQLWithNamedParams(
+				'employees | select lead(salary, 1, :fallback) over (order by name) as next_salary',
+				{ fallback: 0 },
+			);
+			const lagResult = nqlToSQLWithNamedParams(
+				'employees | select lag(salary, 1, :default) over (order by name) as prev_salary',
+				{ default: -1 },
+			);
+
+			expect(leadResult.sql).toContain('lead(');
+			expect(leadResult.sql).toContain('$1');
+			expect(leadResult.sql).toContain('$2');
+			expect(leadResult.params).toEqual([1, 0]);
+
+			expect(lagResult.sql).toContain('lag(');
+			expect(lagResult.sql).toContain('$1');
+			expect(lagResult.sql).toContain('$2');
+			expect(lagResult.params).toEqual([1, -1]);
+		});
+
 		it('lag without offset omits offset param (PG defaults to 1)', () => {
 			const { sql, params } = nqlToSQLWithParams(
 				'employees | select lag(salary) over (order by name) as prev',
@@ -868,7 +1719,22 @@ function mutationToSQL(nql: string): {
 	sql: string;
 	params: readonly unknown[];
 } {
-	const compiled = compile(nql, mutationSchema.model);
+	return mutationToSQLWithNamedParams(nql);
+}
+
+function mutationToSQLWithNamedParams(
+	nql: string,
+	namedParams?: Readonly<Record<string, unknown>>,
+): {
+	sql: string;
+	params: readonly unknown[];
+} {
+	const compiled = compile(
+		nql,
+		mutationSchema.model,
+		undefined,
+		namedParams ? { params: namedParams } : undefined,
+	);
 	if (!compiled.success || !compiled.ast?.mutation) {
 		throw new Error(
 			`NQL mutation compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
@@ -877,7 +1743,9 @@ function mutationToSQL(nql: string): {
 
 	const mutation = compiled.ast.mutation;
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const opts = { model: mutationSchema.model };
+	const opts = {
+		model: mutationSchema.model,
+	};
 
 	let result: { sql: string; parameters: readonly unknown[] };
 	if (isUpdateIntent(mutation)) {
@@ -936,6 +1804,32 @@ describe('NQL → SQL mutation E2E', () => {
 		expect(sql).toEqual(
 			'update authors set active = $1 where authors.id = $2 returning authors.id as id, authors.name as name',
 		);
+	});
+
+	it('binds explicit NQL param nodes through mutation values and WHERE', () => {
+		const needle = { kind: 'fieldRef', column: 'active' };
+		const { sql, params } = mutationToSQLWithNamedParams(
+			'update authors set active = :status where name = :needle',
+			{ status: null, needle },
+		);
+
+		expect(sql).toContain('set active = $1');
+		expect(sql).toContain('authors.name = $2');
+		expect(sql).not.toContain('set active = null');
+		expect(sql).not.toContain('authors.name = null');
+		expect(params).toEqual([null, needle]);
+	});
+
+	it('binds named-param $ref in mutation IN as a value, not a CTE subquery', () => {
+		const refValue = { $ref: 'ids' };
+		const { sql, params } = mutationToSQLWithNamedParams(
+			'posts | select id | bind ids\ndelete from posts where userId in (:p)',
+			{ p: refValue },
+		);
+
+		expect(sql).toContain('posts."userid" = any');
+		expect(sql).not.toContain('select "ids');
+		expect(params).toEqual([[refValue]]);
 	});
 });
 
@@ -1397,11 +2291,19 @@ function jsonNqlToSQL(nql: string): string {
 	return normalizeSQL(result.sql);
 }
 
-function jsonNqlToSQLWithParams(nql: string): {
+function jsonNqlToSQLWithParams(
+	nql: string,
+	namedParams?: Readonly<Record<string, unknown>>,
+): {
 	sql: string;
 	params: readonly unknown[];
 } {
-	const compiled = compile(nql, jsonSchema.model);
+	const compiled = compile(
+		nql,
+		jsonSchema.model,
+		undefined,
+		namedParams ? { params: namedParams } : undefined,
+	);
 	if (!compiled.success || !compiled.ast?.query) {
 		throw new Error(
 			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
@@ -1411,7 +2313,9 @@ function jsonNqlToSQLWithParams(nql: string): {
 		dialectCapabilities: POSTGRESQL_CAPABILITIES,
 	});
 	const adapter = createPgsqlCompileOnlyAdapter();
-	const result = adapter.compile(planReport, { model: jsonSchema.model });
+	const result = adapter.compile(planReport, {
+		model: jsonSchema.model,
+	});
 	return { sql: normalizeSQL(result.sql), params: result.parameters };
 }
 
@@ -1539,6 +2443,24 @@ describe('JSONB operators (E13)', () => {
 			);
 			expect(sql).toContain('#>');
 			expect(sql).toContain('as nested');
+		});
+
+		it('binds json_path named-param key with comma as a single path segment', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | select json_path(data, :key) as nested',
+				{ key: 'a,b' },
+			);
+			expect(sql).toContain('data #> $1');
+			expect(params).toEqual([['a,b']]);
+		});
+
+		it('binds json_path_text named-param braced key as a single path segment', () => {
+			const { sql, params } = jsonNqlToSQLWithParams(
+				'events | select json_path_text(data, :key) as nested',
+				{ key: '{a,b}' },
+			);
+			expect(sql).toContain('data #>> $1');
+			expect(params).toEqual([['{a,b}']]);
 		});
 	});
 

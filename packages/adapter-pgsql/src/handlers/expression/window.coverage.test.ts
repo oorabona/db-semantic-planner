@@ -304,6 +304,18 @@ describe('lagHandler', () => {
 		expect(state.parameters).toContain(100);
 	});
 
+	it('unwraps ParamIntent default values before binding', () => {
+		const state = createCompilerState();
+		const decision = {
+			type: 'lag',
+			column: 'price',
+			args: [1],
+			value: { kind: 'param', value: -1 },
+		} as unknown as Decision;
+		lagHandler.compile(decision, ctx, state);
+		expect(state.parameters).toEqual([1, -1]);
+	});
+
 	it('compiles with PARTITION BY and ORDER BY', () => {
 		const state = createCompilerState();
 		const decision = {
@@ -380,6 +392,18 @@ describe('leadHandler', () => {
 		expect(result.FuncCall?.args).toHaveLength(3);
 		expect(state.parameters).toContain(2);
 		expect(state.parameters).toContain(999);
+	});
+
+	it('unwraps ParamIntent default values before binding', () => {
+		const state = createCompilerState();
+		const decision = {
+			type: 'lead',
+			column: 'price',
+			args: [1],
+			value: { kind: 'param', value: 0 },
+		} as unknown as Decision;
+		leadHandler.compile(decision, ctx, state);
+		expect(state.parameters).toEqual([1, 0]);
 	});
 
 	it('compiles with PARTITION BY and ORDER BY', () => {
@@ -600,6 +624,20 @@ describe('genericWindowHandler', () => {
 		const result = genericWindowHandler.compile(decision, ctx, state);
 		expect(result.FuncCall?.args).toHaveLength(2); // column + value
 		expect(state.parameters).toContain(0);
+	});
+
+	it('unwraps ParamIntent args and values before binding', () => {
+		const state = createCompilerState();
+		const decision = {
+			type: 'window',
+			function: 'lead',
+			column: 'score',
+			args: [{ kind: 'param', value: 1 }],
+			value: { kind: 'param', value: 0 },
+		} as unknown as Decision;
+		const result = genericWindowHandler.compile(decision, ctx, state);
+		expect(result.FuncCall?.args).toHaveLength(3); // column + offset + default
+		expect(state.parameters).toEqual([1, 0]);
 	});
 
 	it('compiles with column, args, and value', () => {

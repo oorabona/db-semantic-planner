@@ -5,6 +5,7 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -30,7 +31,7 @@ export const jsonExtractHandler: ExpressionHandler = {
 			throw new Error('JSON extract handler requires a column');
 		}
 
-		const path = (decision.args ?? []) as string[];
+		const path = (decision.args ?? []) as readonly unknown[];
 		const mode = decision.jsonMode ?? 'text';
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
@@ -55,9 +56,32 @@ export const jsonExtractHandler: ExpressionHandler = {
 };
 
 /**
- * JSON path extract: col#>'{a,b}' or col#>>'{a,b}'
+ * JSON path extract: col#>ARRAY['a','b'] or col#>>ARRAY['a','b}'
  * Produces: "col" #> $1 or "col" #>> $1
  */
+function normalizeJsonPathArgs(args: readonly unknown[] | undefined): unknown {
+	if (!args || args.length === 0) return [];
+	if (args.length === 1) {
+		const first = args[0];
+		const unwrappedFirst = unwrapParamIntent(first);
+		if (first !== unwrappedFirst) {
+			return unwrappedFirst;
+		}
+		if (Array.isArray(first)) {
+			return first.map(unwrapParamIntent);
+		}
+		if (
+			typeof first === 'string' &&
+			first.startsWith('{') &&
+			first.endsWith('}')
+		) {
+			const inner = first.slice(1, -1);
+			return inner.length === 0 ? [] : inner.split(',');
+		}
+	}
+	return args.map(unwrapParamIntent);
+}
+
 export const jsonPathExtractHandler: ExpressionHandler = {
 	types: ['jsonPathExtract'],
 
@@ -72,12 +96,11 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 		}
 
 		const mode = decision.jsonMode ?? 'text';
-		// args[0] is the pre-built PostgreSQL array literal '{a,b}'
-		const arrayLiteral = (decision.args?.[0] as string) ?? '{}';
+		const path = normalizeJsonPathArgs(decision.args);
 
 		const alias = ctx.currentAlias ?? ctx.rootTable;
 		const left: Node = columnRef(column, alias, undefined, ctx.naming);
-		const right = compileValue(arrayLiteral, state);
+		const right = compileValue(path, state);
 		const op = mode === 'text' ? '#>>' : '#>';
 
 		return {

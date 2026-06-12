@@ -8,13 +8,14 @@
 
 import type { CoalesceExpr, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
 	Decision,
 	ExpressionHandler,
 } from '../types.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Build a value node from a decision argument
@@ -39,10 +40,17 @@ function buildValueNode(
 		}
 	}
 
+	if (
+		typeof value === 'object' &&
+		value !== null &&
+		'kind' in value &&
+		ctx.compileNqlSelectExpression
+	) {
+		return ctx.compileNqlSelectExpression(value, ctx, state);
+	}
+
 	// Otherwise, parameterize it
-	const paramNumber = ++state.paramIndex;
-	state.parameters.push(value);
-	return createParamRef(paramNumber);
+	return bindParameter(unwrapParamIntent(value), state);
 }
 
 /**
@@ -53,6 +61,7 @@ function buildValueNode(
  */
 export const coalesceHandler: ExpressionHandler = {
 	types: ['coalesce', 'COALESCE', 'ifNull', 'nvl'],
+	nqlSafe: true,
 
 	compile(
 		decision: Decision,
@@ -124,9 +133,7 @@ export const nullIfHandler: ExpressionHandler = {
 		const tableAlias = ctx.currentAlias ?? ctx.rootTable;
 		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
-		const paramNumber = ++state.paramIndex;
-		state.parameters.push(value);
-		const valueRef = createParamRef(paramNumber);
+		const valueRef = bindParameter(unwrapParamIntent(value), state);
 
 		return {
 			NullIfExpr: {

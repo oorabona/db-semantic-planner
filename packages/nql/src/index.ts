@@ -18,6 +18,7 @@
 // Re-export compiler types
 export type {
 	ColumnValidatorSchema,
+	CompiledNqlQuery,
 	CompileResult,
 	DeleteIntent,
 	ExpressionIntent,
@@ -55,7 +56,7 @@ export type {
 	NqlWarning,
 } from './errors/types.js';
 // Re-export lexer
-export { allTokens, NqlLexer } from './lexer/index.js';
+export { allTokens, NqlLexer, tokenize } from './lexer/index.js';
 // Re-export AST types
 export * from './parser/ast.js';
 // Re-export parser
@@ -178,16 +179,16 @@ export function compile(
 			warnings: parseResult.warnings,
 		};
 	} catch (err) {
-		const code =
-			err instanceof NqlSemanticException
-				? err.code
-				: NqlErrorCodes.SEM_UNREACHABLE;
+		const semanticError = err instanceof NqlSemanticException;
+		const code = semanticError ? err.code : NqlErrorCodes.SEM_UNREACHABLE;
 		return {
 			success: false,
 			errors: [
 				{
 					code,
 					message: err instanceof Error ? err.message : String(err),
+					location: semanticError ? err.location : undefined,
+					suggestion: semanticError ? err.suggestion : undefined,
 				},
 			],
 			warnings: [],

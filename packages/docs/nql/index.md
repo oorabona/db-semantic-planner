@@ -13,6 +13,7 @@ NQL (Natural Query Language) is a pipe-based query language that compiles to par
 
 - [Getting Started](#getting-started)
 - [Basic Queries](#basic-queries)
+- [Named Parameters and Template Binding](#named-parameters-and-template-binding)
 - [Filtering (WHERE)](#filtering-where)
 - [Sorting and Pagination](#sorting-and-pagination)
 - [Relations and Includes](#relations-and-includes)
@@ -144,6 +145,51 @@ SELECT customers.* FROM ch5_ecommerce.customers
 | 3  | carol@example.com | Carol      | Williams  | NULL        | 2024-01-02T10:00:00.000Z |
 | 4  | david@example.com | David      | Brown     | +1-555-0104 | 2024-01-03T11:00:00.000Z |
 | 5  | emma@example.com  | Emma       | Davis     | +1-555-0105 | 2024-01-04T12:00:00.000Z |
+
+---
+
+## Named Parameters and Template Binding
+
+NQL supports named value parameters in expression positions. A named parameter is written as `:name` in the query text and resolved from the compiler `params` map. Use it for values only: comparison right-hand sides, `IN` lists, function arguments, `BETWEEN`, `CASE` results, JSON/range value operands, and `limit`/`offset`. Identifiers, table names, column names, directions, lock modes, and traversal hints remain query structure.
+
+```typescript
+// doctest: skip — illustrative direct compiler params example
+import { createPgsqlCompileOnlyAdapter } from '@dbsp/adapter-pgsql';
+import { compile } from '@dbsp/nql';
+
+const compiled = compile('users | where id = :id and active = :active', db.model, undefined, {
+  params: { id: 42, active: true },
+});
+
+if (!compiled.success || !compiled.ast?.query) {
+  throw new Error(compiled.errors.map((e) => e.message).join(', '));
+}
+
+const adapter = createPgsqlCompileOnlyAdapter();
+const query = adapter.compile(compiled.ast, { model: db.model });
+```
+
+Resolution uses own properties on the params object. `{ p: null }` binds SQL `NULL`; a missing `p` fails compilation; `{ p: undefined }`, `NaN`, and `Infinity` are rejected. `Date` and `BigInt` values are passed through to the adapter. Parameter names `__proto__`, `constructor`, and `prototype` are rejected.
+
+When using the TypeScript `orm.nql` template tag, every non-raw interpolation is converted to an internal generated parameter named `:__p0`, `:__p1`, and so on. Numbering counts bound interpolations only, in template order. `nqlRaw()` fragments do not allocate a generated parameter and do not shift the mapping.
+
+```typescript
+// doctest: skip — illustrative ORM tag params example
+import { nqlRaw } from '@dbsp/core';
+
+const ids = [1, 2, 3];
+const rows = await orm.nql<PostRow>`posts
+  | where id = ANY(${ids})
+  | ${nqlRaw('order by createdAt desc')}
+  | limit ${10}
+`.all();
+```
+
+The `__p` namespace is reserved for the tag implementation. User-authored `:__p0` source, `params` keys beginning with `__p`, or raw fragments that contain `:__p0` are rejected. Use your own names, such as `:id` or `:status`, for direct compiler parameters.
+
+`nqlRaw(fragment)` is a trusted-fragment escape hatch. It splices the fragment verbatim into NQL source before parsing, so never pass untrusted input to it. Plain strings are always bound as values; they never become query structure.
+
+Migration from earlier tag interpolation is behavior-compatible for strings, numbers, booleans, and `null`, but values now appear in `dump().params` instead of being escaped into NQL source. Arrays are newly supported for patterns such as `ANY(${ids})`; `limit ${n}` and `offset ${n}` continue to work through integer validation.
 
 ---
 

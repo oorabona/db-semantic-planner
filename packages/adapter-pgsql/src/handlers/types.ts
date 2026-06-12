@@ -5,7 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
-import type { ModelIR } from '@dbsp/types';
+import type { ModelIR, ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { NamingPlugin } from '../naming-plugin.js';
@@ -49,6 +49,16 @@ export interface CompilerContext {
 		query: import('@dbsp/types').QueryIntent,
 		paramOffset: number,
 	) => { ast: Node; parameters: readonly unknown[] };
+	/**
+	 * Optional recursive compiler for NQL-origin SELECT expression values nested
+	 * inside handler arguments, such as coalesce(upper(name), :fallback) or
+	 * (price + :a) * :b.
+	 */
+	readonly compileNqlSelectExpression?: (
+		value: unknown,
+		ctx: CompilerContext,
+		state: CompilerState,
+	) => Node;
 	/**
 	 * Optional ModelIR for type-aware parameter casting.
 	 * When provided, WHERE comparisons emit `$N::type` to eliminate
@@ -118,8 +128,8 @@ export interface Decision {
 	readonly columns?: readonly string[];
 	readonly values?: readonly unknown[];
 	readonly set?: readonly { column: string; value: unknown }[];
-	readonly limit?: number | { paramIndex: number };
-	readonly offset?: number | { paramIndex: number };
+	readonly limit?: number | ParamIntent | { paramIndex: number };
+	readonly offset?: number | ParamIntent | { paramIndex: number };
 	// Include-specific
 	readonly strategy?: 'join' | 'lateral' | 'json_agg' | 'cte';
 	readonly relation?: string;
@@ -160,7 +170,7 @@ export interface Decision {
 	// Populated when selectRelationColumn decisions carry an `alias` field.
 	readonly columnAliases?: Readonly<Record<string, string>>;
 	// JSON-specific
-	readonly jsonPath?: readonly string[];
+	readonly jsonPath?: readonly unknown[];
 	readonly jsonMode?: 'json' | 'text';
 	// Pre-compiled filter from EXISTS propagation (set by compiler, read by json_agg handler)
 	readonly _compiledFilterWhere?: import('@pgsql/types').Node;
@@ -228,6 +238,13 @@ export type WhereDispatcher = (
 export interface ExpressionHandler {
 	/** Expression type(s) this handler supports */
 	readonly types: readonly string[];
+	/**
+	 * Safe to use when a function name comes from NQL text.
+	 *
+	 * Raw/escape-hatch handlers must not set this. NQL-origin function names use
+	 * this opt-in surface only, then fall back to generic FuncCall emission.
+	 */
+	readonly nqlSafe?: boolean;
 
 	/**
 	 * Compile an expression to AST.

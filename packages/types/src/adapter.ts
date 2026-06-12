@@ -15,6 +15,8 @@ import type {
 	ExpressionIntent,
 	InsertFromIntent,
 	InsertIntent,
+	MutationIntent,
+	QueryIntent,
 	SelectIntent,
 	SetOperationIntent,
 	UpdateIntent,
@@ -117,6 +119,23 @@ export interface CompileOptionsBase {
 	 * @default undefined (no limit)
 	 */
 	readonly maxBatchSize?: number;
+}
+
+/**
+ * Adapter-facing NQL compile bundle.
+ */
+export interface CompiledNqlQuery {
+	readonly query?: QueryIntent;
+	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
+	readonly cteQuery?: CteQueryIntent;
+	readonly mutation?: MutationIntent;
+	readonly returning?: readonly string[];
+	/** Named bindings from `| bind X` clauses (CTE source queries) */
+	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+	/** Named mutation bindings from `mutation | select cols | bind X` clauses. */
+	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
+	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
+	readonly setOperation?: SetOperationIntent;
 }
 
 /**
@@ -269,7 +288,7 @@ export interface BaseAdapter {
 export interface CompilingAdapter extends BaseAdapter {
 	/** Compile a plan to executable SQL. */
 	compile<T = unknown>(
-		plan: PlanReport,
+		plan: PlanReport | CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T>;
 

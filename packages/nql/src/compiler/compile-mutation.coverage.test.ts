@@ -716,6 +716,23 @@ describe('resolveBindingsInWhere with bound IN', () => {
 		expect(inWhere.subquery?.from).toBe('activeIds');
 	});
 
+	it('IN with named-param $ref value remains a value, not a bound CTE subquery', () => {
+		const refValue = { $ref: 'activeIds' };
+		const result = compileNql(
+			'users | select id | bind activeIds\ndelete from users where id in (:p)',
+			{ params: { p: refValue } },
+		);
+
+		expect(result.mutation).toBeDefined();
+		const where = (result.mutation as MutationWithWhere)?.where;
+		expect(where).toBeDefined();
+		expect(where?.kind).toBe('in');
+		const inWhere = where as WhereInIntent;
+		expect(inWhere.subquery).toBeUndefined();
+		const values = (inWhere as { values: readonly unknown[] }).values;
+		expect(values).toEqual([{ kind: 'param', value: refValue }]);
+	});
+
 	it('IN with bound ref in update resolves to subquery', () => {
 		const result = compileNql(
 			"users | where active = true | select id | bind validIds\nupdate users set status = 'archived' where id in (validIds)",

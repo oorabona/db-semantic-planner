@@ -24,6 +24,7 @@ import type {
 	CompilerState,
 	Decision,
 } from '../handlers/types.js';
+import { unwrapParamIntent } from '../param-intent.js';
 import { createTypeCastParamRef } from '../param-ref.js';
 import { buildReturningList } from './mutation-compiler.js';
 
@@ -335,7 +336,7 @@ export function compileUnnestUpsert(
  */
 function valueToParam(state: CompilerState, value?: unknown): Node {
 	if (value !== undefined) {
-		state.parameters.push(value);
+		state.parameters.push(unwrapParamIntent(value));
 	}
 	state.paramIndex++;
 

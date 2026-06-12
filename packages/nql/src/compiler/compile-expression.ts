@@ -5,6 +5,7 @@
  */
 
 import type {
+	ParamIntent,
 	QueryIntent,
 	WhereAnyIntent,
 	WhereComparisonIntent,
@@ -37,9 +38,18 @@ import {
 	expressionToRangeValue,
 	mapComparisonOperator,
 	resolveFilterValue,
+	resolveNamedParam,
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function paramValue(value: unknown): unknown {
+	return value !== null &&
+		typeof value === 'object' &&
+		(value as Record<string, unknown>).kind === 'param'
+		? (value as ParamIntent).value
+		: value;
+}
 
 // ---------------------------------------------------------------------------
 // Handler functions (extracted from switch cases)
@@ -133,7 +143,7 @@ function compileComparison(
 			aliasContext,
 			outerAliases,
 		);
-		return {
+		const intent = {
 			kind: 'comparison',
 			field: baseField,
 			operator,
@@ -141,6 +151,7 @@ function compileComparison(
 			jsonPath: jsonLeft.path,
 			jsonMode: jsonLeft.mode,
 		} satisfies WhereComparisonIntent;
+		return intent;
 	}
 
 	// JSON function on LHS: json_extract_text(data, 'key') = 'val'
@@ -169,7 +180,7 @@ function compileComparison(
 			// '[object Object]' for path expressions — use coerceToStringKey instead.
 			const keys = comp.left.args
 				.slice(1)
-				.map((a) => coerceToStringKey(a, `${fn}() path argument`));
+				.map((a) => coerceToStringKey(a, `${fn}() path argument`, ctx));
 			const operator = mapComparisonOperator(comp.operator);
 			const value = resolveFilterValue(
 				comp.right,
@@ -177,7 +188,7 @@ function compileComparison(
 				aliasContext,
 				outerAliases,
 			);
-			return {
+			const intent = {
 				kind: 'comparison',
 				field: baseField,
 				operator,
@@ -185,6 +196,7 @@ function compileComparison(
 				jsonPath: keys,
 				jsonMode: fn === 'json_extract' ? 'json' : 'text',
 			} satisfies WhereComparisonIntent;
+			return intent;
 		}
 	}
 
@@ -204,22 +216,24 @@ function compileComparison(
 	// Dotted paths and expression nodes are rejected by coerceToStringKey().
 	// String(resolveFilterValue(...)) would silently yield '[object Object]' for path refs.
 	if (comp.operator === 'like') {
+		const pattern = coerceToStringKey(comp.right, 'LIKE pattern', ctx);
 		return {
 			kind: 'like',
 			field,
-			pattern: coerceToStringKey(comp.right, 'LIKE pattern'),
+			pattern,
 		};
 	}
 
 	const operator = mapComparisonOperator(comp.operator);
 	const value = resolveFilterValue(comp.right, ctx, aliasContext, outerAliases);
 
-	return {
+	const intent: WhereComparisonIntent = {
 		kind: 'comparison',
 		field,
 		operator,
 		value,
 	};
+	return intent;
 }
 
 function compileRange(
@@ -259,12 +273,13 @@ function compileRange(
 		);
 	}
 	/* v8 ignore stop -- @preserve */
-	return {
+	const result: WhereRangeIntent = {
 		kind: 'range',
 		field,
 		operator: rangeExpr.operator,
-		value: rangeValue,
-	} as WhereRangeIntent;
+		value: rangeValue as WhereRangeIntent['value'],
+	};
+	return result;
 }
 
 function compileMembership(
@@ -286,11 +301,12 @@ function compileMembership(
 		}
 		/* v8 ignore stop -- @preserve */
 		validateWhereField(ctx, field, aliasContext, anyExpr.column);
-		const rawValues = ctx.params[anyExpr.paramName];
+		const valuesParam = resolveNamedParam(ctx, anyExpr.paramName);
+		const rawValues = valuesParam.value;
 		if (!Array.isArray(rawValues)) {
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,
-				`ANY(:${anyExpr.paramName}) requires an array argument but received ${rawValues === undefined ? 'undefined (parameter not bound)' : typeof rawValues}`,
+				`ANY(:${anyExpr.paramName}) requires an array argument`,
 			);
 		}
 		if (rawValues.length > ctx.maxAnyItems) {
@@ -299,8 +315,12 @@ function compileMembership(
 				`ANY(:${anyExpr.paramName}) array length ${rawValues.length} exceeds maximum of ${ctx.maxAnyItems}`,
 			);
 		}
-		const values: readonly unknown[] = rawValues;
-		return { kind: 'any', field, values } satisfies WhereAnyIntent;
+		const result = {
+			kind: 'any',
+			field,
+			values: valuesParam,
+		} satisfies WhereAnyIntent;
+		return result;
 	}
 
 	// in
@@ -409,42 +429,41 @@ function compileBetween(
 		aliasContext,
 		outerAliases,
 	);
+	const lowerValue = paramValue(lower);
+	const upperValue = paramValue(upper);
 
-	if (
-		lower !== null &&
-		typeof lower !== 'number' &&
-		typeof lower !== 'string' &&
-		!(lower instanceof Date)
-	) {
-		// L-6: actionable message — tell the user what the lower bound was
-		const got =
-			typeof lower === 'object' ? 'path reference' : JSON.stringify(lower);
-		throw new NqlSemanticException(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
-			`BETWEEN lower bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
-		);
-	}
-	if (
-		upper !== null &&
-		typeof upper !== 'number' &&
-		typeof upper !== 'string' &&
-		!(upper instanceof Date)
-	) {
-		// L-6: actionable message — tell the user what the upper bound was
-		const got =
-			typeof upper === 'object' ? 'path reference' : JSON.stringify(upper);
-		throw new NqlSemanticException(
-			NqlErrorCodes.SEM_INVALID_SYNTAX,
-			`BETWEEN upper bound must be a literal number, string, or date — got ${got}. Use a param or hardcoded value.`,
-		);
-	}
+	assertBetweenBoundValueAllowed('lower', between.low, lowerValue);
+	assertBetweenBoundValueAllowed('upper', between.high, upperValue);
 
+	const value = { lower, upper };
 	return {
 		kind: 'range',
 		field,
 		operator: 'between',
-		value: { lower, upper },
+		value,
 	};
+}
+
+function assertBetweenBoundValueAllowed(
+	position: 'lower' | 'upper',
+	expr: NqlExpression,
+	value: unknown,
+): void {
+	if (
+		value === null ||
+		typeof value === 'number' ||
+		typeof value === 'string' ||
+		typeof value === 'bigint' ||
+		value instanceof Date
+	) {
+		return;
+	}
+
+	const paramSuffix = expr.type === 'namedParam' ? `; param :${expr.name}` : '';
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`BETWEEN ${position} bound must be a literal number, string, or date, or a bigint param; got type ${typeof value}${paramSuffix}.`,
+	);
 }
 
 function compileNull(
@@ -505,12 +524,13 @@ function compileJson(
 				aliasContext,
 				outerAliases,
 			);
-			return {
+			const intent = {
 				kind: 'jsonContains',
 				field: jsonField,
 				value: jsonValue,
 				reversed: fn === 'json_contained_by',
 			} satisfies WhereJsonContainsIntent;
+			return intent;
 		}
 		if (fn === 'json_exists') {
 			/* v8 ignore start — defensive: parser guarantees at least 2 args -- @preserve */
@@ -533,7 +553,7 @@ function compileJson(
 			// Route through coerceToStringKey: handles single-segment path identifiers
 			// (e.g. json_exists(data, email) → key='email') and rejects dotted paths
 			// and non-string values that would silently yield '[object Object]'.
-			const key = coerceToStringKey(expr.args[1]!, `${fn}() key`);
+			const key = coerceToStringKey(expr.args[1]!, `${fn}() key`, ctx);
 			return {
 				kind: 'jsonExists',
 				field: jsonField,
@@ -562,7 +582,7 @@ function compileJson(
 	if (jsonComp.operator === '?') {
 		// S-3: String(resolveFilterValue(...)) would silently yield '[object Object]'
 		// for path expressions — use coerceToStringKey to reject non-string RHS.
-		const key = coerceToStringKey(jsonComp.right, '? operator key');
+		const key = coerceToStringKey(jsonComp.right, '? operator key', ctx);
 		return {
 			kind: 'jsonExists',
 			field: jsonField,
@@ -577,12 +597,13 @@ function compileJson(
 		aliasContext,
 		outerAliases,
 	);
-	return {
+	const intent = {
 		kind: 'jsonContains',
 		field: jsonField,
 		value: jsonValue,
 		reversed: jsonComp.operator === '<@',
 	} satisfies WhereJsonContainsIntent;
+	return intent;
 }
 
 function compileRelationFilter(

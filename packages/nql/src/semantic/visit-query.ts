@@ -10,6 +10,7 @@ import type {
 	NqlExpression,
 	NqlJoinParam,
 	NqlJoinSpec,
+	NqlLimitCount,
 	NqlLockClause,
 	NqlOrderItem,
 	NqlProgram,
@@ -118,8 +119,8 @@ export function visitOrderClause(ctx: CstContext, visit: VisitFn): NqlClause {
 }
 
 export function visitLimitClause(ctx: CstContext, visit: VisitFn): NqlClause {
-	requireFirst(ctx, 'NumberLiteral', 'Limit clause missing number');
-	const count = parseInt(getImage(ctx.NumberLiteral[0]!), 10);
+	requireFirst(ctx, 'numericValueAtom', 'Limit clause missing number');
+	const count = visit(asCstNode(ctx.numericValueAtom[0]!)) as NqlLimitCount;
 	const segments = ctx.identSegment;
 	if (segments && segments.length > 0) {
 		const parts: string[] = [];
@@ -131,12 +132,24 @@ export function visitLimitClause(ctx: CstContext, visit: VisitFn): NqlClause {
 	return { type: 'limit', count };
 }
 
-export function visitOffsetClause(ctx: CstContext): NqlClause {
-	requireFirst(ctx, 'NumberLiteral', 'Offset clause missing number');
+export function visitOffsetClause(ctx: CstContext, visit: VisitFn): NqlClause {
+	requireFirst(ctx, 'numericValueAtom', 'Offset clause missing number');
 	return {
 		type: 'offset',
-		count: parseInt(getImage(ctx.NumberLiteral[0]!), 10),
+		count: visit(asCstNode(ctx.numericValueAtom[0]!)) as NqlLimitCount,
 	};
+}
+
+export function visitNumericValueAtom(ctx: CstContext): NqlLimitCount {
+	if (ctx.NumberLiteral) {
+		return parseInt(getImage(ctx.NumberLiteral[0]!), 10);
+	}
+	if (ctx.NamedParam) {
+		const raw = getImage(ctx.NamedParam[0]!);
+		return { type: 'namedParam', name: raw.slice(1) };
+	}
+	/* v8 ignore next — defensive: parser guarantees NumberLiteral or NamedParam -- @preserve */
+	unreachable('Invalid numeric value');
 }
 
 export function visitJoinSpec(ctx: CstContext, visit: VisitFn): NqlJoinSpec {

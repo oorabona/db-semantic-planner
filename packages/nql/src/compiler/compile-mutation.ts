@@ -21,8 +21,10 @@ import type {
 	WhereNotIntent,
 	WhereOrIntent,
 } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
 import type {
 	NqlDelete,
+	NqlExpression,
 	NqlInsert,
 	NqlInsertFrom,
 	NqlMutation,
@@ -33,8 +35,21 @@ import type {
 	NqlUpsert,
 	NqlUpsertFrom,
 } from '../parser/ast.js';
-import { expressionToField, expressionToValue } from './expression-utils.js';
+import {
+	expressionToField,
+	expressionToValue,
+	resolveIntegerCount,
+} from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+function assignMutationValue(
+	target: Record<string, unknown>,
+	column: string,
+	value: NqlExpression,
+	ctx: CompilerContext,
+): void {
+	target[column] = expressionToValue(value, ctx);
+}
 
 /**
  * Compile a mutation pipeline (mutation + clauses like RETURNING).
@@ -110,7 +125,7 @@ function compileInsert(insert: NqlInsert, ctx: CompilerContext): InsertIntent {
 		const rowColumns = new Set<string>();
 		for (const assignment of row) {
 			rowColumns.add(assignment.column);
-			rowValues[assignment.column] = expressionToValue(assignment.value);
+			assignMutationValue(rowValues, assignment.column, assignment.value, ctx);
 		}
 		for (const col of allColumns) {
 			if (!rowColumns.has(col)) {
@@ -152,7 +167,9 @@ function compileInsertFrom(
 		...(insertFrom.where !== undefined && {
 			where: fns.compileExpression(insertFrom.where, ctx, fns),
 		}),
-		...(insertFrom.limit !== undefined && { limit: insertFrom.limit }),
+		...(insertFrom.limit !== undefined && {
+			limit: resolveIntegerCount(insertFrom.limit, ctx, 'insert-from limit'),
+		}),
 	};
 }
 
@@ -167,7 +184,7 @@ function compileUpdate(
 	const set: Record<string, unknown> = {};
 	for (const assignment of update.assignments) {
 		ctx.validator?.validateColumn(update.table, assignment.column);
-		set[assignment.column] = expressionToValue(assignment.value);
+		assignMutationValue(set, assignment.column, assignment.value, ctx);
 	}
 
 	if (update.where) {
@@ -233,7 +250,7 @@ function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
 	const values: Record<string, unknown> = {};
 	for (const assignment of upsert.assignments) {
 		ctx.validator?.validateColumn(upsert.table, assignment.column);
-		values[assignment.column] = expressionToValue(assignment.value);
+		assignMutationValue(values, assignment.column, assignment.value, ctx);
 	}
 
 	for (const col of upsert.conflictColumns) {
@@ -288,7 +305,9 @@ function compileUpsertFrom(
 		...(upsertFrom.where !== undefined && {
 			where: fns.compileExpression(upsertFrom.where, ctx, fns),
 		}),
-		...(upsertFrom.limit !== undefined && { limit: upsertFrom.limit }),
+		...(upsertFrom.limit !== undefined && {
+			limit: resolveIntegerCount(upsertFrom.limit, ctx, 'upsert-from limit'),
+		}),
 	};
 }
 
@@ -338,6 +357,7 @@ function resolveBindingsInWhere(
 		if (inValues && inValues.length === 1) {
 			const val = inValues[0];
 			if (
+				!isParamIntent(val) &&
 				val &&
 				typeof val === 'object' &&
 				'$ref' in (val as Record<string, unknown>)

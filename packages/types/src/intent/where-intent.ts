@@ -4,7 +4,7 @@
  */
 
 import type { RangeValue } from '../shared/utils.js';
-import type { ExpressionIntent } from './expression-intent.js';
+import type { ExpressionIntent, ParamIntent } from './expression-intent.js';
 import type { ComparisonOperator, NullOperator } from './operators.js';
 import type { QueryIntent } from './query-intent.js';
 import type { RecursiveExistsOptions } from './recursive-types.js';
@@ -53,7 +53,7 @@ export interface WhereComparisonIntent {
 	readonly operator: ComparisonOperator;
 	readonly value: unknown;
 	/** JSON path extraction before comparison (e.g., data->'key' = 'val') */
-	readonly jsonPath?: readonly string[];
+	readonly jsonPath?: readonly (string | ParamIntent)[];
 	/** JSON extraction mode: 'json' = ->, 'text' = ->> */
 	readonly jsonMode?: 'json' | 'text';
 }
@@ -64,7 +64,7 @@ export interface WhereComparisonIntent {
 export interface WhereLikeIntent {
 	readonly kind: 'like';
 	readonly field: string;
-	readonly pattern: string;
+	readonly pattern: string | ParamIntent;
 	/** Case-insensitive matching */
 	readonly caseInsensitive?: boolean;
 	/** Escape character for LIKE pattern (e.g. '\\' to escape _ and %) */
@@ -109,7 +109,7 @@ export type WhereInIntent = WhereInValueIntent | WhereInSubqueryIntent;
 export interface WhereAnyIntent {
 	readonly kind: 'any';
 	readonly field: string;
-	readonly values: readonly unknown[];
+	readonly values: readonly unknown[] | ParamIntent;
 }
 
 /**
@@ -405,7 +405,7 @@ export interface WhereJsonContainsIntent {
 export interface WhereJsonExistsIntent {
 	readonly kind: 'jsonExists';
 	readonly field: string;
-	readonly key: string;
+	readonly key: string | ParamIntent;
 }
 
 /** WHERE clause using a custom expression with comparison */

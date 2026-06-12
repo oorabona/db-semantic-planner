@@ -22,6 +22,7 @@ import type {
 	AdapterLogger,
 	AdapterStreamOptions,
 	BatchUpdateIntent,
+	CompiledNqlQuery,
 	CompiledQuery,
 	CompileOnlyAdapter,
 	CompileOptions,
@@ -79,6 +80,7 @@ import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
+import { quoteIdent } from './ddl/phases/utils.js';
 import {
 	generateAlterColumnSQL,
 	generateTruncateSQL,
@@ -112,6 +114,27 @@ type CompileSubqueryResult = {
 	ast: import('@pgsql/types').Node;
 	parameters: readonly unknown[];
 };
+
+function renumberSqlParams(sql: string, offset: number): string {
+	if (offset === 0) return sql;
+	return sql.replace(/\$(\d+)/g, (_match, num) => {
+		return `$${Number.parseInt(num, 10) + offset}`;
+	});
+}
+
+function isCompiledNqlQuery(
+	input: PlanReport | CompiledNqlQuery,
+): input is CompiledNqlQuery {
+	return (
+		!('intent' in input) &&
+		('query' in input ||
+			'cteQuery' in input ||
+			'mutation' in input ||
+			'setOperation' in input ||
+			'bindings' in input ||
+			'mutationBindings' in input)
+	);
+}
 // ============================================================================
 // Options
 // ============================================================================
@@ -258,6 +281,143 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 	}
 
+	private requireNqlCompileModel(options?: CompileOptions): ModelIR {
+		const model = options?.model ?? this.model;
+		if (model === undefined) {
+			throw new Error(
+				'Compiling an NQL bundle requires a model. Pass { model } to adapter.compile(compiledNql, { model }) or configure the adapter with a model.',
+			);
+		}
+		return model;
+	}
+
+	private compileNqlMutation(
+		bundle: CompiledNqlQuery,
+		options?: CompileOptions,
+	): CompiledQuery {
+		const mutation = bundle.mutation;
+		if (mutation === undefined) {
+			throw new Error('NQL bundle did not contain a mutation intent.');
+		}
+
+		switch (mutation.type) {
+			case 'insert':
+				return compileInsertImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+			case 'insert_from':
+				return compileInsertFromImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+			case 'update':
+				return compileUpdateImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+			case 'delete':
+				return compileDeleteImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+			case 'upsert':
+				return compileUpsertImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+			case 'upsert_from':
+				return compileUpsertFromImpl(
+					mutation,
+					options,
+					this.buildCompileDeps(options),
+				);
+		}
+		throw new Error(
+			`Unsupported NQL mutation type: ${(mutation as { type: string }).type}`,
+		);
+	}
+
+	private compileNqlBundleLeaf<T = unknown>(
+		bundle: CompiledNqlQuery,
+		options?: CompileOptions,
+	): CompiledQuery<T> {
+		if (bundle.query !== undefined) {
+			const model = this.requireNqlCompileModel(options);
+			const planReport = planFn(bundle.query, model, {
+				dialectCapabilities: this.dialectCapabilities,
+			});
+			return compileSelect<T>(
+				planReport,
+				options,
+				this.buildCompileDeps(options),
+			);
+		}
+		if (bundle.cteQuery !== undefined) {
+			return compileCteQueryImpl(
+				bundle.cteQuery,
+				options,
+				this.buildCompileDeps(options),
+			) as CompiledQuery<T>;
+		}
+		if (bundle.setOperation !== undefined) {
+			const model = this.requireNqlCompileModel(options);
+			return this.compileSetOperation(
+				bundle.setOperation,
+				model,
+				options,
+			) as CompiledQuery<T>;
+		}
+		if (bundle.mutation !== undefined) {
+			return this.compileNqlMutation(bundle, options) as CompiledQuery<T>;
+		}
+		throw new Error('NQL bundle did not contain a compilable intent.');
+	}
+
+	private compileNqlBundle<T = unknown>(
+		bundle: CompiledNqlQuery,
+		options?: CompileOptions,
+	): CompiledQuery<T> {
+		const ctes: string[] = [];
+		const parameters: unknown[] = [];
+
+		for (const [name, queryIntent] of bundle.bindings ?? []) {
+			const cteName = quoteIdent(name, 'alias');
+			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
+				? { mutation: bundle.mutationBindings.get(name)! }
+				: { query: queryIntent };
+			const compiled = this.compileNqlBundleLeaf(bindingBundle, options);
+			ctes.push(
+				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
+			);
+			parameters.push(...compiled.parameters);
+		}
+
+		const leafBundle: CompiledNqlQuery = {
+			...(bundle.query !== undefined && { query: bundle.query }),
+			...(bundle.cteQuery !== undefined && { cteQuery: bundle.cteQuery }),
+			...(bundle.mutation !== undefined && { mutation: bundle.mutation }),
+			...(bundle.returning !== undefined && { returning: bundle.returning }),
+			...(bundle.setOperation !== undefined && {
+				setOperation: bundle.setOperation,
+			}),
+		};
+		const compiled = this.compileNqlBundleLeaf<T>(leafBundle, options);
+		if (ctes.length === 0) {
+			return compiled;
+		}
+
+		return {
+			sql: `WITH ${ctes.join(', ')} ${renumberSqlParams(compiled.sql, parameters.length)}`,
+			parameters: [...parameters, ...compiled.parameters],
+		};
+	}
+
 	/**
 	 * Returns the pool/client executor, or throws if in compile-only mode.
 	 */
@@ -304,9 +464,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile a plan to executable SQL.
 	 */
 	compile<T = unknown>(
-		plan: PlanReport,
+		plan: PlanReport | CompiledNqlQuery,
 		options?: CompileOptions,
 	): CompiledQuery<T> {
+		if (isCompiledNqlQuery(plan)) {
+			return this.compileNqlBundle<T>(plan, options);
+		}
 		return compileSelect<T>(plan, options, this.buildCompileDeps(options));
 	}
 
@@ -512,9 +675,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	compileSetOperation(
 		intent: SetOperationIntent,
 		model: ModelIR,
-		_options?: CompileOptions,
+		options?: CompileOptions,
 	): CompiledQuery {
-		const compileFn = createLeafCompileFn(this, model, planFn);
+		const compileFn = createLeafCompileFn(this, model, planFn, options);
 		const result = compileSetOperationImpl(intent, compileFn);
 		return {
 			sql: result.sql,

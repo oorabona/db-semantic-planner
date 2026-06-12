@@ -4,17 +4,20 @@
  * Compiles NQL queries to QueryIntent (SELECT statements with clauses).
  */
 
-import type {
-	IncludeIntent,
-	LockIntent,
-	OrderByIntent,
-	QueryIntent,
-	SelectIntent,
-	SetOperationIntent,
-	SetOperationType,
-	WhereIntent,
+import {
+	type IncludeIntent,
+	isParamIntent,
+	type LockIntent,
+	type OrderByIntent,
+	type ParamIntent,
+	type QueryIntent,
+	type SelectIntent,
+	type SetOperationIntent,
+	type SetOperationType,
+	type WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlGroupByClause,
 	NqlLimitClause,
@@ -27,7 +30,11 @@ import type {
 	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
-import { expressionToField, expressionToSql } from './expression-utils.js';
+import {
+	expressionToField,
+	expressionToSql,
+	resolveIntegerCount,
+} from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
@@ -96,8 +103,8 @@ export function compileQuery(
 	let currentIncludeBatch: IncludeIntent[] | undefined;
 	let groupBy: readonly string[] | undefined;
 	let orderBy: readonly OrderByIntent[] | undefined;
-	let limit: number | undefined;
-	let offset: number | undefined;
+	let limit: number | ParamIntent | undefined;
+	let offset: number | ParamIntent | undefined;
 	let flatMode = false;
 	let lock: LockIntent | undefined;
 	const includeLimits = new Map<string, number>();
@@ -150,15 +157,25 @@ export function compileQuery(
 				break;
 			case 'limit': {
 				const lc = clause as NqlLimitClause;
+				const count = resolveIntegerCount(
+					lc.count,
+					ctx,
+					lc.relation ? 'per-include limit' : 'limit',
+				);
 				if (lc.relation) {
-					includeLimits.set(lc.relation, lc.count);
+					const includeLimit = isParamIntent(count) ? count.value : count;
+					includeLimits.set(lc.relation, includeLimit);
 				} else {
-					limit = lc.count;
+					limit = count;
 				}
 				break;
 			}
 			case 'offset':
-				offset = (clause as NqlOffsetClause).count;
+				offset = resolveIntegerCount(
+					(clause as NqlOffsetClause).count,
+					ctx,
+					'offset',
+				);
 				break;
 			case 'lock': {
 				const lc = clause as NqlLockClause;
@@ -401,6 +418,14 @@ function compileOrderItem(
 			ctx.validator?.validateColumn(ctx.currentFromTable, field);
 		}
 		return { field, direction: item.direction };
+	}
+	if (item.expression.type === 'namedParam') {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${item.expression.name} cannot be used as an ORDER BY expression because ORDER BY is query structure, not a value`,
+			undefined,
+			'Choose a trusted structural path for dynamic ordering, such as nqlRaw("order by ...") or the query builder after validating the requested column and direction.',
+		);
 	}
 	const sqlExpr = expressionToSql(item.expression);
 	return { field: sqlExpr, direction: item.direction };

@@ -30,6 +30,17 @@ function compileNql(input: string): CompileResult {
 	return result.ast!;
 }
 
+function compileNqlWithParams(
+	input: string,
+	params: Readonly<Record<string, unknown>>,
+): CompileResult {
+	const result = compile(input, null, undefined, { params });
+	if (!result.success) {
+		throw new Error(`Compile error: ${result.errors[0]?.message}`);
+	}
+	return result.ast!;
+}
+
 function getSelectColumns(result: CompileResult): readonly ExpressionIntent[] {
 	const select = result.query!.select as SelectWithExpressionsIntent;
 	expect(select.type).toBe('expressions');
@@ -428,13 +439,13 @@ describe('compile-select: JSON function notation', () => {
 		expect(col.kind).toBe('jsonPathExtract');
 		if (col.kind === 'jsonPathExtract') {
 			expect(col.field).toBe('data');
-			expect(col.path).toBe('{name,first}');
+			expect(col.path).toEqual(['name', 'first']);
 			expect(col.mode).toBe('text');
 			expect(col.as).toBe('first_name');
 		}
 	});
 
-	it('json_path with multiple separate key arguments builds array literal', () => {
+	it('json_path with multiple separate key arguments preserves path segments', () => {
 		const cols = getSelectColumns(
 			compileNql("users | select json_path(data, 'a', 'b', 'c') as nested"),
 		);
@@ -443,7 +454,7 @@ describe('compile-select: JSON function notation', () => {
 		expect(col.kind).toBe('jsonPathExtract');
 		if (col.kind === 'jsonPathExtract') {
 			expect(col.field).toBe('data');
-			expect(col.path).toBe('{a,b,c}');
+			expect(col.path).toEqual(['a', 'b', 'c']);
 			expect(col.mode).toBe('json');
 		}
 	});
@@ -520,8 +531,74 @@ describe('compile-select: non-aggregate function', () => {
 			// Path args → field names, string literal → value
 			expect(col.args).toContain('nickname');
 			expect(col.args).toContain('name');
-			expect(col.args).toContain('anon');
+			expect(col.args).toContainEqual({ kind: 'literal', value: 'anon' });
 			expect(col.as).toBe('display');
+		}
+	});
+
+	it('recursively lowers arithmetic function arguments', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams('users | select round(price + :d) as r', { d: 5 }),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('round');
+			expect(col.args[0]).toMatchObject({
+				kind: 'arithmetic',
+				left: 'price',
+				operator: '+',
+				right: { kind: 'param', value: 5 },
+			});
+		}
+	});
+
+	it('recursively lowers nested function arguments in coalesce()', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams(
+				'users | select coalesce(upper(name), :fallback) as display',
+				{ fallback: 'anon' },
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('coalesce');
+			expect(col.args[0]).toMatchObject({
+				kind: 'function',
+				name: 'upper',
+				args: ['name'],
+			});
+			expect(col.args[1]).toMatchObject({
+				kind: 'param',
+				value: 'anon',
+			});
+		}
+	});
+
+	it('recursively lowers CASE function arguments', () => {
+		const cols = getSelectColumns(
+			compileNqlWithParams(
+				'users | select upper(case when status = :s then :a else :b end) as label',
+				{ s: 'active', a: 'A', b: 'B' },
+			),
+		);
+
+		const col = cols[0]!;
+		expect(col.kind).toBe('function');
+		if (col.kind === 'function') {
+			expect(col.name).toBe('upper');
+			expect(col.args[0]).toMatchObject({
+				kind: 'case',
+				when: [
+					{
+						result: { kind: 'param', value: 'A' },
+					},
+				],
+				else: { kind: 'param', value: 'B' },
+			});
 		}
 	});
 
@@ -538,38 +615,149 @@ describe('compile-select: non-aggregate function', () => {
 			expect(col.as).toBe('current_time');
 		}
 	});
-});
 
-// ===========================================================================
-// Aggregate with extraArgs
-// ===========================================================================
-describe('compile-select: aggregate with extraArgs', () => {
-	it('string_agg with separator has extraArgs', () => {
-		const cols = getSelectColumns(
-			compileNql("users | select string_agg(name, ', ') as names"),
-		);
+	it('rejects unsupported SELECT functions with structured SEM_INVALID_SYNTAX', () => {
+		for (const [fn, args] of [
+			['pg_sleep', '1'],
+			['pg_read_file', "'x'"],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
 
-		const col = cols[0]!;
-		expect(col.kind).toBe('aggregate');
-		if (col.kind === 'aggregate') {
-			expect(col.function).toBe('string_agg');
-			expect(col.field).toBe('name');
-			expect(col.extraArgs).toEqual([', ']);
-			expect(col.as).toBe('names');
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
 		}
 	});
 
-	it('array_agg with no extraArgs', () => {
-		const cols = getSelectColumns(
-			compileNql('orders | select array_agg(status) as statuses'),
+	it('rejects array_agg and string_agg until SELECT aggregate projection support exists', () => {
+		for (const [fn, args] of [
+			['array_agg', 'name'],
+			['string_agg', "name, ','"],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
+
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+		}
+	});
+
+	it('rejects unsupported nested SELECT functions before adapter FuncCall emission', () => {
+		const result = compileRawSelect(
+			'users | select upper(pg_sleep(1)) as blocked',
 		);
 
-		const col = cols[0]!;
-		expect(col.kind).toBe('aggregate');
-		if (col.kind === 'aggregate') {
-			expect(col.function).toBe('array_agg');
-			expect(col.field).toBe('status');
-			expect(col.extraArgs).toBeUndefined();
+		expect(result.success).toBe(false);
+		expect(result.ast).toBeUndefined();
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: pg_sleep()',
+		);
+		expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+	});
+
+	it('rejects window-only SELECT functions without OVER', () => {
+		for (const [fn, args] of [
+			['row_number', ''],
+			['rank', ''],
+			['dense_rank', ''],
+			['lag', 'id'],
+			['lead', 'id'],
+		] as const) {
+			const result = compileRawSelect(
+				`users | select ${fn}(${args}) as blocked`,
+			);
+
+			expect(result.success, fn).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toBe(
+				`Unsupported function in SELECT context: ${fn}()`,
+			);
+			expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+		}
+	});
+
+	it('keeps the empirically-derived SELECT function allowlist compiling', () => {
+		const cases = [
+			'users | select coalesce(name, :fallback) as display',
+			'users | select lower(name) as lower_name',
+			'users | select now() as ts',
+			'users | select round(price) as rounded',
+			'users | select upper(name) as upper_name',
+			'users | select count() as total',
+			'users | select sum(price) as total_price',
+			'users | select avg(price) as avg_price',
+			'users | select min(price) as min_price',
+			'users | select max(price) as max_price',
+			"users | select json_extract(data, 'meta') as meta",
+			"users | select json_extract_text(data, 'email') as email",
+			"users | select json_path(data, 'a', 'b') as nested",
+			"users | select json_path_text(data, '{name,first}') as first_name",
+			'users | select row_number() over (order by id) as rn',
+			'users | select rank() over (order by price) as rnk',
+			'users | select dense_rank() over (order by price) as dr',
+			'users | select lag(price) over (order by id) as prev_price',
+			'users | select lead(price) over (order by id) as next_price',
+			'users | select count() over () as total_rows',
+			'users | select sum(price) over (order by id) as running_sum',
+			'users | select avg(price) over (order by id) as running_avg',
+			'users | select min(price) over (order by id) as running_min',
+			'users | select max(price) over (order by id) as running_max',
+		] as const;
+
+		for (const input of cases) {
+			const result = compile(input, null, undefined, {
+				params: { fallback: 'anon' },
+			});
+			expect(result.success, input).toBe(true);
+			expect(result.ast?.query).toBeDefined();
+		}
+	});
+
+	it('rejects unsupported window function names with SEM_INVALID_SYNTAX', () => {
+		const result = compileRawSelect(
+			'users | select pg_sleep(1) over () as blocked',
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.ast).toBeUndefined();
+		expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+		expect(result.errors[0]?.message).toBe(
+			'Unsupported function in SELECT context: pg_sleep()',
+		);
+		expect(JSON.stringify(result.ast ?? {})).not.toContain('FuncCall');
+	});
+});
+
+// ===========================================================================
+// Unsupported aggregate candidates
+// ===========================================================================
+describe('compile-select: unsupported aggregate candidates', () => {
+	it('does not lower array_agg/string_agg into aggregate intents', () => {
+		for (const input of [
+			'orders | select array_agg(status) as statuses',
+			"users | select string_agg(name, ', ') as names",
+		] as const) {
+			const result = compileRawSelect(input);
+
+			expect(result.success).toBe(false);
+			expect(result.ast).toBeUndefined();
+			expect(result.errors[0]?.code).toBe(NqlErrorCodes.SEM_INVALID_SYNTAX);
+			expect(result.errors[0]?.message).toMatch(
+				/^Unsupported function in SELECT context: (array_agg|string_agg)\(\)$/,
+			);
 		}
 	});
 });
@@ -1117,7 +1305,9 @@ describe('compile-select: M-1 — json function path args coercion (no [object O
 		const col = sel.columns[0];
 		expect(col?.kind).toBe('jsonPathExtract');
 		// Must contain 'someKey', never '[object Object]'
-		expect((col as unknown as { path: string }).path).toContain('someKey');
+		expect((col as unknown as { path: readonly string[] }).path).toContain(
+			'someKey',
+		);
 	});
 
 	it('json_path with dotted path arg throws SEM_INVALID_SYNTAX', () => {

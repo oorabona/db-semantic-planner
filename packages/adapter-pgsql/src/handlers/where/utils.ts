@@ -3,13 +3,16 @@
  * @internal Extracted from comparison, in, like, null handlers (PGSQL-008, PGSQL-009).
  */
 
-import { isFieldRef } from '@dbsp/types';
+import { isFieldRef, isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import { validateDbTypeName } from '../../validate.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import { isParamRef } from '../types.js';
+
+export { unwrapParamIntent } from '../../param-intent.js';
 
 /**
  * Build column reference from decision column, using current alias or root table.
@@ -36,12 +39,13 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
  * If value has a pre-assigned `paramIndex` (from PlanDecision), use it directly.
  */
 export function buildParamRef(value: unknown, state: CompilerState): Node {
-	if (isParamRef(value)) {
-		state.parameters.push(value.value);
-		return createParamRef(value.paramIndex);
+	const boundValue = unwrapParamIntent(value);
+	if (isParamRef(boundValue)) {
+		state.parameters.push(boundValue.value);
+		return createParamRef(boundValue.paramIndex);
 	}
 	state.paramIndex++;
-	state.parameters.push(value);
+	state.parameters.push(boundValue);
 	return createParamRef(state.paramIndex);
 }
 
@@ -54,7 +58,25 @@ export function compileValue(
 	value: unknown,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
+	forceParam = false,
 ): Node {
+	const boundValue = unwrapParamIntent(value);
+	if (isParamIntent(value)) {
+		const idx = ++state.paramIndex;
+		state.parameters.push(boundValue);
+		return columnType
+			? createTypeCastParamRef(idx, columnType)
+			: createParamRef(idx);
+	}
+
+	if (forceParam) {
+		const idx = ++state.paramIndex;
+		state.parameters.push(boundValue);
+		return columnType
+			? createTypeCastParamRef(idx, columnType)
+			: createParamRef(idx);
+	}
+
 	if (value === null || value === undefined) {
 		return nullConstNode();
 	}
@@ -83,7 +105,11 @@ export function compileValueOrFieldRef(
 	ctx: CompilerContext,
 	state: Pick<CompilerState, 'parameters' | 'paramIndex'>,
 	columnType?: string,
+	forceParam = false,
 ): Node {
+	if (forceParam || isParamIntent(value)) {
+		return compileValue(value, state, columnType, true);
+	}
 	if (isFieldRef(value)) {
 		const alias =
 			value.scope === 'outer'

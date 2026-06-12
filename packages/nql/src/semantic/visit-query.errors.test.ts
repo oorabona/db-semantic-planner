@@ -162,9 +162,11 @@ describe('visitLimitClause', () => {
 describe('visitOffsetClause', () => {
 	it('throws SEM_INVALID_SYNTAX when NumberLiteral is missing', () => {
 		const ctx: CstContext = {};
-		expect(() => visitOffsetClause(ctx)).toThrow(NqlSemanticException);
+		expect(() => visitOffsetClause(ctx, noopVisit)).toThrow(
+			NqlSemanticException,
+		);
 		try {
-			visitOffsetClause(ctx);
+			visitOffsetClause(ctx, noopVisit);
 		} catch (e) {
 			expect((e as NqlSemanticException).code).toBe(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,

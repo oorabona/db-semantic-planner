@@ -9,6 +9,7 @@
 import type { ExpressionIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { binaryExpr } from '../../ast-helpers.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import { compileExpressionIntent } from '../expression/custom.js';
 import type {
@@ -65,7 +66,7 @@ export const customExpressionWhereHandler: WhereHandler = {
 
 		// Right side: bind the comparison value as a parameter
 		const idx = ++state.paramIndex;
-		state.parameters.push(decision.value);
+		state.parameters.push(unwrapParamIntent(decision.value));
 		const rightNode = createParamRef(idx);
 
 		// Map comparison operator

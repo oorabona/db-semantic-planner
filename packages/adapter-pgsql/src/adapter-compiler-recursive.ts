@@ -32,11 +32,9 @@ import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
 import { createCompilerState } from './handlers/index.js';
+import { compileValue } from './handlers/where/utils.js';
 import { createTypeCastParamRef } from './param-ref.js';
-import {
-	mapComparisonOperator,
-	valueToNode,
-} from './plan-decision-extractor.js';
+import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
@@ -59,6 +57,7 @@ export function compileRecursive(
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
+	const state = createCompilerState();
 	const intent = report.intent;
 	const traversal = intent.traversal;
 
@@ -93,7 +92,7 @@ export function compileRecursive(
 
 		// Build anchor WHERE from intent.start.where
 		const anchorWhere = intent.start.where
-			? buildRecursiveAnchorWhere(intent.start.where, '__n', deps)
+			? buildRecursiveAnchorWhere(intent.start.where, '__n', deps, state)
 			: undefined;
 
 		const base: RecursiveCteConfig = {
@@ -244,7 +243,7 @@ export function compileRecursive(
 
 	return {
 		sql,
-		parameters: [],
+		parameters: state.parameters,
 	};
 }
 
@@ -263,11 +262,10 @@ export function compileRecursive(
  */
 export function compileCteQuery(
 	intent: CteQueryIntent,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
-	const schemaName = deps.schemaName;
 	const state = createCompilerState();
 
 	// All parameters accumulated from all CTEs (in declaration order)
@@ -288,8 +286,8 @@ export function compileCteQuery(
 			isRecursive = true;
 			const { sql: cteSql, params: cteParams } = buildRawCte(
 				cte,
-				schemaName,
 				deps,
+				options,
 			);
 			allCteParams.push(...cteParams);
 			cteSqlFragments.push(cteSql);
@@ -308,13 +306,7 @@ export function compileCteQuery(
 					isAmbiguous: false,
 				},
 			};
-			const innerCompileOptions: CompileOptions =
-				schemaName !== undefined ? { schemaName } : {};
-			const innerCompiled = compileSelect(
-				innerPlanReport,
-				innerCompileOptions,
-				deps,
-			);
+			const innerCompiled = compileSelect(innerPlanReport, options, deps);
 			// Renumber inner params to follow all previously accumulated CTE params
 			const currentParamOffset = allCteParams.length;
 			const renumberedInnerSql =
@@ -336,8 +328,6 @@ export function compileCteQuery(
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
-	const outerCompileOptions: CompileOptions =
-		schemaName !== undefined ? { schemaName } : {};
 	const outerPlanReport: PlanReport = {
 		rootTable: intent.query.from,
 		decisions: [],
@@ -350,11 +340,7 @@ export function compileCteQuery(
 			isAmbiguous: false,
 		},
 	};
-	const outerCompiled = compileSelect(
-		outerPlanReport,
-		outerCompileOptions,
-		deps,
-	);
+	const outerCompiled = compileSelect(outerPlanReport, options, deps);
 
 	// 3. Renumber outer SQL parameters to follow all CTE parameters.
 	// Safety: the deparser always emits user values as $N parameters, never as inline string
@@ -473,12 +459,9 @@ function buildUnnestCte(
  */
 function buildRawCte(
 	cte: RawCteIntent,
-	schemaName: string | undefined,
 	deps: AdapterCompilerDeps,
+	options: CompileOptions | undefined,
 ): { sql: string; params: readonly unknown[] } {
-	const compileOptions: CompileOptions =
-		schemaName !== undefined ? { schemaName } : {};
-
 	// Compile base (anchor) query
 	const basePlanReport: PlanReport = {
 		rootTable: cte.base.from,
@@ -488,7 +471,7 @@ function buildRawCte(
 		intent: cte.base as QueryIntent,
 		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 	};
-	const baseCompiled = compileSelect(basePlanReport, compileOptions, deps);
+	const baseCompiled = compileSelect(basePlanReport, options, deps);
 
 	// Compile step (recursive) query
 	const stepPlanReport: PlanReport = {
@@ -499,7 +482,7 @@ function buildRawCte(
 		intent: cte.step as QueryIntent,
 		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 	};
-	const stepCompiled = compileSelect(stepPlanReport, compileOptions, deps);
+	const stepCompiled = compileSelect(stepPlanReport, options, deps);
 
 	// Renumber step params to follow base params.
 	// Safety: the deparser always emits user values as $N parameters, never as inline string
@@ -555,6 +538,7 @@ function buildRecursiveAnchorWhere(
 	where: unknown,
 	tableAlias: string,
 	deps: AdapterCompilerDeps,
+	state: ReturnType<typeof createCompilerState>,
 ): Node {
 	if (!where || typeof where !== 'object') {
 		return { A_Const: { boolval: { boolval: true } } };
@@ -573,7 +557,7 @@ function buildRecursiveAnchorWhere(
 				},
 			};
 			const op = mapComparisonOperator(w.operator as string);
-			const right: Node = valueToNode(w.value);
+			const right: Node = compileValue(w.value, state, undefined, true);
 			return {
 				A_Expr: {
 					kind: 'AEXPR_OP',
@@ -585,14 +569,14 @@ function buildRecursiveAnchorWhere(
 		}
 		case 'and': {
 			const conditions = (w.conditions as unknown[]).map((c) =>
-				buildRecursiveAnchorWhere(c, tableAlias, deps),
+				buildRecursiveAnchorWhere(c, tableAlias, deps, state),
 			);
 			if (conditions.length === 1) return conditions[0]!;
 			return { BoolExpr: { boolop: 'AND_EXPR', args: conditions } };
 		}
 		case 'or': {
 			const conditions = (w.conditions as unknown[]).map((c) =>
-				buildRecursiveAnchorWhere(c, tableAlias, deps),
+				buildRecursiveAnchorWhere(c, tableAlias, deps, state),
 			);
 			if (conditions.length === 1) return conditions[0]!;
 			return { BoolExpr: { boolop: 'OR_EXPR', args: conditions } };

@@ -75,6 +75,20 @@ describe('SC-14: CTE with unnest + WITH ORDINALITY index', () => {
 		expect(result.params[1]).toEqual(['Foo', 'Bar', 'Baz']);
 	});
 
+	it('keeps wrapper-shaped unnest elements opaque', () => {
+		const orm = makeOrm();
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const result = orm
+			.withCte('lookups')
+			.fromUnnest({ payload: [paramShaped, literalShaped] })
+			.query(orm.select('symbols'))
+			.dump();
+
+		expect(result.params[0]).toEqual([paramShaped, literalShaped]);
+		expect(result.params[0]).not.toEqual([7, 'x']);
+	});
+
 	it('index column uses (ordinality - 1) expression', () => {
 		const orm = makeOrm();
 		const result = orm

@@ -11,10 +11,20 @@ import type {
 	SelectIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { isParamIntent } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
+
+export class UnknownSelectExpressionKindError extends Error {
+	readonly code = 'ERR_ADAPTER_UNKNOWN_SELECT_EXPRESSION_KIND';
+
+	constructor(readonly kind: string) {
+		super(`Unknown SELECT expression kind: ${kind}`);
+		this.name = 'UnknownSelectExpressionKindError';
+	}
+}
 
 // ============================================================================
 // Main Converter
@@ -134,17 +144,20 @@ function convertSelect(
 
 		for (const exprUnknown of columns) {
 			const expr = exprUnknown as Record<string, unknown>;
-			const handler = EXPRESSION_HANDLERS[expr.kind as string];
-			if (handler) {
-				handler(
-					expr,
-					rootTable,
-					decisions,
-					applyFilterCondition,
-					convertWhereCondition,
-				);
+			const kind =
+				typeof expr.kind === 'string' ? expr.kind : String(expr.kind);
+			const handler = EXPRESSION_HANDLERS[kind];
+			if (!handler) {
+				throw new UnknownSelectExpressionKindError(kind);
 			}
-			// else: unknown kind (e.g., pseudoColumn) — intentional no-op
+			handler(
+				expr,
+				rootTable,
+				decisions,
+				(decision, filter, table) =>
+					applyFilterCondition(decision, filter, table),
+				(condition, table) => convertWhereCondition(condition, table),
+			);
 		}
 
 		return decisions;
@@ -488,10 +501,12 @@ export function isOuterRef(value: unknown): boolean {
 export function containsOuterRef(where: unknown): boolean {
 	if (!where || typeof where !== 'object') return false;
 	const w = where as Record<string, unknown>;
+	if (isParamIntent(w)) return false;
 	if (isOuterRef(w)) return true;
 	for (const value of Object.values(w)) {
 		if (Array.isArray(value)) {
-			for (const item of value) {
+			for (let i = 0; i < value.length; i++) {
+				const item = value[i];
 				if (containsOuterRef(item)) return true;
 			}
 		} else if (typeof value === 'object' && value !== null) {
@@ -910,7 +925,7 @@ export function convertWhereCondition(
 				table: rootTable,
 			};
 		}
-		case 'jsonContains':
+		case 'jsonContains': {
 			return {
 				type: 'where',
 				column: cond.field as string,
@@ -918,6 +933,7 @@ export function convertWhereCondition(
 				value: cond.value,
 				table: rootTable,
 			};
+		}
 		case 'any':
 			return {
 				type: 'where',

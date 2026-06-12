@@ -112,7 +112,7 @@ describe('jsonPathExtractHandler — coverage', () => {
 			{
 				type: 'jsonPathExtract',
 				column: 'data',
-				args: ['{a,b}'],
+				args: ['a', 'b'],
 				jsonMode: 'text',
 			},
 			makeCtx(),
@@ -127,7 +127,7 @@ describe('jsonPathExtractHandler — coverage', () => {
 			{
 				type: 'jsonPathExtract',
 				column: 'data',
-				args: ['{a,b}'],
+				args: ['a', 'b'],
 				jsonMode: 'json',
 			},
 			makeCtx(),
@@ -139,7 +139,7 @@ describe('jsonPathExtractHandler — coverage', () => {
 	it('defaults to text mode', () => {
 		const state = createCompilerState();
 		const node = jsonPathExtractHandler.compile(
-			{ type: 'jsonPathExtract', column: 'data', args: ['{x}'] },
+			{ type: 'jsonPathExtract', column: 'data', args: ['x'] },
 			makeCtx(),
 			state,
 		);
@@ -154,7 +154,7 @@ describe('jsonPathExtractHandler — coverage', () => {
 			state,
 		);
 		expect(node).toHaveProperty('A_Expr');
-		expect(state.parameters).toContain('{}');
+		expect(state.parameters).toContainEqual([]);
 	});
 
 	it('throws when column is missing', () => {
@@ -171,7 +171,7 @@ describe('jsonPathExtractHandler — coverage', () => {
 	it('uses currentAlias when available', () => {
 		const state = createCompilerState();
 		const node = jsonPathExtractHandler.compile(
-			{ type: 'jsonPathExtract', column: 'meta', args: ['{a}'] },
+			{ type: 'jsonPathExtract', column: 'meta', args: ['a'] },
 			makeCtx({ currentAlias: 't0' }),
 			state,
 		);

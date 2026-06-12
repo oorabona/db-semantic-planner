@@ -121,3 +121,23 @@ describe('ANY() operator — BATCH-001 Block 1', () => {
 		});
 	});
 });
+
+describe('FEAT-134 NQL scalar params through PostgreSQL adapter', () => {
+	it('compiles scalar :param comparison values to SQL params', () => {
+		const result = nqlToSQLWithParams('symbols | where id = :id', { id: 7 });
+
+		expect(result.sql).toMatch(/symbols\.id\s*=\s*\$1/i);
+		expect(result.params).toEqual([7]);
+	});
+
+	it('emits independent $N placeholders when the same :param is referenced twice', () => {
+		const result = nqlToSQLWithParams(
+			'symbols | where id = :id or id = :id',
+			{ id: 7 },
+		);
+
+		expect(result.sql).toMatch(/\$1/);
+		expect(result.sql).toMatch(/\$2/);
+		expect(result.params).toEqual([7, 7]);
+	});
+});

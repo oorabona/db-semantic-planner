@@ -125,6 +125,30 @@ describe('SC-12: large batch upsert (100 rows) uses unnest strategy', () => {
 		expect(chunkTexts[99]).toBe('chunk_99');
 	});
 
+	it('keeps wrapper-shaped row values opaque in unnest column arrays', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const paramShaped = { kind: 'param', value: 7 };
+		const literalShaped = { kind: 'literal', value: 'x' };
+		const rows = makeEmbeddingRows(100).map((row, i) => ({
+			...row,
+			vector: i === 0 ? paramShaped : i === 1 ? literalShaped : row.vector,
+		})) as Record<string, unknown>[];
+		const intent = makeUpsertIntent(rows, ['symbol_id', 'chunk_index']);
+
+		const result = adapter.compileUpsert(intent as any);
+
+		expect(result.parameters[2]).toEqual([
+			paramShaped,
+			literalShaped,
+			...Array.from({ length: 98 }, (_, i) => `vec_${i + 2}`),
+		]);
+		expect(result.parameters[2]).not.toEqual([
+			7,
+			'x',
+			...Array.from({ length: 98 }, (_, i) => `vec_${i + 2}`),
+		]);
+	});
+
 	it('conflict columns appear in ON CONFLICT clause', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		const intent = makeUpsertIntent(

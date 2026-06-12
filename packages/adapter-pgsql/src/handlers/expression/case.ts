@@ -8,7 +8,7 @@
 
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
-import { createParamRef } from '../../param-ref.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -16,6 +16,7 @@ import type {
 	ExpressionHandler,
 } from '../types.js';
 import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
+import { bindParameter } from './param-value.js';
 
 /**
  * Case condition structure
@@ -124,15 +125,14 @@ export const simpleCaseHandler: ExpressionHandler = {
 		const args: Node[] = conditions.map((cond) => {
 			// Build the comparison value — `when` may be a Decision with .value
 			// or a primitive; extract the raw value for parameterization.
-			const whenParamNumber = ++state.paramIndex;
 			const whenDecision = cond.when as Decision & { value?: unknown };
-			state.parameters.push(whenDecision.value ?? cond.when);
-			const whenExpr = createParamRef(whenParamNumber);
+			const whenExpr = bindParameter(
+				unwrapParamIntent(whenDecision.value ?? cond.when),
+				state,
+			);
 
 			// Build the THEN result
-			const thenParamNumber = ++state.paramIndex;
-			state.parameters.push(cond.then);
-			const thenResult = createParamRef(thenParamNumber);
+			const thenResult = bindParameter(unwrapParamIntent(cond.then), state);
 
 			const caseWhen: CaseWhen = {
 				expr: whenExpr,
@@ -145,9 +145,7 @@ export const simpleCaseHandler: ExpressionHandler = {
 		// Build ELSE clause if present
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			const paramNumber = ++state.paramIndex;
-			state.parameters.push(elseValue);
-			defresult = createParamRef(paramNumber);
+			defresult = bindParameter(unwrapParamIntent(elseValue), state);
 		}
 
 		const caseExpr: CaseExpr = {

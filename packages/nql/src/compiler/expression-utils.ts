@@ -4,16 +4,151 @@
  * No shared state — all functions are stateless.
  */
 
-import type { ComparisonOperator, FieldRef } from '@dbsp/types';
+import {
+	type ComparisonOperator,
+	type FieldRef,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	type ParamIntent,
+} from '@dbsp/types';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
 	NqlExpression,
+	NqlLimitCount,
+	NqlNamedParamExpr,
 	NqlPathExpression,
 	NqlRangeLiteral,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
 import type { CompilerContext } from './types.js';
+
+const FORBIDDEN_PARAM_NAMES = new Set([
+	'__proto__',
+	'constructor',
+	'prototype',
+]);
+
+function isReservedAutoParamName(name: string): boolean {
+	return name.startsWith('__p');
+}
+
+function assertParamNameAllowed(
+	name: string,
+	ctx?: Pick<CompilerContext, 'allowInternalParams'>,
+): void {
+	if (FORBIDDEN_PARAM_NAMES.has(name)) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${name} is reserved and cannot be bound`,
+		);
+	}
+	if (!ctx?.allowInternalParams && isReservedAutoParamName(name)) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${name} uses the reserved __p namespace`,
+		);
+	}
+}
+
+function assertParamValueAllowed(name: string, value: unknown): void {
+	if (value === undefined) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${name} must not be undefined; use null to bind SQL NULL`,
+		);
+	}
+	if (typeof value === 'number' && !Number.isFinite(value)) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${name} must be a finite number`,
+		);
+	}
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) {
+			assertParamValueAllowed(`${name}[${i}]`, value[i]);
+		}
+	}
+}
+
+/**
+ * Validate all caller-supplied params keys before compilation.
+ */
+export function validateParamsMap(
+	params: Readonly<Record<string, unknown>>,
+	ctx?: Pick<CompilerContext, 'allowInternalParams'>,
+): void {
+	for (const key of Object.getOwnPropertyNames(params)) {
+		assertParamNameAllowed(key, ctx);
+		assertParamValueAllowed(key, params[key]);
+	}
+}
+
+/**
+ * Resolve one NQL `:name` bound parameter from the compiler context.
+ */
+export function resolveNamedParam(
+	ctx: CompilerContext,
+	name: string,
+): ParamIntent {
+	assertParamNameAllowed(name, ctx);
+	if (!Object.hasOwn(ctx.params, name)) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Named parameter :${name} is not bound`,
+		);
+	}
+	const value = ctx.params[name];
+	assertParamValueAllowed(name, value);
+	return { kind: 'param', value };
+}
+
+function resolveNamedParamValue(ctx: CompilerContext, name: string): unknown {
+	return resolveNamedParam(ctx, name).value;
+}
+
+/**
+ * Resolve `ANY(:name)` and validate it as an array after the shared value checks.
+ */
+export function resolveNamedParamArray(
+	ctx: CompilerContext,
+	name: string,
+): readonly unknown[] {
+	const value = resolveNamedParamValue(ctx, name);
+	if (!Array.isArray(value)) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`ANY(:${name}) requires an array argument`,
+		);
+	}
+	return value;
+}
+
+function assertIntegerCount(
+	value: unknown,
+	label: string,
+): asserts value is number {
+	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`${label} must resolve to a non-negative safe integer`,
+		);
+	}
+}
+
+export function resolveIntegerCount(
+	count: NqlLimitCount,
+	ctx: CompilerContext,
+	label: string,
+): number | (ParamIntent & { readonly value: number }) {
+	if (typeof count === 'number') {
+		assertIntegerCount(count, label);
+		return count;
+	}
+	const param = resolveNamedParam(ctx, count.name);
+	const { value } = param;
+	assertIntegerCount(value, label);
+	return { ...param, value };
+}
 
 /**
  * Extract a field name from an expression, or null if not a simple field reference.
@@ -36,8 +171,19 @@ export function expressionToField(
 /**
  * Convert an expression to a plain value for use in intents.
  */
-export function expressionToValue(expr: NqlExpression): unknown {
+export function expressionToValue(
+	expr: NqlExpression,
+	ctx?: CompilerContext,
+): unknown {
 	switch (expr.type) {
+		case 'namedParam':
+			if (!ctx) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_UNREACHABLE,
+					`Cannot resolve named parameter :${(expr as NqlNamedParamExpr).name} without compiler context`,
+				);
+			}
+			return resolveNamedParam(ctx, (expr as NqlNamedParamExpr).name);
 		case 'string':
 			return expr.value;
 		case 'number':
@@ -53,7 +199,7 @@ export function expressionToValue(expr: NqlExpression): unknown {
 			// Function call in value context → special value
 			return {
 				$fn: expr.name,
-				$args: expr.args.map((a) => expressionToValue(a)),
+				$args: expr.args.map((a) => expressionToValue(a, ctx)),
 			};
 		}
 		case 'binary': {
@@ -61,15 +207,15 @@ export function expressionToValue(expr: NqlExpression): unknown {
 			const binary = expr as NqlBinaryExpression;
 			return {
 				$op: binary.operator,
-				$left: expressionToValue(binary.left),
-				$right: expressionToValue(binary.right),
+				$left: expressionToValue(binary.left, ctx),
+				$right: expressionToValue(binary.right, ctx),
 			};
 		}
 		case 'unary': {
 			// Unary expression (e.g., -price, -5)
 			const unary = expr as NqlUnaryExpression;
 			if (unary.operator === '-') {
-				const operand = expressionToValue(unary.operand);
+				const operand = expressionToValue(unary.operand, ctx);
 				// Optimize: if operand is a number, negate it directly
 				if (typeof operand === 'number') {
 					return -operand;
@@ -102,6 +248,11 @@ export function expressionToValue(expr: NqlExpression): unknown {
  */
 export function expressionToSql(expr: NqlExpression): string {
 	switch (expr.type) {
+		case 'namedParam':
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Named parameter :${(expr as NqlNamedParamExpr).name} cannot be used as SQL structure; use nqlRaw() for trusted dynamic structure`,
+			);
 		case 'path':
 			return expr.segments.join('.');
 		case 'string':
@@ -151,6 +302,12 @@ export function expressionToRangeValue(expr: NqlExpression): string {
 	if (expr.type === 'string') {
 		return expr.value;
 	}
+	if (expr.type === 'namedParam') {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_UNREACHABLE,
+			`Named parameter :${(expr as NqlNamedParamExpr).name} must be resolved by the caller`,
+		);
+	}
 	throw new Error(
 		`Range operator requires a range literal or scalar value, got ${expr.type}`,
 	);
@@ -167,7 +324,7 @@ export function resolveFilterValue(
 	outerAliases?: string[],
 ): unknown {
 	// No alias context → standard value resolution (literals, $ref, etc.)
-	if (!aliasContext) return expressionToValue(expr);
+	if (!aliasContext) return expressionToValue(expr, ctx);
 
 	// Only path expressions can produce FieldRef
 	if (expr.type === 'path') {
@@ -218,7 +375,7 @@ export function resolveFilterValue(
 	}
 
 	// Non-path expressions (literals, functions, etc.) → standard value
-	return expressionToValue(expr);
+	return expressionToValue(expr, ctx);
 }
 
 /**
@@ -249,15 +406,9 @@ export function mapComparisonOperator(
  * Check if a function name is an aggregate function.
  */
 export function isAggregateFunction(name: string): boolean {
-	return [
-		'count',
-		'sum',
-		'avg',
-		'min',
-		'max',
-		'array_agg',
-		'string_agg',
-	].includes(name.toLowerCase());
+	return (NQL_SELECT_AGGREGATE_FUNCTIONS as readonly string[]).includes(
+		name.toLowerCase(),
+	);
 }
 
 /**
@@ -307,17 +458,20 @@ export function validateWhereField(
  *
  * Dispatch rules:
  *   - string literal → use `.value` directly
+ *   - named parameter → resolve through the shared param resolver and require a string value
  *   - single-segment path → treat the identifier name as the key (prevents `String({$ref:...})` → `'[object Object]'`)
  *   - multi-segment dotted path → throw SEM_INVALID_SYNTAX (ambiguous — caller cannot know which segment to use)
  *   - anything else → throw SEM_INVALID_SYNTAX
  *
  * @param expr - The NQL expression to coerce.
  * @param contextLabel - Human-readable label for the position (e.g. `"LIKE pattern"`, `"json_extract() path argument"`) used in error messages.
+ * @param ctx - Compiler context used to resolve named params through the shared resolver.
  */
 export function coerceToStringKey(
 	expr: NqlExpression,
 	contextLabel: string,
-): string {
+	ctx: CompilerContext,
+): string | ParamIntent {
 	if (expr.type === 'path') {
 		const segments = (expr as NqlPathExpression).segments;
 		if (segments.length > 1) {
@@ -339,6 +493,17 @@ export function coerceToStringKey(
 	}
 	if (expr.type === 'string') {
 		return (expr as { type: 'string'; value: string }).value;
+	}
+	if (expr.type === 'namedParam') {
+		const param = resolveNamedParam(ctx, expr.name);
+		const value = param.value;
+		if (typeof value !== 'string') {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`${contextLabel} named parameter :${expr.name} must resolve to a string`,
+			);
+		}
+		return param;
 	}
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,

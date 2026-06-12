@@ -19,6 +19,7 @@ import type {
 	NqlJsonAccessExpression,
 	NqlJsonComparisonExpression,
 	NqlLiteral,
+	NqlNamedParamExpr,
 	NqlPathExpression,
 	NqlRangeLiteral,
 	NqlRangeOpExpression,
@@ -265,6 +266,12 @@ function buildRangeOp(
 	}
 	if (suffixCtx.literal) {
 		const scalar = visit(asCstNode(suffixCtx.literal[0]!)) as NqlLiteral;
+		return { type: 'rangeOp', operator, left, scalar };
+	}
+	if (suffixCtx.namedParamExpr) {
+		const scalar = visit(
+			asCstNode(suffixCtx.namedParamExpr[0]!),
+		) as NqlNamedParamExpr;
 		return { type: 'rangeOp', operator, left, scalar };
 	}
 
@@ -515,6 +522,7 @@ export function visitPrimaryExpr(
 	ctx: CstContext,
 	visit: VisitFn,
 ): NqlExpression {
+	if (ctx.namedParamExpr) return visit(asCstNode(ctx.namedParamExpr[0]!));
 	if (ctx.rangeLiteral) return visit(asCstNode(ctx.rangeLiteral[0]!));
 	if (ctx.literal) return visit(asCstNode(ctx.literal[0]!));
 	if (ctx.caseExpr) return visit(asCstNode(ctx.caseExpr[0]!));
@@ -530,6 +538,15 @@ export function visitPrimaryExpr(
 		'Invalid primary expression',
 	);
 	/* v8 ignore stop -- @preserve */
+}
+
+export function visitNamedParamExpr(ctx: CstContext): NqlNamedParamExpr {
+	const token = ctx.NamedParam?.[0];
+	const raw = token ? getImage(token) : ':unknown';
+	return {
+		type: 'namedParam',
+		name: raw.slice(1),
+	};
 }
 
 // ============================================================

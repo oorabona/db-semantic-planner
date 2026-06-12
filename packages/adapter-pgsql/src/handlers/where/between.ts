@@ -5,6 +5,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -32,19 +33,21 @@ export const betweenHandler: WhereHandler = {
 			throw new Error('BETWEEN handler requires a column');
 		}
 
-		const range = decision.value as [unknown, unknown];
+		const range = unwrapParamIntent(decision.value) as [unknown, unknown];
 		if (!Array.isArray(range) || range.length !== 2) {
 			throw new Error('BETWEEN condition requires [min, max] array');
 		}
 
 		const columnNode = buildColumnRef(column, ctx);
+		const minValue = unwrapParamIntent(range[0]);
+		const maxValue = unwrapParamIntent(range[1]);
 
 		const minIdx = ++state.paramIndex;
-		state.parameters.push(range[0]);
+		state.parameters.push(minValue);
 		const minNode = createParamRef(minIdx);
 
 		const maxIdx = ++state.paramIndex;
-		state.parameters.push(range[1]);
+		state.parameters.push(maxValue);
 		const maxNode = createParamRef(maxIdx);
 
 		return {

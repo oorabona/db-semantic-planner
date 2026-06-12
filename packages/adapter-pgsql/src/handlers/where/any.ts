@@ -11,6 +11,7 @@
 
 import type { Node } from '@pgsql/types';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
+import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
 	CompilerContext,
@@ -69,7 +70,8 @@ export const anyHandler: WhereHandler = {
 			throw new Error('ANY handler requires a column');
 		}
 
-		const values = Array.isArray(decision.values) ? decision.values : [];
+		const rawValues = unwrapParamIntent(decision.values);
+		const values = Array.isArray(rawValues) ? rawValues : [];
 		const columnNode = buildColumnRef(column, ctx);
 
 		// Determine the PG base type

@@ -4,32 +4,23 @@
  */
 
 import type {
-	CteQueryIntent,
-	MutationIntent,
+	CompiledNqlQuery,
 	QueryIntent,
 	SetOperationIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
 import type { NqlExpression } from '../parser/ast.js';
 import type { ColumnValidator } from './column-validator.js';
 
-export interface CompileResult {
-	readonly query?: QueryIntent;
-	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
-	readonly cteQuery?: CteQueryIntent;
-	readonly mutation?: MutationIntent;
-	readonly returning?: readonly string[];
-	/** Named bindings from `| bind X` clauses (CTE source queries) */
-	readonly bindings?: ReadonlyMap<string, QueryIntent>;
-	/**
-	 * Named mutation bindings from `mutation | select cols | bind X` clauses.
-	 * When a mutation has RETURNING and is bound, the original MutationIntent is stored here
-	 * so the adapter can compile it as a CTE: `WITH X AS (INSERT ... RETURNING cols) ...`
-	 * The corresponding synthetic QueryIntent is also stored in `bindings` for reference resolution.
-	 */
-	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
-	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
-	readonly setOperation?: SetOperationIntent;
+export type CompileResult = CompiledNqlQuery;
+export type { CompiledNqlQuery };
+
+/** @internal */
+export interface NqlInternalCompilerOptions {
+	readonly [NQL_INTERNAL_COMPILER_OPTIONS]?: {
+		readonly allowInternalParams?: boolean;
+	};
 }
 
 /**
@@ -82,6 +73,8 @@ export interface CompilerContext {
 	readonly maxAnyItems: number;
 	/** Permit a where-less update/delete to compile to an unfiltered, all-rows mutation. Default false — a where-less mutation throws unless this is set. */
 	readonly allowUnfilteredMutations: boolean;
+	/** @internal Allows generated __pN params from the core nql tag only. */
+	readonly allowInternalParams: boolean;
 }
 
 /**
