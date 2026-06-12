@@ -4,7 +4,7 @@
 doc-meta:
   story: FEAT-134
   issue: 134
-  status: draft
+  status: canonical
   adversarial_applied: true
   llm_consensus_applied: true
   production_audit_applied: true
