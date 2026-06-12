@@ -388,6 +388,7 @@ type JoinAliasEntry = {
 	readonly alias: string;
 	readonly joinType: 'inner' | 'left';
 	readonly targetTable?: string;
+	readonly relationName?: string;
 };
 
 function getRelationIdentityPath(
@@ -636,6 +637,7 @@ export class PlanCompiler {
 	private joinAliasMap: Map<string, JoinAliasEntry> = new Map();
 	/**
 	 * Tracks all join aliases in use for the current query.
+	 * Entries are stored in emitted database-alias space, after naming.toDatabase().
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
 	 */
 	private usedJoinAliases: Set<string> = new Set();
@@ -669,6 +671,32 @@ export class PlanCompiler {
 			if (entry.targetTable === sourceTable) alias = entry.alias;
 		}
 		return alias;
+	}
+
+	private emittedJoinAlias(alias: string): string {
+		const dbAlias = this.naming.toDatabase(alias);
+		validateIdentifier(dbAlias, 'alias');
+		return dbAlias;
+	}
+
+	private resolvedJoinAliases(): Map<string, string> {
+		const aliases = new Map<string, string>();
+		for (const [relationPath, entry] of this.joinAliasMap) {
+			const isLegacyPath = relationPath.startsWith('__legacy__:');
+			if (!isLegacyPath) {
+				aliases.set(relationPath, entry.alias);
+			}
+
+			// Direct includes can resolve by relation name. Nested includes need the
+			// exact dotted path to avoid leaf-name collisions like file vs definition.file.
+			if (
+				entry.relationName &&
+				(isLegacyPath || relationPath === entry.relationName)
+			) {
+				aliases.set(entry.relationName, entry.alias);
+			}
+		}
+		return aliases;
 	}
 
 	/**
@@ -1017,12 +1045,13 @@ export class PlanCompiler {
 				handlerDecision.relationName;
 			if (candidateAlias) {
 				let alias = candidateAlias;
+				let emittedAlias = this.emittedJoinAlias(alias);
 				let counter = 1;
-				while (this.usedJoinAliases.has(alias)) {
+				while (this.usedJoinAliases.has(emittedAlias)) {
 					alias = `${candidateAlias}_${counter++}`;
+					emittedAlias = this.emittedJoinAlias(alias);
 				}
-				validateIdentifier(alias, 'alias');
-				this.usedJoinAliases.add(alias);
+				this.usedJoinAliases.add(emittedAlias);
 				finalJoinAlias = alias;
 				// Inject the deduplicated alias so the handler uses it
 				if (alias !== candidateAlias) {
@@ -1042,6 +1071,9 @@ export class PlanCompiler {
 				alias: finalJoinAlias,
 				joinType: requestedJoinType,
 				...(decision.targetTable && { targetTable: decision.targetTable }),
+				...((decision.relationName ?? decision.relation) && {
+					relationName: decision.relationName ?? decision.relation,
+				}),
 			});
 		}
 
@@ -1157,7 +1189,7 @@ export class PlanCompiler {
 			parameters: this.state.parameters,
 			paramIndex: this.state.paramIndex,
 			ctes: new Map(),
-			aliases: new Map(),
+			aliases: this.resolvedJoinAliases(),
 			joins: [],
 		};
 	}
@@ -1950,8 +1982,7 @@ export class PlanCompiler {
 			const alias = decision.alias ?? decision.targetTable;
 			if (!alias) continue;
 
-			validateIdentifier(alias, 'alias');
-			this.usedJoinAliases.add(alias);
+			this.usedJoinAliases.add(this.emittedJoinAlias(alias));
 		}
 	}
 
@@ -2121,6 +2152,7 @@ export class PlanCompiler {
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
 		const orderBy: Node[] = [];
+		const orderByDecisions: PlanDecision[] = [];
 		const groupBy: Node[] = [];
 		let having: Node | undefined;
 		let limit: Node | undefined;
@@ -2158,8 +2190,7 @@ export class PlanCompiler {
 					break;
 
 				case 'orderBy': {
-					const obNode = this.compileOrderByDecision(decision, plan);
-					if (obNode) orderBy.push(obNode);
+					orderByDecisions.push(decision);
 					break;
 				}
 
@@ -2211,6 +2242,11 @@ export class PlanCompiler {
 					}
 					break;
 			}
+		}
+
+		for (const decision of orderByDecisions) {
+			const obNode = this.compileOrderByDecision(decision, plan);
+			if (obNode) orderBy.push(obNode);
 		}
 
 		this.flushPendingJoins(from, plan);

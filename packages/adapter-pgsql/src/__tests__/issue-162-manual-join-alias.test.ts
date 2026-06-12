@@ -22,13 +22,15 @@ const issue162Schema = schema({
 		id: { type: 'integer', primaryKey: true },
 		def_id: ref('definitions', { as: 'definition', inverse: 'uses' }),
 		file_id: ref('files', { as: 'file', inverse: 'uses' }),
+		file_one_id: ref('files', { as: 'file_one', inverse: 'file_one_uses' }),
 		alt_file_id: ref('files', { as: 'file_1', inverse: 'alt_uses' }),
 	},
 });
 
-function buildOrm() {
+function buildOrm(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
 	const adapter = createPgsqlCompileOnlyAdapter({
 		model: issue162Schema.model,
+		...(dbCasing ? { dbCasing } : {}),
 	});
 	return createOrm({ model: issue162Schema.model, adapter });
 }
@@ -68,6 +70,48 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).toContain('uses.file_id = file_2.id');
 		expect(sql).toContain('file.path AS def_file');
 		expect(sql).toContain('file_2.path AS use_file');
+	});
+
+	it('reserves manual aliases in emitted DB-cased alias space', () => {
+		const orm = buildOrm('snake_case');
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'fileOne',
+					on: eq('uses.def_id', exprRef('fileOne.id')),
+				})
+				.include('file_one', { join: 'inner' })
+				.columns([relationColumn('file_one', 'path', 'file_one_path')])
+				.dump().sql,
+		);
+
+		expect(occurrenceCount(sql, /\bAS file_one\b/g)).toBe(1);
+		expect(sql).toMatch(/JOIN definitions AS file_one\b/);
+		expect(sql).toMatch(/JOIN files AS file_one_1\b/);
+		expect(sql).toContain('uses.file_one_id = file_one_1.id');
+		expect(sql).toContain('file_one_1.path AS file_one_path');
+	});
+
+	it('uses the final bumped include alias in relationColumn ORDER BY expressions', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'file',
+					on: eq('uses.def_id', exprRef('file.id')),
+				})
+				.include('file', { join: 'inner' })
+				.orderBy(relationColumn('file', 'path', 'path'), 'asc')
+				.dump().sql,
+		);
+
+		expect(sql).toMatch(/JOIN definitions AS file\b/);
+		expect(sql).toMatch(/JOIN files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toMatch(/ORDER BY file_1\.path ASC\b/);
+		expect(sql).not.toMatch(/ORDER BY file\.path ASC\b/);
 	});
 
 	it('duplicate manual .join() aliases are preserved as user-authored SQL aliases', () => {
