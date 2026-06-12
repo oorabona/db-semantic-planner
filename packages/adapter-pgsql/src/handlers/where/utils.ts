@@ -23,8 +23,9 @@ export function buildColumnRef(column: string, ctx: CompilerContext): Node {
 	// Without splitting, the full dotted string becomes a column name and the root table is
 	// prepended, producing "root"."alias.col" (3-part) instead of "alias"."col" (2-part).
 	if (column.includes('.')) {
-		const dotIndex = column.indexOf('.');
-		const table = column.substring(0, dotIndex);
+		const dotIndex = column.lastIndexOf('.');
+		const relation = column.substring(0, dotIndex);
+		const table = ctx.aliases?.get(relation) ?? relation;
 		const col = column.substring(dotIndex + 1);
 		return columnRef(col, table, undefined, ctx.naming);
 	}

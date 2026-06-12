@@ -78,13 +78,12 @@ export const relationColumnHandler: ExpressionHandler = {
 
 		// Look up the alias for this relation from state.
 		// For dotted paths like 'callee.file', split and resolve only the final
-		// segment — state.aliases keyed by the leaf relation name.
-		// A dotted path in state (unlikely) is also supported via direct lookup.
+		// segment when no exact path alias exists.
 		let alias: string;
 		if (relation.includes('.')) {
 			const segments = relation.split('.');
 			const leaf = segments[segments.length - 1]!;
-			alias = state.aliases.get(leaf) ?? state.aliases.get(relation) ?? leaf;
+			alias = state.aliases.get(relation) ?? state.aliases.get(leaf) ?? leaf;
 		} else {
 			alias = state.aliases.get(relation) ?? relation;
 		}

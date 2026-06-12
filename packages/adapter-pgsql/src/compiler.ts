@@ -388,6 +388,14 @@ type JoinAliasEntry = {
 	readonly alias: string;
 	readonly joinType: 'inner' | 'left';
 	readonly targetTable?: string;
+	readonly relationName?: string;
+};
+
+type IncludeCompilationResult = {
+	readonly targets?: Node[];
+	readonly rawJoin?: Node;
+	readonly additionalJoins?: Node[];
+	readonly cte?: Node;
 };
 
 function getRelationIdentityPath(
@@ -636,6 +644,7 @@ export class PlanCompiler {
 	private joinAliasMap: Map<string, JoinAliasEntry> = new Map();
 	/**
 	 * Tracks all join aliases in use for the current query.
+	 * Entries are stored in emitted database-alias space, after naming.toDatabase().
 	 * Ensures no two JOINs share the same alias (DOUBLE-ALIAS prevention).
 	 */
 	private usedJoinAliases: Set<string> = new Set();
@@ -653,6 +662,7 @@ export class PlanCompiler {
 		return {
 			naming: this.naming,
 			rootTable: this.currentRootTable,
+			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: 100,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -669,6 +679,32 @@ export class PlanCompiler {
 			if (entry.targetTable === sourceTable) alias = entry.alias;
 		}
 		return alias;
+	}
+
+	private emittedJoinAlias(alias: string): string {
+		const dbAlias = this.naming.toDatabase(alias);
+		validateIdentifier(dbAlias, 'alias');
+		return dbAlias;
+	}
+
+	private resolvedJoinAliases(): Map<string, string> {
+		const aliases = new Map<string, string>();
+		for (const [relationPath, entry] of this.joinAliasMap) {
+			const isLegacyPath = relationPath.startsWith('__legacy__:');
+			if (!isLegacyPath) {
+				aliases.set(relationPath, entry.alias);
+			}
+
+			// Direct includes can resolve by relation name. Nested includes need the
+			// exact dotted path to avoid leaf-name collisions like file vs definition.file.
+			if (
+				entry.relationName &&
+				(isLegacyPath || relationPath === entry.relationName)
+			) {
+				aliases.set(entry.relationName, entry.alias);
+			}
+		}
+		return aliases;
 	}
 
 	/**
@@ -903,12 +939,7 @@ export class PlanCompiler {
 	private compileIncludeViaHandler(
 		decision: PlanDecision,
 		plan: SimplifiedPlanReport,
-	): {
-		targets?: Node[];
-		rawJoin?: Node;
-		additionalJoins?: Node[];
-		cte?: Node;
-	} {
+	): IncludeCompilationResult {
 		ensureIncludeHandlersRegistered();
 
 		const strategy = decision.choice as
@@ -1017,12 +1048,13 @@ export class PlanCompiler {
 				handlerDecision.relationName;
 			if (candidateAlias) {
 				let alias = candidateAlias;
+				let emittedAlias = this.emittedJoinAlias(alias);
 				let counter = 1;
-				while (this.usedJoinAliases.has(alias)) {
+				while (this.usedJoinAliases.has(emittedAlias)) {
 					alias = `${candidateAlias}_${counter++}`;
+					emittedAlias = this.emittedJoinAlias(alias);
 				}
-				validateIdentifier(alias, 'alias');
-				this.usedJoinAliases.add(alias);
+				this.usedJoinAliases.add(emittedAlias);
 				finalJoinAlias = alias;
 				// Inject the deduplicated alias so the handler uses it
 				if (alias !== candidateAlias) {
@@ -1042,6 +1074,9 @@ export class PlanCompiler {
 				alias: finalJoinAlias,
 				joinType: requestedJoinType,
 				...(decision.targetTable && { targetTable: decision.targetTable }),
+				...((decision.relationName ?? decision.relation) && {
+					relationName: decision.relationName ?? decision.relation,
+				}),
 			});
 		}
 
@@ -1134,6 +1169,7 @@ export class PlanCompiler {
 			naming: this.naming,
 			rootTable: plan.rootTable,
 			currentAlias: currentAlias ?? plan.rootTable,
+			aliases: this.resolvedJoinAliases(),
 			maxRecursiveDepth: 100,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
@@ -1157,7 +1193,7 @@ export class PlanCompiler {
 			parameters: this.state.parameters,
 			paramIndex: this.state.paramIndex,
 			ctes: new Map(),
-			aliases: new Map(),
+			aliases: this.resolvedJoinAliases(),
 			joins: [],
 		};
 	}
@@ -1738,15 +1774,9 @@ export class PlanCompiler {
 	 * Compile an includeStrategy decision and register its results.
 	 * Pushes targets onto targetList, raw joins / CTEs onto instance collections.
 	 */
-	private compileIncludeDecision(
-		decision: PlanDecision,
-		plan: SimplifiedPlanReport,
-		targetList: Node[],
+	private registerIncludeCompilationResult(
+		includeResult: IncludeCompilationResult,
 	): void {
-		const includeResult = this.compileIncludeViaHandler(decision, plan);
-		if (includeResult.targets) {
-			targetList.push(...includeResult.targets);
-		}
 		if (includeResult.rawJoin) {
 			this.rawJoins.push(includeResult.rawJoin);
 		}
@@ -1756,6 +1786,38 @@ export class PlanCompiler {
 		if (includeResult.cte) {
 			this.pendingCtes.push(includeResult.cte);
 		}
+	}
+
+	private compileIncludeDecision(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+		targetList: Node[],
+		precompiled?: IncludeCompilationResult,
+	): void {
+		const includeResult =
+			precompiled ?? this.compileIncludeViaHandler(decision, plan);
+		if (includeResult.targets) {
+			targetList.push(...includeResult.targets);
+		}
+		if (!precompiled) {
+			this.registerIncludeCompilationResult(includeResult);
+		}
+	}
+
+	private compileJoinIncludeAllocationPass(
+		decisions: readonly PlanDecision[],
+		plan: SimplifiedPlanReport,
+	): Map<PlanDecision, IncludeCompilationResult> {
+		const includeResults = new Map<PlanDecision, IncludeCompilationResult>();
+		for (const decision of decisions) {
+			if (decision.type !== 'includeStrategy' || decision.choice !== 'join') {
+				continue;
+			}
+			const includeResult = this.compileIncludeViaHandler(decision, plan);
+			includeResults.set(decision, includeResult);
+			this.registerIncludeCompilationResult(includeResult);
+		}
+		return includeResults;
 	}
 
 	/**
@@ -1943,6 +2005,17 @@ export class PlanCompiler {
 		return where;
 	}
 
+	private reserveManualJoinAliases(decisions: readonly PlanDecision[]): void {
+		for (const decision of decisions) {
+			if (decision.type !== 'join') continue;
+
+			const alias = decision.alias ?? decision.targetTable;
+			if (!alias) continue;
+
+			this.usedJoinAliases.add(this.emittedJoinAlias(alias));
+		}
+	}
+
 	/**
 	 * Apply a single join decision to the FROM clause in-place.
 	 * Chains multiple joins by wrapping from[0] as the left-arg each time.
@@ -2023,14 +2096,11 @@ export class PlanCompiler {
 	 */
 	private compileGroupByDecision(decision: PlanDecision): Node {
 		const gbCol = decision.column as string;
-		const gbDot = gbCol.indexOf('.');
+		const gbDot = gbCol.lastIndexOf('.');
 		if (gbDot !== -1) {
-			return columnRef(
-				gbCol.slice(gbDot + 1),
-				gbCol.slice(0, gbDot),
-				undefined,
-				this.naming,
-			);
+			const relation = gbCol.slice(0, gbDot);
+			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
+			return columnRef(gbCol.slice(gbDot + 1), alias, undefined, this.naming);
 		}
 		return columnRef(gbCol, decision.table, undefined, this.naming);
 	}
@@ -2104,10 +2174,17 @@ export class PlanCompiler {
 			plan.decisions,
 			plan.rootTable,
 		);
+		this.reserveManualJoinAliases(decisions);
+		const includeJoinResults = this.compileJoinIncludeAllocationPass(
+			decisions,
+			plan,
+		);
+		this.state.aliases = this.resolvedJoinAliases();
 		const targetList: Node[] = [];
 		const from = this.compileFromClause(plan);
 		let where: Node | undefined;
 		const orderBy: Node[] = [];
+		const orderByDecisions: PlanDecision[] = [];
 		const groupBy: Node[] = [];
 		let having: Node | undefined;
 		let limit: Node | undefined;
@@ -2129,7 +2206,12 @@ export class PlanCompiler {
 					break;
 
 				case 'includeStrategy':
-					this.compileIncludeDecision(decision, plan, targetList);
+					this.compileIncludeDecision(
+						decision,
+						plan,
+						targetList,
+						includeJoinResults.get(decision),
+					);
 					where = this.compileIncludeWhereConditions(decision, where);
 					break;
 
@@ -2145,8 +2227,7 @@ export class PlanCompiler {
 					break;
 
 				case 'orderBy': {
-					const obNode = this.compileOrderByDecision(decision, plan);
-					if (obNode) orderBy.push(obNode);
+					orderByDecisions.push(decision);
 					break;
 				}
 
@@ -2198,6 +2279,11 @@ export class PlanCompiler {
 					}
 					break;
 			}
+		}
+
+		for (const decision of orderByDecisions) {
+			const obNode = this.compileOrderByDecision(decision, plan);
+			if (obNode) orderBy.push(obNode);
 		}
 
 		this.flushPendingJoins(from, plan);
