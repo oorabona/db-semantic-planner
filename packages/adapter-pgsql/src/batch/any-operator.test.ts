@@ -131,10 +131,9 @@ describe('FEAT-134 NQL scalar params through PostgreSQL adapter', () => {
 	});
 
 	it('emits independent $N placeholders when the same :param is referenced twice', () => {
-		const result = nqlToSQLWithParams(
-			'symbols | where id = :id or id = :id',
-			{ id: 7 },
-		);
+		const result = nqlToSQLWithParams('symbols | where id = :id or id = :id', {
+			id: 7,
+		});
 
 		expect(result.sql).toMatch(/\$1/);
 		expect(result.sql).toMatch(/\$2/);
