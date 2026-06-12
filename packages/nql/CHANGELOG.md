@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.1.0...nql-v1.2.0) (2026-06-12)
+
+
+### Features
+
+* **nql:** General named parameters, tag binding, and nqlRaw() ([#165](https://github.com/oorabona/db-semantic-planner/issues/165)) ([905c323](https://github.com/oorabona/db-semantic-planner/commit/905c323f6a9a907dd39a86950e746d8dd5822a61)), closes [#134](https://github.com/oorabona/db-semantic-planner/issues/134)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 1.1.0
+
 ## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.0.4...nql-v1.1.0) (2026-06-10)
 
 

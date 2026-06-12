@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.1.1...adapter-pgsql-v1.2.0) (2026-06-12)
+
+
+### Features
+
+* **nql:** General named parameters, tag binding, and nqlRaw() ([#165](https://github.com/oorabona/db-semantic-planner/issues/165)) ([905c323](https://github.com/oorabona/db-semantic-planner/commit/905c323f6a9a907dd39a86950e746d8dd5822a61)), closes [#134](https://github.com/oorabona/db-semantic-planner/issues/134)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Multi-path join aliasing and result hydration ([#163](https://github.com/oorabona/db-semantic-planner/issues/163)) ([130f53f](https://github.com/oorabona/db-semantic-planner/commit/130f53f0630c5655ac13f8b755f8730c22c59b41)), closes [#154](https://github.com/oorabona/db-semantic-planner/issues/154)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.1.0
+    * @dbsp/types bumped to 1.1.0
+
 ## [1.1.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.1.0...adapter-pgsql-v1.1.1) (2026-06-10)
 
 
