@@ -123,20 +123,31 @@ export function resolveNamedParamArray(
 	return value;
 }
 
-export function resolveIntegerCount(
-	count: NqlLimitCount,
-	ctx: CompilerContext,
+function assertIntegerCount(
+	value: unknown,
 	label: string,
-): number | ParamIntent {
-	const value: unknown =
-		typeof count === 'number' ? count : resolveNamedParamValue(ctx, count.name);
+): asserts value is number {
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
 		throw new NqlSemanticException(
 			NqlErrorCodes.SEM_INVALID_SYNTAX,
 			`${label} must resolve to a non-negative safe integer`,
 		);
 	}
-	return typeof count === 'number' ? value : resolveNamedParam(ctx, count.name);
+}
+
+export function resolveIntegerCount(
+	count: NqlLimitCount,
+	ctx: CompilerContext,
+	label: string,
+): number | (ParamIntent & { readonly value: number }) {
+	if (typeof count === 'number') {
+		assertIntegerCount(count, label);
+		return count;
+	}
+	const param = resolveNamedParam(ctx, count.name);
+	const { value } = param;
+	assertIntegerCount(value, label);
+	return { ...param, value };
 }
 
 /**

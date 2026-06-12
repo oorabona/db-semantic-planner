@@ -11,10 +11,8 @@ import { InvalidOperationError } from '@dbsp/core';
 import {
 	type ExpressionIntent,
 	isParamIntent,
-	NQL_SELECT_AGGREGATE_FUNCTIONS,
-	NQL_SELECT_JSON_FUNCTIONS,
-	NQL_SELECT_SCALAR_FUNCTIONS,
-	NQL_SELECT_WINDOW_FUNCTIONS,
+	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
+	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 	type ParamIntent,
 	type QueryIntent,
 } from '@dbsp/types';
@@ -106,16 +104,6 @@ export class UnsupportedNqlSelectFunctionError extends Error {
 		this.name = 'UnsupportedNqlSelectFunctionError';
 	}
 }
-
-const NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set([
-	...NQL_SELECT_AGGREGATE_FUNCTIONS,
-	...NQL_SELECT_JSON_FUNCTIONS,
-	...NQL_SELECT_SCALAR_FUNCTIONS,
-]);
-
-const NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST: ReadonlySet<string> = new Set(
-	NQL_SELECT_WINDOW_FUNCTIONS,
-);
 
 function assertNqlSelectScalarFunctionAllowed(functionName: string): void {
 	if (!NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST.has(functionName.toLowerCase())) {

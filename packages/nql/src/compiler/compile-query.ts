@@ -163,10 +163,8 @@ export function compileQuery(
 					lc.relation ? 'per-include limit' : 'limit',
 				);
 				if (lc.relation) {
-					includeLimits.set(
-						lc.relation,
-						isParamIntent(count) ? (count.value as number) : count,
-					);
+					const includeLimit = isParamIntent(count) ? count.value : count;
+					includeLimits.set(lc.relation, includeLimit);
 				} else {
 					limit = count;
 				}

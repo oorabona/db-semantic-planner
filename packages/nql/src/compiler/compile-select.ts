@@ -72,11 +72,11 @@ function resolveLagLeadOffset(
 ): number {
 	if (expr.type === 'number') {
 		const resolved = resolveIntegerCount(expr.value, ctx, 'lag/lead offset');
-		return isParamIntent(resolved) ? (resolved.value as number) : resolved;
+		return isParamIntent(resolved) ? resolved.value : resolved;
 	}
 	if (expr.type === 'namedParam') {
 		const resolved = resolveIntegerCount(expr, ctx, 'lag/lead offset');
-		return isParamIntent(resolved) ? (resolved.value as number) : resolved;
+		return isParamIntent(resolved) ? resolved.value : resolved;
 	}
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,

@@ -337,7 +337,7 @@ export interface ParamExpressionIntent {
 /** @public */
 export type ParamIntent = ParamExpressionIntent;
 
-/** @public */
+/** Single-level only — never recurse into .value; the inner bound value is opaque user data. @public */
 export function isParamIntent(value: unknown): value is ParamIntent {
 	return (
 		typeof value === 'object' &&
