@@ -2091,18 +2091,39 @@ export class PlanCompiler {
 	}
 
 	/**
+	 * Compile a column reference that may use dotted 'relation.column' notation.
+	 */
+	private compileRelationAwareColumnRef(
+		column: string,
+		table: string | undefined,
+	): Node {
+		const dot = column.lastIndexOf('.');
+		if (dot !== -1) {
+			const relation = column.slice(0, dot);
+			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
+			return columnRef(column.slice(dot + 1), alias, undefined, this.naming);
+		}
+		return columnRef(column, table, undefined, this.naming);
+	}
+
+	/**
 	 * Compile a single groupBy decision into a ColumnRef AST node.
 	 * Supports dotted 'relation.column' notation for joined tables.
 	 */
 	private compileGroupByDecision(decision: PlanDecision): Node {
-		const gbCol = decision.column as string;
-		const gbDot = gbCol.lastIndexOf('.');
-		if (gbDot !== -1) {
-			const relation = gbCol.slice(0, gbDot);
-			const alias = this.resolvedJoinAliases().get(relation) ?? relation;
-			return columnRef(gbCol.slice(gbDot + 1), alias, undefined, this.naming);
-		}
-		return columnRef(gbCol, decision.table, undefined, this.naming);
+		return this.compileRelationAwareColumnRef(
+			decision.column as string,
+			decision.table,
+		);
+	}
+
+	/**
+	 * Compile a DISTINCT ON column into a ColumnRef AST node.
+	 * Mirrors GROUP BY relation-alias resolution while preserving unqualified
+	 * DISTINCT ON columns as unqualified references.
+	 */
+	private compileDistinctOnColumn(column: string): Node {
+		return this.compileRelationAwareColumnRef(column, undefined);
 	}
 
 	/**
@@ -2274,7 +2295,7 @@ export class PlanCompiler {
 				case 'distinctOn':
 					if (decision.columns && decision.columns.length > 0) {
 						distinct = decision.columns.map((col) =>
-							columnRef(col as string, undefined, undefined, this.naming),
+							this.compileDistinctOnColumn(col as string),
 						);
 					}
 					break;

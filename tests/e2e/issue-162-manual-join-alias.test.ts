@@ -69,6 +69,34 @@ describe('FIX-162 manual .join() alias collisions', () => {
 		]);
 	});
 
+	it('executes DISTINCT ON relation references with the final bumped include alias', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ model: issue154Model, adapter });
+		const query = orm
+			.withSchema(SCHEMA)
+			.select('uses')
+			.join('definitions', {
+				as: 'file',
+				on: eq('uses.def_id', exprRef('file.id')),
+			})
+			.include('file', { join: 'inner' })
+			.distinctOn('file.path')
+			.columns(['id'])
+			.orderBy(relationColumn('file', 'path', 'file_path'), 'asc')
+			.orderBy('id', 'asc');
+
+		const sql = normalizeSql(query.dump().sql);
+		expect(sql).toMatch(/JOIN issue_162_e2e\.definitions AS file\b/);
+		expect(sql).toMatch(/JOIN issue_162_e2e\.files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toContain('DISTINCT ON (file_1.path)');
+		expect(sql).not.toContain('DISTINCT ON (file.path)');
+
+		const rows = (await query.execute()) as Array<{ id: number }>;
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.id).toBe(1000);
+	});
+
 	it('leaves duplicate manual join aliases to PostgreSQL conflict semantics', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ model: issue154Model, adapter });

@@ -162,6 +162,28 @@ describe('FIX-162: manual join aliases reserve include-generated aliases', () =>
 		expect(sql).not.toMatch(/GROUP BY uses\.id, file\.path\b/);
 	});
 
+	it('uses the final bumped include alias in DISTINCT ON relation references', () => {
+		const orm = buildOrm();
+		const sql = compact(
+			orm
+				.select('uses')
+				.join('definitions', {
+					as: 'file',
+					on: eq('uses.def_id', exprRef('file.id')),
+				})
+				.include('file', { join: 'inner' })
+				.distinctOn('file.path')
+				.columns(['id'])
+				.dump().sql,
+		);
+
+		expect(sql).toMatch(/JOIN definitions AS file\b/);
+		expect(sql).toMatch(/JOIN files AS file_1\b/);
+		expect(sql).toContain('uses.file_id = file_1.id');
+		expect(sql).toMatch(/SELECT DISTINCT ON \(file_1\.path\)/);
+		expect(sql).not.toMatch(/SELECT DISTINCT ON \(file\.path\)/);
+	});
+
 	it('uses the final bumped include alias in HAVING relationColumn expressions', () => {
 		const orm = buildOrm();
 		const sql = compact(
