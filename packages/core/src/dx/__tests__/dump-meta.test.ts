@@ -111,4 +111,34 @@ describe('nql`...`.dump(meta?)', () => {
 		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
 		expect(dump.meta?.queryName).toBe('nql-with-at');
 	});
+
+	it('attaches queryName and correlationId via NQL mutation dump path', () => {
+		const dump = nql<unknown>`insert into users set name = 'Alice'`.dump({
+			queryName: 'nql-insert-user',
+			correlationId: 'cid-nql-mut-1',
+		});
+
+		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+		expect(dump.meta?.queryName).toBe('nql-insert-user');
+		expect(dump.meta?.correlationId).toBe('cid-nql-mut-1');
+		expect(dump.sql).toMatch(/INSERT/i);
+	});
+});
+
+describe('mutation dump(meta?)', () => {
+	const db = schema({ users: { id: 'integer', name: 'string' } } as const);
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const orm = createOrm({ schema: db, adapter });
+
+	it('attaches queryName and correlationId via fluent mutation dump path', () => {
+		const dump = orm
+			.insert('users')
+			.values({ name: 'Alice' })
+			.dump({ queryName: 'insert-user', correlationId: 'cid-mut-1' });
+
+		expect(dump.meta?.compiledAt).toBeInstanceOf(Date);
+		expect(dump.meta?.queryName).toBe('insert-user');
+		expect(dump.meta?.correlationId).toBe('cid-mut-1');
+		expect(dump.sql).toMatch(/INSERT/i);
+	});
 });

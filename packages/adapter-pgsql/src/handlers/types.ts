@@ -8,6 +8,7 @@
 import type { ModelIR, ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
+import type { BindingNameRegistry } from '../binding-registry.js';
 import type { NamingPlugin } from '../naming-plugin.js';
 
 // ============================================================================
@@ -38,6 +39,8 @@ export interface CompilerContext {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 	/** Alias of the outer (parent) query — used for FieldRef scope:'outer' resolution in EXISTS subqueries */
 	readonly outerAlias?: string;
+	/** Query-local CTE/binding names that must not be schema-qualified. */
+	readonly bindingNames?: BindingNameRegistry;
 	/**
 	 * Optional callback to compile a QueryIntent into an AST Node (SubLink subselect).
 	 * Set by PlanCompiler when compiling selectCustomExpression — enables SubqueryExpressionIntent

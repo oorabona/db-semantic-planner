@@ -733,7 +733,7 @@ describe('RETURNING with schema validation', () => {
 });
 
 // ===========================================================================
-// ROUND 2: resolveBindingsInWhere with IN $ref binding (lines 296-308)
+// ROUND 2: resolveBindingsInWhere with branded IN binding (lines 296-308)
 // ===========================================================================
 
 describe('resolveBindingsInWhere with bound IN', () => {

@@ -17,16 +17,23 @@
  */
 
 import {
+	type CompiledNqlQuery,
 	type NqlCompilerOptions,
 	NqlLexer,
 	compile as nqlCompile,
 } from '@dbsp/nql';
 import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
-import type { Adapter, Dump } from '../adapter.js';
-import type { QueryIntent } from '../intent-ast.js';
+import type { Adapter, CompileOptions, Dump, DumpMeta } from '../adapter.js';
+import type { MutationIntent, QueryIntent } from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
+import { ExecutionError } from './errors.js';
+import type { HookErrorHandler, HookStore } from './hooks.js';
+import {
+	type MutationDump,
+	runMutationWithHooks,
+} from './mutation-builders.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 
 // ============================================================================
@@ -41,14 +48,16 @@ import type { DumpMetaInput } from './query-builder-types.js';
 export interface NqlBuilder<T> {
 	/** Execute query and return all results */
 	all(): Promise<T[]>;
+	/** Execute query or mutation and discard any returned rows */
+	run(): Promise<void>;
 	/** Execute query and return first result or null */
 	first(): Promise<T | null>;
 	/** Get the IntentIR for debugging */
-	toIntentIR(): QueryIntent;
+	toIntentIR(): QueryIntent | MutationIntent;
 	/** Get the execution plan */
 	plan(): PlanReport;
-	/** Get full dump (plan + SQL + params) */
-	dump(meta?: DumpMetaInput): Dump;
+	/** Get full dump. Mutations return MutationDump without a plan. */
+	dump(meta?: DumpMetaInput): Dump | MutationDump;
 }
 
 /**
@@ -100,6 +109,36 @@ interface AssembledNqlTemplate {
 	readonly params: Readonly<Record<string, unknown>>;
 	readonly hasBoundParams: boolean;
 	readonly sourceError: string | undefined;
+}
+
+type CompiledNqlIntent =
+	| {
+			readonly kind: 'query';
+			readonly bundle: CompiledNqlQuery;
+			readonly intent: QueryIntent;
+	  }
+	| {
+			readonly kind: 'mutation';
+			readonly bundle: CompiledNqlQuery;
+			readonly intent: MutationIntent;
+	  };
+
+function hasNqlBindings(bundle: CompiledNqlQuery): boolean {
+	return (bundle.bindings?.size ?? 0) > 0;
+}
+
+function assertNoMutationBindingBodies(bundle: CompiledNqlQuery): void {
+	const mutationBindings = bundle.mutationBindings;
+	if (!mutationBindings || mutationBindings.size === 0) {
+		return;
+	}
+
+	const bindNames = [...mutationBindings.keys()]
+		.map((name) => `'${name}'`)
+		.join(', ');
+	throw new Error(
+		`NQL tag programs cannot use mutation bodies in | bind clauses (${bindNames}); writable binding CTEs are disabled for tag execution (#173). Use a read-only bind before a single final mutation, or execute the mutation explicitly.`,
+	);
 }
 
 /**
@@ -278,6 +317,9 @@ export function createNqlTag(
 	model: ModelIR,
 	adapter?: Adapter<unknown>,
 	schemaName?: string,
+	hookStore?: HookStore,
+	onHookError?: HookErrorHandler,
+	inTransaction?: boolean,
 ): NqlTag {
 	return function nql<T>(
 		strings: TemplateStringsArray,
@@ -294,6 +336,9 @@ export function createNqlTag(
 			model,
 			adapter,
 			schemaName,
+			hookStore,
+			onHookError,
+			inTransaction,
 		);
 	};
 }
@@ -303,16 +348,18 @@ export function createNqlTag(
  * @internal
  */
 class NqlBuilderImpl<T> implements NqlBuilder<T> {
-	private _intent: QueryIntent | undefined;
+	private _compiled: CompiledNqlIntent | undefined;
 	private readonly query: string;
 	private readonly params: Readonly<Record<string, unknown>>;
 	private readonly hasBoundParams: boolean;
 	private readonly sourceError: string | undefined;
 	private readonly schemaDefinition: unknown;
 	private readonly model: ModelIR;
-	// biome-ignore lint/correctness/noUnusedPrivateClassMembers: Reserved for future schema-scoping support
 	private readonly _schemaName: string | undefined;
 	private readonly adapter: Adapter<unknown> | undefined;
+	private readonly hookStore: HookStore | undefined;
+	private readonly onHookError: HookErrorHandler | undefined;
+	private readonly inTransaction: boolean | undefined;
 
 	constructor(
 		query: string,
@@ -323,6 +370,9 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		model: ModelIR,
 		adapter: Adapter<unknown> | undefined,
 		schemaName: string | undefined,
+		hookStore: HookStore | undefined,
+		onHookError: HookErrorHandler | undefined,
+		inTransaction: boolean | undefined,
 	) {
 		this.query = query;
 		this.params = params;
@@ -332,11 +382,14 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		this.model = model;
 		this.adapter = adapter;
 		this._schemaName = schemaName;
+		this.hookStore = hookStore;
+		this.onHookError = onHookError;
+		this.inTransaction = inTransaction;
 	}
 
-	private compile(): QueryIntent {
-		if (this._intent) {
-			return this._intent;
+	private compile(): CompiledNqlIntent {
+		if (this._compiled) {
+			return this._compiled;
 		}
 
 		if (this.sourceError !== undefined) {
@@ -369,37 +422,60 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 				: '';
 			throw new Error(`NQL compilation failed: ${errors}${rawHint}`);
 		}
-		if (result.ast?.mutation && !result.ast?.query) {
-			throw new Error(
-				'INSERT/UPDATE/DELETE/UPSERT not yet supported via the nql`...` tagged template. ' +
-					'Use orm.insert(table, data) / orm.update(table, set) / orm.delete(table) / orm.upsert(table, data) instead. ' +
-					'Tracking: https://github.com/oorabona/db-semantic-planner/issues/113',
-			);
-		}
-		if (!result.ast?.query) {
+		const bundle = result.ast;
+		if (!bundle) {
 			throw new Error('NQL compilation failed: no query AST produced');
 		}
-
-		// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
-		// structurally identical to core's re-export.
-		this._intent = result.ast.query as QueryIntent;
-		return this._intent;
+		assertNoMutationBindingBodies(bundle);
+		if (bundle.query) {
+			// Type assertion: NQL imports QueryIntent from @dbsp/types (ARCH-007),
+			// structurally identical to core's re-export.
+			this._compiled = {
+				kind: 'query',
+				bundle,
+				intent: bundle.query as QueryIntent,
+			};
+			return this._compiled;
+		}
+		if (bundle.mutation) {
+			this._compiled = {
+				kind: 'mutation',
+				bundle,
+				intent: bundle.mutation as MutationIntent,
+			};
+			return this._compiled;
+		}
+		throw new Error('NQL compilation failed: no query AST produced');
 	}
 
-	toIntentIR(): QueryIntent {
-		return this.compile();
+	toIntentIR(): QueryIntent | MutationIntent {
+		return this.compile().intent;
 	}
 
 	private planInternal(): PlanReport {
-		const intent = this.compile();
-		return executePlan(intent, this.model);
+		const compiled = this.compile();
+		if (compiled.kind === 'mutation') {
+			throw new Error(
+				'NQL mutations do not have execution plans; use dump() for SQL and parameters.',
+			);
+		}
+		return executePlan(compiled.intent, this.model);
 	}
 
 	plan(): PlanReport {
 		return this.planInternal();
 	}
 
-	dump(meta?: DumpMetaInput): Dump {
+	dump(meta?: DumpMetaInput): Dump | MutationDump {
+		const compiledIntent = this.compile();
+		if (compiledIntent.kind === 'mutation') {
+			return this.dumpMutation(
+				compiledIntent.bundle,
+				compiledIntent.intent,
+				meta,
+			);
+		}
+
 		const planReport = this.planInternal();
 
 		if (!this.adapter) {
@@ -411,7 +487,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			};
 		}
 
-		const compiled = this.adapter.compile<T>(planReport);
+		const compiled = hasNqlBindings(compiledIntent.bundle)
+			? this.adapter.compile<T>(
+					compiledIntent.bundle,
+					this.nqlBundleCompileOptions(),
+				)
+			: this.adapter.compile<T>(planReport);
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -445,17 +526,104 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 	}
 
-	async all(): Promise<T[]> {
+	private requireAdapter(operation: string): Adapter<unknown> {
 		if (!this.adapter) {
+			throw new ExecutionError({
+				operation,
+				reason: 'Adapter not configured',
+				fix: 'Pass adapter option when creating ORM: createOrm({ model, adapter })',
+			});
+		}
+		return this.adapter;
+	}
+
+	private mutationCompileOptions(extraOptions?: DumpMetaInput): CompileOptions {
+		return {
+			model: this.model,
+			...(this._schemaName !== undefined && { schemaName: this._schemaName }),
+			...extraOptions,
+		};
+	}
+
+	private nqlBundleCompileOptions(): CompileOptions {
+		return {
+			model: this.model,
+			...(this._schemaName !== undefined && { schemaName: this._schemaName }),
+		};
+	}
+
+	private dumpMutation(
+		bundle: CompiledNqlQuery,
+		intent: MutationIntent,
+		meta?: DumpMetaInput,
+	): MutationDump {
+		const adapter = this.requireAdapter('dump');
+		const compiled = adapter.compile(bundle, this.mutationCompileOptions(meta));
+
+		const dumpMeta: DumpMeta = {
+			compiledAt: new Date(),
+			...(this._schemaName !== undefined && { schema: this._schemaName }),
+			...(meta?.queryName !== undefined && { queryName: meta.queryName }),
+			...(meta?.correlationId !== undefined && {
+				correlationId: meta.correlationId,
+			}),
+		};
+
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters,
+			intent,
+			meta: dumpMeta,
+		};
+	}
+
+	async all(): Promise<T[]> {
+		const adapter = this.adapter;
+		if (!adapter) {
 			throw new Error(
 				'Cannot execute query: no adapter configured. ' +
 					'Pass an adapter to createOrm() or use .toIntentIR() / .plan() for debugging.',
 			);
 		}
 
+		const compiledIntent = this.compile();
+		if (compiledIntent.kind === 'mutation') {
+			const hasReturning = (compiledIntent.intent.returning?.length ?? 0) > 0;
+			return runMutationWithHooks<T[], MutationIntent>({
+				table: compiledIntent.intent.table,
+				intent: compiledIntent.intent,
+				hookStore: this.hookStore,
+				onHookError: this.onHookError,
+				schemaName: this._schemaName,
+				inTransaction: this.inTransaction,
+				prepare: () => {
+					const compiled = adapter.compile<T[]>(
+						compiledIntent.bundle,
+						this.mutationCompileOptions(),
+					);
+					return {
+						sql: compiled.sql,
+						parameters: compiled.parameters,
+						execute: () => adapter.execute(compiled) as Promise<T[]>,
+						getAfterMutationResult: (result) => (hasReturning ? result : []),
+						returnAfterMutationResult: hasReturning,
+					};
+				},
+			});
+		}
+
 		const planReport = this.planInternal();
-		const compiled = this.adapter.compile<T>(planReport);
-		return this.adapter.execute(compiled);
+		const compiled = hasNqlBindings(compiledIntent.bundle)
+			? adapter.compile<T>(
+					compiledIntent.bundle,
+					this.nqlBundleCompileOptions(),
+				)
+			: adapter.compile<T>(planReport);
+		return adapter.execute(compiled);
+	}
+
+	async run(): Promise<void> {
+		await this.all();
 	}
 
 	async first(): Promise<T | null> {

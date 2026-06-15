@@ -16,6 +16,7 @@ import {
 	type ParamIntent,
 	type QueryIntent,
 } from '@dbsp/types';
+import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -43,6 +44,7 @@ import {
 	starTarget,
 	updateStmt,
 } from './ast-helpers.js';
+import type { BindingNameRegistry } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import {
@@ -590,6 +592,8 @@ export interface CompilerOptions {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 	/** ModelIR for type-aware parameter casting in WHERE clauses */
 	readonly model?: import('@dbsp/types').ModelIR;
+	/** Query-local CTE/binding names that must not be schema-qualified. */
+	readonly bindingNames?: BindingNameRegistry;
 }
 
 /**
@@ -615,6 +619,7 @@ export class PlanCompiler {
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
+	private readonly bindingNames: BindingNameRegistry | undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
 		parameters: [],
@@ -655,6 +660,7 @@ export class PlanCompiler {
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
 		this.model = options.model ?? undefined;
+		this.bindingNames = options.bindingNames;
 	}
 
 	/** Build immutable context for handler-based WHERE compilation */
@@ -667,6 +673,7 @@ export class PlanCompiler {
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
+			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.model != null && { model: this.model }),
 		} as HandlerCompilerContext;
 	}
@@ -1176,6 +1183,7 @@ export class PlanCompiler {
 			...((plan.schema ?? this.schema)
 				? { schema: plan.schema ?? this.schema }
 				: {}),
+			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.model != null && { model: this.model }),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
 				this.compileExpressionSubquery(query, paramOffset),
@@ -1212,6 +1220,9 @@ export class PlanCompiler {
 			}),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
+			...(this.bindingNames !== undefined && {
+				bindingNames: this.bindingNames,
+			}),
 		});
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
@@ -1241,16 +1252,16 @@ export class PlanCompiler {
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
 	): Node {
+		if (isNqlBindingRef(arg)) {
+			return buildColumnRef(getNqlBindingRefName(arg), ctx);
+		}
+
 		if (typeof arg === 'string') {
 			return buildColumnRef(arg, ctx);
 		}
 
 		if (typeof arg === 'object' && arg !== null) {
 			const record = arg as Record<string, unknown>;
-
-			if (typeof record.$ref === 'string') {
-				return buildColumnRef(record.$ref, ctx);
-			}
 
 			if (typeof record.kind !== 'string') {
 				const legacyKind =

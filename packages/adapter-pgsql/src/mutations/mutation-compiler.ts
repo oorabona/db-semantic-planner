@@ -24,6 +24,7 @@ import {
 	type UpdateOptions,
 	updateStmt,
 } from '../ast-helpers.js';
+import { schemaForFromName } from '../binding-registry.js';
 import {
 	inferPgArrayType,
 	parseRawExpression,
@@ -537,6 +538,12 @@ export function compileInsertFrom(
 	const _dbTargetTable = naming.toDatabase(config.targetTable);
 	const dbSourceTable = naming.toDatabase(config.sourceTable);
 	const sourceAlias = config.sourceTable;
+	const sourceSchema = schemaForFromName(
+		ctx.schema,
+		config.sourceTable,
+		ctx.bindingNames,
+		naming,
+	);
 
 	// Build column list
 	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
@@ -546,7 +553,7 @@ export function compileInsertFrom(
 	if (config.columns && config.columns.length > 0) {
 		targetList = config.columns.map((col) =>
 			resTarget(
-				columnRef(col, sourceAlias, ctx.schema, naming),
+				columnRef(col, sourceAlias, sourceSchema, naming),
 				naming.toDatabase(col),
 			),
 		);
@@ -600,8 +607,8 @@ export function compileInsertFrom(
 		inh: true,
 		relpersistence: 'p',
 	};
-	if (ctx.schema) {
-		sourceRelation.schemaname = naming.toDatabase(ctx.schema);
+	if (sourceSchema) {
+		sourceRelation.schemaname = naming.toDatabase(sourceSchema);
 	}
 
 	const selectQuery: Node = {
@@ -648,6 +655,12 @@ export function compileUpsertFrom(
 	const naming = ctx.naming;
 	const dbSourceTable = naming.toDatabase(config.sourceTable);
 	const sourceAlias = config.sourceTable;
+	const sourceSchema = schemaForFromName(
+		ctx.schema,
+		config.sourceTable,
+		ctx.bindingNames,
+		naming,
+	);
 
 	// Build column list
 	const dbColumns = config.columns?.map((c) => naming.toDatabase(c));
@@ -657,7 +670,7 @@ export function compileUpsertFrom(
 	if (config.columns && config.columns.length > 0) {
 		targetList = config.columns.map((col) =>
 			resTarget(
-				columnRef(col, sourceAlias, ctx.schema, naming),
+				columnRef(col, sourceAlias, sourceSchema, naming),
 				naming.toDatabase(col),
 			),
 		);
@@ -711,8 +724,8 @@ export function compileUpsertFrom(
 		inh: true,
 		relpersistence: 'p',
 	};
-	if (ctx.schema) {
-		sourceRelation.schemaname = naming.toDatabase(ctx.schema);
+	if (sourceSchema) {
+		sourceRelation.schemaname = naming.toDatabase(sourceSchema);
 	}
 
 	const selectQuery: Node = {

@@ -6,6 +6,7 @@
  * isAggregateFunction, mapComparisonOperator, validateWhereField.
  */
 
+import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import { describe, expect, it, vi } from 'vitest';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
@@ -31,6 +32,11 @@ import {
 	validateWhereField,
 } from './expression-utils.js';
 import type { CompilerContext } from './types.js';
+
+function expectNqlBindingRef(value: unknown, name: string): void {
+	expect(isNqlBindingRef(value)).toBe(true);
+	expect(getNqlBindingRefName(value)).toBe(name);
+}
 
 // ============================================================================
 // expressionToField
@@ -131,17 +137,22 @@ describe('expressionToValue', () => {
 		expect(expressionToValue(expr)).toBeNull();
 	});
 
-	it('converts path to $ref', () => {
+	it('converts path to branded binding ref', () => {
 		const expr: NqlPathExpression = { type: 'path', segments: ['name'] };
-		expect(expressionToValue(expr)).toEqual({ $ref: 'name' });
+		const value = expressionToValue(expr);
+
+		expectNqlBindingRef(value, 'name');
+		expect(isNqlBindingRef({ name: 'name' })).toBe(false);
+		expect(isNqlBindingRef({ $ref: 'name' })).toBe(false);
+		expect(isNqlBindingRef(JSON.parse(JSON.stringify(value)))).toBe(false);
 	});
 
-	it('converts dotted path to dotted $ref', () => {
+	it('converts dotted path to branded binding ref', () => {
 		const expr: NqlPathExpression = {
 			type: 'path',
 			segments: ['users', 'name'],
 		};
-		expect(expressionToValue(expr)).toEqual({ $ref: 'users.name' });
+		expectNqlBindingRef(expressionToValue(expr), 'users.name');
 	});
 
 	it('converts function call to $fn', () => {
@@ -159,10 +170,13 @@ describe('expressionToValue', () => {
 			name: 'upper',
 			args: [{ type: 'path', segments: ['name'] } as NqlPathExpression],
 		};
-		expect(expressionToValue(expr)).toEqual({
-			$fn: 'upper',
-			$args: [{ $ref: 'name' }],
-		});
+		const value = expressionToValue(expr) as {
+			$fn: string;
+			$args: readonly unknown[];
+		};
+
+		expect(value.$fn).toBe('upper');
+		expectNqlBindingRef(value.$args[0], 'name');
 	});
 
 	it('converts binary expression to $op', () => {
@@ -186,11 +200,15 @@ describe('expressionToValue', () => {
 			left: { type: 'path', segments: ['price'] } as NqlPathExpression,
 			right: { type: 'path', segments: ['qty'] } as NqlPathExpression,
 		};
-		expect(expressionToValue(expr)).toEqual({
-			$op: '*',
-			$left: { $ref: 'price' },
-			$right: { $ref: 'qty' },
-		});
+		const value = expressionToValue(expr) as {
+			$op: string;
+			$left: unknown;
+			$right: unknown;
+		};
+
+		expect(value.$op).toBe('*');
+		expectNqlBindingRef(value.$left, 'price');
+		expectNqlBindingRef(value.$right, 'qty');
 	});
 
 	it('converts unary minus with number operand to negated number', () => {
@@ -217,11 +235,15 @@ describe('expressionToValue', () => {
 			operator: '-',
 			operand: { type: 'path', segments: ['price'] } as NqlPathExpression,
 		};
-		expect(expressionToValue(expr)).toEqual({
-			$op: '*',
-			$left: -1,
-			$right: { $ref: 'price' },
-		});
+		const value = expressionToValue(expr) as {
+			$op: string;
+			$left: unknown;
+			$right: unknown;
+		};
+
+		expect(value.$op).toBe('*');
+		expect(value.$left).toBe(-1);
+		expectNqlBindingRef(value.$right, 'price');
 	});
 
 	it('throws for unsupported unary operator', () => {

@@ -5,7 +5,12 @@
  * @internal
  */
 
-import { InvalidOperationError, isSqlRaw } from '@dbsp/core';
+import {
+	InvalidOperationError,
+	isSqlRaw,
+	POSTGRESQL_CAPABILITIES,
+	plan as planFn,
+} from '@dbsp/core';
 import type {
 	BatchUpdateIntent,
 	CompiledQuery,
@@ -13,12 +18,19 @@ import type {
 	DeleteIntent,
 	InsertFromIntent,
 	InsertIntent,
+	QueryIntent,
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
+import { compileSelect } from './adapter-compiler-select.js';
+import {
+	emittedBindName,
+	hasBindingName,
+	withBindingName,
+} from './binding-registry.js';
 import {
 	buildSubqueryFromIntent,
 	compileWhereIntent,
@@ -28,6 +40,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
+import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import {
 	type CompilerContext,
@@ -52,6 +65,7 @@ import {
 	type UpsertConfig,
 	type UpsertFromConfig,
 } from './mutations/index.js';
+import type { NamingPlugin } from './naming-plugin.js';
 
 // ============================================================================
 // Internal helpers
@@ -64,6 +78,50 @@ import {
  */
 function whereIntentAsDecision(where: WhereIntent): Decision {
 	return where as never as Decision;
+}
+
+function renumberSqlParams(sql: string, offset: number): string {
+	if (offset === 0) return sql;
+	return sql.replace(/\$(\d+)/g, (_match, num) => {
+		return `$${Number.parseInt(num, 10) + offset}`;
+	});
+}
+
+function compileSourceQueryCte(
+	operation: 'compileInsertFrom' | 'compileUpsertFrom',
+	sourceName: string,
+	sourceQuery: QueryIntent,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): CompiledQuery {
+	const model = deps.model;
+	if (model === undefined) {
+		throw new Error(
+			`${operation} with sourceQuery requires a model to emit the source CTE for '${sourceName}'.`,
+		);
+	}
+	const sourcePlan = planFn(sourceQuery, model, {
+		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+	});
+	return compileSelect(sourcePlan, options, deps);
+}
+
+function prependSourceCte(
+	sql: string,
+	parameters: readonly unknown[],
+	sourceName: string,
+	sourceCte: CompiledQuery | undefined,
+	naming: NamingPlugin,
+): CompiledQuery {
+	if (sourceCte === undefined) {
+		return { sql, parameters };
+	}
+	const cteParamCount = sourceCte.parameters.length;
+	const sourceCteName = emittedBindName(sourceName, naming);
+	return {
+		sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(sql, cteParamCount)}`,
+		parameters: [...sourceCte.parameters, ...parameters],
+	};
 }
 
 /**
@@ -200,6 +258,7 @@ function compileUpsertActionWhere(
 		paramState: state,
 		naming: deps.naming,
 		...(schemaName !== undefined && { schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.model !== undefined && { model: deps.model }),
 		compileSubquery: (sqIntent, paramOffset) =>
 			buildSubqueryFromIntent(
@@ -208,6 +267,7 @@ function compileUpsertActionWhere(
 				deps.naming,
 				schemaName,
 				'rawExists',
+				deps.bindingNames,
 			),
 	};
 	return compileWhereIntent(where, whereCtx);
@@ -238,6 +298,7 @@ export function compileInsert(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -294,16 +355,32 @@ export function compileInsert(
  */
 export function compileInsertFrom(
 	intent: InsertFromIntent,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
+	const sourceCte =
+		intent.sourceQuery !== undefined &&
+		!hasBindingName(deps.bindingNames, intent.source, deps.naming)
+			? compileSourceQueryCte(
+					'compileInsertFrom',
+					intent.source,
+					intent.sourceQuery,
+					options,
+					deps,
+				)
+			: undefined;
+	const bindingNames =
+		intent.sourceQuery !== undefined
+			? withBindingName(deps.bindingNames, intent.source, deps.naming)
+			: deps.bindingNames;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -320,10 +397,13 @@ export function compileInsertFrom(
 	const ast = compileInsertFromMutation(config, ctx, state);
 	const sql = deparseQuoted(ast);
 
-	return {
+	return prependSourceCte(
 		sql,
-		parameters: state.parameters,
-	};
+		state.parameters,
+		intent.source,
+		sourceCte,
+		deps.naming,
+	);
 }
 
 // ============================================================================
@@ -347,6 +427,7 @@ export function compileUpdate(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 		maxRecursiveDepth: 100,
 	};
@@ -405,6 +486,7 @@ export function compileBatchUpdate(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -458,6 +540,9 @@ export function compileBatchUpdate(
 			paramState: state,
 			naming: deps.naming,
 			...(schemaName !== undefined && { schemaName }),
+			...(deps.bindingNames !== undefined && {
+				bindingNames: deps.bindingNames,
+			}),
 			...(deps.model !== undefined && { model: deps.model }),
 			compileSubquery: (sqIntent, paramOffset) =>
 				buildSubqueryFromIntent(
@@ -466,6 +551,7 @@ export function compileBatchUpdate(
 					deps.naming,
 					schemaName,
 					'rawExists',
+					deps.bindingNames,
 				),
 		};
 		whereGuard = compileWhereIntent(intent.where, whereCtx);
@@ -512,6 +598,7 @@ export function compileDelete(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: 100,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
@@ -558,6 +645,7 @@ export function compileUpsert(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.model !== undefined && { model: deps.model }),
 		maxRecursiveDepth: 100,
 	};
@@ -701,11 +789,27 @@ export function compileUpsertFrom(
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
+	const sourceCte =
+		intent.sourceQuery !== undefined &&
+		!hasBindingName(deps.bindingNames, intent.source, deps.naming)
+			? compileSourceQueryCte(
+					'compileUpsertFrom',
+					intent.source,
+					intent.sourceQuery,
+					options,
+					deps,
+				)
+			: undefined;
+	const bindingNames =
+		intent.sourceQuery !== undefined
+			? withBindingName(deps.bindingNames, intent.source, deps.naming)
+			: deps.bindingNames;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -734,8 +838,11 @@ export function compileUpsertFrom(
 	const ast = compileUpsertFromMutation(config, ctx, state);
 	const sql = deparseQuoted(ast);
 
-	return {
+	return prependSourceCte(
 		sql,
-		parameters: state.parameters,
-	};
+		state.parameters,
+		intent.source,
+		sourceCte,
+		deps.naming,
+	);
 }

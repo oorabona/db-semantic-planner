@@ -4,8 +4,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
-import type { Adapter } from '../adapter.js';
+import type { Adapter, CompiledNqlQuery, CompileOptions } from '../adapter.js';
 import type { PlanReport } from '../planner.js';
+import { createHookManager } from './hooks.js';
+import type { MutationDump } from './mutation-builders.js';
 import { createNqlTag, nqlRaw } from './nql.js';
 import { createOrm } from './orm.js';
 import { schema } from './schema.js';
@@ -32,6 +34,21 @@ function createParamTestSchema() {
 			active: 'boolean',
 			createdAt: 'timestamp',
 			profile: 'json',
+		},
+	} as const);
+}
+
+function createMutationPipelineTestSchema() {
+	return schema({
+		users: {
+			id: 'integer',
+			name: 'string',
+			active: 'boolean',
+		},
+		archivedUsers: {
+			id: 'integer',
+			name: 'string',
+			active: 'boolean',
 		},
 	} as const);
 }
@@ -415,6 +432,122 @@ describe('FEAT-134 NQL tag params', () => {
 		expect(() => {
 			nql<unknown>`users | where id in (${1}${2})`.toIntentIR();
 		}).toThrow(/NQL compilation failed/);
+	});
+
+	it('compiles bound mutation pipelines through the full NQL bundle', () => {
+		const db = createMutationPipelineTestSchema();
+		const base = createPgsqlCompileOnlyAdapter();
+		let compileInput: PlanReport | CompiledNqlQuery | undefined;
+		let compileOptions: CompileOptions | undefined;
+		const adapter: Adapter = {
+			...base,
+			compile<T = unknown>(plan: PlanReport | CompiledNqlQuery, options) {
+				compileInput = plan;
+				compileOptions = options;
+				return base.compile<T>(plan, options);
+			},
+			createDump(plan, query, meta) {
+				return base.createDump(plan, query, meta);
+			},
+		};
+		const nql = createNqlTag(db.definition, db.model, adapter);
+
+		const dump =
+			nql<unknown>`users | where active = ${true} | select id, name, active | bind active_users
+insert into archivedUsers from active_users`.dump() as MutationDump;
+
+		expect(compileInput).toBeDefined();
+		expect('bindings' in (compileInput as CompiledNqlQuery)).toBe(true);
+		expect(
+			(compileInput as CompiledNqlQuery).bindings?.has('active_users'),
+		).toBe(true);
+		expect(compileOptions?.model).toBe(db.model);
+		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toContain('INSERT INTO "archivedUsers"');
+		expect(dump.parameters).toEqual([true]);
+	});
+});
+
+describe('NQL mutation hook lifecycle', () => {
+	it('runs beforeMutation and afterMutation hooks around NQL tag mutations', async () => {
+		const db = createParamTestSchema();
+		const base = createPgsqlCompileOnlyAdapter();
+		const events: string[] = [];
+		const adapter: Adapter = {
+			...base,
+			compile(plan, options) {
+				const compiled = base.compile(plan, options);
+				return {
+					sql: compiled.sql,
+					parameters: ['compiled-param'],
+				};
+			},
+			execute: async () => [{ id: 1 }],
+		};
+		const hooks = createHookManager()
+			.beforeMutation((ctx) => {
+				events.push(`before:${ctx.table}:${ctx.operation}:${ctx.cardinality}`);
+				expect(ctx.sql).toBeUndefined();
+				return ctx;
+			})
+			.afterMutation((ctx, rows) => {
+				events.push(`after:${ctx.table}:${ctx.operation}:${rows.length}`);
+				expect(ctx.sql).toMatch(/insert/i);
+				expect(ctx.parameters).toEqual(['compiled-param']);
+				return [{ id: 2 }];
+			});
+		const orm = createOrm({
+			schema: db,
+			adapter,
+			hooks,
+		});
+
+		const rows = await orm.nql<{
+			id: number;
+		}>`insert into users set name = ${'Alice'} | select id`.all();
+
+		expect(events).toEqual([
+			'before:users:insert:single',
+			'after:users:insert:1',
+		]);
+		expect(rows).toEqual([{ id: 2 }]);
+	});
+
+	it('runs onError hooks when NQL tag mutation execution fails', async () => {
+		const db = createParamTestSchema();
+		const base = createPgsqlCompileOnlyAdapter();
+		const transformed = new Error('transformed NQL mutation error');
+		let errorTable: string | undefined;
+		let errorOperation: string | undefined;
+		const adapter: Adapter = {
+			...base,
+			compile(plan, options) {
+				const compiled = base.compile(plan, options);
+				return {
+					sql: compiled.sql,
+					parameters: compiled.parameters,
+				};
+			},
+			execute: async () => {
+				throw new Error('adapter failed');
+			},
+		};
+		const hooks = createHookManager().onError((ctx) => {
+			errorTable = ctx.table;
+			errorOperation = ctx.operation;
+			return transformed;
+		});
+		const orm = createOrm({
+			schema: db,
+			adapter,
+			hooks,
+		});
+
+		await expect(
+			orm.nql<unknown>`insert into users set name = ${'Alice'}`.run(),
+		).rejects.toThrow('transformed NQL mutation error');
+		expect(errorTable).toBe('users');
+		expect(errorOperation).toBe('insert');
 	});
 });
 
