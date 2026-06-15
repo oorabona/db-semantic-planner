@@ -249,18 +249,25 @@ describe('item 3 — nested subquery ctx restore', () => {
 });
 
 // ===========================================================================
-// ITEM 4 — `upsert ... where ...` parsed but unsupported
+// ITEM 4 — `upsert ... where ...` conditional DO UPDATE predicate
 // ===========================================================================
 
-const conditionalUpsertUnsupportedError =
-	'conditional upsert is not yet supported: a WHERE clause on `upsert` (ON CONFLICT DO UPDATE ... WHERE) is parsed but cannot be honored by the SQL generator yet. Remove the WHERE, or use a plain conditional update. Tracked for a future release.';
-
-describe('item 4 — upsert where fails loudly', () => {
-	it('upsert with where throws unsupported conditional upsert error', () => {
-		const msg = compileFails(
+describe('item 4 — upsert where is carried on the conflict action', () => {
+	it('upsert with where carries the predicate on action.where', () => {
+		const result = compileNql(
 			"upsert into users on id set name = 'Alice' where active = true",
 		);
-		expect(msg).toBe(conditionalUpsertUnsupportedError);
+		const upsert = result.mutation as UpsertIntent;
+
+		expect(upsert.action).toMatchObject({
+			type: 'doUpdate',
+			where: {
+				kind: 'comparison',
+				field: 'active',
+				operator: 'eq',
+				value: true,
+			},
+		});
 	});
 
 	it('upsert without where produces no action.where', () => {
@@ -271,11 +278,32 @@ describe('item 4 — upsert where fails loudly', () => {
 		expect(action.where).toBeUndefined();
 	});
 
-	it('upsert where with compound condition throws unsupported conditional upsert error', () => {
-		const msg = compileFails(
+	it('upsert where with compound condition carries the full predicate', () => {
+		const result = compileNql(
 			"upsert into users on id set name = 'Carol' where active = true and score > 0",
 		);
-		expect(msg).toBe(conditionalUpsertUnsupportedError);
+		const upsert = result.mutation as UpsertIntent;
+
+		expect(upsert.action).toMatchObject({
+			type: 'doUpdate',
+			where: {
+				kind: 'and',
+				conditions: [
+					{
+						kind: 'comparison',
+						field: 'active',
+						operator: 'eq',
+						value: true,
+					},
+					{
+						kind: 'comparison',
+						field: 'score',
+						operator: 'gt',
+						value: 0,
+					},
+				],
+			},
+		});
 	});
 });
 

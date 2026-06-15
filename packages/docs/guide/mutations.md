@@ -197,9 +197,24 @@ orm.upsert('products')
 
 > **Note:** The `WHERE` here is on the **conflict target** (the partial index predicate), not on the UPDATE action. It tells PostgreSQL which index to use for conflict detection.
 
-> **Not yet supported:** The second argument to `doUpdate(set, where)` is accepted by the TypeScript API but is **silently ignored** by the PostgreSQL compiler — the WHERE is not emitted in `DO UPDATE SET ... WHERE ...`. Do not use `doUpdate(set, whereCondition)` to conditionally apply updates; the condition will have no effect.
+#### Conditional DO UPDATE predicates
 
-Source: `packages/core/src/dx/mutation-builders.ts:887` — `doUpdate(set?, where?)`; `packages/adapter-pgsql/src/mutations/upsert.ts:116` — partial-index `WHERE` on conflict target.
+Use the second argument to `.doUpdate(set, where)` when conflict detection should happen normally, but the conflicting row should only be updated if the existing target row matches a predicate:
+
+```typescript
+import { eq } from '@dbsp/core';
+
+orm.upsert('products')
+  .values({ sku: 'ABC', price: 99.99, active: true })
+  .onConflict(['sku'])
+  .doUpdate({ price: 99.99 }, eq('active', true))
+  .dump();
+// SQL: INSERT INTO "products" ("sku", "price", "active") VALUES ($1, $2, $3)
+// ON CONFLICT ("sku") DO UPDATE SET "price" = excluded."price"
+// WHERE "products"."active" = $4
+```
+
+This `WHERE` belongs to the `DO UPDATE` action. If it evaluates to false, PostgreSQL leaves the existing conflicting row unchanged.
 
 #### Multi-column conflict targets
 
@@ -223,7 +238,7 @@ orm.upsert('user_roles')
 | Idempotent insert: ignore if already exists | `.doNothing()` |
 | Upsert: create if new, update if exists | `.doUpdate()` (no args = auto-update all non-conflict columns) |
 | Selective upsert: update only specific fields | `.doUpdate({ col: value })` |
-| Conditional upsert: only update if a condition holds | Not yet supported (see note above) |
+| Conditional upsert: only update if a condition holds | `.doUpdate({ col: value }, whereCondition)` |
 
 `.doNothing()` compiles to `ON CONFLICT DO NOTHING` — the entire row is left unchanged on a conflict. It is the correct choice for "insert if not exists" patterns where updating the existing row would be incorrect (e.g., first-write-wins semantics).
 

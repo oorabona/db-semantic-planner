@@ -489,6 +489,44 @@ describe('UPSERT Compiler', () => {
 			expect(result.targetList).toHaveLength(1);
 		});
 
+		it('should build DO UPDATE WHERE separately from partial-index WHERE', () => {
+			const ctx = createContext('users');
+			const state = createState();
+
+			const config: UpsertConfig = {
+				table: 'users',
+				columns: ['email', 'name', 'active', 'score'],
+				values: [['test@example.com', 'Test', true, 10]],
+				conflictTarget: {
+					columns: ['email'],
+					where: [
+						{
+							type: 'where',
+							column: 'active',
+							operator: '=',
+							value: true,
+						},
+					],
+				},
+				conflictAction: 'update',
+				updateColumns: ['name', 'score'],
+				actionWhere: [
+					{
+						type: 'where',
+						column: 'score',
+						operator: '>',
+						value: 0,
+					},
+				],
+			};
+
+			const result = buildOnConflictClause(config, ctx, state);
+
+			expect(result.infer?.whereClause).toBeDefined();
+			expect(result.whereClause).toBeDefined();
+			expect(state.parameters).toEqual([true, 0]);
+		});
+
 		it('should use EXCLUDED references for update values', () => {
 			const ctx = createContext('users');
 			const state = createState();

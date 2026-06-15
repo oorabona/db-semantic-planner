@@ -100,7 +100,7 @@ function compileMutation(
 		case 'delete':
 			return compileDelete(mutation, ctx, fns, bindings);
 		case 'upsert':
-			return compileUpsert(mutation, ctx);
+			return compileUpsert(mutation, ctx, fns, bindings);
 		case 'upsert_from':
 			return compileUpsertFrom(mutation, ctx, fns, bindings);
 	}
@@ -245,7 +245,13 @@ function compileDelete(
 	};
 }
 
-function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
+function compileUpsert(
+	upsert: NqlUpsert,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	bindings?: Map<string, QueryIntent>,
+): UpsertIntent {
+	ctx.currentFromTable = upsert.table;
 	ctx.validator?.validateTable(upsert.table);
 	const values: Record<string, unknown> = {};
 	for (const assignment of upsert.assignments) {
@@ -257,18 +263,21 @@ function compileUpsert(upsert: NqlUpsert, ctx: CompilerContext): UpsertIntent {
 		ctx.validator?.validateColumn(upsert.table, col);
 	}
 
-	if (upsert.where) {
-		throw new Error(
-			'conditional upsert is not yet supported: a WHERE clause on `upsert` (ON CONFLICT DO UPDATE ... WHERE) is parsed but cannot be honored by the SQL generator yet. Remove the WHERE, or use a plain conditional update. Tracked for a future release.',
-		);
-	}
-
 	return {
 		type: 'upsert',
 		table: upsert.table,
 		values: [values],
 		onConflict: { columns: upsert.conflictColumns },
-		action: { type: 'doUpdate', set: values },
+		action: {
+			type: 'doUpdate',
+			set: values,
+			...(upsert.where !== undefined && {
+				where: resolveBindingsInWhere(
+					fns.compileExpression(upsert.where, ctx, fns),
+					bindings,
+				),
+			}),
+		},
 	};
 }
 

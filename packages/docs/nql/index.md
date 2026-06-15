@@ -1638,6 +1638,29 @@ SET name = excluded.name, sku = excluded.sku,
 ```
 </details>
 
+Add a `where` clause to make the conflict update conditional. The predicate is emitted after `DO UPDATE SET`, so it checks the existing conflicting row; when it is false, PostgreSQL leaves that row unchanged.
+
+```nql
+upsert into products on sku \
+  set name = 'New Widget', sku = 'WIDGET-NEW', price = 19.99, \
+      categoryId = 1, active = true \
+  where active = true!
+```
+
+<details><summary>SQL</summary>
+
+```sql
+INSERT INTO ch5_ecommerce.products (name, sku, price, category_id, active)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (sku) DO UPDATE
+SET name = excluded.name, sku = excluded.sku,
+    price = excluded.price, category_id = excluded.category_id,
+    active = excluded.active
+WHERE products.active = $6
+-- params: ["New Widget", "WIDGET-NEW", 19.99, 1, true, true]
+```
+</details>
+
 ### Multi-Row INSERT
 
 Insert multiple rows in a single statement. Two syntaxes are available:
