@@ -6,7 +6,18 @@
  * - rows > batchThreshold OR batchThreshold === 0 → SELECT unnest(...) ON CONFLICT ...
  */
 
-import { InvalidOperationError } from '@dbsp/core';
+import {
+	and,
+	eq,
+	exists,
+	InvalidOperationError,
+	like,
+	notExists,
+	rawExists,
+	ref,
+	schema,
+	subquery,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -71,6 +82,31 @@ function makeUpsertIntent(
 	};
 	if (returning) intent.returning = returning;
 	return intent;
+}
+
+function makeCompoundActionWhere() {
+	return and(
+		like('chunk_text', '\\_archived%', { escape: '\\' }),
+		rawExists(
+			subquery('audit_log').select('id').where(eq('entity_type', 'embedding')),
+		),
+	);
+}
+
+const actionWhereSchema = schema({
+	symbols: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'text' },
+	},
+	embeddings: {
+		id: { type: 'integer', primaryKey: true },
+		symbol_id: ref('symbols', { as: 'symbol', inverse: 'embeddings' }),
+		vector: { type: 'text' },
+	},
+});
+
+function ws(sql: string): string {
+	return sql.replace(/\s+/g, ' ').trim();
 }
 
 // ---------------------------------------------------------------------------
@@ -258,6 +294,122 @@ describe('small batch upsert uses VALUES strategy', () => {
 		expect(result.sql).toContain('unnest(');
 		// 2 column arrays
 		expect(result.parameters).toHaveLength(2);
+	});
+});
+
+describe('conditional upsert action WHERE direct compiler path', () => {
+	it('VALUES strategy preserves LIKE ESCAPE and direct-only predicates', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const intent: Record<string, unknown> = {
+			type: 'upsert',
+			table: 'embeddings',
+			values: [{ symbol_id: 1, vector: 'vec_1', chunk_text: 'chunk_1' }],
+			onConflict: { columns: ['symbol_id'] },
+			action: {
+				type: 'doUpdate',
+				where: makeCompoundActionWhere(),
+			},
+		};
+
+		const result = adapter.compileUpsert(intent as any);
+
+		expect(result.sql).not.toContain('unnest(');
+		expect(result.sql).toMatch(/chunk_text LIKE \$4 ESCAPE \$5/);
+		expect(result.sql).toContain('EXISTS');
+		expect(result.sql).toContain('audit_log');
+		expect(result.parameters).toEqual([
+			1,
+			'vec_1',
+			'chunk_1',
+			'\\_archived%',
+			'\\',
+			'embedding',
+		]);
+	});
+
+	it('unnest strategy preserves LIKE ESCAPE and direct-only predicates', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const intent: Record<string, unknown> = {
+			type: 'upsert',
+			table: 'embeddings',
+			values: [{ symbol_id: 1, vector: 'vec_1', chunk_text: 'chunk_1' }],
+			onConflict: { columns: ['symbol_id'] },
+			action: {
+				type: 'doUpdate',
+				where: makeCompoundActionWhere(),
+			},
+		};
+
+		const result = adapter.compileUpsert(intent as any, {
+			batchThreshold: 0,
+		});
+
+		expect(result.sql).toContain('unnest(');
+		expect(result.sql).toMatch(/chunk_text LIKE \$4 ESCAPE \$5/);
+		expect(result.sql).toContain('EXISTS');
+		expect(result.sql).toContain('audit_log');
+		expect(result.parameters).toEqual([
+			[1],
+			['vec_1'],
+			['chunk_1'],
+			'\\_archived%',
+			'\\',
+			'embedding',
+		]);
+	});
+
+	it('VALUES strategy resolves action WHERE exists() relation metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: actionWhereSchema.model,
+		});
+		const intent: Record<string, unknown> = {
+			type: 'upsert',
+			table: 'embeddings',
+			values: [{ id: 1, symbol_id: 7, vector: 'vec_1' }],
+			onConflict: { columns: ['id'] },
+			action: {
+				type: 'doUpdate',
+				where: exists('symbol'),
+			},
+		};
+
+		const result = adapter.compileUpsert(intent as any);
+		const normalized = ws(result.sql);
+
+		expect(normalized).not.toContain('unnest(');
+		expect(normalized).toMatch(/\bEXISTS\b/i);
+		expect(normalized).toMatch(/FROM\s+"?symbols"?/i);
+		expect(normalized).not.toMatch(/FROM\s+"?symbol"?\b/i);
+		expect(normalized).toContain('symbol_id');
+		expect(normalized).not.toContain('embedding_id');
+	});
+
+	it('unnest strategy resolves action WHERE notExists() relation metadata', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: actionWhereSchema.model,
+		});
+		const intent: Record<string, unknown> = {
+			type: 'upsert',
+			table: 'embeddings',
+			values: [{ id: 1, symbol_id: 7, vector: 'vec_1' }],
+			onConflict: { columns: ['id'] },
+			action: {
+				type: 'doUpdate',
+				where: notExists('symbol'),
+			},
+		};
+
+		const result = adapter.compileUpsert(intent as any, {
+			batchThreshold: 0,
+		});
+		const normalized = ws(result.sql);
+
+		expect(normalized).toContain('unnest(');
+		expect(normalized).toMatch(/NOT.*EXISTS/i);
+		expect(normalized).toMatch(/FROM\s+"?symbols"?/i);
+		expect(normalized).not.toMatch(/FROM\s+"?symbol"?\b/i);
+		expect(normalized).toContain('symbol_id');
+		expect(normalized).not.toContain('embedding_id');
 	});
 });
 

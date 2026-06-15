@@ -76,7 +76,7 @@ function whereIntentAsDecision(where: WhereIntent): Decision {
  * This helper looks up `sourceTable.relation` in ModelIR and returns:
  * - `targetTable`: real DB table name (e.g. 'symbols' for relation 'symbol')
  * - `sourceColumn`: FK column on the root table for `belongsTo` (e.g. 'symbol_id')
- * - `targetColumn`: PK on the target table (always 'id' for standard schemas)
+ * - `targetColumn`: PK on the target table for belongsTo, FK on the target table for hasMany/hasOne
  *
  * Falls back gracefully when ModelIR is unavailable or relation not found.
  */
@@ -99,8 +99,14 @@ function resolveExistsRelation(
 			targetColumn: 'id',
 		};
 	}
-	// For hasMany/hasOne: FK is on the target table (e.g. symbols.file_id → files.id)
-	return { targetTable };
+	// For hasMany/hasOne: FK is on the target table (e.g. symbols.id → calls.callee_id)
+	const fk =
+		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+	return {
+		targetTable,
+		sourceColumn: rel.sourceKey ?? 'id',
+		...(fk !== undefined && { targetColumn: fk }),
+	};
 }
 
 /**
@@ -179,6 +185,32 @@ function getColumnTypes(
 		}
 	}
 	return result;
+}
+
+function compileUpsertActionWhere(
+	where: WhereIntent,
+	table: string,
+	state: ReturnType<typeof createCompilerState>,
+	deps: AdapterCompilerDeps,
+	schemaName: string | undefined,
+): import('@pgsql/types').Node {
+	const whereCtx: WhereCompilerCtx = {
+		rootTable: table,
+		aliases: new Map<string, string>(),
+		paramState: state,
+		naming: deps.naming,
+		...(schemaName !== undefined && { schemaName }),
+		...(deps.model !== undefined && { model: deps.model }),
+		compileSubquery: (sqIntent, paramOffset) =>
+			buildSubqueryFromIntent(
+				sqIntent,
+				paramOffset,
+				deps.naming,
+				schemaName,
+				'rawExists',
+			),
+	};
+	return compileWhereIntent(where, whereCtx);
 }
 
 // ============================================================================
@@ -304,22 +336,27 @@ export function compileInsertFrom(
  */
 export function compileUpdate(
 	intent: UpdateIntent,
-	_options: CompileOptions | undefined,
+	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const schemaName = deps.schemaName;
+	const resolvedModel = options?.model ?? deps.model;
 
 	const ctx: CompilerContext = {
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(resolvedModel !== undefined && { model: resolvedModel }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
 
 	const setColumns = Object.keys(intent.set ?? {});
 	const columnTypes = getColumnTypes(intent.table, setColumns, deps);
+	const resolvedWhere = intent.where
+		? resolveExistsIntent(intent.where, intent.table, deps)
+		: undefined;
 
 	const config: UpdateConfig = {
 		table: intent.table,
@@ -327,7 +364,7 @@ export function compileUpdate(
 			column,
 			value,
 		})),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
+		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
 	};
@@ -521,6 +558,7 @@ export function compileUpsert(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.model !== undefined && { model: deps.model }),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -590,6 +628,13 @@ export function compileUpsert(
 
 	const columnTypes = getColumnTypes(intent.table, columns, deps);
 	const hasRawExprs = Object.keys(rawExprs).length > 0;
+	const actionWhere =
+		intent.action.type === 'doUpdate' && intent.action.where
+			? intent.action.where
+			: undefined;
+	const resolvedActionWhere = actionWhere
+		? resolveExistsIntent(actionWhere, intent.table, deps)
+		: undefined;
 
 	const config: UpsertConfig = {
 		table: intent.table,
@@ -601,6 +646,17 @@ export function compileUpsert(
 		...(intent.returning && { returning: [...intent.returning] }),
 		...(columnTypes && { columnTypes }),
 		...(hasRawExprs && { updateExpressions: rawExprs }),
+		...(resolvedActionWhere && {
+			actionWhereIntent: resolvedActionWhere,
+			compileActionWhere: (where, paramState) =>
+				compileUpsertActionWhere(
+					where,
+					intent.table,
+					paramState,
+					deps,
+					schemaName,
+				),
+		}),
 	};
 
 	// maxBatchSize guard (INV-07)

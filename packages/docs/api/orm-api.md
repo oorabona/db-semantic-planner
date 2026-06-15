@@ -988,6 +988,13 @@ orm.upsert('users')
   .doUpdate({ name: 'Alice Updated', active: true })
   .dump();
 
+// On conflict — update only when the existing row matches a predicate
+orm.upsert('users')
+  .values({ name: 'Alice', email: 'alice@example.com', active: true })
+  .onConflict(['email'])
+  .doUpdate({ name: 'Alice Updated' }, eq('active', true))
+  .dump();
+
 // On conflict by constraint name
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })

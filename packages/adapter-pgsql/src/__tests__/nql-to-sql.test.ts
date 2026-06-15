@@ -1284,6 +1284,26 @@ describe('NQL → SQL upsert (ON CONFLICT)', () => {
 		expect(sql).toContain('excluded');
 	});
 
+	it('compiles upsert where as ON CONFLICT DO UPDATE WHERE', () => {
+		const compiled = compile(
+			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000 where salary > 80000",
+			testSchema.model,
+		);
+		expect(compiled.success).toBe(true);
+		const mutation = compiled.ast!.mutation!;
+		expect(isUpsertIntent(mutation)).toBe(true);
+
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileUpsert(mutation as any, {
+			model: testSchema.model,
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('on conflict (email) do update set');
+		expect(sql).toContain('where employees.salary > $4');
+		expect(result.parameters).toEqual(['Alice', 'alice@co.com', 90000, 80000]);
+	});
+
 	it('parameterizes values', () => {
 		const compiled = compile(
 			"upsert into employees on email set name = 'Alice', email = 'alice@co.com', salary = 90000",

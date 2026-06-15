@@ -265,6 +265,42 @@ describe('compile-mutation: UPSERT', () => {
 		expect(upsert.returning).toBeDefined();
 		expect(upsert.returning).toContain('*');
 	});
+
+	it('upsert WHERE compiles compound predicates against the target table', () => {
+		const validationSchema = {
+			getTable(name: string) {
+				const tables: Record<
+					string,
+					{ columns: { name: string }[]; pseudoColumns?: never[] }
+				> = {
+					users: {
+						columns: [{ name: 'id' }, { name: 'name' }, { name: 'active' }],
+					},
+				};
+				return tables[name];
+			},
+			getRelationsFrom() {
+				return [];
+			},
+			getRelationsTo() {
+				return [];
+			},
+		};
+		const result = compile(
+			"upsert into users on id set id = 1, name = 'John', active = true where active = true and name like 'J%'",
+			validationSchema,
+		);
+
+		if (!result.success || !result.ast?.mutation) {
+			throw new Error(`Compile error: ${result.errors[0]?.message}`);
+		}
+		const upsert = result.ast.mutation as UpsertIntent;
+		expect(upsert.action.type).toBe('doUpdate');
+		if (upsert.action.type !== 'doUpdate') return;
+		const where = upsert.action.where as WhereAndIntent;
+		expect(where.kind).toBe('and');
+		expect(where.conditions).toHaveLength(2);
+	});
 });
 
 // ===========================================================================

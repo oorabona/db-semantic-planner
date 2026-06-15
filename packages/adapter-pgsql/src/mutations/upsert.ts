@@ -9,6 +9,7 @@
  * - WHERE clause for conflict resolution
  */
 
+import type { WhereIntent } from '@dbsp/types';
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
 import { columnRef, funcCall } from '../ast-helpers.js';
 import {
@@ -65,6 +66,12 @@ export interface UpsertConfig {
 	conflictAction: ConflictAction;
 	/** Columns to update on conflict (for 'update' action) */
 	updateColumns?: string[];
+	/** Optional WHERE clause for ON CONFLICT DO UPDATE */
+	actionWhere?: Decision[];
+	/** Optional direct WHERE intent for ON CONFLICT DO UPDATE */
+	actionWhereIntent?: WhereIntent;
+	/** Compile the direct action WHERE intent using the caller's WHERE compiler */
+	compileActionWhere?: (where: WhereIntent, state: CompilerState) => Node;
 	/** Use EXCLUDED.column for update values (default: true) */
 	useExcluded?: boolean;
 	/** Columns to return (RETURNING clause) */
@@ -87,6 +94,41 @@ export interface UpsertConfig {
 // ============================================================================
 // ON CONFLICT Builder
 // ============================================================================
+
+function buildWhereClause(
+	conditions: Decision[] | undefined,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node | undefined {
+	if (!conditions || conditions.length === 0) return undefined;
+
+	const dispatch = createWhereDispatcher();
+	if (conditions.length === 1) {
+		return dispatch(conditions[0]!, ctx, state);
+	}
+
+	const nodes = conditions.map((condition) => dispatch(condition, ctx, state));
+	return {
+		BoolExpr: { boolop: 'AND_EXPR', args: nodes },
+	} as unknown as Node;
+}
+
+function buildActionWhereClause(
+	config: UpsertConfig,
+	ctx: CompilerContext,
+	state: CompilerState,
+): Node | undefined {
+	if (config.actionWhereIntent) {
+		if (!config.compileActionWhere) {
+			throw new Error(
+				'Upsert actionWhereIntent requires compileActionWhere callback',
+			);
+		}
+		return config.compileActionWhere(config.actionWhereIntent, state);
+	}
+
+	return buildWhereClause(config.actionWhere, ctx, state);
+}
 
 /**
  * Build ON CONFLICT clause for INSERT statement.
@@ -116,18 +158,12 @@ export function buildOnConflictClause(
 
 		// Partial-index conflict: ON CONFLICT (col) WHERE predicate
 		if (config.conflictTarget.where && config.conflictTarget.where.length > 0) {
-			const dispatch = createWhereDispatcher();
-			const conditions = config.conflictTarget.where;
-			let whereClause: Node;
-			if (conditions.length === 1) {
-				whereClause = dispatch(conditions[0]!, ctx, state);
-			} else {
-				const nodes = conditions.map((c) => dispatch(c, ctx, state));
-				whereClause = {
-					BoolExpr: { boolop: 'AND_EXPR', args: nodes },
-				} as unknown as Node;
-			}
-			infer.whereClause = whereClause;
+			const whereClause = buildWhereClause(
+				config.conflictTarget.where,
+				ctx,
+				state,
+			);
+			if (whereClause) infer.whereClause = whereClause;
 		}
 	} else if (config.conflictTarget.constraint) {
 		// Conflict on named constraint
@@ -180,11 +216,13 @@ export function buildOnConflictClause(
 			},
 		};
 	});
+	const whereClause = buildActionWhereClause(config, ctx, state);
 
 	return {
 		action: 'ONCONFLICT_UPDATE',
 		...(infer && { infer }),
 		targetList,
+		...(whereClause && { whereClause }),
 	};
 }
 
