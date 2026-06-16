@@ -496,6 +496,20 @@ const distinctNames = await orm.select('users').columns(['name']).distinct().all
 // SQL: SELECT DISTINCT "name" FROM "users"
 ```
 
+### `distinctOn()` — PostgreSQL DISTINCT ON
+
+Use `distinctOn()` for PostgreSQL's `DISTINCT ON (...)`. Plain columns and relation-qualified columns are both supported. Relation paths such as `users.email` are resolved through the planner's final relation alias, so alias bumps from joins/includes do not point at the wrong table.
+
+```typescript
+const latestPostByAuthor = orm.select('posts')
+  .include('users', { join: 'inner' })
+  .distinctOn('users.email')
+  .columns(['id', 'title'])
+  .dump();
+
+console.log(latestPostByAuthor.sql);
+```
+
 ### `where()` — Filter Rows
 
 Uses filter helpers (see full list below):
@@ -995,6 +1009,24 @@ orm.upsert('users')
   .doUpdate({ name: 'Alice Updated' }, eq('active', true))
   .dump();
 
+// On conflict — update only when a related row exists
+const guarded = orm.upsert('users')
+  .values({
+    id: 'user-1',
+    name: 'Alice',
+    email: 'alice@example.com',
+    active: true,
+  })
+  .onConflict(['email'])
+  .doUpdate(
+    { active: true },
+    exists('posts', { where: eq('published', true) }),
+  )
+  .dump();
+
+console.log(guarded.sql);
+console.log(guarded.parameters);
+
 // On conflict by constraint name
 orm.upsert('users')
   .values({ name: 'Alice', email: 'alice@example.com' })
@@ -1237,21 +1269,19 @@ orm.select('posts').withStrictMode(false).include('users')
 Use the pipe-based Natural Query Language directly from TypeScript:
 
 ```typescript
-// doctest: skip — illustrative NQL tag interpolation example
-import { nqlRaw } from '@dbsp/core';
-
-const ids = [1, 2, 3];
-const posts = await orm.nql<PostRow>`posts
-  | where id = ANY(${ids})
-  | ${nqlRaw('order by createdAt desc')}
-  | limit ${10}
-`.all();
-
 const dump = orm.nql`users | where active = ${true}`.dump();
 console.log(dump.params); // [true]
+
+const mutationDump = orm.nql<unknown>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'}
+`.dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+};
+console.log(mutationDump.parameters); // ['Alice', 'alice@example.com']
 ```
 
-Interpolated values are bound as SQL parameters. Use `nqlRaw()` only for trusted NQL structure. See [Named Parameters and Template Binding](../nql/#named-parameters-and-template-binding) for the detailed binding contract.
+Interpolated values are bound as SQL parameters. NQL tag mutations support `.dump()`, `.run()`, and `.all()`; executed tag mutations run the normal mutation hook lifecycle. Use `nqlRaw()` only for trusted NQL structure. See [Named Parameters and Template Binding](../nql/#named-parameters-and-template-binding) and [TypeScript Tag Mutations](../nql/#typescript-tag-mutations) for the detailed binding and mutation contracts.
 
 ### Hierarchy Shortcuts
 

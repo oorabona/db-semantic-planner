@@ -127,6 +127,21 @@ const latest = await orm.select('posts')
   .orderBy('createdAt', 'desc')
   .dump();
 // SQL: SELECT DISTINCT ON ("author_id") * FROM "posts" ORDER BY "author_id", "created_at" DESC
+
+// DISTINCT ON a joined relation column — compile-only inspection
+const latestPostPerAuthorEmail = orm.select('posts')
+  .include('author', { join: 'inner' })
+  .distinctOn('author.email')
+  .columns(['id', 'title'])
+  .dump();
+
+if (
+  !latestPostPerAuthorEmail.sql.includes('DISTINCT ON (author.email)') ||
+  !latestPostPerAuthorEmail.sql.includes('JOIN users AS author') ||
+  latestPostPerAuthorEmail.params.length !== 0
+) {
+  throw new Error('relation-column distinctOn() did not compile as expected');
+}
 ```
 
 ---

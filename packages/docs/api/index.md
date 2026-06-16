@@ -19,6 +19,11 @@ title: API Reference
 | `some()`, `every()`, `none()` | Relation quantifier filters |
 | `count()`, `sum()`, `avg()`, `min()`, `max()` | Aggregate helpers |
 | `subquery()`, `outerRef()` | Correlated subquery builders |
+| `createHookManager()` | Query and mutation hook registration |
+| `nqlRaw()` | Trusted NQL tag structure interpolation escape hatch |
+| `orm.nql` | Pipe-based NQL tag for queries and mutations |
+| `distinctOn('relation.column')` | PostgreSQL DISTINCT ON with relation-column alias resolution |
+| `upsert().doUpdate(set, exists('relation'))` | Conditional upsert updates guarded by relation existence |
 
 ## Adapter Package (@dbsp/adapter-pgsql)
 

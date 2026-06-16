@@ -211,10 +211,12 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
 | Manual JOIN | `.join(rel)` / `.join(table, { on, as, type })` — flat, non-hydrating | `orm.select('calls').join('caller')` / `.join('t', { on: eq(...), as: 'alias' })` |
-| DISTINCT ON | `.distinctOn('col1', 'col2')` | PostgreSQL DISTINCT ON |
+| DISTINCT ON | `.distinctOn('col1', 'relation.col')` | PostgreSQL DISTINCT ON, including relation-column alias resolution |
 | Set operations | `.union()`, `.unionAll()`, `.intersect()`, `.except()` | `q1.union(q2).all()` |
 | IN subquery (= ANY) | `inSubquery('id', subquery('posts').select('userId'))` | Compiled as `col = ANY (SELECT ...)` |
 | Scalar subquery | `subquery('t').count().asExpr('cnt')` | Subquery as SELECT column |
+| Conditional upsert guard | `.doUpdate(set, exists('relation'))` | `ON CONFLICT ... DO UPDATE ... WHERE EXISTS (...)` |
+| NQL tag mutations | ``orm.nql`insert into t set x = ${v}`.dump()/.run()/.all()`` | `.dump()` compile-only; execution runs mutation hooks; read-only `\| bind` pipelines may feed one final mutation |
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
 | Range operators (PostgreSQL) | `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | `rangeOverlaps('period', ['2024-01-01', '2024-01-31'])` — covers `daterange`, `int4range`, `tsrange`, etc. |
