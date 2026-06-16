@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.1.0...core-v1.2.0) (2026-06-16)
+
+
+### Features
+
+* **nql:** Support tagged template mutations ([#175](https://github.com/oorabona/db-semantic-planner/issues/175)) ([c78e89e](https://github.com/oorabona/db-semantic-planner/commit/c78e89e00479359f67f50a3c00edf7fdc63aec18))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.3.0
+    * @dbsp/types bumped to 1.2.0
+
 ## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.0.5...core-v1.1.0) (2026-06-12)
 
 

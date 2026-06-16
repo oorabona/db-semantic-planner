@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.3.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.2.1...adapter-pgsql-v1.3.0) (2026-06-16)
+
+
+### Features
+
+* **adapter-pgsql:** Support conditional upsert ON CONFLICT DO UPDATE SET ... WHERE ([#172](https://github.com/oorabona/db-semantic-planner/issues/172)) ([ddf5d2c](https://github.com/oorabona/db-semantic-planner/commit/ddf5d2c69178dbd6e231955a922bf99853763b3a)), closes [#160](https://github.com/oorabona/db-semantic-planner/issues/160)
+* **nql:** Support tagged template mutations ([#175](https://github.com/oorabona/db-semantic-planner/issues/175)) ([c78e89e](https://github.com/oorabona/db-semantic-planner/commit/c78e89e00479359f67f50a3c00edf7fdc63aec18))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Resolve relation aliases in distinctOn() columns ([#169](https://github.com/oorabona/db-semantic-planner/issues/169)) ([bc5ea35](https://github.com/oorabona/db-semantic-planner/commit/bc5ea351f85af0b57b3b0777eb18cbea91e37e9f)), closes [#168](https://github.com/oorabona/db-semantic-planner/issues/168)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.2.0
+    * @dbsp/types bumped to 1.2.0
+
 ## [1.2.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.2.0...adapter-pgsql-v1.2.1) (2026-06-12)
 
 

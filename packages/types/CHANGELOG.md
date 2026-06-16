@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.1.0...types-v1.2.0) (2026-06-16)
+
+
+### Features
+
+* **nql:** Support tagged template mutations ([#175](https://github.com/oorabona/db-semantic-planner/issues/175)) ([c78e89e](https://github.com/oorabona/db-semantic-planner/commit/c78e89e00479359f67f50a3c00edf7fdc63aec18))
+
 ## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.0.3...types-v1.1.0) (2026-06-12)
 
 
