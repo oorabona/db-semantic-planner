@@ -1682,6 +1682,116 @@ insert into categories set name = 'Toys', slug = 'toys' \
 
 Both produce a single `INSERT ... VALUES (...), (...)` statement. If rows have different columns, missing ones are normalized to NULL.
 
+### TypeScript Tag Mutations
+
+When NQL is used through the TypeScript `orm.nql` tag, final mutation statements use the same mutation compiler and hook pipeline as the fluent mutation builders.
+
+| Method | Mutation behavior |
+|--------|-------------------|
+| `.dump()` | Compiles only. Returns mutation SQL, `parameters`, intent, and metadata; it does not execute and does not run hooks. |
+| `.run()` | Executes the query or mutation and discards returned rows. Mutation hooks run. |
+| `.all()` | Executes the query or mutation. For mutations with `| select ...`, returned rows flow through `afterMutation` hooks; mutations without `RETURNING` return no rows from PostgreSQL. |
+
+Use `.dump()` when you want SQL and parameters without touching the database:
+
+```typescript
+const created = orm.nql<unknown>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'}
+`.dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+};
+
+console.log(created.sql);
+console.log(created.parameters);
+```
+
+Read-only `| bind` pipelines can feed a final mutation. The bound query is compiled as a CTE and all tag interpolations share one generated params map across the whole template:
+
+```typescript
+const archivedDrafts = orm.nql<unknown>`posts
+  | where published = ${false}
+  | select id, title, authorId, published, createdAt
+  | bind draft_posts
+insert into posts from draft_posts`
+  .dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+};
+
+console.log(archivedDrafts.sql);
+console.log(archivedDrafts.parameters);
+```
+
+Mutation hooks run for tag mutations during execution:
+
+```typescript
+const { createHookManager } = await import('@dbsp/core');
+
+const adapterWithExecute = createPgsqlCompileOnlyAdapter() as ReturnType<
+  typeof createPgsqlCompileOnlyAdapter
+> & {
+  execute: () => Promise<Array<{ id: string }>>;
+};
+adapterWithExecute.execute = async () => [{ id: 'user-1' }];
+
+const events: string[] = [];
+const hooks = createHookManager()
+  .beforeMutation((ctx) => {
+    events.push(`before:${ctx.operation}:${ctx.table}`);
+    return ctx;
+  })
+  .afterMutation((ctx, rows) => {
+    events.push(`after:${ctx.operation}:${ctx.table}:${rows.length}`);
+    return rows;
+  });
+
+const hookedOrm = createOrm({ schema: db, adapter: adapterWithExecute, hooks });
+const rows = await hookedOrm.nql<{ id: string }>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id
+`.all();
+
+if (rows.length !== 1 || events.join(',') !== 'before:insert:users,after:insert:users:1') {
+  throw new Error('NQL mutation hooks did not run as expected');
+}
+```
+
+The tag path fails loudly instead of dropping statements or silently materializing writable CTEs:
+
+```typescript
+let missingBind = '';
+try {
+  orm.nql`users | where active = ${true}
+posts | select id`.dump();
+} catch (error) {
+  missingBind = error instanceof Error ? error.message : String(error);
+}
+
+if (!missingBind.includes('Multiple statements require explicit binding')) {
+  throw new Error(missingBind || 'expected missing bind failure');
+}
+
+let mutationBind = '';
+try {
+  orm.nql`
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created_user
+users | where id in (created_user)`.dump();
+} catch (error) {
+  mutationBind = error instanceof Error ? error.message : String(error);
+}
+
+if (!mutationBind.includes('NQL tag programs cannot use mutation bodies')) {
+  throw new Error(mutationBind || 'expected mutation-bind failure');
+}
+```
+
+Constraints to rely on:
+
+- Every non-final statement in a multi-statement tag template must end with `| bind <name>`.
+- Bound tag pipelines must be read-only before the final statement; mutation bodies inside `| bind` are rejected in the tag executor.
+- A mutation used as a direct NQL binding outside the tag must include `| select ...` / `RETURNING` so it produces a referenceable result.
+- Where-less NQL `update` and `delete` fail unless the compiler is explicitly configured with `allowUnfilteredMutations`.
+
 ---
 
 ## Advanced Features
@@ -1948,6 +2058,8 @@ table                              -- table scan
 | UPDATE | `update table set col = val where condition!` |
 | DELETE | `delete from table where condition!` |
 | UPSERT | `upsert into table on conflictCol set col = val!` |
+| Tag mutation dump | ``orm.nql`insert into table set col = ${value}`.dump()`` |
+| Bound pipeline mutation | ``query \| bind source`` then `insert into table from source` |
 
 ### Include Strategies
 

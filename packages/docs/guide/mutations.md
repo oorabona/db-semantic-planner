@@ -110,6 +110,45 @@ const { sql: removedSql } = orm.delete('posts')
   .dump();
 ```
 
+### Relation guards with exists()
+
+Mutation `WHERE` clauses can use relation-aware `exists()` guards. The relation must be declared in the schema; the compiler emits the foreign-key correlation and your extra relation filter. `.dump()` compiles the mutation without opening a database connection.
+
+```typescript
+const __mutationGuardDb = schema({
+  posts: {
+    id: { type: 'integer', primaryKey: true },
+    title: 'string',
+    archived: 'boolean',
+  },
+  comments: {
+    id: { type: 'integer', primaryKey: true },
+    postId: ref('posts'),
+    flagged: 'boolean',
+  },
+} as const);
+
+const __mutationGuardOrm = createOrm({
+  schema: __mutationGuardDb,
+  adapter: createPgsqlCompileOnlyAdapter({ model: __mutationGuardDb.model }),
+});
+
+const __mutationGuardDump = __mutationGuardOrm.update('posts')
+  .set({ archived: true })
+  .where(exists('comments', { where: eq('flagged', true) }))
+  .dump();
+
+if (
+  !__mutationGuardDump.sql.includes('WHERE EXISTS') ||
+  !__mutationGuardDump.sql.includes('comments_exists_0.flagged = $2') ||
+  __mutationGuardDump.parameters.length !== 2 ||
+  __mutationGuardDump.parameters[0] !== true ||
+  __mutationGuardDump.parameters[1] !== true
+) {
+  throw new Error('mutation exists() relation guard did not compile as expected');
+}
+```
+
 ---
 
 ## Upsert

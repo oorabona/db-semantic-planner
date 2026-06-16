@@ -59,6 +59,7 @@ orders | group customerId | select customerId, sum(total) as revenue
 - **SQL-style literals** — Single-quoted strings (`'value'`), not double-quoted
 - **Named parameters** — Bind runtime values with `:name` in expression positions
 - **CTE support** — `WITH name AS (subquery)` for named subqueries
+- **Mutation support** — Insert, update, delete, upsert, and `insert/upsert ... from ...` pipelines
 - **Schema-aware** — Validates column names and relation paths against `ModelIR` at parse time
 - **LLM-friendly** — Concise syntax designed for AI-generated queries
 - **Chevrotain-based** — Robust lexer + parser with structured error recovery
@@ -89,6 +90,41 @@ const query = adapter.compile(compiled.ast, { model: db.model });
 ```
 
 Missing params fail compilation. `null` binds SQL `NULL`; `undefined`, `NaN`, and `Infinity` are rejected. The `@dbsp/core` `orm.nql` template tag builds on the same mechanism for `${value}` interpolation. See [Named Parameters and Template Binding](https://oorabona.github.io/db-semantic-planner/nql/#named-parameters-and-template-binding) for the full contract.
+
+## Tag mutations
+
+The `@dbsp/core` `orm.nql` tag can compile and execute final mutation statements. Use `.dump()` for compile-only inspection; mutation dumps expose `parameters` instead of query dump `params`.
+
+```typescript
+const mutationDump = orm.nql<unknown>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'}
+`.dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+};
+
+console.log(mutationDump.sql);
+console.log(mutationDump.parameters);
+```
+
+Read-only `| bind` statements can feed a final `insert ... from ...` or `upsert ... from ...` mutation:
+
+```typescript
+const pipelineDump = orm.nql<unknown>`posts
+  | where published = ${false}
+  | select id, title, authorId, published, createdAt
+  | bind draft_posts
+insert into posts from draft_posts`
+  .dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+};
+
+console.log(pipelineDump.sql);
+console.log(pipelineDump.parameters);
+```
+
+Tag mutation execution uses the normal mutation hooks. Multi-statement tags require every non-final statement to end with `| bind <name>`, and writable mutation bodies inside `| bind` are rejected by the tag executor.
 
 ## Documentation
 

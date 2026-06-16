@@ -26,7 +26,7 @@ features:
       width: 24
       height: 24
     title: Full Observability
-    details: Every query exposes its plan, compiled SQL, and bound parameters via dump(). Debug before you execute.
+    details: Queries expose plan, SQL, and bound parameters via dump(); mutations expose SQL, parameters, intent, and metadata before execution.
   - icon:
       src: /icons/shield.svg
       width: 24
@@ -195,6 +195,7 @@ const users = await tenantOrm
       <span class="pg-badge">CTEs</span>
       <span class="pg-badge">Window Fn</span>
       <span class="pg-badge">DISTINCT ON</span>
+      <span class="pg-badge">NQL Mutations</span>
       <span class="pg-badge">Multi-tenant</span>
       <span class="pg-badge">Range Types</span>
     </div>
@@ -230,7 +231,7 @@ const users = await tenantOrm
   <div class="stat"><span class="stat-value">MIT</span><span class="stat-label">license</span></div>
 </div>
 
-<p class="whats-new"><strong>v1.0.1 highlights:</strong> Range operators (<code>rangeOverlaps</code>, <code>rangeContains</code>, <code>rangeContainedBy</code>), <code>dump({ queryName, correlationId })</code> for end-to-end request tracking, fixed relation-mode <code>.join()</code> on compile-only adapters.</p>
+<p class="whats-new"><strong>v1.0.1 highlights:</strong> Range operators (<code>rangeOverlaps</code>, <code>rangeContains</code>, <code>rangeContainedBy</code>), <code>dump({ queryName, correlationId })</code> for end-to-end request tracking, relation-column <code>distinctOn()</code>, NQL tag mutations, and conditional upsert guards.</p>
 
 <div class="cta-buttons">
   <a href="/guide/getting-started" class="cta-primary">Get Started</a>

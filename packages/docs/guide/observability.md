@@ -257,6 +257,65 @@ Each hook receives a **frozen** context object (`Object.freeze` is applied at co
 | `data` | The values being written |
 | `affectedRows` | afterMutation only — row count |
 
+### NQL tag mutations
+
+NQL tag mutations use the same mutation hook pipeline as fluent mutation builders when they execute through `.all()` or `.run()`. A mutation `.dump()` remains compile-only: it returns SQL and `parameters` without executing or firing hooks.
+
+```typescript
+const { createHookManager } = await import('@dbsp/core');
+
+const __nqlHookDb = schema({
+  users: {
+    id: { type: 'integer', primaryKey: true },
+    name: 'string',
+    email: 'string',
+  },
+} as const);
+
+const __nqlHookAdapter = createPgsqlCompileOnlyAdapter() as ReturnType<
+  typeof createPgsqlCompileOnlyAdapter
+> & {
+  execute: () => Promise<Array<{ id: number }>>;
+};
+__nqlHookAdapter.execute = async () => [{ id: 1 }];
+
+const __nqlHookEvents: string[] = [];
+const __nqlHooks = createHookManager()
+  .beforeMutation((ctx) => {
+    __nqlHookEvents.push(`before:${ctx.operation}:${ctx.table}`);
+    return ctx;
+  })
+  .afterMutation((ctx, rows) => {
+    __nqlHookEvents.push(`after:${ctx.operation}:${ctx.table}:${rows.length}`);
+    return rows;
+  });
+
+const __nqlHookOrm = createOrm({
+  schema: __nqlHookDb,
+  adapter: __nqlHookAdapter,
+  hooks: __nqlHooks,
+});
+
+const __nqlHookDump = __nqlHookOrm.nql<unknown>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id
+`.dump() as { sql: string; parameters: readonly unknown[] };
+
+if (__nqlHookEvents.length !== 0 || !__nqlHookDump.sql.includes('INSERT INTO users')) {
+  throw new Error('NQL mutation dump should compile without firing hooks');
+}
+
+const __nqlHookRows = await __nqlHookOrm.nql<{ id: number }>`
+  insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id
+`.all();
+
+if (
+  __nqlHookRows.length !== 1 ||
+  __nqlHookEvents.join(',') !== 'before:insert:users,after:insert:users:1'
+) {
+  throw new Error('NQL mutation hooks did not run as expected');
+}
+```
+
 ### Lifecycle order
 
 For a SELECT query, hooks fire in this order:
