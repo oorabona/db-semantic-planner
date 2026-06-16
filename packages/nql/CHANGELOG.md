@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.3.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.2.0...nql-v1.3.0) (2026-06-16)
+
+
+### Features
+
+* **adapter-pgsql:** Support conditional upsert ON CONFLICT DO UPDATE SET ... WHERE ([#172](https://github.com/oorabona/db-semantic-planner/issues/172)) ([ddf5d2c](https://github.com/oorabona/db-semantic-planner/commit/ddf5d2c69178dbd6e231955a922bf99853763b3a)), closes [#160](https://github.com/oorabona/db-semantic-planner/issues/160)
+* **nql:** Support tagged template mutations ([#175](https://github.com/oorabona/db-semantic-planner/issues/175)) ([c78e89e](https://github.com/oorabona/db-semantic-planner/commit/c78e89e00479359f67f50a3c00edf7fdc63aec18))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 1.2.0
+
 ## [1.2.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.1.0...nql-v1.2.0) (2026-06-12)
 
 
