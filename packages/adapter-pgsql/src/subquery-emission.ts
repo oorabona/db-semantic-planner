@@ -44,6 +44,7 @@
 import { isParamIntent, type QueryIntent } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import { columnRef, integerNode, rangeVar, sortBy } from './ast-helpers.js';
+import { schemaForFromName } from './binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -293,7 +294,19 @@ export function buildPredicateSubquerySelect(
 
 	const stmt: SelectStmt = {
 		targetList: [{ ResTarget: { val: targetVal } }],
-		fromClause: [rangeVar(targetTable, targetAlias, ctx.schema, ctx.naming)],
+		fromClause: [
+			rangeVar(
+				targetTable,
+				targetAlias,
+				schemaForFromName(
+					ctx.schema,
+					targetTable,
+					ctx.bindingNames,
+					ctx.naming,
+				),
+				ctx.naming,
+			),
+		],
 		...(whereClause && { whereClause }),
 	};
 

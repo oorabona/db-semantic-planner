@@ -4,11 +4,17 @@
  * Part of DX-010: Mutations.
  */
 
-import type { Adapter, CompiledQuery, CompileOptions } from '../adapter.js';
+import type {
+	Adapter,
+	CompiledQuery,
+	CompileOptions,
+	DumpMeta,
+} from '../adapter.js';
 import type {
 	BatchUpdateIntent,
 	DeleteIntent,
 	InsertIntent,
+	MutationIntent,
 	UpdateIntent,
 	UpsertConflictAction,
 	UpsertConflictTarget,
@@ -49,17 +55,42 @@ export interface MutationDump {
 	/** Bound parameter values */
 	readonly parameters: readonly unknown[];
 	/** The mutation intent */
-	readonly intent:
-		| InsertIntent
-		| UpdateIntent
-		| BatchUpdateIntent
-		| DeleteIntent
-		| UpsertIntent;
+	readonly intent: MutationIntent;
 	/** Optional metadata */
-	readonly meta?: {
-		readonly schema?: string;
-		readonly compiledAt?: Date;
-	};
+	readonly meta?: DumpMeta;
+}
+
+/**
+ * Compile a mutation intent through the adapter's mutation-specific compiler.
+ *
+ * Shared by the fluent mutation builders and NQL tag mutation support so the
+ * intent-type dispatch stays in one place.
+ */
+export function compileMutationIntent(
+	adapter: Adapter,
+	intent: MutationIntent,
+	options?: CompileOptions,
+): CompiledQuery {
+	switch (intent.type) {
+		case 'insert':
+			return adapter.compileInsert(intent, options);
+		case 'insert_from':
+			return adapter.compileInsertFrom(intent, options);
+		case 'update':
+			return adapter.compileUpdate(intent, options);
+		case 'batchUpdate':
+			return adapter.compileBatchUpdate(intent, options);
+		case 'delete':
+			return adapter.compileDelete(intent, options);
+		case 'upsert':
+			return adapter.compileUpsert(intent, options);
+		case 'upsert_from':
+			return adapter.compileUpsertFrom(intent, options);
+	}
+	const _exhaustive: never = intent;
+	throw new Error(
+		`Unsupported mutation type: ${(_exhaustive as { type: string }).type}`,
+	);
 }
 
 /** Shared base options for all mutation builders */
@@ -72,6 +103,140 @@ type MutationBaseOpts = {
 	onHookError?: HookErrorHandler | undefined;
 	inTransaction?: boolean | undefined;
 };
+
+export type PreparedMutationExecution<T> = {
+	readonly sql: string;
+	readonly parameters: readonly unknown[];
+	readonly execute: () => Promise<T>;
+	readonly getAfterMutationResult?: (result: T) => readonly unknown[];
+	readonly returnAfterMutationResult?: boolean;
+};
+
+export type RunMutationWithHooksOptions<
+	T,
+	TIntent extends MutationIntent = MutationIntent,
+> = {
+	readonly table: string;
+	readonly intent: TIntent;
+	readonly hookStore?: HookStore | undefined;
+	readonly onHookError?: HookErrorHandler | undefined;
+	readonly schemaName?: string | undefined;
+	readonly inTransaction?: boolean | undefined;
+	readonly prepare: (intent: TIntent) => PreparedMutationExecution<T>;
+};
+
+export async function runMutationWithHooks<
+	T,
+	TIntent extends MutationIntent = MutationIntent,
+>(opts: RunMutationWithHooksOptions<T, TIntent>): Promise<T> {
+	if (!opts.hookStore || !hasHooks(opts.hookStore)) {
+		const prepared = opts.prepare(opts.intent);
+		return prepared.execute();
+	}
+
+	return withReentrancyGuard(opts.hookStore, (store) =>
+		runMutationWithHooksInner(opts, store),
+	);
+}
+
+async function runMutationWithHooksInner<
+	T,
+	TIntent extends MutationIntent = MutationIntent,
+>(opts: RunMutationWithHooksOptions<T, TIntent>, store: HookStore): Promise<T> {
+	const { intent } = opts;
+	const operation = intent.type as MutationOperation;
+	const startTime = Date.now();
+	const { cardinality, data } = extractMutationIntentData(intent);
+
+	let ctx: MutationHookContext = Object.freeze({
+		table: opts.table,
+		operation,
+		intent,
+		cardinality,
+		data,
+		...(opts.schemaName !== undefined ? { schemaName: opts.schemaName } : {}),
+		...(opts.inTransaction ? { inTransaction: true } : {}),
+	});
+
+	try {
+		if (store.beforeMutation.length > 0) {
+			ctx = await runBeforeMutationHooks(
+				store.beforeMutation,
+				ctx,
+				opts.onHookError,
+			);
+		}
+
+		const prepared = opts.prepare(intent);
+		const duration = Date.now() - startTime;
+		const result = await prepared.execute();
+
+		if (store.afterMutation.length > 0) {
+			const afterCtx: MutationHookContext = Object.freeze({
+				...ctx,
+				sql: prepared.sql,
+				parameters: prepared.parameters,
+				duration,
+			});
+			const transformed = await runAfterMutationHooks(
+				store.afterMutation,
+				afterCtx,
+				[...(prepared.getAfterMutationResult?.(result) ?? [])],
+				opts.onHookError,
+			);
+			if (prepared.returnAfterMutationResult) {
+				return transformed as T;
+			}
+		}
+
+		return result;
+	} catch (error) {
+		if (store.onError.length > 0) {
+			const errorCtx = {
+				table: opts.table,
+				operation,
+				error: error as Error,
+				intent,
+				phase: 'beforeMutation' as const,
+				...(opts.schemaName !== undefined
+					? { schemaName: opts.schemaName }
+					: {}),
+			};
+			const transformed = await runOnErrorHooks(store.onError, errorCtx);
+			throw transformed;
+		}
+		throw error;
+	}
+}
+
+function extractMutationIntentData(intent: MutationIntent): {
+	cardinality: 'single' | 'bulk';
+	data: unknown;
+} {
+	if (intent.type === 'insert' || intent.type === 'upsert') {
+		const values = (intent as InsertIntent | UpsertIntent).values;
+		return {
+			cardinality: values.length > 1 ? 'bulk' : 'single',
+			data: values.length > 1 ? values : values[0],
+		};
+	}
+	if (intent.type === 'update') {
+		return {
+			cardinality: 'single',
+			data: (intent as UpdateIntent).set,
+		};
+	}
+	if (intent.type === 'batchUpdate') {
+		return {
+			cardinality: 'bulk',
+			data: (intent as BatchUpdateIntent).updates,
+		};
+	}
+	if (intent.type === 'insert_from' || intent.type === 'upsert_from') {
+		return { cardinality: 'bulk', data: undefined };
+	}
+	return { cardinality: 'single', data: undefined };
+}
 
 // ============================================================================
 // Abstract Base
@@ -169,12 +334,16 @@ abstract class MutationBuilderBase<
 			Object.keys(compileOptions).length > 0 ? compileOptions : undefined,
 		);
 
-		const meta: { compiledAt: Date; schema?: string } = {
+		const meta: DumpMeta = {
 			compiledAt: new Date(),
+			...(this.schemaName !== undefined && { schema: this.schemaName }),
+			...(extraOptions?.queryName !== undefined && {
+				queryName: extraOptions.queryName,
+			}),
+			...(extraOptions?.correlationId !== undefined && {
+				correlationId: extraOptions.correlationId,
+			}),
 		};
-		if (this.schemaName !== undefined) {
-			meta.schema = this.schemaName;
-		}
 
 		return {
 			sql: compiled.sql,
@@ -186,168 +355,48 @@ abstract class MutationBuilderBase<
 
 	async execute(): Promise<T> {
 		const adapter = this.requireAdapter(this.operationName);
+		const intent = this.buildIntent();
 
-		// Fast path: no hooks registered
-		if (!this.hookStore || !hasHooks(this.hookStore)) {
-			return this.executeWithoutHooks(adapter);
-		}
-
-		return this.executeWithHooks(adapter);
+		return runMutationWithHooks({
+			table: this.table,
+			intent,
+			hookStore: this.hookStore,
+			onHookError: this.onHookError,
+			schemaName: this.schemaName,
+			inTransaction: this.inTransaction,
+			prepare: (preparedIntent) =>
+				this.prepareMutationExecution(adapter, preparedIntent),
+		});
 	}
 
-	private async executeWithoutHooks(adapter: Adapter): Promise<T> {
-		const intent = this.buildIntent();
+	private prepareMutationExecution(
+		adapter: Adapter,
+		intent: TIntent,
+	): PreparedMutationExecution<T> {
 		const compileOptions = this.schemaName
 			? { schemaName: this.schemaName }
 			: undefined;
 		const compiled = this.compileIntent(adapter, intent, compileOptions);
 
 		if (this.returningColumns && this.returningColumns.length > 0) {
-			const result = await adapter.execute(compiled);
-			return result as T;
-		}
-		await adapter.execute(compiled);
-		return undefined as T;
-	}
-
-	private async executeWithHooks(adapter: Adapter): Promise<T> {
-		const store = this.hookStore;
-		if (!store) throw new Error('executeWithHooks called without hookStore');
-		// INV-07: Re-entrancy guard
-		return withReentrancyGuard(store, (s) =>
-			this.executeWithHooksInner(adapter, s),
-		);
-	}
-
-	private async executeWithHooksInner(
-		adapter: Adapter,
-		store: HookStore,
-	): Promise<T> {
-		const intent = this.buildIntent();
-		const operation = intent.type as MutationOperation;
-		const startTime = Date.now();
-
-		// Determine cardinality and data from intent
-		const { cardinality, data } = this.extractIntentData(intent);
-
-		// Build before-mutation context (no sql/duration yet)
-		let ctx: MutationHookContext = Object.freeze({
-			table: this.table,
-			operation,
-			intent,
-			cardinality,
-			data,
-			...(this.schemaName !== undefined ? { schemaName: this.schemaName } : {}),
-			...(this.inTransaction ? { inTransaction: true } : {}),
-		});
-
-		try {
-			// Run beforeMutation hooks (FIFO)
-			if (store.beforeMutation.length > 0) {
-				ctx = await runBeforeMutationHooks(
-					store.beforeMutation,
-					ctx,
-					this.onHookError,
-				);
-			}
-
-			// Compile and execute
-			const compileOptions = this.schemaName
-				? { schemaName: this.schemaName }
-				: undefined;
-			const compiled = this.compileIntent(adapter, intent, compileOptions);
-			const duration = Date.now() - startTime;
-
-			if (this.returningColumns && this.returningColumns.length > 0) {
-				const result = await adapter.execute(compiled);
-
-				// Build after-mutation context with sql/duration
-				const afterCtx: MutationHookContext = Object.freeze({
-					...ctx,
-					sql: compiled.sql,
-					parameters: compiled.parameters,
-					duration,
-				});
-
-				// Run afterMutation hooks (LIFO)
-				if (store.afterMutation.length > 0) {
-					const transformed = await runAfterMutationHooks(
-						store.afterMutation,
-						afterCtx,
-						result as unknown[],
-						this.onHookError,
-					);
-					return transformed as T;
-				}
-				return result as T;
-			}
-
-			await adapter.execute(compiled);
-
-			// Even without RETURNING, fire afterMutation with empty results
-			if (store.afterMutation.length > 0) {
-				const afterCtx: MutationHookContext = Object.freeze({
-					...ctx,
-					sql: compiled.sql,
-					parameters: compiled.parameters,
-					duration,
-				});
-				await runAfterMutationHooks(
-					store.afterMutation,
-					afterCtx,
-					[],
-					this.onHookError,
-				);
-			}
-
-			return undefined as T;
-		} catch (error) {
-			// Run onError hooks
-			if (store.onError.length > 0) {
-				const errorCtx = {
-					table: this.table,
-					operation,
-					error: error as Error,
-					intent,
-					phase: 'beforeMutation' as const,
-					...(this.schemaName !== undefined
-						? { schemaName: this.schemaName }
-						: {}),
-				};
-				const transformed = await runOnErrorHooks(store.onError, errorCtx);
-				throw transformed;
-			}
-			throw error;
-		}
-	}
-
-	/** Extract cardinality and data from mutation intent */
-	private extractIntentData(intent: TIntent): {
-		cardinality: 'single' | 'bulk';
-		data: unknown;
-	} {
-		if (intent.type === 'insert' || intent.type === 'upsert') {
-			const values = (intent as InsertIntent | UpsertIntent).values;
 			return {
-				cardinality: values.length > 1 ? 'bulk' : 'single',
-				data: values.length > 1 ? values : values[0],
+				sql: compiled.sql,
+				parameters: compiled.parameters,
+				execute: () => adapter.execute(compiled) as Promise<T>,
+				getAfterMutationResult: (result) => result as unknown[],
+				returnAfterMutationResult: true,
 			};
 		}
-		if (intent.type === 'update') {
-			return {
-				cardinality: 'single',
-				data: (intent as UpdateIntent).set,
-			};
-		}
-		if (intent.type === 'batchUpdate') {
-			const updates = (intent as BatchUpdateIntent).updates;
-			return {
-				cardinality: 'bulk',
-				data: updates,
-			};
-		}
-		// delete — no data
-		return { cardinality: 'single', data: undefined };
+
+		return {
+			sql: compiled.sql,
+			parameters: compiled.parameters,
+			execute: async () => {
+				await adapter.execute(compiled);
+				return undefined as T;
+			},
+			getAfterMutationResult: () => [],
+		};
 	}
 }
 
@@ -441,7 +490,7 @@ export class InsertBuilder<T = void> extends MutationBuilderBase<
 		intent: InsertIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return adapter.compileInsert(intent, options);
+		return compileMutationIntent(adapter, intent, options);
 	}
 }
 
@@ -646,10 +695,7 @@ export class UpdateBuilder<T = void> extends MutationBuilderBase<
 		intent: UpdateIntent | BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		if (intent.type === 'batchUpdate') {
-			return adapter.compileBatchUpdate(intent, options);
-		}
-		return adapter.compileUpdate(intent, options);
+		return compileMutationIntent(adapter, intent, options);
 	}
 }
 
@@ -771,7 +817,7 @@ export class DeleteBuilder<T = void> extends MutationBuilderBase<
 		intent: DeleteIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return adapter.compileDelete(intent, options);
+		return compileMutationIntent(adapter, intent, options);
 	}
 }
 
@@ -973,6 +1019,6 @@ export class UpsertBuilder<T = void> extends MutationBuilderBase<
 		intent: UpsertIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return adapter.compileUpsert(intent, options);
+		return compileMutationIntent(adapter, intent, options);
 	}
 }

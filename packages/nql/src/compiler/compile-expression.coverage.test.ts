@@ -887,7 +887,7 @@ describe('compile-expression: caseExpr in WHERE (P1-4)', () => {
 // and error code preservation (M-4).
 //
 // The original bug: String(resolveFilterValue(...)) emitted '[object Object]'
-// when the RHS was a path expression (resolveFilterValue returns {$ref:...}
+// when the RHS was a path expression (resolveFilterValue returns a branded ref)
 // for bare fields, or FieldRef for alias-context paths — both non-string).
 //
 // The fix: coerceToStringKey() dispatches on expression type:

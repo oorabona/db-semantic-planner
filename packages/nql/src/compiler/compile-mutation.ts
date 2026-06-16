@@ -22,6 +22,7 @@ import type {
 	WhereOrIntent,
 } from '@dbsp/types';
 import { isParamIntent } from '@dbsp/types';
+import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type {
 	NqlDelete,
 	NqlExpression,
@@ -349,11 +350,11 @@ function extractReturningColumns(
 
 /**
  * Walk a WhereIntent tree and resolve any IN clause whose values contain
- * a $ref matching a bound CTE name → convert to subquery.
+ * a branded binding reference matching a bound CTE name -> convert to subquery.
  */
-function resolveBindingsInWhere(
+export function resolveBindingsInWhere(
 	where: WhereIntent,
-	bindings?: Map<string, QueryIntent>,
+	bindings?: ReadonlyMap<string, QueryIntent>,
 ): WhereIntent {
 	if (!bindings || bindings.size === 0) return where;
 
@@ -365,13 +366,8 @@ function resolveBindingsInWhere(
 			: (inWhere as WhereInValueIntent).values;
 		if (inValues && inValues.length === 1) {
 			const val = inValues[0];
-			if (
-				!isParamIntent(val) &&
-				val &&
-				typeof val === 'object' &&
-				'$ref' in (val as Record<string, unknown>)
-			) {
-				const ref = (val as Record<string, unknown>).$ref as string;
+			if (!isParamIntent(val) && isNqlBindingRef(val)) {
+				const ref = getNqlBindingRefName(val);
 				if (bindings.has(ref)) {
 					const boundQuery = bindings.get(ref)!;
 					const boundSelect = boundQuery.select;

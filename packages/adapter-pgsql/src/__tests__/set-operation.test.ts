@@ -5,7 +5,7 @@
 
 import { plan, type QueryIntent, ref, schema } from '@dbsp/core';
 import { compile } from '@dbsp/nql';
-import type { SetOperationIntent } from '@dbsp/types';
+import type { CompiledNqlQuery, SetOperationIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { normalizeSQL } from '../ast-helpers.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -87,6 +87,55 @@ function adapterSetOpToSQLWithParams(
 	);
 }
 
+function boundSetOpBundleToSQL(
+	op: 'union' | 'intersect' | 'except',
+	schemaName: string,
+): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
+	const bindingQuery: QueryIntent = {
+		type: 'select',
+		from: 'employees',
+		select: { type: 'fields', fields: ['id'] },
+		where: {
+			kind: 'comparison',
+			field: 'active',
+			operator: 'eq',
+			value: true,
+		},
+	};
+	const bundle: CompiledNqlQuery = {
+		setOperation: {
+			kind: 'setOperation',
+			op,
+			all: false,
+			left: {
+				type: 'select',
+				from: 'employees',
+				select: { type: 'fields', fields: ['id'] },
+				where: {
+					kind: 'in',
+					field: 'id',
+					subquery: {
+						type: 'select',
+						from: 'active_employees',
+						select: { type: 'fields', fields: ['id'] },
+					},
+				},
+			},
+			right: {
+				type: 'select',
+				from: 'departments',
+				select: { type: 'fields', fields: ['id'] },
+			},
+		},
+		bindings: new Map([['active_employees', bindingQuery]]),
+	};
+	const adapter = createPgsqlCompileOnlyAdapter();
+	return adapter.compile(bundle, { model: testSchema.model, schemaName });
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -164,6 +213,19 @@ describe('compileSetOperation', () => {
 				expect(normalized).not.toContain('employees.name = employees.name');
 				expect(normalized).not.toContain('employees.name = null');
 				expect(result.parameters).toEqual([fieldRefShaped, null]);
+			});
+		}
+
+		for (const op of ['union', 'intersect', 'except'] as const) {
+			it(`keeps bound CTE set-operation ${op.toUpperCase()} leaves unqualified under schema scoping`, () => {
+				const result = boundSetOpBundleToSQL(op, 'tenant_set');
+				const normalized = normalizeSQL(result.sql);
+
+				expect(normalized).toContain('with "active_employees" as (');
+				expect(normalized).toContain('from tenant_set.employees');
+				expect(normalized).toContain('from active_employees as');
+				expect(normalized).not.toContain('from tenant_set.active_employees');
+				expect(result.parameters).toEqual([true]);
 			});
 		}
 

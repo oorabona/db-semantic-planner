@@ -45,6 +45,10 @@ import { createWhereDispatcher } from './handlers/index.js';
 registerWhereDispatcherFactory(createWhereDispatcher);
 
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from './assert-field.js';
+import {
+	type BindingNameRegistry,
+	schemaForFromName,
+} from './binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -102,6 +106,8 @@ export type WhereCompilerCtx = {
 	readonly model?: ModelIR;
 	/** Schema name for table qualification */
 	readonly schemaName?: string;
+	/** Query-local CTE/binding names that must not be schema-qualified. */
+	readonly bindingNames?: BindingNameRegistry;
 	/** Naming convention plugin */
 	readonly naming: NamingPlugin;
 	/**
@@ -143,6 +149,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		currentAlias: ctx.currentAlias ?? ctx.rootTable,
 		maxRecursiveDepth: 100,
 		...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
+		...(ctx.bindingNames !== undefined && { bindingNames: ctx.bindingNames }),
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
 	};
@@ -170,6 +177,7 @@ export function buildSubqueryFromIntent(
 	naming: NamingPlugin = identityNaming,
 	schemaName?: string,
 	use: 'rawExists' | 'scalar-direct' = 'rawExists',
+	bindingNames?: BindingNameRegistry,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
@@ -249,9 +257,14 @@ export function buildSubqueryFromIntent(
 
 	const stmt: SelectStmt = {
 		targetList,
-		// Bug 3 fix: propagate schema name from outer context so schema-scoped
-		// queries generate "schema"."table" AS alias instead of bare "table" AS alias.
-		fromClause: [rangeVar(targetTable, innerAlias, schemaName, naming)],
+		fromClause: [
+			rangeVar(
+				targetTable,
+				innerAlias,
+				schemaForFromName(schemaName, targetTable, bindingNames, naming),
+				naming,
+			),
+		],
 	};
 
 	let paramCount = 0;
@@ -269,6 +282,7 @@ export function buildSubqueryFromIntent(
 			aliases: new Map(),
 			paramState: innerState,
 			naming,
+			...(bindingNames !== undefined && { bindingNames }),
 			compileSubquery: (_nestedIntent, _nestedOffset) => {
 				throw new Error(
 					'buildSubqueryFromIntent: nested subquery not supported',

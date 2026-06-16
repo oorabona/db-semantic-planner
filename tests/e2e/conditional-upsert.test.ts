@@ -5,7 +5,7 @@
  * ON CONFLICT DO UPDATE SET ... WHERE and PostgreSQL honors the predicate.
  */
 
-import { isUpsertIntent, schema } from '@dbsp/core';
+import { createOrm, isUpsertIntent, schema } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createPgsqlAdapter } from '../../packages/adapter-pgsql/src/pgsql-adapter.js';
 import { compile } from '../../packages/nql/src/index.js';
@@ -114,6 +114,70 @@ describe('Issue #160 — conditional upsert', () => {
 		expect(rows.rows).toEqual([
 			{ sku: 'LOCKED', name: 'old locked', active: false },
 			{ sku: 'OPEN', name: 'new open', active: true },
+		]);
+	});
+
+	it('executes conditional upsert through orm.nql tag with bound interpolations', async () => {
+		const pool = await getTestPool();
+		const s = sql.ref(SCHEMA);
+
+		await sql`
+			INSERT INTO ${s}.widgets (sku, name, active) VALUES
+				('TAG_LOCKED', 'tag old locked', false),
+				('TAG_OPEN', 'tag old open', true)
+		`.execute(pool);
+
+		const adapter = createPgsqlAdapter(pool, {
+			schemaName: SCHEMA,
+			dbCasing: 'snake_case',
+		});
+		const orm = createOrm({ schema: conditionalUpsertSchema, adapter });
+
+		const locked = orm.nql<{
+			sku: string;
+			name: string;
+			active: boolean;
+		}>`upsert into widgets on sku set sku = ${'TAG_LOCKED'}, name = ${'tag new locked'}, active = ${false} where active = ${true} | select sku, name, active`;
+		const lockedDump = locked.dump();
+		if (!('parameters' in lockedDump)) {
+			throw new Error('Expected mutation dump for NQL upsert');
+		}
+		expect(lockedDump).not.toHaveProperty('plan');
+		expect(lockedDump.parameters).toEqual([
+			'TAG_LOCKED',
+			'tag new locked',
+			false,
+			true,
+		]);
+		expect(lockedDump.sql.toLowerCase()).toContain('do update set');
+		expect(lockedDump.sql.toLowerCase()).toContain('where widgets.active = $4');
+
+		const lockedRows = await locked.all();
+		expect(lockedRows).toEqual([]);
+
+		const openRows = await orm.nql<{
+			sku: string;
+			name: string;
+			active: boolean;
+		}>`upsert into widgets on sku set sku = ${'TAG_OPEN'}, name = ${'tag new open'}, active = ${true} where active = ${true} | select sku, name, active`.all();
+		expect(openRows).toEqual([
+			{ sku: 'TAG_OPEN', name: 'tag new open', active: true },
+		]);
+
+		const rows = await sql<{
+			sku: string;
+			name: string;
+			active: boolean;
+		}>`
+			SELECT sku, name, active
+			FROM ${sql.ref(SCHEMA)}.widgets
+			WHERE sku LIKE 'TAG_%'
+			ORDER BY sku
+		`.execute(pool);
+
+		expect(rows.rows).toEqual([
+			{ sku: 'TAG_LOCKED', name: 'tag old locked', active: false },
+			{ sku: 'TAG_OPEN', name: 'tag new open', active: true },
 		]);
 	});
 });

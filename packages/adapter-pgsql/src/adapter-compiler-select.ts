@@ -707,6 +707,9 @@ export function compileSelect<T = unknown>(
 		...(schemaName && { schema: schemaName }),
 		defaultPkColumnName: deps.defaultPk,
 		deriveFkColumnName: deps.deriveFk,
+		...(deps.bindingNames !== undefined && {
+			bindingNames: deps.bindingNames,
+		}),
 		...(resolvedModelForCompiler != null && {
 			model: resolvedModelForCompiler,
 		}),

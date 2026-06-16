@@ -424,6 +424,9 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		model,
 		adapter as Adapter<unknown> | undefined,
 		schemaName,
+		hookStore,
+		onHookError,
+		inTransaction,
 	);
 
 	// Helper: build a MutationBuilder options object (shared across mutation methods)

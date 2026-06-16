@@ -45,6 +45,7 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
+import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
@@ -71,6 +72,11 @@ import {
 	type FkColumnDerivation,
 } from './assert-field.js';
 import { selectStmt } from './ast-helpers.js';
+import {
+	type BindingNameRegistry,
+	emittedBindName,
+	hasBindingName,
+} from './binding-registry.js';
 import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
 import {
 	type GenerateDDLOptions,
@@ -115,6 +121,10 @@ type CompileSubqueryResult = {
 	parameters: readonly unknown[];
 };
 
+type PgsqlInternalCompileOptions = CompileOptions & {
+	readonly naming?: NamingPlugin;
+};
+
 function renumberSqlParams(sql: string, offset: number): string {
 	if (offset === 0) return sql;
 	return sql.replace(/\$(\d+)/g, (_match, num) => {
@@ -134,6 +144,113 @@ function isCompiledNqlQuery(
 			'bindings' in input ||
 			'mutationBindings' in input)
 	);
+}
+
+function formatGuardPathSegment(key: string): string {
+	return /^[A-Za-z_$][\w$]*$/.test(key)
+		? `.${key}`
+		: `[${JSON.stringify(key)}]`;
+}
+
+function findNqlBindingRefMarker(
+	value: unknown,
+	path: string,
+	seen = new WeakSet<object>(),
+): { ref: string; path: string } | undefined {
+	if (value === null || typeof value !== 'object') {
+		return undefined;
+	}
+
+	if (isNqlBindingRef(value)) {
+		return {
+			ref: getNqlBindingRefName(value),
+			path,
+		};
+	}
+
+	if (seen.has(value)) {
+		return undefined;
+	}
+	seen.add(value);
+
+	if (Array.isArray(value)) {
+		for (let i = 0; i < value.length; i++) {
+			const found = findNqlBindingRefMarker(value[i], `${path}[${i}]`, seen);
+			if (found) return found;
+		}
+		return undefined;
+	}
+
+	const record = value as Record<string, unknown>;
+	for (const key of Object.keys(record)) {
+		const found = findNqlBindingRefMarker(
+			record[key],
+			`${path}${formatGuardPathSegment(key)}`,
+			seen,
+		);
+		if (found) return found;
+	}
+
+	return undefined;
+}
+
+function guardCompiledQuery<T>(
+	query: CompiledQuery<T>,
+	context: string,
+): CompiledQuery<T> {
+	const found = findNqlBindingRefMarker(query.parameters, 'parameters');
+	if (found) {
+		throw new Error(
+			`NQL binding reference marker '${found.ref}' survived into emitted SQL parameters at ${found.path} while compiling ${context}. ` +
+				'Binding references must resolve to CTE subqueries before SQL emission.',
+		);
+	}
+
+	return query;
+}
+
+function guardCompileResultWithIncludes<T>(
+	result: CompileResultWithIncludes<T>,
+	context: string,
+): CompileResultWithIncludes<T> {
+	return {
+		...result,
+		main: guardCompiledQuery(result.main, context),
+	};
+}
+
+function findPhysicalTableNameCollision(
+	model: ModelIR,
+	bindingName: string,
+	naming: NamingPlugin,
+): string | undefined {
+	for (const [modelTableName, table] of model.tables) {
+		if (bindingName === table.name) return table.name;
+		if (bindingName === modelTableName) return table.name;
+		const emittedTableName = naming.toDatabase(table.name);
+		if (bindingName === emittedTableName) return emittedTableName;
+		const emittedModelTableName = naming.toDatabase(modelTableName);
+		if (bindingName === emittedModelTableName) return emittedModelTableName;
+	}
+	return undefined;
+}
+
+function findDuplicateEmittedNqlBindingName(
+	bindingNames: Iterable<string>,
+	naming: NamingPlugin,
+):
+	| { originalName: string; duplicateName: string; emittedName: string }
+	| undefined {
+	const seen = new Map<string, string>();
+	for (const bindingName of bindingNames) {
+		const emittedName = emittedBindName(bindingName, naming);
+		const originalName = seen.get(emittedName);
+		if (originalName !== undefined && originalName !== bindingName) {
+			return { originalName, duplicateName: bindingName, emittedName };
+		}
+		seen.set(emittedName, bindingName);
+	}
+	return undefined;
 }
 // ============================================================================
 // Options
@@ -263,7 +380,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		};
 	}
 
-	private buildCompileDeps(options?: CompileOptions): AdapterCompilerDeps {
+	private buildCompileDeps(
+		options?: CompileOptions,
+		bindingNames?: BindingNameRegistry,
+	): AdapterCompilerDeps {
 		// Validate schemaName from CompileOptions before use — prevents SQL injection
 		// via direct callers of adapter.compile().  Empty string is treated as "no
 		// override" (falls through to this.schemaName via ||), so we skip it here;
@@ -271,13 +391,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (options?.schemaName) {
 			validateIdentifier(options.schemaName, 'schema');
 		}
+		const naming =
+			(options as PgsqlInternalCompileOptions | undefined)?.naming ??
+			this.naming;
 		return {
-			naming: this.naming,
+			naming,
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName: options?.schemaName || this.schemaName,
 			model: options?.model ?? this.model,
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
+			...(bindingNames !== undefined && { bindingNames }),
 		};
 	}
 
@@ -291,9 +415,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return model;
 	}
 
+	private assertNqlBindingNamesDisjointFromTables(
+		bindingNames: BindingNameRegistry | undefined,
+		options?: CompileOptions,
+	): void {
+		if (bindingNames === undefined || bindingNames.size === 0) return;
+		const model = this.requireNqlCompileModel(options);
+		const naming = this.buildCompileDeps(options, bindingNames).naming;
+		for (const bindingName of bindingNames) {
+			const physicalTableName = findPhysicalTableNameCollision(
+				model,
+				bindingName,
+				naming,
+			);
+			if (physicalTableName !== undefined) {
+				throw new Error(
+					`NQL binding '${bindingName}' collides with physical table name '${physicalTableName}'. ` +
+						'NQL binding names must be disjoint from model table names.',
+				);
+			}
+		}
+	}
+
 	private compileNqlMutation(
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
+		bindingNames?: BindingNameRegistry,
 	): CompiledQuery {
 		const mutation = bundle.mutation;
 		if (mutation === undefined) {
@@ -305,37 +452,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				return compileInsertImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 			case 'insert_from':
 				return compileInsertFromImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 			case 'update':
 				return compileUpdateImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 			case 'delete':
 				return compileDeleteImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 			case 'upsert':
 				return compileUpsertImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 			case 'upsert_from':
 				return compileUpsertFromImpl(
 					mutation,
 					options,
-					this.buildCompileDeps(options),
+					this.buildCompileDeps(options, bindingNames),
 				);
 		}
 		throw new Error(
@@ -346,35 +493,60 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private compileNqlBundleLeaf<T = unknown>(
 		bundle: CompiledNqlQuery,
 		options?: CompileOptions,
+		bindingNames?: BindingNameRegistry,
 	): CompiledQuery<T> {
 		if (bundle.query !== undefined) {
+			const naming = this.buildCompileDeps(options, bindingNames).naming;
+			if (hasBindingName(bindingNames, bundle.query.from, naming)) {
+				throw new Error(
+					`NQL binding '${bundle.query.from}' cannot be used as the final FROM source yet. ` +
+						'Use the binding from a mutation source or WHERE IN predicate, or select from a real table.',
+				);
+			}
 			const model = this.requireNqlCompileModel(options);
 			const planReport = planFn(bundle.query, model, {
 				dialectCapabilities: this.dialectCapabilities,
 			});
-			return compileSelect<T>(
-				planReport,
-				options,
-				this.buildCompileDeps(options),
+			return guardCompiledQuery(
+				compileSelect<T>(
+					planReport,
+					options,
+					this.buildCompileDeps(options, bindingNames),
+				),
+				'NQL query',
 			);
 		}
 		if (bundle.cteQuery !== undefined) {
-			return compileCteQueryImpl(
-				bundle.cteQuery,
-				options,
-				this.buildCompileDeps(options),
+			return guardCompiledQuery(
+				compileCteQueryImpl(
+					bundle.cteQuery,
+					options,
+					this.buildCompileDeps(options, bindingNames),
+				) as CompiledQuery<T>,
+				'NQL CTE query',
 			) as CompiledQuery<T>;
 		}
 		if (bundle.setOperation !== undefined) {
 			const model = this.requireNqlCompileModel(options);
-			return this.compileSetOperation(
-				bundle.setOperation,
-				model,
-				options,
+			return guardCompiledQuery(
+				this.compileSetOperationWithBindings(
+					bundle.setOperation,
+					model,
+					options,
+					bindingNames,
+				) as CompiledQuery<T>,
+				'NQL set operation',
 			) as CompiledQuery<T>;
 		}
 		if (bundle.mutation !== undefined) {
-			return this.compileNqlMutation(bundle, options) as CompiledQuery<T>;
+			return guardCompiledQuery(
+				this.compileNqlMutation(
+					bundle,
+					options,
+					bindingNames,
+				) as CompiledQuery<T>,
+				'NQL mutation',
+			) as CompiledQuery<T>;
 		}
 		throw new Error('NQL bundle did not contain a compilable intent.');
 	}
@@ -385,13 +557,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery<T> {
 		const ctes: string[] = [];
 		const parameters: unknown[] = [];
+		const naming = this.buildCompileDeps(options).naming;
+		const duplicateEmittedBinding =
+			bundle.bindings !== undefined
+				? findDuplicateEmittedNqlBindingName(bundle.bindings.keys(), naming)
+				: undefined;
+		if (duplicateEmittedBinding !== undefined) {
+			throw new Error(
+				`NQL bindings '${duplicateEmittedBinding.originalName}' and '${duplicateEmittedBinding.duplicateName}' emit to duplicate CTE name '${duplicateEmittedBinding.emittedName}'. ` +
+					'NQL binding names must be unique after database naming.',
+			);
+		}
+		const bindingNames =
+			bundle.bindings !== undefined
+				? new Set(
+						[...bundle.bindings.keys()].map((name) =>
+							emittedBindName(name, naming),
+						),
+					)
+				: undefined;
+		this.assertNqlBindingNamesDisjointFromTables(bindingNames, options);
 
 		for (const [name, queryIntent] of bundle.bindings ?? []) {
-			const cteName = quoteIdent(name, 'alias');
+			const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }
 				: { query: queryIntent };
-			const compiled = this.compileNqlBundleLeaf(bindingBundle, options);
+			const compiled = this.compileNqlBundleLeaf(
+				bindingBundle,
+				options,
+				bindingNames,
+			);
 			ctes.push(
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
@@ -407,15 +603,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				setOperation: bundle.setOperation,
 			}),
 		};
-		const compiled = this.compileNqlBundleLeaf<T>(leafBundle, options);
+		const compiled = this.compileNqlBundleLeaf<T>(
+			leafBundle,
+			options,
+			bindingNames,
+		);
 		if (ctes.length === 0) {
-			return compiled;
+			return guardCompiledQuery(compiled, 'NQL bundle');
 		}
 
-		return {
-			sql: `WITH ${ctes.join(', ')} ${renumberSqlParams(compiled.sql, parameters.length)}`,
-			parameters: [...parameters, ...compiled.parameters],
-		};
+		return guardCompiledQuery(
+			{
+				sql: `WITH ${ctes.join(', ')} ${renumberSqlParams(compiled.sql, parameters.length)}`,
+				parameters: [...parameters, ...compiled.parameters],
+			},
+			'NQL bundle',
+		);
 	}
 
 	/**
@@ -470,7 +673,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (isCompiledNqlQuery(plan)) {
 			return this.compileNqlBundle<T>(plan, options);
 		}
-		return compileSelect<T>(plan, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileSelect<T>(plan, options, this.buildCompileDeps(options)),
+			'select plan',
+		);
 	}
 
 	/**
@@ -480,10 +686,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		plan: PlanReport,
 		options?: CompileOptions,
 	): CompileResultWithIncludes<T> {
-		return compileWithIncludesImpl<T>(
-			plan,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompileResultWithIncludes(
+			compileWithIncludesImpl<T>(plan, options, this.buildCompileDeps(options)),
+			'select plan with includes',
 		);
 	}
 
@@ -501,11 +706,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parentIds: readonly unknown[],
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileSubqueryIncludeImpl(
-			info,
-			parentIds,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompiledQuery(
+			compileSubqueryIncludeImpl(
+				info,
+				parentIds,
+				options,
+				this.buildCompileDeps(options),
+			),
+			'subquery include',
 		);
 	}
 
@@ -553,7 +761,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			targetList: [{ ResTarget: { val: node } }],
 		});
 		const sql = deparseQuoted(ast);
-		return { sql, parameters: state.parameters };
+		return guardCompiledQuery(
+			{ sql, parameters: state.parameters },
+			'select expression',
+		);
 	}
 
 	/**
@@ -564,7 +775,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * - rows > batchThreshold OR batchThreshold === 0: SELECT unnest($1::type[]),...
 	 */
 	compileInsert(intent: InsertIntent, options?: CompileOptions): CompiledQuery {
-		return compileInsertImpl(intent, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileInsertImpl(intent, options, this.buildCompileDeps(options)),
+			'insert',
+		);
 	}
 
 	/**
@@ -575,10 +789,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: InsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileInsertFromImpl(
-			intent,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompiledQuery(
+			compileInsertFromImpl(intent, options, this.buildCompileDeps(options)),
+			'insert from',
 		);
 	}
 
@@ -586,7 +799,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile an update intent to executable SQL.
 	 */
 	compileUpdate(intent: UpdateIntent, options?: CompileOptions): CompiledQuery {
-		return compileUpdateImpl(intent, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileUpdateImpl(intent, options, this.buildCompileDeps(options)),
+			'update',
+		);
 	}
 
 	/**
@@ -602,10 +818,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: BatchUpdateIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileBatchUpdateImpl(
-			intent,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompiledQuery(
+			compileBatchUpdateImpl(intent, options, this.buildCompileDeps(options)),
+			'batch update',
 		);
 	}
 
@@ -613,14 +828,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Compile a delete intent to executable SQL.
 	 */
 	compileDelete(intent: DeleteIntent, options?: CompileOptions): CompiledQuery {
-		return compileDeleteImpl(intent, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileDeleteImpl(intent, options, this.buildCompileDeps(options)),
+			'delete',
+		);
 	}
 
 	/**
 	 * Compile an upsert intent to executable SQL (DX-026).
 	 */
 	compileUpsert(intent: UpsertIntent, options?: CompileOptions): CompiledQuery {
-		return compileUpsertImpl(intent, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileUpsertImpl(intent, options, this.buildCompileDeps(options)),
+			'upsert',
+		);
 	}
 
 	/**
@@ -631,10 +852,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: UpsertFromIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileUpsertFromImpl(
-			intent,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompiledQuery(
+			compileUpsertFromImpl(intent, options, this.buildCompileDeps(options)),
+			'upsert from',
 		);
 	}
 
@@ -647,11 +867,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileRecursiveImpl(
-			report,
-			model,
-			options,
-			this.buildCompileDeps(options),
+		return guardCompiledQuery(
+			compileRecursiveImpl(
+				report,
+				model,
+				options,
+				this.buildCompileDeps(options),
+			),
+			'recursive query',
 		);
 	}
 
@@ -666,7 +889,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		intent: CteQueryIntent,
 		options?: CompileOptions,
 	): CompiledQuery {
-		return compileCteQueryImpl(intent, options, this.buildCompileDeps(options));
+		return guardCompiledQuery(
+			compileCteQueryImpl(intent, options, this.buildCompileDeps(options)),
+			'CTE query',
+		);
 	}
 
 	/**
@@ -677,12 +903,40 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		model: ModelIR,
 		options?: CompileOptions,
 	): CompiledQuery {
-		const compileFn = createLeafCompileFn(this, model, planFn, options);
+		return guardCompiledQuery(
+			this.compileSetOperationWithBindings(intent, model, options),
+			'set operation',
+		);
+	}
+
+	private compileSetOperationWithBindings(
+		intent: SetOperationIntent,
+		model: ModelIR,
+		options?: CompileOptions,
+		bindingNames?: BindingNameRegistry,
+	): CompiledQuery {
+		const compileFn = createLeafCompileFn(
+			{
+				dialectCapabilities: this.dialectCapabilities,
+				compile: (planReport, leafOptions) =>
+					compileSelect(
+						planReport,
+						leafOptions,
+						this.buildCompileDeps(leafOptions, bindingNames),
+					),
+			},
+			model,
+			planFn,
+			options,
+		);
 		const result = compileSetOperationImpl(intent, compileFn);
-		return {
-			sql: result.sql,
-			parameters: result.parameters,
-		};
+		return guardCompiledQuery(
+			{
+				sql: result.sql,
+				parameters: result.parameters,
+			},
+			'set operation',
+		);
 	}
 
 	/**

@@ -30,6 +30,7 @@ import type {
 	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
+import { resolveBindingsInWhere } from './compile-mutation.js';
 import {
 	expressionToField,
 	expressionToSql,
@@ -114,10 +115,9 @@ export function compileQuery(
 
 		switch (clause.type) {
 			case 'where': {
-				const condition = fns.compileExpression(
-					(clause as NqlWhereClause).condition,
-					ctx,
-					fns,
+				const condition = resolveBindingsInWhere(
+					fns.compileExpression((clause as NqlWhereClause).condition, ctx, fns),
+					bindings,
 				);
 				if (groupByIndex >= 0 && i > groupByIndex) {
 					havingConditions.push(condition);

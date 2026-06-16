@@ -27,10 +27,12 @@ import {
 	schema,
 } from '@dbsp/core';
 import type {
+	CompiledNqlQuery,
 	InsertFromIntent,
 	SetOperationIntent,
 	UpsertFromIntent,
 } from '@dbsp/types';
+import { createNqlBindingRef } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../../../nql/src/index.js';
 import {
@@ -1840,15 +1842,14 @@ describe('NQL → SQL mutation E2E', () => {
 		expect(params).toEqual([null, needle]);
 	});
 
-	it('binds named-param $ref in mutation IN as a value, not a CTE subquery', () => {
+	it('binds user JSON with $ref in mutation IN instead of treating it as internal', () => {
 		const refValue = { $ref: 'ids' };
 		const { sql, params } = mutationToSQLWithNamedParams(
 			'posts | select id | bind ids\ndelete from posts where userId in (:p)',
 			{ p: refValue },
 		);
 
-		expect(sql).toContain('posts."userid" = any');
-		expect(sql).not.toContain('select "ids');
+		expect(sql).toContain('posts."userid" = any ($1)');
 		expect(params).toEqual([[refValue]]);
 	});
 });
@@ -1957,11 +1958,20 @@ function bindToSQL(
 	const adapter = createPgsqlCompileOnlyAdapter();
 	const opts = { model };
 	const allParams: unknown[] = [];
+	const sourceQueryMutationSource =
+		ast.mutation?.type === 'insert_from' || ast.mutation?.type === 'upsert_from'
+			? ast.mutation.sourceQuery !== undefined
+				? ast.mutation.source
+				: undefined
+			: undefined;
 
 	// Compile each binding to SQL for CTE generation
 	const ctes: string[] = [];
 	if (ast.bindings) {
 		for (const [name, queryIntent] of ast.bindings) {
+			if (name === sourceQueryMutationSource) {
+				continue;
+			}
 			const planReport = plan(queryIntent, model, {
 				dialectCapabilities: POSTGRESQL_CAPABILITIES,
 			});
@@ -2012,6 +2022,24 @@ function bindToSQL(
 	return { sql: finalSql, params: allParams };
 }
 
+function boundBundleToSQL(
+	nql: string,
+	model: ReturnType<typeof schema>['model'],
+	schemaName: string,
+): { sql: string; params: readonly unknown[] } {
+	const compiled = compile(nql, model);
+	if (!compiled.success || !compiled.ast) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(compiled.ast, { model, schemaName });
+
+	return { sql: normalizeSQL(result.sql), params: result.parameters };
+}
+
 describe('NQL → SQL bind + CTE E2E', () => {
 	it('D3: query bind + insert from produces CTE-wrapped SQL', () => {
 		const { sql } = bindToSQL(
@@ -2031,6 +2059,214 @@ describe('NQL → SQL bind + CTE E2E', () => {
 		expect(sql).toEqual(
 			'with "toDelete" as (select posts.id from posts where posts.published = $1) delete from comments where comments."postid" = any (select "todelete_subq_0".id from "todelete" as "todelete_subq_0")',
 		);
+	});
+
+	it('schema-scoped WHERE IN bound CTE keeps CTE FROM unqualified', () => {
+		const { sql } = boundBundleToSQL(
+			'posts | where published = false | select id | bind to_delete\ndelete from comments where postId in (to_delete)',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('delete from tenant_bound.comments');
+		expect(sql).toContain('from to_delete as to_delete_subq_0');
+		expect(sql).not.toContain('from tenant_bound.to_delete');
+	});
+
+	it('schema-scoped final query WHERE IN bound CTE resolves through the CTE', () => {
+		const { sql, params } = boundBundleToSQL(
+			'posts | where published = false | select id | bind visible_posts\ncomments | where postId in (visible_posts)',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "visible_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from tenant_bound.comments');
+		expect(sql).toContain('from visible_posts as visible_posts_subq_0');
+		expect(sql).not.toContain('from tenant_bound.visible_posts');
+		expect(params).toEqual([false]);
+	});
+
+	it('schema-scoped insert-from bound CTE keeps CTE source unqualified', () => {
+		const { sql } = boundBundleToSQL(
+			'posts | where published = false | select id | bind subset\ninsert into archivedPosts from subset',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "subset" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('insert into tenant_bound."archivedposts"');
+		expect(sql).toContain('from subset');
+		expect(sql).not.toContain('from tenant_bound.subset');
+	});
+
+	it('schema-scoped upsert-from bound CTE keeps CTE source unqualified', () => {
+		const { sql } = boundBundleToSQL(
+			'authors | where active = true | select id, name, email, active | bind active_authors\nupsert into authors on id from active_authors',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "active_authors" as (');
+		expect(sql).toContain('from tenant_bound.authors');
+		expect(sql).toContain('insert into tenant_bound.authors');
+		expect(sql).toContain('from active_authors');
+		expect(sql).not.toContain('from tenant_bound.active_authors');
+	});
+
+	it('schema-scoped insert-from real table source stays schema-qualified', () => {
+		const { sql } = boundBundleToSQL(
+			'insert into archivedPosts from posts',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('insert into tenant_bound."archivedposts"');
+		expect(sql).toContain('from tenant_bound.posts');
+	});
+
+	it('direct schema-scoped compileInsertFrom emits the sourceQuery CTE before using the bound source', () => {
+		const compiled = compile(
+			'posts | where published = false | select id, title, published, userId | bind subset\ninsert into archivedPosts from subset',
+			mutationSchema.model,
+		);
+		if (!compiled.success || compiled.ast?.mutation?.type !== 'insert_from') {
+			throw new Error('Expected insert_from mutation from NQL compilation');
+		}
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileInsertFrom(compiled.ast.mutation, {
+			model: mutationSchema.model,
+			schemaName: 'tenant_direct',
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('with "subset" as (');
+		expect(sql).toContain('from tenant_direct.posts');
+		expect(sql).toContain('insert into tenant_direct."archivedposts"');
+		expect(sql).toContain('from subset');
+		expect(sql).not.toContain('from tenant_direct.subset');
+		expect(result.parameters).toEqual([false]);
+	});
+
+	it('direct schema-scoped compileUpsertFrom emits the sourceQuery CTE before using the bound source', () => {
+		const compiled = compile(
+			'authors | where active = true | select id, name, email, active | bind active_authors\nupsert into authors on id from active_authors',
+			mutationSchema.model,
+		);
+		if (!compiled.success || compiled.ast?.mutation?.type !== 'upsert_from') {
+			throw new Error('Expected upsert_from mutation from NQL compilation');
+		}
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compileUpsertFrom(compiled.ast.mutation, {
+			model: mutationSchema.model,
+			schemaName: 'tenant_direct',
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('with "active_authors" as (');
+		expect(sql).toContain('from tenant_direct.authors');
+		expect(sql).toContain('insert into tenant_direct.authors');
+		expect(sql).toContain('from active_authors');
+		expect(sql).not.toContain('from tenant_direct.active_authors');
+		expect(result.parameters).toEqual([true]);
+	});
+
+	it('direct compileInsertFrom with sourceQuery fails loudly without a model', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const sourceQuery: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'fields',
+				fields: ['id'],
+			},
+		};
+		const intent: InsertFromIntent = {
+			type: 'insert_from',
+			table: 'archivedPosts',
+			source: 'subset',
+			sourceQuery,
+		};
+
+		expect(() =>
+			adapter.compileInsertFrom(intent, { schemaName: 'tenant_direct' }),
+		).toThrow(
+			'compileInsertFrom with sourceQuery requires a model to emit the source CTE',
+		);
+	});
+
+	it('schema-scoped final query from bound CTE fails loudly', () => {
+		const bindingQuery: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'fields',
+				fields: ['id'],
+			},
+		};
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'subset',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			bindings: new Map([['subset', bindingQuery]]),
+		};
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		expect(() =>
+			adapter.compile(bundle, {
+				model: mutationSchema.model,
+				schemaName: 'tenant_bound',
+			}),
+		).toThrow(
+			"NQL binding 'subset' cannot be used as the final FROM source yet.",
+		);
+	});
+
+	it('fails closed when a branded binding ref reaches a direct mutation compile path', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+
+		expect(() =>
+			adapter.compileDelete(
+				{
+					type: 'delete',
+					table: 'comments',
+					where: {
+						kind: 'in',
+						field: 'postId',
+						values: [createNqlBindingRef('leaked_posts')],
+					},
+				} as any,
+				{ model: mutationSchema.model },
+			),
+		).toThrow(/NQL binding reference marker.*leaked_posts.*survived/i);
+	});
+
+	it('does not reject user JSON with $ref on a direct mutation compile path', () => {
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const refValue = { $ref: 'leaked_posts' };
+		const result = adapter.compileDelete(
+			{
+				type: 'delete',
+				table: 'comments',
+				where: {
+					kind: 'in',
+					field: 'postId',
+					values: [refValue],
+				},
+			} as any,
+			{ model: mutationSchema.model },
+		);
+
+		expect(normalizeSQL(result.sql)).toContain('comments."postid" = any ($1)');
+		expect(result.parameters).toEqual([[refValue]]);
 	});
 });
 

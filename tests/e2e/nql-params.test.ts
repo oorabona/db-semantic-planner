@@ -2,7 +2,8 @@
  * FEAT-134 E2E: NQL tag interpolation binds values as PostgreSQL params.
  */
 
-import { createOrm, nqlRaw } from '@dbsp/core';
+import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import { createHookManager, createOrm, nqlRaw } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	blogSchema,
@@ -10,7 +11,9 @@ import {
 	createBlogSchema,
 	dropBlogSchema,
 	getTestAdapter,
+	getTestPool,
 	seedBlogData,
+	sql,
 } from './testkit/index.js';
 
 describe('FEAT-134 NQL params E2E', () => {
@@ -100,5 +103,155 @@ describe('FEAT-134 NQL params E2E', () => {
 		expect(dump.sql).toMatch(/order by/i);
 		expect(dump.params).toEqual([]);
 		expect(rows).toEqual([{ id: 5 }]);
+	});
+
+	it('executes query-final read-only bindings through WITH CTEs', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number }>`posts
+			| where id >= ${3}
+			| select id
+			| bind recent_posts
+posts
+			| where published = ${true}
+			| select id
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
+		expect(dump.params).toEqual([3, true]);
+		expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
+	});
+
+	it('rejects mutation binding bodies before execution', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const program = orm.nql<{
+			id: number;
+		}>`insert into authors set id = ${999_001}, name = ${'Rejected Bind'}, email = ${'rejected-bind@example.com'} | select id | bind new_author
+authors | select id`;
+
+		expect(() => program.dump()).toThrow(/#173/);
+	});
+
+	it('runs mutation hooks around NQL tag mutations', async () => {
+		const adapter = await getTestAdapter();
+		const events: string[] = [];
+		const hooks = createHookManager()
+			.beforeMutation((ctx) => {
+				events.push(`before:${ctx.table}:${ctx.operation}:${ctx.cardinality}`);
+				expect(ctx.sql).toBeUndefined();
+				return ctx;
+			})
+			.afterMutation((ctx, rows) => {
+				events.push(`after:${ctx.table}:${ctx.operation}:${rows.length}`);
+				expect(ctx.sql).toMatch(/insert/i);
+				expect(ctx.parameters).toHaveLength(3);
+				return rows;
+			});
+		const orm = createOrm({ schema: blogSchema, adapter, hooks }).withSchema(
+			SCHEMA,
+		);
+		const authorId = 100_000 + Math.floor(Date.now() % 1_000_000);
+		const email = `nql-hook-${authorId}@example.com`;
+
+		const rows = await orm.nql<{
+			id: number;
+			email: string;
+		}>`insert into authors set id = ${authorId}, name = ${'NQL Hook'}, email = ${email} | select id, email`.all();
+
+		expect(events).toEqual([
+			'before:authors:insert:single',
+			'after:authors:insert:1',
+		]);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]?.email).toBe(email);
+	});
+
+	it('executes bound mutation pipelines through WITH CTEs', async () => {
+		const pool = await getTestPool();
+		const suffix = 200_000 + Math.floor(Date.now() % 1_000_000);
+		const authorId = suffix;
+		const postId = suffix + 1_000_000;
+		const email = `nql-bound-${suffix}@example.com`;
+		const author = await sql<{ id: number }>`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${authorId}, ${'NQL Bound'}, ${email})
+			RETURNING id
+		`.execute(pool);
+		const post = await sql<{ id: number }>`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts
+				(id, title, content, author_id, published, created_at)
+			VALUES (${postId}, ${'NQL Bound Draft'}, ${'draft'}, ${author.rows[0]!.id}, ${false}, NOW())
+			RETURNING id
+		`.execute(pool);
+		const client = await pool.connect();
+
+		try {
+			const searchPath = sql`SET search_path TO ${sql.ref(SCHEMA)}`.compile();
+			await client.query(searchPath.sql, searchPath.parameters as unknown[]);
+			const adapter = createPgsqlAdapter(client, { dbCasing: 'snake_case' });
+			const orm = createOrm({ schema: blogSchema, adapter });
+			const mutation = orm.nql<{
+				id: number;
+				published: boolean;
+			}>`authors | where email = ${email} | select id | bind target_author
+update posts set published = ${true} where authorId in (target_author) | select id, published`;
+			const dump = mutation.dump();
+			const rows = await mutation.all();
+
+			expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
+			expect((dump as { parameters: readonly unknown[] }).parameters).toEqual([
+				email,
+				true,
+			]);
+			expect(rows).toEqual([{ id: post.rows[0]!.id, published: true }]);
+		} finally {
+			await client.query('RESET search_path');
+			client.release();
+		}
+	});
+
+	it('executes schema-scoped bound mutation pipelines through WITH CTEs', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const suffix = 300_000 + Math.floor(Date.now() % 1_000_000);
+		const authorId = suffix;
+		const postId = suffix + 1_000_000;
+		const email = `nql-bound-schema-${suffix}@example.com`;
+		const author = await sql<{ id: number }>`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${authorId}, ${'NQL Bound Schema'}, ${email})
+			RETURNING id
+		`.execute(pool);
+		const post = await sql<{ id: number }>`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts
+				(id, title, content, author_id, published, created_at)
+			VALUES (${postId}, ${'NQL Bound Schema Draft'}, ${'draft'}, ${author.rows[0]!.id}, ${false}, NOW())
+			RETURNING id
+		`.execute(pool);
+
+		const mutation = orm.nql<{
+			id: number;
+			published: boolean;
+		}>`authors | where email = ${email} | select id | bind target_author
+update posts set published = ${true} where authorId in (target_author) | select id, published`;
+		const dump = mutation.dump();
+		const rows = await mutation.all();
+
+		expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
+		expect(dump.sql).toContain(`${SCHEMA}.authors`);
+		expect(dump.sql).toMatch(new RegExp(`\\bUPDATE\\s+${SCHEMA}\\.posts\\b`));
+		expect(dump.sql).not.toContain(`"${SCHEMA}".target_author`);
+		expect(dump.sql).not.toContain(`${SCHEMA}.target_author`);
+		expect((dump as { parameters: readonly unknown[] }).parameters).toEqual([
+			email,
+			true,
+		]);
+		expect(rows).toEqual([{ id: post.rows[0]!.id, published: true }]);
 	});
 });

@@ -60,6 +60,7 @@ export const rawExistsHandler: WhereHandler = {
 			ctx.naming,
 			ctx.schema,
 			'rawExists',
+			ctx.bindingNames,
 		);
 
 		if (innerParams) {

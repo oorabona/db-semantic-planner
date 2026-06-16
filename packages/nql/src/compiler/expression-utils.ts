@@ -10,6 +10,7 @@ import {
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	type ParamIntent,
 } from '@dbsp/types';
+import { createNqlBindingRef } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
@@ -193,8 +194,8 @@ export function expressionToValue(
 		case 'null':
 			return null;
 		case 'path':
-			// Path in value context → treat as field reference (for computed columns)
-			return { $ref: expr.segments.join('.') };
+			// Path in value context -> internal field reference for computed columns.
+			return createNqlBindingRef(expr.segments.join('.'));
 		case 'function': {
 			// Function call in value context → special value
 			return {
@@ -323,7 +324,7 @@ export function resolveFilterValue(
 	aliasContext?: string,
 	outerAliases?: string[],
 ): unknown {
-	// No alias context → standard value resolution (literals, $ref, etc.)
+	// No alias context -> standard value resolution (literals, branded refs, etc.)
 	if (!aliasContext) return expressionToValue(expr, ctx);
 
 	// Only path expressions can produce FieldRef
@@ -459,7 +460,7 @@ export function validateWhereField(
  * Dispatch rules:
  *   - string literal → use `.value` directly
  *   - named parameter → resolve through the shared param resolver and require a string value
- *   - single-segment path → treat the identifier name as the key (prevents `String({$ref:...})` → `'[object Object]'`)
+ *   - single-segment path -> treat the identifier name as the key (prevents `String(brandedRef)` -> `'[object Object]'`)
  *   - multi-segment dotted path → throw SEM_INVALID_SYNTAX (ambiguous — caller cannot know which segment to use)
  *   - anything else → throw SEM_INVALID_SYNTAX
  *

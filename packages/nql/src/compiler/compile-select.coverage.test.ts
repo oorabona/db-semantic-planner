@@ -1255,7 +1255,7 @@ describe('compile-select: arithmetic with literal left', () => {
 //
 // compileJsonFunction() previously called String(expressionToValue(a)) for
 // json_extract/json_extract_text/json_path/json_path_text path arguments.
-// expressionToValue() returns { $ref: 'field' } for bare identifiers, so
+// expressionToValue() returns a branded binding ref for bare identifiers, so
 // String({...}) → '[object Object]' ends up in the JSON path.
 //
 // The fix: coerceToStringKey() — same helper as the WHERE-context S-1/S-2/S-3

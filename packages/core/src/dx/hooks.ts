@@ -25,9 +25,11 @@
 import type {
 	BatchUpdateIntent,
 	DeleteIntent,
+	InsertFromIntent,
 	InsertIntent,
 	QueryIntent,
 	UpdateIntent,
+	UpsertFromIntent,
 	UpsertIntent,
 } from '../intent-ast.js';
 
@@ -67,18 +69,22 @@ export type QueryHookContext = {
 /** Union of all mutation intent types */
 export type MutationIntent =
 	| InsertIntent
+	| InsertFromIntent
 	| UpdateIntent
 	| BatchUpdateIntent
 	| DeleteIntent
-	| UpsertIntent;
+	| UpsertIntent
+	| UpsertFromIntent;
 
 /** Mutation operation types */
 export type MutationOperation =
 	| 'insert'
+	| 'insert_from'
 	| 'update'
 	| 'batchUpdate'
 	| 'delete'
-	| 'upsert';
+	| 'upsert'
+	| 'upsert_from';
 
 /**
  * Context passed to mutation hooks (beforeMutation/afterMutation).

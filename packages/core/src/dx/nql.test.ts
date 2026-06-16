@@ -52,6 +52,7 @@ describe('DX-040 Block 8: NQL Template Literal Integration', () => {
 			const builder = nql<{ name: string }>`users | select name`;
 
 			expect(typeof builder.all).toBe('function');
+			expect(typeof builder.run).toBe('function');
 			expect(typeof builder.first).toBe('function');
 			expect(typeof builder.toIntentIR).toBe('function');
 			expect(typeof builder.plan).toBe('function');
