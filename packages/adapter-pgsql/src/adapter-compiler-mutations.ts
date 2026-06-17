@@ -124,6 +124,21 @@ function prependSourceCte(
 	};
 }
 
+function resolveMutationExistsForeignKey(
+	foreignKey: string | readonly string[] | undefined,
+	relationName: string,
+): string | undefined {
+	if (typeof foreignKey === 'string') return foreignKey;
+	if (!Array.isArray(foreignKey)) return undefined;
+	if (foreignKey.length > 1) {
+		throw new Error(
+			`Mutation exists()/notExists() guards do not support composite foreignKey relations yet: relation '${relationName}' has foreignKey ${JSON.stringify(foreignKey)}. ` +
+				'Composite FK correlation is tracked by #179.',
+		);
+	}
+	return foreignKey[0];
+}
+
 /**
  * Resolve relation metadata for an exists/notExists WHERE condition.
  *
@@ -144,13 +159,13 @@ function resolveExistsRelation(
 	model: import('@dbsp/types').ModelIR | undefined,
 ): { targetTable: string; sourceColumn?: string; targetColumn?: string } {
 	if (!model) return { targetTable: relation };
-	const rel = model.getRelation(`${sourceTable}.${relation}`);
+	const relationName = `${sourceTable}.${relation}`;
+	const rel = model.getRelation(relationName);
 	if (!rel) return { targetTable: relation };
 	const targetTable = rel.target;
 	// For belongsTo: FK is on the source table (e.g. embeddings.symbol_id → symbols.id)
 	if (rel.type === 'belongsTo') {
-		const fk =
-			typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		const fk = resolveMutationExistsForeignKey(rel.foreignKey, relationName);
 		return {
 			targetTable,
 			...(fk !== undefined && { sourceColumn: fk }),
@@ -158,8 +173,7 @@ function resolveExistsRelation(
 		};
 	}
 	// For hasMany/hasOne: FK is on the target table (e.g. symbols.id → calls.callee_id)
-	const fk =
-		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+	const fk = resolveMutationExistsForeignKey(rel.foreignKey, relationName);
 	return {
 		targetTable,
 		sourceColumn: rel.sourceKey ?? 'id',
@@ -201,12 +215,23 @@ function resolveExistsIntent(
 			: where;
 	}
 
-	// Only enrich exists/notExists at this level
 	if (kind !== 'exists' && kind !== 'notExists') return where;
 	const relation = w.relation as string;
 	const resolved = resolveExistsRelation(sourceTable, relation, deps.model);
+	const nestedWhere = w.where as WhereIntent | undefined;
+	const enrichedNestedWhere =
+		nestedWhere !== undefined
+			? resolveExistsIntent(nestedWhere, resolved.targetTable, deps)
+			: undefined;
 	// Only enrich if we resolved to a different name (avoid mutation when model absent)
-	if (resolved.targetTable === relation && !resolved.sourceColumn) return where;
+	if (
+		resolved.targetTable === relation &&
+		!resolved.sourceColumn &&
+		!resolved.targetColumn &&
+		enrichedNestedWhere === nestedWhere
+	) {
+		return where;
+	}
 	return {
 		...w,
 		targetTable: resolved.targetTable,
@@ -216,6 +241,7 @@ function resolveExistsIntent(
 		...(resolved.targetColumn !== undefined && {
 			targetColumn: resolved.targetColumn,
 		}),
+		...(enrichedNestedWhere !== undefined && { where: enrichedNestedWhere }),
 	} as unknown as WhereIntent;
 }
 
@@ -384,12 +410,15 @@ export function compileInsertFrom(
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
+	const resolvedWhere = intent.where
+		? resolveExistsIntent(intent.where, intent.source, deps)
+		: undefined;
 
 	const config: InsertFromConfig = {
 		targetTable: intent.table,
 		sourceTable: intent.source,
 		...(intent.columns && { columns: [...intent.columns] }),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
+		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
@@ -534,6 +563,7 @@ export function compileBatchUpdate(
 	// The guard uses the shared `state` so $N numbering continues from unnest params.
 	let whereGuard: import('@pgsql/types').Node | undefined;
 	if (intent.where) {
+		const resolvedWhere = resolveExistsIntent(intent.where, intent.table, deps);
 		const whereCtx: WhereCompilerCtx = {
 			rootTable: intent.table,
 			aliases: new Map<string, string>(),
@@ -554,7 +584,7 @@ export function compileBatchUpdate(
 					deps.bindingNames,
 				),
 		};
-		whereGuard = compileWhereIntent(intent.where, whereCtx);
+		whereGuard = compileWhereIntent(resolvedWhere, whereCtx);
 	}
 
 	const config: BatchUpdateConfig = {
@@ -813,6 +843,9 @@ export function compileUpsertFrom(
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
+	const resolvedWhere = intent.where
+		? resolveExistsIntent(intent.where, intent.source, deps)
+		: undefined;
 
 	// Derive columns from model if not explicitly specified (needed for ON CONFLICT SET)
 	let columns: string[] | undefined;
@@ -830,7 +863,7 @@ export function compileUpsertFrom(
 		sourceTable: intent.source,
 		conflictColumns: [...intent.conflictColumns],
 		...(columns && { columns }),
-		...(intent.where && { where: [whereIntentAsDecision(intent.where)] }),
+		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
 	};
