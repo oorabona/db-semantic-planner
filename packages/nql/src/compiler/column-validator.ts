@@ -12,6 +12,7 @@ import type { ColumnValidatorSchema } from './types.js';
  */
 export class ColumnValidator {
 	private knownCteTables: Set<string> = new Set();
+	private virtualBindingTables: Map<string, readonly string[]> = new Map();
 
 	constructor(private readonly schema: ColumnValidatorSchema) {}
 
@@ -28,6 +29,33 @@ export class ColumnValidator {
 	/** Clear all registered CTE table names (used between compilations). */
 	clearKnownCteTables(): void {
 		this.knownCteTables.clear();
+	}
+
+	/**
+	 * Register an NQL binding as a virtual table with a concrete output schema.
+	 * Binding columns are logical output names, so matching is exact.
+	 */
+	addVirtualBindingTable(name: string, columns: readonly string[]): void {
+		this.virtualBindingTables.set(name, columns);
+	}
+
+	/** Clear all registered virtual binding tables (used between compilations). */
+	clearVirtualBindingTables(): void {
+		this.virtualBindingTables.clear();
+	}
+
+	isVirtualBindingTable(name: string | undefined): boolean {
+		return name !== undefined && this.virtualBindingTables.has(name);
+	}
+
+	getVirtualBindingColumns(name: string): readonly string[] | undefined {
+		return this.virtualBindingTables.get(name);
+	}
+
+	getTableColumns(name: string): readonly string[] | undefined {
+		const virtualColumns = this.virtualBindingTables.get(name);
+		if (virtualColumns) return virtualColumns;
+		return this.schema.getTable(name)?.columns.map((column) => column.name);
 	}
 
 	/**
@@ -54,6 +82,18 @@ export class ColumnValidator {
 	validateColumn(table: string, column: string): void {
 		/* v8 ignore next — '*' columns are validated at call-site before reaching here -- @preserve */
 		if (column === '*') return;
+		const virtualColumns = this.virtualBindingTables.get(table);
+		if (virtualColumns) {
+			const exists = virtualColumns.some((c) => c === column);
+			if (!exists) {
+				const available = virtualColumns.join(', ') || '(none)';
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_UNKNOWN_COLUMN,
+					`Column '${column}' is not projected by NQL binding '${table}'. Available columns: ${available}`,
+				);
+			}
+			return;
+		}
 		const tableInfo = this.schema.getTable(table);
 		/* v8 ignore next — graceful degradation: unknown tables skip validation -- @preserve */
 		if (!tableInfo) return; // Unknown table → graceful degradation
@@ -70,6 +110,7 @@ export class ColumnValidator {
 	}
 
 	validateTable(table: string): void {
+		if (this.virtualBindingTables.has(table)) return;
 		// CTE names are valid table references even though they are not in the schema
 		if (this.knownCteTables.has(table)) return;
 		const tableInfo = this.schema.getTable(table);
@@ -85,8 +126,37 @@ export class ColumnValidator {
 		sourceTable: string,
 		relationName: string,
 	): string | undefined {
+		if (this.virtualBindingTables.has(sourceTable)) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Query '${sourceTable}' reads from an NQL binding and cannot use relation filters (${relationName}). Relation constructs require a physical model table, not a CTE binding.`,
+			);
+		}
 		const relations = this.schema.getRelationsFrom(sourceTable);
 		const rel = relations.find((r) => r.name === relationName);
 		return rel?.target;
+	}
+
+	assertNoBindingRelationConstruct(
+		bindingName: string | undefined,
+		construct: string,
+		detail: string,
+	): void {
+		if (!this.isVirtualBindingTable(bindingName)) return;
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Query '${bindingName}' reads from an NQL binding and cannot ${construct} (${detail}). Relation constructs require a physical model table, not a CTE binding.`,
+		);
+	}
+
+	assertNoBindingRelationPath(
+		bindingName: string | undefined,
+		path: string,
+	): void {
+		if (!this.isVirtualBindingTable(bindingName)) return;
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Query '${bindingName}' reads from an NQL binding and cannot reference relation path '${path}'. Relation paths require a physical model table, not a CTE binding.`,
+		);
 	}
 }

@@ -44,7 +44,10 @@ import {
 	starTarget,
 	updateStmt,
 } from './ast-helpers.js';
-import type { BindingNameRegistry } from './binding-registry.js';
+import {
+	type BindingNameRegistry,
+	schemaForFromName,
+} from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import {
@@ -663,6 +666,22 @@ export class PlanCompiler {
 		this.bindingNames = options.bindingNames;
 	}
 
+	private childCompilerOptions(
+		overrides: CompilerOptions = {},
+	): CompilerOptions {
+		return {
+			naming: this.naming,
+			...(this.schema !== undefined && { schema: this.schema }),
+			defaultPkColumnName: this.defaultPk,
+			deriveFkColumnName: this.deriveFk,
+			...(this.model !== undefined && { model: this.model }),
+			...(this.bindingNames !== undefined && {
+				bindingNames: this.bindingNames,
+			}),
+			...overrides,
+		};
+	}
+
 	/** Build immutable context for handler-based WHERE compilation */
 	private handlerCtx(): HandlerCompilerContext {
 		return {
@@ -1206,6 +1225,18 @@ export class PlanCompiler {
 		};
 	}
 
+	private schemaForRangeVar(
+		plan: SimplifiedPlanReport,
+		table: string,
+	): string | undefined {
+		return schemaForFromName(
+			plan.schema ?? this.schema,
+			table,
+			this.bindingNames,
+			this.naming,
+		);
+	}
+
 	private compileExpressionSubquery(
 		query: QueryIntent,
 		paramOffset: number,
@@ -1213,17 +1244,7 @@ export class PlanCompiler {
 		ast: Node;
 		parameters: readonly unknown[];
 	} {
-		const innerCompiler = new PlanCompiler({
-			naming: this.naming,
-			...(this.schema !== undefined && {
-				schema: this.schema,
-			}),
-			defaultPkColumnName: this.defaultPk,
-			deriveFkColumnName: this.deriveFk,
-			...(this.bindingNames !== undefined && {
-				bindingNames: this.bindingNames,
-			}),
-		});
+		const innerCompiler = new PlanCompiler(this.childCompilerOptions());
 		const innerPlan: SimplifiedPlanReport = {
 			rootTable: query.from,
 			decisions: intentToDecisions(query, query.from),
@@ -1649,28 +1670,7 @@ export class PlanCompiler {
 						ast: import('@pgsql/types').Node;
 						parameters: readonly unknown[];
 					} {
-						// Compile the inner QueryIntent through a fresh PlanCompiler
-						// (same options: naming, schema, defaultPk, deriveFk)
-						const innerCompiler = new PlanCompiler({
-							naming: outerThis.naming,
-							...(outerThis.schema !== undefined && {
-								schema: outerThis.schema,
-							}),
-							defaultPkColumnName: outerThis.defaultPk,
-							deriveFkColumnName: outerThis.deriveFk,
-						});
-						const innerPlan: SimplifiedPlanReport = {
-							rootTable: query.from,
-							decisions: intentToDecisions(query, query.from),
-						};
-						const innerResult = innerCompiler.compile(innerPlan);
-						// Renumber ParamRef $N in the inner AST by paramOffset so they
-						// don't collide with the outer query's already-consumed parameters.
-						const renumbered = renumberParamRefsInAst(
-							innerResult.ast,
-							paramOffset,
-						);
-						return { ast: renumbered, parameters: innerResult.parameters };
+						return outerThis.compileExpressionSubquery(query, paramOffset);
 					},
 				} as HandlerCompilerContext;
 				const state = this.createHandlerState();
@@ -1921,7 +1921,7 @@ export class PlanCompiler {
 			const targetRV = rangeVar(
 				pj.table,
 				pj.alias,
-				plan.schema ?? this.schema,
+				this.schemaForRangeVar(plan, pj.table),
 				this.naming,
 			);
 			const base =
@@ -1930,7 +1930,7 @@ export class PlanCompiler {
 					: rangeVar(
 							plan.rootTable,
 							undefined,
-							plan.schema ?? this.schema,
+							this.schemaForRangeVar(plan, plan.rootTable),
 							this.naming,
 						);
 			from[0] =
@@ -1947,7 +1947,7 @@ export class PlanCompiler {
 					: rangeVar(
 							plan.rootTable,
 							undefined,
-							plan.schema ?? this.schema,
+							this.schemaForRangeVar(plan, plan.rootTable),
 							this.naming,
 						);
 			// Raw joins are pre-built JoinExpr — inject base table as larg
@@ -1976,7 +1976,7 @@ export class PlanCompiler {
 				: rangeVar(
 						plan.rootTable,
 						undefined,
-						plan.schema ?? this.schema,
+						this.schemaForRangeVar(plan, plan.rootTable),
 						this.naming,
 					),
 		];
@@ -2189,7 +2189,7 @@ export class PlanCompiler {
 								rangeVar(
 									plan.rootTable,
 									undefined,
-									plan.schema ?? this.schema,
+									this.schemaForRangeVar(plan, plan.rootTable),
 									this.naming,
 								),
 							],
@@ -2647,13 +2647,13 @@ export class PlanCompiler {
 			rangeVar(
 				plan.rootTable,
 				undefined,
-				plan.schema ?? this.schema,
+				this.schemaForRangeVar(plan, plan.rootTable),
 				this.naming,
 			);
 		const targetTable = rangeVar(
 			decision.targetTable ?? '',
 			decision.alias,
-			plan.schema ?? this.schema,
+			this.schemaForRangeVar(plan, decision.targetTable ?? ''),
 			this.naming,
 		);
 

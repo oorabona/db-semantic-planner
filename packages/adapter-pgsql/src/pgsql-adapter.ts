@@ -38,6 +38,7 @@ import type {
 	InsertIntent,
 	ModelIR,
 	PlanReport,
+	QueryIntent,
 	RecursivePlanReport,
 	SetOperationIntent,
 	SubqueryIncludeInfo,
@@ -107,7 +108,7 @@ import {
 } from './naming-plugin.js';
 import {
 	compileSetOperation as compileSetOperationImpl,
-	createLeafCompileFn,
+	type LeafCompileFn,
 } from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
 import { validateIdentifier } from './validate.js';
@@ -251,6 +252,21 @@ function findDuplicateEmittedNqlBindingName(
 		seen.set(emittedName, bindingName);
 	}
 	return undefined;
+}
+
+function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
+	return {
+		rootTable: query.from,
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: query,
+		metadata: {
+			planningTimeMs: 0,
+			relationsAnalyzed: 0,
+			isAmbiguous: false,
+		},
+	};
 }
 // ============================================================================
 // Options
@@ -496,23 +512,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		bindingNames?: BindingNameRegistry,
 	): CompiledQuery<T> {
 		if (bundle.query !== undefined) {
-			const naming = this.buildCompileDeps(options, bindingNames).naming;
-			if (hasBindingName(bindingNames, bundle.query.from, naming)) {
-				throw new Error(
-					`NQL binding '${bundle.query.from}' cannot be used as the final FROM source yet. ` +
-						'Use the binding from a mutation source or WHERE IN predicate, or select from a real table.',
-				);
-			}
-			const model = this.requireNqlCompileModel(options);
-			const planReport = planFn(bundle.query, model, {
-				dialectCapabilities: this.dialectCapabilities,
-			});
+			const deps = this.buildCompileDeps(options, bindingNames);
+			const queryFromBinding = hasBindingName(
+				bindingNames,
+				bundle.query.from,
+				deps.naming,
+			);
+			const planReport = queryFromBinding
+				? createNqlBindingSelectPlan(bundle.query as QueryIntent)
+				: planFn(bundle.query, this.requireNqlCompileModel(options), {
+						dialectCapabilities: this.dialectCapabilities,
+					});
 			return guardCompiledQuery(
-				compileSelect<T>(
-					planReport,
-					options,
-					this.buildCompileDeps(options, bindingNames),
-				),
+				compileSelect<T>(planReport, options, deps),
 				'NQL query',
 			);
 		}
@@ -665,6 +677,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Compile a plan to executable SQL.
+	 *
+	 * When passed a direct `CompiledNqlQuery`, the adapter trusts that the bundle
+	 * has already been semantically validated by the NQL compiler. This method
+	 * still performs adapter-owned SQL safety checks for emitted binding names
+	 * before CTE emission.
 	 */
 	compile<T = unknown>(
 		plan: PlanReport | CompiledNqlQuery,
@@ -915,20 +932,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: CompileOptions,
 		bindingNames?: BindingNameRegistry,
 	): CompiledQuery {
-		const compileFn = createLeafCompileFn(
-			{
-				dialectCapabilities: this.dialectCapabilities,
-				compile: (planReport, leafOptions) =>
-					compileSelect(
-						planReport,
-						leafOptions,
-						this.buildCompileDeps(leafOptions, bindingNames),
-					),
-			},
-			model,
-			planFn,
-			options,
-		);
+		const compileFn: LeafCompileFn = (query) => {
+			const leafOptions: CompileOptions & { model: ModelIR } = {
+				...options,
+				model,
+			};
+			const deps = this.buildCompileDeps(leafOptions, bindingNames);
+			const queryFromBinding = hasBindingName(
+				bindingNames,
+				query.from,
+				deps.naming,
+			);
+			const planReport = queryFromBinding
+				? createNqlBindingSelectPlan(query)
+				: planFn(query, model, {
+						dialectCapabilities: this.dialectCapabilities,
+					});
+			return compileSelect(planReport, leafOptions, deps);
+		};
 		const result = compileSetOperationImpl(intent, compileFn);
 		return guardCompiledQuery(
 			{

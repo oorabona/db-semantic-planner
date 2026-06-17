@@ -1035,6 +1035,7 @@ function compileAnyExpressionWithParams(params: Record<string, unknown>) {
 		pseudoColumnKeywords: new Set(),
 		recursiveKeywords: new Set(),
 		validator: null,
+		bindingOutputColumns: new Map(),
 		params,
 		maxAnyItems: MAX_ANY_ITEMS,
 		allowUnfilteredMutations: false,

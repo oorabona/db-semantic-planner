@@ -282,6 +282,7 @@ export function buildSubqueryFromIntent(
 			aliases: new Map(),
 			paramState: innerState,
 			naming,
+			...(schemaName !== undefined && { schemaName }),
 			...(bindingNames !== undefined && { bindingNames }),
 			compileSubquery: (_nestedIntent, _nestedOffset) => {
 				throw new Error(

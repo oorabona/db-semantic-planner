@@ -42,6 +42,10 @@ const { sql, params } = orm.select('users').where(eq('active', true)).dump();
 // sql, params — no Pool needed
 ```
 
+### Direct NQL bundles
+
+`adapter.compile(compiledNqlBundle, options)` trusts that direct `CompiledNqlQuery` bundles are well-formed and semantically validated by the NQL compiler. The adapter still enforces SQL safety for emitted binding names, including identifier validation and binding/table or binding/binding collision checks before emitting `WITH` CTEs.
+
 ## Key features
 
 - **Parameterized queries** — All user values use `$N` positional parameters; no SQL injection surface

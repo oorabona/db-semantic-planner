@@ -125,6 +125,34 @@ posts
 		expect(rows).toEqual([{ id: 1 }, { id: 2 }, { id: 3 }]);
 	});
 
+	it('executes binding-final read-only queries through WITH CTEs', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number; title: string }>`posts
+			| where id >= ${3}
+			| select id, title
+			| bind recent_posts
+recent_posts
+			| where id < ${5}
+			| select id, title
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "recent_posts" as \(/);
+		expect(dump.sql).toContain(`${SCHEMA}.posts`);
+		expect(dump.sql).toContain('FROM recent_posts');
+		expect(dump.sql).not.toContain(`${SCHEMA}.recent_posts`);
+		expect(dump.params).toEqual([3, 5]);
+		expect(dump.plan.rootTable).toBe('recent_posts');
+		expect(dump.plan.decisions).toEqual([]);
+		expect(rows).toEqual([
+			{ id: 3, title: 'Introduction to PostgreSQL' },
+			{ id: 4, title: 'Draft: React Best Practices' },
+		]);
+	});
+
 	it('rejects mutation binding bodies before execution', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

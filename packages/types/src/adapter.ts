@@ -124,6 +124,10 @@ export interface CompileOptionsBase {
 /**
  * Adapter-facing NQL compile bundle.
  */
+export interface NqlBindingOutputSchema {
+	readonly columns: readonly string[];
+}
+
 export interface CompiledNqlQuery {
 	readonly query?: QueryIntent;
 	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
@@ -132,6 +136,8 @@ export interface CompiledNqlQuery {
 	readonly returning?: readonly string[];
 	/** Named bindings from `| bind X` clauses (CTE source queries) */
 	readonly bindings?: ReadonlyMap<string, QueryIntent>;
+	/** Output column schemas for named NQL bindings. Required for direct bundle validation. */
+	readonly bindingOutputSchemas?: ReadonlyMap<string, NqlBindingOutputSchema>;
 	/** Named mutation bindings from `mutation | select cols | bind X` clauses. */
 	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
 	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */

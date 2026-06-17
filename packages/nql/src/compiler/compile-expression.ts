@@ -5,10 +5,12 @@
  */
 
 import type {
+	ExpressionIntent,
 	ParamIntent,
 	QueryIntent,
 	WhereAnyIntent,
 	WhereComparisonIntent,
+	WhereExpressionIntent,
 	WhereInIntent,
 	WhereIntent,
 	WhereJsonContainsIntent,
@@ -22,6 +24,7 @@ import type {
 	NqlBinaryExpression,
 	NqlComparisonExpression,
 	NqlExpression,
+	NqlFunctionCall,
 	NqlInExpression,
 	NqlIsNullExpression,
 	NqlJsonAccessExpression,
@@ -33,6 +36,7 @@ import type {
 import { compileNestedQuery } from './compile-query.js';
 import { expandDateRange, isDateRangePattern } from './date-range-patterns.js';
 import {
+	assertNoBindingRelationConstruct,
 	coerceToStringKey,
 	expressionToField,
 	expressionToRangeValue,
@@ -200,6 +204,14 @@ function compileComparison(
 		}
 	}
 
+	const havingAggregateComparison = compileHavingAggregateComparison(
+		comp,
+		ctx,
+		aliasContext,
+		outerAliases,
+	);
+	if (havingAggregateComparison) return havingAggregateComparison;
+
 	const field = expressionToField(comp.left, aliasContext);
 	/* v8 ignore start — defensive: parser guarantees LHS is a path expression -- @preserve */
 	if (!field) {
@@ -234,6 +246,38 @@ function compileComparison(
 		value,
 	};
 	return intent;
+}
+
+function compileHavingAggregateComparison(
+	comp: NqlComparisonExpression,
+	ctx: CompilerContext,
+	aliasContext?: string,
+	outerAliases?: string[],
+): WhereExpressionIntent | null {
+	if (
+		ctx.currentHavingAliases === undefined ||
+		aliasContext ||
+		comp.left.type !== 'function'
+	) {
+		return null;
+	}
+
+	const fn = (comp.left as NqlFunctionCall).name.toLowerCase();
+	if (fn !== 'count' || (comp.left as NqlFunctionCall).args.length !== 0) {
+		return null;
+	}
+
+	const exprIntent: ExpressionIntent = {
+		kind: 'aggregate',
+		function: 'count',
+		field: '*',
+	};
+	return {
+		kind: 'expression',
+		expr: exprIntent,
+		operator: mapComparisonOperator(comp.operator),
+		value: resolveFilterValue(comp.right, ctx, aliasContext, outerAliases),
+	};
 }
 
 function compileRange(
@@ -621,11 +665,19 @@ function compileRelationFilter(
 		: (outerAliases ?? []);
 	// Resolve relation target for inner scope validation (first segment of relation path)
 	const prevRelationTarget = ctx.currentRelationTarget;
-	if (ctx.currentFromTable && ctx.validator && relFilter.relation[0]) {
-		ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
+	if (ctx.currentFromTable && relFilter.relation[0]) {
+		assertNoBindingRelationConstruct(
+			ctx,
 			ctx.currentFromTable,
-			relFilter.relation[0],
+			'use relation filters',
+			relFilter.relation.join('.'),
 		);
+		if (ctx.validator) {
+			ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
+				ctx.currentFromTable,
+				relFilter.relation[0],
+			);
+		}
 	}
 	const where = compileExpression(
 		relFilter.condition,

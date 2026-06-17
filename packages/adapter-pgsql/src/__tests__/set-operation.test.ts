@@ -87,6 +87,25 @@ function adapterSetOpToSQLWithParams(
 	);
 }
 
+function adapterNqlBundleToSQL(nql: string): {
+	sql: string;
+	parameters: readonly unknown[];
+} {
+	const compiled = compile(nql, testSchema.model);
+	if (!compiled.success || !compiled.ast) {
+		throw new Error(
+			`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+		);
+	}
+
+	const adapter = createPgsqlCompileOnlyAdapter();
+	const result = adapter.compile(compiled.ast, { model: testSchema.model });
+	return {
+		sql: normalizeSQL(result.sql),
+		parameters: result.parameters,
+	};
+}
+
 function boundSetOpBundleToSQL(
 	op: 'union' | 'intersect' | 'except',
 	schemaName: string,
@@ -228,6 +247,56 @@ describe('compileSetOperation', () => {
 				expect(result.parameters).toEqual([true]);
 			});
 		}
+
+		for (const op of ['union', 'intersect', 'except'] as const) {
+			it(`compiles binding-final left leaf through ${op.toUpperCase()}`, () => {
+				const result = adapterNqlBundleToSQL(
+					`employees | select name | bind employee_names
+employee_names | select name | ${op} (departments | select name)`,
+				);
+
+				expect(result.sql).toContain('with "employee_names" as (');
+				expect(result.sql).toContain('from employee_names');
+				expect(result.parameters).toEqual([]);
+			});
+
+			it(`compiles binding-final inline right leaf through ${op.toUpperCase()}`, () => {
+				const result = adapterNqlBundleToSQL(
+					`employees | select name | bind employee_names
+departments | select name | ${op} (employee_names | select name)`,
+				);
+
+				expect(result.sql).toContain('with "employee_names" as (');
+				expect(result.sql).toContain('from employee_names');
+				expect(result.parameters).toEqual([]);
+			});
+		}
+
+		it('compiles a bound set-operation leaf whose source is another binding', () => {
+			const result = adapterNqlBundleToSQL(
+				`employees | select name | bind employee_names
+employee_names | select name | bind projected_names
+departments | select name | union projected_names`,
+			);
+
+			expect(result.sql).toContain('with "employee_names" as (');
+			expect(result.sql).toContain('"projected_names" as (select');
+			expect(result.sql).toContain('from employee_names');
+			expect(result.parameters).toEqual([]);
+		});
+
+		it('compiles binding-final leaves recursively inside nested set operations', () => {
+			const result = adapterNqlBundleToSQL(
+				`employees | select name | bind employee_names
+departments | select name | union (employee_names | select name | except (departments | select name))`,
+			);
+
+			expect(result.sql).toContain('with "employee_names" as (');
+			expect(result.sql).toContain('union');
+			expect(result.sql).toContain('except');
+			expect(result.sql).toContain('from employee_names');
+			expect(result.parameters).toEqual([]);
+		});
 
 		it('handles no parameters on either side', () => {
 			const result = setOpToSQL(

@@ -5,9 +5,13 @@
  */
 
 import {
+	type ExpressionIntent,
 	type IncludeIntent,
 	isParamIntent,
 	type LockIntent,
+	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	NQL_SELECT_VALUE_FUNCTIONS,
+	type NqlBindingOutputSchema,
 	type OrderByIntent,
 	type ParamIntent,
 	type QueryIntent,
@@ -19,6 +23,7 @@ import {
 import type { Mutable } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
+	NqlExpression,
 	NqlGroupByClause,
 	NqlLimitClause,
 	NqlLockClause,
@@ -32,12 +37,27 @@ import type {
 } from '../parser/ast.js';
 import { resolveBindingsInWhere } from './compile-mutation.js';
 import {
+	assertNoBindingRelationConstruct,
+	assertNoBindingRelationPath,
 	expressionToField,
 	expressionToSql,
+	getKnownBindingColumns,
+	isBindingTable,
 	resolveIntegerCount,
+	validateColumnForTable,
 } from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
 import type { CompilerContext, CompilerFns } from './types.js';
+
+const activeBindingScopes = new WeakMap<
+	CompilerContext,
+	ReadonlyMap<string, QueryIntent>
+>();
+
+const PORTABLE_BINDING_FINAL_FUNCTIONS: ReadonlySet<string> = new Set([
+	...NQL_SELECT_AGGREGATE_FUNCTIONS,
+	...NQL_SELECT_VALUE_FUNCTIONS,
+]);
 
 /**
  * Compile a nested query without leaking the nested query's mutable context
@@ -52,16 +72,19 @@ export function compileNestedQuery(
 	const savedContext = {
 		currentFromTable: ctx.currentFromTable,
 		currentRelationTarget: ctx.currentRelationTarget,
+		currentHavingAliases: ctx.currentHavingAliases,
 	};
 
 	try {
-		if (bindings) {
-			return compileQuery(query, ctx, fns, bindings);
+		const nestedBindings = bindings ?? activeBindingScopes.get(ctx);
+		if (nestedBindings) {
+			return compileQuery(query, ctx, fns, nestedBindings);
 		}
 		return fns.compileQuery(query, ctx);
 	} finally {
 		ctx.currentFromTable = savedContext.currentFromTable;
 		ctx.currentRelationTarget = savedContext.currentRelationTarget;
+		ctx.currentHavingAliases = savedContext.currentHavingAliases;
 	}
 }
 
@@ -76,6 +99,338 @@ export function compileQuery(
 	fns: CompilerFns,
 	bindings?: ReadonlyMap<string, QueryIntent>,
 ): QueryIntent | SetOperationIntent {
+	const hadPreviousBindingScope = activeBindingScopes.has(ctx);
+	const previousBindingScope = activeBindingScopes.get(ctx);
+	if (bindings) {
+		activeBindingScopes.set(ctx, bindings);
+	}
+
+	try {
+		return compileQueryInternal(query, ctx, fns, bindings);
+	} finally {
+		if (hadPreviousBindingScope && previousBindingScope) {
+			activeBindingScopes.set(ctx, previousBindingScope);
+		} else {
+			activeBindingScopes.delete(ctx);
+		}
+	}
+}
+
+function collectSelectAliasesFromQuery(query: NqlQuery): ReadonlySet<string> {
+	const aliases = new Set<string>();
+	for (const clause of query.clauses) {
+		if (clause.type !== 'select') continue;
+		for (const item of (clause as NqlSelectClause).items) {
+			if (item.type === 'expression' && item.alias) {
+				aliases.add(item.alias);
+			}
+		}
+	}
+	return aliases;
+}
+
+function throwUnsupportedBindingFinal(
+	bindingName: string,
+	feature: string,
+): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Query '${bindingName}' reads from an NQL binding and cannot use ${feature} in a binding-final query (#183). Binding-final queries are restricted to portable common-ground SQL over projected binding columns: SELECT (including plain DISTINCT), WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, and UNION/INTERSECT/EXCEPT.`,
+	);
+}
+
+function validateBindingFinalPath(
+	expr: Extract<NqlExpression, { type: 'path' }>,
+	ctx: CompilerContext,
+	bindingName: string,
+): void {
+	const { segments } = expr;
+	if (segments.length === 1) {
+		if (ctx.currentHavingAliases?.has(segments[0]!)) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`HAVING cannot reference SELECT alias '${segments[0]!}'. PostgreSQL does not allow SELECT aliases in HAVING; repeat the aggregate expression or filter the result in an outer query.`,
+			);
+		}
+		validateColumnForTable(ctx, bindingName, segments[0]!);
+		return;
+	}
+
+	const firstSegment = segments[0]!;
+	if (ctx.pseudoColumnKeywords.has(firstSegment.toLowerCase())) {
+		assertNoBindingRelationConstruct(
+			ctx,
+			bindingName,
+			'use pseudo-column traversals',
+			firstSegment,
+		);
+		return;
+	}
+
+	assertNoBindingRelationPath(ctx, bindingName, segments.join('.'));
+}
+
+function validateBindingFinalFunction(
+	expr: Extract<NqlExpression, { type: 'function' }>,
+	ctx: CompilerContext,
+	bindingName: string,
+): void {
+	const fn = expr.name.toLowerCase();
+	if (!PORTABLE_BINDING_FINAL_FUNCTIONS.has(fn)) {
+		throwUnsupportedBindingFinal(bindingName, `function ${expr.name}()`);
+	}
+	for (const arg of expr.args) {
+		validateBindingFinalExpression(arg, ctx, bindingName);
+	}
+}
+
+function validateBindingFinalExpression(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+	bindingName: string,
+): void {
+	switch (expr.type) {
+		case 'path':
+			validateBindingFinalPath(expr, ctx, bindingName);
+			break;
+		case 'binary':
+			validateBindingFinalExpression(expr.left, ctx, bindingName);
+			validateBindingFinalExpression(expr.right, ctx, bindingName);
+			break;
+		case 'unary':
+			validateBindingFinalExpression(expr.operand, ctx, bindingName);
+			break;
+		case 'comparison':
+			validateBindingFinalExpression(expr.left, ctx, bindingName);
+			validateBindingFinalExpression(expr.right, ctx, bindingName);
+			break;
+		case 'in':
+			validateBindingFinalExpression(expr.expression, ctx, bindingName);
+			if (Array.isArray(expr.values)) {
+				for (const value of expr.values) {
+					validateBindingFinalExpression(value, ctx, bindingName);
+				}
+			} else if (expr.values.type === 'dateRange') {
+				// Date-range values compile to ordinary comparison predicates.
+			} else {
+				// IN subqueries keep their own source context; binding-sourced nested
+				// queries are validated when compileNestedQuery compiles that query.
+			}
+			break;
+		case 'between':
+			validateBindingFinalExpression(expr.expression, ctx, bindingName);
+			validateBindingFinalExpression(expr.low, ctx, bindingName);
+			validateBindingFinalExpression(expr.high, ctx, bindingName);
+			break;
+		case 'isNull':
+			validateBindingFinalExpression(expr.expression, ctx, bindingName);
+			break;
+		case 'function':
+			validateBindingFinalFunction(expr, ctx, bindingName);
+			break;
+		case 'case':
+			if (expr.subject) {
+				validateBindingFinalExpression(expr.subject, ctx, bindingName);
+			}
+			for (const when of expr.whenClauses) {
+				validateBindingFinalExpression(when.condition, ctx, bindingName);
+				validateBindingFinalExpression(when.result, ctx, bindingName);
+			}
+			if (expr.elseClause) {
+				validateBindingFinalExpression(expr.elseClause, ctx, bindingName);
+			}
+			break;
+		case 'relationFilter':
+			assertNoBindingRelationConstruct(
+				ctx,
+				bindingName,
+				'use relation filters',
+				expr.relation.join('.'),
+			);
+			break;
+		case 'any':
+			throwUnsupportedBindingFinal(bindingName, 'ANY(:param)');
+			break;
+		case 'rangeOp':
+		case 'rangeLiteral':
+			throwUnsupportedBindingFinal(bindingName, 'PostgreSQL range operators');
+			break;
+		case 'jsonAccess':
+		case 'jsonComparison':
+			throwUnsupportedBindingFinal(bindingName, 'PostgreSQL JSON operators');
+			break;
+		case 'window':
+			throwUnsupportedBindingFinal(bindingName, 'window functions');
+			break;
+		case 'exists':
+			throwUnsupportedBindingFinal(bindingName, 'EXISTS subqueries');
+			break;
+		case 'subquery':
+			throwUnsupportedBindingFinal(bindingName, 'scalar subqueries');
+			break;
+		case 'variable':
+			throwUnsupportedBindingFinal(bindingName, `variable '${expr.name}'`);
+			break;
+		case 'namedParam':
+		case 'string':
+		case 'number':
+		case 'boolean':
+		case 'null':
+		case 'dateRange':
+			break;
+		/* v8 ignore next — defensive: default-reject future expression shapes in binding-final queries -- @preserve */
+		default:
+			throwUnsupportedBindingFinal(
+				bindingName,
+				`expression type '${(expr as { type?: unknown }).type ?? 'unknown'}'`,
+			);
+	}
+}
+
+function validateBindingFinalSelectClause(
+	clause: NqlSelectClause,
+	ctx: CompilerContext,
+	bindingName: string,
+): void {
+	const distinctOn = (clause as NqlSelectClause & { distinctOn?: unknown })
+		.distinctOn;
+	if (distinctOn !== undefined) {
+		throwUnsupportedBindingFinal(bindingName, 'DISTINCT ON');
+	}
+
+	for (const item of clause.items) {
+		switch (item.type) {
+			case 'star':
+				break;
+			case 'relationStar':
+				assertNoBindingRelationConstruct(
+					ctx,
+					bindingName,
+					'select relation columns',
+					item.relation.join('.'),
+				);
+				break;
+			case 'expression':
+				if (
+					item.expression.type === 'path' &&
+					item.expression.segments.length > 1
+				) {
+					const segments = item.expression.segments;
+					const firstSegment = segments[0]!;
+					if (ctx.pseudoColumnKeywords.has(firstSegment.toLowerCase())) {
+						assertNoBindingRelationConstruct(
+							ctx,
+							bindingName,
+							'use pseudo-column traversals',
+							firstSegment,
+						);
+					} else {
+						assertNoBindingRelationConstruct(
+							ctx,
+							bindingName,
+							'select relation columns',
+							segments.slice(0, -1).join('.'),
+						);
+					}
+				} else {
+					validateBindingFinalExpression(item.expression, ctx, bindingName);
+				}
+				break;
+			/* v8 ignore next — defensive: default-reject future select item shapes in binding-final queries -- @preserve */
+			default:
+				throwUnsupportedBindingFinal(
+					bindingName,
+					`SELECT item type '${(item as { type?: unknown }).type ?? 'unknown'}'`,
+				);
+		}
+	}
+}
+
+function validateBindingFinalQuery(
+	query: NqlQuery,
+	ctx: CompilerContext,
+): void {
+	const groupByIndex = query.clauses.findIndex((c) => c.type === 'groupBy');
+	const havingAliases = collectSelectAliasesFromQuery(query);
+
+	for (let i = 0; i < query.clauses.length; i++) {
+		const clause = query.clauses[i]!;
+		switch (clause.type) {
+			case 'where': {
+				if (groupByIndex >= 0 && i > groupByIndex) {
+					const previousHavingAliases = ctx.currentHavingAliases;
+					ctx.currentHavingAliases = havingAliases;
+					try {
+						validateBindingFinalExpression(clause.condition, ctx, query.table);
+					} finally {
+						ctx.currentHavingAliases = previousHavingAliases;
+					}
+				} else {
+					validateBindingFinalExpression(clause.condition, ctx, query.table);
+				}
+				break;
+			}
+			case 'select':
+				validateBindingFinalSelectClause(clause, ctx, query.table);
+				break;
+			case 'groupBy':
+				for (const expr of clause.expressions) {
+					validateBindingFinalExpression(expr, ctx, query.table);
+				}
+				break;
+			case 'orderBy':
+				for (const item of clause.items) {
+					validateBindingFinalExpression(item.expression, ctx, query.table);
+				}
+				break;
+			case 'limit':
+				if (clause.relation) {
+					assertNoBindingRelationConstruct(
+						ctx,
+						query.table,
+						'use relation include limits',
+						clause.relation,
+					);
+				}
+				break;
+			case 'offset':
+			case 'bind':
+			case 'setOperation':
+				break;
+			case 'flat':
+				throwUnsupportedBindingFinal(query.table, 'flat relation include mode');
+				break;
+			case 'lock':
+				throwUnsupportedBindingFinal(
+					query.table,
+					'row-level locks (FOR UPDATE / SKIP LOCKED), because locks over a CTE binding are silently ineffective',
+				);
+				break;
+			/* v8 ignore next — defensive: default-reject future clauses in binding-final queries -- @preserve */
+			default:
+				throwUnsupportedBindingFinal(
+					query.table,
+					`clause '${(clause as { type?: unknown }).type ?? 'unknown'}'`,
+				);
+		}
+	}
+}
+
+function compileQueryInternal(
+	query: NqlQuery,
+	ctx: CompilerContext,
+	fns: CompilerFns,
+	bindings?: ReadonlyMap<string, QueryIntent>,
+): QueryIntent | SetOperationIntent {
+	const bindingSource = bindings?.get(query.table);
+	const isBindingSource =
+		bindingSource !== undefined || isBindingTable(ctx, query.table);
+	ctx.currentFromTable = query.table;
+	ctx.validator?.validateTable(query.table);
+	if (isBindingSource) {
+		validateBindingFinalQuery(query, ctx);
+	}
+
 	// Check for set operation clause
 	const setClauseIndex = query.clauses.findIndex(
 		(c) => c.type === 'setOperation',
@@ -83,8 +438,6 @@ export function compileQuery(
 	if (setClauseIndex >= 0) {
 		return compileSetOperation(query, setClauseIndex, ctx, fns, bindings);
 	}
-	ctx.currentFromTable = query.table;
-	ctx.validator?.validateTable(query.table);
 
 	// Track if we've seen groupBy (for WHERE vs HAVING)
 	let groupByIndex = -1;
@@ -94,6 +447,7 @@ export function compileQuery(
 			break;
 		}
 	}
+	const havingAliases = collectSelectAliasesFromQuery(query);
 
 	// Process clauses and collect results
 	const whereConditions: WhereIntent[] = [];
@@ -115,16 +469,36 @@ export function compileQuery(
 
 		switch (clause.type) {
 			case 'where': {
-				const condition = resolveBindingsInWhere(
-					fns.compileExpression((clause as NqlWhereClause).condition, ctx, fns),
-					bindings,
-				);
 				if (groupByIndex >= 0 && i > groupByIndex) {
+					const previousHavingAliases = ctx.currentHavingAliases;
+					ctx.currentHavingAliases = havingAliases;
+					const condition = (() => {
+						try {
+							return resolveBindingsInWhere(
+								fns.compileExpression(
+									(clause as NqlWhereClause).condition,
+									ctx,
+									fns,
+								),
+								bindings,
+							);
+						} finally {
+							ctx.currentHavingAliases = previousHavingAliases;
+						}
+					})();
 					havingConditions.push(condition);
 				} /* v8 ignore start — not yet reachable: include-batch WHERE merging requires WITH clause (not yet in grammar) -- @preserve */ else if (
 					currentIncludeBatch &&
 					currentIncludeBatch.length > 0
 				) {
+					const condition = resolveBindingsInWhere(
+						fns.compileExpression(
+							(clause as NqlWhereClause).condition,
+							ctx,
+							fns,
+						),
+						bindings,
+					);
 					const targetInclude =
 						currentIncludeBatch[currentIncludeBatch.length - 1]!;
 					const mutableInclude = targetInclude as Mutable<IncludeIntent>;
@@ -137,6 +511,14 @@ export function compileQuery(
 						mutableInclude.where = condition;
 					}
 				} /* v8 ignore stop -- @preserve */ else {
+					const condition = resolveBindingsInWhere(
+						fns.compileExpression(
+							(clause as NqlWhereClause).condition,
+							ctx,
+							fns,
+						),
+						bindings,
+					);
 					whereConditions.push(condition);
 				}
 				break;
@@ -222,6 +604,12 @@ export function compileQuery(
 
 	// Apply per-include limits
 	if (includeLimits.size > 0) {
+		if (isBindingSource) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Query '${query.table}' reads from an NQL binding and cannot use relation include limits (${[...includeLimits.keys()].join(', ')}). Relation includes require a physical model table, not a CTE binding.`,
+			);
+		}
 		for (const [relation, limitCount] of includeLimits) {
 			const rootRelation = relation.split('.')[0]!;
 			const targetInclude = allIncludes.find(
@@ -255,7 +643,7 @@ export function compileQuery(
 		having = { kind: 'and', conditions: havingConditions };
 	}
 
-	return {
+	const compiledQuery: QueryIntent = {
 		type: 'select',
 		from: query.table,
 		...(select !== undefined && { select }),
@@ -269,6 +657,8 @@ export function compileQuery(
 		...(offset !== undefined && { offset }),
 		...(lock !== undefined && { lock }),
 	};
+
+	return compiledQuery;
 }
 
 /**
@@ -303,6 +693,255 @@ function getExplicitColumnCount(
 		/* v8 ignore next — defensive: exhaustive switch -- @preserve */
 		default:
 			return undefined;
+	}
+}
+
+function expressionOutputColumn(expr: ExpressionIntent): string | undefined {
+	switch (expr.kind) {
+		case 'column':
+			if (expr.column === '*') return undefined;
+			return expr.as ?? expr.column;
+		case 'columnAlias':
+			return expr.alias;
+		case 'relationColumn':
+			if (expr.column === '*') return undefined;
+			return expr.as;
+		case 'aggregate':
+		case 'function':
+		case 'subquery':
+		case 'arithmetic':
+		case 'literal':
+		case 'case':
+		case 'jsonExtract':
+		case 'jsonPathExtract':
+		case 'customOp':
+		case 'customFn':
+		case 'array':
+		case 'unary':
+		case 'param':
+			return expr.as;
+		case 'coalesce':
+		case 'raw':
+		case 'pseudoColumn':
+			return expr.as;
+		case 'window':
+			return expr.alias;
+		case 'comparison':
+		case 'jsonContains':
+		case 'jsonExists':
+		case 'ref':
+		case 'cast':
+		case 'namedArg':
+		case 'star':
+			return undefined;
+		/* v8 ignore next — defensive: exhaustive switch -- @preserve */
+		default:
+			return undefined;
+	}
+}
+
+function addUnique(columns: string[], seen: Set<string>, column: string): void {
+	if (seen.has(column)) return;
+	seen.add(column);
+	columns.push(column);
+}
+
+function resolveSourceOutputColumns(
+	intent: QueryIntent,
+	ctx: CompilerContext,
+	bindingName: string,
+): readonly string[] {
+	const bindingColumns = getKnownBindingColumns(ctx, intent.from);
+	if (bindingColumns !== undefined) return bindingColumns;
+	const columns = ctx.validator?.getTableColumns(intent.from);
+	if (columns !== undefined) return columns;
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Cannot compute output schema for NQL binding '${bindingName}' from SELECT * on '${intent.from}' without a concrete table schema.`,
+	);
+}
+
+export function getQueryOutputSchema(
+	intent: QueryIntent,
+	ctx: CompilerContext,
+	bindingName: string,
+): NqlBindingOutputSchema {
+	const columns: string[] = [];
+	const seen = new Set<string>();
+	const addColumn = (column: string) => addUnique(columns, seen, column);
+	const addSourceColumns = () => {
+		for (const column of resolveSourceOutputColumns(intent, ctx, bindingName)) {
+			addColumn(column);
+		}
+	};
+	const { select } = intent;
+	if (!select || select.type === 'all') {
+		addSourceColumns();
+		return { columns };
+	}
+
+	if (select.type === 'fields') {
+		for (const field of select.fields) {
+			if (field === '*') {
+				addSourceColumns();
+			} else {
+				addColumn(field);
+			}
+		}
+		return { columns };
+	}
+
+	if (select.type === 'aggregate') {
+		for (const field of select.fields ?? []) {
+			addColumn(field);
+		}
+		for (const aggregate of select.aggregates) {
+			if (!aggregate.as) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`Cannot compute output schema for NQL binding '${bindingName}': aggregate '${aggregate.function}' must use an alias.`,
+				);
+			}
+			addColumn(aggregate.as);
+		}
+		return { columns };
+	}
+
+	for (const expr of select.columns) {
+		if (expr.kind === 'column' && expr.column === '*') {
+			addSourceColumns();
+			continue;
+		}
+		if (expr.kind === 'relationColumn' && expr.column === '*') {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Cannot compute output schema for NQL binding '${bindingName}' from relation SELECT * '${expr.relation}.*'. Use explicit aliases for binding outputs.`,
+			);
+		}
+		const outputColumn = expressionOutputColumn(expr);
+		if (!outputColumn) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Cannot compute output schema for NQL binding '${bindingName}': selected expression must use an alias.`,
+			);
+		}
+		addColumn(outputColumn);
+	}
+	return { columns };
+}
+
+function validateNqlExpressionPaths(
+	expr: NqlExpression,
+	ctx: CompilerContext,
+): void {
+	switch (expr.type) {
+		case 'path':
+			if (expr.segments.length === 1) {
+				if (ctx.currentFromTable && isBindingTable(ctx, ctx.currentFromTable)) {
+					validateColumnForTable(ctx, ctx.currentFromTable, expr.segments[0]!);
+				}
+			} else if (
+				ctx.currentFromTable &&
+				isBindingTable(ctx, ctx.currentFromTable)
+			) {
+				assertNoBindingRelationPath(
+					ctx,
+					ctx.currentFromTable,
+					expr.segments.join('.'),
+				);
+			}
+			break;
+		case 'binary':
+			validateNqlExpressionPaths(expr.left, ctx);
+			validateNqlExpressionPaths(expr.right, ctx);
+			break;
+		case 'unary':
+			validateNqlExpressionPaths(expr.operand, ctx);
+			break;
+		case 'comparison':
+		case 'jsonComparison':
+			validateNqlExpressionPaths(expr.left, ctx);
+			validateNqlExpressionPaths(expr.right, ctx);
+			break;
+		case 'rangeOp':
+			validateNqlExpressionPaths(expr.left, ctx);
+			if (expr.scalar) {
+				validateNqlExpressionPaths(expr.scalar, ctx);
+			}
+			break;
+		case 'in':
+			validateNqlExpressionPaths(expr.expression, ctx);
+			if (Array.isArray(expr.values)) {
+				for (const value of expr.values) {
+					validateNqlExpressionPaths(value, ctx);
+				}
+			}
+			break;
+		case 'any':
+			validateNqlExpressionPaths(expr.column, ctx);
+			break;
+		case 'between':
+			validateNqlExpressionPaths(expr.expression, ctx);
+			validateNqlExpressionPaths(expr.low, ctx);
+			validateNqlExpressionPaths(expr.high, ctx);
+			break;
+		case 'isNull':
+			validateNqlExpressionPaths(expr.expression, ctx);
+			break;
+		case 'function':
+			for (const arg of expr.args) {
+				validateNqlExpressionPaths(arg, ctx);
+			}
+			break;
+		case 'window':
+			for (const arg of expr.args) {
+				validateNqlExpressionPaths(arg, ctx);
+			}
+			for (const item of expr.orderBy) {
+				validateNqlExpressionPaths(item.expression, ctx);
+			}
+			for (const partitionBy of expr.partitionBy) {
+				validateNqlExpressionPaths(partitionBy, ctx);
+			}
+			break;
+		case 'case':
+			if (expr.subject) {
+				validateNqlExpressionPaths(expr.subject, ctx);
+			}
+			for (const when of expr.whenClauses) {
+				validateNqlExpressionPaths(when.condition, ctx);
+				validateNqlExpressionPaths(when.result, ctx);
+			}
+			if (expr.elseClause) {
+				validateNqlExpressionPaths(expr.elseClause, ctx);
+			}
+			break;
+		case 'jsonAccess':
+			validateNqlExpressionPaths(expr.base, ctx);
+			break;
+		case 'relationFilter':
+			assertNoBindingRelationConstruct(
+				ctx,
+				ctx.currentFromTable,
+				'use relation filters',
+				expr.relation.join('.'),
+			);
+			break;
+		case 'exists':
+		case 'subquery':
+			break;
+		case 'variable':
+		case 'namedParam':
+		case 'string':
+		case 'number':
+		case 'boolean':
+		case 'null':
+		case 'dateRange':
+		case 'rangeLiteral':
+			break;
+		/* v8 ignore next — defensive: exhaustive switch -- @preserve */
+		default:
+			break;
 	}
 }
 
@@ -384,10 +1023,11 @@ function compileGroupByClause(
 	ctx: CompilerContext,
 ): readonly string[] {
 	return clause.expressions.map((expr) => {
+		validateNqlExpressionPaths(expr, ctx);
 		if (expr.type === 'path') {
 			const field = expr.segments.join('.');
 			if (ctx.currentFromTable && !field.includes('.')) {
-				ctx.validator?.validateColumn(ctx.currentFromTable, field);
+				validateColumnForTable(ctx, ctx.currentFromTable, field);
 			}
 			return field;
 		}
@@ -412,10 +1052,21 @@ function compileOrderItem(
 	item: NqlOrderItem,
 	ctx: CompilerContext,
 ): OrderByIntent {
+	validateNqlExpressionPaths(item.expression, ctx);
 	const field = expressionToField(item.expression);
 	if (field) {
-		if (ctx.currentFromTable && !field.includes('.') && !field.includes('(')) {
-			ctx.validator?.validateColumn(ctx.currentFromTable, field);
+		if (
+			ctx.currentFromTable &&
+			field.includes('.') &&
+			isBindingTable(ctx, ctx.currentFromTable)
+		) {
+			assertNoBindingRelationPath(ctx, ctx.currentFromTable, field);
+		} else if (
+			ctx.currentFromTable &&
+			!field.includes('.') &&
+			!field.includes('(')
+		) {
+			validateColumnForTable(ctx, ctx.currentFromTable, field);
 		}
 		return { field, direction: item.direction };
 	}

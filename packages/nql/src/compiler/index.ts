@@ -53,10 +53,12 @@ export type {
 
 import type {
 	MutationIntent,
+	NqlBindingOutputSchema,
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
 import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlMutationPipeline,
 	NqlProgram,
@@ -74,7 +76,7 @@ import {
 	compileMutationPipeline,
 	extractBindName,
 } from './compile-mutation.js';
-import { compileQuery } from './compile-query.js';
+import { compileQuery, getQueryOutputSchema } from './compile-query.js';
 import { compileSelectClause } from './compile-select.js';
 import { validateParamsMap } from './expression-utils.js';
 
@@ -112,6 +114,14 @@ function allowsInternalParams(
 	return internalOptions?.allowInternalParams === true;
 }
 
+function isUnresolvedSelectAllOutputSchemaError(error: unknown): boolean {
+	return (
+		error instanceof NqlSemanticException &&
+		error.message.includes('from SELECT *') &&
+		error.message.includes('without a concrete table schema')
+	);
+}
+
 /**
  * Compiler that transforms NQL AST to IntentAST.
  * Thin coordinator: holds context, wires domain modules via CompilerFns.
@@ -143,9 +153,11 @@ export class NqlCompiler {
 		this.ctx = {
 			currentFromTable: undefined,
 			currentRelationTarget: undefined,
+			currentHavingAliases: undefined,
 			pseudoColumnKeywords,
 			recursiveKeywords,
 			validator,
+			bindingOutputColumns: new Map(),
 			params,
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
@@ -169,6 +181,15 @@ export class NqlCompiler {
 	 * Compile an NQL program to IntentAST.
 	 */
 	compile(program: NqlProgram): CompileResult {
+		try {
+			return this.compileProgram(program);
+		} finally {
+			this.ctx.bindingOutputColumns.clear();
+			this.ctx.validator?.clearVirtualBindingTables();
+		}
+	}
+
+	private compileProgram(program: NqlProgram): CompileResult {
 		if (program.statements.length === 0) {
 			return {};
 		}
@@ -195,6 +216,7 @@ export class NqlCompiler {
 
 		// Multi-statement: build bindings map, resolve references
 		const bindings = new Map<string, QueryIntent>();
+		const bindingOutputSchemas = new Map<string, NqlBindingOutputSchema>();
 		const mutationBindings = new Map<string, MutationIntent>();
 		const materializedBindStatements = new Set<number>();
 		let lastResult: CompileResult = {};
@@ -206,12 +228,28 @@ export class NqlCompiler {
 			const bindName = extractBindName(stmt);
 			if (bindName) {
 				if (lastResult.query) {
+					const outputSchema = this.registerQueryBindingOutputSchema(
+						bindName,
+						lastResult.query,
+						bindingOutputSchemas,
+					);
 					bindings.set(bindName, lastResult.query);
+					if (outputSchema) {
+						this.ctx.validator?.addVirtualBindingTable(
+							bindName,
+							outputSchema.columns,
+						);
+					}
 					materializedBindStatements.add(i);
 				} else if (lastResult.mutation?.returning?.length) {
 					// Mutation with RETURNING: store the original mutation for CTE compilation
 					// and a synthetic QueryIntent for reference resolution in WHERE clauses
 					mutationBindings.set(bindName, lastResult.mutation);
+					const outputSchema = this.getMutationBindingOutputSchema(
+						bindName,
+						lastResult.mutation,
+					);
+					this.ctx.bindingOutputColumns.set(bindName, outputSchema?.columns);
 					bindings.set(bindName, {
 						type: 'select',
 						from: lastResult.mutation.table,
@@ -220,6 +258,13 @@ export class NqlCompiler {
 							fields: [...lastResult.mutation.returning],
 						},
 					});
+					if (outputSchema) {
+						bindingOutputSchemas.set(bindName, outputSchema);
+						this.ctx.validator?.addVirtualBindingTable(
+							bindName,
+							outputSchema.columns,
+						);
+					}
 					materializedBindStatements.add(i);
 				}
 				// Note: set operations cannot currently be bound as CTE sources
@@ -237,14 +282,56 @@ export class NqlCompiler {
 		}
 
 		const hasMutationBindings = mutationBindings.size > 0;
+		const hasBindingOutputSchemas = bindingOutputSchemas.size > 0;
 		if (bindings.size > 0) {
 			return {
 				...lastResult,
 				bindings,
+				...(hasBindingOutputSchemas && { bindingOutputSchemas }),
 				...(hasMutationBindings && { mutationBindings }),
 			};
 		}
 		return lastResult;
+	}
+
+	private registerQueryBindingOutputSchema(
+		bindName: string,
+		query: QueryIntent,
+		bindingOutputSchemas: Map<string, NqlBindingOutputSchema>,
+	): NqlBindingOutputSchema | undefined {
+		try {
+			const outputSchema = getQueryOutputSchema(query, this.ctx, bindName);
+			bindingOutputSchemas.set(bindName, outputSchema);
+			this.ctx.bindingOutputColumns.set(bindName, outputSchema.columns);
+			return outputSchema;
+		} catch (error) {
+			if (
+				!this.ctx.validator &&
+				isUnresolvedSelectAllOutputSchemaError(error)
+			) {
+				this.ctx.bindingOutputColumns.set(bindName, undefined);
+				return undefined;
+			}
+			throw error;
+		}
+	}
+
+	private getMutationBindingOutputSchema(
+		bindName: string,
+		mutation: MutationIntent,
+	): NqlBindingOutputSchema | undefined {
+		const returning = mutation.returning;
+		if (!returning || returning.length === 0) return undefined;
+		if (returning.includes('*')) {
+			const columns = this.ctx.validator?.getTableColumns(mutation.table);
+			if (columns !== undefined) return { columns };
+			if (!this.ctx.validator) return undefined;
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Cannot compute output schema for NQL binding '${bindName}' from mutation RETURNING * on '${mutation.table}' without a concrete table schema.`,
+			);
+		}
+		return { columns: [...returning] };
 	}
 
 	private compileSingleStatement(

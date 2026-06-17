@@ -169,6 +169,81 @@ export function expressionToField(
 	return null;
 }
 
+export function isBindingTable(
+	ctx: CompilerContext,
+	table: string | undefined,
+): boolean {
+	if (table === undefined) return false;
+	return (
+		ctx.bindingOutputColumns.has(table) ||
+		ctx.validator?.isVirtualBindingTable?.(table) === true
+	);
+}
+
+function bindingColumns(
+	ctx: CompilerContext,
+	table: string | undefined,
+): readonly string[] | undefined {
+	if (table === undefined) return undefined;
+	if (ctx.bindingOutputColumns.has(table)) {
+		return ctx.bindingOutputColumns.get(table);
+	}
+	return ctx.validator?.getVirtualBindingColumns?.(table);
+}
+
+export function getKnownBindingColumns(
+	ctx: CompilerContext,
+	table: string | undefined,
+): readonly string[] | undefined {
+	return bindingColumns(ctx, table);
+}
+
+export function assertNoBindingRelationConstruct(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	construct: string,
+	detail: string,
+): void {
+	if (!isBindingTable(ctx, bindingName)) return;
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Query '${bindingName}' reads from an NQL binding and cannot ${construct} (${detail}). Relation constructs require a physical model table, not a CTE binding.`,
+	);
+}
+
+export function assertNoBindingRelationPath(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	path: string,
+): void {
+	if (!isBindingTable(ctx, bindingName)) return;
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Query '${bindingName}' reads from an NQL binding and cannot reference relation path '${path}'. Relation paths require a physical model table, not a CTE binding.`,
+	);
+}
+
+export function validateColumnForTable(
+	ctx: CompilerContext,
+	table: string | undefined,
+	column: string,
+): void {
+	if (table === undefined || column === '*') return;
+	if (isBindingTable(ctx, table)) {
+		const columns = bindingColumns(ctx, table);
+		if (columns === undefined) return;
+		if (!columns.some((c) => c === column)) {
+			const available = columns.join(', ') || '(none)';
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_UNKNOWN_COLUMN,
+				`Column '${column}' is not projected by NQL binding '${table}'. Available columns: ${available}`,
+			);
+		}
+		return;
+	}
+	ctx.validator?.validateColumn(table, column);
+}
+
 /**
  * Convert an expression to a plain value for use in intents.
  */
@@ -195,6 +270,24 @@ export function expressionToValue(
 			return null;
 		case 'path':
 			// Path in value context -> internal field reference for computed columns.
+			if (ctx) {
+				const field = expr.segments.join('.');
+				const isBindingReference =
+					expr.segments.length === 1 && isBindingTable(ctx, field);
+				if (isBindingReference) {
+					return createNqlBindingRef(field);
+				}
+				const sourceTable = ctx.currentFromTable;
+				const isVirtualBindingSource =
+					sourceTable !== undefined && isBindingTable(ctx, sourceTable);
+				if (isVirtualBindingSource) {
+					if (field.includes('.')) {
+						assertNoBindingRelationPath(ctx, sourceTable, field);
+					} else {
+						validateColumnForTable(ctx, sourceTable, field);
+					}
+				}
+			}
 			return createNqlBindingRef(expr.segments.join('.'));
 		case 'function': {
 			// Function call in value context → special value
@@ -422,6 +515,28 @@ export function validateWhereField(
 	aliasContext?: string,
 	originalExpr?: NqlExpression,
 ): void {
+	if (
+		!aliasContext &&
+		!field.includes('.') &&
+		ctx.currentHavingAliases?.has(field)
+	) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`HAVING cannot reference SELECT alias '${field}'. PostgreSQL does not allow SELECT aliases in HAVING; repeat the aggregate expression or filter the result in an outer query.`,
+		);
+	}
+	if (
+		!aliasContext &&
+		ctx.currentFromTable &&
+		isBindingTable(ctx, ctx.currentFromTable)
+	) {
+		if (field.includes('.')) {
+			assertNoBindingRelationPath(ctx, ctx.currentFromTable, field);
+		} else {
+			validateColumnForTable(ctx, ctx.currentFromTable, field);
+		}
+		return;
+	}
 	if (!ctx.validator) return;
 	if (aliasContext) {
 		// Inside relation filter — determine if field is inner or outer scope
@@ -448,8 +563,14 @@ export function validateWhereField(
 		return;
 	}
 	// Simple column on root table
+	if (ctx.currentFromTable && field.includes('.')) {
+		if (isBindingTable(ctx, ctx.currentFromTable)) {
+			assertNoBindingRelationPath(ctx, ctx.currentFromTable, field);
+		}
+		return;
+	}
 	if (ctx.currentFromTable && !field.includes('.')) {
-		ctx.validator.validateColumn(ctx.currentFromTable, field);
+		validateColumnForTable(ctx, ctx.currentFromTable, field);
 	}
 }
 
