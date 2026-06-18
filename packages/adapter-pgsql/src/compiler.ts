@@ -9,6 +9,7 @@
 
 import { InvalidOperationError } from '@dbsp/core';
 import {
+	type DialectCapabilities,
 	type ExpressionIntent,
 	isParamIntent,
 	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
@@ -49,6 +50,7 @@ import {
 	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
+import { assertDialectCapability } from './dialect-capabilities.js';
 import { resolveCaseValue as resolveCaseValueShared } from './handlers/expression/case-value.js';
 import {
 	compileExpressionIntent,
@@ -589,6 +591,7 @@ function renumberNode(value: unknown, offset: number): unknown {
 export interface CompilerOptions {
 	readonly naming?: NamingPlugin;
 	readonly schema?: string;
+	readonly dialectCapabilities?: DialectCapabilities;
 	/** Default primary key column name convention (default: 'id') */
 	readonly defaultPkColumnName?: string;
 	/** Convention for deriving FK column names: (tableName, pkName) => fkColumnName */
@@ -622,6 +625,7 @@ export class PlanCompiler {
 	private readonly defaultPk: string;
 	private readonly deriveFk: FkColumnDerivation;
 	private readonly model: import('@dbsp/types').ModelIR | undefined;
+	private readonly dialectCapabilities: DialectCapabilities | undefined;
 	private readonly bindingNames: BindingNameRegistry | undefined;
 	/** Mutable state shared with extracted condition/value compilation functions */
 	private state: HandlerCompilerState = {
@@ -663,6 +667,7 @@ export class PlanCompiler {
 		this.defaultPk = options.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options.deriveFkColumnName ?? defaultFkDerivation;
 		this.model = options.model ?? undefined;
+		this.dialectCapabilities = options.dialectCapabilities;
 		this.bindingNames = options.bindingNames;
 	}
 
@@ -675,6 +680,9 @@ export class PlanCompiler {
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.model !== undefined && { model: this.model }),
+			...(this.dialectCapabilities !== undefined && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
 			...(this.bindingNames !== undefined && {
 				bindingNames: this.bindingNames,
 			}),
@@ -692,6 +700,9 @@ export class PlanCompiler {
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
+			...(this.dialectCapabilities != null && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.model != null && { model: this.model }),
 		} as HandlerCompilerContext;
@@ -1202,6 +1213,9 @@ export class PlanCompiler {
 			...((plan.schema ?? this.schema)
 				? { schema: plan.schema ?? this.schema }
 				: {}),
+			...(this.dialectCapabilities != null && {
+				dialectCapabilities: this.dialectCapabilities,
+			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.model != null && { model: this.model }),
 			compileSubquery: (query: QueryIntent, paramOffset: number) =>
@@ -2177,6 +2191,18 @@ export class PlanCompiler {
 
 		// Row-level locking (E15: FOR UPDATE/SHARE/etc.)
 		if (plan.lock) {
+			assertDialectCapability(
+				this.dialectCapabilities,
+				'supportsRowLevelLocks',
+				'Row-level locks are',
+			);
+			if (plan.lock.waitPolicy !== 'block') {
+				assertDialectCapability(
+					this.dialectCapabilities,
+					'supportsLockWaitPolicies',
+					'Lock wait policies are',
+				);
+			}
 			const mapped = mapLockToAst(plan.lock);
 			// INV-E15-05: When query has JOINs (includes), scope lock to root table
 			// to prevent lock amplification on joined tables.

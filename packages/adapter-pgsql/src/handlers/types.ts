@@ -5,7 +5,7 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
-import type { ModelIR, ParamIntent } from '@dbsp/types';
+import type { DialectCapabilities, ModelIR, ParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { BindingNameRegistry } from '../binding-registry.js';
@@ -23,6 +23,8 @@ export interface CompilerContext {
 	readonly naming: NamingPlugin;
 	/** Schema name for table qualification (optional) */
 	readonly schema?: string;
+	/** Dialect capabilities for adapter-layer SQL surface gates */
+	readonly dialectCapabilities?: DialectCapabilities;
 	/** Root table name for the query */
 	readonly rootTable: string;
 	/** Current table alias (for JOINs) */

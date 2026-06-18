@@ -9,6 +9,7 @@
  */
 
 import type {
+	DialectCapabilities,
 	ExpressionIntent,
 	ModelIR,
 	QueryIntent,
@@ -104,6 +105,8 @@ export type WhereCompilerCtx = {
 	readonly paramState: CompilerState;
 	/** Schema model for FK resolution and type-aware casting */
 	readonly model?: ModelIR;
+	/** Dialect capabilities for adapter-layer SQL surface gates */
+	readonly dialectCapabilities?: DialectCapabilities;
 	/** Schema name for table qualification */
 	readonly schemaName?: string;
 	/** Query-local CTE/binding names that must not be schema-qualified. */
@@ -149,6 +152,9 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		currentAlias: ctx.currentAlias ?? ctx.rootTable,
 		maxRecursiveDepth: 100,
 		...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
+		...(ctx.dialectCapabilities !== undefined && {
+			dialectCapabilities: ctx.dialectCapabilities,
+		}),
 		...(ctx.bindingNames !== undefined && { bindingNames: ctx.bindingNames }),
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
@@ -178,6 +184,7 @@ export function buildSubqueryFromIntent(
 	schemaName?: string,
 	use: 'rawExists' | 'scalar-direct' = 'rawExists',
 	bindingNames?: BindingNameRegistry,
+	dialectCapabilities?: DialectCapabilities,
 ): { sql: Node; paramCount: number; parameters?: unknown[] } {
 	// CHOKEPOINT GUARD: buildSubqueryFromIntent emits ONLY SELECT/FROM/WHERE —
 	// it never emits LIMIT, ORDER BY, OFFSET, GROUP BY, HAVING, DISTINCT, DISTINCT ON,
@@ -283,6 +290,7 @@ export function buildSubqueryFromIntent(
 			paramState: innerState,
 			naming,
 			...(schemaName !== undefined && { schemaName }),
+			...(dialectCapabilities !== undefined && { dialectCapabilities }),
 			...(bindingNames !== undefined && { bindingNames }),
 			compileSubquery: (_nestedIntent, _nestedOffset) => {
 				throw new Error(

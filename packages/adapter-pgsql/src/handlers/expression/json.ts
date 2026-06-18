@@ -5,6 +5,7 @@
 
 import type { Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
+import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
 	CompilerContext,
@@ -26,6 +27,11 @@ export const jsonExtractHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsJsonOperators',
+			'JSON operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('JSON extract handler requires a column');
@@ -90,6 +96,11 @@ export const jsonPathExtractHandler: ExpressionHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsJsonOperators',
+			'JSON operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('JSON path extract handler requires a column');

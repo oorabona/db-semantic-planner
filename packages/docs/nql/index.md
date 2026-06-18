@@ -981,6 +981,12 @@ Simple CASE is normalized to searched CASE during compilation.
 
 *Schema: iam* — The `audit_log.details` column is JSONB.
 
+**Portability:** Adapter-specific PostgreSQL JSON operator surface. Requires
+`DialectCapabilities.supportsJsonOperators`; unsupported adapters throw before
+SQL emission. PostgreSQL supports this surface, while MySQL 8+ and SQLite 3.38+
+need adapter-specific JSON function/operator translations for equivalent
+behavior.
+
 ### Text Extraction (`->>`)
 
 Filter on a specific field inside a JSONB column. The `->>` operator extracts the value as text, so it can be compared with `=`.
@@ -1103,6 +1109,12 @@ WHERE audit_log.details ? $1
 *Schema: iam*
 
 Use a subquery to filter dynamically. Here, we find roles assigned to user 1 by first selecting their role IDs from the junction table. NQL compiles the inner pipe to a subquery using `= ANY(...)`.
+
+**Portability:** the `IN (subquery)` form shown here compiles to `= ANY (SELECT ...)`,
+which is standard portable SQL and is NOT capability-gated. Only the *bound-array*
+form — `= ANY(:param)` over an array parameter — requires
+`DialectCapabilities.supportsArrayType` and throws before SQL emission on adapters
+that lack array support (where a plain `IN` over a value list is emitted instead).
 
 ```nql
 roles | where id in (userRoles | where userId = 1 | select roleId)
@@ -1448,6 +1460,11 @@ employees | select name, allReports.name
 *Schema: scheduling*
 
 PostgreSQL range types (`daterange`, `tstzrange`, `int4range`) are supported natively. NQL uses readable operator names instead of PostgreSQL's symbolic operators.
+
+**Portability:** PostgreSQL-only native range surface. Requires
+`DialectCapabilities.supportsRangeTypes`; unsupported adapters throw before SQL
+emission. MySQL 8+ and SQLite 3.38+ do not provide equivalent native range
+operators.
 
 ### Overlaps
 
@@ -1995,6 +2012,13 @@ users | select *, userRoles.* | limit userRoles.role 1
 ### Row-Level Locking (FOR UPDATE / FOR SHARE)
 
 Row-level locks are used in transaction contexts to prevent concurrent modifications. The classic use case is the **job queue pattern**: claim a pending row atomically.
+
+**Portability:** Lock strengths require
+`DialectCapabilities.supportsRowLevelLocks`; `skip locked` and `nowait` also
+require `DialectCapabilities.supportsLockWaitPolicies`. Unsupported adapters
+throw before SQL emission. PostgreSQL supports the full surface; MySQL 8+ has
+partial locking-read support, and SQLite 3.38+ does not support row-level lock
+clauses.
 
 **Lock strengths:**
 

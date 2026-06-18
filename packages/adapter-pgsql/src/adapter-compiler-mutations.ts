@@ -101,7 +101,7 @@ function compileSourceQueryCte(
 		);
 	}
 	const sourcePlan = planFn(sourceQuery, model, {
-		dialectCapabilities: POSTGRESQL_CAPABILITIES,
+		dialectCapabilities: deps.dialectCapabilities ?? POSTGRESQL_CAPABILITIES,
 	});
 	return compileSelect(sourcePlan, options, deps);
 }
@@ -286,6 +286,9 @@ function compileUpsertActionWhere(
 		...(schemaName !== undefined && { schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.model !== undefined && { model: deps.model }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		compileSubquery: (sqIntent, paramOffset) =>
 			buildSubqueryFromIntent(
 				sqIntent,
@@ -294,6 +297,7 @@ function compileUpsertActionWhere(
 				schemaName,
 				'rawExists',
 				deps.bindingNames,
+				deps.dialectCapabilities,
 			),
 	};
 	return compileWhereIntent(where, whereCtx);
@@ -324,6 +328,9 @@ export function compileInsert(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: 100,
 	};
@@ -406,6 +413,9 @@ export function compileInsertFrom(
 		naming: deps.naming,
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: 100,
 	};
@@ -458,6 +468,9 @@ export function compileUpdate(
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(resolvedModel !== undefined && { model: resolvedModel }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -515,6 +528,9 @@ export function compileBatchUpdate(
 		naming: deps.naming,
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: 100,
 	};
@@ -574,6 +590,9 @@ export function compileBatchUpdate(
 				bindingNames: deps.bindingNames,
 			}),
 			...(deps.model !== undefined && { model: deps.model }),
+			...(deps.dialectCapabilities !== undefined && {
+				dialectCapabilities: deps.dialectCapabilities,
+			}),
 			compileSubquery: (sqIntent, paramOffset) =>
 				buildSubqueryFromIntent(
 					sqIntent,
@@ -582,6 +601,7 @@ export function compileBatchUpdate(
 					schemaName,
 					'rawExists',
 					deps.bindingNames,
+					deps.dialectCapabilities,
 				),
 		};
 		whereGuard = compileWhereIntent(resolvedWhere, whereCtx);
@@ -629,6 +649,9 @@ export function compileDelete(
 		rootTable: intent.table,
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		maxRecursiveDepth: 100,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
@@ -677,6 +700,9 @@ export function compileUpsert(
 		...(schemaName !== undefined && { schema: schemaName }),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		...(deps.model !== undefined && { model: deps.model }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		maxRecursiveDepth: 100,
 	};
 	const state = createCompilerState();
@@ -839,6 +865,9 @@ export function compileUpsertFrom(
 		naming: deps.naming,
 		rootTable: intent.source,
 		...(schemaName !== undefined && { schema: schemaName }),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
+		}),
 		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: 100,
 	};

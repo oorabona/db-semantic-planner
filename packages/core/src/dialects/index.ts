@@ -47,6 +47,8 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsRangeTypes: true, // PostgreSQL has native range types (daterange, int4range, etc.)
 	supportsJsonType: true,
 	supportsJsonOperators: true, // PG: ->, ->>, @>, <@, ?, #>, #>>
+	supportsRowLevelLocks: true,
+	supportsLockWaitPolicies: true,
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)
@@ -94,6 +96,9 @@ export const MYSQL_CAPABILITIES: DialectCapabilities = {
 	supportsRangeTypes: false, // MySQL has no native range types
 	supportsJsonType: true,
 	supportsJsonOperators: false, // MySQL uses JSON_EXTRACT() functions, not operators
+	// Coarse PostgreSQL-shaped lock flags; revisit MySQL with per-strength caps.
+	supportsRowLevelLocks: false,
+	supportsLockWaitPolicies: false,
 	supportsSchemas: true, // MySQL uses database as schema
 
 	// Include Strategy Capabilities (CORE-006)
@@ -123,6 +128,8 @@ export const SQLITE_CAPABILITIES: DialectCapabilities = {
 	supportsRangeTypes: false, // SQLite has no native range types
 	supportsJsonType: true, // SQLite 3.38+ (JSON1 extension)
 	supportsJsonOperators: false, // SQLite uses json_extract() functions
+	supportsRowLevelLocks: false,
+	supportsLockWaitPolicies: false,
 	supportsSchemas: false, // SQLite uses ATTACH for multiple databases
 
 	// Include Strategy Capabilities (CORE-006)
@@ -153,6 +160,8 @@ export const DUCKDB_CAPABILITIES: DialectCapabilities = {
 	supportsRangeTypes: false, // DuckDB has no native range types like PostgreSQL
 	supportsJsonType: true,
 	supportsJsonOperators: false, // DuckDB uses json_extract() style
+	supportsRowLevelLocks: false,
+	supportsLockWaitPolicies: false,
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)
@@ -182,6 +191,9 @@ export const MSSQL_CAPABILITIES: DialectCapabilities = {
 	supportsRangeTypes: false, // MSSQL has no native range types
 	supportsJsonType: true, // SQL Server 2016+
 	supportsJsonOperators: false, // MSSQL uses JSON_VALUE/JSON_QUERY functions
+	// Coarse PostgreSQL-shaped lock flags; revisit MSSQL hints with per-strength caps.
+	supportsRowLevelLocks: false,
+	supportsLockWaitPolicies: false,
 	supportsSchemas: true,
 
 	// Include Strategy Capabilities (CORE-006)
@@ -273,6 +285,8 @@ export function createDialectCapabilities(
 		supportsRangeTypes: false,
 		supportsJsonType: false,
 		supportsJsonOperators: false,
+		supportsRowLevelLocks: false,
+		supportsLockWaitPolicies: false,
 		supportsSchemas: false,
 		supportsLateralJoin: false,
 		supportsJsonAgg: false,

@@ -5,6 +5,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
@@ -36,6 +37,11 @@ export const rangeHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsRangeTypes',
+			'Range operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('Range handler requires a column');

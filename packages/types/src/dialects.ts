@@ -106,6 +106,18 @@ export interface DialectCapabilities {
 	/** Supports JSON path/extract/contains operators (PG: ->, ->>, @>, <@, ?, #>, #>>) */
 	readonly supportsJsonOperators: boolean;
 
+	/**
+	 * Supports row-level lock clauses (FOR UPDATE, FOR SHARE, FOR NO KEY UPDATE,
+	 * FOR KEY SHARE). Undefined means the adapter has not declared the capability.
+	 */
+	readonly supportsRowLevelLocks?: boolean;
+
+	/**
+	 * Supports row-level lock wait policies (SKIP LOCKED, NOWAIT). Undefined means
+	 * the adapter has not declared the capability.
+	 */
+	readonly supportsLockWaitPolicies?: boolean;
+
 	/** Supports schema prefixes (e.g., schema.table) */
 	readonly supportsSchemas: boolean;
 
