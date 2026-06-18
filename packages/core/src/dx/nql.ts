@@ -24,7 +24,11 @@ import {
 } from '@dbsp/nql';
 import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
 import type { Adapter, CompileOptions, Dump, DumpMeta } from '../adapter.js';
-import type { MutationIntent, QueryIntent } from '../intent-ast.js';
+import type {
+	MutationIntent,
+	QueryIntent,
+	WhereIntent,
+} from '../intent-ast.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
@@ -125,6 +129,85 @@ type CompiledNqlIntent =
 
 function hasNqlBindings(bundle: CompiledNqlQuery): boolean {
 	return (bundle.bindings?.size ?? 0) > 0;
+}
+
+function isBindingFinalQuery(bundle: CompiledNqlQuery): boolean {
+	return (
+		bundle.query !== undefined &&
+		(bundle.bindings?.has(bundle.query.from) ?? false)
+	);
+}
+
+function formatBindingRelationPath(path: string | readonly string[]): string {
+	return typeof path === 'string' ? path : path.join('.');
+}
+
+function findBindingFinalRelationFilter(
+	where: WhereIntent,
+): string | undefined {
+	switch (where.kind) {
+		case 'and':
+		case 'or':
+			for (const condition of where.conditions) {
+				const found = findBindingFinalRelationFilter(condition);
+				if (found !== undefined) return found;
+			}
+			return undefined;
+		case 'not':
+			return findBindingFinalRelationFilter(where.condition);
+		case 'relationFilter':
+			return formatBindingRelationPath(where.relation);
+		case 'exists':
+		case 'notExists':
+			return where.relation;
+		case 'rawExists':
+		case 'rawNotExists':
+			return 'raw EXISTS';
+		default:
+			return undefined;
+	}
+}
+
+function assertBindingFinalQueryCanUseSyntheticPlan(intent: QueryIntent): void {
+	const relationColumns =
+		intent.select?.type === 'expressions'
+			? intent.select.columns
+					.filter((column) => column.kind === 'relationColumn')
+					.map((column) => column.relation)
+			: [];
+	const relationFilter = intent.where
+		? findBindingFinalRelationFilter(intent.where)
+		: undefined;
+	const havingRelationFilter = intent.having
+		? findBindingFinalRelationFilter(intent.having)
+		: undefined;
+	if (
+		(intent.include?.length ?? 0) > 0 ||
+		relationColumns.length > 0 ||
+		(intent.joins?.length ?? 0) > 0 ||
+		relationFilter !== undefined ||
+		havingRelationFilter !== undefined
+	) {
+		throw new Error(
+			`NQL binding-final query '${intent.from}' cannot select relation columns, use includes, joins, or relation filters. Relation planning requires a physical model table, not a CTE binding.`,
+		);
+	}
+}
+
+function createBindingFinalPlan(intent: QueryIntent): PlanReport {
+	assertBindingFinalQueryCanUseSyntheticPlan(intent);
+	return {
+		rootTable: intent.from,
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent,
+		metadata: {
+			planningTimeMs: 0,
+			relationsAnalyzed: 0,
+			isAmbiguous: false,
+		},
+	};
 }
 
 function assertNoMutationBindingBodies(bundle: CompiledNqlQuery): void {
@@ -313,7 +396,7 @@ function assembleNqlTemplate(
  * @returns NQL template tag function
  */
 export function createNqlTag(
-	schemaDefinition: unknown,
+	_schemaDefinition: unknown,
 	model: ModelIR,
 	adapter?: Adapter<unknown>,
 	schemaName?: string,
@@ -332,7 +415,6 @@ export function createNqlTag(
 			assembled.params,
 			assembled.hasBoundParams,
 			assembled.sourceError,
-			schemaDefinition,
 			model,
 			adapter,
 			schemaName,
@@ -353,7 +435,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	private readonly params: Readonly<Record<string, unknown>>;
 	private readonly hasBoundParams: boolean;
 	private readonly sourceError: string | undefined;
-	private readonly schemaDefinition: unknown;
 	private readonly model: ModelIR;
 	private readonly _schemaName: string | undefined;
 	private readonly adapter: Adapter<unknown> | undefined;
@@ -366,7 +447,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		params: Readonly<Record<string, unknown>>,
 		hasBoundParams: boolean,
 		sourceError: string | undefined,
-		schemaDefinition: unknown,
 		model: ModelIR,
 		adapter: Adapter<unknown> | undefined,
 		schemaName: string | undefined,
@@ -378,7 +458,6 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		this.params = params;
 		this.hasBoundParams = hasBoundParams;
 		this.sourceError = sourceError;
-		this.schemaDefinition = schemaDefinition;
 		this.model = model;
 		this.adapter = adapter;
 		this._schemaName = schemaName;
@@ -410,7 +489,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		// Use integrated @dbsp/nql compiler with dynamic keywords
 		const result = nqlCompile(
 			this.query,
-			this.schemaDefinition,
+			this.model,
 			undefined,
 			compilerOptions,
 		);
@@ -463,7 +542,15 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	}
 
 	plan(): PlanReport {
-		return this.planInternal();
+		const compiled = this.compile();
+		if (compiled.kind === 'mutation') {
+			throw new Error(
+				'NQL mutations do not have execution plans; use dump() for SQL and parameters.',
+			);
+		}
+		return isBindingFinalQuery(compiled.bundle)
+			? createBindingFinalPlan(compiled.intent)
+			: this.planInternal();
 	}
 
 	dump(meta?: DumpMetaInput): Dump | MutationDump {
@@ -476,7 +563,10 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 		}
 
-		const planReport = this.planInternal();
+		const bindingFinalQuery = isBindingFinalQuery(compiledIntent.bundle);
+		const planReport = bindingFinalQuery
+			? createBindingFinalPlan(compiledIntent.intent)
+			: this.planInternal();
 
 		if (!this.adapter) {
 			return {
@@ -487,12 +577,13 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			};
 		}
 
-		const compiled = hasNqlBindings(compiledIntent.bundle)
-			? this.adapter.compile<T>(
-					compiledIntent.bundle,
-					this.nqlBundleCompileOptions(),
-				)
-			: this.adapter.compile<T>(planReport);
+		const compiled =
+			bindingFinalQuery || hasNqlBindings(compiledIntent.bundle)
+				? this.adapter.compile<T>(
+						compiledIntent.bundle,
+						this.nqlBundleCompileOptions(),
+					)
+				: this.adapter.compile<T>(planReport);
 
 		try {
 			return this.adapter.createDump(planReport, compiled, meta);
@@ -610,6 +701,14 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					};
 				},
 			});
+		}
+
+		if (isBindingFinalQuery(compiledIntent.bundle)) {
+			const compiled = adapter.compile<T>(
+				compiledIntent.bundle,
+				this.nqlBundleCompileOptions(),
+			);
+			return adapter.execute(compiled);
 		}
 
 		const planReport = this.planInternal();

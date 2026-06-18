@@ -11,7 +11,9 @@
 
 import {
 	createOrm,
+	eq,
 	exists,
+	exprRef,
 	gt,
 	isDeleteIntent,
 	isInsertIntent,
@@ -2089,6 +2091,96 @@ describe('NQL → SQL bind + CTE E2E', () => {
 		expect(params).toEqual([false]);
 	});
 
+	it('schema-scoped final query FROM bound CTE keeps the final CTE unqualified', () => {
+		const { sql, params } = boundBundleToSQL(
+			'posts | where published = false | select id | bind draft_posts\ndraft_posts | where id > 3 | select id',
+			mutationSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from draft_posts');
+		expect(sql).not.toContain('from tenant_bound.draft_posts');
+		expect(params).toEqual([false, 3]);
+	});
+
+	it('withSchema binding-final query keeps real tables in the final query qualified', () => {
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: mutationSchema.model,
+		});
+		const orm = createOrm({ schema: mutationSchema, adapter });
+
+		const dump = orm.withSchema('tenant_bound').nql<{ id: number }>`posts
+			| where published = false
+			| select id
+			| bind draft_posts
+draft_posts | where id in (comments | select postId) | select id`.dump();
+
+		const sql = normalizeSQL(dump.sql);
+		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from draft_posts');
+		expect(sql).toContain('from tenant_bound.comments');
+		expect(sql).not.toContain('from tenant_bound.draft_posts');
+		expect(dump.params).toEqual([false]);
+	});
+
+	it('withSchema explicit table-mode join to a binding stays unqualified while real-table join stays qualified', () => {
+		const bindingQuery: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'fields',
+				fields: ['id'],
+			},
+			where: eq('published', false),
+		};
+		const finalQuery: QueryIntent = {
+			type: 'select',
+			from: 'comments',
+			select: {
+				type: 'fields',
+				fields: ['id'],
+			},
+			joins: [
+				{
+					table: 'draft_posts',
+					alias: 'draft',
+					type: 'inner',
+					on: eq('comments.postId', exprRef('draft.id')),
+				},
+				{
+					table: 'posts',
+					alias: 'real_posts',
+					type: 'inner',
+					on: eq('comments.postId', exprRef('real_posts.id')),
+				},
+			],
+		};
+		const bundle: CompiledNqlQuery = {
+			bindings: new Map([['draft_posts', bindingQuery]]),
+			query: finalQuery,
+		};
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: mutationSchema.model,
+		});
+
+		const result = adapter.compile(bundle, {
+			model: mutationSchema.model,
+			schemaName: 'tenant_bound',
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('with "draft_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from tenant_bound.comments');
+		expect(sql).toContain('join draft_posts as draft');
+		expect(sql).toContain('join tenant_bound.posts as real_posts');
+		expect(sql).not.toContain('join tenant_bound.draft_posts as draft');
+		expect(result.parameters).toEqual([false]);
+	});
+
 	it('schema-scoped insert-from bound CTE keeps CTE source unqualified', () => {
 		const { sql } = boundBundleToSQL(
 			'posts | where published = false | select id | bind subset\ninsert into archivedPosts from subset',
@@ -2198,13 +2290,19 @@ describe('NQL → SQL bind + CTE E2E', () => {
 		);
 	});
 
-	it('schema-scoped final query from bound CTE fails loudly', () => {
+	it('schema-scoped final query from bound CTE compiles against the CTE', () => {
 		const bindingQuery: QueryIntent = {
 			type: 'select',
 			from: 'posts',
 			select: {
 				type: 'fields',
 				fields: ['id'],
+			},
+			where: {
+				kind: 'comparison',
+				field: 'published',
+				operator: 'eq',
+				value: false,
 			},
 		};
 		const bundle: CompiledNqlQuery = {
@@ -2215,19 +2313,26 @@ describe('NQL → SQL bind + CTE E2E', () => {
 					type: 'fields',
 					fields: ['id'],
 				},
+				where: {
+					kind: 'comparison',
+					field: 'id',
+					operator: 'gt',
+					value: 1,
+				},
 			},
 			bindings: new Map([['subset', bindingQuery]]),
 		};
 		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(bundle, {
+			model: mutationSchema.model,
+			schemaName: 'tenant_bound',
+		});
+		const sql = normalizeSQL(result.sql);
 
-		expect(() =>
-			adapter.compile(bundle, {
-				model: mutationSchema.model,
-				schemaName: 'tenant_bound',
-			}),
-		).toThrow(
-			"NQL binding 'subset' cannot be used as the final FROM source yet.",
+		expect(sql).toBe(
+			'with "subset" as (select posts.id from tenant_bound.posts where posts.published = $1) select subset.id from subset where subset.id > $2',
 		);
+		expect(result.parameters).toEqual([false, 1]);
 	});
 
 	it('fails closed when a branded binding ref reaches a direct mutation compile path', () => {

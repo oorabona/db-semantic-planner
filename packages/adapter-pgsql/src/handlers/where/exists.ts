@@ -16,6 +16,7 @@ import {
 	joinExpr,
 	rangeVar,
 } from '../../ast-helpers.js';
+import { schemaForFromName } from '../../binding-registry.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -62,6 +63,13 @@ function buildCorrelation(
 	const left = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
 	const right = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
 	return eqExpr(left, right);
+}
+
+function schemaForExistsFromName(
+	ctx: CompilerContext,
+	fromName: string,
+): string | undefined {
+	return schemaForFromName(ctx.schema, fromName, ctx.bindingNames, ctx.naming);
 }
 
 /**
@@ -146,7 +154,7 @@ function buildExistsSubquery(
 	let fromNode: Node = rangeVar(
 		targetTable,
 		targetAlias,
-		ctx.schema,
+		schemaForExistsFromName(ctx, targetTable),
 		ctx.naming,
 	);
 
@@ -253,7 +261,7 @@ function buildExistsSubquery(
 			const joinRangeVar = rangeVar(
 				joinTargetTable,
 				joinAlias,
-				ctx.schema,
+				schemaForExistsFromName(ctx, joinTargetTable),
 				ctx.naming,
 			);
 

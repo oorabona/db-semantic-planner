@@ -113,6 +113,35 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql).not.toContain('activeItems');
 	});
 
+	it('emits camelCase binding-final FROM through the same snake_case CTE name as the declaration', () => {
+		const bundle = compileNqlBundle(
+			'items | select id | bind activeItems\nactiveItems | select id',
+		);
+
+		const { error, sql } = tryCompileNqlBundle(bundle, {
+			dbCasing: 'snake_case',
+		});
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "active_items" as (');
+		expect(sql).toContain('FROM active_items');
+		expect(sql).not.toContain('activeItems');
+	});
+
+	it('keeps scalar subquery binding CTE unqualified under withSchema while real tables are qualified', () => {
+		const bundle = compileNqlBundle(
+			'items | select id | bind recent_items\nitems | select id, (recent_items | select count() as total) as recent_count',
+		);
+		const adapter = createPgsqlCompileOnlyAdapter().withSchema('tenant_1');
+
+		const result = adapter.compile(bundle, { model: testSchema.model });
+
+		expect(result.sql).toContain('WITH "recent_items" as (');
+		expect(result.sql).toContain('FROM tenant_1.items');
+		expect(result.sql).toContain('FROM recent_items');
+		expect(result.sql).not.toContain('tenant_1.recent_items');
+	});
+
 	it('rejects distinct NQL bind names that emit to the same snake_case CTE name', () => {
 		const bundle = compileNqlBundle(
 			'items | select id | bind fooBar\nitems | select id | bind foo_bar\nitems | select id',
@@ -290,5 +319,25 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(error).toBeInstanceOf(Error);
 		expect((error as Error).message).toContain('fooBar');
 		expect((error as Error).message).toContain('foo_bar');
+	});
+
+	it('compiles well-formed direct binding-final bundles without adapter-side output schemas', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			bindings: new Map([['ids', itemsQuery]]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('WITH "ids" as (');
+		expect(sql).toContain('FROM ids');
 	});
 });

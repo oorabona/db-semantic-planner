@@ -526,6 +526,7 @@ describe('resolveFilterValue', () => {
 		pseudoColumnKeywords: new Set(),
 		recursiveKeywords: new Set(),
 		validator: null,
+		bindingOutputColumns: new Map(),
 		...overrides,
 	});
 
@@ -787,6 +788,7 @@ describe('validateWhereField', () => {
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
 			validator: null,
+			bindingOutputColumns: new Map(),
 		};
 		// Should not throw
 		validateWhereField(ctx, 'name');
@@ -799,6 +801,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: undefined,
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -816,6 +819,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: 'orders',
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -837,6 +841,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: 'orders',
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -859,6 +864,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: 'orders',
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -876,6 +882,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: 'orders',
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -898,6 +905,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: undefined,
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,
@@ -915,6 +923,7 @@ describe('validateWhereField', () => {
 			currentRelationTarget: undefined,
 			pseudoColumnKeywords: new Set(),
 			recursiveKeywords: new Set(),
+			bindingOutputColumns: new Map(),
 			validator: {
 				validateTable: vi.fn(),
 				validateColumn,

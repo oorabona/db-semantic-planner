@@ -64,9 +64,11 @@ export interface NqlCompilerOptions {
 export interface CompilerContext {
 	currentFromTable: string | undefined;
 	currentRelationTarget: string | undefined;
+	currentHavingAliases?: ReadonlySet<string>;
 	readonly pseudoColumnKeywords: ReadonlySet<string>;
 	readonly recursiveKeywords: ReadonlySet<string>;
 	readonly validator: ColumnValidator | null;
+	readonly bindingOutputColumns: Map<string, readonly string[] | undefined>;
 	/** BATCH-001: Named parameters for ANY(:param) expressions */
 	readonly params: Readonly<Record<string, unknown>>;
 	/** Maximum number of items allowed in an ANY(:param) array. Resolved by constructor (never undefined). */

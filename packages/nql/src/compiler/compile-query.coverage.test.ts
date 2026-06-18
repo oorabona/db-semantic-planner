@@ -5,7 +5,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { compile } from '../index.js';
+import { compile, NqlCompiler, parse } from '../index.js';
+import type { NqlClause, NqlProgram, NqlQuery } from '../parser/ast.js';
 
 // Schema with relations for include tests
 const schema = {
@@ -32,6 +33,9 @@ const schema = {
 					{ name: 'authorId' },
 					{ name: 'published' },
 				],
+			},
+			comments: {
+				columns: [{ name: 'id' }, { name: 'postId' }, { name: 'body' }],
 			},
 			orders: {
 				columns: [
@@ -71,6 +75,22 @@ function compileNql(input: string) {
 		throw new Error(`Compile error: ${result.errors[0]?.message}`);
 	}
 	return result;
+}
+
+function compileWithReusableCompiler(compiler: NqlCompiler, input: string) {
+	const parsed = parse(input);
+	if (!parsed.success || !parsed.ast) {
+		throw new Error(`Parse error: ${parsed.errors[0]?.message}`);
+	}
+	return compiler.compile(parsed.ast);
+}
+
+function parseProgram(input: string): NqlProgram {
+	const parsed = parse(input);
+	if (!parsed.success || !parsed.ast) {
+		throw new Error(`Parse error: ${parsed.errors[0]?.message}`);
+	}
+	return parsed.ast;
 }
 
 // ============================================================================
@@ -272,6 +292,664 @@ describe('includes via relation paths in SELECT', () => {
 		expect(result.ast?.query).toBeDefined();
 		expect(result.ast?.query?.include).toHaveLength(1);
 		expect(result.ast?.query?.include?.[0]?.relation).toBe('posts');
+	});
+});
+
+describe('binding-final query sources', () => {
+	it('does not leak virtual binding tables across successful compile calls on a reused compiler', () => {
+		const compiler = new NqlCompiler(undefined, schema);
+
+		expect(() =>
+			compileWithReusableCompiler(
+				compiler,
+				'users | select id | bind projected_users\nprojected_users | select id',
+			),
+		).not.toThrow();
+		expect(() =>
+			compileWithReusableCompiler(compiler, 'projected_users | select id'),
+		).toThrow(/Table 'projected_users' does not exist/);
+	});
+
+	it('clears virtual binding tables when a reused compiler compile throws', () => {
+		const compiler = new NqlCompiler(undefined, schema);
+
+		expect(() =>
+			compileWithReusableCompiler(
+				compiler,
+				'users | select id | bind projected_users\nprojected_users | select email',
+			),
+		).toThrow(
+			/Column 'email' is not projected by NQL binding 'projected_users'/,
+		);
+		expect(() =>
+			compileWithReusableCompiler(compiler, 'projected_users | select id'),
+		).toThrow(/Table 'projected_users' does not exist/);
+	});
+
+	it('accepts a final query FROM that references a declared bind name with schema validation enabled', () => {
+		const result = compile(
+			'users | where active = true | select id | bind active_users\nactive_users | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindings?.has('active_users')).toBe(true);
+		expect(result.ast?.query?.from).toBe('active_users');
+	});
+
+	it('accepts IN subqueries over real tables from a final query that reads a bind source', () => {
+		const result = compile(
+			'posts | where published = false | select id | bind draft_posts\ndraft_posts | where id in (comments | select postId) | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('recursively validates binding-sourced IN subqueries in their own binding context', () => {
+		const result = compile(
+			'users | select id | bind projected_users\norders | select userId | bind order_user_ids\nprojected_users | where id in (order_user_ids | select userId) | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('rejects invalid columns inside binding-sourced IN subqueries against the subquery binding projection', () => {
+		const result = compile(
+			'users | select id | bind projected_users\norders | select userId | bind order_user_ids\nprojected_users | where id in (order_user_ids | select total) | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'total' is not projected by NQL binding 'order_user_ids'.*Available columns: userId/,
+		);
+	});
+
+	it('rejects SELECT columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select email',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('rejects WHERE columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			"users | select id | bind active_users\nactive_users | where email = 'a@example.com' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('rejects ORDER BY columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select id | order by email',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('rejects GROUP BY columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | group by email | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('rejects ORDER BY expression columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select id | order by email + id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('rejects GROUP BY expression columns that were not projected by the referenced bind', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | group by upper(email) | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('accepts projected aliases from the referenced bind and rejects the original column name', () => {
+		const aliased = compile(
+			'users | select id as userId, name | bind projected_users\nprojected_users | where userId > 1 | select userId, name | order by userId',
+			schema,
+		);
+		expect(aliased.success).toBe(true);
+
+		const original = compile(
+			'users | select id as userId | bind projected_users\nprojected_users | select id',
+			schema,
+		);
+		expect(original.success).toBe(false);
+		expect(original.errors[0]?.message).toMatch(
+			/Column 'id' is not projected by NQL binding 'projected_users'.*Available columns: userId/,
+		);
+	});
+
+	it('validates final bind-source columns by exact logical projected name, not DB casing aliases', () => {
+		const logical = compile(
+			'users | select id as userId | bind projected_users\nprojected_users | select userId',
+			schema,
+		);
+		expect(logical.success).toBe(true);
+
+		const dbLayer = compile(
+			'users | select id as userId | bind projected_users\nprojected_users | select user_id',
+			schema,
+		);
+		expect(dbLayer.success).toBe(false);
+		expect(dbLayer.errors[0]?.message).toMatch(
+			/Column 'user_id' is not projected by NQL binding 'projected_users'.*Available columns: userId/,
+		);
+	});
+
+	it('accepts GROUP BY columns that were projected by the referenced bind', () => {
+		const result = compile(
+			'users | select department | bind departments\ndepartments | group by department | select department',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('allows portable common-ground clauses from a final query that reads a bind source', () => {
+		const result = compile(
+			'users | select id, department, salary | bind projected_users\nprojected_users | where salary > 100 | group by department | where count(*) > 0 | select distinct department, count(id) as total | order by department | limit 10 | offset 1',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.from).toBe('projected_users');
+		expect(result.ast?.query?.distinct).toBe(true);
+		expect(result.ast?.query?.groupBy).toEqual(['department']);
+		expect(result.ast?.query?.having).toBeDefined();
+		expect(result.ast?.query?.limit).toBe(10);
+		expect(result.ast?.query?.offset).toBe(1);
+	});
+
+	it('allows set operations whose leaves read from bind sources', () => {
+		const result = compile(
+			'users | select id | bind projected_users\nprojected_users | select id | union (users | select id)',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.setOperation?.op).toBe('union');
+	});
+
+	it('rejects row-level locks from a final query that reads a bind source (ref #183)', () => {
+		const result = compile(
+			'users | select id | bind projected_users\nprojected_users | select id | for update skip locked',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/#183/);
+		expect(result.errors[0]?.message).toMatch(/lock|FOR UPDATE|SKIP LOCKED/i);
+	});
+
+	it('rejects DISTINCT ON from a final query that reads a bind source (ref #183)', () => {
+		const ast = parseProgram(
+			'users | select id | bind projected_users\nprojected_users | select id',
+		);
+		const finalQuery = ast.statements[1] as NqlQuery;
+		const selectClause = finalQuery.clauses.find((c) => c.type === 'select') as
+			| (NqlClause & { distinctOn?: string[] })
+			| undefined;
+		expect(selectClause).toBeDefined();
+		selectClause!.distinctOn = ['id'];
+
+		expect(() => new NqlCompiler(undefined, schema).compile(ast)).toThrow(
+			/#183.*DISTINCT ON|DISTINCT ON.*#183/,
+		);
+	});
+
+	it('rejects window functions from a final query that reads a bind source (ref #183)', () => {
+		const result = compile(
+			'users | select id, salary | bind projected_users\nprojected_users | select id, row_number() over (order by salary) as rn',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/#183/);
+		expect(result.errors[0]?.message).toMatch(/window/i);
+	});
+
+	it('rejects PostgreSQL range operators from a final query that reads a bind source (ref #183)', () => {
+		const result = compile(
+			'users | select id, salary | bind projected_users\nprojected_users | where salary contains 25 | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/#183/);
+		expect(result.errors[0]?.message).toMatch(/range/i);
+	});
+
+	it('rejects ANY(:param) from a final query that reads a bind source (ref #183)', () => {
+		const result = compile(
+			'users | select id | bind projected_users\nprojected_users | where id = ANY(:ids) | select id',
+			schema,
+			undefined,
+			{ params: { ids: [1, 2] } },
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/#183/);
+		expect(result.errors[0]?.message).toMatch(/ANY/i);
+	});
+
+	it('default-rejects unhandled future binding-final clauses (ref #183)', () => {
+		const ast = parseProgram(
+			'users | select id | bind projected_users\nprojected_users | select id',
+		);
+		const finalQuery = ast.statements[1] as NqlQuery;
+		finalQuery.clauses.push({ type: 'qualify' } as unknown as NqlClause);
+
+		expect(() => new NqlCompiler(undefined, schema).compile(ast)).toThrow(
+			/#183.*qualify|qualify.*#183/,
+		);
+	});
+
+	it('rejects relation filters from a final query that reads from a bind source', () => {
+		const result = compile(
+			"users | select id | bind projected_users\nprojected_users | where some(posts).title = 'draft' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot use relation filters \(posts\)/,
+		);
+	});
+
+	it('rejects relation filters from a bind source even when the binding projected SELECT *', () => {
+		const result = compile(
+			"users | select * | bind all_users\nall_users | where some(posts).title = 'draft' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'all_users' reads from an NQL binding and cannot use relation filters \(posts\)/,
+		);
+	});
+
+	it('rejects relation columns from a bind source that projected SELECT * (ref #182)', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select posts.title',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/all_users.*cannot select relation columns.*CTE binding/,
+		);
+	});
+
+	it('rejects pseudo-columns from a bind source that projected SELECT * (ref #182)', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select parent.name',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/all_users.*cannot use pseudo-column traversals.*parent/,
+		);
+	});
+
+	it('rejects relation filters in HAVING from a final query that reads from a bind source', () => {
+		const result = compile(
+			"users | select id | bind projected_users\nprojected_users | group by id | where some(posts).title = 'draft' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot use relation filters \(posts\)/,
+		);
+	});
+
+	it('rejects relation paths in WHERE from a final query that reads from a bind source', () => {
+		const result = compile(
+			"users | select id | bind projected_users\nprojected_users | where posts.title = 'draft' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot reference relation path 'posts\.title'/,
+		);
+	});
+
+	it('rejects relation paths in HAVING from a final query that reads from a bind source', () => {
+		const result = compile(
+			"users | select id | bind projected_users\nprojected_users | group by id | where posts.title = 'draft' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot reference relation path 'posts\.title'/,
+		);
+	});
+
+	it('rejects relation paths in ORDER BY from a final query that reads from a bind source', () => {
+		const result = compile(
+			'users | select id | bind projected_users\nprojected_users | select id | order by posts.title',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot reference relation path 'posts\.title'/,
+		);
+	});
+
+	it('rejects relation paths in GROUP BY from a final query that reads from a bind source', () => {
+		const result = compile(
+			'users | select id | bind projected_users\nprojected_users | group by posts.title | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'projected_users' reads from an NQL binding and cannot reference relation path 'posts\.title'/,
+		);
+	});
+
+	it('keeps final bind-source validation permissive for SELECT * projections', () => {
+		const result = compile(
+			"users | select * | bind all_users\nall_users | where email = 'a@example.com' | select email | order by name",
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('keeps plain columns valid from a bind source that projected SELECT * (ref #182)', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('carries concrete output schema for SELECT * bindings', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select id',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindingOutputSchemas?.get('all_users')?.columns).toEqual(
+			['id', 'name', 'email', 'department', 'active', 'salary'],
+		);
+	});
+
+	it('inherits SELECT * output schema through binding chains and rejects unknown columns', () => {
+		const result = compile(
+			'users | select * | bind A\nA | select foo | bind B\nB | select bar',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'foo' is not projected by NQL binding 'A'/,
+		);
+	});
+
+	it('rejects the ROOT chain example when a later binding selects a missing inherited column', () => {
+		const result = compile(
+			'users | select name as foo | bind A\nA | select * | bind A2\nA2 | select foo | bind B\nB | select bar',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'bar' is not projected by NQL binding 'B'/,
+		);
+	});
+
+	it('keeps final bind-source validation permissive for mixed SELECT * projections', () => {
+		const result = compile(
+			'users | select *, name as displayName | bind all_users\nall_users | select email, displayName',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('accepts nested expressions and aggregates over projected bind-source columns', () => {
+		const result = compile(
+			'users | select id, name, salary | bind projected_users\nprojected_users | select upper(name) as upperName, salary + id as score, count(id) as total',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+	});
+
+	it('rejects HAVING references to final SELECT aggregate aliases from a bind source', () => {
+		const result = compile(
+			'users | select department, id | bind projected_users\nprojected_users | group by department | where total > 1 | select department, count(id) as total',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/HAVING cannot reference SELECT alias 'total'/,
+		);
+	});
+
+	it('rejects HAVING references to SELECT aggregate aliases from a real table', () => {
+		const result = compile(
+			'orders | group by status | where totalOrders > 1 | select status, count(*) as totalOrders',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/HAVING cannot reference SELECT alias 'totalOrders'/,
+		);
+	});
+
+	it('continues to allow HAVING over a real table column', () => {
+		const result = compile(
+			'orders | group by status | where total > 5 | select status',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.having).toMatchObject({
+			kind: 'comparison',
+			field: 'total',
+			operator: 'gt',
+			value: 5,
+		});
+	});
+
+	it('continues to allow HAVING over count(*)', () => {
+		const result = compile(
+			'orders | group by status | where count(*) > 1 | select status',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.having).toMatchObject({
+			kind: 'expression',
+			operator: 'gt',
+			value: 1,
+			expr: {
+				kind: 'aggregate',
+				function: 'count',
+				field: '*',
+			},
+		});
+	});
+
+	it('keeps SELECT * permissive for nested plain refs but rejects nested dotted refs (ref #182)', () => {
+		const plain = compile(
+			'users | select * | bind all_users\nall_users | select upper(email) as upperEmail | order by name',
+			schema,
+		);
+		expect(plain.success).toBe(true);
+
+		const dotted = compile(
+			'users | select * | bind all_users\nall_users | select upper(posts.title) as postTitle',
+			schema,
+		);
+		expect(dotted.success).toBe(false);
+		expect(dotted.errors[0]?.message).toMatch(
+			/Query 'all_users' reads from an NQL binding and cannot reference relation path 'posts\.title'/,
+		);
+	});
+
+	it('rejects relation columns from a final query that reads a bind name', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select posts.title',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/active_users.*cannot select relation columns.*CTE binding/,
+		);
+	});
+
+	it('rejects relation include limits from a final query that reads a bind name', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select id | limit posts 5',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/active_users.*cannot use relation include limits.*CTE binding/,
+		);
+	});
+
+	it.each([
+		[
+			'WHERE relation path',
+			"users | select * | bind all_users\nall_users | where posts.title = 'draft' | select id",
+		],
+		[
+			'SELECT relation column',
+			'users | select * | bind all_users\nall_users | select posts.title',
+		],
+		[
+			'GROUP BY relation path',
+			'users | select * | bind all_users\nall_users | group by posts.title | select id',
+		],
+	])('rejects binding-final %s without a model (ref #182)', (_label, nql) => {
+		const result = compile(nql, null);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'all_users' reads from an NQL binding/,
+		);
+	});
+
+	it('rejects binding-final relation filters without a model', () => {
+		const result = compile(
+			"users | select * | bind all_users\nall_users | where some(posts).title = 'draft' | select id",
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Query 'all_users' reads from an NQL binding and cannot use relation filters \(posts\)/,
+		);
+	});
+
+	it('rejects binding-final pseudo-columns without a model', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select parent.name',
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/all_users.*cannot use pseudo-column traversals.*parent/,
+		);
+	});
+
+	it('validates computable binding projections without a model', () => {
+		const result = compile(
+			'users | select id | bind active_users\nactive_users | select email',
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Column 'email' is not projected by NQL binding 'active_users'.*Available columns: id/,
+		);
+	});
+
+	it('validates computable SELECT-star binding chains without a model', () => {
+		const valid = compile(
+			'users | select id as userId | bind A\nA | select * | bind B\nB | select userId',
+			null,
+		);
+		expect(valid.success).toBe(true);
+
+		const invalid = compile(
+			'users | select id as userId | bind A\nA | select * | bind B\nB | select id',
+			null,
+		);
+		expect(invalid.success).toBe(false);
+		expect(invalid.errors[0]?.message).toMatch(
+			/Column 'id' is not projected by NQL binding 'B'.*Available columns: userId/,
+		);
+	});
+
+	it('keeps plain columns permissive for no-model SELECT-star bindings but still rejects relations', () => {
+		const plain = compile(
+			"users | select * | bind all_users\nall_users | where email = 'a@example.com' | select email | order by name",
+			null,
+		);
+		expect(plain.success).toBe(true);
+
+		const relation = compile(
+			'users | select * | bind all_users\nall_users | select posts.title',
+			null,
+		);
+		expect(relation.success).toBe(false);
+		expect(relation.errors[0]?.message).toMatch(
+			/all_users.*cannot select relation columns.*CTE binding/,
+		);
 	});
 });
 

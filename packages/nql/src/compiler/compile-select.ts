@@ -36,12 +36,15 @@ import type {
 } from '../parser/ast.js';
 import { compileNestedQuery } from './compile-query.js';
 import {
+	assertNoBindingRelationConstruct,
+	assertNoBindingRelationPath,
 	coerceToStringKey,
 	expressionToField,
 	expressionToSql,
 	expressionToValue,
 	isAggregateFunction,
 	resolveIntegerCount,
+	validateColumnForTable,
 } from './expression-utils.js';
 import type { CompilerContext, CompilerFns } from './types.js';
 
@@ -101,16 +104,22 @@ function validateSelectPathExpression(
 	expr: NqlPathExpression,
 	ctx: CompilerContext,
 ): void {
-	if (!ctx.currentFromTable || !ctx.validator) return;
+	if (!ctx.currentFromTable) return;
 
 	const { segments } = expr;
 	if (segments.length === 1) {
-		ctx.validator.validateColumn(ctx.currentFromTable, segments[0]!);
+		validateColumnForTable(ctx, ctx.currentFromTable, segments[0]!);
 		return;
 	}
 
 	const firstSegmentLower = segments[0]!.toLowerCase();
 	if (ctx.pseudoColumnKeywords.has(firstSegmentLower)) {
+		assertNoBindingRelationConstruct(
+			ctx,
+			ctx.currentFromTable,
+			'use pseudo-column traversals',
+			segments[0]!,
+		);
 		let i = 1;
 		while (
 			i < segments.length &&
@@ -119,11 +128,13 @@ function validateSelectPathExpression(
 			i++;
 		}
 		if (i < segments.length) {
-			ctx.validator.validateColumn(ctx.currentFromTable, segments[i]!);
+			validateColumnForTable(ctx, ctx.currentFromTable, segments[i]!);
 		}
 		return;
 	}
 
+	assertNoBindingRelationPath(ctx, ctx.currentFromTable, segments.join('.'));
+	if (!ctx.validator) return;
 	const targetTable = ctx.validator.resolveRelationTarget(
 		ctx.currentFromTable,
 		segments[0]!,
@@ -170,6 +181,12 @@ export function compileSelectClause(
 			// relation.* → use relationColumn with '*' as column
 			hasExpressions = true;
 			const relation = item.relation.join('.');
+			assertNoBindingRelationConstruct(
+				ctx,
+				ctx.currentFromTable,
+				'select relation columns',
+				relation,
+			);
 			expressions.push({
 				kind: 'relationColumn',
 				relation,
@@ -388,7 +405,7 @@ function compileSelectExpression(
 				? windowExpr.partitionBy.map((e) => {
 						const f = expressionToValidatedField(e, ctx) ?? expressionToSql(e);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
-							ctx.validator?.validateColumn(ctx.currentFromTable, f);
+							validateColumnForTable(ctx, ctx.currentFromTable, f);
 						}
 						return f;
 					})
@@ -401,7 +418,7 @@ function compileSelectExpression(
 							expressionToValidatedField(o.expression, ctx) ??
 							expressionToSql(o.expression);
 						if (ctx.currentFromTable && !f.includes('.') && !f.includes('(')) {
-							ctx.validator?.validateColumn(ctx.currentFromTable, f);
+							validateColumnForTable(ctx, ctx.currentFromTable, f);
 						}
 						return { field: f, direction: o.direction };
 					})
@@ -571,6 +588,12 @@ function compileMultiSegmentPath(
 
 	// Check for pseudo-column traversal
 	if (ctx.pseudoColumnKeywords.has(firstSegmentLower)) {
+		assertNoBindingRelationConstruct(
+			ctx,
+			ctx.currentFromTable,
+			'use pseudo-column traversals',
+			segments[0]!,
+		);
 		const firstSegment: string = firstSegmentLower;
 		const depthHint = expr.depthHint;
 
@@ -609,7 +632,7 @@ function compileMultiSegmentPath(
 		/* v8 ignore stop -- @preserve */
 		const targetColumn = segments[i]!;
 		if (ctx.currentFromTable) {
-			ctx.validator?.validateColumn(ctx.currentFromTable, targetColumn);
+			validateColumnForTable(ctx, ctx.currentFromTable, targetColumn);
 		}
 		const defaultAlias = segments.map((s) => s.toLowerCase()).join('.');
 
@@ -635,6 +658,12 @@ function compileMultiSegmentPath(
 	// Regular relation path (e.g., customer.name)
 	const column = segments[segments.length - 1]!;
 	const relation = segments.slice(0, -1).join('.');
+	assertNoBindingRelationConstruct(
+		ctx,
+		ctx.currentFromTable,
+		'select relation columns',
+		relation,
+	);
 	if (ctx.currentFromTable && ctx.validator) {
 		const targetTable = ctx.validator.resolveRelationTarget(
 			ctx.currentFromTable,

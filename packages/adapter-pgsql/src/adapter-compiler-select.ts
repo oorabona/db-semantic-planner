@@ -19,6 +19,7 @@ import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, rangeVar } from './ast-helpers.js';
+import { schemaForFromName } from './binding-registry.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -328,6 +329,9 @@ function compileJoinIntents(
 				naming,
 				outerTable: alias,
 				...(schemaName !== undefined && { schemaName }),
+				...(deps.bindingNames !== undefined && {
+					bindingNames: deps.bindingNames,
+				}),
 				...(model !== undefined && { model }),
 				compileSubquery: () => {
 					throw new Error(
@@ -384,6 +388,9 @@ function compileJoinIntents(
 				// joined alias (e.g. 'e2' in self-join ON conditions).
 				outerTable: tableAlias,
 				...(schemaName !== undefined && { schemaName }),
+				...(deps.bindingNames !== undefined && {
+					bindingNames: deps.bindingNames,
+				}),
 				...(model !== undefined && { model }),
 				compileSubquery: () => {
 					throw new Error('Subquery in JOIN ON condition is not supported.');
@@ -397,7 +404,7 @@ function compileJoinIntents(
 			const joinedRangeVar = rangeVar(
 				intent.table,
 				tableAlias,
-				schemaName,
+				schemaForFromName(schemaName, intent.table, deps.bindingNames, naming),
 				naming,
 			);
 
