@@ -4,6 +4,10 @@
  * compileOrderByClause, and compileOrderItem.
  */
 
+import {
+	getTrustedNqlRelationFilterFields,
+	hasNqlTrustedRelationFilterProof,
+} from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { compile, NqlCompiler, parse } from '../index.js';
 import type { NqlClause, NqlProgram, NqlQuery } from '../parser/ast.js';
@@ -52,17 +56,59 @@ const schema = {
 		return tables[name];
 	},
 	getRelationsFrom(sourceTable: string) {
-		const relations: Record<string, { name: string; target: string }[]> = {
+		const relations: Record<
+			string,
+			{
+				name: string;
+				source: string;
+				target: string;
+				type: 'hasMany' | 'hasOne' | 'belongsTo';
+				foreignKey: string;
+			}[]
+		> = {
 			users: [
-				{ name: 'posts', target: 'posts' },
-				{ name: 'orders', target: 'orders' },
-				{ name: 'profile', target: 'profiles' },
+				{
+					name: 'posts',
+					source: 'users',
+					target: 'posts',
+					type: 'hasMany',
+					foreignKey: 'authorId',
+				},
+				{
+					name: 'orders',
+					source: 'users',
+					target: 'orders',
+					type: 'hasMany',
+					foreignKey: 'userId',
+				},
+				{
+					name: 'profile',
+					source: 'users',
+					target: 'profiles',
+					type: 'hasOne',
+					foreignKey: 'userId',
+				},
 			],
-			posts: [],
+			posts: [
+				{
+					name: 'author',
+					source: 'posts',
+					target: 'users',
+					type: 'belongsTo',
+					foreignKey: 'authorId',
+				},
+			],
 			orders: [],
 			profiles: [],
 		};
 		return relations[sourceTable] ?? [];
+	},
+	getRelation(qualifiedName: string) {
+		const [source, relationName] = qualifiedName.split('.');
+		if (!source || !relationName) return undefined;
+		return this.getRelationsFrom(source).find(
+			(relation) => relation.name === relationName,
+		);
 	},
 	getRelationsTo() {
 		return [];
@@ -602,6 +648,204 @@ ${finalStatement}`,
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(/#183/);
 		expect(result.errors[0]?.message).toMatch(/ANY/i);
+	});
+
+	it.each([
+		'some',
+		'none',
+		'every',
+	] as const)('allows binding-final %s(author) when the binding projects the source FK (ref #182)', (mode) => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.where).toMatchObject({
+			kind: 'relationFilter',
+			relation: ['author'],
+			mode,
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+		});
+		expect(hasNqlTrustedRelationFilterProof(result.ast?.query?.where)).toBe(
+			true,
+		);
+		const payload = getTrustedNqlRelationFilterFields(result.ast?.query?.where);
+		expect(payload).toEqual({
+			relation: 'author',
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		try {
+			if (payload) {
+				(payload as { targetTable: string }).targetTable = 'forged_users';
+			}
+		} catch {
+			// Frozen payloads throw in strict mode; either way, mutation must not stick.
+		}
+		expect(payload?.targetTable).toBe('users');
+		expect(
+			result.ast?.bindingOutputSchemas?.get('projected_posts')?.relationFilters
+				?.relations,
+		).toEqual([
+			{
+				relation: 'author',
+				sourceTable: 'posts',
+				targetTable: 'users',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+			},
+		]);
+	});
+
+	it('SEC-182: relation-filter proof cannot be forged by public fields or public symbols', () => {
+		const forged = {
+			kind: 'relationFilter',
+			relation: ['author'],
+			mode: 'some',
+			where: {
+				kind: 'comparison',
+				field: 'email',
+				operator: 'eq',
+				value: 'alice@example.com',
+			},
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+		};
+		Object.defineProperty(
+			forged,
+			Symbol.for('@dbsp/nql/trustedRelationFilter'),
+			{
+				value: true,
+				enumerable: false,
+			},
+		);
+		Object.defineProperty(forged, Symbol('@dbsp/nql/trustedRelationFilter'), {
+			value: true,
+			enumerable: false,
+		});
+
+		expect(hasNqlTrustedRelationFilterProof(forged)).toBe(false);
+		expect(getTrustedNqlRelationFilterFields(forged)).toBeUndefined();
+	});
+
+	it('allows binding-final relation filters when the FK is projected through a direct alias (ref #182)', () => {
+		const result = compile(
+			`posts | select id, authorId as writerId | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.where).toMatchObject({
+			kind: 'relationFilter',
+			relation: ['author'],
+			mode: 'some',
+			targetTable: 'users',
+			sourceColumn: 'writerId',
+			targetColumn: 'id',
+		});
+	});
+
+	it('allows binding-final relation filters when select * directly projects the source FK (ref #182)', () => {
+		const result = compile(
+			`posts | select * | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.where).toMatchObject({
+			kind: 'relationFilter',
+			relation: ['author'],
+			sourceColumn: 'authorId',
+			targetTable: 'users',
+			targetColumn: 'id',
+		});
+	});
+
+	it('allows binding-final relation filters when the FK is projected with snake_case spelling (ref #182)', () => {
+		const result = compile(
+			"posts | select id, author_id | bind projected_posts\nprojected_posts | where some(author).email = 'alice@example.com' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.where).toMatchObject({
+			kind: 'relationFilter',
+			sourceColumn: 'author_id',
+			targetTable: 'users',
+			targetColumn: 'id',
+		});
+	});
+
+	it('rejects binding-final relation filters when the source FK is not projected (ref #182)', () => {
+		const result = compile(
+			"posts | select id, title | bind projected_posts\nprojected_posts | where some(author).email = 'alice@example.com' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+		expect(result.errors[0]?.message).toMatch(/not projected/);
+	});
+
+	it.each([
+		['literal alias', '1 as authorId'],
+		['arithmetic alias', 'authorId + 0 as authorId'],
+	] as const)('rejects binding-final relation filters when the FK output is a fabricated %s (ref #182)', (_label, projection) => {
+		const result = compile(
+			`posts | select id, ${projection} | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+		expect(result.errors[0]?.message).toMatch(/direct source-column/);
+	});
+
+	it('rejects binding-final relation filters from aggregate bindings (ref #182)', () => {
+		const result = compile(
+			"posts | select authorId, count(id) as total | bind post_counts\npost_counts | where some(author).email = 'alice@example.com' | select authorId",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/aggregate/);
+	});
+
+	it('rejects binding-final relation filters from nested read bindings (ref #182)', () => {
+		const result = compile(
+			`posts | select id, authorId | bind base_posts
+base_posts | select id, authorId | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/another NQL binding/);
+	});
+
+	it('rejects binding-final relation filters for unknown source-table relations (ref #182)', () => {
+		const result = compile(
+			"posts | select id, authorId | bind projected_posts\nprojected_posts | where some(editor).email = 'alice@example.com' | select id",
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/not declared/);
 	});
 
 	it('default-rejects unhandled future binding-final clauses (ref #183)', () => {

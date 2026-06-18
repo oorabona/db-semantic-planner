@@ -8,6 +8,7 @@ import {
 	type ComparisonOperator,
 	type FieldRef,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
+	type NqlBindingVirtualRelation,
 	type ParamIntent,
 } from '@dbsp/types';
 import { createNqlBindingRef } from '@dbsp/types/internal';
@@ -209,6 +210,53 @@ export function assertNoBindingRelationConstruct(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
 		`Query '${bindingName}' reads from an NQL binding and cannot ${construct} (${detail}). Relation constructs require a physical model table, not a CTE binding.`,
 	);
+}
+
+function throwBindingRelationFilter182(
+	bindingName: string,
+	relationName: string,
+	reason: string,
+): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Query '${bindingName}' reads from an NQL binding and cannot use relation filters (${relationName}) under A-lite (ref-#182): ${reason}.`,
+	);
+}
+
+export function resolveBindingRelationFilter(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	relationPath: readonly string[],
+): NqlBindingVirtualRelation | undefined {
+	if (!isBindingTable(ctx, bindingName)) return undefined;
+	const actualBindingName = bindingName as string;
+	const relationName = relationPath.join('.');
+	if (relationPath.length !== 1) {
+		throwBindingRelationFilter182(
+			actualBindingName,
+			relationName,
+			'multi-hop binding relation filters are not supported; the relation path must be a single source-table relation',
+		);
+	}
+	const relation = relationPath[0];
+	if (!relation) {
+		throwBindingRelationFilter182(
+			actualBindingName,
+			relationName,
+			'the relation path must name a source-table relation',
+		);
+	}
+	const virtualRelation = ctx.validator?.getVirtualBindingRelation(
+		actualBindingName,
+		relation,
+	);
+	if (virtualRelation) return virtualRelation;
+	const reason =
+		ctx.validator?.explainVirtualBindingRelationRejection(
+			actualBindingName,
+			relation,
+		) ?? 'model metadata is not available';
+	throwBindingRelationFilter182(actualBindingName, relation, reason);
 }
 
 export function assertNoBindingRelationPath(
@@ -525,6 +573,13 @@ export function validateWhereField(
 			`HAVING cannot reference SELECT alias '${field}'. PostgreSQL does not allow SELECT aliases in HAVING; repeat the aggregate expression or filter the result in an outer query.`,
 		);
 	}
+	// Inside dot-syntax relation filters, bare fields belong to the related table.
+	// This must run before the binding-source check so safe binding-final
+	// relation filters validate their inner predicate against the real target.
+	if (!aliasContext && ctx.currentRelationTarget && !field.includes('.')) {
+		ctx.validator?.validateColumn(ctx.currentRelationTarget, field);
+		return;
+	}
 	if (
 		!aliasContext &&
 		ctx.currentFromTable &&
@@ -555,11 +610,6 @@ export function validateWhereField(
 				ctx.validator.validateColumn(ctx.currentFromTable, field);
 			}
 		}
-		return;
-	}
-	// If inside a relation filter (dot-syntax, no alias), validate against relation target
-	if (ctx.currentRelationTarget && !field.includes('.')) {
-		ctx.validator.validateColumn(ctx.currentRelationTarget, field);
 		return;
 	}
 	// Simple column on root table

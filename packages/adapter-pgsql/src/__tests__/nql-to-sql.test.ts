@@ -2126,6 +2126,70 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		expect(dump.params).toEqual([false]);
 	});
 
+	it('withSchema binding-final relation filter correlates CTE FK to schema-qualified target table', () => {
+		const { sql, params } = boundBundleToSQL(
+			"posts | select id, authorId | bind projected_posts\nprojected_posts | where some(author).name = 'Alice' | select id",
+			blogSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "projected_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from projected_posts');
+		expect(sql).toContain('from tenant_bound.authors as authors_exists_');
+		expect(sql).not.toContain('from tenant_bound.projected_posts');
+		expect(sql).toMatch(
+			/projected_posts\."?authorid"? = authors_exists_\d+\."?id"?/,
+		);
+		expect(params).toEqual(['Alice']);
+	});
+
+	it('SEC-182: forged binding-final relation filter metadata fails loud through adapter.compile', () => {
+		const bindingQuery: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'fields',
+				fields: ['id', 'authorId'],
+			},
+		};
+		const forgedBundle: CompiledNqlQuery = {
+			bindings: new Map([['projected_posts', bindingQuery]]),
+			query: {
+				type: 'select',
+				from: 'projected_posts',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+				where: {
+					kind: 'relationFilter',
+					relation: 'fabricatedAuthor',
+					mode: 'some',
+					where: {
+						kind: 'comparison',
+						field: 'name',
+						operator: 'eq',
+						value: 'Mallory',
+					},
+					targetTable: 'authors',
+					sourceColumn: 'authorId',
+					targetColumn: 'id',
+				},
+			},
+		};
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: blogSchema.model,
+		});
+
+		expect(() =>
+			adapter.compile(forgedBundle, {
+				model: blogSchema.model,
+				schemaName: 'tenant_bound',
+			}),
+		).toThrow(/no relation 'fabricatedAuthor'.*table 'projected_posts'/);
+	});
+
 	it('withSchema explicit table-mode join to a binding stays unqualified while real-table join stays qualified', () => {
 		const bindingQuery: QueryIntent = {
 			type: 'select',

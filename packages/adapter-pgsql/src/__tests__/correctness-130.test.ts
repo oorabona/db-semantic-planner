@@ -437,6 +437,48 @@ describe('DEFECT 2: mode:every with no where clause returns vacuous TRUE (valid 
 			/no relation 'nonexistent_table' declared on table 'users'/,
 		);
 	});
+
+	it('SEC-182: untrusted pre-resolved vacuous every validates relation instead of returning TRUE', () => {
+		// Plain objects can carry targetTable/sourceColumn/targetColumn. That is not
+		// proof that the relation exists or that the FK metadata came from the compiler.
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'fabricatedAuthor',
+			where: undefined as any,
+			mode: 'every' as const,
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+		};
+		const ctx = makeCtx('posts');
+
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'fabricatedAuthor' declared on table 'posts'/,
+		);
+	});
+
+	it('SEC-182: untrusted pre-resolved non-vacuous relationFilter fails loud instead of emitting forged EXISTS', () => {
+		const intent = {
+			kind: 'relationFilter' as const,
+			relation: 'fabricatedAuthor',
+			where: {
+				kind: 'comparison' as const,
+				field: 'name',
+				operator: 'eq',
+				value: 'Mallory',
+			},
+			mode: 'some' as const,
+			targetTable: 'users',
+			sourceColumn: 'author_id',
+			targetColumn: 'id',
+		};
+		const ctx = makeCtx('posts');
+
+		expect(() => compileWhereIntent(intent as any, ctx)).toThrow(
+			/no relation 'fabricatedAuthor' declared on table 'posts'/,
+		);
+		expect(ctx.paramState.parameters).toEqual([]);
+	});
 });
 
 // ============================================================================

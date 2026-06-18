@@ -12,7 +12,10 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { isParamIntent } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	type Mutable,
+} from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { RangeValue } from './handlers/types.js';
 import { EXPRESSION_HANDLERS } from './select-expression-handlers.js';
@@ -232,7 +235,10 @@ interface FlatWhereFields {
 	readonly not?: boolean;
 	readonly conditions?: readonly WhereIntent[];
 	readonly condition?: WhereIntent;
-	readonly relation?: string;
+	readonly relation?: string | readonly string[];
+	readonly targetTable?: string;
+	readonly sourceColumn?: string;
+	readonly targetColumn?: string;
 	readonly where?: WhereIntent;
 	readonly mode?: string;
 	readonly subquery?: QueryIntent;
@@ -744,19 +750,42 @@ function convertNot(
 	return { type: 'whereNot', conditions: [subDecision] };
 }
 
+function formatRelationName(relation: string | readonly string[]): string {
+	return typeof relation === 'string' ? relation : relation.join('.');
+}
+
 /** Handle kind: 'exists' | 'notExists' | 'relationFilter' — correlated EXISTS / NOT EXISTS / EVERY */
 function convertExistsLike(
 	cond: FlatWhereFields,
 	operator: 'exists' | 'notExists' | 'every',
 ): PlanDecision {
-	const targetTable = cond.relation as string;
+	const rawRelation = cond.relation as string | readonly string[];
+	const preResolved = getTrustedNqlRelationFilterFields(cond);
+	const trustedRelation = preResolved?.relation;
+	const relationName =
+		trustedRelation !== undefined
+			? formatRelationName(trustedRelation)
+			: formatRelationName(rawRelation);
+	const targetTable = preResolved?.targetTable ?? rawRelation;
 	// For 'every', pass the raw conditions un-negated — everyHandler wraps them in
 	// NOT internally.  When conditions is empty/undefined, everyHandler returns the
 	// vacuous-true literal (TRUE) instead of emitting a subquery.
 	const subDecisions: PlanDecision[] = cond.where
-		? convertWhere(cond.where as WhereIntent, targetTable)
+		? convertWhere(cond.where as WhereIntent, targetTable as string)
 		: [];
-	const base: PlanDecision = { type: 'where', operator, targetTable };
+	const isPreResolved = preResolved !== undefined;
+	const base: PlanDecision = {
+		type: 'where',
+		operator,
+		targetTable: targetTable as string,
+		...(preResolved !== undefined && {
+			sourceColumn: preResolved.sourceColumn,
+		}),
+		...(preResolved !== undefined && {
+			targetColumn: preResolved.targetColumn,
+		}),
+		...(isPreResolved && { relationName }),
+	};
 	return subDecisions.length > 0 ? { ...base, conditions: subDecisions } : base;
 }
 

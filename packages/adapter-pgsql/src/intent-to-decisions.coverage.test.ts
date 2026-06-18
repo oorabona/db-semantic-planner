@@ -961,6 +961,37 @@ describe('intentToDecisions - coverage', () => {
 			expect(decision).toBeDefined();
 		});
 
+		it('SEC-182: ignores untrusted pre-resolved relationFilter metadata', () => {
+			const intent = {
+				type: 'select' as const,
+				from: 'posts',
+				where: {
+					kind: 'relationFilter' as const,
+					relation: 'fabricatedAuthor',
+					mode: 'some' as const,
+					where: {
+						kind: 'comparison' as const,
+						field: 'name',
+						operator: 'eq',
+						value: 'Mallory',
+					},
+					targetTable: 'users',
+					sourceColumn: 'author_id',
+					targetColumn: 'id',
+				},
+			};
+
+			const decisions = intentToDecisions(intent, 'posts');
+			const decision = decisions.find((d) => d.operator === 'exists');
+
+			expect(decision).toMatchObject({
+				targetTable: 'fabricatedAuthor',
+			});
+			expect(decision).not.toHaveProperty('sourceColumn');
+			expect(decision).not.toHaveProperty('targetColumn');
+			expect(decision).not.toHaveProperty('relationName');
+		});
+
 		it('converts relationFilter mode=none to NOT EXISTS', () => {
 			const intent = {
 				type: 'select' as const,

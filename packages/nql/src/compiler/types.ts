@@ -5,6 +5,7 @@
 
 import type {
 	CompiledNqlQuery,
+	NqlBindingRelationFilterMetadata,
 	QueryIntent,
 	SetOperationIntent,
 	WhereIntent,
@@ -37,9 +38,18 @@ export interface ColumnValidatorSchema {
 				}[];
 		  }
 		| undefined;
-	getRelationsFrom(
-		sourceTable: string,
-	): readonly { readonly name: string; readonly target: string }[];
+	getRelationsFrom(sourceTable: string): readonly ColumnValidatorRelation[];
+	getRelation?(qualifiedName: string): ColumnValidatorRelation | undefined;
+}
+
+export interface ColumnValidatorRelation {
+	readonly name: string;
+	readonly source?: string;
+	readonly target: string;
+	readonly type?: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
+	readonly foreignKey?: string | readonly string[] | undefined;
+	readonly sourceKey?: string | undefined;
+	readonly targetKey?: string | undefined;
 }
 
 /**
@@ -69,6 +79,10 @@ export interface CompilerContext {
 	readonly recursiveKeywords: ReadonlySet<string>;
 	readonly validator: ColumnValidator | null;
 	readonly bindingOutputColumns: Map<string, readonly string[] | undefined>;
+	readonly bindingRelationFilters: Map<
+		string,
+		NqlBindingRelationFilterMetadata
+	>;
 	/** BATCH-001: Named parameters for ANY(:param) expressions */
 	readonly params: Readonly<Record<string, unknown>>;
 	/** Maximum number of items allowed in an ANY(:param) array. Resolved by constructor (never undefined). */

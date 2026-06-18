@@ -4,10 +4,93 @@
  * E05 regression: Verify WhereSubqueryIntent is converted correctly.
  */
 
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
 import { intentToDecisions } from '../intent-to-decisions.js';
 
 describe('intentToDecisions', () => {
+	it('uses trusted relation-filter payload instead of mutable public metadata', () => {
+		const relationFilter = markNqlTrustedRelationFilter(
+			{
+				kind: 'relationFilter' as const,
+				relation: 'author',
+				mode: 'some' as const,
+				where: {
+					kind: 'comparison' as const,
+					field: 'email',
+					operator: 'eq' as const,
+					value: 'alice@example.com',
+				},
+				targetTable: 'users',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+			},
+			{
+				relation: 'author',
+				targetTable: 'users',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+			},
+		);
+		relationFilter.relation = 'forgedRoles';
+		relationFilter.targetTable = 'roles';
+		relationFilter.sourceColumn = 'id';
+		relationFilter.targetColumn = 'admin_id';
+
+		const decisions = intentToDecisions(
+			{
+				type: 'select' as const,
+				from: 'projected_posts',
+				where: relationFilter,
+			},
+			'projected_posts',
+		);
+
+		const whereDecision = decisions.find(
+			(d) => d.type === 'where' && d.operator === 'exists',
+		);
+		expect(whereDecision).toMatchObject({
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+			relationName: 'author',
+		});
+	});
+
+	it('does not trust forged relation-filter public metadata without payload', () => {
+		const decisions = intentToDecisions(
+			{
+				type: 'select' as const,
+				from: 'projected_posts',
+				where: {
+					kind: 'relationFilter' as const,
+					relation: 'forgedRoles',
+					mode: 'some' as const,
+					where: {
+						kind: 'comparison' as const,
+						field: 'email',
+						operator: 'eq' as const,
+						value: 'mallory@example.com',
+					},
+					targetTable: 'users',
+					sourceColumn: 'authorId',
+					targetColumn: 'id',
+				},
+			},
+			'projected_posts',
+		);
+
+		const whereDecision = decisions.find(
+			(d) => d.type === 'where' && d.operator === 'exists',
+		);
+		expect(whereDecision).toMatchObject({
+			targetTable: 'forgedRoles',
+		});
+		expect(whereDecision).not.toHaveProperty('sourceColumn');
+		expect(whereDecision).not.toHaveProperty('targetColumn');
+		expect(whereDecision).not.toHaveProperty('relationName');
+	});
+
 	describe('E05 Regression: WhereSubqueryIntent', () => {
 		it('converts scalar subquery comparison with aggregate', () => {
 			const intent = {

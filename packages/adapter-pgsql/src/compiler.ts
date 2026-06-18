@@ -141,6 +141,12 @@ function mapToHandlerDecision(
 	defaultPk: string,
 	deriveFk: FkColumnDerivation,
 ): HandlerDecision {
+	const derivedFkColumns = deriveFkColumns(
+		pd,
+		pd.sourceTable ?? rootTable,
+		defaultPk,
+		deriveFk,
+	);
 	return {
 		type: pd.type,
 		table: pd.table,
@@ -151,7 +157,8 @@ function mapToHandlerDecision(
 		paramIndex: pd.paramIndex,
 		direction: pd.direction,
 		joinType: pd.joinType,
-		...deriveFkColumns(pd, pd.sourceTable ?? rootTable, defaultPk, deriveFk),
+		sourceColumn: pd.sourceColumn ?? derivedFkColumns.sourceColumn,
+		targetColumn: pd.targetColumn ?? derivedFkColumns.targetColumn,
 		targetTable: pd.targetTable,
 		function: pd.function,
 		args: pd.args,

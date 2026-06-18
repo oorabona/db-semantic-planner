@@ -11,7 +11,10 @@ import {
 	type LockIntent,
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_VALUE_FUNCTIONS,
+	type NqlBindingColumnLineage,
 	type NqlBindingOutputSchema,
+	type NqlBindingRelationFilterMetadata,
+	type NqlBindingVirtualRelation,
 	type OrderByIntent,
 	type ParamIntent,
 	type QueryIntent,
@@ -31,6 +34,7 @@ import type {
 	NqlOrderByClause,
 	NqlOrderItem,
 	NqlQuery,
+	NqlRelationFilterExpression,
 	NqlSelectClause,
 	NqlSetClause,
 	NqlWhereClause,
@@ -43,6 +47,7 @@ import {
 	expressionToSql,
 	getKnownBindingColumns,
 	isBindingTable,
+	resolveBindingRelationFilter,
 	resolveIntegerCount,
 	validateColumnForTable,
 } from './expression-utils.js';
@@ -58,6 +63,8 @@ const PORTABLE_BINDING_FINAL_FUNCTIONS: ReadonlySet<string> = new Set([
 	...NQL_SELECT_AGGREGATE_FUNCTIONS,
 	...NQL_SELECT_VALUE_FUNCTIONS,
 ]);
+
+const DEFAULT_RELATION_TARGET_COLUMN = 'id';
 
 /**
  * Compile a nested query without leaking the nested query's mutable context
@@ -139,6 +146,153 @@ function throwUnsupportedBindingFinal(
 	);
 }
 
+function toSnakeCase(name: string): string {
+	return name.replace(/[A-Z]/g, (ch) => `_${ch.toLowerCase()}`);
+}
+
+function columnsMatch(left: string, right: string): boolean {
+	return left === right || toSnakeCase(left) === toSnakeCase(right);
+}
+
+function expressionIntentContainsAggregate(value: unknown): boolean {
+	if (!value || typeof value !== 'object') return false;
+	const record = value as Record<string, unknown>;
+	if (record.kind === 'aggregate') return true;
+	for (const child of Object.values(record)) {
+		if (Array.isArray(child)) {
+			if (child.some((item) => expressionIntentContainsAggregate(item))) {
+				return true;
+			}
+		} else if (expressionIntentContainsAggregate(child)) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function selectContainsAggregate(select: SelectIntent | undefined): boolean {
+	if (!select) return false;
+	if (select.type === 'aggregate') return true;
+	if (select.type !== 'expressions') return false;
+	return select.columns.some((column) =>
+		expressionIntentContainsAggregate(column),
+	);
+}
+
+function relationForeignKeysOnSource(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+): readonly string[] | undefined {
+	if (!relation || relation.type !== 'belongsTo') return undefined;
+	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
+	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
+	return undefined;
+}
+
+function unsafeBindingRelationReason(
+	intent: QueryIntent,
+	ctx: CompilerContext,
+	bindingDependencies: readonly string[],
+): string | undefined {
+	if (!ctx.validator) return 'model metadata is not available';
+	if (!ctx.validator.hasQualifiedRelationLookup()) {
+		return 'model.getRelation metadata is not available';
+	}
+	if (bindingDependencies.length > 0 || isBindingTable(ctx, intent.from)) {
+		return 'the binding body reads from another NQL binding';
+	}
+	if (!ctx.validator.hasPhysicalTable(intent.from)) {
+		return `the binding source '${intent.from}' is not a single real model table`;
+	}
+	if (intent.batchValuesSource) {
+		return 'the binding body reads from a batch-values source';
+	}
+	if ((intent.joins?.length ?? 0) > 0) {
+		return 'the binding body uses joins';
+	}
+	if ((intent.include?.length ?? 0) > 0) {
+		return 'the binding body uses relation includes';
+	}
+	if ((intent.groupBy?.length ?? 0) > 0 || intent.having) {
+		return 'the binding body uses GROUP BY or HAVING';
+	}
+	if (selectContainsAggregate(intent.select)) {
+		return 'the binding body uses aggregate projections';
+	}
+	return undefined;
+}
+
+function virtualRelationForBinding(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+	sourceTable: string,
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+): NqlBindingVirtualRelation | undefined {
+	const fkColumns = relationForeignKeysOnSource(relation);
+	if (!relation || !fkColumns || fkColumns.length !== 1) return undefined;
+	const fkColumn = fkColumns[0]!;
+	const sourceProjection = directProjectionLineage.find(
+		(projection) =>
+			projection.sourceTable === sourceTable &&
+			columnsMatch(projection.sourceColumn, fkColumn),
+	);
+	if (!sourceProjection) return undefined;
+	return {
+		relation: relation.name,
+		sourceTable,
+		targetTable: relation.target,
+		sourceColumn: sourceProjection.outputColumn,
+		targetColumn: relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN,
+	};
+}
+
+function getBindingRelationFilterMetadata(
+	intent: QueryIntent,
+	ctx: CompilerContext,
+	outputSchema: Pick<
+		NqlBindingRelationFilterMetadata,
+		'directProjectionLineage'
+	> &
+		Pick<NqlBindingOutputSchema, 'columns'>,
+	bindingDependencies: readonly string[],
+): NqlBindingRelationFilterMetadata | undefined {
+	const unsafeReason = unsafeBindingRelationReason(
+		intent,
+		ctx,
+		bindingDependencies,
+	);
+	if (unsafeReason) {
+		return {
+			unsafeReason,
+			directProjectionLineage: outputSchema.directProjectionLineage,
+			relations: [],
+		};
+	}
+	const sourceTable = intent.from;
+	const relations: NqlBindingVirtualRelation[] = [];
+	const relationNames = new Set(
+		ctx.validator
+			?.getRelationsFrom(sourceTable)
+			.map((relation) => relation.name),
+	);
+	for (const relationName of relationNames ?? []) {
+		const relation = ctx.validator?.getRelation(sourceTable, relationName);
+		const virtualRelation = virtualRelationForBinding(
+			relation,
+			sourceTable,
+			outputSchema.directProjectionLineage ?? [],
+		);
+		if (virtualRelation) relations.push(virtualRelation);
+	}
+	return {
+		sourceTable,
+		directProjectionLineage: outputSchema.directProjectionLineage,
+		relations,
+	};
+}
+
 function validateBindingFinalPath(
 	expr: Extract<NqlExpression, { type: 'path' }>,
 	ctx: CompilerContext,
@@ -174,13 +328,14 @@ function validateBindingFinalFunction(
 	expr: Extract<NqlExpression, { type: 'function' }>,
 	ctx: CompilerContext,
 	bindingName: string,
+	allowRelationFilters: boolean,
 ): void {
 	const fn = expr.name.toLowerCase();
 	if (!PORTABLE_BINDING_FINAL_FUNCTIONS.has(fn)) {
 		throwUnsupportedBindingFinal(bindingName, `function ${expr.name}()`);
 	}
 	for (const arg of expr.args) {
-		validateBindingFinalExpression(arg, ctx, bindingName);
+		validateBindingFinalExpression(arg, ctx, bindingName, allowRelationFilters);
 	}
 }
 
@@ -188,27 +343,63 @@ function validateBindingFinalExpression(
 	expr: NqlExpression,
 	ctx: CompilerContext,
 	bindingName: string,
+	allowRelationFilters = false,
 ): void {
 	switch (expr.type) {
 		case 'path':
 			validateBindingFinalPath(expr, ctx, bindingName);
 			break;
 		case 'binary':
-			validateBindingFinalExpression(expr.left, ctx, bindingName);
-			validateBindingFinalExpression(expr.right, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.left,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
+			validateBindingFinalExpression(
+				expr.right,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'unary':
-			validateBindingFinalExpression(expr.operand, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.operand,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'comparison':
-			validateBindingFinalExpression(expr.left, ctx, bindingName);
-			validateBindingFinalExpression(expr.right, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.left,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
+			validateBindingFinalExpression(
+				expr.right,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'in':
-			validateBindingFinalExpression(expr.expression, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.expression,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			if (Array.isArray(expr.values)) {
 				for (const value of expr.values) {
-					validateBindingFinalExpression(value, ctx, bindingName);
+					validateBindingFinalExpression(
+						value,
+						ctx,
+						bindingName,
+						allowRelationFilters,
+					);
 				}
 			} else if (expr.values.type === 'dateRange') {
 				// Date-range values compile to ordinary comparison predicates.
@@ -218,29 +409,82 @@ function validateBindingFinalExpression(
 			}
 			break;
 		case 'between':
-			validateBindingFinalExpression(expr.expression, ctx, bindingName);
-			validateBindingFinalExpression(expr.low, ctx, bindingName);
-			validateBindingFinalExpression(expr.high, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.expression,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
+			validateBindingFinalExpression(
+				expr.low,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
+			validateBindingFinalExpression(
+				expr.high,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'isNull':
-			validateBindingFinalExpression(expr.expression, ctx, bindingName);
+			validateBindingFinalExpression(
+				expr.expression,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'function':
-			validateBindingFinalFunction(expr, ctx, bindingName);
+			validateBindingFinalFunction(
+				expr,
+				ctx,
+				bindingName,
+				allowRelationFilters,
+			);
 			break;
 		case 'case':
 			if (expr.subject) {
-				validateBindingFinalExpression(expr.subject, ctx, bindingName);
+				validateBindingFinalExpression(
+					expr.subject,
+					ctx,
+					bindingName,
+					allowRelationFilters,
+				);
 			}
 			for (const when of expr.whenClauses) {
-				validateBindingFinalExpression(when.condition, ctx, bindingName);
-				validateBindingFinalExpression(when.result, ctx, bindingName);
+				validateBindingFinalExpression(
+					when.condition,
+					ctx,
+					bindingName,
+					allowRelationFilters,
+				);
+				validateBindingFinalExpression(
+					when.result,
+					ctx,
+					bindingName,
+					allowRelationFilters,
+				);
 			}
 			if (expr.elseClause) {
-				validateBindingFinalExpression(expr.elseClause, ctx, bindingName);
+				validateBindingFinalExpression(
+					expr.elseClause,
+					ctx,
+					bindingName,
+					allowRelationFilters,
+				);
 			}
 			break;
 		case 'relationFilter':
+			if (allowRelationFilters) {
+				resolveBindingRelationFilter(
+					ctx,
+					bindingName,
+					(expr as NqlRelationFilterExpression).relation,
+				);
+				break;
+			}
 			assertNoBindingRelationConstruct(
 				ctx,
 				bindingName,
@@ -366,7 +610,12 @@ function validateBindingFinalQuery(
 						ctx.currentHavingAliases = previousHavingAliases;
 					}
 				} else {
-					validateBindingFinalExpression(clause.condition, ctx, query.table);
+					validateBindingFinalExpression(
+						clause.condition,
+						ctx,
+						query.table,
+						true,
+					);
 				}
 				break;
 			}
@@ -740,10 +989,15 @@ function expressionOutputColumn(expr: ExpressionIntent): string | undefined {
 	}
 }
 
-function addUnique(columns: string[], seen: Set<string>, column: string): void {
-	if (seen.has(column)) return;
+function addUnique(
+	columns: string[],
+	seen: Set<string>,
+	column: string,
+): boolean {
+	if (seen.has(column)) return false;
 	seen.add(column);
 	columns.push(column);
+	return true;
 }
 
 function resolveSourceOutputColumns(
@@ -765,19 +1019,41 @@ export function getQueryOutputSchema(
 	intent: QueryIntent,
 	ctx: CompilerContext,
 	bindingName: string,
+	bindingDependencies: readonly string[] = [],
 ): NqlBindingOutputSchema {
 	const columns: string[] = [];
 	const seen = new Set<string>();
+	const directProjectionLineage: NqlBindingColumnLineage[] = [];
 	const addColumn = (column: string) => addUnique(columns, seen, column);
+	const resolveSourceColumn = (column: string) =>
+		ctx.validator?.resolveColumnName(intent.from, column) ?? column;
+	const addDirectProjection = (outputColumn: string, sourceColumn: string) => {
+		if (!addColumn(outputColumn)) return;
+		directProjectionLineage.push({
+			kind: 'directProjection',
+			sourceTable: intent.from,
+			sourceColumn: resolveSourceColumn(sourceColumn),
+			outputColumn,
+		});
+	};
 	const addSourceColumns = () => {
 		for (const column of resolveSourceOutputColumns(intent, ctx, bindingName)) {
-			addColumn(column);
+			addDirectProjection(column, column);
 		}
 	};
 	const { select } = intent;
 	if (!select || select.type === 'all') {
 		addSourceColumns();
-		return { columns };
+		const outputSchema = { columns, directProjectionLineage };
+		return {
+			columns: outputSchema.columns,
+			relationFilters: getBindingRelationFilterMetadata(
+				intent,
+				ctx,
+				outputSchema,
+				bindingDependencies,
+			),
+		};
 	}
 
 	if (select.type === 'fields') {
@@ -785,15 +1061,24 @@ export function getQueryOutputSchema(
 			if (field === '*') {
 				addSourceColumns();
 			} else {
-				addColumn(field);
+				addDirectProjection(field, field);
 			}
 		}
-		return { columns };
+		const outputSchema = { columns, directProjectionLineage };
+		return {
+			columns: outputSchema.columns,
+			relationFilters: getBindingRelationFilterMetadata(
+				intent,
+				ctx,
+				outputSchema,
+				bindingDependencies,
+			),
+		};
 	}
 
 	if (select.type === 'aggregate') {
 		for (const field of select.fields ?? []) {
-			addColumn(field);
+			addDirectProjection(field, field);
 		}
 		for (const aggregate of select.aggregates) {
 			if (!aggregate.as) {
@@ -804,7 +1089,16 @@ export function getQueryOutputSchema(
 			}
 			addColumn(aggregate.as);
 		}
-		return { columns };
+		const outputSchema = { columns, directProjectionLineage };
+		return {
+			columns: outputSchema.columns,
+			relationFilters: getBindingRelationFilterMetadata(
+				intent,
+				ctx,
+				outputSchema,
+				bindingDependencies,
+			),
+		};
 	}
 
 	for (const expr of select.columns) {
@@ -825,9 +1119,24 @@ export function getQueryOutputSchema(
 				`Cannot compute output schema for NQL binding '${bindingName}': selected expression must use an alias.`,
 			);
 		}
-		addColumn(outputColumn);
+		if (expr.kind === 'column') {
+			addDirectProjection(outputColumn, expr.column);
+		} else if (expr.kind === 'columnAlias') {
+			addDirectProjection(outputColumn, expr.column);
+		} else {
+			addColumn(outputColumn);
+		}
 	}
-	return { columns };
+	const outputSchema = { columns, directProjectionLineage };
+	return {
+		columns: outputSchema.columns,
+		relationFilters: getBindingRelationFilterMetadata(
+			intent,
+			ctx,
+			outputSchema,
+			bindingDependencies,
+		),
+	};
 }
 
 function validateNqlExpressionPaths(

@@ -130,8 +130,31 @@ export interface CompileOptionsBase {
 /**
  * Adapter-facing NQL compile bundle.
  */
+export interface NqlBindingVirtualRelation {
+	readonly relation: string;
+	readonly sourceTable: string;
+	readonly targetTable: string;
+	readonly sourceColumn: string;
+	readonly targetColumn: string;
+}
+
+export interface NqlBindingColumnLineage {
+	readonly kind: 'directProjection';
+	readonly sourceTable: string;
+	readonly sourceColumn: string;
+	readonly outputColumn: string;
+}
+
+export interface NqlBindingRelationFilterMetadata {
+	readonly sourceTable?: string;
+	readonly unsafeReason?: string;
+	readonly directProjectionLineage?: readonly NqlBindingColumnLineage[];
+	readonly relations: readonly NqlBindingVirtualRelation[];
+}
+
 export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
+	readonly relationFilters?: NqlBindingRelationFilterMetadata;
 }
 
 export interface NqlRuntimeBinding {
