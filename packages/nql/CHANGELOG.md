@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.4.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.3.0...nql-v1.4.0) (2026-06-18)
+
+
+### Features
+
+* **nql:** Support binding-final tag queries ([#184](https://github.com/oorabona/db-semantic-planner/issues/184)) ([f4ccf6d](https://github.com/oorabona/db-semantic-planner/commit/f4ccf6d32a7c65afc9a1ada9506877a827f92c2a)), closes [#176](https://github.com/oorabona/db-semantic-planner/issues/176)
+* **nql:** Support ordered multi-mutation tag programs ([#185](https://github.com/oorabona/db-semantic-planner/issues/185)) ([7ddebfa](https://github.com/oorabona/db-semantic-planner/commit/7ddebfa4b2c6c5f7a234c0f94e9dd98753c8074f)), closes [#173](https://github.com/oorabona/db-semantic-planner/issues/173)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 1.3.0
+
 ## [1.3.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.2.0...nql-v1.3.0) (2026-06-16)
 
 
