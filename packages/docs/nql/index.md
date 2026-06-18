@@ -1948,7 +1948,55 @@ WHERE users.active = $1
 
 *(5 rows — the bound result `activeUsers` can be used in subsequent queries, e.g. `where userId in activeUsers`)*
 
-**Follow-up usage** — reference the bound name in a later query:
+A read pipeline ending in `| bind` can be the final query's `FROM` source: NQL compiles the binding as a `WITH` CTE and the final query reads from that CTE.
+
+```typescript
+const bindingFinalFromDb = schema({
+  users: {
+    id: { type: 'integer', primaryKey: true, autoIncrement: true },
+    username: 'string',
+    email: { type: 'string', unique: true },
+    active: { type: 'boolean', default: 'true', index: true },
+    createdAt: { type: 'timestamp', default: 'now()' },
+  },
+} as const);
+const bindingFinalFromOrm = createOrm({
+  schema: bindingFinalFromDb,
+  adapter: createPgsqlCompileOnlyAdapter({
+    model: bindingFinalFromDb.model,
+    dbCasing: 'snake_case',
+    schemaName: 'iam_example',
+  }),
+});
+
+const bindingFinalFromDump = bindingFinalFromOrm.nql<unknown>`users | where active = true | select id, username | bind active_users
+active_users | where username like 'a%' | select id, username | order by id | limit 5`.dump() as any;
+const bindingFinalFromSql = 'WITH "active_users" as (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5';
+const bindingFinalFromParams = bindingFinalFromDump.params ?? bindingFinalFromDump.parameters;
+
+if (bindingFinalFromDump.sql !== bindingFinalFromSql) {
+  throw new Error(bindingFinalFromDump.sql);
+}
+if (JSON.stringify(bindingFinalFromParams) !== JSON.stringify([true, 'a%'])) {
+  throw new Error(JSON.stringify(bindingFinalFromParams));
+}
+```
+
+<details><summary>SQL</summary>
+
+```sql
+WITH "active_users" as (SELECT users.id, users.username FROM iam_example.users WHERE users.active = $1) SELECT active_users.id, active_users.username FROM active_users WHERE active_users.username LIKE $2 ORDER BY active_users.id ASC LIMIT 5
+-- params: [true, "a%"]
+```
+</details>
+
+| id | username |
+|----|----------|
+| 1  | alice    |
+
+*(1 row — the final query reads from the `active_users` binding)*
+
+**Related subquery usage** — parenthesized queries can also feed `IN`:
 
 ```nql
 roles | where id in (userRoles | where userId = 1 | select roleId)
