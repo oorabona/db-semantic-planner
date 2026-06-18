@@ -1,5 +1,5 @@
 import { schema } from '@dbsp/core';
-import type { CompiledNqlQuery, QueryIntent } from '@dbsp/types';
+import type { CompiledNqlQuery, QueryIntent, UpdateIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../../../nql/src/index.js';
 import {
@@ -28,6 +28,14 @@ const itemsQuery: QueryIntent = {
 	},
 };
 
+const idsMutation: UpdateIntent = {
+	type: 'update',
+	table: 'items',
+	set: { name: 'unused' },
+	allowAll: true,
+	returning: ['id'],
+};
+
 function compileNqlBundle(nql: string): CompiledNqlQuery {
 	const result = compile(nql, testSchema.model);
 	if (!result.success || !result.ast) {
@@ -43,14 +51,15 @@ function tryCompileNqlBundle(
 	adapterOptions?: PgsqlAdapterOptions,
 ): {
 	error: unknown;
+	params: readonly unknown[] | undefined;
 	sql: string | undefined;
 } {
 	const adapter = createPgsqlCompileOnlyAdapter(adapterOptions);
 	try {
 		const result = adapter.compile(bundle, { model: testSchema.model });
-		return { error: undefined, sql: result.sql };
+		return { error: undefined, params: result.parameters, sql: result.sql };
 	} catch (error) {
-		return { error, sql: undefined };
+		return { error, params: undefined, sql: undefined };
 	}
 }
 
@@ -71,6 +80,57 @@ function expectBindTableCollision(
 	expect((error as Error).message).toContain(
 		`NQL binding '${bindingName}' collides with physical table name '${physicalTableName}'`,
 	);
+}
+
+function withOriginalDbType<T>(
+	tableName: string,
+	columnName: string,
+	originalDbType: string,
+	fn: () => T,
+): T {
+	const table = testSchema.model.getTable(tableName);
+	const column = table?.columns.find(
+		(candidate) => candidate.name === columnName,
+	);
+	if (column === undefined) {
+		throw new Error(`Missing test column ${tableName}.${columnName}`);
+	}
+	const mutableColumn = column as { originalDbType?: string };
+	const previousOriginalDbType = mutableColumn.originalDbType;
+	mutableColumn.originalDbType = originalDbType;
+	try {
+		return fn();
+	} finally {
+		if (previousOriginalDbType === undefined) {
+			delete mutableColumn.originalDbType;
+		} else {
+			mutableColumn.originalDbType = previousOriginalDbType;
+		}
+	}
+}
+
+function withoutOriginalDbType<T>(
+	tableName: string,
+	columnName: string,
+	fn: () => T,
+): T {
+	const table = testSchema.model.getTable(tableName);
+	const column = table?.columns.find(
+		(candidate) => candidate.name === columnName,
+	);
+	if (column === undefined) {
+		throw new Error(`Missing test column ${tableName}.${columnName}`);
+	}
+	const mutableColumn = column as { originalDbType?: string };
+	const previousOriginalDbType = mutableColumn.originalDbType;
+	delete mutableColumn.originalDbType;
+	try {
+		return fn();
+	} finally {
+		if (previousOriginalDbType !== undefined) {
+			mutableColumn.originalDbType = previousOriginalDbType;
+		}
+	}
 }
 
 describe('NQL bind CTE identifier injection defense', () => {
@@ -339,5 +399,329 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(error).toBeUndefined();
 		expect(sql).toContain('WITH "ids" as (');
 		expect(sql).toContain('FROM ids');
+	});
+
+	it('materializes runtime bindings as typed CTEs without writable mutation CTEs', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 1 }, { id: 2 }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+		);
+		expect(sql).toContain('FROM ids');
+		expect(sql).not.toMatch(/WITH "ids"\s+as\s+\(\s*insert/i);
+		expect(params).toEqual([1, 2]);
+	});
+
+	it('casts runtime binding VALUES params from shorthand source-table column types', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'item_rows',
+				select: {
+					type: 'fields',
+					fields: ['id', 'name'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'item_rows',
+					{
+						columns: ['id', 'name'],
+						rows: [{ id: 1, name: 'one' }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['item_rows', idsMutation]]),
+		};
+
+		const { error, params, sql } = withoutOriginalDbType('items', 'name', () =>
+			tryCompileNqlBundle(bundle),
+		);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "item_rows" ("id", "name") as (SELECT "id", "name" FROM "items" WHERE false UNION ALL VALUES ($1::integer, $2::text))',
+		);
+		expect(params).toEqual([1, 'one']);
+	});
+
+	it('materializes empty runtime bindings as table-derived zero-row relations', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
+		);
+		expect(sql).not.toContain('NULL::');
+		expect(sql).not.toContain('VALUES (NULL)');
+		expect(sql).toContain('FROM ids');
+		expect(params).toEqual([]);
+	});
+
+	it('keeps empty runtime binding SQL independent of model originalDbType strings', () => {
+		const payload = 'text UNION SELECT password FROM users --';
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [],
+					},
+				],
+			]),
+			mutationBindings: new Map([
+				[
+					'ids',
+					{
+						...idsMutation,
+						table: 'items',
+					},
+				],
+			]),
+		};
+		const model = testSchema.model;
+		const table = model.getTable('items');
+		const idColumn = table?.columns.find((column) => column.name === 'id');
+		const previousOriginalDbType = idColumn?.originalDbType;
+		if (idColumn) {
+			(idColumn as { originalDbType?: string }).originalDbType = payload;
+		}
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+		if (idColumn) {
+			if (previousOriginalDbType === undefined) {
+				delete (idColumn as { originalDbType?: string }).originalDbType;
+			} else {
+				(idColumn as { originalDbType?: string }).originalDbType =
+					previousOriginalDbType;
+			}
+		}
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
+		);
+		expect(sql ?? '').not.toContain(payload);
+		expect(sql ?? '').not.toContain('NULL::');
+	});
+
+	it('validates model-derived runtime binding cast types before SQL emission', () => {
+		const payload = 'integer); DROP TABLE users; --';
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 1 }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+		const { error, sql } = withOriginalDbType('items', 'id', payload, () =>
+			tryCompileNqlBundle(bundle),
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('invalid type name');
+		expect(sql ?? '').not.toContain(payload);
+	});
+
+	it.each([
+		'boolean or true',
+		'text UNION SELECT',
+	])('rejects runtime binding cast type "%s" via the strict core validator', (payload) => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 1 }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, sql } = withOriginalDbType('items', 'id', payload, () =>
+			tryCompileNqlBundle(bundle),
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('invalid type name');
+		expect(sql ?? '').not.toContain(payload);
+	});
+
+	it.each([
+		['double precision', 1.5],
+		['varchar(255)', 'ok'],
+		['character varying(255)', 'ok'],
+		['timestamp with time zone', '2026-06-18T00:00:00.000Z'],
+		['integer[]', [1, 2, 3]],
+	])('accepts legitimate runtime binding cast type "%s"', (typeName, value) => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: value }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = withOriginalDbType(
+			'items',
+			'id',
+			typeName,
+			() => tryCompileNqlBundle(bundle),
+		);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(`$1::${typeName}`);
+		expect(params).toEqual([value]);
+	});
+
+	it('fails loud before emitting over-cap runtime binding VALUES parameters', () => {
+		const rows = Array.from({ length: 32_001 }, (_, id) => ({ id }));
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows,
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(sql).toBeUndefined();
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			"NQL runtime binding 'ids' would materialize 32001 VALUES parameters",
+		);
+		expect((error as Error).message).toContain('limit is 32000');
+	});
+
+	it('rejects empty runtime bindings without a source mutation table', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [],
+					},
+				],
+			]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(sql).toBeUndefined();
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			'source mutation table is unavailable',
+		);
 	});
 });

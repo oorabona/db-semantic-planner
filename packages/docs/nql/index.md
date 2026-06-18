@@ -1723,6 +1723,64 @@ console.log(archivedDrafts.sql);
 console.log(archivedDrafts.parameters);
 ```
 
+A tag program can also contain ordered mutations. A non-final mutation may end with `| bind <name>` when it includes a `| select ...` returning projection. During execution, each mutation runs in source order inside one adapter transaction; each mutation fires its own `beforeMutation` and `afterMutation` hooks. Rows returned by a bound mutation feed later statements as a standard SQL CTE, for example `WITH "created_user" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES (...))`. This is not a PostgreSQL writable CTE; NQL executes the mutation first, then materializes its returned rows for subsequent statements.
+
+Use `.dump()` to inspect the compile-only statement sequence. Since `.dump()` does not execute the bound mutation, each empty runtime binding is emitted as a table-derived empty relation such as `WITH "created_user" ("id") as (SELECT "id" FROM "users" WHERE false)`:
+
+```typescript
+const mutationBindingDb = schema({
+  users: {
+    id: { type: 'uuid', primaryKey: true, dbType: 'uuid' },
+    name: 'string',
+    email: 'string',
+    active: 'boolean',
+  },
+} as const);
+const mutationBindingOrm = createOrm({
+  schema: mutationBindingDb,
+  adapter: createPgsqlCompileOnlyAdapter({ model: mutationBindingDb.model }),
+});
+
+const orderedMutationProgram = mutationBindingOrm.nql<unknown>`
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created_user
+update users set active = ${true} where id in (created_user) | select id | bind activated_user
+update users set active = ${false} where id in (activated_user) | select id
+`.dump() as {
+  sql: string;
+  parameters: readonly unknown[];
+  sequence?: ReadonlyArray<{
+    kind: string;
+    bindName?: string;
+    sql: string;
+    params: readonly unknown[];
+  }>;
+};
+
+if (
+  orderedMutationProgram.sequence?.length !== 3 ||
+  orderedMutationProgram.sequence[0]?.bindName !== 'created_user' ||
+  orderedMutationProgram.sequence[1]?.bindName !== 'activated_user'
+) {
+  throw new Error('expected ordered mutation sequence');
+}
+
+const updateSql = orderedMutationProgram.sequence[1]?.sql ?? '';
+const finalSql = orderedMutationProgram.sequence[2]?.sql ?? '';
+const emptyUserIdRelation = 'SELECT "id" FROM "users" WHERE false';
+const writableMutationCte = /WITH "(?:created_user|activated_user)"\s+\("id"\)\s+as\s+\(\s*insert/i;
+
+if (
+  !updateSql.includes('WITH "created_user" ("id") as (') ||
+  !updateSql.includes(emptyUserIdRelation) ||
+  !finalSql.includes('"activated_user" ("id") as (') ||
+  !finalSql.includes(emptyUserIdRelation) ||
+  writableMutationCte.test(updateSql) ||
+  writableMutationCte.test(finalSql)
+) {
+  throw new Error('expected mutation bindings to materialize through table-derived empty CTEs');
+}
+```
+
 Mutation hooks run for tag mutations during execution:
 
 ```typescript
@@ -1756,12 +1814,30 @@ if (rows.length !== 1 || events.join(',') !== 'before:insert:users,after:insert:
 }
 ```
 
-The tag path fails loudly instead of dropping statements or silently materializing writable CTEs:
+The tag path fails loudly instead of dropping statements or silently accepting unusable bindings:
 
 ```typescript
+const mutationBindingFailureDb = schema({
+  users: {
+    id: { type: 'uuid', primaryKey: true, dbType: 'uuid' },
+    name: 'string',
+    email: 'string',
+    active: 'boolean',
+  },
+  posts: {
+    id: { type: 'uuid', primaryKey: true, dbType: 'uuid' },
+    title: 'string',
+    authorId: ref('users'),
+  },
+} as const);
+const mutationBindingFailureOrm = createOrm({
+  schema: mutationBindingFailureDb,
+  adapter: createPgsqlCompileOnlyAdapter({ model: mutationBindingFailureDb.model }),
+});
+
 let missingBind = '';
 try {
-  orm.nql`users | where active = ${true}
+  mutationBindingFailureOrm.nql`users | where active = ${true}
 posts | select id`.dump();
 } catch (error) {
   missingBind = error instanceof Error ? error.message : String(error);
@@ -1771,25 +1847,54 @@ if (!missingBind.includes('Multiple statements require explicit binding')) {
   throw new Error(missingBind || 'expected missing bind failure');
 }
 
-let mutationBind = '';
+let missingReturning = '';
 try {
-  orm.nql`
-insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created_user
+  mutationBindingFailureOrm.nql`
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | bind created_user
 users | where id in (created_user)`.dump();
 } catch (error) {
-  mutationBind = error instanceof Error ? error.message : String(error);
+  missingReturning = error instanceof Error ? error.message : String(error);
 }
 
-if (!mutationBind.includes('NQL tag programs cannot use mutation bodies')) {
-  throw new Error(mutationBind || 'expected mutation-bind failure');
+if (!missingReturning.includes('must include a `returning` clause')) {
+  throw new Error(missingReturning || 'expected missing RETURNING failure');
+}
+
+let duplicateBind = '';
+try {
+  mutationBindingFailureOrm.nql`
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created_user
+insert into users set name = ${'Bob'}, email = ${'bob@example.com'} | select id | bind created_user
+users | where id in (created_user)`.dump();
+} catch (error) {
+  duplicateBind = error instanceof Error ? error.message : String(error);
+}
+
+if (!duplicateBind.includes("NQL binding name 'created_user' is used more than once")) {
+  throw new Error(duplicateBind || 'expected duplicate bind failure');
+}
+
+let nonProjectedColumn = '';
+try {
+  mutationBindingFailureOrm.nql`
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created_user
+created_user | select email`.dump();
+} catch (error) {
+  nonProjectedColumn = error instanceof Error ? error.message : String(error);
+}
+
+if (!nonProjectedColumn.includes("Column 'email' is not projected by NQL binding 'created_user'")) {
+  throw new Error(nonProjectedColumn || 'expected non-projected column failure');
 }
 ```
 
 Constraints to rely on:
 
 - Every non-final statement in a multi-statement tag template must end with `| bind <name>`.
-- Bound tag pipelines must be read-only before the final statement; mutation bodies inside `| bind` are rejected in the tag executor.
-- A mutation used as a direct NQL binding outside the tag must include `| select ...` / `RETURNING` so it produces a referenceable result.
+- Binding names must be unique within one NQL program.
+- A bound mutation must include `| select ...` / `RETURNING` so it produces a referenceable result.
+- Later statements may reference only columns projected by the bound query or mutation.
+- Bound mutation rows are materialized for later statements as standard SQL CTEs: runtime rows use `SELECT <projected columns> FROM <source table> WHERE false UNION ALL VALUES (...)`, while compile-only empty bindings use only the `SELECT <projected columns> FROM <source table> WHERE false` branch. PostgreSQL derives binding column types from the real table. They are not PostgreSQL writable CTEs.
 - Where-less NQL `update` and `delete` fail unless the compiler is explicitly configured with `allowUnfilteredMutations`.
 
 ---
@@ -2059,7 +2164,7 @@ table                              -- table scan
 | DELETE | `delete from table where condition!` |
 | UPSERT | `upsert into table on conflictCol set col = val!` |
 | Tag mutation dump | ``orm.nql`insert into table set col = ${value}`.dump()`` |
-| Bound pipeline mutation | ``query \| bind source`` then `insert into table from source` |
+| Bound pipeline mutation | ``query-or-returning-mutation \| bind source`` then `insert into table from source` |
 
 ### Include Strategies
 

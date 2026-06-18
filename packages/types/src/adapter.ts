@@ -128,6 +128,25 @@ export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
 }
 
+export interface NqlRuntimeBinding {
+	readonly columns: readonly string[];
+	readonly rows: readonly Readonly<Record<string, unknown>>[];
+}
+
+export type NqlProgramSequenceStep =
+	| {
+			readonly kind: 'query';
+			readonly query: QueryIntent;
+			readonly bindName?: string;
+			readonly final: boolean;
+	  }
+	| {
+			readonly kind: 'mutation';
+			readonly mutation: MutationIntent;
+			readonly bindName?: string;
+			readonly final: boolean;
+	  };
+
 export interface CompiledNqlQuery {
 	readonly query?: QueryIntent;
 	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
@@ -140,6 +159,10 @@ export interface CompiledNqlQuery {
 	readonly bindingOutputSchemas?: ReadonlyMap<string, NqlBindingOutputSchema>;
 	/** Named mutation bindings from `mutation | select cols | bind X` clauses. */
 	readonly mutationBindings?: ReadonlyMap<string, MutationIntent>;
+	/** Runtime row bindings materialized as typed CTEs by the adapter. */
+	readonly runtimeBindings?: ReadonlyMap<string, NqlRuntimeBinding>;
+	/** Source-ordered NQL statements for multi-statement program execution. */
+	readonly nqlProgramSequence?: readonly NqlProgramSequenceStep[];
 	/** Set operation (UNION/INTERSECT/EXCEPT) wrapping two queries */
 	readonly setOperation?: SetOperationIntent;
 }
@@ -256,11 +279,19 @@ export interface DumpMeta {
 /**
  * A dump contains the plan, compiled SQL, and parameters for observability.
  */
+export interface DumpSequenceStep {
+	readonly sql: string;
+	readonly params: readonly unknown[];
+	readonly bindName?: string;
+	readonly kind?: 'query' | 'mutation';
+}
+
 export interface Dump {
 	readonly plan?: PlanReport | undefined;
 	readonly sql: string;
 	readonly params: readonly unknown[];
 	readonly meta?: DumpMeta;
+	readonly sequence?: readonly DumpSequenceStep[];
 }
 
 // ============================================================================

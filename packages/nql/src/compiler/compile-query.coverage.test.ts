@@ -337,6 +337,41 @@ describe('binding-final query sources', () => {
 		expect(result.ast?.query?.from).toBe('active_users');
 	});
 
+	it('records a final query FROM binding as a dependency for CTE retention (#173)', () => {
+		const result = compile(
+			'posts | where id >= 3 | select id | bind recent_posts\nrecent_posts | select id',
+			schema,
+		);
+		const sequence = result.ast?.nqlProgramSequence as
+			| readonly { readonly bindingDependencies?: readonly string[] }[]
+			| undefined;
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindings?.has('recent_posts')).toBe(true);
+		expect(result.ast?.query?.from).toBe('recent_posts');
+		expect(sequence?.at(-1)?.bindingDependencies).toEqual(['recent_posts']);
+	});
+
+	it.each([
+		['WITH CTE body', 'with ids as (active_users | select id) ids | select id'],
+		[
+			'WITH outer query',
+			'with passthrough as (users | select id) active_users | select id',
+		],
+	])('rejects read binding references across mutation inside %s', (_label, finalStatement) => {
+		const result = compile(
+			`users | select id | bind active_users
+insert into users set name = 'Alice' | select id | bind created_user
+${finalStatement}`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/read binding referenced across a mutation \(#186\)/,
+		);
+	});
+
 	it('accepts IN subqueries over real tables from a final query that reads a bind source', () => {
 		const result = compile(
 			'posts | where published = false | select id | bind draft_posts\ndraft_posts | where id in (comments | select postId) | select id',

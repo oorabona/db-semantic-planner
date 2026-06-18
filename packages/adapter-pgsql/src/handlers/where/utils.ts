@@ -3,12 +3,12 @@
  * @internal Extracted from comparison, in, like, null handlers (PGSQL-008, PGSQL-009).
  */
 
+import { validateTypeName } from '@dbsp/core';
 import { isFieldRef, isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { columnRef, nullConstNode } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
-import { validateDbTypeName } from '../../validate.js';
 import type { CompilerContext, CompilerState } from '../types.js';
 import { isParamRef } from '../types.js';
 
@@ -137,6 +137,10 @@ export function resolveColumnPgType(
 	// Only cast when originalDbType is explicitly set (populated by introspection).
 	// Manually defined schemas omit this field — we do not guess the PG type from
 	// the abstract ColumnType to avoid breaking queries on non-introspected schemas.
-	if (column.originalDbType) return validateDbTypeName(column.originalDbType);
+	if (column.originalDbType) {
+		const typeName = column.originalDbType.trim();
+		validateTypeName(typeName);
+		return typeName;
+	}
 	return undefined;
 }

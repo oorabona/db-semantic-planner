@@ -153,16 +153,24 @@ recent_posts
 		]);
 	});
 
-	it('rejects mutation binding bodies before execution', async () => {
+	it('executes mutation binding bodies before the final query', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const authorId = 999_001 + Math.floor(Date.now() % 1_000_000);
+		const email = `mutation-bind-${authorId}@example.com`;
 
 		const program = orm.nql<{
 			id: number;
-		}>`insert into authors set id = ${999_001}, name = ${'Rejected Bind'}, email = ${'rejected-bind@example.com'} | select id | bind new_author
-authors | select id`;
+		}>`insert into authors set id = ${authorId}, name = ${'Mutation Bind'}, email = ${email} | select id | bind new_author
+authors | where id in (new_author) | select id`;
+		const dump = program.dump();
+		const rows = await program.all();
 
-		expect(() => program.dump()).toThrow(/#173/);
+		expect(dump.sequence).toHaveLength(2);
+		expect(dump.sql).toContain(
+			`WITH "new_author" ("id") as (SELECT "id" FROM "${SCHEMA}"."authors" WHERE false)`,
+		);
+		expect(rows).toEqual([{ id: authorId }]);
 	});
 
 	it('runs mutation hooks around NQL tag mutations', async () => {

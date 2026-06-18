@@ -61,6 +61,18 @@ describe('validateTypeName — injection strings are rejected', () => {
 		);
 	});
 
+	it('rejects keyword suffix injection after a valid base type', () => {
+		expect(() => validateTypeName('boolean or true')).toThrow(
+			/invalid type name/i,
+		);
+	});
+
+	it('rejects UNION injection after a valid base type', () => {
+		expect(() => validateTypeName('text UNION SELECT')).toThrow(
+			/invalid type name/i,
+		);
+	});
+
 	it('rejects type with invalid modifier content (non-digit in parens)', () => {
 		// "(255px)" is not a valid modifier — only digits or digits,digits allowed
 		expect(() => validateTypeName('varchar(255px)')).toThrow(
