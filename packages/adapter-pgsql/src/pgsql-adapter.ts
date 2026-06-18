@@ -15,13 +15,18 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
+import {
+	POSTGRESQL_CAPABILITIES,
+	plan as planFn,
+	validateTypeName,
+} from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
 	AdapterLogger,
 	AdapterStreamOptions,
 	BatchUpdateIntent,
+	ColumnType,
 	CompiledNqlQuery,
 	CompiledQuery,
 	CompileOnlyAdapter,
@@ -37,11 +42,13 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
+	NqlRuntimeBinding,
 	PlanReport,
 	QueryIntent,
 	RecursivePlanReport,
 	SetOperationIntent,
 	SubqueryIncludeInfo,
+	TableIR,
 	UpdateIntent,
 	UpsertFromIntent,
 	UpsertIntent,
@@ -87,7 +94,7 @@ import {
 	generateCreateIndexSQL,
 	generateDropIndexSQL,
 } from './ddl/index-operations.js';
-import { quoteIdent } from './ddl/phases/utils.js';
+import { qualifyTableIdent, quoteIdent } from './ddl/phases/utils.js';
 import {
 	generateAlterColumnSQL,
 	generateTruncateSQL,
@@ -126,6 +133,8 @@ type PgsqlInternalCompileOptions = CompileOptions & {
 	readonly naming?: NamingPlugin;
 };
 
+const MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS = 32_000;
+
 function renumberSqlParams(sql: string, offset: number): string {
 	if (offset === 0) return sql;
 	return sql.replace(/\$(\d+)/g, (_match, num) => {
@@ -143,7 +152,8 @@ function isCompiledNqlQuery(
 			'mutation' in input ||
 			'setOperation' in input ||
 			'bindings' in input ||
-			'mutationBindings' in input)
+			'mutationBindings' in input ||
+			'runtimeBindings' in input)
 	);
 }
 
@@ -252,6 +262,209 @@ function findDuplicateEmittedNqlBindingName(
 		seen.set(emittedName, bindingName);
 	}
 	return undefined;
+}
+
+function orderedNqlBindingNames(bundle: CompiledNqlQuery): string[] {
+	const names: string[] = [];
+	const seen = new Set<string>();
+	for (const name of bundle.bindings?.keys() ?? []) {
+		names.push(name);
+		seen.add(name);
+	}
+	for (const name of bundle.runtimeBindings?.keys() ?? []) {
+		if (!seen.has(name)) {
+			names.push(name);
+			seen.add(name);
+		}
+	}
+	return names;
+}
+
+function mapRuntimeBindingColumnType(type: ColumnType): string | undefined {
+	switch (type) {
+		case 'string':
+			return 'text';
+		case 'text':
+			return 'text';
+		case 'number':
+		case 'integer':
+			return 'integer';
+		case 'bigint':
+			return 'bigint';
+		case 'decimal':
+			return 'numeric';
+		case 'boolean':
+			return 'boolean';
+		case 'date':
+			return 'date';
+		case 'time':
+			return 'time';
+		case 'datetime':
+		case 'timestamp':
+			return 'timestamptz';
+		case 'json':
+		case 'jsonb':
+			return 'jsonb';
+		case 'uuid':
+			return 'uuid';
+		case 'daterange':
+			return 'daterange';
+		case 'tsrange':
+			return 'tsrange';
+		case 'tstzrange':
+			return 'tstzrange';
+		case 'int4range':
+			return 'int4range';
+		case 'int8range':
+			return 'int8range';
+		case 'numrange':
+			return 'numrange';
+		default:
+			return undefined;
+	}
+}
+
+function findRuntimeBindingSourceTable(
+	model: ModelIR,
+	sourceTable: string,
+): TableIR | undefined {
+	return (
+		model.getTable(sourceTable) ??
+		[...model.tables.values()].find((table) => table.name === sourceTable)
+	);
+}
+
+function resolveRuntimeBindingColumnType(
+	bindingName: string,
+	sourceTable: TableIR,
+	columnName: string,
+): string {
+	const column = sourceTable.columns.find(
+		(candidate) => candidate.name === columnName,
+	);
+	if (column === undefined) {
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot resolve projected column '${columnName}' on source mutation table '${sourceTable.name}'.`,
+		);
+	}
+	const dbType =
+		column.originalDbType?.trim() || mapRuntimeBindingColumnType(column.type);
+	if (dbType === undefined || dbType.trim() === '') {
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${columnName}' on source mutation table '${sourceTable.name}'.`,
+		);
+	}
+	const typeName = dbType.trim();
+	try {
+		validateTypeName(typeName);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot use PostgreSQL cast type for projected column '${columnName}': ${reason}`,
+		);
+	}
+	return typeName;
+}
+
+function resolveRuntimeBindingColumnTypes(
+	name: string,
+	binding: NqlRuntimeBinding,
+	model: ModelIR | undefined,
+	sourceTableName: string,
+): readonly string[] {
+	if (model === undefined) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot materialize non-empty rows because no model is available for source-table column type resolution.`,
+		);
+	}
+	const sourceTable = findRuntimeBindingSourceTable(model, sourceTableName);
+	if (sourceTable === undefined) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot resolve source mutation table '${sourceTableName}' in the model.`,
+		);
+	}
+	return binding.columns.map((column) =>
+		resolveRuntimeBindingColumnType(name, sourceTable, column),
+	);
+}
+
+function assertRuntimeBindingValuesParameterCount(
+	name: string,
+	binding: NqlRuntimeBinding,
+	parameterOffset: number,
+): void {
+	const valueParameterCount = binding.rows.length * binding.columns.length;
+	if (
+		valueParameterCount <= MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS &&
+		parameterOffset + valueParameterCount <=
+			MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS
+	) {
+		return;
+	}
+	const totalParameterCount = parameterOffset + valueParameterCount;
+	throw new Error(
+		`NQL runtime binding '${name}' would materialize ${valueParameterCount} VALUES parameters; ` +
+			`limit is ${MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS}. ` +
+			`Current parameter offset is ${parameterOffset}, which would make ${totalParameterCount} total parameters before compiling the final statement.`,
+	);
+}
+
+function compileNqlRuntimeBindingCte(
+	name: string,
+	binding: NqlRuntimeBinding,
+	naming: NamingPlugin,
+	parameterOffset: number,
+	sourceTable: string | undefined,
+	schemaName: string | undefined,
+	model: ModelIR | undefined,
+): { cte: string; parameters: readonly unknown[] } {
+	if (binding.columns.length === 0) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
+		);
+	}
+	const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
+	const columnSql = binding.columns
+		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
+		.join(', ');
+	if (sourceTable === undefined) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot materialize a typed relation because its source mutation table is unavailable.`,
+		);
+	}
+	const projectedColumns = binding.columns
+		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
+		.join(', ');
+	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${qualifyTableIdent(sourceTable, schemaName, naming)} WHERE false`;
+	if (binding.rows.length === 0) {
+		return {
+			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
+			parameters: [],
+		};
+	}
+	assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
+
+	const columnTypes = resolveRuntimeBindingColumnTypes(
+		name,
+		binding,
+		model,
+		sourceTable,
+	);
+	const parameters: unknown[] = [];
+	let nextParam = parameterOffset + 1;
+	const valuesSql = binding.rows
+		.map((row) => {
+			const placeholders = binding.columns.map((column, columnIndex) => {
+				parameters.push(row[column]);
+				return `$${nextParam++}::${columnTypes[columnIndex]}`;
+			});
+			return `(${placeholders.join(', ')})`;
+		})
+		.join(', ');
+	return {
+		cte: `${cteName} (${columnSql}) as (${sourceAnchorSql} UNION ALL VALUES ${valuesSql})`,
+		parameters,
+	};
 }
 
 function createNqlBindingSelectPlan(query: QueryIntent): PlanReport {
@@ -569,10 +782,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): CompiledQuery<T> {
 		const ctes: string[] = [];
 		const parameters: unknown[] = [];
-		const naming = this.buildCompileDeps(options).naming;
+		const deps = this.buildCompileDeps(options);
+		const { naming } = deps;
+		const bindingNamesInOrder = orderedNqlBindingNames(bundle);
 		const duplicateEmittedBinding =
-			bundle.bindings !== undefined
-				? findDuplicateEmittedNqlBindingName(bundle.bindings.keys(), naming)
+			bindingNamesInOrder.length > 0
+				? findDuplicateEmittedNqlBindingName(bindingNamesInOrder, naming)
 				: undefined;
 		if (duplicateEmittedBinding !== undefined) {
 			throw new Error(
@@ -581,16 +796,36 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 		const bindingNames =
-			bundle.bindings !== undefined
+			bindingNamesInOrder.length > 0
 				? new Set(
-						[...bundle.bindings.keys()].map((name) =>
-							emittedBindName(name, naming),
-						),
+						bindingNamesInOrder.map((name) => emittedBindName(name, naming)),
 					)
 				: undefined;
 		this.assertNqlBindingNamesDisjointFromTables(bindingNames, options);
 
-		for (const [name, queryIntent] of bundle.bindings ?? []) {
+		for (const name of bindingNamesInOrder) {
+			const runtimeBinding = bundle.runtimeBindings?.get(name);
+			if (runtimeBinding !== undefined) {
+				const compiledRuntimeBinding = compileNqlRuntimeBindingCte(
+					name,
+					runtimeBinding,
+					naming,
+					parameters.length,
+					bundle.mutationBindings?.get(name)?.table,
+					deps.schemaName,
+					deps.model,
+				);
+				ctes.push(compiledRuntimeBinding.cte);
+				parameters.push(...compiledRuntimeBinding.parameters);
+				continue;
+			}
+
+			const queryIntent = bundle.bindings?.get(name);
+			if (queryIntent === undefined) {
+				throw new Error(
+					`NQL binding '${name}' has no query intent or runtime rows to materialize.`,
+				);
+			}
 			const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
 			const bindingBundle: CompiledNqlQuery = bundle.mutationBindings?.has(name)
 				? { mutation: bundle.mutationBindings.get(name)! }

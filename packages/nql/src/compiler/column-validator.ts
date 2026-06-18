@@ -79,6 +79,23 @@ export class ColumnValidator {
 		);
 	}
 
+	/**
+	 * Resolve a user-authored column spelling to the model column name.
+	 * Uses the same exact-or-snake/camel equivalence as validateColumn().
+	 */
+	resolveColumnName(table: string, column: string): string | undefined {
+		if (column === '*') return column;
+		const virtualColumns = this.virtualBindingTables.get(table);
+		if (virtualColumns) {
+			return virtualColumns.find((c) => c === column);
+		}
+		const tableInfo = this.schema.getTable(table);
+		if (!tableInfo) return undefined;
+		return tableInfo.columns.find((c) =>
+			ColumnValidator.columnsMatch(column, c.name),
+		)?.name;
+	}
+
 	validateColumn(table: string, column: string): void {
 		/* v8 ignore next — '*' columns are validated at call-site before reaching here -- @preserve */
 		if (column === '*') return;
@@ -97,10 +114,8 @@ export class ColumnValidator {
 		const tableInfo = this.schema.getTable(table);
 		/* v8 ignore next — graceful degradation: unknown tables skip validation -- @preserve */
 		if (!tableInfo) return; // Unknown table → graceful degradation
-		const exists = tableInfo.columns.some((c) =>
-			ColumnValidator.columnsMatch(column, c.name),
-		);
-		if (!exists) {
+		const resolvedColumn = this.resolveColumnName(table, column);
+		if (resolvedColumn === undefined) {
 			const available = tableInfo.columns.map((c) => c.name).join(', ');
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_UNKNOWN_COLUMN,

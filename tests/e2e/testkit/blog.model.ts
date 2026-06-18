@@ -23,12 +23,12 @@ import { ref, schema } from '@dbsp/core';
  */
 export const blogSchema = schema({
 	authors: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, dbType: 'integer' },
 		name: 'string',
 		email: 'string',
 	},
 	posts: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, dbType: 'integer' },
 		title: 'string',
 		content: 'string',
 		authorId: ref('authors'),
@@ -36,7 +36,7 @@ export const blogSchema = schema({
 		createdAt: 'timestamp',
 	},
 	comments: {
-		id: { type: 'integer', primaryKey: true },
+		id: { type: 'integer', primaryKey: true, dbType: 'integer' },
 		postId: ref('posts'),
 		authorName: 'string',
 		content: 'string',

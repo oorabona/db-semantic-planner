@@ -9,6 +9,7 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	DumpMeta,
+	DumpSequenceStep,
 } from '../adapter.js';
 import type {
 	BatchUpdateIntent,
@@ -58,6 +59,8 @@ export interface MutationDump {
 	readonly intent: MutationIntent;
 	/** Optional metadata */
 	readonly meta?: DumpMeta;
+	/** Compile-only statement sequence for multi-statement NQL programs. */
+	readonly sequence?: readonly DumpSequenceStep[];
 }
 
 /**
@@ -109,6 +112,10 @@ export type PreparedMutationExecution<T> = {
 	readonly parameters: readonly unknown[];
 	readonly execute: () => Promise<T>;
 	readonly getAfterMutationResult?: (result: T) => readonly unknown[];
+	readonly mapAfterMutationResult?: (
+		result: T,
+		transformed: readonly unknown[],
+	) => T;
 	readonly returnAfterMutationResult?: boolean;
 };
 
@@ -185,7 +192,10 @@ async function runMutationWithHooksInner<
 				opts.onHookError,
 			);
 			if (prepared.returnAfterMutationResult) {
-				return transformed as T;
+				return (
+					prepared.mapAfterMutationResult?.(result, transformed) ??
+					(transformed as T)
+				);
 			}
 		}
 

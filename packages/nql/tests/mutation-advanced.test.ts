@@ -572,11 +572,32 @@ describe('F16: Mutation bind with RETURNING', () => {
 
 		expect(result.mutationBindings).toBeDefined();
 		expect(result.mutationBindings!.size).toBe(2);
+		expect(result.nqlProgramSequence).toHaveLength(3);
+		expect(result.nqlProgramSequence?.map((step) => step.kind)).toEqual([
+			'mutation',
+			'mutation',
+			'query',
+		]);
+		expect(result.nqlProgramSequence?.map((step) => step.bindName)).toEqual([
+			'user1',
+			'user2',
+			undefined,
+		]);
 	});
 
-	it('F16g: mixed query bind + mutation bind', () => {
+	it('F16f2: duplicate bind names are rejected before map reconstruction can drop statements', () => {
+		expect(() =>
+			compileNql(
+				"insert into users set name = 'Alice' | select id | bind duplicate\ninsert into users set name = 'Bob' | select id | bind duplicate\nusers | where id in (duplicate)",
+			),
+		).toThrowError(
+			"Compile error: NQL binding name 'duplicate' is used more than once (statements 1 and 2). NQL binding names must be unique.",
+		);
+	});
+
+	it('F16g: mixed query bind + mutation bind can reference mutation binding', () => {
 		const result = compileNql(
-			'users | where active = true | select id | bind activeIds\ninsert into logs set userId = 1 | select id | bind logIds\nusers | where id in (activeIds)',
+			'users | where active = true | select id | bind activeIds\ninsert into logs set userId = 1 | select id | bind logIds\nlogs | where id in (logIds)',
 		);
 
 		expect(result.bindings).toBeDefined();
@@ -605,5 +626,62 @@ describe('F16: Mutation bind with RETURNING', () => {
 			type: 'fields',
 			fields: ['*'],
 		});
+	});
+});
+
+// ===========================================================================
+// F17: read binding drift guard (#186)
+// ===========================================================================
+describe('F17: read binding references across mutations', () => {
+	it('rejects a read binding referenced after an intervening mutation (#186)', () => {
+		const result = compile(
+			'users | where active = true | select id | bind d\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (d)',
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/read binding referenced across a mutation \(#186\)/,
+		);
+		expect(result.errors[0]?.message).toContain("binding 'd'");
+		expect(result.errors[0]?.message).toContain('read-only statement 1');
+		expect(result.errors[0]?.message).toContain('mutation statement 2');
+		expect(result.errors[0]?.message).toContain('referenced by statement 3');
+	});
+
+	it('allows a read binding to feed the immediately following mutation (#113)', () => {
+		const result = compileNql(
+			'users | where active = false | select id | bind inactive\nupdate users set active = true where id in (inactive)',
+		);
+
+		const update = result.mutation as UpdateIntent;
+		expect(update.type).toBe('update');
+		const where = update.where as WhereInIntent;
+		expect(where.subquery?.from).toBe('inactive');
+		expect(result.bindings?.has('inactive')).toBe(true);
+	});
+
+	it('allows pure-read binding-final queries (#176)', () => {
+		const result = compileNql(
+			'users | where active = true | select id | bind activeIds\nactiveIds | select id',
+		);
+
+		expect(result.query?.from).toBe('activeIds');
+		expect(result.bindings?.has('activeIds')).toBe(true);
+		expect(result.mutationBindings).toBeUndefined();
+	});
+
+	it('allows mutation bindings to be referenced across later mutations', () => {
+		const result = compileNql(
+			"users | select id | bind activeIds\ninsert into users set name = 'Alice' | select id | bind created\ninsert into users set name = 'Bob' | select id | bind second\nusers | where id in (created)",
+		);
+
+		expect(result.bindings?.has('activeIds')).toBe(true);
+		expect(result.bindings?.has('created')).toBe(true);
+		expect(result.bindings?.has('second')).toBe(true);
+		expect(result.mutationBindings?.has('created')).toBe(true);
+		expect(result.mutationBindings?.has('second')).toBe(true);
+		const where = result.query?.where as WhereInIntent | undefined;
+		expect(where?.subquery?.from).toBe('created');
 	});
 });

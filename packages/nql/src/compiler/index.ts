@@ -54,6 +54,7 @@ export type {
 import type {
 	MutationIntent,
 	NqlBindingOutputSchema,
+	NqlProgramSequenceStep,
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
@@ -105,6 +106,10 @@ import {
 	DEFAULT_RECURSIVE_KEYWORDS,
 } from './types.js';
 
+type NqlProgramSequenceStepWithDependencies = NqlProgramSequenceStep & {
+	readonly bindingDependencies: readonly string[];
+};
+
 function allowsInternalParams(
 	options: NqlCompilerOptions | undefined,
 ): boolean {
@@ -120,6 +125,300 @@ function isUnresolvedSelectAllOutputSchemaError(error: unknown): boolean {
 		error.message.includes('from SELECT *') &&
 		error.message.includes('without a concrete table schema')
 	);
+}
+
+function programSequenceStepFromResult(
+	result: CompileResult,
+	bindName: string | undefined,
+	final: boolean,
+	bindingDependencies: readonly string[],
+): NqlProgramSequenceStepWithDependencies | undefined {
+	if (result.query) {
+		return {
+			kind: 'query',
+			query: result.query,
+			...(bindName !== undefined && { bindName }),
+			final,
+			bindingDependencies,
+		};
+	}
+	if (result.mutation) {
+		return {
+			kind: 'mutation',
+			mutation: result.mutation,
+			...(bindName !== undefined && { bindName }),
+			final,
+			bindingDependencies,
+		};
+	}
+	return undefined;
+}
+
+function stringArraysEqual(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every((value, index) => value === right[index])
+	);
+}
+
+type NqlAstRecord = {
+	readonly type?: unknown;
+	readonly [key: string]: unknown;
+};
+
+function isNqlAstRecord(value: unknown): value is NqlAstRecord {
+	return typeof value === 'object' && value !== null;
+}
+
+function addReadBindingReference(
+	references: Set<string>,
+	readBindingNames: ReadonlySet<string>,
+	name: unknown,
+): void {
+	if (typeof name === 'string' && readBindingNames.has(name)) {
+		references.add(name);
+	}
+}
+
+function withoutLocalCteNames(
+	readBindingNames: ReadonlySet<string>,
+	ctes: readonly { readonly name: string }[],
+): ReadonlySet<string> {
+	if (ctes.length === 0) return readBindingNames;
+	const localCteNames = new Set(ctes.map((cte) => cte.name));
+	if (![...localCteNames].some((name) => readBindingNames.has(name))) {
+		return readBindingNames;
+	}
+	return new Set(
+		[...readBindingNames].filter((name) => !localCteNames.has(name)),
+	);
+}
+
+function collectQueryReadBindingReferences(
+	query: NqlQuery,
+	readBindingNames: ReadonlySet<string>,
+	references: Set<string>,
+): void {
+	addReadBindingReference(references, readBindingNames, query.table);
+	collectNodeReadBindingReferences(query.clauses, readBindingNames, references);
+}
+
+function collectWithQueryReadBindingReferences(
+	withQuery: NqlWithQuery,
+	readBindingNames: ReadonlySet<string>,
+	references: Set<string>,
+): void {
+	const scopedReadBindingNames = withoutLocalCteNames(
+		readBindingNames,
+		withQuery.ctes,
+	);
+	for (const cte of withQuery.ctes) {
+		collectQueryReadBindingReferences(
+			cte.query,
+			scopedReadBindingNames,
+			references,
+		);
+	}
+	collectQueryReadBindingReferences(
+		withQuery.query,
+		scopedReadBindingNames,
+		references,
+	);
+}
+
+function collectInListReadBindingReference(
+	values: unknown,
+	readBindingNames: ReadonlySet<string>,
+	references: Set<string>,
+): void {
+	if (!Array.isArray(values) || values.length !== 1) return;
+	const value = values[0];
+	if (!isNqlAstRecord(value) || value.type !== 'path') return;
+	const segments = value.segments;
+	if (!Array.isArray(segments) || segments.length !== 1) return;
+	addReadBindingReference(references, readBindingNames, segments[0]);
+}
+
+function collectNodeReadBindingReferences(
+	node: unknown,
+	readBindingNames: ReadonlySet<string>,
+	references: Set<string>,
+): void {
+	if (Array.isArray(node)) {
+		for (const item of node) {
+			collectNodeReadBindingReferences(item, readBindingNames, references);
+		}
+		return;
+	}
+	if (!isNqlAstRecord(node)) return;
+
+	switch (node.type) {
+		case 'query':
+			collectQueryReadBindingReferences(
+				node as unknown as NqlQuery,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'withQuery':
+			collectWithQueryReadBindingReferences(
+				node as unknown as NqlWithQuery,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'mutationPipeline':
+			collectNodeReadBindingReferences(
+				node.mutation,
+				readBindingNames,
+				references,
+			);
+			collectNodeReadBindingReferences(
+				node.clauses,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'insert_from':
+		case 'upsert_from':
+			addReadBindingReference(references, readBindingNames, node.source);
+			collectNodeReadBindingReferences(
+				node.where,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'setOperation':
+			addReadBindingReference(references, readBindingNames, node.boundName);
+			collectNodeReadBindingReferences(
+				node.right,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'in':
+			collectNodeReadBindingReferences(
+				node.expression,
+				readBindingNames,
+				references,
+			);
+			collectInListReadBindingReference(
+				node.values,
+				readBindingNames,
+				references,
+			);
+			collectNodeReadBindingReferences(
+				node.values,
+				readBindingNames,
+				references,
+			);
+			return;
+		case 'subquery':
+			collectNodeReadBindingReferences(
+				node.query,
+				readBindingNames,
+				references,
+			);
+			return;
+	}
+
+	for (const child of Object.values(node)) {
+		collectNodeReadBindingReferences(child, readBindingNames, references);
+	}
+}
+
+function collectStatementReadBindingReferences(
+	stmt: NqlStatement,
+	readBindingNames: ReadonlySet<string>,
+): Set<string> {
+	const references = new Set<string>();
+	if (readBindingNames.size === 0) return references;
+	collectNodeReadBindingReferences(stmt, readBindingNames, references);
+	return references;
+}
+
+function collectCompileResultReadBindingReferences(
+	result: CompileResult,
+	readBindingNames: ReadonlySet<string>,
+	references: Set<string>,
+): void {
+	if (result.query) {
+		addReadBindingReference(references, readBindingNames, result.query.from);
+	}
+}
+
+function addTransitiveBindingDependency(
+	bindName: string,
+	bindingDependencies: ReadonlyMap<string, readonly string[]>,
+	ordered: string[],
+	seen: Set<string>,
+): void {
+	if (seen.has(bindName)) return;
+	seen.add(bindName);
+	for (const dependency of bindingDependencies.get(bindName) ?? []) {
+		addTransitiveBindingDependency(
+			dependency,
+			bindingDependencies,
+			ordered,
+			seen,
+		);
+	}
+	ordered.push(bindName);
+}
+
+function collectTransitiveReadBindingDependencies(
+	directReferences: Iterable<string>,
+	bindingDependencies: ReadonlyMap<string, readonly string[]>,
+): readonly string[] {
+	const ordered: string[] = [];
+	const seen = new Set<string>();
+	for (const reference of directReferences) {
+		addTransitiveBindingDependency(
+			reference,
+			bindingDependencies,
+			ordered,
+			seen,
+		);
+	}
+	return ordered;
+}
+
+function rejectReadBindingReferenceAcrossMutation(
+	bindName: string,
+	definitionIndex: number,
+	mutationIndex: number,
+	referenceIndex: number,
+	statementCount: number,
+): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`read binding referenced across a mutation (#186): binding '${bindName}' is defined by read-only statement ${definitionIndex + 1} of ${statementCount} and referenced by statement ${referenceIndex + 1} after mutation statement ${mutationIndex + 1}. Read-only bindings are not materialized snapshots; move the reference before the mutation or bind the mutation RETURNING result instead.`,
+	);
+}
+
+function rejectInvalidReadBindingDependencies(
+	statementBindingDependencies: readonly string[],
+	readBindingDefinitions: ReadonlyMap<string, number>,
+	lastMutationStatement: number,
+	referenceIndex: number,
+	statementCount: number,
+): void {
+	for (const referencedBindName of statementBindingDependencies) {
+		const definitionIndex = readBindingDefinitions.get(referencedBindName);
+		if (definitionIndex === undefined) continue;
+		if (lastMutationStatement > definitionIndex) {
+			rejectReadBindingReferenceAcrossMutation(
+				referencedBindName,
+				definitionIndex,
+				lastMutationStatement,
+				referenceIndex,
+				statementCount,
+			);
+		}
+	}
 }
 
 /**
@@ -219,13 +518,67 @@ export class NqlCompiler {
 		const bindingOutputSchemas = new Map<string, NqlBindingOutputSchema>();
 		const mutationBindings = new Map<string, MutationIntent>();
 		const materializedBindStatements = new Set<number>();
+		const seenBindNames = new Map<string, number>();
+		const nqlProgramSequence: NqlProgramSequenceStepWithDependencies[] = [];
+		const readBindingDefinitions = new Map<string, number>();
+		const definedBindingNames = new Set<string>();
+		const bindingDependencies = new Map<string, readonly string[]>();
+		let lastMutationStatement = -1;
 		let lastResult: CompileResult = {};
 
 		for (let i = 0; i < program.statements.length; i++) {
 			const stmt = program.statements[i]!;
-			lastResult = this.compileSingleStatement(stmt, bindings);
-
 			const bindName = extractBindName(stmt);
+			if (bindName) {
+				const previousStatement = seenBindNames.get(bindName);
+				if (previousStatement !== undefined) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`NQL binding name '${bindName}' is used more than once (statements ${previousStatement + 1} and ${i + 1}). NQL binding names must be unique.`,
+					);
+				}
+				seenBindNames.set(bindName, i);
+			}
+
+			const readBindingReferences = collectStatementReadBindingReferences(
+				stmt,
+				definedBindingNames,
+			);
+			let statementBindingDependencies =
+				collectTransitiveReadBindingDependencies(
+					readBindingReferences,
+					bindingDependencies,
+				);
+			rejectInvalidReadBindingDependencies(
+				statementBindingDependencies,
+				readBindingDefinitions,
+				lastMutationStatement,
+				i,
+				program.statements.length,
+			);
+
+			lastResult = this.compileSingleStatement(stmt, bindings);
+			collectCompileResultReadBindingReferences(
+				lastResult,
+				definedBindingNames,
+				readBindingReferences,
+			);
+			statementBindingDependencies = collectTransitiveReadBindingDependencies(
+				readBindingReferences,
+				bindingDependencies,
+			);
+			rejectInvalidReadBindingDependencies(
+				statementBindingDependencies,
+				readBindingDefinitions,
+				lastMutationStatement,
+				i,
+				program.statements.length,
+			);
+
+			if (stmt.type === 'mutationPipeline') {
+				lastMutationStatement = i;
+			}
+
 			if (bindName) {
 				if (lastResult.query) {
 					const outputSchema = this.registerQueryBindingOutputSchema(
@@ -241,21 +594,28 @@ export class NqlCompiler {
 						);
 					}
 					materializedBindStatements.add(i);
+					readBindingDefinitions.set(bindName, i);
+					definedBindingNames.add(bindName);
+					bindingDependencies.set(bindName, statementBindingDependencies);
 				} else if (lastResult.mutation?.returning?.length) {
-					// Mutation with RETURNING: store the original mutation for CTE compilation
-					// and a synthetic QueryIntent for reference resolution in WHERE clauses
-					mutationBindings.set(bindName, lastResult.mutation);
-					const outputSchema = this.getMutationBindingOutputSchema(
+					// Mutation with RETURNING: store the mutation for runtime CTE
+					// materialization and a synthetic QueryIntent for reference resolution.
+					const canonicalBinding = this.canonicalizeMutationBinding(
 						bindName,
 						lastResult.mutation,
 					);
+					lastResult = { mutation: canonicalBinding.mutation };
+					mutationBindings.set(bindName, canonicalBinding.mutation);
+					const outputSchema = canonicalBinding.outputSchema;
+					const bindingFields =
+						outputSchema?.columns ?? canonicalBinding.mutation.returning ?? [];
 					this.ctx.bindingOutputColumns.set(bindName, outputSchema?.columns);
 					bindings.set(bindName, {
 						type: 'select',
-						from: lastResult.mutation.table,
+						from: canonicalBinding.mutation.table,
 						select: {
 							type: 'fields',
-							fields: [...lastResult.mutation.returning],
+							fields: [...bindingFields],
 						},
 					});
 					if (outputSchema) {
@@ -266,9 +626,20 @@ export class NqlCompiler {
 						);
 					}
 					materializedBindStatements.add(i);
+					definedBindingNames.add(bindName);
+					bindingDependencies.set(bindName, []);
 				}
 				// Note: set operations cannot currently be bound as CTE sources
 				// Note: mutations without RETURNING cannot be bound (no output to reference)
+			}
+			const sequenceStep = programSequenceStepFromResult(
+				lastResult,
+				bindName,
+				i === program.statements.length - 1,
+				statementBindingDependencies,
+			);
+			if (sequenceStep !== undefined) {
+				nqlProgramSequence.push(sequenceStep);
 			}
 		}
 
@@ -283,12 +654,15 @@ export class NqlCompiler {
 
 		const hasMutationBindings = mutationBindings.size > 0;
 		const hasBindingOutputSchemas = bindingOutputSchemas.size > 0;
+		const hasNqlProgramSequence =
+			nqlProgramSequence.length === program.statements.length;
 		if (bindings.size > 0) {
 			return {
 				...lastResult,
 				bindings,
 				...(hasBindingOutputSchemas && { bindingOutputSchemas }),
 				...(hasMutationBindings && { mutationBindings }),
+				...(hasNqlProgramSequence && { nqlProgramSequence }),
 			};
 		}
 		return lastResult;
@@ -316,6 +690,36 @@ export class NqlCompiler {
 		}
 	}
 
+	private canonicalizeMutationBinding(
+		bindName: string,
+		mutation: MutationIntent,
+	): {
+		readonly mutation: MutationIntent;
+		readonly outputSchema: NqlBindingOutputSchema | undefined;
+	} {
+		const outputSchema = this.getMutationBindingOutputSchema(
+			bindName,
+			mutation,
+		);
+		const returning = mutation.returning;
+		if (
+			returning === undefined ||
+			returning.length === 0 ||
+			returning.includes('*') ||
+			outputSchema === undefined ||
+			stringArraysEqual(returning, outputSchema.columns)
+		) {
+			return { mutation, outputSchema };
+		}
+		return {
+			mutation: {
+				...mutation,
+				returning: outputSchema.columns,
+			} as MutationIntent,
+			outputSchema,
+		};
+	}
+
 	private getMutationBindingOutputSchema(
 		bindName: string,
 		mutation: MutationIntent,
@@ -331,7 +735,13 @@ export class NqlCompiler {
 				`Cannot compute output schema for NQL binding '${bindName}' from mutation RETURNING * on '${mutation.table}' without a concrete table schema.`,
 			);
 		}
-		return { columns: [...returning] };
+		return {
+			columns: returning.map(
+				(column) =>
+					this.ctx.validator?.resolveColumnName(mutation.table, column) ??
+					column,
+			),
+		};
 	}
 
 	private compileSingleStatement(
