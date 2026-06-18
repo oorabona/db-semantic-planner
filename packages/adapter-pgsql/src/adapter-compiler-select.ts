@@ -333,6 +333,9 @@ function compileJoinIntents(
 					bindingNames: deps.bindingNames,
 				}),
 				...(model !== undefined && { model }),
+				...(deps.dialectCapabilities !== undefined && {
+					dialectCapabilities: deps.dialectCapabilities,
+				}),
 				compileSubquery: () => {
 					throw new Error(
 						'Subquery in BatchValues JOIN ON condition is not supported.',
@@ -392,6 +395,9 @@ function compileJoinIntents(
 					bindingNames: deps.bindingNames,
 				}),
 				...(model !== undefined && { model }),
+				...(deps.dialectCapabilities !== undefined && {
+					dialectCapabilities: deps.dialectCapabilities,
+				}),
 				compileSubquery: () => {
 					throw new Error('Subquery in JOIN ON condition is not supported.');
 				},
@@ -716,6 +722,9 @@ export function compileSelect<T = unknown>(
 		deriveFkColumnName: deps.deriveFk,
 		...(deps.bindingNames !== undefined && {
 			bindingNames: deps.bindingNames,
+		}),
+		...(deps.dialectCapabilities !== undefined && {
+			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(resolvedModelForCompiler != null && {
 			model: resolvedModelForCompiler,

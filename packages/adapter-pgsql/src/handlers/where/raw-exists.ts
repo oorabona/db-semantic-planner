@@ -61,6 +61,7 @@ export const rawExistsHandler: WhereHandler = {
 			ctx.schema,
 			'rawExists',
 			ctx.bindingNames,
+			ctx.dialectCapabilities,
 		);
 
 		if (innerParams) {

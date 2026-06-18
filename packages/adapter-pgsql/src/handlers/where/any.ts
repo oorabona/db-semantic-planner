@@ -11,6 +11,7 @@
 
 import type { Node } from '@pgsql/types';
 import { mapModelIRTypeToPgBase } from '../../compiler-utils.js';
+import { assertDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef } from '../../param-ref.js';
 import type {
@@ -64,6 +65,11 @@ export const anyHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsArrayType',
+			'ANY array operator is',
+		);
 		const column = decision.column;
 
 		if (!column) {

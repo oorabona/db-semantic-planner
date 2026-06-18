@@ -98,6 +98,12 @@ export interface CompileOptionsBase {
 	/** Schema name for schema-scoped/multi-tenant queries */
 	readonly schemaName?: string;
 
+	/**
+	 * Dialect capabilities for adapter-layer SQL surface gates.
+	 * When absent, adapters preserve historical behavior and assume supported.
+	 */
+	readonly dialectCapabilities?: DialectCapabilities;
+
 	/** Query name for logging */
 	readonly queryName?: string;
 

@@ -4,6 +4,7 @@
  */
 
 import type { Node } from '@pgsql/types';
+import { assertDialectCapability } from '../../dialect-capabilities.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -23,6 +24,11 @@ export const jsonContainsHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsJsonOperators',
+			'JSON operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('JSON contains handler requires a column');
@@ -54,6 +60,11 @@ export const jsonExistsHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsJsonOperators',
+			'JSON operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('JSON exists handler requires a column');
@@ -85,6 +96,11 @@ export const jsonComparisonHandler: WhereHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): Node {
+		assertDialectCapability(
+			ctx.dialectCapabilities,
+			'supportsJsonOperators',
+			'JSON operators are',
+		);
 		const column = decision.column;
 		if (!column) {
 			throw new Error('JSON comparison handler requires a column');

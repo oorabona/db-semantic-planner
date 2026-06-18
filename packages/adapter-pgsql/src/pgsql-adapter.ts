@@ -628,6 +628,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// `||` (not `??`): empty string is treated as "no override" and falls back to this.schemaName (which may be a configured schema or undefined)
 			schemaName: options?.schemaName || this.schemaName,
 			model: options?.model ?? this.model,
+			dialectCapabilities:
+				options?.dialectCapabilities ?? this.dialectCapabilities,
 			defaultPk: this.defaultPk,
 			deriveFk: this.deriveFk,
 			...(bindingNames !== undefined && { bindingNames }),
@@ -734,7 +736,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const planReport = queryFromBinding
 				? createNqlBindingSelectPlan(bundle.query as QueryIntent)
 				: planFn(bundle.query, this.requireNqlCompileModel(options), {
-						dialectCapabilities: this.dialectCapabilities,
+						dialectCapabilities:
+							options?.dialectCapabilities ?? this.dialectCapabilities,
 					});
 			return guardCompiledQuery(
 				compileSelect<T>(planReport, options, deps),
@@ -981,10 +984,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	compileSelectExpression(expr: ExpressionIntent): CompiledQuery {
 		const naming = this.naming;
 		const schemaName = this.schemaName;
+		const dialectCapabilities = this.dialectCapabilities;
 		const state = createCompilerState();
 		const ctx = {
 			naming,
 			...(schemaName !== undefined && { schema: schemaName }),
+			dialectCapabilities,
 			rootTable: '',
 			maxRecursiveDepth: 100,
 			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
@@ -998,6 +1003,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				const innerCompiler = new PlanCompiler({
 					naming,
 					...(schemaName !== undefined && { schema: schemaName }),
+					dialectCapabilities,
 				});
 				const innerPlan = {
 					rootTable: query.from,
@@ -1181,7 +1187,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			const planReport = queryFromBinding
 				? createNqlBindingSelectPlan(query)
 				: planFn(query, model, {
-						dialectCapabilities: this.dialectCapabilities,
+						dialectCapabilities:
+							options?.dialectCapabilities ?? this.dialectCapabilities,
 					});
 			return compileSelect(planReport, leafOptions, deps);
 		};

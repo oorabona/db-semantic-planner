@@ -32,7 +32,11 @@ describe('Dialect Capabilities', () => {
 			expect(caps.supportsRecursiveCTE).toBe(true);
 			expect(caps.supportsWindowFunctions).toBe(true);
 			expect(caps.supportsArrayType).toBe(true);
+			expect(caps.supportsRangeTypes).toBe(true);
 			expect(caps.supportsJsonType).toBe(true);
+			expect(caps.supportsJsonOperators).toBe(true);
+			expect(caps.supportsRowLevelLocks).toBe(true);
+			expect(caps.supportsLockWaitPolicies).toBe(true);
 			expect(caps.supportsSchemas).toBe(true);
 			expect(caps.recursivePathStyle).toBe('array');
 			expect(caps.stringConcatStyle).toBe('operator');
@@ -49,6 +53,10 @@ describe('Dialect Capabilities', () => {
 			expect(caps.supportsReturning).toBe(false);
 			expect(caps.supportsRecursiveCTE).toBe(true);
 			expect(caps.supportsArrayType).toBe(false);
+			expect(caps.supportsRangeTypes).toBe(false);
+			expect(caps.supportsJsonOperators).toBe(false);
+			expect(caps.supportsRowLevelLocks).toBe(false);
+			expect(caps.supportsLockWaitPolicies).toBe(false);
 			expect(caps.recursivePathStyle).toBe('string');
 			expect(caps.stringConcatStyle).toBe('function');
 			expect(caps.identifierQuote).toBe('`');
@@ -62,6 +70,10 @@ describe('Dialect Capabilities', () => {
 			expect(caps.name).toBe('sqlite');
 			expect(caps.supportsReturning).toBe(true);
 			expect(caps.supportsArrayType).toBe(false);
+			expect(caps.supportsRangeTypes).toBe(false);
+			expect(caps.supportsJsonOperators).toBe(false);
+			expect(caps.supportsRowLevelLocks).toBe(false);
+			expect(caps.supportsLockWaitPolicies).toBe(false);
 			expect(caps.supportsSchemas).toBe(false);
 			expect(caps.recursivePathStyle).toBe('string');
 			expect(caps.stringConcatStyle).toBe('operator');
@@ -75,6 +87,10 @@ describe('Dialect Capabilities', () => {
 			expect(caps.name).toBe('duckdb');
 			expect(caps.supportsReturning).toBe(true);
 			expect(caps.supportsArrayType).toBe(true);
+			expect(caps.supportsRangeTypes).toBe(false);
+			expect(caps.supportsJsonOperators).toBe(false);
+			expect(caps.supportsRowLevelLocks).toBe(false);
+			expect(caps.supportsLockWaitPolicies).toBe(false);
 			expect(caps.recursivePathStyle).toBe('array');
 			expect(caps.stringConcatStyle).toBe('operator');
 			expect(caps.identifierQuote).toBe('"');
@@ -87,6 +103,10 @@ describe('Dialect Capabilities', () => {
 			expect(caps.name).toBe('mssql');
 			expect(caps.supportsReturning).toBe(true);
 			expect(caps.supportsArrayType).toBe(false);
+			expect(caps.supportsRangeTypes).toBe(false);
+			expect(caps.supportsJsonOperators).toBe(false);
+			expect(caps.supportsRowLevelLocks).toBe(false);
+			expect(caps.supportsLockWaitPolicies).toBe(false);
 			expect(caps.recursivePathStyle).toBe('string');
 			expect(caps.stringConcatStyle).toBe('function');
 			expect(caps.identifierQuote).toBe('[');
@@ -526,6 +546,11 @@ describe('createDialectCapabilities factory (INV-11)', () => {
 		// Assert
 		expect(caps.supportsReturning).toBe(false);
 		expect(caps.supportsRecursiveCTE).toBe(false);
+		expect(caps.supportsArrayType).toBe(false);
+		expect(caps.supportsRangeTypes).toBe(false);
+		expect(caps.supportsJsonOperators).toBe(false);
+		expect(caps.supportsRowLevelLocks).toBe(false);
+		expect(caps.supportsLockWaitPolicies).toBe(false);
 		expect(caps.supportsDDLEnumTypes).toBeUndefined();
 	});
 

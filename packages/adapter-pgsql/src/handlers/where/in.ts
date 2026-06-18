@@ -7,6 +7,7 @@
 import { isParamIntent } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { booleanConstNode } from '../../ast-helpers.js';
+import { supportsDialectCapability } from '../../dialect-capabilities.js';
 import { unwrapParamIntent } from '../../param-intent.js';
 import { createParamRef, createTypeCastParamRef } from '../../param-ref.js';
 import type {
@@ -64,6 +65,31 @@ function createNotInExpr(
 			name: [{ String: { sval: '<>' } }],
 			lexpr: columnNode,
 			rexpr: paramNode,
+		},
+	};
+}
+
+/**
+ * Create portable IN/NOT IN expression using one parameter per list item.
+ * Used when the target dialect does not support native array parameters.
+ */
+function createLiteralInListExpr(
+	columnNode: Node,
+	state: CompilerState,
+	values: unknown[],
+	negated: boolean,
+): Node {
+	const paramRefs = values.map((value) => {
+		state.paramIndex++;
+		state.parameters.push(value);
+		return createParamRef(state.paramIndex);
+	});
+	return {
+		A_Expr: {
+			kind: 'AEXPR_IN',
+			name: [{ String: { sval: negated ? '<>' : '=' } }],
+			lexpr: columnNode,
+			rexpr: { List: { items: paramRefs } },
 		},
 	};
 }
@@ -140,8 +166,16 @@ export const inHandler: WhereHandler = {
 
 		const columnNode = buildColumnRef(column, ctx);
 		const columnType = resolveColumnPgType(column, ctx);
+		const isNotIn =
+			operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn';
 
-		if (operator === COLLECTION_OPERATORS.NOT_IN || operator === 'notIn') {
+		if (
+			!supportsDialectCapability(ctx.dialectCapabilities, 'supportsArrayType')
+		) {
+			return createLiteralInListExpr(columnNode, state, values, isNotIn);
+		}
+
+		if (isNotIn) {
 			return createNotInExpr(columnNode, state, values, columnType);
 		}
 
