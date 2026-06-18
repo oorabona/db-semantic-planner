@@ -13,7 +13,9 @@
  * - Template interpolation with multiple values
  * - Error path: compilation failure with specific error messages
  */
+
 import { describe, expect, it } from 'vitest';
+import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter, CompiledQuery } from '../adapter.js';
 import type { ModelIR, TableIR } from '../model-ir.js';
 import { createNqlTag, extractPseudoColumnKeywords } from './nql.js';
@@ -56,6 +58,10 @@ function createCompilableAdapter(rows: unknown[] = []): Adapter {
 	};
 }
 
+function ws(sql: string): string {
+	return sql.replace(/\s+/g, ' ').trim();
+}
+
 // ============================================================================
 // Cache hit — compile() called twice
 // ============================================================================
@@ -87,6 +93,79 @@ describe('NqlBuilder compile cache (coverage)', () => {
 
 		expect(intent.from).toBe('users');
 		expect(planReport.rootTable).toBe('users');
+	});
+});
+
+describe('SEC-182 binding-final relation-filter proof guard', () => {
+	it('allows compiler-produced binding-final relation filters with trusted proof', () => {
+		const s = createTestSchema();
+		const nql = createNqlTag(s.definition, s.model);
+
+		const builder = nql<unknown>`posts | select id, author | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`;
+
+		expect(() => builder.plan()).not.toThrow();
+	});
+
+	it('rejects forged binding-final relation filters with only public metadata', () => {
+		const s = createTestSchema();
+		const nql = createNqlTag(s.definition, s.model);
+
+		const builder = nql<unknown>`posts | select id, author | bind projected_posts
+projected_posts | select id`;
+		const intent = builder.toIntentIR();
+		intent.where = {
+			kind: 'relationFilter',
+			relation: 'fabricatedAuthor',
+			mode: 'some',
+			where: {
+				kind: 'comparison',
+				field: 'email',
+				operator: 'eq',
+				value: 'mallory@example.com',
+			},
+			targetTable: 'users',
+			sourceColumn: 'author',
+			targetColumn: 'id',
+		};
+
+		expect(() => builder.plan()).toThrow(
+			/binding-final query 'projected_posts'.*relation filters/i,
+		);
+	});
+
+	it('uses frozen proof payload after public relation metadata is mutated', () => {
+		const s = createTestSchema();
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: s.model,
+		}) as Adapter;
+		const nql = createNqlTag(s.definition, s.model, adapter);
+
+		const builder = nql<unknown>`posts | select id, author | bind projected_posts
+projected_posts | where some(author).email = 'alice@example.com' | select id`;
+		const intent = builder.toIntentIR();
+		const relationFilter = intent.where;
+		expect(relationFilter).toMatchObject({
+			kind: 'relationFilter',
+			relation: ['author'],
+			targetTable: 'users',
+			sourceColumn: 'author',
+			targetColumn: 'id',
+		});
+
+		relationFilter.relation = 'forgedRoles';
+		relationFilter.targetTable = 'roles';
+		relationFilter.sourceColumn = 'id';
+		relationFilter.targetColumn = 'admin_id';
+
+		const dump = builder.dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain(
+			'EXISTS (SELECT 1 FROM users AS users_exists_0 WHERE projected_posts.author = users_exists_0.id',
+		);
+		expect(sql).not.toContain('roles');
+		expect(sql).not.toContain('forgedRoles');
+		expect(sql).not.toContain('admin_id');
 	});
 });
 

@@ -457,6 +457,7 @@ export class NqlCompiler {
 			recursiveKeywords,
 			validator,
 			bindingOutputColumns: new Map(),
+			bindingRelationFilters: new Map(),
 			params,
 			maxAnyItems: maxAnyItemsRaw ?? MAX_ANY_ITEMS,
 			allowUnfilteredMutations: options?.allowUnfilteredMutations ?? false,
@@ -484,6 +485,7 @@ export class NqlCompiler {
 			return this.compileProgram(program);
 		} finally {
 			this.ctx.bindingOutputColumns.clear();
+			this.ctx.bindingRelationFilters.clear();
 			this.ctx.validator?.clearVirtualBindingTables();
 		}
 	}
@@ -585,12 +587,14 @@ export class NqlCompiler {
 						bindName,
 						lastResult.query,
 						bindingOutputSchemas,
+						statementBindingDependencies,
 					);
 					bindings.set(bindName, lastResult.query);
 					if (outputSchema) {
 						this.ctx.validator?.addVirtualBindingTable(
 							bindName,
 							outputSchema.columns,
+							outputSchema.relationFilters,
 						);
 					}
 					materializedBindStatements.add(i);
@@ -623,6 +627,7 @@ export class NqlCompiler {
 						this.ctx.validator?.addVirtualBindingTable(
 							bindName,
 							outputSchema.columns,
+							outputSchema.relationFilters,
 						);
 					}
 					materializedBindStatements.add(i);
@@ -672,11 +677,23 @@ export class NqlCompiler {
 		bindName: string,
 		query: QueryIntent,
 		bindingOutputSchemas: Map<string, NqlBindingOutputSchema>,
+		bindingDependencies: readonly string[],
 	): NqlBindingOutputSchema | undefined {
 		try {
-			const outputSchema = getQueryOutputSchema(query, this.ctx, bindName);
+			const outputSchema = getQueryOutputSchema(
+				query,
+				this.ctx,
+				bindName,
+				bindingDependencies,
+			);
 			bindingOutputSchemas.set(bindName, outputSchema);
 			this.ctx.bindingOutputColumns.set(bindName, outputSchema.columns);
+			if (outputSchema.relationFilters) {
+				this.ctx.bindingRelationFilters.set(
+					bindName,
+					outputSchema.relationFilters,
+				);
+			}
 			return outputSchema;
 		} catch (error) {
 			if (

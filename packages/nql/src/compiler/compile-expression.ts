@@ -16,7 +16,9 @@ import type {
 	WhereJsonContainsIntent,
 	WhereJsonExistsIntent,
 	WhereRangeIntent,
+	WhereRelationFilterIntent,
 } from '@dbsp/types';
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlAnyExpression,
@@ -36,11 +38,11 @@ import type {
 import { compileNestedQuery } from './compile-query.js';
 import { expandDateRange, isDateRangePattern } from './date-range-patterns.js';
 import {
-	assertNoBindingRelationConstruct,
 	coerceToStringKey,
 	expressionToField,
 	expressionToRangeValue,
 	mapComparisonOperator,
+	resolveBindingRelationFilter,
 	resolveFilterValue,
 	resolveNamedParam,
 	validateWhereField,
@@ -665,13 +667,15 @@ function compileRelationFilter(
 		: (outerAliases ?? []);
 	// Resolve relation target for inner scope validation (first segment of relation path)
 	const prevRelationTarget = ctx.currentRelationTarget;
+	const bindingRelation =
+		ctx.currentFromTable && relFilter.relation[0]
+			? resolveBindingRelationFilter(
+					ctx,
+					ctx.currentFromTable,
+					relFilter.relation,
+				)
+			: undefined;
 	if (ctx.currentFromTable && relFilter.relation[0]) {
-		assertNoBindingRelationConstruct(
-			ctx,
-			ctx.currentFromTable,
-			'use relation filters',
-			relFilter.relation.join('.'),
-		);
 		if (ctx.validator) {
 			ctx.currentRelationTarget = ctx.validator.resolveRelationTarget(
 				ctx.currentFromTable,
@@ -687,13 +691,26 @@ function compileRelationFilter(
 		nestedOuterAliases,
 	);
 	ctx.currentRelationTarget = prevRelationTarget;
-	return {
+	const relationFilterIntent: WhereRelationFilterIntent = {
 		kind: 'relationFilter',
 		relation: relFilter.relation,
 		where,
 		mode: relFilter.mode,
 		...(relFilter.alias !== undefined && { alias: relFilter.alias }),
+		...(bindingRelation !== undefined && {
+			targetTable: bindingRelation.targetTable,
+			sourceColumn: bindingRelation.sourceColumn,
+			targetColumn: bindingRelation.targetColumn,
+		}),
 	};
+	return bindingRelation
+		? markNqlTrustedRelationFilter(relationFilterIntent, {
+				relation: bindingRelation.relation,
+				targetTable: bindingRelation.targetTable,
+				sourceColumn: bindingRelation.sourceColumn,
+				targetColumn: bindingRelation.targetColumn,
+			})
+		: relationFilterIntent;
 }
 
 // ---------------------------------------------------------------------------

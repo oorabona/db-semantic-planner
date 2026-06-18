@@ -312,6 +312,15 @@ export interface WhereRelationFilterIntent {
 	readonly mode: 'some' | 'every' | 'none';
 	/** Optional alias for complex conditions (SPEC-002) */
 	readonly alias?: string | undefined;
+	/**
+	 * Optional display/debug metadata for pre-resolved relation filters.
+	 * These fields are not trusted for compilation. Internal compiler paths that
+	 * prove a virtual source maps to a real model relation use a module-private
+	 * proof payload instead.
+	 */
+	readonly targetTable?: string | undefined;
+	readonly sourceColumn?: string | undefined;
+	readonly targetColumn?: string | undefined;
 }
 
 // ============================================================================

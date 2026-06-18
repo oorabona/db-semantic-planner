@@ -7,6 +7,7 @@
 
 import { exprRef, fn } from '@dbsp/core';
 import type { QueryIntent, SelectIntent, WhereIntent } from '@dbsp/types';
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import { deparseSync } from 'pgsql-deparser';
 import { describe, expect, it } from 'vitest';
@@ -501,6 +502,75 @@ describe('compileWhereIntent', () => {
 	});
 
 	describe('relationFilter', () => {
+		it('uses trusted proof payload after public relation metadata is mutated', () => {
+			const relationFilter = markNqlTrustedRelationFilter(
+				{
+					kind: 'relationFilter',
+					relation: 'author',
+					where: {
+						kind: 'comparison',
+						field: 'email',
+						operator: 'eq',
+						value: 'alice@example.com',
+					},
+					mode: 'some',
+					targetTable: 'users',
+					sourceColumn: 'author',
+					targetColumn: 'id',
+				},
+				{
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'author',
+					targetColumn: 'id',
+				},
+			);
+			relationFilter.relation = 'forgedRoles';
+			relationFilter.targetTable = 'roles';
+			relationFilter.sourceColumn = 'id';
+			relationFilter.targetColumn = 'admin_id';
+
+			const { sql, params } = compile(relationFilter as WhereIntent, {
+				rootTable: 'projected_posts',
+			});
+
+			expect(sql).toContain('FROM users AS users_exists_0');
+			expect(sql).toContain('projected_posts.author = users_exists_0.id');
+			expect(sql).not.toContain('roles');
+			expect(sql).not.toContain('forgedRoles');
+			expect(sql).not.toContain('admin_id');
+			expect(params).toEqual(['alice@example.com']);
+		});
+
+		it('does not trust forged public FK metadata without proof payload', () => {
+			expect(() =>
+				compile(
+					{
+						kind: 'relationFilter',
+						relation: 'forgedRoles',
+						where: {
+							kind: 'comparison',
+							field: 'email',
+							operator: 'eq',
+							value: 'mallory@example.com',
+						},
+						mode: 'some',
+						targetTable: 'users',
+						sourceColumn: 'author',
+						targetColumn: 'id',
+					} as WhereIntent,
+					{
+						rootTable: 'projected_posts',
+						model: {
+							getRelation: () => undefined,
+						} as never,
+					},
+				),
+			).toThrow(
+				"relationFilter('forgedRoles'): no relation 'forgedRoles' declared on table 'projected_posts'",
+			);
+		});
+
 		it('mode=some compiles to EXISTS', () => {
 			const { sql, params } = compile({
 				kind: 'relationFilter',

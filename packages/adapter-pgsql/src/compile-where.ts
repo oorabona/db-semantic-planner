@@ -24,6 +24,7 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
+import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
 	andExpr,
@@ -511,9 +512,11 @@ function handleRelationFilterIntent(
 	ctx: WhereCompilerCtx,
 ): Node {
 	const rf = intent as WhereRelationFilterIntent;
-	const hops: string[] = Array.isArray(rf.relation)
-		? (rf.relation as string[])
-		: [rf.relation as string];
+	const preResolved = getTrustedNqlRelationFilterFields(rf);
+	const relationPath = preResolved?.relation ?? rf.relation;
+	const hops: string[] = Array.isArray(relationPath)
+		? [...relationPath]
+		: [relationPath];
 
 	// mode:'some'  → EXISTS         (at least one matches)
 	// mode:'none'  → NOT EXISTS     (none match)
@@ -537,6 +540,9 @@ function handleRelationFilterIntent(
 				Array.isArray(rfWhere.conditions) &&
 				(rfWhere.conditions as unknown[]).length === 0));
 	if (isVacuousEvery) {
+		if (preResolved) {
+			return { A_Const: { boolval: { boolval: true } } };
+		}
 		// Validate the relation/path BEFORE returning vacuous-true.
 		// Without this, a typoed/undeclared relation short-circuits to all-rows TRUE
 		// (fail-open security regression) instead of throwing fail-closed.
@@ -597,6 +603,19 @@ function handleRelationFilterIntent(
 		// (DEFECT 1 FIX: before this fix, single-hop always fell back to convention,
 		//  so e.g. posts.author_id was correlated as posts.user_id — wrong.)
 		const relation = hops[0] ?? (rf.relation as string);
+		if (preResolved) {
+			return compileWhereIntent(
+				{
+					kind: existsKind,
+					relation,
+					targetTable: preResolved.targetTable,
+					sourceColumn: preResolved.sourceColumn,
+					targetColumn: preResolved.targetColumn,
+					where: innermostWhere,
+				} as unknown as WhereIntent,
+				ctx,
+			);
+		}
 		const resolvedRelation = ctx.model?.getRelation(
 			`${ctx.rootTable}.${relation}`,
 		);

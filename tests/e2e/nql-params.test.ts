@@ -153,6 +153,32 @@ recent_posts
 		]);
 	});
 
+	it('executes binding-final relation filters through projected source FKs', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number; title: string }>`posts
+			| select id, title, authorId
+			| bind projected_posts
+projected_posts
+			| where some(author).name = ${'Alice Johnson'}
+			| select id, title
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toContain(`${SCHEMA}.authors`);
+		expect(dump.sql).toContain('FROM projected_posts');
+		expect(dump.sql).not.toContain(`${SCHEMA}.projected_posts`);
+		expect(dump.params).toEqual(['Alice Johnson']);
+		expect(rows).toEqual([
+			{ id: 1, title: 'Getting Started with TypeScript' },
+			{ id: 2, title: 'Advanced TypeScript Patterns' },
+			{ id: 4, title: 'Draft: React Best Practices' },
+		]);
+	});
+
 	it('executes mutation binding bodies before the final query', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

@@ -22,7 +22,10 @@ import {
 	NqlLexer,
 	compile as nqlCompile,
 } from '@dbsp/nql';
-import { NQL_INTERNAL_COMPILER_OPTIONS } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	NQL_INTERNAL_COMPILER_OPTIONS,
+} from '@dbsp/types/internal';
 import {
 	type Adapter,
 	type CompileOptions,
@@ -165,6 +168,9 @@ function findBindingFinalRelationFilter(
 		case 'not':
 			return findBindingFinalRelationFilter(where.condition);
 		case 'relationFilter':
+			if (getTrustedNqlRelationFilterFields(where) !== undefined) {
+				return undefined;
+			}
 			return formatBindingRelationPath(where.relation);
 		case 'exists':
 		case 'notExists':

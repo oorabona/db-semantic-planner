@@ -22,6 +22,7 @@ export const NQL_INTERNAL_COMPILER_OPTIONS: unique symbol = Symbol(
 );
 
 const NQL_BINDING_REF = Symbol('@dbsp/nql/bindingRef');
+const NQL_TRUSTED_RELATION_FILTER = Symbol('@dbsp/nql/trustedRelationFilter');
 
 /**
  * @internal Opaque marker for NQL compiler-created binding references.
@@ -63,6 +64,110 @@ export function isNqlBindingRef(value: unknown): value is NqlBindingRef {
 /** @internal */
 export function getNqlBindingRefName(ref: NqlBindingRef): string {
 	return ref.name;
+}
+
+/** @internal */
+export type NqlTrustedRelationFilterRelation = string | readonly string[];
+
+/** @internal */
+export interface NqlTrustedRelationFilterFields {
+	readonly relation: NqlTrustedRelationFilterRelation;
+	readonly targetTable: string;
+	readonly sourceColumn: string;
+	readonly targetColumn: string;
+}
+
+/**
+ * @internal Opaque proof for NQL compiler-proven relation filter metadata.
+ *
+ * The module-private Symbol stores the frozen proven payload. Public
+ * targetTable/sourceColumn/targetColumn/relation fields are display metadata only;
+ * consumers must read the payload through getTrustedNqlRelationFilterFields().
+ */
+export interface NqlTrustedRelationFilterProof {
+	readonly [NQL_TRUSTED_RELATION_FILTER]: NqlTrustedRelationFilterFields;
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+	return (
+		Array.isArray(value) && value.every((item) => typeof item === 'string')
+	);
+}
+
+function isTrustedRelationFilterPayload(
+	value: unknown,
+): value is NqlTrustedRelationFilterFields {
+	if (value === null || typeof value !== 'object') {
+		return false;
+	}
+	const record = value as {
+		readonly relation?: unknown;
+		readonly targetTable?: unknown;
+		readonly sourceColumn?: unknown;
+		readonly targetColumn?: unknown;
+	};
+	return (
+		(typeof record.relation === 'string' || isStringArray(record.relation)) &&
+		typeof record.targetTable === 'string' &&
+		typeof record.sourceColumn === 'string' &&
+		typeof record.targetColumn === 'string'
+	);
+}
+
+function freezeTrustedRelationFilterPayload(
+	fields: NqlTrustedRelationFilterFields,
+): NqlTrustedRelationFilterFields {
+	const relation = Array.isArray(fields.relation)
+		? Object.freeze([...fields.relation])
+		: fields.relation;
+	return Object.freeze({
+		relation,
+		targetTable: fields.targetTable,
+		sourceColumn: fields.sourceColumn,
+		targetColumn: fields.targetColumn,
+	});
+}
+
+/** @internal */
+export function markNqlTrustedRelationFilter<T extends object>(
+	value: T,
+	fields: NqlTrustedRelationFilterFields,
+): T & NqlTrustedRelationFilterProof {
+	Object.defineProperty(value, NQL_TRUSTED_RELATION_FILTER, {
+		value: freezeTrustedRelationFilterPayload(fields),
+		enumerable: false,
+	});
+	return value as T & NqlTrustedRelationFilterProof;
+}
+
+/** @internal */
+export function hasNqlTrustedRelationFilterProof(
+	value: unknown,
+): value is NqlTrustedRelationFilterProof {
+	if (value === null || typeof value !== 'object') {
+		return false;
+	}
+	const record = value as {
+		readonly [NQL_TRUSTED_RELATION_FILTER]?: unknown;
+	};
+	return (
+		Object.hasOwn(record, NQL_TRUSTED_RELATION_FILTER) &&
+		isTrustedRelationFilterPayload(record[NQL_TRUSTED_RELATION_FILTER])
+	);
+}
+
+/** @internal */
+export function getTrustedNqlRelationFilterFields(
+	value: unknown,
+): NqlTrustedRelationFilterFields | undefined {
+	if (value === null || typeof value !== 'object') {
+		return undefined;
+	}
+	const record = value as {
+		readonly [NQL_TRUSTED_RELATION_FILTER]?: unknown;
+	};
+	const payload = record[NQL_TRUSTED_RELATION_FILTER];
+	return isTrustedRelationFilterPayload(payload) ? payload : undefined;
 }
 
 // Re-export all public types for convenience
