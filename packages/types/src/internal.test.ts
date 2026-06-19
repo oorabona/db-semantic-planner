@@ -65,6 +65,7 @@ describe('NQL trusted relation-filter proof', () => {
 				targetTable: 'posts',
 				sourceColumn: 'id',
 				targetColumn: 'authorId',
+				hops: [],
 				selectedColumn: 'title',
 				cardinality: 'many',
 				relationType: 'hasMany',
@@ -79,6 +80,7 @@ describe('NQL trusted relation-filter proof', () => {
 			targetTable: 'posts',
 			sourceColumn: 'id',
 			targetColumn: 'authorId',
+			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
 			relationType: 'hasMany',
@@ -95,12 +97,55 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(payload?.relationType).toBe('hasMany');
 	});
 
+	it('deep-freezes and validates scalar multi-hop trusted payloads', () => {
+		const proof = markNqlTrustedRelationFilter(
+			{ kind: 'relationColumn' },
+			{
+				relation: 'author.company',
+				targetTable: 'authors',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+				hops: [
+					{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+				],
+				selectedColumn: 'name',
+				cardinality: 'one',
+				relationType: 'belongsTo',
+			},
+		);
+
+		const payload = getTrustedNqlRelationFilterFields(proof);
+
+		expect(payload).toEqual({
+			relation: 'author.company',
+			targetTable: 'authors',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+			hops: [{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' }],
+			selectedColumn: 'name',
+			cardinality: 'one',
+			relationType: 'belongsTo',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.hops)).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0])).toBe(true);
+		try {
+			if (payload) {
+				(payload.hops[0] as { target: string }).target = 'forged';
+			}
+		} catch {
+			// Frozen payloads throw in strict mode; either way, mutation must not stick.
+		}
+		expect(payload?.hops[0]?.target).toBe('companies');
+	});
+
 	it('does not trust forged plain objects or invalid relationType payloads', () => {
 		const forged = {
 			relation: 'posts',
 			targetTable: 'posts',
 			sourceColumn: 'id',
 			targetColumn: 'authorId',
+			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
 			relationType: 'hasMany',
@@ -119,6 +164,7 @@ describe('NQL trusted relation-filter proof', () => {
 			targetTable: 'posts',
 			sourceColumn: 'id',
 			targetColumn: 'authorId',
+			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
 			relationType: 'madeUp',
@@ -128,5 +174,41 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(getTrustedNqlRelationFilterFields(forged)).toBeUndefined();
 		expect(hasNqlTrustedRelationFilterProof(invalid)).toBe(false);
 		expect(getTrustedNqlRelationFilterFields(invalid)).toBeUndefined();
+	});
+
+	it('does not trust malformed or incomplete hop chains', () => {
+		const dottedWithoutHops = markNqlTrustedRelationFilter(
+			{ kind: 'relationColumn' },
+			{
+				relation: 'author.company',
+				targetTable: 'authors',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+				hops: [],
+				selectedColumn: 'name',
+				cardinality: 'one',
+				relationType: 'belongsTo',
+			},
+		);
+		const malformedHop = markNqlTrustedRelationFilter(
+			{ kind: 'relationColumn' },
+			{
+				relation: 'author.company',
+				targetTable: 'authors',
+				sourceColumn: 'authorId',
+				targetColumn: 'id',
+				hops: [{ target: '', fkColumn: 'companyId', joinColumn: 'id' }],
+				selectedColumn: 'name',
+				cardinality: 'one',
+				relationType: 'belongsTo',
+			} as unknown as Parameters<typeof markNqlTrustedRelationFilter>[1],
+		);
+
+		expect(
+			getTrustedNqlRelationFilterFields(dottedWithoutHops),
+		).toBeUndefined();
+		expect(hasNqlTrustedRelationFilterProof(dottedWithoutHops)).toBe(false);
+		expect(getTrustedNqlRelationFilterFields(malformedHop)).toBeUndefined();
+		expect(hasNqlTrustedRelationFilterProof(malformedHop)).toBe(false);
 	});
 });

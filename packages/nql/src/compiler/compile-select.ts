@@ -699,7 +699,10 @@ function compileMultiSegmentPath(
 		);
 	}
 	if (ctx.currentFromTable && ctx.validator) {
+		const lastBindingHop =
+			bindingRelation?.hops[bindingRelation.hops.length - 1];
 		const targetTable =
+			lastBindingHop?.target ??
 			bindingRelation?.targetTable ??
 			ctx.validator.resolveRelationTarget(ctx.currentFromTable, segments[0]!);
 		if (targetTable) {
@@ -718,6 +721,7 @@ function compileMultiSegmentPath(
 				targetTable: bindingRelation.targetTable,
 				sourceColumn: bindingRelation.sourceColumn,
 				targetColumn: bindingRelation.targetColumn,
+				hops: bindingRelation.hops,
 				selectedColumn: column,
 				...(bindingRelation.cardinality !== undefined && {
 					cardinality: bindingRelation.cardinality,

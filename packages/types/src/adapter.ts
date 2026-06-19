@@ -131,12 +131,19 @@ export interface CompileOptionsBase {
 /**
  * Adapter-facing NQL compile bundle.
  */
+export interface NqlBindingVirtualRelationHop {
+	readonly target: string;
+	readonly fkColumn: string;
+	readonly joinColumn: string;
+}
+
 export interface NqlBindingVirtualRelation {
 	readonly relation: string;
 	readonly sourceTable: string;
 	readonly targetTable: string;
 	readonly sourceColumn: string;
 	readonly targetColumn: string;
+	readonly hops: readonly NqlBindingVirtualRelationHop[];
 	readonly cardinality?: 'one' | 'many';
 	readonly relationType?: RelationType;
 }

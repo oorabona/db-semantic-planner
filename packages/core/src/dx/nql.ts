@@ -296,6 +296,27 @@ function bindingIncludesCoverRelationPath(
 	);
 }
 
+function trustedBindingRelationColumnIsAdmitted(
+	column: Extract<
+		NonNullable<QueryIntent['select']>,
+		{ readonly type: 'expressions' }
+	>['columns'][number],
+): boolean {
+	if (column.kind !== 'relationColumn') return false;
+	const trusted = getTrustedNqlRelationFilterFields(column);
+	if (trusted?.selectedColumn === undefined) return false;
+	const isDotted = column.relation.split('.').length > 1;
+	if (trusted.cardinality === 'one') {
+		return !isDotted || trusted.hops.length > 0;
+	}
+	return (
+		trusted.cardinality === 'many' &&
+		trusted.relationType === 'hasMany' &&
+		!isDotted &&
+		trusted.hops.length === 0
+	);
+}
+
 function assertProvenBindingInclude(
 	bindingName: string,
 	include: IncludeIntent,
@@ -356,13 +377,7 @@ function assertBindingFinalQueryCanUseSyntheticPlan(
 					) {
 						return [];
 					}
-					const trusted = getTrustedNqlRelationFilterFields(column);
-					if (
-						trusted?.selectedColumn !== undefined &&
-						(trusted.cardinality === 'one' ||
-							(trusted.cardinality === 'many' &&
-								trusted.relationType === 'hasMany'))
-					) {
+					if (trustedBindingRelationColumnIsAdmitted(column)) {
 						return [];
 					}
 					return [column.relation];

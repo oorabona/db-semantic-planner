@@ -75,7 +75,15 @@ const schema = {
 				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
 			},
 			profiles: {
-				columns: [{ name: 'id' }, { name: 'userId' }, { name: 'bio' }],
+				columns: [
+					{ name: 'id' },
+					{ name: 'userId' },
+					{ name: 'companyId' },
+					{ name: 'bio' },
+				],
+			},
+			companies: {
+				columns: [{ name: 'id' }, { name: 'name' }],
 			},
 		};
 		return tables[name];
@@ -136,7 +144,16 @@ const schema = {
 				},
 			],
 			orders: [],
-			profiles: [],
+			profiles: [
+				{
+					name: 'company',
+					source: 'profiles',
+					target: 'companies',
+					type: 'belongsTo',
+					foreignKey: 'companyId',
+				},
+			],
+			companies: [],
 			categories: [
 				{
 					name: 'parent',
@@ -752,6 +769,7 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 			targetTable: 'users',
 			sourceColumn: 'authorId',
 			targetColumn: 'id',
+			hops: [],
 			cardinality: 'one',
 		});
 		expect(Object.isFrozen(payload)).toBe(true);
@@ -773,6 +791,7 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 				targetTable: 'users',
 				sourceColumn: 'authorId',
 				targetColumn: 'id',
+				hops: [],
 				cardinality: 'one',
 			},
 		]);
@@ -804,6 +823,7 @@ projected_posts | select id, author.name`,
 			targetTable: 'users',
 			sourceColumn: 'authorId',
 			targetColumn: 'id',
+			hops: [],
 			selectedColumn: 'name',
 			cardinality: 'one',
 			relationType: 'belongsTo',
@@ -831,6 +851,7 @@ projected_users | select id, profile.bio`,
 			targetTable: 'profiles',
 			sourceColumn: 'id',
 			targetColumn: 'userId',
+			hops: [],
 			selectedColumn: 'bio',
 			cardinality: 'one',
 			relationType: 'hasOne',
@@ -864,6 +885,7 @@ projected_users | select posts.title`,
 			targetTable: 'posts',
 			sourceColumn: 'id',
 			targetColumn: 'authorId',
+			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
 			relationType: 'hasMany',
@@ -933,15 +955,240 @@ projected_users | select *, posts.*`,
 		expect(result.ast?.query?.include).toEqual([{ relation: 'posts' }]);
 	});
 
-	it('rejects binding-final multi-hop relation columns', () => {
+	it('accepts binding-final two-hop to-one scalar relation columns with frozen hops', () => {
 		const result = compile(
 			`posts | select id, authorId | bind projected_posts
 projected_posts | select author.profile.bio`,
 			schema,
 		);
 
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'author.profile',
+			column: 'bio',
+			as: 'author.profile.bio',
+		});
+		const payload = getTrustedNqlRelationFilterFields(relationColumn);
+		expect(payload).toEqual({
+			relation: 'author.profile',
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+			hops: [{ target: 'profiles', fkColumn: 'id', joinColumn: 'userId' }],
+			selectedColumn: 'bio',
+			cardinality: 'one',
+			relationType: 'belongsTo',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.hops)).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0])).toBe(true);
+		expect(result.ast?.query?.include).toBeUndefined();
+	});
+
+	it('accepts binding-final three-hop to-one scalar relation columns with ordered frozen hops', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.profile.company.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'author.profile.company',
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+			hops: [
+				{ target: 'profiles', fkColumn: 'id', joinColumn: 'userId' },
+				{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+			],
+			selectedColumn: 'name',
+			cardinality: 'one',
+			relationType: 'belongsTo',
+		});
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose first hop is hasMany', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.comments.body`,
+			schema,
+		);
+
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/multi-hop/);
+		expect(result.errors[0]?.message).toMatch(/relation 'posts' is 'hasMany'/);
+		expect(result.errors[0]?.message).toMatch(/to-one/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose mid hop is hasMany', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.posts.comments.body`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/tail relation 'posts' is 'hasMany'/,
+		);
+		expect(result.errors[0]?.message).toMatch(/to-one/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose leaf hop is hasMany', () => {
+		const leafHasManySchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'profiles') {
+					return schema.getRelationsFrom(sourceTable);
+				}
+				return [
+					...schema.getRelationsFrom(sourceTable),
+					{
+						name: 'posts',
+						source: 'profiles',
+						target: 'posts',
+						type: 'hasMany' as const,
+						foreignKey: 'authorId',
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.profile.posts.title`,
+			leafHasManySchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/tail relation 'posts' is 'hasMany'/,
+		);
+		expect(result.errors[0]?.message).toMatch(/to-one/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose tail hop is belongsToMany', () => {
+		const belongsToManyTailSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'profiles') {
+					return schema.getRelationsFrom(sourceTable);
+				}
+				return [
+					...schema.getRelationsFrom(sourceTable),
+					{
+						name: 'tags',
+						source: 'profiles',
+						target: 'tags',
+						type: 'belongsToMany' as const,
+						foreignKey: 'id',
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.profile.tags.name`,
+			belongsToManyTailSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'tags'/);
+		expect(result.errors[0]?.message).toMatch(/junction/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose tail hop has a composite FK', () => {
+		const compositeTailSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'profiles') {
+					return schema.getRelationsFrom(sourceTable);
+				}
+				return [
+					{
+						name: 'company',
+						source: 'profiles',
+						target: 'companies',
+						type: 'belongsTo' as const,
+						foreignKey: ['companyId', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.profile.company.name`,
+			compositeTailSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'company'/);
+		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns whose tail hop is recursive self-ref', () => {
+		const result = compile(
+			`posts | select id, categoryId | bind projected_posts
+projected_posts | select category.parent.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'parent'/);
+		expect(result.errors[0]?.message).toMatch(/recursive\/self-referential/);
+		expect(result.errors[0]?.message).toMatch(/ref-#193/);
+	});
+
+	it('rejects binding-final multi-hop scalar relation columns with an unresolvable tail', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.missing.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+		expect(result.errors[0]?.message).toMatch(
+			/tail relation 'missing' is not declared on table 'users'/,
+		);
 	});
 
 	it('accepts binding-final multi-level relationStar as a proven include with real-table tail', () => {

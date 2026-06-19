@@ -131,6 +131,15 @@ function assertNqlSelectWindowFunctionAllowed(functionName: string): void {
 	}
 }
 
+function trustedRelationHasMultipleHops(
+	relation: NonNullable<
+		ReturnType<typeof getTrustedNqlRelationFilterFields>
+	>['relation'],
+): boolean {
+	if (typeof relation !== 'string') return relation.length > 1;
+	return relation.split('.').length > 1;
+}
+
 // ============================================================================
 // PlanDecision → HandlerDecision mapper
 // ============================================================================
@@ -1282,6 +1291,7 @@ export class PlanCompiler {
 		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
 		plan: SimplifiedPlanReport,
 	): {
+		relatedAlias: string;
 		relatedTable: Node;
 		relatedColumn: Node;
 		relatedJoinColumn: Node;
@@ -1313,6 +1323,7 @@ export class PlanCompiler {
 			this.naming,
 		);
 		return {
+			relatedAlias,
 			relatedTable,
 			relatedColumn,
 			relatedJoinColumn,
@@ -1332,11 +1343,64 @@ export class PlanCompiler {
 		}
 		if (fields.cardinality === 'one') {
 			const {
+				relatedAlias,
 				relatedTable,
 				relatedColumn,
 				relatedJoinColumn,
 				bindingJoinColumn,
 			} = this.buildCorrelatedRelationRefs(fields, plan);
+			if (
+				fields.hops.length === 0 &&
+				trustedRelationHasMultipleHops(fields.relation)
+			) {
+				throw new Error(
+					`NQL binding relation-column proof for '${plan.rootTable}' is dotted but missing resolved hops.`,
+				);
+			}
+			if (fields.hops.length > 0) {
+				let fromNode = relatedTable;
+				let previousAlias = relatedAlias;
+				for (let i = 0; i < fields.hops.length; i++) {
+					const hop = fields.hops[i]!;
+					const hopAlias = `${relatedAlias}_h${i + 1}`;
+					const hopTable = rangeVar(
+						hop.target,
+						hopAlias,
+						this.schemaForRangeVar(plan, hop.target),
+						this.naming,
+					);
+					fromNode = innerJoin(
+						fromNode,
+						hopTable,
+						eqExpr(
+							columnRef(hop.joinColumn, hopAlias, undefined, this.naming),
+							columnRef(hop.fkColumn, previousAlias, undefined, this.naming),
+						),
+					);
+					previousAlias = hopAlias;
+				}
+				return {
+					SubLink: {
+						subLinkType: 'EXPR_SUBLINK',
+						subselect: selectStmt({
+							targetList: [
+								{
+									ResTarget: {
+										val: columnRef(
+											fields.selectedColumn!,
+											previousAlias,
+											undefined,
+											this.naming,
+										),
+									},
+								},
+							],
+							from: [fromNode],
+							where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+						}),
+					},
+				};
+			}
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',

@@ -10,6 +10,7 @@ import { sql } from './sql.js';
 /**
  * Seed blog data in a schema.
  *
+ * - 1 company
  * - 2 authors
  * - 5 posts (3 published)
  * - 10 comments
@@ -17,12 +18,19 @@ import { sql } from './sql.js';
 export async function seedBlogData(schemaName: string): Promise<void> {
 	const pool = await getTestPool();
 
+	// Companies
+	await sql`
+    INSERT INTO ${sql.ref(schemaName)}.companies (id, name)
+    VALUES
+      (1, 'Type Labs')
+  `.execute(pool);
+
 	// Authors
 	await sql`
-    INSERT INTO ${sql.ref(schemaName)}.authors (id, name, email)
+    INSERT INTO ${sql.ref(schemaName)}.authors (id, name, email, company_id)
     VALUES
-      (1, 'Alice Johnson', 'alice@example.com'),
-      (2, 'Bob Smith', 'bob@example.com')
+      (1, 'Alice Johnson', 'alice@example.com', 1),
+      (2, 'Bob Smith', 'bob@example.com', NULL)
   `.execute(pool);
 
 	// Posts (3 published, 2 drafts)

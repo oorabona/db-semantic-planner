@@ -514,6 +514,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 					targetTable: fields.targetTable ?? 'posts',
 					sourceColumn: fields.sourceColumn ?? 'id',
 					targetColumn: fields.targetColumn ?? 'authorId',
+					hops: [],
 					selectedColumn,
 					...(fields.cardinality !== undefined && {
 						cardinality: fields.cardinality,
@@ -596,6 +597,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 					targetTable: 'users',
 					sourceColumn: 'authorId',
 					targetColumn: 'id',
+					hops: [],
 					selectedColumn: 'name',
 					cardinality: 'one',
 					relationType: 'belongsTo',
@@ -611,6 +613,92 @@ describe('PlanCompiler - Coverage Tests', () => {
 				/\(select rc_\d+\.name from users as rc_\d+ where rc_\d+\.id = projected_posts\."authorId"\) as "author\.name"/i,
 			);
 			expect(sql).not.toContain('json_agg');
+		});
+
+		it('emits a two-hop binding scalar relation column as one correlated subquery with one internal join', () => {
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author.company',
+					column: 'name',
+					alias: 'author.company.name',
+				},
+				{
+					relation: 'author.company',
+					targetTable: 'authors',
+					sourceColumn: 'authorId',
+					targetColumn: 'id',
+					hops: [
+						{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+					],
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: [relationColumn],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/\(select rc_\d+_h1\.name from authors as rc_\d+ join companies as rc_\d+_h1 on rc_\d+_h1\.id = rc_\d+\."companyId" where rc_\d+\.id = projected_posts\."authorId"\) as "author\.company\.name"/i,
+			);
+		});
+
+		it('emits a three-hop binding scalar relation column as one correlated subquery with two internal joins', () => {
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author.company.country',
+					column: 'name',
+					alias: 'author.company.country.name',
+				},
+				{
+					relation: 'author.company.country',
+					targetTable: 'authors',
+					sourceColumn: 'authorId',
+					targetColumn: 'id',
+					hops: [
+						{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+						{ target: 'countries', fkColumn: 'countryId', joinColumn: 'id' },
+					],
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: [relationColumn],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/\(select rc_\d+_h2\.name from authors as rc_\d+ join companies as rc_\d+_h1 on rc_\d+_h1\.id = rc_\d+\."companyId" join countries as rc_\d+_h2 on rc_\d+_h2\.id = rc_\d+_h1\."countryId" where rc_\d+\.id = projected_posts\."authorId"\) as "author\.company\.country\.name"/i,
+			);
+		});
+
+		it('rejects cardinality-one dotted binding relation columns without resolved hops', () => {
+			const compiler = new PlanCompiler();
+
+			expect(() =>
+				compiler.compileBindingRelationColumnSubquery(
+					{
+						relation: 'author.company',
+						targetTable: 'authors',
+						sourceColumn: 'authorId',
+						targetColumn: 'id',
+						hops: [],
+						selectedColumn: 'name',
+						cardinality: 'one',
+						relationType: 'belongsTo',
+					},
+					{ rootTable: 'projected_posts', decisions: [] },
+					undefined,
+				),
+			).toThrow(/dotted but missing resolved hops/);
 		});
 
 		it('throws before SQL construction when hasMany aggregation is unsupported by the dialect', () => {

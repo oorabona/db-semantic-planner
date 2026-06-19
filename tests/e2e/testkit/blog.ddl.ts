@@ -17,12 +17,21 @@ export async function createBlogSchema(schemaName: string): Promise<void> {
 	// Create schema
 	await sql`CREATE SCHEMA IF NOT EXISTS ${s}`.execute(pool);
 
+	// Companies table
+	await sql`
+    CREATE TABLE ${s}.companies (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL
+    )
+  `.execute(pool);
+
 	// Authors table
 	await sql`
     CREATE TABLE ${s}.authors (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
-      email TEXT NOT NULL UNIQUE
+      email TEXT NOT NULL UNIQUE,
+      company_id INTEGER REFERENCES ${s}.companies(id)
     )
   `.execute(pool);
 
@@ -53,6 +62,11 @@ export async function createBlogSchema(schemaName: string): Promise<void> {
 	await sql`
     CREATE INDEX ${sql.ref(`idx_${schemaName}_posts_author`)}
     ON ${s}.posts(author_id)
+  `.execute(pool);
+
+	await sql`
+    CREATE INDEX ${sql.ref(`idx_${schemaName}_authors_company`)}
+    ON ${s}.authors(company_id)
   `.execute(pool);
 
 	await sql`

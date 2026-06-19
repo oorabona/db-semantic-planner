@@ -205,6 +205,34 @@ projected_posts
 		]);
 	});
 
+	it('executes binding-final multi-hop scalar relation columns through projected source FKs', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number; companyName: string | null }>`posts
+			| select id, authorId
+			| bind projected_posts
+projected_posts
+			| select id, author.company.name as companyName
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(
+			/FROM .+\.authors AS rc_\d+ JOIN .+\.companies AS rc_\d+_h1 ON rc_\d+_h1\."?id"? = rc_\d+\."?company_?id"?/i,
+		);
+		expect(dump.sql).toContain('FROM projected_posts');
+		expect(dump.sql).not.toContain(`${SCHEMA}.projected_posts`);
+		expect(rows).toEqual([
+			{ id: 1, companyName: 'Type Labs' },
+			{ id: 2, companyName: 'Type Labs' },
+			{ id: 3, companyName: null },
+			{ id: 4, companyName: 'Type Labs' },
+			{ id: 5, companyName: null },
+		]);
+	});
+
 	it('executes binding-final hasMany relation columns as deterministic JSON arrays', async () => {
 		const pool = await getTestPool();
 		const adapter = await getTestAdapter();

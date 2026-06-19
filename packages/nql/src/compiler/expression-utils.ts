@@ -11,7 +11,10 @@ import {
 	type NqlBindingVirtualRelation,
 	type ParamIntent,
 } from '@dbsp/types';
-import { createNqlBindingRef } from '@dbsp/types/internal';
+import {
+	createNqlBindingRef,
+	explainUnsupportedNqlBindingIncludeHop,
+} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlBinaryExpression,
@@ -22,7 +25,11 @@ import type {
 	NqlRangeLiteral,
 	NqlUnaryExpression,
 } from '../parser/ast.js';
-import type { CompilerContext } from './types.js';
+import {
+	relationCardinality,
+	scalarRelationJoinColumns,
+} from './binding-relation-utils.js';
+import type { ColumnValidatorRelation, CompilerContext } from './types.js';
 
 const FORBIDDEN_PARAM_NAMES = new Set([
 	'__proto__',
@@ -234,6 +241,21 @@ function throwBindingRelationColumn182(
 	);
 }
 
+function bindingRelationColumnUnsupportedReason(
+	relationName: string,
+	relation: ColumnValidatorRelation,
+): string | undefined {
+	const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+		relationName,
+		relation,
+	);
+	if (unsupportedReason) return unsupportedReason;
+	if (relationCardinality(relation) !== 'one') {
+		return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; scalar binding relation columns require every hop to be to-one (belongsTo/hasOne) (ref-#192)`;
+	}
+	return undefined;
+}
+
 export function resolveBindingRelationFilter(
 	ctx: CompilerContext,
 	bindingName: string | undefined,
@@ -279,19 +301,19 @@ export function resolveBindingRelationColumn(
 	if (!isBindingTable(ctx, bindingName)) return undefined;
 	const actualBindingName = bindingName as string;
 	const relationName = relationPath.join('.');
-	if (relationPath.length !== 1) {
-		throwBindingRelationColumn182(
-			actualBindingName,
-			relationName,
-			'multi-hop binding relation columns are not supported; the relation path must be a single source-table relation',
-		);
-	}
 	const relation = relationPath[0];
 	if (!relation) {
 		throwBindingRelationColumn182(
 			actualBindingName,
 			relationName,
 			'the relation path must name a source-table relation',
+		);
+	}
+	if (!ctx.validator) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			'model metadata is not available',
 		);
 	}
 	const virtualRelation = ctx.validator?.getVirtualBindingScalarRelation(
@@ -304,10 +326,85 @@ export function resolveBindingRelationColumn(
 				actualBindingName,
 				relation,
 			) ?? 'model metadata is not available';
-		throwBindingRelationColumn182(actualBindingName, relation, reason);
+		throwBindingRelationColumn182(actualBindingName, relationName, reason);
 	}
-	ctx.validator?.validateColumn(virtualRelation.targetTable, selectedColumn);
-	return virtualRelation;
+	if (relationPath.length === 1) {
+		ctx.validator.validateColumn(virtualRelation.targetTable, selectedColumn);
+		return virtualRelation;
+	}
+	const firstHop = ctx.validator.getRelation(
+		virtualRelation.sourceTable,
+		relation,
+	);
+	if (!firstHop) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			`relation '${relation}' is not declared on source table '${virtualRelation.sourceTable}'`,
+		);
+	}
+	const firstHopReason = bindingRelationColumnUnsupportedReason(
+		relation,
+		firstHop,
+	);
+	if (firstHopReason) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			firstHopReason,
+		);
+	}
+	let sourceTable = virtualRelation.targetTable;
+	const hops: NqlBindingVirtualRelation['hops'][number][] = [];
+	for (let i = 1; i < relationPath.length; i++) {
+		const tailRelation = relationPath[i];
+		if (!tailRelation) {
+			throwBindingRelationColumn182(
+				actualBindingName,
+				relationName,
+				`relation path segment ${i + 1} is empty (ref-#192)`,
+			);
+		}
+		const resolvedTail = ctx.validator.getRelation(sourceTable, tailRelation);
+		if (!resolvedTail) {
+			throwBindingRelationColumn182(
+				actualBindingName,
+				relationName,
+				`tail relation '${tailRelation}' is not declared on table '${sourceTable}' (ref-#192)`,
+			);
+		}
+		const tailReason = bindingRelationColumnUnsupportedReason(
+			tailRelation,
+			resolvedTail,
+		);
+		if (tailReason) {
+			throwBindingRelationColumn182(
+				actualBindingName,
+				relationName,
+				`tail ${tailReason}`,
+			);
+		}
+		const joinColumns = scalarRelationJoinColumns(resolvedTail);
+		if (!joinColumns) {
+			throwBindingRelationColumn182(
+				actualBindingName,
+				relationName,
+				`tail relation '${tailRelation}' cannot be resolved to a single-column scalar join (ref-#192)`,
+			);
+		}
+		hops.push({
+			target: resolvedTail.target,
+			fkColumn: joinColumns.sourceJoinColumn,
+			joinColumn: joinColumns.targetJoinColumn,
+		});
+		sourceTable = resolvedTail.target;
+	}
+	ctx.validator.validateColumn(sourceTable, selectedColumn);
+	return {
+		...virtualRelation,
+		relation: relationName,
+		hops,
+	};
 }
 
 export function assertNoBindingRelationPath(

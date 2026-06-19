@@ -154,6 +154,7 @@ function createBindingFinalBundle(include: IncludeIntent): CompiledNqlQuery {
 								targetTable: 'posts',
 								sourceColumn: 'id',
 								targetColumn: 'userId',
+								hops: [],
 								cardinality: 'many',
 								relationType: 'hasMany',
 							},
