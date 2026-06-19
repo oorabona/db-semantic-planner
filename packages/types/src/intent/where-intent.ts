@@ -3,6 +3,7 @@
  * Where intent types for filter conditions.
  */
 
+import type { ColumnListInput } from '../column-list.js';
 import type { RangeValue } from '../shared/utils.js';
 import type { ExpressionIntent, ParamIntent } from './expression-intent.js';
 import type { ComparisonOperator, NullOperator } from './operators.js';
@@ -319,8 +320,8 @@ export interface WhereRelationFilterIntent {
 	 * proof payload instead.
 	 */
 	readonly targetTable?: string | undefined;
-	readonly sourceColumn?: string | undefined;
-	readonly targetColumn?: string | undefined;
+	readonly sourceColumn?: ColumnListInput;
+	readonly targetColumn?: ColumnListInput;
 }
 
 // ============================================================================

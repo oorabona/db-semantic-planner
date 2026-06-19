@@ -946,6 +946,11 @@ function inferRelations(
 		// category_id → category (belongsTo)
 		const belongsToName = deriveRelationName(fk.cols[0]!, fk.target);
 		const fkCol = fk.cols.length === 1 ? fk.cols[0]! : fk.cols;
+		const refCol = fk.refs.length === 1 ? fk.refs[0]! : fk.refs;
+		const keyOverride =
+			Array.isArray(refCol) || refCol !== DEFAULT_PK_COLUMN
+				? refCol
+				: undefined;
 
 		// belongsTo: source (FK owner) → target
 		const belongsToKey = `${fk.source}.${belongsToName}`;
@@ -956,6 +961,7 @@ function inferRelations(
 				source: fk.source,
 				target: fk.target,
 				foreignKey: fkCol,
+				...(keyOverride !== undefined && { targetKey: keyOverride }),
 				cardinality: 'one',
 				optionality: 'optional',
 				includeStrategy: 'auto',
@@ -975,6 +981,7 @@ function inferRelations(
 				source: fk.target,
 				target: fk.source,
 				foreignKey: fkCol,
+				...(keyOverride !== undefined && { sourceKey: keyOverride }),
 				cardinality: 'many',
 				optionality: 'optional',
 				includeStrategy: 'auto',

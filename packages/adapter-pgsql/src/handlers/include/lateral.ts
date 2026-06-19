@@ -10,18 +10,10 @@
  * Produces: LEFT JOIN LATERAL (SELECT ... WHERE fk = outer.pk) AS alias ON true
  */
 
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-	requiredColumn,
-} from '../../assert-field.js';
-import {
-	columnRef,
-	fkCorrelation,
-	rangeVar,
-	starTarget,
-} from '../../ast-helpers.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
+import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -29,6 +21,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
 
 /**
@@ -62,20 +55,20 @@ function buildLateralSubquery(
 	targetTable: string,
 	innerAlias: string,
 	outerAlias: string,
-	sourceColumn: string,
-	targetColumn: string,
+	sourceColumn: ColumnListInput,
+	targetColumn: ColumnListInput,
 	columns: readonly string[] | undefined,
 	limit: number | undefined,
 	ctx: CompilerContext,
 ): Node {
 	// Build the correlation condition
 	// LATERAL can reference outer columns directly
-	const whereClause = fkCorrelation(
-		targetColumn,
+	const whereClause = buildKeyCorrelation(
 		innerAlias,
-		sourceColumn,
+		targetColumn,
 		outerAlias,
-		ctx.naming,
+		sourceColumn,
+		ctx,
 	);
 
 	// Build target list
@@ -130,8 +123,8 @@ function buildLateralJoin(
 function compileLateralCascade(
 	decision: Decision,
 	outerAlias: string,
-	sourceColumn: string,
-	targetColumn: string,
+	sourceColumn: ColumnListInput,
+	targetColumn: ColumnListInput,
 	ctx: CompilerContext,
 	state: CompilerState,
 ): { joins: Node[]; targets: Node[]; lateralAlias: string } {
@@ -217,17 +210,18 @@ export const lateralIncludeHandler: IncludeHandler = {
 		ctx: CompilerContext,
 		state: CompilerState,
 	): IncludeResult {
-		const sourceColumn = requiredColumn(
-			decision.sourceColumn,
-			'sourceColumn',
-			'lateral include',
-		);
-		const targetColumn =
-			decision.targetColumn ??
+		const sourceColumn = toColumnList(decision.sourceColumn);
+		if (sourceColumn.length === 0) {
+			throw new Error(
+				"Missing required column 'sourceColumn' in lateral include",
+			);
+		}
+		const targetColumn = decision.targetColumn ?? [
 			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
 				ctx.rootTable,
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			);
+			),
+		];
 		const outerAlias = ctx.currentAlias ?? ctx.rootTable;
 
 		const { joins, targets } = compileLateralCascade(

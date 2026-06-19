@@ -173,6 +173,27 @@ describe('json-agg handler', () => {
 		expect(sql).toContain('__t__.id = posts.author_id');
 	});
 
+	it('builds hasMany json_agg correlation from every composite key column', () => {
+		const ctx = makeCtx('orders');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'items',
+			targetTable: 'order_items',
+			relationType: 'hasMany',
+			foreignKey: ['order_id', 'tenant_id'],
+			parentKey: ['order_id', 'tenant_id'],
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain('__t__.order_id = orders.order_id');
+		expect(sql).toContain('__t__.tenant_id = orders.tenant_id');
+		expect(sql).toMatch(
+			/__t__\.order_id = orders\.order_id\s+and\s+__t__\.tenant_id = orders\.tenant_id/i,
+		);
+	});
+
 	it('skips children with missing required fields', () => {
 		const ctx = makeCtx('users');
 		const state = createCompilerState();

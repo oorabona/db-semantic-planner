@@ -11,6 +11,7 @@ import type {
 	CompileOptions,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
@@ -49,9 +50,12 @@ export function compileSubqueryInclude(
 	}
 
 	// Determine FK column(s)
-	const fkColumns = Array.isArray(info.foreignKey)
-		? info.foreignKey
-		: [info.foreignKey];
+	const fkColumns = toColumnList(info.foreignKey);
+	if (fkColumns.length === 0) {
+		throw new Error(
+			'Subquery include requires at least one foreignKey column.',
+		);
+	}
 
 	// For M:N relations with junction table
 	if (info.through && info.throughSourceKey && info.throughTargetKey) {
@@ -112,7 +116,12 @@ export function compileSubqueryInclude(
 		// Composite FK: (col1, col2) IN (($1, $2), ($3, $4), ...)
 		// For simplicity, use OR of ANDs
 		const conditions = parentIds.map((id) => {
-			const idValues = id as unknown[];
+			if (!Array.isArray(id) || id.length !== fkColumns.length) {
+				throw new Error(
+					`Subquery include composite key parameter width (${Array.isArray(id) ? id.length : 1}) must match foreignKey width (${fkColumns.length}).`,
+				);
+			}
+			const idValues = id;
 			const colConditions = fkColumns.map((col, idx) => {
 				state.parameters.push(idValues[idx]);
 				state.paramIndex++;
@@ -185,9 +194,13 @@ function compileSubqueryIncludeManyToMany(
 	const throughTargetKey = info.throughTargetKey!;
 
 	// Determine target PK (usually 'id', but could be from sourceKey)
-	const targetPk = Array.isArray(info.sourceKey)
-		? info.sourceKey[0]!
-		: info.sourceKey;
+	const targetPkColumns = toColumnList(info.sourceKey);
+	if (targetPkColumns.length !== 1) {
+		throw new Error(
+			`Many-to-many subquery include requires a single-column target key; got ${JSON.stringify(targetPkColumns)}.`,
+		);
+	}
+	const targetPk = targetPkColumns[0]!;
 
 	// Build param refs for parent IDs
 	const paramRefs = parentIds.map((id) => {

@@ -63,8 +63,8 @@ describe('NQL trusted relation-filter proof', () => {
 			{
 				relation: 'posts',
 				targetTable: 'posts',
-				sourceColumn: 'id',
-				targetColumn: 'authorId',
+				sourceColumn: ['id'],
+				targetColumn: ['authorId'],
 				hops: [],
 				selectedColumn: 'title',
 				cardinality: 'many',
@@ -78,14 +78,16 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(payload).toEqual({
 			relation: 'posts',
 			targetTable: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
 			relationType: 'hasMany',
 		});
 		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.sourceColumn)).toBe(true);
+		expect(Object.isFrozen(payload?.targetColumn)).toBe(true);
 
 		try {
 			if (payload) {
@@ -103,10 +105,10 @@ describe('NQL trusted relation-filter proof', () => {
 			{
 				relation: 'author.company',
 				targetTable: 'authors',
-				sourceColumn: 'authorId',
-				targetColumn: 'id',
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
 				hops: [
-					{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+					{ target: 'companies', fkColumn: ['companyId'], joinColumn: ['id'] },
 				],
 				selectedColumn: 'name',
 				cardinality: 'one',
@@ -119,9 +121,11 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(payload).toEqual({
 			relation: 'author.company',
 			targetTable: 'authors',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
-			hops: [{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' }],
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
+			hops: [
+				{ target: 'companies', fkColumn: ['companyId'], joinColumn: ['id'] },
+			],
 			selectedColumn: 'name',
 			cardinality: 'one',
 			relationType: 'belongsTo',
@@ -129,6 +133,8 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(Object.isFrozen(payload)).toBe(true);
 		expect(Object.isFrozen(payload?.hops)).toBe(true);
 		expect(Object.isFrozen(payload?.hops[0])).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0]?.fkColumn)).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0]?.joinColumn)).toBe(true);
 		try {
 			if (payload) {
 				(payload.hops[0] as { target: string }).target = 'forged';
@@ -143,8 +149,8 @@ describe('NQL trusted relation-filter proof', () => {
 		const forged = {
 			relation: 'posts',
 			targetTable: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
@@ -162,8 +168,8 @@ describe('NQL trusted relation-filter proof', () => {
 		const invalid = markNqlTrustedRelationFilter({ kind: 'relationColumn' }, {
 			relation: 'posts',
 			targetTable: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
@@ -182,8 +188,8 @@ describe('NQL trusted relation-filter proof', () => {
 			{
 				relation: 'author.company',
 				targetTable: 'authors',
-				sourceColumn: 'authorId',
-				targetColumn: 'id',
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
 				hops: [],
 				selectedColumn: 'name',
 				cardinality: 'one',
@@ -195,9 +201,9 @@ describe('NQL trusted relation-filter proof', () => {
 			{
 				relation: 'author.company',
 				targetTable: 'authors',
-				sourceColumn: 'authorId',
-				targetColumn: 'id',
-				hops: [{ target: '', fkColumn: 'companyId', joinColumn: 'id' }],
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
+				hops: [{ target: '', fkColumn: ['companyId'], joinColumn: ['id'] }],
 				selectedColumn: 'name',
 				cardinality: 'one',
 				relationType: 'belongsTo',

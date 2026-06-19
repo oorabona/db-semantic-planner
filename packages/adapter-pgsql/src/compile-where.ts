@@ -24,6 +24,7 @@ import type {
 	WhereRawNotExistsIntent,
 	WhereRelationFilterIntent,
 } from '@dbsp/types';
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import { getTrustedNqlRelationFilterFields } from '@dbsp/types/internal';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import {
@@ -637,27 +638,24 @@ function handleRelationFilterIntent(
 		// Thread FK metadata when the model is available and the relation is declared.
 		// When the model is absent we keep the current convention-fallback path
 		// (no model = no FK resolution possible, the exists handler will fall back too).
-		let singleHopSourceColumn: string | undefined;
-		let singleHopTargetColumn: string | undefined;
+		let singleHopSourceColumn: ColumnListInput;
+		let singleHopTargetColumn: ColumnListInput;
 		if (resolvedRelation) {
 			const rel = resolvedRelation;
-			const fk =
-				typeof rel.foreignKey === 'string'
-					? rel.foreignKey
-					: Array.isArray(rel.foreignKey)
-						? (rel.foreignKey as readonly string[])[0]
-						: undefined;
+			const fk = toColumnList(rel.foreignKey);
 			const defaultPk = DEFAULT_PK_COLUMN;
 			if (rel.type === 'belongsTo') {
 				// FK is on the source side: sourceTable.fkCol → targetTable.pk
 				singleHopSourceColumn =
-					fk ?? defaultFkDerivation(rel.target, defaultPk);
-				singleHopTargetColumn = rel.targetKey ?? defaultPk;
+					fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)];
+				const targetKey = toColumnList(rel.targetKey);
+				singleHopTargetColumn = targetKey.length > 0 ? targetKey : [defaultPk];
 			} else {
 				// hasMany / hasOne: FK is on the target side: targetTable.fkCol → sourceTable.pk
-				singleHopSourceColumn = rel.sourceKey ?? defaultPk;
+				const sourceKey = toColumnList(rel.sourceKey);
+				singleHopSourceColumn = sourceKey.length > 0 ? sourceKey : [defaultPk];
 				singleHopTargetColumn =
-					fk ?? defaultFkDerivation(ctx.rootTable, defaultPk);
+					fk.length > 0 ? fk : [defaultFkDerivation(ctx.rootTable, defaultPk)];
 			}
 		}
 
@@ -693,8 +691,8 @@ function handleRelationFilterIntent(
 	const hopTargets: string[] = [];
 	// Per-hop FK columns so the EXISTS handler uses model-declared FKs instead
 	// of convention fallback (fixes the DEFECT-2 wrong-correlation bug).
-	const hopSourceColumns: string[] = [];
-	const hopTargetColumns: string[] = [];
+	const hopSourceColumns: ColumnListInput[] = [];
+	const hopTargetColumns: ColumnListInput[] = [];
 	for (const hop of hops) {
 		const rel = model.getRelation(`${currentSource}.${hop}`);
 		if (!rel) {
@@ -707,21 +705,20 @@ function handleRelationFilterIntent(
 		// Resolve explicit FK columns using the same direction logic as deriveFkColumns.
 		// For belongsTo: FK is on the source side (sourceTable.fkCol → targetTable.pk)
 		// For hasMany/hasOne: FK is on the target side (targetTable.fkCol → sourceTable.pk)
-		const fk =
-			typeof rel.foreignKey === 'string'
-				? rel.foreignKey
-				: Array.isArray(rel.foreignKey)
-					? (rel.foreignKey as readonly string[])[0]
-					: undefined;
+		const fk = toColumnList(rel.foreignKey);
 		const defaultPk = DEFAULT_PK_COLUMN;
 		if (rel.type === 'belongsTo') {
-			hopSourceColumns.push(fk ?? defaultFkDerivation(rel.target, defaultPk));
-			hopTargetColumns.push(rel.targetKey ?? defaultPk);
+			hopSourceColumns.push(
+				fk.length > 0 ? fk : [defaultFkDerivation(rel.target, defaultPk)],
+			);
+			const targetKey = toColumnList(rel.targetKey);
+			hopTargetColumns.push(targetKey.length > 0 ? targetKey : [defaultPk]);
 		} else {
 			// hasMany / hasOne: FK lives on the target table
-			hopSourceColumns.push(rel.sourceKey ?? defaultPk);
+			const sourceKey = toColumnList(rel.sourceKey);
+			hopSourceColumns.push(sourceKey.length > 0 ? sourceKey : [defaultPk]);
 			hopTargetColumns.push(
-				fk ?? defaultFkDerivation(currentSource, defaultPk),
+				fk.length > 0 ? fk : [defaultFkDerivation(currentSource, defaultPk)],
 			);
 		}
 		currentSource = rel.target;

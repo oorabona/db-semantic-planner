@@ -7,18 +7,10 @@
  * Produces: WITH relation_cte AS (SELECT ... FROM related) SELECT ... JOIN relation_cte
  */
 
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { CommonTableExpr, JoinExpr, Node, SelectStmt } from '@pgsql/types';
-import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-	requiredColumn,
-} from '../../assert-field.js';
-import {
-	columnRef,
-	fkCorrelation,
-	rangeVar,
-	starTarget,
-} from '../../ast-helpers.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
+import { columnRef, rangeVar, starTarget } from '../../ast-helpers.js';
 import { createWhereDispatcher } from '../index.js';
 import type {
 	CompilerContext,
@@ -27,6 +19,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { buildKeyCorrelation } from '../where/exists.js';
 
 /**
  * Build column targets for CTE
@@ -122,17 +115,17 @@ function buildCteJoin(
 	cteName: string,
 	cteAlias: string,
 	sourceAlias: string,
-	sourceColumn: string,
-	targetColumn: string,
+	sourceColumn: ColumnListInput,
+	targetColumn: ColumnListInput,
 	ctx: CompilerContext,
 ): Node {
 	// Join condition: source.fk = cte.pk
-	const joinCondition = fkCorrelation(
-		sourceColumn,
+	const joinCondition = buildKeyCorrelation(
 		sourceAlias,
-		targetColumn,
+		sourceColumn,
 		cteAlias,
-		ctx.naming,
+		targetColumn,
+		ctx,
 	);
 
 	// Reference the CTE as if it were a table
@@ -179,17 +172,16 @@ export const cteIncludeHandler: IncludeHandler = {
 	): IncludeResult {
 		const relation = decision.relation;
 		const targetTable = decision.targetTable ?? relation;
-		const sourceColumn = requiredColumn(
-			decision.sourceColumn,
-			'sourceColumn',
-			'CTE include',
-		);
-		const targetColumn =
-			decision.targetColumn ??
+		const sourceColumn = toColumnList(decision.sourceColumn);
+		if (sourceColumn.length === 0 || sourceColumn.some((col) => col === '')) {
+			throw new Error("Missing required column 'sourceColumn' in CTE include");
+		}
+		const targetColumn = decision.targetColumn ?? [
 			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
 				ctx.rootTable,
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			);
+			),
+		];
 		const columns = decision.columns;
 		const conditions = decision.conditions;
 

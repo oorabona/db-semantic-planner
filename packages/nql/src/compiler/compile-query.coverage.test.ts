@@ -26,8 +26,8 @@ type TestRelation = {
 	readonly through?: string;
 	readonly otherKey?: string;
 	readonly recursive?: unknown;
-	readonly sourceKey?: string;
-	readonly targetKey?: string;
+	readonly sourceKey?: string | readonly string[];
+	readonly targetKey?: string | readonly string[];
 };
 
 // Schema with relations for include tests
@@ -757,8 +757,8 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 			relation: ['author'],
 			mode,
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 		});
 		expect(hasNqlTrustedRelationFilterProof(result.ast?.query?.where)).toBe(
 			true,
@@ -767,12 +767,14 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 		expect(payload).toEqual({
 			relation: 'author',
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 			hops: [],
 			cardinality: 'one',
 		});
 		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.sourceColumn)).toBe(true);
+		expect(Object.isFrozen(payload?.targetColumn)).toBe(true);
 		try {
 			if (payload) {
 				(payload as { targetTable: string }).targetTable = 'forged_users';
@@ -789,8 +791,8 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 				relation: 'author',
 				sourceTable: 'posts',
 				targetTable: 'users',
-				sourceColumn: 'authorId',
-				targetColumn: 'id',
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
 				hops: [],
 				cardinality: 'one',
 			},
@@ -821,8 +823,8 @@ projected_posts | select id, author.name`,
 		expect(payload).toEqual({
 			relation: 'author',
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 			hops: [],
 			selectedColumn: 'name',
 			cardinality: 'one',
@@ -849,8 +851,8 @@ projected_users | select id, profile.bio`,
 		expect(getTrustedNqlRelationFilterFields(relationColumn)).toEqual({
 			relation: 'profile',
 			targetTable: 'profiles',
-			sourceColumn: 'id',
-			targetColumn: 'userId',
+			sourceColumn: ['id'],
+			targetColumn: ['userId'],
 			hops: [],
 			selectedColumn: 'bio',
 			cardinality: 'one',
@@ -883,8 +885,8 @@ projected_users | select posts.title`,
 		expect(payload).toEqual({
 			relation: 'posts',
 			targetTable: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			hops: [],
 			selectedColumn: 'title',
 			cardinality: 'many',
@@ -979,9 +981,9 @@ projected_posts | select author.profile.bio`,
 		expect(payload).toEqual({
 			relation: 'author.profile',
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
-			hops: [{ target: 'profiles', fkColumn: 'id', joinColumn: 'userId' }],
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
+			hops: [{ target: 'profiles', fkColumn: ['id'], joinColumn: ['userId'] }],
 			selectedColumn: 'bio',
 			cardinality: 'one',
 			relationType: 'belongsTo',
@@ -989,6 +991,8 @@ projected_posts | select author.profile.bio`,
 		expect(Object.isFrozen(payload)).toBe(true);
 		expect(Object.isFrozen(payload?.hops)).toBe(true);
 		expect(Object.isFrozen(payload?.hops[0])).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0]?.fkColumn)).toBe(true);
+		expect(Object.isFrozen(payload?.hops[0]?.joinColumn)).toBe(true);
 		expect(result.ast?.query?.include).toBeUndefined();
 	});
 
@@ -1009,11 +1013,11 @@ projected_posts | select author.profile.company.name`,
 		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
 			relation: 'author.profile.company',
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 			hops: [
-				{ target: 'profiles', fkColumn: 'id', joinColumn: 'userId' },
-				{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+				{ target: 'profiles', fkColumn: ['id'], joinColumn: ['userId'] },
+				{ target: 'companies', fkColumn: ['companyId'], joinColumn: ['id'] },
 			],
 			selectedColumn: 'name',
 			cardinality: 'one',
@@ -1127,9 +1131,28 @@ projected_posts | select author.profile.tags.name`,
 		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 	});
 
-	it('rejects binding-final multi-hop scalar relation columns whose tail hop has a composite FK', () => {
+	it('accepts binding-final multi-hop scalar relation columns whose tail hop has a composite FK', () => {
 		const compositeTailSchema = {
 			...schema,
+			getTable(name: string) {
+				if (name === 'profiles') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'userId' },
+							{ name: 'companyId' },
+							{ name: 'tenantId' },
+							{ name: 'bio' },
+						],
+					};
+				}
+				if (name === 'companies') {
+					return {
+						columns: [{ name: 'id' }, { name: 'tenantId' }, { name: 'name' }],
+					};
+				}
+				return schema.getTable(name);
+			},
 			getRelationsFrom(sourceTable: string) {
 				if (sourceTable !== 'profiles') {
 					return schema.getRelationsFrom(sourceTable);
@@ -1141,6 +1164,7 @@ projected_posts | select author.profile.tags.name`,
 						target: 'companies',
 						type: 'belongsTo' as const,
 						foreignKey: ['companyId', 'tenantId'],
+						targetKey: ['id', 'tenantId'],
 					},
 				];
 			},
@@ -1158,10 +1182,28 @@ projected_posts | select author.profile.company.name`,
 			compositeTailSchema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/tail relation 'company'/);
-		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
-		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'author.profile.company',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
+			hops: [
+				{ target: 'profiles', fkColumn: ['id'], joinColumn: ['userId'] },
+				{
+					target: 'companies',
+					fkColumn: ['companyId', 'tenantId'],
+					joinColumn: ['id', 'tenantId'],
+				},
+			],
+			cardinality: 'one',
+			relationType: 'belongsTo',
+		});
 	});
 
 	it('rejects binding-final multi-hop scalar relation columns whose tail hop is recursive self-ref', () => {
@@ -1231,9 +1273,35 @@ projected_users | select posts.tags.*`,
 		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 	});
 
-	it('rejects binding-final multi-level relationStar includes whose tail hop has a composite FK', () => {
+	it('accepts binding-final multi-level relationStar includes whose tail hop has a composite FK', () => {
 		const compositeTailSchema = {
 			...schema,
+			getTable(name: string) {
+				if (name === 'posts') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'title' },
+							{ name: 'body' },
+							{ name: 'authorId' },
+							{ name: 'tenantId' },
+							{ name: 'categoryId' },
+							{ name: 'published' },
+						],
+					};
+				}
+				if (name === 'comments') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'postId' },
+							{ name: 'tenantId' },
+							{ name: 'body' },
+						],
+					};
+				}
+				return schema.getTable(name);
+			},
 			getRelationsFrom(sourceTable: string) {
 				if (sourceTable !== 'posts')
 					return schema.getRelationsFrom(sourceTable);
@@ -1251,6 +1319,7 @@ projected_users | select posts.tags.*`,
 						target: 'comments',
 						type: 'hasMany' as const,
 						foreignKey: ['postId', 'tenantId'],
+						sourceKey: ['id', 'tenantId'],
 					},
 					{
 						name: 'tags',
@@ -1275,10 +1344,10 @@ projected_users | select posts.comments.*`,
 			compositeTailSchema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/tail relation 'comments'/);
-		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
-		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.include).toEqual([
+			{ relation: 'posts', include: [{ relation: 'comments' }] },
+		]);
 	});
 
 	it('rejects binding-final multi-level relationStar includes whose tail hop is recursive self-ref', () => {
@@ -1340,7 +1409,225 @@ projected_posts | select author.*`,
 		expect(result.errors[0]?.message).toMatch(/direct source-column/);
 	});
 
-	it('rejects binding-final relation columns for composite FK relations', () => {
+	it('allows binding-final relation columns for fully projected composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getTable(name: string) {
+				if (name === 'posts') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'title' },
+							{ name: 'body' },
+							{ name: 'authorId' },
+							{ name: 'tenantId' },
+							{ name: 'categoryId' },
+							{ name: 'published' },
+						],
+					};
+				}
+				if (name === 'users') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'tenantId' },
+							{ name: 'name' },
+							{ name: 'email' },
+							{ name: 'department' },
+							{ name: 'active' },
+							{ name: 'salary' },
+						],
+					};
+				}
+				return schema.getTable(name);
+			},
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'author',
+						source: 'posts',
+						target: 'users',
+						type: 'belongsTo' as const,
+						foreignKey: ['authorId', 'tenantId'],
+						targetKey: ['id', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId, tenantId | bind projected_posts
+projected_posts | select author.name`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'author',
+			targetTable: 'users',
+			sourceColumn: ['authorId', 'tenantId'],
+			targetColumn: ['id', 'tenantId'],
+			cardinality: 'one',
+			relationType: 'belongsTo',
+		});
+	});
+
+	it('allows binding-final relationStar includes for fully projected composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getTable(name: string) {
+				if (name === 'posts') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'title' },
+							{ name: 'body' },
+							{ name: 'authorId' },
+							{ name: 'tenantId' },
+							{ name: 'categoryId' },
+							{ name: 'published' },
+						],
+					};
+				}
+				if (name === 'users') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'tenantId' },
+							{ name: 'name' },
+							{ name: 'email' },
+							{ name: 'department' },
+							{ name: 'active' },
+							{ name: 'salary' },
+						],
+					};
+				}
+				return schema.getTable(name);
+			},
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'author',
+						source: 'posts',
+						target: 'users',
+						type: 'belongsTo' as const,
+						foreignKey: ['authorId', 'tenantId'],
+						targetKey: ['id', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId, tenantId | bind projected_posts
+projected_posts | select author.*`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.include).toEqual([{ relation: 'author' }]);
+	});
+
+	it('allows binding-final hasMany relation columns for fully projected composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getTable(name: string) {
+				if (name === 'users') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'tenantId' },
+							{ name: 'name' },
+							{ name: 'email' },
+							{ name: 'department' },
+							{ name: 'active' },
+							{ name: 'salary' },
+						],
+					};
+				}
+				if (name === 'posts') {
+					return {
+						columns: [
+							{ name: 'id' },
+							{ name: 'title' },
+							{ name: 'body' },
+							{ name: 'authorId' },
+							{ name: 'tenantId' },
+							{ name: 'categoryId' },
+							{ name: 'published' },
+						],
+					};
+				}
+				return schema.getTable(name);
+			},
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'users')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'posts',
+						source: 'users',
+						target: 'posts',
+						type: 'hasMany' as const,
+						foreignKey: ['authorId', 'tenantId'],
+						sourceKey: ['id', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`users | select id, tenantId | bind projected_users
+projected_users | select posts.title`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'posts',
+			targetTable: 'posts',
+			sourceColumn: ['id', 'tenantId'],
+			targetColumn: ['authorId', 'tenantId'],
+			cardinality: 'many',
+			relationType: 'hasMany',
+		});
+	});
+
+	it('rejects binding-final composite FK relation columns when any FK column is not directly projected', () => {
 		const compositeSchema = {
 			...schema,
 			getRelationsFrom(sourceTable: string) {
@@ -1353,6 +1640,7 @@ projected_posts | select author.*`,
 						target: 'users',
 						type: 'belongsTo' as const,
 						foreignKey: ['authorId', 'tenantId'],
+						targetKey: ['id', 'tenantId'],
 					},
 				];
 			},
@@ -1371,78 +1659,9 @@ projected_posts | select author.name`,
 		);
 
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
-		expect(result.errors[0]?.message).toMatch(/ref-#179/);
-	});
-
-	it('rejects binding-final relationStar includes for composite FK relations', () => {
-		const compositeSchema = {
-			...schema,
-			getRelationsFrom(sourceTable: string) {
-				if (sourceTable !== 'posts')
-					return schema.getRelationsFrom(sourceTable);
-				return [
-					{
-						name: 'author',
-						source: 'posts',
-						target: 'users',
-						type: 'belongsTo' as const,
-						foreignKey: ['authorId', 'tenantId'],
-					},
-				];
-			},
-			getRelation(qualifiedName: string) {
-				const [source, relationName] = qualifiedName.split('.');
-				if (!source || !relationName) return undefined;
-				return this.getRelationsFrom(source).find(
-					(relation) => relation.name === relationName,
-				);
-			},
-		};
-		const result = compile(
-			`posts | select id, authorId | bind projected_posts
-projected_posts | select author.*`,
-			compositeSchema,
-		);
-
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
-		expect(result.errors[0]?.message).toMatch(/ref-#179/);
-	});
-
-	it('rejects binding-final hasMany relation columns for composite FK relations', () => {
-		const compositeSchema = {
-			...schema,
-			getRelationsFrom(sourceTable: string) {
-				if (sourceTable !== 'users')
-					return schema.getRelationsFrom(sourceTable);
-				return [
-					{
-						name: 'posts',
-						source: 'users',
-						target: 'posts',
-						type: 'hasMany' as const,
-						foreignKey: ['authorId', 'tenantId'],
-					},
-				];
-			},
-			getRelation(qualifiedName: string) {
-				const [source, relationName] = qualifiedName.split('.');
-				if (!source || !relationName) return undefined;
-				return this.getRelationsFrom(source).find(
-					(relation) => relation.name === relationName,
-				);
-			},
-		};
-		const result = compile(
-			`users | select id | bind projected_users
-projected_users | select posts.title`,
-			compositeSchema,
-		);
-
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
-		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/FK column 'tenantId'/);
+		expect(result.errors[0]?.message).toMatch(/not projected/);
 	});
 
 	it('rejects binding-final relation columns when the binding body used relation includes', () => {
@@ -1510,8 +1729,8 @@ projected_posts | select author.name`,
 				value: 'alice@example.com',
 			},
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 		};
 		Object.defineProperty(
 			forged,
@@ -1543,8 +1762,8 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 			relation: ['author'],
 			mode: 'some',
 			targetTable: 'users',
-			sourceColumn: 'writerId',
-			targetColumn: 'id',
+			sourceColumn: ['writerId'],
+			targetColumn: ['id'],
 		});
 	});
 
@@ -1559,9 +1778,9 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		expect(result.ast?.query?.where).toMatchObject({
 			kind: 'relationFilter',
 			relation: ['author'],
-			sourceColumn: 'authorId',
+			sourceColumn: ['authorId'],
 			targetTable: 'users',
-			targetColumn: 'id',
+			targetColumn: ['id'],
 		});
 	});
 
@@ -1574,9 +1793,9 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		expect(result.success).toBe(true);
 		expect(result.ast?.query?.where).toMatchObject({
 			kind: 'relationFilter',
-			sourceColumn: 'author_id',
+			sourceColumn: ['author_id'],
 			targetTable: 'users',
-			targetColumn: 'id',
+			targetColumn: ['id'],
 		});
 	});
 
@@ -1694,8 +1913,8 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 				: undefined;
 		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
 			relation: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			cardinality: 'many',
 			relationType: 'hasMany',
 		});
@@ -1935,8 +2154,8 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 				: undefined;
 		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
 			relation: 'posts',
-			sourceColumn: 'id',
-			targetColumn: 'authorId',
+			sourceColumn: ['id'],
+			targetColumn: ['authorId'],
 			cardinality: 'many',
 			relationType: 'hasMany',
 		});

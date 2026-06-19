@@ -496,12 +496,18 @@ describe('PlanCompiler - Coverage Tests', () => {
 					| 'belongsToMany';
 				readonly cardinality?: 'one' | 'many';
 				readonly targetTable?: string;
-				readonly sourceColumn?: string;
-				readonly targetColumn?: string;
+				readonly sourceColumn?: string | readonly string[];
+				readonly targetColumn?: string | readonly string[];
 				readonly selectedColumn?: string;
 			} = {},
 		): SimplifiedPlanReport {
 			const selectedColumn = fields.selectedColumn ?? 'title';
+			const sourceColumn = Array.isArray(fields.sourceColumn)
+				? fields.sourceColumn
+				: [fields.sourceColumn ?? 'id'];
+			const targetColumn = Array.isArray(fields.targetColumn)
+				? fields.targetColumn
+				: [fields.targetColumn ?? 'authorId'];
 			const relationColumn = markNqlTrustedRelationFilter(
 				{
 					type: 'selectRelationColumn',
@@ -512,8 +518,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 				{
 					relation: 'posts',
 					targetTable: fields.targetTable ?? 'posts',
-					sourceColumn: fields.sourceColumn ?? 'id',
-					targetColumn: fields.targetColumn ?? 'authorId',
+					sourceColumn,
+					targetColumn,
 					hops: [],
 					selectedColumn,
 					...(fields.cardinality !== undefined && {
@@ -595,8 +601,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 				{
 					relation: 'author',
 					targetTable: 'users',
-					sourceColumn: 'authorId',
-					targetColumn: 'id',
+					sourceColumn: ['authorId'],
+					targetColumn: ['id'],
 					hops: [],
 					selectedColumn: 'name',
 					cardinality: 'one',
@@ -626,10 +632,14 @@ describe('PlanCompiler - Coverage Tests', () => {
 				{
 					relation: 'author.company',
 					targetTable: 'authors',
-					sourceColumn: 'authorId',
-					targetColumn: 'id',
+					sourceColumn: ['authorId'],
+					targetColumn: ['id'],
 					hops: [
-						{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
+						{
+							target: 'companies',
+							fkColumn: ['companyId'],
+							joinColumn: ['id'],
+						},
 					],
 					selectedColumn: 'name',
 					cardinality: 'one',
@@ -647,6 +657,75 @@ describe('PlanCompiler - Coverage Tests', () => {
 			);
 		});
 
+		it('emits composite binding scalar relation-column correlation on the full root key', () => {
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author',
+					column: 'name',
+					alias: 'author.name',
+				},
+				{
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: ['authorId', 'tenantId'],
+					targetColumn: ['id', 'tenantId'],
+					hops: [],
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: [relationColumn],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/where rc_\d+\.id = projected_posts\."authorId" and rc_\d+\."tenantId" = projected_posts\."tenantId"/i,
+			);
+		});
+
+		it('emits composite binding per-hop JOIN correlation on the full hop key', () => {
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author.company',
+					column: 'name',
+					alias: 'author.company.name',
+				},
+				{
+					relation: 'author.company',
+					targetTable: 'authors',
+					sourceColumn: ['authorId', 'tenantId'],
+					targetColumn: ['id', 'tenantId'],
+					hops: [
+						{
+							target: 'companies',
+							fkColumn: ['companyId', 'tenantId'],
+							joinColumn: ['id', 'tenantId'],
+						},
+					],
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: [relationColumn],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/join companies as rc_\d+_h1 on rc_\d+_h1\.id = rc_\d+\."companyId" and rc_\d+_h1\."tenantId" = rc_\d+\."tenantId"/i,
+			);
+			expect(sql).toMatch(
+				/where rc_\d+\.id = projected_posts\."authorId" and rc_\d+\."tenantId" = projected_posts\."tenantId"/i,
+			);
+		});
+
 		it('emits a three-hop binding scalar relation column as one correlated subquery with two internal joins', () => {
 			const relationColumn = markNqlTrustedRelationFilter(
 				{
@@ -658,11 +737,19 @@ describe('PlanCompiler - Coverage Tests', () => {
 				{
 					relation: 'author.company.country',
 					targetTable: 'authors',
-					sourceColumn: 'authorId',
-					targetColumn: 'id',
+					sourceColumn: ['authorId'],
+					targetColumn: ['id'],
 					hops: [
-						{ target: 'companies', fkColumn: 'companyId', joinColumn: 'id' },
-						{ target: 'countries', fkColumn: 'countryId', joinColumn: 'id' },
+						{
+							target: 'companies',
+							fkColumn: ['companyId'],
+							joinColumn: ['id'],
+						},
+						{
+							target: 'countries',
+							fkColumn: ['countryId'],
+							joinColumn: ['id'],
+						},
 					],
 					selectedColumn: 'name',
 					cardinality: 'one',
@@ -688,8 +775,8 @@ describe('PlanCompiler - Coverage Tests', () => {
 					{
 						relation: 'author.company',
 						targetTable: 'authors',
-						sourceColumn: 'authorId',
-						targetColumn: 'id',
+						sourceColumn: ['authorId'],
+						targetColumn: ['id'],
 						hops: [],
 						selectedColumn: 'name',
 						cardinality: 'one',

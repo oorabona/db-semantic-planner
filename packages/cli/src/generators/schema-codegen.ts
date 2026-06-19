@@ -372,6 +372,49 @@ function generateTableCode(
 	return `\t${tableKey}: {\n${columnLines.join(',\n')},\n\t}`;
 }
 
+function generatedName(name: string, options: SchemaCodegenOptions): string {
+	return options.dbCasing === 'snake_case' ? snakeToCamelCase(name) : name;
+}
+
+function stringArrayLiteral(values: readonly string[]): string {
+	return `[${values.map(singleQuoteEscape).join(', ')}]`;
+}
+
+function compositeForeignKeys(table: TableIR): TableIR['foreignKeys'] {
+	return table.foreignKeys.filter(
+		(fk) => fk.columns.length > 1 || fk.references.columns.length > 1,
+	);
+}
+
+function generateCompositeConstraintCode(
+	model: ModelIR,
+	options: SchemaCodegenOptions,
+): string | undefined {
+	const tableBlocks: string[] = [];
+	for (const table of model.tables.values()) {
+		const fks = compositeForeignKeys(table);
+		if (fks.length === 0) continue;
+		const fkLines = fks.map((fk) => {
+			const refOptions = [
+				`columns: ${stringArrayLiteral(fk.columns.map((col) => generatedName(col, options)))}`,
+				`references: ${stringArrayLiteral(fk.references.columns.map((col) => generatedName(col, options)))}`,
+			];
+			if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
+				refOptions.push(`onDelete: ${singleQuoteEscape(fk.onDelete)}`);
+			}
+			if (fk.onUpdate && fk.onUpdate !== 'NO ACTION') {
+				refOptions.push(`onUpdate: ${singleQuoteEscape(fk.onUpdate)}`);
+			}
+			return `\t\t\tref(${singleQuoteEscape(generatedName(fk.references.table, options))}, { ${refOptions.join(', ')} })`;
+		});
+		tableBlocks.push(
+			`\t${quoteKey(generatedName(table.name, options))}: {\n\t\tforeignKeys: [\n${fkLines.join(',\n')}\n\t\t]\n\t}`,
+		);
+	}
+	if (tableBlocks.length === 0) return undefined;
+	return `{\n${tableBlocks.join(',\n\n')}\n}`;
+}
+
 /**
  * Generate a TypeScript schema file from ModelIR.
  *
@@ -430,7 +473,12 @@ export function generateSchemaFile(
 	const tableLines = tables.map((table) => generateTableCode(table, options));
 	lines.push(tableLines.join(',\n\n'));
 
-	lines.push('});');
+	const compositeConstraints = generateCompositeConstraintCode(model, options);
+	if (compositeConstraints) {
+		lines.push(`}, ${compositeConstraints});`);
+	} else {
+		lines.push('});');
+	}
 	lines.push('');
 
 	// Add a default export so schema-loader can load generated files directly.

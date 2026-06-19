@@ -362,8 +362,8 @@ active_users | select *, posts.*`;
 				target: 'posts',
 				relation: 'posts',
 				relationType: 'hasMany',
-				foreignKey: 'userId',
-				parentKey: 'id',
+				foreignKey: ['userId'],
+				parentKey: ['id'],
 				includeAlias: 'posts',
 			},
 		});
@@ -426,8 +426,8 @@ active_users | select *, posts.comments.*`;
 				target: 'posts',
 				relation: 'posts',
 				relationType: 'hasMany',
-				foreignKey: 'userId',
-				parentKey: 'id',
+				foreignKey: ['userId'],
+				parentKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -593,8 +593,8 @@ active_users | select *, posts.user.*`.dump();
 				target: 'posts',
 				relation: 'posts',
 				relationType: 'hasMany',
-				foreignKey: 'userId',
-				parentKey: 'id',
+				foreignKey: ['userId'],
+				parentKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});

@@ -11,13 +11,10 @@
  * the appropriate underlying handler (EXISTS, JOIN, etc.)
  */
 
+import { toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
-import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-	requiredColumn,
-} from '../../assert-field.js';
-import { columnRef, eqExpr, rangeVar } from '../../ast-helpers.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
+import { rangeVar } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -25,6 +22,7 @@ import type {
 	WhereDispatcher,
 	WhereHandler,
 } from '../types.js';
+import { buildKeyCorrelation } from './exists.js';
 
 /**
  * Relation filter mode
@@ -57,17 +55,18 @@ function buildJoinFilter(
 ): Node {
 	const relation = decision.relation;
 	const targetTable = decision.targetTable ?? relation;
-	const sourceColumn = requiredColumn(
-		decision.sourceColumn,
-		'sourceColumn',
-		'relation filter',
-	);
-	const targetColumn =
-		decision.targetColumn ??
+	const sourceColumn = toColumnList(decision.sourceColumn);
+	if (sourceColumn.length === 0) {
+		throw new Error(
+			"Missing required column 'sourceColumn' in relation filter",
+		);
+	}
+	const targetColumn = decision.targetColumn ?? [
 		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
 			ctx.rootTable,
 			ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-		);
+		),
+	];
 
 	if (!targetTable) {
 		throw new Error('Relation filter requires targetTable');
@@ -81,9 +80,12 @@ function buildJoinFilter(
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 
 	// Build join condition: source.column = target.column
-	const joinCondition = eqExpr(
-		columnRef(sourceColumn, sourceAlias, ctx.schema, ctx.naming),
-		columnRef(targetColumn, targetAlias, ctx.schema, ctx.naming),
+	const joinCondition = buildKeyCorrelation(
+		sourceAlias,
+		sourceColumn,
+		targetAlias,
+		targetColumn,
+		ctx,
 	);
 
 	// Build a proper JoinExpr node

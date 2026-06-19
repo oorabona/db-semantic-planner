@@ -9,6 +9,8 @@
 
 // Adapter types (interfaces, options, dump)
 export * from './adapter.js';
+// Shared relation-key helpers
+export * from './column-list.js';
 // Dialect types (capabilities, column type unions)
 export * from './dialects.js';
 // IntentAST types (shared between core and nql)

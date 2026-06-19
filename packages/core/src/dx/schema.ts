@@ -670,8 +670,13 @@ export function schemaToModelIR(
 	// Phase 3.5: Validate FK targets exist and are referenceable (post-build, uses resolved PKs)
 	validateFkTargets(tables);
 
-	// Phase 4: Build relations from refs
-	const relations = buildRelations(definition, refsByTable, tableNames);
+	// Phase 4: Build relations from refs and table-level composite FK constraints
+	const relations = buildRelations(
+		definition,
+		refsByTable,
+		tableNames,
+		constraints,
+	);
 
 	// Phase 5: Build ModelIR
 	const tableMap = new Map<string, TableIR>();
@@ -1376,6 +1381,7 @@ function buildTableConstraints(
 				},
 			};
 			if (fkRef.options.onDelete) fk.onDelete = fkRef.options.onDelete;
+			if (fkRef.options.onUpdate) fk.onUpdate = fkRef.options.onUpdate;
 			extraForeignKeys.push(fk as ForeignKeyIR);
 		}
 	}
@@ -1455,6 +1461,7 @@ function buildRelations(
 	_definition: SchemaDefinition,
 	refsByTable: Map<string, CollectedRef[]>,
 	tableNames: string[],
+	constraints?: SchemaConstraints,
 ): RelationIR[] {
 	const relations: RelationIR[] = [];
 
@@ -1571,7 +1578,99 @@ function buildRelations(
 		}
 	}
 
+	addCompositeConstraintRelations(relations, tableNames, constraints);
+
 	return relations;
+}
+
+function relationKey(source: string, name: string): string {
+	return `${source}.${name}`;
+}
+
+function pushRelationIfAbsent(
+	relations: RelationIR[],
+	relationKeys: Set<string>,
+	relation: RelationIR,
+): void {
+	const key = relationKey(relation.source, relation.name);
+	if (relationKeys.has(key)) return;
+	relationKeys.add(key);
+	relations.push(relation);
+}
+
+function deriveCompositeConstraintRelationName(
+	fkColumn: string,
+	options: RefOptions,
+): string {
+	return deriveLocalRelation(fkColumn, options);
+}
+
+function addCompositeConstraintRelations(
+	relations: RelationIR[],
+	tableNames: readonly string[],
+	constraints?: SchemaConstraints,
+): void {
+	if (!constraints) return;
+
+	const tableSet = new Set(tableNames);
+	const relationKeys = new Set(
+		relations.map((relation) => relationKey(relation.source, relation.name)),
+	);
+
+	for (const tableName of tableNames) {
+		const foreignKeys = constraints[tableName]?.foreignKeys;
+		if (!foreignKeys) continue;
+
+		for (const fkRef of foreignKeys) {
+			if (!tableSet.has(fkRef.target)) continue;
+
+			const columns = fkRef.options.columns;
+			if (!columns?.length) continue;
+			const references = fkRef.options.references ?? ['id'];
+
+			// Column-level ref() already derives navigable single-column relations.
+			if (columns.length === 1 && references.length === 1) continue;
+
+			const foreignKey = [...columns];
+			const referencedKey = [...references];
+			const belongsToName = deriveCompositeConstraintRelationName(
+				foreignKey[0]!,
+				fkRef.options,
+			);
+			const inverseName = fkRef.options.inverse ?? tableName;
+			const isUnique = fkRef.options.unique ?? false;
+			const inverseType: RelationType = isUnique ? 'hasOne' : 'hasMany';
+			const inverseCardinality = isUnique ? 'one' : 'many';
+
+			pushRelationIfAbsent(relations, relationKeys, {
+				name: belongsToName,
+				type: 'belongsTo',
+				source: tableName,
+				target: fkRef.target,
+				foreignKey,
+				targetKey: referencedKey,
+				cardinality: 'one',
+				optionality: fkRef.options.nullable ? 'optional' : 'required',
+				includeStrategy: 'auto',
+				filterStrategy: 'auto',
+				joinDefault: 'auto',
+			});
+
+			pushRelationIfAbsent(relations, relationKeys, {
+				name: inverseName,
+				type: inverseType,
+				source: fkRef.target,
+				target: tableName,
+				foreignKey,
+				sourceKey: referencedKey,
+				cardinality: inverseCardinality,
+				optionality: 'optional',
+				includeStrategy: 'auto',
+				filterStrategy: 'auto',
+				joinDefault: 'auto',
+			});
+		}
+	}
 }
 
 // ============================================================================

@@ -3,16 +3,19 @@
  * Coverage tests for schema-codegen.ts — targets uncovered branches
  * not in schema-codegen.test.ts.
  *
- * Focus: unique columns, composite primary keys, multi-column FKs (skipped),
+ * Focus: unique columns, composite primary keys, multi-column FKs,
  * non-'id' FK reference columns, onDelete actions, originalDbType on short-form + ref columns,
  * FK with both nullable and unique, self-ref with non-'parent' base name,
  * empty model, empty warnings array, camelCase dbCasing option.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { ModelIR, TableIR } from '@dbsp/core';
 import { ref, schema } from '@dbsp/core';
 import type { ForeignKeyIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { loadSchema } from '../utils/schema-loader.js';
 import { generateSchemaFile } from './schema-codegen.js';
 
 describe('generateSchemaFile — coverage', () => {
@@ -80,11 +83,24 @@ describe('generateSchemaFile — coverage', () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// multi-column FK (skipped by codegen)
+	// multi-column FK
 	// -----------------------------------------------------------------------
-	describe('multi-column foreign keys (skipped)', () => {
-		it('does not generate ref() for multi-column FKs', () => {
+	describe('multi-column foreign keys', () => {
+		it('emits loadable table-level ref() constraints for composite relations', async () => {
 			const tables = new Map<string, TableIR>([
+				[
+					'orders',
+					{
+						name: 'orders',
+						columns: [
+							{ name: 'orderId', type: 'integer', nullable: false },
+							{ name: 'lineId', type: 'integer', nullable: false },
+						],
+						primaryKey: ['orderId', 'lineId'],
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
 				[
 					'items',
 					{
@@ -117,10 +133,39 @@ describe('generateSchemaFile — coverage', () => {
 
 			const result = generateSchemaFile(model);
 
-			// Multi-column FK should be skipped — no ref()
-			expect(result).not.toContain("ref('orders')");
+			// Single-column ref() lowering remains skipped, but the composite
+			// table-level constraint is preserved.
+			expect(result).toContain(
+				"ref('orders', { columns: ['orderId', 'lineId'], references: ['orderId', 'lineId'] })",
+			);
+			expect(result).toContain('foreignKeys: [');
+			expect(result).not.toContain('export const relations');
 			// Columns should be rendered as regular columns
 			expect(result).toContain("orderId: 'integer'");
+
+			const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-schema-codegen-'));
+			try {
+				const schemaPath = join(tmpDir, 'dbsp.schema.ts');
+				writeFileSync(schemaPath, result, 'utf8');
+
+				const loaded = await loadSchema(schemaPath);
+				expect(loaded.model.getRelation('items.order')).toMatchObject({
+					type: 'belongsTo',
+					source: 'items',
+					target: 'orders',
+					foreignKey: ['orderId', 'lineId'],
+					targetKey: ['orderId', 'lineId'],
+				});
+				expect(loaded.model.getRelation('orders.items')).toMatchObject({
+					type: 'hasMany',
+					source: 'orders',
+					target: 'items',
+					foreignKey: ['orderId', 'lineId'],
+					sourceKey: ['orderId', 'lineId'],
+				});
+			} finally {
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
 		});
 	});
 

@@ -465,11 +465,11 @@ export interface RelationIR {
 	 */
 	readonly joinDefault: JoinDefault;
 
-	/** Column on source table that FK on target references; set when generated relation overrides the default PK. */
-	readonly sourceKey?: string | undefined;
+	/** Column(s) on source table that FK on target references; set when generated relation overrides the default PK. */
+	readonly sourceKey?: string | readonly string[] | undefined;
 
-	/** Column on target table that the FK points to; set when generated relation overrides the default PK. */
-	readonly targetKey?: string | undefined;
+	/** Column(s) on target table that the FK points to; set when generated relation overrides the default PK. */
+	readonly targetKey?: string | readonly string[] | undefined;
 
 	// --- CLI-NQL: Recursive Relations ---
 

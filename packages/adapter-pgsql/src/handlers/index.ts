@@ -5,6 +5,7 @@
  * Handlers are registered at module initialization and looked up by operator/type.
  */
 
+import type { ColumnListInput } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { assertNoUnsupportedSubqueryModifiers } from '../intent-to-decisions.js';
 import type {
@@ -395,8 +396,8 @@ function normalizeToDecision(input: Decision, ctx?: CompilerContext): Decision {
 			// Fall back to relation name when no ModelIR is available.
 			const targetTable = (raw.targetTable as string | undefined) ?? relation;
 			// Pass through FK column hints resolved by resolveExistsIntent from ModelIR.
-			const sourceColumn = raw.sourceColumn as string | undefined;
-			const targetColumn = raw.targetColumn as string | undefined;
+			const sourceColumn = raw.sourceColumn as ColumnListInput;
+			const targetColumn = raw.targetColumn as ColumnListInput;
 			// Pass through include declarations (JOIN inside the subquery).
 			const includeIntent = raw.include as
 				| Record<string, { join?: 'inner' | 'left' }>

@@ -54,6 +54,30 @@ describe('INNER JOIN include compilation', () => {
 			expect(result.sql).toContain('"file.path"');
 		});
 
+		it('compiles a manual JOIN ON every composite key column', () => {
+			const plan: SimplifiedPlanReport = {
+				rootTable: 'orders',
+				decisions: [
+					{ type: 'select', column: '*', table: 'orders' },
+					{
+						type: 'join',
+						joinType: 'inner',
+						targetTable: 'order_items',
+						alias: 'items',
+						sourceColumn: ['order_id', 'tenant_id'],
+						targetColumn: ['order_id', 'tenant_id'],
+					} satisfies PlanDecision,
+				],
+			};
+
+			const result = compileToSql(plan);
+
+			expect(result.sql).toContain('JOIN');
+			expect(result.sql).toMatch(
+				/orders\.order_id\s*=\s*items\.order_id\s+AND\s+orders\.tenant_id\s*=\s*items\.tenant_id/i,
+			);
+		});
+
 		it('default (no joinType) should still produce LEFT JOIN', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'symbols',

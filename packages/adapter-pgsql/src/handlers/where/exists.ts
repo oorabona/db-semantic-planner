@@ -7,12 +7,13 @@
  * NOT EXISTS checks that no related records exist.
  */
 
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { Node, SelectStmt, SubLink } from '@pgsql/types';
 import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
 import {
+	andExpr,
 	columnRef,
 	eqExpr,
-	fkCorrelation,
 	joinExpr,
 	rangeVar,
 } from '../../ast-helpers.js';
@@ -48,21 +49,59 @@ function createSubLinkExists(subquery: Node, negated: boolean): Node {
 	return existsNode;
 }
 
+export function buildKeyCorrelation(
+	sourceAlias: string,
+	sourceCols: ColumnListInput,
+	targetAlias: string,
+	targetCols: ColumnListInput,
+	ctx: CompilerContext,
+): Node {
+	const normalizedSourceCols = toColumnList(sourceCols);
+	const normalizedTargetCols = toColumnList(targetCols);
+	if (
+		normalizedSourceCols.length === 0 ||
+		normalizedTargetCols.length === 0 ||
+		normalizedSourceCols.length !== normalizedTargetCols.length ||
+		normalizedSourceCols.some((column) => column.length === 0) ||
+		normalizedTargetCols.some((column) => column.length === 0)
+	) {
+		throw new Error(
+			`Invalid relation correlation: source columns (${normalizedSourceCols.length}) must match target columns (${normalizedTargetCols.length}) and both must be non-empty.`,
+		);
+	}
+
+	const comparisons = normalizedSourceCols.map((sourceColumn, index) =>
+		eqExpr(
+			columnRef(sourceColumn, sourceAlias, undefined, ctx.naming),
+			columnRef(
+				normalizedTargetCols[index]!,
+				targetAlias,
+				undefined,
+				ctx.naming,
+			),
+		),
+	);
+	if (comparisons.length === 1) return comparisons[0]!;
+	return andExpr(...comparisons);
+}
+
 /**
  * Build correlation condition: source.column = target.column
  */
-function buildCorrelation(
+function _buildCorrelation(
 	sourceAlias: string,
 	sourceColumn: string,
 	targetAlias: string,
 	targetColumn: string,
 	ctx: CompilerContext,
 ): Node {
-	// Neither source nor target uses schema — column references are query-scoped.
-	// Schema is only for FROM/JOIN clause table entries (rangeVar).
-	const left = columnRef(sourceColumn, sourceAlias, undefined, ctx.naming);
-	const right = columnRef(targetColumn, targetAlias, undefined, ctx.naming);
-	return eqExpr(left, right);
+	return buildKeyCorrelation(
+		sourceAlias,
+		[sourceColumn],
+		targetAlias,
+		[targetColumn],
+		ctx,
+	);
 }
 
 function schemaForExistsFromName(
@@ -89,14 +128,15 @@ function buildExistsSubquery(
 	// sourceColumn: prefer explicit value from decision (set by planner's mapToHandlerDecision).
 	// When called directly from mutation WHERE (DELETE/UPDATE), the planner is bypassed and
 	// sourceColumn is absent — fall back to the PK convention (typically 'id' for hasMany).
-	const sourceColumn =
-		decision.sourceColumn ?? ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
-	const targetColumn =
-		decision.targetColumn ??
+	const sourceColumn = decision.sourceColumn ?? [
+		ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
+	];
+	const targetColumn = decision.targetColumn ?? [
 		(ctx.deriveFkColumnName ?? defaultFkDerivation)(
 			ctx.rootTable,
 			ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-		);
+		),
+	];
 
 	if (!targetTable) {
 		throw new Error('EXISTS handler requires targetTable or relation');
@@ -110,7 +150,7 @@ function buildExistsSubquery(
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 
 	// Build correlation condition
-	const correlation = buildCorrelation(
+	const correlation = buildKeyCorrelation(
 		sourceAlias,
 		sourceColumn,
 		targetAlias,
@@ -177,8 +217,8 @@ function buildExistsSubquery(
 
 			// Resolve the join target table and FK columns from ModelIR when available.
 			let joinTargetTable: string = joinRelation;
-			let joinSourceCol: string | undefined;
-			let joinTargetCol: string | undefined;
+			let joinSourceCols: readonly string[] | undefined;
+			let joinTargetCols: readonly string[] | undefined;
 			// sourceAliasForJoin: alias to use on the LEFT side of the JOIN ON.
 			// Defaults to the root EXISTS alias; overridden when FK is found on an
 			// intermediate table (multi-hop).
@@ -207,50 +247,54 @@ function buildExistsSubquery(
 					joinTargetTable = rel.target;
 					if (rel.type === 'belongsTo') {
 						// FK is on the source side (sourceTable.fkCol → joinTargetTable.id)
-						const fk =
-							typeof rel.foreignKey === 'string'
-								? rel.foreignKey
-								: Array.isArray(rel.foreignKey)
-									? rel.foreignKey[0]
-									: undefined;
-						joinSourceCol = fk;
-						joinTargetCol =
-							(ctx.defaultPkColumnName as string | undefined) ??
-							DEFAULT_PK_COLUMN;
+						const fk = toColumnList(rel.foreignKey);
+						joinSourceCols = fk.length > 0 ? fk : undefined;
+						const targetKey = toColumnList(rel.targetKey);
+						joinTargetCols =
+							targetKey.length > 0
+								? targetKey
+								: [
+										(ctx.defaultPkColumnName as string | undefined) ??
+											DEFAULT_PK_COLUMN,
+									];
 					} else {
 						// hasMany/hasOne: FK is on the target side (joinTargetTable.fkCol → sourceTable.id)
-						const fk =
-							typeof rel.foreignKey === 'string'
-								? rel.foreignKey
-								: Array.isArray(rel.foreignKey)
-									? rel.foreignKey[0]
-									: undefined;
-						joinSourceCol =
-							(ctx.defaultPkColumnName as string | undefined) ??
-							DEFAULT_PK_COLUMN;
-						joinTargetCol = fk;
+						const fk = toColumnList(rel.foreignKey);
+						const sourceKey = toColumnList(rel.sourceKey);
+						joinSourceCols =
+							sourceKey.length > 0
+								? sourceKey
+								: [
+										(ctx.defaultPkColumnName as string | undefined) ??
+											DEFAULT_PK_COLUMN,
+									];
+						joinTargetCols = fk.length > 0 ? fk : undefined;
 					}
 				}
 			}
 
 			// Fall back to FK derivation convention when ModelIR didn't resolve columns.
-			if (!joinSourceCol) {
+			if (!joinSourceCols || joinSourceCols.length === 0) {
 				// Assume belongsTo: FK on source table = joinRelation + '_id'
-				joinSourceCol = (ctx.deriveFkColumnName ?? defaultFkDerivation)(
-					joinRelation,
+				joinSourceCols = [
+					(ctx.deriveFkColumnName ?? defaultFkDerivation)(
+						joinRelation,
+						(ctx.defaultPkColumnName as string | undefined) ??
+							DEFAULT_PK_COLUMN,
+					),
+				];
+				joinTargetCols = [
 					(ctx.defaultPkColumnName as string | undefined) ?? DEFAULT_PK_COLUMN,
-				);
-				joinTargetCol =
-					(ctx.defaultPkColumnName as string | undefined) ?? DEFAULT_PK_COLUMN;
+				];
 			}
 
 			const joinAlias = joinRelation; // e.g. 'callerFile'
-			const joinQuals = fkCorrelation(
-				joinSourceCol,
+			const joinQuals = buildKeyCorrelation(
 				sourceAliasForJoin, // resolved source alias (root or intermediate)
-				joinTargetCol ?? DEFAULT_PK_COLUMN,
+				joinSourceCols,
 				joinAlias,
-				ctx.naming,
+				joinTargetCols,
+				ctx,
 			);
 
 			const joinType =

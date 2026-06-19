@@ -521,8 +521,8 @@ describe('compileWhereIntent', () => {
 				{
 					relation: 'author',
 					targetTable: 'users',
-					sourceColumn: 'author',
-					targetColumn: 'id',
+					sourceColumn: ['author'],
+					targetColumn: ['id'],
 					hops: [],
 				},
 			);
