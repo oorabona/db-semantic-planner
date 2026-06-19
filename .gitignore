@@ -5,8 +5,21 @@ node_modules/
 dist/
 dist-types/
 *.tsbuildinfo
+# Compiled-in-place TS artifacts. Sources are .ts; the build output goes to dist/.
+# Source maps are always generated (never hand-written), so they are ignored globally.
+# Compiled .js/.d.ts are ignored only where the tree is pure-TS — packages/*/src, the
+# tsup config, and examples/*.schema.* — so a genuinely hand-written .js/.d.ts (e.g. a
+# test fixture or example) stays visible. `pnpm clean:artifacts` removes any remaining
+# compiled sibling on disk (a .js/.d.ts whose .ts exists) under the source trees,
+# without ignoring or deleting hand-written files; pretest:unit/pretest:e2e run it.
+*.js.map
+*.d.ts.map
 *.config.d.ts
-*.config.d.ts.map
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/tsup.config.js
+examples/*.schema.js
+examples/*.schema.d.ts
 
 # Generated files (dbsp generate)
 generated/
