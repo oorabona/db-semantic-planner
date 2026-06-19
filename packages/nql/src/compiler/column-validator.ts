@@ -119,6 +119,39 @@ export class ColumnValidator {
 			?.scalarRelations?.find((relation) => relation.relation === relationName);
 	}
 
+	resolveVirtualBindingScalarRelationForInclude(
+		bindingName: string,
+		relationPath: readonly string[],
+	): NqlBindingVirtualRelation {
+		const relationName = relationPath.join('.');
+		if (relationPath.length !== 1) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): multi-level binding includes are not supported; the relation path must be a single source-table relation.`,
+			);
+		}
+		const relation = relationPath[0];
+		if (!relation) {
+			throw new NqlSemanticException(
+				NqlErrorCodes.SEM_INVALID_SYNTAX,
+				`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): the relation path must name a source-table relation.`,
+			);
+		}
+		const virtualRelation = this.getVirtualBindingScalarRelation(
+			bindingName,
+			relation,
+		);
+		if (virtualRelation) return virtualRelation;
+		const reason = this.explainVirtualBindingScalarRelationRejection(
+			bindingName,
+			relation,
+		);
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relation}' (ref-#192): ${reason}.`,
+		);
+	}
+
 	explainVirtualBindingRelationRejection(
 		bindingName: string,
 		relationName: string,

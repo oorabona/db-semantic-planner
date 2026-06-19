@@ -845,15 +845,52 @@ projected_posts | select tags.name`,
 		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 	});
 
-	it('rejects binding-final relationStar columns', () => {
+	it('rejects binding-final belongsToMany relationStar includes because junction traversal is unsupported', () => {
+		const result = compile(
+			`posts | select id | bind projected_posts
+projected_posts | select tags.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/belongsToMany/);
+		expect(result.errors[0]?.message).toMatch(/junction/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('accepts binding-final belongsTo relationStar as a proven single-level include', () => {
 		const result = compile(
 			`posts | select id, authorId | bind projected_posts
 projected_posts | select author.*`,
 			schema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/cannot select relation columns/);
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.include).toEqual([{ relation: 'author' }]);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) =>
+							column.kind === 'relationColumn' && column.relation === 'author',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'author',
+			column: '*',
+			as: 'author.*',
+		});
+	});
+
+	it('accepts binding-final hasMany relationStar as a proven single-level include', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select *, posts.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.include).toEqual([{ relation: 'posts' }]);
 	});
 
 	it('rejects binding-final multi-hop relation columns', () => {
@@ -865,6 +902,18 @@ projected_posts | select author.profile.bio`,
 
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(/multi-hop/);
+	});
+
+	it('rejects binding-final multi-level relationStar includes', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.comments.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+		expect(result.errors[0]?.message).toMatch(/multi-level/);
 	});
 
 	it.each([
@@ -879,6 +928,22 @@ projected_posts | select author.name`,
 
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+		expect(result.errors[0]?.message).toMatch(/direct source-column/);
+	});
+
+	it.each([
+		['missing projected FK', 'id, title'],
+		['fabricated FK alias', 'id, 1 as authorId'],
+	] as const)('rejects binding-final belongsTo relationStar includes with %s', (_label, projection) => {
+		const result = compile(
+			`posts | select ${projection} | bind projected_posts
+projected_posts | select author.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
 		expect(result.errors[0]?.message).toMatch(/direct source-column/);
 	});
@@ -910,6 +975,41 @@ projected_posts | select author.name`,
 		const result = compile(
 			`posts | select id, authorId | bind projected_posts
 projected_posts | select author.name`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+	});
+
+	it('rejects binding-final relationStar includes for composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'author',
+						source: 'posts',
+						target: 'users',
+						type: 'belongsTo' as const,
+						foreignKey: ['authorId', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.*`,
 			compositeSchema,
 		);
 

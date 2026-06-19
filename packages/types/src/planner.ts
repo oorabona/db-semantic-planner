@@ -54,6 +54,8 @@ export interface PlanDecision {
 		readonly includeAlias?: string;
 		/** Foreign key column(s) for include-strategy (Phase 3) */
 		readonly foreignKey?: string | readonly string[];
+		/** Parent/source key override for include-strategy correlation */
+		readonly parentKey?: string;
 		/** Whether the relation is self-referential (source === target) */
 		readonly isSelfRef?: boolean;
 	};

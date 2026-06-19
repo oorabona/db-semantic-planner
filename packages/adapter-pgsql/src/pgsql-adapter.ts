@@ -734,7 +734,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				deps.naming,
 			);
 			const planReport = queryFromBinding
-				? createNqlBindingSelectPlan(bundle.query as QueryIntent)
+				? (bundle.plan ??
+					createNqlBindingSelectPlan(bundle.query as QueryIntent))
 				: planFn(bundle.query, this.requireNqlCompileModel(options), {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,
@@ -846,6 +847,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		const leafBundle: CompiledNqlQuery = {
 			...(bundle.query !== undefined && { query: bundle.query }),
+			...(bundle.plan !== undefined && { plan: bundle.plan }),
 			...(bundle.cteQuery !== undefined && { cteQuery: bundle.cteQuery }),
 			...(bundle.mutation !== undefined && { mutation: bundle.mutation }),
 			...(bundle.returning !== undefined && { returning: bundle.returning }),

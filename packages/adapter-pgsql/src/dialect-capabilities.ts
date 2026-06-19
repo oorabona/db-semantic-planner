@@ -3,6 +3,7 @@ import type { DialectCapabilities } from '@dbsp/types';
 type NqlTextCapability =
 	| 'supportsArrayType'
 	| 'supportsJsonOperators'
+	| 'supportsJsonAgg'
 	| 'supportsRangeTypes'
 	| 'supportsRowLevelLocks'
 	| 'supportsLockWaitPolicies';

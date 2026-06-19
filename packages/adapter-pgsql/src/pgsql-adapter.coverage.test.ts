@@ -446,6 +446,113 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.main).toBeDefined();
 			expect(result.main.sql).toContain('SELECT');
 		});
+
+		it('compiles synthetic binding json_agg include decisions with CTE parentKey correlation', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'active_authors',
+				intent: {
+					type: 'select',
+					from: 'active_authors',
+					select: {
+						type: 'expressions',
+						columns: [
+							{ kind: 'column', column: '*' },
+							{
+								kind: 'relationColumn',
+								relation: 'author_posts',
+								column: '*',
+								as: 'author_posts.*',
+							},
+						],
+					},
+					include: [{ relation: 'author_posts' }],
+				},
+				decisions: [
+					{
+						id: 'binding-include-0',
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							sourceTable: 'active_authors',
+							target: 'posts',
+							relation: 'author_posts',
+							relationType: 'hasMany',
+							foreignKey: 'author_id',
+							parentKey: 'author_key',
+							includeAlias: 'authorPosts',
+							intentPath: 'include[0]',
+						},
+						reasoning: 'synthetic binding include',
+						alternatives: [],
+					},
+				],
+				warnings: [],
+				ctes: [],
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
+			} as PlanReport;
+
+			const result = adapter.compile(plan);
+
+			expect(result.sql).toContain('json_agg(to_jsonb(__t__))');
+			expect(result.sql).toContain('AS author_posts_json');
+			expect(result.sql).toMatch(
+				/WHERE __t__\.author_id = active_authors\.author_key/i,
+			);
+			expect(result.sql).not.toMatch(/\bORDER\s+BY\b/i);
+		});
+
+		it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'active_authors',
+				intent: {
+					type: 'select',
+					from: 'active_authors',
+					select: { type: 'all' },
+					include: [{ relation: 'author_posts' }],
+				},
+				decisions: [
+					{
+						id: 'binding-include-0',
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							sourceTable: 'active_authors',
+							target: 'posts',
+							relation: 'author_posts',
+							relationType: 'hasMany',
+							foreignKey: 'author_id',
+							parentKey: 'author_key',
+							includeAlias: 'author_posts',
+							intentPath: 'include[0]',
+						},
+						reasoning: 'synthetic binding include',
+						alternatives: [],
+					},
+				],
+				warnings: [],
+				ctes: [],
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
+			} as PlanReport;
+
+			expect(() =>
+				adapter.compile(plan, {
+					dialectCapabilities: {
+						...adapter.dialectCapabilities,
+						supportsJsonAgg: false,
+					},
+				}),
+			).toThrow(/JSON aggregation for relation includes not supported/);
+		});
 	});
 
 	describe('withSchema', () => {

@@ -119,6 +119,33 @@ describe('hydrateJsonAggIncludes', () => {
 		});
 	});
 
+	it('uses canonical relation for the raw JSON column and includeAlias for the nested key', () => {
+		const results = [
+			{
+				id: 1,
+				author_posts_json: '[{"id":10,"title":"Hello"}]',
+			},
+		];
+		const report = makePlanReport([
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: {
+					relation: 'author_posts',
+					includeAlias: 'posts',
+					relationType: 'hasMany',
+				},
+			},
+		]);
+		hydrateJsonAggIncludes(results, report);
+		expect(results[0]).toEqual({
+			id: 1,
+			posts: [{ id: 10, title: 'Hello' }],
+		});
+		expect(results[0]).not.toHaveProperty('author_posts_json');
+		expect(results[0]).not.toHaveProperty('author_posts');
+	});
+
 	it('falls back to empty array on JSON parse failure for to-many', () => {
 		const results = [{ id: 1, posts_json: '{{{invalid' }];
 		const report = makePlanReport([

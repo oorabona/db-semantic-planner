@@ -8,6 +8,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter, CompiledNqlQuery } from '../../adapter.js';
+import type { IncludeIntent, QueryIntent } from '../../intent-ast.js';
 import { createHookManager, getHookStore, type HookStore } from '../hooks.js';
 import type { MutationDump } from '../mutation-builders.js';
 import { createNqlTag, nqlRaw } from '../nql.js';
@@ -81,6 +82,47 @@ function expectCompiledNqlBundle(value: unknown): CompiledNqlQuery {
 		bindings: expect.any(Map),
 	});
 	return value as CompiledNqlQuery;
+}
+
+function createBindingFinalBundle(include: IncludeIntent): CompiledNqlQuery {
+	const bindingSource: QueryIntent = {
+		type: 'select',
+		from: 'users',
+		select: { type: 'fields', fields: ['id'] },
+	};
+	const finalQuery: QueryIntent = {
+		type: 'select',
+		from: 'active_users',
+		include: [include],
+	};
+
+	return {
+		query: finalQuery,
+		bindings: new Map([['active_users', bindingSource]]),
+		bindingOutputSchemas: new Map([
+			[
+				'active_users',
+				{
+					columns: ['id'],
+					relationFilters: {
+						sourceTable: 'users',
+						relations: [],
+						scalarRelations: [
+							{
+								relation: 'posts',
+								sourceTable: 'users',
+								targetTable: 'posts',
+								sourceColumn: 'id',
+								targetColumn: 'userId',
+								cardinality: 'many',
+								relationType: 'hasMany',
+							},
+						],
+					},
+				},
+			],
+		]),
+	};
 }
 
 async function expectAuthorBindingProjectionMaterializes(
@@ -245,6 +287,86 @@ projected_posts | select id, user.name`.dump();
 		expect(dump.sql).not.toContain('JOIN "users"');
 	});
 
+	it('compiles and hydrates binding-final hasMany includes through the json_agg include pipeline', async () => {
+		const { compile, nql } = createBindingTag([
+			{
+				id: 1,
+				name: 'Ada',
+				posts_json: JSON.stringify([{ id: 10, title: 'First' }]),
+			},
+			{ id: 2, name: 'No Posts', posts_json: null },
+		]);
+
+		const query = nql<{
+			id: number;
+			name: string;
+			posts: Array<{ id: number; title: string }>;
+		}>`users
+			| select id, name
+			| bind active_users
+active_users | select *, posts.*`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		const decision = dump.plan.decisions.find(
+			(planDecision) =>
+				planDecision.type === 'include-strategy' &&
+				planDecision.choice === 'json_agg',
+		);
+		expect(decision).toMatchObject({
+			type: 'include-strategy',
+			choice: 'json_agg',
+			context: {
+				sourceTable: 'active_users',
+				target: 'posts',
+				relation: 'posts',
+				relationType: 'hasMany',
+				foreignKey: 'userId',
+				parentKey: 'id',
+				includeAlias: 'posts',
+			},
+		});
+		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
+		expect(dump.sql).toContain('json_agg(to_jsonb(__t__))');
+		expect(dump.sql).toContain('AS posts_json');
+		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
+		expect(dump.sql).not.toMatch(/\bORDER\s+BY\b/i);
+		expect(rows).toEqual([
+			{ id: 1, name: 'Ada', posts: [{ id: 10, title: 'First' }] },
+			{ id: 2, name: 'No Posts', posts: [] },
+		]);
+		expect(rows[0]).not.toHaveProperty('posts_json');
+		expect(compile).toHaveBeenCalledTimes(2);
+		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+		expect(bundle.plan?.decisions).toHaveLength(1);
+	});
+
+	it('hydrates binding-final belongsTo includes to objects and nulls', async () => {
+		const { nql } = createBindingTag([
+			{
+				id: 10,
+				userId: 1,
+				user_json: JSON.stringify([{ id: 1, name: 'Ada' }]),
+			},
+			{ id: 11, userId: null, user_json: '[]' },
+		]);
+
+		const rows = await nql<{
+			id: number;
+			userId: number | null;
+			user: { id: number; name: string } | null;
+		}>`posts
+			| select id, userId
+			| bind projected_posts
+projected_posts | select *, user.*`.all();
+
+		expect(rows).toEqual([
+			{ id: 10, userId: 1, user: { id: 1, name: 'Ada' } },
+			{ id: 11, userId: null, user: null },
+		]);
+		expect(rows[0]).not.toHaveProperty('user_json');
+	});
+
 	it('rejects binding-final relation include limits before creating a synthetic plan', () => {
 		const { compile, nql } = createBindingTag();
 
@@ -258,6 +380,99 @@ active_users | select id | limit posts 5`.dump();
 			/cannot use relation include limits|cannot select relation columns or use includes/,
 		);
 		expect(compile).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[
+			'nested where',
+			{
+				relation: 'posts',
+				where: {
+					kind: 'comparison',
+					field: 'published',
+					operator: '=',
+					value: true,
+				},
+			},
+			'include options are not supported for binding includes',
+		],
+		[
+			'limit',
+			{ relation: 'posts', limit: 5 },
+			'include options are not supported for binding includes',
+		],
+		[
+			'orderBy',
+			{
+				relation: 'posts',
+				orderBy: [{ field: 'createdAt', direction: 'desc' }],
+			},
+			'include options are not supported for binding includes',
+		],
+		[
+			'via',
+			{ relation: 'posts', via: 'publishedPosts' },
+			'include options are not supported for binding includes',
+		],
+		[
+			'strategy',
+			{ relation: 'posts', strategy: 'flat' },
+			'include options are not supported for binding includes',
+		],
+		[
+			'recursive',
+			{ relation: 'posts', recursive: { maxDepth: 2 } },
+			'include options are not supported for binding includes',
+		],
+		[
+			'nested include',
+			{ relation: 'posts', include: [{ relation: 'comments' }] },
+			'nested binding includes are not supported',
+		],
+	] satisfies readonly (readonly [
+		string,
+		IncludeIntent,
+		string,
+	])[])('rejects binding-final include option %s with ref-#192 fail-loud message', async (_option, include, reason) => {
+		const db = schema({
+			users: {
+				id: { type: 'integer', dbType: 'integer' },
+				name: 'string',
+			},
+		} as const);
+
+		vi.resetModules();
+		vi.doMock('@dbsp/nql', async () => {
+			const actual =
+				await vi.importActual<typeof import('@dbsp/nql')>('@dbsp/nql');
+			return {
+				...actual,
+				compile: vi.fn(() => ({
+					success: true,
+					ast: createBindingFinalBundle(include),
+				})),
+			};
+		});
+
+		try {
+			const { createNqlTag: createMockedNqlTag } = await import('../nql.js');
+			const nql = createMockedNqlTag(db.definition, db.model);
+			let thrown: unknown;
+
+			try {
+				nql<{ id: number }>`active_users | select id`.dump();
+			} catch (err) {
+				thrown = err;
+			}
+
+			expect(thrown).toBeInstanceOf(Error);
+			expect((thrown as Error).message).toBe(
+				`NQL binding-final query 'active_users' cannot use relation include 'posts' (ref-#192): ${reason}.`,
+			);
+		} finally {
+			vi.doUnmock('@dbsp/nql');
+			vi.resetModules();
+		}
 	});
 
 	it('executes referenced query-final read-only bindings through the NQL bundle', async () => {

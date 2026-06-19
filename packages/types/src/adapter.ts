@@ -182,6 +182,8 @@ export type NqlProgramSequenceStep =
 
 export interface CompiledNqlQuery {
 	readonly query?: QueryIntent;
+	/** Optional prebuilt plan for the final query leaf. Used when NQL binding-final queries need synthetic planner decisions. */
+	readonly plan?: PlanReport;
 	/** CTE query (WITH clause): wraps outer QueryIntent in CteQueryIntent */
 	readonly cteQuery?: CteQueryIntent;
 	readonly mutation?: MutationIntent;
