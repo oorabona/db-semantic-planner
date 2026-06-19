@@ -27,8 +27,11 @@ import type {
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
 import {
+	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
 	NQL_INTERNAL_COMPILER_OPTIONS,
+	type NqlBindingIncludeNodeShape,
+	type NqlBindingIncludeRelationShape,
 } from '@dbsp/types/internal';
 import {
 	type Adapter,
@@ -40,12 +43,14 @@ import {
 	type NqlRuntimeBinding,
 	supportsTransactions,
 } from '../adapter.js';
+import type { DialectCapabilities } from '../dialects/index.js';
 import type {
+	IncludeIntent,
 	MutationIntent,
 	QueryIntent,
 	WhereIntent,
 } from '../intent-ast.js';
-import type { ModelIR } from '../model-ir.js';
+import type { ModelIR, RelationIR } from '../model-ir.js';
 import type { PlanDecision, PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { ExecutionError } from './errors.js';
@@ -198,16 +203,6 @@ function bindingFinalIncludeError(
 	);
 }
 
-function isSupportedBindingIncludeRelationType(
-	relationType: NqlBindingVirtualRelation['relationType'],
-): relationType is 'belongsTo' | 'hasOne' | 'hasMany' {
-	return (
-		relationType === 'belongsTo' ||
-		relationType === 'hasOne' ||
-		relationType === 'hasMany'
-	);
-}
-
 function getBindingRelationMetadata(
 	bundle: CompiledNqlQuery,
 	bindingName: string,
@@ -227,47 +222,85 @@ function getScalarBindingRelationsByName(
 	return relations;
 }
 
-function assertNoBindingIncludeOptions(
+function bindingIncludeNodeShape(
+	include: IncludeIntent,
+): NqlBindingIncludeNodeShape {
+	return include as unknown as NqlBindingIncludeNodeShape;
+}
+
+function virtualRelationIncludeShape(
+	relation: NqlBindingVirtualRelation,
+): NqlBindingIncludeRelationShape {
+	const relationType = relation.relationType;
+	const foreignKey =
+		relationType === 'belongsTo'
+			? relation.sourceColumn
+			: relationType === 'hasOne' || relationType === 'hasMany'
+				? relation.targetColumn
+				: undefined;
+	return {
+		type: relationType,
+		foreignKey,
+		source: relation.sourceTable,
+		target: relation.targetTable,
+	};
+}
+
+const BINDING_INCLUDE_NODE_ONLY_RELATION: NqlBindingIncludeRelationShape = {
+	type: 'hasMany',
+	foreignKey: '__dbsp_binding_include_node__',
+	source: '__dbsp_binding_include_source__',
+	target: '__dbsp_binding_include_target__',
+};
+
+function assertSupportedBindingIncludeNodeShape(
 	bindingName: string,
-	include: NonNullable<QueryIntent['include']>[number],
+	rootIncludeRelation: string,
+	include: IncludeIntent,
+	reasonPrefix = '',
 ): void {
-	const relation = include.relation;
-	if (relation.includes('.')) {
+	const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+		include.relation,
+		BINDING_INCLUDE_NODE_ONLY_RELATION,
+		bindingIncludeNodeShape(include),
+	);
+	if (unsupportedReason) {
 		throw bindingFinalIncludeError(
 			bindingName,
-			relation,
-			'multi-level binding includes are not supported',
-		);
-	}
-	if ((include.include?.length ?? 0) > 0) {
-		throw bindingFinalIncludeError(
-			bindingName,
-			relation,
-			'nested binding includes are not supported',
-		);
-	}
-	if (
-		include.where !== undefined ||
-		include.limit !== undefined ||
-		include.orderBy !== undefined ||
-		include.via !== undefined ||
-		include.strategy !== undefined ||
-		include.recursive !== undefined
-	) {
-		throw bindingFinalIncludeError(
-			bindingName,
-			relation,
-			'include options are not supported for binding includes',
+			rootIncludeRelation,
+			`${reasonPrefix}${unsupportedReason}`,
 		);
 	}
 }
 
+function bindingIncludeCoversRelationPath(
+	include: IncludeIntent,
+	segments: readonly string[],
+): boolean {
+	const [head, ...tail] = segments;
+	if (!head || include.relation !== head) return false;
+	if (tail.length === 0) return true;
+	return (include.include ?? []).some((child) =>
+		bindingIncludeCoversRelationPath(child, tail),
+	);
+}
+
+function bindingIncludesCoverRelationPath(
+	includes: readonly IncludeIntent[] | undefined,
+	relationPath: string,
+): boolean {
+	const segments = relationPath.split('.');
+	if (segments.some((segment) => segment.length === 0)) return false;
+	return (includes ?? []).some((include) =>
+		bindingIncludeCoversRelationPath(include, segments),
+	);
+}
+
 function assertProvenBindingInclude(
 	bindingName: string,
-	include: NonNullable<QueryIntent['include']>[number],
+	include: IncludeIntent,
 	provenRelations: ReadonlyMap<string, NqlBindingVirtualRelation>,
 ): NqlBindingVirtualRelation {
-	assertNoBindingIncludeOptions(bindingName, include);
 	const proven = provenRelations.get(include.relation);
 	if (!proven) {
 		throw bindingFinalIncludeError(
@@ -276,18 +309,16 @@ function assertProvenBindingInclude(
 			'the relation is not in the binding proven virtual-relation set',
 		);
 	}
-	if (!isSupportedBindingIncludeRelationType(proven.relationType)) {
+	const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+		include.relation,
+		virtualRelationIncludeShape(proven),
+		bindingIncludeNodeShape(include),
+	);
+	if (unsupportedReason) {
 		throw bindingFinalIncludeError(
 			bindingName,
 			include.relation,
-			`relation type '${proven.relationType ?? 'unknown'}' is not supported`,
-		);
-	}
-	if (!proven.sourceColumn || !proven.targetColumn) {
-		throw bindingFinalIncludeError(
-			bindingName,
-			include.relation,
-			'expected a direct single-column FK lineage proof',
+			unsupportedReason,
 		);
 	}
 	return proven;
@@ -314,12 +345,15 @@ function assertBindingFinalQueryCanUseSyntheticPlan(
 	intent: QueryIntent,
 	bundle: CompiledNqlQuery,
 ): void {
-	const provenIncludes = getProvenBindingIncludes(intent, bundle);
+	getProvenBindingIncludes(intent, bundle);
 	const relationColumns =
 		intent.select?.type === 'expressions'
 			? intent.select.columns.flatMap((column) => {
 					if (column.kind !== 'relationColumn') return [];
-					if (column.column === '*' && provenIncludes.has(column.relation)) {
+					if (
+						column.column === '*' &&
+						bindingIncludesCoverRelationPath(intent.include, column.relation)
+					) {
 						return [];
 					}
 					const trusted = getTrustedNqlRelationFilterFields(column);
@@ -354,7 +388,7 @@ function assertBindingFinalQueryCanUseSyntheticPlan(
 
 function createBindingIncludeDecision(
 	intent: QueryIntent,
-	include: NonNullable<QueryIntent['include']>[number],
+	include: IncludeIntent,
 	relation: NqlBindingVirtualRelation,
 	index: number,
 ): PlanDecision {
@@ -391,20 +425,213 @@ function createBindingIncludeDecision(
 	};
 }
 
+function findModelRelation(
+	model: ModelIR,
+	sourceTable: string,
+	relationName: string,
+): RelationIR | undefined {
+	return (
+		model.getRelation(`${sourceTable}.${relationName}`) ??
+		model
+			.getRelationsFrom(sourceTable)
+			.find((relation) => relation.name === relationName)
+	);
+}
+
+function parentKeyForRelation(relation: RelationIR): string | undefined {
+	if (relation.type === 'belongsTo') return relation.targetKey;
+	return relation.sourceKey;
+}
+
+function assertSupportedBindingIncludeHop(
+	bindingName: string,
+	rootIncludeRelation: string,
+	relationName: string,
+	relation: NqlBindingIncludeRelationShape,
+	include: IncludeIntent,
+	reasonPrefix = '',
+): void {
+	const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+		relationName,
+		relation,
+		bindingIncludeNodeShape(include),
+	);
+	if (unsupportedReason) {
+		throw bindingFinalIncludeError(
+			bindingName,
+			rootIncludeRelation,
+			`${reasonPrefix}${unsupportedReason}`,
+		);
+	}
+}
+
+function assertSupportedBindingTailIncludeTree(
+	bindingName: string,
+	rootInclude: IncludeIntent,
+	sourceTable: string,
+	includes: readonly IncludeIntent[],
+	model: ModelIR,
+): void {
+	for (const include of includes) {
+		assertSupportedBindingIncludeNodeShape(
+			bindingName,
+			rootInclude.relation,
+			include,
+			'tail ',
+		);
+		const relation = findModelRelation(model, sourceTable, include.relation);
+		if (!relation) {
+			throw bindingFinalIncludeError(
+				bindingName,
+				rootInclude.relation,
+				`tail relation '${include.relation}' is not declared on table '${sourceTable}'`,
+			);
+		}
+		assertSupportedBindingIncludeHop(
+			bindingName,
+			rootInclude.relation,
+			include.relation,
+			relation,
+			include,
+			'tail ',
+		);
+		assertSupportedBindingTailIncludeTree(
+			bindingName,
+			rootInclude,
+			relation.target,
+			include.include ?? [],
+			model,
+		);
+	}
+}
+
+function rebaseBindingTailIntentPath(
+	intentPath: string | undefined,
+	includeIndex: number,
+): string {
+	return `include[${includeIndex}]${intentPath ? `.${intentPath}` : ''}`;
+}
+
+function createBindingTailIncludeDecisions(
+	bindingName: string,
+	include: IncludeIntent,
+	firstHopRelation: NqlBindingVirtualRelation,
+	includeIndex: number,
+	model: ModelIR,
+): PlanDecision[] {
+	const nestedIncludes = include.include ?? [];
+	if (nestedIncludes.length === 0) return [];
+	assertSupportedBindingTailIncludeTree(
+		bindingName,
+		include,
+		firstHopRelation.targetTable,
+		nestedIncludes,
+		model,
+	);
+
+	const tailPlan = executePlan(
+		{
+			type: 'select',
+			from: firstHopRelation.targetTable,
+			include: nestedIncludes,
+		},
+		model,
+		{ defaultIncludeStrategy: 'json_agg' },
+	);
+
+	return tailPlan.decisions
+		.filter((decision) => decision.type === 'include-strategy')
+		.map((decision, tailIndex) => {
+			const sourceTable = decision.context.sourceTable;
+			const relationName = decision.context.relation;
+			if (!relationName) {
+				throw bindingFinalIncludeError(
+					bindingName,
+					include.relation,
+					'tail include planning produced a decision without a relation name',
+				);
+			}
+			const relation = findModelRelation(model, sourceTable, relationName);
+			if (!relation) {
+				throw bindingFinalIncludeError(
+					bindingName,
+					include.relation,
+					`tail relation '${relationName}' is not declared on table '${sourceTable}'`,
+				);
+			}
+			assertSupportedBindingIncludeHop(
+				bindingName,
+				include.relation,
+				relationName,
+				relation,
+				{ relation: relationName },
+				'tail ',
+			);
+			const baseContext = { ...decision.context };
+			delete (baseContext as { foreignKey?: unknown }).foreignKey;
+			delete (baseContext as { parentKey?: unknown }).parentKey;
+			const parentKey = parentKeyForRelation(relation);
+			return {
+				...decision,
+				id: `binding-include-${includeIndex}-tail-${tailIndex}`,
+				choice: 'json_agg',
+				reasoning:
+					'NQL binding-final tail include uses real-table relation metadata and is forced through the json_agg include pipeline.',
+				context: {
+					...baseContext,
+					sourceTable: relation.source,
+					target: relation.target,
+					relation: relation.name,
+					relationType: relation.type,
+					...(relation.foreignKey !== undefined && {
+						foreignKey: relation.foreignKey,
+					}),
+					// Leave parentKey absent when RelationIR does not specify it so the
+					// adapter applies the same defaultPkColumnName fallback as real-table includes.
+					...(parentKey !== undefined && { parentKey }),
+					intentPath: rebaseBindingTailIntentPath(
+						decision.context.intentPath,
+						includeIndex,
+					),
+				},
+			};
+		});
+}
+
 function createBindingFinalPlan(
 	intent: QueryIntent,
 	bundle: CompiledNqlQuery,
+	model: ModelIR,
+	dialectCapabilities?: DialectCapabilities,
 ): PlanReport {
 	assertBindingFinalQueryCanUseSyntheticPlan(intent, bundle);
 	const provenIncludes = getProvenBindingIncludes(intent, bundle);
-	const decisions = (intent.include ?? []).map((include, index) =>
-		createBindingIncludeDecision(
+	const decisions = (intent.include ?? []).flatMap((include, index) => {
+		if (dialectCapabilities?.supportsJsonAgg === false) {
+			throw bindingFinalIncludeError(
+				intent.from,
+				include.relation,
+				'JSON aggregation for binding includes is not supported by this adapter',
+			);
+		}
+		const proven = provenIncludes.get(include.relation)!;
+		const firstHopDecision = createBindingIncludeDecision(
 			intent,
 			include,
-			provenIncludes.get(include.relation)!,
+			proven,
 			index,
-		),
-	);
+		);
+		return [
+			firstHopDecision,
+			...createBindingTailIncludeDecisions(
+				intent.from,
+				include,
+				proven,
+				index,
+				model,
+			),
+		];
+	});
 	return {
 		rootTable: intent.from,
 		decisions,
@@ -1112,7 +1339,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 		}
 		return isBindingFinalQuery(compiled.bundle)
-			? createBindingFinalPlan(compiled.intent, compiled.bundle)
+			? createBindingFinalPlan(
+					compiled.intent,
+					compiled.bundle,
+					this.model,
+					this.adapter?.dialectCapabilities,
+				)
 			: this.planInternal();
 	}
 
@@ -1131,7 +1363,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 		const bindingFinalQuery = isBindingFinalQuery(compiledIntent.bundle);
 		const planReport = bindingFinalQuery
-			? createBindingFinalPlan(compiledIntent.intent, compiledIntent.bundle)
+			? createBindingFinalPlan(
+					compiledIntent.intent,
+					compiledIntent.bundle,
+					this.model,
+					this.adapter?.dialectCapabilities,
+				)
 			: this.planInternal();
 
 		if (!this.adapter) {
@@ -1384,7 +1621,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					const planReport =
 						isBindingFinalQuery(compiledIntent.bundle) &&
 						compiledIntent.kind === 'query'
-							? createBindingFinalPlan(step.intent, sourceBundle)
+							? createBindingFinalPlan(
+									step.intent,
+									sourceBundle,
+									this.model,
+									txAdapter.dialectCapabilities,
+								)
 							: undefined;
 					const statementBundle = this.createNqlStatementBundle(
 						{ query: step.intent },
@@ -1463,7 +1705,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					step.final &&
 					isBindingFinalQuery(compiledIntent.bundle) &&
 					compiledIntent.kind === 'query'
-						? createBindingFinalPlan(step.intent, sourceBundle)
+						? createBindingFinalPlan(
+								step.intent,
+								sourceBundle,
+								this.model,
+								adapter.dialectCapabilities,
+							)
 						: undefined;
 				const statementBundle = this.createNqlStatementBundle(
 					{ query: step.intent },
@@ -1499,7 +1746,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const finalStep = steps.at(-1);
 		if (finalStep?.kind === 'query') {
 			const planReport = isBindingFinalQuery(compiledIntent.bundle)
-				? createBindingFinalPlan(finalStep.intent, compiledIntent.bundle)
+				? createBindingFinalPlan(
+						finalStep.intent,
+						compiledIntent.bundle,
+						this.model,
+						this.adapter?.dialectCapabilities,
+					)
 				: this.planInternal();
 			const dumpMeta: DumpMeta = {
 				compiledAt: new Date(),
@@ -1594,6 +1846,8 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			const planReport = createBindingFinalPlan(
 				compiledIntent.intent,
 				compiledIntent.bundle,
+				this.model,
+				adapter.dialectCapabilities,
 			);
 			const compiled = adapter.compile<T>(
 				this.createFinalNqlStatementBundle(

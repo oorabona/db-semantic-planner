@@ -506,6 +506,89 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			expect(result.sql).not.toMatch(/\bORDER\s+BY\b/i);
 		});
 
+		it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const plan: PlanReport = {
+				rootTable: 'projected_authors',
+				intent: {
+					type: 'select',
+					from: 'projected_authors',
+					select: {
+						type: 'expressions',
+						columns: [
+							{ kind: 'column', column: '*' },
+							{
+								kind: 'relationColumn',
+								relation: 'author_posts.comments',
+								column: '*',
+								as: 'author_posts.comments.*',
+							},
+						],
+					},
+					include: [
+						{
+							relation: 'author_posts',
+							include: [{ relation: 'comments' }],
+						},
+					],
+				},
+				decisions: [
+					{
+						id: 'binding-include-0',
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							sourceTable: 'projected_authors',
+							target: 'posts',
+							relation: 'author_posts',
+							relationType: 'hasMany',
+							foreignKey: 'author_id',
+							parentKey: 'id',
+							includeAlias: 'author_posts',
+							intentPath: 'include[0]',
+						},
+						reasoning: 'synthetic binding include',
+						alternatives: [],
+					},
+					{
+						id: 'binding-include-0-tail-0',
+						type: 'include-strategy',
+						choice: 'json_agg',
+						context: {
+							sourceTable: 'posts',
+							target: 'comments',
+							relation: 'comments',
+							relationType: 'hasMany',
+							foreignKey: 'post_id',
+							parentKey: 'id',
+							includeAlias: 'comments',
+							intentPath: 'include[0].include[0]',
+						},
+						reasoning: 'synthetic binding tail include',
+						alternatives: [],
+					},
+				],
+				warnings: [],
+				ctes: [],
+				metadata: {
+					planningTimeMs: 0,
+					relationsAnalyzed: 0,
+					isAmbiguous: false,
+				},
+			} as PlanReport;
+
+			const result = adapter.compile(plan);
+
+			expect(result.sql).toContain('json_agg(to_jsonb(__t__)');
+			expect(result.sql).toContain('jsonb_build_object');
+			expect(result.sql).toContain('AS author_posts_json');
+			expect(result.sql).toMatch(
+				/WHERE __t__\.author_id = projected_authors\.id/i,
+			);
+			expect(result.sql).toMatch(/WHERE __t1__\.post_id = __t__\.id/i);
+			expect(result.sql).not.toMatch(/\bORDER\s+BY\b/i);
+		});
+
 		it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {
 			const adapter = createPgsqlCompileOnlyAdapter();
 			const plan: PlanReport = {

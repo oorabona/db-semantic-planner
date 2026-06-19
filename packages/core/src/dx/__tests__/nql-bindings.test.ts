@@ -27,6 +27,46 @@ function createBindingTag(executeResult: readonly unknown[] = []) {
 			published: 'boolean',
 			userId: ref('users', { inverse: 'posts' }),
 		},
+		comments: {
+			id: { type: 'integer', dbType: 'integer' },
+			body: 'string',
+			postId: ref('posts', { inverse: 'comments' }),
+		},
+	} as const);
+	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
+	const compile = vi.spyOn(adapter, 'compile');
+	adapter.execute = vi.fn(async () => [...executeResult]);
+
+	return {
+		adapter,
+		compile,
+		nql: createNqlTag(db.definition, db.model, adapter),
+	};
+}
+
+function createBlogBindingTag(executeResult: readonly unknown[] = []) {
+	const db = schema({
+		authors: {
+			id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+			name: 'string',
+			email: 'string',
+			post_comments_json: 'string',
+		},
+		posts: {
+			id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+			title: 'string',
+			content: 'string',
+			authorId: ref('authors'),
+			published: 'boolean',
+			createdAt: 'timestamp',
+		},
+		comments: {
+			id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+			postId: ref('posts'),
+			authorName: 'string',
+			content: 'string',
+			createdAt: 'timestamp',
+		},
 	} as const);
 	const adapter = createPgsqlCompileOnlyAdapter() as unknown as Adapter;
 	const compile = vi.spyOn(adapter, 'compile');
@@ -341,6 +381,240 @@ active_users | select *, posts.*`;
 		expect(bundle.plan?.decisions).toHaveLength(1);
 	});
 
+	it('compiles nested binding-final hasMany includes as flat chained json_agg decisions', async () => {
+		const { compile, nql } = createBindingTag([
+			{
+				id: 1,
+				name: 'Ada',
+				posts_json: JSON.stringify([
+					{
+						id: 10,
+						title: 'First',
+						userId: 1,
+						comments: [{ id: 100, body: 'Nice', postId: 10 }],
+					},
+				]),
+			},
+			{ id: 2, name: 'No Posts', posts_json: null },
+		]);
+
+		const query = nql<{
+			id: number;
+			name: string;
+			posts: Array<{
+				id: number;
+				title: string;
+				userId: number;
+				comments: Array<{ id: number; body: string; postId: number }>;
+			}>;
+		}>`users
+			| select id, name
+			| bind active_users
+active_users | select *, posts.comments.*`;
+		const dump = query.dump();
+		const rows = await query.all();
+		const decisions = dump.plan.decisions.filter(
+			(decision) => decision.type === 'include-strategy',
+		);
+
+		expect(decisions).toHaveLength(2);
+		expect(decisions[0]).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				sourceTable: 'active_users',
+				target: 'posts',
+				relation: 'posts',
+				relationType: 'hasMany',
+				foreignKey: 'userId',
+				parentKey: 'id',
+				intentPath: 'include[0]',
+			},
+		});
+		expect(decisions[1]).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				sourceTable: 'posts',
+				target: 'comments',
+				relation: 'comments',
+				relationType: 'hasMany',
+				foreignKey: 'postId',
+				intentPath: 'include[0].include[0]',
+			},
+		});
+		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
+		expect(dump.sql).toContain('jsonb_build_object');
+		expect(dump.sql).toContain('AS posts_json');
+		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
+		expect(dump.sql).toMatch(/WHERE __t1__\."postId" = __t__\.id/i);
+		expect(dump.sql).not.toMatch(/\bORDER\s+BY\b/i);
+		expect(rows).toEqual([
+			{
+				id: 1,
+				name: 'Ada',
+				posts: [
+					{
+						id: 10,
+						title: 'First',
+						userId: 1,
+						comments: [{ id: 100, body: 'Nice', postId: 10 }],
+					},
+				],
+			},
+			{ id: 2, name: 'No Posts', posts: [] },
+		]);
+		expect(rows[0]).not.toHaveProperty('posts_json');
+		expect(compile).toHaveBeenCalledTimes(2);
+		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+		expect(bundle.plan?.decisions).toHaveLength(2);
+	});
+
+	it('mutation: nested json_agg hydrator scans tail decision as top-level column', async () => {
+		const { nql } = createBlogBindingTag([
+			{
+				id: 1,
+				name: 'Ada',
+				post_comments_json: '{"owned":true}',
+				author_posts_json: JSON.stringify([
+					{
+						id: 10,
+						title: 'First',
+						content: 'Post body',
+						authorId: 1,
+						published: true,
+						createdAt: '2026-01-01T00:00:00.000Z',
+						post_comments: [
+							{
+								id: 100,
+								postId: 10,
+								authorName: 'Lin',
+								content: 'Nice',
+								createdAt: '2026-01-02T00:00:00.000Z',
+							},
+						],
+					},
+				]),
+			},
+		]);
+
+		const query = nql<{
+			id: number;
+			name: string;
+			post_comments_json: string;
+			author_posts: Array<{
+				id: number;
+				title: string;
+				post_comments: Array<{ id: number; postId: number; content: string }>;
+			}>;
+		}>`authors
+			| select id, name, post_comments_json
+			| bind active_authors
+active_authors | select *, author_posts.post_comments.*`;
+		const dump = query.dump();
+		const rows = await query.all();
+		const decisions = dump.plan.decisions.filter(
+			(decision) => decision.type === 'include-strategy',
+		);
+
+		expect(decisions).toHaveLength(2);
+		expect(decisions[0]).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				relation: 'author_posts',
+				intentPath: 'include[0]',
+			},
+		});
+		expect(decisions[1]).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				relation: 'post_comments',
+				intentPath: 'include[0].include[0]',
+			},
+		});
+		expect(dump.sql).toContain('AS author_posts_json');
+		expect(dump.sql).toContain('jsonb_build_object');
+		expect(rows).toEqual([
+			{
+				id: 1,
+				name: 'Ada',
+				post_comments_json: '{"owned":true}',
+				author_posts: [
+					{
+						id: 10,
+						title: 'First',
+						content: 'Post body',
+						authorId: 1,
+						published: true,
+						createdAt: '2026-01-01T00:00:00.000Z',
+						post_comments: [
+							{
+								id: 100,
+								postId: 10,
+								authorName: 'Lin',
+								content: 'Nice',
+								createdAt: '2026-01-02T00:00:00.000Z',
+							},
+						],
+					},
+				],
+			},
+		]);
+		expect(rows[0]).not.toHaveProperty('author_posts_json');
+		expect(rows[0]).not.toHaveProperty('post_comments');
+	});
+
+	it('forces binding-final hasMany tail belongsTo includes through nested json_agg', () => {
+		const { nql } = createBindingTag();
+
+		const dump = nql<{
+			id: number;
+			name: string;
+			posts: Array<{
+				id: number;
+				title: string;
+				userId: number;
+				user: { id: number; name: string } | null;
+			}>;
+		}>`users
+			| select id, name
+			| bind active_users
+active_users | select *, posts.user.*`.dump();
+
+		const decisions = dump.plan.decisions.filter(
+			(decision) => decision.type === 'include-strategy',
+		);
+		const tailDecision = decisions[1];
+
+		expect(decisions).toHaveLength(2);
+		expect(decisions[0]).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				sourceTable: 'active_users',
+				target: 'posts',
+				relation: 'posts',
+				relationType: 'hasMany',
+				foreignKey: 'userId',
+				parentKey: 'id',
+				intentPath: 'include[0]',
+			},
+		});
+		expect(tailDecision).toMatchObject({
+			choice: 'json_agg',
+			context: {
+				sourceTable: 'posts',
+				target: 'users',
+				relation: 'user',
+				relationType: 'belongsTo',
+				foreignKey: 'userId',
+				intentPath: 'include[0].include[0]',
+			},
+		});
+		expect(dump.sql.match(/json_agg\(to_jsonb/g)).toHaveLength(2);
+		expect(dump.sql).toContain('jsonb_build_object');
+		expect(dump.sql).toMatch(/WHERE __t1__\.id = __t__\."userId"/i);
+		expect(dump.sql).not.toMatch(/\bJOIN\s+"?users"?\b/i);
+		expect(dump.sql).not.toMatch(/cte_posts_user/i);
+	});
+
 	it('hydrates binding-final belongsTo includes to objects and nulls', async () => {
 		const { nql } = createBindingTag([
 			{
@@ -394,40 +668,54 @@ active_users | select id | limit posts 5`.dump();
 					value: true,
 				},
 			},
-			'include options are not supported for binding includes',
+			"unsupported option 'where'",
 		],
-		[
-			'limit',
-			{ relation: 'posts', limit: 5 },
-			'include options are not supported for binding includes',
-		],
+		['limit', { relation: 'posts', limit: 5 }, "unsupported option 'limit'"],
 		[
 			'orderBy',
 			{
 				relation: 'posts',
 				orderBy: [{ field: 'createdAt', direction: 'desc' }],
 			},
-			'include options are not supported for binding includes',
+			"unsupported option 'orderBy'",
 		],
 		[
 			'via',
 			{ relation: 'posts', via: 'publishedPosts' },
-			'include options are not supported for binding includes',
+			"unsupported option 'via'",
 		],
 		[
 			'strategy',
 			{ relation: 'posts', strategy: 'flat' },
-			'include options are not supported for binding includes',
+			"unsupported option 'strategy'",
 		],
 		[
 			'recursive',
 			{ relation: 'posts', recursive: { maxDepth: 2 } },
-			'include options are not supported for binding includes',
+			"unsupported option 'recursive'",
 		],
 		[
-			'nested include',
-			{ relation: 'posts', include: [{ relation: 'comments' }] },
-			'nested binding includes are not supported',
+			'select',
+			{ relation: 'posts', select: { type: 'all' } },
+			"unsupported option 'select'",
+		],
+		[
+			'nested include option',
+			{ relation: 'posts', include: [{ relation: 'comments', limit: 5 }] },
+			"tail relation 'comments' include node carries unsupported option 'limit'",
+		],
+		[
+			'unknown tail include option',
+			{
+				relation: 'posts',
+				include: [
+					{
+						relation: 'comments',
+						futureOption: true,
+					} as IncludeIntent,
+				],
+			},
+			"tail relation 'comments' include node carries unsupported option 'futureOption'",
 		],
 	] satisfies readonly (readonly [
 		string,
@@ -466,9 +754,11 @@ active_users | select id | limit posts 5`.dump();
 			}
 
 			expect(thrown).toBeInstanceOf(Error);
-			expect((thrown as Error).message).toBe(
-				`NQL binding-final query 'active_users' cannot use relation include 'posts' (ref-#192): ${reason}.`,
+			expect((thrown as Error).message).toContain(
+				"NQL binding-final query 'active_users' cannot use relation include",
 			);
+			expect((thrown as Error).message).toContain('(ref-#192)');
+			expect((thrown as Error).message).toContain(reason);
 		} finally {
 			vi.doUnmock('@dbsp/nql');
 			vi.resetModules();

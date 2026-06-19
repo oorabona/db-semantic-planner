@@ -17,6 +17,19 @@ import { getQueryOutputSchema } from './compile-query.js';
 import { resolveBindingRelationColumn } from './expression-utils.js';
 import type { CompilerContext } from './types.js';
 
+type TestRelation = {
+	readonly name: string;
+	readonly source: string;
+	readonly target: string;
+	readonly type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany';
+	readonly foreignKey: string | readonly string[];
+	readonly through?: string;
+	readonly otherKey?: string;
+	readonly recursive?: unknown;
+	readonly sourceKey?: string;
+	readonly targetKey?: string;
+};
+
 // Schema with relations for include tests
 const schema = {
 	getTable(name: string) {
@@ -40,6 +53,7 @@ const schema = {
 					{ name: 'title' },
 					{ name: 'body' },
 					{ name: 'authorId' },
+					{ name: 'categoryId' },
 					{ name: 'published' },
 				],
 			},
@@ -57,6 +71,9 @@ const schema = {
 			tags: {
 				columns: [{ name: 'id' }, { name: 'name' }],
 			},
+			categories: {
+				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
+			},
 			profiles: {
 				columns: [{ name: 'id' }, { name: 'userId' }, { name: 'bio' }],
 			},
@@ -64,16 +81,7 @@ const schema = {
 		return tables[name];
 	},
 	getRelationsFrom(sourceTable: string) {
-		const relations: Record<
-			string,
-			{
-				name: string;
-				source: string;
-				target: string;
-				type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany';
-				foreignKey: string;
-			}[]
-		> = {
+		const relations: Record<string, TestRelation[]> = {
 			users: [
 				{
 					name: 'posts',
@@ -106,6 +114,20 @@ const schema = {
 					foreignKey: 'authorId',
 				},
 				{
+					name: 'category',
+					source: 'posts',
+					target: 'categories',
+					type: 'belongsTo',
+					foreignKey: 'categoryId',
+				},
+				{
+					name: 'comments',
+					source: 'posts',
+					target: 'comments',
+					type: 'hasMany',
+					foreignKey: 'postId',
+				},
+				{
 					name: 'tags',
 					source: 'posts',
 					target: 'tags',
@@ -115,6 +137,24 @@ const schema = {
 			],
 			orders: [],
 			profiles: [],
+			categories: [
+				{
+					name: 'parent',
+					source: 'categories',
+					target: 'categories',
+					type: 'belongsTo',
+					foreignKey: 'parentId',
+					recursive: { direction: 'ancestors' },
+				},
+				{
+					name: 'children',
+					source: 'categories',
+					target: 'categories',
+					type: 'hasMany',
+					foreignKey: 'parentId',
+					recursive: { direction: 'descendants' },
+				},
+			],
 		};
 		return relations[sourceTable] ?? [];
 	},
@@ -904,16 +944,121 @@ projected_posts | select author.profile.bio`,
 		expect(result.errors[0]?.message).toMatch(/multi-hop/);
 	});
 
-	it('rejects binding-final multi-level relationStar includes', () => {
+	it('accepts binding-final multi-level relationStar as a proven include with real-table tail', () => {
 		const result = compile(
 			`users | select id | bind projected_users
 projected_users | select posts.comments.*`,
 			schema,
 		);
 
+		expect(result.success).toBe(true);
+		expect(result.ast?.query?.include).toEqual([
+			{ relation: 'posts', include: [{ relation: 'comments' }] },
+		]);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) =>
+							column.kind === 'relationColumn' &&
+							column.relation === 'posts.comments',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'posts.comments',
+			column: '*',
+			as: 'posts.comments.*',
+		});
+	});
+
+	it('rejects binding-final multi-level relationStar includes whose tail hop is belongsToMany', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.tags.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'tags'/);
+		expect(result.errors[0]?.message).toMatch(/junction/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final multi-level relationStar includes whose tail hop has a composite FK', () => {
+		const compositeTailSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'author',
+						source: 'posts',
+						target: 'users',
+						type: 'belongsTo' as const,
+						foreignKey: 'authorId',
+					},
+					{
+						name: 'comments',
+						source: 'posts',
+						target: 'comments',
+						type: 'hasMany' as const,
+						foreignKey: ['postId', 'tenantId'],
+					},
+					{
+						name: 'tags',
+						source: 'posts',
+						target: 'tags',
+						type: 'belongsToMany' as const,
+						foreignKey: 'id',
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.comments.*`,
+			compositeTailSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'comments'/);
+		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+	});
+
+	it('rejects binding-final multi-level relationStar includes whose tail hop is recursive self-ref', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.category.children.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/tail relation 'children'/);
+		expect(result.errors[0]?.message).toMatch(/recursive\/self-referential/);
+		expect(result.errors[0]?.message).toMatch(/ref-#193/);
+	});
+
+	it('rejects binding-final multi-level relationStar includes with an unresolvable real-table tail', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.missing.*`,
+			schema,
+		);
+
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(/ref-#192/);
-		expect(result.errors[0]?.message).toMatch(/multi-level/);
+		expect(result.errors[0]?.message).toMatch(
+			/tail relation 'missing' is not declared on table 'posts'/,
+		);
 	});
 
 	it.each([

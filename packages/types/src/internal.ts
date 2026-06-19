@@ -13,6 +13,101 @@ import type { RelationType } from './model-ir.js';
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
 
+/** @internal Minimal relation shape needed to validate NQL binding include hops. */
+export interface NqlBindingIncludeRelationShape {
+	readonly type?: RelationType | undefined;
+	readonly foreignKey?: string | readonly string[] | undefined;
+	readonly source?: string | undefined;
+	readonly target?: string | undefined;
+	readonly through?: unknown;
+	readonly otherKey?: unknown;
+	readonly throughSourceKey?: unknown;
+	readonly throughTargetKey?: unknown;
+	readonly recursive?: unknown;
+}
+
+/** @internal Minimal include-node shape needed to validate NQL binding include hops. */
+export interface NqlBindingIncludeNodeShape {
+	readonly relation?: unknown;
+	readonly include?: readonly NqlBindingIncludeNodeShape[] | undefined;
+	readonly [key: string]: unknown;
+}
+
+/** @internal */
+export function explainUnsupportedNqlBindingIncludeHop(
+	relationName: string,
+	relation: NqlBindingIncludeRelationShape,
+	include?: NqlBindingIncludeNodeShape,
+): string | undefined {
+	const includeReason = include
+		? explainUnsupportedNqlBindingIncludeNode(relationName, include)
+		: undefined;
+	if (includeReason) return includeReason;
+	if (
+		relation.type === 'belongsToMany' ||
+		relation.through !== undefined ||
+		relation.otherKey !== undefined ||
+		relation.throughSourceKey !== undefined ||
+		relation.throughTargetKey !== undefined
+	) {
+		return `relation '${relationName}' is '${relation.type ?? 'through'}' and needs junction traversal; binding includes for many-to-many/through relations are not supported (ref-#192)`;
+	}
+	if (
+		relation.type !== 'belongsTo' &&
+		relation.type !== 'hasOne' &&
+		relation.type !== 'hasMany'
+	) {
+		return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding includes require a belongsTo/hasOne/hasMany relation (ref-#192)`;
+	}
+	const fkColumns =
+		typeof relation.foreignKey === 'string'
+			? [relation.foreignKey]
+			: Array.isArray(relation.foreignKey)
+				? [...relation.foreignKey]
+				: [];
+	if (fkColumns.length !== 1) {
+		return `relation '${relationName}' must have exactly one FK column for binding includes; composite FK binding includes are not yet supported (ref-#179)`;
+	}
+	if (fkColumns[0] === undefined || fkColumns[0].length === 0) {
+		return `relation '${relationName}' must have exactly one FK column for binding includes; composite FK binding includes are not yet supported (ref-#179)`;
+	}
+	if (
+		relation.recursive !== undefined ||
+		(relation.source !== undefined &&
+			relation.target !== undefined &&
+			relation.source === relation.target)
+	) {
+		return `relation '${relationName}' is recursive/self-referential; binding includes for recursive relations require recursive CTE handling and are not supported (ref-#193)`;
+	}
+	return undefined;
+}
+
+const NQL_BINDING_INCLUDE_NODE_KEYS: ReadonlySet<string> = new Set([
+	'relation',
+	'include',
+]);
+
+function explainUnsupportedNqlBindingIncludeNode(
+	relationName: string,
+	include: NqlBindingIncludeNodeShape,
+): string | undefined {
+	const keys = Object.keys(include);
+	const unsupportedKeys = keys.filter(
+		(key) => !NQL_BINDING_INCLUDE_NODE_KEYS.has(key),
+	);
+	if (unsupportedKeys.length > 0) {
+		const options = unsupportedKeys.map((key) => `'${key}'`).join(', ');
+		return `relation '${relationName}' include node carries unsupported option${unsupportedKeys.length === 1 ? '' : 's'} ${options}; binding includes only allow 'relation' and nested 'include' (ref-#192)`;
+	}
+	if (typeof include.relation !== 'string' || include.relation.length === 0) {
+		return `relation '${relationName}' include node must name a relation (ref-#192)`;
+	}
+	if (include.include !== undefined && !Array.isArray(include.include)) {
+		return `relation '${relationName}' nested include must be an array (ref-#192)`;
+	}
+	return undefined;
+}
+
 /**
  * @internal Shared compiler-options marker for trusted NQL package internals.
  *
