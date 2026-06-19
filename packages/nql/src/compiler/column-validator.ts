@@ -110,6 +110,15 @@ export class ColumnValidator {
 			?.relations.find((relation) => relation.relation === relationName);
 	}
 
+	getVirtualBindingScalarRelation(
+		bindingName: string,
+		relationName: string,
+	): NqlBindingVirtualRelation | undefined {
+		return this.virtualBindingRelationFilters
+			.get(bindingName)
+			?.scalarRelations?.find((relation) => relation.relation === relationName);
+	}
+
 	explainVirtualBindingRelationRejection(
 		bindingName: string,
 		relationName: string,
@@ -151,6 +160,53 @@ export class ColumnValidator {
 		}
 		const available = this.virtualBindingTables.get(bindingName)?.join(', ');
 		return `relation '${relationName}' FK column '${fkColumn}' is not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+	}
+
+	explainVirtualBindingScalarRelationRejection(
+		bindingName: string,
+		relationName: string,
+	): string {
+		const metadata = this.virtualBindingRelationFilters.get(bindingName);
+		if (!metadata) {
+			return 'no binding relation metadata is available';
+		}
+		if (metadata.unsafeReason) return metadata.unsafeReason;
+		const sourceTable = metadata.sourceTable;
+		if (!sourceTable) {
+			return 'the binding source table could not be proven';
+		}
+		const relation = this.getRelation(sourceTable, relationName);
+		if (!relation) {
+			return `relation '${relationName}' is not declared on source table '${sourceTable}'`;
+		}
+		const fk = relation.foreignKey;
+		const fkColumns =
+			typeof fk === 'string' ? [fk] : Array.isArray(fk) ? [...fk] : [];
+		if (relation.type !== 'belongsTo' && relation.type !== 'hasOne') {
+			return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding relation columns require a scalar belongsTo/hasOne relation`;
+		}
+		if (fkColumns.length !== 1) {
+			return `relation '${relationName}' must have exactly one FK column for binding relation columns`;
+		}
+		const fkColumn = fkColumns[0];
+		if (fkColumn === undefined) {
+			return `relation '${relationName}' must have exactly one FK column for binding relation columns`;
+		}
+		const sourceColumn =
+			relation.type === 'belongsTo' ? fkColumn : (relation.sourceKey ?? 'id');
+		const directProjection = metadata.directProjectionLineage?.find(
+			(projection) =>
+				projection.sourceTable === sourceTable &&
+				ColumnValidator.columnsMatch(projection.sourceColumn, sourceColumn),
+		);
+		if (!directProjection) {
+			const available = this.virtualBindingTables.get(bindingName)?.join(', ');
+			const sourceColumnLabel =
+				relation.type === 'belongsTo' ? 'FK column' : 'source key column';
+			return `relation '${relationName}' ${sourceColumnLabel} '${sourceColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		}
+		const available = this.virtualBindingTables.get(bindingName)?.join(', ');
+		return `relation '${relationName}' source column '${sourceColumn}' is not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
 	}
 
 	/**

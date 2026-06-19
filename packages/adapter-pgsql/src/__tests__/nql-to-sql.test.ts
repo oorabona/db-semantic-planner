@@ -2144,6 +2144,24 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 		expect(params).toEqual(['Alice']);
 	});
 
+	it('withSchema binding-final scalar relation column emits a correlated scalar subquery', () => {
+		const { sql, params } = boundBundleToSQL(
+			'posts | select id, authorId | bind projected_posts\nprojected_posts | select id, author.name',
+			blogSchema.model,
+			'tenant_bound',
+		);
+
+		expect(sql).toContain('with "projected_posts" as (');
+		expect(sql).toContain('from tenant_bound.posts');
+		expect(sql).toContain('from projected_posts');
+		expect(sql).toContain('from tenant_bound.authors as rc_');
+		expect(sql).not.toContain('from tenant_bound.projected_posts');
+		expect(sql).toMatch(
+			/\(select rc_\d+\.name from tenant_bound\.authors as rc_\d+ where rc_\d+\.id = projected_posts\."?authorid"?\) as "author\.name"/,
+		);
+		expect(params).toEqual([]);
+	});
+
 	it('SEC-182: forged binding-final relation filter metadata fails loud through adapter.compile', () => {
 		const bindingQuery: QueryIntent = {
 			type: 'select',
@@ -2188,6 +2206,49 @@ draft_posts | where id in (comments | select postId) | select id`.dump();
 				schemaName: 'tenant_bound',
 			}),
 		).toThrow(/no relation 'fabricatedAuthor'.*table 'projected_posts'/);
+	});
+
+	it('SEC-182: forged binding-final relation column metadata fails loud through adapter.compile', () => {
+		const bindingQuery: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: {
+				type: 'fields',
+				fields: ['id', 'authorId'],
+			},
+		};
+		const forgedBundle: CompiledNqlQuery = {
+			bindings: new Map([['projected_posts', bindingQuery]]),
+			query: {
+				type: 'select',
+				from: 'projected_posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{ kind: 'column', column: 'id' },
+						{
+							kind: 'relationColumn',
+							relation: 'author',
+							column: 'name',
+							as: 'author.name',
+							targetTable: 'authors',
+							sourceColumn: 'authorId',
+							targetColumn: 'id',
+						} as never,
+					],
+				},
+			},
+		};
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: blogSchema.model,
+		});
+
+		expect(() =>
+			adapter.compile(forgedBundle, {
+				model: blogSchema.model,
+				schemaName: 'tenant_bound',
+			}),
+		).toThrow(/trusted compiler proof/);
 	});
 
 	it('withSchema explicit table-mode join to a binding stays unqualified while real-table join stays qualified', () => {

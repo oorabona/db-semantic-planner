@@ -75,6 +75,8 @@ export interface NqlTrustedRelationFilterFields {
 	readonly targetTable: string;
 	readonly sourceColumn: string;
 	readonly targetColumn: string;
+	readonly selectedColumn?: string;
+	readonly cardinality?: 'one' | 'many';
 }
 
 /**
@@ -105,12 +107,19 @@ function isTrustedRelationFilterPayload(
 		readonly targetTable?: unknown;
 		readonly sourceColumn?: unknown;
 		readonly targetColumn?: unknown;
+		readonly selectedColumn?: unknown;
+		readonly cardinality?: unknown;
 	};
 	return (
 		(typeof record.relation === 'string' || isStringArray(record.relation)) &&
 		typeof record.targetTable === 'string' &&
 		typeof record.sourceColumn === 'string' &&
-		typeof record.targetColumn === 'string'
+		typeof record.targetColumn === 'string' &&
+		(record.selectedColumn === undefined ||
+			typeof record.selectedColumn === 'string') &&
+		(record.cardinality === undefined ||
+			record.cardinality === 'one' ||
+			record.cardinality === 'many')
 	);
 }
 
@@ -125,6 +134,12 @@ function freezeTrustedRelationFilterPayload(
 		targetTable: fields.targetTable,
 		sourceColumn: fields.sourceColumn,
 		targetColumn: fields.targetColumn,
+		...(fields.selectedColumn !== undefined && {
+			selectedColumn: fields.selectedColumn,
+		}),
+		...(fields.cardinality !== undefined && {
+			cardinality: fields.cardinality,
+		}),
 	});
 }
 

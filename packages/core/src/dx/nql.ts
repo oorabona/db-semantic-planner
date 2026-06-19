@@ -186,9 +186,17 @@ function findBindingFinalRelationFilter(
 function assertBindingFinalQueryCanUseSyntheticPlan(intent: QueryIntent): void {
 	const relationColumns =
 		intent.select?.type === 'expressions'
-			? intent.select.columns
-					.filter((column) => column.kind === 'relationColumn')
-					.map((column) => column.relation)
+			? intent.select.columns.flatMap((column) => {
+					if (column.kind !== 'relationColumn') return [];
+					const trusted = getTrustedNqlRelationFilterFields(column);
+					if (
+						trusted?.selectedColumn !== undefined &&
+						trusted.cardinality === 'one'
+					) {
+						return [];
+					}
+					return [column.relation];
+				})
 			: [];
 	const relationFilter = intent.where
 		? findBindingFinalRelationFilter(intent.where)

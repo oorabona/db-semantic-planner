@@ -709,6 +709,9 @@ function compileRelationFilter(
 				targetTable: bindingRelation.targetTable,
 				sourceColumn: bindingRelation.sourceColumn,
 				targetColumn: bindingRelation.targetColumn,
+				...(bindingRelation.cardinality !== undefined && {
+					cardinality: bindingRelation.cardinality,
+				}),
 			})
 		: relationFilterIntent;
 }

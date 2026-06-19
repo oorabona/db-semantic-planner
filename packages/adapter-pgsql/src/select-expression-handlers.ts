@@ -6,7 +6,11 @@
  */
 
 import type { WhereIntent } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	type Mutable,
+	markNqlTrustedRelationFilter,
+} from '@dbsp/types/internal';
 import type { PlanDecision } from './compiler.js';
 import type { WindowOver } from './handlers/types.js';
 
@@ -258,14 +262,23 @@ export function handleRelationColumnExpression(
 	rootTable: string,
 	decisions: PlanDecision[],
 ): void {
+	const trusted = getTrustedNqlRelationFilterFields(expr);
+	const trustedRelation =
+		typeof trusted?.relation === 'string'
+			? trusted.relation
+			: trusted?.relation.join('.');
 	const decision: Mutable<PlanDecision> = {
 		type: 'selectRelationColumn',
-		relation: expr.relation as string,
-		column: (expr.column ?? '*') as string,
+		relation: trustedRelation ?? (expr.relation as string),
+		column: trusted?.selectedColumn ?? ((expr.column ?? '*') as string),
 		table: rootTable,
 	};
 	if (expr.as) decision.alias = expr.as as string;
-	decisions.push(decision);
+	decisions.push(
+		trusted?.selectedColumn !== undefined
+			? markNqlTrustedRelationFilter(decision, trusted)
+			: decision,
+	);
 }
 
 /**

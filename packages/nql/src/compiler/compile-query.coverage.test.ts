@@ -4,6 +4,7 @@
  * compileOrderByClause, and compileOrderItem.
  */
 
+import type { QueryIntent } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	hasNqlTrustedRelationFilterProof,
@@ -11,6 +12,10 @@ import {
 import { describe, expect, it } from 'vitest';
 import { compile, NqlCompiler, parse } from '../index.js';
 import type { NqlClause, NqlProgram, NqlQuery } from '../parser/ast.js';
+import { ColumnValidator } from './column-validator.js';
+import { getQueryOutputSchema } from './compile-query.js';
+import { resolveBindingRelationColumn } from './expression-utils.js';
+import type { CompilerContext } from './types.js';
 
 // Schema with relations for include tests
 const schema = {
@@ -114,6 +119,24 @@ const schema = {
 		return [];
 	},
 };
+
+function compilerContextForValidator(
+	validator: ColumnValidator,
+): CompilerContext {
+	return {
+		currentFromTable: undefined,
+		currentRelationTarget: undefined,
+		pseudoColumnKeywords: new Set(),
+		recursiveKeywords: new Set(),
+		validator,
+		bindingOutputColumns: new Map(),
+		bindingRelationFilters: new Map(),
+		params: {},
+		maxAnyItems: 10_000,
+		allowUnfilteredMutations: false,
+		allowInternalParams: false,
+	};
+}
 
 function compileNql(input: string) {
 	const result = compile(input, schema);
@@ -679,6 +702,7 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 			targetTable: 'users',
 			sourceColumn: 'authorId',
 			targetColumn: 'id',
+			cardinality: 'one',
 		});
 		expect(Object.isFrozen(payload)).toBe(true);
 		try {
@@ -699,8 +723,204 @@ projected_posts | where ${mode}(author).email = 'alice@example.com' | select id`
 				targetTable: 'users',
 				sourceColumn: 'authorId',
 				targetColumn: 'id',
+				cardinality: 'one',
 			},
 		]);
+	});
+
+	it('allows binding-final belongsTo scalar relation columns with a frozen trusted proof', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select id, author.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'author',
+			column: 'name',
+			as: 'author.name',
+		});
+		const payload = getTrustedNqlRelationFilterFields(relationColumn);
+		expect(payload).toEqual({
+			relation: 'author',
+			targetTable: 'users',
+			sourceColumn: 'authorId',
+			targetColumn: 'id',
+			selectedColumn: 'name',
+			cardinality: 'one',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(result.ast?.query?.include).toBeUndefined();
+	});
+
+	it('allows binding-final hasOne scalar relation columns when the source key is directly projected', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select id, profile.bio`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toEqual({
+			relation: 'profile',
+			targetTable: 'profiles',
+			sourceColumn: 'id',
+			targetColumn: 'userId',
+			selectedColumn: 'bio',
+			cardinality: 'one',
+		});
+		expect(result.ast?.query?.include).toBeUndefined();
+	});
+
+	it('rejects binding-final hasMany relation columns as non-scalar', () => {
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.title`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/scalar belongsTo\/hasOne/);
+	});
+
+	it('rejects binding-final relationStar columns', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.*`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/cannot select relation columns/);
+	});
+
+	it('rejects binding-final multi-hop relation columns', () => {
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.profile.bio`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/multi-hop/);
+	});
+
+	it.each([
+		['missing projected FK', 'id, title'],
+		['fabricated FK alias', 'id, 1 as authorId'],
+	] as const)('rejects binding-final belongsTo relation columns with %s', (_label, projection) => {
+		const result = compile(
+			`posts | select ${projection} | bind projected_posts
+projected_posts | select author.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/FK column 'authorId'/);
+		expect(result.errors[0]?.message).toMatch(/direct source-column/);
+	});
+
+	it('rejects binding-final relation columns for composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'author',
+						source: 'posts',
+						target: 'users',
+						type: 'belongsTo' as const,
+						foreignKey: ['authorId', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id, authorId | bind projected_posts
+projected_posts | select author.name`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+	});
+
+	it('rejects binding-final relation columns when the binding body used relation includes', () => {
+		const result = compile(
+			`posts | select id, authorId, author.name | bind projected_posts
+projected_posts | select author.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/relation includes/);
+	});
+
+	it('rejects binding-final relation columns from nested read bindings', () => {
+		const result = compile(
+			`posts | select id, authorId | bind base_posts
+base_posts | select id, authorId | bind projected_posts
+projected_posts | select author.name`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ref-#182/);
+		expect(result.errors[0]?.message).toMatch(/another NQL binding/);
+	});
+
+	it('rejects binding-final relation columns when the binding body used joins', () => {
+		const validator = new ColumnValidator(schema);
+		const ctx = compilerContextForValidator(validator);
+		const joinedBinding: QueryIntent = {
+			type: 'select',
+			from: 'posts',
+			select: { type: 'fields', fields: ['id', 'authorId'] },
+			joins: [{ relation: 'author', type: 'inner' }],
+		};
+		const outputSchema = getQueryOutputSchema(
+			joinedBinding,
+			ctx,
+			'joined_posts',
+		);
+		validator.addVirtualBindingTable(
+			'joined_posts',
+			outputSchema.columns,
+			outputSchema.relationFilters,
+		);
+
+		expect(outputSchema.relationFilters?.unsafeReason).toBe(
+			'the binding body uses joins',
+		);
+		expect(() =>
+			resolveBindingRelationColumn(ctx, 'joined_posts', ['author'], 'name'),
+		).toThrow(/cannot select relation column 'author'.*uses joins/);
 	});
 
 	it('SEC-182: relation-filter proof cannot be forged by public fields or public symbols', () => {
@@ -892,7 +1112,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(
-			/all_users.*cannot select relation columns.*CTE binding/,
+			/all_users.*cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
 		);
 	});
 
@@ -1123,7 +1343,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(
-			/active_users.*cannot select relation columns.*CTE binding/,
+			/active_users.*cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
 		);
 	});
 
@@ -1227,7 +1447,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 		expect(relation.success).toBe(false);
 		expect(relation.errors[0]?.message).toMatch(
-			/all_users.*cannot select relation columns.*CTE binding/,
+			/all_users.*cannot select relation column 'posts'.*model metadata is not available/,
 		);
 	});
 });

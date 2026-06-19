@@ -167,6 +167,44 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`;
 		expect(sql).not.toContain('forgedRoles');
 		expect(sql).not.toContain('admin_id');
 	});
+
+	it('uses frozen proof payload after public relation-column metadata is mutated', () => {
+		const s = createTestSchema();
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model: s.model,
+		}) as Adapter;
+		const nql = createNqlTag(s.definition, s.model, adapter);
+
+		const builder = nql<unknown>`posts | select id, author | bind projected_posts
+projected_posts | select id, author.email`;
+		const intent = builder.toIntentIR();
+		const relationColumn =
+			intent.type === 'select' && intent.select?.type === 'expressions'
+				? intent.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'author',
+			column: 'email',
+		});
+
+		if (relationColumn?.kind !== 'relationColumn') {
+			throw new Error('Expected relationColumn intent');
+		}
+		relationColumn.relation = 'forgedRoles';
+		relationColumn.column = 'adminFlag';
+
+		const dump = builder.dump();
+		const sql = ws(dump.sql);
+		expect(sql).toContain(
+			'(SELECT rc_0.email FROM users AS rc_0 WHERE rc_0.id = projected_posts.author)',
+		);
+		expect(sql).not.toContain('forgedRoles');
+		expect(sql).not.toContain('adminFlag');
+		expect(sql).not.toContain('roles');
+	});
 });
 
 // ============================================================================

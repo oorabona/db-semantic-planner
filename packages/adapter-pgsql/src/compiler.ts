@@ -17,7 +17,11 @@ import {
 	type ParamIntent,
 	type QueryIntent,
 } from '@dbsp/types';
-import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
+import {
+	getNqlBindingRefName,
+	getTrustedNqlRelationFilterFields,
+	isNqlBindingRef,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -47,6 +51,7 @@ import {
 } from './ast-helpers.js';
 import {
 	type BindingNameRegistry,
+	hasBindingName,
 	schemaForFromName,
 } from './binding-registry.js';
 import { deparseQuoted } from './deparse.js';
@@ -655,6 +660,8 @@ export class PlanCompiler {
 	private rawJoins: Node[] = [];
 	/** CTE nodes from include handlers (e.g., CTE strategy) */
 	private pendingCtes: Node[] = [];
+	/** Local aliases for binding relation-column scalar subqueries. */
+	private bindingRelationColumnSubqueryIndex = 0;
 	/**
 	 * Maps relation-dotted include path → JOIN alias for multi-hop FK resolution.
 	 * Populated as join decisions are compiled so later hops can find the
@@ -1258,6 +1265,61 @@ export class PlanCompiler {
 		);
 	}
 
+	private isNqlBindingRoot(plan: SimplifiedPlanReport): boolean {
+		return hasBindingName(this.bindingNames, plan.rootTable, this.naming);
+	}
+
+	private compileBindingRelationColumnSubquery(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+		plan: SimplifiedPlanReport,
+	): Node {
+		if (fields.selectedColumn === undefined) {
+			throw new Error(
+				`NQL binding relation-column proof for '${plan.rootTable}' is missing selectedColumn.`,
+			);
+		}
+		if (fields.cardinality !== 'one') {
+			throw new Error(
+				`NQL binding relation-column proof for '${plan.rootTable}' is not scalar (cardinality: ${fields.cardinality ?? 'unknown'}).`,
+			);
+		}
+		const relatedAlias = `rc_${this.bindingRelationColumnSubqueryIndex++}`;
+		const relatedTable = rangeVar(
+			fields.targetTable,
+			relatedAlias,
+			this.schemaForRangeVar(plan, fields.targetTable),
+			this.naming,
+		);
+		const relatedColumn = columnRef(
+			fields.selectedColumn,
+			relatedAlias,
+			undefined,
+			this.naming,
+		);
+		const relatedJoinColumn = columnRef(
+			fields.targetColumn,
+			relatedAlias,
+			undefined,
+			this.naming,
+		);
+		const bindingJoinColumn = columnRef(
+			fields.sourceColumn,
+			plan.rootTable,
+			undefined,
+			this.naming,
+		);
+		return {
+			SubLink: {
+				subLinkType: 'EXPR_SUBLINK',
+				subselect: selectStmt({
+					targetList: [{ ResTarget: { val: relatedColumn } }],
+					from: [relatedTable],
+					where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+				}),
+			},
+		};
+	}
+
 	private compileExpressionSubquery(
 		query: QueryIntent,
 		paramOffset: number,
@@ -1739,6 +1801,29 @@ export class PlanCompiler {
 			case 'selectRelationColumn':
 			case 'selectPseudoColumn':
 			case 'selectArithmetic': {
+				if (decision.type === 'selectRelationColumn') {
+					const trusted = getTrustedNqlRelationFilterFields(decision);
+					if (trusted?.selectedColumn !== undefined) {
+						const node = this.compileBindingRelationColumnSubquery(
+							trusted,
+							plan,
+						);
+						targetList.push({
+							ResTarget: {
+								val: node,
+								...(decision.alias
+									? { name: this.naming.toDatabase(decision.alias) }
+									: {}),
+							},
+						});
+						break;
+					}
+					if (this.isNqlBindingRoot(plan)) {
+						throw new Error(
+							`NQL binding-final query '${plan.rootTable}' cannot select relation column '${decision.relation ?? 'unknown'}.${decision.column ?? 'unknown'}' without a trusted compiler proof.`,
+						);
+					}
+				}
 				ensureExpressionHandlersRegistered();
 				const exprType =
 					decision.type === 'selectRelationColumn'
