@@ -8,6 +8,8 @@
  * @internal
  */
 
+import type { RelationType } from './model-ir.js';
+
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
 
@@ -77,6 +79,7 @@ export interface NqlTrustedRelationFilterFields {
 	readonly targetColumn: string;
 	readonly selectedColumn?: string;
 	readonly cardinality?: 'one' | 'many';
+	readonly relationType?: RelationType;
 }
 
 /**
@@ -96,6 +99,15 @@ function isStringArray(value: unknown): value is readonly string[] {
 	);
 }
 
+function isRelationType(value: unknown): value is RelationType {
+	return (
+		value === 'hasOne' ||
+		value === 'hasMany' ||
+		value === 'belongsTo' ||
+		value === 'belongsToMany'
+	);
+}
+
 function isTrustedRelationFilterPayload(
 	value: unknown,
 ): value is NqlTrustedRelationFilterFields {
@@ -109,6 +121,7 @@ function isTrustedRelationFilterPayload(
 		readonly targetColumn?: unknown;
 		readonly selectedColumn?: unknown;
 		readonly cardinality?: unknown;
+		readonly relationType?: unknown;
 	};
 	return (
 		(typeof record.relation === 'string' || isStringArray(record.relation)) &&
@@ -119,7 +132,8 @@ function isTrustedRelationFilterPayload(
 			typeof record.selectedColumn === 'string') &&
 		(record.cardinality === undefined ||
 			record.cardinality === 'one' ||
-			record.cardinality === 'many')
+			record.cardinality === 'many') &&
+		(record.relationType === undefined || isRelationType(record.relationType))
 	);
 }
 
@@ -139,6 +153,9 @@ function freezeTrustedRelationFilterPayload(
 		}),
 		...(fields.cardinality !== undefined && {
 			cardinality: fields.cardinality,
+		}),
+		...(fields.relationType !== undefined && {
+			relationType: fields.relationType,
 		}),
 	});
 }

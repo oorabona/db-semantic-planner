@@ -210,19 +210,22 @@ users | where id in (active_users) | select id`.dump();
 		expect(compile).not.toHaveBeenCalled();
 	});
 
-	it('rejects binding-final hasMany relation columns before creating a synthetic plan', () => {
+	it('compiles binding-final hasMany relation columns through a correlated json_agg subquery', () => {
 		const { compile, nql } = createBindingTag();
 
-		expect(() => {
-			nql<{ title: string }>`users
-				| where active = ${true}
-				| select id
-				| bind active_users
+		const dump = nql<{ title: string[] }>`users
+			| where active = ${true}
+			| select id
+			| bind active_users
 active_users | select posts.title`.dump();
-		}).toThrow(
-			/cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
+
+		expect(compile).toHaveBeenCalledOnce();
+		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+		expect(bundle.query?.from).toBe('active_users');
+		expect(dump.sql).toMatch(
+			/\(SELECT COALESCE\(json_agg\(rc_\d+\.title ORDER BY CAST\(rc_\d+\.title AS text\) NULLS LAST\), '\[\]'::json\) FROM posts AS rc_\d+ WHERE rc_\d+\."userId" = active_users\.id\) AS "posts\.title"/i,
 		);
-		expect(compile).not.toHaveBeenCalled();
+		expect(dump.sql).not.toMatch(/\bJOIN\s+"?posts"?/i);
 	});
 
 	it('compiles binding-final belongsTo scalar relation columns through a correlated subquery', () => {

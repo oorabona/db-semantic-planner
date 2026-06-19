@@ -31,6 +31,7 @@ import {
 } from './assert-field.js';
 import {
 	andExpr,
+	coalesceExpr,
 	columnRef,
 	columnTarget,
 	deleteStmt,
@@ -47,6 +48,7 @@ import {
 	selectStmt,
 	sortBy,
 	starTarget,
+	typeCast,
 	updateStmt,
 } from './ast-helpers.js';
 import {
@@ -1269,20 +1271,15 @@ export class PlanCompiler {
 		return hasBindingName(this.bindingNames, plan.rootTable, this.naming);
 	}
 
-	private compileBindingRelationColumnSubquery(
+	private buildCorrelatedRelationRefs(
 		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
 		plan: SimplifiedPlanReport,
-	): Node {
-		if (fields.selectedColumn === undefined) {
-			throw new Error(
-				`NQL binding relation-column proof for '${plan.rootTable}' is missing selectedColumn.`,
-			);
-		}
-		if (fields.cardinality !== 'one') {
-			throw new Error(
-				`NQL binding relation-column proof for '${plan.rootTable}' is not scalar (cardinality: ${fields.cardinality ?? 'unknown'}).`,
-			);
-		}
+	): {
+		relatedTable: Node;
+		relatedColumn: Node;
+		relatedJoinColumn: Node;
+		bindingJoinColumn: Node;
+	} {
 		const relatedAlias = `rc_${this.bindingRelationColumnSubqueryIndex++}`;
 		const relatedTable = rangeVar(
 			fields.targetTable,
@@ -1291,7 +1288,7 @@ export class PlanCompiler {
 			this.naming,
 		);
 		const relatedColumn = columnRef(
-			fields.selectedColumn,
+			fields.selectedColumn!,
 			relatedAlias,
 			undefined,
 			this.naming,
@@ -1309,15 +1306,89 @@ export class PlanCompiler {
 			this.naming,
 		);
 		return {
-			SubLink: {
-				subLinkType: 'EXPR_SUBLINK',
-				subselect: selectStmt({
-					targetList: [{ ResTarget: { val: relatedColumn } }],
-					from: [relatedTable],
-					where: eqExpr(relatedJoinColumn, bindingJoinColumn),
-				}),
-			},
+			relatedTable,
+			relatedColumn,
+			relatedJoinColumn,
+			bindingJoinColumn,
 		};
+	}
+
+	private compileBindingRelationColumnSubquery(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+		plan: SimplifiedPlanReport,
+		dialectCapabilities: DialectCapabilities | undefined,
+	): Node {
+		if (fields.selectedColumn === undefined) {
+			throw new Error(
+				`NQL binding relation-column proof for '${plan.rootTable}' is missing selectedColumn.`,
+			);
+		}
+		if (fields.cardinality === 'one') {
+			const {
+				relatedTable,
+				relatedColumn,
+				relatedJoinColumn,
+				bindingJoinColumn,
+			} = this.buildCorrelatedRelationRefs(fields, plan);
+			return {
+				SubLink: {
+					subLinkType: 'EXPR_SUBLINK',
+					subselect: selectStmt({
+						targetList: [{ ResTarget: { val: relatedColumn } }],
+						from: [relatedTable],
+						where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+					}),
+				},
+			};
+		}
+		if (fields.cardinality === 'many') {
+			if (fields.relationType !== 'hasMany') {
+				throw new Error(
+					`NQL binding relation-column proof for '${plan.rootTable}' has cardinality 'many' but relationType '${fields.relationType ?? 'unknown'}' is not supported; only hasMany can be aggregated (ref-#192).`,
+				);
+			}
+			if (dialectCapabilities?.supportsJsonAgg === false) {
+				throw new Error(
+					'JSON aggregation for NQL binding relation columns is not supported by this adapter',
+				);
+			}
+			const {
+				relatedTable,
+				relatedColumn,
+				relatedJoinColumn,
+				bindingJoinColumn,
+			} = this.buildCorrelatedRelationRefs(fields, plan);
+			return {
+				SubLink: {
+					subLinkType: 'EXPR_SUBLINK',
+					subselect: selectStmt({
+						targetList: [
+							{
+								ResTarget: {
+									val: coalesceExpr([
+										funcCall('json_agg', [relatedColumn], {
+											orderBy: [
+												sortBy(
+													typeCast(relatedColumn, 'text'),
+													'DEFAULT',
+													'LAST',
+												),
+											],
+										}),
+										typeCast({ A_Const: { sval: { sval: '[]' } } }, 'json'),
+									]),
+								},
+							},
+						],
+						from: [relatedTable],
+						where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+					}),
+				},
+			};
+		}
+		throw new Error(
+			`NQL binding relation-column proof for '${plan.rootTable}' is not scalar (cardinality: ${fields.cardinality ?? 'unknown'}).`,
+		);
 	}
 
 	private compileExpressionSubquery(
@@ -1807,6 +1878,7 @@ export class PlanCompiler {
 						const node = this.compileBindingRelationColumnSubquery(
 							trusted,
 							plan,
+							this.dialectCapabilities,
 						);
 						targetList.push({
 							ResTarget: {

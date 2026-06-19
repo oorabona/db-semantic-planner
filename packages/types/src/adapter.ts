@@ -33,6 +33,7 @@ import type {
 	IndexIR,
 	ModelIR,
 	PartitionIR,
+	RelationType,
 	SequenceIR,
 	TableIR,
 } from './model-ir.js';
@@ -137,6 +138,7 @@ export interface NqlBindingVirtualRelation {
 	readonly sourceColumn: string;
 	readonly targetColumn: string;
 	readonly cardinality?: 'one' | 'many';
+	readonly relationType?: RelationType;
 }
 
 export interface NqlBindingColumnLineage {
