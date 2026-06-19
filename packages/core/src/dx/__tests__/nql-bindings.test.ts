@@ -210,7 +210,7 @@ users | where id in (active_users) | select id`.dump();
 		expect(compile).not.toHaveBeenCalled();
 	});
 
-	it('rejects binding-final relation columns before creating a synthetic plan', () => {
+	it('rejects binding-final hasMany relation columns before creating a synthetic plan', () => {
 		const { compile, nql } = createBindingTag();
 
 		expect(() => {
@@ -220,9 +220,26 @@ users | where id in (active_users) | select id`.dump();
 				| bind active_users
 active_users | select posts.title`.dump();
 		}).toThrow(
-			/cannot select relation columns or use includes|cannot select relation columns/,
+			/cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
 		);
 		expect(compile).not.toHaveBeenCalled();
+	});
+
+	it('compiles binding-final belongsTo scalar relation columns through a correlated subquery', () => {
+		const { compile, nql } = createBindingTag();
+
+		const dump = nql<{ id: number; 'user.name': string }>`posts
+			| select id, userId
+			| bind projected_posts
+projected_posts | select id, user.name`.dump();
+
+		expect(compile).toHaveBeenCalledOnce();
+		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+		expect(bundle.query?.from).toBe('projected_posts');
+		expect(dump.sql).toMatch(
+			/\(SELECT rc_\d+\.name FROM users AS rc_\d+ WHERE rc_\d+\.id = projected_posts\."userId"\) AS "user\.name"/i,
+		);
+		expect(dump.sql).not.toContain('JOIN "users"');
 	});
 
 	it('rejects binding-final relation include limits before creating a synthetic plan', () => {

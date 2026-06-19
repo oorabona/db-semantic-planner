@@ -179,6 +179,32 @@ projected_posts
 		]);
 	});
 
+	it('executes binding-final scalar relation columns through projected source FKs', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const query = orm.nql<{ id: number; authorName: string }>`posts
+			| select id, authorId
+			| bind projected_posts
+projected_posts
+			| select id, author.name as authorName
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toContain(`FROM ${SCHEMA}.authors AS rc_`);
+		expect(dump.sql).toContain('FROM projected_posts');
+		expect(dump.sql).not.toContain(`${SCHEMA}.projected_posts`);
+		expect(rows).toEqual([
+			{ id: 1, authorName: 'Alice Johnson' },
+			{ id: 2, authorName: 'Alice Johnson' },
+			{ id: 3, authorName: 'Bob Smith' },
+			{ id: 4, authorName: 'Alice Johnson' },
+			{ id: 5, authorName: 'Bob Smith' },
+		]);
+	});
+
 	it('executes mutation binding bodies before the final query', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

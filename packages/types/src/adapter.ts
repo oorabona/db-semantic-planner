@@ -136,6 +136,7 @@ export interface NqlBindingVirtualRelation {
 	readonly targetTable: string;
 	readonly sourceColumn: string;
 	readonly targetColumn: string;
+	readonly cardinality?: 'one' | 'many';
 }
 
 export interface NqlBindingColumnLineage {
@@ -150,6 +151,7 @@ export interface NqlBindingRelationFilterMetadata {
 	readonly unsafeReason?: string;
 	readonly directProjectionLineage?: readonly NqlBindingColumnLineage[];
 	readonly relations: readonly NqlBindingVirtualRelation[];
+	readonly scalarRelations?: readonly NqlBindingVirtualRelation[];
 }
 
 export interface NqlBindingOutputSchema {

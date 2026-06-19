@@ -47,6 +47,7 @@ import {
 	expressionToSql,
 	getKnownBindingColumns,
 	isBindingTable,
+	resolveBindingRelationColumn,
 	resolveBindingRelationFilter,
 	resolveIntegerCount,
 	validateColumnForTable,
@@ -190,6 +191,27 @@ function relationForeignKeysOnSource(
 	return undefined;
 }
 
+function relationForeignKeys(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+): readonly string[] | undefined {
+	if (!relation) return undefined;
+	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
+	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
+	return undefined;
+}
+
+function relationCardinality(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+): 'one' | 'many' {
+	return relation?.type === 'hasMany' || relation?.type === 'belongsToMany'
+		? 'many'
+		: 'one';
+}
+
 function unsafeBindingRelationReason(
 	intent: QueryIntent,
 	ctx: CompilerContext,
@@ -223,6 +245,18 @@ function unsafeBindingRelationReason(
 	return undefined;
 }
 
+function findDirectSourceProjection(
+	sourceTable: string,
+	sourceColumn: string,
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+): NqlBindingColumnLineage | undefined {
+	return directProjectionLineage.find(
+		(projection) =>
+			projection.sourceTable === sourceTable &&
+			columnsMatch(projection.sourceColumn, sourceColumn),
+	);
+}
+
 function virtualRelationForBinding(
 	relation: ReturnType<
 		NonNullable<CompilerContext['validator']>['getRelation']
@@ -233,10 +267,10 @@ function virtualRelationForBinding(
 	const fkColumns = relationForeignKeysOnSource(relation);
 	if (!relation || !fkColumns || fkColumns.length !== 1) return undefined;
 	const fkColumn = fkColumns[0]!;
-	const sourceProjection = directProjectionLineage.find(
-		(projection) =>
-			projection.sourceTable === sourceTable &&
-			columnsMatch(projection.sourceColumn, fkColumn),
+	const sourceProjection = findDirectSourceProjection(
+		sourceTable,
+		fkColumn,
+		directProjectionLineage,
 	);
 	if (!sourceProjection) return undefined;
 	return {
@@ -245,6 +279,45 @@ function virtualRelationForBinding(
 		targetTable: relation.target,
 		sourceColumn: sourceProjection.outputColumn,
 		targetColumn: relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN,
+		cardinality: 'one',
+	};
+}
+
+function scalarVirtualRelationForBinding(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+	sourceTable: string,
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+): NqlBindingVirtualRelation | undefined {
+	if (!relation) return undefined;
+	if (relation.type !== 'belongsTo' && relation.type !== 'hasOne') {
+		return undefined;
+	}
+	const fkColumns = relationForeignKeys(relation);
+	if (!fkColumns || fkColumns.length !== 1) return undefined;
+	const fkColumn = fkColumns[0]!;
+	const sourceJoinColumn =
+		relation.type === 'belongsTo'
+			? fkColumn
+			: (relation.sourceKey ?? DEFAULT_RELATION_TARGET_COLUMN);
+	const targetJoinColumn =
+		relation.type === 'belongsTo'
+			? (relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN)
+			: fkColumn;
+	const sourceProjection = findDirectSourceProjection(
+		sourceTable,
+		sourceJoinColumn,
+		directProjectionLineage,
+	);
+	if (!sourceProjection) return undefined;
+	return {
+		relation: relation.name,
+		sourceTable,
+		targetTable: relation.target,
+		sourceColumn: sourceProjection.outputColumn,
+		targetColumn: targetJoinColumn,
+		cardinality: relationCardinality(relation),
 	};
 }
 
@@ -272,6 +345,7 @@ function getBindingRelationFilterMetadata(
 	}
 	const sourceTable = intent.from;
 	const relations: NqlBindingVirtualRelation[] = [];
+	const scalarRelations: NqlBindingVirtualRelation[] = [];
 	const relationNames = new Set(
 		ctx.validator
 			?.getRelationsFrom(sourceTable)
@@ -285,11 +359,18 @@ function getBindingRelationFilterMetadata(
 			outputSchema.directProjectionLineage ?? [],
 		);
 		if (virtualRelation) relations.push(virtualRelation);
+		const scalarRelation = scalarVirtualRelationForBinding(
+			relation,
+			sourceTable,
+			outputSchema.directProjectionLineage ?? [],
+		);
+		if (scalarRelation) scalarRelations.push(scalarRelation);
 	}
 	return {
 		sourceTable,
 		directProjectionLineage: outputSchema.directProjectionLineage,
 		relations,
+		scalarRelations,
 	};
 }
 
@@ -569,11 +650,11 @@ function validateBindingFinalSelectClause(
 							firstSegment,
 						);
 					} else {
-						assertNoBindingRelationConstruct(
+						resolveBindingRelationColumn(
 							ctx,
 							bindingName,
-							'select relation columns',
-							segments.slice(0, -1).join('.'),
+							segments.slice(0, -1),
+							segments.at(-1)!,
 						);
 					}
 				} else {
@@ -820,7 +901,7 @@ function compileQueryInternal(
 	}
 
 	// Auto-generate includes from relation paths in SELECT
-	if (select && select.type === 'expressions') {
+	if (select && select.type === 'expressions' && !isBindingSource) {
 		const relationPaths = new Set<string>();
 		for (const expr of select.columns) {
 			if (expr.kind === 'relationColumn') {

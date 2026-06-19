@@ -223,6 +223,17 @@ function throwBindingRelationFilter182(
 	);
 }
 
+function throwBindingRelationColumn182(
+	bindingName: string,
+	relationName: string,
+	reason: string,
+): never {
+	throw new NqlSemanticException(
+		NqlErrorCodes.SEM_INVALID_SYNTAX,
+		`Query '${bindingName}' reads from an NQL binding and cannot select relation column '${relationName}' under A-full (ref-#182): ${reason}.`,
+	);
+}
+
 export function resolveBindingRelationFilter(
 	ctx: CompilerContext,
 	bindingName: string | undefined,
@@ -257,6 +268,46 @@ export function resolveBindingRelationFilter(
 			relation,
 		) ?? 'model metadata is not available';
 	throwBindingRelationFilter182(actualBindingName, relation, reason);
+}
+
+export function resolveBindingRelationColumn(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	relationPath: readonly string[],
+	selectedColumn: string,
+): NqlBindingVirtualRelation | undefined {
+	if (!isBindingTable(ctx, bindingName)) return undefined;
+	const actualBindingName = bindingName as string;
+	const relationName = relationPath.join('.');
+	if (relationPath.length !== 1) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			'multi-hop binding relation columns are not supported; the relation path must be a single source-table relation',
+		);
+	}
+	const relation = relationPath[0];
+	if (!relation) {
+		throwBindingRelationColumn182(
+			actualBindingName,
+			relationName,
+			'the relation path must name a source-table relation',
+		);
+	}
+	const virtualRelation = ctx.validator?.getVirtualBindingScalarRelation(
+		actualBindingName,
+		relation,
+	);
+	if (!virtualRelation) {
+		const reason =
+			ctx.validator?.explainVirtualBindingScalarRelationRejection(
+				actualBindingName,
+				relation,
+			) ?? 'model metadata is not available';
+		throwBindingRelationColumn182(actualBindingName, relation, reason);
+	}
+	ctx.validator?.validateColumn(virtualRelation.targetTable, selectedColumn);
+	return virtualRelation;
 }
 
 export function assertNoBindingRelationPath(

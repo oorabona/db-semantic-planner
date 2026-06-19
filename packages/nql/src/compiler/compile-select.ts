@@ -22,6 +22,7 @@ import {
 	type SelectIntent,
 	type WindowFunction,
 } from '@dbsp/types';
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlCaseExpression,
@@ -43,6 +44,7 @@ import {
 	expressionToSql,
 	expressionToValue,
 	isAggregateFunction,
+	resolveBindingRelationColumn,
 	resolveIntegerCount,
 	validateColumnForTable,
 } from './expression-utils.js';
@@ -658,27 +660,46 @@ function compileMultiSegmentPath(
 	// Regular relation path (e.g., customer.name)
 	const column = segments[segments.length - 1]!;
 	const relation = segments.slice(0, -1).join('.');
-	assertNoBindingRelationConstruct(
+	const bindingRelation = resolveBindingRelationColumn(
 		ctx,
 		ctx.currentFromTable,
-		'select relation columns',
-		relation,
+		segments.slice(0, -1),
+		column,
 	);
-	if (ctx.currentFromTable && ctx.validator) {
-		const targetTable = ctx.validator.resolveRelationTarget(
+	if (!bindingRelation) {
+		assertNoBindingRelationConstruct(
+			ctx,
 			ctx.currentFromTable,
-			segments[0]!,
+			'select relation columns',
+			relation,
 		);
+	}
+	if (ctx.currentFromTable && ctx.validator) {
+		const targetTable =
+			bindingRelation?.targetTable ??
+			ctx.validator.resolveRelationTarget(ctx.currentFromTable, segments[0]!);
 		if (targetTable) {
 			ctx.validator.validateColumn(targetTable, column);
 		}
 	}
-	return {
+	const relationColumnIntent: ExpressionIntent = {
 		kind: 'relationColumn',
 		relation,
 		column,
 		as: item.alias ?? `${relation}.${column}`,
 	};
+	return bindingRelation
+		? markNqlTrustedRelationFilter(relationColumnIntent, {
+				relation: bindingRelation.relation,
+				targetTable: bindingRelation.targetTable,
+				sourceColumn: bindingRelation.sourceColumn,
+				targetColumn: bindingRelation.targetColumn,
+				selectedColumn: column,
+				...(bindingRelation.cardinality !== undefined && {
+					cardinality: bindingRelation.cardinality,
+				}),
+			})
+		: relationColumnIntent;
 }
 
 /**
