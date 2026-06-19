@@ -5,6 +5,13 @@
  */
 import type { PlanReport } from '../planner.js';
 
+function isRootIncludeDecision(
+	decision: PlanReport['decisions'][number],
+): boolean {
+	const intentPath = decision.context.intentPath;
+	return typeof intentPath !== 'string' || !intentPath.includes('.include[');
+}
+
 /**
  * Hydrate json_agg include columns in query results.
  *
@@ -16,9 +23,13 @@ export function hydrateJsonAggIncludes<T>(
 	results: T[],
 	planReport: PlanReport,
 ): void {
-	// Find all json_agg include decisions
+	// Find root json_agg include decisions. Nested json_agg decisions are emitted
+	// inside the root JSON payload and do not produce top-level *_json columns.
 	const jsonAggDecisions = planReport.decisions.filter(
-		(d) => d.type === 'include-strategy' && d.choice === 'json_agg',
+		(d) =>
+			d.type === 'include-strategy' &&
+			d.choice === 'json_agg' &&
+			isRootIncludeDecision(d),
 	);
 
 	if (jsonAggDecisions.length === 0) {

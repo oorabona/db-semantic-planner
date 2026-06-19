@@ -420,6 +420,52 @@ describe('hydrateJsonAggIncludes', () => {
 		});
 	});
 
+	it('preserves top-level columns that collide with nested json_agg decisions', () => {
+		const results = [
+			{
+				id: 1,
+				post_comments_json: '{"owned":true}',
+				author_posts_json:
+					'[{"id":10,"post_comments":[{"id":100,"content":"Nice"}]}]',
+			},
+		];
+		const report = makePlanReport([
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: {
+					relation: 'author_posts',
+					includeAlias: 'author_posts',
+					relationType: 'hasMany',
+					intentPath: 'include[0]',
+				},
+			},
+			{
+				type: 'include-strategy',
+				choice: 'json_agg',
+				context: {
+					relation: 'post_comments',
+					includeAlias: 'post_comments',
+					relationType: 'hasMany',
+					intentPath: 'include[0].include[0]',
+				},
+			},
+		]);
+		hydrateJsonAggIncludes(results, report);
+		expect(results[0]).toEqual({
+			id: 1,
+			post_comments_json: '{"owned":true}',
+			author_posts: [
+				{
+					id: 10,
+					post_comments: [{ id: 100, content: 'Nice' }],
+				},
+			],
+		});
+		expect(results[0]).not.toHaveProperty('author_posts_json');
+		expect(results[0]).not.toHaveProperty('post_comments');
+	});
+
 	it('does not modify rows when column name is not found in record', () => {
 		const results = [{ id: 1, unrelated_col: 'x' }];
 		const report = makePlanReport([

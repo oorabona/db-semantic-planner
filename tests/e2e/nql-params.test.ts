@@ -322,6 +322,66 @@ projected_authors
 		expect(rows[0]).not.toHaveProperty('author_posts_json');
 	});
 
+	it('executes binding-final multi-level hasMany includes as nested arrays', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const emptyAuthorId = 920_011;
+		const noCommentPostId = 920_012;
+
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${emptyAuthorId}, ${'No Nested Posts'}, ${'no-nested-posts@example.com'})
+		`.execute(pool);
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts
+				(id, title, content, author_id, published, created_at)
+			VALUES
+				(${noCommentPostId}, ${'No Comment Post'}, ${'no comments'}, ${1}, ${true}, NOW())
+		`.execute(pool);
+
+		const query = orm.nql<{
+			id: number;
+			name: string;
+			author_posts: Array<{
+				id: number;
+				title: string;
+				authorId: number;
+				post_comments: Array<{ id: number; postId: number; content: string }>;
+			}>;
+		}>`authors
+			| where id = ${1} or id = ${emptyAuthorId}
+			| select id, name
+			| bind projected_authors
+projected_authors
+			| select *, author_posts.post_comments.*`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
+		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
+		expect(dump.sql).toContain('jsonb_build_object');
+		expect(dump.sql).toContain('AS author_posts_json');
+		expect(
+			dump.plan.decisions.map((decision) => decision.context.intentPath),
+		).toEqual(['include[0]', 'include[0].include[0]']);
+
+		const alice = rows.find((row) => row.id === 1);
+		expect(alice?.author_posts).toEqual(expect.any(Array));
+		const postOne = alice?.author_posts.find((post) => post.id === 1);
+		expect(postOne?.post_comments.map((comment) => comment.id).sort()).toEqual([
+			1, 2, 3, 9,
+		]);
+		const noCommentPost = alice?.author_posts.find(
+			(post) => post.id === noCommentPostId,
+		);
+		expect(noCommentPost?.post_comments).toEqual([]);
+		expect(rows.find((row) => row.id === emptyAuthorId)?.author_posts).toEqual(
+			[],
+		);
+		expect(rows[0]).not.toHaveProperty('author_posts_json');
+	});
+
 	it('executes binding-final belongsTo includes as nested objects and nulls', async () => {
 		const pool = await getTestPool();
 		const adapter = await getTestAdapter();

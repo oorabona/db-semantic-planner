@@ -1,9 +1,60 @@
 import { describe, expect, it } from 'vitest';
 import {
+	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
 	hasNqlTrustedRelationFilterProof,
 	markNqlTrustedRelationFilter,
 } from './internal.js';
+
+describe('NQL binding include hop allowlist', () => {
+	const supportedRelation = {
+		type: 'hasMany',
+		foreignKey: 'authorId',
+		source: 'users',
+		target: 'posts',
+	} as const;
+
+	it('accepts only supported relation metadata and relation/include node keys', () => {
+		expect(
+			explainUnsupportedNqlBindingIncludeHop('posts', supportedRelation, {
+				relation: 'posts',
+				include: [{ relation: 'comments' }],
+			}),
+		).toBeUndefined();
+	});
+
+	it('rejects unknown include-node fields by default', () => {
+		expect(
+			explainUnsupportedNqlBindingIncludeHop('posts', supportedRelation, {
+				relation: 'posts',
+				select: { type: 'all' },
+			}),
+		).toContain("unsupported option 'select'");
+	});
+
+	it('rejects future relation kinds by default', () => {
+		expect(
+			explainUnsupportedNqlBindingIncludeHop('posts', {
+				type: 'newRelationKind' as never,
+				foreignKey: 'authorId',
+				source: 'users',
+				target: 'posts',
+			}),
+		).toContain('belongsTo/hasOne/hasMany');
+	});
+
+	it('rejects recursive self-referential relations', () => {
+		expect(
+			explainUnsupportedNqlBindingIncludeHop('children', {
+				type: 'hasMany',
+				foreignKey: 'parentId',
+				source: 'categories',
+				target: 'categories',
+				recursive: { direction: 'descendants' },
+			}),
+		).toContain('ref-#193');
+	});
+});
 
 describe('NQL trusted relation-filter proof', () => {
 	it('freezes and validates relationType in the trusted payload', () => {

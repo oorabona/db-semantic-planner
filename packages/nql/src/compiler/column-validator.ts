@@ -7,6 +7,10 @@ import type {
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
+import {
+	explainUnsupportedNqlBindingIncludeHop,
+	type NqlBindingIncludeRelationShape,
+} from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
 import type {
 	ColumnValidatorRelation,
@@ -119,15 +123,31 @@ export class ColumnValidator {
 			?.scalarRelations?.find((relation) => relation.relation === relationName);
 	}
 
+	private static virtualRelationIncludeShape(
+		relation: NqlBindingVirtualRelation,
+	): NqlBindingIncludeRelationShape {
+		const relationType = relation.relationType;
+		const foreignKey =
+			relationType === 'belongsTo'
+				? relation.sourceColumn
+				: relation.targetColumn;
+		return {
+			type: relationType,
+			foreignKey,
+			source: relation.sourceTable,
+			target: relation.targetTable,
+		};
+	}
+
 	resolveVirtualBindingScalarRelationForInclude(
 		bindingName: string,
 		relationPath: readonly string[],
 	): NqlBindingVirtualRelation {
 		const relationName = relationPath.join('.');
-		if (relationPath.length !== 1) {
+		if (relationPath.length < 1) {
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,
-				`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): multi-level binding includes are not supported; the relation path must be a single source-table relation.`,
+				`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): the relation path must name a source-table relation.`,
 			);
 		}
 		const relation = relationPath[0];
@@ -141,7 +161,52 @@ export class ColumnValidator {
 			bindingName,
 			relation,
 		);
-		if (virtualRelation) return virtualRelation;
+		if (virtualRelation) {
+			const resolvedFirstHop =
+				this.getRelation(virtualRelation.sourceTable, relation) ??
+				ColumnValidator.virtualRelationIncludeShape(virtualRelation);
+			const unsupportedFirstHopReason = explainUnsupportedNqlBindingIncludeHop(
+				relation,
+				resolvedFirstHop,
+				{ relation },
+			);
+			if (unsupportedFirstHopReason) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): ${unsupportedFirstHopReason}.`,
+				);
+			}
+			let sourceTable = virtualRelation.targetTable;
+			for (let i = 1; i < relationPath.length; i++) {
+				const tailRelation = relationPath[i];
+				if (!tailRelation) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): relation path segment ${i + 1} is empty.`,
+					);
+				}
+				const resolvedTail = this.getRelation(sourceTable, tailRelation);
+				if (!resolvedTail) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): tail relation '${tailRelation}' is not declared on table '${sourceTable}'.`,
+					);
+				}
+				const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+					tailRelation,
+					resolvedTail,
+					{ relation: tailRelation },
+				);
+				if (unsupportedReason) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`Query '${bindingName}' reads from an NQL binding and cannot use relation include '${relationName}' (ref-#192): tail ${unsupportedReason}.`,
+					);
+				}
+				sourceTable = resolvedTail.target;
+			}
+			return virtualRelation;
+		}
 		const reason = this.explainVirtualBindingScalarRelationRejection(
 			bindingName,
 			relation,
@@ -212,26 +277,15 @@ export class ColumnValidator {
 		if (!relation) {
 			return `relation '${relationName}' is not declared on source table '${sourceTable}'`;
 		}
+		const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
+			relationName,
+			relation,
+		);
+		if (unsupportedReason) return unsupportedReason;
 		const fk = relation.foreignKey;
 		const fkColumns =
 			typeof fk === 'string' ? [fk] : Array.isArray(fk) ? [...fk] : [];
-		if (relation.type === 'belongsToMany') {
-			return `relation '${relationName}' is 'belongsToMany'; binding relation columns for many-to-many relations need junction traversal and are not yet supported (ref-#192)`;
-		}
-		if (
-			relation.type !== 'belongsTo' &&
-			relation.type !== 'hasOne' &&
-			relation.type !== 'hasMany'
-		) {
-			return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding relation columns require a belongsTo/hasOne/hasMany relation`;
-		}
-		if (fkColumns.length !== 1) {
-			return `relation '${relationName}' must have exactly one FK column for binding relation columns; composite FK relation columns are not yet supported (ref-#179)`;
-		}
-		const fkColumn = fkColumns[0];
-		if (fkColumn === undefined) {
-			return `relation '${relationName}' must have exactly one FK column for binding relation columns; composite FK relation columns are not yet supported (ref-#179)`;
-		}
+		const fkColumn = fkColumns[0]!;
 		const sourceColumn =
 			relation.type === 'belongsTo' ? fkColumn : (relation.sourceKey ?? 'id');
 		const directProjection = metadata.directProjectionLineage?.find(

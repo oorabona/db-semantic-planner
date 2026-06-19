@@ -929,14 +929,15 @@ function compileQueryInternal(
 		if (relationPaths.size > 0) {
 			if (isBindingSource) {
 				for (const relation of relationPaths) {
-					if (relation.includes('.')) {
-						throw new NqlSemanticException(
-							NqlErrorCodes.SEM_INVALID_SYNTAX,
-							`Query '${query.table}' reads from an NQL binding and cannot use relation include '${relation}' (ref-#192): multi-level binding includes are not supported; the relation path must be a single source-table relation.`,
-						);
-					}
-					if (!allIncludes.some((existing) => existing.relation === relation)) {
-						allIncludes.push({ relation });
+					resolveBindingRelationInclude(ctx, query.table, relation.split('.'));
+				}
+				const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
+				for (const inc of nestedIncludes) {
+					const exists = allIncludes.some(
+						(existing) => existing.relation === inc.relation,
+					);
+					if (!exists) {
+						allIncludes.push(inc);
 					}
 				}
 			} else {

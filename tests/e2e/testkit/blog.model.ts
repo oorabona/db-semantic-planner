@@ -16,9 +16,9 @@ import { ref, schema } from '@dbsp/core';
  * - comments
  *
  * Relations (auto-inferred from ref()):
- * - authors.authorId_posts (hasMany)
+ * - authors.author_posts (hasMany)
  * - posts.author (belongsTo)
- * - posts.postId_comments (hasMany)
+ * - posts.post_comments (hasMany)
  * - comments.post (belongsTo)
  */
 export const blogSchema = schema({
