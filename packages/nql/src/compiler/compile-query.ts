@@ -39,6 +39,11 @@ import type {
 	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
+import {
+	DEFAULT_RELATION_TARGET_COLUMN,
+	relationCardinality,
+	scalarRelationJoinColumns,
+} from './binding-relation-utils.js';
 import { resolveBindingsInWhere } from './compile-mutation.js';
 import {
 	assertNoBindingRelationConstruct,
@@ -64,8 +69,6 @@ const PORTABLE_BINDING_FINAL_FUNCTIONS: ReadonlySet<string> = new Set([
 	...NQL_SELECT_AGGREGATE_FUNCTIONS,
 	...NQL_SELECT_VALUE_FUNCTIONS,
 ]);
-
-const DEFAULT_RELATION_TARGET_COLUMN = 'id';
 
 /**
  * Compile a nested query without leaking the nested query's mutable context
@@ -191,27 +194,6 @@ function relationForeignKeysOnSource(
 	return undefined;
 }
 
-function relationForeignKeys(
-	relation: ReturnType<
-		NonNullable<CompilerContext['validator']>['getRelation']
-	>,
-): readonly string[] | undefined {
-	if (!relation) return undefined;
-	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
-	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
-	return undefined;
-}
-
-function relationCardinality(
-	relation: ReturnType<
-		NonNullable<CompilerContext['validator']>['getRelation']
-	>,
-): 'one' | 'many' {
-	return relation?.type === 'hasMany' || relation?.type === 'belongsToMany'
-		? 'many'
-		: 'one';
-}
-
 function unsafeBindingRelationReason(
 	intent: QueryIntent,
 	ctx: CompilerContext,
@@ -279,6 +261,7 @@ function virtualRelationForBinding(
 		targetTable: relation.target,
 		sourceColumn: sourceProjection.outputColumn,
 		targetColumn: relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN,
+		hops: [],
 		cardinality: 'one',
 	};
 }
@@ -298,20 +281,11 @@ function scalarVirtualRelationForBinding(
 	) {
 		return undefined;
 	}
-	const fkColumns = relationForeignKeys(relation);
-	if (fkColumns?.length !== 1) return undefined;
-	const fkColumn = fkColumns[0]!;
-	const sourceJoinColumn =
-		relation.type === 'belongsTo'
-			? fkColumn
-			: (relation.sourceKey ?? DEFAULT_RELATION_TARGET_COLUMN);
-	const targetJoinColumn =
-		relation.type === 'belongsTo'
-			? (relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN)
-			: fkColumn;
+	const joinColumns = scalarRelationJoinColumns(relation);
+	if (!joinColumns) return undefined;
 	const sourceProjection = findDirectSourceProjection(
 		sourceTable,
-		sourceJoinColumn,
+		joinColumns.sourceJoinColumn,
 		directProjectionLineage,
 	);
 	if (!sourceProjection) return undefined;
@@ -320,7 +294,8 @@ function scalarVirtualRelationForBinding(
 		sourceTable,
 		targetTable: relation.target,
 		sourceColumn: sourceProjection.outputColumn,
-		targetColumn: targetJoinColumn,
+		targetColumn: joinColumns.targetJoinColumn,
+		hops: [],
 		cardinality: relationCardinality(relation),
 		relationType: relation.type,
 	};

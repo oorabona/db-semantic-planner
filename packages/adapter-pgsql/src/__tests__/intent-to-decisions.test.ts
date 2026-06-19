@@ -30,6 +30,7 @@ describe('intentToDecisions', () => {
 				targetTable: 'users',
 				sourceColumn: 'authorId',
 				targetColumn: 'id',
+				hops: [],
 			},
 		);
 		relationFilter.relation = 'forgedRoles';

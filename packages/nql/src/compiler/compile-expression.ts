@@ -709,6 +709,7 @@ function compileRelationFilter(
 				targetTable: bindingRelation.targetTable,
 				sourceColumn: bindingRelation.sourceColumn,
 				targetColumn: bindingRelation.targetColumn,
+				hops: bindingRelation.hops,
 				...(bindingRelation.cardinality !== undefined && {
 					cardinality: bindingRelation.cardinality,
 				}),

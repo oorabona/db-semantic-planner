@@ -167,11 +167,19 @@ export function getNqlBindingRefName(ref: NqlBindingRef): string {
 export type NqlTrustedRelationFilterRelation = string | readonly string[];
 
 /** @internal */
+export interface NqlTrustedRelationFilterHop {
+	readonly target: string;
+	readonly fkColumn: string;
+	readonly joinColumn: string;
+}
+
+/** @internal */
 export interface NqlTrustedRelationFilterFields {
 	readonly relation: NqlTrustedRelationFilterRelation;
 	readonly targetTable: string;
 	readonly sourceColumn: string;
 	readonly targetColumn: string;
+	readonly hops: readonly NqlTrustedRelationFilterHop[];
 	readonly selectedColumn?: string;
 	readonly cardinality?: 'one' | 'many';
 	readonly relationType?: RelationType;
@@ -203,6 +211,34 @@ function isRelationType(value: unknown): value is RelationType {
 	);
 }
 
+function isTrustedRelationFilterHop(
+	value: unknown,
+): value is NqlTrustedRelationFilterHop {
+	if (value === null || typeof value !== 'object') {
+		return false;
+	}
+	const record = value as {
+		readonly target?: unknown;
+		readonly fkColumn?: unknown;
+		readonly joinColumn?: unknown;
+	};
+	return (
+		typeof record.target === 'string' &&
+		record.target.length > 0 &&
+		typeof record.fkColumn === 'string' &&
+		record.fkColumn.length > 0 &&
+		typeof record.joinColumn === 'string' &&
+		record.joinColumn.length > 0
+	);
+}
+
+function relationHasMultipleHops(
+	relation: NqlTrustedRelationFilterRelation,
+): boolean {
+	if (typeof relation !== 'string') return relation.length > 1;
+	return relation.split('.').length > 1;
+}
+
 function isTrustedRelationFilterPayload(
 	value: unknown,
 ): value is NqlTrustedRelationFilterFields {
@@ -214,6 +250,7 @@ function isTrustedRelationFilterPayload(
 		readonly targetTable?: unknown;
 		readonly sourceColumn?: unknown;
 		readonly targetColumn?: unknown;
+		readonly hops?: unknown;
 		readonly selectedColumn?: unknown;
 		readonly cardinality?: unknown;
 		readonly relationType?: unknown;
@@ -223,12 +260,21 @@ function isTrustedRelationFilterPayload(
 		typeof record.targetTable === 'string' &&
 		typeof record.sourceColumn === 'string' &&
 		typeof record.targetColumn === 'string' &&
+		Array.isArray(record.hops) &&
+		record.hops.every(isTrustedRelationFilterHop) &&
 		(record.selectedColumn === undefined ||
 			typeof record.selectedColumn === 'string') &&
 		(record.cardinality === undefined ||
 			record.cardinality === 'one' ||
 			record.cardinality === 'many') &&
-		(record.relationType === undefined || isRelationType(record.relationType))
+		(record.relationType === undefined ||
+			isRelationType(record.relationType)) &&
+		!(
+			record.selectedColumn !== undefined &&
+			record.cardinality === 'one' &&
+			relationHasMultipleHops(record.relation) &&
+			record.hops.length === 0
+		)
 	);
 }
 
@@ -238,11 +284,21 @@ function freezeTrustedRelationFilterPayload(
 	const relation = Array.isArray(fields.relation)
 		? Object.freeze([...fields.relation])
 		: fields.relation;
+	const hops = Object.freeze(
+		fields.hops.map((hop) =>
+			Object.freeze({
+				target: hop.target,
+				fkColumn: hop.fkColumn,
+				joinColumn: hop.joinColumn,
+			}),
+		),
+	);
 	return Object.freeze({
 		relation,
 		targetTable: fields.targetTable,
 		sourceColumn: fields.sourceColumn,
 		targetColumn: fields.targetColumn,
+		hops,
 		...(fields.selectedColumn !== undefined && {
 			selectedColumn: fields.selectedColumn,
 		}),

@@ -523,6 +523,7 @@ describe('compileWhereIntent', () => {
 					targetTable: 'users',
 					sourceColumn: 'author',
 					targetColumn: 'id',
+					hops: [],
 				},
 			);
 			relationFilter.relation = 'forgedRoles';
