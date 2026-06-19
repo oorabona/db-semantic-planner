@@ -74,7 +74,7 @@ export interface NqlCompilerOptions {
 export interface CompilerContext {
 	currentFromTable: string | undefined;
 	currentRelationTarget: string | undefined;
-	currentHavingAliases?: ReadonlySet<string>;
+	currentHavingAliases?: ReadonlySet<string> | undefined;
 	readonly pseudoColumnKeywords: ReadonlySet<string>;
 	readonly recursiveKeywords: ReadonlySet<string>;
 	readonly validator: ColumnValidator | null;

@@ -281,6 +281,89 @@ projected_authors
 		]);
 	});
 
+	it('executes binding-final hasMany includes as nested arrays', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const emptyAuthorId = 920_001;
+
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${emptyAuthorId}, ${'No Include Posts'}, ${'no-include-posts@example.com'})
+		`.execute(pool);
+
+		const query = orm.nql<{
+			id: number;
+			name: string;
+			author_posts: Array<{ id: number; title: string; authorId: number }>;
+		}>`authors
+			| where id = ${1} or id = ${emptyAuthorId}
+			| select id, name
+			| bind projected_authors
+projected_authors
+			| select *, author_posts.*
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
+		expect(dump.sql).toContain('json_agg(to_jsonb(__t__))');
+		expect(dump.sql).toContain('AS author_posts_json');
+		const alice = rows.find((row) => row.id === 1);
+		expect(alice?.author_posts).toHaveLength(3);
+		expect(alice?.author_posts.map((post) => post.title).sort()).toEqual([
+			'Advanced TypeScript Patterns',
+			'Draft: React Best Practices',
+			'Getting Started with TypeScript',
+		]);
+		expect(rows.find((row) => row.id === emptyAuthorId)?.author_posts).toEqual(
+			[],
+		);
+		expect(rows[0]).not.toHaveProperty('author_posts_json');
+	});
+
+	it('executes binding-final belongsTo includes as nested objects and nulls', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const nullAuthorPostId = 920_101;
+
+		await sql`
+			ALTER TABLE ${sql.ref(SCHEMA)}.posts
+			ALTER COLUMN author_id DROP NOT NULL
+		`.execute(pool);
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts
+				(id, title, content, author_id, published, created_at)
+			VALUES
+				(${nullAuthorPostId}, ${'No Author Include'}, ${'orphan'}, ${null}, ${false}, NOW())
+		`.execute(pool);
+
+		const rows = await orm.nql<{
+			id: number;
+			authorId: number | null;
+			author: { id: number; name: string } | null;
+		}>`posts
+			| where id = ${1} or id = ${nullAuthorPostId}
+			| select id, authorId
+			| bind projected_posts
+projected_posts
+			| select *, author.*
+			| order by id`.all();
+
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.author).toMatchObject({
+			id: 1,
+			name: 'Alice Johnson',
+		});
+		expect(rows[1]).toEqual({
+			id: nullAuthorPostId,
+			authorId: null,
+			author: null,
+		});
+		expect(rows[0]).not.toHaveProperty('author_json');
+	});
+
 	it('executes mutation binding bodies before the final query', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

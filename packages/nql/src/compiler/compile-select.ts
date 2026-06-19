@@ -44,6 +44,7 @@ import {
 	expressionToSql,
 	expressionToValue,
 	isAggregateFunction,
+	isBindingTable,
 	resolveBindingRelationColumn,
 	resolveIntegerCount,
 	validateColumnForTable,
@@ -101,6 +102,25 @@ const SELECT_SCALAR_FUNCTION_NAMES: ReadonlySet<string> = new Set([
 	...NQL_SELECT_JSON_FUNCTIONS,
 	...NQL_SELECT_SCALAR_FUNCTIONS,
 ]);
+
+function resolveBindingRelationInclude(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	relationPath: readonly string[],
+): boolean {
+	if (!isBindingTable(ctx, bindingName)) return false;
+	if (!bindingName || !ctx.validator) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Query '${bindingName ?? '<unknown>'}' reads from an NQL binding and cannot use relation include '${relationPath.join('.')}' (ref-#192): model metadata is not available.`,
+		);
+	}
+	ctx.validator.resolveVirtualBindingScalarRelationForInclude(
+		bindingName,
+		relationPath,
+	);
+	return true;
+}
 
 function validateSelectPathExpression(
 	expr: NqlPathExpression,
@@ -183,12 +203,16 @@ export function compileSelectClause(
 			// relation.* → use relationColumn with '*' as column
 			hasExpressions = true;
 			const relation = item.relation.join('.');
-			assertNoBindingRelationConstruct(
-				ctx,
-				ctx.currentFromTable,
-				'select relation columns',
-				relation,
-			);
+			if (
+				!resolveBindingRelationInclude(ctx, ctx.currentFromTable, item.relation)
+			) {
+				assertNoBindingRelationConstruct(
+					ctx,
+					ctx.currentFromTable,
+					'select relation columns',
+					relation,
+				);
+			}
 			expressions.push({
 				kind: 'relationColumn',
 				relation,

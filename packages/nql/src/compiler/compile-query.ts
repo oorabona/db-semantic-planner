@@ -329,13 +329,11 @@ function scalarVirtualRelationForBinding(
 function getBindingRelationFilterMetadata(
 	intent: QueryIntent,
 	ctx: CompilerContext,
-	outputSchema: Pick<
-		NqlBindingRelationFilterMetadata,
-		'directProjectionLineage'
-	> &
-		Pick<NqlBindingOutputSchema, 'columns'>,
+	outputSchema: Pick<NqlBindingOutputSchema, 'columns'> & {
+		readonly directProjectionLineage: readonly NqlBindingColumnLineage[];
+	},
 	bindingDependencies: readonly string[],
-): NqlBindingRelationFilterMetadata | undefined {
+): NqlBindingRelationFilterMetadata {
 	const unsafeReason = unsafeBindingRelationReason(
 		intent,
 		ctx,
@@ -408,6 +406,24 @@ function validateBindingFinalPath(
 	}
 
 	assertNoBindingRelationPath(ctx, bindingName, segments.join('.'));
+}
+
+function resolveBindingRelationInclude(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	relationPath: readonly string[],
+): NqlBindingVirtualRelation | undefined {
+	if (!isBindingTable(ctx, bindingName)) return undefined;
+	if (!bindingName || !ctx.validator) {
+		throw new NqlSemanticException(
+			NqlErrorCodes.SEM_INVALID_SYNTAX,
+			`Query '${bindingName ?? '<unknown>'}' reads from an NQL binding and cannot use relation include '${relationPath.join('.')}' (ref-#192): model metadata is not available.`,
+		);
+	}
+	return ctx.validator.resolveVirtualBindingScalarRelationForInclude(
+		bindingName,
+		relationPath,
+	);
 }
 
 function validateBindingFinalFunction(
@@ -633,12 +649,7 @@ function validateBindingFinalSelectClause(
 			case 'star':
 				break;
 			case 'relationStar':
-				assertNoBindingRelationConstruct(
-					ctx,
-					bindingName,
-					'select relation columns',
-					item.relation.join('.'),
-				);
+				resolveBindingRelationInclude(ctx, bindingName, item.relation);
 				break;
 			case 'expression':
 				if (
@@ -906,21 +917,37 @@ function compileQueryInternal(
 	}
 
 	// Auto-generate includes from relation paths in SELECT
-	if (select && select.type === 'expressions' && !isBindingSource) {
+	if (select && select.type === 'expressions') {
 		const relationPaths = new Set<string>();
 		for (const expr of select.columns) {
 			if (expr.kind === 'relationColumn') {
-				relationPaths.add(expr.relation);
+				if (!isBindingSource || expr.column === '*') {
+					relationPaths.add(expr.relation);
+				}
 			}
 		}
 		if (relationPaths.size > 0) {
-			const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
-			for (const inc of nestedIncludes) {
-				const exists = allIncludes.some(
-					(existing) => existing.relation === inc.relation,
-				);
-				if (!exists) {
-					allIncludes.push(inc);
+			if (isBindingSource) {
+				for (const relation of relationPaths) {
+					if (relation.includes('.')) {
+						throw new NqlSemanticException(
+							NqlErrorCodes.SEM_INVALID_SYNTAX,
+							`Query '${query.table}' reads from an NQL binding and cannot use relation include '${relation}' (ref-#192): multi-level binding includes are not supported; the relation path must be a single source-table relation.`,
+						);
+					}
+					if (!allIncludes.some((existing) => existing.relation === relation)) {
+						allIncludes.push({ relation });
+					}
+				}
+			} else {
+				const nestedIncludes = buildNestedIncludes(relationPaths, flatMode);
+				for (const inc of nestedIncludes) {
+					const exists = allIncludes.some(
+						(existing) => existing.relation === inc.relation,
+					);
+					if (!exists) {
+						allIncludes.push(inc);
+					}
 				}
 			}
 		}

@@ -1015,6 +1015,13 @@ export class PlanCompiler {
 			this.defaultPk,
 			this.deriveFk,
 		);
+		if (handlerDecision.strategy === 'json_agg') {
+			assertDialectCapability(
+				this.dialectCapabilities,
+				'supportsJsonAgg',
+				'JSON aggregation for relation includes',
+			);
+		}
 
 		const handler = getIncludeHandler(
 			handlerDecision.strategy as 'json_agg' | 'join' | 'lateral' | 'cte',

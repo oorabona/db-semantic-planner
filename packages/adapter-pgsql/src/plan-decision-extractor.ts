@@ -1651,6 +1651,7 @@ function toIncludeDecision(
 
 	const foreignKey =
 		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
+	const parentKey = context.parentKey ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -1695,7 +1696,7 @@ function toIncludeDecision(
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: defaultPk,
+		parentKey,
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
 	};
@@ -1756,6 +1757,7 @@ function toJoinIncludeDecision(
 
 	const foreignKey =
 		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
+	const parentKey = context.parentKey ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -1793,7 +1795,7 @@ function toJoinIncludeDecision(
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: defaultPk,
+		parentKey,
 		columns,
 		...(joinType && { joinType }),
 		...(conditions && { conditions }),
@@ -1972,6 +1974,7 @@ function toJsonAggDecision(
 
 	const foreignKey =
 		deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
+	const parentKey = context.parentKey ?? defaultPk;
 	const relationType = context.relationType as
 		| 'belongsTo'
 		| 'hasMany'
@@ -1985,7 +1988,7 @@ function toJsonAggDecision(
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
 		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-		parentKey: defaultPk,
+		parentKey,
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
 }
@@ -2110,6 +2113,7 @@ export function extractLeftJoinIncludeDecisions(
 
 		const foreignKey =
 			deriveForeignKey(context, deriveFk, defaultPk) ?? defaultPk;
+		const parentKey = context.parentKey ?? defaultPk;
 		const relationType = context.relationType as
 			| 'belongsTo'
 			| 'hasMany'
@@ -2122,7 +2126,7 @@ export function extractLeftJoinIncludeDecisions(
 			targetTable: context.target,
 			...(relationType && { relationType }),
 			foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
-			parentKey: defaultPk,
+			parentKey,
 			columns,
 		});
 	}
