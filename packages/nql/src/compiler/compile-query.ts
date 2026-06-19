@@ -185,7 +185,7 @@ function relationForeignKeysOnSource(
 		NonNullable<CompilerContext['validator']>['getRelation']
 	>,
 ): readonly string[] | undefined {
-	if (!relation || relation.type !== 'belongsTo') return undefined;
+	if (relation?.type !== 'belongsTo') return undefined;
 	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
 	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
 	return undefined;
@@ -291,11 +291,15 @@ function scalarVirtualRelationForBinding(
 	directProjectionLineage: readonly NqlBindingColumnLineage[],
 ): NqlBindingVirtualRelation | undefined {
 	if (!relation) return undefined;
-	if (relation.type !== 'belongsTo' && relation.type !== 'hasOne') {
+	if (
+		relation.type !== 'belongsTo' &&
+		relation.type !== 'hasOne' &&
+		relation.type !== 'hasMany'
+	) {
 		return undefined;
 	}
 	const fkColumns = relationForeignKeys(relation);
-	if (!fkColumns || fkColumns.length !== 1) return undefined;
+	if (fkColumns?.length !== 1) return undefined;
 	const fkColumn = fkColumns[0]!;
 	const sourceJoinColumn =
 		relation.type === 'belongsTo'
@@ -318,6 +322,7 @@ function scalarVirtualRelationForBinding(
 		sourceColumn: sourceProjection.outputColumn,
 		targetColumn: targetJoinColumn,
 		cardinality: relationCardinality(relation),
+		relationType: relation.type,
 	};
 }
 

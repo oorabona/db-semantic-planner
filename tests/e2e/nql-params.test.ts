@@ -205,6 +205,82 @@ projected_posts
 		]);
 	});
 
+	it('executes binding-final hasMany relation columns as deterministic JSON arrays', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const emptyAuthorId = 900_001;
+
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${emptyAuthorId}, ${'No Posts'}, ${'no-posts@example.com'})
+		`.execute(pool);
+
+		const query = orm.nql<{ id: number; titles: string[] }>`authors
+			| select id
+			| bind projected_authors
+projected_authors
+			| select id, author_posts.title as titles
+			| order by id`;
+		const dump = query.dump();
+		const rows = await query.all();
+
+		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
+		expect(dump.sql).toContain('COALESCE(json_agg');
+		expect(dump.sql).toContain('ORDER BY');
+		expect(dump.sql).toContain('NULLS LAST');
+		expect(dump.sql).not.toMatch(/\bJOIN\s+"?posts"?/i);
+		expect(rows.find((row) => row.id === 1)?.titles).toEqual([
+			'Advanced TypeScript Patterns',
+			'Draft: React Best Practices',
+			'Getting Started with TypeScript',
+		]);
+		expect(rows.find((row) => row.id === 2)?.titles).toEqual([
+			'Draft: Database Optimization',
+			'Introduction to PostgreSQL',
+		]);
+		expect(rows.find((row) => row.id === emptyAuthorId)?.titles).toEqual([]);
+	});
+
+	it('keeps null elements and duplicate values in binding-final hasMany arrays', async () => {
+		const pool = await getTestPool();
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+		const authorId = 900_002;
+
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.authors (id, name, email)
+			VALUES (${authorId}, ${'Nullable Posts'}, ${'nullable-posts@example.com'})
+		`.execute(pool);
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES
+				(${910_001}, ${'Null content'}, ${null}, ${authorId}, ${true}),
+				(${910_002}, ${'Duplicate content A'}, ${'repeat'}, ${authorId}, ${true}),
+				(${910_003}, ${'Duplicate content B'}, ${'repeat'}, ${authorId}, ${false})
+		`.execute(pool);
+
+		const rows = await orm.nql<{
+			id: number;
+			contents: Array<string | null>;
+		}>`authors
+			| where id = ${authorId}
+			| select id
+			| bind projected_authors
+projected_authors
+			| select id, author_posts.content as contents`.all();
+
+		// Duplicate content ordering is intentional: deterministic identity/PK ordering
+		// is deferred to #192 increment 2 (include hydration), so this loose array
+		// assertion is not an oversight.
+		expect(rows).toEqual([
+			{
+				id: authorId,
+				contents: ['repeat', 'repeat', null],
+			},
+		]);
+	});
+
 	it('executes mutation binding bodies before the final query', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

@@ -182,15 +182,22 @@ export class ColumnValidator {
 		const fk = relation.foreignKey;
 		const fkColumns =
 			typeof fk === 'string' ? [fk] : Array.isArray(fk) ? [...fk] : [];
-		if (relation.type !== 'belongsTo' && relation.type !== 'hasOne') {
-			return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding relation columns require a scalar belongsTo/hasOne relation`;
+		if (relation.type === 'belongsToMany') {
+			return `relation '${relationName}' is 'belongsToMany'; binding relation columns for many-to-many relations need junction traversal and are not yet supported (ref-#192)`;
+		}
+		if (
+			relation.type !== 'belongsTo' &&
+			relation.type !== 'hasOne' &&
+			relation.type !== 'hasMany'
+		) {
+			return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding relation columns require a belongsTo/hasOne/hasMany relation`;
 		}
 		if (fkColumns.length !== 1) {
-			return `relation '${relationName}' must have exactly one FK column for binding relation columns`;
+			return `relation '${relationName}' must have exactly one FK column for binding relation columns; composite FK relation columns are not yet supported (ref-#179)`;
 		}
 		const fkColumn = fkColumns[0];
 		if (fkColumn === undefined) {
-			return `relation '${relationName}' must have exactly one FK column for binding relation columns`;
+			return `relation '${relationName}' must have exactly one FK column for binding relation columns; composite FK relation columns are not yet supported (ref-#179)`;
 		}
 		const sourceColumn =
 			relation.type === 'belongsTo' ? fkColumn : (relation.sourceKey ?? 'id');

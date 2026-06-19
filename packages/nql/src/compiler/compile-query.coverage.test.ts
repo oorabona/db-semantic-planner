@@ -54,6 +54,9 @@ const schema = {
 					{ name: 'status' },
 				],
 			},
+			tags: {
+				columns: [{ name: 'id' }, { name: 'name' }],
+			},
 			profiles: {
 				columns: [{ name: 'id' }, { name: 'userId' }, { name: 'bio' }],
 			},
@@ -67,7 +70,7 @@ const schema = {
 				name: string;
 				source: string;
 				target: string;
-				type: 'hasMany' | 'hasOne' | 'belongsTo';
+				type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany';
 				foreignKey: string;
 			}[]
 		> = {
@@ -101,6 +104,13 @@ const schema = {
 					target: 'users',
 					type: 'belongsTo',
 					foreignKey: 'authorId',
+				},
+				{
+					name: 'tags',
+					source: 'posts',
+					target: 'tags',
+					type: 'belongsToMany',
+					foreignKey: 'id',
 				},
 			],
 			orders: [],
@@ -756,6 +766,7 @@ projected_posts | select id, author.name`,
 			targetColumn: 'id',
 			selectedColumn: 'name',
 			cardinality: 'one',
+			relationType: 'belongsTo',
 		});
 		expect(Object.isFrozen(payload)).toBe(true);
 		expect(result.ast?.query?.include).toBeUndefined();
@@ -782,20 +793,56 @@ projected_users | select id, profile.bio`,
 			targetColumn: 'userId',
 			selectedColumn: 'bio',
 			cardinality: 'one',
+			relationType: 'hasOne',
 		});
 		expect(result.ast?.query?.include).toBeUndefined();
 	});
 
-	it('rejects binding-final hasMany relation columns as non-scalar', () => {
+	it('allows binding-final hasMany relation columns with a frozen trusted proof', () => {
 		const result = compile(
 			`users | select id | bind projected_users
 projected_users | select posts.title`,
 			schema,
 		);
 
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'posts',
+			column: 'title',
+			as: 'posts.title',
+		});
+		const payload = getTrustedNqlRelationFilterFields(relationColumn);
+		expect(payload).toEqual({
+			relation: 'posts',
+			targetTable: 'posts',
+			sourceColumn: 'id',
+			targetColumn: 'authorId',
+			selectedColumn: 'title',
+			cardinality: 'many',
+			relationType: 'hasMany',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(result.ast?.query?.include).toBeUndefined();
+	});
+
+	it('rejects binding-final belongsToMany relation columns because junction traversal is unsupported', () => {
+		const result = compile(
+			`posts | select id | bind projected_posts
+projected_posts | select tags.name`,
+			schema,
+		);
+
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/ref-#182/);
-		expect(result.errors[0]?.message).toMatch(/scalar belongsTo\/hasOne/);
+		expect(result.errors[0]?.message).toMatch(/belongsToMany/);
+		expect(result.errors[0]?.message).toMatch(/junction/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 	});
 
 	it('rejects binding-final relationStar columns', () => {
@@ -868,6 +915,42 @@ projected_posts | select author.name`,
 
 		expect(result.success).toBe(false);
 		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+	});
+
+	it('rejects binding-final hasMany relation columns for composite FK relations', () => {
+		const compositeSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'users')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'posts',
+						source: 'users',
+						target: 'posts',
+						type: 'hasMany' as const,
+						foreignKey: ['authorId', 'tenantId'],
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`users | select id | bind projected_users
+projected_users | select posts.title`,
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/exactly one FK column/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
 	});
 
 	it('rejects binding-final relation columns when the binding body used relation includes', () => {
@@ -1104,16 +1187,26 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 	});
 
-	it('rejects relation columns from a bind source that projected SELECT * (ref #182)', () => {
+	it('allows hasMany relation columns from a bind source that projected SELECT *', () => {
 		const result = compile(
 			'users | select * | bind all_users\nall_users | select posts.title',
 			schema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(
-			/all_users.*cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
-		);
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'posts',
+			sourceColumn: 'id',
+			targetColumn: 'authorId',
+			cardinality: 'many',
+			relationType: 'hasMany',
+		});
 	});
 
 	it('rejects pseudo-columns from a bind source that projected SELECT * (ref #182)', () => {
@@ -1335,16 +1428,26 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 	});
 
-	it('rejects relation columns from a final query that reads a bind name', () => {
+	it('allows hasMany relation columns from a final query that reads a bind name', () => {
 		const result = compile(
 			'users | select id | bind active_users\nactive_users | select posts.title',
 			schema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(
-			/active_users.*cannot select relation column 'posts'.*scalar belongsTo\/hasOne/,
-		);
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'posts',
+			sourceColumn: 'id',
+			targetColumn: 'authorId',
+			cardinality: 'many',
+			relationType: 'hasMany',
+		});
 	});
 
 	it('rejects relation include limits from a final query that reads a bind name', () => {

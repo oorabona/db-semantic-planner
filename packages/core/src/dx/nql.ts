@@ -191,7 +191,9 @@ function assertBindingFinalQueryCanUseSyntheticPlan(intent: QueryIntent): void {
 					const trusted = getTrustedNqlRelationFilterFields(column);
 					if (
 						trusted?.selectedColumn !== undefined &&
-						trusted.cardinality === 'one'
+						(trusted.cardinality === 'one' ||
+							(trusted.cardinality === 'many' &&
+								trusted.relationType === 'hasMany'))
 					) {
 						return [];
 					}

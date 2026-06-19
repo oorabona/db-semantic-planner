@@ -698,6 +698,9 @@ function compileMultiSegmentPath(
 				...(bindingRelation.cardinality !== undefined && {
 					cardinality: bindingRelation.cardinality,
 				}),
+				...(bindingRelation.relationType !== undefined && {
+					relationType: bindingRelation.relationType,
+				}),
 			})
 		: relationColumnIntent;
 }

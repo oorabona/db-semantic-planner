@@ -19,7 +19,9 @@
  * - Returning clauses
  */
 
+import { markNqlTrustedRelationFilter } from '@dbsp/types/internal';
 import { describe, expect, it } from 'vitest';
+import { POSTGRESQL_CAPABILITIES } from '../../core/src/dialects/index.js';
 import { normalizeSQL } from './ast-helpers.js';
 import { PlanCompiler, type SimplifiedPlanReport } from './compiler.js';
 import { identityNaming } from './naming-plugin.js';
@@ -485,6 +487,48 @@ describe('PlanCompiler - Coverage Tests', () => {
 	});
 
 	describe('selectRelationColumn', () => {
+		function bindingRelationColumnPlan(
+			fields: {
+				readonly relationType?:
+					| 'belongsTo'
+					| 'hasOne'
+					| 'hasMany'
+					| 'belongsToMany';
+				readonly cardinality?: 'one' | 'many';
+				readonly targetTable?: string;
+				readonly sourceColumn?: string;
+				readonly targetColumn?: string;
+				readonly selectedColumn?: string;
+			} = {},
+		): SimplifiedPlanReport {
+			const selectedColumn = fields.selectedColumn ?? 'title';
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'posts',
+					column: selectedColumn,
+					alias: `posts.${selectedColumn}`,
+				},
+				{
+					relation: 'posts',
+					targetTable: fields.targetTable ?? 'posts',
+					sourceColumn: fields.sourceColumn ?? 'id',
+					targetColumn: fields.targetColumn ?? 'authorId',
+					selectedColumn,
+					...(fields.cardinality !== undefined && {
+						cardinality: fields.cardinality,
+					}),
+					...(fields.relationType !== undefined && {
+						relationType: fields.relationType,
+					}),
+				},
+			);
+			return {
+				rootTable: 'projected_users',
+				decisions: [relationColumn],
+			};
+		}
+
 		it('compiles relation column selection', () => {
 			const plan: SimplifiedPlanReport = {
 				rootTable: 'posts',
@@ -501,6 +545,110 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const result = compiler.compile(plan);
 			// Should compile via expression handler
 			expect(result.sql).toBeDefined();
+		});
+
+		it('compiles trusted hasMany binding relation columns as a correlated json_agg subquery', () => {
+			const compiler = new PlanCompiler();
+			const result = compiler.compile(
+				bindingRelationColumnPlan({
+					cardinality: 'many',
+					relationType: 'hasMany',
+				}),
+			);
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toContain(
+				"coalesce(json_agg(rc_0.title order by cast(rc_0.title as text) nulls last), '[]'::json)",
+			);
+			expect(sql).toContain('from posts as rc_0');
+			expect(sql).toMatch(/where rc_0\."authorid" = projected_users\.id/i);
+			expect(sql).toContain('as "posts.title"');
+			expect(sql).not.toMatch(/\bjoin\s+"?posts"?/i);
+		});
+
+		it('casts the hasMany relation-column json aggregate sort key to text', () => {
+			const compiler = new PlanCompiler();
+			const result = compiler.compile(
+				bindingRelationColumnPlan({
+					cardinality: 'many',
+					relationType: 'hasMany',
+					selectedColumn: 'metadata',
+				}),
+			);
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toContain(
+				"coalesce(json_agg(rc_0.metadata order by cast(rc_0.metadata as text) nulls last), '[]'::json)",
+			);
+			expect(sql).toContain('as "posts.metadata"');
+		});
+
+		it('keeps trusted belongsTo binding relation columns on the scalar subquery path', () => {
+			const relationColumn = markNqlTrustedRelationFilter(
+				{
+					type: 'selectRelationColumn',
+					relation: 'author',
+					column: 'name',
+					alias: 'author.name',
+				},
+				{
+					relation: 'author',
+					targetTable: 'users',
+					sourceColumn: 'authorId',
+					targetColumn: 'id',
+					selectedColumn: 'name',
+					cardinality: 'one',
+					relationType: 'belongsTo',
+				},
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: [relationColumn],
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/\(select rc_\d+\.name from users as rc_\d+ where rc_\d+\.id = projected_posts\."authorId"\) as "author\.name"/i,
+			);
+			expect(sql).not.toContain('json_agg');
+		});
+
+		it('throws before SQL construction when hasMany aggregation is unsupported by the dialect', () => {
+			const compiler = new PlanCompiler({
+				dialectCapabilities: {
+					...POSTGRESQL_CAPABILITIES,
+					supportsJsonAgg: false,
+				},
+			});
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						cardinality: 'many',
+						relationType: 'hasMany',
+						targetTable: 'posts;drop',
+					}),
+				),
+			).toThrow(
+				'JSON aggregation for NQL binding relation columns is not supported by this adapter',
+			);
+		});
+
+		it.each([
+			'belongsToMany',
+			undefined,
+		] as const)('throws before SQL construction for cardinality many with relationType %s', (relationType) => {
+			const compiler = new PlanCompiler();
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						cardinality: 'many',
+						relationType,
+						targetTable: 'posts;drop',
+					}),
+				),
+			).toThrow(/only hasMany can be aggregated \(ref-#192\)/);
 		});
 	});
 
