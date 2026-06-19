@@ -28,8 +28,8 @@ describe('intentToDecisions', () => {
 			{
 				relation: 'author',
 				targetTable: 'users',
-				sourceColumn: 'authorId',
-				targetColumn: 'id',
+				sourceColumn: ['authorId'],
+				targetColumn: ['id'],
 				hops: [],
 			},
 		);
@@ -52,8 +52,8 @@ describe('intentToDecisions', () => {
 		);
 		expect(whereDecision).toMatchObject({
 			targetTable: 'users',
-			sourceColumn: 'authorId',
-			targetColumn: 'id',
+			sourceColumn: ['authorId'],
+			targetColumn: ['id'],
 			relationName: 'author',
 		});
 	});

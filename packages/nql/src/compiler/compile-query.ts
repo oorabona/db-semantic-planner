@@ -21,6 +21,7 @@ import {
 	type SelectIntent,
 	type SetOperationIntent,
 	type SetOperationType,
+	toColumnList,
 	type WhereIntent,
 } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
@@ -189,9 +190,8 @@ function relationForeignKeysOnSource(
 	>,
 ): readonly string[] | undefined {
 	if (relation?.type !== 'belongsTo') return undefined;
-	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
-	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
-	return undefined;
+	const fkColumns = toColumnList(relation.foreignKey);
+	return fkColumns.length > 0 ? fkColumns : undefined;
 }
 
 function unsafeBindingRelationReason(
@@ -239,6 +239,24 @@ function findDirectSourceProjection(
 	);
 }
 
+function findDirectSourceProjections(
+	sourceTable: string,
+	sourceColumns: readonly string[],
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+): readonly NqlBindingColumnLineage[] | undefined {
+	const projections: NqlBindingColumnLineage[] = [];
+	for (const sourceColumn of sourceColumns) {
+		const projection = findDirectSourceProjection(
+			sourceTable,
+			sourceColumn,
+			directProjectionLineage,
+		);
+		if (!projection) return undefined;
+		projections.push(projection);
+	}
+	return projections;
+}
+
 function virtualRelationForBinding(
 	relation: ReturnType<
 		NonNullable<CompilerContext['validator']>['getRelation']
@@ -247,20 +265,25 @@ function virtualRelationForBinding(
 	directProjectionLineage: readonly NqlBindingColumnLineage[],
 ): NqlBindingVirtualRelation | undefined {
 	const fkColumns = relationForeignKeysOnSource(relation);
-	if (!relation || !fkColumns || fkColumns.length !== 1) return undefined;
-	const fkColumn = fkColumns[0]!;
-	const sourceProjection = findDirectSourceProjection(
+	if (!relation || !fkColumns) return undefined;
+	const sourceProjections = findDirectSourceProjections(
 		sourceTable,
-		fkColumn,
+		fkColumns,
 		directProjectionLineage,
 	);
-	if (!sourceProjection) return undefined;
+	if (!sourceProjections) return undefined;
+	const targetKey = toColumnList(relation.targetKey);
+	const targetColumns =
+		targetKey.length > 0 ? targetKey : [DEFAULT_RELATION_TARGET_COLUMN];
+	if (targetColumns.length !== fkColumns.length) return undefined;
 	return {
 		relation: relation.name,
 		sourceTable,
 		targetTable: relation.target,
-		sourceColumn: sourceProjection.outputColumn,
-		targetColumn: relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN,
+		sourceColumn: sourceProjections.map(
+			(projection) => projection.outputColumn,
+		),
+		targetColumn: targetColumns,
 		hops: [],
 		cardinality: 'one',
 	};
@@ -283,17 +306,24 @@ function scalarVirtualRelationForBinding(
 	}
 	const joinColumns = scalarRelationJoinColumns(relation);
 	if (!joinColumns) return undefined;
-	const sourceProjection = findDirectSourceProjection(
+	if (
+		joinColumns.sourceJoinColumn.length !== joinColumns.targetJoinColumn.length
+	) {
+		return undefined;
+	}
+	const sourceProjections = findDirectSourceProjections(
 		sourceTable,
 		joinColumns.sourceJoinColumn,
 		directProjectionLineage,
 	);
-	if (!sourceProjection) return undefined;
+	if (!sourceProjections) return undefined;
 	return {
 		relation: relation.name,
 		sourceTable,
 		targetTable: relation.target,
-		sourceColumn: sourceProjection.outputColumn,
+		sourceColumn: sourceProjections.map(
+			(projection) => projection.outputColumn,
+		),
 		targetColumn: joinColumns.targetJoinColumn,
 		hops: [],
 		cardinality: relationCardinality(relation),

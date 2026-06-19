@@ -6,6 +6,7 @@
  */
 
 import type {
+	ColumnListInput,
 	OrderByIntent,
 	QueryIntent,
 	SelectIntent,
@@ -237,8 +238,8 @@ interface FlatWhereFields {
 	readonly condition?: WhereIntent;
 	readonly relation?: string | readonly string[];
 	readonly targetTable?: string;
-	readonly sourceColumn?: string;
-	readonly targetColumn?: string;
+	readonly sourceColumn?: ColumnListInput;
+	readonly targetColumn?: ColumnListInput;
 	readonly where?: WhereIntent;
 	readonly mode?: string;
 	readonly subquery?: QueryIntent;

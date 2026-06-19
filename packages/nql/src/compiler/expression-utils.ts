@@ -389,7 +389,17 @@ export function resolveBindingRelationColumn(
 			throwBindingRelationColumn182(
 				actualBindingName,
 				relationName,
-				`tail relation '${tailRelation}' cannot be resolved to a single-column scalar join (ref-#192)`,
+				`tail relation '${tailRelation}' cannot be resolved to a scalar join (ref-#192)`,
+			);
+		}
+		if (
+			joinColumns.sourceJoinColumn.length !==
+			joinColumns.targetJoinColumn.length
+		) {
+			throwBindingRelationColumn182(
+				actualBindingName,
+				relationName,
+				`tail relation '${tailRelation}' has mismatched join column counts (${joinColumns.sourceJoinColumn.length} source, ${joinColumns.targetJoinColumn.length} target) (ref-#179)`,
 			);
 		}
 		hops.push({

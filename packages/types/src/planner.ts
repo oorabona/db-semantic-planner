@@ -5,6 +5,7 @@
  * Runtime functions (plan(), planRecursive(), etc.) remain in @dbsp/core.
  */
 
+import type { ColumnListInput } from './column-list.js';
 import type { DialectCapabilities } from './dialects.js';
 import type { QueryIntent, RecursiveIntent } from './intent-ast.js';
 import type { IncludeStrategy, RelationType } from './model-ir.js';
@@ -55,7 +56,7 @@ export interface PlanDecision {
 		/** Foreign key column(s) for include-strategy (Phase 3) */
 		readonly foreignKey?: string | readonly string[];
 		/** Parent/source key override for include-strategy correlation */
-		readonly parentKey?: string;
+		readonly parentKey?: ColumnListInput;
 		/** Whether the relation is self-referential (source === target) */
 		readonly isSelfRef?: boolean;
 	};

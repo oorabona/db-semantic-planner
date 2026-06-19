@@ -4,7 +4,7 @@
  * derivation (symbols -> symbol_id) would be visibly wrong.
  */
 
-import { defineModel, exists, notExists, ref, schema } from '@dbsp/core';
+import { exists, notExists, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -40,20 +40,56 @@ function expectInverseCorrelation(sql: string) {
 	);
 }
 
-const compositeFkModel = defineModel({
-	relations: {
-		'customers.orders': {
-			cardinality: '1:N',
+const compositeFkRelations = new Map([
+	[
+		'customers.orders',
+		{
+			name: 'orders',
+			type: 'hasMany',
+			source: 'customers',
 			target: 'orders',
-			fk: 'customer_id',
+			foreignKey: 'customer_id',
+			cardinality: 'many',
+			optionality: 'optional',
+			includeStrategy: 'auto',
+			filterStrategy: 'auto',
+			joinDefault: 'auto',
 		},
-		'orders.items': {
-			cardinality: '1:N',
+	],
+	[
+		'orders.items',
+		{
+			name: 'items',
+			type: 'hasMany',
+			source: 'orders',
 			target: 'order_items',
-			fk: ['order_id', 'tenant_id'],
+			foreignKey: ['order_id', 'tenant_id'],
+			sourceKey: ['order_id', 'tenant_id'],
+			cardinality: 'many',
+			optionality: 'optional',
+			includeStrategy: 'auto',
+			filterStrategy: 'auto',
+			joinDefault: 'auto',
 		},
-	},
-});
+	],
+] as const);
+
+const compositeFkModel = {
+	relations: compositeFkRelations,
+	tables: new Map(),
+	getTable: () => undefined,
+	getRelation: (qualifiedName: string) =>
+		compositeFkRelations.get(qualifiedName),
+	getRelationsFrom: (source: string) =>
+		[...compositeFkRelations.values()].filter(
+			(relation) => relation.source === source,
+		),
+	getRelationsTo: (target: string) =>
+		[...compositeFkRelations.values()].filter(
+			(relation) => relation.target === target,
+		),
+	isAmbiguous: () => ({ ambiguous: false, options: [] }),
+};
 
 function buildCompositeFkAdapter() {
 	const relation = compositeFkModel.getRelation('orders.items');
@@ -61,18 +97,23 @@ function buildCompositeFkAdapter() {
 	return createPgsqlCompileOnlyAdapter({ model: compositeFkModel });
 }
 
-function expectCompositeFkGuardError(compile: () => unknown) {
-	try {
-		compile();
-	} catch (error) {
-		expect(error).toBeInstanceOf(Error);
-		const message = (error as Error).message;
-		expect(message).toContain('orders.items');
-		expect(message).toContain('foreignKey');
-		expect(message).toContain('#179');
-		return;
-	}
-	throw new Error('Expected composite FK mutation guard to throw');
+function expectCompositeCorrelation(sql: string, sourceAlias = 'orders') {
+	expect(sql).toMatch(/EXISTS/i);
+	expect(sql).toMatch(/FROM\s+"?order_items"?/i);
+	const quotedSource = sourceAlias.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+	expect(sql).toMatch(
+		new RegExp(
+			`"?${quotedSource}"?\\."?order_id"?\\s*=\\s*"?order_items_exists_\\d+"?\\."?order_id"?`,
+		),
+	);
+	expect(sql).toMatch(
+		new RegExp(
+			`"?${quotedSource}"?\\."?tenant_id"?\\s*=\\s*"?order_items_exists_\\d+"?\\."?tenant_id"?`,
+		),
+	);
+	expect(sql).not.toMatch(
+		/"?orders"?\."?id"?\s*=\s*"?order_items_exists_\d+"?\."?order_id"?/,
+	);
 }
 
 function compileMutationWhere(
@@ -232,71 +273,78 @@ describe('inverse relation exists() mutation FK resolution', () => {
 	});
 });
 
-describe('composite FK exists() mutation guard fail-loud behavior', () => {
-	it('DELETE WHERE notExists(composite relation) throws a clear #179 error', () => {
+describe('composite FK exists() mutation correlation', () => {
+	it('DELETE WHERE notExists(composite relation) correlates on the full key', () => {
 		const adapter = buildCompositeFkAdapter();
 
-		expectCompositeFkGuardError(() =>
-			adapter.compileDelete({
-				type: 'delete',
-				table: 'orders',
+		const { sql } = adapter.compileDelete({
+			type: 'delete',
+			table: 'orders',
+			where: notExists('items'),
+		} as any);
+
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expectCompositeCorrelation(sql);
+	});
+
+	it('UPDATE WHERE exists(composite relation) correlates on the full key', () => {
+		const adapter = buildCompositeFkAdapter();
+
+		const { sql } = adapter.compileUpdate({
+			type: 'update',
+			table: 'orders',
+			set: { status: 'archived' },
+			where: exists('items'),
+		} as any);
+
+		expectCompositeCorrelation(sql);
+	});
+
+	it('upsert doUpdate WHERE notExists(composite relation) correlates on the full key', () => {
+		const adapter = buildCompositeFkAdapter();
+
+		const { sql } = adapter.compileUpsert({
+			type: 'upsert',
+			table: 'orders',
+			values: [{ order_id: 1, tenant_id: 10, status: 'active' }],
+			onConflict: { columns: ['order_id', 'tenant_id'] },
+			action: {
+				type: 'doUpdate',
+				set: { status: 'active' },
 				where: notExists('items'),
-			} as any),
-		);
-	});
+			},
+		} as any);
 
-	it('UPDATE WHERE exists(composite relation) throws a clear #179 error', () => {
-		const adapter = buildCompositeFkAdapter();
-
-		expectCompositeFkGuardError(() =>
-			adapter.compileUpdate({
-				type: 'update',
-				table: 'orders',
-				set: { status: 'archived' },
-				where: exists('items'),
-			} as any),
-		);
-	});
-
-	it('upsert doUpdate WHERE notExists(composite relation) throws a clear #179 error', () => {
-		const adapter = buildCompositeFkAdapter();
-
-		expectCompositeFkGuardError(() =>
-			adapter.compileUpsert({
-				type: 'upsert',
-				table: 'orders',
-				values: [{ id: 1, tenant_id: 10, status: 'active' }],
-				onConflict: { columns: ['id', 'tenant_id'] },
-				action: {
-					type: 'doUpdate',
-					set: { status: 'active' },
-					where: notExists('items'),
-				},
-			} as any),
-		);
+		expect(sql).toMatch(/NOT.*EXISTS/i);
+		expectCompositeCorrelation(sql);
 	});
 
 	it.each([
 		'compileInsertFrom',
 		'compileBatchUpdate',
 		'compileUpsertFrom',
-	])('%s WHERE exists(composite relation) throws a clear #179 error', (entryPoint) => {
+	])('%s WHERE exists(composite relation) correlates on the full key', (entryPoint) => {
 		const adapter = buildCompositeFkAdapter();
 
-		expectCompositeFkGuardError(() =>
-			compileMutationWhere(adapter, entryPoint, 'orders', exists('items')),
+		const sql = compileMutationWhere(
+			adapter,
+			entryPoint,
+			'orders',
+			exists('items'),
 		);
+
+		expectCompositeCorrelation(sql);
 	});
 
-	it('nested exists().where composite relation throws a clear #179 error', () => {
+	it('nested exists().where composite relation correlates on the full key', () => {
 		const adapter = buildCompositeFkAdapter();
 
-		expectCompositeFkGuardError(() =>
-			adapter.compileDelete({
-				type: 'delete',
-				table: 'customers',
-				where: exists('orders', { where: exists('items') }),
-			} as any),
-		);
+		const { sql } = adapter.compileDelete({
+			type: 'delete',
+			table: 'customers',
+			where: exists('orders', { where: exists('items') }),
+		} as any);
+
+		expectCompositeCorrelation(sql, 'orders_exists_0');
 	});
 });

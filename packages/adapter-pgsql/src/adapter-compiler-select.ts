@@ -14,6 +14,7 @@ import type {
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
@@ -283,14 +284,23 @@ function compileJoinIntents(
 			// - belongsTo: FK is on the source (root) table → sourceColumn=FK, targetColumn=PK
 			// - hasMany/hasOne: FK is on the target table → sourceColumn=PK, targetColumn=FK
 			const isBelongsTo = rel.type === 'belongsTo';
-			const rawFk = rel.foreignKey
-				? Array.isArray(rel.foreignKey)
-					? rel.foreignKey[0]!
-					: rel.foreignKey
-				: deriveFk(isBelongsTo ? rootTable : rel.target, defaultPk);
-
-			const sourceColumn = isBelongsTo ? rawFk : defaultPk;
-			const targetColumn = isBelongsTo ? defaultPk : rawFk;
+			const rawFk = toColumnList(rel.foreignKey);
+			const fkColumns =
+				rawFk.length > 0
+					? rawFk
+					: [deriveFk(isBelongsTo ? rootTable : rel.target, defaultPk)];
+			const sourceKey = toColumnList(rel.sourceKey);
+			const targetKey = toColumnList(rel.targetKey);
+			const sourceColumn = isBelongsTo
+				? fkColumns
+				: sourceKey.length > 0
+					? sourceKey
+					: [defaultPk];
+			const targetColumn = isBelongsTo
+				? targetKey.length > 0
+					? targetKey
+					: [defaultPk]
+				: fkColumns;
 			const alias = intent.alias ?? intent.relation;
 
 			results.push({
@@ -956,7 +966,8 @@ export function compileWithIncludes<T = unknown>(
 		// Derive FK using shared helper
 		const rawFk =
 			deriveForeignKey(ctx, deps.deriveFk, deps.defaultPk) ?? deps.defaultPk;
-		const fk = Array.isArray(rawFk) ? rawFk[0]! : rawFk;
+		const fk = toColumnList(rawFk);
+		const parentKey = toColumnList(ctx.parentKey);
 
 		// For subquery include, we need:
 		// - sourceKey: column on the parent result to extract IDs from
@@ -970,8 +981,16 @@ export function compileWithIncludes<T = unknown>(
 		//   Extract id from parents → SELECT * FROM posts WHERE author_id IN (...)
 		//   sourceKey=id, foreignKey=authorId (target FK)
 		const isBelongsTo = ctx.relationType === 'belongsTo';
-		const sourceKey = isBelongsTo ? fk : 'id';
-		const targetFk = isBelongsTo ? 'id' : fk;
+		const sourceKey = isBelongsTo
+			? fk
+			: parentKey.length > 0
+				? parentKey
+				: [deps.defaultPk];
+		const targetFk = isBelongsTo
+			? parentKey.length > 0
+				? parentKey
+				: [deps.defaultPk]
+			: fk;
 
 		// Find matching include intent for select/where passthrough
 		const includeIntent = (

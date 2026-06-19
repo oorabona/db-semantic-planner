@@ -84,7 +84,32 @@ export interface GeneratedColumn {
 /**
  * Table definition in generated schema.
  */
-export type GeneratedTable = Record<string, GeneratedColumn>;
+export interface GeneratedForeignKey {
+	readonly columns: readonly string[];
+	readonly references: {
+		readonly table: string;
+		readonly columns: readonly string[];
+	};
+	readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+	readonly onUpdate?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+}
+
+export interface GeneratedIndex {
+	readonly columns: readonly string[];
+	readonly unique?: boolean;
+	readonly name?: string;
+}
+
+export interface GeneratedTableWithConfig {
+	readonly columns: Record<string, GeneratedColumn>;
+	readonly primaryKey?: string | readonly string[];
+	readonly foreignKeys?: readonly GeneratedForeignKey[];
+	readonly indexes?: readonly GeneratedIndex[];
+}
+
+export type GeneratedFlatTable = Record<string, GeneratedColumn>;
+
+export type GeneratedTable = GeneratedFlatTable | GeneratedTableWithConfig;
 
 /**
  * Relation kind in generated schema (discriminated union).
@@ -108,8 +133,8 @@ type GeneratedIncludeStrategy =
 export interface GeneratedBelongsTo {
 	readonly kind: 'belongsTo';
 	readonly target: string;
-	readonly foreignKey: string;
-	readonly targetKey?: string;
+	readonly foreignKey: string | readonly string[];
+	readonly targetKey?: string | readonly string[];
 	readonly includeStrategy?: GeneratedIncludeStrategy;
 }
 
@@ -119,8 +144,8 @@ export interface GeneratedBelongsTo {
 export interface GeneratedHasMany {
 	readonly kind: 'hasMany';
 	readonly target: string;
-	readonly foreignKey: string;
-	readonly sourceKey?: string;
+	readonly foreignKey: string | readonly string[];
+	readonly sourceKey?: string | readonly string[];
 	readonly includeStrategy?: GeneratedIncludeStrategy;
 	readonly cardinality?: 'one' | 'many';
 }
@@ -234,10 +259,15 @@ export type ColumnTypeToTS<T extends GeneratedColumnType> = T extends
 /**
  * Infer the TypeScript row type from a GeneratedTable definition.
  */
+type GeneratedColumnsOf<T extends GeneratedTable> =
+	T extends GeneratedTableWithConfig ? T['columns'] : T;
+
 export type InferRowType<T extends GeneratedTable> = {
-	[K in keyof T]: T[K]['nullable'] extends true
-		? ColumnTypeToTS<T[K]['type']> | null
-		: ColumnTypeToTS<T[K]['type']>;
+	[K in keyof GeneratedColumnsOf<T>]: GeneratedColumnsOf<T>[K] extends GeneratedColumn
+		? GeneratedColumnsOf<T>[K]['nullable'] extends true
+			? ColumnTypeToTS<GeneratedColumnsOf<T>[K]['type']> | null
+			: ColumnTypeToTS<GeneratedColumnsOf<T>[K]['type']>
+		: never;
 };
 
 /**
@@ -323,6 +353,17 @@ function mapRelationType(kind: GeneratedRelationKind): RelationType {
 /**
  * Build a TableIR from generated table definition.
  */
+function isGeneratedTableWithConfig(
+	table: GeneratedTable,
+): table is GeneratedTableWithConfig {
+	const columns = (table as { readonly columns?: unknown }).columns;
+	return (
+		typeof columns === 'object' &&
+		columns !== null &&
+		typeof (columns as { readonly type?: unknown }).type !== 'string'
+	);
+}
+
 function buildTableIRFromDefinition(
 	tableName: string,
 	genTable: GeneratedTable,
@@ -332,10 +373,13 @@ function buildTableIRFromDefinition(
 	const foreignKeys: ForeignKeyIR[] = [];
 	const indexes: IndexIR[] = [];
 	const primaryKeys: string[] = [];
+	const tableColumns = isGeneratedTableWithConfig(genTable)
+		? genTable.columns
+		: genTable;
 	// Track columns that already have explicit indexes
 	const indexedColumns = new Set<string>();
 
-	for (const [colName, colDef] of Object.entries(genTable)) {
+	for (const [colName, colDef] of Object.entries(tableColumns)) {
 		// Column (with unique support)
 		const col: Mutable<ColumnIR> = {
 			name: colName,
@@ -408,7 +452,7 @@ function buildTableIRFromDefinition(
 			targetColumn !== undefined
 		) {
 			// Get column definition for role extraction
-			const colDef = genTable[fkColumn];
+			const colDef = tableColumns[fkColumn];
 			// Infer role names from column name or explicit references
 			const inferredName = fkColumn.endsWith('Id')
 				? fkColumn.slice(0, -2)
@@ -432,7 +476,12 @@ function buildTableIRFromDefinition(
 
 	// Determine PK: explicit > composite FK > 'id' column > omit
 	let primaryKey: string | readonly string[] | undefined;
-	if (primaryKeys.length > 0) {
+	const configuredPrimaryKey = isGeneratedTableWithConfig(genTable)
+		? genTable.primaryKey
+		: undefined;
+	if (configuredPrimaryKey !== undefined) {
+		primaryKey = configuredPrimaryKey;
+	} else if (primaryKeys.length > 0) {
 		primaryKey =
 			primaryKeys.length === 1 ? (primaryKeys[0] as string) : primaryKeys;
 	} else {
@@ -443,6 +492,28 @@ function buildTableIRFromDefinition(
 		} else {
 			const hasId = columns.some((c) => c.name === 'id');
 			primaryKey = hasId ? 'id' : undefined;
+		}
+	}
+
+	if (isGeneratedTableWithConfig(genTable)) {
+		for (const fk of genTable.foreignKeys ?? []) {
+			const foreignKey: Mutable<ForeignKeyIR> = {
+				columns: [...fk.columns],
+				references: {
+					table: fk.references.table,
+					columns: [...fk.references.columns],
+				},
+			};
+			if (fk.onDelete) foreignKey.onDelete = fk.onDelete;
+			if (fk.onUpdate) foreignKey.onUpdate = fk.onUpdate;
+			foreignKeys.push(foreignKey);
+		}
+		for (const index of genTable.indexes ?? []) {
+			indexes.push({
+				columns: [...index.columns],
+				unique: index.unique ?? false,
+				...(index.name !== undefined && { name: index.name }),
+			});
 		}
 	}
 
@@ -829,6 +900,8 @@ const ForeignKeyReferenceSchema = v.object({
 	childRole: v.optional(v.string()),
 });
 
+const StringOrStringArraySchema = v.union([v.string(), v.array(v.string())]);
+
 /**
  * Column definition schema (from @dbsp/schema)
  */
@@ -854,7 +927,24 @@ const FlatTableDefinitionSchema = safeRecord(ColumnDefinitionSchema);
  */
 const TableDefWithConfigSchema = v.object({
 	columns: FlatTableDefinitionSchema,
-	primaryKey: v.array(v.string()),
+	primaryKey: v.optional(StringOrStringArraySchema),
+	foreignKeys: v.optional(
+		v.array(
+			v.object({
+				columns: v.array(v.string()),
+				references: v.object({
+					table: v.string(),
+					columns: v.array(v.string()),
+				}),
+				onDelete: v.optional(
+					v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
+				),
+				onUpdate: v.optional(
+					v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
+				),
+			}),
+		),
+	),
 	indexes: v.optional(
 		v.array(
 			v.object({
@@ -892,8 +982,8 @@ const IncludeStrategySchema = v.optional(
 const BelongsToRelationSchema = v.object({
 	kind: v.literal('belongsTo'),
 	target: v.string(),
-	foreignKey: v.string(),
-	targetKey: v.optional(v.string()),
+	foreignKey: StringOrStringArraySchema,
+	targetKey: v.optional(StringOrStringArraySchema),
 	includeStrategy: IncludeStrategySchema,
 });
 
@@ -903,8 +993,8 @@ const BelongsToRelationSchema = v.object({
 const HasManyRelationSchema = v.object({
 	kind: v.literal('hasMany'),
 	target: v.string(),
-	foreignKey: v.string(),
-	sourceKey: v.optional(v.string()),
+	foreignKey: StringOrStringArraySchema,
+	sourceKey: v.optional(StringOrStringArraySchema),
 	includeStrategy: IncludeStrategySchema,
 });
 

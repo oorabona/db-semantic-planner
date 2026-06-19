@@ -9,18 +9,10 @@
  * With aliased columns: "relation.column" for hydration
  */
 
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { JoinExpr, Node } from '@pgsql/types';
-import {
-	DEFAULT_PK_COLUMN,
-	defaultFkDerivation,
-	requiredColumn,
-} from '../../assert-field.js';
-import {
-	columnTarget,
-	fkCorrelation,
-	rangeVar,
-	starTarget,
-} from '../../ast-helpers.js';
+import { DEFAULT_PK_COLUMN, defaultFkDerivation } from '../../assert-field.js';
+import { columnTarget, rangeVar, starTarget } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -28,6 +20,7 @@ import type {
 	IncludeHandler,
 	IncludeResult,
 } from '../types.js';
+import { buildKeyCorrelation } from '../where/exists.js';
 
 /**
  * Build a JOIN expression (LEFT JOIN by default, INNER JOIN when joinType='inner').
@@ -36,18 +29,18 @@ function buildJoin(
 	targetTable: string,
 	targetAlias: string,
 	sourceAlias: string,
-	sourceColumn: string,
-	targetColumn: string,
+	sourceColumn: ColumnListInput,
+	targetColumn: ColumnListInput,
 	ctx: CompilerContext,
 	joinType: 'inner' | 'left' = 'left',
 ): Node {
 	// Build the join condition: source.sourceColumn = target.targetColumn
-	const joinCondition = fkCorrelation(
-		sourceColumn,
+	const joinCondition = buildKeyCorrelation(
 		sourceAlias,
-		targetColumn,
+		sourceColumn,
 		targetAlias,
-		ctx.naming,
+		targetColumn,
+		ctx,
 	);
 
 	const joinExpr: JoinExpr = {
@@ -86,17 +79,16 @@ export const joinIncludeHandler: IncludeHandler = {
 		// (e.g., "author" and "editor" both from "users")
 		const targetAlias = relation ?? targetTable;
 		const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
-		const sourceColumn = requiredColumn(
-			decision.sourceColumn,
-			'sourceColumn',
-			'JOIN include',
-		);
-		const targetColumn =
-			decision.targetColumn ??
+		const sourceColumn = toColumnList(decision.sourceColumn);
+		if (sourceColumn.length === 0) {
+			throw new Error("Missing required column 'sourceColumn' in JOIN include");
+		}
+		const targetColumn = decision.targetColumn ?? [
 			(ctx.deriveFkColumnName ?? defaultFkDerivation)(
 				ctx.rootTable,
 				ctx.defaultPkColumnName ?? DEFAULT_PK_COLUMN,
-			);
+			),
+		];
 
 		// Build the JOIN (LEFT or INNER based on decision.joinType)
 		const join = buildJoin(

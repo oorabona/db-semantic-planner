@@ -23,6 +23,7 @@ import {
 	compile as nqlCompile,
 } from '@dbsp/nql';
 import type {
+	ColumnListInput,
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
@@ -453,7 +454,7 @@ function findModelRelation(
 	);
 }
 
-function parentKeyForRelation(relation: RelationIR): string | undefined {
+function parentKeyForRelation(relation: RelationIR): ColumnListInput {
 	if (relation.type === 'belongsTo') return relation.targetKey;
 	return relation.sourceKey;
 }

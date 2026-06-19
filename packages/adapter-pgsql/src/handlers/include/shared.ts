@@ -4,16 +4,18 @@
  * Extracted from lateral.ts and json-agg.ts to eliminate FK direction duplication.
  */
 
+import type { ColumnListInput } from '@dbsp/types';
 import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
 	type FkColumnDerivation,
 } from '../../assert-field.js';
+
 /** Minimal shape required by deriveFkColumns — works with both Decision and PlanDecision. */
 export interface FkColumnSource {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
-	readonly foreignKey?: string;
-	readonly parentKey?: string;
+	readonly foreignKey?: ColumnListInput;
+	readonly parentKey?: ColumnListInput;
 	readonly targetTable?: string;
 }
 
@@ -31,7 +33,7 @@ export function deriveFkColumns(
 	parentTable: string,
 	defaultPk: string = DEFAULT_PK_COLUMN,
 	deriveFk: FkColumnDerivation = defaultFkDerivation,
-): { sourceColumn: string; targetColumn: string } {
+): { sourceColumn: ColumnListInput; targetColumn: ColumnListInput } {
 	if (decision.relationType === 'belongsTo') {
 		return {
 			sourceColumn:

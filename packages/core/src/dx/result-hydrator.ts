@@ -7,6 +7,7 @@
  * @module result-hydrator
  */
 
+import { toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import type {
 	Adapter,
@@ -250,7 +251,7 @@ export class ResultHydrator<TResult = unknown> {
 			// that .map().filter() allocates (2 passes + length-N temp array).
 			const parentIds: unknown[] = [];
 			for (const r of results) {
-				const id = this.extractKeyValue(
+				const id = this.extractQueryKeyValue(
 					r as Record<string, unknown>,
 					includeInfo.sourceKey,
 				);
@@ -556,15 +557,16 @@ export class ResultHydrator<TResult = unknown> {
 	private getForeignKeyColumn(
 		foreignKey: string | readonly string[] | undefined,
 	): string {
-		if (!foreignKey) {
+		const columns = toColumnList(foreignKey);
+		if (columns.length === 0) {
 			return 'parent_id'; // Default convention for self-referential
 		}
-		if (typeof foreignKey === 'string') {
-			return foreignKey;
+		if (columns.length !== 1) {
+			throw new Error(
+				`Recursive include hydration requires a single-column self-referential foreign key; got ${JSON.stringify(columns)}.`,
+			);
 		}
-		// It's a readonly array - use first column for composite FK
-		const first = foreignKey[0];
-		return first ?? 'parent_id'; // Fallback for empty array
+		return columns[0]!;
 	}
 
 	/**
@@ -713,11 +715,15 @@ export class ResultHydrator<TResult = unknown> {
 		obj: Record<string, unknown>,
 		key: string | readonly string[],
 	): unknown {
-		if (typeof key === 'string') {
-			return obj[key];
+		const columns = toColumnList(key);
+		if (columns.length === 0) {
+			return undefined;
+		}
+		if (columns.length === 1) {
+			return obj[columns[0]!];
 		}
 		// Composite key: build a string key for Map grouping.
-		const values = key.map((k) => obj[k]);
+		const values = columns.map((k) => obj[k]);
 		// Return undefined if any component is missing
 		if (values.some((v) => v === undefined || v === null)) {
 			return undefined;
@@ -731,5 +737,22 @@ export class ResultHydrator<TResult = unknown> {
 			return JSON.stringify(parts);
 		}
 		return parts.join(COMPOSITE_KEY_SEP);
+	}
+
+	private extractQueryKeyValue(
+		obj: Record<string, unknown>,
+		key: string | readonly string[],
+	): unknown {
+		const columns = toColumnList(key);
+		if (columns.length === 0) {
+			return undefined;
+		}
+		if (columns.length === 1) {
+			return obj[columns[0]!];
+		}
+		const values = columns.map((k) => obj[k]);
+		return values.some((v) => v === undefined || v === null)
+			? undefined
+			: values;
 	}
 }

@@ -5,7 +5,12 @@
  * Each handler transforms a specific decision type into PostgreSQL AST nodes.
  */
 
-import type { DialectCapabilities, ModelIR, ParamIntent } from '@dbsp/types';
+import type {
+	ColumnListInput,
+	DialectCapabilities,
+	ModelIR,
+	ParamIntent,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { FkColumnDerivation } from '../assert-field.js';
 import type { BindingNameRegistry } from '../binding-registry.js';
@@ -126,8 +131,8 @@ export interface Decision {
 	readonly direction?: 'ASC' | 'DESC';
 	readonly nulls?: 'FIRST' | 'LAST';
 	readonly joinType?: 'inner' | 'left';
-	readonly sourceColumn?: string;
-	readonly targetColumn?: string;
+	readonly sourceColumn?: ColumnListInput;
+	readonly targetColumn?: ColumnListInput;
 	readonly targetTable?: string;
 	readonly function?: string;
 	readonly args?: readonly unknown[];
@@ -146,8 +151,8 @@ export interface Decision {
 	readonly include?: readonly Decision[];
 	// Relation metadata (for json_agg nesting)
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
-	readonly foreignKey?: string;
-	readonly parentKey?: string;
+	readonly foreignKey?: ColumnListInput;
+	readonly parentKey?: ColumnListInput;
 	readonly children?: readonly Decision[];
 	// Window function specific
 	readonly partition?: readonly string[];

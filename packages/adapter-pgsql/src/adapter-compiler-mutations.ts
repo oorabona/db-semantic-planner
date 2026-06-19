@@ -24,6 +24,7 @@ import type {
 	UpsertIntent,
 	WhereIntent,
 } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelect } from './adapter-compiler-select.js';
 import {
@@ -127,16 +128,15 @@ function prependSourceCte(
 function resolveMutationExistsForeignKey(
 	foreignKey: string | readonly string[] | undefined,
 	relationName: string,
-): string | undefined {
-	if (typeof foreignKey === 'string') return foreignKey;
-	if (!Array.isArray(foreignKey)) return undefined;
-	if (foreignKey.length > 1) {
+): readonly string[] | undefined {
+	const columns = toColumnList(foreignKey);
+	if (columns.length === 0) return undefined;
+	if (columns.some((column) => column.length === 0)) {
 		throw new Error(
-			`Mutation exists()/notExists() guards do not support composite foreignKey relations yet: relation '${relationName}' has foreignKey ${JSON.stringify(foreignKey)}. ` +
-				'Composite FK correlation is tracked by #179.',
+			`Mutation exists()/notExists() guard relation '${relationName}' has an empty foreignKey column.`,
 		);
 	}
-	return foreignKey[0];
+	return columns;
 }
 
 /**
@@ -157,7 +157,11 @@ function resolveExistsRelation(
 	sourceTable: string,
 	relation: string,
 	model: import('@dbsp/types').ModelIR | undefined,
-): { targetTable: string; sourceColumn?: string; targetColumn?: string } {
+): {
+	targetTable: string;
+	sourceColumn?: string | readonly string[];
+	targetColumn?: string | readonly string[];
+} {
 	if (!model) return { targetTable: relation };
 	const relationName = `${sourceTable}.${relation}`;
 	const rel = model.getRelation(relationName);
@@ -169,14 +173,20 @@ function resolveExistsRelation(
 		return {
 			targetTable,
 			...(fk !== undefined && { sourceColumn: fk }),
-			targetColumn: 'id',
+			targetColumn:
+				toColumnList(rel.targetKey).length > 0
+					? toColumnList(rel.targetKey)
+					: ['id'],
 		};
 	}
 	// For hasMany/hasOne: FK is on the target table (e.g. symbols.id → calls.callee_id)
 	const fk = resolveMutationExistsForeignKey(rel.foreignKey, relationName);
 	return {
 		targetTable,
-		sourceColumn: rel.sourceKey ?? 'id',
+		sourceColumn:
+			toColumnList(rel.sourceKey).length > 0
+				? toColumnList(rel.sourceKey)
+				: ['id'],
 		...(fk !== undefined && { targetColumn: fk }),
 	};
 }

@@ -18,6 +18,13 @@ export {
 	blogExtendedTestData,
 	seedBlogExtendedData,
 } from './blog-extended.seed.js';
+// Composite-FK correctness
+export {
+	createCompositeFkSchema,
+	dropCompositeFkSchema,
+} from './composite-fk.ddl.js';
+export { compositeFkModel } from './composite-fk.model.js';
+export { seedCompositeFkData } from './composite-fk.seed.js';
 // Database utilities
 export {
 	closeTestDb,

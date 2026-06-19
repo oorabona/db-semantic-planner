@@ -1,3 +1,4 @@
+import { toColumnList } from '@dbsp/types';
 import type { ColumnValidatorRelation } from './types.js';
 
 export const DEFAULT_RELATION_TARGET_COLUMN = 'id';
@@ -6,9 +7,8 @@ export function relationForeignKeys(
 	relation: ColumnValidatorRelation | undefined,
 ): readonly string[] | undefined {
 	if (!relation) return undefined;
-	if (typeof relation.foreignKey === 'string') return [relation.foreignKey];
-	if (Array.isArray(relation.foreignKey)) return relation.foreignKey;
-	return undefined;
+	const columns = toColumnList(relation.foreignKey);
+	return columns.length > 0 ? columns : undefined;
 }
 
 export function relationCardinality(
@@ -23,8 +23,8 @@ export function scalarRelationJoinColumns(
 	relation: ColumnValidatorRelation | undefined,
 ):
 	| {
-			readonly sourceJoinColumn: string;
-			readonly targetJoinColumn: string;
+			readonly sourceJoinColumn: readonly string[];
+			readonly targetJoinColumn: readonly string[];
 	  }
 	| undefined {
 	if (!relation) return undefined;
@@ -36,15 +36,20 @@ export function scalarRelationJoinColumns(
 		return undefined;
 	}
 	const fkColumns = relationForeignKeys(relation);
-	if (fkColumns?.length !== 1) return undefined;
-	const fkColumn = fkColumns[0]!;
+	if (!fkColumns) return undefined;
+	const sourceKeys = toColumnList(relation.sourceKey);
+	const targetKeys = toColumnList(relation.targetKey);
 	const sourceJoinColumn =
 		relation.type === 'belongsTo'
-			? fkColumn
-			: (relation.sourceKey ?? DEFAULT_RELATION_TARGET_COLUMN);
+			? fkColumns
+			: sourceKeys.length > 0
+				? sourceKeys
+				: [DEFAULT_RELATION_TARGET_COLUMN];
 	const targetJoinColumn =
 		relation.type === 'belongsTo'
-			? (relation.targetKey ?? DEFAULT_RELATION_TARGET_COLUMN)
-			: fkColumn;
+			? targetKeys.length > 0
+				? targetKeys
+				: [DEFAULT_RELATION_TARGET_COLUMN]
+			: fkColumns;
 	return { sourceJoinColumn, targetJoinColumn };
 }

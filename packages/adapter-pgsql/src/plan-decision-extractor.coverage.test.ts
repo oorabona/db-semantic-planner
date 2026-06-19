@@ -94,7 +94,7 @@ describe('plan-decision-extractor - coverage', () => {
 			const result = resolveRelation(model, 'users', 'posts');
 			expect(result).toEqual({
 				target: 'posts',
-				foreignKey: 'user_id',
+				foreignKey: ['user_id'],
 				relationType: 'hasMany',
 			});
 		});
@@ -113,7 +113,7 @@ describe('plan-decision-extractor - coverage', () => {
 			const result = resolveRelation(model, 'posts', 'author');
 			expect(result).toEqual({
 				target: 'users',
-				foreignKey: 'user_id',
+				foreignKey: ['user_id', 'tenant_id'],
 				relationType: 'belongsTo',
 			});
 		});
@@ -778,7 +778,7 @@ describe('plan-decision-extractor - coverage', () => {
 				],
 			};
 			const result = extractExistsDecisions(plan, model);
-			expect(result[0].foreignKey).toBe('user_id');
+			expect(result[0].foreignKey).toEqual(['user_id']);
 		});
 	});
 
@@ -1262,7 +1262,7 @@ describe('plan-decision-extractor - coverage', () => {
 			expect(d.relationName).toBe('enclosingSymbol');
 			expect(d.targetTable).toBe('symbols');
 			expect(d.joinType).toBe('left');
-			expect(d.foreignKey).toBe('enclosing_symbol_id');
+			expect(d.foreignKey).toEqual(['enclosing_symbol_id']);
 			expect(d.relationType).toBe('belongsTo');
 		});
 

@@ -1489,6 +1489,91 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			expect(fk!.onDelete).toBe('CASCADE');
 		});
 
+		it('should honor as, inverse, and unique when synthesizing composite FK relations', () => {
+			const s = schema(
+				{
+					orders: {
+						orderId: { type: 'uuid', primaryKey: true },
+						productId: { type: 'uuid', primaryKey: true },
+						total: 'number',
+					},
+					orderLines: {
+						id: { type: 'uuid', primaryKey: true },
+						orderId: 'uuid',
+						productId: 'uuid',
+					},
+					shipments: {
+						id: { type: 'uuid', primaryKey: true },
+						orderId: 'uuid',
+						productId: 'uuid',
+					},
+				},
+				{
+					orderLines: {
+						foreignKeys: [
+							ref('orders', {
+								columns: ['orderId', 'productId'],
+								references: ['orderId', 'productId'],
+								as: 'purchase',
+								inverse: 'lines',
+								unique: true,
+							}),
+						],
+					},
+					shipments: {
+						foreignKeys: [
+							ref('orders', {
+								columns: ['orderId', 'productId'],
+								references: ['orderId', 'productId'],
+								as: 'purchaseOrder',
+								inverse: 'shipments',
+							}),
+						],
+					},
+				},
+			);
+
+			expect(s.model.getRelation('orderLines.purchase')).toMatchObject({
+				name: 'purchase',
+				type: 'belongsTo',
+				source: 'orderLines',
+				target: 'orders',
+				foreignKey: ['orderId', 'productId'],
+				targetKey: ['orderId', 'productId'],
+				cardinality: 'one',
+			});
+
+			expect(s.model.getRelation('orders.lines')).toMatchObject({
+				name: 'lines',
+				type: 'hasOne',
+				source: 'orders',
+				target: 'orderLines',
+				foreignKey: ['orderId', 'productId'],
+				sourceKey: ['orderId', 'productId'],
+				cardinality: 'one',
+			});
+
+			expect(s.model.getRelation('shipments.purchaseOrder')).toMatchObject({
+				name: 'purchaseOrder',
+				type: 'belongsTo',
+				source: 'shipments',
+				target: 'orders',
+				foreignKey: ['orderId', 'productId'],
+				targetKey: ['orderId', 'productId'],
+				cardinality: 'one',
+			});
+
+			expect(s.model.getRelation('orders.shipments')).toMatchObject({
+				name: 'shipments',
+				type: 'hasMany',
+				source: 'orders',
+				target: 'shipments',
+				foreignKey: ['orderId', 'productId'],
+				sourceKey: ['orderId', 'productId'],
+				cardinality: 'many',
+			});
+		});
+
 		it('should default references to [id] when not specified', () => {
 			// Single-column FK with default references — validateFkTargets requires
 			// matching source/target column counts (R6-3a), so this test uses a 1:1 FK

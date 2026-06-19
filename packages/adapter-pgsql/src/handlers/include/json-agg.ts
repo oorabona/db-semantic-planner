@@ -9,11 +9,7 @@
  */
 
 import type { Node } from '@pgsql/types';
-import {
-	andExpr,
-	jsonAggCorrelation,
-	jsonAggSubquery,
-} from '../../ast-helpers.js';
+import { andExpr, jsonAggSubquery } from '../../ast-helpers.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -22,6 +18,7 @@ import type {
 	IncludeResult,
 	ResTargetNode,
 } from '../types.js';
+import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
 
 /**
@@ -55,12 +52,12 @@ function compileJsonAggRecursive(
 		ctx.defaultPkColumnName,
 		ctx.deriveFkColumnName,
 	);
-	let whereExpr: Node = jsonAggCorrelation(
-		parentAlias,
-		sourceColumn,
+	let whereExpr: Node = buildKeyCorrelation(
 		innerAlias,
 		targetColumn,
-		ctx.naming,
+		parentAlias,
+		sourceColumn,
+		ctx,
 	);
 
 	// Merge pre-compiled filter conditions (from EXISTS propagation via bridge)

@@ -8,6 +8,7 @@
  * @internal
  */
 
+import { toColumnList } from './column-list.js';
 import type { RelationType } from './model-ir.js';
 
 // Internal-only build utilities (NOT part of public API)
@@ -59,17 +60,9 @@ export function explainUnsupportedNqlBindingIncludeHop(
 	) {
 		return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; binding includes require a belongsTo/hasOne/hasMany relation (ref-#192)`;
 	}
-	const fkColumns =
-		typeof relation.foreignKey === 'string'
-			? [relation.foreignKey]
-			: Array.isArray(relation.foreignKey)
-				? [...relation.foreignKey]
-				: [];
-	if (fkColumns.length !== 1) {
-		return `relation '${relationName}' must have exactly one FK column for binding includes; composite FK binding includes are not yet supported (ref-#179)`;
-	}
-	if (fkColumns[0] === undefined || fkColumns[0].length === 0) {
-		return `relation '${relationName}' must have exactly one FK column for binding includes; composite FK binding includes are not yet supported (ref-#179)`;
+	const fkColumns = toColumnList(relation.foreignKey);
+	if (fkColumns.length === 0 || fkColumns.some((col) => col.length === 0)) {
+		return `relation '${relationName}' must have at least one non-empty FK column for binding includes (ref-#179)`;
 	}
 	if (
 		relation.recursive !== undefined ||
@@ -169,16 +162,16 @@ export type NqlTrustedRelationFilterRelation = string | readonly string[];
 /** @internal */
 export interface NqlTrustedRelationFilterHop {
 	readonly target: string;
-	readonly fkColumn: string;
-	readonly joinColumn: string;
+	readonly fkColumn: readonly string[];
+	readonly joinColumn: readonly string[];
 }
 
 /** @internal */
 export interface NqlTrustedRelationFilterFields {
 	readonly relation: NqlTrustedRelationFilterRelation;
 	readonly targetTable: string;
-	readonly sourceColumn: string;
-	readonly targetColumn: string;
+	readonly sourceColumn: readonly string[];
+	readonly targetColumn: readonly string[];
 	readonly hops: readonly NqlTrustedRelationFilterHop[];
 	readonly selectedColumn?: string;
 	readonly cardinality?: 'one' | 'many';
@@ -198,7 +191,9 @@ export interface NqlTrustedRelationFilterProof {
 
 function isStringArray(value: unknown): value is readonly string[] {
 	return (
-		Array.isArray(value) && value.every((item) => typeof item === 'string')
+		Array.isArray(value) &&
+		value.length > 0 &&
+		value.every((item) => typeof item === 'string' && item.length > 0)
 	);
 }
 
@@ -225,10 +220,9 @@ function isTrustedRelationFilterHop(
 	return (
 		typeof record.target === 'string' &&
 		record.target.length > 0 &&
-		typeof record.fkColumn === 'string' &&
-		record.fkColumn.length > 0 &&
-		typeof record.joinColumn === 'string' &&
-		record.joinColumn.length > 0
+		isStringArray(record.fkColumn) &&
+		isStringArray(record.joinColumn) &&
+		record.fkColumn.length === record.joinColumn.length
 	);
 }
 
@@ -258,8 +252,9 @@ function isTrustedRelationFilterPayload(
 	return (
 		(typeof record.relation === 'string' || isStringArray(record.relation)) &&
 		typeof record.targetTable === 'string' &&
-		typeof record.sourceColumn === 'string' &&
-		typeof record.targetColumn === 'string' &&
+		isStringArray(record.sourceColumn) &&
+		isStringArray(record.targetColumn) &&
+		record.sourceColumn.length === record.targetColumn.length &&
 		Array.isArray(record.hops) &&
 		record.hops.every(isTrustedRelationFilterHop) &&
 		(record.selectedColumn === undefined ||
@@ -288,16 +283,16 @@ function freezeTrustedRelationFilterPayload(
 		fields.hops.map((hop) =>
 			Object.freeze({
 				target: hop.target,
-				fkColumn: hop.fkColumn,
-				joinColumn: hop.joinColumn,
+				fkColumn: Object.freeze([...hop.fkColumn]),
+				joinColumn: Object.freeze([...hop.joinColumn]),
 			}),
 		),
 	);
 	return Object.freeze({
 		relation,
 		targetTable: fields.targetTable,
-		sourceColumn: fields.sourceColumn,
-		targetColumn: fields.targetColumn,
+		sourceColumn: Object.freeze([...fields.sourceColumn]),
+		targetColumn: Object.freeze([...fields.targetColumn]),
 		hops,
 		...(fields.selectedColumn !== undefined && {
 			selectedColumn: fields.selectedColumn,

@@ -9,6 +9,7 @@
 
 import { InvalidOperationError } from '@dbsp/core';
 import {
+	type ColumnListInput,
 	type DialectCapabilities,
 	type ExpressionIntent,
 	isParamIntent,
@@ -16,6 +17,7 @@ import {
 	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 	type ParamIntent,
 	type QueryIntent,
+	toColumnList,
 } from '@dbsp/types';
 import {
 	getNqlBindingRefName,
@@ -27,7 +29,6 @@ import {
 	DEFAULT_PK_COLUMN,
 	defaultFkDerivation,
 	type FkColumnDerivation,
-	requiredColumn,
 } from './assert-field.js';
 import {
 	andExpr,
@@ -35,7 +36,6 @@ import {
 	columnRef,
 	columnTarget,
 	deleteStmt,
-	eqExpr,
 	funcCall,
 	innerJoin,
 	insertStmt,
@@ -74,6 +74,7 @@ import {
 	getIncludeHandler,
 	getNqlSafeExpressionHandler,
 } from './handlers/index.js';
+import { buildKeyCorrelation } from './handlers/where/exists.js';
 
 // Register createWhereDispatcher with compileExpressionIntent so CASE expressions
 // can compile their WHEN conditions. compiler.ts is the bridge: it imports both
@@ -264,8 +265,8 @@ export interface PlanDecision {
 	readonly direction?: 'ASC' | 'DESC';
 	readonly nulls?: 'FIRST' | 'LAST';
 	readonly joinType?: 'inner' | 'left';
-	readonly sourceColumn?: string;
-	readonly targetColumn?: string;
+	readonly sourceColumn?: ColumnListInput;
+	readonly targetColumn?: ColumnListInput;
 	readonly targetTable?: string;
 	readonly function?: string;
 	readonly args?: readonly unknown[];
@@ -286,8 +287,8 @@ export interface PlanDecision {
 	readonly relationPath?: string;
 	readonly hydrationPrefix?: string;
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
-	readonly foreignKey?: string;
-	readonly parentKey?: string;
+	readonly foreignKey?: ColumnListInput;
+	readonly parentKey?: ColumnListInput;
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];
 	readonly intentPath?: string;
@@ -1294,8 +1295,6 @@ export class PlanCompiler {
 		relatedAlias: string;
 		relatedTable: Node;
 		relatedColumn: Node;
-		relatedJoinColumn: Node;
-		bindingJoinColumn: Node;
 	} {
 		const relatedAlias = `rc_${this.bindingRelationColumnSubqueryIndex++}`;
 		const relatedTable = rangeVar(
@@ -1310,24 +1309,10 @@ export class PlanCompiler {
 			undefined,
 			this.naming,
 		);
-		const relatedJoinColumn = columnRef(
-			fields.targetColumn,
-			relatedAlias,
-			undefined,
-			this.naming,
-		);
-		const bindingJoinColumn = columnRef(
-			fields.sourceColumn,
-			plan.rootTable,
-			undefined,
-			this.naming,
-		);
 		return {
 			relatedAlias,
 			relatedTable,
 			relatedColumn,
-			relatedJoinColumn,
-			bindingJoinColumn,
 		};
 	}
 
@@ -1342,13 +1327,8 @@ export class PlanCompiler {
 			);
 		}
 		if (fields.cardinality === 'one') {
-			const {
-				relatedAlias,
-				relatedTable,
-				relatedColumn,
-				relatedJoinColumn,
-				bindingJoinColumn,
-			} = this.buildCorrelatedRelationRefs(fields, plan);
+			const { relatedAlias, relatedTable, relatedColumn } =
+				this.buildCorrelatedRelationRefs(fields, plan);
 			if (
 				fields.hops.length === 0 &&
 				trustedRelationHasMultipleHops(fields.relation)
@@ -1372,9 +1352,12 @@ export class PlanCompiler {
 					fromNode = innerJoin(
 						fromNode,
 						hopTable,
-						eqExpr(
-							columnRef(hop.joinColumn, hopAlias, undefined, this.naming),
-							columnRef(hop.fkColumn, previousAlias, undefined, this.naming),
+						buildKeyCorrelation(
+							hopAlias,
+							hop.joinColumn,
+							previousAlias,
+							hop.fkColumn,
+							this.createHandlerContext(plan),
 						),
 					);
 					previousAlias = hopAlias;
@@ -1396,7 +1379,13 @@ export class PlanCompiler {
 								},
 							],
 							from: [fromNode],
-							where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+							where: buildKeyCorrelation(
+								relatedAlias,
+								fields.targetColumn,
+								plan.rootTable,
+								fields.sourceColumn,
+								this.createHandlerContext(plan),
+							),
 						}),
 					},
 				};
@@ -1407,7 +1396,13 @@ export class PlanCompiler {
 					subselect: selectStmt({
 						targetList: [{ ResTarget: { val: relatedColumn } }],
 						from: [relatedTable],
-						where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+						where: buildKeyCorrelation(
+							relatedAlias,
+							fields.targetColumn,
+							plan.rootTable,
+							fields.sourceColumn,
+							this.createHandlerContext(plan),
+						),
 					}),
 				},
 			};
@@ -1423,12 +1418,8 @@ export class PlanCompiler {
 					'JSON aggregation for NQL binding relation columns is not supported by this adapter',
 				);
 			}
-			const {
-				relatedTable,
-				relatedColumn,
-				relatedJoinColumn,
-				bindingJoinColumn,
-			} = this.buildCorrelatedRelationRefs(fields, plan);
+			const { relatedAlias, relatedTable, relatedColumn } =
+				this.buildCorrelatedRelationRefs(fields, plan);
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',
@@ -1452,7 +1443,13 @@ export class PlanCompiler {
 							},
 						],
 						from: [relatedTable],
-						where: eqExpr(relatedJoinColumn, bindingJoinColumn),
+						where: buildKeyCorrelation(
+							relatedAlias,
+							fields.targetColumn,
+							plan.rootTable,
+							fields.sourceColumn,
+							this.createHandlerContext(plan),
+						),
 					}),
 				},
 			};
@@ -2877,18 +2874,26 @@ export class PlanCompiler {
 
 		// For belongsTo: FK is on source table, references target PK
 		// e.g., posts.author_id → authors.id
-		const fkColumn =
-			decision.foreignKey ?? this.deriveFk(targetTable, this.defaultPk);
-		const onCondition = eqExpr(
-			columnRef(this.defaultPk, targetTable, undefined, this.naming),
-			columnRef(fkColumn, sourceTable, undefined, this.naming),
-		);
-
 		// Use relation-based alias for self-referential tables
 		const alias =
 			targetTable === sourceTable
 				? (decision.relationName ?? `${targetTable}_join`)
 				: undefined;
+		const targetAlias = alias ?? targetTable;
+		const fkColumn = decision.foreignKey ?? [
+			this.deriveFk(targetTable, this.defaultPk),
+		];
+		const targetKey = decision.parentKey ?? [this.defaultPk];
+		const onCondition = buildKeyCorrelation(
+			targetAlias,
+			targetKey,
+			sourceTable,
+			fkColumn,
+			this.createHandlerContext({
+				rootTable: sourceTable,
+				decisions: [],
+			}),
+		);
 
 		this.pendingJoins.push({
 			type: 'JOIN',
@@ -2918,19 +2923,21 @@ export class PlanCompiler {
 			this.naming,
 		);
 
-		const onCondition = eqExpr(
-			columnRef(
-				requiredColumn(decision.sourceColumn, 'sourceColumn', 'compileJoin'),
-				undefined,
-				undefined,
-				this.naming,
-			),
-			columnRef(
-				requiredColumn(decision.targetColumn, 'targetColumn', 'compileJoin'),
-				decision.alias ?? decision.targetTable,
-				undefined,
-				this.naming,
-			),
+		const sourceColumn = toColumnList(decision.sourceColumn);
+		const targetColumn = toColumnList(decision.targetColumn);
+		if (sourceColumn.length === 0) {
+			throw new Error("Missing required column 'sourceColumn' in compileJoin");
+		}
+		if (targetColumn.length === 0) {
+			throw new Error("Missing required column 'targetColumn' in compileJoin");
+		}
+		const sourceAlias = sourceColumn.length > 1 ? plan.rootTable : '';
+		const onCondition = buildKeyCorrelation(
+			sourceAlias,
+			sourceColumn,
+			decision.alias ?? decision.targetTable ?? '',
+			targetColumn,
+			this.createHandlerContext(plan),
 		);
 
 		if (decision.joinType === 'left') {

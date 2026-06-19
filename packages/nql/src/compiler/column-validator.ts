@@ -7,6 +7,7 @@ import type {
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	type NqlBindingIncludeRelationShape,
@@ -234,30 +235,28 @@ export class ColumnValidator {
 		if (!relation) {
 			return `relation '${relationName}' is not declared on source table '${sourceTable}'`;
 		}
-		const fk = relation.foreignKey;
-		const fkColumns =
-			typeof fk === 'string' ? [fk] : Array.isArray(fk) ? [...fk] : [];
+		const fkColumns = toColumnList(relation.foreignKey);
 		if (relation.type !== 'belongsTo') {
 			return `relation '${relationName}' is '${relation.type ?? 'unknown'}'; A-lite only supports relations whose FK column is on the binding source table`;
 		}
-		if (fkColumns.length !== 1) {
-			return `relation '${relationName}' must have exactly one FK column for A-lite binding relation filters`;
+		if (fkColumns.length === 0) {
+			return `relation '${relationName}' must have at least one FK column for A-lite binding relation filters`;
 		}
-		const fkColumn = fkColumns[0];
-		if (fkColumn === undefined) {
-			return `relation '${relationName}' must have exactly one FK column for A-lite binding relation filters`;
-		}
-		const directProjection = metadata.directProjectionLineage?.find(
-			(projection) =>
-				projection.sourceTable === sourceTable &&
-				ColumnValidator.columnsMatch(projection.sourceColumn, fkColumn),
-		);
-		if (!directProjection) {
-			const available = this.virtualBindingTables.get(bindingName)?.join(', ');
-			return `relation '${relationName}' FK column '${fkColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		for (const fkColumn of fkColumns) {
+			const directProjection = metadata.directProjectionLineage?.find(
+				(projection) =>
+					projection.sourceTable === sourceTable &&
+					ColumnValidator.columnsMatch(projection.sourceColumn, fkColumn),
+			);
+			if (!directProjection) {
+				const available = this.virtualBindingTables
+					.get(bindingName)
+					?.join(', ');
+				return `relation '${relationName}' FK column '${fkColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+			}
 		}
 		const available = this.virtualBindingTables.get(bindingName)?.join(', ');
-		return `relation '${relationName}' FK column '${fkColumn}' is not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		return `relation '${relationName}' FK columns '${fkColumns.join(', ')}' are not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
 	}
 
 	explainVirtualBindingScalarRelationRejection(
@@ -282,25 +281,30 @@ export class ColumnValidator {
 			relation,
 		);
 		if (unsupportedReason) return unsupportedReason;
-		const fk = relation.foreignKey;
-		const fkColumns =
-			typeof fk === 'string' ? [fk] : Array.isArray(fk) ? [...fk] : [];
-		const fkColumn = fkColumns[0]!;
-		const sourceColumn =
-			relation.type === 'belongsTo' ? fkColumn : (relation.sourceKey ?? 'id');
-		const directProjection = metadata.directProjectionLineage?.find(
-			(projection) =>
-				projection.sourceTable === sourceTable &&
-				ColumnValidator.columnsMatch(projection.sourceColumn, sourceColumn),
-		);
-		if (!directProjection) {
-			const available = this.virtualBindingTables.get(bindingName)?.join(', ');
-			const sourceColumnLabel =
-				relation.type === 'belongsTo' ? 'FK column' : 'source key column';
-			return `relation '${relationName}' ${sourceColumnLabel} '${sourceColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		const fkColumns = toColumnList(relation.foreignKey);
+		const sourceColumns =
+			relation.type === 'belongsTo'
+				? fkColumns
+				: toColumnList(relation.sourceKey).length > 0
+					? toColumnList(relation.sourceKey)
+					: ['id'];
+		for (const sourceColumn of sourceColumns) {
+			const directProjection = metadata.directProjectionLineage?.find(
+				(projection) =>
+					projection.sourceTable === sourceTable &&
+					ColumnValidator.columnsMatch(projection.sourceColumn, sourceColumn),
+			);
+			if (!directProjection) {
+				const available = this.virtualBindingTables
+					.get(bindingName)
+					?.join(', ');
+				const sourceColumnLabel =
+					relation.type === 'belongsTo' ? 'FK column' : 'source key column';
+				return `relation '${relationName}' ${sourceColumnLabel} '${sourceColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+			}
 		}
 		const available = this.virtualBindingTables.get(bindingName)?.join(', ');
-		return `relation '${relationName}' source column '${sourceColumn}' is not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		return `relation '${relationName}' source columns '${sourceColumns.join(', ')}' are not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
 	}
 
 	/**

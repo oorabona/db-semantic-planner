@@ -1404,7 +1404,7 @@ describe('ResultHydrator', () => {
 			expect(adapter.compileRecursive).toHaveBeenCalled();
 		});
 
-		it('uses first element of array foreignKey', async () => {
+		it('fails loud for composite recursive foreignKey arrays', async () => {
 			const model = createMockModel({
 				'categories.parent': {
 					name: 'parent',
@@ -1420,22 +1420,23 @@ describe('ResultHydrator', () => {
 			const adapter = createMockAdapter([]);
 			const results = [{ id: 1, name: 'Root' }];
 
-			await hydrator.processRecursiveIncludes(
-				results,
-				[
-					{
-						relation: 'parent',
-						options: {
-							recursive: true,
-							direction: 'ancestors',
-							flat: true,
+			await expect(
+				hydrator.processRecursiveIncludes(
+					results,
+					[
+						{
+							relation: 'parent',
+							options: {
+								recursive: true,
+								direction: 'ancestors',
+								flat: true,
+							},
 						},
-					},
-				],
-				adapter as any,
-			);
-
-			expect(adapter.compileRecursive).toHaveBeenCalled();
+					],
+					adapter as any,
+				),
+			).rejects.toThrow(/single-column self-referential foreign key/);
+			expect(adapter.compileRecursive).not.toHaveBeenCalled();
 		});
 
 		it('defaults to parent_id for empty array foreignKey', async () => {
@@ -1976,6 +1977,36 @@ describe('ResultHydrator', () => {
 
 			// sourceKey='id' → extracts value 1 from result
 			expect(adapter.compileSubqueryInclude).toHaveBeenCalled();
+		});
+
+		it('treats single-column array keys as scalars for binding and grouping', async () => {
+			const model = createMockModel();
+			const hydrator = new ResultHydrator(model as any, 'users');
+			const adapter = createMockAdapter([{ id: 10, user_id: 1 }]);
+			const results = [
+				{ id: 1, name: 'Alice' },
+				{ id: 2, name: 'Bob' },
+			];
+
+			await hydrator.hydrateIncludes(
+				results,
+				[
+					{
+						relationName: 'posts',
+						targetTable: 'posts',
+						foreignKey: ['user_id'],
+						sourceKey: ['id'],
+						relationType: 'hasMany',
+					},
+				],
+				adapter as any,
+				makeHydrateOptions(model),
+			);
+
+			expect(adapter.compileSubqueryInclude).toHaveBeenCalled();
+			expect(adapter.compileSubqueryInclude.mock.calls[0][1]).toEqual([1, 2]);
+			expect(results[0].posts).toEqual([{ id: 10, user_id: 1 }]);
+			expect(results[1].posts).toEqual([]);
 		});
 
 		it('handles composite key (string[]) via NUL-byte fast path', async () => {

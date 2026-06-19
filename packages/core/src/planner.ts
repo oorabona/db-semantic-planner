@@ -20,6 +20,7 @@ import type {
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
+import { toColumnList } from '@dbsp/types';
 import { InvalidOperationError } from './dx/errors.js';
 import {
 	getNodeIdAlias,
@@ -606,9 +607,9 @@ function isSubquerySelectedColumnNonNullable(
 	const rel = model.getRelation(`${sourceTable}.${existsIntent.relation}`);
 	if (!rel) return false;
 
-	const fk =
-		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
-	if (!fk) return false;
+	const fkColumns = toColumnList(rel.foreignKey);
+	if (fkColumns.length !== 1) return false;
+	const fk = fkColumns[0]!;
 
 	const targetTableIR = model.getTable(rel.target);
 	if (!targetTableIR) return false;
@@ -683,9 +684,9 @@ function optimizeInToExists(
 
 			// Extract the single column from the subquery's select
 			const subSelect = inWhere.subquery.select;
-			if (!subSelect || subSelect.type !== 'fields') return where;
+			if (subSelect?.type !== 'fields') return where;
 			const fields = 'fields' in subSelect ? subSelect.fields : undefined;
-			if (!fields || fields.length !== 1) return where;
+			if (fields?.length !== 1) return where;
 			const subColumn = fields[0];
 			if (!subColumn) return where;
 
@@ -693,21 +694,17 @@ function optimizeInToExists(
 			// where the FK column matches the subquery's selected column
 			const relationsFrom = model.getRelationsFrom(sourceTable);
 			const sourceTableIR = model.getTable(sourceTable);
-			// For composite PKs, only the first column is checked — multi-column
-			// IN-subquery optimization is not supported (falls through as-is).
-			const sourcePk =
-				typeof sourceTableIR?.primaryKey === 'string'
-					? sourceTableIR.primaryKey
-					: (sourceTableIR?.primaryKey?.[0] ?? 'id');
+			const sourcePkColumns = toColumnList(sourceTableIR?.primaryKey);
+			if (sourcePkColumns.length > 1) return where;
+			const sourcePk = sourcePkColumns[0] ?? 'id';
 
 			let matchedRelation: string | undefined;
 
 			for (const rel of relationsFrom) {
 				if (rel.target !== inWhere.subquery.from) continue;
-				const fk =
-					typeof rel.foreignKey === 'string'
-						? rel.foreignKey
-						: rel.foreignKey?.[0];
+				const fkColumns = toColumnList(rel.foreignKey);
+				if (fkColumns.length !== 1) continue;
+				const fk = fkColumns[0]!;
 
 				// hasMany: outer.pk IN (SELECT fk FROM target WHERE ...)
 				// The subquery selects the FK column, outer field is PK
@@ -1171,6 +1168,8 @@ function processInclude(
 		includeStrategy === 'join' ? (include.join ?? cascadedJoinType) : undefined;
 
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
+	const parentKey =
+		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey;
 
 	state.decisions.push({
 		id: includeDecisionId,
@@ -1186,6 +1185,7 @@ function processInclude(
 			...(relation.foreignKey !== undefined && {
 				foreignKey: relation.foreignKey,
 			}),
+			...(parentKey !== undefined && { parentKey }),
 		},
 		choice: includeStrategy,
 		// Embed joinType so the adapter's join handler can use it directly

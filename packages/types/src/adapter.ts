@@ -133,16 +133,16 @@ export interface CompileOptionsBase {
  */
 export interface NqlBindingVirtualRelationHop {
 	readonly target: string;
-	readonly fkColumn: string;
-	readonly joinColumn: string;
+	readonly fkColumn: readonly string[];
+	readonly joinColumn: readonly string[];
 }
 
 export interface NqlBindingVirtualRelation {
 	readonly relation: string;
 	readonly sourceTable: string;
 	readonly targetTable: string;
-	readonly sourceColumn: string;
-	readonly targetColumn: string;
+	readonly sourceColumn: readonly string[];
+	readonly targetColumn: readonly string[];
 	readonly hops: readonly NqlBindingVirtualRelationHop[];
 	readonly cardinality?: 'one' | 'many';
 	readonly relationType?: RelationType;

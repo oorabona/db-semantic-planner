@@ -10,6 +10,7 @@
 
 import { deriveRelationPathFromIntentPath } from '@dbsp/core';
 import type { ModelIR, PlanReport, WhereIntent } from '@dbsp/types';
+import { type ColumnListInput, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	DEFAULT_PK_COLUMN,
@@ -32,7 +33,7 @@ type ExistsIntent = {
 
 type ResolvedRelation = {
 	target: string;
-	foreignKey: string | undefined;
+	foreignKey: readonly string[] | undefined;
 	relationType: 'belongsTo' | 'hasMany' | 'hasOne' | undefined;
 };
 
@@ -75,8 +76,9 @@ export function resolveRelation(
 ): ResolvedRelation | undefined {
 	const rel = model.getRelation(`${sourceTable}.${relationName}`);
 	if (!rel) return undefined;
+	const foreignKeyColumns = toColumnList(rel.foreignKey);
 	const foreignKey =
-		typeof rel.foreignKey === 'string' ? rel.foreignKey : rel.foreignKey?.[0];
+		foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 	const relationType = rel.type as
 		| 'belongsTo'
 		| 'hasMany'
@@ -611,18 +613,16 @@ function buildMultiHopExistsChain(
 	const hopRelations: Array<{
 		source: string;
 		target: string;
-		foreignKey: string | undefined;
+		foreignKey: readonly string[] | undefined;
 		relationType: 'belongsTo' | 'hasMany' | 'hasOne' | undefined;
-		parentKey: string | undefined;
+		parentKey: ColumnListInput;
 	}> = [];
 
 	for (const hop of hops) {
 		const rel = model.getRelation(`${currentSource}.${hop}`);
-		const foreignKey = rel
-			? typeof rel.foreignKey === 'string'
-				? rel.foreignKey
-				: rel.foreignKey?.[0]
-			: undefined;
+		const foreignKeyColumns = rel ? toColumnList(rel.foreignKey) : [];
+		const foreignKey =
+			foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 		const relationType =
 			rel?.type === 'belongsTo'
 				? ('belongsTo' as const)
@@ -842,10 +842,9 @@ function enrichExistsStubsInConditions(
 							`Use rawExists(subquery(...)) for an EXISTS over an undeclared or uncorrelated subquery.`,
 					);
 				}
+				const foreignKeyColumns = toColumnList(rel.foreignKey);
 				const foreignKey =
-					typeof rel.foreignKey === 'string'
-						? rel.foreignKey
-						: rel.foreignKey?.[0];
+					foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 				const relationType =
 					rel.type === 'belongsTo'
 						? ('belongsTo' as const)
@@ -957,11 +956,9 @@ function buildEnrichedExistsDecision(
 					`${sourceTableForRelation}.${context.relation as string}`,
 				)
 			: undefined;
-	const foreignKey = relIR
-		? typeof relIR.foreignKey === 'string'
-			? relIR.foreignKey
-			: relIR.foreignKey?.[0]
-		: undefined;
+	const foreignKeyColumns = relIR ? toColumnList(relIR.foreignKey) : [];
+	const foreignKey =
+		foreignKeyColumns.length > 0 ? foreignKeyColumns : undefined;
 	// PlanDecision.relationType only supports 'belongsTo' | 'hasMany' | 'hasOne'.
 	// 'belongsToMany' (M:N via junction table) is excluded — its EXISTS path is handled
 	// separately upstream, so if it reaches here we fall back to the hasMany default.
@@ -1695,7 +1692,7 @@ function toIncludeDecision(
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
-		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		foreignKey,
 		parentKey,
 		...(context.intentPath && { intentPath: context.intentPath }),
 		...(limit != null && { limit }),
@@ -1794,7 +1791,7 @@ function toJoinIncludeDecision(
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
-		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		foreignKey,
 		parentKey,
 		columns,
 		...(joinType && { joinType }),
@@ -1869,14 +1866,16 @@ export function synthesizeMissingJoinDecisions(
 		if (!rel) continue;
 
 		// Derive FK from RelationIR
-		const rawFk = rel.foreignKey
-			? Array.isArray(rel.foreignKey)
-				? rel.foreignKey[0]
-				: rel.foreignKey
-			: deriveFk(
-					rel.type === 'belongsTo' ? rel.target : sourceTable,
-					defaultPk,
-				);
+		const rawFkColumns = toColumnList(rel.foreignKey);
+		const rawFk =
+			rawFkColumns.length > 0
+				? rawFkColumns
+				: [
+						deriveFk(
+							rel.type === 'belongsTo' ? rel.target : sourceTable,
+							defaultPk,
+						),
+					];
 
 		// Build column list (PK always included for NULL-detection)
 		let columns: string[] = [defaultPk];
@@ -1902,8 +1901,15 @@ export function synthesizeMissingJoinDecisions(
 			...(rel.type && {
 				relationType: rel.type as 'belongsTo' | 'hasMany' | 'hasOne',
 			}),
-			foreignKey: Array.isArray(rawFk) ? rawFk[0] : rawFk,
-			parentKey: defaultPk,
+			foreignKey: rawFk,
+			parentKey:
+				rel.type === 'belongsTo'
+					? toColumnList(rel.targetKey).length > 0
+						? toColumnList(rel.targetKey)
+						: [defaultPk]
+					: toColumnList(rel.sourceKey).length > 0
+						? toColumnList(rel.sourceKey)
+						: [defaultPk],
 			columns,
 			joinType: inc.join,
 			...(conditions && { conditions }),
@@ -1987,7 +1993,7 @@ function toJsonAggDecision(
 		targetTable: context.target,
 		...(context.sourceTable && { sourceTable: context.sourceTable }),
 		...(relationType && { relationType }),
-		foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+		foreignKey,
 		parentKey,
 		...(context.intentPath && { intentPath: context.intentPath }),
 	};
@@ -2125,7 +2131,7 @@ export function extractLeftJoinIncludeDecisions(
 			relationName,
 			targetTable: context.target,
 			...(relationType && { relationType }),
-			foreignKey: Array.isArray(foreignKey) ? foreignKey[0] : foreignKey,
+			foreignKey,
 			parentKey,
 			columns,
 		});
