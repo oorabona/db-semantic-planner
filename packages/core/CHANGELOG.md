@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.4.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.3.0...core-v1.4.0) (2026-06-19)
+
+
+### Features
+
+* **nql:** Support relation filters from single-source binding reads ([#189](https://github.com/oorabona/db-semantic-planner/issues/189)) ([fb76c10](https://github.com/oorabona/db-semantic-planner/commit/fb76c10dc6540971524e87cae37d4f6e35df85d2)), closes [#182](https://github.com/oorabona/db-semantic-planner/issues/182)
+* **nql:** Support scalar relation columns from single-source binding reads ([#191](https://github.com/oorabona/db-semantic-planner/issues/191)) ([f6d0ad4](https://github.com/oorabona/db-semantic-planner/commit/f6d0ad4eb50101f8270ad8b78320e63fa69f8c5f)), closes [#182](https://github.com/oorabona/db-semantic-planner/issues/182)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.5.0
+    * @dbsp/types bumped to 1.4.0
+
 ## [1.3.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.2.0...core-v1.3.0) (2026-06-18)
 
 
