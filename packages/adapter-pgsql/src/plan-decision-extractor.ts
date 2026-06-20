@@ -1694,11 +1694,8 @@ function toIncludeDecision(
 		...(relationType && { relationType }),
 		foreignKey,
 		parentKey,
-		...(context.targetPrimaryKey && context.targetPrimaryKey.length > 0
-			? {
-					targetPrimaryKey: context.targetPrimaryKey,
-					orderBy: context.targetPrimaryKey,
-				}
+		...(context.targetOrderKey && context.targetOrderKey.length > 0
+			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
 		...(context.intentPath && { intentPath: context.intentPath }),
@@ -2002,11 +1999,8 @@ function toJsonAggDecision(
 		...(relationType && { relationType }),
 		foreignKey,
 		parentKey,
-		...(context.targetPrimaryKey && context.targetPrimaryKey.length > 0
-			? {
-					targetPrimaryKey: context.targetPrimaryKey,
-					orderBy: context.targetPrimaryKey,
-				}
+		...(context.targetOrderKey && context.targetOrderKey.length > 0
+			? { orderBy: context.targetOrderKey }
 			: {}),
 		...(context.orderByFallback ? { orderByFallback: true } : {}),
 		...(context.intentPath && { intentPath: context.intentPath }),

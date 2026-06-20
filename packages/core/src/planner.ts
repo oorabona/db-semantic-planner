@@ -20,7 +20,7 @@ import type {
 	RecursivePlanReport,
 	ResolvedIncludeStrategy,
 } from '@dbsp/types';
-import { toColumnList } from '@dbsp/types';
+import { resolveJsonAggOrderKey, toColumnList } from '@dbsp/types';
 import { InvalidOperationError } from './dx/errors.js';
 import {
 	getNodeIdAlias,
@@ -35,11 +35,6 @@ import {
 	type WhereOrIntent,
 } from './intent-ast.js';
 import type { ModelIR, RelationIR } from './model-ir.js';
-
-interface JsonAggOrderIntent {
-	readonly columns: readonly string[];
-	readonly fallback: boolean;
-}
 
 // Re-export all planner types from @dbsp/types for backward compatibility
 export type {
@@ -625,20 +620,6 @@ function isSubquerySelectedColumnNonNullable(
 	return !column.nullable;
 }
 
-function resolveTargetJsonAggOrderKey(
-	model: ModelIR,
-	targetTable: string,
-): JsonAggOrderIntent {
-	const table = model.getTable(targetTable);
-	if (!table) return { columns: [], fallback: false };
-	const pkColumns = toColumnList(table.primaryKey);
-	// PK-less include targets still need deterministic json_agg arrays; use the
-	// declared table column order as a stable total ordering fallback.
-	return pkColumns.length > 0
-		? { columns: pkColumns, fallback: false }
-		: { columns: table.columns.map((col) => col.name), fallback: true };
-}
-
 function optimizeInToExists(
 	where: WhereIntent,
 	sourceTable: string,
@@ -1189,7 +1170,10 @@ function processInclude(
 	const includeDecisionId = generateDecisionId(state, 'include-strategy');
 	const parentKey =
 		relation.type === 'belongsTo' ? relation.targetKey : relation.sourceKey;
-	const targetOrder = resolveTargetJsonAggOrderKey(model, relation.target);
+	const targetTable = model.getTable(relation.target);
+	const targetOrder = targetTable
+		? resolveJsonAggOrderKey(targetTable)
+		: undefined;
 
 	state.decisions.push({
 		id: includeDecisionId,
@@ -1206,10 +1190,11 @@ function processInclude(
 				foreignKey: relation.foreignKey,
 			}),
 			...(parentKey !== undefined && { parentKey }),
-			...(targetOrder.columns.length > 0 && {
-				targetPrimaryKey: targetOrder.columns,
-			}),
-			...(targetOrder.fallback && { orderByFallback: true }),
+			...(targetOrder &&
+				targetOrder.columns.length > 0 && {
+					targetOrderKey: targetOrder.columns,
+				}),
+			...(targetOrder?.fallback && { orderByFallback: true }),
 		},
 		choice: includeStrategy,
 		// Embed joinType so the adapter's join handler can use it directly

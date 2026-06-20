@@ -25,6 +25,21 @@ import { bindParameter } from './param-value.js';
  */
 const WINDOW_FRAME_DEFAULT = 1034;
 
+function isWindowOrderBy(
+	orderBy: Decision['orderBy'],
+): orderBy is readonly { column: string; direction?: 'ASC' | 'DESC' }[] {
+	return (
+		Array.isArray(orderBy) &&
+		orderBy.every(
+			(item) =>
+				typeof item === 'object' &&
+				item !== null &&
+				'column' in item &&
+				typeof item.column === 'string',
+		)
+	);
+}
+
 /**
  * Build a SortBy node for ORDER BY clause
  */
@@ -50,7 +65,9 @@ function buildSortBy(
  */
 function buildWindowDef(decision: Decision, ctx: CompilerContext): WindowDef {
 	const partition = decision.partition;
-	const orderBy = decision.orderBy;
+	const orderBy = isWindowOrderBy(decision.orderBy)
+		? decision.orderBy
+		: undefined;
 	const frame = decision.frame;
 
 	const tableAlias = ctx.currentAlias ?? ctx.rootTable;

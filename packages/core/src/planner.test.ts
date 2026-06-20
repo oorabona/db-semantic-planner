@@ -835,14 +835,14 @@ describe('Semantic Planner', () => {
 				(d) => d.type === 'include-strategy',
 			);
 			expect(includeDecision?.choice).toBe('json_agg');
-			expect(includeDecision?.context.targetPrimaryKey).toEqual([
+			expect(includeDecision?.context.targetOrderKey).toEqual([
 				'user_id',
 				'event_time',
 				'message',
 			]);
 			expect(includeDecision?.context.orderByFallback).toBe(true);
 			expect(
-				includeDecision?.context.targetPrimaryKey?.every(
+				includeDecision?.context.targetOrderKey?.every(
 					(entry) => typeof entry === 'string',
 				),
 			).toBe(true);

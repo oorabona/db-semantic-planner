@@ -154,12 +154,13 @@ export interface Decision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
-	readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
 	readonly orderByFallback?: boolean;
 	readonly children?: readonly Decision[];
 	// Window function specific
 	readonly partition?: readonly string[];
-	readonly orderBy?: readonly { column: string; direction?: 'ASC' | 'DESC' }[];
+	readonly orderBy?:
+		| readonly { column: string; direction?: 'ASC' | 'DESC' }[]
+		| readonly JsonAggOrderByEntry[];
 	readonly frame?: string;
 	// Recursive specific
 	readonly maxDepth?: number;

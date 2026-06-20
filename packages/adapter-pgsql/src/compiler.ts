@@ -191,6 +191,12 @@ function mapToHandlerDecision(
 	const expressionOrderBy = isExpressionOrderBy(pd.orderBy)
 		? pd.orderBy
 		: undefined;
+	const handlerOrderBy =
+		jsonAggOrderBy ??
+		expressionOrderBy?.map((o) => ({
+			column: o.field,
+			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
+		}));
 	const derivedFkColumns = deriveFkColumns(
 		pd,
 		pd.sourceTable ?? rootTable,
@@ -227,7 +233,6 @@ function mapToHandlerDecision(
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
-		targetPrimaryKey: pd.targetPrimaryKey ?? jsonAggOrderBy,
 		orderByFallback: pd.orderByFallback,
 		dataType: pd.dataType,
 		traversal: pd.traversal,
@@ -243,10 +248,7 @@ function mapToHandlerDecision(
 		include: pd.include?.map((c) =>
 			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
 		),
-		orderBy: expressionOrderBy?.map((o) => ({
-			column: o.field,
-			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
-		})),
+		orderBy: handlerOrderBy,
 		partition: pd.partitionBy,
 		jsonPath: pd.jsonPath,
 		jsonMode: pd.jsonMode,
@@ -324,7 +326,6 @@ export interface PlanDecision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
-	readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
 	readonly orderByFallback?: boolean;
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];

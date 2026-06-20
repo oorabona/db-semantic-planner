@@ -8,7 +8,7 @@
  * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
-import { type JsonAggOrderByEntry, toColumnList } from '@dbsp/types';
+import { type JsonAggOrderByEntry, resolveJsonAggOrderKey } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { andExpr, jsonAggSubquery } from '../../ast-helpers.js';
 import type {
@@ -27,6 +27,14 @@ interface JsonAggOrderIntent {
 	readonly fallback: boolean;
 }
 
+function isJsonAggOrderBy(
+	orderBy: Decision['orderBy'],
+): orderBy is readonly JsonAggOrderByEntry[] {
+	return (
+		Array.isArray(orderBy) && orderBy.every((item) => typeof item === 'string')
+	);
+}
+
 function resolveJsonAggOrderBy(
 	decision: Decision,
 	targetTable: string,
@@ -34,22 +42,18 @@ function resolveJsonAggOrderBy(
 ): JsonAggOrderIntent | undefined {
 	const table = ctx.model?.getTable(targetTable);
 	if (table) {
-		const pkColumns = toColumnList(table.primaryKey);
-		// Tables without declared PKs still need deterministic include arrays; use
-		// all target columns in declared order as the stable fallback key.
-		const orderIntent =
-			pkColumns.length > 0
-				? { columns: pkColumns, fallback: false }
-				: {
-						columns: table.columns.map((col) => col.name),
-						fallback: true,
-					};
-		return orderIntent.columns.length > 0 ? orderIntent : undefined;
+		// ctx.model is authoritative: with schema metadata available, resolve the
+		// order key from the model rather than trusting decision-carried fallbacks.
+		const orderKey = resolveJsonAggOrderKey(table);
+		return orderKey.columns.length > 0 ? orderKey : undefined;
 	}
 
-	return decision.targetPrimaryKey && decision.targetPrimaryKey.length > 0
+	const decisionOrderBy = isJsonAggOrderBy(decision.orderBy)
+		? decision.orderBy
+		: undefined;
+	return decisionOrderBy && decisionOrderBy.length > 0
 		? {
-				columns: decision.targetPrimaryKey,
+				columns: decisionOrderBy,
 				fallback: decision.orderByFallback === true,
 			}
 		: undefined;
