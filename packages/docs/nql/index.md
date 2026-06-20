@@ -514,7 +514,7 @@ customers | select *, orders.*
 ```sql
 SELECT customers.*,
   COALESCE(
-    (SELECT json_agg(to_jsonb(__t__))
+    (SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)
      FROM ch5_ecommerce.orders AS __t__
      WHERE __t__.customer_id = customers.id),
     '[]'::json
@@ -613,7 +613,7 @@ users | where active = true \
 
 ```sql
 SELECT users.*,
-  COALESCE((SELECT json_agg(to_jsonb(__t__))
+  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.user_id ASC NULLS LAST, __t__.role_id ASC NULLS LAST)
     FROM iam_example.user_roles AS __t__
     WHERE __t__.user_id = users.id), '[]'::json) AS user_roles_json
 FROM iam_example.users
@@ -647,7 +647,7 @@ posts | select *, tags.*
 ```sql
 SELECT posts.*,
   COALESCE(
-    (SELECT json_agg(to_jsonb(__t__))
+    (SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)
      FROM ch2_blog.tags AS __t__
      INNER JOIN ch2_blog.post_tags ON __t__.id = post_tags.tag_id
      WHERE post_tags.post_id = posts.id),
@@ -682,9 +682,9 @@ roleEdges | select *, parentRole.*, childRole.*
 
 ```sql
 SELECT role_edges.*,
-  COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__
+  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
     WHERE __t__.id = role_edges.parent_role_id), '[]'::json) AS parent_role_json,
-  COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM iam_example.roles AS __t__
+  COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM iam_example.roles AS __t__
     WHERE __t__.id = role_edges.child_role_id), '[]'::json) AS child_role_json
 FROM iam_example.role_edges
 ```

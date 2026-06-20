@@ -13,6 +13,7 @@ import {
 	type DialectCapabilities,
 	type ExpressionIntent,
 	isParamIntent,
+	type JsonAggOrderByEntry,
 	NQL_SELECT_SCALAR_FUNCTION_ALLOWLIST,
 	NQL_SELECT_WINDOW_FUNCTION_ALLOWLIST,
 	type ParamIntent,
@@ -145,6 +146,34 @@ function trustedRelationHasMultipleHops(
 // PlanDecision → HandlerDecision mapper
 // ============================================================================
 
+type PlanExpressionOrderBy = readonly {
+	field: string;
+	direction?: 'asc' | 'desc';
+}[];
+
+function isJsonAggOrderBy(
+	orderBy: PlanDecision['orderBy'],
+): orderBy is readonly JsonAggOrderByEntry[] {
+	return (
+		Array.isArray(orderBy) && orderBy.every((item) => typeof item === 'string')
+	);
+}
+
+function isExpressionOrderBy(
+	orderBy: PlanDecision['orderBy'],
+): orderBy is PlanExpressionOrderBy {
+	return (
+		Array.isArray(orderBy) &&
+		orderBy.every(
+			(item) =>
+				typeof item === 'object' &&
+				item !== null &&
+				'field' in item &&
+				typeof item.field === 'string',
+		)
+	);
+}
+
 /**
  * Recursively map a PlanDecision tree to a HandlerDecision tree.
  *
@@ -158,6 +187,10 @@ function mapToHandlerDecision(
 	defaultPk: string,
 	deriveFk: FkColumnDerivation,
 ): HandlerDecision {
+	const jsonAggOrderBy = isJsonAggOrderBy(pd.orderBy) ? pd.orderBy : undefined;
+	const expressionOrderBy = isExpressionOrderBy(pd.orderBy)
+		? pd.orderBy
+		: undefined;
 	const derivedFkColumns = deriveFkColumns(
 		pd,
 		pd.sourceTable ?? rootTable,
@@ -194,6 +227,8 @@ function mapToHandlerDecision(
 		relationType: pd.relationType,
 		foreignKey: pd.foreignKey,
 		parentKey: pd.parentKey,
+		targetPrimaryKey: pd.targetPrimaryKey ?? jsonAggOrderBy,
+		orderByFallback: pd.orderByFallback,
 		dataType: pd.dataType,
 		traversal: pd.traversal,
 		pkColumn: pd.pkColumn,
@@ -208,7 +243,7 @@ function mapToHandlerDecision(
 		include: pd.include?.map((c) =>
 			mapToHandlerDecision(c, rootTable, defaultPk, deriveFk),
 		),
-		orderBy: pd.orderBy?.map((o) => ({
+		orderBy: expressionOrderBy?.map((o) => ({
 			column: o.field,
 			direction: (o.direction?.toUpperCase() ?? 'ASC') as 'ASC' | 'DESC',
 		})),
@@ -278,7 +313,7 @@ export interface PlanDecision {
 	readonly offset?: number | ParamIntent | { paramIndex: number };
 	// Window function properties
 	readonly partitionBy?: readonly string[];
-	readonly orderBy?: readonly { field: string; direction?: 'asc' | 'desc' }[];
+	readonly orderBy?: PlanExpressionOrderBy | readonly JsonAggOrderByEntry[];
 	// Column data type (for range type casting, e.g. 'daterange', 'int4range')
 	readonly dataType?: string;
 	// JSON aggregation (include strategy: 'json_agg')
@@ -289,6 +324,8 @@ export interface PlanDecision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
+	readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
+	readonly orderByFallback?: boolean;
 	// Nested json_agg children (for deep relation traversal)
 	readonly children?: readonly PlanDecision[];
 	readonly intentPath?: string;

@@ -8,6 +8,7 @@
 import type {
 	ColumnListInput,
 	DialectCapabilities,
+	JsonAggOrderByEntry,
 	ModelIR,
 	ParamIntent,
 } from '@dbsp/types';
@@ -153,6 +154,8 @@ export interface Decision {
 	readonly relationType?: 'belongsTo' | 'hasMany' | 'hasOne';
 	readonly foreignKey?: ColumnListInput;
 	readonly parentKey?: ColumnListInput;
+	readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
+	readonly orderByFallback?: boolean;
 	readonly children?: readonly Decision[];
 	// Window function specific
 	readonly partition?: readonly string[];

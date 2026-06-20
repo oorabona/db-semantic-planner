@@ -155,7 +155,7 @@ params.equals: []
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT customers.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch5_ecommerce.orders AS __t__ WHERE __t__.customer_id = customers.id), '[]'::json) AS orders_json FROM ch5_ecommerce.customers
+sql.equals: SELECT customers.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch5_ecommerce.orders AS __t__ WHERE __t__.customer_id = customers.id), '[]'::json) AS orders_json FROM ch5_ecommerce.customers
 db.rows.equals: 5
 db.output:
 | id | email             | first_name | last_name | phone       | created_at               | orders_json                                                                                                                                                                                                                                                                                                                                                                                               |

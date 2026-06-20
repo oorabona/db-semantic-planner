@@ -480,6 +480,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 							relationType: 'hasMany',
 							foreignKey: 'author_id',
 							parentKey: 'author_key',
+							targetPrimaryKey: ['id'],
 							includeAlias: 'authorPosts',
 							intentPath: 'include[0]',
 						},
@@ -498,12 +499,13 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 			const result = adapter.compile(plan);
 
-			expect(result.sql).toContain('json_agg(to_jsonb(__t__))');
+			expect(result.sql).toContain(
+				'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
+			);
 			expect(result.sql).toContain('AS author_posts_json');
 			expect(result.sql).toMatch(
 				/WHERE __t__\.author_id = active_authors\.author_key/i,
 			);
-			expect(result.sql).not.toMatch(/\bORDER\s+BY\b/i);
 		});
 
 		it('compiles synthetic binding nested json_agg includes from flat chained intent paths', () => {
@@ -544,6 +546,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 							relationType: 'hasMany',
 							foreignKey: 'author_id',
 							parentKey: 'id',
+							targetPrimaryKey: ['id'],
 							includeAlias: 'author_posts',
 							intentPath: 'include[0]',
 						},
@@ -561,6 +564,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 							relationType: 'hasMany',
 							foreignKey: 'post_id',
 							parentKey: 'id',
+							targetPrimaryKey: ['id'],
 							includeAlias: 'comments',
 							intentPath: 'include[0].include[0]',
 						},
@@ -579,14 +583,17 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 
 			const result = adapter.compile(plan);
 
-			expect(result.sql).toContain('json_agg(to_jsonb(__t__)');
+			expect(result.sql).toContain(
+				'json_agg(to_jsonb(__t__) || jsonb_build_object',
+			);
+			expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+			expect(result.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 			expect(result.sql).toContain('jsonb_build_object');
 			expect(result.sql).toContain('AS author_posts_json');
 			expect(result.sql).toMatch(
 				/WHERE __t__\.author_id = projected_authors\.id/i,
 			);
 			expect(result.sql).toMatch(/WHERE __t1__\.post_id = __t__\.id/i);
-			expect(result.sql).not.toMatch(/\bORDER\s+BY\b/i);
 		});
 
 		it('rejects synthetic binding json_agg includes when the dialect disables JSON aggregation', () => {

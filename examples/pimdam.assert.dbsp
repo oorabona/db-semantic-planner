@@ -160,7 +160,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 10
 success: true
-sql.equals: SELECT product_images.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.products AS __t__ WHERE __t__.id = product_images.product_id), '[]'::json) AS product_json FROM ch6_pimdam.product_images WHERE product_images.locale = $1
+sql.equals: SELECT product_images.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch6_pimdam.products AS __t__ WHERE __t__.id = product_images.product_id), '[]'::json) AS product_json FROM ch6_pimdam.product_images WHERE product_images.locale = $1
 db.rows.equals: 19
 db.output:
 | id | product_id | asset_id | locale | status   | is_main | position | rejected_reason | approved_by    | approved_at              | created_at               | deleted_at | product_json                                                                                                                                                                                                                                         |
@@ -190,7 +190,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 11
 success: true
-sql.equals: SELECT product_images.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.assets AS __t__ WHERE __t__.id = product_images.asset_id), '[]'::json) AS asset_json FROM ch6_pimdam.product_images
+sql.equals: SELECT product_images.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch6_pimdam.assets AS __t__ WHERE __t__.id = product_images.asset_id), '[]'::json) AS asset_json FROM ch6_pimdam.product_images
 db.rows.equals: 25
 db.output:
 | id | product_id | asset_id | locale | status   | is_main | position | rejected_reason                         | approved_by    | approved_at              | created_at               | deleted_at | asset_json                                                                                                                                                                                                                                                                                                                                                  |
@@ -226,7 +226,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT products.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = products.category_id), '[]'::json) AS category_json FROM ch6_pimdam.products WHERE products.active = $1 AND products.deleted_at IS NULL AND products.category_id = $2
+sql.equals: SELECT products.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = products.category_id), '[]'::json) AS category_json FROM ch6_pimdam.products WHERE products.active = $1 AND products.deleted_at IS NULL AND products.category_id = $2
 params.equals: [true,7]
 db.rows.equals: 4
 db.output:
@@ -272,7 +272,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 15
 success: true
-sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = categories.parent_id), '[]'::json) AS parent_json FROM ch6_pimdam.categories WHERE categories.parent_id IS NOT NULL
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch6_pimdam.categories AS __t__ WHERE __t__.id = categories.parent_id), '[]'::json) AS parent_json FROM ch6_pimdam.categories WHERE categories.parent_id IS NOT NULL
 db.rows.equals: 8
 db.output:
 | id | name              | slug              | description                        | parent_id | position | active | created_at               | parent_json                                                                                                                                                                                  |

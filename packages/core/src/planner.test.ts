@@ -6,6 +6,7 @@ import {
 import { ref, schema } from './dx/schema.js';
 import type { QueryIntent } from './index.js';
 import type { RecursiveIntent } from './intent-ast.js';
+import type { ModelIR } from './model-ir.js';
 import {
 	AmbiguousPlanError,
 	plan,
@@ -768,6 +769,83 @@ describe('Semantic Planner', () => {
 			);
 			expect(includeDecision).toBeDefined();
 			expect(includeDecision?.choice).toBe('json_agg');
+		});
+
+		it('marks no-primary-key json_agg fallback ordering with neutral metadata', () => {
+			const users = {
+				name: 'users',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'name', type: 'text', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			const auditEvents = {
+				name: 'audit_events',
+				columns: [
+					{ name: 'user_id', type: 'integer', nullable: false },
+					{ name: 'event_time', type: 'timestamp', nullable: false },
+					{ name: 'message', type: 'text', nullable: false },
+				],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const relation = {
+				name: 'auditEvents',
+				type: 'hasMany',
+				source: 'users',
+				target: 'audit_events',
+				foreignKey: 'user_id',
+				sourceKey: 'id',
+				cardinality: 'many',
+				optionality: 'optional',
+				includeStrategy: 'auto',
+				filterStrategy: 'auto',
+				joinDefault: 'auto',
+			};
+			const tables = new Map([
+				['users', users],
+				['audit_events', auditEvents],
+			]);
+			const relations = new Map([['users.auditEvents', relation]]);
+			const noPkModel = {
+				tables,
+				relations,
+				getTable: (name: string) => tables.get(name),
+				getRelation: (name: string) => relations.get(name),
+				getRelationsFrom: (sourceTable: string) =>
+					[...relations.values()].filter((rel) => rel.source === sourceTable),
+				getRelationsTo: (targetTable: string) =>
+					[...relations.values()].filter((rel) => rel.target === targetTable),
+				isAmbiguous: () => ({ ambiguous: false, options: [] }),
+			} as unknown as ModelIR;
+			const intent: QueryIntent = {
+				type: 'select',
+				from: 'users',
+				include: [{ relation: 'auditEvents' }],
+			};
+
+			const report = plan(intent, noPkModel, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			});
+
+			const includeDecision = report.decisions.find(
+				(d) => d.type === 'include-strategy',
+			);
+			expect(includeDecision?.choice).toBe('json_agg');
+			expect(includeDecision?.context.targetPrimaryKey).toEqual([
+				'user_id',
+				'event_time',
+				'message',
+			]);
+			expect(includeDecision?.context.orderByFallback).toBe(true);
+			expect(
+				includeDecision?.context.targetPrimaryKey?.every(
+					(entry) => typeof entry === 'string',
+				),
+			).toBe(true);
 		});
 
 		it('should use join when flat strategy is used without limit', () => {

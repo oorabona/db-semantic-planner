@@ -5,9 +5,10 @@
  * Uses to_jsonb(__t__) for wildcard row selection, with recursive nesting
  * via jsonb_build_object merge for child relations.
  *
- * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)]) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
+ * Produces: COALESCE((SELECT json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk ASC NULLS LAST) FROM target AS __t__ WHERE ...), '[]'::json) AS relation
  */
 
+import { type JsonAggOrderByEntry, toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import { andExpr, jsonAggSubquery } from '../../ast-helpers.js';
 import type {
@@ -20,6 +21,39 @@ import type {
 } from '../types.js';
 import { buildKeyCorrelation } from '../where/exists.js';
 import { deriveFkColumns } from './shared.js';
+
+interface JsonAggOrderIntent {
+	readonly columns: readonly JsonAggOrderByEntry[];
+	readonly fallback: boolean;
+}
+
+function resolveJsonAggOrderBy(
+	decision: Decision,
+	targetTable: string,
+	ctx: CompilerContext,
+): JsonAggOrderIntent | undefined {
+	const table = ctx.model?.getTable(targetTable);
+	if (table) {
+		const pkColumns = toColumnList(table.primaryKey);
+		// Tables without declared PKs still need deterministic include arrays; use
+		// all target columns in declared order as the stable fallback key.
+		const orderIntent =
+			pkColumns.length > 0
+				? { columns: pkColumns, fallback: false }
+				: {
+						columns: table.columns.map((col) => col.name),
+						fallback: true,
+					};
+		return orderIntent.columns.length > 0 ? orderIntent : undefined;
+	}
+
+	return decision.targetPrimaryKey && decision.targetPrimaryKey.length > 0
+		? {
+				columns: decision.targetPrimaryKey,
+				fallback: decision.orderByFallback === true,
+			}
+		: undefined;
+}
 
 /**
  * Recursively compile a json_agg decision into a ResTarget node.
@@ -94,6 +128,7 @@ function compileJsonAggRecursive(
 	}
 
 	const limit = typeof decision.limit === 'number' ? decision.limit : undefined;
+	const orderBy = resolveJsonAggOrderBy(decision, targetTable, ctx);
 
 	return jsonAggSubquery(
 		targetTable,
@@ -106,6 +141,8 @@ function compileJsonAggRecursive(
 			innerAlias,
 			...(limit !== undefined && { limit }),
 			...(decision.columns && { columns: decision.columns }),
+			...(orderBy && { orderBy: orderBy.columns }),
+			...(orderBy?.fallback && { orderByFallback: true }),
 		},
 	);
 }

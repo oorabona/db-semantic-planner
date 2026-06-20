@@ -8,7 +8,12 @@
  * - Support the NamingPlugin for identifier transformation
  */
 
-import type { LockIntent, LockStrength, LockWaitPolicy } from '@dbsp/types';
+import type {
+	JsonAggOrderByEntry,
+	LockIntent,
+	LockStrength,
+	LockWaitPolicy,
+} from '@dbsp/types';
 import type {
 	A_Expr,
 	A_Expr_Kind,
@@ -905,7 +910,8 @@ export function windowFuncCall(
  *
  * Generates:
  * COALESCE(
- *   (SELECT json_agg(to_jsonb(__t__)) FROM schema.table AS __t__ WHERE __t__.fk = parent.pk),
+ *   (SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.pk ASC NULLS LAST)
+ *    FROM schema.table AS __t__ WHERE __t__.fk = parent.pk),
  *   '[]'::json
  * ) AS "relation_json"
  *
@@ -931,6 +937,10 @@ export function jsonAggSubquery(
 		limit?: number;
 		/** Column projection — if specified, use jsonb_build_object instead of to_jsonb(__t__) */
 		columns?: readonly string[];
+		/** Aggregate ORDER BY columns for deterministic json_agg array order */
+		orderBy?: readonly JsonAggOrderByEntry[];
+		/** True for the no-PK deterministic fallback order key. */
+		orderByFallback?: boolean;
 	},
 ): Node {
 	const targetAlias = options?.innerAlias ?? '__t__';
@@ -997,11 +1007,28 @@ export function jsonAggSubquery(
 		};
 	}
 
-	// Build: json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)])
+	const aggOrder =
+		options?.orderBy && options.orderBy.length > 0
+			? options.orderBy.map((col) =>
+					sortBy(
+						jsonAggOrderByExpression(
+							col,
+							targetAlias,
+							naming,
+							options.orderByFallback === true,
+						),
+						'ASC',
+						'LAST',
+					),
+				)
+			: undefined;
+
+	// Build: json_agg(to_jsonb(__t__) [|| jsonb_build_object(...)] ORDER BY __t__.pk)
 	const jsonAggCall: Node = {
 		FuncCall: {
 			funcname: [stringNode('json_agg')],
 			args: [toJsonbCall],
+			...(aggOrder && { agg_order: aggOrder }),
 		} as FuncCall,
 	};
 
@@ -1049,6 +1076,16 @@ export function jsonAggSubquery(
 			name: alias,
 		} as ResTarget,
 	};
+}
+
+function jsonAggOrderByExpression(
+	entry: JsonAggOrderByEntry,
+	targetAlias: string,
+	naming: NamingPlugin,
+	castToText: boolean,
+): Node {
+	const ref = columnRef(entry, targetAlias, undefined, naming);
+	return castToText ? typeCast(ref, 'text') : ref;
 }
 
 /**

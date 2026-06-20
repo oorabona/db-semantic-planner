@@ -1012,6 +1012,7 @@ describe('NQL → SQL compile-only pipeline', () => {
 		// Should use jsonb_build_object for column projection instead of to_jsonb
 		expect(sql).toContain('jsonb_build_object');
 		expect(sql).not.toContain('to_jsonb');
+		expect(sql).toContain('order by __t__.id asc nulls last');
 		// Projected columns: name, email (from employees.name, employees.email)
 		// PK (id) is added by extractor for NULL detection
 		expect(sql).toContain("'name'");

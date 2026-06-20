@@ -364,14 +364,16 @@ active_users | select *, posts.*`;
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
+				targetPrimaryKey: ['id'],
 				includeAlias: 'posts',
 			},
 		});
 		expect(dump.sql).toMatch(/^WITH "active_users" as \(/);
-		expect(dump.sql).toContain('json_agg(to_jsonb(__t__))');
+		expect(dump.sql).toContain(
+			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
+		);
 		expect(dump.sql).toContain('AS posts_json');
 		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
-		expect(dump.sql).not.toMatch(/\bORDER\s+BY\b/i);
 		expect(rows).toEqual([
 			{ id: 1, name: 'Ada', posts: [{ id: 10, title: 'First' }] },
 			{ id: 2, name: 'No Posts', posts: [] },
@@ -428,6 +430,7 @@ active_users | select *, posts.comments.*`;
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -439,15 +442,17 @@ active_users | select *, posts.comments.*`;
 				relation: 'comments',
 				relationType: 'hasMany',
 				foreignKey: 'postId',
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});
 		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
+		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('jsonb_build_object');
 		expect(dump.sql).toContain('AS posts_json');
 		expect(dump.sql).toMatch(/WHERE __t__\."userId" = active_users\.id/i);
 		expect(dump.sql).toMatch(/WHERE __t1__\."postId" = __t__\.id/i);
-		expect(dump.sql).not.toMatch(/\bORDER\s+BY\b/i);
 		expect(rows).toEqual([
 			{
 				id: 1,
@@ -521,6 +526,7 @@ active_authors | select *, author_posts.post_comments.*`;
 			choice: 'json_agg',
 			context: {
 				relation: 'author_posts',
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -528,11 +534,14 @@ active_authors | select *, author_posts.post_comments.*`;
 			choice: 'json_agg',
 			context: {
 				relation: 'post_comments',
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});
 		expect(dump.sql).toContain('AS author_posts_json');
 		expect(dump.sql).toContain('jsonb_build_object');
+		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(rows).toEqual([
 			{
 				id: 1,
@@ -595,6 +604,7 @@ active_users | select *, posts.user.*`.dump();
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -606,11 +616,14 @@ active_users | select *, posts.user.*`.dump();
 				relation: 'user',
 				relationType: 'belongsTo',
 				foreignKey: 'userId',
+				targetPrimaryKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});
 		expect(dump.sql.match(/json_agg\(to_jsonb/g)).toHaveLength(2);
 		expect(dump.sql).toContain('jsonb_build_object');
+		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(dump.sql).toMatch(/WHERE __t1__\.id = __t__\."userId"/i);
 		expect(dump.sql).not.toMatch(/\bJOIN\s+"?users"?\b/i);
 		expect(dump.sql).not.toMatch(/cte_posts_user/i);

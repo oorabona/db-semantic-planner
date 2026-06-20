@@ -77,7 +77,7 @@ output.contains: orgs.departments: hasMany
 # ─────────────────────────────────────────
 --- query: 7
 success: true
-sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
+sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
@@ -85,7 +85,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 8
 success: true
-sql.equals: SELECT departments.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.department_id = departments.id), '[]'::json) AS employees_json FROM test_strategies.departments
+sql.equals: SELECT departments.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM test_strategies.employees AS __t__ WHERE __t__.department_id = departments.id), '[]'::json) AS employees_json FROM test_strategies.departments
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
@@ -93,7 +93,7 @@ db.rows.equals: 3
 # ─────────────────────────────────────────
 --- query: 9
 success: true
-sql.equals: SELECT employees.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.assignments AS __t__ WHERE __t__.employee_id = employees.id), '[]'::json) AS assignments_json FROM test_strategies.employees
+sql.equals: SELECT employees.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM test_strategies.assignments AS __t__ WHERE __t__.employee_id = employees.id), '[]'::json) AS assignments_json FROM test_strategies.employees
 db.rows.equals: 6
 
 # =============================================================================
@@ -154,7 +154,7 @@ sql.equals: WITH descendants_cte AS (SELECT orgs_inner_0.* FROM test_strategies.
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('employees', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('assignments', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('project', COALESCE((SELECT json_agg(to_jsonb(__t3__)) FROM test_strategies.projects AS __t3__ WHERE __t3__.id = __t2__.project_id), '[]'::json))) FROM test_strategies.assignments AS __t2__ WHERE __t2__.employee_id = __t1__.id), '[]'::json))) FROM test_strategies.employees AS __t1__ WHERE __t1__.department_id = __t__.id), '[]'::json))) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
+sql.equals: SELECT orgs.*, COALESCE((SELECT json_agg(to_jsonb(__t__) || jsonb_build_object('employees', COALESCE((SELECT json_agg(to_jsonb(__t1__) || jsonb_build_object('assignments', COALESCE((SELECT json_agg(to_jsonb(__t2__) || jsonb_build_object('project', COALESCE((SELECT json_agg(to_jsonb(__t3__) ORDER BY __t3__.id ASC NULLS LAST) FROM test_strategies.projects AS __t3__ WHERE __t3__.id = __t2__.project_id), '[]'::json)) ORDER BY __t2__.id ASC NULLS LAST) FROM test_strategies.assignments AS __t2__ WHERE __t2__.employee_id = __t1__.id), '[]'::json)) ORDER BY __t1__.id ASC NULLS LAST) FROM test_strategies.employees AS __t1__ WHERE __t1__.department_id = __t__.id), '[]'::json)) ORDER BY __t__.id ASC NULLS LAST) FROM test_strategies.departments AS __t__ WHERE __t__.org_id = orgs.id), '[]'::json) AS departments_json FROM test_strategies.orgs
 db.rows.equals: 3
 
 # ─────────────────────────────────────────
@@ -326,7 +326,7 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 30
 success: true
-sql.equals: SELECT tasks.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM test_strategies.employees AS __t__ WHERE __t__.id = tasks.assignee_id), '[]'::json) AS assignee_json FROM test_strategies.tasks
+sql.equals: SELECT tasks.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM test_strategies.employees AS __t__ WHERE __t__.id = tasks.assignee_id), '[]'::json) AS assignee_json FROM test_strategies.tasks
 db.rows.equals: 5
 
 # ─────────────────────────────────────────

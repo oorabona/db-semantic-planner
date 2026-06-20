@@ -5,6 +5,7 @@
  * compileJsonAggDecision for all nesting depths.
  */
 
+import type { ColumnIR, ModelIR, TableIR } from '@dbsp/types';
 import { deparseSync } from 'pgsql-deparser';
 import { parseSync } from 'pgsql-parser';
 import { describe, expect, it } from 'vitest';
@@ -31,8 +32,56 @@ function buildDecision(overrides: Partial<Decision> = {}): Decision {
 		relationType: 'hasMany',
 		foreignKey: 'user_id',
 		parentKey: 'id',
+		targetPrimaryKey: ['id'],
 		...overrides,
 	} as Decision;
+}
+
+function makeModel(
+	tables: Record<
+		string,
+		{
+			readonly columns: readonly (
+				| string
+				| {
+						readonly name: string;
+						readonly type?: ColumnIR['type'];
+						readonly originalDbType?: string;
+				  }
+			)[];
+			readonly primaryKey?: string | readonly string[];
+		}
+	>,
+): ModelIR {
+	const tableMap = new Map<string, TableIR>();
+	for (const [name, table] of Object.entries(tables)) {
+		tableMap.set(name, {
+			name,
+			columns: table.columns.map((column) =>
+				typeof column === 'string'
+					? { name: column, type: 'text' }
+					: {
+							name: column.name,
+							type: column.type ?? 'text',
+							...(column.originalDbType !== undefined && {
+								originalDbType: column.originalDbType,
+							}),
+						},
+			),
+			...(table.primaryKey !== undefined && { primaryKey: table.primaryKey }),
+			foreignKeys: [],
+			indexes: [],
+		} as TableIR);
+	}
+	return {
+		tables: tableMap,
+		relations: new Map(),
+		getTable: (name: string) => tableMap.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	} as unknown as ModelIR;
 }
 
 /**
@@ -73,6 +122,9 @@ describe('json-agg handler', () => {
 		expect(sql).toContain('__t__');
 		expect(sql).toContain('posts');
 		expect(sql).toContain('__t__.user_id = users.id');
+		expect(sql).toContain(
+			'json_agg(to_jsonb(__t__) order by __t__.id asc nulls last)',
+		);
 		// No children → no jsonb_build_object
 		expect(sql).not.toContain('jsonb_build_object');
 	});
@@ -93,6 +145,7 @@ describe('json-agg handler', () => {
 					relationType: 'belongsTo',
 					foreignKey: 'role_id',
 					parentKey: 'id',
+					targetPrimaryKey: ['slug'],
 				}),
 			],
 		});
@@ -108,6 +161,8 @@ describe('json-agg handler', () => {
 		expect(sql).toContain('roles as __t1__');
 		// belongsTo: target.pk = parent.fk → __t1__.id = __t__.role_id
 		expect(sql).toContain('__t1__.id = __t__.role_id');
+		expect(sql).toContain('order by __t__.id asc nulls last');
+		expect(sql).toContain('order by __t1__.slug asc nulls last');
 
 		// Must have jsonb_build_object for merging child
 		expect(sql).toContain('jsonb_build_object');
@@ -189,9 +244,124 @@ describe('json-agg handler', () => {
 
 		expect(sql).toContain('__t__.order_id = orders.order_id');
 		expect(sql).toContain('__t__.tenant_id = orders.tenant_id');
+		expect(sql).toContain('order by __t__.id asc nulls last');
 		expect(sql).toMatch(
 			/__t__\.order_id = orders\.order_id\s+and\s+__t__\.tenant_id = orders\.tenant_id/i,
 		);
+	});
+
+	it('orders json_agg by composite target primary key from the model', () => {
+		const ctx = {
+			...makeCtx('orders'),
+			model: makeModel({
+				order_items: {
+					columns: ['order_id', 'tenant_id', 'line_no', 'sku'],
+					primaryKey: ['order_id', 'tenant_id', 'line_no'],
+				},
+			}),
+		};
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'items',
+			targetTable: 'order_items',
+			relationType: 'hasMany',
+			foreignKey: ['order_id', 'tenant_id'],
+			parentKey: ['order_id', 'tenant_id'],
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain(
+			'order by __t__.order_id asc nulls last, __t__.tenant_id asc nulls last, __t__.line_no asc nulls last',
+		);
+		expect(sql).not.toContain('__t__.order_id::text');
+		expect(sql).not.toContain('__t__.tenant_id::text');
+		expect(sql).not.toContain('__t__.line_no::text');
+	});
+
+	it('casts every no-primary-key fallback column to text', () => {
+		const ctx = {
+			...makeCtx('users'),
+			model: makeModel({
+				audit_events: {
+					columns: ['user_id', 'event_time', 'message'],
+				},
+			}),
+		};
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'auditEvents',
+			targetTable: 'audit_events',
+			relationType: 'hasMany',
+			foreignKey: 'user_id',
+			parentKey: 'id',
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain(
+			'order by __t__.user_id::text asc nulls last, __t__.event_time::text asc nulls last, __t__.message::text asc nulls last',
+		);
+	});
+
+	it('casts decision-only no-primary-key fallback columns when the neutral flag is set', () => {
+		const ctx = makeCtx('users');
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'auditEvents',
+			targetTable: 'audit_events',
+			relationType: 'hasMany',
+			foreignKey: 'user_id',
+			parentKey: 'id',
+			targetPrimaryKey: ['user_id', 'event_time', 'message'],
+			orderByFallback: true,
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain(
+			'order by __t__.user_id::text asc nulls last, __t__.event_time::text asc nulls last, __t__.message::text asc nulls last',
+		);
+	});
+
+	it('casts mixed no-primary-key fallback columns to text, including extension db types', () => {
+		const ctx = {
+			...makeCtx('users'),
+			model: makeModel({
+				audit_events: {
+					columns: [
+						{ name: 'user_id', type: 'integer' },
+						{ name: 'payload', type: 'json' },
+						{ name: 'search_payload', type: 'jsonb' },
+						{
+							name: 'embedding',
+							type: 'text',
+							originalDbType: 'vector(768)',
+						},
+						{ name: 'message', type: 'text' },
+					],
+				},
+			}),
+		};
+		const state = createCompilerState();
+		const decision = buildDecision({
+			relation: 'auditEvents',
+			targetTable: 'audit_events',
+			relationType: 'hasMany',
+			foreignKey: 'user_id',
+			parentKey: 'id',
+		});
+
+		const result = jsonAggIncludeHandler.compile(decision, ctx, state);
+		const sql = targetsToSQL(result.targets!);
+
+		expect(sql).toContain(
+			'order by __t__.user_id::text asc nulls last, __t__.payload::text asc nulls last, __t__.search_payload::text asc nulls last, __t__.embedding::text asc nulls last, __t__.message::text asc nulls last',
+		);
+		expect(() => parseSync(sql)).not.toThrow();
 	});
 
 	it('skips children with missing required fields', () => {

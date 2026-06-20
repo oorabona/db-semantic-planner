@@ -15,6 +15,14 @@ import type { IncludeStrategy, RelationType } from './model-ir.js';
 // ============================================================================
 
 /**
+ * Aggregate ORDER BY key for deterministic json_agg include arrays.
+ * Core keeps this dialect-neutral: entries are column names only. When
+ * `PlanDecision.context.orderByFallback` is true, adapters decide how to
+ * realize the PK-less deterministic fallback for their dialect.
+ */
+export type JsonAggOrderByEntry = string;
+
+/**
  * Decision types made by the planner
  */
 export type DecisionType =
@@ -57,6 +65,13 @@ export interface PlanDecision {
 		readonly foreignKey?: string | readonly string[];
 		/** Parent/source key override for include-strategy correlation */
 		readonly parentKey?: ColumnListInput;
+		/**
+		 * Stable target order key for json_agg include arrays.
+		 * Uses the target table primary key, or all target columns when no PK is declared.
+		 */
+		readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
+		/** True when the target order key is the no-PK deterministic fallback. */
+		readonly orderByFallback?: boolean;
 		/** Whether the relation is self-referential (source === target) */
 		readonly isSelfRef?: boolean;
 	};

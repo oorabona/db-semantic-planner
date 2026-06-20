@@ -109,14 +109,14 @@ params.equals: [true]
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM minimal.users AS __t__ WHERE __t__.id = posts.user_id), '[]'::json) AS user_json FROM minimal.posts
+sql.equals: SELECT posts.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM minimal.users AS __t__ WHERE __t__.id = posts.user_id), '[]'::json) AS user_json FROM minimal.posts
 
 # ─────────────────────────────────────────
 # Query 14: users with posts (json_agg default)
 # ─────────────────────────────────────────
 --- query: 14
 success: true
-sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM minimal.posts AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS posts_json FROM minimal.users
+sql.equals: SELECT users.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM minimal.posts AS __t__ WHERE __t__.user_id = users.id), '[]'::json) AS posts_json FROM minimal.users
 
 # ─────────────────────────────────────────
 # Query 15: posts where published = true and userId = 1
