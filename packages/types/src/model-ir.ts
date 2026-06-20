@@ -54,6 +54,9 @@ export type OnDeleteAction =
 /** Relation types */
 export type RelationType = 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
 
+/** Relation type label carried by NQL binding proofs. */
+export type NqlBindingRelationType = RelationType | 'manyToMany';
+
 /**
  * CLI-NQL: Relation kind for natural query language.
  * Maps to SQL/database perspective rather than ORM perspective.

@@ -489,19 +489,25 @@ describe('PlanCompiler - Coverage Tests', () => {
 	describe('selectRelationColumn', () => {
 		function bindingRelationColumnPlan(
 			fields: {
+				readonly relation?: string;
 				readonly relationType?:
 					| 'belongsTo'
 					| 'hasOne'
 					| 'hasMany'
-					| 'belongsToMany';
+					| 'belongsToMany'
+					| 'manyToMany';
 				readonly cardinality?: 'one' | 'many';
 				readonly targetTable?: string;
 				readonly sourceColumn?: string | readonly string[];
 				readonly targetColumn?: string | readonly string[];
+				readonly through?: string;
+				readonly throughSourceColumn?: string;
+				readonly throughTargetColumn?: string;
 				readonly selectedColumn?: string;
 			} = {},
 		): SimplifiedPlanReport {
 			const selectedColumn = fields.selectedColumn ?? 'title';
+			const relation = fields.relation ?? 'posts';
 			const sourceColumn = Array.isArray(fields.sourceColumn)
 				? fields.sourceColumn
 				: [fields.sourceColumn ?? 'id'];
@@ -511,12 +517,12 @@ describe('PlanCompiler - Coverage Tests', () => {
 			const relationColumn = markNqlTrustedRelationFilter(
 				{
 					type: 'selectRelationColumn',
-					relation: 'posts',
+					relation,
 					column: selectedColumn,
-					alias: `posts.${selectedColumn}`,
+					alias: `${relation}.${selectedColumn}`,
 				},
 				{
-					relation: 'posts',
+					relation,
 					targetTable: fields.targetTable ?? 'posts',
 					sourceColumn,
 					targetColumn,
@@ -527,6 +533,15 @@ describe('PlanCompiler - Coverage Tests', () => {
 					}),
 					...(fields.relationType !== undefined && {
 						relationType: fields.relationType,
+					}),
+					...(fields.through !== undefined && {
+						through: fields.through,
+					}),
+					...(fields.throughSourceColumn !== undefined && {
+						throughSourceColumn: fields.throughSourceColumn,
+					}),
+					...(fields.throughTargetColumn !== undefined && {
+						throughTargetColumn: fields.throughTargetColumn,
 					}),
 				},
 			);
@@ -588,6 +603,82 @@ describe('PlanCompiler - Coverage Tests', () => {
 				"coalesce(json_agg(rc_0.metadata order by cast(rc_0.metadata as text) nulls last), '[]'::json)",
 			);
 			expect(sql).toContain('as "posts.metadata"');
+		});
+
+		it('compiles trusted manyToMany binding relation columns through one junction join subquery', () => {
+			const compiler = new PlanCompiler();
+			const result = compiler.compile(
+				bindingRelationColumnPlan({
+					relation: 'tags',
+					cardinality: 'many',
+					relationType: 'manyToMany',
+					targetTable: 'tags',
+					targetColumn: 'id',
+					selectedColumn: 'name',
+					through: 'post_tags',
+					throughSourceColumn: 'post_id',
+					throughTargetColumn: 'tag_id',
+				}),
+			);
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toMatch(
+				/\(select coalesce\(json_agg\(rc_0\.name order by cast\(rc_0\.name as text\) nulls last\), '\[\]'::json\) from tags as rc_0 join post_tags as rc_1 on rc_0\.id = rc_1\.tag_id where rc_1\.post_id = projected_users\.id\) as "tags\.name"/i,
+			);
+			expect(sql).not.toMatch(/where rc_0\.id = projected_users\.id/i);
+		});
+
+		it('rejects trusted manyToMany binding relation columns forged as cardinality one', () => {
+			const compiler = new PlanCompiler();
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						relation: 'tags',
+						cardinality: 'one',
+						relationType: 'manyToMany',
+						targetTable: 'tags',
+						targetColumn: 'id',
+						selectedColumn: 'name',
+					}),
+				),
+			).toThrow(/must use cardinality 'many' with complete junction proof/);
+		});
+
+		it('allocates distinct junction aliases for two manyToMany binding relation columns', () => {
+			const relationColumns = ['name', 'slug'].map((selectedColumn) =>
+				markNqlTrustedRelationFilter(
+					{
+						type: 'selectRelationColumn',
+						relation: 'tags',
+						column: selectedColumn,
+						alias: `tags.${selectedColumn}`,
+					},
+					{
+						relation: 'tags',
+						targetTable: 'tags',
+						sourceColumn: ['id'],
+						targetColumn: ['id'],
+						hops: [],
+						through: 'post_tags',
+						throughSourceColumn: 'post_id',
+						throughTargetColumn: 'tag_id',
+						selectedColumn,
+						cardinality: 'many',
+						relationType: 'manyToMany',
+					},
+				),
+			);
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_posts',
+				decisions: relationColumns,
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toContain('from tags as rc_0 join post_tags as rc_1');
+			expect(sql).toContain('from tags as rc_2 join post_tags as rc_3');
+			expect(sql).toMatch(/where rc_1\.post_id = projected_posts\.id/i);
+			expect(sql).toMatch(/where rc_3\.post_id = projected_posts\.id/i);
 		});
 
 		it('keeps trusted belongsTo binding relation columns on the scalar subquery path', () => {
@@ -809,8 +900,21 @@ describe('PlanCompiler - Coverage Tests', () => {
 			);
 		});
 
+		it('throws before SQL construction for manyToMany without complete junction proof', () => {
+			const compiler = new PlanCompiler();
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						cardinality: 'many',
+						relationType: 'manyToMany',
+						targetTable: 'posts;drop',
+					}),
+				),
+			).toThrow(/missing complete junction proof/);
+		});
+
 		it.each([
-			'belongsToMany',
 			undefined,
 		] as const)('throws before SQL construction for cardinality many with relationType %s', (relationType) => {
 			const compiler = new PlanCompiler();
@@ -823,7 +927,7 @@ describe('PlanCompiler - Coverage Tests', () => {
 						targetTable: 'posts;drop',
 					}),
 				),
-			).toThrow(/only hasMany can be aggregated \(ref-#192\)/);
+			).toThrow(/only hasMany or manyToMany can be aggregated \(ref-#192\)/);
 		});
 	});
 

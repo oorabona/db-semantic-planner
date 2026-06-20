@@ -145,6 +145,45 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(payload?.hops[0]?.target).toBe('companies');
 	});
 
+	it('carries and freezes many-to-many junction proof fields', () => {
+		const proof = markNqlTrustedRelationFilter(
+			{ kind: 'relationColumn' },
+			{
+				relation: 'tags',
+				targetTable: 'tags',
+				sourceColumn: ['id'],
+				targetColumn: ['id'],
+				hops: [],
+				through: 'post_tags',
+				throughSourceColumn: 'post_id',
+				throughTargetColumn: 'tag_id',
+				selectedColumn: 'name',
+				cardinality: 'many',
+				relationType: 'manyToMany',
+			},
+		);
+
+		const payload = getTrustedNqlRelationFilterFields(proof);
+
+		expect(payload).toEqual({
+			relation: 'tags',
+			targetTable: 'tags',
+			sourceColumn: ['id'],
+			targetColumn: ['id'],
+			hops: [],
+			through: 'post_tags',
+			throughSourceColumn: 'post_id',
+			throughTargetColumn: 'tag_id',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			relationType: 'manyToMany',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.through)).toBe(true);
+		expect(Object.isFrozen(payload?.throughSourceColumn)).toBe(true);
+		expect(Object.isFrozen(payload?.throughTargetColumn)).toBe(true);
+	});
+
 	it('does not trust forged plain objects or invalid relationType payloads', () => {
 		const forged = {
 			relation: 'posts',
