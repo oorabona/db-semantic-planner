@@ -1326,6 +1326,10 @@ export class PlanCompiler {
 		return hasBindingName(this.bindingNames, plan.rootTable, this.naming);
 	}
 
+	private allocateBindingRelationAlias(): string {
+		return `rc_${this.bindingRelationColumnSubqueryIndex++}`;
+	}
+
 	private buildCorrelatedRelationRefs(
 		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
 		plan: SimplifiedPlanReport,
@@ -1334,7 +1338,7 @@ export class PlanCompiler {
 		relatedTable: Node;
 		relatedColumn: Node;
 	} {
-		const relatedAlias = `rc_${this.bindingRelationColumnSubqueryIndex++}`;
+		const relatedAlias = this.allocateBindingRelationAlias();
 		const relatedTable = rangeVar(
 			fields.targetTable,
 			relatedAlias,
@@ -1354,6 +1358,18 @@ export class PlanCompiler {
 		};
 	}
 
+	private bindingRelationHasCompleteManyToManyProof(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+	): boolean {
+		return (
+			(fields.relationType === 'manyToMany' ||
+				fields.relationType === 'belongsToMany') &&
+			fields.through !== undefined &&
+			fields.throughSourceColumn !== undefined &&
+			fields.throughTargetColumn !== undefined
+		);
+	}
+
 	private compileBindingRelationColumnSubquery(
 		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
 		plan: SimplifiedPlanReport,
@@ -1362,6 +1378,24 @@ export class PlanCompiler {
 		if (fields.selectedColumn === undefined) {
 			throw new Error(
 				`NQL binding relation-column proof for '${plan.rootTable}' is missing selectedColumn.`,
+			);
+		}
+		const isManyToManyRelation =
+			fields.relationType === 'manyToMany' ||
+			fields.relationType === 'belongsToMany';
+		const hasCompleteManyToManyProof =
+			this.bindingRelationHasCompleteManyToManyProof(fields);
+		if (
+			isManyToManyRelation &&
+			(fields.cardinality !== 'many' || !hasCompleteManyToManyProof)
+		) {
+			if (fields.cardinality !== 'many') {
+				throw new Error(
+					`NQL binding relation-column proof for '${plan.rootTable}' is manyToMany but must use cardinality 'many' with complete junction proof (through, throughSourceColumn, throughTargetColumn) (ref-#192).`,
+				);
+			}
+			throw new Error(
+				`NQL binding relation-column proof for '${plan.rootTable}' is manyToMany but missing complete junction proof (through, throughSourceColumn, throughTargetColumn) (ref-#192).`,
 			);
 		}
 		if (fields.cardinality === 'one') {
@@ -1446,9 +1480,22 @@ export class PlanCompiler {
 			};
 		}
 		if (fields.cardinality === 'many') {
-			if (fields.relationType !== 'hasMany') {
+			if (
+				fields.relationType !== 'hasMany' &&
+				fields.relationType !== 'manyToMany' &&
+				fields.relationType !== 'belongsToMany'
+			) {
 				throw new Error(
-					`NQL binding relation-column proof for '${plan.rootTable}' has cardinality 'many' but relationType '${fields.relationType ?? 'unknown'}' is not supported; only hasMany can be aggregated (ref-#192).`,
+					`NQL binding relation-column proof for '${plan.rootTable}' has cardinality 'many' but relationType '${fields.relationType ?? 'unknown'}' is not supported; only hasMany or manyToMany can be aggregated (ref-#192).`,
+				);
+			}
+			if (
+				(fields.relationType === 'manyToMany' ||
+					fields.relationType === 'belongsToMany') &&
+				!hasCompleteManyToManyProof
+			) {
+				throw new Error(
+					`NQL binding relation-column proof for '${plan.rootTable}' is manyToMany but missing complete junction proof (through, throughSourceColumn, throughTargetColumn) (ref-#192).`,
 				);
 			}
 			if (dialectCapabilities?.supportsJsonAgg === false) {
@@ -1458,6 +1505,43 @@ export class PlanCompiler {
 			}
 			const { relatedAlias, relatedTable, relatedColumn } =
 				this.buildCorrelatedRelationRefs(fields, plan);
+			const junctionAlias = hasCompleteManyToManyProof
+				? this.allocateBindingRelationAlias()
+				: undefined;
+			const handlerContext = this.createHandlerContext(plan);
+			const fromNode = hasCompleteManyToManyProof
+				? innerJoin(
+						relatedTable,
+						rangeVar(
+							fields.through!,
+							junctionAlias!,
+							this.schemaForRangeVar(plan, fields.through!),
+							this.naming,
+						),
+						buildKeyCorrelation(
+							relatedAlias,
+							fields.targetColumn,
+							junctionAlias!,
+							[fields.throughTargetColumn!],
+							handlerContext,
+						),
+					)
+				: relatedTable;
+			const whereNode = hasCompleteManyToManyProof
+				? buildKeyCorrelation(
+						junctionAlias!,
+						[fields.throughSourceColumn!],
+						plan.rootTable,
+						fields.sourceColumn,
+						handlerContext,
+					)
+				: buildKeyCorrelation(
+						relatedAlias,
+						fields.targetColumn,
+						plan.rootTable,
+						fields.sourceColumn,
+						handlerContext,
+					);
 			return {
 				SubLink: {
 					subLinkType: 'EXPR_SUBLINK',
@@ -1480,14 +1564,8 @@ export class PlanCompiler {
 								},
 							},
 						],
-						from: [relatedTable],
-						where: buildKeyCorrelation(
-							relatedAlias,
-							fields.targetColumn,
-							plan.rootTable,
-							fields.sourceColumn,
-							this.createHandlerContext(plan),
-						),
+						from: [fromNode],
+						where: whereNode,
 					}),
 				},
 			};

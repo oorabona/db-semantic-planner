@@ -9,14 +9,14 @@
  */
 
 import { toColumnList } from './column-list.js';
-import type { RelationType } from './model-ir.js';
+import type { NqlBindingRelationType } from './model-ir.js';
 
 // Internal-only build utilities (NOT part of public API)
 export type { IntentBuilder, Mutable } from './builders.js';
 
 /** @internal Minimal relation shape needed to validate NQL binding include hops. */
 export interface NqlBindingIncludeRelationShape {
-	readonly type?: RelationType | undefined;
+	readonly type?: NqlBindingRelationType | undefined;
 	readonly foreignKey?: string | readonly string[] | undefined;
 	readonly source?: string | undefined;
 	readonly target?: string | undefined;
@@ -46,6 +46,7 @@ export function explainUnsupportedNqlBindingIncludeHop(
 	if (includeReason) return includeReason;
 	if (
 		relation.type === 'belongsToMany' ||
+		relation.type === 'manyToMany' ||
 		relation.through !== undefined ||
 		relation.otherKey !== undefined ||
 		relation.throughSourceKey !== undefined ||
@@ -173,9 +174,12 @@ export interface NqlTrustedRelationFilterFields {
 	readonly sourceColumn: readonly string[];
 	readonly targetColumn: readonly string[];
 	readonly hops: readonly NqlTrustedRelationFilterHop[];
+	readonly through?: string;
+	readonly throughSourceColumn?: string;
+	readonly throughTargetColumn?: string;
 	readonly selectedColumn?: string;
 	readonly cardinality?: 'one' | 'many';
-	readonly relationType?: RelationType;
+	readonly relationType?: NqlBindingRelationType;
 }
 
 /**
@@ -197,12 +201,13 @@ function isStringArray(value: unknown): value is readonly string[] {
 	);
 }
 
-function isRelationType(value: unknown): value is RelationType {
+function isRelationType(value: unknown): value is NqlBindingRelationType {
 	return (
 		value === 'hasOne' ||
 		value === 'hasMany' ||
 		value === 'belongsTo' ||
-		value === 'belongsToMany'
+		value === 'belongsToMany' ||
+		value === 'manyToMany'
 	);
 }
 
@@ -245,6 +250,9 @@ function isTrustedRelationFilterPayload(
 		readonly sourceColumn?: unknown;
 		readonly targetColumn?: unknown;
 		readonly hops?: unknown;
+		readonly through?: unknown;
+		readonly throughSourceColumn?: unknown;
+		readonly throughTargetColumn?: unknown;
 		readonly selectedColumn?: unknown;
 		readonly cardinality?: unknown;
 		readonly relationType?: unknown;
@@ -257,6 +265,14 @@ function isTrustedRelationFilterPayload(
 		record.sourceColumn.length === record.targetColumn.length &&
 		Array.isArray(record.hops) &&
 		record.hops.every(isTrustedRelationFilterHop) &&
+		(record.through === undefined ||
+			(typeof record.through === 'string' && record.through.length > 0)) &&
+		(record.throughSourceColumn === undefined ||
+			(typeof record.throughSourceColumn === 'string' &&
+				record.throughSourceColumn.length > 0)) &&
+		(record.throughTargetColumn === undefined ||
+			(typeof record.throughTargetColumn === 'string' &&
+				record.throughTargetColumn.length > 0)) &&
 		(record.selectedColumn === undefined ||
 			typeof record.selectedColumn === 'string') &&
 		(record.cardinality === undefined ||
@@ -279,6 +295,9 @@ function freezeTrustedRelationFilterPayload(
 	const relation = Array.isArray(fields.relation)
 		? Object.freeze([...fields.relation])
 		: fields.relation;
+	const through = fields.through;
+	const throughSourceColumn = fields.throughSourceColumn;
+	const throughTargetColumn = fields.throughTargetColumn;
 	const hops = Object.freeze(
 		fields.hops.map((hop) =>
 			Object.freeze({
@@ -294,6 +313,15 @@ function freezeTrustedRelationFilterPayload(
 		sourceColumn: Object.freeze([...fields.sourceColumn]),
 		targetColumn: Object.freeze([...fields.targetColumn]),
 		hops,
+		...(through !== undefined && {
+			through,
+		}),
+		...(throughSourceColumn !== undefined && {
+			throughSourceColumn,
+		}),
+		...(throughTargetColumn !== undefined && {
+			throughTargetColumn,
+		}),
 		...(fields.selectedColumn !== undefined && {
 			selectedColumn: fields.selectedColumn,
 		}),

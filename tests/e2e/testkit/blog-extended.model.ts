@@ -8,6 +8,7 @@
  */
 
 import { ref, schema } from '@dbsp/core';
+import type { ModelIR, RelationIR } from '@dbsp/types';
 
 const blogExtendedSchema = schema({
 	authors: {
@@ -56,4 +57,66 @@ const blogExtendedSchema = schema({
 	},
 });
 
-export const blogExtendedModel = blogExtendedSchema.model;
+const postsTagsRelation: RelationIR = {
+	name: 'tags',
+	type: 'belongsToMany',
+	source: 'posts',
+	target: 'tags',
+	through: 'postTags',
+	foreignKey: 'postId',
+	otherKey: 'tagId',
+	cardinality: 'many',
+	optionality: 'optional',
+	includeStrategy: 'auto',
+	filterStrategy: 'auto',
+	joinDefault: 'auto',
+};
+
+const tagsPostsRelation: RelationIR = {
+	name: 'posts',
+	type: 'belongsToMany',
+	source: 'tags',
+	target: 'posts',
+	through: 'postTags',
+	foreignKey: 'tagId',
+	otherKey: 'postId',
+	cardinality: 'many',
+	optionality: 'optional',
+	includeStrategy: 'auto',
+	filterStrategy: 'auto',
+	joinDefault: 'auto',
+};
+
+function withBlogExtendedManyToManyRelations(model: ModelIR): ModelIR {
+	const relations = new Map(model.relations);
+	relations.set('posts.tags', postsTagsRelation);
+	relations.set('tags.posts', tagsPostsRelation);
+	return {
+		tables: model.tables,
+		relations,
+		...(model.enums !== undefined && { enums: model.enums }),
+		...(model.extensions !== undefined && { extensions: model.extensions }),
+		...(model.sequences !== undefined && { sequences: model.sequences }),
+		getTable: model.getTable.bind(model),
+		getRelationsFrom(sourceTable: string) {
+			const sourceRelations = model.getRelationsFrom(sourceTable);
+			if (sourceTable === 'posts') {
+				return [...sourceRelations, postsTagsRelation];
+			}
+			if (sourceTable === 'tags') {
+				return [...sourceRelations, tagsPostsRelation];
+			}
+			return sourceRelations;
+		},
+		getRelation(qualifiedName: string) {
+			if (qualifiedName === 'posts.tags') return postsTagsRelation;
+			if (qualifiedName === 'tags.posts') return tagsPostsRelation;
+			return model.getRelation(qualifiedName);
+		},
+		getRelationsTo: model.getRelationsTo.bind(model),
+	};
+}
+
+export const blogExtendedModel = withBlogExtendedManyToManyRelations(
+	blogExtendedSchema.model,
+);

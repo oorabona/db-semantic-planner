@@ -28,7 +28,7 @@ type TestRelation = {
 	readonly type: 'hasMany' | 'hasOne' | 'belongsTo' | 'belongsToMany';
 	readonly foreignKey: string | readonly string[];
 	readonly through?: string;
-	readonly otherKey?: string;
+	readonly otherKey?: string | readonly string[];
 	readonly recursive?: unknown;
 	readonly sourceKey?: string | readonly string[];
 	readonly targetKey?: string | readonly string[];
@@ -74,6 +74,9 @@ const schema = {
 			},
 			tags: {
 				columns: [{ name: 'id' }, { name: 'name' }],
+			},
+			postTags: {
+				columns: [{ name: 'postId' }, { name: 'tagId' }],
 			},
 			categories: {
 				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
@@ -144,7 +147,20 @@ const schema = {
 					source: 'posts',
 					target: 'tags',
 					type: 'belongsToMany',
-					foreignKey: 'id',
+					through: 'postTags',
+					foreignKey: 'postId',
+					otherKey: 'tagId',
+				},
+			],
+			tags: [
+				{
+					name: 'posts',
+					source: 'tags',
+					target: 'posts',
+					type: 'belongsToMany',
+					through: 'postTags',
+					foreignKey: 'tagId',
+					otherKey: 'postId',
 				},
 			],
 			orders: [],
@@ -900,15 +916,154 @@ projected_users | select posts.title`,
 		expect(result.ast?.query?.include).toBeUndefined();
 	});
 
-	it('rejects binding-final belongsToMany relation columns because junction traversal is unsupported', () => {
+	it('allows binding-final many-to-many relation columns with frozen junction proof', () => {
 		const result = compile(
 			`posts | select id | bind projected_posts
 projected_posts | select tags.name`,
 			schema,
 		);
 
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(relationColumn).toMatchObject({
+			kind: 'relationColumn',
+			relation: 'tags',
+			column: 'name',
+			as: 'tags.name',
+		});
+		const payload = getTrustedNqlRelationFilterFields(relationColumn);
+		expect(payload).toEqual({
+			relation: 'tags',
+			targetTable: 'tags',
+			sourceColumn: ['id'],
+			targetColumn: ['id'],
+			hops: [],
+			through: 'postTags',
+			throughSourceColumn: 'postId',
+			throughTargetColumn: 'tagId',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			relationType: 'manyToMany',
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.throughSourceColumn)).toBe(true);
+		expect(result.ast?.query?.include).toBeUndefined();
+	});
+
+	it('allows binding-final many-to-many relation columns in the reverse direction', () => {
+		const result = compile(
+			`tags | select id | bind projected_tags
+projected_tags | select posts.title`,
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumn =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.find(
+						(column) => column.kind === 'relationColumn',
+					)
+				: undefined;
+		expect(getTrustedNqlRelationFilterFields(relationColumn)).toMatchObject({
+			relation: 'posts',
+			targetTable: 'posts',
+			sourceColumn: ['id'],
+			targetColumn: ['id'],
+			through: 'postTags',
+			throughSourceColumn: 'tagId',
+			throughTargetColumn: 'postId',
+			selectedColumn: 'title',
+			cardinality: 'many',
+			relationType: 'manyToMany',
+		});
+	});
+
+	it('rejects binding-final many-to-many relation columns without a resolvable junction', () => {
+		const unresolvedJunctionSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'tags',
+						source: 'posts',
+						target: 'tags',
+						type: 'belongsToMany' as const,
+						foreignKey: 'postId',
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id | bind projected_posts
+projected_posts | select tags.name`,
+			unresolvedJunctionSchema,
+		);
+
 		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(/belongsToMany/);
+		expect(result.errors[0]?.message).toMatch(/resolvable junction/);
+		expect(result.errors[0]?.message).toMatch(/ref-#192/);
+	});
+
+	it('rejects binding-final many-to-many relation columns with composite junction keys', () => {
+		const compositeJunctionSchema = {
+			...schema,
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'posts')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'tags',
+						source: 'posts',
+						target: 'tags',
+						type: 'belongsToMany' as const,
+						through: 'postTags',
+						foreignKey: ['postId', 'tenantId'],
+						otherKey: 'tagId',
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			`posts | select id | bind projected_posts
+projected_posts | select tags.name`,
+			compositeJunctionSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/junction source FK/);
+		expect(result.errors[0]?.message).toMatch(/ref-#179/);
+	});
+
+	it('rejects binding-final many-to-many relation columns as a tail hop', () => {
+		const result = compile(
+			`posts | select id | bind projected_posts
+projected_posts | select tags.posts.title`,
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/relation 'tags'/);
 		expect(result.errors[0]?.message).toMatch(/junction/);
 		expect(result.errors[0]?.message).toMatch(/ref-#192/);
 	});

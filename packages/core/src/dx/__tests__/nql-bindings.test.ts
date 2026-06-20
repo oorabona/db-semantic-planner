@@ -5,6 +5,7 @@
  * Regression: https://github.com/oorabona/db-semantic-planner/issues/173
  */
 
+import type { ModelIR, RelationIR } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
 import type { Adapter, CompiledNqlQuery } from '../../adapter.js';
@@ -76,6 +77,92 @@ function createBlogBindingTag(executeResult: readonly unknown[] = []) {
 		adapter,
 		compile,
 		nql: createNqlTag(db.definition, db.model, adapter),
+	};
+}
+
+function createM2mBindingTag(executeResult: readonly unknown[] = []) {
+	const db = schema({
+		posts: {
+			id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+			title: 'string',
+		},
+		tags: {
+			id: { type: 'integer', primaryKey: true, dbType: 'integer' },
+			name: 'string',
+			slug: 'string',
+		},
+		postTags: {
+			postId: ref('posts'),
+			tagId: ref('tags'),
+		},
+	} as const);
+	const postsTagsRelation: RelationIR = {
+		name: 'tags',
+		type: 'belongsToMany',
+		source: 'posts',
+		target: 'tags',
+		through: 'postTags',
+		foreignKey: 'postId',
+		otherKey: 'tagId',
+		cardinality: 'many',
+		optionality: 'optional',
+		includeStrategy: 'auto',
+		filterStrategy: 'auto',
+		joinDefault: 'auto',
+	};
+	const tagsPostsRelation: RelationIR = {
+		name: 'posts',
+		type: 'belongsToMany',
+		source: 'tags',
+		target: 'posts',
+		through: 'postTags',
+		foreignKey: 'tagId',
+		otherKey: 'postId',
+		cardinality: 'many',
+		optionality: 'optional',
+		includeStrategy: 'auto',
+		filterStrategy: 'auto',
+		joinDefault: 'auto',
+	};
+	const relationMap = new Map(db.model.relations);
+	relationMap.set('posts.tags', postsTagsRelation);
+	relationMap.set('tags.posts', tagsPostsRelation);
+	const model = {
+		tables: db.model.tables,
+		relations: relationMap,
+		...(db.model.enums !== undefined && { enums: db.model.enums }),
+		...(db.model.extensions !== undefined && {
+			extensions: db.model.extensions,
+		}),
+		...(db.model.sequences !== undefined && {
+			sequences: db.model.sequences,
+		}),
+		getTable: db.model.getTable.bind(db.model),
+		getRelationsFrom(sourceTable: string) {
+			const relations = db.model.getRelationsFrom(sourceTable);
+			if (sourceTable === 'posts') return [...relations, postsTagsRelation];
+			if (sourceTable === 'tags') return [...relations, tagsPostsRelation];
+			return relations;
+		},
+		getRelation(qualifiedName: string) {
+			if (qualifiedName === 'posts.tags') return postsTagsRelation;
+			if (qualifiedName === 'tags.posts') return tagsPostsRelation;
+			return db.model.getRelation(qualifiedName);
+		},
+		getRelationsTo: db.model.getRelationsTo.bind(db.model),
+	} as ModelIR;
+	const adapter = createPgsqlCompileOnlyAdapter({
+		model,
+		dbCasing: 'snake_case',
+	}) as unknown as Adapter;
+	const compile = vi.spyOn(adapter, 'compile');
+	adapter.execute = vi.fn(async () => [...executeResult]);
+
+	return {
+		adapter,
+		compile,
+		model,
+		nql: createNqlTag(db.definition, model, adapter),
 	};
 }
 
@@ -320,6 +407,31 @@ active_users | select posts.title`.dump();
 			/\(SELECT COALESCE\(json_agg\(rc_\d+\.title ORDER BY CAST\(rc_\d+\.title AS text\) NULLS LAST\), '\[\]'::json\) FROM posts AS rc_\d+ WHERE rc_\d+\."userId" = active_users\.id\) AS "posts\.title"/i,
 		);
 		expect(dump.sql).not.toMatch(/\bJOIN\s+"?posts"?/i);
+	});
+
+	it('compiles binding-final many-to-many relation columns through a junction join subquery', () => {
+		const { compile, model, nql } = createM2mBindingTag();
+		const postTagsRelation = model
+			.getRelationsFrom('posts')
+			.find(
+				(relation) =>
+					relation.type === 'belongsToMany' && relation.target === 'tags',
+			);
+		expect(postTagsRelation?.name).toBe('tags');
+
+		const dump = nql<{ id: number; 'tags.name': string[] }>`posts
+			| select id
+			| bind projected_posts
+projected_posts | select id, tags.name`.dump();
+
+		expect(compile).toHaveBeenCalledOnce();
+		const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+		expect(bundle.query?.from).toBe('projected_posts');
+		expect(dump.sql).toMatch(/^WITH "projected_posts" as \(/);
+		expect(dump.sql).toMatch(
+			/\(SELECT COALESCE\(json_agg\(rc_\d+\.name ORDER BY CAST\(rc_\d+\.name AS text\) NULLS LAST\), '\[\]'::json\) FROM tags AS rc_\d+ JOIN post_tags AS rc_\d+ ON rc_\d+\.id = rc_\d+\.tag_id WHERE rc_\d+\.post_id = projected_posts\.id\) AS "tags\.name"/i,
+		);
+		expect(dump.sql).not.toMatch(/WHERE rc_\d+\.id = projected_posts\.id/i);
 	});
 
 	it('compiles binding-final belongsTo scalar relation columns through a correlated subquery', () => {

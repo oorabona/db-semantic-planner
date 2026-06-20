@@ -49,7 +49,7 @@ export interface ColumnValidatorRelation {
 	readonly type?: 'hasOne' | 'hasMany' | 'belongsTo' | 'belongsToMany';
 	readonly foreignKey?: string | readonly string[] | undefined;
 	readonly through?: string | undefined;
-	readonly otherKey?: string | undefined;
+	readonly otherKey?: string | readonly string[] | undefined;
 	readonly throughSourceKey?: string | undefined;
 	readonly throughTargetKey?: string | undefined;
 	readonly recursive?: unknown;

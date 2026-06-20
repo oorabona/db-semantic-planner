@@ -245,6 +245,10 @@ function virtualRelationIncludeShape(
 		foreignKey,
 		source: relation.sourceTable,
 		target: relation.targetTable,
+		...(relation.through !== undefined && { through: relation.through }),
+		...(relation.throughTargetColumn !== undefined && {
+			otherKey: relation.throughTargetColumn,
+		}),
 	};
 }
 
@@ -311,9 +315,15 @@ function trustedBindingRelationColumnIsAdmitted(
 	if (trusted.cardinality === 'one') {
 		return !isDotted || trusted.hops.length > 0;
 	}
+	const hasCompleteManyToManyProof =
+		(trusted.relationType === 'manyToMany' ||
+			trusted.relationType === 'belongsToMany') &&
+		trusted.through !== undefined &&
+		trusted.throughSourceColumn !== undefined &&
+		trusted.throughTargetColumn !== undefined;
 	return (
 		trusted.cardinality === 'many' &&
-		trusted.relationType === 'hasMany' &&
+		(trusted.relationType === 'hasMany' || hasCompleteManyToManyProof) &&
 		!isDotted &&
 		trusted.hops.length === 0
 	);
@@ -652,7 +662,14 @@ function createBindingFinalPlan(
 				'JSON aggregation for binding includes is not supported by this adapter',
 			);
 		}
-		const proven = provenIncludes.get(include.relation)!;
+		const proven = provenIncludes.get(include.relation);
+		if (!proven) {
+			throw bindingFinalIncludeError(
+				intent.from,
+				include.relation,
+				'include relation proof was not emitted by the binding compiler',
+			);
+		}
 		const firstHopDecision = createBindingIncludeDecision(
 			intent,
 			include,

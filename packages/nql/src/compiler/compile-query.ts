@@ -296,6 +296,69 @@ function virtualRelationForBinding(
 	};
 }
 
+function singleResolvedColumn(columns: readonly string[]): string | undefined {
+	return columns.length === 1 ? columns[0] : undefined;
+}
+
+function manyToManyVirtualRelationForBinding(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+	sourceTable: string,
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+): NqlBindingVirtualRelation | undefined {
+	if (relation?.type !== 'belongsToMany') return undefined;
+	if (
+		typeof relation.through !== 'string' ||
+		relation.through.length === 0 ||
+		relation.recursive !== undefined ||
+		(relation.source !== undefined && relation.source === relation.target)
+	) {
+		return undefined;
+	}
+	const sourceKeys = toColumnList(relation.sourceKey);
+	const sourceColumn = singleResolvedColumn(
+		sourceKeys.length > 0 ? sourceKeys : [DEFAULT_RELATION_TARGET_COLUMN],
+	);
+	const targetKeys = toColumnList(relation.targetKey);
+	const targetColumn = singleResolvedColumn(
+		targetKeys.length > 0 ? targetKeys : [DEFAULT_RELATION_TARGET_COLUMN],
+	);
+	const throughSourceColumn = singleResolvedColumn(
+		toColumnList(relation.foreignKey),
+	);
+	const throughTargetColumn = singleResolvedColumn(
+		toColumnList(relation.otherKey),
+	);
+	if (
+		!sourceColumn ||
+		!targetColumn ||
+		!throughSourceColumn ||
+		!throughTargetColumn
+	) {
+		return undefined;
+	}
+	const sourceProjection = findDirectSourceProjection(
+		sourceTable,
+		sourceColumn,
+		directProjectionLineage,
+	);
+	if (!sourceProjection) return undefined;
+	return {
+		relation: relation.name,
+		sourceTable,
+		targetTable: relation.target,
+		sourceColumn: [sourceProjection.outputColumn],
+		targetColumn: [targetColumn],
+		hops: [],
+		through: relation.through,
+		throughSourceColumn,
+		throughTargetColumn,
+		cardinality: 'many',
+		relationType: 'manyToMany',
+	};
+}
+
 function scalarVirtualRelationForBinding(
 	relation: ReturnType<
 		NonNullable<CompilerContext['validator']>['getRelation']
@@ -304,6 +367,13 @@ function scalarVirtualRelationForBinding(
 	directProjectionLineage: readonly NqlBindingColumnLineage[],
 ): NqlBindingVirtualRelation | undefined {
 	if (!relation) return undefined;
+	if (relation.type === 'belongsToMany') {
+		return manyToManyVirtualRelationForBinding(
+			relation,
+			sourceTable,
+			directProjectionLineage,
+		);
+	}
 	if (
 		relation.type !== 'belongsTo' &&
 		relation.type !== 'hasOne' &&

@@ -276,6 +276,59 @@ export class ColumnValidator {
 		if (!relation) {
 			return `relation '${relationName}' is not declared on source table '${sourceTable}'`;
 		}
+		if (relation.type === 'belongsToMany') {
+			if (
+				relation.recursive !== undefined ||
+				(relation.source !== undefined && relation.source === relation.target)
+			) {
+				return `relation '${relationName}' is recursive/self-referential; binding relation columns for recursive relations require recursive CTE handling and are not supported (ref-#193)`;
+			}
+			if (
+				typeof relation.through !== 'string' ||
+				relation.through.length === 0
+			) {
+				return `relation '${relationName}' is many-to-many but does not declare a resolvable junction table (ref-#192)`;
+			}
+			const sourceColumns =
+				toColumnList(relation.sourceKey).length > 0
+					? toColumnList(relation.sourceKey)
+					: ['id'];
+			const throughSourceColumns = toColumnList(relation.foreignKey);
+			const throughTargetColumns = toColumnList(relation.otherKey);
+			const targetColumns =
+				toColumnList(relation.targetKey).length > 0
+					? toColumnList(relation.targetKey)
+					: ['id'];
+			if (sourceColumns.length !== 1) {
+				return `relation '${relationName}' source key is composite; binding many-to-many relation columns require a single source key column (ref-#179)`;
+			}
+			if (throughSourceColumns.length !== 1) {
+				return `relation '${relationName}' junction source FK is composite or missing; binding many-to-many relation columns require a single junction source FK column (ref-#179)`;
+			}
+			if (throughTargetColumns.length !== 1) {
+				return `relation '${relationName}' junction target FK is composite or missing; binding many-to-many relation columns require a single junction target FK column (ref-#179)`;
+			}
+			if (targetColumns.length !== 1) {
+				return `relation '${relationName}' target key is composite; binding many-to-many relation columns require a single target key column (ref-#179)`;
+			}
+			const [sourceColumn] = sourceColumns;
+			if (sourceColumn === undefined) {
+				return `relation '${relationName}' source key is missing; binding many-to-many relation columns require a single source key column (ref-#179)`;
+			}
+			const directProjection = metadata.directProjectionLineage?.find(
+				(projection) =>
+					projection.sourceTable === sourceTable &&
+					ColumnValidator.columnsMatch(projection.sourceColumn, sourceColumn),
+			);
+			if (!directProjection) {
+				const available = this.virtualBindingTables
+					.get(bindingName)
+					?.join(', ');
+				return `relation '${relationName}' source key column '${sourceColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+			}
+			const available = this.virtualBindingTables.get(bindingName)?.join(', ');
+			return `relation '${relationName}' many-to-many source column '${sourceColumn}' is not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+		}
 		const unsupportedReason = explainUnsupportedNqlBindingIncludeHop(
 			relationName,
 			relation,

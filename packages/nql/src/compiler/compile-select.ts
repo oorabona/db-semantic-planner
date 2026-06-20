@@ -722,6 +722,15 @@ function compileMultiSegmentPath(
 				sourceColumn: bindingRelation.sourceColumn,
 				targetColumn: bindingRelation.targetColumn,
 				hops: bindingRelation.hops,
+				...(bindingRelation.through !== undefined && {
+					through: bindingRelation.through,
+				}),
+				...(bindingRelation.throughSourceColumn !== undefined && {
+					throughSourceColumn: bindingRelation.throughSourceColumn,
+				}),
+				...(bindingRelation.throughTargetColumn !== undefined && {
+					throughTargetColumn: bindingRelation.throughTargetColumn,
+				}),
 				selectedColumn: column,
 				...(bindingRelation.cardinality !== undefined && {
 					cardinality: bindingRelation.cardinality,
