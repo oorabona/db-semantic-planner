@@ -960,6 +960,33 @@ describe('ast-helpers coverage tests', () => {
 			expect(result.ResTarget.name).toBe('posts_json');
 		});
 
+		it('jsonAggSubquery with aggregate orderBy', () => {
+			const whereExpr = eqExpr(columnRef('user_id'), columnRef('id'));
+			const result = jsonAggSubquery(
+				'posts',
+				whereExpr,
+				'posts_json',
+				undefined,
+				identityNaming,
+				{ orderBy: ['id', 'created_at'] },
+			);
+			const funcCall =
+				result.ResTarget.val.CoalesceExpr.args[0].SubLink.subselect.SelectStmt
+					.targetList[0].ResTarget.val.FuncCall;
+
+			expect(funcCall.agg_order).toHaveLength(2);
+			expect(funcCall.agg_order[0].SortBy.sortby_dir).toBe('SORTBY_ASC');
+			expect(funcCall.agg_order[0].SortBy.sortby_nulls).toBe(
+				'SORTBY_NULLS_LAST',
+			);
+			expect(
+				funcCall.agg_order[0].SortBy.node.ColumnRef.fields[1].String.sval,
+			).toBe('id');
+			expect(
+				funcCall.agg_order[1].SortBy.node.ColumnRef.fields[1].String.sval,
+			).toBe('created_at');
+		});
+
 		it('jsonAggSubquery with childNodes', () => {
 			const whereExpr = eqExpr(columnRef('user_id'), columnRef('id'));
 			const childNode = jsonAggSubquery(

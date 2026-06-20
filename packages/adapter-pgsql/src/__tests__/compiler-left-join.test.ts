@@ -125,6 +125,7 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 						relationType: 'hasMany',
 						foreignKey: 'author_id',
 						parentKey: 'id',
+						targetPrimaryKey: ['id'],
 					} satisfies PlanDecision,
 				],
 			};
@@ -132,6 +133,7 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 			const result = compileToSql(plan);
 
 			expect(result.sql).toContain('json_agg');
+			expect(result.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
 			expect(result.sql).not.toMatch(/LEFT\s+JOIN/);
 		});
 	});

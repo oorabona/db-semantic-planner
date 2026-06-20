@@ -335,15 +335,13 @@ projected_authors
 		const rows = await query.all();
 
 		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
-		expect(dump.sql).toContain('json_agg(to_jsonb(__t__))');
+		expect(dump.sql).toContain(
+			'json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST)',
+		);
 		expect(dump.sql).toContain('AS author_posts_json');
 		const alice = rows.find((row) => row.id === 1);
 		expect(alice?.author_posts).toHaveLength(3);
-		expect(alice?.author_posts.map((post) => post.title).sort()).toEqual([
-			'Advanced TypeScript Patterns',
-			'Draft: React Best Practices',
-			'Getting Started with TypeScript',
-		]);
+		expect(alice?.author_posts.map((post) => post.id)).toEqual([1, 2, 4]);
 		expect(rows.find((row) => row.id === emptyAuthorId)?.author_posts).toEqual(
 			[],
 		);
@@ -388,6 +386,8 @@ projected_authors
 
 		expect(dump.sql).toMatch(/^WITH "projected_authors" as \(/);
 		expect(dump.sql).toContain('json_agg(to_jsonb(__t__)');
+		expect(dump.sql).toContain('ORDER BY __t__.id ASC NULLS LAST');
+		expect(dump.sql).toContain('ORDER BY __t1__.id ASC NULLS LAST');
 		expect(dump.sql).toContain('jsonb_build_object');
 		expect(dump.sql).toContain('AS author_posts_json');
 		expect(
@@ -397,7 +397,7 @@ projected_authors
 		const alice = rows.find((row) => row.id === 1);
 		expect(alice?.author_posts).toEqual(expect.any(Array));
 		const postOne = alice?.author_posts.find((post) => post.id === 1);
-		expect(postOne?.post_comments.map((comment) => comment.id).sort()).toEqual([
+		expect(postOne?.post_comments.map((comment) => comment.id)).toEqual([
 			1, 2, 3, 9,
 		]);
 		const noCommentPost = alice?.author_posts.find(

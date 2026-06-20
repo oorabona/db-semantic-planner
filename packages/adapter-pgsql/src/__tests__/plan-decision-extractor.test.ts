@@ -62,6 +62,7 @@ describe('extractJsonAggDecisions', () => {
 				target: 'posts',
 				relation: 'posts',
 				intentPath: 'include[0]',
+				targetPrimaryKey: ['id'],
 			}),
 		]);
 
@@ -70,7 +71,31 @@ describe('extractJsonAggDecisions', () => {
 		expect(result[0]?.type).toBe('selectJsonAgg');
 		expect(result[0]?.relationName).toBe('posts');
 		expect(result[0]?.targetTable).toBe('posts');
+		expect(result[0]?.orderBy).toEqual(['id']);
+		expect(result[0]?.targetPrimaryKey).toEqual(['id']);
 		expect(result[0]?.children).toBeUndefined();
+	});
+
+	it('preserves no-primary-key fallback order intent for decision-only paths', () => {
+		const plan = makePlanReport([
+			makeIncludeDecision({
+				target: 'audit_events',
+				relation: 'auditEvents',
+				intentPath: 'include[0]',
+				targetPrimaryKey: ['user_id', 'event_time', 'message'],
+				orderByFallback: true,
+			}),
+		]);
+
+		const result = extractJsonAggDecisions(plan);
+		expect(result).toHaveLength(1);
+		expect(result[0]?.targetPrimaryKey).toEqual([
+			'user_id',
+			'event_time',
+			'message',
+		]);
+		expect(result[0]?.orderBy).toEqual(['user_id', 'event_time', 'message']);
+		expect(result[0]?.orderByFallback).toBe(true);
 	});
 
 	it('extracts multiple sibling root includes', () => {

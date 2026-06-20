@@ -153,7 +153,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 12
 success: true
-sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories
 db.rows.equals: 4
 output.contains: children_json
 db.output:
@@ -170,7 +170,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 13
 success: true
-sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
+sql.equals: SELECT categories.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.categories AS __t__ WHERE __t__.parent_id = categories.id), '[]'::json) AS children_json FROM ch3_blog_extended.categories WHERE categories.parent_id IS NULL
 db.rows.equals: 2
 db.output.contains: Technology
 db.output.contains: Lifestyle
@@ -228,7 +228,7 @@ db.output:
 # ─────────────────────────────────────────
 --- query: 17
 success: true
-sql.equals: SELECT authors.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch3_blog_extended.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS posts_json FROM ch3_blog_extended.authors WHERE authors.active = $1
+sql.equals: SELECT authors.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch3_blog_extended.posts AS __t__ WHERE __t__.author_id = authors.id), '[]'::json) AS posts_json FROM ch3_blog_extended.authors WHERE authors.active = $1
 db.output:
 | id | name          | email             | active | posts_json                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 |----|---------------|-------------------|--------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|

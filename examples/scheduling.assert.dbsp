@@ -219,7 +219,7 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: false
-sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms
+sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms
 db.output:
 | id | name              | capacity | floor | roomBookings_json                                                                                                                                                                                                                                                                                                                                                           |
 | -- | ----------------- | -------- | ----- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -242,7 +242,7 @@ intent.type: query
 intent.table: rooms
 intent.with: roomBookings
 intent.hasWhere: true
-sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__)) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms WHERE EXISTS (SELECT 1 FROM ch4_scheduling.room_bookings AS room_bookings_exists_0 WHERE rooms.id = room_bookings_exists_0.room_id AND room_bookings_exists_0.booking_period && $1)
+sql.equals: SELECT rooms.*, COALESCE((SELECT json_agg(to_jsonb(__t__) ORDER BY __t__.id ASC NULLS LAST) FROM ch4_scheduling.room_bookings AS __t__ WHERE __t__.room_id = rooms.id), '[]'::json) AS "roomBookings_json" FROM ch4_scheduling.rooms WHERE EXISTS (SELECT 1 FROM ch4_scheduling.room_bookings AS room_bookings_exists_0 WHERE rooms.id = room_bookings_exists_0.room_id AND room_bookings_exists_0.booking_period && $1)
 db.success: true
 
 # ─────────────────────────────────────────

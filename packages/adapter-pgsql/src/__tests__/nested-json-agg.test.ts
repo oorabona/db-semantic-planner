@@ -28,6 +28,7 @@ function buildJsonAggDecision(
 		relationType: 'hasMany',
 		foreignKey: 'user_id',
 		parentKey: 'id',
+		targetPrimaryKey: ['id'],
 		...overrides,
 	};
 }
@@ -46,6 +47,7 @@ describe('Nested json_agg compilation', () => {
 		expect(sql).toContain('__t__');
 		expect(sql).toContain('posts');
 		expect(sql).toContain('__t__.user_id = users.id');
+		expect(sql).toContain('order by __t__.id asc nulls last');
 		// Should NOT have jsonb_build_object (no children)
 		expect(sql).not.toContain('jsonb_build_object');
 
@@ -71,6 +73,7 @@ describe('Nested json_agg compilation', () => {
 							relationType: 'belongsTo',
 							foreignKey: 'role_id',
 							parentKey: 'id',
+							targetPrimaryKey: ['role_id', 'tenant_id'],
 						}),
 					],
 				}),
@@ -87,6 +90,10 @@ describe('Nested json_agg compilation', () => {
 		// Nested level uses __t1__
 		expect(sql).toContain('roles as __t1__');
 		expect(sql).toContain('__t1__.id = __t__.role_id');
+		expect(sql).toContain('order by __t__.id asc nulls last');
+		expect(sql).toContain(
+			'order by __t1__.role_id asc nulls last, __t1__.tenant_id asc nulls last',
+		);
 
 		// Must have jsonb_build_object for merging child
 		expect(sql).toContain('jsonb_build_object');
