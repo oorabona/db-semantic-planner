@@ -168,6 +168,14 @@ export interface NqlTrustedRelationFilterHop {
 }
 
 /** @internal */
+export interface NqlTrustedRelationFilterRecursive {
+	readonly direction: 'up' | 'down';
+	readonly maxDepth: number;
+	readonly selfRefColumn: string;
+	readonly targetKeyColumn: string;
+}
+
+/** @internal */
 export interface NqlTrustedRelationFilterFields {
 	readonly relation: NqlTrustedRelationFilterRelation;
 	readonly targetTable: string;
@@ -180,6 +188,7 @@ export interface NqlTrustedRelationFilterFields {
 	readonly selectedColumn?: string;
 	readonly cardinality?: 'one' | 'many';
 	readonly relationType?: NqlBindingRelationType;
+	readonly recursive?: NqlTrustedRelationFilterRecursive;
 }
 
 /**
@@ -231,6 +240,30 @@ function isTrustedRelationFilterHop(
 	);
 }
 
+function isTrustedRelationFilterRecursive(
+	value: unknown,
+): value is NqlTrustedRelationFilterRecursive {
+	if (value === null || typeof value !== 'object') {
+		return false;
+	}
+	const record = value as {
+		readonly direction?: unknown;
+		readonly maxDepth?: unknown;
+		readonly selfRefColumn?: unknown;
+		readonly targetKeyColumn?: unknown;
+	};
+	return (
+		(record.direction === 'up' || record.direction === 'down') &&
+		typeof record.maxDepth === 'number' &&
+		Number.isSafeInteger(record.maxDepth) &&
+		record.maxDepth > 0 &&
+		typeof record.selfRefColumn === 'string' &&
+		record.selfRefColumn.length > 0 &&
+		typeof record.targetKeyColumn === 'string' &&
+		record.targetKeyColumn.length > 0
+	);
+}
+
 function relationHasMultipleHops(
 	relation: NqlTrustedRelationFilterRelation,
 ): boolean {
@@ -256,6 +289,7 @@ function isTrustedRelationFilterPayload(
 		readonly selectedColumn?: unknown;
 		readonly cardinality?: unknown;
 		readonly relationType?: unknown;
+		readonly recursive?: unknown;
 	};
 	return (
 		(typeof record.relation === 'string' || isStringArray(record.relation)) &&
@@ -280,6 +314,8 @@ function isTrustedRelationFilterPayload(
 			record.cardinality === 'many') &&
 		(record.relationType === undefined ||
 			isRelationType(record.relationType)) &&
+		(record.recursive === undefined ||
+			isTrustedRelationFilterRecursive(record.recursive)) &&
 		!(
 			record.selectedColumn !== undefined &&
 			record.cardinality === 'one' &&
@@ -298,6 +334,15 @@ function freezeTrustedRelationFilterPayload(
 	const through = fields.through;
 	const throughSourceColumn = fields.throughSourceColumn;
 	const throughTargetColumn = fields.throughTargetColumn;
+	const recursive =
+		fields.recursive === undefined
+			? undefined
+			: Object.freeze({
+					direction: fields.recursive.direction,
+					maxDepth: fields.recursive.maxDepth,
+					selfRefColumn: fields.recursive.selfRefColumn,
+					targetKeyColumn: fields.recursive.targetKeyColumn,
+				});
 	const hops = Object.freeze(
 		fields.hops.map((hop) =>
 			Object.freeze({
@@ -330,6 +375,9 @@ function freezeTrustedRelationFilterPayload(
 		}),
 		...(fields.relationType !== undefined && {
 			relationType: fields.relationType,
+		}),
+		...(recursive !== undefined && {
+			recursive,
 		}),
 	});
 }

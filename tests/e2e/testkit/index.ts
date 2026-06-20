@@ -18,6 +18,13 @@ export {
 	blogExtendedTestData,
 	seedBlogExtendedData,
 } from './blog-extended.seed.js';
+// Categories adjacency-list recursion
+export {
+	createCategoriesSchema,
+	dropCategoriesSchema,
+} from './categories.ddl.js';
+export { categoriesModel, categoriesSchema } from './categories.model.js';
+export { seedCategoriesData } from './categories.seed.js';
 // Composite-FK correctness
 export {
 	createCompositeFkSchema,

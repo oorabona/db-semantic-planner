@@ -417,6 +417,53 @@ export function resolveBindingRelationColumn(
 	};
 }
 
+export function resolveBindingRecursiveRelationColumn(
+	ctx: CompilerContext,
+	bindingName: string | undefined,
+	traversal: string,
+	selectedColumn: string,
+	maxDepth?: number,
+): NqlBindingVirtualRelation | undefined {
+	if (!isBindingTable(ctx, bindingName)) return undefined;
+	const traversalName = traversal.toLowerCase();
+	const isRecursiveTraversal =
+		ctx.recursiveKeywords.has(traversalName) ||
+		traversalName === 'ascendant' ||
+		traversalName === 'descendant';
+	const actualBindingName = bindingName as string;
+	if (!ctx.validator) {
+		if (!isRecursiveTraversal) return undefined;
+		throwBindingRelationColumn182(
+			actualBindingName,
+			traversalName,
+			'model metadata is not available',
+		);
+	}
+	const virtualRelation = ctx.validator.getVirtualBindingScalarRelation(
+		actualBindingName,
+		traversalName,
+	);
+	if (!isRecursiveTraversal && !virtualRelation?.recursive) {
+		return undefined;
+	}
+	if (!virtualRelation?.recursive) {
+		const reason = ctx.validator.explainVirtualBindingScalarRelationRejection(
+			actualBindingName,
+			traversalName,
+		);
+		throwBindingRelationColumn182(actualBindingName, traversalName, reason);
+	}
+	ctx.validator.validateColumn(virtualRelation.targetTable, selectedColumn);
+	if (maxDepth === undefined) return virtualRelation;
+	return {
+		...virtualRelation,
+		recursive: {
+			...virtualRelation.recursive,
+			maxDepth,
+		},
+	};
+}
+
 export function assertNoBindingRelationPath(
 	ctx: CompilerContext,
 	bindingName: string | undefined,

@@ -39,7 +39,18 @@ const schema = {
 	getTable(name: string) {
 		const tables: Record<
 			string,
-			{ columns: { name: string }[]; pseudoColumns?: never[] }
+			{
+				columns: { name: string }[];
+				pseudoColumns?: {
+					table: string;
+					foreignKeyColumn: string;
+					targetColumn: string;
+					parentRole: string;
+					childRole: string;
+					ascendantKeyword: string;
+					descendantKeyword: string;
+				}[];
+			}
 		> = {
 			users: {
 				columns: [
@@ -80,6 +91,17 @@ const schema = {
 			},
 			categories: {
 				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
+				pseudoColumns: [
+					{
+						table: 'categories',
+						foreignKeyColumn: 'parentId',
+						targetColumn: 'id',
+						parentRole: 'parent',
+						childRole: 'children',
+						ascendantKeyword: 'ascendant',
+						descendantKeyword: 'descendant',
+					},
+				],
 			},
 			profiles: {
 				columns: [
@@ -2077,6 +2099,237 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 			cardinality: 'many',
 			relationType: 'hasMany',
 		});
+	});
+
+	it('allows recursive relation columns from a bind source when the proven seed columns are projected', () => {
+		const result = compile(
+			'categories | select id, parentId | bind c\nc | select id, ascendant.name, descendant.name',
+			schema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumns =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.filter(
+						(column) => column.kind === 'relationColumn',
+					)
+				: [];
+		const ascendant = relationColumns.find(
+			(column) => column.relation === 'ascendant',
+		);
+		const descendant = relationColumns.find(
+			(column) => column.relation === 'descendant',
+		);
+		expect(getTrustedNqlRelationFilterFields(ascendant)).toMatchObject({
+			relation: 'ascendant',
+			sourceColumn: ['parentId'],
+			targetColumn: ['id'],
+			targetTable: 'categories',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			recursive: {
+				direction: 'up',
+				maxDepth: 10,
+				selfRefColumn: 'parentId',
+				targetKeyColumn: 'id',
+			},
+		});
+		expect(getTrustedNqlRelationFilterFields(descendant)).toMatchObject({
+			relation: 'descendant',
+			sourceColumn: ['id'],
+			targetColumn: ['parentId'],
+			targetTable: 'categories',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			recursive: {
+				direction: 'down',
+				maxDepth: 10,
+				selfRefColumn: 'parentId',
+				targetKeyColumn: 'id',
+			},
+		});
+	});
+
+	it('uses pseudo metadata as the recursive target key fallback for non-id self-ref bindings', () => {
+		const nonIdSelfRefSchema = {
+			...schema,
+			getTable(name: string) {
+				if (name !== 'categories') return schema.getTable(name);
+				return {
+					columns: [
+						{ name: 'catId' },
+						{ name: 'name' },
+						{ name: 'parentCatId' },
+					],
+					pseudoColumns: [
+						{
+							table: 'categories',
+							foreignKeyColumn: 'parentCatId',
+							targetColumn: 'catId',
+							parentRole: 'parent',
+							childRole: 'children',
+							ascendantKeyword: 'ascendant',
+							descendantKeyword: 'descendant',
+						},
+					],
+				};
+			},
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'categories')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'parent',
+						source: 'categories',
+						target: 'categories',
+						type: 'belongsTo' as const,
+						foreignKey: 'parentCatId',
+						recursive: { direction: 'ancestors' },
+					},
+					{
+						name: 'children',
+						source: 'categories',
+						target: 'categories',
+						type: 'hasMany' as const,
+						foreignKey: 'parentCatId',
+						recursive: { direction: 'descendants' },
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			'categories | select catId, parentCatId | bind c\nc | select catId, ascendant.name, descendant.name',
+			nonIdSelfRefSchema,
+		);
+
+		expect(result.success).toBe(true);
+		const relationColumns =
+			result.ast?.query?.select?.type === 'expressions'
+				? result.ast.query.select.columns.filter(
+						(column) => column.kind === 'relationColumn',
+					)
+				: [];
+		const ascendant = relationColumns.find(
+			(column) => column.relation === 'ascendant',
+		);
+		const descendant = relationColumns.find(
+			(column) => column.relation === 'descendant',
+		);
+		expect(getTrustedNqlRelationFilterFields(ascendant)).toMatchObject({
+			relation: 'ascendant',
+			sourceColumn: ['parentCatId'],
+			targetColumn: ['catId'],
+			targetTable: 'categories',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			recursive: {
+				direction: 'up',
+				maxDepth: 10,
+				selfRefColumn: 'parentCatId',
+				targetKeyColumn: 'catId',
+			},
+		});
+		expect(getTrustedNqlRelationFilterFields(descendant)).toMatchObject({
+			relation: 'descendant',
+			sourceColumn: ['catId'],
+			targetColumn: ['parentCatId'],
+			targetTable: 'categories',
+			selectedColumn: 'name',
+			cardinality: 'many',
+			recursive: {
+				direction: 'down',
+				maxDepth: 10,
+				selfRefColumn: 'parentCatId',
+				targetKeyColumn: 'catId',
+			},
+		});
+	});
+
+	it('rejects recursive relation columns from a bind source when the seed column is not a direct projection', () => {
+		const result = compile(
+			'categories | select id | bind c\nc | select ascendant.name',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/ascendant/);
+		expect(result.errors[0]?.message).toMatch(/select relation column/);
+	});
+
+	it('rejects binding recursive relation columns with a composite self-ref FK', () => {
+		const compositeSchema = {
+			...schema,
+			getTable(name: string) {
+				if (name !== 'categories') return schema.getTable(name);
+				return {
+					columns: [
+						{ name: 'id' },
+						{ name: 'tenantId' },
+						{ name: 'parentId' },
+						{ name: 'name' },
+					],
+					pseudoColumns: [
+						{
+							table: 'categories',
+							foreignKeyColumn: 'parentId',
+							targetColumn: 'id',
+							parentRole: 'parent',
+							childRole: 'children',
+							ascendantKeyword: 'ascendant',
+							descendantKeyword: 'descendant',
+						},
+					],
+				};
+			},
+			getRelationsFrom(sourceTable: string) {
+				if (sourceTable !== 'categories')
+					return schema.getRelationsFrom(sourceTable);
+				return [
+					{
+						name: 'parent',
+						source: 'categories',
+						target: 'categories',
+						type: 'belongsTo' as const,
+						foreignKey: ['parentId', 'tenantId'],
+						targetKey: ['id', 'tenantId'],
+						recursive: { direction: 'up', maxDepth: 10 },
+					},
+				];
+			},
+			getRelation(qualifiedName: string) {
+				const [source, relationName] = qualifiedName.split('.');
+				if (!source || !relationName) return undefined;
+				return this.getRelationsFrom(source).find(
+					(relation) => relation.name === relationName,
+				);
+			},
+		};
+		const result = compile(
+			'categories | select id, tenantId, parentId | bind c\nc | select ascendant.name',
+			compositeSchema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/composite/);
+		expect(result.errors[0]?.message).toMatch(/ref-#193/);
+	});
+
+	it('rejects recursive includes from a bind source', () => {
+		const result = compile(
+			'categories | select id, parentId | bind c\nc | select descendant.*',
+			schema,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(/recursive\/self-referential/);
+		expect(result.errors[0]?.message).toMatch(/ref-#193/);
 	});
 
 	it('rejects pseudo-columns from a bind source that projected SELECT * (ref #182)', () => {

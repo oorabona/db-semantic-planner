@@ -13,7 +13,9 @@ import {
 	type NqlBindingIncludeRelationShape,
 } from '@dbsp/types/internal';
 import { NqlErrorCodes, NqlSemanticException } from '../errors/index.js';
+import { DEFAULT_RELATION_TARGET_COLUMN } from './binding-relation-utils.js';
 import type {
+	ColumnValidatorPseudoColumn,
 	ColumnValidatorRelation,
 	ColumnValidatorSchema,
 } from './types.js';
@@ -80,6 +82,10 @@ export class ColumnValidator {
 		const virtualColumns = this.virtualBindingTables.get(name);
 		if (virtualColumns) return virtualColumns;
 		return this.schema.getTable(name)?.columns.map((column) => column.name);
+	}
+
+	getPseudoColumns(name: string): readonly ColumnValidatorPseudoColumn[] {
+		return this.schema.getTable(name)?.pseudoColumns ?? [];
 	}
 
 	hasPhysicalTable(name: string): boolean {
@@ -272,6 +278,14 @@ export class ColumnValidator {
 		if (!sourceTable) {
 			return 'the binding source table could not be proven';
 		}
+		const recursiveReason =
+			this.explainVirtualBindingRecursiveScalarRelationRejection(
+				bindingName,
+				relationName,
+				sourceTable,
+				metadata,
+			);
+		if (recursiveReason) return recursiveReason;
 		const relation = this.getRelation(sourceTable, relationName);
 		if (!relation) {
 			return `relation '${relationName}' is not declared on source table '${sourceTable}'`;
@@ -358,6 +372,98 @@ export class ColumnValidator {
 		}
 		const available = this.virtualBindingTables.get(bindingName)?.join(', ');
 		return `relation '${relationName}' source columns '${sourceColumns.join(', ')}' are not available through binding '${bindingName}'${available ? ` (available columns: ${available})` : ''}`;
+	}
+
+	private static recursiveDirection(value: unknown): 'up' | 'down' | undefined {
+		if (value === null || typeof value !== 'object') return undefined;
+		const direction = (value as { readonly direction?: unknown }).direction;
+		if (direction === 'up' || direction === 'ancestors') return 'up';
+		if (direction === 'down' || direction === 'descendants') return 'down';
+		return undefined;
+	}
+
+	private explainVirtualBindingRecursiveScalarRelationRejection(
+		bindingName: string,
+		relationName: string,
+		sourceTable: string,
+		metadata: NqlBindingRelationFilterMetadata,
+	): string | undefined {
+		const lowerRelationName = relationName.toLowerCase();
+		const pseudoColumn = this.getPseudoColumns(sourceTable).find(
+			(candidate) =>
+				candidate.ascendantKeyword?.toLowerCase() === lowerRelationName ||
+				candidate.descendantKeyword?.toLowerCase() === lowerRelationName,
+		);
+		if (!pseudoColumn) return undefined;
+		const direction =
+			pseudoColumn.ascendantKeyword?.toLowerCase() === lowerRelationName
+				? 'up'
+				: 'down';
+		const recursiveRelations = this.getRelationsFrom(sourceTable).filter(
+			(relation) =>
+				relation.recursive !== undefined &&
+				relation.source === relation.target &&
+				relation.source === sourceTable &&
+				ColumnValidator.recursiveDirection(relation.recursive) === direction,
+		);
+		if (recursiveRelations.length === 0) {
+			return `recursive traversal '${relationName}' is missing recursive relation metadata for direction '${direction}' (ref-#193)`;
+		}
+		for (const relation of recursiveRelations) {
+			const relationFkColumns = toColumnList(relation.foreignKey);
+			const fkColumns =
+				relationFkColumns.length > 0
+					? relationFkColumns
+					: toColumnList(pseudoColumn.foreignKeyColumn);
+			if (fkColumns.length !== 1) {
+				return `relation '${relation.name}' self-ref FK is composite or missing; binding recursive relation columns require a single self-ref FK column (ref-#193)`;
+			}
+			const relationTargetColumns = toColumnList(relation.targetKey);
+			const targetColumns =
+				relationTargetColumns.length > 0
+					? relationTargetColumns
+					: pseudoColumn.targetColumn !== undefined
+						? [pseudoColumn.targetColumn]
+						: [DEFAULT_RELATION_TARGET_COLUMN];
+			if (targetColumns.length !== 1) {
+				return `relation '${relation.name}' target key is composite; binding recursive relation columns require a single target key column (ref-#193)`;
+			}
+			const selfRefColumn = fkColumns[0];
+			const targetKeyColumn = targetColumns[0];
+			if (selfRefColumn === undefined || targetKeyColumn === undefined) {
+				return `relation '${relation.name}' recursive metadata is missing a single-column seed; binding recursive relation columns require a single self-ref FK and target key column (ref-#193)`;
+			}
+			if (
+				(pseudoColumn.foreignKeyColumn !== undefined &&
+					!ColumnValidator.columnsMatch(
+						pseudoColumn.foreignKeyColumn,
+						selfRefColumn,
+					)) ||
+				(pseudoColumn.targetColumn !== undefined &&
+					!ColumnValidator.columnsMatch(
+						pseudoColumn.targetColumn,
+						targetKeyColumn,
+					))
+			) {
+				continue;
+			}
+			const seedColumn = direction === 'up' ? selfRefColumn : targetKeyColumn;
+			const directProjection = metadata.directProjectionLineage?.find(
+				(projection) =>
+					projection.sourceTable === sourceTable &&
+					ColumnValidator.columnsMatch(projection.sourceColumn, seedColumn),
+			);
+			if (!directProjection) {
+				const available = this.virtualBindingTables
+					.get(bindingName)
+					?.join(', ');
+				const seedLabel =
+					direction === 'up' ? 'self-ref FK column' : 'target key column';
+				return `recursive traversal '${relationName}' ${seedLabel} '${seedColumn}' is not projected as a direct source-column projection by binding '${bindingName}'${available ? ` (available columns: ${available})` : ''} (ref-#193)`;
+			}
+			return undefined;
+		}
+		return `recursive traversal '${relationName}' pseudo metadata does not match a single-column recursive self-reference (ref-#193)`;
 	}
 
 	/**

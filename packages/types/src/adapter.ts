@@ -137,6 +137,13 @@ export interface NqlBindingVirtualRelationHop {
 	readonly joinColumn: readonly string[];
 }
 
+export interface NqlBindingVirtualRelationRecursive {
+	readonly direction: 'up' | 'down';
+	readonly maxDepth: number;
+	readonly selfRefColumn: string;
+	readonly targetKeyColumn: string;
+}
+
 export interface NqlBindingVirtualRelation {
 	readonly relation: string;
 	readonly sourceTable: string;
@@ -149,6 +156,7 @@ export interface NqlBindingVirtualRelation {
 	readonly throughTargetColumn?: string;
 	readonly cardinality?: 'one' | 'many';
 	readonly relationType?: NqlBindingRelationType;
+	readonly recursive?: NqlBindingVirtualRelationRecursive;
 }
 
 export interface NqlBindingColumnLineage {

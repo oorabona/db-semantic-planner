@@ -2064,6 +2064,49 @@ describe('NQL → SQL bind + CTE E2E', () => {
 		);
 	});
 
+	it('binding-final recursive columns over a non-id self-ref correlate on the pseudo target key', () => {
+		const hierarchySchema = schema({
+			categories: {
+				catId: { type: 'integer', primaryKey: true },
+				name: 'string',
+				parentCatId: ref('categories', {
+					references: ['catId'],
+					nullable: true,
+					roles: { parent: 'parent', children: 'children' },
+				}),
+			},
+		});
+		const compiled = compile(
+			'categories | select catId, parentCatId | bind c\nc | select catId, ascendant.name, descendant.name',
+			hierarchySchema.model,
+		);
+		if (!compiled.success || !compiled.ast) {
+			throw new Error(
+				`NQL compilation failed: ${compiled.errors.map((e) => e.message).join(', ')}`,
+			);
+		}
+		const adapter = createPgsqlCompileOnlyAdapter();
+		const result = adapter.compile(compiled.ast, {
+			model: hierarchySchema.model,
+		});
+		const sql = normalizeSQL(result.sql);
+
+		expect(sql).toContain('with recursive __rc_0 as');
+		expect(sql).toContain('with recursive __rc_1 as');
+		expect(sql).toMatch(/where __n\."catid" = c\."parentcatid"/i);
+		expect(sql).toMatch(
+			/join categories as __n on __n\."catid" = __rc_0\."parentcatid"/i,
+		);
+		expect(sql).toMatch(/where __n\."parentcatid" = c\."catid"/i);
+		expect(sql).toMatch(
+			/join categories as __n on __n\."parentcatid" = __rc_1\."catid"/i,
+		);
+		expect(sql).not.toMatch(/__n\.id = c\."parentcatid"/i);
+		expect(sql).not.toMatch(/__n\.id = __rc_0\."parentcatid"/i);
+		expect(sql).not.toMatch(/__n\."parentcatid" = c\.id/i);
+		expect(sql).not.toMatch(/__n\."parentcatid" = __rc_1\.id/i);
+	});
+
 	it('schema-scoped WHERE IN bound CTE keeps CTE FROM unqualified', () => {
 		const { sql } = boundBundleToSQL(
 			'posts | where published = false | select id | bind to_delete\ndelete from comments where postId in (to_delete)',
