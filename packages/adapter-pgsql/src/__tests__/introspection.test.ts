@@ -4,9 +4,11 @@
  * Tests introspect() with mock pg.Pool returning controlled result sets.
  */
 
+import { createOrm, exists } from '@dbsp/core';
 import type { Pool, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import { type DetectedHierarchy, introspect } from '../introspection.js';
+import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
 // ============================================================================
 // Mock Pool Factory
@@ -221,6 +223,119 @@ describe('introspect', () => {
 		expect(hasMany!.source).toBe('users');
 		expect(hasMany!.target).toBe('posts');
 		expect(hasMany!.cardinality).toBe('many');
+	});
+
+	it('should preserve composite referenced non-id keys in relations and SQL correlation', async () => {
+		const columns = [
+			{
+				table_name: 'orders',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'orders',
+				column_name: 'order_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'orders',
+				column_name: 'tenant_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'order_items',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'order_items',
+				column_name: 'order_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'order_items',
+				column_name: 'tenant_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'orders', column_name: 'id' },
+			{ table_name: 'order_items', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'order_items_order_ref_fkey',
+				source_table: 'order_items',
+				source_column: 'order_id',
+				target_table: 'orders',
+				target_column: 'order_id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+			{
+				constraint_name: 'order_items_order_ref_fkey',
+				source_table: 'order_items',
+				source_column: 'tenant_id',
+				target_table: 'orders',
+				target_column: 'tenant_id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool);
+
+		expect(result.relations.get('order_items.order')).toMatchObject({
+			type: 'belongsTo',
+			source: 'order_items',
+			target: 'orders',
+			foreignKey: ['order_id', 'tenant_id'],
+			targetKey: ['order_id', 'tenant_id'],
+		});
+		expect(result.relations.get('orders.order_items')).toMatchObject({
+			type: 'hasMany',
+			source: 'orders',
+			target: 'order_items',
+			foreignKey: ['order_id', 'tenant_id'],
+			sourceKey: ['order_id', 'tenant_id'],
+		});
+
+		const adapter = createPgsqlCompileOnlyAdapter({ model: result });
+		const orm = createOrm({ model: result, adapter });
+		const { sql } = (orm as any)
+			.select('orders')
+			.where(exists('order_items'))
+			.dump();
+
+		expect(sql).toMatch(/EXISTS/i);
+		expect(sql).toMatch(
+			/orders\.order_id\s*=\s*order_items_exists_\d+\.order_id\s+AND\s+orders\.tenant_id\s*=\s*order_items_exists_\d+\.tenant_id/i,
+		);
+		expect(sql).not.toMatch(
+			/orders\.id\s*=\s*order_items_exists_\d+\.order_id/i,
+		);
 	});
 
 	it('should detect adjacency hierarchy (self-referential FK)', async () => {

@@ -5,6 +5,7 @@
  * This enables sync createOrm usage with codegen-first schemas.
  */
 
+import { buildRelationKeyFields, toColumnList } from '@dbsp/types';
 import type { Mutable } from '@dbsp/types/internal';
 import * as v from 'valibot';
 import { ModelIRImpl } from '../model-impl.js';
@@ -350,6 +351,62 @@ function mapRelationType(kind: GeneratedRelationKind): RelationType {
 	}
 }
 
+function sourceTableFromQualifiedName(qualifiedName: string): string {
+	const dotIndex = qualifiedName.indexOf('.');
+	return dotIndex > 0 ? qualifiedName.slice(0, dotIndex) : qualifiedName;
+}
+
+function relationNameFromQualifiedName(qualifiedName: string): string {
+	const dotIndex = qualifiedName.indexOf('.');
+	return dotIndex > 0 ? qualifiedName.slice(dotIndex + 1) : qualifiedName;
+}
+
+function columnListsEqual(
+	left: string | readonly string[] | undefined,
+	right: string | readonly string[] | undefined,
+): boolean {
+	const leftColumns = toColumnList(left);
+	const rightColumns = toColumnList(right);
+	return (
+		leftColumns.length === rightColumns.length &&
+		leftColumns.every((column, index) => column === rightColumns[index])
+	);
+}
+
+function generatedReferencedColumns(
+	key: string | readonly string[] | undefined,
+): readonly string[] {
+	const columns = toColumnList(key);
+	return columns.length > 0 ? columns : ['id'];
+}
+
+function findRelationForeignKey(
+	sourceTable: string,
+	genRelation: GeneratedRelation,
+	tables: ReadonlyMap<string, TableIR>,
+): ForeignKeyIR | undefined {
+	switch (genRelation.kind) {
+		case 'belongsTo':
+			return tables
+				.get(sourceTable)
+				?.foreignKeys.find(
+					(fk) =>
+						fk.references.table === genRelation.target &&
+						columnListsEqual(fk.columns, genRelation.foreignKey),
+				);
+		case 'hasMany':
+			return tables
+				.get(genRelation.target)
+				?.foreignKeys.find(
+					(fk) =>
+						fk.references.table === sourceTable &&
+						columnListsEqual(fk.columns, genRelation.foreignKey),
+				);
+		case 'manyToMany':
+			return undefined;
+	}
+}
+
 /**
  * Build a TableIR from generated table definition.
  */
@@ -540,13 +597,11 @@ function buildRelationIR(
 	qualifiedName: string,
 	genRelation: GeneratedRelation,
 	hints: Record<string, GeneratedHint>,
+	relationFk?: ForeignKeyIR,
 ): RelationIR {
 	// Extract source table and relation name from qualified name (e.g., "posts.author")
-	const dotIndex = qualifiedName.indexOf('.');
-	const sourceTable =
-		dotIndex > 0 ? qualifiedName.slice(0, dotIndex) : qualifiedName;
-	const relationName =
-		dotIndex > 0 ? qualifiedName.slice(dotIndex + 1) : qualifiedName;
+	const sourceTable = sourceTableFromQualifiedName(qualifiedName);
+	const relationName = relationNameFromQualifiedName(qualifiedName);
 
 	// Get hints for this relation
 	const hint = hints[qualifiedName];
@@ -594,14 +649,42 @@ function buildRelationIR(
 		case 'belongsTo':
 			return {
 				...baseRelation,
-				foreignKey: genRelation.foreignKey,
-				...(genRelation.targetKey ? { targetKey: genRelation.targetKey } : {}),
+				...buildRelationKeyFields(
+					relationFk ?? {
+						columns: genRelation.foreignKey,
+						references: {
+							table: genRelation.target,
+							columns: generatedReferencedColumns(genRelation.targetKey),
+						},
+					},
+					'belongsTo',
+					{
+						foreignKeyShape: genRelation.foreignKey,
+						...(genRelation.targetKey !== undefined
+							? { referencedKeyShape: genRelation.targetKey }
+							: {}),
+					},
+				),
 			};
 		case 'hasMany':
 			return {
 				...baseRelation,
-				foreignKey: genRelation.foreignKey,
-				...(genRelation.sourceKey ? { sourceKey: genRelation.sourceKey } : {}),
+				...buildRelationKeyFields(
+					relationFk ?? {
+						columns: genRelation.foreignKey,
+						references: {
+							table: sourceTable,
+							columns: generatedReferencedColumns(genRelation.sourceKey),
+						},
+					},
+					'inverse',
+					{
+						foreignKeyShape: genRelation.foreignKey,
+						...(genRelation.sourceKey !== undefined
+							? { referencedKeyShape: genRelation.sourceKey }
+							: {}),
+					},
+				),
 			};
 		case 'manyToMany':
 			return {
@@ -644,9 +727,15 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 
 	// Build relations
 	for (const [qualifiedName, genRelation] of Object.entries(schema.relations)) {
+		const sourceTable = sourceTableFromQualifiedName(qualifiedName);
 		relations.set(
 			qualifiedName,
-			buildRelationIR(qualifiedName, genRelation, schema.hints),
+			buildRelationIR(
+				qualifiedName,
+				genRelation,
+				schema.hints,
+				findRelationForeignKey(sourceTable, genRelation, tables),
+			),
 		);
 	}
 
