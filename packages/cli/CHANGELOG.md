@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.1](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.0...cli-v1.1.1) (2026-06-20)
+
+
+### Bug Fixes
+
+* **cli:** Make destructive-rollback guard fail-safe and metadata-driven ([#210](https://github.com/oorabona/db-semantic-planner/issues/210)) ([0aa6b61](https://github.com/oorabona/db-semantic-planner/commit/0aa6b613422d8a8f302279ca22008a8b8400ac84)), closes [#155](https://github.com/oorabona/db-semantic-planner/issues/155)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 1.7.0
+    * @dbsp/core bumped to 1.6.0
+    * @dbsp/nql bumped to 1.7.0
+    * @dbsp/types bumped to 1.6.0
+
 ## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.0.10...cli-v1.1.0) (2026-06-20)
 
 
