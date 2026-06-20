@@ -50,6 +50,19 @@ export {
 } from './exists-correctness.ddl.js';
 export { existsCorrectnessModel } from './exists-correctness.model.js';
 export { seedExistsCorrectnessData } from './exists-correctness.seed.js';
+// Extension feature fixtures (pgvector, ParadeDB BM25, PostgreSQL full-text)
+export {
+	createExtensionFeatureIndexes,
+	createExtensionFeatureSchema,
+	dropExtensionFeatureSchema,
+	type ExtensionFeatureCapabilities,
+} from './extension-features.ddl.js';
+export { extensionFeaturesModel } from './extension-features.model.js';
+export {
+	documentTitles,
+	seedExtensionFeatureData,
+	vectorLabels,
+} from './extension-features.seed.js';
 // IAM/RBAC
 export { createIamSchema, dropIamSchema } from './iam.ddl.js';
 export { iamModel } from './iam.model.js';
