@@ -80,6 +80,112 @@ update posts set title = ${'empty binding should not update'} where id in (touch
 		expect(rows).toEqual([]);
 	});
 
+	it('snapshots a read binding before an intervening mutation changes matching data', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9300}, ${'snapshot before'}, ${'read bind drift fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			id: number;
+			title: string;
+		}>`posts | where id = ${9300} | select id, title | bind original_post
+update posts set title = ${'snapshot after'} where id = ${9300} | select id | bind changed
+original_post | select id, title`.all();
+
+		expect(rows).toEqual([{ id: 9300, title: 'snapshot before' }]);
+
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9300}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'snapshot after' }]);
+	});
+
+	it('keeps an empty read snapshot empty after a mutation creates matching state', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9301}, ${'empty snapshot before'}, ${'empty drift fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{ id: number }>`posts
+			| where title = ${'empty snapshot after'}
+			| select id
+			| bind matching_posts
+update posts set title = ${'empty snapshot after'} where id = ${9301} | select id | bind changed
+matching_posts | select id`.all();
+
+		expect(rows).toEqual([]);
+
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9301}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'empty snapshot after' }]);
+	});
+
+	it('preserves multi-row read snapshot order from ORDER BY', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES
+				(${9302}, ${'ordered first'}, ${'ordered drift fixture'}, ${1}, ${false}),
+				(${9303}, ${'ordered second'}, ${'ordered drift fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{ id: number }>`posts
+			| where id >= ${9302} and id <= ${9303}
+			| select id
+			| order by id desc
+			| bind ordered_posts
+update posts set title = ${'ordered mutated'} where id = ${9302} | select id | bind changed
+ordered_posts | select id`.all();
+
+		expect(rows).toEqual([{ id: 9303 }, { id: 9302 }]);
+	});
+
+	it('uses the same pre-mutation read snapshot before and after a later mutation', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9304}, ${'before-and-after original'}, ${'before-and-after fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			id: number;
+			title: string;
+		}>`posts | where id = ${9304} | select id, title | bind original_post
+update posts set content = ${'touched through original snapshot'} where id in (original_post | select id) | select id | bind before_touch
+update posts set title = ${'before-and-after mutated'} where id = ${9304} | select id | bind changed
+original_post | where id in (before_touch | select id) | select id, title`.all();
+
+		expect(rows).toEqual([{ id: 9304, title: 'before-and-after original' }]);
+
+		const persisted = await sql<{ title: string; content: string }>`
+			SELECT title, content
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9304}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([
+			{
+				title: 'before-and-after mutated',
+				content: 'touched through original snapshot',
+			},
+		]);
+	});
+
 	it('rolls back the whole program when a later mutation fails', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

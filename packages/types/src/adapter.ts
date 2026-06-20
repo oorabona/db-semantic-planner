@@ -190,6 +190,7 @@ export type NqlProgramSequenceStep =
 			readonly query: QueryIntent;
 			readonly bindName?: string;
 			readonly final: boolean;
+			readonly snapshot?: true;
 	  }
 	| {
 			readonly kind: 'mutation';

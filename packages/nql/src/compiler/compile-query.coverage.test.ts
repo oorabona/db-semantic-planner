@@ -530,13 +530,34 @@ describe('binding-final query sources', () => {
 		expect(sequence?.at(-1)?.bindingDependencies).toEqual(['recent_posts']);
 	});
 
+	it('tags a final query read binding reference across mutation', () => {
+		const result = compile(
+			`users | select id | bind active_users
+insert into users set name = 'Alice' | select id | bind created_user
+active_users | select id`,
+			schema,
+		);
+		const sequence = result.ast?.nqlProgramSequence;
+
+		expect(result.success).toBe(true);
+		expect(sequence?.[0]).toMatchObject({
+			kind: 'query',
+			bindName: 'active_users',
+			snapshot: true,
+		});
+		expect(sequence?.[1]).toMatchObject({
+			kind: 'mutation',
+			bindName: 'created_user',
+		});
+	});
+
 	it.each([
 		['WITH CTE body', 'with ids as (active_users | select id) ids | select id'],
 		[
 			'WITH outer query',
 			'with passthrough as (users | select id) active_users | select id',
 		],
-	])('rejects read binding references across mutation inside %s', (_label, finalStatement) => {
+	])('accepts read binding references across mutation inside %s', (_label, finalStatement) => {
 		const result = compile(
 			`users | select id | bind active_users
 insert into users set name = 'Alice' | select id | bind created_user
@@ -544,10 +565,7 @@ ${finalStatement}`,
 			schema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(
-			/read binding referenced across a mutation \(#186\)/,
-		);
+		expect(result.success).toBe(true);
 	});
 
 	it('accepts IN subqueries over real tables from a final query that reads a bind source', () => {

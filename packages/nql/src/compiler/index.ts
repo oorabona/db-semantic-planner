@@ -135,6 +135,7 @@ function programSequenceStepFromResult(
 	bindName: string | undefined,
 	final: boolean,
 	bindingDependencies: readonly string[],
+	snapshotReadBindings: ReadonlySet<string>,
 ): NqlProgramSequenceStepWithDependencies | undefined {
 	if (result.query) {
 		return {
@@ -143,6 +144,8 @@ function programSequenceStepFromResult(
 			...(bindName !== undefined && { bindName }),
 			final,
 			bindingDependencies,
+			...(bindName !== undefined &&
+				snapshotReadBindings.has(bindName) && { snapshot: true }),
 		};
 	}
 	if (result.mutation) {
@@ -172,8 +175,113 @@ type NqlAstRecord = {
 	readonly [key: string]: unknown;
 };
 
+type ReadBindingSnapshotShape =
+	| { readonly supported: true }
+	| { readonly supported: false; readonly reason: string };
+
 function isNqlAstRecord(value: unknown): value is NqlAstRecord {
 	return typeof value === 'object' && value !== null;
+}
+
+function isExactPhysicalProjectionColumn(
+	query: QueryIntent,
+	ctx: CompilerContext,
+	sourceColumn: string,
+	outputColumn: string,
+): boolean {
+	const resolvedColumn = ctx.validator?.resolvePhysicalColumnName(
+		query.from,
+		sourceColumn,
+	);
+	return (
+		resolvedColumn !== undefined &&
+		sourceColumn === resolvedColumn &&
+		outputColumn === resolvedColumn
+	);
+}
+
+function hasDirectPhysicalColumnProjection(
+	query: QueryIntent,
+	ctx: CompilerContext,
+): boolean {
+	const physicalColumns = ctx.validator?.getPhysicalTableColumns(query.from);
+	if (physicalColumns === undefined) return false;
+
+	const select = query.select;
+	if (!select || select.type === 'all') return physicalColumns.length > 0;
+
+	let projectedColumnCount = 0;
+	const addStarProjection = () => {
+		projectedColumnCount += physicalColumns.length;
+		return physicalColumns.length > 0;
+	};
+	const addDirectProjection = (
+		sourceColumn: string,
+		outputColumn: string,
+	): boolean => {
+		projectedColumnCount++;
+		return isExactPhysicalProjectionColumn(
+			query,
+			ctx,
+			sourceColumn,
+			outputColumn,
+		);
+	};
+
+	if (select.type === 'fields') {
+		for (const field of select.fields) {
+			if (field === '*') {
+				if (!addStarProjection()) return false;
+			} else if (!addDirectProjection(field, field)) {
+				return false;
+			}
+		}
+		return projectedColumnCount > 0;
+	}
+
+	if (select.type === 'aggregate') return false;
+
+	for (const expr of select.columns) {
+		if (expr.kind === 'column' && expr.column === '*') {
+			if (!addStarProjection()) return false;
+			continue;
+		}
+		if (expr.kind === 'column') {
+			const outputColumn = expr.as ?? expr.column;
+			if (!addDirectProjection(expr.column, outputColumn)) return false;
+			continue;
+		}
+		if (expr.kind === 'columnAlias') {
+			if (!addDirectProjection(expr.column, expr.alias)) return false;
+			continue;
+		}
+		return false;
+	}
+
+	return projectedColumnCount > 0;
+}
+
+function classifyReadBindingSnapshotShape(
+	query: QueryIntent,
+	ctx: CompilerContext,
+	sourceWasBinding: boolean,
+): ReadBindingSnapshotShape {
+	if (sourceWasBinding) {
+		return { supported: false, reason: 'a binding source' };
+	}
+	if (ctx.validator?.getPhysicalTableColumns(query.from) === undefined) {
+		return {
+			supported: false,
+			reason: `no physical model table source '${query.from}'`,
+		};
+	}
+	if (!hasDirectPhysicalColumnProjection(query, ctx)) {
+		return {
+			supported: false,
+			reason: 'aliased/computed/aggregate columns',
+		};
+	}
+	return { supported: true };
 }
 
 function addReadBindingReference(
@@ -391,34 +499,44 @@ function collectTransitiveReadBindingDependencies(
 
 function rejectReadBindingReferenceAcrossMutation(
 	bindName: string,
-	definitionIndex: number,
-	mutationIndex: number,
-	referenceIndex: number,
-	statementCount: number,
+	reason: string,
 ): never {
 	throw new NqlSemanticException(
 		NqlErrorCodes.SEM_INVALID_SYNTAX,
-		`read binding referenced across a mutation (#186): binding '${bindName}' is defined by read-only statement ${definitionIndex + 1} of ${statementCount} and referenced by statement ${referenceIndex + 1} after mutation statement ${mutationIndex + 1}. Read-only bindings are not materialized snapshots; move the reference before the mutation or bind the mutation RETURNING result instead.`,
+		`read binding referenced across a mutation: unsupported snapshot shape (#186): snapshotting currently supports only a direct single-table column projection; binding '${bindName}' has ${reason}, so it cannot be materialized - move the reference before the mutation, or bind the mutation RETURNING result.`,
 	);
 }
 
-function rejectInvalidReadBindingDependencies(
+function markReadBindingReferenceAcrossMutation(
+	bindName: string,
+	snapshotReadBindings: Set<string>,
+	readBindingSnapshotShapes: ReadonlyMap<string, ReadBindingSnapshotShape>,
+): void {
+	const snapshotShape = readBindingSnapshotShapes.get(bindName);
+	if (snapshotShape?.supported !== true) {
+		rejectReadBindingReferenceAcrossMutation(
+			bindName,
+			snapshotShape?.reason ?? 'an unavailable output shape',
+		);
+	}
+	snapshotReadBindings.add(bindName);
+}
+
+function markReadBindingDependenciesRequiringSnapshot(
 	statementBindingDependencies: readonly string[],
 	readBindingDefinitions: ReadonlyMap<string, number>,
 	lastMutationStatement: number,
-	referenceIndex: number,
-	statementCount: number,
+	snapshotReadBindings: Set<string>,
+	readBindingSnapshotShapes: ReadonlyMap<string, ReadBindingSnapshotShape>,
 ): void {
 	for (const referencedBindName of statementBindingDependencies) {
 		const definitionIndex = readBindingDefinitions.get(referencedBindName);
 		if (definitionIndex === undefined) continue;
 		if (lastMutationStatement > definitionIndex) {
-			rejectReadBindingReferenceAcrossMutation(
+			markReadBindingReferenceAcrossMutation(
 				referencedBindName,
-				definitionIndex,
-				lastMutationStatement,
-				referenceIndex,
-				statementCount,
+				snapshotReadBindings,
+				readBindingSnapshotShapes,
 			);
 		}
 	}
@@ -526,6 +644,11 @@ export class NqlCompiler {
 		const seenBindNames = new Map<string, number>();
 		const nqlProgramSequence: NqlProgramSequenceStepWithDependencies[] = [];
 		const readBindingDefinitions = new Map<string, number>();
+		const readBindingSnapshotShapes = new Map<
+			string,
+			ReadBindingSnapshotShape
+		>();
+		const snapshotReadBindings = new Set<string>();
 		const definedBindingNames = new Set<string>();
 		const bindingDependencies = new Map<string, readonly string[]>();
 		let lastMutationStatement = -1;
@@ -554,12 +677,12 @@ export class NqlCompiler {
 					readBindingReferences,
 					bindingDependencies,
 				);
-			rejectInvalidReadBindingDependencies(
+			markReadBindingDependenciesRequiringSnapshot(
 				statementBindingDependencies,
 				readBindingDefinitions,
 				lastMutationStatement,
-				i,
-				program.statements.length,
+				snapshotReadBindings,
+				readBindingSnapshotShapes,
 			);
 
 			lastResult = this.compileSingleStatement(stmt, bindings);
@@ -572,12 +695,12 @@ export class NqlCompiler {
 				readBindingReferences,
 				bindingDependencies,
 			);
-			rejectInvalidReadBindingDependencies(
+			markReadBindingDependenciesRequiringSnapshot(
 				statementBindingDependencies,
 				readBindingDefinitions,
 				lastMutationStatement,
-				i,
-				program.statements.length,
+				snapshotReadBindings,
+				readBindingSnapshotShapes,
 			);
 
 			if (stmt.type === 'mutationPipeline') {
@@ -586,11 +709,22 @@ export class NqlCompiler {
 
 			if (bindName) {
 				if (lastResult.query) {
+					const sourceWasBinding = definedBindingNames.has(
+						lastResult.query.from,
+					);
 					const outputSchema = this.registerQueryBindingOutputSchema(
 						bindName,
 						lastResult.query,
 						bindingOutputSchemas,
 						statementBindingDependencies,
+					);
+					readBindingSnapshotShapes.set(
+						bindName,
+						classifyReadBindingSnapshotShape(
+							lastResult.query,
+							this.ctx,
+							sourceWasBinding,
+						),
 					);
 					bindings.set(bindName, lastResult.query);
 					if (outputSchema) {
@@ -645,6 +779,7 @@ export class NqlCompiler {
 				bindName,
 				i === program.statements.length - 1,
 				statementBindingDependencies,
+				snapshotReadBindings,
 			);
 			if (sequenceStep !== undefined) {
 				nqlProgramSequence.push(sequenceStep);
@@ -662,15 +797,24 @@ export class NqlCompiler {
 
 		const hasMutationBindings = mutationBindings.size > 0;
 		const hasBindingOutputSchemas = bindingOutputSchemas.size > 0;
+		const taggedNqlProgramSequence = nqlProgramSequence.map((step) =>
+			step.kind === 'query' &&
+			step.bindName !== undefined &&
+			snapshotReadBindings.has(step.bindName)
+				? { ...step, snapshot: true as const }
+				: step,
+		);
 		const hasNqlProgramSequence =
-			nqlProgramSequence.length === program.statements.length;
+			taggedNqlProgramSequence.length === program.statements.length;
 		if (bindings.size > 0) {
 			return {
 				...lastResult,
 				bindings,
 				...(hasBindingOutputSchemas && { bindingOutputSchemas }),
 				...(hasMutationBindings && { mutationBindings }),
-				...(hasNqlProgramSequence && { nqlProgramSequence }),
+				...(hasNqlProgramSequence && {
+					nqlProgramSequence: taggedNqlProgramSequence,
+				}),
 			};
 		}
 		return lastResult;
