@@ -184,6 +184,58 @@ describe('NQL trusted relation-filter proof', () => {
 		expect(Object.isFrozen(payload?.throughTargetColumn)).toBe(true);
 	});
 
+	it('carries and deep-freezes recursive trusted payload fields', () => {
+		const proof = markNqlTrustedRelationFilter(
+			{ kind: 'relationColumn' },
+			{
+				relation: 'ascendant',
+				targetTable: 'categories',
+				sourceColumn: ['parentId'],
+				targetColumn: ['id'],
+				hops: [],
+				selectedColumn: 'name',
+				cardinality: 'many',
+				relationType: 'hasMany',
+				recursive: {
+					direction: 'up',
+					maxDepth: 10,
+					selfRefColumn: 'parentId',
+					targetKeyColumn: 'id',
+				},
+			},
+		);
+
+		const payload = getTrustedNqlRelationFilterFields(proof);
+
+		expect(payload).toEqual({
+			relation: 'ascendant',
+			targetTable: 'categories',
+			sourceColumn: ['parentId'],
+			targetColumn: ['id'],
+			hops: [],
+			selectedColumn: 'name',
+			cardinality: 'many',
+			relationType: 'hasMany',
+			recursive: {
+				direction: 'up',
+				maxDepth: 10,
+				selfRefColumn: 'parentId',
+				targetKeyColumn: 'id',
+			},
+		});
+		expect(Object.isFrozen(payload)).toBe(true);
+		expect(Object.isFrozen(payload?.recursive)).toBe(true);
+		try {
+			if (payload?.recursive) {
+				(payload.recursive as { selfRefColumn: string }).selfRefColumn =
+					'forged';
+			}
+		} catch {
+			// Frozen payloads throw in strict mode; either way, mutation must not stick.
+		}
+		expect(payload?.recursive?.selfRefColumn).toBe('parentId');
+	});
+
 	it('does not trust forged plain objects or invalid relationType payloads', () => {
 		const forged = {
 			relation: 'posts',

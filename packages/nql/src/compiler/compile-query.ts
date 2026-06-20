@@ -53,13 +53,18 @@ import {
 	expressionToSql,
 	getKnownBindingColumns,
 	isBindingTable,
+	resolveBindingRecursiveRelationColumn,
 	resolveBindingRelationColumn,
 	resolveBindingRelationFilter,
 	resolveIntegerCount,
 	validateColumnForTable,
 } from './expression-utils.js';
 import { applyIncludeLimit, buildNestedIncludes } from './include-builder.js';
-import type { CompilerContext, CompilerFns } from './types.js';
+import type {
+	ColumnValidatorPseudoColumn,
+	CompilerContext,
+	CompilerFns,
+} from './types.js';
 
 const activeBindingScopes = new WeakMap<
 	CompilerContext,
@@ -199,6 +204,43 @@ function relationForeignKeysOnSource(
 	if (relation?.type !== 'belongsTo') return undefined;
 	const fkColumns = toColumnList(relation.foreignKey);
 	return fkColumns.length > 0 ? fkColumns : undefined;
+}
+
+type RecursiveDirection = 'up' | 'down';
+
+function recursiveDirection(
+	recursive: unknown,
+): RecursiveDirection | undefined {
+	if (recursive === null || typeof recursive !== 'object') return undefined;
+	const direction = (recursive as { readonly direction?: unknown }).direction;
+	if (direction === 'up' || direction === 'ancestors') return 'up';
+	if (direction === 'down' || direction === 'descendants') return 'down';
+	return undefined;
+}
+
+function recursiveMaxDepth(recursive: unknown): number | undefined {
+	if (recursive === null || typeof recursive !== 'object') return undefined;
+	const maxDepth = (recursive as { readonly maxDepth?: unknown }).maxDepth;
+	return typeof maxDepth === 'number' &&
+		Number.isSafeInteger(maxDepth) &&
+		maxDepth > 0
+		? maxDepth
+		: undefined;
+}
+
+function pseudoColumnMatchesSelfRef(
+	pseudoColumn: ColumnValidatorPseudoColumn,
+	sourceTable: string,
+	selfRefColumn: string,
+	targetKeyColumn: string,
+): boolean {
+	return (
+		(pseudoColumn.table === undefined || pseudoColumn.table === sourceTable) &&
+		(pseudoColumn.foreignKeyColumn === undefined ||
+			columnsMatch(pseudoColumn.foreignKeyColumn, selfRefColumn)) &&
+		(pseudoColumn.targetColumn === undefined ||
+			columnsMatch(pseudoColumn.targetColumn, targetKeyColumn))
+	);
 }
 
 function unsafeBindingRelationReason(
@@ -359,6 +401,91 @@ function manyToManyVirtualRelationForBinding(
 	};
 }
 
+function recursiveVirtualRelationForBinding(
+	relation: ReturnType<
+		NonNullable<CompilerContext['validator']>['getRelation']
+	>,
+	sourceTable: string,
+	directProjectionLineage: readonly NqlBindingColumnLineage[],
+	pseudoColumns: readonly ColumnValidatorPseudoColumn[],
+): NqlBindingVirtualRelation | undefined {
+	const direction = recursiveDirection(relation?.recursive);
+	if (!relation || !direction) return undefined;
+	if (relation.source !== relation.target || relation.source !== sourceTable) {
+		return undefined;
+	}
+	const fkColumns = toColumnList(relation.foreignKey);
+	const targetKeys = toColumnList(relation.targetKey);
+	const pseudoColumn = pseudoColumns.find((candidate) => {
+		const candidateFkColumns =
+			fkColumns.length > 0
+				? fkColumns
+				: toColumnList(candidate.foreignKeyColumn);
+		const candidateTargetColumns =
+			targetKeys.length > 0
+				? targetKeys
+				: candidate.targetColumn !== undefined
+					? [candidate.targetColumn]
+					: [DEFAULT_RELATION_TARGET_COLUMN];
+		const candidateSelfRefColumn = singleResolvedColumn(candidateFkColumns);
+		const candidateTargetKeyColumn = singleResolvedColumn(
+			candidateTargetColumns,
+		);
+		return (
+			candidateSelfRefColumn !== undefined &&
+			candidateTargetKeyColumn !== undefined &&
+			pseudoColumnMatchesSelfRef(
+				candidate,
+				sourceTable,
+				candidateSelfRefColumn,
+				candidateTargetKeyColumn,
+			)
+		);
+	});
+	if (!pseudoColumn) return undefined;
+	const selfRefColumn = singleResolvedColumn(
+		fkColumns.length > 0
+			? fkColumns
+			: toColumnList(pseudoColumn.foreignKeyColumn),
+	);
+	const targetKeyColumn = singleResolvedColumn(
+		targetKeys.length > 0
+			? targetKeys
+			: pseudoColumn.targetColumn !== undefined
+				? [pseudoColumn.targetColumn]
+				: [DEFAULT_RELATION_TARGET_COLUMN],
+	);
+	if (!selfRefColumn || !targetKeyColumn) return undefined;
+	const relationName =
+		direction === 'up'
+			? pseudoColumn.ascendantKeyword
+			: pseudoColumn.descendantKeyword;
+	if (!relationName) return undefined;
+	const seedColumn = direction === 'up' ? selfRefColumn : targetKeyColumn;
+	const sourceProjection = findDirectSourceProjection(
+		sourceTable,
+		seedColumn,
+		directProjectionLineage,
+	);
+	if (!sourceProjection) return undefined;
+	return {
+		relation: relationName.toLowerCase(),
+		sourceTable,
+		targetTable: relation.target,
+		sourceColumn: [sourceProjection.outputColumn],
+		targetColumn: [direction === 'up' ? targetKeyColumn : selfRefColumn],
+		hops: [],
+		cardinality: 'many',
+		relationType: relation.type,
+		recursive: {
+			direction,
+			maxDepth: recursiveMaxDepth(relation.recursive) ?? 10,
+			selfRefColumn,
+			targetKeyColumn,
+		},
+	};
+}
+
 function scalarVirtualRelationForBinding(
 	relation: ReturnType<
 		NonNullable<CompilerContext['validator']>['getRelation']
@@ -373,6 +500,12 @@ function scalarVirtualRelationForBinding(
 			sourceTable,
 			directProjectionLineage,
 		);
+	}
+	if (
+		relation.recursive !== undefined ||
+		(relation.source !== undefined && relation.source === relation.target)
+	) {
+		return undefined;
 	}
 	if (
 		relation.type !== 'belongsTo' &&
@@ -438,6 +571,13 @@ function getBindingRelationFilterMetadata(
 	);
 	for (const relationName of relationNames ?? []) {
 		const relation = ctx.validator?.getRelation(sourceTable, relationName);
+		const recursiveRelation = recursiveVirtualRelationForBinding(
+			relation,
+			sourceTable,
+			outputSchema.directProjectionLineage ?? [],
+			ctx.validator?.getPseudoColumns(sourceTable) ?? [],
+		);
+		if (recursiveRelation) scalarRelations.push(recursiveRelation);
 		const virtualRelation = virtualRelationForBinding(
 			relation,
 			sourceTable,
@@ -478,6 +618,18 @@ function validateBindingFinalPath(
 
 	const firstSegment = segments[0]!;
 	if (ctx.pseudoColumnKeywords.has(firstSegment.toLowerCase())) {
+		if (
+			segments.length === 2 &&
+			resolveBindingRecursiveRelationColumn(
+				ctx,
+				bindingName,
+				firstSegment,
+				segments[1]!,
+				expr.depthHint,
+			)
+		) {
+			return;
+		}
 		assertNoBindingRelationConstruct(
 			ctx,
 			bindingName,
@@ -741,12 +893,23 @@ function validateBindingFinalSelectClause(
 					const segments = item.expression.segments;
 					const firstSegment = segments[0]!;
 					if (ctx.pseudoColumnKeywords.has(firstSegment.toLowerCase())) {
-						assertNoBindingRelationConstruct(
-							ctx,
-							bindingName,
-							'use pseudo-column traversals',
-							firstSegment,
-						);
+						if (
+							segments.length !== 2 ||
+							!resolveBindingRecursiveRelationColumn(
+								ctx,
+								bindingName,
+								firstSegment,
+								segments[1]!,
+								item.expression.depthHint,
+							)
+						) {
+							assertNoBindingRelationConstruct(
+								ctx,
+								bindingName,
+								'use pseudo-column traversals',
+								firstSegment,
+							);
+						}
 					} else {
 						resolveBindingRelationColumn(
 							ctx,

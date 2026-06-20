@@ -12,11 +12,11 @@ import type { CommonTableExpr, Node, SelectStmt, SubLink } from '@pgsql/types';
 import { requiredColumn } from '../../assert-field.js';
 import {
 	binaryExpr,
-	coalesce,
+	coalesceExpr,
 	eqExpr,
 	funcCall,
 	integerNode,
-	stringNode,
+	sortBy,
 	typeCast,
 } from '../../ast-helpers.js';
 import type {
@@ -33,12 +33,13 @@ import type {
 /**
  * Configuration for recursive CTE builder
  */
-interface RecursiveCteConfig {
+export interface RecursiveCteConfig {
 	cteAlias: string;
 	table: string;
 	pkColumn: string;
 	fkColumn: string;
 	outerAlias: string;
+	outerSeedColumn?: string;
 	isAncestors: boolean;
 	maxDepth: number;
 	selectColumn: string;
@@ -68,13 +69,14 @@ interface RecursiveCteConfig {
  * FROM __rc)
  * ```
  */
-function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
+export function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	const {
 		cteAlias,
 		table,
 		pkColumn,
 		fkColumn,
 		outerAlias,
+		outerSeedColumn,
 		isAncestors,
 		maxDepth,
 		selectColumn,
@@ -86,6 +88,9 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 	const dbPk = naming.toDatabase(pkColumn);
 	const dbFk = naming.toDatabase(fkColumn);
 	const dbOuter = naming.toDatabase(outerAlias);
+	const dbOuterSeed = naming.toDatabase(
+		outerSeedColumn ?? (isAncestors ? fkColumn : pkColumn),
+	);
 
 	// Inner alias for CTE iterations
 	const innerAlias = '__n';
@@ -158,7 +163,7 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 						ColumnRef: {
 							fields: [
 								{ String: { sval: dbOuter } },
-								{ String: { sval: dbFk } },
+								{ String: { sval: dbOuterSeed } },
 							],
 						},
 					},
@@ -177,7 +182,7 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 						ColumnRef: {
 							fields: [
 								{ String: { sval: dbOuter } },
-								{ String: { sval: dbPk } },
+								{ String: { sval: dbOuterSeed } },
 							],
 						},
 					},
@@ -242,15 +247,7 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 			},
 		],
 		fromClause: [
-			// FROM __rc
-			{
-				RangeVar: {
-					relname: cteAlias,
-					inh: true,
-					relpersistence: 'p',
-				},
-			},
-			// INNER JOIN table AS __n
+			// FROM __rc INNER JOIN table AS __n
 			{
 				JoinExpr: {
 					jointype: 'JOIN_INNER',
@@ -331,7 +328,7 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 						},
 						integerNode(maxDepth),
 					),
-					// pk <> ALL(__visited) — cycle detection
+					// pk <> ALL(__visited) - cycle detection
 					{
 						A_Expr: {
 							kind: 'AEXPR_OP_ALL',
@@ -381,20 +378,35 @@ function buildRecursiveScalarSubquery(config: RecursiveCteConfig): Node {
 		targetList: [
 			{
 				ResTarget: {
-					val: coalesce(
-						funcCall('json_agg', [
-							{
-								ColumnRef: {
-									fields: [
-										{ String: { sval: cteAlias } },
-										{ String: { sval: dbSelectCol } },
-									],
+					val: coalesceExpr([
+						funcCall(
+							'json_agg',
+							[
+								{
+									ColumnRef: {
+										fields: [
+											{ String: { sval: cteAlias } },
+											{ String: { sval: dbSelectCol } },
+										],
+									},
 								},
+							],
+							{
+								orderBy: [
+									sortBy({
+										ColumnRef: {
+											fields: [
+												{ String: { sval: cteAlias } },
+												{ String: { sval: '__depth' } },
+											],
+										},
+									}),
+								],
 							},
-						]),
+						),
 						// Empty array fallback: '[]'::json
-						typeCast(stringNode('[]'), 'json'),
-					),
+						typeCast({ A_Const: { sval: { sval: '[]' } } }, 'json'),
+					]),
 				},
 			},
 		],

@@ -28,14 +28,21 @@ export interface NqlInternalCompilerOptions {
  * Duck-type interface for schema-based column validation.
  * Loose coupling: ModelIR from @dbsp/core satisfies this shape without direct import.
  */
+export interface ColumnValidatorPseudoColumn {
+	readonly table?: string;
+	readonly foreignKeyColumn?: string;
+	readonly targetColumn?: string;
+	readonly parentRole: string;
+	readonly childRole: string;
+	readonly ascendantKeyword?: string;
+	readonly descendantKeyword?: string;
+}
+
 export interface ColumnValidatorSchema {
 	getTable(name: string):
 		| {
 				readonly columns: readonly { readonly name: string }[];
-				readonly pseudoColumns?: readonly {
-					readonly parentRole: string;
-					readonly childRole: string;
-				}[];
+				readonly pseudoColumns?: readonly ColumnValidatorPseudoColumn[];
 		  }
 		| undefined;
 	getRelationsFrom(sourceTable: string): readonly ColumnValidatorRelation[];

@@ -45,6 +45,7 @@ import {
 	expressionToValue,
 	isAggregateFunction,
 	isBindingTable,
+	resolveBindingRecursiveRelationColumn,
 	resolveBindingRelationColumn,
 	resolveIntegerCount,
 	validateColumnForTable,
@@ -614,12 +615,6 @@ function compileMultiSegmentPath(
 
 	// Check for pseudo-column traversal
 	if (ctx.pseudoColumnKeywords.has(firstSegmentLower)) {
-		assertNoBindingRelationConstruct(
-			ctx,
-			ctx.currentFromTable,
-			'use pseudo-column traversals',
-			segments[0]!,
-		);
 		const firstSegment: string = firstSegmentLower;
 		const depthHint = expr.depthHint;
 
@@ -657,6 +652,47 @@ function compileMultiSegmentPath(
 		}
 		/* v8 ignore stop -- @preserve */
 		const targetColumn = segments[i]!;
+		const bindingRelation =
+			traversals.length === 1
+				? resolveBindingRecursiveRelationColumn(
+						ctx,
+						ctx.currentFromTable,
+						firstSegment,
+						targetColumn,
+						depthHint,
+					)
+				: undefined;
+		if (bindingRelation) {
+			const relationColumnIntent: ExpressionIntent = {
+				kind: 'relationColumn',
+				relation: bindingRelation.relation,
+				column: targetColumn,
+				as: item.alias ?? `${bindingRelation.relation}.${targetColumn}`,
+			};
+			return markNqlTrustedRelationFilter(relationColumnIntent, {
+				relation: bindingRelation.relation,
+				targetTable: bindingRelation.targetTable,
+				sourceColumn: bindingRelation.sourceColumn,
+				targetColumn: bindingRelation.targetColumn,
+				hops: bindingRelation.hops,
+				selectedColumn: targetColumn,
+				...(bindingRelation.cardinality !== undefined && {
+					cardinality: bindingRelation.cardinality,
+				}),
+				...(bindingRelation.relationType !== undefined && {
+					relationType: bindingRelation.relationType,
+				}),
+				...(bindingRelation.recursive !== undefined && {
+					recursive: bindingRelation.recursive,
+				}),
+			});
+		}
+		assertNoBindingRelationConstruct(
+			ctx,
+			ctx.currentFromTable,
+			'use pseudo-column traversals',
+			segments[0]!,
+		);
 		if (ctx.currentFromTable) {
 			validateColumnForTable(ctx, ctx.currentFromTable, targetColumn);
 		}
@@ -737,6 +773,9 @@ function compileMultiSegmentPath(
 				}),
 				...(bindingRelation.relationType !== undefined && {
 					relationType: bindingRelation.relationType,
+				}),
+				...(bindingRelation.recursive !== undefined && {
+					recursive: bindingRelation.recursive,
 				}),
 			})
 		: relationColumnIntent;

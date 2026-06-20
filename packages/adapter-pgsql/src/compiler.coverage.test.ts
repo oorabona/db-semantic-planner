@@ -504,6 +504,12 @@ describe('PlanCompiler - Coverage Tests', () => {
 				readonly throughSourceColumn?: string;
 				readonly throughTargetColumn?: string;
 				readonly selectedColumn?: string;
+				readonly recursive?: {
+					readonly direction: 'up' | 'down';
+					readonly maxDepth: number;
+					readonly selfRefColumn: string;
+					readonly targetKeyColumn: string;
+				};
 			} = {},
 		): SimplifiedPlanReport {
 			const selectedColumn = fields.selectedColumn ?? 'title';
@@ -542,6 +548,9 @@ describe('PlanCompiler - Coverage Tests', () => {
 					}),
 					...(fields.throughTargetColumn !== undefined && {
 						throughTargetColumn: fields.throughTargetColumn,
+					}),
+					...(fields.recursive !== undefined && {
+						recursive: fields.recursive,
 					}),
 				},
 			);
@@ -603,6 +612,190 @@ describe('PlanCompiler - Coverage Tests', () => {
 				"coalesce(json_agg(rc_0.metadata order by cast(rc_0.metadata as text) nulls last), '[]'::json)",
 			);
 			expect(sql).toContain('as "posts.metadata"');
+		});
+
+		it('compiles trusted recursive binding relation columns as inline WITH RECURSIVE subqueries in both directions', () => {
+			const relationColumns = [
+				markNqlTrustedRelationFilter(
+					{
+						type: 'selectRelationColumn',
+						relation: 'ascendant',
+						column: 'name',
+						alias: 'ascendant.name',
+					},
+					{
+						relation: 'ascendant',
+						targetTable: 'categories',
+						sourceColumn: ['parentId'],
+						targetColumn: ['id'],
+						hops: [],
+						selectedColumn: 'name',
+						cardinality: 'many',
+						relationType: 'hasMany',
+						recursive: {
+							direction: 'up',
+							maxDepth: 10,
+							selfRefColumn: 'parentId',
+							targetKeyColumn: 'id',
+						},
+					},
+				),
+				markNqlTrustedRelationFilter(
+					{
+						type: 'selectRelationColumn',
+						relation: 'descendant',
+						column: 'name',
+						alias: 'descendant.name',
+					},
+					{
+						relation: 'descendant',
+						targetTable: 'categories',
+						sourceColumn: ['id'],
+						targetColumn: ['parentId'],
+						hops: [],
+						selectedColumn: 'name',
+						cardinality: 'many',
+						relationType: 'hasMany',
+						recursive: {
+							direction: 'down',
+							maxDepth: 10,
+							selfRefColumn: 'parentId',
+							targetKeyColumn: 'id',
+						},
+					},
+				),
+			];
+			const result = new PlanCompiler().compile({
+				rootTable: 'projected_categories',
+				decisions: relationColumns,
+			});
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toContain('with recursive __rc_0 as');
+			expect(sql).toContain('with recursive __rc_1 as');
+			expect(sql).toMatch(/where __n\.id = projected_categories\."parentId"/i);
+			expect(sql).toMatch(
+				/join categories as __n on __n\.id = __rc_0\."parentId"/i,
+			);
+			expect(sql).toMatch(/where __n\."parentId" = projected_categories\.id/i);
+			expect(sql).toMatch(
+				/join categories as __n on __n\."parentId" = __rc_1\.id/i,
+			);
+			expect(sql).toContain('__rc_0.__depth < 10');
+			expect(sql).toMatch(/__n\.id <> all\s*\(__rc_0\.__visited\)/i);
+			expect(sql).toContain('json_agg(__rc_0.name order by __rc_0.__depth)');
+			expect(sql).toContain('as "ascendant.name"');
+			expect(sql).toContain('as "descendant.name"');
+		});
+
+		it('rejects trusted recursive binding relation columns when recursive metadata is missing', () => {
+			const compiler = new PlanCompiler();
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						relation: 'ascendant',
+						cardinality: 'many',
+						relationType: 'hasMany',
+						targetTable: 'categories',
+						sourceColumn: 'parentId',
+						targetColumn: 'id',
+						selectedColumn: 'name',
+					}),
+				),
+			).toThrow(/missing recursive metadata/);
+		});
+
+		it('throws before SQL construction when recursive CTEs are unsupported by the dialect', () => {
+			const compiler = new PlanCompiler({
+				dialectCapabilities: {
+					...POSTGRESQL_CAPABILITIES,
+					supportsRecursiveCTE: false,
+				},
+			});
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						relation: 'ascendant',
+						cardinality: 'many',
+						relationType: 'hasMany',
+						targetTable: 'categories;drop',
+						sourceColumn: 'parentId',
+						targetColumn: 'id',
+						selectedColumn: 'name',
+						recursive: {
+							direction: 'up',
+							maxDepth: 10,
+							selfRefColumn: 'parentId',
+							targetKeyColumn: 'id',
+						},
+					}),
+				),
+			).toThrow(/supportsRecursiveCTE/);
+		});
+
+		it('throws before SQL construction when recursive binding aggregation is unsupported by the dialect', () => {
+			const compiler = new PlanCompiler({
+				dialectCapabilities: {
+					...POSTGRESQL_CAPABILITIES,
+					supportsRecursiveCTE: true,
+					supportsJsonAgg: false,
+				},
+			});
+
+			expect(() =>
+				compiler.compile(
+					bindingRelationColumnPlan({
+						relation: 'ascendant',
+						cardinality: 'many',
+						relationType: 'hasMany',
+						targetTable: 'categories;drop',
+						sourceColumn: 'parentId',
+						targetColumn: 'id',
+						selectedColumn: 'name',
+						recursive: {
+							direction: 'up',
+							maxDepth: 10,
+							selfRefColumn: 'parentId',
+							targetKeyColumn: 'id',
+						},
+					}),
+				),
+			).toThrow(
+				'JSON aggregation for NQL binding relation columns is not supported by this adapter',
+			);
+		});
+
+		it('compiles recursive binding aggregation when recursive CTEs and JSON aggregation are supported', () => {
+			const compiler = new PlanCompiler({
+				dialectCapabilities: {
+					...POSTGRESQL_CAPABILITIES,
+					supportsRecursiveCTE: true,
+					supportsJsonAgg: true,
+				},
+			});
+			const result = compiler.compile(
+				bindingRelationColumnPlan({
+					relation: 'ascendant',
+					cardinality: 'many',
+					relationType: 'hasMany',
+					targetTable: 'categories',
+					sourceColumn: 'parentId',
+					targetColumn: 'id',
+					selectedColumn: 'name',
+					recursive: {
+						direction: 'up',
+						maxDepth: 10,
+						selfRefColumn: 'parentId',
+						targetKeyColumn: 'id',
+					},
+				}),
+			);
+			const sql = normalizeSQL(result.sql);
+
+			expect(sql).toContain('with recursive __rc_0 as');
+			expect(sql).toContain('json_agg(__rc_0.name order by __rc_0.__depth)');
 		});
 
 		it('compiles trusted manyToMany binding relation columns through one junction join subquery', () => {

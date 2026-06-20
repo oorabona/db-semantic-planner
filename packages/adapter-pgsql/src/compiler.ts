@@ -66,6 +66,7 @@ import {
 } from './handlers/expression/custom.js';
 import { registerAllExpressionHandlers } from './handlers/expression/index.js';
 import { bindParameter } from './handlers/expression/param-value.js';
+import { buildRecursiveScalarSubquery } from './handlers/expression/pseudo.js';
 import { genericWindowHandler } from './handlers/expression/window.js';
 import { registerAllIncludeHandlers } from './handlers/include/index.js';
 import { deriveFkColumns } from './handlers/include/shared.js';
@@ -1370,6 +1371,73 @@ export class PlanCompiler {
 		);
 	}
 
+	private bindingRelationName(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+	): string {
+		return typeof fields.relation === 'string'
+			? fields.relation
+			: fields.relation.join('.');
+	}
+
+	private bindingRelationNameLooksRecursive(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+	): boolean {
+		const relationName = this.bindingRelationName(fields).toLowerCase();
+		return relationName === 'ascendant' || relationName === 'descendant';
+	}
+
+	private compileBindingRecursiveRelationColumnSubquery(
+		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
+		plan: SimplifiedPlanReport,
+		dialectCapabilities: DialectCapabilities | undefined,
+	): Node {
+		const recursive = fields.recursive;
+		if (recursive === undefined) {
+			throw new Error(
+				`NQL binding recursive relation-column proof for '${plan.rootTable}' is missing recursive metadata.`,
+			);
+		}
+		if (fields.cardinality !== 'many') {
+			throw new Error(
+				`NQL binding recursive relation-column proof for '${plan.rootTable}' must use cardinality 'many'.`,
+			);
+		}
+		if (fields.sourceColumn.length !== 1) {
+			throw new Error(
+				`NQL binding recursive relation-column proof for '${plan.rootTable}' must carry exactly one projected seed column.`,
+			);
+		}
+		if (dialectCapabilities?.supportsRecursiveCTE === false) {
+			throw new Error(
+				`Recursive NQL binding relation columns require a dialect with supportsRecursiveCTE; current dialect (${dialectCapabilities.name}) declared it unsupported.`,
+			);
+		}
+		assertDialectCapability(
+			dialectCapabilities,
+			'supportsJsonAgg',
+			'JSON aggregation for NQL binding relation columns is',
+		);
+		const seedColumn = fields.sourceColumn[0];
+		if (!seedColumn) {
+			throw new Error(
+				`NQL binding recursive relation-column proof for '${plan.rootTable}' is missing its projected seed column.`,
+			);
+		}
+		const relatedAlias = this.allocateBindingRelationAlias();
+		return buildRecursiveScalarSubquery({
+			cteAlias: `__${relatedAlias}`,
+			table: fields.targetTable,
+			pkColumn: recursive.targetKeyColumn,
+			fkColumn: recursive.selfRefColumn,
+			outerAlias: plan.rootTable,
+			outerSeedColumn: seedColumn,
+			isAncestors: recursive.direction === 'up',
+			maxDepth: recursive.maxDepth,
+			selectColumn: fields.selectedColumn!,
+			ctx: this.createHandlerContext(plan, plan.rootTable),
+		});
+	}
+
 	private compileBindingRelationColumnSubquery(
 		fields: NonNullable<ReturnType<typeof getTrustedNqlRelationFilterFields>>,
 		plan: SimplifiedPlanReport,
@@ -1378,6 +1446,18 @@ export class PlanCompiler {
 		if (fields.selectedColumn === undefined) {
 			throw new Error(
 				`NQL binding relation-column proof for '${plan.rootTable}' is missing selectedColumn.`,
+			);
+		}
+		if (fields.recursive !== undefined) {
+			return this.compileBindingRecursiveRelationColumnSubquery(
+				fields,
+				plan,
+				dialectCapabilities,
+			);
+		}
+		if (this.bindingRelationNameLooksRecursive(fields)) {
+			throw new Error(
+				`NQL binding recursive relation-column proof for '${plan.rootTable}' is missing recursive metadata.`,
 			);
 		}
 		const isManyToManyRelation =
