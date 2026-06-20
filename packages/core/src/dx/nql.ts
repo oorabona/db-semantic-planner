@@ -1001,15 +1001,58 @@ function orderedSequenceStepToProgramStep(
 	};
 }
 
+const structuredCloneFn = (
+	globalThis as {
+		readonly structuredClone?: (value: unknown) => unknown;
+	}
+).structuredClone;
+
+/**
+ * Snapshot mutation RETURNING rows before afterMutation hooks can mutate them.
+ *
+ * The residual contract is per top-level column value: plain data
+ * (objects/arrays/JSON values/Date/Map/Set) is deep-copied with
+ * structuredClone, while values with a custom prototype are preserved by
+ * reference. If structuredClone is unavailable or rejects a value, that value is
+ * preserved by reference.
+ */
+function hasCustomSnapshotPrototype(value: unknown): boolean {
+	if (value === null || typeof value !== 'object') return false;
+	const prototype = Object.getPrototypeOf(value);
+	return (
+		prototype !== Object.prototype &&
+		prototype !== null &&
+		prototype !== Array.prototype &&
+		prototype !== Date.prototype &&
+		prototype !== Map.prototype &&
+		prototype !== Set.prototype
+	);
+}
+
+function cloneMutationSnapshotColumnValue(value: unknown): unknown {
+	if (hasCustomSnapshotPrototype(value) || structuredCloneFn === undefined) {
+		return value;
+	}
+	try {
+		return structuredCloneFn(value);
+	} catch {
+		return value;
+	}
+}
+
 function snapshotMutationRows(rows: readonly unknown[]): unknown[] {
 	return rows.map((row) => {
-		if (Array.isArray(row)) {
-			return [...row];
+		if (row === null || typeof row !== 'object') {
+			return cloneMutationSnapshotColumnValue(row);
 		}
-		if (row !== null && typeof row === 'object') {
-			return { ...(row as Record<string, unknown>) };
+		const snapshot = { ...(row as Record<PropertyKey, unknown>) } as Record<
+			PropertyKey,
+			unknown
+		>;
+		for (const key of Reflect.ownKeys(snapshot)) {
+			snapshot[key] = cloneMutationSnapshotColumnValue(snapshot[key]);
 		}
-		return row;
+		return snapshot;
 	});
 }
 

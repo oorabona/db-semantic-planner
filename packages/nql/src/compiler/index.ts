@@ -77,10 +77,15 @@ import {
 	compileMutationPipeline,
 	extractBindName,
 } from './compile-mutation.js';
-import { compileQuery, getQueryOutputSchema } from './compile-query.js';
+import {
+	compileQuery,
+	getQueryOutputSchema,
+	UnresolvedSelectAllOutputSchemaError,
+} from './compile-query.js';
 import { compileSelectClause } from './compile-select.js';
 import { validateParamsMap } from './expression-utils.js';
 
+export { UnresolvedSelectAllOutputSchemaError } from './compile-query.js';
 // Re-export public types
 export type {
 	ColumnValidatorSchema,
@@ -119,12 +124,10 @@ function allowsInternalParams(
 	return internalOptions?.allowInternalParams === true;
 }
 
-function isUnresolvedSelectAllOutputSchemaError(error: unknown): boolean {
-	return (
-		error instanceof NqlSemanticException &&
-		error.message.includes('from SELECT *') &&
-		error.message.includes('without a concrete table schema')
-	);
+export function isUnresolvedSelectAllOutputSchemaError(
+	error: unknown,
+): boolean {
+	return error instanceof UnresolvedSelectAllOutputSchemaError;
 }
 
 function programSequenceStepFromResult(

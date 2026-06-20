@@ -71,6 +71,13 @@ const PORTABLE_BINDING_FINAL_FUNCTIONS: ReadonlySet<string> = new Set([
 	...NQL_SELECT_VALUE_FUNCTIONS,
 ]);
 
+export class UnresolvedSelectAllOutputSchemaError extends NqlSemanticException {
+	constructor(message: string) {
+		super(NqlErrorCodes.SEM_INVALID_SYNTAX, message);
+		this.name = 'UnresolvedSelectAllOutputSchemaError';
+	}
+}
+
 /**
  * Compile a nested query without leaking the nested query's mutable context
  * back into the parent compiler scope.
@@ -1128,8 +1135,7 @@ function resolveSourceOutputColumns(
 	if (bindingColumns !== undefined) return bindingColumns;
 	const columns = ctx.validator?.getTableColumns(intent.from);
 	if (columns !== undefined) return columns;
-	throw new NqlSemanticException(
-		NqlErrorCodes.SEM_INVALID_SYNTAX,
+	throw new UnresolvedSelectAllOutputSchemaError(
 		`Cannot compute output schema for NQL binding '${bindingName}' from SELECT * on '${intent.from}' without a concrete table schema.`,
 	);
 }

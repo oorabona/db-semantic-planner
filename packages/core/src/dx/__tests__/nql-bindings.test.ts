@@ -95,6 +95,9 @@ function createMutationBindingTag(
 			id: { type: 'integer', dbType: 'integer' },
 			title: 'string',
 			authorId: { type: 'integer', dbType: 'integer' },
+			profile: 'jsonb',
+			embedding: { type: 'jsonb', dbType: 'vector' },
+			embedding2: { type: 'jsonb', dbType: 'vector' },
 		},
 	} as const);
 	const adapter = createPgsqlCompileOnlyAdapter({
@@ -203,6 +206,14 @@ posts | where authorId in (touched) | select authorId`.all();
 		`WITH "touched" ("${expectedCteColumn}") as (SELECT "${expectedCteColumn}" FROM "posts" WHERE false UNION ALL VALUES ($1::integer))`,
 	);
 	expect(execute.mock.calls[1]?.[0].parameters).toEqual([17]);
+}
+
+class CustomVectorScalar {
+	constructor(readonly values: readonly number[]) {}
+
+	toPostgres(): string {
+		return `[${this.values.join(',')}]`;
+	}
 }
 
 describe('nql`...` bind handling', () => {
@@ -911,6 +922,178 @@ update users set active = ${true} where id in (new_user) | select id`.all();
 		expect(adapter.transaction).toHaveBeenCalledOnce();
 		expect(execute).toHaveBeenCalledTimes(2);
 		expect(execute.mock.calls[1]?.[0].parameters).toEqual([15, true]);
+	});
+
+	it('keeps nested mutation RETURNING snapshots isolated from afterMutation hooks', async () => {
+		const returnedProfile = {
+			status: 'original',
+			details: { archived: false },
+		};
+		const afterMutation = vi.fn(
+			(_ctx, rows: Array<{ profile: typeof returnedProfile }>) => {
+				rows[0]!.profile.status = 'mutated';
+				rows[0]!.profile.details.archived = true;
+				return rows;
+			},
+		);
+		const hooks = getHookStore(
+			createHookManager().afterMutation(afterMutation as never),
+		);
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ profile: returnedProfile }])
+			.mockResolvedValueOnce([{ profile: { status: 'from-query' } }]);
+		const { nql } = createMutationBindingTag(execute, undefined, hooks);
+
+		await nql<{
+			profile: typeof returnedProfile;
+		}>`update posts set title = ${'Touched'} where id = ${1} | select profile | bind touched
+posts | where profile in (touched) | select profile`.all();
+
+		expect(afterMutation).toHaveBeenCalledOnce();
+		expect(returnedProfile).toEqual({
+			status: 'mutated',
+			details: { archived: true },
+		});
+		expect(execute.mock.calls[1]?.[0].parameters).toEqual([
+			{ status: 'original', details: { archived: false } },
+		]);
+		expect(execute.mock.calls[1]?.[0].parameters[0]).not.toBe(returnedProfile);
+	});
+
+	it('isolates plain mutation RETURNING snapshots while preserving custom scalar instances', async () => {
+		class V extends Array<number> {
+			constructor(values: readonly number[]) {
+				super();
+				this.push(...values);
+			}
+
+			toPostgres(): string {
+				return `[${this.join(',')}]`;
+			}
+		}
+
+		const returnedProfile = {
+			status: 'original',
+			details: { archived: false },
+		};
+		const returnedEmbedding = new CustomVectorScalar([0.1, 0.2, 0.3]);
+		const returnedEmbedding2 = new V([0.4]);
+		const afterMutation = vi.fn(
+			(
+				_ctx,
+				rows: Array<{
+					profile: typeof returnedProfile;
+					embedding: CustomVectorScalar;
+					embedding2: V;
+				}>,
+			) => {
+				rows[0]!.profile.status = 'mutated';
+				rows[0]!.profile.details.archived = true;
+				return rows;
+			},
+		);
+		const hooks = getHookStore(
+			createHookManager().afterMutation(afterMutation as never),
+		);
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([
+				{
+					profile: returnedProfile,
+					embedding: returnedEmbedding,
+					embedding2: returnedEmbedding2,
+				},
+			])
+			.mockResolvedValueOnce([
+				{
+					profile: { status: 'from-query' },
+					embedding: returnedEmbedding,
+					embedding2: returnedEmbedding2,
+				},
+			]);
+		const { nql } = createMutationBindingTag(execute, undefined, hooks);
+
+		await nql<{
+			profile: typeof returnedProfile;
+			embedding: CustomVectorScalar;
+			embedding2: V;
+		}>`update posts set title = ${'Touched'} where id = ${1} | select profile, embedding, embedding2 | bind touched
+touched | select profile, embedding, embedding2`.all();
+
+		expect(afterMutation).toHaveBeenCalledOnce();
+		expect(returnedProfile).toEqual({
+			status: 'mutated',
+			details: { archived: true },
+		});
+		const parameters = execute.mock.calls[1]?.[0].parameters ?? [];
+		expect(parameters[0]).toEqual({
+			status: 'original',
+			details: { archived: false },
+		});
+		expect(parameters[0]).not.toBe(returnedProfile);
+		expect(parameters[1]).toBe(returnedEmbedding);
+		expect(parameters[1]).toBeInstanceOf(CustomVectorScalar);
+		expect((parameters[1] as CustomVectorScalar).toPostgres()).toBe(
+			'[0.1,0.2,0.3]',
+		);
+		expect(parameters[2]).toBe(returnedEmbedding2);
+		expect(parameters[2]).toBeInstanceOf(V);
+		expect(Object.getPrototypeOf(parameters[2])).toBe(V.prototype);
+		expect(Object.getPrototypeOf(parameters[2])).not.toBe(Array.prototype);
+		expect((parameters[2] as V).toPostgres()).toBe('[0.4]');
+	});
+
+	it('preserves enumerable __proto__ JSON keys without polluting snapshot prototypes', async () => {
+		const returnedProfile = JSON.parse(
+			'{"__proto__":{"polluted":true},"status":"original","details":{"archived":false}}',
+		) as Record<string, unknown>;
+		const afterMutation = vi.fn(
+			(_ctx, rows: Array<{ profile: Record<string, unknown> }>) => {
+				rows[0]!.profile.status = 'mutated';
+				(rows[0]!.profile.details as Record<string, unknown>).archived = true;
+				(rows[0]!.profile.__proto__ as Record<string, unknown>).polluted =
+					'mutated';
+				return rows;
+			},
+		);
+		const hooks = getHookStore(
+			createHookManager().afterMutation(afterMutation as never),
+		);
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ profile: returnedProfile }])
+			.mockResolvedValueOnce([{ profile: { status: 'from-query' } }]);
+		const { nql } = createMutationBindingTag(execute, undefined, hooks);
+
+		await nql<{
+			profile: Record<string, unknown>;
+		}>`update posts set title = ${'Touched'} where id = ${1} | select profile | bind touched
+touched | select profile`.all();
+
+		expect(afterMutation).toHaveBeenCalledOnce();
+		expect(returnedProfile.status).toBe('mutated');
+		expect((returnedProfile.details as Record<string, unknown>).archived).toBe(
+			true,
+		);
+		expect(
+			(returnedProfile.__proto__ as Record<string, unknown>).polluted,
+		).toBe('mutated');
+
+		const snapshotProfile = execute.mock.calls[1]?.[0].parameters[0] as Record<
+			string,
+			unknown
+		>;
+		expect(Object.hasOwn(snapshotProfile, '__proto__')).toBe(true);
+		expect(Object.getPrototypeOf(snapshotProfile)).toBe(
+			Object.getPrototypeOf(returnedProfile),
+		);
+		expect(snapshotProfile.status).toBe('original');
+		expect((snapshotProfile.details as Record<string, unknown>).archived).toBe(
+			false,
+		);
+		expect(snapshotProfile.__proto__).toEqual({ polluted: true });
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
 	});
 
 	it('executes unreferenced mutation bindings but omits their CTE from later statements', async () => {
