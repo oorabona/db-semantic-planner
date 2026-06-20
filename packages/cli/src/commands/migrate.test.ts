@@ -7,7 +7,7 @@
  */
 
 import type { SchemaDiff } from '@dbsp/adapter-pgsql';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hasExecutableSql, migrateCommand } from './migrate.js';
 
 // ============================================================================
@@ -352,6 +352,7 @@ describe('migrate apply — comment-headed DDL reaches DB client (e2e regression
 	};
 
 	beforeEach(() => {
+		vi.clearAllMocks();
 		executedSql = [];
 
 		mockClient = {
@@ -381,7 +382,7 @@ describe('migrate apply — comment-headed DDL reaches DB client (e2e regression
 		// getNextSchemaVersion: return version 1
 		mockGetNextSchemaVersion.mockResolvedValue(1);
 
-		// isDestructiveDown: non-destructive
+		// Legacy regex classifier mock: apply should not use this path anymore.
 		mockIsDestructiveDown.mockReturnValue(false);
 
 		// recordMigration: no-op
@@ -458,6 +459,70 @@ describe('migrate apply — comment-headed DDL reaches DB client (e2e regression
 		);
 		expect(commentCall).toBeUndefined();
 	});
+
+	it('records destructive from parsed metadata instead of scanning DOWN SQL', async () => {
+		mockParseMigrationFile.mockReturnValue({
+			upStatements: ['CREATE TABLE "users" ("id" serial PRIMARY KEY)'],
+			downStatements: ['CREATE INDEX "idx_users_id" ON "users" ("id")'],
+			hasDown: true,
+			destructive: true,
+		});
+
+		mockScanMigrationFiles.mockReturnValue([
+			{
+				name: '0001_create_users.sql',
+				content: 'irrelevant',
+				checksum: 'abc123',
+			},
+		]);
+
+		await migrateCommand.parseAsync(
+			['apply', '--db', 'postgres://localhost/test'],
+			{ from: 'user' },
+		);
+
+		expect(mockRecordMigration).toHaveBeenCalledWith(
+			expect.anything(),
+			'0001_create_users.sql',
+			'abc123',
+			1,
+			true,
+		);
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
+
+	it('records safe metadata as non-destructive even when DOWN contains dynamic SQL text', async () => {
+		mockParseMigrationFile.mockReturnValue({
+			upStatements: ['CREATE TABLE "audit" ("id" serial PRIMARY KEY)'],
+			downStatements: [
+				`DO $$ BEGIN EXECUTE 'DROP TABLE IF EXISTS ignored'; END $$`,
+			],
+			hasDown: true,
+			destructive: false,
+		});
+
+		mockScanMigrationFiles.mockReturnValue([
+			{
+				name: '0001_dynamic_safe.sql',
+				content: 'irrelevant',
+				checksum: 'def456',
+			},
+		]);
+
+		await migrateCommand.parseAsync(
+			['apply', '--db', 'postgres://localhost/test'],
+			{ from: 'user' },
+		);
+
+		expect(mockRecordMigration).toHaveBeenCalledWith(
+			expect.anything(),
+			'0001_dynamic_safe.sql',
+			'def456',
+			1,
+			false,
+		);
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
 });
 
 // ============================================================================
@@ -523,83 +588,6 @@ describe('migrate rollback — reverse chronological order', () => {
 	});
 });
 
-// M4 regression: isDestructiveDown must be called with downStatements, not upStatements.
-// A migration with DROP TABLE in the DOWN section (but not in the UP section) should be
-// recorded as destructive=true. If upStatements were passed instead, it would incorrectly
-// be recorded as destructive=false.
-//
-// Note: These tests cover the isDestructiveDown function in isolation (boundary values).
-// Full end-to-end coverage of applyCommand recording destructive=true in the
-// _dbsp_migrations table requires a real PostgreSQL container (testcontainers).
-// TODO: add testcontainers integration test — see packages/cli/src/commands/migrate.integrity.test.ts
-// for the pattern to follow (applyCommand + pool lifecycle + _dbsp_migrations query).
-describe('isDestructiveDown — boundary value coverage (M4 regression context)', () => {
-	it('real isDestructiveDown returns true for DROP TABLE in DOWN, false for CREATE TABLE in UP', async () => {
-		// Use the REAL isDestructiveDown (not the mock) to verify the actual function contract.
-		// vi.importActual bypasses the vi.mock() at the top of this file for this one import.
-		const { isDestructiveDown } = await vi.importActual<
-			typeof import('@dbsp/adapter-pgsql')
-		>('@dbsp/adapter-pgsql');
-
-		// Migration: UP creates table (non-destructive), DOWN drops it (destructive)
-		const upStatements = ['CREATE TABLE "users" (id SERIAL PRIMARY KEY)'];
-		const downStatements = ['DROP TABLE IF EXISTS "users" CASCADE'];
-
-		// Core M4 invariant: DOWN is destructive, UP is not
-		expect(isDestructiveDown(downStatements)).toBe(true);
-		expect(isDestructiveDown(upStatements)).toBe(false);
-
-		// The two results must differ — confirms the function correctly discriminates
-		// destructive (DROP TABLE in DOWN) from non-destructive (CREATE TABLE in UP).
-		// This is the invariant applyCommand relies on to set the destructive flag correctly.
-		expect(isDestructiveDown(downStatements)).not.toBe(
-			isDestructiveDown(upStatements),
-		);
-	});
-
-	it('real isDestructiveDown returns true for DROP COLUMN in DOWN section', async () => {
-		const { isDestructiveDown } = await vi.importActual<
-			typeof import('@dbsp/adapter-pgsql')
-		>('@dbsp/adapter-pgsql');
-
-		const downStatements = ['ALTER TABLE "users" DROP COLUMN "email" CASCADE'];
-		expect(isDestructiveDown(downStatements)).toBe(true);
-	});
-
-	it('real isDestructiveDown returns false for non-destructive DOWN (DROP INDEX only)', async () => {
-		const { isDestructiveDown } = await vi.importActual<
-			typeof import('@dbsp/adapter-pgsql')
-		>('@dbsp/adapter-pgsql');
-
-		// DROP INDEX is not in the destructive patterns (only DROP TABLE / DROP COLUMN / ALTER COLUMN TYPE)
-		const downStatements = ['DROP INDEX IF EXISTS "idx_users_email"'];
-		expect(isDestructiveDown(downStatements)).toBe(false);
-	});
-
-	it('isDestructiveDown receives downStatements, not upStatements (M4 bug direction check)', () => {
-		// This test exercises the mocks directly to assert argument direction:
-		// isDestructiveDown must be called with downStatements, never upStatements.
-		// NOTE: this does not call applyCommand — it documents the expected call
-		// contract that applyCommand must satisfy. A full wiring test requires
-		// testcontainers (see migrate.integrity.test.ts).
-		mockParseMigrationFile.mockReturnValue({
-			upStatements: ['CREATE TABLE "users" (id SERIAL PRIMARY KEY)'],
-			downStatements: ['DROP TABLE IF EXISTS "users" CASCADE'],
-			hasDown: true,
-		});
-		mockIsDestructiveDown.mockReturnValue(true);
-
-		const content = 'fake-migration-content';
-		const parsed = mockParseMigrationFile(content);
-		mockIsDestructiveDown(parsed.downStatements);
-
-		expect(mockParseMigrationFile).toHaveBeenCalledWith(content);
-		expect(mockIsDestructiveDown).toHaveBeenCalledWith(parsed.downStatements);
-		// The M4 bug passed upStatements instead — assert it is never called with upStatements
-		expect(mockIsDestructiveDown).not.toHaveBeenCalledWith(parsed.upStatements);
-	});
-});
-
 describe('migrate rollback — checksum validation', () => {
 	it('SC-17: should reject rollback when checksum mismatches', () => {
 		const record = { name: '0001_init.sql', checksum: 'original_hash' };
@@ -659,28 +647,294 @@ describe('migrate rollback — DOWN section handling', () => {
 		expect(shouldReject).toBe(false);
 	});
 
-	it('SC-19: should reject destructive DOWN without --force', () => {
-		const downStatements = [
-			'DROP TABLE IF EXISTS "users" CASCADE',
-			'DROP TABLE IF EXISTS "posts" CASCADE',
-		];
+	it('SC-19: should reject destructive metadata without --force', () => {
+		const parsed = { destructive: true };
 		const force = false;
 
-		// Simulate isDestructiveDown check
-		const hasDropTable = downStatements.some((s) => /DROP\s+TABLE/i.test(s));
-		const shouldReject = hasDropTable && !force;
+		const shouldReject = parsed.destructive !== false && !force;
 
 		expect(shouldReject).toBe(true);
 	});
 
-	it('SC-19: should allow destructive DOWN with --force', () => {
-		const downStatements = ['DROP TABLE IF EXISTS "users" CASCADE'];
+	it('SC-19: should allow destructive metadata with --force', () => {
+		const parsed = { destructive: true };
 		const force = true;
 
-		const hasDropTable = downStatements.some((s) => /DROP\s+TABLE/i.test(s));
-		const shouldReject = hasDropTable && !force;
+		const shouldReject = parsed.destructive !== false && !force;
 
 		expect(shouldReject).toBe(false);
+	});
+
+	it('SC-19: should allow safe metadata without obvious destructive DOWN without --force', () => {
+		const parsed = {
+			destructive: false,
+			downStatements: [
+				`DO $$ BEGIN ALTER TABLE "orders" ADD CONSTRAINT "orders_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id"); END $$`,
+			],
+		};
+		const force = false;
+		const safeHeaderContradictedByDown = false;
+
+		const shouldReject =
+			(parsed.destructive !== false || safeHeaderContradictedByDown) && !force;
+
+		expect(shouldReject).toBe(false);
+	});
+
+	it('SC-19: should reject safe metadata with obvious destructive DOWN without --force', () => {
+		const parsed = {
+			destructive: false,
+			downStatements: ['DROP TABLE IF EXISTS "users" CASCADE'],
+		};
+		const force = false;
+		const safeHeaderContradictedByDown = true;
+
+		const shouldReject =
+			(parsed.destructive !== false || safeHeaderContradictedByDown) && !force;
+
+		expect(shouldReject).toBe(true);
+	});
+
+	it('SC-19: should reject unmarked legacy metadata without --force', () => {
+		const parsed: { destructive?: boolean | undefined } = {};
+		const force = false;
+
+		const shouldReject = parsed.destructive !== false && !force;
+
+		expect(shouldReject).toBe(true);
+	});
+
+	it('SC-19: should reject unmarked legacy dynamic SQL without --force', () => {
+		const parsed: {
+			destructive?: boolean | undefined;
+			downStatements: string[];
+		} = {
+			downStatements: [
+				`DO $$ BEGIN EXECUTE 'DROP TABLE IF EXISTS users'; END $$`,
+			],
+		};
+		const force = false;
+
+		const shouldReject = parsed.destructive !== false && !force;
+
+		expect(shouldReject).toBe(true);
+	});
+});
+
+describe('migrate rollback — metadata gate e2e', () => {
+	let executedSql: string[];
+	let errorMessages: string[];
+	let mockClient: {
+		query: ReturnType<typeof vi.fn>;
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		executedSql = [];
+		errorMessages = [];
+
+		mockClient = {
+			query: vi.fn().mockImplementation((sql: string) => {
+				executedSql.push(sql);
+				return Promise.resolve({ rows: [] });
+			}),
+		};
+
+		mockWithMigrationLock.mockImplementation(
+			async (_pool: unknown, fn: (client: unknown) => Promise<void>) => {
+				await fn(mockClient);
+			},
+		);
+		mockEnsureMigrationsTable.mockResolvedValue(undefined);
+		mockGetAppliedMigrations.mockResolvedValue([
+			{
+				name: '0001_metadata_gate.sql',
+				checksum: 'abc123',
+				appliedAt: new Date('2026-01-01'),
+				schemaVersion: 1,
+				destructive: false,
+			},
+		]);
+		mockRemoveMigrationRecord.mockResolvedValue(undefined);
+		mockCreateDbConnection.mockResolvedValue({
+			pool: { end: vi.fn().mockResolvedValue(undefined) },
+		});
+		mockScanMigrationFiles.mockReturnValue([
+			{
+				name: '0001_metadata_gate.sql',
+				content: 'irrelevant',
+				checksum: 'abc123',
+			},
+		]);
+		mockIsDestructiveDown.mockReturnValue(false);
+
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation((message?: unknown) => {
+			errorMessages.push(String(message));
+		});
+		vi.spyOn(process, 'exit').mockImplementation(((
+			code?: string | number | null | undefined,
+		) => {
+			throw new Error(`process.exit:${code}`);
+		}) as typeof process.exit);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	function arrangeParsedMigration(parsed: {
+		upStatements: string[];
+		downStatements: string[];
+		hasDown: boolean;
+		destructive?: boolean | undefined;
+	}): void {
+		mockParseMigrationFile.mockReturnValue(parsed);
+	}
+
+	async function expectRollbackExit(): Promise<void> {
+		await expect(
+			migrateCommand.parseAsync(
+				['rollback', '1', '--db', 'postgres://localhost/test'],
+				{ from: 'user' },
+			),
+		).rejects.toThrow('process.exit:1');
+	}
+
+	it('stamped destructive metadata requires --force', async () => {
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: ['DROP TABLE IF EXISTS "users" CASCADE'],
+			hasDown: true,
+			destructive: true,
+		});
+
+		await expectRollbackExit();
+
+		expect(errorMessages.join('\n')).toContain(
+			'Migration 0001_metadata_gate.sql has destructive DOWN operations',
+		);
+		expect(mockClient.query).not.toHaveBeenCalledWith('BEGIN');
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
+
+	it('stamped destructive metadata is allowed with --force', async () => {
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: ['DROP TABLE IF EXISTS "users" CASCADE'],
+			hasDown: true,
+			destructive: true,
+		});
+
+		await migrateCommand.parseAsync(
+			['rollback', '1', '--db', 'postgres://localhost/test', '--force'],
+			{ from: 'user' },
+		);
+
+		expect(executedSql).toContain('DROP TABLE IF EXISTS "users" CASCADE');
+		expect(mockRemoveMigrationRecord).toHaveBeenCalledWith(
+			expect.anything(),
+			'0001_metadata_gate.sql',
+		);
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['DROP TABLE', 'DROP TABLE IF EXISTS "users" CASCADE'],
+		['DROP COLUMN', 'ALTER TABLE "users" DROP COLUMN "email" CASCADE'],
+	])('stamped safe metadata with obvious %s requires --force', async (_caseName, downStatement) => {
+		mockIsDestructiveDown.mockReturnValueOnce(true);
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: [downStatement],
+			hasDown: true,
+			destructive: false,
+		});
+
+		await expectRollbackExit();
+
+		expect(errorMessages.join('\n')).toContain(
+			'Migration 0001_metadata_gate.sql is marked non-destructive but its DOWN section contains an obvious destructive statement',
+		);
+		expect(mockClient.query).not.toHaveBeenCalledWith('BEGIN');
+		expect(mockIsDestructiveDown).toHaveBeenCalledWith([downStatement]);
+	});
+
+	it('stamped safe metadata rolls back without --force for reversible DO block', async () => {
+		const reversibleDown = `DO $$ BEGIN ALTER TABLE "orders" ADD CONSTRAINT "orders_user_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users" ("id"); END $$`;
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: [reversibleDown],
+			hasDown: true,
+			destructive: false,
+		});
+
+		await migrateCommand.parseAsync(
+			['rollback', '1', '--db', 'postgres://localhost/test'],
+			{ from: 'user' },
+		);
+
+		expect(executedSql).toContain(reversibleDown);
+		expect(mockRemoveMigrationRecord).toHaveBeenCalledWith(
+			expect.anything(),
+			'0001_metadata_gate.sql',
+		);
+		expect(mockIsDestructiveDown).toHaveBeenCalledWith([reversibleDown]);
+	});
+
+	it('unmarked legacy migration requires --force', async () => {
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: ['CREATE INDEX "idx_users_id" ON "users" ("id")'],
+			hasDown: true,
+		});
+
+		await expectRollbackExit();
+
+		expect(errorMessages.join('\n')).toContain(
+			'Migration 0001_metadata_gate.sql is unmarked or legacy',
+		);
+		expect(mockClient.query).not.toHaveBeenCalledWith('BEGIN');
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
+
+	it('unmarked legacy migration with dynamic SQL requires --force', async () => {
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: [
+				`DO $$ BEGIN EXECUTE 'DROP TABLE IF EXISTS users'; END $$`,
+			],
+			hasDown: true,
+		});
+
+		await expectRollbackExit();
+
+		expect(errorMessages.join('\n')).toContain(
+			'Migration 0001_metadata_gate.sql is unmarked or legacy',
+		);
+		expect(mockClient.query).not.toHaveBeenCalledWith('BEGIN');
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
+	});
+
+	it('unmarked legacy migration rolls back with --force', async () => {
+		const downStatement = 'CREATE INDEX "idx_users_id" ON "users" ("id")';
+		arrangeParsedMigration({
+			upStatements: [],
+			downStatements: [downStatement],
+			hasDown: true,
+		});
+
+		await migrateCommand.parseAsync(
+			['rollback', '1', '--db', 'postgres://localhost/test', '--force'],
+			{ from: 'user' },
+		);
+
+		expect(executedSql).toContain(downStatement);
+		expect(mockRemoveMigrationRecord).toHaveBeenCalledWith(
+			expect.anything(),
+			'0001_metadata_gate.sql',
+		);
+		expect(mockIsDestructiveDown).not.toHaveBeenCalled();
 	});
 });
 
