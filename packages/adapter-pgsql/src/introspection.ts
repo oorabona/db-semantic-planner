@@ -29,6 +29,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import { buildRelationKeyFields } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 
@@ -945,12 +946,10 @@ function inferRelations(
 		// author_id → author (belongsTo)
 		// category_id → category (belongsTo)
 		const belongsToName = deriveRelationName(fk.cols[0]!, fk.target);
-		const fkCol = fk.cols.length === 1 ? fk.cols[0]! : fk.cols;
-		const refCol = fk.refs.length === 1 ? fk.refs[0]! : fk.refs;
-		const keyOverride =
-			Array.isArray(refCol) || refCol !== DEFAULT_PK_COLUMN
-				? refCol
-				: undefined;
+		const relationFk = {
+			columns: fk.cols,
+			references: { table: fk.target, columns: fk.refs },
+		};
 
 		// belongsTo: source (FK owner) → target
 		const belongsToKey = `${fk.source}.${belongsToName}`;
@@ -960,8 +959,7 @@ function inferRelations(
 				type: 'belongsTo' as RelationType,
 				source: fk.source,
 				target: fk.target,
-				foreignKey: fkCol,
-				...(keyOverride !== undefined && { targetKey: keyOverride }),
+				...buildRelationKeyFields(relationFk, 'belongsTo'),
 				cardinality: 'one',
 				optionality: 'optional',
 				includeStrategy: 'auto',
@@ -980,8 +978,7 @@ function inferRelations(
 				type: 'hasMany' as RelationType,
 				source: fk.target,
 				target: fk.source,
-				foreignKey: fkCol,
-				...(keyOverride !== undefined && { sourceKey: keyOverride }),
+				...buildRelationKeyFields(relationFk, 'inverse'),
 				cardinality: 'many',
 				optionality: 'optional',
 				includeStrategy: 'auto',

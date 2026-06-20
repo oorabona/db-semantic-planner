@@ -508,6 +508,67 @@ describe('FIND-026: sourceKey and targetKey threaded through buildRelationIR', (
 		});
 	});
 
+	it('should derive composite non-id relation keys from generated table FK metadata', () => {
+		const schema: GeneratedSchema = {
+			tables: {
+				orders: {
+					columns: {
+						id: { type: 'integer', primaryKey: true },
+						orderId: { type: 'integer' },
+						tenantId: { type: 'integer' },
+					},
+					primaryKey: 'id',
+					foreignKeys: [],
+				},
+				items: {
+					columns: {
+						id: { type: 'integer', primaryKey: true },
+						orderId: { type: 'integer' },
+						tenantId: { type: 'integer' },
+					},
+					foreignKeys: [
+						{
+							columns: ['orderId', 'tenantId'],
+							references: {
+								table: 'orders',
+								columns: ['orderId', 'tenantId'],
+							},
+						},
+					],
+				},
+			},
+			relations: {
+				'items.order': {
+					kind: 'belongsTo',
+					target: 'orders',
+					foreignKey: ['orderId', 'tenantId'],
+				},
+				'orders.items': {
+					kind: 'hasMany',
+					target: 'items',
+					foreignKey: ['orderId', 'tenantId'],
+				},
+			},
+			hints: {},
+			conventions: {
+				fkPattern: '{singular}Id',
+				pluralize: true,
+				timestamps: [],
+				fkAutoIndex: false,
+			},
+		};
+
+		const model = buildModelFromSchema(schema);
+		expect(model.getRelation('items.order')).toMatchObject({
+			foreignKey: ['orderId', 'tenantId'],
+			targetKey: ['orderId', 'tenantId'],
+		});
+		expect(model.getRelation('orders.items')).toMatchObject({
+			foreignKey: ['orderId', 'tenantId'],
+			sourceKey: ['orderId', 'tenantId'],
+		});
+	});
+
 	it('should not set sourceKey/targetKey when not specified', () => {
 		// Regression gate: when keys not specified, properties must be absent
 		const schema: GeneratedSchema = {

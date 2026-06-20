@@ -24,5 +24,7 @@ export { isValidSchema } from './loaded-schema.js';
 export * from './model-ir.js';
 // Planner types (plan report, decisions, warnings)
 export * from './planner.js';
+// Dialect-neutral RelationIR key-field builder
+export * from './relation-key-fields.js';
 // Shared utility types
 export type { RangeValue, SortDirection } from './shared/utils.js';
