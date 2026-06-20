@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.0.10...cli-v1.1.0) (2026-06-20)
+
+
+### Features
+
+* **adapter-pgsql:** Correlate composite (multi-column) foreign keys end-to-end ([#202](https://github.com/oorabona/db-semantic-planner/issues/202)) ([6b4422d](https://github.com/oorabona/db-semantic-planner/commit/6b4422d79768f8bd4cf70d95eecc484ebb034e92)), closes [#179](https://github.com/oorabona/db-semantic-planner/issues/179)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 1.6.0
+    * @dbsp/core bumped to 1.5.0
+    * @dbsp/nql bumped to 1.6.0
+    * @dbsp/types bumped to 1.5.0
+
 ## [1.0.10](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.0.9...cli-v1.0.10) (2026-06-19)
 
 
