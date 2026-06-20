@@ -32,7 +32,7 @@ function buildDecision(overrides: Partial<Decision> = {}): Decision {
 		relationType: 'hasMany',
 		foreignKey: 'user_id',
 		parentKey: 'id',
-		targetPrimaryKey: ['id'],
+		orderBy: ['id'],
 		...overrides,
 	} as Decision;
 }
@@ -145,7 +145,7 @@ describe('json-agg handler', () => {
 					relationType: 'belongsTo',
 					foreignKey: 'role_id',
 					parentKey: 'id',
-					targetPrimaryKey: ['slug'],
+					orderBy: ['slug'],
 				}),
 			],
 		});
@@ -315,7 +315,7 @@ describe('json-agg handler', () => {
 			relationType: 'hasMany',
 			foreignKey: 'user_id',
 			parentKey: 'id',
-			targetPrimaryKey: ['user_id', 'event_time', 'message'],
+			orderBy: ['user_id', 'event_time', 'message'],
 			orderByFallback: true,
 		});
 

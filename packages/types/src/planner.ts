@@ -69,7 +69,7 @@ export interface PlanDecision {
 		 * Stable target order key for json_agg include arrays.
 		 * Uses the target table primary key, or all target columns when no PK is declared.
 		 */
-		readonly targetPrimaryKey?: readonly JsonAggOrderByEntry[];
+		readonly targetOrderKey?: readonly JsonAggOrderByEntry[];
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
 		/** Whether the relation is self-referential (source === target) */

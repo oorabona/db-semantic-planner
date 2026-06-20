@@ -76,6 +76,21 @@ export type SubqueryPredicateUse =
 	| 'scalar-direct'
 	| 'rawExists';
 
+function isColumnOrderBy(
+	orderBy: Decision['orderBy'],
+): orderBy is readonly { column: string; direction?: 'ASC' | 'DESC' }[] {
+	return (
+		Array.isArray(orderBy) &&
+		orderBy.every(
+			(item) =>
+				typeof item === 'object' &&
+				item !== null &&
+				'column' in item &&
+				typeof item.column === 'string',
+		)
+	);
+}
+
 // ============================================================================
 // Decision-level modifier guard (Layer 2 of the dual validation)
 // ============================================================================
@@ -311,8 +326,11 @@ export function buildPredicateSubquerySelect(
 	};
 
 	// Add ORDER BY if present
-	if (decision.orderBy && decision.orderBy.length > 0) {
-		stmt.sortClause = decision.orderBy.map((o) =>
+	const orderBy = isColumnOrderBy(decision.orderBy)
+		? decision.orderBy
+		: undefined;
+	if (orderBy && orderBy.length > 0) {
+		stmt.sortClause = orderBy.map((o) =>
 			sortBy(
 				columnRef(o.column, targetAlias, undefined, ctx.naming),
 				o.direction ?? 'ASC',

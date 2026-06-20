@@ -27,7 +27,7 @@ import type {
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
-import { toColumnList } from '@dbsp/types';
+import { resolveJsonAggOrderKey } from '@dbsp/types';
 import {
 	explainUnsupportedNqlBindingIncludeHop,
 	getTrustedNqlRelationFilterFields,
@@ -67,11 +67,6 @@ import type { DumpMetaInput } from './query-builder-types.js';
 // ============================================================================
 // Types
 // ============================================================================
-
-interface JsonAggOrderIntent {
-	readonly columns: readonly string[];
-	readonly fallback: boolean;
-}
 
 /**
  * NQL query builder with type-safe result.
@@ -427,7 +422,10 @@ function createBindingIncludeDecision(
 		relationType === 'belongsTo'
 			? relation.targetColumn
 			: relation.sourceColumn;
-	const targetOrder = resolveTargetJsonAggOrderKey(model, relation.targetTable);
+	const targetTable = model.getTable(relation.targetTable);
+	const targetOrder = targetTable
+		? resolveJsonAggOrderKey(targetTable)
+		: undefined;
 
 	return {
 		id: `binding-include-${index}`,
@@ -439,10 +437,11 @@ function createBindingIncludeDecision(
 			relationType,
 			foreignKey,
 			parentKey,
-			...(targetOrder.columns.length > 0 && {
-				targetPrimaryKey: targetOrder.columns,
-			}),
-			...(targetOrder.fallback && { orderByFallback: true }),
+			...(targetOrder &&
+				targetOrder.columns.length > 0 && {
+					targetOrderKey: targetOrder.columns,
+				}),
+			...(targetOrder?.fallback && { orderByFallback: true }),
 			includeAlias: include.relation,
 			intentPath: `include[${index}]`,
 		},
@@ -469,20 +468,6 @@ function findModelRelation(
 function parentKeyForRelation(relation: RelationIR): ColumnListInput {
 	if (relation.type === 'belongsTo') return relation.targetKey;
 	return relation.sourceKey;
-}
-
-function resolveTargetJsonAggOrderKey(
-	model: ModelIR,
-	targetTable: string,
-): JsonAggOrderIntent {
-	const table = model.getTable(targetTable);
-	if (!table) return { columns: [], fallback: false };
-	const pkColumns = toColumnList(table.primaryKey);
-	// Binding CTE includes target a real model table; when that table has no PK,
-	// order by all declared columns to keep json_agg arrays deterministic.
-	return pkColumns.length > 0
-		? { columns: pkColumns, fallback: false }
-		: { columns: table.columns.map((col) => col.name), fallback: true };
 }
 
 function assertSupportedBindingIncludeHop(
@@ -612,10 +597,13 @@ function createBindingTailIncludeDecisions(
 			const baseContext = { ...decision.context };
 			delete (baseContext as { foreignKey?: unknown }).foreignKey;
 			delete (baseContext as { parentKey?: unknown }).parentKey;
-			delete (baseContext as { targetPrimaryKey?: unknown }).targetPrimaryKey;
+			delete (baseContext as { targetOrderKey?: unknown }).targetOrderKey;
 			delete (baseContext as { orderByFallback?: unknown }).orderByFallback;
 			const parentKey = parentKeyForRelation(relation);
-			const targetOrder = resolveTargetJsonAggOrderKey(model, relation.target);
+			const targetTable = model.getTable(relation.target);
+			const targetOrder = targetTable
+				? resolveJsonAggOrderKey(targetTable)
+				: undefined;
 			return {
 				...decision,
 				id: `binding-include-${includeIndex}-tail-${tailIndex}`,
@@ -634,10 +622,11 @@ function createBindingTailIncludeDecisions(
 					// Leave parentKey absent when RelationIR does not specify it so the
 					// adapter applies the same defaultPkColumnName fallback as real-table includes.
 					...(parentKey !== undefined && { parentKey }),
-					...(targetOrder.columns.length > 0 && {
-						targetPrimaryKey: targetOrder.columns,
-					}),
-					...(targetOrder.fallback && { orderByFallback: true }),
+					...(targetOrder &&
+						targetOrder.columns.length > 0 && {
+							targetOrderKey: targetOrder.columns,
+						}),
+					...(targetOrder?.fallback && { orderByFallback: true }),
 					intentPath: rebaseBindingTailIntentPath(
 						decision.context.intentPath,
 						includeIndex,

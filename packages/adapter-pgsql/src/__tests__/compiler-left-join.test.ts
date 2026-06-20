@@ -125,7 +125,7 @@ describe('LEFT JOIN include compilation (F-006)', () => {
 						relationType: 'hasMany',
 						foreignKey: 'author_id',
 						parentKey: 'id',
-						targetPrimaryKey: ['id'],
+						orderBy: ['id'],
 					} satisfies PlanDecision,
 				],
 			};

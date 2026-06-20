@@ -364,7 +364,7 @@ active_users | select *, posts.*`;
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				includeAlias: 'posts',
 			},
 		});
@@ -430,7 +430,7 @@ active_users | select *, posts.comments.*`;
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -442,7 +442,7 @@ active_users | select *, posts.comments.*`;
 				relation: 'comments',
 				relationType: 'hasMany',
 				foreignKey: 'postId',
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});
@@ -526,7 +526,7 @@ active_authors | select *, author_posts.post_comments.*`;
 			choice: 'json_agg',
 			context: {
 				relation: 'author_posts',
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -534,7 +534,7 @@ active_authors | select *, author_posts.post_comments.*`;
 			choice: 'json_agg',
 			context: {
 				relation: 'post_comments',
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});
@@ -604,7 +604,7 @@ active_users | select *, posts.user.*`.dump();
 				relationType: 'hasMany',
 				foreignKey: ['userId'],
 				parentKey: ['id'],
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0]',
 			},
 		});
@@ -616,7 +616,7 @@ active_users | select *, posts.user.*`.dump();
 				relation: 'user',
 				relationType: 'belongsTo',
 				foreignKey: 'userId',
-				targetPrimaryKey: ['id'],
+				targetOrderKey: ['id'],
 				intentPath: 'include[0].include[0]',
 			},
 		});

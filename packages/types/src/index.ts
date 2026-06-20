@@ -15,6 +15,8 @@ export * from './column-list.js';
 export * from './dialects.js';
 // IntentAST types (shared between core and nql)
 export * from './intent-ast.js';
+// Dialect-neutral json_agg include order-key resolution
+export * from './json-agg-order-key.js';
 // LoadedSchema + isValidSchema (canonical cross-package type, consumed by cli, gui, mcp-server)
 export type { LoadedSchema } from './loaded-schema.js';
 export { isValidSchema } from './loaded-schema.js';

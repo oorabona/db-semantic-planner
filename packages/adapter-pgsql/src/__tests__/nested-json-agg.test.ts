@@ -28,7 +28,7 @@ function buildJsonAggDecision(
 		relationType: 'hasMany',
 		foreignKey: 'user_id',
 		parentKey: 'id',
-		targetPrimaryKey: ['id'],
+		orderBy: ['id'],
 		...overrides,
 	};
 }
@@ -73,7 +73,7 @@ describe('Nested json_agg compilation', () => {
 							relationType: 'belongsTo',
 							foreignKey: 'role_id',
 							parentKey: 'id',
-							targetPrimaryKey: ['role_id', 'tenant_id'],
+							orderBy: ['role_id', 'tenant_id'],
 						}),
 					],
 				}),
