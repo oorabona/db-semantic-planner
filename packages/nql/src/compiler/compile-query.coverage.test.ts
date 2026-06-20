@@ -15,6 +15,10 @@ import type { NqlClause, NqlProgram, NqlQuery } from '../parser/ast.js';
 import { ColumnValidator } from './column-validator.js';
 import { getQueryOutputSchema } from './compile-query.js';
 import { resolveBindingRelationColumn } from './expression-utils.js';
+import {
+	isUnresolvedSelectAllOutputSchemaError,
+	UnresolvedSelectAllOutputSchemaError,
+} from './index.js';
 import type { CompilerContext } from './types.js';
 
 type TestRelation = {
@@ -2020,6 +2024,25 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		expect(result.ast?.bindingOutputSchemas?.get('all_users')?.columns).toEqual(
 			['id', 'name', 'email', 'department', 'active', 'salary'],
 		);
+	});
+
+	it('detects unresolved SELECT * output-schema errors by typed discriminant', () => {
+		const error = new UnresolvedSelectAllOutputSchemaError(
+			'changed human-readable output-schema wording',
+		);
+
+		expect(isUnresolvedSelectAllOutputSchemaError(error)).toBe(true);
+	});
+
+	it('gracefully degrades unresolved SELECT * binding schemas without a validator', () => {
+		const result = compile(
+			'users | select * | bind all_users\nall_users | select id',
+			null,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindings?.has('all_users')).toBe(true);
+		expect(result.ast?.bindingOutputSchemas?.has('all_users')).not.toBe(true);
 	});
 
 	it('inherits SELECT * output schema through binding chains and rejects unknown columns', () => {
