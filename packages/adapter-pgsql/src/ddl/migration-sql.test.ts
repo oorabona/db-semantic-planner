@@ -21,7 +21,11 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
+import {
+	generateDownMigrationSQL,
+	generateDownSQL,
+	generateMigrationSQL,
+} from './migration-sql.js';
 import {
 	compareSchemata,
 	type SchemaChange,
@@ -861,6 +865,136 @@ describe('generateMigrationSQL', () => {
 // ============================================================================
 
 describe('generateDownSQL', () => {
+	describe('structured destructiveness', () => {
+		it.each([
+			{
+				name: 'create_enum DOWN drops a type',
+				change: {
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: { name: 'status', values: ['active'] } },
+				},
+				expectedSql: 'DROP TYPE IF EXISTS "status" CASCADE;',
+			},
+			{
+				name: 'create_extension DOWN drops an extension',
+				change: {
+					kind: 'create_extension',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { extension: 'uuid-ossp' },
+				},
+				expectedSql: 'DROP EXTENSION IF EXISTS "uuid-ossp" CASCADE;',
+			},
+			{
+				name: 'create_sequence DOWN drops a sequence',
+				change: {
+					kind: 'create_sequence',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { sequence: { name: 'order_seq' } },
+				},
+				expectedSql: 'DROP SEQUENCE IF EXISTS "order_seq" CASCADE;',
+			},
+			{
+				name: 'enable_rls DOWN disables a security control',
+				change: {
+					kind: 'enable_rls',
+					table: 'documents',
+					destructive: false,
+					details: '',
+				},
+				expectedSql: 'ALTER TABLE "documents" DISABLE ROW LEVEL SECURITY;',
+			},
+			{
+				name: 'create_policy DOWN drops a security policy',
+				change: {
+					kind: 'create_policy',
+					table: 'documents',
+					destructive: false,
+					details: '',
+					meta: { policy: { name: 'tenant_isolation' } },
+				},
+				expectedSql: 'DROP POLICY IF EXISTS "tenant_isolation" ON "documents";',
+			},
+			{
+				name: 'add_check_constraint DOWN removes a control',
+				change: {
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						check: {
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0))',
+						},
+					},
+				},
+				expectedSql:
+					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
+			},
+		] satisfies Array<{
+			name: string;
+			change: SchemaChange;
+			expectedSql: string;
+		}>)('$name', ({ change, expectedSql }) => {
+			const down = generateDownMigrationSQL(makeDiff([change]));
+
+			expect(down.statements).toEqual([expectedSql]);
+			expect(down.destructive).toBe(true);
+		});
+
+		it.each([
+			{
+				name: 'drop_comment DOWN re-adds the recorded comment',
+				change: {
+					kind: 'drop_comment',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: { target: 'table', comment: 'User accounts' },
+				},
+				expectedSql: `COMMENT ON TABLE "users" IS 'User accounts';`,
+			},
+			{
+				name: 'disable_rls DOWN re-enables a security control',
+				change: {
+					kind: 'disable_rls',
+					table: 'documents',
+					destructive: false,
+					details: '',
+				},
+				expectedSql: 'ALTER TABLE "documents" ENABLE ROW LEVEL SECURITY;',
+			},
+			{
+				name: 'drop_policy DOWN re-creates the recorded policy',
+				change: {
+					kind: 'drop_policy',
+					table: 'documents',
+					destructive: false,
+					details: '',
+					meta: { policy: { name: 'tenant_isolation' } },
+				},
+				expectedSql:
+					'CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE;',
+			},
+		] satisfies Array<{
+			name: string;
+			change: SchemaChange;
+			expectedSql: string;
+		}>)('$name', ({ change, expectedSql }) => {
+			const down = generateDownMigrationSQL(makeDiff([change]));
+
+			expect(down.statements).toEqual([expectedSql]);
+			expect(down.destructive).toBe(false);
+		});
+	});
+
 	describe('reversible changes', () => {
 		it('SC-01: create_table → DROP TABLE', () => {
 			const table = makeTable('users', [
@@ -1245,7 +1379,7 @@ describe('generateDownSQL', () => {
 			expect(sql[0]).toContain('drop_primary_key');
 		});
 
-		it('drop_foreign_key → WARNING comment', () => {
+		it('drop_foreign_key without metadata → WARNING comment', () => {
 			const sql = generateDownSQL(
 				makeDiff([
 					{
@@ -1253,12 +1387,6 @@ describe('generateDownSQL', () => {
 						table: 'orders',
 						destructive: true,
 						details: '',
-						meta: {
-							fk: {
-								columns: ['user_id'],
-								references: { table: 'users', columns: ['id'] },
-							},
-						},
 					},
 				]),
 			);
@@ -1268,7 +1396,7 @@ describe('generateDownSQL', () => {
 			expect(sql[0]).toContain('drop_foreign_key');
 		});
 
-		it('drop_index → WARNING comment', () => {
+		it('drop_index without metadata → WARNING comment', () => {
 			const sql = generateDownSQL(
 				makeDiff([
 					{
@@ -1276,13 +1404,6 @@ describe('generateDownSQL', () => {
 						table: 'users',
 						destructive: false,
 						details: '',
-						meta: {
-							index: {
-								name: 'idx_users_email',
-								columns: ['email'],
-								unique: false,
-							},
-						},
 					},
 				]),
 			);

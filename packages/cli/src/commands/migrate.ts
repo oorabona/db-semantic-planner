@@ -300,7 +300,7 @@ const applyCommand = new Command('apply')
 						const version = await getNextSchemaVersion(
 							client as unknown as Pool,
 						);
-						const destructive = isDestructiveDown(parsed.downStatements);
+						const destructive = parsed.destructive === true;
 
 						// Atomic: DDL + record in ONE transaction on the lock-holding client
 						try {
@@ -434,11 +434,29 @@ const rollbackCommand = new Command('rollback')
 								);
 							}
 
-							// SC-19: Destructive DOWN check
-							if (isDestructiveDown(parsed.downStatements) && !options.force) {
+							// SC-19: Metadata-driven destructive rollback guard
+							const safeHeaderContradictedByDown =
+								parsed.destructive === false && isDestructiveDown(downStmts);
+							if (
+								(parsed.destructive !== false ||
+									safeHeaderContradictedByDown) &&
+								!options.force
+							) {
+								if (parsed.destructive === true) {
+									throw new MigrationError(
+										`Migration ${record.name} has destructive DOWN operations\n` +
+											'   Use --force to proceed with destructive rollback.',
+									);
+								}
+								if (safeHeaderContradictedByDown) {
+									throw new MigrationError(
+										`Migration ${record.name} is marked non-destructive but its DOWN section contains an obvious destructive statement\n` +
+											'   Re-generate the migration with accurate dbsp metadata or pass --force.',
+									);
+								}
 								throw new MigrationError(
-									`Migration ${record.name} has destructive DOWN operations\n` +
-										'   Use --force to proceed with destructive rollback.',
+									`Migration ${record.name} is unmarked or legacy\n` +
+										'   Re-generate the migration with dbsp metadata or pass --force.',
 								);
 							}
 

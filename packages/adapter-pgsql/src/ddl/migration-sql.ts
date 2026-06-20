@@ -216,6 +216,23 @@ export interface MigrationSQLOptions {
 	readonly dialectCapabilities?: DialectCapabilities;
 }
 
+export interface DownMigrationSQL {
+	readonly statements: readonly string[];
+	readonly destructive: boolean;
+}
+
+interface DownChangeSQL {
+	readonly sql: string | undefined;
+	readonly destructive: boolean;
+}
+
+function failSafeUnknownDownChange(kind: never): DownChangeSQL {
+	return {
+		sql: `-- WARNING: Cannot reverse unsupported SchemaChange kind "${kind}"`,
+		destructive: true,
+	};
+}
+
 // ============================================================================
 // Capability Helpers
 // ============================================================================
@@ -866,87 +883,161 @@ function changeToUpSQL(
 function changeToDownSQL(
 	change: SchemaChange,
 	schemaName?: string,
-): string | undefined {
+): DownChangeSQL {
+	// Fail-safe allowlist: DOWN is destructive unless this switch explicitly
+	// proves it only re-adds/restores recorded prior state. Any DROP, DISABLE,
+	// removal, warning, missing metadata, or uncertain reversal stays destructive.
 	switch (change.kind) {
 		case 'create_table':
-			return `DROP TABLE IF EXISTS ${qualifyTable(change.table, schemaName)} CASCADE;`;
+			return {
+				sql: `DROP TABLE IF EXISTS ${qualifyTable(change.table, schemaName)} CASCADE;`,
+				destructive: true,
+			};
 
 		case 'drop_table':
-			return `-- WARNING: Cannot reverse drop_table "${change.table}" -- table data was lost`;
+			return {
+				sql: `-- WARNING: Cannot reverse drop_table "${change.table}" -- table data was lost`,
+				destructive: true,
+			};
 
 		case 'add_column':
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column!, 'alias')} CASCADE;`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP COLUMN ${quoteIdent(change.column!, 'alias')} CASCADE;`,
+				destructive: true,
+			};
 
 		case 'drop_column':
-			return `-- WARNING: Cannot reverse drop_column "${change.table}"."${change.column}" -- column data was lost`;
+			return {
+				sql: `-- WARNING: Cannot reverse drop_column "${change.table}"."${change.column}" -- column data was lost`,
+				destructive: true,
+			};
 
 		case 'alter_column_type': {
 			const fromType = change.meta?.fromType as string | undefined;
 			if (!fromType) {
-				return `-- WARNING: Cannot reverse alter_column_type "${change.table}"."${change.column}" -- missing migration metadata`;
+				return {
+					sql: `-- WARNING: Cannot reverse alter_column_type "${change.table}"."${change.column}" -- missing migration metadata`,
+					destructive: true,
+				};
 			}
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${fromType};`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${fromType};`,
+				destructive: true,
+			};
 		}
 
 		case 'alter_column_nullable': {
 			const oldNullable = change.meta?.oldNullable as boolean | undefined;
 			if (oldNullable === undefined) {
-				return `-- WARNING: Cannot reverse alter_column_nullable "${change.table}"."${change.column}" -- missing migration metadata`;
+				return {
+					sql: `-- WARNING: Cannot reverse alter_column_nullable "${change.table}"."${change.column}" -- missing migration metadata`,
+					destructive: true,
+				};
 			}
 			// Reverse: restore old nullable state
 			const action = oldNullable ? 'DROP NOT NULL' : 'SET NOT NULL';
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} ${action};`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} ${action};`,
+				// Allowlisted: restores the recorded prior nullability metadata.
+				destructive: false,
+			};
 		}
 
 		case 'alter_column_default': {
 			const oldDefault = change.meta?.oldDefault;
 			if (oldDefault === undefined) {
-				return `-- WARNING: Cannot reverse alter_column_default "${change.table}"."${change.column}" -- missing migration metadata`;
+				return {
+					sql: `-- WARNING: Cannot reverse alter_column_default "${change.table}"."${change.column}" -- missing migration metadata`,
+					destructive: true,
+				};
 			}
 			if (oldDefault === null) {
-				return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} DROP DEFAULT;`;
+				return {
+					sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} DROP DEFAULT;`,
+					// Allowlisted: restores the recorded prior state of "no default".
+					destructive: false,
+				};
 			}
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(oldDefault)};`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(oldDefault)};`,
+				// Allowlisted: restores the recorded prior default value.
+				destructive: false,
+			};
 		}
 
 		case 'add_primary_key': {
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(pkName(change.table), 'alias')} CASCADE;`,
+				destructive: true,
+			};
 		}
 
-		case 'drop_primary_key':
-			return `-- WARNING: Cannot reverse drop_primary_key "${change.table}" -- columns unknown`;
+		case 'drop_primary_key': {
+			const columns = change.meta?.columns as readonly string[] | undefined;
+			if (Array.isArray(columns) && columns.length > 0) {
+				const pkCols = columns.map((n) => quoteIdent(n, 'alias')).join(', ');
+				return {
+					sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ADD CONSTRAINT ${quoteIdent(pkName(change.table), 'alias')} PRIMARY KEY (${pkCols});`,
+					// Allowlisted: re-adds the dropped primary-key constraint from metadata.
+					destructive: false,
+				};
+			}
+			return {
+				sql: `-- WARNING: Cannot reverse drop_primary_key "${change.table}" -- columns unknown`,
+				destructive: true,
+			};
+		}
 
 		case 'add_foreign_key': {
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
-			if (!fk) return undefined;
+			if (!fk) return { sql: undefined, destructive: true };
 			const constraintName = quoteIdent(
 				fkName(change.table, fk.columns),
 				'alias',
 			);
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName} CASCADE;`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName} CASCADE;`,
+				destructive: true,
+			};
 		}
 
-		case 'drop_foreign_key':
-			return `-- WARNING: Cannot reverse drop_foreign_key "${change.table}" -- FK definition was lost`;
+		case 'drop_foreign_key': {
+			const fk = change.meta?.fk as ForeignKeyIR | undefined;
+			if (!fk) {
+				return {
+					sql: `-- WARNING: Cannot reverse drop_foreign_key "${change.table}" -- FK definition was lost`,
+					destructive: true,
+				};
+			}
+			return {
+				sql: generateAddFKSQL(change.table, fk, schemaName),
+				// Allowlisted: re-adds the dropped foreign-key constraint from metadata.
+				destructive: false,
+			};
+		}
 
 		case 'alter_foreign_key': {
 			const oldFk = change.meta?.oldFk as ForeignKeyIR | undefined;
-			if (!oldFk) {
-				return `-- WARNING: Cannot reverse alter_foreign_key "${change.table}" -- missing migration metadata`;
+			const fk = change.meta?.fk as ForeignKeyIR | undefined;
+			if (!oldFk || !fk) {
+				return {
+					sql: `-- WARNING: Cannot reverse alter_foreign_key "${change.table}" -- missing migration metadata`,
+					destructive: true,
+				};
 			}
-			const fk = change.meta?.fk as ForeignKeyIR;
 			const constraintName = quoteIdent(
 				fkName(change.table, fk.columns),
 				'alias',
 			);
 			const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 			const add = generateAddFKSQL(change.table, oldFk, schemaName);
-			return `${drop}\n${add}`;
+			// Allowlisted: swaps the current FK back to the recorded prior FK.
+			return { sql: `${drop}\n${add}`, destructive: false };
 		}
 
 		case 'create_index': {
 			const idx = change.meta?.index as IndexIR | undefined;
-			if (!idx) return undefined;
+			if (!idx) return { sql: undefined, destructive: true };
 			const indexName = quoteIdent(
 				idxName(change.table, idx.columns, idx.name),
 				'alias',
@@ -954,174 +1045,293 @@ function changeToDownSQL(
 			const schemaPrefix = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.`
 				: '';
-			return `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`;
+			return {
+				sql: `DROP INDEX IF EXISTS ${schemaPrefix}${indexName};`,
+				destructive: true,
+			};
 		}
 
-		case 'drop_index':
-			return `-- WARNING: Cannot reverse drop_index "${change.table}" -- index definition was lost`;
+		case 'drop_index': {
+			const idx = change.meta?.index as IndexIR | undefined;
+			if (!idx) {
+				return {
+					sql: `-- WARNING: Cannot reverse drop_index "${change.table}" -- index definition was lost`,
+					destructive: true,
+				};
+			}
+			return {
+				sql: upCreateIndex(change, schemaName),
+				// Allowlisted: re-creates the dropped index from metadata.
+				destructive: false,
+			};
+		}
 
 		case 'add_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
-			if (!check) return undefined;
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(check.name, 'alias')};`;
+			if (!check) return { sql: undefined, destructive: true };
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${quoteIdent(check.name, 'alias')};`,
+				destructive: true,
+			};
 		}
 
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
-			if (!check) return undefined;
+			if (!check) return { sql: undefined, destructive: true };
 			validateSqlExpression(
 				check.expression,
 				'migration check constraint (down)',
 			);
-			return (
-				'DO $$ BEGIN ALTER TABLE ' +
-				qualifyTable(change.table, schemaName) +
-				' ADD CONSTRAINT ' +
-				quoteIdent(check.name, 'alias') +
-				' ' +
-				check.expression +
-				'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
-			);
+			return {
+				sql:
+					'DO $$ BEGIN ALTER TABLE ' +
+					qualifyTable(change.table, schemaName) +
+					' ADD CONSTRAINT ' +
+					quoteIdent(check.name, 'alias') +
+					' ' +
+					check.expression +
+					'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+				// Allowlisted: re-adds the dropped CHECK constraint from metadata.
+				destructive: false,
+			};
 		}
 
 		case 'create_enum': {
 			// DOWN: drop the type that was created
 			const enumDef = change.meta?.enum as EnumIR | undefined;
-			if (!enumDef) return undefined;
+			if (!enumDef) return { sql: undefined, destructive: true };
 			const enumName = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
 				: quoteIdent(enumDef.name, 'alias');
-			return `DROP TYPE IF EXISTS ${enumName} CASCADE;`;
+			return {
+				sql: `DROP TYPE IF EXISTS ${enumName} CASCADE;`,
+				destructive: true,
+			};
 		}
 
 		case 'drop_enum': {
 			// DOWN: recreate the type that was dropped
 			const enumDef = change.meta?.enum as EnumIR | undefined;
-			if (!enumDef) return undefined;
+			if (!enumDef) return { sql: undefined, destructive: true };
 			const enumName = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
 				: quoteIdent(enumDef.name, 'alias');
 			const values = enumDef.values
 				.map((v) => `'${v.replace(/'/g, "''")}'`)
 				.join(', ');
-			return `CREATE TYPE ${enumName} AS ENUM (${values});`;
+			return {
+				sql: `CREATE TYPE ${enumName} AS ENUM (${values});`,
+				// Allowlisted: re-creates the dropped enum type from metadata.
+				destructive: false,
+			};
 		}
 
 		case 'alter_enum_add_value':
 			// DOWN: ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL
-			return `-- ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL`;
+			return {
+				sql: `-- ALTER TYPE ADD VALUE cannot be reversed in PostgreSQL`,
+				destructive: true,
+			};
 
 		case 'alter_column_collation': {
 			// DOWN: restore previous collation — stored in db state, not in meta; emit warning
-			return `-- WARNING: Cannot reverse alter_column_collation "${change.table}"."${change.column}" -- previous collation unknown`;
+			return {
+				sql: `-- WARNING: Cannot reverse alter_column_collation "${change.table}"."${change.column}" -- previous collation unknown`,
+				destructive: true,
+			};
 		}
 
 		case 'alter_column_identity': {
 			const col = change.meta?.column as ColumnIR | undefined;
 			const prevIdentity = change.meta?.previousIdentity as string | undefined;
-			if (!col) return undefined;
+			if (!col) return { sql: undefined, destructive: true };
 			const table = qualifyTable(change.table, schemaName);
 			const column = quoteIdent(change.column!, 'alias');
 			// Reverse: restore previous identity state
 			if (prevIdentity && !col.identity) {
 				// Was identity, now not → re-add identity
 				const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
-				return `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`;
+				return {
+					sql: `ALTER TABLE ${table} ALTER COLUMN ${column} ADD GENERATED ${gen} AS IDENTITY;`,
+					// Allowlisted: re-adds the previously recorded identity metadata.
+					destructive: false,
+				};
 			}
 			if (!prevIdentity && col.identity) {
 				// Was not identity, now is → drop identity
-				return `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`;
+				return {
+					sql: `ALTER TABLE ${table} ALTER COLUMN ${column} DROP IDENTITY IF EXISTS;`,
+					destructive: true,
+				};
+			}
+			if (!prevIdentity && !col.identity) {
+				return {
+					sql: `-- WARNING: Cannot reverse alter_column_identity "${change.table}"."${change.column}" -- missing previous identity metadata`,
+					destructive: true,
+				};
 			}
 			// Change between types → restore previous
 			const gen = prevIdentity === 'always' ? 'ALWAYS' : 'BY DEFAULT';
-			return `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`;
+			return {
+				sql: `ALTER TABLE ${table} ALTER COLUMN ${column} SET GENERATED ${gen};`,
+				// Allowlisted: restores the recorded prior identity generation mode.
+				destructive: false,
+			};
 		}
 
 		case 'add_comment': {
 			// DOWN: remove the comment that was added
 			const target = change.meta?.target as string;
 			if (target === 'table') {
-				return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`;
+				return {
+					sql: `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`,
+					destructive: true,
+				};
 			}
-			return `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS NULL;`;
+			return {
+				sql: `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS NULL;`,
+				destructive: true,
+			};
 		}
 
 		case 'drop_comment': {
-			// DOWN: cannot restore comment — value was lost
-			return `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`;
+			const target = change.meta?.target as string | undefined;
+			const comment = change.meta?.comment as string | undefined;
+			if (typeof comment === 'string') {
+				const escaped = comment.replace(/'/g, "''");
+				if (target === 'table') {
+					return {
+						sql: `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${escaped}';`,
+						// Allowlisted: re-adds the dropped table comment from metadata.
+						destructive: false,
+					};
+				}
+				if (target === 'column') {
+					return {
+						sql: `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS '${escaped}';`,
+						// Allowlisted: re-adds the dropped column comment from metadata.
+						destructive: false,
+					};
+				}
+			}
+			return {
+				sql: `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`,
+				destructive: true,
+			};
 		}
 
 		case 'create_extension': {
 			// DOWN: drop the extension that was created
 			const ext = change.meta?.extension as string;
-			if (ext == null) return undefined;
-			return `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`;
+			if (ext == null) return { sql: undefined, destructive: true };
+			return {
+				sql: `DROP EXTENSION IF EXISTS ${quoteExtensionName(ext)} CASCADE;`,
+				destructive: true,
+			};
 		}
 
 		case 'drop_extension': {
 			// DOWN: recreate the extension that was dropped
 			const ext = change.meta?.extension as string;
-			if (ext == null) return undefined;
-			return `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`;
+			if (ext == null) return { sql: undefined, destructive: true };
+			return {
+				sql: `CREATE EXTENSION IF NOT EXISTS ${quoteExtensionName(ext)};`,
+				// Allowlisted: re-creates the dropped extension from metadata.
+				destructive: false,
+			};
 		}
 
 		case 'create_sequence': {
 			// DOWN: drop the sequence that was created
 			const seq = change.meta?.sequence as SequenceIR;
-			if (!seq) return undefined;
+			if (!seq) return { sql: undefined, destructive: true };
 			const seqName = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(seq.name, 'alias')}`
 				: quoteIdent(seq.name, 'alias');
-			return `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`;
+			return {
+				sql: `DROP SEQUENCE IF EXISTS ${seqName} CASCADE;`,
+				destructive: true,
+			};
 		}
 
 		case 'alter_sequence': {
 			// DOWN: restore previous sequence state
 			const prevSeq = change.meta?.previousSequence as SequenceIR | undefined;
 			if (!prevSeq) {
-				return `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`;
+				return {
+					sql: `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`,
+					destructive: true,
+				};
 			}
 			const seqName = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(prevSeq.name, 'alias')}`
 				: quoteIdent(prevSeq.name, 'alias');
-			return buildSequenceClause('ALTER SEQUENCE', seqName, prevSeq, true);
+			return {
+				sql: buildSequenceClause('ALTER SEQUENCE', seqName, prevSeq, true),
+				// Allowlisted: restores the recorded prior sequence metadata.
+				destructive: false,
+			};
 		}
 
 		case 'drop_sequence': {
 			// DOWN: recreate the sequence that was dropped
 			const seq = change.meta?.sequence as SequenceIR;
-			if (!seq) return undefined;
+			if (!seq) return { sql: undefined, destructive: true };
 			const seqName = schemaName
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(seq.name, 'alias')}`
 				: quoteIdent(seq.name, 'alias');
-			return buildSequenceClause('CREATE SEQUENCE', seqName, seq);
+			return {
+				sql: buildSequenceClause('CREATE SEQUENCE', seqName, seq),
+				// Allowlisted: re-creates the dropped sequence from metadata.
+				destructive: false,
+			};
 		}
 
 		case 'validate_constraint':
 			// DOWN: VALIDATE CONSTRAINT cannot be reversed in PostgreSQL
-			return `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${change.table}")`;
+			return {
+				sql: `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${change.table}")`,
+				destructive: true,
+			};
 
 		case 'enable_rls':
 			// DOWN: reverse enable → disable
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DISABLE ROW LEVEL SECURITY;`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} DISABLE ROW LEVEL SECURITY;`,
+				destructive: true,
+			};
 
 		case 'disable_rls':
 			// DOWN: reverse disable → enable
-			return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ENABLE ROW LEVEL SECURITY;`;
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ENABLE ROW LEVEL SECURITY;`,
+				// Allowlisted: re-enables the previously present RLS security control.
+				destructive: false,
+			};
 
 		case 'create_policy': {
 			// DOWN: drop the policy that was created
 			const policy = change.meta?.policy as PolicyIR;
-			if (!policy) return undefined;
-			return `DROP POLICY IF EXISTS ${quoteIdent(policy.name, 'alias')} ON ${qualifyTable(change.table, schemaName)};`;
+			if (!policy) return { sql: undefined, destructive: true };
+			return {
+				sql: `DROP POLICY IF EXISTS ${quoteIdent(policy.name, 'alias')} ON ${qualifyTable(change.table, schemaName)};`,
+				destructive: true,
+			};
 		}
 
 		case 'drop_policy': {
 			// DOWN: recreate the policy that was dropped
 			const policy = change.meta?.policy as PolicyIR;
-			if (!policy) return undefined;
-			return buildPolicySQL(change.table, policy, schemaName);
+			if (!policy) return { sql: undefined, destructive: true };
+			return {
+				sql: buildPolicySQL(change.table, policy, schemaName),
+				// Allowlisted: re-creates the dropped RLS policy from metadata.
+				destructive: false,
+			};
 		}
+
+		default:
+			return failSafeUnknownDownChange(change.kind);
 	}
 }
 
@@ -1141,6 +1351,19 @@ export function generateDownSQL(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
 ): readonly string[] {
+	return generateDownMigrationSQL(diff, options).statements;
+}
+
+/**
+ * Generate ordered DOWN SQL statements with structural rollback destructiveness.
+ *
+ * The destructive flag is emitted by changeToDownSQL alongside each DOWN
+ * statement, not by regex-scanning SQL text or by a second SchemaChange switch.
+ */
+export function generateDownMigrationSQL(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): DownMigrationSQL {
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
@@ -1179,19 +1402,17 @@ export function generateDownSQL(
 
 	// Generate SQL in REVERSE phase order (index → FK → PK → alter → column → table)
 	const statements: string[] = [];
+	let destructive = false;
 	for (let i = phases.length - 1; i >= 0; i--) {
 		for (const change of phases[i]!) {
-			const sql = changeToDownSQL(change, schemaName);
-			if (sql) statements.push(sql);
+			const down = changeToDownSQL(change, schemaName);
+			destructive = down.destructive || destructive;
+			if (down.sql) statements.push(down.sql);
 		}
 	}
 
-	return statements;
+	return { statements, destructive };
 }
-
-// ============================================================================
-// Helpers
-// ============================================================================
 
 function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 	const qualTable = qualifyTable(table.name, schemaName);
