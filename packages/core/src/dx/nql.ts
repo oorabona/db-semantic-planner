@@ -872,6 +872,20 @@ function hasMutationBindingBodies(bundle: CompiledNqlQuery): boolean {
 	return (bundle.mutationBindings?.size ?? 0) > 0;
 }
 
+function hasSnapshotReadBindingSteps(bundle: CompiledNqlQuery): boolean {
+	return (
+		bundle.nqlProgramSequence?.some(
+			(step) => step.kind === 'query' && step.snapshot === true,
+		) ?? false
+	);
+}
+
+function hasExecutableNqlProgramSequence(bundle: CompiledNqlQuery): boolean {
+	return (
+		hasMutationBindingBodies(bundle) || hasSnapshotReadBindingSteps(bundle)
+	);
+}
+
 function requireMutationBindingColumns(
 	bundle: CompiledNqlQuery,
 	bindName: string,
@@ -955,6 +969,7 @@ type NqlProgramStep =
 			readonly intent: QueryIntent;
 			readonly bindName?: string;
 			readonly final: boolean;
+			readonly snapshot?: true;
 			readonly bindingDependencies?: readonly string[];
 	  }
 	| {
@@ -1002,6 +1017,7 @@ function orderedSequenceStepToProgramStep(
 			intent: step.query as QueryIntent,
 			...(step.bindName !== undefined && { bindName: step.bindName }),
 			final: step.final,
+			...(step.snapshot === true && { snapshot: true }),
 			...(dependencyStep.bindingDependencies !== undefined && {
 				bindingDependencies: dependencyStep.bindingDependencies,
 			}),
@@ -1102,6 +1118,13 @@ function assertNqlProgramSteps(
 	}
 	const seenBindNames = new Set<string>();
 	for (const step of steps) {
+		if (step.kind === 'query' && step.snapshot === true) {
+			if (step.bindName === undefined || step.final) {
+				throw new Error(
+					'NQL program sequence query snapshots must be named non-final statements.',
+				);
+			}
+		}
 		if (step.bindName === undefined) continue;
 		if (seenBindNames.has(step.bindName)) {
 			throw new Error(
@@ -1232,11 +1255,30 @@ function filterOptionalMapByBindingDependencies<T>(
 	return filtered.size > 0 ? filtered : undefined;
 }
 
-// Read bindings are cheap SQL CTEs and must be emitted even when unreferenced;
-// dependency filtering is only for mutation-sourced runtime VALUES bindings.
+function runtimeSourceBindingNames(
+	sourceBundle: CompiledNqlQuery,
+): ReadonlySet<string> | undefined {
+	const names = new Set<string>();
+	for (const name of sourceBundle.mutationBindings?.keys() ?? []) {
+		names.add(name);
+	}
+	for (const step of sourceBundle.nqlProgramSequence ?? []) {
+		if (
+			step.kind === 'query' &&
+			step.snapshot === true &&
+			step.bindName !== undefined
+		) {
+			names.add(step.bindName);
+		}
+	}
+	return names.size > 0 ? names : undefined;
+}
+
+// Inline read bindings are cheap SQL CTEs and remain always-emitted; bindings
+// materialized into runtime VALUES rows are dependency-filtered.
 function filterMapByRuntimeBindingDependencies<T>(
 	source: ReadonlyMap<string, T> | undefined,
-	runtimeSourceBindings: ReadonlyMap<string, unknown> | undefined,
+	runtimeSourceBindings: ReadonlySet<string> | undefined,
 	bindingDependencies: readonly string[] | undefined,
 ): Map<string, T> {
 	if (source === undefined) return new Map();
@@ -1449,7 +1491,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 
 	dump(meta?: DumpMetaInput): Dump | MutationDump {
 		const compiledIntent = this.compile();
-		if (hasMutationBindingBodies(compiledIntent.bundle)) {
+		if (hasExecutableNqlProgramSequence(compiledIntent.bundle)) {
 			return this.dumpNqlProgramSequence(compiledIntent, meta);
 		}
 		if (compiledIntent.kind === 'mutation') {
@@ -1558,7 +1600,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 	): CompiledNqlQuery {
 		const statementBindings = filterMapByRuntimeBindingDependencies(
 			bindings,
-			sourceBundle.mutationBindings,
+			runtimeSourceBindingNames(sourceBundle),
 			bindingDependencies,
 		);
 		const statementRuntimeBindings = filterMapByBindingDependencies(
@@ -1716,6 +1758,28 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					if (step.final) {
 						finalRows = rows.transformedRows;
 					}
+				} else if (step.snapshot === true && step.bindName !== undefined) {
+					const statementBundle = this.createNqlStatementBundle(
+						{ query: step.intent },
+						priorBindings,
+						runtimeBindings,
+						sourceBundle,
+						step.bindingDependencies,
+					);
+					const compiled = txAdapter.compile<unknown[]>(
+						statementBundle,
+						this.nqlBundleCompileOptions(),
+					);
+					const rows = await txAdapter.execute(compiled);
+					runtimeBindings.set(
+						step.bindName,
+						createRuntimeBinding(
+							sourceBundle,
+							step.bindName,
+							snapshotMutationRows(rows),
+							txAdapter.dbCasing,
+						),
+					);
 				} else if (step.final) {
 					const planReport =
 						isBindingFinalQuery(compiledIntent.bundle) &&
@@ -1832,6 +1896,12 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					sql: compiled.sql,
 					params: compiled.parameters,
 				});
+				if (step.snapshot === true && step.bindName !== undefined) {
+					runtimeBindings.set(step.bindName, {
+						columns: requireMutationBindingColumns(sourceBundle, step.bindName),
+						rows: [],
+					});
+				}
 			}
 
 			if (step.bindName !== undefined) {
@@ -1927,7 +1997,7 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		}
 
 		const compiledIntent = this.compile();
-		if (hasMutationBindingBodies(compiledIntent.bundle)) {
+		if (hasExecutableNqlProgramSequence(compiledIntent.bundle)) {
 			return this.executeNqlProgramSequence(compiledIntent, adapter);
 		}
 		if (compiledIntent.kind === 'mutation') {

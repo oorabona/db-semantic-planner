@@ -376,19 +376,193 @@ active_users | select id`.plan();
 		expect(plan.decisions).toEqual([]);
 	});
 
-	it('rejects read binding references across an intervening mutation (#186)', () => {
-		const execute = vi.fn(async () => [{ id: 1 }]);
+	it('snapshots read binding references across an intervening mutation (#186)', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ id: 1 }])
+			.mockResolvedValueOnce([{ id: 2 }])
+			.mockResolvedValueOnce([{ id: 1 }]);
 		const { compile, nql } = createMutationBindingTag(execute);
 
-		expect(() => {
-			nql<{ id: number }>`users
-				| where active = ${true}
-				| select id
-				| bind active_users
+		const rows = await nql<{ id: number }>`users
+			| where active = ${true}
+			| select id
+			| bind active_users
 insert into users set name = ${'Alice'}, active = ${true} | select id | bind created
-users | where id in (active_users) | select id`.dump();
-		}).toThrow(/read binding referenced across a mutation \(#186\)/);
+users | where id in (active_users) | select id`.all();
+
+		expect(rows).toEqual([{ id: 1 }]);
+		expect(execute).toHaveBeenCalledTimes(3);
+		const snapshotSql = execute.mock.calls[0]?.[0].sql ?? '';
+		const mutationSql = execute.mock.calls[1]?.[0].sql ?? '';
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(snapshotSql).toContain('FROM users');
+		expect(snapshotSql).toContain('WHERE users.active = $1');
+		expect(mutationSql).not.toContain('active_users');
+		expect(finalSql).toContain(
+			'WITH "active_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+		);
+		expect(finalSql).not.toMatch(/"active_users"\s+as\s+\(\s*SELECT/i);
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([1]);
+		expect(compile).toHaveBeenCalledTimes(3);
+	});
+
+	it('rejects a transitive-source read snapshot before SQL emission (#186)', async () => {
+		const execute = vi.fn().mockResolvedValue([]);
+		const { compile, nql } = createMutationBindingTag(execute);
+
+		await expect(async () => {
+			await nql`users | select id | bind created
+created | select id | bind ids
+update users set active = false where id = 1 | select id | bind changed
+users | where id in (ids) | select id`.all();
+		}).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*binding 'ids' has a binding source/,
+		);
 		expect(compile).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it('rejects an aliased-column read snapshot before SQL emission (#186)', async () => {
+		const execute = vi.fn().mockResolvedValue([]);
+		const { compile, nql } = createMutationBindingTag(execute);
+
+		await expect(async () => {
+			await nql`users | select id as userId | bind ids
+update users set active = false where id = 1 | select id | bind changed
+users | where id in (ids) | select id`.all();
+		}).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*binding 'ids' has aliased\/computed\/aggregate columns/,
+		);
+		expect(compile).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it('rejects an aggregate-column read snapshot before SQL emission (#186)', async () => {
+		const execute = vi.fn().mockResolvedValue([]);
+		const { compile, nql } = createMutationBindingTag(execute);
+
+		await expect(async () => {
+			await nql`users | select count(*) as n | bind counts
+update users set active = false where id = 1 | select id | bind changed
+users | where id in (counts) | select id`.all();
+		}).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*binding 'counts' has aliased\/computed\/aggregate columns/,
+		);
+		expect(compile).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it('materializes empty read binding snapshots as zero-row typed CTEs', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([])
+			.mockResolvedValueOnce([{ id: 2 }])
+			.mockResolvedValueOnce([]);
+		const { nql } = createMutationBindingTag(execute);
+
+		const rows = await nql<{ id: number }>`users
+			| where id = ${-1}
+			| select id
+			| bind missing_users
+insert into users set name = ${'Alice'} | select id | bind created
+missing_users | select id`.all();
+
+		expect(rows).toEqual([]);
+		expect(execute).toHaveBeenCalledTimes(3);
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(finalSql).toContain(
+			'WITH "missing_users" ("id") as (SELECT "id" FROM "users" WHERE false)',
+		);
+		expect(finalSql).not.toContain('VALUES');
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([]);
+	});
+
+	it('preserves read binding snapshot row order from the source ORDER BY', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ id: 2 }, { id: 1 }])
+			.mockResolvedValueOnce([{ id: 3 }])
+			.mockResolvedValueOnce([{ id: 2 }, { id: 1 }]);
+		const { nql } = createMutationBindingTag(execute);
+
+		const rows = await nql<{ id: number }>`users
+			| where active = ${true}
+			| select id
+			| order by id desc
+			| bind ordered_users
+insert into users set name = ${'Alice'} | select id | bind created
+ordered_users | select id`.all();
+
+		expect(rows).toEqual([{ id: 2 }, { id: 1 }]);
+		const snapshotSql = execute.mock.calls[0]?.[0].sql ?? '';
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(snapshotSql).toContain('ORDER BY');
+		expect(snapshotSql).toContain('id DESC');
+		expect(finalSql).toContain('UNION ALL VALUES ($1::integer), ($2::integer)');
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([2, 1]);
+	});
+
+	it('uses one read snapshot for references before and after a later mutation', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ id: 5 }])
+			.mockResolvedValueOnce([{ id: 5 }])
+			.mockResolvedValueOnce([{ id: 6 }])
+			.mockResolvedValueOnce([{ id: 5 }]);
+		const { nql } = createMutationBindingTag(execute);
+
+		const rows = await nql<{ id: number }>`users
+			| where active = ${false}
+			| select id
+			| bind inactive_users
+update users set active = ${true} where id in (inactive_users) | select id | bind touched
+insert into users set name = ${'Bob'}, active = ${false} | select id | bind created
+inactive_users | select id`.all();
+
+		expect(rows).toEqual([{ id: 5 }]);
+		expect(execute).toHaveBeenCalledTimes(4);
+		const beforeMutationSql = execute.mock.calls[1]?.[0].sql ?? '';
+		const laterMutationSql = execute.mock.calls[2]?.[0].sql ?? '';
+		const finalSql = execute.mock.calls[3]?.[0].sql ?? '';
+		expect(beforeMutationSql).toContain(
+			'WITH "inactive_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+		);
+		expect(beforeMutationSql).not.toMatch(
+			/"inactive_users"\s+as\s+\(\s*SELECT/i,
+		);
+		expect(laterMutationSql).not.toContain('inactive_users');
+		expect(finalSql).toContain(
+			'WITH "inactive_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+		);
+		expect(execute.mock.calls[1]?.[0].parameters).toEqual([5, true]);
+		expect(execute.mock.calls[3]?.[0].parameters).toEqual([5]);
+	});
+
+	it('canonicalizes snake_case read snapshot rows to logical binding columns', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ author_id: 7 }])
+			.mockResolvedValueOnce([{ id: 1 }])
+			.mockResolvedValueOnce([{ authorId: 7 }]);
+		const { nql } = createMutationBindingTag(execute, undefined, undefined, {
+			dbCasing: 'snake_case',
+		});
+
+		const rows = await nql<{ authorId: number }>`posts
+			| where id = ${1}
+			| select authorId
+			| bind post_authors
+update posts set title = ${'Touched'} where id = ${1} | select id | bind touched
+posts | where authorId in (post_authors) | select authorId`.all();
+
+		expect(rows).toEqual([{ authorId: 7 }]);
+		expect(execute).toHaveBeenCalledTimes(3);
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(finalSql).toContain(
+			'WITH "post_authors" ("author_id") as (SELECT "author_id" FROM "posts" WHERE false UNION ALL VALUES ($1::integer))',
+		);
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([7]);
 	});
 
 	it('compiles binding-final hasMany relation columns through a correlated json_agg subquery', () => {
@@ -1263,6 +1437,25 @@ users | where id in (kept_user) | select id`.all();
 		expect(finalSql).toContain('"kept_user"');
 		expect(finalSql).not.toContain('"unused_users"');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([33]);
+	});
+
+	it('fails loud when a referenced read snapshot exceeds the runtime binding parameter cap', async () => {
+		const oversizedRows = Array.from({ length: 32_001 }, (_, id) => ({ id }));
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce(oversizedRows)
+			.mockResolvedValueOnce([{ id: 34 }]);
+		const { nql } = createMutationBindingTag(execute);
+
+		await expect(
+			nql<{ id: number }>`users | select id | bind too_many_users
+insert into users set name = ${'kept'} | select id | bind kept_user
+too_many_users | select id`.all(),
+		).rejects.toThrow(
+			"NQL runtime binding 'too_many_users' would materialize 32001 VALUES parameters",
+		);
+
+		expect(execute).toHaveBeenCalledTimes(2);
 	});
 
 	it('emits transitive binding dependencies in dependency order only', async () => {

@@ -84,6 +84,10 @@ export class ColumnValidator {
 		return this.schema.getTable(name)?.columns.map((column) => column.name);
 	}
 
+	getPhysicalTableColumns(name: string): readonly string[] | undefined {
+		return this.schema.getTable(name)?.columns.map((column) => column.name);
+	}
+
 	getPseudoColumns(name: string): readonly ColumnValidatorPseudoColumn[] {
 		return this.schema.getTable(name)?.pseudoColumns ?? [];
 	}
@@ -497,6 +501,15 @@ export class ColumnValidator {
 		if (virtualColumns) {
 			return virtualColumns.find((c) => c === column);
 		}
+		const tableInfo = this.schema.getTable(table);
+		if (!tableInfo) return undefined;
+		return tableInfo.columns.find((c) =>
+			ColumnValidator.columnsMatch(column, c.name),
+		)?.name;
+	}
+
+	resolvePhysicalColumnName(table: string, column: string): string | undefined {
+		if (column === '*') return column;
 		const tableInfo = this.schema.getTable(table);
 		if (!tableInfo) return undefined;
 		return tableInfo.columns.find((c) =>

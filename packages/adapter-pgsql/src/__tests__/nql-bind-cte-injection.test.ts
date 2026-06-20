@@ -434,6 +434,69 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(params).toEqual([1, 2]);
 	});
 
+	it('anchors read snapshot runtime bindings on the binding query source table', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			bindings: new Map([['ids', itemsQuery]]),
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 1 }, { id: 2 }],
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+		);
+		expect(params).toEqual([1, 2]);
+	});
+
+	it('anchors empty read snapshot runtime bindings on the binding query source table', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			bindings: new Map([['ids', itemsQuery]]),
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [],
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false)',
+		);
+		expect(sql).not.toContain('VALUES');
+		expect(params).toEqual([]);
+	});
+
 	it('casts runtime binding VALUES params from shorthand source-table column types', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {
@@ -695,7 +758,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect((error as Error).message).toContain('limit is 32000');
 	});
 
-	it('rejects empty runtime bindings without a source mutation table', () => {
+	it('rejects empty runtime bindings without a source table', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -720,8 +783,6 @@ describe('NQL bind CTE identifier injection defense', () => {
 
 		expect(sql).toBeUndefined();
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain(
-			'source mutation table is unavailable',
-		);
+		expect((error as Error).message).toContain('source table is unavailable');
 	});
 });

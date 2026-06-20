@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type {
+	ColumnValidatorSchema,
 	DeleteIntent,
 	InsertFromIntent,
 	InsertIntent,
@@ -22,13 +23,30 @@ import { compile } from '../src/index.js';
 // ---------------------------------------------------------------------------
 // Helper
 // ---------------------------------------------------------------------------
-function compileNql(input: string) {
-	const result = compile(input, null);
+function compileNql(
+	input: string,
+	schema: ColumnValidatorSchema | null = null,
+) {
+	const result = compile(input, schema);
 	if (!result.success) {
 		throw new Error(`Compile error: ${result.errors[0]?.message}`);
 	}
 	return result.ast!;
 }
+
+const snapshotSchema: ColumnValidatorSchema = {
+	getTable(name: string) {
+		const tables: Record<string, { columns: { name: string }[] }> = {
+			users: {
+				columns: [{ name: 'id' }, { name: 'name' }, { name: 'active' }],
+			},
+		};
+		return tables[name];
+	},
+	getRelationsFrom() {
+		return [];
+	},
+};
 
 // ===========================================================================
 // A: Subquery in WHERE on mutations
@@ -633,20 +651,71 @@ describe('F16: Mutation bind with RETURNING', () => {
 // F17: read binding drift guard (#186)
 // ===========================================================================
 describe('F17: read binding references across mutations', () => {
-	it('rejects a read binding referenced after an intervening mutation (#186)', () => {
+	it('snapshots a read binding referenced after an intervening mutation (#186)', () => {
 		const result = compile(
 			'users | where active = true | select id | bind d\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (d)',
-			null,
+			snapshotSchema,
 		);
 
-		expect(result.success).toBe(false);
-		expect(result.errors[0]?.message).toMatch(
-			/read binding referenced across a mutation \(#186\)/,
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindings?.has('d')).toBe(true);
+		expect(result.ast?.mutationBindings?.has('changed')).toBe(true);
+		expect(result.ast?.nqlProgramSequence?.[0]).toMatchObject({
+			kind: 'query',
+			bindName: 'd',
+			snapshot: true,
+		});
+	});
+
+	it('snapshots only a direct single-table physical-column projection (#186)', () => {
+		const result = compileNql(
+			'users | where active = true | select id, name | bind u\nupdate users set active = false where id = 1 | select id | bind changed\nu | select id, name',
+			snapshotSchema,
 		);
-		expect(result.errors[0]?.message).toContain("binding 'd'");
-		expect(result.errors[0]?.message).toContain('read-only statement 1');
-		expect(result.errors[0]?.message).toContain('mutation statement 2');
-		expect(result.errors[0]?.message).toContain('referenced by statement 3');
+
+		expect(result.bindings?.get('u')).toMatchObject({
+			from: 'users',
+			select: {
+				type: 'fields',
+				fields: ['id', 'name'],
+			},
+		});
+		expect(result.bindingOutputSchemas?.get('u')?.columns).toEqual([
+			'id',
+			'name',
+		]);
+		expect(result.nqlProgramSequence?.[0]).toMatchObject({
+			kind: 'query',
+			bindName: 'u',
+			snapshot: true,
+		});
+	});
+
+	it.each([
+		[
+			'binding source',
+			'ids',
+			'a binding source',
+			'users | select id | bind created\ncreated | select id | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
+		],
+		[
+			'aliased column',
+			'ids',
+			'aliased/computed/aggregate columns',
+			'users | select id as userId | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
+		],
+		[
+			'aggregate column',
+			'counts',
+			'aliased/computed/aggregate columns',
+			'users | select count(*) as n | bind counts\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (counts) | select id',
+		],
+	])('rejects unsupported read-binding snapshot shape: %s (#186)', (_label, bindName, reason, input) => {
+		expect(() => compileNql(input, snapshotSchema)).toThrow(
+			new RegExp(
+				`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
+			),
+		);
 	});
 
 	it('allows a read binding to feed the immediately following mutation (#113)', () => {

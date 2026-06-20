@@ -280,6 +280,16 @@ function orderedNqlBindingNames(bundle: CompiledNqlQuery): string[] {
 	return names;
 }
 
+function runtimeBindingSourceTable(
+	bundle: CompiledNqlQuery,
+	name: string,
+): string | undefined {
+	return (
+		bundle.mutationBindings?.get(name)?.table ??
+		bundle.bindings?.get(name)?.from
+	);
+}
+
 function mapRuntimeBindingColumnType(type: ColumnType): string | undefined {
 	switch (type) {
 		case 'string':
@@ -344,14 +354,14 @@ function resolveRuntimeBindingColumnType(
 	);
 	if (column === undefined) {
 		throw new Error(
-			`NQL runtime binding '${bindingName}' cannot resolve projected column '${columnName}' on source mutation table '${sourceTable.name}'.`,
+			`NQL runtime binding '${bindingName}' cannot resolve projected column '${columnName}' on source table '${sourceTable.name}'.`,
 		);
 	}
 	const dbType =
 		column.originalDbType?.trim() || mapRuntimeBindingColumnType(column.type);
 	if (dbType === undefined || dbType.trim() === '') {
 		throw new Error(
-			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${columnName}' on source mutation table '${sourceTable.name}'.`,
+			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${columnName}' on source table '${sourceTable.name}'.`,
 		);
 	}
 	const typeName = dbType.trim();
@@ -380,7 +390,7 @@ function resolveRuntimeBindingColumnTypes(
 	const sourceTable = findRuntimeBindingSourceTable(model, sourceTableName);
 	if (sourceTable === undefined) {
 		throw new Error(
-			`NQL runtime binding '${name}' cannot resolve source mutation table '${sourceTableName}' in the model.`,
+			`NQL runtime binding '${name}' cannot resolve source table '${sourceTableName}' in the model.`,
 		);
 	}
 	return binding.columns.map((column) =>
@@ -429,7 +439,7 @@ function compileNqlRuntimeBindingCte(
 		.join(', ');
 	if (sourceTable === undefined) {
 		throw new Error(
-			`NQL runtime binding '${name}' cannot materialize a typed relation because its source mutation table is unavailable.`,
+			`NQL runtime binding '${name}' cannot materialize a typed relation because its source table is unavailable.`,
 		);
 	}
 	const projectedColumns = binding.columns
@@ -815,7 +825,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					runtimeBinding,
 					naming,
 					parameters.length,
-					bundle.mutationBindings?.get(name)?.table,
+					runtimeBindingSourceTable(bundle, name),
 					deps.schemaName,
 					deps.model,
 				);
