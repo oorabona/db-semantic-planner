@@ -85,7 +85,7 @@ export const simpleWhereHandlers = [
 /**
  * Complex WHERE handlers (relation filtering, subqueries)
  */
-export const complexWhereHandlers = [
+const complexWhereHandlers = [
 	// EXISTS-based
 	existsHandler,
 	notExistsHandler,
@@ -104,10 +104,7 @@ export const complexWhereHandlers = [
 /**
  * All WHERE handlers
  */
-export const allWhereHandlers = [
-	...simpleWhereHandlers,
-	...complexWhereHandlers,
-];
+const allWhereHandlers = [...simpleWhereHandlers, ...complexWhereHandlers];
 
 /**
  * Register all simple WHERE handlers.

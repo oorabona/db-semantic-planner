@@ -23,7 +23,7 @@ import type { PhaseContext } from './types.js';
  * Valid PostgreSQL index access methods.
  * Used by validateIndexMethod() to reject unknown / injection-bearing strings.
  */
-export const VALID_INDEX_METHODS = new Set([
+const VALID_INDEX_METHODS = new Set([
 	'btree',
 	'hash',
 	'gist',
