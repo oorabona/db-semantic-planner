@@ -100,7 +100,7 @@ export {
 /**
  * Column expression handlers
  */
-export const columnExpressionHandlers = [
+const columnExpressionHandlers = [
 	columnHandler,
 	columnAliasHandler,
 	starHandler,
@@ -109,7 +109,7 @@ export const columnExpressionHandlers = [
 /**
  * Aggregate expression handlers
  */
-export const aggregateExpressionHandlers = [
+const aggregateExpressionHandlers = [
 	countHandler,
 	countDistinctHandler,
 	sumHandler,
@@ -122,7 +122,7 @@ export const aggregateExpressionHandlers = [
 /**
  * Conditional expression handlers (CASE, COALESCE, etc.)
  */
-export const conditionalExpressionHandlers = [
+const conditionalExpressionHandlers = [
 	caseHandler,
 	simpleCaseHandler,
 	coalesceHandler,
@@ -134,7 +134,7 @@ export const conditionalExpressionHandlers = [
 /**
  * Window function expression handlers
  */
-export const windowExpressionHandlers = [
+const windowExpressionHandlers = [
 	rowNumberHandler,
 	rankHandler,
 	denseRankHandler,
@@ -149,24 +149,17 @@ export const windowExpressionHandlers = [
 /**
  * Raw/escape hatch expression handlers
  */
-export const rawExpressionHandlers = [
-	rawHandler,
-	sqlFunctionHandler,
-	literalHandler,
-];
+const rawExpressionHandlers = [rawHandler, sqlFunctionHandler, literalHandler];
 
 /**
  * JSON expression handlers
  */
-export const jsonExpressionHandlers = [
-	jsonExtractHandler,
-	jsonPathExtractHandler,
-];
+const jsonExpressionHandlers = [jsonExtractHandler, jsonPathExtractHandler];
 
 /**
  * Pseudo-column expression handlers (hierarchy traversal)
  */
-export const pseudoExpressionHandlers = [
+const pseudoExpressionHandlers = [
 	pseudoColumnHandler,
 	singleHopPseudoHandler,
 	chainedPseudoHandler,
@@ -175,7 +168,7 @@ export const pseudoExpressionHandlers = [
 /**
  * Relation column expansion handlers
  */
-export const relationExpressionHandlers = [
+const relationExpressionHandlers = [
 	relationStarHandler,
 	relationColumnHandler,
 	relationColumnsHandler,
@@ -186,7 +179,7 @@ export const relationExpressionHandlers = [
 /**
  * All expression handlers
  */
-export const allExpressionHandlers = [
+const allExpressionHandlers = [
 	...columnExpressionHandlers,
 	...aggregateExpressionHandlers,
 	...conditionalExpressionHandlers,

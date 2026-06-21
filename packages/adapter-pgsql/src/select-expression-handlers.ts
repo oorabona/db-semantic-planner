@@ -46,7 +46,7 @@ export type SelectExpressionHandler = (
  * - column:      uses `expr.as` for alias
  * - columnAlias: uses `expr.alias` for alias
  */
-export function handleColumnExpression(
+function handleColumnExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -65,7 +65,7 @@ export function handleColumnExpression(
 /**
  * aggregate — count(*), countDistinct, or generic aggregate function.
  */
-export function handleAggregateExpression(
+function handleAggregateExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -129,7 +129,7 @@ export function handleAggregateExpression(
 /**
  * coalesce — COALESCE(field1, field2, ...) [AS alias]
  */
-export function handleCoalesceExpression(
+function handleCoalesceExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -147,7 +147,7 @@ export function handleCoalesceExpression(
 /**
  * raw — raw SQL snippet wrapped in a selectFunction decision.
  */
-export function handleRawExpression(
+function handleRawExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -165,7 +165,7 @@ export function handleRawExpression(
 /**
  * function — generic SQL function expression from NQL text.
  */
-export function handleFunctionExpression(
+function handleFunctionExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -183,7 +183,7 @@ export function handleFunctionExpression(
 /**
  * window — window function with OVER (PARTITION BY … ORDER BY …).
  */
-export function handleWindowExpression(
+function handleWindowExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -212,7 +212,7 @@ export function handleWindowExpression(
 /**
  * case — CASE WHEN … THEN … ELSE … END [AS alias]
  */
-export function handleCaseExpression(
+function handleCaseExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -257,7 +257,7 @@ export function handleCaseExpression(
 /**
  * relationColumn — SELECT relation.column AS alias
  */
-export function handleRelationColumnExpression(
+function handleRelationColumnExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -284,7 +284,7 @@ export function handleRelationColumnExpression(
 /**
  * arithmetic — SELECT left op right AS alias
  */
-export function handleArithmeticExpression(
+function handleArithmeticExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -302,7 +302,7 @@ export function handleArithmeticExpression(
 /**
  * jsonExtract — col->'key' or col->>'key'
  */
-export function handleJsonExtractExpression(
+function handleJsonExtractExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -322,7 +322,7 @@ export function handleJsonExtractExpression(
 /**
  * jsonPathExtract — col#>'{a,b}' or col#>>'{a,b}'
  */
-export function handleJsonPathExtractExpression(
+function handleJsonPathExtractExpression(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],
@@ -352,7 +352,7 @@ export function handleJsonPathExtractExpression(
  *     cast(ref('t.score'), 'float4')           → alias 'score'
  *     cast(ref('created_at'), 'text').as('ts') → alias 'ts' (explicit wins)
  */
-export function handleCustomExpressionSelect(
+function handleCustomExpressionSelect(
 	expr: Record<string, unknown>,
 	rootTable: string,
 	decisions: PlanDecision[],

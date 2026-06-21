@@ -30,17 +30,17 @@ import {
 /**
  * Brand symbol for aggregate expressions.
  */
-export const AGGREGATE_BRAND = Symbol('AggregateExpr');
+const AGGREGATE_BRAND = Symbol('AggregateExpr');
 
 /**
  * Brand symbol for scalar expressions.
  */
-export const SCALAR_BRAND = Symbol('ScalarExpr');
+const SCALAR_BRAND = Symbol('ScalarExpr');
 
 /**
  * Brand symbol for case expressions.
  */
-export const CASE_BRAND = Symbol('CaseExpr');
+const CASE_BRAND = Symbol('CaseExpr');
 
 /**
  * Aggregate expression result (count, sum, avg, min, max).

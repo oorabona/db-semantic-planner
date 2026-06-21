@@ -20,7 +20,7 @@ export { lateralIncludeHandler } from './lateral.js';
 /**
  * All include strategy handlers
  */
-export const allIncludeHandlers = [
+const allIncludeHandlers = [
 	joinIncludeHandler,
 	lateralIncludeHandler,
 	jsonAggIncludeHandler,
