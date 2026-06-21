@@ -231,6 +231,35 @@ function levenshteinDistance(a: string, b: string): number {
 	return lastRow ? (lastRow[a.length] ?? 0) : 0;
 }
 
+type TableScopedErrorOptions = {
+	table: string;
+	requested: string;
+	available: readonly string[];
+};
+
+abstract class TableScopedError extends Error {
+	readonly table: string;
+	readonly requested: string;
+	readonly available: readonly string[];
+	readonly suggestion?: string;
+	readonly publicMessage: string;
+
+	protected constructor(opts: TableScopedErrorOptions, genericMessage: string) {
+		const suggestion = findClosestMatch(opts.requested, opts.available);
+
+		// Generic message — does NOT embed available list to avoid info leakage
+		super(genericMessage);
+
+		this.table = opts.table;
+		this.requested = opts.requested;
+		this.available = opts.available;
+		this.publicMessage = genericMessage;
+		if (suggestion !== undefined) {
+			this.suggestion = suggestion;
+		}
+	}
+}
+
 /**
  * Error thrown when a requested relation does not exist.
  *
@@ -249,54 +278,40 @@ function levenshteinDistance(a: string, b: string): number {
  * // err.suggestion === 'comments'
  * ```
  */
-export class RelationNotFoundError extends Error {
+export class RelationNotFoundError extends TableScopedError {
 	override readonly name = 'RelationNotFoundError' as const;
 
 	/**
 	 * The table where the relation was requested.
 	 */
-	readonly table: string;
+	declare readonly table: string;
 
 	/**
 	 * The relation name that was requested but not found.
 	 */
-	readonly requested: string;
+	declare readonly requested: string;
 
 	/**
 	 * Available relations on this table.
 	 */
-	readonly available: readonly string[];
+	declare readonly available: readonly string[];
 
 	/**
 	 * Suggested relation name (fuzzy match), if any.
 	 */
-	readonly suggestion?: string;
+	declare readonly suggestion?: string;
 
 	/**
 	 * Public-safe message (no schema enumeration).
 	 */
-	readonly publicMessage: string;
+	declare readonly publicMessage: string;
 
 	constructor(opts: {
 		table: string;
 		requested: string;
 		available: readonly string[];
 	}) {
-		const suggestion = findClosestMatch(opts.requested, opts.available);
-
-		// Generic message — does NOT embed available list to avoid info leakage
-		const genericMessage = 'Relation not found';
-
-		super(genericMessage);
-
-		this.table = opts.table;
-		this.requested = opts.requested;
-		this.available = opts.available;
-		this.publicMessage = genericMessage;
-		if (suggestion !== undefined) {
-			this.suggestion = suggestion;
-		}
-
+		super(opts, 'Relation not found');
 		Object.setPrototypeOf(this, RelationNotFoundError.prototype);
 	}
 }
@@ -472,54 +487,40 @@ export class TableNotFoundError extends Error {
  * // err.suggestion === 'email'
  * ```
  */
-export class ColumnNotFoundError extends Error {
+export class ColumnNotFoundError extends TableScopedError {
 	override readonly name = 'ColumnNotFoundError' as const;
 
 	/**
 	 * The table where the column was requested.
 	 */
-	readonly table: string;
+	declare readonly table: string;
 
 	/**
 	 * The column name that was requested but not found.
 	 */
-	readonly requested: string;
+	declare readonly requested: string;
 
 	/**
 	 * Available columns on this table.
 	 */
-	readonly available: readonly string[];
+	declare readonly available: readonly string[];
 
 	/**
 	 * Suggested column name (fuzzy match), if any.
 	 */
-	readonly suggestion?: string;
+	declare readonly suggestion?: string;
 
 	/**
 	 * Public-safe message (no schema enumeration).
 	 */
-	readonly publicMessage: string;
+	declare readonly publicMessage: string;
 
 	constructor(opts: {
 		table: string;
 		requested: string;
 		available: readonly string[];
 	}) {
-		const suggestion = findClosestMatch(opts.requested, opts.available);
-
-		// Generic message — does NOT embed available list to avoid info leakage
-		const genericMessage = 'Column not found';
-
-		super(genericMessage);
-
-		this.table = opts.table;
-		this.requested = opts.requested;
-		this.available = opts.available;
-		this.publicMessage = genericMessage;
-		if (suggestion !== undefined) {
-			this.suggestion = suggestion;
-		}
-
+		super(opts, 'Column not found');
 		Object.setPrototypeOf(this, ColumnNotFoundError.prototype);
 	}
 }

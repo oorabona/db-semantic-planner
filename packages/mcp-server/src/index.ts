@@ -16,6 +16,7 @@
 import { realpathSync } from 'node:fs';
 import { basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseArgs as parseNodeArgs } from 'node:util';
 import { formatLogPath } from './format-error.js';
 import { loadSchema, SchemaLoadError } from './schema-loader.js';
 import { startMcpServer } from './server.js';
@@ -30,19 +31,50 @@ interface CliArgs {
 	verbose?: boolean;
 }
 
-/**
- * Parse command line arguments.
- */
-export function parseArgs(args: string[]): CliArgs {
-	const result: CliArgs = {
-		schemaPath: '',
-		help: false,
-	};
+const CLI_PARSE_OPTIONS = {
+	schema: {
+		type: 'string',
+		short: 's',
+	},
+	'allowed-root': {
+		type: 'string',
+		short: 'r',
+		multiple: true,
+	},
+	help: {
+		type: 'boolean',
+		short: 'h',
+	},
+	verbose: {
+		type: 'boolean',
+		short: 'v',
+	},
+} as const;
 
-	// Normalize --foo=bar form → ['--foo', 'bar'] before main loop.
-	// Detect empty value (--schema=) immediately — the sliced value would be ''
-	// which silently passes as schemaPath='' and triggers a misleading "required" error.
+const VALUE_FLAGS = new Set(['--schema', '-s', '--allowed-root', '-r']);
+const KNOWN_FLAGS = new Set([
+	...VALUE_FLAGS,
+	'--help',
+	'-h',
+	'--verbose',
+	'-v',
+]);
+const KNOWN_OPTION_NAMES = new Set([
+	'schema',
+	'allowed-root',
+	'help',
+	'verbose',
+]);
+
+function missingValueMessage(flag: string): string {
+	return flag === '--allowed-root' || flag === '-r'
+		? '--allowed-root requires a path argument'
+		: '--schema requires a path argument';
+}
+
+function splitInlineValues(args: string[]): string[] {
 	const normalized: string[] = [];
+
 	for (const arg of args) {
 		if (arg.startsWith('--') && arg.includes('=')) {
 			const eqIdx = arg.indexOf('=');
@@ -69,88 +101,109 @@ export function parseArgs(args: string[]): CliArgs {
 		}
 	}
 
-	// The set of flags that consume the next argument as a value.
-	// Used to distinguish "missing value" from a legitimate hyphen-leading path (M-A).
-	const VALUE_FLAGS = new Set(['--schema', '-s', '--allowed-root', '-r']);
-	const KNOWN_FLAGS = new Set([
-		...VALUE_FLAGS,
-		'--help',
-		'-h',
-		'--verbose',
-		'-v',
-	]);
+	return normalized;
+}
 
-	// POSIX-style end-of-options marker. We do NOT support positional args (this CLI
-	// has no positionals), so any token after a bare '--' is rejected as 'Unknown argument'.
-	// The '--' marker only escapes a value that starts with '-' when consumed inline by
-	// --schema/--allowed-root (e.g. '--schema -- -my.ts' assigns '-my.ts' to schemaPath).
+function prepareArgsForNodeParse(args: string[]): string[] {
+	const splitArgs = splitInlineValues(args);
+	const normalized: string[] = [];
 	let endOfOptions = false;
 
-	for (let i = 0; i < normalized.length; i++) {
-		const arg = normalized[i];
+	for (let i = 0; i < splitArgs.length; i++) {
+		const arg = splitArgs[i];
 
 		if (arg === undefined) {
 			continue;
 		}
 
-		// POSIX end-of-options marker: after '--', treat remaining tokens as values.
-		if (!endOfOptions && arg === '--') {
-			endOfOptions = true;
-			continue;
-		}
-
-		// After '--' with no pending value flag, all remaining tokens are unexpected positionals.
 		if (endOfOptions) {
 			throw new Error(`Unknown argument: ${arg}`);
 		}
 
-		if (arg === '--help' || arg === '-h') {
-			result.help = true;
-		} else if (arg === '--verbose' || arg === '-v') {
-			result.verbose = true;
-		} else if (arg === '--schema' || arg === '-s') {
-			const nextArg = normalized[i + 1];
-			// Check if next token is '--' (POSIX end-of-options) — consume it
-			// and treat the token after it as the value.
-			if (nextArg === '--') {
-				// Consume '--' inline and take the token after it as the literal value.
-				i++; // skip '--'
-				const valueArg = normalized[i + 1];
-				if (valueArg === undefined) {
-					throw new Error('--schema requires a path argument');
-				}
-				result.schemaPath = valueArg;
-				i++; // skip value
-				endOfOptions = true;
-			} else if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
-				// Only reject if the next token is itself a known flag or missing.
-				// A value like '-my-file.ts' is a legitimate relative path (M-A).
-				throw new Error('--schema requires a path argument');
-			} else {
-				result.schemaPath = nextArg;
-				i++; // Skip next arg
-			}
-		} else if (arg === '--allowed-root' || arg === '-r') {
-			const nextArg = normalized[i + 1];
-			if (nextArg === '--') {
-				const valueArg = normalized[i + 2];
-				if (valueArg === undefined) {
-					throw new Error('--allowed-root requires a path argument');
-				}
-				result.allowedRoots = result.allowedRoots ?? [];
-				result.allowedRoots.push(valueArg);
-				i += 2; // skip '--' and value
-				endOfOptions = true;
-			} else if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
-				throw new Error('--allowed-root requires a path argument');
-			} else {
-				result.allowedRoots = result.allowedRoots ?? [];
-				result.allowedRoots.push(nextArg);
-				i++; // Skip next arg
-			}
-		} else {
-			throw new Error(`Unknown argument: ${arg}`);
+		if (arg === '--') {
+			endOfOptions = true;
+			continue;
 		}
+
+		if (!VALUE_FLAGS.has(arg)) {
+			normalized.push(arg);
+			continue;
+		}
+
+		const nextArg = splitArgs[i + 1];
+		if (nextArg === '--') {
+			const valueArg = splitArgs[i + 2];
+			if (valueArg === undefined) {
+				throw new Error(missingValueMessage(arg));
+			}
+			normalized.push(arg, valueArg);
+			i += 2;
+			endOfOptions = true;
+			continue;
+		}
+
+		if (nextArg === undefined || KNOWN_FLAGS.has(nextArg)) {
+			throw new Error(missingValueMessage(arg));
+		}
+
+		normalized.push(arg, nextArg);
+		i++;
+	}
+
+	return normalized;
+}
+
+/**
+ * Parse command line arguments.
+ */
+export function parseArgs(args: string[]): CliArgs {
+	const normalized = prepareArgsForNodeParse(args);
+	const parsed = parseNodeArgs({
+		args: normalized,
+		options: CLI_PARSE_OPTIONS,
+		allowPositionals: true,
+		strict: false,
+		tokens: true,
+	});
+
+	for (const token of parsed.tokens) {
+		if (token.kind === 'positional') {
+			throw new Error(`Unknown argument: ${token.value}`);
+		}
+
+		if (token.kind !== 'option') {
+			continue;
+		}
+
+		const originalArg = normalized[token.index];
+		if (
+			token.rawName.startsWith('-') &&
+			!token.rawName.startsWith('--') &&
+			originalArg !== token.rawName
+		) {
+			throw new Error(`Unknown argument: ${originalArg ?? token.rawName}`);
+		}
+
+		if (!KNOWN_OPTION_NAMES.has(token.name)) {
+			throw new Error(`Unknown argument: ${token.rawName}`);
+		}
+	}
+
+	const values = parsed.values;
+	const result: CliArgs = {
+		schemaPath: typeof values.schema === 'string' ? values.schema : '',
+		help: values.help === true,
+	};
+
+	const allowedRoots = values['allowed-root'];
+	if (Array.isArray(allowedRoots) && allowedRoots.length > 0) {
+		result.allowedRoots = allowedRoots.filter(
+			(root): root is string => typeof root === 'string',
+		);
+	}
+
+	if (values.verbose === true) {
+		result.verbose = true;
 	}
 
 	return result;

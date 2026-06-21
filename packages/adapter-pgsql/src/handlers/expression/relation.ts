@@ -17,6 +17,20 @@ import type {
 	ExpressionHandler,
 } from '../types.js';
 
+function resolveRelationAlias(
+	relation: string,
+	state: CompilerState,
+	options: { resolveDottedLeaf?: boolean } = {},
+): string {
+	if (options.resolveDottedLeaf && relation.includes('.')) {
+		const segments = relation.split('.');
+		const leaf = segments[segments.length - 1]!;
+		return state.aliases.get(relation) ?? state.aliases.get(leaf) ?? leaf;
+	}
+
+	return state.aliases.get(relation) ?? relation;
+}
+
 /**
  * Relation star handler
  *
@@ -76,17 +90,9 @@ export const relationColumnHandler: ExpressionHandler = {
 			throw new Error('Relation column handler requires column name');
 		}
 
-		// Look up the alias for this relation from state.
-		// For dotted paths like 'callee.file', split and resolve only the final
-		// segment when no exact path alias exists.
-		let alias: string;
-		if (relation.includes('.')) {
-			const segments = relation.split('.');
-			const leaf = segments[segments.length - 1]!;
-			alias = state.aliases.get(relation) ?? state.aliases.get(leaf) ?? leaf;
-		} else {
-			alias = state.aliases.get(relation) ?? relation;
-		}
+		const alias = resolveRelationAlias(relation, state, {
+			resolveDottedLeaf: true,
+		});
 
 		// Wildcard: relation.* should produce unquoted * (A_Star), not quoted "*"
 		if (column === '*') {
@@ -126,8 +132,7 @@ export const relationColumnsHandler: ExpressionHandler = {
 			throw new Error('Relation columns handler requires columns array');
 		}
 
-		// Look up the alias for this relation from state
-		const alias = state.aliases.get(relation) ?? relation;
+		const alias = resolveRelationAlias(relation, state);
 
 		// Build the first column reference (handler must return a single node)
 		// For multiple columns, the compiler should call this handler multiple times
@@ -175,8 +180,7 @@ export const relationAliasHandler: ExpressionHandler = {
 			throw new Error('Relation alias handler requires column name');
 		}
 
-		// Look up the alias for this relation from state
-		const tableAlias = state.aliases.get(relation) ?? relation;
+		const tableAlias = resolveRelationAlias(relation, state);
 		const colRef = columnRef(column, tableAlias, undefined, ctx.naming);
 
 		// If no output alias, return just the column ref
