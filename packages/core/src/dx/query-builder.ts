@@ -43,6 +43,7 @@ import {
 	runOnErrorHooks,
 	withReentrancyGuard,
 } from './hooks.js';
+import { applyHintToIncludeRecursive } from './include-hints.js';
 import {
 	includeOptionsToIntent,
 	isRecursiveIncludeOptions,
@@ -1148,46 +1149,13 @@ export class QueryBuilderImpl<TResult = unknown>
 		}
 
 		const updatedIncludes = intent.include.map((inc) =>
-			this.applyHintToInclude(inc),
+			applyHintToIncludeRecursive(inc, this.relationHints),
 		);
 
 		return {
 			...intent,
 			include: updatedIncludes,
 		};
-	}
-
-	/**
-	 * Apply relation hint to a single include (recursively).
-	 */
-	private applyHintToInclude(inc: IncludeIntent): IncludeIntent {
-		// If already has explicit via, don't override
-		if (inc.via !== undefined) {
-			// But still process nested includes
-			if (inc.include && inc.include.length > 0) {
-				return {
-					...inc,
-					include: inc.include.map((nested) => this.applyHintToInclude(nested)),
-				};
-			}
-			return inc;
-		}
-
-		// Check if we have a hint for this target
-		const hint = this.relationHints[inc.relation];
-		const result: IncludeIntent = hint ? { ...inc, via: hint } : inc;
-
-		// Process nested includes
-		if (result.include && result.include.length > 0) {
-			return {
-				...result,
-				include: result.include.map((nested) =>
-					this.applyHintToInclude(nested),
-				),
-			};
-		}
-
-		return result;
 	}
 
 	/**

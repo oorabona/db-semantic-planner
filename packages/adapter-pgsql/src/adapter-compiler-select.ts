@@ -137,24 +137,6 @@ function assertSafeTypeName(typeName: string, colIndex: number): void {
 	}
 }
 
-// ============================================================================
-// Internal: legacy bridge
-// ============================================================================
-
-/**
- * Bridge core's PlanDecision[] (observability format) to adapter's PlanDecision[].
- * Used only in the legacy/test path where mock plans carry adapter-format decisions
- * inside a core PlanReport. At runtime the data is already in adapter format.
- */
-// stripExistsFromDecision removed — exists decisions are now enriched in-place
-// by enrichExistsDecisionsInPlace() instead of being stripped and re-appended at top level.
-
-export function bridgeLegacyDecisions(
-	decisions: readonly unknown[],
-): SimplifiedPlanReport['decisions'] {
-	return decisions as SimplifiedPlanReport['decisions'];
-}
-
 /**
  * Compile JoinIntent[] from a QueryIntent into PlanDecision[] of type 'join'.
  *
@@ -925,7 +907,7 @@ export function compileSelect<T = unknown>(
 		// so the runtime data is already in the right shape — bridge the type gap.
 		simplifiedPlan = {
 			rootTable: plan.rootTable,
-			decisions: bridgeLegacyDecisions(plan.decisions),
+			decisions: plan.decisions as SimplifiedPlanReport['decisions'],
 			...(schemaName ? { schema: schemaName } : {}),
 		};
 	}
