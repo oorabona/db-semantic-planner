@@ -569,7 +569,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(params).toEqual([]);
 	});
 
-	it('maps a count-aggregate columnType to bigint (forward-compat; the nql compiler never emits this kind in B1)', () => {
+	it('maps a count-aggregate columnType to bigint', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -600,6 +600,42 @@ describe('NQL bind CTE identifier injection defense', () => {
 			'WITH "counts" ("n") as (SELECT CAST(NULL AS bigint) AS "n" WHERE false UNION ALL VALUES ($1::bigint))',
 		);
 		expect(params).toEqual([3]);
+	});
+
+	it('rejects a non-count aggregate columnType instead of silently casting it to bigint', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'sums',
+				select: {
+					type: 'fields',
+					fields: ['t'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'sums',
+					{
+						columns: ['t'],
+						rows: [{ t: 42 }],
+						columnTypes: {
+							// The TS union only admits fn:'count'; a runtime-forged or
+							// future aggregate variant erases to plain data — the adapter
+							// must fail loud, never default to bigint.
+							t: { kind: 'aggregate', fn: 'sum' } as unknown as never,
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			"unsupported aggregate kind 'sum'",
+		);
+		expect(sql ?? '').not.toContain('bigint');
 	});
 
 	it('prefers originalDbType over the neutral type mapping on the typed anchor surface', () => {
@@ -690,7 +726,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 					{
 						columns: ['id'],
 						rows: [{ id: 1 }, { id: 2 }],
-						// no columnTypes — mutation bindings never carry it in B1.
+						// no columnTypes — locks the model-walk fallback for untyped schemas.
 					},
 				],
 			]),

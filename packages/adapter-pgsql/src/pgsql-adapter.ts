@@ -422,10 +422,9 @@ function assertRuntimeBindingValuesParameterCount(
 
 /**
  * Resolve the PostgreSQL cast type name for one binding column's neutral
- * type info (#213). `kind: 'aggregate'` currently only ever carries `count`
- * (B1 scope fence — the nql compiler never emits any other aggregate kind
- * yet), which is forward-mapped to `bigint` regardless of `fn` so future
- * aggregate kinds fail loud here instead of silently mis-typing. Every
+ * type info (#213). `kind: 'aggregate'` maps `count` to `bigint`; any other
+ * aggregate kind throws, so a forged or future aggregate variant fails loud
+ * here instead of silently mis-typing. Every
  * resolved type name is re-validated via validateTypeName — the compiler is
  * never trusted, since PlanCompiler is a public export.
  */
@@ -434,6 +433,11 @@ function resolvePgTypeForColumnTypeInfo(
 	column: string,
 	info: NqlBindingColumnTypeInfo,
 ): string {
+	if (info.kind === 'aggregate' && info.fn !== 'count') {
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}': unsupported aggregate kind '${String(info.fn)}'.`,
+		);
+	}
 	const rawType =
 		info.kind === 'aggregate'
 			? 'bigint'
