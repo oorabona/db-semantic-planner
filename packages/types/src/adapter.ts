@@ -27,6 +27,7 @@ import type {
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	ColumnType,
 	EnumIR,
 	ForeignKeyIR,
 	HierarchyIR,
@@ -174,14 +175,52 @@ export interface NqlBindingRelationFilterMetadata {
 	readonly scalarRelations?: readonly NqlBindingVirtualRelation[];
 }
 
+/**
+ * Neutral per-column type info for a binding's output schema.
+ * ARCH-001: dialect-neutral — the adapter maps `type`/`fn` to a PG type name.
+ */
+export type NqlBindingColumnTypeInfo =
+	| {
+			readonly kind: 'column';
+			readonly type: ColumnType;
+			readonly originalDbType?: string;
+	  }
+	| { readonly kind: 'aggregate'; readonly fn: 'count' };
+
+/** Reason a binding output column's type could not be statically resolved. */
+export type NqlBindingColumnUntypeableReason =
+	| 'computed-expression'
+	| 'unsupported-aggregate'
+	| 'unresolvable-source'
+	| 'duplicate-output-name'
+	| 'aliased-returning'
+	| 'relation-column';
+
 export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
 	readonly relationFilters?: NqlBindingRelationFilterMetadata;
+	/**
+	 * Present when EVERY projected column's type is statically resolvable
+	 * (completeness invariant — complete or absent, never partial). Keyed by
+	 * output column name (post-alias). Deep-frozen at build.
+	 */
+	readonly columnTypes?: Readonly<Record<string, NqlBindingColumnTypeInfo>>;
+	/**
+	 * Present ONLY when `columnTypes` is absent: names the first untypeable
+	 * output column and why. Computed once at schema build — consumers
+	 * (the snapshot gate) must never re-derive it.
+	 */
+	readonly columnTypesUnavailable?: {
+		readonly column: string;
+		readonly reason: NqlBindingColumnUntypeableReason;
+	};
 }
 
 export interface NqlRuntimeBinding {
 	readonly columns: readonly string[];
 	readonly rows: readonly Readonly<Record<string, unknown>>[];
+	/** Per-column type info carried from the binding's output schema (absent → fall back to model-walk anchor resolution). */
+	readonly columnTypes?: Readonly<Record<string, NqlBindingColumnTypeInfo>>;
 }
 
 export type NqlProgramSequenceStep =

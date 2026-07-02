@@ -41,7 +41,11 @@ import {
 	expressionToValue,
 	resolveIntegerCount,
 } from './expression-utils.js';
-import type { CompilerContext, CompilerFns } from './types.js';
+import type {
+	CompilerContext,
+	CompilerFns,
+	ReturningColumnInfo,
+} from './types.js';
 
 function assignMutationValue(
 	target: Record<string, unknown>,
@@ -67,11 +71,21 @@ export function compileMutationPipeline(
 
 	// Extract RETURNING from select clauses
 	let returning: readonly string[] | undefined;
+	let returningItems: readonly ReturningColumnInfo[] | 'star' | undefined;
 	for (const clause of pipeline.clauses) {
 		if (clause.type === 'select') {
-			returning = extractReturningColumns(clause, ctx);
+			returningItems = extractReturningItems(clause, ctx);
+			returning =
+				returningItems === 'star'
+					? ['*']
+					: returningItems.map((item) => item.output);
 		}
 	}
+
+	// #213 B2: stash the alias-aware RETURNING info for the schema producer
+	// (`getMutationBindingOutputSchema`), consumed immediately after this
+	// call returns — never re-derived from the collapsed `returning` names.
+	ctx.lastMutationReturningItems = returningItems;
 
 	if (returning) {
 		return {
@@ -324,15 +338,22 @@ function compileUpsertFrom(
 /**
  * Extract RETURNING column names from a SELECT clause after a mutation.
  */
-function extractReturningColumns(
+
+/**
+ * Alias-aware extraction of RETURNING items from a SELECT clause after a
+ * mutation. Returns the 'star' sentinel for `RETURNING *`. #213 B2: this is
+ * the ONLY producer of alias info — `extractReturningColumns` derives its
+ * collapsed name list from this, never the other way around.
+ */
+function extractReturningItems(
 	clause: NqlSelectClause,
 	ctx: CompilerContext,
-): readonly string[] {
-	const columns: string[] = [];
+): readonly ReturningColumnInfo[] | 'star' {
+	const items: ReturningColumnInfo[] = [];
 
 	for (const item of clause.items) {
 		if (item.type === 'star') {
-			return ['*'];
+			return 'star';
 		}
 		if (item.type === 'expression') {
 			const field = expressionToField(item.expression);
@@ -340,13 +361,20 @@ function extractReturningColumns(
 				if (ctx.currentFromTable && !field.includes('.')) {
 					ctx.validator?.validateColumn(ctx.currentFromTable, field);
 				}
-				columns.push(item.alias ?? field);
+				items.push({
+					output: item.alias ?? field,
+					aliased: item.alias !== undefined,
+				});
 			}
 		}
 	}
 
-	return columns;
+	return items;
 }
+
+/**
+ * Extract RETURNING column names from a SELECT clause after a mutation.
+ */
 
 /**
  * Walk a WhereIntent tree and resolve any IN clause whose values contain

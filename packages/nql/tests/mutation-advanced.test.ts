@@ -5,6 +5,7 @@
  * and insert-from patterns at the NQL → Intent level.
  */
 
+import type { ColumnType } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import type {
 	ColumnValidatorSchema,
@@ -36,9 +37,16 @@ function compileNql(
 
 const snapshotSchema: ColumnValidatorSchema = {
 	getTable(name: string) {
-		const tables: Record<string, { columns: { name: string }[] }> = {
+		const tables: Record<
+			string,
+			{ columns: { name: string; type?: ColumnType }[] }
+		> = {
 			users: {
-				columns: [{ name: 'id' }, { name: 'name' }, { name: 'active' }],
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'name', type: 'string' },
+					{ name: 'active', type: 'boolean' },
+				],
 			},
 		};
 		return tables[name];
@@ -693,22 +701,10 @@ describe('F17: read binding references across mutations', () => {
 
 	it.each([
 		[
-			'binding source',
-			'ids',
-			'a binding source',
-			'users | select id | bind created\ncreated | select id | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
-		],
-		[
-			'aliased column',
-			'ids',
+			'sum aggregate column',
+			'sums',
 			'aliased/computed/aggregate columns',
-			'users | select id as userId | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
-		],
-		[
-			'aggregate column',
-			'counts',
-			'aliased/computed/aggregate columns',
-			'users | select count(*) as n | bind counts\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (counts) | select id',
+			'users | select sum(id) as total | bind sums\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (sums) | select id',
 		],
 	])('rejects unsupported read-binding snapshot shape: %s (#186)', (_label, bindName, reason, input) => {
 		expect(() => compileNql(input, snapshotSchema)).toThrow(
@@ -716,6 +712,67 @@ describe('F17: read binding references across mutations', () => {
 				`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
 			),
 		);
+	});
+
+	it('snapshots a count(*) aggregate-column read binding after an intervening mutation (#213 B3)', () => {
+		const result = compile(
+			'users | select count(*) as n | bind counts\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (counts) | select id',
+			snapshotSchema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('counts')?.columnTypes,
+		).toEqual({
+			n: { kind: 'aggregate', fn: 'count' },
+		});
+		expect(
+			result.ast?.nqlProgramSequence?.find(
+				(step) => step.bindName === 'counts',
+			),
+		).toMatchObject({
+			kind: 'query',
+			bindName: 'counts',
+			snapshot: true,
+		});
+	});
+
+	it('snapshots a read binding transitively sourced from another binding (#213)', () => {
+		const result = compile(
+			'users | select id | bind created\ncreated | select id | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
+			snapshotSchema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindingOutputSchemas?.get('ids')?.columnTypes).toEqual({
+			id: { kind: 'column', type: 'integer' },
+		});
+		expect(
+			result.ast?.nqlProgramSequence?.find((step) => step.bindName === 'ids'),
+		).toMatchObject({
+			kind: 'query',
+			bindName: 'ids',
+			snapshot: true,
+		});
+	});
+
+	it('snapshots an aliased-column read binding referenced after an intervening mutation (#213)', () => {
+		const result = compileNql(
+			'users | select id as userId | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
+			snapshotSchema,
+		);
+
+		expect(result.nqlProgramSequence?.[0]).toMatchObject({
+			kind: 'query',
+			bindName: 'ids',
+			snapshot: true,
+		});
+		expect(result.bindingOutputSchemas?.get('ids')?.columns).toEqual([
+			'userId',
+		]);
+		expect(
+			result.bindingOutputSchemas?.get('ids')?.columnTypes?.userId,
+		).toMatchObject({ kind: 'column', type: 'integer' });
 	});
 
 	it('allows a read binding to feed the immediately following mutation (#113)', () => {

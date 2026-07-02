@@ -467,7 +467,7 @@ authors | where id in (new_author) | select id`;
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sql).toContain(
-			`WITH "new_author" ("id") as (SELECT "id" FROM "${SCHEMA}"."authors" WHERE false)`,
+			`WITH "new_author" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)`,
 		);
 		expect(rows).toEqual([{ id: authorId }]);
 	});

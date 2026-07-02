@@ -4,6 +4,7 @@
  */
 
 import type {
+	ColumnType,
 	CompiledNqlQuery,
 	NqlBindingRelationFilterMetadata,
 	QueryIntent,
@@ -38,10 +39,22 @@ export interface ColumnValidatorPseudoColumn {
 	readonly descendantKeyword?: string;
 }
 
+/**
+ * Duck-type column shape carried by `ColumnValidatorSchema.getTable()`.
+ * `type`/`originalDbType` are optional so hand-authored test schemas that
+ * only supply `name` remain valid — absence makes a column's type
+ * unresolvable (untypeable), never silently mismatched.
+ */
+export interface ColumnValidatorTableColumn {
+	readonly name: string;
+	readonly type?: ColumnType;
+	readonly originalDbType?: string;
+}
+
 export interface ColumnValidatorSchema {
 	getTable(name: string):
 		| {
-				readonly columns: readonly { readonly name: string }[];
+				readonly columns: readonly ColumnValidatorTableColumn[];
 				readonly pseudoColumns?: readonly ColumnValidatorPseudoColumn[];
 		  }
 		| undefined;
@@ -83,6 +96,21 @@ export interface NqlCompilerOptions {
  * Mutable compilation context carried through all compiler functions.
  * Holds shared state that changes during compilation of a single statement.
  */
+
+/**
+ * Alias-aware description of one mutation RETURNING projection: the OUTPUT
+ * name (post-alias) and whether it was aliased. #213 B2: threaded
+ * internally (never part of the public `MutationIntent.returning:
+ * string[]`) so mutation-RETURNING binding output-schema typing can tell
+ * `returning email as name` apart from a genuine `name` column — typing
+ * off the collapsed output name alone would silently mis-type on a
+ * collision (the A2 trap, mutation-side).
+ */
+export interface ReturningColumnInfo {
+	readonly output: string;
+	readonly aliased: boolean;
+}
+
 export interface CompilerContext {
 	currentFromTable: string | undefined;
 	currentRelationTarget: string | undefined;
@@ -103,6 +131,17 @@ export interface CompilerContext {
 	readonly allowUnfilteredMutations: boolean;
 	/** @internal Allows generated __pN params from the core nql tag only. */
 	readonly allowInternalParams: boolean;
+	/**
+	 * @internal #213 B2: alias-aware RETURNING items for the mutation
+	 * pipeline most recently compiled via `compileMutationPipeline`.
+	 * Consumed immediately after by `getMutationBindingOutputSchema` — never
+	 * re-derived from the collapsed `MutationIntent.returning` names.
+	 * `'star'` marks a `RETURNING *` clause (no per-item alias info).
+	 */
+	lastMutationReturningItems?:
+		| readonly ReturningColumnInfo[]
+		| 'star'
+		| undefined;
 }
 
 /**

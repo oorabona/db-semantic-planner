@@ -42,6 +42,7 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
+	NqlBindingColumnTypeInfo,
 	NqlRuntimeBinding,
 	PlanReport,
 	QueryIntent,
@@ -419,6 +420,114 @@ function assertRuntimeBindingValuesParameterCount(
 	);
 }
 
+/**
+ * Resolve the PostgreSQL cast type name for one binding column's neutral
+ * type info (#213). `kind: 'aggregate'` maps `count` to `bigint`; any other
+ * aggregate kind throws, so a forged or future aggregate variant fails loud
+ * here instead of silently mis-typing. Every
+ * resolved type name is re-validated via validateTypeName — the compiler is
+ * never trusted, since PlanCompiler is a public export.
+ */
+function resolvePgTypeForColumnTypeInfo(
+	bindingName: string,
+	column: string,
+	info: NqlBindingColumnTypeInfo,
+): string {
+	if (info.kind === 'aggregate' && info.fn !== 'count') {
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}': unsupported aggregate kind '${String(info.fn)}'.`,
+		);
+	}
+	const rawType =
+		info.kind === 'aggregate'
+			? 'bigint'
+			: info.originalDbType?.trim() || mapRuntimeBindingColumnType(info.type);
+	if (rawType === undefined || rawType.trim() === '') {
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}'.`,
+		);
+	}
+	const typeName = rawType.trim();
+	try {
+		validateTypeName(typeName);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
+		throw new Error(
+			`NQL runtime binding '${bindingName}' cannot use PostgreSQL cast type for projected column '${column}': ${reason}`,
+		);
+	}
+	return typeName;
+}
+
+/** Resolve PostgreSQL cast types for every column of a typed runtime binding, in column order. */
+function resolveRuntimeBindingCteColumnTypes(
+	name: string,
+	binding: NqlRuntimeBinding,
+): readonly string[] {
+	const columnTypes = binding.columnTypes;
+	if (columnTypes === undefined) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot resolve typed columns without a columnTypes map.`,
+		);
+	}
+	return binding.columns.map((column) => {
+		const info = columnTypes[column];
+		if (info === undefined) {
+			throw new Error(
+				`NQL runtime binding '${name}' is missing type info for projected column '${column}'.`,
+			);
+		}
+		return resolvePgTypeForColumnTypeInfo(name, column, info);
+	});
+}
+
+/**
+ * Compile a runtime-binding CTE anchored on a SYNTHETIC typed NULL row
+ * (`SELECT CAST(NULL AS <t>) AS "<col>", ... WHERE false`) rather than the
+ * source table. Used when the binding carries per-column type info
+ * (#213) — the source-table anchor cannot be reused because aliased/typed
+ * output column names may not exist as physical columns on any one table.
+ */
+function compileTypedNqlRuntimeBindingCte(
+	name: string,
+	binding: NqlRuntimeBinding,
+	naming: NamingPlugin,
+	parameterOffset: number,
+	cteName: string,
+	columnSql: string,
+): { cte: string; parameters: readonly unknown[] } {
+	const pgTypes = resolveRuntimeBindingCteColumnTypes(name, binding);
+	const anchorColumns = binding.columns
+		.map(
+			(column, columnIndex) =>
+				`CAST(NULL AS ${pgTypes[columnIndex]}) AS ${quoteIdent(naming.toDatabase(column), 'column')}`,
+		)
+		.join(', ');
+	const sourceAnchorSql = `SELECT ${anchorColumns} WHERE false`;
+	if (binding.rows.length === 0) {
+		return {
+			cte: `${cteName} (${columnSql}) as (${sourceAnchorSql})`,
+			parameters: [],
+		};
+	}
+	assertRuntimeBindingValuesParameterCount(name, binding, parameterOffset);
+	const parameters: unknown[] = [];
+	let nextParam = parameterOffset + 1;
+	const valuesSql = binding.rows
+		.map((row) => {
+			const placeholders = binding.columns.map((column, columnIndex) => {
+				parameters.push(row[column]);
+				return `$${nextParam++}::${pgTypes[columnIndex]}`;
+			});
+			return `(${placeholders.join(', ')})`;
+		})
+		.join(', ');
+	return {
+		cte: `${cteName} (${columnSql}) as (${sourceAnchorSql} UNION ALL VALUES ${valuesSql})`,
+		parameters,
+	};
+}
+
 function compileNqlRuntimeBindingCte(
 	name: string,
 	binding: NqlRuntimeBinding,
@@ -437,6 +546,23 @@ function compileNqlRuntimeBindingCte(
 	const columnSql = binding.columns
 		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
 		.join(', ');
+
+	// #213: a binding carrying per-column type info (currently: snapshotted
+	// read-bindings) anchors on a synthetic typed NULL row instead of the
+	// source table, because aliased output names may not exist as physical
+	// columns on it. Mutation bindings (no columnTypes in B1) keep the
+	// existing model-walk + FROM-source anchor below, byte-for-byte.
+	if (binding.columnTypes !== undefined) {
+		return compileTypedNqlRuntimeBindingCte(
+			name,
+			binding,
+			naming,
+			parameterOffset,
+			cteName,
+			columnSql,
+		);
+	}
+
 	if (sourceTable === undefined) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot materialize a typed relation because its source table is unavailable.`,
