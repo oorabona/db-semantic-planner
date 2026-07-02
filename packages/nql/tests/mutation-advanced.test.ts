@@ -701,10 +701,10 @@ describe('F17: read binding references across mutations', () => {
 
 	it.each([
 		[
-			'aggregate column',
-			'counts',
+			'sum aggregate column',
+			'sums',
 			'aliased/computed/aggregate columns',
-			'users | select count(*) as n | bind counts\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (counts) | select id',
+			'users | select sum(id) as total | bind sums\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (sums) | select id',
 		],
 	])('rejects unsupported read-binding snapshot shape: %s (#186)', (_label, bindName, reason, input) => {
 		expect(() => compileNql(input, snapshotSchema)).toThrow(
@@ -712,6 +712,29 @@ describe('F17: read binding references across mutations', () => {
 				`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
 			),
 		);
+	});
+
+	it('snapshots a count(*) aggregate-column read binding after an intervening mutation (#213 B3)', () => {
+		const result = compile(
+			'users | select count(*) as n | bind counts\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (counts) | select id',
+			snapshotSchema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(
+			result.ast?.bindingOutputSchemas?.get('counts')?.columnTypes,
+		).toEqual({
+			n: { kind: 'aggregate', fn: 'count' },
+		});
+		expect(
+			result.ast?.nqlProgramSequence?.find(
+				(step) => step.bindName === 'counts',
+			),
+		).toMatchObject({
+			kind: 'query',
+			bindName: 'counts',
+			snapshot: true,
+		});
 	});
 
 	it('snapshots a read binding transitively sourced from another binding (#213)', () => {

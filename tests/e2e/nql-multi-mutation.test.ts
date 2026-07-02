@@ -391,4 +391,88 @@ b | select who`.all(),
 			/unsupported snapshot shape \(#186\).*binding 'b' has aliased-returning column 'who'/,
 		);
 	});
+
+	it('snapshots a count(*) aggregate column across an intervening mutation, matching live count(*) semantics (#213 S4)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		// Baseline: what a live (non-binding) count(*) looks like through the
+		// ORM, to compare JS value types/representation against the
+		// snapshot-materialized value below (PG bigint semantics).
+		const live = await orm.nql<{
+			total: number | bigint | string;
+		}>`posts | select count(*) as total`.all();
+
+		const rows = await orm.nql<{
+			total: number | bigint | string;
+		}>`posts | select count(*) as total | bind b
+insert into posts set id = ${9800}, title = ${'S4'}, content = ${'S4 fixture'}, authorId = ${1}, published = ${false} | select id | bind created
+b | select total`.all();
+
+		expect(rows).toHaveLength(1);
+		expect(typeof rows[0]?.total).toBe(typeof live[0]?.total);
+		expect(rows[0]?.total).toEqual(live[0]?.total);
+
+		const pool = await getTestPool();
+		const persisted = await sql<{ count: string }>`
+			SELECT count(*)::text AS count
+			FROM ${sql.ref(SCHEMA)}.posts
+		`.execute(pool);
+		// The insert IS visible in a fresh direct count — proving the
+		// binding's snapshot value is the PRE-mutation total, not the
+		// post-mutation one.
+		expect(Number(persisted.rows[0]?.count)).toBe(Number(rows[0]?.total) + 1);
+	});
+
+	it('keeps a sum(...) aggregate read binding fail-loud across a mutation (#213 S6)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		await expect(
+			orm.nql`posts | select sum(id) as t | bind b
+update posts set title = ${'noop'} where id = ${1} | select id | bind changed
+b | select t`.all(),
+		).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*binding 'b' has aliased\/computed\/aggregate columns/,
+		);
+	});
+
+	it('snapshots a grouped field + count(*) aggregate across an intervening mutation (#213 S10)', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES
+				(${9900}, ${'S10 a'}, ${'S10 grouped-count fixture'}, ${1}, ${false}),
+				(${9901}, ${'S10 b'}, ${'S10 grouped-count fixture'}, ${1}, ${true})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			published: boolean;
+			n: number | bigint | string;
+		}>`posts | where content = ${'S10 grouped-count fixture'} | group by published | select published, count(*) as n | bind b
+insert into posts set id = ${9902}, title = ${'S10 c'}, content = ${'S10 grouped-count fixture'}, authorId = ${1}, published = ${false} | select id | bind created
+b | select published, n`.all();
+
+		const byPublished = new Map(
+			rows.map((row) => [row.published, Number(row.n)]),
+		);
+		// PRE-mutation grouping: exactly one row per boolean group, from the
+		// two seeded rows only — the third (published = false) inserted by
+		// the intervening mutation must NOT bump the `false` group from 1 to
+		// 2.
+		expect(byPublished.get(false)).toBe(1);
+		expect(byPublished.get(true)).toBe(1);
+
+		const persistedCount = await sql<{ count: string }>`
+			SELECT count(*)::text AS count
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE content = ${'S10 grouped-count fixture'}
+		`.execute(pool);
+		// Confirms the mutation DID persist a third matching row — proving
+		// the snapshot's n=1 for `published=false` is genuinely pre-mutation,
+		// not an accidental match.
+		expect(Number(persistedCount.rows[0]?.count)).toBe(3);
+	});
 });

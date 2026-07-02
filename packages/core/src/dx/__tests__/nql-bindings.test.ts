@@ -470,16 +470,40 @@ users | where id in (ids | select userId) | select id as userId`.all();
 		expect(compile).toHaveBeenCalledTimes(3);
 	});
 
-	it('rejects an aggregate-column read snapshot before SQL emission (#186)', async () => {
+	it('snapshots a count(*) aggregate-column read binding across an intervening mutation (#213 B3)', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ n: 3 }])
+			.mockResolvedValueOnce([{ id: 2 }])
+			.mockResolvedValueOnce([{ n: 3 }]);
+		const { compile, nql } = createMutationBindingTag(execute);
+
+		const rows = await nql<{
+			n: number;
+		}>`users | select count(*) as n | bind counts
+update users set active = false where id = 1 | select id | bind changed
+counts | select n`.all();
+
+		expect(rows).toEqual([{ n: 3 }]);
+		expect(execute).toHaveBeenCalledTimes(3);
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(finalSql).toContain(
+			'WITH "counts" ("n") as (SELECT CAST(NULL AS bigint) AS "n" WHERE false UNION ALL VALUES ($1::bigint))',
+		);
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([3]);
+		expect(compile).toHaveBeenCalledTimes(3);
+	});
+
+	it('rejects a sum(...) aggregate-column read snapshot before SQL emission (#213 B3 scope fence)', async () => {
 		const execute = vi.fn().mockResolvedValue([]);
 		const { compile, nql } = createMutationBindingTag(execute);
 
 		await expect(async () => {
-			await nql`users | select count(*) as n | bind counts
+			await nql`users | select sum(id) as total | bind sums
 update users set active = false where id = 1 | select id | bind changed
-users | where id in (counts) | select id`.all();
+users | where id in (sums) | select id`.all();
 		}).rejects.toThrow(
-			/unsupported snapshot shape \(#186\).*binding 'counts' has aliased\/computed\/aggregate columns/,
+			/unsupported snapshot shape \(#186\).*binding 'sums' has aliased\/computed\/aggregate columns/,
 		);
 		expect(compile).not.toHaveBeenCalled();
 		expect(execute).not.toHaveBeenCalled();
@@ -699,7 +723,7 @@ b | select id`.dump();
 			});
 		});
 
-		it('marks a count(*) aggregate column untypeable with reason unsupported-aggregate (B1 scope fence)', () => {
+		it('types a count(*) aggregate column as {kind:"aggregate", fn:"count"} (#213 B3)', () => {
 			const { compile, nql } = createMutationBindingTag(vi.fn());
 
 			nql`users | select count(*) as n | bind b
@@ -707,9 +731,67 @@ b | select n`.dump();
 
 			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
 			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toEqual({
+				n: { kind: 'aggregate', fn: 'count' },
+			});
+			expect(outputSchema?.columnTypesUnavailable).toBeUndefined();
+		});
+
+		it('types a count(col) aggregate column the same as count(*) (#213 B3)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select count(id) as n | bind b
+b | select n`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('b')?.columnTypes).toEqual({
+				n: { kind: 'aggregate', fn: 'count' },
+			});
+		});
+
+		it('types a grouped field alongside a count(*) aggregate column (#213 B3)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`posts | group by authorId | select authorId, count(*) as n | bind b
+b | select authorId, n`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('b')?.columnTypes).toEqual({
+				authorId: {
+					kind: 'column',
+					type: 'integer',
+					originalDbType: 'integer',
+				},
+				n: { kind: 'aggregate', fn: 'count' },
+			});
+		});
+
+		it('marks a sum(...) aggregate column untypeable with reason unsupported-aggregate (#213 B3 scope fence)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select sum(id) as total | bind b
+b | select total`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
 			expect(outputSchema?.columnTypes).toBeUndefined();
 			expect(outputSchema?.columnTypesUnavailable).toEqual({
-				column: 'n',
+				column: 'total',
+				reason: 'unsupported-aggregate',
+			});
+		});
+
+		it('marks an avg(...) aggregate column untypeable with reason unsupported-aggregate (#213 B3 scope fence)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select avg(id) as average | bind b
+b | select average`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'average',
 				reason: 'unsupported-aggregate',
 			});
 		});

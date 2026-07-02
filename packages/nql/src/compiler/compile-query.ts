@@ -1445,6 +1445,18 @@ export function getQueryOutputSchema(
 		typeCandidates.push({ column: outputColumn, untypeable: reason });
 		addColumn(outputColumn);
 	};
+	// #213 B3: `count(*)` / `count(col)` is statically typeable — PostgreSQL
+	// always returns bigint for COUNT regardless of the argument, so this is
+	// the ONE aggregate the neutral `NqlBindingColumnTypeInfo` union can
+	// represent without dialect-specific type-promotion knowledge (ARCH-001;
+	// see `{kind:'aggregate', fn:'count'}` in packages/types/src/adapter.ts).
+	const addCountAggregateColumn = (outputColumn: string) => {
+		typeCandidates.push({
+			column: outputColumn,
+			typed: { kind: 'aggregate', fn: 'count' },
+		});
+		addColumn(outputColumn);
+	};
 	const addSourceColumns = () => {
 		for (const column of resolveSourceOutputColumns(intent, ctx, bindingName)) {
 			addDirectProjection(column, column);
@@ -1495,10 +1507,16 @@ export function getQueryOutputSchema(
 					`Cannot compute output schema for NQL binding '${bindingName}': aggregate '${aggregate.function}' must use an alias.`,
 				);
 			}
-			// #213 B1 scope fence: aggregates (including count) are not typed
-			// yet — classifyReadBindingSnapshotShape special-cases the
-			// aggregate select shape to keep the pre-#213 reject message.
-			addUntypedColumn(aggregate.as, 'unsupported-aggregate');
+			// #213 B3: `count` (count(*) / count(col)) is statically
+			// typeable — every other aggregate stays fail-loud: sum/avg/
+			// min/max type-promotion rules are dialect knowledge with no
+			// neutral representation yet (deferred by design, not a scope
+			// fence).
+			if (aggregate.function === 'count') {
+				addCountAggregateColumn(aggregate.as);
+			} else {
+				addUntypedColumn(aggregate.as, 'unsupported-aggregate');
+			}
 		}
 		return finalizeOutputSchema();
 	}
@@ -1525,11 +1543,15 @@ export function getQueryOutputSchema(
 			addDirectProjection(outputColumn, expr.column);
 		} else if (expr.kind === 'columnAlias') {
 			addDirectProjection(outputColumn, expr.column);
+		} else if (expr.kind === 'aggregate' && expr.function === 'count') {
+			// #213 B3: `count(*) as n` / `count(col) as n` is statically
+			// typeable regardless of which select-shape carries it.
+			addCountAggregateColumn(outputColumn);
 		} else {
-			// #213 B1 scope fence: aggregate expressions (`count(*) as n`) are
-			// untypeable regardless of which select-shape carries them — unify
-			// on 'unsupported-aggregate' so the gate's backward-compat message
-			// special-case (keyed on this reason) covers both shapes.
+			// #213 B3 scope fence: every OTHER aggregate expression stays
+			// untypeable — unify on 'unsupported-aggregate' so the gate's
+			// backward-compat message special-case (keyed on this reason)
+			// covers both shapes.
 			let reason: NqlBindingColumnUntypeableReason = 'computed-expression';
 			if (expr.kind === 'relationColumn') reason = 'relation-column';
 			else if (expr.kind === 'aggregate') reason = 'unsupported-aggregate';
