@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.6.0...types-v1.7.0) (2026-07-02)
+
+
+### Features
+
+* **nql:** Generalize read-bind snapshots to aliased, transitive, and count columns ([#218](https://github.com/oorabona/db-semantic-planner/issues/218)) ([0b4b315](https://github.com/oorabona/db-semantic-planner/commit/0b4b315a17427f358aa0f7dd076d0e1b152fdf07))
+
 ## [1.6.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.5.0...types-v1.6.0) (2026-06-20)
 
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.8.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.7.0...adapter-pgsql-v1.8.0) (2026-07-02)
+
+
+### Features
+
+* **nql:** Generalize read-bind snapshots to aliased, transitive, and count columns ([#218](https://github.com/oorabona/db-semantic-planner/issues/218)) ([0b4b315](https://github.com/oorabona/db-semantic-planner/commit/0b4b315a17427f358aa0f7dd076d0e1b152fdf07))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.7.0
+    * @dbsp/types bumped to 1.7.0
+
 ## [1.7.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.6.0...adapter-pgsql-v1.7.0) (2026-06-20)
 
 
