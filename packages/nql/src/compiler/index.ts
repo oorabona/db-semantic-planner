@@ -212,11 +212,14 @@ function classifyReadBindingSnapshotShape(
 		return { supported: true };
 	}
 	const untypeable = outputSchema?.columnTypesUnavailable;
-	// #213 B1 scope fence: aggregates are not typed yet — keep the pre-#213
-	// generic reject message for this shape unchanged (tests lock on this
-	// exact wording), regardless of which select-shape carried the aggregate.
+	// Aggregates other than count are not statically typeable. Keep the
+	// long-standing generic phrase first (callers and tests match on it),
+	// then name the exact column so the user knows what to change.
 	if (untypeable?.reason === 'unsupported-aggregate') {
-		return { supported: false, reason: 'aliased/computed/aggregate columns' };
+		return {
+			supported: false,
+			reason: `aliased/computed/aggregate columns (unsupported aggregate column '${untypeable.column}')`,
+		};
 	}
 	if (untypeable) {
 		return {

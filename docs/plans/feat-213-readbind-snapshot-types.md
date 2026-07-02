@@ -206,7 +206,14 @@ aliased/count/transitive output names would not exist on the source. On the
 `SELECT CAST(NULL AS <pgtype>) AS "<col>", ... WHERE false` (exact idiom per
 existing compiler conventions; identifier-quoted names, types via
 `validateTypeName`). The `FROM <source>`-anchored form remains ONLY on the
-model-walk fallback path (#186 shapes — byte-identical SQL preserved there).
+model-walk fallback path — i.e. bindings whose schema carries NO
+`columnTypes` (untyped `select *` without a validator, hand-built bundles).
+Since every compiler-produced binding — including mutation-RETURNING binds
+with plain fields — now carries `columnTypes`, the typed synthetic anchor is
+the normal emission for ALL supported shapes; pre-existing SQL-shape asserts
+and doc examples were updated accordingly. (Amended post-implementation: the
+draft's "mutation bindings keep the FROM-source anchor byte-identical" held
+only until transitive chaining typed them too.)
 
 **Injection surface (security):** `columnTypes` values flow into SQL as cast
 targets in BOTH the VALUES rows (`$N::<type>`) and the synthetic anchor
@@ -345,3 +352,15 @@ Perspectives applied: 5/5 · Challenges: 9 · Spec amended: 7 (A1-A7, A9) · Def
 | M | S11 (§4) and B2 (§5) still required aliased-RETURNING SUCCESS — inconsistent with the fallback | S11 rewritten as fail-loud assertion; B2 exit criteria updated |
 
 Remaining verdict-drivers exhausted: the aliased-RETURNING surface is now fully fail-loud (no success path specced), which was the sole S-carrier of rounds 2-3. Reality audit (§2.5 stage) carries the two open verification questions (grammar acceptance; execution behavior today).
+
+## §10 Post-implementation review ledger
+
+Cross-family catch-all (codex, single exhaustive pass on the full cumulative diff) + structural senior pass. Verdicts: codex S:0 M:1 L:1 · senior 0 blocking, 3 low.
+
+| Sev | Finding | Disposition |
+|-----|---------|-------------|
+| M | Typed anchor applies to previously-supported shapes too: when a model column lacks `originalDbType` (shorthand schemas), the zero-row CTE type comes from the neutral mapping instead of the live table's exact type | REJECTED with rationale: the DATA path (`$N::type` VALUES casts) has imposed neutral-mapped types on every materialized row since the mutation-binding machinery landed — the anchor now matches the params instead of diverging from them; introspected and `dbType`-annotated schemas carry `originalDbType` and are unaffected; the delta is confined to zero-row result-type metadata. Restoring the table-derived anchor for "proven direct" shapes would reintroduce a dual emission path plus a name-collision mis-typing hazard for no data-path gain. Both reviewers assessed the same surface; the structural pass judged it "equivalent, none functional". |
+| L | Snapshot gate discarded the offending column name on the unsupported-aggregate reject | FIXED — the legacy phrase is kept (locked by tests) and the exact column is appended |
+| L | §3.4's draft claim "mutation bindings keep the FROM-source anchor byte-identical" went stale once transitive chaining typed mutation-RETURNING binds | FIXED — §3.4 amended; the FROM-source anchor is now scoped to genuinely untyped schemas only |
+| L | Transitive lookup vs DB-casing divergence (hypothetical) | NOTED — fail-safe by construction: a lookup miss yields `unresolvable-source` reject, never a mis-type |
+| L | Adapter injection tests mutate a shared schema object with try/finally restore | NOTED — safe under Vitest sequential-per-file execution; accepted pattern |
