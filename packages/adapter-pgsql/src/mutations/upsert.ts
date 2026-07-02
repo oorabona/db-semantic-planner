@@ -9,7 +9,7 @@
  * - WHERE clause for conflict resolution
  */
 
-import type { WhereIntent } from '@dbsp/types';
+import type { MutationReturningItem, WhereIntent } from '@dbsp/types';
 import type { InferClause, Node, OnConflictClause } from '@pgsql/types';
 import { columnRef, funcCall } from '../ast-helpers.js';
 import {
@@ -76,6 +76,8 @@ export interface UpsertConfig {
 	useExcluded?: boolean;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 	/** Optional column type hints for unnest casting (schema-driven) */
 	columnTypes?: Record<string, string>;
 	/**
@@ -252,7 +254,12 @@ export function compileUpsert(
 	const onConflict = buildOnConflictClause(config, ctx, state);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, dbTable, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		dbTable,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build INSERT statement with ON CONFLICT
 	return {
@@ -343,7 +350,12 @@ export function compileUnnestUpsert(
 	const onConflict = buildOnConflictClause(config, ctx, state);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, dbTable, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		dbTable,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build INSERT INTO "table" ("col1", "col2") <selectQuery> ON CONFLICT ...
 	return {

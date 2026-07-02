@@ -710,6 +710,74 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql ?? '').not.toContain(payload);
 	});
 
+	it('resolves aliased mutation RETURNING runtime-binding CTE types through the source column (#217)', () => {
+		const aliasedMutation: UpdateIntent = {
+			type: 'update',
+			table: 'items',
+			set: { name: 'unused' },
+			allowAll: true,
+			returning: ['label'],
+			returningItems: [{ source: 'name', output: 'label' }],
+		};
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'aliased',
+				select: {
+					type: 'fields',
+					fields: ['label'],
+				},
+			},
+			runtimeBindings: new Map([
+				['aliased', { columns: ['label'], rows: [{ label: 'ok' }] }],
+			]),
+			mutationBindings: new Map([['aliased', aliasedMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "aliased" ("label") as (SELECT "name" FROM "items" WHERE false UNION ALL VALUES ($1::text))',
+		);
+		expect(params).toEqual(['ok']);
+	});
+
+	it('rejects a runtime binding whose columns collide after database naming (#217)', () => {
+		const forgedMutation: UpdateIntent = {
+			type: 'update',
+			table: 'items',
+			set: { name: 'unused' },
+			allowAll: true,
+			returning: ['userId', 'user_id'],
+			returningItems: [
+				{ source: 'name', output: 'userId' },
+				{ source: 'name', output: 'user_id' },
+			],
+		};
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'clash',
+				select: {
+					type: 'fields',
+					fields: ['userId', 'user_id'],
+				},
+			},
+			runtimeBindings: new Map([
+				['clash', { columns: ['userId', 'user_id'], rows: [] }],
+			]),
+			mutationBindings: new Map([['clash', forgedMutation]]),
+		};
+
+		const { error } = tryCompileNqlBundle(bundle, { dbCasing: 'snake_case' });
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			'duplicate column names after database naming',
+		);
+	});
+
 	it('keeps the model-walk source-table anchor byte-identical to pre-#213 SQL when columnTypes is absent (regression lock)', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {

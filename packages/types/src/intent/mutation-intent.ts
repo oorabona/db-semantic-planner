@@ -11,6 +11,14 @@ import type { WhereIntent } from './where-intent.js';
 // Mutation Intents - Insert, Update, Delete (DX-010)
 // ============================================================================
 
+/** Alias-aware RETURNING projection: emitted as `"source" AS "output"`. */
+export interface MutationReturningItem {
+	/** Physical column on the mutation's table. */
+	readonly source: string;
+	/** Result field name: alias when present, otherwise the source name. */
+	readonly output: string;
+}
+
 /**
  * Insert intent - insert one or more rows into a table.
  * @example { type: 'insert', table: 'users', values: [{ name: 'Alice' }] }
@@ -30,6 +38,9 @@ export interface InsertIntent {
 	 * @example ['id', 'created_at']
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -63,6 +74,9 @@ export interface InsertFromIntent {
 	 * @example ['id', 'created_at']
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -99,6 +113,9 @@ export interface UpsertFromIntent {
 	 * Requires adapter capability: supportsReturning
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -126,6 +143,9 @@ export interface UpdateIntent {
 	 * @example ['id', 'updated_at']
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -158,6 +178,9 @@ export interface DeleteIntent {
 	 * @example ['id', 'email']
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -223,6 +246,9 @@ export interface UpsertIntent {
 	 * @example ['id', 'created_at', 'updated_at']
 	 */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -252,6 +278,9 @@ export interface BatchUpdateIntent {
 
 	/** Columns to return from updated rows (RETURNING clause) */
 	readonly returning?: readonly string[];
+
+	/** Alias-aware RETURNING projection items, present only when aliases are needed. */
+	readonly returningItems?: readonly MutationReturningItem[];
 
 	/** Optional WHERE guard applied in addition to match columns (e.g., AND EXISTS(...)) */
 	readonly where?: WhereIntent;

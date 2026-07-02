@@ -53,6 +53,7 @@ export type {
 
 import type {
 	MutationIntent,
+	MutationReturningItem,
 	NqlBindingOutputSchema,
 	NqlProgramSequenceStep,
 	QueryIntent,
@@ -171,6 +172,16 @@ function stringArraysEqual(
 	return (
 		left.length === right.length &&
 		left.every((value, index) => value === right[index])
+	);
+}
+
+function mutationReturningItemsMatchReturning(
+	returning: readonly string[],
+	returningItems: readonly MutationReturningItem[],
+): boolean {
+	return (
+		returningItems.length === returning.length &&
+		returningItems.every((item, index) => item.output === returning[index])
 	);
 }
 
@@ -825,13 +836,74 @@ export class NqlCompiler {
 			mutation,
 		);
 		const returning = mutation.returning;
+		const returningItems = mutation.returningItems;
 		if (
 			returning === undefined ||
 			returning.length === 0 ||
 			returning.includes('*') ||
-			outputSchema === undefined ||
-			stringArraysEqual(returning, outputSchema.columns)
+			outputSchema === undefined
 		) {
+			return { mutation, outputSchema };
+		}
+
+		// Canonicalization can COLLAPSE distinct raw spellings onto one model
+		// column (`user_id` and `userId` both resolve to `userId`), creating
+		// duplicates the raw-extraction guard could not see (#217).
+		const seenOutputs = new Set<string>();
+		for (const column of outputSchema.columns) {
+			if (seenOutputs.has(column)) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`Mutation RETURNING resolves to duplicate output name '${column}' after column canonicalization for binding '${bindName}'.`,
+				);
+			}
+			seenOutputs.add(column);
+		}
+
+		if (returningItems !== undefined) {
+			const internalItems =
+				this.ctx.lastMutationReturningItems !== undefined &&
+				this.ctx.lastMutationReturningItems !== 'star'
+					? this.ctx.lastMutationReturningItems
+					: undefined;
+			const canonicalItems = returningItems.map((item, index) => {
+				const source =
+					this.ctx.validator?.resolveColumnName(mutation.table, item.source) ??
+					item.source;
+				const internalItem = internalItems?.[index];
+				const output = internalItem?.aliased ? item.output : source;
+				return source === item.source && output === item.output
+					? item
+					: { source, output };
+			});
+			if (
+				!mutationReturningItemsMatchReturning(
+					outputSchema.columns,
+					canonicalItems,
+				)
+			) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					`Mutation RETURNING item outputs drifted during canonicalization for binding '${bindName}'.`,
+				);
+			}
+			if (
+				stringArraysEqual(returning, outputSchema.columns) &&
+				canonicalItems.every((item, index) => item === returningItems[index])
+			) {
+				return { mutation, outputSchema };
+			}
+			return {
+				mutation: {
+					...mutation,
+					returning: outputSchema.columns,
+					returningItems: canonicalItems,
+				} as MutationIntent,
+				outputSchema,
+			};
+		}
+
+		if (stringArraysEqual(returning, outputSchema.columns)) {
 			return { mutation, outputSchema };
 		}
 		return {
@@ -867,6 +939,24 @@ export class NqlCompiler {
 			(column) =>
 				this.ctx.validator?.resolveColumnName(mutation.table, column) ?? column,
 		);
+		const returningItems = mutation.returningItems;
+		if (returningItems !== undefined) {
+			const internalItems =
+				this.ctx.lastMutationReturningItems !== undefined &&
+				this.ctx.lastMutationReturningItems !== 'star'
+					? this.ctx.lastMutationReturningItems
+					: undefined;
+			const columns = returningItems.map((item, index) => {
+				const source =
+					this.ctx.validator?.resolveColumnName(mutation.table, item.source) ??
+					item.source;
+				return internalItems?.[index]?.aliased ? item.output : source;
+			});
+			return {
+				columns,
+				...this.buildMutationReturningColumnTypes(mutation.table, columns),
+			};
+		}
 		return {
 			columns,
 			...this.buildMutationReturningColumnTypes(mutation.table, columns),

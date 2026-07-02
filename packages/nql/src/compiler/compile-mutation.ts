@@ -23,6 +23,7 @@ import type {
 } from '@dbsp/types';
 import { isParamIntent } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
+import { NqlErrorCodes, NqlSemanticException } from '../errors/types.js';
 import type {
 	NqlDelete,
 	NqlExpression,
@@ -69,6 +70,13 @@ export function compileMutationPipeline(
 
 	const mutation = compileMutation(pipeline.mutation, ctx, fns, bindings);
 
+	// RETURNING always projects the mutation's TARGET table. insert-from /
+	// upsert-from compilation repoints currentFromTable at the SOURCE for
+	// their WHERE clauses — restore the target before extracting RETURNING
+	// so source validation and alias sources resolve against the emitted
+	// table (#217).
+	ctx.currentFromTable = pipeline.mutation.table;
+
 	// Extract RETURNING from select clauses
 	let returning: readonly string[] | undefined;
 	let returningItems: readonly ReturningColumnInfo[] | 'star' | undefined;
@@ -88,8 +96,23 @@ export function compileMutationPipeline(
 	ctx.lastMutationReturningItems = returningItems;
 
 	if (returning) {
+		const aliasAwareReturningItems =
+			returningItems !== undefined &&
+			returningItems !== 'star' &&
+			returningItems.some((item) => item.aliased)
+				? returningItems.map((item) => ({
+						source: item.source,
+						output: item.output,
+					}))
+				: undefined;
 		return {
-			mutation: { ...mutation, returning } as MutationIntent,
+			mutation: {
+				...mutation,
+				returning,
+				...(aliasAwareReturningItems !== undefined && {
+					returningItems: aliasAwareReturningItems,
+				}),
+			} as MutationIntent,
 		};
 	}
 
@@ -350,20 +373,43 @@ function extractReturningItems(
 	ctx: CompilerContext,
 ): readonly ReturningColumnInfo[] | 'star' {
 	const items: ReturningColumnInfo[] = [];
+	const outputs = new Set<string>();
 
 	for (const item of clause.items) {
 		if (item.type === 'star') {
+			if (clause.items.length > 1) {
+				throw new NqlSemanticException(
+					NqlErrorCodes.SEM_INVALID_SYNTAX,
+					'Mutation RETURNING cannot mix `select *` with explicit projection items.',
+				);
+			}
 			return 'star';
 		}
 		if (item.type === 'expression') {
 			const field = expressionToField(item.expression);
 			if (field) {
+				const aliased = item.alias !== undefined;
+				if (aliased && field.includes('.')) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`Mutation RETURNING alias cannot use dotted source '${field}'.`,
+					);
+				}
 				if (ctx.currentFromTable && !field.includes('.')) {
 					ctx.validator?.validateColumn(ctx.currentFromTable, field);
 				}
+				const output = item.alias ?? field;
+				if (outputs.has(output)) {
+					throw new NqlSemanticException(
+						NqlErrorCodes.SEM_INVALID_SYNTAX,
+						`Mutation RETURNING has duplicate output name '${output}'.`,
+					);
+				}
+				outputs.add(output);
 				items.push({
-					output: item.alias ?? field,
-					aliased: item.alias !== undefined,
+					source: field,
+					output,
+					aliased,
 				});
 			}
 		}

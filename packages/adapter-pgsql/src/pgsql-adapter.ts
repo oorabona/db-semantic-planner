@@ -42,6 +42,7 @@ import type {
 	InsertFromIntent,
 	InsertIntent,
 	ModelIR,
+	MutationReturningItem,
 	NqlBindingColumnTypeInfo,
 	NqlRuntimeBinding,
 	PlanReport,
@@ -536,13 +537,38 @@ function compileNqlRuntimeBindingCte(
 	sourceTable: string | undefined,
 	schemaName: string | undefined,
 	model: ModelIR | undefined,
+	returningItems?: readonly MutationReturningItem[],
 ): { cte: string; parameters: readonly unknown[] } {
+	// #217: an aliased mutation RETURNING projects OUTPUT names that are not
+	// physical columns of the source table. The CTE header (columnSql) names
+	// the outputs positionally, so the source-table anchor and the type walk
+	// both resolve through the SOURCE column of each output instead.
+	if (returningItems !== undefined) {
+		if (
+			returningItems.length !== binding.columns.length ||
+			returningItems.some((item, i) => item.output !== binding.columns[i])
+		) {
+			throw new Error(
+				`NQL runtime binding '${name}' has returningItems desynced from its projected columns.`,
+			);
+		}
+	}
+	const sourceColumnFor = (output: string): string =>
+		returningItems?.find((item) => item.output === output)?.source ?? output;
 	if (binding.columns.length === 0) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot be materialized without projected columns.`,
 		);
 	}
 	const cteName = quoteIdent(emittedBindName(name, naming), 'alias');
+	const emittedColumnNames = binding.columns.map((column) =>
+		naming.toDatabase(column),
+	);
+	if (new Set(emittedColumnNames).size !== emittedColumnNames.length) {
+		throw new Error(
+			`NQL runtime binding '${name}' emits duplicate column names after database naming.`,
+		);
+	}
 	const columnSql = binding.columns
 		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
 		.join(', ');
@@ -569,7 +595,9 @@ function compileNqlRuntimeBindingCte(
 		);
 	}
 	const projectedColumns = binding.columns
-		.map((column) => quoteIdent(naming.toDatabase(column), 'column'))
+		.map((column) =>
+			quoteIdent(naming.toDatabase(sourceColumnFor(column)), 'column'),
+		)
 		.join(', ');
 	const sourceAnchorSql = `SELECT ${projectedColumns} FROM ${qualifyTableIdent(sourceTable, schemaName, naming)} WHERE false`;
 	if (binding.rows.length === 0) {
@@ -582,7 +610,7 @@ function compileNqlRuntimeBindingCte(
 
 	const columnTypes = resolveRuntimeBindingColumnTypes(
 		name,
-		binding,
+		{ ...binding, columns: binding.columns.map(sourceColumnFor) },
 		model,
 		sourceTable,
 	);
@@ -954,6 +982,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					runtimeBindingSourceTable(bundle, name),
 					deps.schemaName,
 					deps.model,
+					bundle.mutationBindings?.get(name)?.returningItems,
 				);
 				ctes.push(compiledRuntimeBinding.cte);
 				parameters.push(...compiledRuntimeBinding.parameters);
