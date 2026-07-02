@@ -12,6 +12,7 @@ import {
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_VALUE_FUNCTIONS,
 	type NqlBindingColumnLineage,
+	type NqlBindingColumnTypeInfo,
 	type NqlBindingColumnUntypeableReason,
 	type NqlBindingOutputSchema,
 	type NqlBindingRelationFilterMetadata,
@@ -1383,17 +1384,22 @@ export function getQueryOutputSchema(
 	ctx: CompilerContext,
 	bindingName: string,
 	bindingDependencies: readonly string[] = [],
+	sourceBindingSchemas?: ReadonlyMap<string, NqlBindingOutputSchema>,
 ): NqlBindingOutputSchema {
 	const columns: string[] = [];
 	const seen = new Set<string>();
 	const directProjectionLineage: NqlBindingColumnLineage[] = [];
 	const typeCandidates: BindingColumnTypeCandidate[] = [];
-	// #213 B1 scope fence: only DIRECT projections off a PHYSICAL source table
-	// are typed. A binding-sourced `from` (transitive) stays untypeable here —
-	// the gate's `sourceWasBinding` check rejects it with its own message
-	// before ever consulting columnTypesUnavailable.
 	const sourceIsPhysicalTable =
 		ctx.validator?.hasPhysicalTable(intent.from) ?? false;
+	// #213 B2: when `from` is itself a binding (transitive chain), resolve
+	// its REGISTERED output schema (fed by `registerQueryBindingOutputSchema`
+	// in program-statement order, so a later binding always sees an earlier
+	// one) — chain per-column types through it rather than re-deriving from
+	// the ultimate source table.
+	const sourceBindingSchema = sourceIsPhysicalTable
+		? undefined
+		: sourceBindingSchemas?.get(intent.from);
 	const addColumn = (column: string) => addUnique(columns, seen, column);
 	const resolveSourceColumn = (column: string) =>
 		ctx.validator?.resolveColumnName(intent.from, column) ?? column;
@@ -1403,13 +1409,26 @@ export function getQueryOutputSchema(
 		// duplicate output name (second `addColumn` call returning false) is
 		// still visible to buildBindingColumnTypes as a second candidate for
 		// the same column — the existing dedup silently drops it otherwise.
-		const typeInfo = sourceIsPhysicalTable
-			? ctx.validator?.getTableColumnType(intent.from, resolvedSourceColumn)
-			: undefined;
+		let typeInfo: NqlBindingColumnTypeInfo | undefined;
+		let untypeableReason: NqlBindingColumnUntypeableReason =
+			'unresolvable-source';
+		if (sourceIsPhysicalTable) {
+			typeInfo = ctx.validator?.getTableColumnType(
+				intent.from,
+				resolvedSourceColumn,
+			);
+		} else if (sourceBindingSchema?.columnTypes) {
+			typeInfo = sourceBindingSchema.columnTypes[resolvedSourceColumn];
+		} else if (sourceBindingSchema?.columnTypesUnavailable) {
+			// Chain broke because the SOURCE binding is itself untypeable —
+			// surface ITS reason (e.g. 'aliased-returning', 'computed-expression')
+			// rather than a generic wrapper, so the root cause stays visible.
+			untypeableReason = sourceBindingSchema.columnTypesUnavailable.reason;
+		}
 		typeCandidates.push(
 			typeInfo !== undefined
 				? { column: outputColumn, typed: typeInfo }
-				: { column: outputColumn, untypeable: 'unresolvable-source' },
+				: { column: outputColumn, untypeable: untypeableReason },
 		);
 		if (!addColumn(outputColumn)) return;
 		directProjectionLineage.push({

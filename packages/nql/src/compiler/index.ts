@@ -70,6 +70,10 @@ import type {
 } from '../parser/ast.js';
 
 // Domain modules
+import {
+	type BindingColumnTypeCandidate,
+	buildBindingColumnTypes,
+} from './binding-column-types.js';
 import { ColumnValidator } from './column-validator.js';
 import { compileWithQuery } from './compile-cte.js';
 import { compileExpression, MAX_ANY_ITEMS } from './compile-expression.js';
@@ -189,10 +193,16 @@ function classifyReadBindingSnapshotShape(
 	sourceWasBinding: boolean,
 	outputSchema: NqlBindingOutputSchema | undefined,
 ): ReadBindingSnapshotShape {
-	if (sourceWasBinding) {
-		return { supported: false, reason: 'a binding source' };
-	}
-	if (ctx.validator?.getPhysicalTableColumns(query.from) === undefined) {
+	// #213 B2: a binding-sourced `from` no longer short-circuits to the
+	// generic 'a binding source' message — its OWN schema may now carry
+	// columnTypes (chained through the source binding's registered schema)
+	// or a PROPAGATED untypeable reason. The physical-table-existence check
+	// only makes sense for a non-binding source (a binding name is never a
+	// physical table).
+	if (
+		!sourceWasBinding &&
+		ctx.validator?.getPhysicalTableColumns(query.from) === undefined
+	) {
 		return {
 			supported: false,
 			reason: `no physical model table source '${query.from}'`,
@@ -213,6 +223,12 @@ function classifyReadBindingSnapshotShape(
 			supported: false,
 			reason: `${untypeable.reason} column '${untypeable.column}'`,
 		};
+	}
+	// Legacy wording — reachable ONLY when the binding source produced no
+	// schema at all (e.g. an untyped `select *` with no validator), so no
+	// more specific reason exists to surface.
+	if (sourceWasBinding) {
+		return { supported: false, reason: 'a binding source' };
 	}
 	return { supported: false, reason: 'aliased/computed/aggregate columns' };
 }
@@ -540,6 +556,7 @@ export class NqlCompiler {
 		} finally {
 			this.ctx.bindingOutputColumns.clear();
 			this.ctx.bindingRelationFilters.clear();
+			this.ctx.lastMutationReturningItems = undefined;
 			this.ctx.validator?.clearVirtualBindingTables();
 		}
 	}
@@ -766,6 +783,11 @@ export class NqlCompiler {
 				this.ctx,
 				bindName,
 				bindingDependencies,
+				// #213 B2: earlier bindings are already registered here (this
+				// map is populated in program-statement order), so a
+				// transitive `from` = binding chains through the SOURCE's
+				// typed schema instead of staying untypeable.
+				bindingOutputSchemas,
 			);
 			bindingOutputSchemas.set(bindName, outputSchema);
 			this.ctx.bindingOutputColumns.set(bindName, outputSchema.columns);
@@ -826,20 +848,58 @@ export class NqlCompiler {
 		if (!returning || returning.length === 0) return undefined;
 		if (returning.includes('*')) {
 			const columns = this.ctx.validator?.getTableColumns(mutation.table);
-			if (columns !== undefined) return { columns };
+			if (columns !== undefined) {
+				return {
+					columns,
+					...this.buildMutationReturningColumnTypes(mutation.table, columns),
+				};
+			}
 			if (!this.ctx.validator) return undefined;
 			throw new NqlSemanticException(
 				NqlErrorCodes.SEM_INVALID_SYNTAX,
 				`Cannot compute output schema for NQL binding '${bindName}' from mutation RETURNING * on '${mutation.table}' without a concrete table schema.`,
 			);
 		}
+		const columns = returning.map(
+			(column) =>
+				this.ctx.validator?.resolveColumnName(mutation.table, column) ?? column,
+		);
 		return {
-			columns: returning.map(
-				(column) =>
-					this.ctx.validator?.resolveColumnName(mutation.table, column) ??
-					column,
-			),
+			columns,
+			...this.buildMutationReturningColumnTypes(mutation.table, columns),
 		};
+	}
+
+	/**
+	 * Build `columnTypes`/`columnTypesUnavailable` for a mutation-RETURNING
+	 * binding. #213 B2: detection consumes `ctx.lastMutationReturningItems`
+	 * (alias-aware, positional) — NEVER the collapsed `columns` names — so an
+	 * alias colliding with a real column (`returning email as name`) is
+	 * flagged 'aliased-returning' rather than silently mistyped as the
+	 * colliding column's type.
+	 */
+	private buildMutationReturningColumnTypes(
+		table: string,
+		columns: readonly string[],
+	): Pick<NqlBindingOutputSchema, 'columnTypes' | 'columnTypesUnavailable'> {
+		const items = this.ctx.lastMutationReturningItems;
+		const candidates: BindingColumnTypeCandidate[] = columns.map(
+			(column, index) => {
+				const item =
+					items !== undefined && items !== 'star' ? items[index] : undefined;
+				if (item?.aliased) {
+					return { column, untypeable: 'aliased-returning' };
+				}
+				const typeInfo = this.ctx.validator?.getTableColumnType(table, column);
+				return typeInfo !== undefined
+					? { column, typed: typeInfo }
+					: { column, untypeable: 'unresolvable-source' };
+			},
+		);
+		const typesResult = buildBindingColumnTypes(columns, candidates);
+		return 'columnTypes' in typesResult
+			? { columnTypes: typesResult.columnTypes }
+			: { columnTypesUnavailable: typesResult.untypeable };
 	}
 
 	private compileSingleStatement(

@@ -701,12 +701,6 @@ describe('F17: read binding references across mutations', () => {
 
 	it.each([
 		[
-			'binding source',
-			'ids',
-			'a binding source',
-			'users | select id | bind created\ncreated | select id | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
-		],
-		[
 			'aggregate column',
 			'counts',
 			'aliased/computed/aggregate columns',
@@ -718,6 +712,25 @@ describe('F17: read binding references across mutations', () => {
 				`unsupported snapshot shape \\(#186\\).*binding '${bindName}' has ${reason}`,
 			),
 		);
+	});
+
+	it('snapshots a read binding transitively sourced from another binding (#213)', () => {
+		const result = compile(
+			'users | select id | bind created\ncreated | select id | bind ids\nupdate users set active = false where id = 1 | select id | bind changed\nusers | where id in (ids) | select id',
+			snapshotSchema,
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.bindingOutputSchemas?.get('ids')?.columnTypes).toEqual({
+			id: { kind: 'column', type: 'integer' },
+		});
+		expect(
+			result.ast?.nqlProgramSequence?.find((step) => step.bindName === 'ids'),
+		).toMatchObject({
+			kind: 'query',
+			bindName: 'ids',
+			snapshot: true,
+		});
 	});
 
 	it('snapshots an aliased-column read binding referenced after an intervening mutation (#213)', () => {

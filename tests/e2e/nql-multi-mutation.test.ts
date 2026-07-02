@@ -44,7 +44,7 @@ update posts set published = ${true} where id in (new_post) | select id`;
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sequence?.[1]?.sql).toContain(
-			`WITH "new_post" ("id") as (SELECT "id" FROM "${SCHEMA}"."posts" WHERE false)`,
+			'WITH "new_post" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
 		);
 		expect(dump.sequence?.[1]?.sql).not.toMatch(
 			/WITH "new_post"\s+as\s+\(\s*insert/i,
@@ -73,7 +73,7 @@ update posts set title = ${'empty binding should not update'} where id in (touch
 
 		expect(dump.sequence).toHaveLength(2);
 		expect(dump.sequence?.[1]?.sql).toContain(
-			`WITH "touched_posts" ("id") as (SELECT "id" FROM "${SCHEMA}"."posts" WHERE false)`,
+			'WITH "touched_posts" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
 		);
 		expect(dump.sequence?.[1]?.sql).not.toContain('NULL::');
 		expect(dump.sequence?.[1]?.sql).not.toContain('VALUES (NULL)');
@@ -287,5 +287,108 @@ update posts set authorId = ${999999} where id in (new_post) | select id`.all(),
 			WHERE id = ${9101}
 		`.execute(pool);
 		expect(persisted.rows).toEqual([{ count: '0' }]);
+	});
+
+	it('snapshots a transitive read-bind chained from another read-bind across a mutation (#213 S2)', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9500}, ${'S2 before'}, ${'S2 fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const program = orm.nql<{
+			title: string;
+		}>`posts | where id = ${9500} | select id, title | bind b1
+b1 | select title | bind b2
+update posts set title = ${'CHANGED'} where id = ${9500} | select id | bind changed
+b2 | select title`;
+		const dump = program.dump();
+		const rows = await program.all();
+
+		expect(rows).toEqual([{ title: 'S2 before' }]);
+		// b2's snapshot-capture statement embeds b1's CTE (read-bind CTEs
+		// always emit — #173) — b2 is chained FROM b1, never re-derived from
+		// the physical `posts` table directly.
+		const b2Step = dump.sequence?.find((step) => step.bindName === 'b2');
+		expect(b2Step?.sql).toContain('"b1"');
+
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9500}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'CHANGED' }]);
+	});
+
+	it('keeps a transitive read-bind chain inline when it never crosses a mutation (#213 S2 sibling)', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9501}, ${'S2 sibling inline'}, ${'S2 sibling fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		// Same b1 -> b2 read-bind chain as S2, but with NO trailing cross-
+		// mutation reference to b2 — the conditional snapshot path stays
+		// OFF, and the chain compiles/executes inline (never a typed empty
+		// anchor CTE).
+		const program = orm.nql<{
+			title: string;
+		}>`posts | where id = ${9501} | select id, title | bind b1
+b1 | select title | bind b2
+b2 | select title | bind b2_check
+update posts set title = ${'noop'} where id = ${9501} | select id`;
+		const dump = program.dump();
+		const rows = await program.all();
+
+		const allSql = (dump.sequence ?? []).map((step) => step.sql).join('\n');
+		expect(allSql).not.toContain('CAST(NULL AS');
+		expect(rows).toEqual([{ id: 9501 }]);
+	});
+
+	it('snapshots a transitive read-bind chained from a mutation-RETURNING bind across a mutation (#213 S3)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const program = orm.nql<{
+			title: string;
+		}>`insert into posts set id = ${9600}, title = ${'S3 first'}, content = ${'S3 fixture'}, authorId = ${1}, published = ${false} | select id, title | bind m
+m | select title | bind b
+update posts set title = ${'S3 second'} where id = ${9600} | select id | bind changed
+b | select title`;
+		const rows = await program.all();
+
+		// b reflects the FIRST mutation's RETURNING rows, not the second
+		// mutation's effect.
+		expect(rows).toEqual([{ title: 'S3 first' }]);
+
+		const pool = await getTestPool();
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9600}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'S3 second' }]);
+	});
+
+	it('rejects a transitive snapshot sourced from an aliased mutation-RETURNING binding (#213 S11)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		// #217: executing a reference to an ALIASED mutation-RETURNING bind is
+		// broken upstream — this never reaches execution because the SNAPSHOT
+		// GATE rejects 'b' at NQL-compile time (before any adapter/execute
+		// call), naming the propagated 'aliased-returning' reason.
+		await expect(
+			orm.nql`insert into posts set id = ${9700}, title = ${'S11'}, content = ${'S11 fixture'}, authorId = ${1}, published = ${false} | select title as who | bind m
+m | select who | bind b
+update posts set title = ${'S11 changed'} where id = ${9700} | select id | bind changed
+b | select who`.all(),
+		).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*binding 'b' has aliased-returning column 'who'/,
+		);
 	});
 });
