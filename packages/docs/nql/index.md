@@ -1740,9 +1740,9 @@ console.log(archivedDrafts.sql);
 console.log(archivedDrafts.parameters);
 ```
 
-A tag program can also contain ordered mutations. A non-final mutation may end with `| bind <name>` when it includes a `| select ...` returning projection. During execution, each mutation runs in source order inside one adapter transaction; each mutation fires its own `beforeMutation` and `afterMutation` hooks. Rows returned by a bound mutation feed later statements as a standard SQL CTE, for example `WITH "created_user" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES (...))`. This is not a PostgreSQL writable CTE; NQL executes the mutation first, then materializes its returned rows for subsequent statements.
+A tag program can also contain ordered mutations. A non-final mutation may end with `| bind <name>` when it includes a `| select ...` returning projection. During execution, each mutation runs in source order inside one adapter transaction; each mutation fires its own `beforeMutation` and `afterMutation` hooks. Rows returned by a bound mutation feed later statements as a standard SQL CTE, for example `WITH "created_user" ("id") as (SELECT CAST(NULL AS uuid) AS "id" WHERE false UNION ALL VALUES (...))`. Each column is cast to its type from the model schema, so the CTE stays correctly typed even when zero rows come back. This is not a PostgreSQL writable CTE; NQL executes the mutation first, then materializes its returned rows for subsequent statements.
 
-Use `.dump()` to inspect the compile-only statement sequence. Since `.dump()` does not execute the bound mutation, each empty runtime binding is emitted as a table-derived empty relation such as `WITH "created_user" ("id") as (SELECT "id" FROM "users" WHERE false)`:
+Use `.dump()` to inspect the compile-only statement sequence. Since `.dump()` does not execute the bound mutation, each empty runtime binding is emitted as a typed empty relation such as `WITH "created_user" ("id") as (SELECT CAST(NULL AS uuid) AS "id" WHERE false)`:
 
 ```typescript
 const mutationBindingDb = schema({
@@ -1783,7 +1783,7 @@ if (
 
 const updateSql = orderedMutationProgram.sequence[1]?.sql ?? '';
 const finalSql = orderedMutationProgram.sequence[2]?.sql ?? '';
-const emptyUserIdRelation = 'SELECT "id" FROM "users" WHERE false';
+const emptyUserIdRelation = 'SELECT CAST(NULL AS uuid) AS "id" WHERE false';
 const writableMutationCte = /WITH "(?:created_user|activated_user)"\s+\("id"\)\s+as\s+\(\s*insert/i;
 
 if (
@@ -1911,8 +1911,57 @@ Constraints to rely on:
 - Binding names must be unique within one NQL program.
 - A bound mutation must include `| select ...` / `RETURNING` so it produces a referenceable result.
 - Later statements may reference only columns projected by the bound query or mutation.
-- Bound mutation rows are materialized for later statements as standard SQL CTEs: runtime rows use `SELECT <projected columns> FROM <source table> WHERE false UNION ALL VALUES (...)`, while compile-only empty bindings use only the `SELECT <projected columns> FROM <source table> WHERE false` branch. PostgreSQL derives binding column types from the real table. They are not PostgreSQL writable CTEs.
+- Bound mutation rows are materialized for later statements as standard SQL CTEs: runtime rows use `SELECT CAST(NULL AS <type>) AS "<column>", ... WHERE false UNION ALL VALUES (...)`, while compile-only empty bindings use only the typed `SELECT CAST(NULL AS <type>) AS "<column>", ... WHERE false` branch. Column types come from the model schema, so the CTE is correctly typed even with zero rows. They are not PostgreSQL writable CTEs.
 - Where-less NQL `update` and `delete` fail unless the compiler is explicitly configured with `allowUnfilteredMutations`.
+- A read-only binding referenced **after** an intervening mutation is snapshotted: it executes once at its source position (before the mutation), and later references see the pre-mutation rows.
+
+#### Snapshot semantics across an intervening mutation
+
+When a read-only `| bind` is referenced after a mutation in the same program, NQL materializes it as a pre-mutation snapshot instead of re-evaluating it inline (which would observe the mutation's effects — a read-after-write drift). Snapshotting requires every projected column's type to be statically resolvable, because the captured rows are re-injected as typed SQL values.
+
+Supported shapes: direct physical columns, aliased columns (`select name as n`), transitive chains (a binding built `from` another binding — read or mutation-RETURNING source), and `count(*)` / `count(col)` aggregates. Computed expressions (arithmetic, function calls, CASE) and other aggregates (`sum`, `avg`, `min`, `max`) are rejected at compile time with an `unsupported snapshot shape (#186)` error naming the offending column — move the reference before the mutation, or bind the mutation's RETURNING result instead.
+
+```typescript
+const snapshotDb = schema({
+  users: {
+    id: { type: 'uuid', primaryKey: true, dbType: 'uuid' },
+    name: 'string',
+    email: 'string',
+  },
+} as const);
+const snapshotOrm = createOrm({
+  schema: snapshotDb,
+  adapter: createPgsqlCompileOnlyAdapter({ model: snapshotDb.model }),
+});
+
+const snapshotProgram = snapshotOrm.nql<unknown>`
+users | select count(*) as total | bind pre_count
+insert into users set name = ${'Alice'}, email = ${'alice@example.com'} | select id | bind created
+pre_count | select total
+`.dump() as {
+  sequence?: ReadonlyArray<{ kind: string; bindName?: string; sql: string }>;
+};
+
+const snapshotFinalSql = snapshotProgram.sequence?.at(-1)?.sql ?? '';
+if (!snapshotFinalSql.includes('CAST(NULL AS bigint) AS "total"')) {
+  throw new Error('expected the count snapshot binding to compile as a typed empty relation');
+}
+
+let unsupportedSnapshotShape = '';
+try {
+  snapshotOrm.nql`
+users | select sum(id) as t | bind pre_sum
+insert into users set name = ${'Bob'}, email = ${'bob@example.com'} | select id | bind created
+pre_sum | select t
+`.dump();
+} catch (error) {
+  unsupportedSnapshotShape = error instanceof Error ? error.message : String(error);
+}
+
+if (!unsupportedSnapshotShape.includes('unsupported snapshot shape (#186)')) {
+  throw new Error(unsupportedSnapshotShape || 'expected the sum snapshot to fail loud');
+}
+```
 
 ---
 
