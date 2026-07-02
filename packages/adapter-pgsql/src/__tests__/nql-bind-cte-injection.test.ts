@@ -497,6 +497,216 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(params).toEqual([]);
 	});
 
+	it('materializes a typed runtime binding via a synthetic NULL anchor, bypassing the source table (#213)', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'aliasedIds',
+				select: {
+					type: 'fields',
+					fields: ['userId'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'aliasedIds',
+					{
+						columns: ['userId'],
+						rows: [{ userId: 1 }, { userId: 2 }],
+						columnTypes: {
+							userId: {
+								kind: 'column',
+								type: 'integer',
+								originalDbType: 'integer',
+							},
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "aliasedIds" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+		);
+		expect(sql).not.toContain('FROM "items"');
+		expect(params).toEqual([1, 2]);
+	});
+
+	it('materializes an empty typed runtime binding via a synthetic NULL anchor (#213)', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'aliasedIds',
+				select: {
+					type: 'fields',
+					fields: ['userId'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'aliasedIds',
+					{
+						columns: ['userId'],
+						rows: [],
+						columnTypes: {
+							userId: { kind: 'column', type: 'integer' },
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "aliasedIds" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false)',
+		);
+		expect(sql).not.toContain('VALUES');
+		expect(params).toEqual([]);
+	});
+
+	it('maps a count-aggregate columnType to bigint (forward-compat; the nql compiler never emits this kind in B1)', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'counts',
+				select: {
+					type: 'fields',
+					fields: ['n'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'counts',
+					{
+						columns: ['n'],
+						rows: [{ n: 3 }],
+						columnTypes: {
+							n: { kind: 'aggregate', fn: 'count' },
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "counts" ("n") as (SELECT CAST(NULL AS bigint) AS "n" WHERE false UNION ALL VALUES ($1::bigint))',
+		);
+		expect(params).toEqual([3]);
+	});
+
+	it('prefers originalDbType over the neutral type mapping on the typed anchor surface', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'names',
+				select: {
+					type: 'fields',
+					fields: ['label'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'names',
+					{
+						columns: ['label'],
+						rows: [{ label: 'ok' }],
+						columnTypes: {
+							label: {
+								kind: 'column',
+								type: 'string',
+								originalDbType: 'varchar(255)',
+							},
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain('CAST(NULL AS varchar(255)) AS "label"');
+		expect(sql).toContain('$1::varchar(255)');
+		expect(params).toEqual(['ok']);
+	});
+
+	it('rejects a hostile originalDbType carried via columnTypes before SQL emission (typed anchor surface, #213)', () => {
+		const payload = 'integer); DROP TABLE users; --';
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'aliasedIds',
+				select: {
+					type: 'fields',
+					fields: ['userId'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'aliasedIds',
+					{
+						columns: ['userId'],
+						rows: [{ userId: 1 }],
+						columnTypes: {
+							userId: {
+								kind: 'column',
+								type: 'integer',
+								originalDbType: payload,
+							},
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('invalid type name');
+		expect(sql ?? '').not.toContain(payload);
+	});
+
+	it('keeps the model-walk source-table anchor byte-identical to pre-#213 SQL when columnTypes is absent (regression lock)', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 1 }, { id: 2 }],
+						// no columnTypes — mutation bindings never carry it in B1.
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::integer), ($2::integer))',
+		);
+		expect(sql).not.toContain('CAST(NULL');
+		expect(params).toEqual([1, 2]);
+	});
+
 	it('casts runtime binding VALUES params from shorthand source-table column types', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {

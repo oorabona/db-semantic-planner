@@ -12,6 +12,7 @@ import {
 	NQL_SELECT_AGGREGATE_FUNCTIONS,
 	NQL_SELECT_VALUE_FUNCTIONS,
 	type NqlBindingColumnLineage,
+	type NqlBindingColumnUntypeableReason,
 	type NqlBindingOutputSchema,
 	type NqlBindingRelationFilterMetadata,
 	type NqlBindingVirtualRelation,
@@ -40,6 +41,10 @@ import type {
 	NqlSetClause,
 	NqlWhereClause,
 } from '../parser/ast.js';
+import {
+	type BindingColumnTypeCandidate,
+	buildBindingColumnTypes,
+} from './binding-column-types.js';
 import {
 	DEFAULT_RELATION_TARGET_COLUMN,
 	relationCardinality,
@@ -1382,27 +1387,53 @@ export function getQueryOutputSchema(
 	const columns: string[] = [];
 	const seen = new Set<string>();
 	const directProjectionLineage: NqlBindingColumnLineage[] = [];
+	const typeCandidates: BindingColumnTypeCandidate[] = [];
+	// #213 B1 scope fence: only DIRECT projections off a PHYSICAL source table
+	// are typed. A binding-sourced `from` (transitive) stays untypeable here —
+	// the gate's `sourceWasBinding` check rejects it with its own message
+	// before ever consulting columnTypesUnavailable.
+	const sourceIsPhysicalTable =
+		ctx.validator?.hasPhysicalTable(intent.from) ?? false;
 	const addColumn = (column: string) => addUnique(columns, seen, column);
 	const resolveSourceColumn = (column: string) =>
 		ctx.validator?.resolveColumnName(intent.from, column) ?? column;
 	const addDirectProjection = (outputColumn: string, sourceColumn: string) => {
+		const resolvedSourceColumn = resolveSourceColumn(sourceColumn);
+		// Record the type-resolution attempt BEFORE the dedup check below so a
+		// duplicate output name (second `addColumn` call returning false) is
+		// still visible to buildBindingColumnTypes as a second candidate for
+		// the same column — the existing dedup silently drops it otherwise.
+		const typeInfo = sourceIsPhysicalTable
+			? ctx.validator?.getTableColumnType(intent.from, resolvedSourceColumn)
+			: undefined;
+		typeCandidates.push(
+			typeInfo !== undefined
+				? { column: outputColumn, typed: typeInfo }
+				: { column: outputColumn, untypeable: 'unresolvable-source' },
+		);
 		if (!addColumn(outputColumn)) return;
 		directProjectionLineage.push({
 			kind: 'directProjection',
 			sourceTable: intent.from,
-			sourceColumn: resolveSourceColumn(sourceColumn),
+			sourceColumn: resolvedSourceColumn,
 			outputColumn,
 		});
+	};
+	const addUntypedColumn = (
+		outputColumn: string,
+		reason: NqlBindingColumnUntypeableReason,
+	) => {
+		typeCandidates.push({ column: outputColumn, untypeable: reason });
+		addColumn(outputColumn);
 	};
 	const addSourceColumns = () => {
 		for (const column of resolveSourceOutputColumns(intent, ctx, bindingName)) {
 			addDirectProjection(column, column);
 		}
 	};
-	const { select } = intent;
-	if (!select || select.type === 'all') {
-		addSourceColumns();
+	const finalizeOutputSchema = (): NqlBindingOutputSchema => {
 		const outputSchema = { columns, directProjectionLineage };
+		const typesResult = buildBindingColumnTypes(columns, typeCandidates);
 		return {
 			columns: outputSchema.columns,
 			relationFilters: getBindingRelationFilterMetadata(
@@ -1411,7 +1442,16 @@ export function getQueryOutputSchema(
 				outputSchema,
 				bindingDependencies,
 			),
+			...('columnTypes' in typesResult
+				? { columnTypes: typesResult.columnTypes }
+				: { columnTypesUnavailable: typesResult.untypeable }),
 		};
+	};
+
+	const { select } = intent;
+	if (!select || select.type === 'all') {
+		addSourceColumns();
+		return finalizeOutputSchema();
 	}
 
 	if (select.type === 'fields') {
@@ -1422,16 +1462,7 @@ export function getQueryOutputSchema(
 				addDirectProjection(field, field);
 			}
 		}
-		const outputSchema = { columns, directProjectionLineage };
-		return {
-			columns: outputSchema.columns,
-			relationFilters: getBindingRelationFilterMetadata(
-				intent,
-				ctx,
-				outputSchema,
-				bindingDependencies,
-			),
-		};
+		return finalizeOutputSchema();
 	}
 
 	if (select.type === 'aggregate') {
@@ -1445,18 +1476,12 @@ export function getQueryOutputSchema(
 					`Cannot compute output schema for NQL binding '${bindingName}': aggregate '${aggregate.function}' must use an alias.`,
 				);
 			}
-			addColumn(aggregate.as);
+			// #213 B1 scope fence: aggregates (including count) are not typed
+			// yet — classifyReadBindingSnapshotShape special-cases the
+			// aggregate select shape to keep the pre-#213 reject message.
+			addUntypedColumn(aggregate.as, 'unsupported-aggregate');
 		}
-		const outputSchema = { columns, directProjectionLineage };
-		return {
-			columns: outputSchema.columns,
-			relationFilters: getBindingRelationFilterMetadata(
-				intent,
-				ctx,
-				outputSchema,
-				bindingDependencies,
-			),
-		};
+		return finalizeOutputSchema();
 	}
 
 	for (const expr of select.columns) {
@@ -1482,19 +1507,17 @@ export function getQueryOutputSchema(
 		} else if (expr.kind === 'columnAlias') {
 			addDirectProjection(outputColumn, expr.column);
 		} else {
-			addColumn(outputColumn);
+			// #213 B1 scope fence: aggregate expressions (`count(*) as n`) are
+			// untypeable regardless of which select-shape carries them — unify
+			// on 'unsupported-aggregate' so the gate's backward-compat message
+			// special-case (keyed on this reason) covers both shapes.
+			let reason: NqlBindingColumnUntypeableReason = 'computed-expression';
+			if (expr.kind === 'relationColumn') reason = 'relation-column';
+			else if (expr.kind === 'aggregate') reason = 'unsupported-aggregate';
+			addUntypedColumn(outputColumn, reason);
 		}
 	}
-	const outputSchema = { columns, directProjectionLineage };
-	return {
-		columns: outputSchema.columns,
-		relationFilters: getBindingRelationFilterMetadata(
-			intent,
-			ctx,
-			outputSchema,
-			bindingDependencies,
-		),
-	};
+	return finalizeOutputSchema();
 }
 
 function validateNqlExpressionPaths(

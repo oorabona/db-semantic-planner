@@ -186,6 +186,91 @@ original_post | where id in (before_touch | select id) | select id, title`.all()
 		]);
 	});
 
+	it('snapshots an aliased column across an intervening mutation (#213 S1)', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9400}, ${'aliased before'}, ${'S1 fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			n: string;
+		}>`posts | where id = ${9400} | select title as n | bind b
+update posts set title = ${'CHANGED'} where id = ${9400} | select id | bind changed
+b | select n`.all();
+
+		expect(rows).toEqual([{ n: 'aliased before' }]);
+
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9400}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'CHANGED' }]);
+	});
+
+	it('materializes an empty synthetic anchor for a zero-row aliased read-bind snapshot (#213 S9)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			n: string;
+		}>`posts | where id = ${-9401} | select title as n | bind b
+update posts set title = ${'noop'} where id = ${-9401} | select id | bind changed
+b | select n`.all();
+
+		expect(rows).toEqual([]);
+	});
+
+	it('keeps the snapshot capture query schema-qualified and the CTE name unqualified under withSchema (#213 S8)', async () => {
+		const pool = await getTestPool();
+		await sql`
+			INSERT INTO ${sql.ref(SCHEMA)}.posts (id, title, content, author_id, published)
+			VALUES (${9402}, ${'withSchema before'}, ${'S8 fixture'}, ${1}, ${false})
+		`.execute(pool);
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const program = orm.nql<{
+			n: string;
+		}>`posts | where id = ${9402} | select title as n | bind b
+update posts set title = ${'withSchema after'} where id = ${9402} | select id | bind changed
+b | select n`;
+		const dump = program.dump();
+		const rows = await program.all();
+
+		// The snapshot capture query (compiled before any mutation runs) is a
+		// plain physical-table SELECT, unaffected by the typed-anchor CTE path
+		// — it must stay schema-qualified like every other physical query.
+		expect(dump.sequence?.[0]?.sql).toContain(`FROM ${SCHEMA}.posts`);
+		// The CTE/binding name 'b' must never be schema-qualified (existing
+		// convention — proven here by successful execution: a wrongly
+		// schema-qualified CTE reference would fail to resolve at all).
+		expect(rows).toEqual([{ n: 'withSchema before' }]);
+
+		const persisted = await sql<{ title: string }>`
+			SELECT title
+			FROM ${sql.ref(SCHEMA)}.posts
+			WHERE id = ${9402}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'withSchema after' }]);
+	});
+
+	it('keeps a computed-expression read binding fail-loud across a mutation (#213 S5)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		await expect(
+			orm.nql`posts | select id * 2 as double | bind b
+update posts set title = ${'noop'} where id = ${1} | select id | bind changed
+b | select double`.all(),
+		).rejects.toThrow(
+			/unsupported snapshot shape \(#186\).*computed-expression column 'double'/,
+		);
+	});
+
 	it('rolls back the whole program when a later mutation fails', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

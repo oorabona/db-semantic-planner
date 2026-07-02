@@ -183,88 +183,11 @@ function isNqlAstRecord(value: unknown): value is NqlAstRecord {
 	return typeof value === 'object' && value !== null;
 }
 
-function isExactPhysicalProjectionColumn(
-	query: QueryIntent,
-	ctx: CompilerContext,
-	sourceColumn: string,
-	outputColumn: string,
-): boolean {
-	const resolvedColumn = ctx.validator?.resolvePhysicalColumnName(
-		query.from,
-		sourceColumn,
-	);
-	return (
-		resolvedColumn !== undefined &&
-		sourceColumn === resolvedColumn &&
-		outputColumn === resolvedColumn
-	);
-}
-
-function hasDirectPhysicalColumnProjection(
-	query: QueryIntent,
-	ctx: CompilerContext,
-): boolean {
-	const physicalColumns = ctx.validator?.getPhysicalTableColumns(query.from);
-	if (physicalColumns === undefined) return false;
-
-	const select = query.select;
-	if (!select || select.type === 'all') return physicalColumns.length > 0;
-
-	let projectedColumnCount = 0;
-	const addStarProjection = () => {
-		projectedColumnCount += physicalColumns.length;
-		return physicalColumns.length > 0;
-	};
-	const addDirectProjection = (
-		sourceColumn: string,
-		outputColumn: string,
-	): boolean => {
-		projectedColumnCount++;
-		return isExactPhysicalProjectionColumn(
-			query,
-			ctx,
-			sourceColumn,
-			outputColumn,
-		);
-	};
-
-	if (select.type === 'fields') {
-		for (const field of select.fields) {
-			if (field === '*') {
-				if (!addStarProjection()) return false;
-			} else if (!addDirectProjection(field, field)) {
-				return false;
-			}
-		}
-		return projectedColumnCount > 0;
-	}
-
-	if (select.type === 'aggregate') return false;
-
-	for (const expr of select.columns) {
-		if (expr.kind === 'column' && expr.column === '*') {
-			if (!addStarProjection()) return false;
-			continue;
-		}
-		if (expr.kind === 'column') {
-			const outputColumn = expr.as ?? expr.column;
-			if (!addDirectProjection(expr.column, outputColumn)) return false;
-			continue;
-		}
-		if (expr.kind === 'columnAlias') {
-			if (!addDirectProjection(expr.column, expr.alias)) return false;
-			continue;
-		}
-		return false;
-	}
-
-	return projectedColumnCount > 0;
-}
-
 function classifyReadBindingSnapshotShape(
 	query: QueryIntent,
 	ctx: CompilerContext,
 	sourceWasBinding: boolean,
+	outputSchema: NqlBindingOutputSchema | undefined,
 ): ReadBindingSnapshotShape {
 	if (sourceWasBinding) {
 		return { supported: false, reason: 'a binding source' };
@@ -275,13 +198,23 @@ function classifyReadBindingSnapshotShape(
 			reason: `no physical model table source '${query.from}'`,
 		};
 	}
-	if (!hasDirectPhysicalColumnProjection(query, ctx)) {
+	if (outputSchema?.columnTypes) {
+		return { supported: true };
+	}
+	const untypeable = outputSchema?.columnTypesUnavailable;
+	// #213 B1 scope fence: aggregates are not typed yet — keep the pre-#213
+	// generic reject message for this shape unchanged (tests lock on this
+	// exact wording), regardless of which select-shape carried the aggregate.
+	if (untypeable?.reason === 'unsupported-aggregate') {
+		return { supported: false, reason: 'aliased/computed/aggregate columns' };
+	}
+	if (untypeable) {
 		return {
 			supported: false,
-			reason: 'aliased/computed/aggregate columns',
+			reason: `${untypeable.reason} column '${untypeable.column}'`,
 		};
 	}
-	return { supported: true };
+	return { supported: false, reason: 'aliased/computed/aggregate columns' };
 }
 
 function addReadBindingReference(
@@ -724,6 +657,7 @@ export class NqlCompiler {
 							lastResult.query,
 							this.ctx,
 							sourceWasBinding,
+							outputSchema,
 						),
 					);
 					bindings.set(bindName, lastResult.query);

@@ -4,6 +4,7 @@
  */
 
 import type {
+	NqlBindingColumnTypeInfo,
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
 } from '@dbsp/types';
@@ -86,6 +87,31 @@ export class ColumnValidator {
 
 	getPhysicalTableColumns(name: string): readonly string[] | undefined {
 		return this.schema.getTable(name)?.columns.map((column) => column.name);
+	}
+
+	/**
+	 * Resolve a physical column's neutral type info for binding-snapshot
+	 * type propagation (#213). Returns undefined when the table/column is
+	 * unknown OR the schema did not supply a `type` for it — the caller
+	 * treats undefined as untypeable, never falls back to a guess.
+	 */
+	getTableColumnType(
+		table: string,
+		column: string,
+	): NqlBindingColumnTypeInfo | undefined {
+		const resolvedName = this.resolvePhysicalColumnName(table, column);
+		if (resolvedName === undefined) return undefined;
+		const columnInfo = this.schema
+			.getTable(table)
+			?.columns.find((candidate) => candidate.name === resolvedName);
+		if (columnInfo?.type === undefined) return undefined;
+		return {
+			kind: 'column',
+			type: columnInfo.type,
+			...(columnInfo.originalDbType !== undefined && {
+				originalDbType: columnInfo.originalDbType,
+			}),
+		};
 	}
 
 	getPseudoColumns(name: string): readonly ColumnValidatorPseudoColumn[] {

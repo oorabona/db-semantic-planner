@@ -400,7 +400,7 @@ users | where id in (active_users) | select id`.all();
 		expect(snapshotSql).toContain('WHERE users.active = $1');
 		expect(mutationSql).not.toContain('active_users');
 		expect(finalSql).toContain(
-			'WITH "active_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH "active_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
 		);
 		expect(finalSql).not.toMatch(/"active_users"\s+as\s+\(\s*SELECT/i);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([1]);
@@ -423,19 +423,32 @@ users | where id in (ids) | select id`.all();
 		expect(execute).not.toHaveBeenCalled();
 	});
 
-	it('rejects an aliased-column read snapshot before SQL emission (#186)', async () => {
-		const execute = vi.fn().mockResolvedValue([]);
+	it('snapshots an aliased-column read binding referenced across an intervening mutation (#213)', async () => {
+		const execute = vi
+			.fn()
+			.mockResolvedValueOnce([{ userId: 1 }])
+			.mockResolvedValueOnce([{ id: 2 }])
+			.mockResolvedValueOnce([{ userId: 1 }]);
 		const { compile, nql } = createMutationBindingTag(execute);
 
-		await expect(async () => {
-			await nql`users | select id as userId | bind ids
+		const rows = await nql<{ userId: number }>`users
+			| where active = ${true}
+			| select id as userId
+			| bind ids
 update users set active = false where id = 1 | select id | bind changed
-users | where id in (ids) | select id`.all();
-		}).rejects.toThrow(
-			/unsupported snapshot shape \(#186\).*binding 'ids' has aliased\/computed\/aggregate columns/,
+users | where id in (ids | select userId) | select id as userId`.all();
+
+		expect(rows).toEqual([{ userId: 1 }]);
+		expect(execute).toHaveBeenCalledTimes(3);
+		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
+		expect(finalSql).toContain(
+			'WITH "ids" ("userId") as (SELECT CAST(NULL AS integer) AS "userId" WHERE false UNION ALL VALUES ($1::integer))',
 		);
-		expect(compile).not.toHaveBeenCalled();
-		expect(execute).not.toHaveBeenCalled();
+		expect(finalSql).not.toMatch(
+			/"ids"\s+as\s+\(\s*SELECT\s+"?userId"?\s+FROM/i,
+		);
+		expect(execute.mock.calls[2]?.[0].parameters).toEqual([1]);
+		expect(compile).toHaveBeenCalledTimes(3);
 	});
 
 	it('rejects an aggregate-column read snapshot before SQL emission (#186)', async () => {
@@ -472,7 +485,7 @@ missing_users | select id`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "missing_users" ("id") as (SELECT "id" FROM "users" WHERE false)',
+			'WITH "missing_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false)',
 		);
 		expect(finalSql).not.toContain('VALUES');
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([]);
@@ -526,14 +539,14 @@ inactive_users | select id`.all();
 		const laterMutationSql = execute.mock.calls[2]?.[0].sql ?? '';
 		const finalSql = execute.mock.calls[3]?.[0].sql ?? '';
 		expect(beforeMutationSql).toContain(
-			'WITH "inactive_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH "inactive_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
 		);
 		expect(beforeMutationSql).not.toMatch(
 			/"inactive_users"\s+as\s+\(\s*SELECT/i,
 		);
 		expect(laterMutationSql).not.toContain('inactive_users');
 		expect(finalSql).toContain(
-			'WITH "inactive_users" ("id") as (SELECT "id" FROM "users" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH "inactive_users" ("id") as (SELECT CAST(NULL AS integer) AS "id" WHERE false UNION ALL VALUES ($1::integer))',
 		);
 		expect(execute.mock.calls[1]?.[0].parameters).toEqual([5, true]);
 		expect(execute.mock.calls[3]?.[0].parameters).toEqual([5]);
@@ -560,9 +573,243 @@ posts | where authorId in (post_authors) | select authorId`.all();
 		expect(execute).toHaveBeenCalledTimes(3);
 		const finalSql = execute.mock.calls[2]?.[0].sql ?? '';
 		expect(finalSql).toContain(
-			'WITH "post_authors" ("author_id") as (SELECT "author_id" FROM "posts" WHERE false UNION ALL VALUES ($1::integer))',
+			'WITH "post_authors" ("author_id") as (SELECT CAST(NULL AS integer) AS "author_id" WHERE false UNION ALL VALUES ($1::integer))',
 		);
 		expect(execute.mock.calls[2]?.[0].parameters).toEqual([7]);
+	});
+
+	describe('#213 binding output schema columnTypes', () => {
+		it('types a direct physical column projection from the source table', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id | bind b
+b | select id`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('b')?.columnTypes).toEqual({
+				id: { kind: 'column', type: 'integer', originalDbType: 'integer' },
+			});
+		});
+
+		it('types an aliased column via its lineage SOURCE column, never by output-name matching', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			// 'active' is aliased FROM 'name' (string) — users ALSO has a real
+			// 'active' column (boolean). The alias's type must come from the
+			// SOURCE ('name': string), never from output-name-matching the
+			// table's own 'active' column (boolean).
+			nql`users | select name as active | bind b
+b | select active`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('b')?.columnTypes).toEqual({
+				active: { kind: 'column', type: 'string' },
+			});
+		});
+
+		it('the completeness invariant: columnTypes keys exactly match the schema columns', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id, name | bind b
+b | select id, name`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(Object.keys(outputSchema?.columnTypes ?? {})).toEqual(
+				outputSchema?.columns,
+			);
+		});
+
+		it('marks a computed-expression column untypeable', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id * 2 as doubled | bind b
+b | select doubled`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'doubled',
+				reason: 'computed-expression',
+			});
+		});
+
+		it('mixed typed + untypeable columns: the WHOLE schema loses columnTypes (never partial)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id, id * 2 as doubled | bind b
+b | select id, doubled`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'doubled',
+				reason: 'computed-expression',
+			});
+		});
+
+		it('flags duplicate output column names as untypeable', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id as x, name as x | bind b
+b | select x`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'x',
+				reason: 'duplicate-output-name',
+			});
+		});
+
+		it('marks relation-column projections as untypeable (relation-column)', () => {
+			const { compile, nql } = createBindingTag();
+
+			nql`posts | select id, user.name | bind b
+b | select id`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'user.name',
+				reason: 'relation-column',
+			});
+		});
+
+		it('marks a count(*) aggregate column untypeable with reason unsupported-aggregate (B1 scope fence)', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select count(*) as n | bind b
+b | select n`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('b');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'n',
+				reason: 'unsupported-aggregate',
+			});
+		});
+
+		it('deep-freezes the columnTypes record — top-level mutation throws in strict mode', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id | bind b
+b | select id`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const columnTypes = bundle.bindingOutputSchemas?.get('b')?.columnTypes;
+			expect(Object.isFrozen(columnTypes)).toBe(true);
+			expect(() => {
+				(columnTypes as unknown as Record<string, unknown>).extra = {};
+			}).toThrow(TypeError);
+		});
+
+		it('deep-freezes the columnTypes record — per-column value mutation throws in strict mode', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id | bind b
+b | select id`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const idInfo = bundle.bindingOutputSchemas?.get('b')?.columnTypes?.id as
+				| Record<string, unknown>
+				| undefined;
+			expect(Object.isFrozen(idInfo)).toBe(true);
+			expect(() => {
+				if (idInfo) idInfo.type = 'text';
+			}).toThrow(TypeError);
+		});
+
+		it('does not leak a __proto__-named output alias onto Object.prototype', () => {
+			const { compile, nql } = createMutationBindingTag(vi.fn());
+
+			nql`users | select id as __proto__ | bind b
+b | select __proto__`.dump();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[0]?.[0]);
+			const columnTypes = bundle.bindingOutputSchemas?.get('b')?.columnTypes;
+			expect(columnTypes).toBeDefined();
+			expect(Object.hasOwn(columnTypes, '__proto__')).toBe(true);
+			expect((columnTypes as Record<string, unknown>).__proto__).toEqual({
+				kind: 'column',
+				type: 'integer',
+				originalDbType: 'integer',
+			});
+			// A polluted plain-object accumulator would leak this shape here.
+			expect(Object.prototype).not.toHaveProperty('kind');
+		});
+	});
+
+	describe('#213 hostile originalDbType is rejected on both cast surfaces', () => {
+		function createHostileTypeBindingTag(
+			execute: Adapter['execute'],
+			hostileColumn: 'id' | 'name',
+		) {
+			const db = schema({
+				users: {
+					id:
+						hostileColumn === 'id'
+							? { type: 'integer', dbType: 'integer); DROP TABLE users;--' }
+							: { type: 'integer', dbType: 'integer' },
+					name:
+						hostileColumn === 'name'
+							? { type: 'string', dbType: 'text); DROP TABLE users;--' }
+							: 'string',
+					active: 'boolean',
+				},
+			} as const);
+			const adapter = createPgsqlCompileOnlyAdapter({
+				model: db.model,
+			}) as unknown as Adapter;
+			const compile = vi.spyOn(adapter, 'compile');
+			adapter.execute = execute;
+			adapter.transaction = vi.fn(async (fn) => fn(adapter));
+			return {
+				adapter,
+				compile,
+				nql: createNqlTag(db.definition, db.model, adapter),
+			};
+		}
+
+		it('rejects a hostile originalDbType on the read-bind snapshot anchor cast surface', async () => {
+			// hostile type on 'name' (never compared in a WHERE clause) isolates
+			// the anchor-cast surface from the pre-existing, unrelated
+			// WHERE-comparison param-cast validation on 'id'.
+			const { nql } = createHostileTypeBindingTag(
+				vi
+					.fn()
+					.mockResolvedValueOnce([{ name: 'Alice' }])
+					.mockResolvedValueOnce([{ id: 1 }]),
+				'name',
+			);
+
+			await expect(async () => {
+				await nql`users | select name | bind b
+update users set active = false where id = 1 | select id | bind changed
+b | select name`.all();
+			}).rejects.toThrow(
+				/cannot use PostgreSQL cast type for projected column 'name'/,
+			);
+		});
+
+		it('rejects a hostile originalDbType on the mutation-binding VALUES cast surface', async () => {
+			const { nql } = createHostileTypeBindingTag(
+				vi.fn().mockResolvedValue([{ id: 1 }]),
+				'id',
+			);
+
+			await expect(async () => {
+				await nql`insert into users set name = ${'Alice'}, active = ${true} | select id | bind created
+created | select id`.all();
+			}).rejects.toThrow(
+				/cannot use PostgreSQL cast type for projected column 'id'/,
+			);
+		});
 	});
 
 	it('compiles binding-final hasMany relation columns through a correlated json_agg subquery', () => {

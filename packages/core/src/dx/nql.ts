@@ -955,11 +955,13 @@ function createRuntimeBinding(
 	dbCasing?: DbCasing,
 ): NqlRuntimeBinding {
 	const columns = requireMutationBindingColumns(bundle, bindName);
+	const columnTypes = bundle.bindingOutputSchemas?.get(bindName)?.columnTypes;
 	return {
 		columns,
 		rows: rows.map((row) =>
 			toRuntimeBindingRow(bindName, row, columns, dbCasing),
 		),
+		...(columnTypes !== undefined && { columnTypes }),
 	};
 }
 
@@ -1838,6 +1840,16 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const sequence: DumpSequenceStep[] = [];
 		const steps = createNqlProgramSteps(compiledIntent);
 
+		const dumpRuntimeBindingPreview = (bindName: string): NqlRuntimeBinding => {
+			const columnTypes =
+				sourceBundle.bindingOutputSchemas?.get(bindName)?.columnTypes;
+			return {
+				columns: requireMutationBindingColumns(sourceBundle, bindName),
+				rows: [],
+				...(columnTypes !== undefined && { columnTypes }),
+			};
+		};
+
 		for (const step of steps) {
 			if (step.kind === 'mutation') {
 				const statementBundle = this.createNqlStatementBundle(
@@ -1858,10 +1870,10 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					params: compiled.parameters,
 				});
 				if (step.bindName !== undefined) {
-					runtimeBindings.set(step.bindName, {
-						columns: requireMutationBindingColumns(sourceBundle, step.bindName),
-						rows: [],
-					});
+					runtimeBindings.set(
+						step.bindName,
+						dumpRuntimeBindingPreview(step.bindName),
+					);
 				}
 			} else {
 				const planReport =
@@ -1897,10 +1909,10 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 					params: compiled.parameters,
 				});
 				if (step.snapshot === true && step.bindName !== undefined) {
-					runtimeBindings.set(step.bindName, {
-						columns: requireMutationBindingColumns(sourceBundle, step.bindName),
-						rows: [],
-					});
+					runtimeBindings.set(
+						step.bindName,
+						dumpRuntimeBindingPreview(step.bindName),
+					);
 				}
 			}
 

@@ -4,6 +4,7 @@
  */
 
 import type {
+	ColumnType,
 	CompiledNqlQuery,
 	NqlBindingRelationFilterMetadata,
 	QueryIntent,
@@ -38,10 +39,22 @@ export interface ColumnValidatorPseudoColumn {
 	readonly descendantKeyword?: string;
 }
 
+/**
+ * Duck-type column shape carried by `ColumnValidatorSchema.getTable()`.
+ * `type`/`originalDbType` are optional so hand-authored test schemas that
+ * only supply `name` remain valid — absence makes a column's type
+ * unresolvable (untypeable), never silently mismatched.
+ */
+export interface ColumnValidatorTableColumn {
+	readonly name: string;
+	readonly type?: ColumnType;
+	readonly originalDbType?: string;
+}
+
 export interface ColumnValidatorSchema {
 	getTable(name: string):
 		| {
-				readonly columns: readonly { readonly name: string }[];
+				readonly columns: readonly ColumnValidatorTableColumn[];
 				readonly pseudoColumns?: readonly ColumnValidatorPseudoColumn[];
 		  }
 		| undefined;

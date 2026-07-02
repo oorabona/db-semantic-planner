@@ -4,7 +4,7 @@
  * compileOrderByClause, and compileOrderItem.
  */
 
-import type { QueryIntent } from '@dbsp/types';
+import type { ColumnType, QueryIntent } from '@dbsp/types';
 import {
 	getTrustedNqlRelationFilterFields,
 	hasNqlTrustedRelationFilterProof,
@@ -40,7 +40,7 @@ const schema = {
 		const tables: Record<
 			string,
 			{
-				columns: { name: string }[];
+				columns: { name: string; type?: ColumnType }[];
 				pseudoColumns?: {
 					table: string;
 					foreignKeyColumn: string;
@@ -54,43 +54,57 @@ const schema = {
 		> = {
 			users: {
 				columns: [
-					{ name: 'id' },
-					{ name: 'name' },
-					{ name: 'email' },
-					{ name: 'department' },
-					{ name: 'active' },
-					{ name: 'salary' },
+					{ name: 'id', type: 'integer' },
+					{ name: 'name', type: 'string' },
+					{ name: 'email', type: 'string' },
+					{ name: 'department', type: 'string' },
+					{ name: 'active', type: 'boolean' },
+					{ name: 'salary', type: 'number' },
 				],
 			},
 			posts: {
 				columns: [
-					{ name: 'id' },
-					{ name: 'title' },
-					{ name: 'body' },
-					{ name: 'authorId' },
-					{ name: 'categoryId' },
-					{ name: 'published' },
+					{ name: 'id', type: 'integer' },
+					{ name: 'title', type: 'string' },
+					{ name: 'body', type: 'string' },
+					{ name: 'authorId', type: 'integer' },
+					{ name: 'categoryId', type: 'integer' },
+					{ name: 'published', type: 'boolean' },
 				],
 			},
 			comments: {
-				columns: [{ name: 'id' }, { name: 'postId' }, { name: 'body' }],
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'postId', type: 'integer' },
+					{ name: 'body', type: 'string' },
+				],
 			},
 			orders: {
 				columns: [
-					{ name: 'id' },
-					{ name: 'userId' },
-					{ name: 'total' },
-					{ name: 'status' },
+					{ name: 'id', type: 'integer' },
+					{ name: 'userId', type: 'integer' },
+					{ name: 'total', type: 'number' },
+					{ name: 'status', type: 'string' },
 				],
 			},
 			tags: {
-				columns: [{ name: 'id' }, { name: 'name' }],
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'name', type: 'string' },
+				],
 			},
 			postTags: {
-				columns: [{ name: 'postId' }, { name: 'tagId' }],
+				columns: [
+					{ name: 'postId', type: 'integer' },
+					{ name: 'tagId', type: 'integer' },
+				],
 			},
 			categories: {
-				columns: [{ name: 'id' }, { name: 'name' }, { name: 'parentId' }],
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'name', type: 'string' },
+					{ name: 'parentId', type: 'integer' },
+				],
 				pseudoColumns: [
 					{
 						table: 'categories',
@@ -105,14 +119,17 @@ const schema = {
 			},
 			profiles: {
 				columns: [
-					{ name: 'id' },
-					{ name: 'userId' },
-					{ name: 'companyId' },
-					{ name: 'bio' },
+					{ name: 'id', type: 'integer' },
+					{ name: 'userId', type: 'integer' },
+					{ name: 'companyId', type: 'integer' },
+					{ name: 'bio', type: 'string' },
 				],
 			},
 			companies: {
-				columns: [{ name: 'id' }, { name: 'name' }],
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'name', type: 'string' },
+				],
 			},
 		};
 		return tables[name];
