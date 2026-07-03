@@ -482,7 +482,7 @@ function recursiveVirtualRelationForBinding(
 		targetColumn: [direction === 'up' ? targetKeyColumn : selfRefColumn],
 		hops: [],
 		cardinality: 'many',
-		relationType: relation.type,
+		...(relation.type !== undefined ? { relationType: relation.type } : {}),
 		recursive: {
 			direction,
 			maxDepth: recursiveMaxDepth(relation.recursive) ?? 10,
