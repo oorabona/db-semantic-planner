@@ -3,7 +3,7 @@
 ```yaml
 doc-meta:
   issue: 193
-  status: draft
+  status: canonical
   created: 2026-06-20
 ```
 

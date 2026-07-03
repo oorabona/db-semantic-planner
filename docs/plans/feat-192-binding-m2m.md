@@ -4,7 +4,7 @@
 doc-meta:
   issue: 192
   increment: m2m
-  status: draft
+  status: canonical
   created: 2026-06-20
 ```
 

@@ -1,7 +1,7 @@
 # FEAT-186 — snapshot a read-only `| bind` referenced across an intervening mutation
 
 ```yaml
-doc-meta: { issue: 186, status: draft, created: 2026-06-20 }
+doc-meta: { issue: 186, status: canonical, created: 2026-06-20 }
 ```
 
 ## §1 Problem
