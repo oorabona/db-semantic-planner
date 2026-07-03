@@ -5,6 +5,7 @@ import { identityNaming } from '../naming-plugin.js';
 import {
 	buildRecursiveCte,
 	buildRecursiveScalarSubquery,
+	MAX_DEPTH_LIMIT,
 } from './cte-compiler.js';
 
 // ============================================================================
@@ -18,7 +19,7 @@ function makeCtx(overrides = {}) {
 	return {
 		naming: identityNaming,
 		rootTable: 'test_table',
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		...overrides,
 	};
 }
@@ -34,7 +35,7 @@ function makeConfig(overrides = {}) {
 		fkColumn: 'parent_id',
 		outerAlias: 't0',
 		isAncestors: true,
-		maxDepth: 100,
+		maxDepth: MAX_DEPTH_LIMIT,
 		selectColumns: ['id', 'name'],
 		ctx: makeCtx(),
 		...overrides,
@@ -92,7 +93,7 @@ describe('buildRecursiveCte - adjacency mode', () => {
 	});
 
 	it('should handle default maxDepth (100)', () => {
-		const result = buildRecursiveCte(makeConfig({ maxDepth: 100 }));
+		const result = buildRecursiveCte(makeConfig({ maxDepth: MAX_DEPTH_LIMIT }));
 
 		expect(result.cte).toBeDefined();
 		expect(result.cteSelect).toBeDefined();
@@ -484,7 +485,7 @@ describe('buildRecursiveCte - complex combinations', () => {
 			fkColumn: 'parent_id',
 			outerAlias: 't0',
 			isAncestors: true,
-			maxDepth: 100,
+			maxDepth: MAX_DEPTH_LIMIT,
 			selectColumns: ['id'],
 			ctx: makeCtx(),
 		});
@@ -502,7 +503,7 @@ describe('buildRecursiveCte - complex combinations', () => {
 			fkColumn: 'parent_id',
 			outerAlias: 't0',
 			isAncestors: true,
-			maxDepth: 100,
+			maxDepth: MAX_DEPTH_LIMIT,
 			selectColumns: ['id'],
 			edgeTable: 'edges',
 			edgeFrom: 'from_id',

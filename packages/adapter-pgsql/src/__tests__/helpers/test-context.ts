@@ -7,11 +7,12 @@
 
 import type { CompilerContext } from '../../handlers/types.js';
 import { identityNaming } from '../../naming-plugin.js';
+import { MAX_DEPTH_LIMIT } from '../../recursive/cte-compiler.js';
 
 /**
  * Build a minimal CompilerContext for unit tests.
  *
- * Defaults: rootTable='test_table', maxRecursiveDepth=100, identityNaming.
+ * Defaults: rootTable='test_table', maxRecursiveDepth={@link MAX_DEPTH_LIMIT}, identityNaming.
  * Pass `overrides` to customise specific fields per test case.
  */
 export function makeCtx(
@@ -20,7 +21,7 @@ export function makeCtx(
 	return {
 		naming: identityNaming,
 		rootTable: 'test_table',
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		...overrides,
 	} as CompilerContext;
 }

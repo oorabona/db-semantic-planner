@@ -69,6 +69,7 @@ import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
+import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 
 // ============================================================================
 // Module-level constants
@@ -152,7 +153,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		naming: ctx.naming,
 		rootTable: ctx.rootTable,
 		currentAlias: ctx.currentAlias ?? ctx.rootTable,
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		...(ctx.schemaName !== undefined && { schema: ctx.schemaName }),
 		...(ctx.dialectCapabilities !== undefined && {
 			dialectCapabilities: ctx.dialectCapabilities,
