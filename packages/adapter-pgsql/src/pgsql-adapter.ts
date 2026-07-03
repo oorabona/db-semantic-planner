@@ -115,6 +115,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
 	compileSetOperation as compileSetOperationImpl,
 	type LeafCompileFn,
@@ -1158,7 +1159,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(schemaName !== undefined && { schema: schemaName }),
 			dialectCapabilities,
 			rootTable: '',
-			maxRecursiveDepth: 100,
+			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
 			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
 			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler

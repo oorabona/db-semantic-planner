@@ -482,6 +482,7 @@ function markReadBindingReferenceAcrossMutation(
 			snapshotShape?.reason ?? 'an unavailable output shape',
 		);
 	}
+	// Reached only on the supported path — the guard above rejects unsupported shapes before this line.
 	snapshotReadBindings.add(bindName);
 }
 

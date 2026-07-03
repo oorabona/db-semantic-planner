@@ -32,6 +32,13 @@ import { appendPathColumn, buildPathColumn } from './path-tracking.js';
 // ============================================================================
 
 /**
+ * Default maximum recursion depth applied when a caller does not supply an
+ * explicit `maxDepth` / `maxRecursiveDepth` (see e.g. pgsql-adapter.ts,
+ * compiler.ts, adapter-compiler-mutations.ts).
+ */
+export const MAX_DEPTH_LIMIT = 100;
+
+/**
  * Configuration for recursive CTE compilation
  */
 export interface RecursiveCteConfig {
@@ -47,7 +54,7 @@ export interface RecursiveCteConfig {
 	outerAlias: string;
 	/** true = traverse up (ancestors), false = traverse down (descendants) */
 	isAncestors: boolean;
-	/** Maximum recursion depth (default: 100) */
+	/** Maximum recursion depth (default: {@link MAX_DEPTH_LIMIT}) */
 	maxDepth: number;
 	/** Column(s) to select from each row */
 	selectColumns: string[];

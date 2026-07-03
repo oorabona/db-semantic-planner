@@ -723,6 +723,77 @@ b | select id`.dump();
 			});
 		});
 
+		it('marks a mutation-RETURNING column with no schema type as untypeable (unresolvable-source)', async () => {
+			// The schema has a real 'name' column on 'users', but its ColumnIR
+			// carries no `type` (simulating introspection that could not resolve
+			// a type) — getTableColumnType() must return undefined for it, so
+			// buildMutationReturningColumnTypes() falls back to the default
+			// 'unresolvable-source' reason (never a guessed type).
+			//
+			// `originalDbType` is deliberately kept ('text'): it lets the
+			// ADAPTER's unrelated runtime-binding-CTE cast-type resolution
+			// (resolveRuntimeBindingColumnType, keyed off originalDbType,
+			// never `type`) succeed when 'm' is read downstream, isolating
+			// this test to the nql-level columnTypes/columnTypesUnavailable
+			// bookkeeping under test here.
+			const db = schema({
+				users: {
+					id: { type: 'integer', dbType: 'integer' },
+					name: 'string',
+				},
+			} as const);
+			const usersTable = db.model.getTable('users');
+			if (!usersTable) throw new Error('test schema missing users table');
+			const typelessColumns = usersTable.columns.map((column) =>
+				column.name === 'name'
+					? ({
+							...column,
+							type: undefined,
+							originalDbType: 'text',
+						} as unknown as typeof column)
+					: column,
+			);
+			const model = {
+				tables: db.model.tables,
+				relations: db.model.relations,
+				...(db.model.enums !== undefined && { enums: db.model.enums }),
+				...(db.model.extensions !== undefined && {
+					extensions: db.model.extensions,
+				}),
+				...(db.model.sequences !== undefined && {
+					sequences: db.model.sequences,
+				}),
+				getTable(name: string) {
+					if (name !== 'users') return db.model.getTable(name);
+					return { ...usersTable, columns: typelessColumns };
+				},
+				getRelation: db.model.getRelation.bind(db.model),
+				getRelationsFrom: db.model.getRelationsFrom.bind(db.model),
+				getRelationsTo: db.model.getRelationsTo.bind(db.model),
+			} as ModelIR;
+			const adapter = createPgsqlCompileOnlyAdapter({
+				model,
+			}) as unknown as Adapter;
+			const compile = vi.spyOn(adapter, 'compile');
+			adapter.execute = vi
+				.fn()
+				.mockResolvedValueOnce([{ name: 'Alice' }])
+				.mockResolvedValueOnce([{ name: 'Alice' }]);
+			adapter.transaction = vi.fn(async (fn) => fn(adapter));
+			const nql = createNqlTag(db.definition, model, adapter);
+
+			await nql`insert into users set name = ${'Alice'} | select name | bind m
+m | select name`.all();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[1]?.[0]);
+			const outputSchema = bundle.bindingOutputSchemas?.get('m');
+			expect(outputSchema?.columnTypes).toBeUndefined();
+			expect(outputSchema?.columnTypesUnavailable).toEqual({
+				column: 'name',
+				reason: 'unresolvable-source',
+			});
+		});
+
 		it('types a count(*) aggregate column as {kind:"aggregate", fn:"count"} (#213 B3)', () => {
 			const { compile, nql } = createMutationBindingTag(vi.fn());
 

@@ -101,6 +101,7 @@ import type { NamingPlugin } from './naming-plugin.js';
 import { identityNaming } from './naming-plugin.js';
 import { unwrapParamIntent } from './param-intent.js';
 import { createParamRef } from './param-ref.js';
+import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import { assertNoDroppedDecisionModifiers } from './subquery-emission.js';
 import { validateIdentifier } from './validate.js';
 
@@ -761,7 +762,7 @@ export class PlanCompiler {
 			naming: this.naming,
 			rootTable: this.currentRootTable,
 			aliases: this.resolvedJoinAliases(),
-			maxRecursiveDepth: 100,
+			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...(this.schema != null && { schema: this.schema }),
@@ -1279,7 +1280,7 @@ export class PlanCompiler {
 			rootTable: plan.rootTable,
 			currentAlias: currentAlias ?? plan.rootTable,
 			aliases: this.resolvedJoinAliases(),
-			maxRecursiveDepth: 100,
+			maxRecursiveDepth: MAX_DEPTH_LIMIT,
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
 			...((plan.schema ?? this.schema)

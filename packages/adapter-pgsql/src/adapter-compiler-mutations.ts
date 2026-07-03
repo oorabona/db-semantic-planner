@@ -67,6 +67,7 @@ import {
 	type UpsertFromConfig,
 } from './mutations/index.js';
 import type { NamingPlugin } from './naming-plugin.js';
+import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 
 // ============================================================================
 // Internal helpers
@@ -342,7 +343,7 @@ export function compileInsert(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 
@@ -428,7 +429,7 @@ export function compileInsertFrom(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 	const resolvedWhere = intent.where
@@ -483,7 +484,7 @@ export function compileUpdate(
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 
@@ -545,7 +546,7 @@ export function compileBatchUpdate(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 
@@ -666,7 +667,7 @@ export function compileDelete(
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
 	};
 	const state = createCompilerState();
@@ -718,7 +719,7 @@ export function compileUpsert(
 		...(deps.dialectCapabilities !== undefined && {
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 
@@ -885,7 +886,7 @@ export function compileUpsertFrom(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
-		maxRecursiveDepth: 100,
+		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 	};
 	const state = createCompilerState();
 	const resolvedWhere = intent.where
