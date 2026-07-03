@@ -15,11 +15,11 @@
 
 ## Future
 
-- [ ] Correlated EXISTS subquery in WHERE/SELECT — `exists('relation', (sub) => sub.where(...))` with outer column refs (use case: astix fetchCommunityMeta — `EXISTS(SELECT 1 FROM files f WHERE f.last_parsed > c.created_at)`)
-- [ ] CAST expression in column selection — `cast(ref('created_at'), 'text')` (use case: `c.created_at::text` in SELECT)
-- [ ] Additional adapters (MySQL, SQLite)
-- [ ] Cost-based join reordering
-- [ ] Query caching layer
-- [ ] VitePress documentation site
-- [ ] Interactive playground (Monaco + compile-only mode)
+- [x] Correlated EXISTS subquery in WHERE/SELECT — `exists('relation', { where: ... outerRef(...) })` with outer column refs (e.g. `EXISTS(SELECT 1 FROM files f WHERE f.last_parsed > c.created_at)`)
+- [x] CAST expression in column selection — `cast(ref('created_at'), 'text')` (`c.created_at::text` in SELECT)
+- [ ] Additional adapters (MySQL, SQLite) — see #102
+- [ ] ~~Cost-based join reordering~~ — out of scope by design (see CLAUDE.md § Out of Scope; #109)
+- [ ] Query caching layer — see #110
+- [x] VitePress documentation site
+- [x] Interactive playground (Monaco + compile-only mode)
 
