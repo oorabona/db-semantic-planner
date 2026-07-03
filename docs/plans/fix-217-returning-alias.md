@@ -1,6 +1,6 @@
 ---
 doc-meta:
-  status: draft
+  status: canonical
   adversarial_applied: true
   production_audit_applied: true
 target_project: /mnt/disk/dev/db-semantic-planner
