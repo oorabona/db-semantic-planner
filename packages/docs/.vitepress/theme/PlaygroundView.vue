@@ -350,6 +350,7 @@ function parseSchemaDsl(text: string): ParsedSchema {
 // ---------------------------------------------------------------------------
 
 function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
+	// biome-ignore lint/style/noNonNullAssertion: sole caller rebuildOrm() guards "if (!coreModule || !adapterModule) return;" before calling; narrowing does not cross the function boundary
 	const { schema, ref: dbRef } = coreModule!;
 	const tableDefs: Record<string, Record<string, unknown>> = {};
 

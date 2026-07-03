@@ -555,7 +555,7 @@ export default function App() {
 			},
 			handler: async () => {
 				const tab = getActiveTab(useEditorStore.getState());
-				if (!tab || tab.language !== 'assert') return;
+				if (tab?.language !== 'assert') return;
 				const activeConn = useConnectionStore.getState().active;
 				if (!activeConn) return;
 

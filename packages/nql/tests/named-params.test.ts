@@ -200,6 +200,7 @@ describe('FEAT-134 named parameters — compiler resolution', () => {
 
 	it('rejects dangerous source names and params map keys', () => {
 		const protoParams = Object.create(null) as Record<string, unknown>;
+		// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — protoParams has a null prototype, so this sets an own data property to exercise dangerous-key rejection
 		protoParams.__proto__ = 1;
 
 		for (const name of ['__proto__', 'constructor', 'prototype']) {
