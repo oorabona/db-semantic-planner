@@ -836,6 +836,7 @@ b | select __proto__`.dump();
 			const columnTypes = bundle.bindingOutputSchemas?.get('b')?.columnTypes;
 			expect(columnTypes).toBeDefined();
 			expect(Object.hasOwn(columnTypes, '__proto__')).toBe(true);
+			// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — asserts the value under an own __proto__ key, not Object.prototype
 			expect((columnTypes as Record<string, unknown>).__proto__).toEqual({
 				kind: 'column',
 				type: 'integer',
@@ -1879,6 +1880,7 @@ touched | select profile, embedding, embedding2`.all();
 			(_ctx, rows: Array<{ profile: Record<string, unknown> }>) => {
 				rows[0]!.profile.status = 'mutated';
 				(rows[0]!.profile.details as Record<string, unknown>).archived = true;
+				// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — mutating the own __proto__ key from JSON.parse, not the prototype link
 				(rows[0]!.profile.__proto__ as Record<string, unknown>).polluted =
 					'mutated';
 				return rows;
@@ -1904,6 +1906,7 @@ touched | select profile`.all();
 			true,
 		);
 		expect(
+			// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — asserting the own __proto__ key survives untouched
 			(returnedProfile.__proto__ as Record<string, unknown>).polluted,
 		).toBe('mutated');
 
@@ -1919,6 +1922,7 @@ touched | select profile`.all();
 		expect((snapshotProfile.details as Record<string, unknown>).archived).toBe(
 			false,
 		);
+		// biome-ignore lint/suspicious/noProto: testing __proto__ prototype-pollution handling — snapshot must preserve the own __proto__ key's value
 		expect(snapshotProfile.__proto__).toEqual({ polluted: true });
 		expect(({} as Record<string, unknown>).polluted).toBeUndefined();
 	});

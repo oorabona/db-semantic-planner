@@ -24,6 +24,7 @@ function columnListValue(
 	shape?: ColumnListInput,
 ): string | readonly string[] {
 	if (shape !== undefined && typeof shape !== 'string') return columns;
+	// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the ternary condition on this line
 	return columns.length === 1 ? columns[0]! : columns;
 }
 

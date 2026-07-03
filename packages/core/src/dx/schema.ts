@@ -1634,6 +1634,7 @@ function addCompositeConstraintRelations(
 			const foreignKey = [...columns];
 			const referencedKey = [...references];
 			const belongsToName = deriveCompositeConstraintRelationName(
+				// biome-ignore lint/style/noNonNullAssertion: foreignKey copies columns whose length is guaranteed >= 1 by the "if (!columns?.length) continue;" guard above
 				foreignKey[0]!,
 				fkRef.options,
 			);

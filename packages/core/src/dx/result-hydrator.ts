@@ -566,6 +566,7 @@ export class ResultHydrator<TResult = unknown> {
 				`Recursive include hydration requires a single-column self-referential foreign key; got ${JSON.stringify(columns)}.`,
 			);
 		}
+		// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the throw above (length !== 1 already handled)
 		return columns[0]!;
 	}
 
@@ -720,6 +721,7 @@ export class ResultHydrator<TResult = unknown> {
 			return undefined;
 		}
 		if (columns.length === 1) {
+			// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the enclosing if-block
 			return obj[columns[0]!];
 		}
 		// Composite key: build a string key for Map grouping.
@@ -748,6 +750,7 @@ export class ResultHydrator<TResult = unknown> {
 			return undefined;
 		}
 		if (columns.length === 1) {
+			// biome-ignore lint/style/noNonNullAssertion: columns.length === 1 guaranteed by the enclosing if-block
 			return obj[columns[0]!];
 		}
 		const values = columns.map((k) => obj[k]);

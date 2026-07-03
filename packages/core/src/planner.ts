@@ -609,6 +609,7 @@ function isSubquerySelectedColumnNonNullable(
 
 	const fkColumns = toColumnList(rel.foreignKey);
 	if (fkColumns.length !== 1) return false;
+	// biome-ignore lint/style/noNonNullAssertion: fkColumns.length === 1 guaranteed by the return-false guard above
 	const fk = fkColumns[0]!;
 
 	const targetTableIR = model.getTable(rel.target);
@@ -704,6 +705,7 @@ function optimizeInToExists(
 				if (rel.target !== inWhere.subquery.from) continue;
 				const fkColumns = toColumnList(rel.foreignKey);
 				if (fkColumns.length !== 1) continue;
+				// biome-ignore lint/style/noNonNullAssertion: fkColumns.length === 1 guaranteed by the continue guard above
 				const fk = fkColumns[0]!;
 
 				// hasMany: outer.pk IN (SELECT fk FROM target WHERE ...)
