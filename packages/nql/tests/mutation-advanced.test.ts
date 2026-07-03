@@ -48,6 +48,18 @@ const snapshotSchema: ColumnValidatorSchema = {
 					{ name: 'active', type: 'boolean' },
 				],
 			},
+			archives: {
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'label', type: 'string' },
+				],
+			},
+			events: {
+				columns: [
+					{ name: 'id', type: 'integer' },
+					{ name: 'userId', type: 'integer' },
+				],
+			},
 		};
 		return tables[name];
 	},
@@ -773,6 +785,34 @@ describe('F17: read binding references across mutations', () => {
 		expect(
 			result.bindingOutputSchemas?.get('ids')?.columnTypes?.userId,
 		).toMatchObject({ kind: 'column', type: 'integer' });
+	});
+
+	it('validates insert-from RETURNING against the TARGET table (#217)', () => {
+		const result = compile(
+			'insert into archives from users | select label as out | bind m\narchives | select id',
+			snapshotSchema,
+		);
+		expect(result.success).toBe(true);
+	});
+
+	it('rejects insert-from RETURNING columns that exist only on the SOURCE table (#217)', () => {
+		const result = compile(
+			'insert into archives from users | select active as out | bind m\narchives | select id',
+			snapshotSchema,
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors?.[0]?.message).toContain('active');
+	});
+
+	it('rejects RETURNING outputs that collide after column canonicalization (#217)', () => {
+		const result = compile(
+			'insert into events set userId = 1 | select userId, user_id | bind m\nevents | select id',
+			snapshotSchema,
+		);
+		expect(result.success).toBe(false);
+		expect(result.errors?.[0]?.message).toMatch(
+			/duplicate output name .*after column canonicalization|duplicate output name/,
+		);
 	});
 
 	it('allows a read binding to feed the immediately following mutation (#113)', () => {

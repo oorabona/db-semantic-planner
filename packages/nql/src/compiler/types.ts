@@ -99,7 +99,7 @@ export interface NqlCompilerOptions {
 
 /**
  * Alias-aware description of one mutation RETURNING projection: the OUTPUT
- * name (post-alias) and whether it was aliased. #213 B2: threaded
+ * name (post-alias), SOURCE column, and whether it was aliased. #213 B2: threaded
  * internally (never part of the public `MutationIntent.returning:
  * string[]`) so mutation-RETURNING binding output-schema typing can tell
  * `returning email as name` apart from a genuine `name` column — typing
@@ -107,6 +107,7 @@ export interface NqlCompilerOptions {
  * collision (the A2 trap, mutation-side).
  */
 export interface ReturningColumnInfo {
+	readonly source: string;
 	readonly output: string;
 	readonly aliased: boolean;
 }

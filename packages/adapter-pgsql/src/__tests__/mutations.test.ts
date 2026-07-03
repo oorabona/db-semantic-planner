@@ -653,6 +653,122 @@ describe('UPSERT Compiler', () => {
 	});
 });
 
+describe('Alias-aware mutation RETURNING intent emission (#217)', () => {
+	const adapter = createPgsqlCompileOnlyAdapter({ dbCasing: 'preserve' });
+
+	function expectReturningAlias(
+		sql: string,
+		table: string,
+		source: string,
+		output: string,
+	): void {
+		expect(sql).toContain(`RETURNING ${table}.${source} AS ${output}`);
+	}
+
+	it('threads returningItems through insert', () => {
+		const { sql } = adapter.compileInsert({
+			type: 'insert',
+			table: 'users',
+			values: [{ email: 'a@example.com' }],
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('threads returningItems through insert-from', () => {
+		const { sql } = adapter.compileInsertFrom({
+			type: 'insert_from',
+			table: 'archived_users',
+			source: 'users',
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'archived_users', 'email', 'contact');
+	});
+
+	it('threads returningItems through update', () => {
+		const { sql } = adapter.compileUpdate({
+			type: 'update',
+			table: 'users',
+			set: { name: 'Jane' },
+			allowAll: true,
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('threads returningItems through batch update', () => {
+		const { sql } = adapter.compileBatchUpdate({
+			type: 'batchUpdate',
+			table: 'users',
+			matchColumns: ['id'],
+			updates: [{ id: 1, name: 'Jane' }],
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('threads returningItems through delete', () => {
+		const { sql } = adapter.compileDelete({
+			type: 'delete',
+			table: 'users',
+			allowAll: true,
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('threads returningItems through upsert', () => {
+		const { sql } = adapter.compileUpsert({
+			type: 'upsert',
+			table: 'users',
+			values: [{ email: 'a@example.com', name: 'Alice' }],
+			onConflict: { columns: ['email'] },
+			action: { type: 'doNothing' },
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('threads returningItems through upsert-from', () => {
+		const { sql } = adapter.compileUpsertFrom({
+			type: 'upsert_from',
+			table: 'users',
+			source: 'import_users',
+			conflictColumns: ['email'],
+			columns: ['email', 'name'],
+			returning: ['contact'],
+			returningItems: [{ source: 'email', output: 'contact' }],
+		});
+
+		expectReturningAlias(sql, 'users', 'email', 'contact');
+	});
+
+	it('quotes hostile forged output aliases instead of concatenating raw SQL', () => {
+		const output = 'bad"; DROP TABLE users; --';
+		const { sql } = adapter.compileInsert({
+			type: 'insert',
+			table: 'users',
+			values: [{ email: 'a@example.com' }],
+			returning: [output],
+			returningItems: [{ source: 'email', output }],
+		});
+
+		expect(sql).toContain('AS "bad""; DROP TABLE users; --"');
+	});
+});
+
 // ============================================================================
 // DELETE-NOT-EXISTS: notExists() / exists() on DELETE mutations (P1 hotfix)
 // ============================================================================

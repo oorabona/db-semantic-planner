@@ -374,6 +374,65 @@ b | select title`;
 		expect(persisted.rows).toEqual([{ title: 'S3 second' }]);
 	});
 
+	it('round-trips an aliased mutation RETURNING binding with the source column value (#217 S1/S8)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const program = orm.nql<{
+			body: string;
+		}>`insert into posts set id = ${9710}, title = ${'S1 title'}, content = ${'S1 content'}, authorId = ${1}, published = ${false} | select content as body | bind m
+m | select body`;
+		const dump = program.dump();
+		const rows = await program.all();
+		const allSql = (dump.sequence ?? []).map((step) => step.sql).join('\n');
+
+		expect(rows).toEqual([{ body: 'S1 content' }]);
+		expect(allSql).toMatch(
+			/RETURNING\s+(?:[A-Za-z_][A-Za-z0-9_]*\.)?posts\.content AS body/,
+		);
+		expect(allSql).not.toMatch(
+			/RETURNING\s+(?:[A-Za-z_][A-Za-z0-9_]*\.)?posts\.body AS body/,
+		);
+	});
+
+	it('returns the source column when an alias collides with a real column (#217 S2)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			title: string;
+		}>`insert into posts set id = ${9711}, title = ${'S2 title'}, content = ${'S2 content'}, authorId = ${1}, published = ${false} | select content as title | bind m
+m | select title`.all();
+
+		expect(rows).toEqual([{ title: 'S2 content' }]);
+	});
+
+	it('keeps mutation RETURNING * behavior unchanged (#217 S7)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			id: number;
+			title: string;
+		}>`insert into posts set id = ${9712}, title = ${'S7 title'}, content = ${'S7 content'}, authorId = ${1}, published = ${false} | select * | bind m
+m | select id, title`.all();
+
+		expect(rows).toEqual([{ id: 9712, title: 'S7 title' }]);
+	});
+
+	it('supports swapped mutation RETURNING aliases with distinct source values (#217 S9)', async () => {
+		const adapter = await getTestAdapter();
+		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
+
+		const rows = await orm.nql<{
+			content: string;
+			title: string;
+		}>`insert into posts set id = ${9713}, title = ${'S9 title'}, content = ${'S9 content'}, authorId = ${1}, published = ${false} | select title as content, content as title | bind m
+m | select content, title`.all();
+
+		expect(rows).toEqual([{ content: 'S9 title', title: 'S9 content' }]);
+	});
+
 	it('rejects a transitive snapshot sourced from an aliased mutation-RETURNING binding (#213 S11)', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);

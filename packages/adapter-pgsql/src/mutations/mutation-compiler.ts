@@ -11,7 +11,11 @@
  */
 
 import { isSqlRaw } from '@dbsp/core';
-import { isParamIntent, type ParamIntent } from '@dbsp/types';
+import {
+	isParamIntent,
+	type MutationReturningItem,
+	type ParamIntent,
+} from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import {
 	columnRef,
@@ -21,6 +25,7 @@ import {
 	type InsertOptions,
 	insertStmt,
 	resTarget,
+	starTarget,
 	type UpdateOptions,
 	updateStmt,
 } from '../ast-helpers.js';
@@ -54,14 +59,54 @@ export function buildReturningList(
 	columns: readonly string[] | undefined,
 	tableRef: string,
 	ctx: CompilerContext,
+	returningItems?: readonly MutationReturningItem[],
 ): Node[] | undefined {
-	if (!columns || columns.length === 0) return undefined;
 	const { naming } = ctx;
+	if (returningItems !== undefined) {
+		const returning = columns ?? [];
+		if (returningItems.length !== returning.length) {
+			throw new Error(
+				`Invalid mutation RETURNING items: returningItems length (${returningItems.length}) must match returning length (${returning.length}).`,
+			);
+		}
+		if (
+			returning.includes('*') ||
+			returningItems.some((item) => item.output === '*' || item.source === '*')
+		) {
+			throw new Error(
+				'Invalid mutation RETURNING items: star RETURNING cannot carry alias-aware returningItems.',
+			);
+		}
+		if (returningItems.length === 0) return undefined;
+		const emittedOutputs = new Map<string, string>();
+		return returningItems.map((item, index) => {
+			if (item.output !== returning[index]) {
+				throw new Error(
+					`Invalid mutation RETURNING items: returningItems[${index}].output '${item.output}' must match returning[${index}] '${returning[index]}'.`,
+				);
+			}
+			const emittedOutput = naming.toDatabase(item.output);
+			const previousOutput = emittedOutputs.get(emittedOutput);
+			if (previousOutput !== undefined) {
+				throw new Error(
+					`Duplicate mutation RETURNING output after database naming: '${emittedOutput}' from '${previousOutput}' and '${item.output}'.`,
+				);
+			}
+			emittedOutputs.set(emittedOutput, item.output);
+			return resTarget(
+				columnRef(item.source, tableRef, ctx.schema, naming),
+				emittedOutput,
+			);
+		});
+	}
+	if (!columns || columns.length === 0) return undefined;
 	return columns.map((col) =>
-		resTarget(
-			columnRef(col, tableRef, ctx.schema, naming),
-			naming.toDatabase(col),
-		),
+		col === '*'
+			? starTarget()
+			: resTarget(
+					columnRef(col, tableRef, ctx.schema, naming),
+					naming.toDatabase(col),
+				),
 	);
 }
 
@@ -81,6 +126,8 @@ export interface InsertConfig {
 	values: unknown[][];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 	/** Subquery for INSERT ... SELECT */
 	selectQuery?: Node;
 	/** Column database types for type-cast emission (e.g. range types) */
@@ -99,6 +146,8 @@ export interface UpdateConfig {
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 	/** Column database types for type-cast emission (e.g. range types) */
 	columnTypes?: Record<string, string>;
 }
@@ -113,6 +162,8 @@ export interface DeleteConfig {
 	where?: Decision[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 }
 
 /**
@@ -131,6 +182,8 @@ export interface InsertFromConfig {
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 }
 
 export interface UpsertFromConfig {
@@ -148,6 +201,8 @@ export interface UpsertFromConfig {
 	limit?: number | ParamIntent;
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 }
 
 // ============================================================================
@@ -178,7 +233,12 @@ export function compileInsert(
 	);
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, dbTable, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		dbTable,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build INSERT statement using helper
 	// Use spread to conditionally include optional properties (exactOptionalPropertyTypes)
@@ -270,7 +330,12 @@ export function compileUnnestInsert(
 	};
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, dbTable, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		dbTable,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build INSERT INTO "table" ("col1", "col2") <selectQuery>
 	const options: InsertOptions = {
@@ -331,7 +396,12 @@ export function compileUpdate(
 	}
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, tableAlias, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		tableAlias,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build UPDATE statement (exactOptionalPropertyTypes compatible)
 	const options: UpdateOptions = {
@@ -366,6 +436,8 @@ export interface BatchUpdateConfig {
 	scalarSet?: { column: string; value: unknown }[];
 	/** Columns to return (RETURNING clause) */
 	returning?: string[];
+	/** Alias-aware RETURNING projection items */
+	returningItems?: readonly MutationReturningItem[];
 	/** Column database types for type-cast emission */
 	columnTypes?: Record<string, string>;
 	/** Optional extra WHERE guard appended as AND after match conditions */
@@ -465,7 +537,12 @@ export function compileUnnestUpdate(
 		: matchWhere;
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, dbTable, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		dbTable,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build UPDATE statement
 	const options: UpdateOptions = {
@@ -511,7 +588,12 @@ export function compileDelete(
 	}
 
 	// Build RETURNING clause if specified
-	const returningList = buildReturningList(config.returning, tableAlias, ctx);
+	const returningList = buildReturningList(
+		config.returning,
+		tableAlias,
+		ctx,
+		config.returningItems,
+	);
 
 	// Build DELETE statement (exactOptionalPropertyTypes compatible)
 	const options: DeleteOptions = {
@@ -625,6 +707,7 @@ export function compileInsertFrom(
 		config.returning,
 		config.targetTable,
 		ctx,
+		config.returningItems,
 	);
 
 	// Build INSERT statement with SELECT query
@@ -742,6 +825,7 @@ export function compileUpsertFrom(
 		config.returning,
 		config.targetTable,
 		ctx,
+		config.returningItems,
 	);
 
 	// Build ON CONFLICT clause: DO UPDATE SET col = EXCLUDED.col for non-conflict columns

@@ -382,6 +382,7 @@ describe('compile-mutation: RETURNING clause', () => {
 
 		const insert = result.mutation as InsertIntent;
 		expect(insert.returning).toEqual(['id']);
+		expect(insert.returningItems).toBeUndefined();
 	});
 
 	it('insert with multiple RETURNING columns', () => {
@@ -602,6 +603,79 @@ describe('compile-mutation: RETURNING with alias', () => {
 
 		const insert = result.mutation as InsertIntent;
 		expect(insert.returning).toEqual(['user_id']);
+		expect(insert.returningItems).toEqual([
+			{ source: 'id', output: 'user_id' },
+		]);
+	});
+
+	it('preserves self alias as an alias-aware item', () => {
+		const result = compileNql(
+			"insert into users set name = 'Alice' | select name as name",
+		);
+
+		const insert = result.mutation as InsertIntent;
+		expect(insert.returning).toEqual(['name']);
+		expect(insert.returningItems).toEqual([{ source: 'name', output: 'name' }]);
+	});
+
+	it('rejects mixed star and explicit RETURNING projections', () => {
+		const result = compile(
+			"insert into users set name = 'Alice' | select *, name as who",
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Mutation RETURNING cannot mix `select \*` with explicit projection items/,
+		);
+	});
+
+	it('rejects duplicate RETURNING output names', () => {
+		const result = compile(
+			"insert into users set name = 'Alice' | select id as x, name as x",
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Mutation RETURNING has duplicate output name 'x'/,
+		);
+	});
+
+	it('rejects aliased dotted RETURNING sources', () => {
+		const result = compile(
+			"insert into users set name = 'Alice' | select users.name as who",
+			null,
+		);
+
+		expect(result.success).toBe(false);
+		expect(result.errors[0]?.message).toMatch(
+			/Mutation RETURNING alias cannot use dotted source 'users\.name'/,
+		);
+	});
+
+	it('canonicalizes aliased RETURNING source but preserves output verbatim', () => {
+		const result = compile(
+			'insert into users set user_id = 1 | select user_id as Contact | bind m\nm | select Contact',
+			{
+				getTable(name: string) {
+					return name === 'users'
+						? { columns: [{ name: 'userId' }, { name: 'email' }] }
+						: undefined;
+				},
+				getRelationsFrom() {
+					return [];
+				},
+			},
+		);
+
+		expect(result.success).toBe(true);
+		expect(result.ast?.mutationBindings?.get('m')?.returning).toEqual([
+			'Contact',
+		]);
+		expect(result.ast?.mutationBindings?.get('m')?.returningItems).toEqual([
+			{ source: 'userId', output: 'Contact' },
+		]);
 	});
 });
 

@@ -58,9 +58,64 @@ describe('mutation-compiler - coverage', () => {
 			expect(result[0].ResTarget).toBeDefined();
 		});
 
+		it('builds RETURNING * as a bare star target', () => {
+			const result = buildReturningList(['*'], 'users', ctx);
+			expect(result).toHaveLength(1);
+			const target = result![0]!.ResTarget;
+			expect(target.name).toBeUndefined();
+			expect(target.val.ColumnRef.fields).toEqual([{ A_Star: {} }]);
+		});
+
 		it('builds returning list for multiple columns', () => {
 			const result = buildReturningList(['id', 'name', 'email'], 'users', ctx);
 			expect(result).toHaveLength(3);
+		});
+
+		it('rejects star RETURNING carrying alias-aware returning items', () => {
+			expect(() =>
+				buildReturningList(['*'], 'users', ctx, [
+					{ source: 'id', output: '*' },
+				]),
+			).toThrow(/star RETURNING cannot carry alias-aware returningItems/);
+		});
+
+		it('uses source for alias-aware returning items and output for aliases', () => {
+			const result = buildReturningList(['contact'], 'users', ctx, [
+				{ source: 'email', output: 'contact' },
+			]);
+			expect(result).toHaveLength(1);
+			const target = result![0]!.ResTarget;
+			expect(target.name).toBe('contact');
+			expect(target.val.ColumnRef.fields).toEqual([
+				{ String: { sval: 'users' } },
+				{ String: { sval: 'email' } },
+			]);
+		});
+
+		it('rejects desynced returningItems length', () => {
+			expect(() =>
+				buildReturningList(['contact'], 'users', ctx, [
+					{ source: 'email', output: 'contact' },
+					{ source: 'name', output: 'display' },
+				]),
+			).toThrow(/returningItems length/);
+		});
+
+		it('rejects desynced returningItems output order', () => {
+			expect(() =>
+				buildReturningList(['contact'], 'users', ctx, [
+					{ source: 'email', output: 'who' },
+				]),
+			).toThrow(/returningItems\[0\]\.output/);
+		});
+
+		it('rejects post-naming duplicate output aliases', () => {
+			expect(() =>
+				buildReturningList(['userId', 'user_id'], 'users', ctx, [
+					{ source: 'id', output: 'userId' },
+					{ source: 'email', output: 'user_id' },
+				]),
+			).toThrow(/Duplicate mutation RETURNING output after database naming/);
 		});
 	});
 

@@ -358,6 +358,7 @@ export function compileInsert(
 		columns,
 		values,
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 	};
 
@@ -441,6 +442,7 @@ export function compileInsertFrom(
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
 	const ast = compileInsertFromMutation(config, ctx, state);
@@ -499,6 +501,7 @@ export function compileUpdate(
 		})),
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 	};
 
@@ -624,6 +627,7 @@ export function compileBatchUpdate(
 		columnArrays,
 		...(scalarSet && { scalarSet }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 		...(whereGuard !== undefined && { whereGuard }),
 	};
@@ -677,6 +681,7 @@ export function compileDelete(
 		table: intent.table,
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
 	const ast = compileDeleteMutation(config, ctx, state);
@@ -798,6 +803,7 @@ export function compileUpsert(
 		conflictAction,
 		...(updateColumns && { updateColumns }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 		...(columnTypes && { columnTypes }),
 		...(hasRawExprs && { updateExpressions: rawExprs }),
 		...(resolvedActionWhere && {
@@ -905,6 +911,7 @@ export function compileUpsertFrom(
 		...(resolvedWhere && { where: [whereIntentAsDecision(resolvedWhere)] }),
 		...(intent.limit !== undefined && { limit: intent.limit }),
 		...(intent.returning && { returning: [...intent.returning] }),
+		...(intent.returningItems && { returningItems: intent.returningItems }),
 	};
 
 	const ast = compileUpsertFromMutation(config, ctx, state);

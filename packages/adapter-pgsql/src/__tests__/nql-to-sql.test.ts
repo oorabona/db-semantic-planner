@@ -1831,6 +1831,34 @@ describe('NQL → SQL mutation E2E', () => {
 		);
 	});
 
+	it('emits aliased mutation RETURNING from the physical source column (#217)', () => {
+		const { sql, params } = mutationToSQL(
+			"insert into authors set name = 'Alice', email = 'alice@example.com' | select email as contact",
+		);
+		expect(sql).toEqual(
+			'insert into authors (name, email) values ($1, $2) returning authors.email as contact',
+		);
+		expect(params).toEqual(['Alice', 'alice@example.com']);
+	});
+
+	it('emits source column when a mutation RETURNING alias collides with a real column (#217)', () => {
+		const { sql } = mutationToSQL(
+			"insert into authors set name = 'Alice', email = 'alice@example.com' | select email as name",
+		);
+		expect(sql).toEqual(
+			'insert into authors (name, email) values ($1, $2) returning authors.email as name',
+		);
+	});
+
+	it('emits swapped mutation RETURNING aliases with crossed source columns (#217)', () => {
+		const { sql } = mutationToSQL(
+			"insert into authors set name = 'Alice', email = 'alice@example.com' | select name as email, email as name",
+		);
+		expect(sql).toEqual(
+			'insert into authors (name, email) values ($1, $2) returning authors.name as email, authors.email as name',
+		);
+	});
+
 	it('binds explicit NQL param nodes through mutation values and WHERE', () => {
 		const needle = { kind: 'fieldRef', column: 'active' };
 		const { sql, params } = mutationToSQLWithNamedParams(
