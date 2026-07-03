@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.7.1](https://github.com/oorabona/db-semantic-planner/compare/types-v1.7.0...types-v1.7.1) (2026-07-03)
+
+
+### Bug Fixes
+
+* **nql:** Emit aliased mutation RETURNING through the source column ([#220](https://github.com/oorabona/db-semantic-planner/issues/220)) ([f4213a0](https://github.com/oorabona/db-semantic-planner/commit/f4213a0f3e23463b5a8f48e379d4ade9ce516232))
+
 ## [1.7.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.6.0...types-v1.7.0) (2026-07-02)
 
 

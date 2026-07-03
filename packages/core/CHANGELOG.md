@@ -1,5 +1,15 @@
 # Changelog
 
+## [1.7.1](https://github.com/oorabona/db-semantic-planner/compare/core-v1.7.0...core-v1.7.1) (2026-07-03)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.8.1
+    * @dbsp/types bumped to 1.7.1
+
 ## [1.7.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.6.0...core-v1.7.0) (2026-07-02)
 
 
