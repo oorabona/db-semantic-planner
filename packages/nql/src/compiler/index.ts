@@ -968,8 +968,8 @@ export class NqlCompiler {
 	 * binding. #213 B2: detection consumes `ctx.lastMutationReturningItems`
 	 * (alias-aware, positional) — NEVER the collapsed `columns` names — so an
 	 * alias colliding with a real column (`returning email as name`) is
-	 * flagged 'aliased-returning' rather than silently mistyped as the
-	 * colliding column's type.
+	 * typed by its physical source column rather than silently mistyped as the
+	 * colliding output column's type.
 	 */
 	private buildMutationReturningColumnTypes(
 		table: string,
@@ -981,7 +981,13 @@ export class NqlCompiler {
 				const item =
 					items !== undefined && items !== 'star' ? items[index] : undefined;
 				if (item?.aliased) {
-					return { column, untypeable: 'aliased-returning' };
+					const typeInfo = this.ctx.validator?.getTableColumnType(
+						table,
+						item.source,
+					);
+					return typeInfo !== undefined
+						? { column, typed: typeInfo }
+						: { column, untypeable: 'unresolvable-source' };
 				}
 				const typeInfo = this.ctx.validator?.getTableColumnType(table, column);
 				return typeInfo !== undefined

@@ -433,22 +433,29 @@ m | select content, title`.all();
 		expect(rows).toEqual([{ content: 'S9 title', title: 'S9 content' }]);
 	});
 
-	it('rejects a transitive snapshot sourced from an aliased mutation-RETURNING binding (#213 S11)', async () => {
+	it('snapshots a transitive read-bind sourced from an aliased mutation-RETURNING binding (#213 S11 lift)', async () => {
 		const adapter = await getTestAdapter();
 		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
 
-		// #217: executing a reference to an ALIASED mutation-RETURNING bind is
-		// broken upstream — this never reaches execution because the SNAPSHOT
-		// GATE rejects 'b' at NQL-compile time (before any adapter/execute
-		// call), naming the propagated 'aliased-returning' reason.
-		await expect(
-			orm.nql`insert into posts set id = ${9700}, title = ${'S11'}, content = ${'S11 fixture'}, authorId = ${1}, published = ${false} | select title as who | bind m
+		// #217 §3.5 lift: 'b' (transitive from the aliased mutation-bind 'm', whose
+		// 'who' is now typed by its SOURCE column `title`) is accepted across the
+		// intervening update. The read-bind is snapshotted at its source position,
+		// so `b | select who` after the update returns the PRE-mutation value —
+		// while the update itself still persists against the real table.
+		const rows = await orm.nql<{
+			who: string;
+		}>`insert into posts set id = ${9700}, title = ${'S11'}, content = ${'S11 fixture'}, authorId = ${1}, published = ${false} | select title as who | bind m
 m | select who | bind b
 update posts set title = ${'S11 changed'} where id = ${9700} | select id | bind changed
-b | select who`.all(),
-		).rejects.toThrow(
-			/unsupported snapshot shape \(#186\).*binding 'b' has aliased-returning column 'who'/,
-		);
+b | select who`.all();
+
+		expect(rows).toEqual([{ who: 'S11' }]);
+
+		const pool = await getTestPool();
+		const persisted = await sql<{ title: string }>`
+			SELECT title FROM ${sql.ref(SCHEMA)}.posts WHERE id = ${9700}
+		`.execute(pool);
+		expect(persisted.rows).toEqual([{ title: 'S11 changed' }]);
 	});
 
 	it('snapshots a count(*) aggregate column across an intervening mutation, matching live count(*) semantics (#213 S4)', async () => {

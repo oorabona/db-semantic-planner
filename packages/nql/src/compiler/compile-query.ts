@@ -1421,7 +1421,7 @@ export function getQueryOutputSchema(
 			typeInfo = sourceBindingSchema.columnTypes[resolvedSourceColumn];
 		} else if (sourceBindingSchema?.columnTypesUnavailable) {
 			// Chain broke because the SOURCE binding is itself untypeable —
-			// surface ITS reason (e.g. 'aliased-returning', 'computed-expression')
+			// surface ITS reason (e.g. 'computed-expression', 'unresolvable-source')
 			// rather than a generic wrapper, so the root cause stays visible.
 			untypeableReason = sourceBindingSchema.columnTypesUnavailable.reason;
 		}
