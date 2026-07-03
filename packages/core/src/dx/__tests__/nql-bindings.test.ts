@@ -886,25 +886,67 @@ m | select id`.all();
 			});
 		});
 
-		it('rejects a transitive snapshot sourced from an aliased mutation-RETURNING binding (aliased-returning)', async () => {
-			// #217: executing a reference to an ALIASED mutation-RETURNING bind
-			// is broken upstream (model-walk cannot resolve the alias as a real
-			// column) — this test never reaches execution because the SNAPSHOT
-			// GATE rejects 'b' at NQL-compile time, before any adapter/execute
-			// call, exactly like the existing #186 reject family.
-			const execute = vi.fn().mockResolvedValue([]);
+		it('types an aliased mutation-RETURNING column by its source column (#213 aliased-returning lift)', async () => {
+			// `select name as who` → output 'who' typed by its SOURCE column `name`,
+			// lifting the former conservative 'aliased-returning' reject (#217 §3.5).
+			const execute = vi
+				.fn()
+				.mockResolvedValueOnce([{ who: 'Alice' }])
+				.mockResolvedValueOnce([{ who: 'Alice' }]);
 			const { compile, nql } = createMutationBindingTag(execute);
 
-			await expect(async () => {
-				await nql`insert into users set name = ${'Alice'} | select name as who | bind m
+			await nql`insert into users set name = ${'Alice'} | select name as who | bind m
+m | select who`.all();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[1]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('m')?.columnTypes).toEqual({
+				who: { kind: 'column', type: 'string' },
+			});
+		});
+
+		it('types an aliased mutation-RETURNING column by its SOURCE, not the colliding alias name', async () => {
+			// `select active as name`: the alias 'name' collides with the real text
+			// column users.name, but the column MUST type by its SOURCE `active`
+			// (boolean) — proving source-based lookup, never alias-based.
+			const execute = vi
+				.fn()
+				.mockResolvedValueOnce([{ name: true }])
+				.mockResolvedValueOnce([{ name: true }]);
+			const { compile, nql } = createMutationBindingTag(execute);
+
+			await nql`insert into users set name = ${'Alice'}, active = ${true} | select active as name | bind m
+m | select name`.all();
+
+			const bundle = expectCompiledNqlBundle(compile.mock.calls[1]?.[0]);
+			expect(bundle.bindingOutputSchemas?.get('m')?.columnTypes).toEqual({
+				name: { kind: 'column', type: 'boolean' },
+			});
+		});
+
+		it('snapshots a transitive read-bind sourced from an aliased mutation-RETURNING binding (#213 lift)', async () => {
+			// #217 §3.5 lift: 'b' (transitive from aliased mutation-bind 'm') is now
+			// typed by 'm's source column `name`, so its across-mutation snapshot is
+			// accepted (was rejected at NQL-compile time as 'aliased-returning').
+			const execute = vi.fn().mockResolvedValue([{ id: 1, who: 'Alice' }]);
+			const { compile, nql } = createMutationBindingTag(execute);
+
+			await nql<{
+				who: string;
+			}>`insert into users set name = ${'Alice'} | select name as who | bind m
 m | select who | bind b
 update users set active = false where id = 1 | select id | bind changed
-users | where id in (b) | select id`.all();
-			}).rejects.toThrow(
-				/unsupported snapshot shape \(#186\).*binding 'b' has aliased-returning column 'who'/,
+b | select who`.all();
+
+			// Both 'm' (aliased mutation-RETURNING) and 'b' (transitive) materialize
+			// as typed VALUES-CTE snapshots, cast via the SOURCE column `name` (text):
+			const finalCall = execute.mock.calls.at(-1)?.[0];
+			expect(finalCall?.sql).toBe(
+				'WITH "m" ("who") as (SELECT CAST(NULL AS text) AS "who" WHERE false UNION ALL VALUES ($1::text)), ' +
+					'"b" ("who") as (SELECT CAST(NULL AS text) AS "who" WHERE false UNION ALL VALUES ($2::text)) ' +
+					'SELECT b.who FROM b',
 			);
-			expect(compile).not.toHaveBeenCalled();
-			expect(execute).not.toHaveBeenCalled();
+			expect(finalCall?.parameters).toEqual(['Alice', 'Alice']);
+			expect(compile).toHaveBeenCalled();
 		});
 
 		it('chains column types transitively from a read-bind into another read-bind', () => {
