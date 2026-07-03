@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.9.0](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.8.1...nql-v1.9.0) (2026-07-03)
+
+
+### Features
+
+* **nql:** Accept aliased mutation-RETURNING columns as typed read-bind snapshot sources ([#222](https://github.com/oorabona/db-semantic-planner/issues/222)) ([267936b](https://github.com/oorabona/db-semantic-planner/commit/267936bd04a26a80672ae19ad20a6bfbfffd9188))
+
 ## [1.8.1](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.8.0...nql-v1.8.1) (2026-07-03)
 
 

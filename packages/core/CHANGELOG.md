@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.8.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.7.1...core-v1.8.0) (2026-07-03)
+
+
+### Features
+
+* **nql:** Accept aliased mutation-RETURNING columns as typed read-bind snapshot sources ([#222](https://github.com/oorabona/db-semantic-planner/issues/222)) ([267936b](https://github.com/oorabona/db-semantic-planner/commit/267936bd04a26a80672ae19ad20a6bfbfffd9188))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.9.0
+
 ## [1.7.1](https://github.com/oorabona/db-semantic-planner/compare/core-v1.7.0...core-v1.7.1) (2026-07-03)
 
 
