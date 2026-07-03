@@ -224,6 +224,19 @@ const dump = orm.select('users').where(eq('active', true))
 // dump.meta?.correlationId === requestId
 ```
 
+**Silencing DX Warnings** — DX warnings are categorized (`'dx'` vs `'runtime'`). The reserved-word column-access hint (`'dx'`) warns once per process; raw-SQL usage (`'runtime'`) fires on every non-production compile and is not deduped. Silence `'dx'` per ORM instance, or globally via env var.
+
+```typescript
+const orm2 = createOrm({ schema: db, adapter, suppressDxWarnings: true });
+```
+
+```bash
+# Or globally, for the whole process (e.g. in CI or a REPL):
+DBSP_SUPPRESS_DX_WARNINGS=1 node app.js
+```
+
+See [Production: Observability & Logging](https://oorabona.github.io/db-semantic-planner/guide/production#observability--logging) for `setLogger()`/`silentLogger` and the full suppression precedence.
+
 ---
 
 ## Architecture

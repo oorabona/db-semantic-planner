@@ -10,7 +10,7 @@
  * - Should be audited in code reviews
  */
 
-import { getLogger } from '@dbsp/core';
+import { emitWarning } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
 import { unwrapParamIntent } from '../../param-intent.js';
 import type {
@@ -73,10 +73,12 @@ export const rawHandler: ExpressionHandler = {
 		// Audit trail callback (opt-in)
 		ctx.onRawSQL?.(sql);
 
-		// Log warning in development
+		// Log warning in development (category: 'runtime' — not affected by
+		// DBSP_SUPPRESS_DX_WARNINGS or per-instance suppressDxWarnings; #159)
 		if (process.env.NODE_ENV !== 'production') {
-			getLogger().warn(
+			emitWarning(
 				`[adapter-pgsql] ⚠️ Raw SQL expression used: ${sql.slice(0, 50)}${sql.length > 50 ? '...' : ''}`,
+				'runtime',
 			);
 		}
 

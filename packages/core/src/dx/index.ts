@@ -205,11 +205,14 @@ export {
 // E10: Injectable Logger
 export {
 	defaultLogger,
+	type EmitWarningOptions,
+	emitWarning,
 	getLogger,
 	type Logger,
 	resetLogger,
 	setLogger,
 	silentLogger,
+	type WarningCategory,
 } from './logger.js';
 // Mutation Builders (DX-010, DX-026)
 export {
