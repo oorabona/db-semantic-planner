@@ -771,8 +771,14 @@ export interface QueryBuilder<TResult = unknown> {
 	 * Check whether any matching rows exist.
 	 *
 	 * Compiles to `SELECT EXISTS(SELECT 1 FROM ... WHERE ...)`.
-	 * Strips `orderBy` and `include` (irrelevant for existence checks).
-	 * Preserves `groupBy`, `having`, and `offset` (they affect the result set).
+	 * Strips `orderBy`; every include is kept and compiled exactly as for the
+	 * full query — nothing is pruned. The `SELECT 1` wrap then discards the
+	 * target list, so target-list hydration (the default `json_agg`) vanishes
+	 * for free while FROM joins (`inner`/`left`/`lateral`/`cte`, incl. recursive)
+	 * ride along and filter/multiply the root rows just as they would in the full
+	 * query. `groupBy`, `having`, and `offset` are preserved (they affect the
+	 * result). A recursive include therefore builds its CTE here (and throws on a
+	 * dialect without `supportsRecursiveCTE`) rather than a cheaper shortcut.
 	 *
 	 * Requires `db` to be configured in createOrm() options.
 	 *

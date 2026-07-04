@@ -25,6 +25,7 @@ import {
 	NotFoundError,
 	validateIdentifier,
 } from './errors.js';
+import { buildExistsIntent } from './exists-intent.js';
 import { ExpressionRef } from './expressions.js';
 import {
 	and,
@@ -1471,23 +1472,13 @@ export class QueryBuilderImpl<TResult = unknown>
 
 	/**
 	 * Build an existence-check intent from current state.
-	 * Strips orderBy and include (irrelevant), preserves groupBy/having/offset.
+	 * Strips orderBy (irrelevant once wrapped in EXISTS), sets existsWrap and
+	 * limit: 1, and keeps every include unchanged; the compiler decides which
+	 * include contributions still need to be emitted (see exists-intent.ts
+	 * and shouldEmitInclude() in the pgsql compiler) (#230).
 	 */
 	private buildExistsIntent(): QueryIntent {
-		const baseIntent = this.buildIntent();
-		const {
-			orderBy: _orderBy,
-			include: _include,
-			...rest
-		} = baseIntent as QueryIntent & {
-			orderBy?: unknown;
-			include?: unknown;
-		};
-		return {
-			...rest,
-			existsWrap: true,
-			limit: 1,
-		};
+		return buildExistsIntent(this.buildIntent());
 	}
 
 	/**
@@ -1495,19 +1486,7 @@ export class QueryBuilderImpl<TResult = unknown>
 	 * @internal
 	 */
 	private buildExistsIntentFromIntent(baseIntent: QueryIntent): QueryIntent {
-		const {
-			orderBy: _orderBy,
-			include: _include,
-			...rest
-		} = baseIntent as QueryIntent & {
-			orderBy?: unknown;
-			include?: unknown;
-		};
-		return {
-			...rest,
-			existsWrap: true,
-			limit: 1,
-		};
+		return buildExistsIntent(baseIntent);
 	}
 
 	/**
