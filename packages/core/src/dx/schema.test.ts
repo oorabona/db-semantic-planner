@@ -5,7 +5,8 @@
  * Structure: AAA (Arrange-Act-Assert) for unit tests.
  */
 
-import { describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
+import { resetLogger } from './logger.js';
 import { createOrm } from './orm.js';
 import type { InferDB, InferredRangeValue, JsonValue } from './schema.js';
 import {
@@ -1278,6 +1279,13 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 	});
 
 	describe('JS reserved words handling (H-03, ERR-05)', () => {
+		// #159: reserved-word warning dedup is now module-level (once per
+		// process), not per-schema()/createTableRef() call. Reset before each
+		// test so these tests stay isolated from each other.
+		beforeEach(() => {
+			resetLogger();
+		});
+
 		it('should return ColumnRef for reserved word column names', () => {
 			// Arrange - Use 'delete' as it's a JS keyword but not an object property
 			const s = schema({

@@ -324,6 +324,48 @@ const users = await orm.select('users')
 }
 ```
 
+### Silencing DX Warnings
+
+DX warnings (reserved-word column access, raw SQL usage, etc.) carry a `WarningCategory`:
+
+| Category | Examples | Dedup | Suppressible via |
+|----------|----------|-------|-------------------|
+| `'dx'` | Reserved-word column access | Once per process (keyed by table + column) | `DBSP_SUPPRESS_DX_WARNINGS` env var, per-instance `suppressDxWarnings` |
+| `'runtime'` | Raw SQL expression usage | **Not deduped** — fires on every non-production compile | `NODE_ENV` gate (adapter-side), global logger only — not env/per-instance suppressible |
+
+Only the reserved-word `'dx'` hint is deduped; it is emitted **once per process**, not once per `createOrm()` call. Raw-SQL `'runtime'` warnings have no dedup and fire on every non-production compile of a `raw()` expression.
+
+Suppress `'dx'` warnings for a single ORM instance:
+
+```typescript
+const quietOrm = createOrm({ schema: db, adapter, suppressDxWarnings: true });
+```
+
+Suppress `'dx'` warnings process-wide via environment variable:
+
+```bash
+DBSP_SUPPRESS_DX_WARNINGS=1 node app.js
+```
+
+Replace the logger entirely — silences every warning routed through the dbsp logger (both `'dx'` and `'runtime'`), at the sink. (A few internal diagnostics — unsupported-feature and lock warnings — call `console.warn` directly and are not affected.)
+
+```typescript
+// doctest: skip — setLogger/silentLogger are not part of the doctest preamble import list
+import { setLogger, silentLogger } from '@dbsp/core';
+
+// Silence all logger-routed dbsp warnings (e.g. in tests)
+setLogger(silentLogger);
+
+// Or route to your own logging framework. Logger.warn is 1-arg only —
+// WarningCategory drives suppression internally and is never passed to
+// the sink, so a rest-arg/pino-style wrapper never sees an extra token.
+setLogger({
+  warn: (message) => myLogger.warn(message, '[dbsp]'),
+});
+```
+
+Suppression precedence (a warning is silenced if ANY apply): the env gate (`'dx'` only) → the per-instance `suppressDxWarnings` option → the global logger being `silentLogger`. With none of these set, warnings behave exactly as before. A suppressed reserved-word warning does NOT consume its dedup slot — a later, non-suppressed ORM instance in the same process still warns.
+
 ### Metrics to Track
 
 | Metric | Description | Alert Threshold |

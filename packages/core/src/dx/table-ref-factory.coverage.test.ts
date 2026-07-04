@@ -5,9 +5,12 @@
  * Focuses on edge cases and branches not covered by table-ref.test.ts
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModelIRImpl } from '../model-impl.js';
 import type { TableIR } from '../model-ir.js';
+import { resetLogger, setLogger, silentLogger } from './logger.js';
+import { createOrm } from './orm.js';
+import { schema } from './schema.js';
 import {
 	BRAND,
 	COLUMN_META,
@@ -22,6 +25,7 @@ import {
 	createTableRef,
 	createTablesProxy,
 } from './table-ref-factory.js';
+import { createMockAdapter } from './test-utils.js';
 
 describe('table-ref-factory coverage', () => {
 	describe('createColumnRef', () => {
@@ -525,6 +529,198 @@ describe('table-ref-factory coverage', () => {
 			const proxy = createTablesProxy(model, ['users', 'posts']);
 			const desc = Object.getOwnPropertyDescriptor(proxy, 'nonExistent');
 			expect(desc).toBeUndefined();
+		});
+	});
+
+	describe('reserved-word warning: module-level dedup + suppression (#159)', () => {
+		afterEach(() => {
+			// resetLogger() also clears the module-level warnedReservedWords Set.
+			resetLogger();
+		});
+
+		function reservedWordModel(tableName: string): ModelIRImpl {
+			const tables = new Map<string, TableIR>([
+				[
+					tableName,
+					{
+						name: tableName,
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'class', type: 'text', nullable: false }, // Reserved word, not a built-in
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+					},
+				],
+			]);
+			return new ModelIRImpl(tables, new Map());
+		}
+
+		it('warns once per table.column across multiple createTableRef() calls (simulating multiple createOrm() instances)', () => {
+			const warnSpy = vi.fn();
+			setLogger({ warn: warnSpy });
+			const model = reservedWordModel('dedup_test');
+
+			// First "ORM instance"
+			const ref1 = createTableRef('dedup_test', model);
+			void (ref1 as Record<string, unknown>).class;
+			expect(warnSpy).toHaveBeenCalledTimes(1);
+
+			// Second "ORM instance" — a brand new Proxy/object, same table.column.
+			// Before #159 the dedup Set lived inside createTableRef, so this
+			// used to re-warn (the "prints twice" symptom); now it must not.
+			const ref2 = createTableRef('dedup_test', model);
+			void (ref2 as Record<string, unknown>).class;
+			expect(warnSpy).toHaveBeenCalledTimes(1);
+		});
+
+		it('resetLogger() clears the dedup set for test isolation', () => {
+			const warnSpy = vi.fn();
+			setLogger({ warn: warnSpy });
+			const model = reservedWordModel('dedup_reset');
+
+			const ref1 = createTableRef('dedup_reset', model);
+			void (ref1 as Record<string, unknown>).class;
+			expect(warnSpy).toHaveBeenCalledTimes(1);
+
+			resetLogger();
+			setLogger({ warn: warnSpy }); // resetLogger() reverts to defaultLogger
+
+			const ref2 = createTableRef('dedup_reset', model);
+			void (ref2 as Record<string, unknown>).class;
+			expect(warnSpy).toHaveBeenCalledTimes(2); // warned again — dedup was cleared
+		});
+
+		it('createTableRef() suppress param suppresses the reserved-word warning', () => {
+			const warnSpy = vi.fn();
+			setLogger({ warn: warnSpy });
+			const model = reservedWordModel('dedup_suppress');
+
+			const ref = createTableRef('dedup_suppress', model, ['dx']);
+			void (ref as Record<string, unknown>).class;
+
+			expect(warnSpy).not.toHaveBeenCalled();
+		});
+
+		it('threads suppressDxWarnings from createOrm() through a schema-provided tables proxy', () => {
+			// This exercises the step-back-flagged path: createOrm() reuses
+			// schemaObj.tables verbatim UNLESS suppressDxWarnings is set, in
+			// which case it must rebuild via createTablesProxy so the option
+			// actually reaches createTableRef.
+			const warnSpy = vi.fn();
+			setLogger({ warn: warnSpy });
+
+			const reservedSchema = schema({
+				widgets: {
+					id: { type: 'uuid', primaryKey: true },
+					class: 'string',
+				},
+			});
+
+			const orm = createOrm({
+				schema: reservedSchema,
+				adapter: createMockAdapter(),
+				suppressDxWarnings: true,
+			});
+
+			// orm.tables.widgets augments the TableRef with DDL methods via
+			// Object.assign, which enumerates own keys (including `class`)
+			// and would trigger the reserved-word warning if not suppressed.
+			void orm.tables.widgets;
+
+			expect(warnSpy).not.toHaveBeenCalled();
+		});
+
+		describe('suppressed access must NOT poison the dedup for later, non-suppressed callers', () => {
+			it('per-instance suppress (createTableRef) then an unsuppressed createTableRef() still warns', () => {
+				const warnSpy = vi.fn();
+				setLogger({ warn: warnSpy });
+				const model = reservedWordModel('poison_suppress_param');
+
+				// First "ORM instance" — suppressed, must NOT warn AND must NOT
+				// consume the dedup slot.
+				const suppressedRef = createTableRef('poison_suppress_param', model, [
+					'dx',
+				]);
+				void (suppressedRef as Record<string, unknown>).class;
+				expect(warnSpy).not.toHaveBeenCalled();
+
+				// Second "ORM instance" — no suppression — must still warn.
+				const unsuppressedRef = createTableRef('poison_suppress_param', model);
+				void (unsuppressedRef as Record<string, unknown>).class;
+				expect(warnSpy).toHaveBeenCalledTimes(1);
+			});
+
+			it('createOrm({ suppressDxWarnings: true }) then a plain createOrm() still warns', () => {
+				const warnSpy = vi.fn();
+				setLogger({ warn: warnSpy });
+
+				const reservedSchema = schema({
+					gadgets: {
+						id: { type: 'uuid', primaryKey: true },
+						class: 'string',
+					},
+				});
+
+				const suppressedOrm = createOrm({
+					schema: reservedSchema,
+					adapter: createMockAdapter(),
+					suppressDxWarnings: true,
+				});
+				void suppressedOrm.tables.gadgets;
+				expect(warnSpy).not.toHaveBeenCalled();
+
+				const plainOrm = createOrm({
+					schema: reservedSchema,
+					adapter: createMockAdapter(),
+				});
+				void plainOrm.tables.gadgets;
+				expect(warnSpy).toHaveBeenCalledTimes(1);
+			});
+
+			it('DBSP_SUPPRESS_DX_WARNINGS env gate then an unsuppressed access still warns', () => {
+				const ENV_KEY = 'DBSP_SUPPRESS_DX_WARNINGS';
+				const originalEnv = process.env[ENV_KEY];
+
+				const warnSpy = vi.fn();
+				setLogger({ warn: warnSpy });
+				const model = reservedWordModel('poison_env');
+
+				try {
+					process.env[ENV_KEY] = '1';
+					const ref1 = createTableRef('poison_env', model);
+					void (ref1 as Record<string, unknown>).class;
+					expect(warnSpy).not.toHaveBeenCalled();
+
+					delete process.env[ENV_KEY];
+					const ref2 = createTableRef('poison_env', model);
+					void (ref2 as Record<string, unknown>).class;
+					expect(warnSpy).toHaveBeenCalledTimes(1);
+				} finally {
+					if (originalEnv === undefined) {
+						delete process.env[ENV_KEY];
+					} else {
+						process.env[ENV_KEY] = originalEnv;
+					}
+				}
+			});
+
+			it('a global silentLogger then a real logger installed later still warns', () => {
+				const model = reservedWordModel('poison_silent');
+
+				setLogger(silentLogger);
+				const ref1 = createTableRef('poison_silent', model);
+				void (ref1 as Record<string, unknown>).class;
+				// Nothing to assert on silentLogger itself — the point is that
+				// the dedup slot must NOT be consumed by this suppressed access.
+
+				const warnSpy = vi.fn();
+				setLogger({ warn: warnSpy });
+				const ref2 = createTableRef('poison_silent', model);
+				void (ref2 as Record<string, unknown>).class;
+				expect(warnSpy).toHaveBeenCalledTimes(1);
+			});
 		});
 	});
 });

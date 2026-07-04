@@ -9,7 +9,7 @@
  */
 
 import type { ModelIR } from '../model-ir.js';
-import { getLogger } from './logger.js';
+import { emitWarning, type WarningCategory } from './logger.js';
 import {
 	BRAND,
 	COLUMN_META,
@@ -62,14 +62,51 @@ const JS_RESERVED_WORDS = new Set([
 ]);
 
 /**
+ * Module-level dedup for reserved-word warnings (#159), keyed
+ * `${tableName}.${columnName}`. Warns once PER PROCESS rather than once per
+ * `createTableRef()` call — a fresh ORM instance no longer re-triggers the
+ * warning for a table/column it already warned about. Cleared by
+ * {@link resetWarnedReservedWords} (wired into `resetLogger()`) for test
+ * isolation.
+ */
+const warnedReservedWords = new Set<string>();
+
+/**
+ * Clear the module-level reserved-word warning dedup (#159).
+ * Called by `resetLogger()`; exported directly for callers that need to
+ * reset dedup without touching the global logger.
+ */
+export function resetWarnedReservedWords(): void {
+	warnedReservedWords.clear();
+}
+
+/**
  * Log a warning when a reserved word is used as a column name.
  * This is ERR-05 from the spec.
+ *
+ * The dedup key is recorded ONLY when emitWarning() actually emits (#159) —
+ * a suppressed access (per-instance suppress, the env gate, or a global
+ * silentLogger) must NOT consume the dedup slot, or a later non-suppressed
+ * caller in the same process would never see the warning.
  */
-function warnReservedWord(tableName: string, columnName: string): void {
-	getLogger().warn(
+function warnReservedWord(
+	tableName: string,
+	columnName: string,
+	suppress?: readonly WarningCategory[],
+): void {
+	const dedupKey = `${tableName}.${columnName}`;
+	if (warnedReservedWords.has(dedupKey)) {
+		return;
+	}
+	const emitted = emitWarning(
 		`[dbsp] Warning: Column "${columnName}" in table "${tableName}" is a JavaScript reserved word. ` +
 			`Access it via bracket notation: table['${columnName}']`,
+		'dx',
+		suppress ? { suppress } : undefined,
 	);
+	if (emitted) {
+		warnedReservedWords.add(dedupKey);
+	}
 }
 
 // ============================================================================
@@ -291,9 +328,16 @@ export function createRelationRef(
  *
  * @param tableName - The table name
  * @param model - The ModelIR containing table and relation information
+ * @param suppress - Warning categories to suppress for this instance (#159).
+ *   The public entry point is `createOrm({ suppressDxWarnings: true })`,
+ *   which derives this general `WarningCategory[]` shape internally.
  * @returns A TableRef-like object with Proxy for lazy property access
  */
-export function createTableRef(tableName: string, model: ModelIR): object {
+export function createTableRef(
+	tableName: string,
+	model: ModelIR,
+	suppress?: readonly WarningCategory[],
+): object {
 	const tableIR = model.getTable(tableName);
 	if (!tableIR) {
 		throw new Error(`Table "${tableName}" not found in model`);
@@ -333,9 +377,6 @@ export function createTableRef(tableName: string, model: ModelIR): object {
 		}
 	}
 
-	// Track which reserved words have been warned about
-	const warnedReservedWords = new Set<string>();
-
 	return new Proxy(base, {
 		get(target, prop, receiver) {
 			// Handle Symbol properties
@@ -359,10 +400,7 @@ export function createTableRef(tableName: string, model: ModelIR): object {
 			if (JS_RESERVED_WORDS.has(propStr)) {
 				// Check if it's actually a column
 				if (hasColumn(tableIR.columns, propStr)) {
-					if (!warnedReservedWords.has(propStr)) {
-						warnReservedWord(tableName, propStr);
-						warnedReservedWords.add(propStr);
-					}
+					warnReservedWord(tableName, propStr, suppress);
 					return createColumnRef(tableName, propStr);
 				}
 			}
@@ -429,6 +467,14 @@ export function createTableRef(tableName: string, model: ModelIR): object {
 }
 
 /**
+ * Options for {@link createTablesProxy}.
+ */
+export interface CreateTablesProxyOptions {
+	/** Warning categories to suppress for every TableRef built by this proxy (#159). */
+	readonly suppressWarnings?: readonly WarningCategory[];
+}
+
+/**
  * Create the tables Proxy for a schema.
  *
  * This is the main entry point that creates a Proxy which lazily
@@ -436,14 +482,17 @@ export function createTableRef(tableName: string, model: ModelIR): object {
  *
  * @param model - The ModelIR containing all table and relation information
  * @param tableNames - List of table names in the schema
+ * @param options - Optional per-instance warning suppression (#159)
  * @returns A Proxy that returns TableRef objects for each table
  */
 export function createTablesProxy(
 	model: ModelIR,
 	tableNames: string[],
+	options?: CreateTablesProxyOptions,
 ): object {
 	const tableSet = new Set(tableNames);
 	const cache = new Map<string, object>();
+	const suppress = options?.suppressWarnings;
 
 	return new Proxy(
 		{},
@@ -463,7 +512,7 @@ export function createTablesProxy(
 
 				// Create TableRef if this is a valid table
 				if (tableSet.has(propStr)) {
-					const tableRef = createTableRef(propStr, model);
+					const tableRef = createTableRef(propStr, model, suppress);
 					cache.set(propStr, tableRef);
 					return tableRef;
 				}
@@ -484,7 +533,7 @@ export function createTablesProxy(
 					// Get or create the TableRef
 					let tableRef = cache.get(prop);
 					if (!tableRef) {
-						tableRef = createTableRef(prop, model);
+						tableRef = createTableRef(prop, model, suppress);
 						cache.set(prop, tableRef);
 					}
 					return {

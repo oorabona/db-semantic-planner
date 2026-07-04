@@ -11,6 +11,7 @@ import {
 	type HookErrorHandler,
 	type HookManager,
 } from './hooks.js';
+import type { WarningCategory } from './logger.js';
 import { negotiateFeatures } from './negotiate-features.js';
 import { createOrmInstance } from './orm-instance.js';
 import type {
@@ -141,6 +142,25 @@ export interface SimplifiedOrmOptions<
 	readonly unsupportedFeatures?:
 		| UnsupportedFeatureBehavior
 		| FeatureBehaviorConfig;
+
+	/**
+	 * Suppress `'dx'` warnings (e.g. reserved-word column access) for this
+	 * ORM instance (#159). Union'd with the `DBSP_SUPPRESS_DX_WARNINGS` env
+	 * gate — a warning is suppressed if EITHER applies.
+	 *
+	 * Deliberately DX-only (not `WarningCategory[]`): `'runtime'` warnings
+	 * (raw-SQL usage) are emitted by the adapter's compiler, which has no
+	 * per-ORM-instance context, so a `'runtime'` entry here would silently
+	 * do nothing. `'runtime'` warnings are controlled only by the adapter's
+	 * `NODE_ENV` gate and the global logger (e.g. `silentLogger`) — not by
+	 * `DBSP_SUPPRESS_DX_WARNINGS` or this option.
+	 *
+	 * @example
+	 * ```typescript
+	 * const orm = createOrm({ schema, adapter, suppressDxWarnings: true });
+	 * ```
+	 */
+	readonly suppressDxWarnings?: boolean;
 }
 
 /**
@@ -211,7 +231,14 @@ export function createOrm<T extends SchemaDefinition>(
 		hooks: hookManager,
 		onHookError,
 		unsupportedFeatures,
+		suppressDxWarnings,
 	} = options;
+
+	// Derive the internal, general-shaped suppress list from the DX-only
+	// public option (#159 finding 2 — 'runtime' would be a silent no-op here
+	// since raw-SQL warnings have no per-ORM-instance context).
+	const suppressWarnings: readonly WarningCategory[] | undefined =
+		suppressDxWarnings ? ['dx'] : undefined;
 
 	// ARCH-006: Either schema or model is required
 	// Schema provides full type inference; model is simpler for introspection/tests
@@ -268,11 +295,19 @@ export function createOrm<T extends SchemaDefinition>(
 		: undefined;
 
 	// DX-040-SURFACE: Build tables proxy for type-safe table access
-	// Use schema's pre-built proxy if available, otherwise build from model
+	// Use schema's pre-built proxy if available, otherwise build from model.
+	// When suppressWarnings is set, always rebuild via createTablesProxy so
+	// per-instance suppression reaches createTableRef even when a pre-built
+	// schema.tables proxy exists (#159) — reusing schemaObj.tables verbatim
+	// would silently ignore the option.
 	const tablesProxy: object =
-		schemaObj && 'tables' in schemaObj
+		schemaObj && 'tables' in schemaObj && !suppressWarnings
 			? (schemaObj.tables as object)
-			: createTablesProxy(model, model.tables ? [...model.tables.keys()] : []);
+			: createTablesProxy(
+					model,
+					model.tables ? [...model.tables.keys()] : [],
+					suppressWarnings ? { suppressWarnings } : undefined,
+				);
 
 	// Create ORM instance with ModelIR
 	// Cast to InferDB<T> since createOrmInstance uses internal types
