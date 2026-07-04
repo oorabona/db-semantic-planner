@@ -25,34 +25,15 @@ import OutputSection from './playground/OutputSection.vue';
 import PlanSection from './playground/PlanSection.vue';
 import QuerySection from './playground/QuerySection.vue';
 import SchemaSection from './playground/SchemaSection.vue';
+import {
+	buildMermaidCode,
+	buildSchemaFromParsed,
+	generateTypeScript,
+	type ParsedSchema,
+	type ParseWarning,
+	parseSchemaDsl,
+} from './playground/schema-dsl';
 import type { ErrorBannerData } from './playground/types';
-
-// ---------------------------------------------------------------------------
-// Local interfaces (migrated from old Playground.vue)
-// ---------------------------------------------------------------------------
-
-interface ParsedColumn {
-	name: string;
-	type: string;
-	nullable?: boolean;
-	pk?: boolean;
-	unique?: boolean;
-	ref?: string;
-	refNullable?: boolean;
-	refUnique?: boolean;
-	onDelete?: string;
-	defaultValue?: string;
-}
-
-interface ParsedTable {
-	name: string;
-	columns: ParsedColumn[];
-}
-
-interface ParsedSchema {
-	tables: ParsedTable[];
-	relations: { from: string; fromCol: string; to: string }[];
-}
 
 // ---------------------------------------------------------------------------
 // Default schema + examples (migrated verbatim from old Playground.vue)
@@ -196,6 +177,21 @@ let pendingManualCompile = false;
 let rebuildGeneration = 0;
 let lastEmittedHash: string | null = null;
 let disposed = false;
+// True only once rebuildOrm() has actually built + createOrm()'d the
+// CURRENT schema successfully. The panel-expand and theme-toggle watchers
+// re-parse+render the diagram independently of rebuildOrm — gating their
+// render call on this flag stops them from drawing a diagram for a schema
+// that parses but FAILED to build (self-ref without roles, duplicate FK
+// targets, ...), which rebuildOrm's own error path already surfaces as an
+// error with mermaidSvg cleared.
+let lastSchemaBuildOk = false;
+// The exact banner OBJECT INSTANCE currently shown for schema-parser
+// warnings, if any — a plain boolean flag isn't bound to which banner is
+// actually displayed (a later unrelated banner — oversize URL, shared-link
+// restore failure, fatal load — would silently desync it), so clearing
+// logic instead compares this reference against errorBanner.value by
+// IDENTITY and only ever touches errorBanner.value when they match.
+let currentSchemaWarningsBanner: ErrorBannerData | null = null;
 
 // ---------------------------------------------------------------------------
 // Reactive state (parent owns)
@@ -247,221 +243,6 @@ const hasChanges = computed(
 		schemaDsl.value !== DEFAULT_SCHEMA_DSL ||
 		nqlCode.value !== (ALL_EXAMPLES[0]?.code ?? ''),
 );
-
-// ---------------------------------------------------------------------------
-// Schema DSL parser (migrated verbatim from old Playground.vue)
-// ---------------------------------------------------------------------------
-
-function stripLineComments(text: string): string {
-	return text
-		.split('\n')
-		.map((l) => l.replace(/\/\/.*/, ''))
-		.join('\n');
-}
-
-function parseSchemaDsl(text: string): ParsedSchema {
-	const tables: ParsedTable[] = [];
-	const relations: { from: string; fromCol: string; to: string }[] = [];
-
-	const stripped = stripLineComments(text);
-	const tableMatches = [...stripped.matchAll(/table\s+(\w+)\s*\{([^}]*)\}/g)];
-
-	for (const tMatch of tableMatches) {
-		const tableName = tMatch[1];
-		const body = tMatch[2];
-		const columns: ParsedColumn[] = [];
-
-		for (const rawLine of body.split('\n')) {
-			const line = rawLine.trim();
-			if (!line) continue;
-
-			const colonIdx = line.indexOf(':');
-			if (colonIdx === -1) continue;
-
-			const colName = line.slice(0, colonIdx).trim();
-			const rest = line.slice(colonIdx + 1).trim();
-			const parts = rest.split(/\s+/);
-
-			if (!colName || parts.length === 0) continue;
-
-			let typeRaw = parts[0];
-			const nullable = typeRaw.endsWith('?');
-			if (nullable) typeRaw = typeRaw.slice(0, -1);
-			const modifiers = parts.slice(1);
-
-			// Parse default(value) modifier
-			const defaultMatch = rest.match(/\bdefault\(([^)]*)\)/);
-			const defaultValue = defaultMatch ? defaultMatch[1].trim() : undefined;
-
-			const col: ParsedColumn = {
-				name: colName,
-				type: typeRaw,
-				...(nullable ? { nullable: true } : {}),
-				...(modifiers.includes('pk') ? { pk: true } : {}),
-				...(modifiers.includes('unique') ? { unique: true } : {}),
-				...(defaultValue !== undefined ? { defaultValue } : {}),
-			};
-
-			if (typeRaw === '->') {
-				// Syntax: colName: -> target[?] [cascade] [unique]
-				let targetRaw = parts[1] ?? '';
-				const refNullable = targetRaw.endsWith('?');
-				if (refNullable) targetRaw = targetRaw.slice(0, -1);
-				if (targetRaw) {
-					const refModifiers = parts.slice(2);
-					col.type = 'uuid';
-					col.ref = targetRaw;
-					col.nullable = refNullable || col.nullable;
-					if (refNullable) col.refNullable = true;
-					if (refModifiers.includes('cascade')) col.onDelete = 'CASCADE';
-					if (refModifiers.includes('unique')) col.refUnique = true;
-					relations.push({ from: tableName, fromCol: colName, to: targetRaw });
-				}
-			} else {
-				const arrowIdx = modifiers.indexOf('->');
-				if (arrowIdx !== -1 && modifiers[arrowIdx + 1]) {
-					let targetRaw = modifiers[arrowIdx + 1];
-					const refNullable = targetRaw.endsWith('?');
-					if (refNullable) targetRaw = targetRaw.slice(0, -1);
-					const refModifiers = modifiers.slice(arrowIdx + 2);
-					col.type = 'uuid';
-					col.ref = targetRaw;
-					if (refNullable) {
-						col.refNullable = true;
-						col.nullable = true;
-					}
-					if (refModifiers.includes('cascade')) col.onDelete = 'CASCADE';
-					if (refModifiers.includes('unique')) col.refUnique = true;
-					relations.push({ from: tableName, fromCol: colName, to: targetRaw });
-				}
-			}
-
-			columns.push(col);
-		}
-
-		tables.push({ name: tableName, columns });
-	}
-
-	return { tables, relations };
-}
-
-// ---------------------------------------------------------------------------
-// Schema-derived generators (migrated verbatim from old Playground.vue)
-// ---------------------------------------------------------------------------
-
-function buildSchemaFromParsed(parsed: ParsedSchema): unknown {
-	// biome-ignore lint/style/noNonNullAssertion: sole caller rebuildOrm() guards "if (!coreModule || !adapterModule) return;" before calling; narrowing does not cross the function boundary
-	const { schema, ref: dbRef } = coreModule!;
-	const tableDefs: Record<string, Record<string, unknown>> = {};
-
-	for (const table of parsed.tables) {
-		const colDefs: Record<string, unknown> = {};
-		for (const col of table.columns) {
-			if (col.ref) {
-				const refOpts: Record<string, unknown> = {};
-				if (col.refNullable) refOpts.nullable = true;
-				if (col.refUnique) refOpts.unique = true;
-				if (col.onDelete) refOpts.onDelete = col.onDelete;
-				colDefs[col.name] =
-					Object.keys(refOpts).length > 0
-						? dbRef(col.ref, refOpts)
-						: dbRef(col.ref);
-			} else {
-				const def: Record<string, unknown> = { type: col.type };
-				if (col.pk) def.primaryKey = true;
-				if (col.nullable) def.nullable = true;
-				if (col.unique) def.unique = true;
-				if (col.defaultValue) def.default = col.defaultValue;
-				colDefs[col.name] = Object.keys(def).length === 1 ? col.type : def;
-			}
-		}
-		tableDefs[table.name] = colDefs;
-	}
-
-	return schema(tableDefs);
-}
-
-function generateTypeScript(parsed: ParsedSchema): string {
-	const lines: string[] = [];
-	lines.push('// NOTE: this code is auto-generated from the playground DSL.');
-	lines.push('// The playground DSL is a teaching subset — it does NOT cover');
-	lines.push(
-		'// indexes, enums, composite keys, CHECK constraints, RLS policies,',
-	);
-	lines.push(
-		'// computed columns, schema scoping, and more. Tracking the gaps:',
-	);
-	lines.push('// https://github.com/oorabona/db-semantic-planner/issues/116');
-	lines.push('//');
-	lines.push(
-		'// The real @dbsp/core schema() API supports all of those — see the',
-	);
-	lines.push('// schema guide in the docs for the full surface.');
-	lines.push('');
-	lines.push("import { schema, ref } from '@dbsp/core';");
-	lines.push('');
-	lines.push('const db = schema({');
-
-	for (const table of parsed.tables) {
-		lines.push(`  ${table.name}: {`);
-		for (const col of table.columns) {
-			if (col.ref) {
-				const opts: string[] = [];
-				if (col.refNullable) opts.push('nullable: true');
-				if (col.refUnique) opts.push('unique: true');
-				if (col.onDelete) opts.push(`onDelete: '${col.onDelete}'`);
-				const refCall =
-					opts.length > 0
-						? `ref('${col.ref}', { ${opts.join(', ')} })`
-						: `ref('${col.ref}')`;
-				lines.push(`    ${col.name}: ${refCall},`);
-			} else {
-				const extras: string[] = [];
-				if (col.pk) extras.push('primaryKey: true');
-				if (col.nullable) extras.push('nullable: true');
-				if (col.unique) extras.push('unique: true');
-				if (col.defaultValue) extras.push(`default: '${col.defaultValue}'`);
-				if (extras.length > 0) {
-					lines.push(
-						'    ' +
-							col.name +
-							": { type: '" +
-							col.type +
-							"', " +
-							extras.join(', ') +
-							' },',
-					);
-				} else {
-					lines.push(`    ${col.name}: '${col.type}',`);
-				}
-			}
-		}
-		lines.push('  },');
-	}
-
-	lines.push('});');
-	return lines.join('\n');
-}
-
-function buildMermaidCode(parsed: ParsedSchema): string {
-	const lines: string[] = ['erDiagram'];
-
-	for (const table of parsed.tables) {
-		lines.push(`    ${table.name} {`);
-		for (const col of table.columns) {
-			const type = col.type.replace(/[^a-zA-Z0-9_]/g, '_');
-			const suffix = col.pk ? ' PK' : col.unique ? ' UK' : '';
-			lines.push(`        ${type} ${col.name}${suffix}`);
-		}
-		lines.push('    }');
-	}
-
-	for (const rel of parsed.relations) {
-		lines.push(`    ${rel.to} ||--o{ ${rel.from} : ""`);
-	}
-
-	return lines.join('\n');
-}
 
 // ---------------------------------------------------------------------------
 // Compile flow
@@ -522,6 +303,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 	if (!coreModule || !adapterModule) return;
 	const myGen = ++rebuildGeneration;
 	schemaError.value = null;
+	lastSchemaBuildOk = false;
 
 	let parsed: ParsedSchema;
 	try {
@@ -534,6 +316,7 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		generatedTs.value = '';
 		nqlTag = null;
 		nqlTagReady.value = false;
+		clearSchemaWarningsBanner();
 		return;
 	}
 
@@ -545,15 +328,21 @@ async function rebuildOrm(dsl: string): Promise<void> {
 		generatedTs.value = '';
 		nqlTag = null;
 		nqlTagReady.value = false;
+		clearSchemaWarningsBanner();
 		return;
 	}
 
 	if (myGen !== rebuildGeneration || disposed) return;
-	tableCount.value = parsed.tables.length;
-	generatedTs.value = generateTypeScript(parsed);
 
+	// Derived UI state (table count, generated TS, diagram) and the
+	// warnings banner are published ONLY after the schema has ACTUALLY
+	// built successfully below — a core-invalid schema (a self-ref without
+	// `roles`, multiple FKs to the same target, ...) parses fine but fails
+	// schema()/createOrm(), and publishing this state beforehand left it
+	// stale (or, for the diagram, carried over from a PREVIOUS successful
+	// build) sitting next to the fatal error.
 	try {
-		const builtSchema = buildSchemaFromParsed(parsed);
+		const builtSchema = buildSchemaFromParsed(parsed, coreModule);
 		const orm = coreModule.createOrm({
 			schema: builtSchema,
 			adapter: adapterModule.createPgsqlCompileOnlyAdapter(),
@@ -563,9 +352,24 @@ async function rebuildOrm(dsl: string): Promise<void> {
 	} catch (e) {
 		if (myGen !== rebuildGeneration || disposed) return;
 		schemaError.value = `Schema error: ${e instanceof Error ? e.message : String(e)}`;
+		tableCount.value = 0;
+		generatedTs.value = '';
+		mermaidSvg.value = '';
 		nqlTag = null;
 		nqlTagReady.value = false;
+		clearSchemaWarningsBanner();
 		return;
+	}
+
+	if (myGen !== rebuildGeneration || disposed) return;
+	lastSchemaBuildOk = true;
+	tableCount.value = parsed.tables.length;
+	generatedTs.value = generateTypeScript(parsed);
+
+	if (parsed.warnings.length > 0) {
+		showSchemaWarningsBanner(parsed.warnings);
+	} else {
+		clearSchemaWarningsBanner();
 	}
 
 	if (schemaExpanded.value) {
@@ -710,6 +514,67 @@ function showOversizeBanner(): void {
 			'The current playground state is too large to share via URL. The page still works locally; URL sharing will resume when state shrinks below the limit.',
 		actions: [{ label: 'Got it', handler: () => (errorBanner.value = null) }],
 	};
+}
+
+/**
+ * Surfaces non-fatal parser warnings (e.g. `pk`/`default` ignored on a
+ * foreign-key column) — called only AFTER the schema has actually built
+ * successfully (see rebuildOrm): showing it right after parse, before
+ * schema()/createOrm() are known to succeed, risked a stale warning
+ * banner sitting alongside — or getting clobbered by — a later fatal
+ * build error. 'warn' severity, distinct from schemaError (which blocks
+ * compilation).
+ */
+function showSchemaWarningsBanner(warnings: readonly ParseWarning[]): void {
+	const lines = warnings.map((w) => {
+		const where = w.table
+			? `${w.table}${w.column ? `.${w.column}` : ''}: `
+			: '';
+		return `${where}${w.message}`;
+	});
+	const banner: ErrorBannerData = {
+		severity: 'warn',
+		title:
+			warnings.length === 1
+				? 'Schema warning'
+				: `${warnings.length} schema warnings`,
+		// KNOWN LIMITATION (deferred, not restyled here): multiple warnings
+		// are joined with '\n', but ErrorBanner.vue renders `message` in a
+		// plain <p> with no whitespace-preserving CSS (white-space: pre-line
+		// or similar) — the newlines currently collapse visually, running
+		// all warnings together on one line for anything beyond a single
+		// warning. TODO: either preserve whitespace in ErrorBanner.vue's
+		// `.error-banner-message` style, or render `message` as a list when
+		// there's more than one warning.
+		message: lines.join('\n'),
+		actions: [
+			{
+				label: 'Got it',
+				handler: () => {
+					if (errorBanner.value === currentSchemaWarningsBanner) {
+						errorBanner.value = null;
+					}
+					currentSchemaWarningsBanner = null;
+				},
+			},
+		],
+	};
+	currentSchemaWarningsBanner = banner;
+	errorBanner.value = banner;
+}
+
+/**
+ * Clears the schema-warnings banner — but ONLY if it's still the banner
+ * actually shown (errorBanner.value may have since been replaced by an
+ * unrelated banner — oversize URL, shared-link restore failure, fatal
+ * load — via referential identity, never a boolean flag that could desync
+ * from what's really on screen).
+ */
+function clearSchemaWarningsBanner(): void {
+	if (errorBanner.value === currentSchemaWarningsBanner) {
+		errorBanner.value = null;
+	}
+	currentSchemaWarningsBanner = null;
 }
 
 function showFatalBanner(error: unknown): void {
@@ -891,7 +756,12 @@ watch(schemaExpanded, async (expanded) => {
 		});
 		mermaidThemeDirty = false;
 	}
-	if (!disposed) {
+	// Only re-render for a schema that actually BUILT — re-parsing here
+	// doesn't re-validate against schema()/createOrm(), so without this
+	// guard, expanding the panel while the current DSL fails to build
+	// would draw a diagram for a schema rebuildOrm() already reported as
+	// broken (and already cleared mermaidSvg for).
+	if (!disposed && lastSchemaBuildOk) {
 		try {
 			const parsed = parseSchemaDsl(schemaDsl.value);
 			const myGen = ++rebuildGeneration;
@@ -910,10 +780,12 @@ watch(isDark, async (dark) => {
 		themeVariables: getMermaidThemeVariables(dark),
 		er: { diagramPadding: 20, layoutDirection: 'TB', minEntityWidth: 100 },
 	});
-	// Re-render the diagram with the new theme if the schema panel is open;
-	// otherwise mark the theme as dirty so the schemaExpanded watcher will
-	// force a re-render when the panel is next expanded.
-	if (schemaExpanded.value) {
+	// Re-render the diagram with the new theme if the schema panel is open
+	// AND the current DSL actually built successfully (same guard as the
+	// schemaExpanded watcher above — re-parsing alone doesn't confirm the
+	// schema builds); otherwise mark the theme as dirty so the
+	// schemaExpanded watcher re-initializes it when the panel next expands.
+	if (schemaExpanded.value && lastSchemaBuildOk) {
 		try {
 			const parsed = parseSchemaDsl(schemaDsl.value);
 			const myGen = ++rebuildGeneration;
@@ -921,7 +793,7 @@ watch(isDark, async (dark) => {
 		} catch {
 			/* schema error already surfaced */
 		}
-	} else {
+	} else if (!schemaExpanded.value) {
 		mermaidThemeDirty = true;
 	}
 });

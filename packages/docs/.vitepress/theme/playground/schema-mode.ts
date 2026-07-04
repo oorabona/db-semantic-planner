@@ -1,24 +1,43 @@
 /**
  * Schema DSL syntax highlighting for CodeMirror 6.
  *
- * Companion to nql-mode.ts but for the database schema DSL used in
- * Playground.vue (DEFAULT_SCHEMA_DSL constant and parseSchemaDsl()).
+ * Companion to nql-mode.ts but for the database schema DSL used in the
+ * Playground (DEFAULT_SCHEMA_DSL constant in PlaygroundView.vue, tokenizer
+ * + recursive-descent parser in playground/schema-dsl.ts).
  *
- * DSL grammar (derived from parseSchemaDsl() in Playground.vue):
+ * DSL grammar (derived from schema-dsl.ts's tokenize()/Parser — whitespace
+ * and newlines are insignificant, layout is free-form):
  *
  *   table <name> {
- *     <col>: <type>[?] [pk] [unique] [cascade] [default(<val>)]
- *     <col>: -> <target>[?] [cascade] [unique]
+ *     <col>: <type>[?] [pk] [unique] [default(<val>)]
+ *     <col>: [<type>[?]] -> <target>['.' <column>][?] <fkModifier>*
  *   }
  *
- * Comment delimiter: `//` (see stripLineComments() in Playground.vue, line 235).
+ *   <fkModifier> := cascade | onDelete:<action> | onUpdate:<action> | unique | pk
+ *   <onDelete action> := cascade | restrict | setnull | setdefault | noaction
+ *   <onUpdate action> := cascade | restrict | setnull | noaction  (no setdefault)
+ *
+ * `default(<val>)`: a value that is exactly one literal token (a number, a
+ * quoted string, or true/false/null) becomes that real JS type. Anything
+ * else — a bare SQL keyword (`CURRENT_TIMESTAMP`) or a call expression
+ * (`NOW()`, `timezone('UTC', now())`) — is a SQL expression (`{ sql }`).
+ *
+ * Column types: the canonical @dbsp/core ColumnType union, a documented
+ * alias table for common SQL synonyms, and serial/bigserial DSL sugar —
+ * see schema-dsl.ts's CANONICAL_TYPES/TYPE_ALIASES/SERIAL_TYPES (this
+ * file's SCHEMA_TYPES below must stay exactly canonical ∪ aliases ∪
+ * serial/bigserial, so highlighting never implies a type the parser
+ * would actually reject).
+ *
+ * Comment delimiter: `//` (see tokenize() in schema-dsl.ts — quote-aware,
+ * so a `//` inside a quoted default value is never mistaken for a comment).
  */
 
 import { StreamLanguage, type StringStream } from '@codemirror/language';
 
 // ---------------------------------------------------------------------------
-// Keyword sets — source of truth: Playground.vue parseSchemaDsl() +
-// DEFAULT_SCHEMA_DSL constant.
+// Keyword sets — source of truth: playground/schema-dsl.ts's tokenizer/
+// parser + PlaygroundView.vue's DEFAULT_SCHEMA_DSL constant.
 //
 // Structural keywords: token 'keyword' → VitePress brand-blue
 //   table  (table block declaration)
@@ -26,9 +45,29 @@ import { StreamLanguage, type StringStream } from '@codemirror/language';
 // Column modifiers: token 'keyword' → VitePress brand-blue
 //   pk        (primary key marker)
 //   unique    (unique constraint)
-//   cascade   (onDelete CASCADE for FK columns)
 //   default   (default value modifier, as in default(<val>))
-//   nullable  (explicit nullable — not used by parser but valid DSL intent)
+//   nullable  KNOWN LIMITATION (deferred, not a bug to fix): highlighted
+//             here as a keyword, but schema-dsl.ts's parser does NOT treat
+//             'nullable' as a modifier at all — nullability is expressed
+//             ONLY via the `?` suffix (`col: type?`, `-> target?`). Typing
+//             the bare word `nullable` in the editor colors it like a
+//             keyword but has zero parsing effect; it's silently absorbed
+//             as an "unrecognized modifier" warning. Kept for now since
+//             removing the highlight is cosmetic-only and low value versus
+//             the risk of user confusion either way.
+//
+// FK action modifiers: token 'keyword' → VitePress brand-blue
+//   ondelete / onupdate      (the onDelete:/onUpdate: prefix, lowercased)
+//   cascade / restrict / setnull / noaction   (action values valid for BOTH directions)
+//
+//   NOTE: 'setdefault' is intentionally NOT highlighted as a keyword — it's
+//   onDelete-only (core's RefOptions.onUpdate has no SET DEFAULT) and this
+//   stream tokenizer has no onDelete/onUpdate direction context to
+//   conditionally highlight it. 'setnull' has no such asymmetry (valid for
+//   BOTH onDelete and onUpdate — see schema-dsl.ts's ON_DELETE_ACTIONS /
+//   ON_UPDATE_ACTIONS), so it's highlighted normally; only 'setdefault' is
+//   left as plain text (variableName) to avoid implying it's valid
+//   everywhere. Both still parse correctly regardless of coloring.
 //
 // Built-in column types: token 'typeName' → VitePress tip-blue
 //   (different color from keywords to visually separate structure from data types)
@@ -40,46 +79,59 @@ const SCHEMA_KEYWORDS = new Set([
 	// Column modifiers
 	'pk',
 	'unique',
-	'cascade',
 	'default',
 	'nullable',
+	// FK action modifiers (direction prefixes + actions valid for both directions)
+	'ondelete',
+	'onupdate',
+	'cascade',
+	'restrict',
+	'setnull',
+	'noaction',
 ]);
 
+// Exactly canonical ∪ aliases ∪ serial/bigserial — see schema-dsl.ts's
+// CANONICAL_TYPES / TYPE_ALIASES / SERIAL_TYPES. Do NOT add a type here
+// that the parser doesn't actually accept (e.g. vector, bytea, binary,
+// blob were removed — those are hard parse errors now, not silent TEXT).
 const SCHEMA_TYPES = new Set([
-	// String types
+	// Canonical @dbsp/core ColumnType union
 	'string',
 	'text',
+	'number',
+	'integer',
+	'bigint',
+	'decimal',
+	'boolean',
+	'date',
+	'time',
+	'datetime',
+	'timestamp',
+	'json',
+	'jsonb',
+	'uuid',
+	'daterange',
+	'tsrange',
+	'tstzrange',
+	'int4range',
+	'int8range',
+	'numrange',
+	// Aliases → canonical (int/smallint→integer, varchar/char→string,
+	// numeric→decimal, float/real/double→number, bool→boolean,
+	// timestamptz→timestamp)
+	'int',
+	'smallint',
 	'varchar',
 	'char',
-	// Integer / numeric types
-	'integer',
-	'int',
-	'bigint',
-	'smallint',
+	'numeric',
 	'float',
 	'real',
 	'double',
-	'decimal',
-	'numeric',
-	// Boolean
-	'boolean',
 	'bool',
-	// UUID
-	'uuid',
-	// Date / time
-	'timestamp',
 	'timestamptz',
-	'date',
-	'time',
-	// JSON
-	'json',
-	'jsonb',
-	// Binary
-	'bytea',
-	'binary',
-	'blob',
-	// Vector (pgvector)
-	'vector',
+	// serial/bigserial DSL sugar → integer/bigint + autoIncrement
+	'serial',
+	'bigserial',
 ]);
 
 interface SchemaState {
@@ -92,13 +144,19 @@ const schemaLanguage = StreamLanguage.define<SchemaState>({
 	},
 
 	token(stream: StringStream, state: SchemaState): string | null {
-		// Continue multi-line string — DSL default values can be quoted
+		// Continue multi-line string — DSL default values can be quoted.
+		// Quote-aware to match the parser's tokenizer: a DOUBLED quote of
+		// the same kind (`''`/`""`) is an escaped literal quote, not the
+		// closing delimiter.
 		if (state.inString !== null) {
 			const quoteChar = state.inString;
 			while (!stream.eol()) {
 				const ch = stream.next();
 				if (ch === quoteChar) {
-					// No doubled-quote escape in schema DSL — just close
+					if (stream.peek() === quoteChar) {
+						stream.next(); // consume the second quote of the '' / "" escape
+						continue;
+					}
 					state.inString = null;
 					break;
 				}
@@ -109,19 +167,24 @@ const schemaLanguage = StreamLanguage.define<SchemaState>({
 		// Skip whitespace
 		if (stream.eatSpace()) return null;
 
-		// Line comments — schema DSL uses '//' (see stripLineComments() in Playground.vue)
+		// Line comments — schema DSL uses '//' (see stripLineComments() in schema-dsl.ts)
 		if (stream.match('//')) {
 			stream.skipToEnd();
 			return 'comment';
 		}
 
-		// String literals (single-quoted, used in default values)
+		// String literals (single-quoted, used in default values). Quote-aware
+		// doubled-quote escape, matching the parser's tokenizer — see above.
 		const ch = stream.peek();
 		if (ch === "'") {
 			stream.next(); // consume opening quote
 			while (!stream.eol()) {
 				const c = stream.next();
 				if (c === "'") {
+					if (stream.peek() === "'") {
+						stream.next();
+						continue;
+					}
 					return 'string';
 				}
 			}
@@ -136,6 +199,10 @@ const schemaLanguage = StreamLanguage.define<SchemaState>({
 			while (!stream.eol()) {
 				const c = stream.next();
 				if (c === '"') {
+					if (stream.peek() === '"') {
+						stream.next();
+						continue;
+					}
 					return 'string';
 				}
 			}
@@ -143,8 +210,8 @@ const schemaLanguage = StreamLanguage.define<SchemaState>({
 			return 'string';
 		}
 
-		// Numbers (used in default values, e.g. default(0))
-		if (stream.match(/^\d+(\.\d+)?/)) {
+		// Numbers (used in default values, e.g. default(0), default(-3.5))
+		if (stream.match(/^-?\d+(\.\d+)?/)) {
 			return 'number';
 		}
 
@@ -167,7 +234,7 @@ const schemaLanguage = StreamLanguage.define<SchemaState>({
 	},
 
 	languageData: {
-		// Schema DSL line comment delimiter is '//' (see stripLineComments() in Playground.vue)
+		// Schema DSL line comment delimiter is '//' (see stripLineComments() in schema-dsl.ts)
 		commentTokens: { line: '//' },
 	},
 });
