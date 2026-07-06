@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.7.1...types-v1.8.0) (2026-07-06)
+
+
+### Features
+
+* **core:** Support nulls-not-distinct indexes and external table refs ([be02788](https://github.com/oorabona/db-semantic-planner/commit/be027887d4e103cf904a755333c8451122c0390c))
+
+
+### Bug Fixes
+
+* **repo:** Scope release-please commits for commitlint, require node &gt;=22 ([#243](https://github.com/oorabona/db-semantic-planner/issues/243)) ([0fe03f7](https://github.com/oorabona/db-semantic-planner/commit/0fe03f7a80c650e2066641d39707a829cb6aa15e)), closes [#242](https://github.com/oorabona/db-semantic-planner/issues/242)
+
 ## [1.7.1](https://github.com/oorabona/db-semantic-planner/compare/types-v1.7.0...types-v1.7.1) (2026-07-03)
 
 

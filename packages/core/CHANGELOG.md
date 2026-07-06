@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.10.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.9.0...core-v1.10.0) (2026-07-06)
+
+
+### Features
+
+* **core:** Support nulls-not-distinct indexes and external table refs ([be02788](https://github.com/oorabona/db-semantic-planner/commit/be027887d4e103cf904a755333c8451122c0390c))
+
+
+### Bug Fixes
+
+* **repo:** Scope release-please commits for commitlint, require node &gt;=22 ([#243](https://github.com/oorabona/db-semantic-planner/issues/243)) ([0fe03f7](https://github.com/oorabona/db-semantic-planner/commit/0fe03f7a80c650e2066641d39707a829cb6aa15e)), closes [#242](https://github.com/oorabona/db-semantic-planner/issues/242)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.9.1
+    * @dbsp/types bumped to 1.8.0
+
 ## [1.9.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.8.0...core-v1.9.0) (2026-07-06)
 
 
