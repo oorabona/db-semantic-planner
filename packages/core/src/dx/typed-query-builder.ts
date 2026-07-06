@@ -14,6 +14,7 @@ import type { ModelIR } from '../model-ir.js';
 import type { PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { getColumnName } from './column-utils.js';
+import { buildExistsIntent } from './exists-intent.js';
 import { and } from './filters.js';
 import type { DumpMetaInput } from './query-builder-types.js';
 import {
@@ -228,24 +229,13 @@ class FromBuilderImpl<
 
 	/**
 	 * Build an existence-check intent from current state.
-	 * Strips orderBy and include (irrelevant), preserves groupBy/having/offset.
+	 * Strips orderBy (irrelevant once wrapped in EXISTS), sets existsWrap and
+	 * limit: 1, and keeps every include unchanged; the compiler decides which
+	 * include contributions still need to be emitted (see exists-intent.ts
+	 * and shouldEmitInclude() in the pgsql compiler) (#230).
 	 */
 	private buildExistsIntent(): QueryIntent {
-		const baseIntent = this.buildIntent();
-		// Destructure to strip orderBy and include (irrelevant for EXISTS)
-		const {
-			orderBy: _orderBy,
-			include: _include,
-			...rest
-		} = baseIntent as QueryIntent & {
-			orderBy?: unknown;
-			include?: unknown;
-		};
-		return {
-			...rest,
-			existsWrap: true,
-			limit: 1,
-		};
+		return buildExistsIntent(this.buildIntent());
 	}
 
 	async exists(): Promise<boolean> {
