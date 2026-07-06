@@ -342,6 +342,9 @@ export interface IndexIR {
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
 
+	/** PG15+ — for a UNIQUE index, treat NULLs as not distinct (`NULLS NOT DISTINCT`); ignored for non-unique indexes */
+	readonly nullsNotDistinct?: boolean;
+
 	/** Index access method (default: btree) */
 	readonly method?: string;
 
@@ -508,6 +511,9 @@ export interface AmbiguityCheckResult {
 export interface ModelIR {
 	/** Table definitions indexed by name */
 	readonly tables: ReadonlyMap<string, TableIR>;
+
+	/** Declared tables outside this managed model that foreign keys may reference */
+	readonly externalTables?: ReadonlySet<string>;
 
 	/** Relation definitions indexed by "source.name" */
 	readonly relations: ReadonlyMap<string, RelationIR>;

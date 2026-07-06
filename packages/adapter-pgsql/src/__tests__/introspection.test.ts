@@ -675,6 +675,54 @@ describe('introspect', () => {
 		expect(posts.indexes[0]!.columns).toEqual(['author_id', 'title']);
 	});
 
+	it('should map NULLS NOT DISTINCT from unique index introspection', async () => {
+		const indexes = [
+			{
+				index_name: 'idx_users_email_unique',
+				table_name: 'users',
+				columns: ['email'],
+				include_columns: null,
+				expressions_text: null,
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: true,
+				nulls_not_distinct: true,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+			{
+				index_name: 'idx_posts_title',
+				table_name: 'posts',
+				columns: ['title'],
+				include_columns: null,
+				expressions_text: null,
+				opclass_names: null,
+				opclass_cols: null,
+				is_unique: false,
+				nulls_not_distinct: true,
+				method: 'btree',
+				predicate: null,
+				reloptions: null,
+			},
+		];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			indexes,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		expect(users.indexes[0]!.unique).toBe(true);
+		expect(users.indexes[0]!.nullsNotDistinct).toBe(true);
+
+		const posts = result.tables.get('posts')!;
+		expect(posts.indexes[0]!.unique).toBeUndefined();
+		expect(posts.indexes[0]!.nullsNotDistinct).toBeUndefined();
+	});
+
 	it('should map INCLUDE columns from index introspection', async () => {
 		const indexes = [
 			{

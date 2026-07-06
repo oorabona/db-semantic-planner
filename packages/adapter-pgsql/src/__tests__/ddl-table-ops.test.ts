@@ -241,6 +241,19 @@ describe('generateCreateIndexSQL', () => {
 		);
 	});
 
+	it('unique index with NULLS NOT DISTINCT', () => {
+		expect(
+			generateCreateIndexSQL('users', {
+				name: 'uk_users_email_nulls',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+			}),
+		).toEqual(
+			'CREATE UNIQUE INDEX "uk_users_email_nulls" ON "users" ("email") NULLS NOT DISTINCT',
+		);
+	});
+
 	it('partial index with WHERE clause', () => {
 		expect(
 			generateCreateIndexSQL('embeddings', {
@@ -308,6 +321,20 @@ describe('generateCreateIndexSQL', () => {
 			}),
 		).toEqual(
 			'CREATE INDEX "idx_cover" ON "embeddings" ("model") INCLUDE ("symbol_id", "vector")',
+		);
+	});
+
+	it('unique NULLS NOT DISTINCT covering index places INCLUDE first', () => {
+		expect(
+			generateCreateIndexSQL('users', {
+				name: 'uk_users_email_nulls_cover',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+				include: ['id'],
+			}),
+		).toEqual(
+			'CREATE UNIQUE INDEX "uk_users_email_nulls_cover" ON "users" ("email") INCLUDE ("id") NULLS NOT DISTINCT',
 		);
 	});
 

@@ -618,6 +618,8 @@ export type CreateIndexOptions = {
 	readonly with?: Readonly<Record<string, unknown>>;
 	readonly where?: string;
 	readonly unique?: boolean;
+	/** PG15+ — for UNIQUE indexes, emit NULLS NOT DISTINCT. Ignored for non-unique indexes. */
+	readonly nullsNotDistinct?: boolean;
 	readonly ifNotExists?: boolean;
 	readonly concurrently?: boolean;
 };

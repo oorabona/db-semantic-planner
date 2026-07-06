@@ -560,6 +560,10 @@ function upCreateIndex(
 			? ` INCLUDE (${idx.include.map((n) => quoteIdent(n, 'alias')).join(', ')})`
 			: '';
 
+	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
+	const nullsNotDistinct =
+		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
+
 	// S-1: validate WITH storage parameter keys (values are numeric literals from IR)
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
@@ -575,7 +579,7 @@ function upCreateIndex(
 	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
 	const where = idx.where ? ` WHERE ${idx.where}` : '';
 
-	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${withParams}${where};`;
+	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
 }
 
 function upDropIndex(

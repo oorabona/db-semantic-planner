@@ -78,6 +78,9 @@ function makeDDLAdapter() {
 			if (options.method) parts.push(`USING ${options.method}`);
 			const cols = (options.columns as string[]).join(', ');
 			parts.push(`(${cols})`);
+			if (options.unique && options.nullsNotDistinct) {
+				parts.push('NULLS NOT DISTINCT');
+			}
 			return parts.join(' ');
 		},
 	);
@@ -409,6 +412,36 @@ describe('orm.tables.X.indexes.create()', () => {
 		);
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('CREATE INDEX'),
+		);
+	});
+
+	it('forwards nullsNotDistinct to adapter SQL generation', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as Record<string, Record<string, Record<string, unknown>>>;
+
+		await (idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
+			name: 'uk_users_email_nulls',
+			columns: ['email'],
+			unique: true,
+			nullsNotDistinct: true,
+		});
+
+		expect(generateCreateIndex).toHaveBeenCalledWith(
+			'users',
+			{
+				name: 'uk_users_email_nulls',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+			},
+			undefined,
+		);
+		expect(executeDDL).toHaveBeenCalledWith(
+			'CREATE UNIQUE INDEX uk_users_email_nulls ON users (email) NULLS NOT DISTINCT',
 		);
 	});
 

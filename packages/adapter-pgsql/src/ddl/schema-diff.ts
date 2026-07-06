@@ -159,6 +159,11 @@ export function compareSchemata(
 		? normalizeTableMap(schema.tables, plugin)
 		: new Map(schema.tables);
 	const dbTables = new Map(db.tables);
+	const externalTables = new Set(
+		[...(schema.externalTables ?? [])].map((name) =>
+			plugin ? plugin.toDatabase(name) : name,
+		),
+	);
 
 	const caps = options?.dialectCapabilities;
 	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
@@ -273,7 +278,7 @@ export function compareSchemata(
 
 	// 2. Tables that exist in DB but not in schema → drop_table
 	for (const [name] of dbTables) {
-		if (!schemaTables.has(name)) {
+		if (!schemaTables.has(name) && !externalTables.has(name)) {
 			changes.push({
 				kind: 'drop_table',
 				table: name,
@@ -728,7 +733,7 @@ function compareIndexes(
 			),
 	);
 
-	// Index identity: columns + unique flag (name is cosmetic)
+	// Index identity: structural definition (name is cosmetic)
 	const schemaIdxMap = new Map(
 		schema.indexes.map((idx) => [indexKey(idx), idx]),
 	);
@@ -783,6 +788,7 @@ function indexKey(idx: IndexIR): string {
 	const parts = [
 		idx.columns.join(','),
 		idx.unique ? 'unique' : 'nonunique',
+		idx.unique && idx.nullsNotDistinct ? 'nulls-not-distinct' : '',
 		idx.method ?? 'btree',
 		idx.where ?? '',
 		(idx.expressions ?? []).join(','),

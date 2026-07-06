@@ -168,6 +168,10 @@ function generateCreateIndexSQL(
 			`INCLUDE (${opts.include.map((c) => quoteIdent(c)).join(', ')})`,
 		);
 	}
+	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
+	if (opts.unique && opts.nullsNotDistinct) {
+		parts.push('NULLS NOT DISTINCT');
+	}
 	if (opts.with && Object.keys(opts.with).length > 0) {
 		const withClauses = Object.entries(opts.with)
 			.map(([k, v]) => `${k} = ${v}`)

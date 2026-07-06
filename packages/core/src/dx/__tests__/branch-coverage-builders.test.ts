@@ -583,6 +583,30 @@ describe('generateCreateIndexSQL — option branches', () => {
 		);
 	});
 
+	it('should place INCLUDE before NULLS NOT DISTINCT when both options are set', async () => {
+		const executeDDL = vi.fn().mockResolvedValue(undefined);
+		const ddlAdapter = makeDDLAdapter({ executeDDL });
+		const orm = createOrm({
+			schema: testSchema,
+			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
+		});
+		await (
+			orm.tables.users as unknown as {
+				indexes: { create(opts: object): Promise<void> };
+			}
+		).indexes.create({
+			name: 'idx_include_nulls',
+			columns: ['name'],
+			unique: true,
+			nullsNotDistinct: true,
+			include: ['id'],
+		});
+		const sql: string = executeDDL.mock.calls[0][0] as string;
+		expect(sql).toBe(
+			'CREATE UNIQUE INDEX "idx_include_nulls" ON "users" ("name") INCLUDE ("id") NULLS NOT DISTINCT',
+		);
+	});
+
 	it('should include WITH clause when with option has storage parameters', async () => {
 		const executeDDL = vi.fn().mockResolvedValue(undefined);
 		const ddlAdapter = makeDDLAdapter({ executeDDL });

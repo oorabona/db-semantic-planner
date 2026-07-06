@@ -290,6 +290,35 @@ describe('generateIndexesPhase', () => {
 		expect(stmts[0]).toContain('idx_posts_user_id');
 	});
 
+	it('does not auto-generate FK index when explicit FK index uses nullsNotDistinct', () => {
+		const posts = makeTable('posts', {
+			indexes: [
+				{
+					name: 'uk_posts_user_id_nulls',
+					columns: ['user_id'],
+					unique: true,
+					nullsNotDistinct: true,
+				} as never,
+			],
+			foreignKeys: [
+				{
+					columns: ['user_id'],
+					references: { table: 'users', columns: ['id'] },
+				} as never,
+			],
+		});
+		const ctx = makeCtx({
+			tables: [posts],
+			fkAutoIndex: true,
+		});
+
+		const stmts = generateIndexesPhase(ctx);
+
+		expect(stmts).toHaveLength(1);
+		expect(stmts[0]).toContain('uk_posts_user_id_nulls');
+		expect(stmts[0]).toContain('NULLS NOT DISTINCT');
+	});
+
 	it('skips FK auto-index when fkAutoIndex=false', () => {
 		const posts = makeTable('posts', {
 			indexes: [],
