@@ -7,6 +7,11 @@
 
 * **core:** Add ergonomic control over DX warnings ([#237](https://github.com/oorabona/db-semantic-planner/issues/237)) ([21c3d3b](https://github.com/oorabona/db-semantic-planner/commit/21c3d3b0c05796591a30660c8c5c3fe99391db46)), closes [#159](https://github.com/oorabona/db-semantic-planner/issues/159)
 
+
+### Bug Fixes
+
+* **core:** Keep every include in .exists() so filters and multiplicity survive ([#241](https://github.com/oorabona/db-semantic-planner/issues/241)) ([d9812950c0bc798e0856f6a33ee44fbdc393c60c](https://github.com/oorabona/db-semantic-planner/commit/d9812950c0bc798e0856f6a33ee44fbdc393c60c)), closes [#230](https://github.com/oorabona/db-semantic-planner/issues/230)
+
 ## [1.8.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.7.1...core-v1.8.0) (2026-07-03)
 
 
