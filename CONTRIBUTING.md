@@ -20,7 +20,7 @@ This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.
 
 ### Prerequisites
 
-- Node.js 20 or later
+- Node.js 22 or later
 - pnpm 9 or later (`npm install -g pnpm`)
 - Docker or Podman (only required for E2E tests that run against a real PostgreSQL instance)
 
