@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.8.2...adapter-pgsql-v1.9.0) (2026-07-06)
+
+
+### Features
+
+* **core:** Add ergonomic control over DX warnings ([#237](https://github.com/oorabona/db-semantic-planner/issues/237)) ([21c3d3b](https://github.com/oorabona/db-semantic-planner/commit/21c3d3b0c05796591a30660c8c5c3fe99391db46)), closes [#159](https://github.com/oorabona/db-semantic-planner/issues/159)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.9.0
+
 ## [1.8.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.8.1...adapter-pgsql-v1.8.2) (2026-07-03)
 
 
