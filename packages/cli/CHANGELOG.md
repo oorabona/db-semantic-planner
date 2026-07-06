@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.1.6](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.5...cli-v1.1.6) (2026-07-06)
+
+
+### Bug Fixes
+
+* **repo:** Scope release-please commits for commitlint, require node &gt;=22 ([#243](https://github.com/oorabona/db-semantic-planner/issues/243)) ([0fe03f7](https://github.com/oorabona/db-semantic-planner/commit/0fe03f7a80c650e2066641d39707a829cb6aa15e)), closes [#242](https://github.com/oorabona/db-semantic-planner/issues/242)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 1.10.0
+    * @dbsp/core bumped to 1.10.0
+    * @dbsp/nql bumped to 1.9.1
+    * @dbsp/types bumped to 1.8.0
+
 ## [1.1.5](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.4...cli-v1.1.5) (2026-07-06)
 
 
