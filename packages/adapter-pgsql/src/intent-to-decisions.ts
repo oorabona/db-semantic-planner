@@ -192,6 +192,9 @@ function convertSelect(
 			if (agg.as) {
 				aggDecision.alias = agg.as;
 			}
+			if (agg.distinct === true) {
+				aggDecision.distinct = true;
+			}
 			applyFilterCondition(aggDecision, agg.filter, rootTable);
 			decisions.push(aggDecision);
 		}
@@ -816,6 +819,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 	const targetTable = subquery.from;
 	let selectColumn = '*';
 	let aggregate: string | undefined;
+	let aggregateDistinct: boolean | undefined;
 
 	const select = subquery.select as SelectIntent | undefined;
 	if (select) {
@@ -824,6 +828,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 			if (agg) {
 				aggregate = agg.function;
 				selectColumn = agg.field ?? '*';
+				aggregateDistinct = agg.distinct === true ? true : undefined;
 			}
 		} else if ('fields' in select && select.fields?.length) {
 			selectColumn = select.fields[0]!;
@@ -866,6 +871,7 @@ function convertSubquery(cond: FlatWhereFields): PlanDecision | null {
 		// Provenance: original QueryIntent for validation in buildPredicateSubquerySelect
 		subqueryIntent: subquery,
 		...(aggregate && { aggregate }),
+		...(aggregateDistinct && { aggregateDistinct }),
 		...(subConditions.length > 0 && { conditions: subConditions }),
 		...(rawLimit != null && { limit: rawLimit }),
 		...(rawOrderBy &&

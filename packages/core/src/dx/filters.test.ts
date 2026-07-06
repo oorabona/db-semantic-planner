@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { DistinctField } from './filters.js';
 import {
 	and,
 	coalesce,
@@ -686,6 +687,24 @@ describe('DX-034: distinct() helper', () => {
 			expect(isDistinctField({ field: 'customerId', distinct: false })).toBe(
 				false,
 			);
+		});
+
+		it('should recognize a spread copy of a distinct() result', () => {
+			const spread = { ...distinct('customerId') };
+			expect(isDistinctField(spread)).toBe(true);
+		});
+
+		it('should recognize a hand-built object satisfying the public DistinctField shape', () => {
+			const handBuilt: DistinctField = { field: 'customerId', distinct: true };
+			expect(isDistinctField(handBuilt)).toBe(true);
+		});
+
+		it('should reflect the current field/distinct values, not a snapshot from construction', () => {
+			const result = distinct('customerId');
+			// distinct is readonly in the type; simulate a caller defeating that
+			// via an unsafe cast, and confirm recognition tracks the live value.
+			(result as { distinct: boolean }).distinct = false;
+			expect(isDistinctField(result)).toBe(false);
 		});
 	});
 });

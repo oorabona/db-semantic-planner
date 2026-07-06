@@ -92,6 +92,7 @@ function handleAggregateExpression(
 			table: rootTable,
 		};
 		if (aggAs) decision.alias = aggAs;
+		if (aggDistinct === true) decision.distinct = true;
 		decisions.push(decision);
 	} else if (aggFunc === 'count' && !aggField) {
 		const decision: Mutable<PlanDecision> = {
@@ -100,10 +101,14 @@ function handleAggregateExpression(
 			column: '*',
 			table: rootTable,
 		};
+		// Propagate distinct onto the decision (rather than dropping it here) so
+		// it reaches countHandler/buildAggregate, which already rejects
+		// DISTINCT on a star column — avoids silently compiling to plain count(*).
+		if (aggDistinct === true) decision.distinct = true;
 		if (aggAs) decision.alias = aggAs;
 		applyFilter(decision, aggFilter, rootTable);
 		decisions.push(decision);
-	} else if (aggFunc === 'count' && aggDistinct && aggField) {
+	} else if (aggFunc === 'count' && aggDistinct === true && aggField) {
 		const decision: Mutable<PlanDecision> = {
 			type: 'selectFunction',
 			function: 'countDistinct',
@@ -121,6 +126,7 @@ function handleAggregateExpression(
 		};
 		if (aggField) decision.column = aggField;
 		if (aggAs) decision.alias = aggAs;
+		if (aggDistinct === true) decision.distinct = true;
 		applyFilter(decision, aggFilter, rootTable);
 		decisions.push(decision);
 	}

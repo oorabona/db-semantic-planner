@@ -23,7 +23,7 @@ import {
 	ref,
 	stringAgg,
 } from './expressions.js';
-import { eq } from './filters.js';
+import { distinct, eq } from './filters.js';
 
 // ============================================================================
 // arrayAgg — 0% coverage
@@ -69,6 +69,15 @@ describe('arrayAgg()', () => {
 		);
 		expect(expr.intent.aggOrderBy).toHaveLength(2);
 	});
+
+	it('accepts a DistinctField (#247 finding 3: was TS-rejected before widening the param type)', () => {
+		const expr = arrayAgg(distinct('name'));
+		expect(expr.intent.kind).toBe('customFn');
+		expect(expr.intent.name).toBe('array_agg');
+		expect(expr.intent.distinct).toBe(true);
+		expect(expr.intent.args).toHaveLength(1);
+		expect(expr.intent.args[0]).toEqual({ kind: 'ref', column: 'name' });
+	});
 });
 
 // ============================================================================
@@ -106,6 +115,15 @@ describe('stringAgg()', () => {
 			aggOrderBy('b', 'desc'),
 		);
 		expect(expr.intent.aggOrderBy).toHaveLength(2);
+	});
+
+	it('accepts a DistinctField (#247 finding 3: was TS-rejected before widening the param type)', () => {
+		const expr = stringAgg(distinct('name'), literal(','));
+		expect(expr.intent.kind).toBe('customFn');
+		expect(expr.intent.name).toBe('string_agg');
+		expect(expr.intent.distinct).toBe(true);
+		expect(expr.intent.args).toHaveLength(2);
+		expect(expr.intent.args[0]).toEqual({ kind: 'ref', column: 'name' });
 	});
 });
 

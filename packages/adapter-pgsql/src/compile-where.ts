@@ -31,6 +31,7 @@ import {
 	andExpr,
 	binaryExpr,
 	columnRef,
+	funcCall,
 	notExpr,
 	orExpr,
 	rangeVar,
@@ -222,7 +223,11 @@ export function buildSubqueryFromIntent(
 		| {
 				fields?: string[];
 				type?: string;
-				aggregates?: { function: string; field?: string }[];
+				aggregates?: {
+					function: string;
+					field?: string;
+					distinct?: boolean;
+				}[];
 		  }
 		| undefined;
 
@@ -235,21 +240,22 @@ export function buildSubqueryFromIntent(
 		// Build a ResTarget for EACH aggregate so multi-aggregate subqueries compile correctly.
 		targetList = select.aggregates.map((agg) => {
 			let aggNode: Node;
-			if (!agg.field || agg.field === '*') {
-				aggNode = {
-					FuncCall: {
-						funcname: [{ String: { sval: agg.function.toLowerCase() } }],
-						agg_star: true,
-					},
-				};
+			const field = agg.field;
+			if (!field || field === '*') {
+				// PostgreSQL does not support DISTINCT on a star aggregate — fail
+				// clearly rather than silently dropping DISTINCT (the #247 class of bug).
+				if (agg.distinct === true) {
+					throw new Error(
+						`${agg.function}(DISTINCT *) is not valid SQL — PostgreSQL does not ` +
+							'support DISTINCT on a star aggregate; provide a specific column.',
+					);
+				}
+				aggNode = funcCall(agg.function.toLowerCase(), [], { star: true });
 			} else {
-				const aggArg = columnRef(agg.field, innerAlias, undefined, naming);
-				aggNode = {
-					FuncCall: {
-						funcname: [{ String: { sval: agg.function.toLowerCase() } }],
-						args: [aggArg],
-					},
-				};
+				const aggArg = columnRef(field, innerAlias, undefined, naming);
+				aggNode = funcCall(agg.function.toLowerCase(), [aggArg], {
+					distinct: agg.distinct === true,
+				});
 			}
 			return { ResTarget: { val: aggNode } };
 		});

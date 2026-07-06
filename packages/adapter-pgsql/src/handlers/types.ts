@@ -136,6 +136,8 @@ export interface Decision {
 	readonly targetColumn?: ColumnListInput;
 	readonly targetTable?: string;
 	readonly function?: string;
+	/** Apply DISTINCT to a SELECT-list aggregate (e.g. COUNT(DISTINCT col)). */
+	readonly distinct?: boolean;
 	readonly args?: readonly unknown[];
 	readonly conditions?: readonly Decision[];
 	readonly columns?: readonly string[];
@@ -169,6 +171,15 @@ export interface Decision {
 	// Subquery specific
 	readonly selectColumn?: string;
 	readonly aggregate?: string;
+	/**
+	 * Apply DISTINCT to a scalar subquery's aggregate (e.g. AVG(DISTINCT price)).
+	 * Deliberately NOT named `distinct` — `assertNoDroppedDecisionModifiers`
+	 * (subquery-emission.ts) treats a top-level `distinct === true` on ANY
+	 * subquery decision as an unsupported query-level DISTINCT modifier and
+	 * throws. This field is scoped to the aggregate projection only, so it
+	 * must not collide with that generic guard.
+	 */
+	readonly aggregateDistinct?: boolean;
 	readonly subqueryOperator?: string;
 	// Pseudo-column specific
 	readonly traversal?: string;
