@@ -496,6 +496,71 @@ describe('generateMigrationSQL', () => {
 			expect(sql[0]).toContain('CREATE UNIQUE INDEX IF NOT EXISTS');
 		});
 
+		it('should generate NULLS NOT DISTINCT only for unique indexes', () => {
+			const uniqueWithNulls: IndexIR = {
+				name: 'idx_users_email_unique',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+				where: 'deleted_at IS NULL',
+			};
+			const uniqueWithoutNulls: IndexIR = {
+				name: 'idx_users_email_unique_plain',
+				columns: ['email'],
+				unique: true,
+				where: 'deleted_at IS NULL',
+			};
+			const nonUniqueWithNulls: IndexIR = {
+				name: 'idx_users_email_plain',
+				columns: ['email'],
+				nullsNotDistinct: true,
+			};
+
+			const withNullsSql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: uniqueWithNulls },
+					},
+				]),
+			);
+			const withoutNullsSql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: uniqueWithoutNulls },
+					},
+				]),
+			);
+			const nonUniqueSql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'create_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: nonUniqueWithNulls },
+					},
+				]),
+			);
+
+			expect(withNullsSql[0]).toBe(
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
+			);
+			expect(withoutNullsSql[0]).toBe(
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
+			);
+			expect(nonUniqueSql[0]).toBe(
+				'CREATE INDEX IF NOT EXISTS "idx_users_email_plain" ON "users" ("email");',
+			);
+		});
+
 		it('should generate DROP INDEX', () => {
 			const idx: IndexIR = {
 				name: 'idx_old',
@@ -651,6 +716,31 @@ describe('generateMigrationSQL', () => {
 				);
 				expect(sql[0]).toBe(
 					'CREATE INDEX IF NOT EXISTS "idx_users_email_include" ON "users" ("email") INCLUDE ("id", "name");',
+				);
+			});
+
+			it('should place INCLUDE before NULLS NOT DISTINCT for unique indexes', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_email_include_nulls',
+					columns: ['email'],
+					unique: true,
+					nullsNotDistinct: true,
+					include: ['id'],
+				};
+				const sql = generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: idx },
+						},
+					]),
+				);
+
+				expect(sql[0]).toBe(
+					'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_include_nulls" ON "users" ("email") INCLUDE ("id") NULLS NOT DISTINCT;',
 				);
 			});
 
@@ -1291,6 +1381,71 @@ describe('generateDownSQL', () => {
 			expect(sql[0]).toBe('DROP INDEX IF EXISTS "tenant_1"."idx_users_email";');
 		});
 
+		it('drop_index with metadata recreates NULLS NOT DISTINCT only for unique indexes', () => {
+			const uniqueWithNulls: IndexIR = {
+				name: 'idx_users_email_unique',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+				where: 'deleted_at IS NULL',
+			};
+			const uniqueWithoutNulls: IndexIR = {
+				name: 'idx_users_email_unique_plain',
+				columns: ['email'],
+				unique: true,
+				where: 'deleted_at IS NULL',
+			};
+			const nonUniqueWithNulls: IndexIR = {
+				name: 'idx_users_email_plain',
+				columns: ['email'],
+				nullsNotDistinct: true,
+			};
+
+			const withNullsSql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: uniqueWithNulls },
+					},
+				]),
+			);
+			const withoutNullsSql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: uniqueWithoutNulls },
+					},
+				]),
+			);
+			const nonUniqueSql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_index',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: { index: nonUniqueWithNulls },
+					},
+				]),
+			);
+
+			expect(withNullsSql).toEqual([
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
+			]);
+			expect(withoutNullsSql).toEqual([
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
+			]);
+			expect(nonUniqueSql).toEqual([
+				'CREATE INDEX IF NOT EXISTS "idx_users_email_plain" ON "users" ("email");',
+			]);
+		});
+
 		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {
 			const newFk: ForeignKeyIR = {
 				columns: ['user_id'],
@@ -1643,6 +1798,44 @@ describe('generateDownSQL', () => {
 			expect(sql[fkIdx]).toBe(
 				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
 			);
+		});
+
+		it('emits an FK to a declared external table without creating that table', () => {
+			const ordersTable = makeFullTable(
+				'orders',
+				[
+					makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+					makeCol({ name: 'tenant_id', type: 'integer', nullable: false }),
+				],
+				{
+					pk: 'id',
+					foreignKeys: [
+						{
+							columns: ['tenant_id'],
+							references: { table: 'tenants', columns: ['id'] },
+						},
+					],
+				},
+			);
+			const schema = new ModelIRImpl(
+				new Map([['orders', ordersTable]]),
+				new Map(),
+				undefined,
+				undefined,
+				undefined,
+				['tenants'],
+			);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+
+			expect(sql).toContain(
+				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_tenant_id" FOREIGN KEY ("tenant_id") REFERENCES "tenants" ("id");',
+			);
+			expect(
+				sql.some((statement) => statement.includes('CREATE TABLE "tenants"')),
+			).toBe(false);
 		});
 
 		it('emits create_index for a new table with an index (CREATE TABLE before CREATE INDEX)', () => {
@@ -2417,6 +2610,39 @@ describe('FK enhancements — migration SQL', () => {
 		).length;
 		// Only the explicit index from create_index phase (none here), no duplicates
 		expect(autoIndexCount).toBe(0);
+	});
+
+	it('should not generate FK auto-index when explicit FK index uses nullsNotDistinct', () => {
+		const table = makeTable('orders', [
+			makeCol({ name: 'user_id', type: 'integer' }),
+		]);
+		const tableWithFk: TableIR = {
+			...table,
+			foreignKeys: [baseFk],
+			indexes: [
+				{
+					name: 'uk_orders_user_id_nulls',
+					columns: ['user_id'],
+					unique: true,
+					nullsNotDistinct: true,
+				},
+			],
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_table',
+				table: 'orders',
+				destructive: false,
+				details: '',
+				meta: { table: tableWithFk },
+			},
+		]);
+
+		const sql = generateMigrationSQL(diff);
+
+		expect(
+			sql.filter((s) => s.includes('CREATE INDEX') && s.includes('"user_id"')),
+		).toEqual([]);
 	});
 });
 

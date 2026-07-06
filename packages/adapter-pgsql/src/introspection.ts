@@ -104,6 +104,7 @@ interface RawIndex {
 	opclass_names: string[] | null;
 	opclass_cols: string[] | null;
 	is_unique: boolean;
+	nulls_not_distinct?: boolean | null;
 	method: string;
 	predicate: string | null;
 	reloptions: string[] | null;
@@ -305,6 +306,7 @@ async function queryAllCatalogs(
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
+			   bool_or(COALESCE((to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean, false)) AS nulls_not_distinct,
 			   am.amname AS method,
 			   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
 			   i.reloptions AS reloptions
@@ -544,6 +546,9 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 			name: idx.index_name,
 			columns,
 			...(idx.is_unique ? { unique: true } : {}),
+			...(idx.is_unique && idx.nulls_not_distinct
+				? { nullsNotDistinct: true }
+				: {}),
 			// Only store method when it's not the default 'btree'
 			...(idx.method && idx.method !== 'btree' ? { method: idx.method } : {}),
 			...(idx.predicate ? { where: idx.predicate } : {}),

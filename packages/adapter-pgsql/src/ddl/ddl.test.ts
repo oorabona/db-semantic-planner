@@ -618,6 +618,39 @@ describe('DDL Generator', () => {
 					'CREATE INDEX "idx_users_active_email" ON "users" ("email") WHERE active = true;',
 				);
 			});
+
+			it('should generate unique index with NULLS NOT DISTINCT', () => {
+				const schema = {
+					tables: new Map([
+						[
+							'users',
+							{
+								name: 'users',
+								columns: [{ name: 'email', type: 'string', nullable: false }],
+								primaryKey: undefined,
+								foreignKeys: [],
+								indexes: [
+									{
+										name: 'idx_users_email_unique',
+										columns: ['email'],
+										unique: true,
+										nullsNotDistinct: true,
+										where: 'deleted_at IS NULL',
+									} satisfies IndexIR,
+								],
+							} satisfies TableIR,
+						],
+					]),
+					relations: new Map(),
+				} as unknown as ModelIR;
+
+				const ddl = generateDDL(schema);
+				const idx = ddl.find((s) => s.includes('idx_users_email_unique'));
+				expect(idx).toBeDefined();
+				expect(idx).toBe(
+					'CREATE UNIQUE INDEX "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
+				);
+			});
 		});
 	});
 

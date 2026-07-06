@@ -17,6 +17,7 @@ import type {
  */
 export class ModelIRImpl implements ModelIR {
 	readonly tables: ReadonlyMap<string, TableIR>;
+	readonly externalTables: ReadonlySet<string>;
 	readonly relations: ReadonlyMap<string, RelationIR>;
 	readonly enums?: ReadonlyMap<string, EnumIR>;
 	readonly extensions?: readonly string[];
@@ -38,12 +39,16 @@ export class ModelIRImpl implements ModelIR {
 		enums?: Map<string, EnumIR>,
 		extensions?: readonly string[],
 		sequences?: Map<string, SequenceIR>,
+		externalTables?: Iterable<string>,
 	) {
 		// Freeze the maps to ensure immutability
 		this.tables = Object.freeze(new Map(tables)) as ReadonlyMap<
 			string,
 			TableIR
 		>;
+		this.externalTables = Object.freeze(
+			new Set(externalTables),
+		) as ReadonlySet<string>;
 		this.relations = Object.freeze(new Map(relations)) as ReadonlyMap<
 			string,
 			RelationIR
@@ -172,6 +177,11 @@ export class ModelIRImpl implements ModelIR {
 
 		// Validate PK columns exist when PK is defined
 		for (const table of this.tables.values()) {
+			if (this.externalTables.has(table.name)) {
+				errors.push(
+					`Table "${table.name}" cannot be both managed and external`,
+				);
+			}
 			if (table.primaryKey) {
 				const pkCols = Array.isArray(table.primaryKey)
 					? table.primaryKey
@@ -189,7 +199,10 @@ export class ModelIRImpl implements ModelIR {
 		// Validate all FK references point to existing tables
 		for (const table of this.tables.values()) {
 			for (const fk of table.foreignKeys) {
-				if (!this.tables.has(fk.references.table)) {
+				if (
+					!this.tables.has(fk.references.table) &&
+					!this.externalTables.has(fk.references.table)
+				) {
 					errors.push(
 						`Table "${table.name}" has FK referencing non-existent table "${fk.references.table}"`,
 					);

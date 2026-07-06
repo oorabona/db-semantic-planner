@@ -2013,4 +2013,18 @@ describe('introspection — query SQL integrity (INTRO-INDEXES)', () => {
 		// Must have: WHERE n.nspname = $1
 		expect(indexQuerySql).toMatch(/WHERE\s+n\.nspname\s*=\s*\$1/);
 	});
+
+	it('index query reads PG15 nulls-not-distinct metadata without a direct column reference', async () => {
+		const pool = createMockPool(
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+			{ rows: [] },
+		);
+		await introspect(pool);
+		const indexQuerySql: string = pool.query.mock.calls[3][0];
+
+		expect(indexQuerySql).toContain("to_jsonb(ix) ->> 'indnullsnotdistinct'");
+		expect(indexQuerySql).not.toContain('ix.indnullsnotdistinct');
+	});
 });

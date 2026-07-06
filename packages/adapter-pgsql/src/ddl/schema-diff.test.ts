@@ -37,9 +37,16 @@ function makeCol(overrides: Partial<ColumnIR> & { name: string }): ColumnIR {
 	};
 }
 
-function makeModel(tables: TableIR[]) {
+function makeModel(tables: TableIR[], externalTables?: Iterable<string>) {
 	const tableMap = new Map(tables.map((t) => [t.name, t]));
-	return new ModelIRImpl(tableMap, new Map());
+	return new ModelIRImpl(
+		tableMap,
+		new Map(),
+		undefined,
+		undefined,
+		undefined,
+		externalTables,
+	);
 }
 
 function changeKinds(changes: readonly SchemaChange[]) {
@@ -87,6 +94,36 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.destructive).toBe(true);
 			expect(diff.hasDestructive).toBe(true);
 			expect(diff.summary.tables.dropped).toBe(1);
+		});
+
+		it('should not drop declared external tables', () => {
+			const posts = makeTable({
+				name: 'posts',
+				columns: [
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'tenant_id', type: 'integer' }),
+				],
+				foreignKeys: [
+					{
+						columns: ['tenant_id'],
+						references: { table: 'tenants', columns: ['id'] },
+					},
+				],
+			});
+			const tenants = makeTable({
+				name: 'tenants',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+			});
+			const schema = makeModel([posts], ['tenants']);
+			const db = makeModel([posts, tenants]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(
+				diff.changes.some(
+					(c) => c.kind === 'drop_table' && c.table === 'tenants',
+				),
+			).toBe(false);
 		});
 
 		it('should produce no changes for identical schemas', () => {
@@ -568,6 +605,40 @@ describe('compareSchemata', () => {
 					name: 'idx_users_active_email',
 					columns: ['email'],
 					// no WHERE
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should detect unique NULLS NOT DISTINCT change', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_users_email_unique',
+					columns: ['email'],
+					unique: true,
+					nullsNotDistinct: true,
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_users_email_unique',
+					columns: ['email'],
+					unique: true,
 				};
 
 				const schema = makeModel([

@@ -385,6 +385,10 @@ export function generateCreateIndex(
 			? ` INCLUDE (${idx.include.map((c) => quoteIdentifier(naming.toDatabase(c))).join(', ')})`
 			: '';
 
+	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
+	const nullsNotDistinct =
+		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
+
 	// S-1: validate WITH storage parameter keys before interpolation
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
@@ -400,7 +404,7 @@ export function generateCreateIndex(
 	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
 	const where = idx.where ? ` WHERE ${idx.where}` : '';
 
-	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${withParams}${where};`;
+	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
 }
 
 // ============================================================================

@@ -104,6 +104,11 @@ export function generateCreateIndexSQL(
 		parts.push(`INCLUDE (${includeCols})`);
 	}
 
+	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
+	if (options.unique && options.nullsNotDistinct) {
+		parts.push('NULLS NOT DISTINCT');
+	}
+
 	// WITH storage parameters — S-1: validate keys via validateIdentifier (consistent with other paths)
 	if (options.with && Object.keys(options.with).length > 0) {
 		const withParams = Object.entries(options.with)

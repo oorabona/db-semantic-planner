@@ -188,6 +188,47 @@ describe('ModelIRImpl validation — primary key', () => {
 // ---------------------------------------------------------------------------
 
 describe('ModelIRImpl validation — foreign keys', () => {
+	it('allows FK references to declared external tables', () => {
+		const posts = makeTable('posts', {
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'tenant_id', type: 'integer', nullable: false },
+			],
+			foreignKeys: [
+				{
+					columns: ['tenant_id'],
+					references: { table: 'tenants', columns: ['id'] },
+				},
+			],
+		});
+		const model = new ModelIRImpl(
+			new Map([['posts', posts]]),
+			new Map(),
+			undefined,
+			undefined,
+			undefined,
+			['tenants'],
+		);
+
+		expect(model.externalTables.has('tenants')).toBe(true);
+	});
+
+	it('throws when a table is both managed and external', () => {
+		const tenants = makeTable('tenants');
+
+		expect(
+			() =>
+				new ModelIRImpl(
+					new Map([['tenants', tenants]]),
+					new Map(),
+					undefined,
+					undefined,
+					undefined,
+					['tenants'],
+				),
+		).toThrow(/cannot be both managed and external/);
+	});
+
 	it('throws when FK references a non-existent table', () => {
 		expect(() =>
 			buildModel(
