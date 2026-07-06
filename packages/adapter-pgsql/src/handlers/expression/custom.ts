@@ -195,6 +195,7 @@ export function compileExpressionIntent(
 			// Note: FILTER (WHERE ...) on customFn is applied at the compiler level
 			// (selectCustomExpression branch in compiler.ts) to avoid circular deps.
 			return funcCall(nameParts, argNodes, {
+				distinct: i.distinct === true,
 				...(orderByNodes ? { orderBy: orderByNodes } : {}),
 			});
 		}

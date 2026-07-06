@@ -1055,6 +1055,31 @@ describe('DEFECT 3 regression: decision-level guard (assertNoDroppedDecisionModi
 		);
 	});
 
+	it('directly-constructed scalarSubquery decision with aggregateDistinct but no aggregate (no subqueryIntent) → throws', () => {
+		// aggregateDistinct is only meaningful on an aggregate. Carried on a plain
+		// scalar projection with no aggregate, it would silently drop DISTINCT at
+		// emission (the #247 class of bug) — the decision-level guard must fail loud.
+		const plan: SimplifiedPlanReport = {
+			rootTable: 'orders',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'total',
+					operator: 'scalarSubquery',
+					subqueryOperator: '>',
+					targetTable: 'products',
+					selectColumn: 'price',
+					// @ts-expect-error: injecting the modifier without an aggregate for the guard test
+					aggregateDistinct: true,
+				},
+			],
+		};
+		expect(() => compilePlan(plan)).toThrow(
+			/aggregate DISTINCT without an aggregate function is not supported/,
+		);
+	});
+
 	it('valid directly-constructed inSubquery decision (with subqueryIntent) still compiles', () => {
 		// Regression guard: a valid lowered decision with subqueryIntent must still work.
 		const orm = buildOrm();

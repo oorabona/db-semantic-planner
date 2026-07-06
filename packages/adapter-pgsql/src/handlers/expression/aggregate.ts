@@ -27,7 +27,19 @@ function buildAggregate(
 	ctx: CompilerContext,
 	filterNode?: Node,
 ): Node {
-	const isCountStar = funcName === 'count' && (!column || column === '*');
+	const isStarColumn = !column || column === '*';
+
+	// PostgreSQL does not support DISTINCT on a star aggregate (COUNT(DISTINCT *)
+	// is a syntax error, and '*' has no columns to deduplicate on for any other
+	// aggregate). Fail clearly rather than silently dropping DISTINCT.
+	if (distinct && isStarColumn) {
+		throw new Error(
+			`${funcName}(DISTINCT *) is not valid SQL — PostgreSQL does not support ` +
+				'DISTINCT on a star aggregate; provide a specific column.',
+		);
+	}
+
+	const isCountStar = funcName === 'count' && isStarColumn;
 
 	if (isCountStar) {
 		return funcCall(funcName, [], {
@@ -71,8 +83,14 @@ export const countHandler: ExpressionHandler = {
 		_state: CompilerState,
 	): Node {
 		const column = decision.column;
+		// NOTE: previously also treated any truthy decision.args?.[0] as a distinct
+		// signal. No production lowering path sets `args` on a count decision for
+		// that purpose (args is used by unrelated decision shapes, e.g. selectNqlFunction),
+		// so that clause was an unsound heuristic — a count(*) decision that happened
+		// to carry an unrelated truthy args[0] would be misidentified as DISTINCT.
+		// Explicit signals only: decision.distinct or operator === 'countDistinct'.
 		const distinct =
-			decision.operator === 'countDistinct' || Boolean(decision.args?.[0]);
+			decision.distinct === true || decision.operator === 'countDistinct';
 		return buildAggregate('count', column, distinct, ctx, decision.filterWhere);
 	},
 };
@@ -114,7 +132,7 @@ function createSimpleAggregateHandler(
 			return buildAggregate(
 				funcName,
 				decision.column,
-				false,
+				decision.distinct === true,
 				ctx,
 				decision.filterWhere,
 			);
@@ -156,7 +174,7 @@ export const genericAggregateHandler: ExpressionHandler = {
 		return buildAggregate(
 			funcName,
 			decision.column,
-			false,
+			decision.distinct === true,
 			ctx,
 			decision.filterWhere,
 		);

@@ -305,6 +305,8 @@ export interface CustomFnExpressionIntent {
 	readonly name: string;
 	readonly args: readonly ExpressionIntent[];
 	readonly as?: string;
+	/** Apply DISTINCT to the call's arguments (e.g. count(DISTINCT id)) */
+	readonly distinct?: boolean;
 	/** FILTER (WHERE ...) clause for conditional aggregation */
 	readonly filter?: WhereIntent | undefined;
 	/** ORDER BY clause for ordered aggregates (e.g. array_agg(x ORDER BY y)) */

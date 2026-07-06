@@ -219,6 +219,7 @@ function mapToHandlerDecision(
 		targetColumn: pd.targetColumn ?? derivedFkColumns.targetColumn,
 		targetTable: pd.targetTable,
 		function: pd.function,
+		distinct: pd.distinct,
 		args: pd.args,
 		columns: pd.columns,
 		values: pd.values,
@@ -258,6 +259,7 @@ function mapToHandlerDecision(
 		subqueryOperator: pd.subqueryOperator,
 		selectColumn: pd.selectColumn,
 		aggregate: pd.aggregate,
+		aggregateDistinct: pd.aggregateDistinct,
 		columnAliases: pd.columnAliases,
 		escape: pd.escape,
 		subqueryIntent: pd.subqueryIntent,
@@ -308,6 +310,7 @@ export interface PlanDecision {
 	readonly targetColumn?: ColumnListInput;
 	readonly targetTable?: string;
 	readonly function?: string;
+	readonly distinct?: boolean;
 	readonly args?: readonly unknown[];
 	readonly conditions?: readonly PlanDecision[];
 	readonly columns?: readonly string[];
@@ -362,6 +365,13 @@ export interface PlanDecision {
 	// Scalar subquery comparison properties
 	readonly selectColumn?: string;
 	readonly aggregate?: string;
+	/**
+	 * Apply DISTINCT to a scalar subquery's aggregate (e.g. AVG(DISTINCT price)).
+	 * Deliberately NOT named `distinct` — that field means "this decision's own
+	 * query-level DISTINCT modifier" and `assertNoDroppedDecisionModifiers`
+	 * (subquery-emission.ts) rejects it as unsupported on subquery decisions.
+	 */
+	readonly aggregateDistinct?: boolean;
 	readonly subqueryOperator?: string;
 	// FILTER (WHERE ...) condition for aggregate expressions (WhereIntent serialized as PlanDecision)
 	readonly filterCondition?: PlanDecision;
@@ -1678,13 +1688,14 @@ export class PlanCompiler {
 		args: readonly unknown[],
 		ctx: HandlerCompilerContext,
 		state: HandlerCompilerState,
+		distinct = false,
 	): Node {
 		assertNqlSelectScalarFunctionAllowed(functionName);
 		validateIdentifier(functionName, 'function');
 		const argNodes = args.map((arg) =>
 			this.compileNqlFunctionArg(arg, ctx, state),
 		);
-		return funcCall(functionName, argNodes);
+		return funcCall(functionName, argNodes, { distinct });
 	}
 
 	private compileNqlFunctionArg(
@@ -1784,6 +1795,8 @@ export class PlanCompiler {
 							'NQL aggregate expression requires a function name',
 						);
 					}
+					// Propagate DISTINCT onto the compiled call (e.g. round(sum(DISTINCT amount))).
+					const isDistinct = record.distinct === true;
 					const aggregateArgs: unknown[] = [];
 					if (record.field === '*') {
 						aggregateArgs.push({ kind: 'star' });
@@ -1793,7 +1806,13 @@ export class PlanCompiler {
 					if (Array.isArray(record.extraArgs)) {
 						aggregateArgs.push(...record.extraArgs);
 					}
-					return this.compileGenericNqlFunction(fn, aggregateArgs, ctx, state);
+					return this.compileGenericNqlFunction(
+						fn,
+						aggregateArgs,
+						ctx,
+						state,
+						isDistinct,
+					);
 				}
 
 				case 'arithmetic': {
@@ -2050,6 +2069,7 @@ export class PlanCompiler {
 							decision.args ?? [],
 							ctx,
 							state,
+							decision.distinct === true,
 						);
 				this.state.paramIndex = state.paramIndex;
 				targetList.push({

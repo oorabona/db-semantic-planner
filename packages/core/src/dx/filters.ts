@@ -104,13 +104,22 @@ export function distinct(field: string): DistinctField {
 }
 
 /**
- * Type guard to check if a value is a DistinctField.
+ * Type guard to check if a value is a DistinctField. Purely structural:
+ * DistinctField is a public, exported interface (`{ field: string; distinct:
+ * true }`), so a value built without calling distinct() — object spread,
+ * `satisfies DistinctField`, JSON round-trip — is still typecheck-valid and
+ * must be recognized the same way as one built by distinct() itself.
+ * Recognition must stay uniform across every consumer (.count()/.sum()/
+ * .avg(), fn()) — a stricter check in one and not the others would silently
+ * drop DISTINCT in whichever consumer rejects it, the exact silent-wrong-
+ * result class this whole guard exists to prevent.
  */
 export function isDistinctField(value: unknown): value is DistinctField {
 	return (
 		typeof value === 'object' &&
 		value !== null &&
 		'field' in value &&
+		typeof (value as DistinctField).field === 'string' &&
 		'distinct' in value &&
 		(value as DistinctField).distinct === true
 	);

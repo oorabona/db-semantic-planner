@@ -25,6 +25,7 @@ import {
 	star,
 	unary,
 } from './expressions.js';
+import { distinct } from './filters.js';
 
 describe('Expression Primitives', () => {
 	describe('ref()', () => {
@@ -245,6 +246,92 @@ describe('Expression Primitives', () => {
 
 		it('should support ST_ prefixed GIS functions', () => {
 			expect(() => fn('ST_Distance', ref('geom'), param([0, 0]))).not.toThrow();
+		});
+
+		describe('fn(name, distinct(field)) — #247', () => {
+			it('should route through customFn with distinct:true, not bind distinct() as a param', () => {
+				const f = fn('count', distinct('id'));
+				expect(f.intent).toEqual({
+					kind: 'customFn',
+					name: 'count',
+					args: [{ kind: 'ref', column: 'id' }],
+					distinct: true,
+				} satisfies CustomFnExpressionIntent);
+			});
+
+			it('should work for sum/avg/min/max, not just count', () => {
+				expect(fn('sum', distinct('amount')).intent).toMatchObject({
+					kind: 'customFn',
+					name: 'sum',
+					distinct: true,
+				});
+				expect(fn('avg', distinct('amount')).intent).toMatchObject({
+					kind: 'customFn',
+					name: 'avg',
+					distinct: true,
+				});
+				expect(fn('min', distinct('amount')).intent).toMatchObject({
+					kind: 'customFn',
+					name: 'min',
+					distinct: true,
+				});
+				expect(fn('max', distinct('amount')).intent).toMatchObject({
+					kind: 'customFn',
+					name: 'max',
+					distinct: true,
+				});
+			});
+
+			it('should support distinct() combined with another arg (e.g. string_agg separator)', () => {
+				const f = fn('string_agg', distinct('name'), literal(','));
+				expect(f.intent).toEqual({
+					kind: 'customFn',
+					name: 'string_agg',
+					args: [
+						{ kind: 'ref', column: 'name' },
+						{ kind: 'literal', value: ',' },
+					],
+					distinct: true,
+				} satisfies CustomFnExpressionIntent);
+			});
+
+			it('should support distinct() with any function name — no whitelist (e.g. array_agg)', () => {
+				expect(fn('array_agg', distinct('name')).intent).toMatchObject({
+					kind: 'customFn',
+					name: 'array_agg',
+					distinct: true,
+				});
+			});
+
+			it('should throw when distinct() appears more than once in the same call', () => {
+				expect(() => fn('foo', distinct('a'), distinct('b'))).toThrow(
+					/distinct\(\) is only supported as the first argument/,
+				);
+			});
+
+			it('should throw when distinct() is not the first argument — SQL DISTINCT applies to the whole call, not one position', () => {
+				expect(() => fn('string_agg', literal(','), distinct('name'))).toThrow(
+					/distinct\(\) is only supported as the first argument/,
+				);
+			});
+
+			it("should throw on distinct('*') — DISTINCT on '*' is not valid SQL for any function name (#247 finding 4)", () => {
+				expect(() => fn('count', distinct('*'))).toThrow(
+					/DISTINCT on '\*' is not valid SQL/,
+				);
+				expect(() => fn('array_agg', distinct('*'))).toThrow(
+					/DISTINCT on '\*' is not valid SQL/,
+				);
+			});
+
+			it('preserves the caller-supplied name verbatim (customFn is not handler-registry-keyed, unlike the old aggregate detour)', () => {
+				expect(fn('Count', distinct('id')).intent).toMatchObject({
+					name: 'Count',
+				});
+				expect(fn('SUM', distinct('amount')).intent).toMatchObject({
+					name: 'SUM',
+				});
+			});
 		});
 	});
 
@@ -673,5 +760,15 @@ describe('ExpressionRef.filter() on non-customFn', () => {
 		).toThrow(
 			"filter() can only be used on function expressions created with fn(). Got kind: 'customOp'",
 		);
+	});
+
+	it('should NOT throw when called on a fn(name, distinct(field)) expression — #247', () => {
+		const a = fn('count', distinct('id'));
+		const condition = {} as unknown as Parameters<typeof a.filter>[0];
+		expect(() => a.filter(condition)).not.toThrow();
+		expect(a.filter(condition).intent).toMatchObject({
+			kind: 'customFn',
+			filter: condition,
+		});
 	});
 });

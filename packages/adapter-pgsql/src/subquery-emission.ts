@@ -128,6 +128,11 @@ export function assertNoDroppedDecisionModifiers(
 	if (d.having != null) unsupported.push('HAVING');
 	if (d.offset != null) unsupported.push('OFFSET');
 	if (d.distinct === true) unsupported.push('DISTINCT');
+	// An aggregate DISTINCT modifier is only meaningful on an aggregate. A
+	// decision carrying `aggregateDistinct` with no `aggregate` would silently
+	// drop the modifier at emission (the #247 class of bug) — fail loud instead.
+	if (d.aggregateDistinct === true && d.aggregate == null)
+		unsupported.push('aggregate DISTINCT without an aggregate function');
 	if (Array.isArray(d.distinctOn) && (d.distinctOn as unknown[]).length > 0)
 		unsupported.push('DISTINCT ON');
 	if (Array.isArray(d.include) && (d.include as unknown[]).length > 0)
@@ -254,6 +259,14 @@ export function buildPredicateSubquerySelect(
 	let targetVal: Node;
 	if (aggregate) {
 		if (selectColumn === '*') {
+			// PostgreSQL does not support DISTINCT on a star aggregate — fail clearly
+			// rather than silently dropping DISTINCT (the #247 class of bug).
+			if (decision.aggregateDistinct === true) {
+				throw new Error(
+					`${aggregate}(DISTINCT *) is not valid SQL — PostgreSQL does not support ` +
+						'DISTINCT on a star aggregate; provide a specific column.',
+				);
+			}
 			// Aggregate with star — e.g. COUNT(*)
 			targetVal = {
 				FuncCall: {
@@ -273,6 +286,7 @@ export function buildPredicateSubquerySelect(
 				FuncCall: {
 					funcname: [{ String: { sval: aggregate.toLowerCase() } }],
 					args: [aggArg],
+					...(decision.aggregateDistinct === true && { agg_distinct: true }),
 				},
 			};
 		}
