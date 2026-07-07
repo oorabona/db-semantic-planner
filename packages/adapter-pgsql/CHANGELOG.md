@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.10.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.0...adapter-pgsql-v1.10.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Propagate DISTINCT flag through aggregate compilation ([f6dc756](https://github.com/oorabona/db-semantic-planner/commit/f6dc756f9d5f1eb63e35ff82fbf06409fa413614))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.10.1
+    * @dbsp/types bumped to 1.8.1
+
 ## [1.10.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.9.0...adapter-pgsql-v1.10.0) (2026-07-06)
 
 
