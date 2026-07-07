@@ -211,7 +211,7 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		expect(sql).not.toContain('CAST');
 	});
 
-	it('handles complex originalDbType like varchar(255)', () => {
+	it('casts varchar typmod columns using the base type to avoid truncation', () => {
 		const { sql, parameters } = compileSelect(
 			'products',
 			[
@@ -219,14 +219,131 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 					name: 'name',
 					type: 'string',
 					nullable: true,
-					originalDbType: 'varchar(255)',
+					originalDbType: 'varchar(8)',
 				},
 			],
 			'name',
-			'widget',
+			'abcdefghi',
 		);
-		expect(sql).toContain('CAST($1 AS varchar(255))');
-		expect(parameters).toEqual(['widget']);
+		expect(sql).toContain('CAST($1 AS varchar)');
+		expect(sql).not.toContain('varchar(8)');
+		expect(parameters).toEqual(['abcdefghi']);
+	});
+
+	it('casts numeric typmod columns using the base type to avoid rounding', () => {
+		const { sql, parameters } = compileSelect(
+			'products',
+			[
+				{
+					name: 'price',
+					type: 'decimal',
+					nullable: true,
+					originalDbType: 'numeric(10,2)',
+				},
+			],
+			'price',
+			12.345,
+		);
+		expect(sql).toContain('CAST($1 AS numeric)');
+		expect(sql).not.toContain('numeric(10,2)');
+		expect(parameters).toEqual([12.345]);
+	});
+
+	it('casts char typmod columns as text to avoid length-1 truncation', () => {
+		const { sql, parameters } = compileSelect(
+			'products',
+			[
+				{
+					name: 'code',
+					type: 'string',
+					nullable: true,
+					originalDbType: 'char(4)',
+				},
+			],
+			'code',
+			'ABCDE',
+		);
+		expect(sql).toContain('CAST($1 AS text)');
+		expect(sql).not.toContain('CAST($1 AS char)');
+		expect(sql).not.toContain('char(4)');
+		expect(parameters).toEqual(['ABCDE']);
+	});
+
+	it('casts bit typmod columns as unbounded bit varying', () => {
+		const { sql, parameters } = compileSelect(
+			'products',
+			[
+				{
+					name: 'flags',
+					type: 'string',
+					nullable: true,
+					originalDbType: 'bit(4)',
+				},
+			],
+			'flags',
+			'1010',
+		);
+		expect(sql).toContain('CAST($1 AS bit varying)');
+		expect(sql).not.toContain('CAST($1 AS text)');
+		expect(sql).not.toContain('bit(4)');
+		expect(parameters).toEqual(['1010']);
+	});
+
+	it('casts varbit typmod columns as unbounded bit varying', () => {
+		const { sql, parameters } = compileSelect(
+			'products',
+			[
+				{
+					name: 'flags',
+					type: 'string',
+					nullable: true,
+					originalDbType: 'varbit(8)',
+				},
+			],
+			'flags',
+			'10101010',
+		);
+		expect(sql).toContain('CAST($1 AS bit varying)');
+		expect(sql).not.toContain('CAST($1 AS text)');
+		expect(sql).not.toContain('varbit(8)');
+		expect(parameters).toEqual(['10101010']);
+	});
+
+	it('preserves temporal precision typmod columns', () => {
+		const date = new Date('2024-01-01T00:00:00.123Z');
+		const { sql, parameters } = compileSelect(
+			'events',
+			[
+				{
+					name: 'created_at',
+					type: 'datetime',
+					nullable: true,
+					originalDbType: 'timestamptz(3)',
+				},
+			],
+			'created_at',
+			date,
+		);
+		expect(sql).toContain('CAST($1 AS timestamptz(3))');
+		expect(parameters).toEqual([date]);
+	});
+
+	it('rejects malformed originalDbType before deriving a cast type', () => {
+		expect(() =>
+			compileSelect(
+				'items',
+				[
+					{
+						name: 'id',
+						type: 'number',
+						nullable: true,
+						originalDbType: 'integer(foo)',
+					},
+				],
+				'id',
+				42,
+			),
+		).toThrow(/Unsafe database type name/);
 	});
 });
 
@@ -266,6 +383,96 @@ describe('PARAM-TYPE-CAST: IN handler emits CAST when originalDbType set', () =>
 		} as Parameters<typeof adapter.compile>[0]);
 		expect(sql).toContain('CAST($1 AS uuid[])');
 		expect(parameters).toEqual([['aaa', 'bbb']]);
+	});
+
+	it('casts typmod IN lists using the base array type', () => {
+		const model = buildModel('products', [
+			{ name: 'token', type: 'string', originalDbType: 'varchar(8)' },
+		]);
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const { sql, parameters } = adapter.compile({
+			rootTable: 'products',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'token',
+					operator: 'in',
+					value: ['abcdefghi'],
+				},
+			],
+		} as Parameters<typeof adapter.compile>[0]);
+		expect(sql).toContain('CAST($1 AS varchar[])');
+		expect(sql).not.toContain('varchar(8)');
+		expect(parameters).toEqual([['abcdefghi']]);
+	});
+
+	it('casts fixed-length char IN lists as text arrays', () => {
+		const model = buildModel('products', [
+			{ name: 'code', type: 'string', originalDbType: 'char(4)' },
+		]);
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const { sql, parameters } = adapter.compile({
+			rootTable: 'products',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'code',
+					operator: 'in',
+					value: ['ABCDE'],
+				},
+			],
+		} as Parameters<typeof adapter.compile>[0]);
+		expect(sql).toContain('CAST($1 AS text[])');
+		expect(sql).not.toContain('char');
+		expect(parameters).toEqual([['ABCDE']]);
+	});
+
+	it('casts bit typmod IN lists as bit varying arrays', () => {
+		const model = buildModel('products', [
+			{ name: 'flags', type: 'string', originalDbType: 'bit(4)' },
+		]);
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const { sql, parameters } = adapter.compile({
+			rootTable: 'products',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'flags',
+					operator: 'in',
+					value: ['1010'],
+				},
+			],
+		} as Parameters<typeof adapter.compile>[0]);
+		expect(sql).toContain('CAST($1 AS bit varying[])');
+		expect(sql).not.toContain('CAST($1 AS text[])');
+		expect(sql).not.toContain('bit(4)');
+		expect(parameters).toEqual([['1010']]);
+	});
+
+	it('casts varbit typmod IN lists as bit varying arrays', () => {
+		const model = buildModel('products', [
+			{ name: 'flags', type: 'string', originalDbType: 'varbit(8)' },
+		]);
+		const adapter = createPgsqlCompileOnlyAdapter({ model });
+		const { sql, parameters } = adapter.compile({
+			rootTable: 'products',
+			decisions: [
+				{ type: 'select', column: '*' },
+				{
+					type: 'where',
+					column: 'flags',
+					operator: 'in',
+					value: ['10101010'],
+				},
+			],
+		} as Parameters<typeof adapter.compile>[0]);
+		expect(sql).toContain('CAST($1 AS bit varying[])');
+		expect(sql).not.toContain('CAST($1 AS text[])');
+		expect(sql).not.toContain('varbit(8)');
+		expect(parameters).toEqual([['10101010']]);
 	});
 
 	it('casts integer NOT IN list', () => {

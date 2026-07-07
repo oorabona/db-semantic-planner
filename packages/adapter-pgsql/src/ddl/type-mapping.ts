@@ -22,7 +22,7 @@ import { validateDbTypeName } from '../validate.js';
 export function mapColumnType(col: ColumnIR): string {
 	// Prefer original DB type if available (preserves precision/scale)
 	if (col.originalDbType) {
-		return validateDbTypeName(col.originalDbType.toUpperCase()).toUpperCase();
+		return validateDbTypeName(col.originalDbType);
 	}
 
 	// Auto-increment columns use SERIAL/BIGSERIAL

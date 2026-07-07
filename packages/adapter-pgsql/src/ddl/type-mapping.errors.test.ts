@@ -27,20 +27,26 @@ describe('mapColumnType', () => {
 	// --- originalDbType takes precedence ---------------------------------
 
 	describe('originalDbType override', () => {
-		it('returns uppercase originalDbType when present', () => {
+		it('returns originalDbType unchanged when present', () => {
 			expect(
 				mapColumnType(
 					col({ type: 'string', originalDbType: 'character varying(100)' }),
 				),
-			).toBe('CHARACTER VARYING(100)');
+			).toBe('character varying(100)');
 		});
 
-		it('uppercases arbitrary originalDbType regardless of base type', () => {
+		it('preserves arbitrary originalDbType case regardless of base type', () => {
 			expect(
 				mapColumnType(
 					col({ type: 'integer', originalDbType: 'numeric(10,2)' }),
 				),
-			).toBe('NUMERIC(10,2)');
+			).toBe('numeric(10,2)');
+		});
+
+		it('preserves quoted case-sensitive originalDbType identifiers', () => {
+			expect(
+				mapColumnType(col({ type: 'string', originalDbType: '"Status"' })),
+			).toBe('"Status"');
 		});
 	});
 

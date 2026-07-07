@@ -130,50 +130,49 @@ describe('validateSqlExpression', () => {
 });
 
 describe('validateDbTypeName', () => {
-	it('rejects injection via semicolon after type name', () => {
-		expect(() => validateDbTypeName('integer; DROP TABLE')).toThrow(
+	it.each([
+		'integer; DROP TABLE',
+		'integer; DROP TABLE x',
+		'text) NOT NULL; --',
+		'1nvalid',
+		'NUMERIC(10,--2)',
+		'integer NOT NULL',
+		'integer DEFAULT 0',
+		'integer REFERENCES users',
+		'int/*',
+		'varchar(10,-2)',
+		'text(10,-2)',
+		'mytype(10,-2)',
+	])('rejects unsafe type name: %s', (typeName) => {
+		expect(() => validateDbTypeName(typeName)).toThrow(
 			/Unsafe database type name/,
 		);
 	});
 
-	it('rejects injection via closing paren + statement', () => {
-		expect(() => validateDbTypeName('text) NOT NULL; --')).toThrow(
-			/Unsafe database type name/,
-		);
-	});
-
-	it('rejects type names starting with a digit', () => {
-		expect(() => validateDbTypeName('1nvalid')).toThrow(
-			/Unsafe database type name/,
-		);
-	});
-
-	it('allows: integer', () => {
-		expect(validateDbTypeName('integer')).toBe('integer');
-	});
-
-	it('allows: VARCHAR(255)', () => {
-		expect(validateDbTypeName('VARCHAR(255)')).toBe('VARCHAR(255)');
-	});
-
-	it('allows: NUMERIC(10,2)', () => {
-		expect(validateDbTypeName('NUMERIC(10,2)')).toBe('NUMERIC(10,2)');
-	});
-
-	it('allows: integer[]', () => {
-		expect(validateDbTypeName('integer[]')).toBe('integer[]');
-	});
-
-	it('allows: timestamp with time zone (multi-word PostgreSQL type)', () => {
-		expect(validateDbTypeName('timestamp with time zone')).toBe(
-			'timestamp with time zone',
-		);
-	});
-
-	it('allows: CHARACTER VARYING(100)', () => {
-		expect(validateDbTypeName('CHARACTER VARYING(100)')).toBe(
-			'CHARACTER VARYING(100)',
-		);
+	it.each([
+		'integer',
+		'VARCHAR(255)',
+		'varchar(120)',
+		'NUMERIC(10,2)',
+		'numeric(10,2)',
+		'NUMERIC(10,-2)',
+		'numeric(10,-2)',
+		'integer[]',
+		'text[][]',
+		'timestamp with time zone',
+		'double precision',
+		'CHARACTER VARYING(100)',
+		'character varying(120)',
+		'geometry(Point,4326)',
+		'vector(768)',
+		'tenant.varchar(8)',
+		'tenant.numeric(10,2)',
+		'tenant.char(4)',
+		'pg_catalog.varchar(8)',
+		'"Status"',
+		'ns."Status"',
+	])('allows structured type name: %s', (typeName) => {
+		expect(validateDbTypeName(typeName)).toBe(typeName);
 	});
 });
 

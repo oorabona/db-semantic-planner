@@ -5,7 +5,7 @@
  * @internal
  */
 
-import { countDistinctRelationPathsByName } from '@dbsp/core';
+import { countDistinctRelationPathsByName, validateTypeName } from '@dbsp/core';
 import type {
 	CompiledQuery,
 	CompileOptions,
@@ -40,27 +40,6 @@ import {
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
 
-// ============================================================================
-// Compile-time type-name safety guard (covers forged BatchValuesRef vector)
-// ============================================================================
-
-/**
- * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
- * Mirrors the constant in @dbsp/core `batch-values.ts`.
- */
-const ADAPTER_MULTIWORD_BASE_TYPES: readonly string[] = [
-	'timestamp with time zone',
-	'timestamp without time zone',
-	'time with time zone',
-	'time without time zone',
-	'double precision',
-	'character varying',
-	'bit varying',
-];
-
-/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
-const ADAPTER_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
 /**
  * Validate a PostgreSQL type name at compile time using the structured grammar.
  *
@@ -78,62 +57,13 @@ const ADAPTER_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * "int[])) AS b(id) JOIN users ON true" or "int4) ; DROP TABLE x; --".
  */
 function assertSafeTypeName(typeName: string, colIndex: number): void {
-	const raw = typeName.trim();
-	if (raw.length === 0) {
+	try {
+		validateTypeName(typeName);
+	} catch (error) {
+		const reason = error instanceof Error ? error.message : String(error);
 		throw new Error(
-			`BatchValues compile error: type name at column index ${colIndex} must not be empty.`,
+			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ${reason}`,
 		);
-	}
-
-	let rest = raw;
-
-	// Step 1: strip at most ONE trailing "[]"
-	if (rest.endsWith('[]')) {
-		rest = rest.slice(0, -2);
-		if (rest.endsWith('[]')) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					'At most one array suffix "[]" is allowed as a raw type-name input.',
-			);
-		}
-	}
-
-	// Step 2: strip optional modifier "(N)" or "(N,M)"
-	const modifierMatch = rest.match(/\(([^)]*)\)$/);
-	if (modifierMatch) {
-		const inner = modifierMatch[1] ?? '';
-		if (!/^\d+(?:,\d+)?$/.test(inner)) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
-			);
-		}
-		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
-	}
-
-	// Step 3: validate the base type
-	const baseLower = rest.toLowerCase();
-
-	// (a) Multi-word allowlist
-	if (ADAPTER_MULTIWORD_BASE_TYPES.includes(baseLower)) {
-		return;
-	}
-
-	// (b) Strict identifier, optionally schema-qualified
-	const parts = rest.split('.');
-	if (parts.length > 2) {
-		throw new Error(
-			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-				'Schema-qualified types allow at most one dot (schema.type).',
-		);
-	}
-	for (const part of parts) {
-		if (!ADAPTER_IDENT_RE.test(part)) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					`Base type "${part}" is not a valid SQL identifier and is not in the multi-word type allowlist.`,
-			);
-		}
 	}
 }
 

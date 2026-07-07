@@ -199,6 +199,90 @@ describe('introspect', () => {
 		expect(table.columns[7]!.type).toBe('date');
 	});
 
+	it('should store faithful originalDbType values with selected typmods', async () => {
+		const columns = [
+			{
+				table_name: 't',
+				column_name: 'name',
+				data_type: 'character varying',
+				udt_name: 'varchar',
+				character_maximum_length: 120,
+				numeric_precision: null,
+				numeric_scale: null,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 't',
+				column_name: 'amount',
+				data_type: 'numeric',
+				udt_name: 'numeric',
+				character_maximum_length: null,
+				numeric_precision: 10,
+				numeric_scale: 2,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 't',
+				column_name: 'count',
+				data_type: 'integer',
+				udt_name: 'int4',
+				character_maximum_length: null,
+				numeric_precision: 32,
+				numeric_scale: 0,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 't',
+				column_name: 'created_at',
+				data_type: 'timestamp with time zone',
+				udt_name: 'timestamptz',
+				character_maximum_length: null,
+				numeric_precision: null,
+				numeric_scale: null,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 't',
+				column_name: 'external_id',
+				data_type: 'USER-DEFINED',
+				udt_name: 'uuid',
+				character_maximum_length: null,
+				numeric_precision: null,
+				numeric_scale: null,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 't',
+				column_name: 'status',
+				data_type: 'USER-DEFINED',
+				udt_name: 'Status',
+				character_maximum_length: null,
+				numeric_precision: null,
+				numeric_scale: null,
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [{ table_name: 't', column_name: 'count' }];
+		const pool = createMockPool([columns, pks, []]);
+		const result = await introspect(pool);
+
+		const table = result.tables.get('t')!;
+		expect(table.columns.map((col) => col.originalDbType)).toEqual([
+			'varchar(120)',
+			'numeric(10,2)',
+			'int4',
+			'timestamptz',
+			'uuid',
+			'Status',
+		]);
+	});
+
 	it('should infer bidirectional relations from FK', async () => {
 		const pool = createMockPool([
 			usersPostsColumns,

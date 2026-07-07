@@ -15,11 +15,7 @@ import type {
 	TruncateOptions,
 	VacuumOptions,
 } from '@dbsp/core';
-import {
-	POSTGRESQL_CAPABILITIES,
-	plan as planFn,
-	validateTypeName,
-} from '@dbsp/core';
+import { POSTGRESQL_CAPABILITIES, plan as planFn } from '@dbsp/core';
 import type {
 	Adapter,
 	AdapterCapabilities,
@@ -88,6 +84,7 @@ import {
 	hasBindingName,
 } from './binding-registry.js';
 import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
+import { resolveRuntimeDbTypeCastName } from './db-type.js';
 import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
@@ -360,8 +357,10 @@ function resolveRuntimeBindingColumnType(
 			`NQL runtime binding '${bindingName}' cannot resolve projected column '${columnName}' on source table '${sourceTable.name}'.`,
 		);
 	}
-	const dbType =
-		column.originalDbType?.trim() || mapRuntimeBindingColumnType(column.type);
+	const originalDbType = column.originalDbType?.trim();
+	const dbType = originalDbType
+		? originalDbType
+		: mapRuntimeBindingColumnType(column.type);
 	if (dbType === undefined || dbType.trim() === '') {
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${columnName}' on source table '${sourceTable.name}'.`,
@@ -369,14 +368,13 @@ function resolveRuntimeBindingColumnType(
 	}
 	const typeName = dbType.trim();
 	try {
-		validateTypeName(typeName);
+		return resolveRuntimeDbTypeCastName(typeName);
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot use PostgreSQL cast type for projected column '${columnName}': ${reason}`,
 		);
 	}
-	return typeName;
 }
 
 function resolveRuntimeBindingColumnTypes(
@@ -427,7 +425,7 @@ function assertRuntimeBindingValuesParameterCount(
  * type info (#213). `kind: 'aggregate'` maps `count` to `bigint`; any other
  * aggregate kind throws, so a forged or future aggregate variant fails loud
  * here instead of silently mis-typing. Every
- * resolved type name is re-validated via validateTypeName — the compiler is
+ * resolved type name is re-validated before use — the compiler is
  * never trusted, since PlanCompiler is a public export.
  */
 function resolvePgTypeForColumnTypeInfo(
@@ -440,10 +438,14 @@ function resolvePgTypeForColumnTypeInfo(
 			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}': unsupported aggregate kind '${String(info.fn)}'.`,
 		);
 	}
+	const originalDbType =
+		info.kind === 'aggregate' ? undefined : info.originalDbType?.trim();
 	const rawType =
 		info.kind === 'aggregate'
 			? 'bigint'
-			: info.originalDbType?.trim() || mapRuntimeBindingColumnType(info.type);
+			: originalDbType
+				? originalDbType
+				: mapRuntimeBindingColumnType(info.type);
 	if (rawType === undefined || rawType.trim() === '') {
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}'.`,
@@ -451,14 +453,13 @@ function resolvePgTypeForColumnTypeInfo(
 	}
 	const typeName = rawType.trim();
 	try {
-		validateTypeName(typeName);
+		return resolveRuntimeDbTypeCastName(typeName);
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot use PostgreSQL cast type for projected column '${column}': ${reason}`,
 		);
 	}
-	return typeName;
 }
 
 /** Resolve PostgreSQL cast types for every column of a typed runtime binding, in column order. */

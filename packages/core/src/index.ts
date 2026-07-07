@@ -8,6 +8,11 @@
 // ============================================================================
 
 export type {
+	ParsedPostgresTypeName,
+	ParsePostgresTypeNameOptions,
+} from './db-type-name.js';
+export { parsePostgresTypeName } from './db-type-name.js';
+export type {
 	// ModelIR
 	AmbiguityCheckResult,
 	Cardinality,
@@ -37,7 +42,6 @@ export type {
 	RelationType,
 	TableIR,
 } from './model-ir.js';
-
 // CLI-NQL: Relation kind helpers and pseudo-column factory
 export {
 	createPseudoColumnMetadata,

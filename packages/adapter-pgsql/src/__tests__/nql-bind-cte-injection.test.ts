@@ -638,7 +638,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect(sql ?? '').not.toContain('bigint');
 	});
 
-	it('prefers originalDbType over the neutral type mapping on the typed anchor surface', () => {
+	it('uses base originalDbType over the neutral type mapping on the typed anchor surface', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -669,8 +669,9 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, params, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain('CAST(NULL AS varchar(255)) AS "label"');
-		expect(sql).toContain('$1::varchar(255)');
+		expect(sql).toContain('CAST(NULL AS varchar) AS "label"');
+		expect(sql).toContain('$1::varchar');
+		expect(sql).not.toContain('varchar(255)');
 		expect(params).toEqual(['ok']);
 	});
 
@@ -706,7 +707,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		const { error, sql } = tryCompileNqlBundle(bundle);
 
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('invalid type name');
+		expect((error as Error).message).toContain('Unsafe database type name');
 		expect(sql ?? '').not.toContain(payload);
 	});
 
@@ -961,14 +962,14 @@ describe('NQL bind CTE identifier injection defense', () => {
 		);
 
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('invalid type name');
+		expect((error as Error).message).toContain('Unsafe database type name');
 		expect(sql ?? '').not.toContain(payload);
 	});
 
 	it.each([
 		'boolean or true',
 		'text UNION SELECT',
-	])('rejects runtime binding cast type "%s" via the strict core validator', (payload) => {
+	])('rejects runtime binding cast type "%s" via the structured validator', (payload) => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -995,17 +996,23 @@ describe('NQL bind CTE identifier injection defense', () => {
 		);
 
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('invalid type name');
+		expect((error as Error).message).toContain('Unsafe database type name');
 		expect(sql ?? '').not.toContain(payload);
 	});
 
 	it.each([
-		['double precision', 1.5],
-		['varchar(255)', 'ok'],
-		['character varying(255)', 'ok'],
-		['timestamp with time zone', '2026-06-18T00:00:00.000Z'],
-		['integer[]', [1, 2, 3]],
-	])('accepts legitimate runtime binding cast type "%s"', (typeName, value) => {
+		['double precision', 1.5, 'double precision'],
+		['varchar(255)', 'ok', 'varchar'],
+		['character varying(255)', 'ok', 'character varying'],
+		['numeric(10,2)', 123.45, 'numeric'],
+		['timestamptz(3)', '2026-06-18T00:00:00.123Z', 'timestamptz(3)'],
+		[
+			'timestamp with time zone',
+			'2026-06-18T00:00:00.000Z',
+			'timestamp with time zone',
+		],
+		['integer[]', [1, 2, 3], 'integer[]'],
+	])('accepts legitimate runtime binding cast type "%s"', (typeName, value, expectedCastType) => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -1035,7 +1042,10 @@ describe('NQL bind CTE identifier injection defense', () => {
 		);
 
 		expect(error).toBeUndefined();
-		expect(sql).toContain(`$1::${typeName}`);
+		expect(sql).toContain(`$1::${expectedCastType}`);
+		if (typeName !== expectedCastType) {
+			expect(sql).not.toContain(`$1::${typeName}`);
+		}
 		expect(params).toEqual([value]);
 	});
 

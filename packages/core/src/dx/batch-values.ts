@@ -1,26 +1,9 @@
+import { parsePostgresTypeName } from '../db-type-name.js';
 import { validateIdentifier } from './errors.js';
 
 // ============================================================================
 // Structured PostgreSQL type-name grammar
 // ============================================================================
-
-/**
- * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
- * These are the only multi-word base types accepted by the structured grammar;
- * all other base types must be strict SQL identifiers (optionally schema-qualified).
- */
-const MULTIWORD_BASE_TYPES: readonly string[] = [
-	'timestamp with time zone',
-	'timestamp without time zone',
-	'time with time zone',
-	'time without time zone',
-	'double precision',
-	'character varying',
-	'bit varying',
-];
-
-/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
-const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /**
  * Validate a PostgreSQL type name for use in CAST($N AS type[]).
@@ -52,67 +35,21 @@ const IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * @internal — exported for adapter compile-time revalidation only.
  */
 export function validateTypeName(typeName: string): void {
-	const raw = typeName.trim();
-	if (raw.length === 0) {
-		throw new Error(
-			`batchValues: invalid type name '${typeName}'. Type names must not be empty.`,
-		);
-	}
-
-	let rest = raw;
-
-	// ── Step 1: strip at most ONE trailing array suffix "[]" ─────────────────
-	// More than one "[]" (e.g. "int4[][]") is rejected by the grammar: after
-	// stripping one, the remaining rest must NOT end in "[]" again.
-	if (rest.endsWith('[]')) {
-		rest = rest.slice(0, -2);
-		if (rest.endsWith('[]')) {
+	const parsed = parsePostgresTypeName(typeName, {
+		allowOuterWhitespace: true,
+		allowQuotedIdentifiers: false,
+		maxArrayDimensions: 1,
+	});
+	if (!parsed) {
+		if (typeName.trim().length === 0) {
 			throw new Error(
-				`batchValues: invalid type name '${typeName}'. ` +
-					'At most one array suffix "[]" is allowed as a raw type-name input. ' +
-					'Use "int4[]" not "int4[][]".',
+				`batchValues: invalid type name '${typeName}'. Type names must not be empty.`,
 			);
 		}
-	}
-
-	// ── Step 2: strip optional modifier "(N)" or "(N,M)" ─────────────────────
-	// Only digits inside parens; any other parenthesised content is rejected.
-	const modifierMatch = rest.match(/\(([^)]*)\)$/);
-	if (modifierMatch) {
-		const inner = modifierMatch[1] ?? '';
-		if (!/^\d+(?:,\d+)?$/.test(inner)) {
-			throw new Error(
-				`batchValues: invalid type name '${typeName}'. ` +
-					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
-			);
-		}
-		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
-	}
-
-	// ── Step 3: validate the base type ───────────────────────────────────────
-	const baseLower = rest.toLowerCase();
-
-	// (a) Multi-word allowlist (case-insensitive)
-	if (MULTIWORD_BASE_TYPES.includes(baseLower)) {
-		return; // valid
-	}
-
-	// (b) Strict identifier, optionally schema-qualified: ident | ident.ident
-	const parts = rest.split('.');
-	if (parts.length > 2) {
 		throw new Error(
 			`batchValues: invalid type name '${typeName}'. ` +
-				'Schema-qualified types allow at most one dot (schema.type).',
+				'Must match PostgreSQL type name rules.',
 		);
-	}
-	for (const part of parts) {
-		if (!IDENT_RE.test(part)) {
-			throw new Error(
-				`batchValues: invalid type name '${typeName}'. ` +
-					`Base type "${part}" is not a valid SQL identifier ` +
-					'([A-Za-z_][A-Za-z0-9_]*) and is not in the multi-word type allowlist.',
-			);
-		}
 	}
 }
 

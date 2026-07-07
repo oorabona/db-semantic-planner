@@ -110,7 +110,7 @@ describe('DDL Generator', () => {
 					nullable: false,
 					originalDbType: 'numeric(10,2)',
 				}),
-			).toBe('NUMERIC(10,2)');
+			).toBe('numeric(10,2)');
 		});
 
 		it('should map ON DELETE actions correctly', () => {

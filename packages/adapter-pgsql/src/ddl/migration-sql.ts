@@ -18,7 +18,11 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	validateDbTypeName,
+	validateIdentifier,
+	validateSqlExpression,
+} from '../validate.js';
 import { assertPartitionStrategy } from './ddl-generator.js';
 import {
 	formatSqlDefault,
@@ -472,7 +476,9 @@ function upAddColumn(
 
 function upAlterColumnType(change: SchemaChange, schemaName?: string): string {
 	const col = change.meta?.column as ColumnIR | undefined;
-	const toType = col ? mapColumnType(col) : String(change.meta?.toType);
+	const toType = col
+		? mapColumnType(col)
+		: validateDbTypeName(String(change.meta?.toType));
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${toType};`;
 }
 
@@ -924,8 +930,9 @@ function changeToDownSQL(
 					destructive: true,
 				};
 			}
+			const safeFromType = validateDbTypeName(fromType);
 			return {
-				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${fromType};`,
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${safeFromType};`,
 				destructive: true,
 			};
 		}

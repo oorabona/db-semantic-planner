@@ -1458,6 +1458,114 @@ describe('compareSchemata', () => {
 
 	// ==========================================================================
 	describe('originalDbType comparison', () => {
+		it('ignores equivalent PostgreSQL originalDbType aliases', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							originalDbType: 'integer',
+						}),
+						makeCol({
+							name: 'name',
+							type: 'string',
+							originalDbType: 'character varying(120)',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'id',
+							type: 'integer',
+							originalDbType: 'int4',
+						}),
+						makeCol({
+							name: 'name',
+							type: 'string',
+							originalDbType: 'varchar(120)',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('does not fall back to abstract type when concrete originalDbTypes match', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'metrics',
+					columns: [
+						makeCol({
+							name: 'count',
+							type: 'number',
+							originalDbType: 'integer',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'metrics',
+					columns: [
+						makeCol({
+							name: 'count',
+							type: 'integer',
+							originalDbType: 'integer',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('detects varchar length change via originalDbType', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'name',
+							type: 'string',
+							originalDbType: 'varchar(200)',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'name',
+							type: 'string',
+							originalDbType: 'varchar(120)',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+			expect(diff.changes[0]!.meta).toMatchObject({
+				fromType: 'varchar(120)',
+				toType: 'varchar(200)',
+			});
+		});
+
 		it('detects vector dimension change via originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
@@ -1557,6 +1665,37 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
+		it('preserves case-sensitive user-defined originalDbType matches', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'string',
+							originalDbType: '"Status"',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'text',
+							originalDbType: '"Status"',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
 		it('falls back to base type when no originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
@@ -1600,35 +1739,34 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
-		it('case-insensitive originalDbType comparison', () => {
+		it('falls back to base type when one side lacks originalDbType', () => {
 			const schema = makeModel([
 				makeTable({
-					name: 'items',
+					name: 'orders',
 					columns: [
 						makeCol({
-							name: 'embedding',
-							type: 'text',
-							originalDbType: 'vector(768)',
+							name: 'price',
+							type: 'decimal',
+							originalDbType: 'numeric(10,2)',
 						}),
 					],
 				}),
 			]);
 			const db = makeModel([
 				makeTable({
-					name: 'items',
-					columns: [
-						makeCol({
-							name: 'embedding',
-							type: 'text',
-							originalDbType: 'VECTOR(768)',
-						}),
-					],
+					name: 'orders',
+					columns: [makeCol({ name: 'price', type: 'integer' })],
 				}),
 			]);
 
 			const diff = compareSchemata(schema, db);
 
-			expect(diff.changes).toHaveLength(0);
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_type');
+			expect(diff.changes[0]!.meta).toMatchObject({
+				fromType: 'integer',
+				toType: 'decimal',
+			});
 		});
 	});
 });

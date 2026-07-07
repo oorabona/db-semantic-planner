@@ -1210,6 +1210,26 @@ describe('generateDownSQL', () => {
 			);
 		});
 
+		it('SC-03c: validates ALTER COLUMN TYPE rollback fromType before rendering', () => {
+			expect(() =>
+				generateDownSQL(
+					makeDiff([
+						{
+							kind: 'alter_column_type',
+							table: 'users',
+							column: 'age',
+							destructive: true,
+							details: '',
+							meta: {
+								fromType: 'integer NOT NULL',
+								toType: 'bigint',
+							},
+						},
+					]),
+				),
+			).toThrow(/Unsafe database type name/);
+		});
+
 		it('SC-05: alter_column_nullable SET NOT NULL → DOWN DROP NOT NULL', () => {
 			const sql = generateDownSQL(
 				makeDiff([

@@ -1,3 +1,5 @@
+import { type ParsedPostgresTypeName, parsePostgresTypeName } from '@dbsp/core';
+
 /**
  * Identifier Validation for adapter-pgsql
  *
@@ -569,9 +571,17 @@ export function validateCollationName(
 	}
 }
 
-/** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
-const SAFE_TYPE_PATTERN =
-	/^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;
+export type ParsedDbTypeName = ParsedPostgresTypeName;
+
+export function parseValidatedDbTypeName(type: string): ParsedDbTypeName {
+	const parsed = parsePostgresTypeName(type);
+	if (!parsed) {
+		throw new Error(
+			`Unsafe database type name: "${type}". Must match PostgreSQL type name rules.`,
+		);
+	}
+	return parsed;
+}
 
 /**
  * Validate a raw SQL expression used in DDL contexts (defaults, policy USING/CHECK).
@@ -601,13 +611,9 @@ export function validateSqlExpression(sql: string, context: string): void {
  * @security Called before any originalDbType value is interpolated into DDL column types.
  * @param type The type name string to validate.
  * @returns The original string (unchanged) when valid.
- * @throws Error if the type name does not match the safe pattern.
+ * @throws Error if the type name does not match the structured type grammar.
  */
 export function validateDbTypeName(type: string): string {
-	if (!SAFE_TYPE_PATTERN.test(type)) {
-		throw new Error(
-			`Unsafe database type name: "${type}". Must match PostgreSQL type name rules.`,
-		);
-	}
+	parseValidatedDbTypeName(type);
 	return type;
 }

@@ -80,6 +80,16 @@ describe('validateTypeName — injection strings are rejected', () => {
 		);
 	});
 
+	it('rejects negative second modifiers outside numeric/decimal', () => {
+		expect(() => validateTypeName('varchar(10,-2)')).toThrow(
+			/invalid type name/i,
+		);
+		expect(() => validateTypeName('text(10,-2)')).toThrow(/invalid type name/i);
+		expect(() => validateTypeName('mytype(10,-2)')).toThrow(
+			/invalid type name/i,
+		);
+	});
+
 	it('rejects type with extra closing paren after modifier', () => {
 		// "int4(5))" — the trailing ")" is not consumed by modifier parsing
 		expect(() => validateTypeName('int4(5))')).toThrow(/invalid type name/i);
@@ -109,8 +119,17 @@ describe('validateTypeName — valid types pass the structured grammar', () => {
 		expect(() => validateTypeName('numeric(10,2)')).not.toThrow();
 	});
 
+	it('accepts "numeric(10,-2)" — negative scale modifier', () => {
+		expect(() => validateTypeName('numeric(10,-2)')).not.toThrow();
+	});
+
 	it('accepts "varchar(255)" — single-part modifier', () => {
 		expect(() => validateTypeName('varchar(255)')).not.toThrow();
+	});
+
+	it('accepts bounded modifiers for recognized bases', () => {
+		expect(() => validateTypeName('numeric(10,2)')).not.toThrow();
+		expect(() => validateTypeName('varchar(120)')).not.toThrow();
 	});
 
 	it('accepts "timestamp with time zone" — multi-word allowlist', () => {

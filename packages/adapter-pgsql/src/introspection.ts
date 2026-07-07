@@ -71,6 +71,9 @@ interface RawColumn {
 	column_name: string;
 	data_type: string;
 	udt_name: string;
+	character_maximum_length: number | null;
+	numeric_precision: number | null;
+	numeric_scale: number | null;
 	is_nullable: string;
 	column_default: string | null;
 	collation_name: string | null;
@@ -147,6 +150,40 @@ function parseExpressionsList(raw: string): readonly string[] {
 	const last = raw.slice(start).trim();
 	if (last) results.push(last);
 	return results;
+}
+
+interface DbTypeModifiers {
+	readonly charLength: number | null | undefined;
+	readonly numericPrecision: number | null | undefined;
+	readonly numericScale: number | null | undefined;
+}
+
+// Full typmod fidelity for bit/varbit/vector/temporal precision needs format_type(atttypid, atttypmod); tracked in #261. This store path only covers varchar/char/numeric.
+function buildStoredDbType(
+	udtName: string,
+	modifiers: DbTypeModifiers,
+): string {
+	if (
+		(udtName === 'varchar' || udtName === 'char' || udtName === 'bpchar') &&
+		modifiers.charLength !== null &&
+		modifiers.charLength !== undefined
+	) {
+		return `${udtName}(${modifiers.charLength})`;
+	}
+
+	if (
+		udtName === 'numeric' &&
+		modifiers.numericPrecision !== null &&
+		modifiers.numericPrecision !== undefined
+	) {
+		const scale = modifiers.numericScale;
+		if (scale !== null && scale !== undefined && scale !== 0) {
+			return `numeric(${modifiers.numericPrecision},${scale})`;
+		}
+		return `numeric(${modifiers.numericPrecision})`;
+	}
+
+	return udtName;
 }
 
 // ============================================================================
@@ -232,11 +269,12 @@ async function queryAllCatalogs(
 	] = await Promise.all([
 		// 1. Columns (including identity and collation)
 		pool.query<RawColumn>(
-			`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
-			        collation_name, is_identity, identity_generation
-			 FROM information_schema.columns
-			 WHERE table_schema = $1
-			 ORDER BY table_name, ordinal_position`,
+			`SELECT table_name, column_name, data_type, udt_name,
+				        character_maximum_length, numeric_precision, numeric_scale,
+				        is_nullable, column_default, collation_name, is_identity, identity_generation
+				 FROM information_schema.columns
+				 WHERE table_schema = $1
+				 ORDER BY table_name, ordinal_position`,
 			[schema],
 		),
 		// 2. Primary keys
@@ -788,7 +826,11 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
 				: {}),
-			originalDbType: col.udt_name,
+			originalDbType: buildStoredDbType(col.udt_name, {
+				charLength: col.character_maximum_length,
+				numericPrecision: col.numeric_precision,
+				numericScale: col.numeric_scale,
+			}),
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),
 			...(colComment ? { comment: colComment } : {}),

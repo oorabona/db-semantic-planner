@@ -502,6 +502,22 @@ describe('migration-sql coverage', () => {
 			const sql = generateMigrationSQL(diff);
 			expect(sql[0]).toContain('TYPE TEXT');
 		});
+
+		it('validates meta.toType when column meta is absent', () => {
+			const diff = makeDiff([
+				{
+					kind: 'alter_column_type',
+					table: 't',
+					column: 'c',
+					destructive: false,
+					details: 'alter type',
+					meta: { toType: 'integer NOT NULL' },
+				},
+			]);
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				/Unsafe database type name/,
+			);
+		});
 	});
 
 	describe('alter_column_nullable', () => {

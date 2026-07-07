@@ -20,6 +20,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import { canonicalizeDbType } from '../db-type.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -406,35 +407,7 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
-	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024))
-	const schemaDbType = schema.originalDbType?.toLowerCase();
-	const dbDbType = db.originalDbType?.toLowerCase();
-
-	if (schemaDbType && dbDbType && schemaDbType !== dbDbType) {
-		// Both have originalDbType and they differ → precision/type change
-		changes.push({
-			kind: 'alter_column_type',
-			table: tableName,
-			column: schema.name,
-			destructive: true,
-			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
-			meta: {
-				fromType: db.originalDbType,
-				toType: schema.originalDbType,
-				column: schema,
-			},
-		});
-	} else if (!areTypesEquivalent(schema.type, db.type)) {
-		// Fall back to base type comparison (original behavior)
-		changes.push({
-			kind: 'alter_column_type',
-			table: tableName,
-			column: schema.name,
-			destructive: true,
-			details: `Change type of "${schema.name}" from ${db.type} to ${schema.type}`,
-			meta: { fromType: db.type, toType: schema.type, column: schema },
-		});
-	}
+	compareColumnType(tableName, schema, db, changes);
 
 	// Nullable change
 	if (schema.nullable !== db.nullable) {
@@ -483,6 +456,48 @@ function compareColumnDetails(
 			destructive: false,
 			details: `Change identity of "${schema.name}" to ${schema.identity ?? 'none'}`,
 			meta: { column: schema, previousIdentity: db.identity },
+		});
+	}
+}
+
+function compareColumnType(
+	tableName: string,
+	schema: ColumnIR,
+	db: ColumnIR,
+	changes: SchemaChange[],
+): void {
+	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024))
+	if (schema.originalDbType !== undefined && db.originalDbType !== undefined) {
+		if (
+			canonicalizeDbType(schema.originalDbType) !==
+			canonicalizeDbType(db.originalDbType)
+		) {
+			// Both have originalDbType and they differ → precision/type change
+			changes.push({
+				kind: 'alter_column_type',
+				table: tableName,
+				column: schema.name,
+				destructive: true,
+				details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
+				meta: {
+					fromType: db.originalDbType,
+					toType: schema.originalDbType,
+					column: schema,
+				},
+			});
+		}
+		return;
+	}
+
+	if (!areTypesEquivalent(schema.type, db.type)) {
+		// Fall back to base type comparison (original behavior)
+		changes.push({
+			kind: 'alter_column_type',
+			table: tableName,
+			column: schema.name,
+			destructive: true,
+			details: `Change type of "${schema.name}" from ${db.type} to ${schema.type}`,
+			meta: { fromType: db.type, toType: schema.type, column: schema },
 		});
 	}
 }

@@ -484,8 +484,32 @@ describe('batchValues() structured type-name grammar (DEFECT-1 fix)', () => {
 		expect(() => batchValues([[1.5]], ['v'], ['numeric(10,2)'])).not.toThrow();
 	});
 
+	it('T-GRAM-6b: numeric(10,-2) passes the structured grammar', () => {
+		expect(() => batchValues([[150]], ['v'], ['numeric(10,-2)'])).not.toThrow();
+	});
+
+	it('T-GRAM-6c: numeric(10,-2) passes the adapter compile-time grammar', () => {
+		const orm = buildOrm();
+		const batch = batchValues([[150]], ['v'], ['numeric(10,-2)']);
+		expect(() => orm.from(batch).dump()).not.toThrow();
+	});
+
 	it('T-GRAM-7: varchar(255) passes the structured grammar', () => {
 		expect(() => batchValues([['x']], ['s'], ['varchar(255)'])).not.toThrow();
+	});
+
+	it('T-GRAM-7b: negative second typmods reject outside numeric bases', () => {
+		expect(() => batchValues([['x']], ['s'], ['varchar(10,-2)'])).toThrow(
+			/invalid type name/i,
+		);
+		expect(() => batchValues([['x']], ['s'], ['text(10,-2)'])).toThrow(
+			/invalid type name/i,
+		);
+	});
+
+	it('T-GRAM-7c: bounded numeric and varchar typmods pass', () => {
+		expect(() => batchValues([[1.5]], ['v'], ['numeric(10,2)'])).not.toThrow();
+		expect(() => batchValues([['x']], ['s'], ['varchar(120)'])).not.toThrow();
 	});
 
 	it('T-GRAM-8: "timestamp with time zone" passes the multi-word allowlist', () => {
@@ -521,6 +545,37 @@ describe('batchValues() structured type-name grammar (DEFECT-1 fix)', () => {
 		expect(() => (orm as any).from(forged).dump()).toThrow(
 			/BatchValues compile error.*unsafe type name/i,
 		);
+	});
+
+	it('T-GRAM-12: forged-ref rejects negative typmods outside numeric bases', () => {
+		const orm = buildOrm();
+		const forged = {
+			__kind: 'batchValues' as const,
+			data: [['x']],
+			columns: ['name'],
+			types: ['varchar(10,-2)'],
+			alias: 'batch',
+			ordinality: false,
+		};
+
+		expect(() => (orm as any).from(forged).dump()).toThrow(
+			/BatchValues compile error.*unsafe type name/i,
+		);
+	});
+
+	it('T-GRAM-13: forged-ref accepts numeric negative scale', () => {
+		const orm = buildOrm();
+		const forged = {
+			__kind: 'batchValues' as const,
+			data: [[150]],
+			columns: ['amount'],
+			types: ['numeric(10,-2)'],
+			alias: 'batch',
+			ordinality: false,
+		};
+
+		const dump = (orm as any).from(forged).dump();
+		expect(ws(dump.sql)).toContain('CAST($1 AS numeric(10,-2)[])');
 	});
 });
 
