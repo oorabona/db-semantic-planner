@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.8.1](https://github.com/oorabona/db-semantic-planner/compare/types-v1.8.0...types-v1.8.1) (2026-07-07)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Propagate DISTINCT flag through aggregate compilation ([f6dc756](https://github.com/oorabona/db-semantic-planner/commit/f6dc756f9d5f1eb63e35ff82fbf06409fa413614))
+
 ## [1.8.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.7.1...types-v1.8.0) (2026-07-06)
 
 
