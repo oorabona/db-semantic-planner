@@ -442,10 +442,9 @@ export function convertDottedFieldsToExists(
 			...(resolved.relationType && { relationType: resolved.relationType }),
 			conditions: [
 				{
+					...d,
 					type: 'where',
 					column: targetColumn,
-					operator: d.operator,
-					value: d.value,
 					table: resolved.target,
 				},
 			],
