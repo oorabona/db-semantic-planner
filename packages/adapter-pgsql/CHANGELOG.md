@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.10.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.1...adapter-pgsql-v1.10.2) (2026-07-07)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Preserve any values and resolve dotted orderBy on joined columns ([236de07](https://github.com/oorabona/db-semantic-planner/commit/236de07e6a62ef4f356a90b89177f7ba61d18710))
+
 ## [1.10.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.0...adapter-pgsql-v1.10.1) (2026-07-07)
 
 
