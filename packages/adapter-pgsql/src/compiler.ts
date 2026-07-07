@@ -2551,11 +2551,9 @@ export class PlanCompiler {
 		}
 		if (decision.column) {
 			return sortBy(
-				columnRef(
+				this.compileRelationAwareColumnRef(
 					decision.column as string,
 					decision.table,
-					undefined,
-					this.naming,
 				),
 				decision.direction ?? 'ASC',
 				decision.nulls ?? 'DEFAULT',
