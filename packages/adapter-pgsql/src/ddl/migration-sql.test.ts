@@ -1309,6 +1309,38 @@ describe('generateDownSQL', () => {
 			);
 		});
 
+		it('compareSchemata PK change down restores previous primary key', () => {
+			const schemaTable = makeTable(
+				'users',
+				[
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'code', type: 'string' }),
+				],
+				'code',
+			);
+			const dbTable = makeTable(
+				'users',
+				[
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'code', type: 'string' }),
+				],
+				'id',
+			);
+			const schema = new ModelIRImpl(
+				new Map([['users', schemaTable]]),
+				new Map(),
+			);
+			const db = new ModelIRImpl(new Map([['users', dbTable]]), new Map());
+
+			const diff = compareSchemata(schema, db);
+			const down = generateDownMigrationSQL(diff);
+
+			expect(down.statements).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "pk_users" CASCADE;',
+				'ALTER TABLE "users" ADD CONSTRAINT "pk_users" PRIMARY KEY ("id");',
+			]);
+		});
+
 		it('SC-06: add_foreign_key → DROP CONSTRAINT', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],

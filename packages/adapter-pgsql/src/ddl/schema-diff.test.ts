@@ -325,6 +325,7 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('drop_primary_key');
 			expect(diff.changes[0]!.destructive).toBe(true);
+			expect(diff.changes[0]!.meta).toEqual({ columns: ['id'] });
 		});
 
 		it('should detect PK column change (drop+add)', () => {
@@ -354,6 +355,8 @@ describe('compareSchemata', () => {
 			const kinds = changeKinds(diff.changes);
 			expect(kinds).toContain('drop_primary_key');
 			expect(kinds).toContain('add_primary_key');
+			const dropPK = diff.changes.find((c) => c.kind === 'drop_primary_key');
+			expect(dropPK?.meta).toEqual({ columns: ['id'] });
 		});
 
 		it('should handle composite PK', () => {
