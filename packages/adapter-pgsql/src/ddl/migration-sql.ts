@@ -18,7 +18,11 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	validateCheckExpression,
+	validateIdentifier,
+	validateSqlExpression,
+} from '../validate.js';
 import { assertPartitionStrategy } from './ddl-generator.js';
 import {
 	formatSqlDefault,
@@ -56,6 +60,23 @@ function qualifyTable(table: string, schemaName?: string): string {
 	return schemaName
 		? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(table, 'table')}`
 		: quoteIdent(table, 'table');
+}
+
+function buildDoBlock(body: string): string {
+	const delimiter = chooseDoBlockDelimiter(body);
+	return `DO ${delimiter} ${body} ${delimiter};`;
+}
+
+function chooseDoBlockDelimiter(body: string): string {
+	if (!body.includes('$$')) return '$$';
+
+	let suffix = 0;
+	let delimiter = '$dbsp_check$';
+	while (body.includes(delimiter)) {
+		suffix++;
+		delimiter = `$dbsp_check_${suffix}$`;
+	}
+	return delimiter;
 }
 
 // validateEnumLabel is imported from './phases/utils.js' (shared with enum-types.ts)
@@ -638,19 +659,19 @@ function upAddCheckConstraint(
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
 	const notValid = check.notValid ? ' NOT VALID' : '';
-	validateSqlExpression(
+	validateCheckExpression(
 		check.expression,
 		'migration check constraint expression',
 	);
-	return (
-		'DO $$ BEGIN ALTER TABLE ' +
-		qualifyTable(change.table, schemaName) +
-		' ADD CONSTRAINT ' +
-		quoteIdent(check.name, 'alias') +
-		' ' +
-		check.expression +
-		notValid +
-		'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;'
+	return buildDoBlock(
+		'BEGIN ALTER TABLE ' +
+			qualifyTable(change.table, schemaName) +
+			' ADD CONSTRAINT ' +
+			quoteIdent(check.name, 'alias') +
+			' ' +
+			check.expression +
+			notValid +
+			'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 	);
 }
 
@@ -1135,19 +1156,20 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
-			validateSqlExpression(
+			validateCheckExpression(
 				check.expression,
 				'migration check constraint (down)',
 			);
 			return {
-				sql:
-					'DO $$ BEGIN ALTER TABLE ' +
+				sql: buildDoBlock(
+					'BEGIN ALTER TABLE ' +
 					qualifyTable(change.table, schemaName) +
 					' ADD CONSTRAINT ' +
 					quoteIdent(check.name, 'alias') +
 					' ' +
 					check.expression +
-					'; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+					'; EXCEPTION WHEN duplicate_object THEN NULL; END',
+				),
 				// Allowlisted: re-adds the dropped CHECK constraint from metadata.
 				destructive: false,
 			};

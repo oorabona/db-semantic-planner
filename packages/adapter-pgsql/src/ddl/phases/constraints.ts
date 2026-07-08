@@ -10,7 +10,7 @@
  * @module ddl/phases/constraints
  */
 
-import { validateSqlExpression } from '../../validate.js';
+import { validateCheckExpression } from '../../validate.js';
 import { generateAlterTableAddFK } from '../ddl-generator.js';
 import { type PhaseContext, sup } from './types.js';
 import {
@@ -43,7 +43,7 @@ export function generateConstraintsPhase(ctx: PhaseContext): string[] {
 			for (const check of table.checkConstraints ?? []) {
 				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
 				const constraintName = quoteId(check.name);
-				validateSqlExpression(check.expression, 'check constraint expression');
+				validateCheckExpression(check.expression, 'check constraint expression');
 				statements.push(
 					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
 				);

@@ -7,11 +7,142 @@ import {
 	InvalidIdentifierError,
 	isReservedKeyword,
 	sanitizeForDisplay,
+	validateCheckExpression,
 	validateCollationName,
 	validateIdentifier,
 	validateIdentifiers,
 	validateQualifiedIdentifier,
 } from '../validate.js';
+
+function getCheckValidationError(sql: string): Error {
+	try {
+		validateCheckExpression(sql, 'test check');
+	} catch (error) {
+		if (error instanceof Error) return error;
+		throw error;
+	}
+	throw new Error('Expected validateCheckExpression to throw');
+}
+
+describe('validateCheckExpression', () => {
+	it('accepts semicolon and line-comment marker inside single-quoted literals', () => {
+		expect(() =>
+			validateCheckExpression(
+				"CHECK (status IN ('a;b', 'c--d'))",
+				'test check',
+			),
+		).not.toThrow();
+	});
+
+	it('accepts block-comment markers inside array string literals', () => {
+		expect(() =>
+			validateCheckExpression(
+				"CHECK (status = ANY (ARRAY['a;b'::text, 'c/*x*/d'::text]))",
+				'test check',
+			),
+		).not.toThrow();
+	});
+
+	it('accepts doubled single quote inside a literal', () => {
+		expect(() =>
+			validateCheckExpression("CHECK (note = 'it''s')", 'test check'),
+		).not.toThrow();
+	});
+
+	it('accepts safe dollar-quoted literal', () => {
+		expect(() =>
+			validateCheckExpression('CHECK (note = $$a;b$$)', 'test check'),
+		).not.toThrow();
+	});
+
+	it('rejects semicolon outside a literal', () => {
+		const sql = 'x = 1); DROP TABLE users; --';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects semicolon after closing single quote', () => {
+		const sql = "x = 'a'; DROP TABLE y";
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects unterminated single-quoted literal', () => {
+		const sql = "x = 'abc";
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: unterminated single-quoted string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects unterminated dollar-quoted literal', () => {
+		const sql = 'x = $$abc';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: unterminated dollar-quoted string literal $$. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects semicolon after closing dollar quote', () => {
+		const sql = 'x = $$a$$; DROP';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects line-comment marker outside a literal', () => {
+		const sql = 'x = 1 -- bypass';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token "--" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects block-comment opener outside a literal', () => {
+		const sql = 'x = 1 /* bypass */';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token "/*" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects block-comment closer outside a literal', () => {
+		const sql = 'x = 1 */ true';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token "*/" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('rejects backslash outside a literal', () => {
+		const sql = 'x = \\bad';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token "\\" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('does not treat a dollar tag after an identifier as a string literal', () => {
+		const sql = 'x = a$t$; DROP TABLE users; $t$';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
+
+	it('does not treat a dollar tag after a dollar identifier character as a string literal', () => {
+		const sql = 'x = a$$tag$; DROP TABLE users; $tag$';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
+});
 
 describe('Identifier Validation', () => {
 	describe('validateIdentifier', () => {
