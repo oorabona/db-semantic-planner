@@ -87,6 +87,7 @@ interface RawForeignKey {
 	constraint_name: string;
 	source_table: string;
 	source_column: string;
+	target_schema: string;
 	target_table: string;
 	target_column: string;
 	delete_rule: string;
@@ -108,6 +109,11 @@ interface RawIndex {
 	method: string;
 	predicate: string | null;
 	reloptions: string[] | null;
+}
+
+interface RawUniqueColumn {
+	table_name: string;
+	column_name: string;
 }
 
 interface RawPartition {
@@ -177,6 +183,7 @@ interface CatalogResults {
 	pks: RawPrimaryKey[];
 	fks: RawForeignKey[];
 	indexes: RawIndex[];
+	uniqueColumns: RawUniqueColumn[];
 	enums: Array<{ name: string; values: string[] }>;
 	comments: Array<{
 		table_name: string;
@@ -207,10 +214,10 @@ interface CatalogResults {
 }
 
 /**
- * Run all 12 catalog queries in parallel.
+ * Run all 13 catalog queries in parallel.
  * Order matches the coverage test mock sequence: columns, pks, fks, indexes,
- * enums, comments, checks, partitions, extensions (no schema param), sequences,
- * rls state, policies.
+ * unique columns, enums, comments, checks, partitions, extensions (no schema
+ * param), sequences, rls state, policies.
  */
 async function queryAllCatalogs(
 	pool: Pool,
@@ -221,6 +228,7 @@ async function queryAllCatalogs(
 		pksResult,
 		fksResult,
 		indexesResult,
+		uniqueColumnsResult,
 		enumsResult,
 		commentsResult,
 		checksResult,
@@ -254,28 +262,44 @@ async function queryAllCatalogs(
 		// 3. Foreign keys
 		pool.query<RawForeignKey>(
 			`SELECT
-			   tc.constraint_name,
-			   kcu.table_name AS source_table,
-			   kcu.column_name AS source_column,
-			   ccu.table_name AS target_table,
-			   ccu.column_name AS target_column,
-			   rc.delete_rule,
-			   rc.update_rule,
-			   tc.is_deferrable,
-			   tc.initially_deferred
-			 FROM information_schema.table_constraints tc
-			 JOIN information_schema.key_column_usage kcu
-			   ON tc.constraint_name = kcu.constraint_name
-			   AND tc.table_schema = kcu.table_schema
-			 JOIN information_schema.constraint_column_usage ccu
-			   ON ccu.constraint_name = tc.constraint_name
-			   AND ccu.table_schema = tc.table_schema
-			 JOIN information_schema.referential_constraints rc
-			   ON rc.constraint_name = tc.constraint_name
-			   AND rc.constraint_schema = tc.table_schema
-			 WHERE tc.constraint_type = 'FOREIGN KEY'
-			   AND tc.table_schema = $1
-			 ORDER BY tc.constraint_name, kcu.ordinal_position`,
+			   c.conname AS constraint_name,
+			   source_rel.relname AS source_table,
+			   source_attr.attname AS source_column,
+			   target_ns.nspname AS target_schema,
+			   target_rel.relname AS target_table,
+			   target_attr.attname AS target_column,
+			   CASE c.confdeltype
+			     WHEN 'c' THEN 'CASCADE'
+			     WHEN 'n' THEN 'SET NULL'
+			     WHEN 'd' THEN 'SET DEFAULT'
+			     WHEN 'r' THEN 'RESTRICT'
+			     ELSE 'NO ACTION'
+			   END AS delete_rule,
+			   CASE c.confupdtype
+			     WHEN 'c' THEN 'CASCADE'
+			     WHEN 'n' THEN 'SET NULL'
+			     WHEN 'd' THEN 'SET DEFAULT'
+			     WHEN 'r' THEN 'RESTRICT'
+			     ELSE 'NO ACTION'
+			   END AS update_rule,
+			   CASE WHEN c.condeferrable THEN 'YES' ELSE 'NO' END AS is_deferrable,
+			   CASE WHEN c.condeferred THEN 'YES' ELSE 'NO' END AS initially_deferred
+			 FROM pg_constraint c
+			 JOIN pg_class source_rel ON source_rel.oid = c.conrelid
+			 JOIN pg_namespace source_ns ON source_ns.oid = source_rel.relnamespace
+			 JOIN pg_class target_rel ON target_rel.oid = c.confrelid
+			 JOIN pg_namespace target_ns ON target_ns.oid = target_rel.relnamespace
+			 JOIN LATERAL unnest(c.conkey, c.confkey) WITH ORDINALITY AS cols(source_attnum, target_attnum, ord) ON true
+			 JOIN pg_attribute source_attr
+			   ON source_attr.attrelid = c.conrelid
+			   AND source_attr.attnum = cols.source_attnum
+			 JOIN pg_attribute target_attr
+			   ON target_attr.attrelid = c.confrelid
+			   AND target_attr.attnum = cols.target_attnum
+			 WHERE c.contype = 'f'
+			   AND c.conparentid = 0
+			   AND source_ns.nspname = $1
+			 ORDER BY c.conname, cols.ord`,
 			[schema],
 		),
 		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
@@ -339,7 +363,19 @@ async function queryAllCatalogs(
 			 ORDER BY t.relname, i.relname`,
 			[schema],
 		),
-		// 5. ENUM types
+		// 5. Single-column UNIQUE constraints tracked as ColumnIR.unique
+		pool.query<RawUniqueColumn>(
+			`SELECT rel.relname AS table_name, att.attname AS column_name
+			 FROM pg_constraint c
+			 JOIN pg_class rel ON rel.oid = c.conrelid
+			 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+			 JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = c.conkey[1]
+			 WHERE c.contype = 'u'
+			   AND array_length(c.conkey, 1) = 1
+			   AND ns.nspname = $1`,
+			[schema],
+		),
+		// 6. ENUM types
 		pool.query<{ name: string; values: string[] }>(
 			`SELECT
 			   t.typname AS name,
@@ -352,7 +388,7 @@ async function queryAllCatalogs(
 			 GROUP BY t.typname`,
 			[schema],
 		),
-		// 6. Comments (table and column level) from pg_description
+		// 7. Comments (table and column level) from pg_description
 		pool.query<{
 			table_name: string;
 			column_name: string | null;
@@ -370,7 +406,7 @@ async function queryAllCatalogs(
 			   AND d.objsubid >= 0`,
 			[schema],
 		),
-		// 7. CHECK constraints
+		// 8. CHECK constraints
 		pool.query<{
 			name: string;
 			expression: string;
@@ -386,7 +422,7 @@ async function queryAllCatalogs(
 			   AND n.nspname = $1`,
 			[schema],
 		),
-		// 8. Partition configurations
+		// 9. Partition configurations
 		pool.query<RawPartition>(
 			`SELECT
 			   c.relname AS table_name,
@@ -401,13 +437,13 @@ async function queryAllCatalogs(
 			 GROUP BY c.relname, p.partstrat`,
 			[schema],
 		),
-		// 9. Installed extensions (no schema param — queries globally; skip plpgsql)
+		// 10. Installed extensions (no schema param — queries globally; skip plpgsql)
 		pool.query<{ name: string }>(
 			`SELECT extname AS name
 			 FROM pg_extension
 			 WHERE extname != 'plpgsql'`,
 		),
-		// 10. Sequences not backed by SERIAL
+		// 11. Sequences not backed by SERIAL
 		pool.query<{
 			name: string;
 			start_value: string;
@@ -425,7 +461,7 @@ async function queryAllCatalogs(
 			   AND d.objid IS NULL`,
 			[schema],
 		),
-		// 11. RLS enabled state per table
+		// 12. RLS enabled state per table
 		pool.query<{ table_name: string; rls_enabled: boolean }>(
 			`SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled
 			 FROM pg_class c
@@ -434,7 +470,7 @@ async function queryAllCatalogs(
 			   AND c.relkind = 'r'`,
 			[schema],
 		),
-		// 12. Row-Level Security policies
+		// 13. Row-Level Security policies
 		pool.query<{
 			table_name: string;
 			policy_name: string;
@@ -465,6 +501,7 @@ async function queryAllCatalogs(
 		pks: pksResult.rows,
 		fks: fksResult.rows,
 		indexes: indexesResult.rows,
+		uniqueColumns: uniqueColumnsResult.rows,
 		enums: enumsResult.rows,
 		comments: commentsResult.rows,
 		checks: checksResult.rows,
@@ -585,6 +622,22 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 	return result;
 }
 
+/** Build a Map<tableName, uniqueColumnNames> from raw unique constraint rows. */
+function buildUniqueColumnMap(
+	rows: RawUniqueColumn[],
+): Map<string, Set<string>> {
+	const result = new Map<string, Set<string>>();
+	for (const row of rows) {
+		const existing = result.get(row.table_name);
+		if (existing) {
+			existing.add(row.column_name);
+		} else {
+			result.set(row.table_name, new Set([row.column_name]));
+		}
+	}
+	return result;
+}
+
 /** Build a Map<tableName, RawColumn[]> from raw column rows. */
 function buildColumnMap(rows: RawColumn[]): Map<string, RawColumn[]> {
 	const result = new Map<string, RawColumn[]>();
@@ -617,6 +670,7 @@ function buildPKMap(rows: RawPrimaryKey[]): Map<string, string[]> {
 interface FKEntry {
 	source: string;
 	target: string;
+	targetSchema?: string;
 	cols: string[];
 	refs: string[];
 	deleteRule: string;
@@ -636,6 +690,7 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 			result.set(fk.constraint_name, {
 				source: fk.source_table,
 				target: fk.target_table,
+				targetSchema: fk.target_schema,
 				cols: [fk.source_column],
 				refs: [fk.target_column],
 				deleteRule: fk.delete_rule,
@@ -745,6 +800,7 @@ interface TableIRContext {
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
+	uniqueColumns: Map<string, Set<string>>;
 	tableChecks: Map<string, CheckConstraintIR[]>;
 	tableComments: Map<string, string>;
 	columnComments: Map<string, string>;
@@ -752,6 +808,7 @@ interface TableIRContext {
 	tableRlsEnabled: Map<string, boolean>;
 	tablePolicies: Map<string, PolicyIR[]>;
 	tableNames: string[];
+	schema: string;
 	warnings: string[];
 }
 
@@ -759,6 +816,7 @@ interface TableIRContext {
 function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	const rawCols = ctx.tableColumns.get(tableName) ?? [];
 	const pkCols = ctx.tablePKs.get(tableName);
+	const uniqueColumns = ctx.uniqueColumns.get(tableName);
 
 	const columns: ColumnIR[] = rawCols.map((col) => {
 		// Map identity_generation: 'ALWAYS' → 'always', 'BY DEFAULT' → 'byDefault'
@@ -789,6 +847,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 				? { default: { sql: col.column_default } }
 				: {}),
 			originalDbType: col.udt_name,
+			...(uniqueColumns?.has(col.column_name) ? { unique: true } : {}),
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),
 			...(colComment ? { comment: colComment } : {}),
@@ -799,13 +858,20 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	const foreignKeys: ForeignKeyIR[] = [];
 	for (const [, fk] of ctx.fksByConstraint) {
 		if (fk.source !== tableName) continue;
-		// Only include FK if target table is in our filtered set
-		if (!ctx.tableNames.includes(fk.target)) continue;
+		const isCrossSchema =
+			fk.targetSchema !== undefined && fk.targetSchema !== ctx.schema;
+		// Same-schema FKs must target a table in our filtered set. Cross-schema
+		// targets are outside the single-schema table list by design.
+		if (!isCrossSchema && !ctx.tableNames.includes(fk.target)) continue;
 		const onDelete = mapDeleteRule(fk.deleteRule);
 		const onUpdate = mapDeleteRule(fk.updateRule);
 		foreignKeys.push({
 			columns: fk.cols,
-			references: { table: fk.target, columns: fk.refs },
+			references: {
+				table: fk.target,
+				columns: fk.refs,
+				...(isCrossSchema ? { schema: fk.targetSchema } : {}),
+			},
 			...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
 			...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
 			...(fk.deferred ? { deferred: true } : {}),
@@ -875,6 +941,7 @@ export async function introspect(
 	const tablePartitions = buildPartitionMap(raw.partitions);
 	const tableChecks = buildCheckMap(raw.checks);
 	const tableIndexes = buildIndexMap(raw.indexes);
+	const uniqueColumns = buildUniqueColumnMap(raw.uniqueColumns);
 	const tableColumns = buildColumnMap(raw.columns);
 	const tablePKs = buildPKMap(raw.pks);
 	const fksByConstraint = buildFKMap(raw.fks);
@@ -897,6 +964,7 @@ export async function introspect(
 			tablePKs,
 			fksByConstraint,
 			tableIndexes,
+			uniqueColumns,
 			tableChecks,
 			tableComments,
 			columnComments,
@@ -904,6 +972,7 @@ export async function introspect(
 			tableRlsEnabled,
 			tablePolicies,
 			tableNames,
+			schema,
 			warnings,
 		});
 		tables.set(tableName, table);
@@ -913,6 +982,16 @@ export async function introspect(
 	const sequenceMap = buildSequenceMap(raw.sequences);
 	const relations = inferRelations(fksByConstraint, tableNames);
 	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
+	const externalTables = new Set<string>();
+	for (const fk of fksByConstraint.values()) {
+		if (
+			fk.targetSchema !== undefined &&
+			fk.targetSchema !== schema &&
+			!tables.has(fk.target)
+		) {
+			externalTables.add(fk.target);
+		}
+	}
 
 	const modelIR = new ModelIRImpl(
 		tables,
@@ -920,6 +999,7 @@ export async function introspect(
 		enumMap,
 		extensions,
 		sequenceMap,
+		externalTables,
 	);
 
 	return Object.assign(modelIR, {

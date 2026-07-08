@@ -713,7 +713,7 @@ function compareForeignKeys(
 }
 
 function fkKey(fk: ForeignKeyIR): string {
-	return `${fk.columns.join(',')}→${fk.references.table}(${fk.references.columns.join(',')})`;
+	return `${fk.columns.join(',')}→${fk.references.schema ?? ''}.${fk.references.table}(${fk.references.columns.join(',')})`;
 }
 
 // ============================================================================

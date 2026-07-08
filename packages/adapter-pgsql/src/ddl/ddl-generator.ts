@@ -324,8 +324,12 @@ export function generateAlterTableAddFK(
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
 
-	// Referenced table and columns (must also be schema-qualified to match the target table's schema)
-	const refTable = qualifyTable(fk.references.table, schemaName, naming);
+	// Referenced table and columns resolve to a declared schema, or the DDL schema when absent.
+	const refTable = qualifyTable(
+		fk.references.table,
+		fk.references.schema ?? schemaName,
+		naming,
+	);
 	const refCols = fk.references.columns
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');

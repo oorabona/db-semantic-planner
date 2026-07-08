@@ -559,6 +559,50 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('alter_foreign_key');
 			expect(diff.summary.constraints.altered).toBe(1);
 		});
+
+		it('should treat referenced schema changes as drop and add', () => {
+			const schemaFk: ForeignKeyIR = {
+				columns: ['external_id'],
+				references: { schema: 'other', table: 'ext', columns: ['id'] },
+			};
+			const dbFk: ForeignKeyIR = {
+				columns: ['external_id'],
+				references: { table: 'ext', columns: ['id'] },
+			};
+
+			const schema = makeModel(
+				[
+					makeTable({
+						name: 'orders',
+						columns: [makeCol({ name: 'external_id', type: 'integer' })],
+						foreignKeys: [schemaFk],
+					}),
+				],
+				['ext'],
+			);
+			const db = makeModel(
+				[
+					makeTable({
+						name: 'orders',
+						columns: [makeCol({ name: 'external_id', type: 'integer' })],
+						foreignKeys: [dbFk],
+					}),
+				],
+				['ext'],
+			);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes).sort()).toEqual([
+				'add_foreign_key',
+				'drop_foreign_key',
+			]);
+			expect(
+				diff.changes.filter((c) => c.kind === 'alter_foreign_key'),
+			).toHaveLength(0);
+			expect(diff.summary.constraints.added).toBe(1);
+			expect(diff.summary.constraints.dropped).toBe(1);
+		});
 	});
 
 	describe('index changes', () => {
@@ -2035,6 +2079,7 @@ describe('FK enhancements — compareForeignKeys', () => {
 			makeModel([usersTable, schema]),
 			makeModel([usersTable, db]),
 		);
+		expect(diff.changes).toHaveLength(0);
 		expect(
 			diff.changes.filter((c) => c.kind === 'alter_foreign_key'),
 		).toHaveLength(0);
