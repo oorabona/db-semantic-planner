@@ -154,6 +154,81 @@ describe('buildModelFromSchema', () => {
 			expect(posts.foreignKeys[0]!.references.columns).toEqual(['id']);
 		});
 
+		it('should preserve referenced schema from generated column and table-level foreign keys', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					users: {
+						tenantId: { type: 'uuid' },
+						id: { type: 'uuid', primaryKey: true },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						authorId: {
+							type: 'uuid',
+							references: { schema: 'auth', table: 'users' },
+						},
+					},
+					memberships: {
+						columns: {
+							id: { type: 'uuid', primaryKey: true },
+							tenantId: { type: 'uuid' },
+							userId: { type: 'uuid' },
+						},
+						foreignKeys: [
+							{
+								columns: ['tenantId', 'userId'],
+								references: {
+									schema: 'auth',
+									table: 'users',
+									columns: ['tenantId', 'id'],
+								},
+							},
+						],
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const columnFk = model.getTable('posts')?.foreignKeys[0];
+			const tableFk = model.getTable('memberships')?.foreignKeys[0];
+			expect(columnFk?.references.schema).toBe('auth');
+			expect(tableFk?.references.schema).toBe('auth');
+		});
+
+		it('should leave referenced schema undefined when omitted from generated foreign keys', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						authorId: { type: 'uuid', references: { table: 'users' } },
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const fk = model.getTable('posts')?.foreignKeys[0];
+			expect(fk?.references.schema).toBeUndefined();
+		});
+
 		it('should use explicit column reference when provided', () => {
 			const schema: GeneratedSchema = {
 				tables: {
@@ -705,6 +780,44 @@ describe('resolvedSchemaToGeneratedSchema (CORE-005)', () => {
 				expect(result.schema.tables.posts!.authorId!.references).toEqual({
 					table: 'users',
 					column: 'id',
+				});
+			}
+		});
+
+		it('round-trips declared referenced schema through Valibot bridge parsing', async () => {
+			const { buildModelFromSchema, resolvedSchemaToGeneratedSchema } =
+				await import('./schema-bridge.js');
+
+			const resolved = {
+				tables: {
+					users: { id: { type: 'uuid' as const } },
+					posts: {
+						id: { type: 'uuid' as const },
+						authorId: {
+							type: 'uuid' as const,
+							references: { schema: 'auth', table: 'users', column: 'id' },
+						},
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const result = resolvedSchemaToGeneratedSchema(resolved);
+			expect(result.success).toBe(true);
+			if (result.success) {
+				const model = buildModelFromSchema(result.schema);
+				const fk = model.getTable('posts')?.foreignKeys[0];
+				expect(fk?.references).toMatchObject({
+					schema: 'auth',
+					table: 'users',
+					columns: ['id'],
 				});
 			}
 		});

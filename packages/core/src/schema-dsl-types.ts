@@ -51,6 +51,8 @@ export type SchemaOnDeleteAction =
  * When present, takes priority over convention-based FK detection.
  */
 export interface SchemaForeignKeyReference {
+	/** Target schema name (omit for same-schema references) */
+	readonly schema?: string;
 	/** Target table name */
 	table: string;
 	/** Target column name (defaults to 'id') */

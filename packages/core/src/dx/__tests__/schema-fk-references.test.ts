@@ -14,6 +14,66 @@ import {
 } from '../schema.js';
 
 describe('buildRefColumn — column-level non-PK FK references', () => {
+	it('round-trips declared referenced schema through typed column and table-level refs', () => {
+		const constraints = {
+			memberships: {
+				foreignKeys: [
+					ref('users', {
+						schema: 'auth',
+						columns: ['tenantId', 'userId'],
+						references: ['tenantId', 'id'],
+					}),
+				],
+			},
+		};
+		const db = schema(
+			{
+				users: {
+					tenantId: 'uuid',
+					id: { type: 'uuid', primaryKey: true },
+				},
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: ref('users', { schema: 'auth' }),
+				},
+				memberships: {
+					id: { type: 'uuid', primaryKey: true },
+					tenantId: 'uuid',
+					userId: 'uuid',
+				},
+			},
+			constraints,
+		);
+
+		const model = schemaToModelIR(db.definition, constraints);
+		const columnFk = model.tables.get('posts')?.foreignKeys?.[0];
+		const tableFk = model.tables.get('memberships')?.foreignKeys?.[0];
+		expect(columnFk?.references).toMatchObject({
+			schema: 'auth',
+			table: 'users',
+			columns: ['id'],
+		});
+		expect(tableFk?.references).toMatchObject({
+			schema: 'auth',
+			table: 'users',
+			columns: ['tenantId', 'id'],
+		});
+	});
+
+	it('leaves referenced schema undefined when no schema is declared', () => {
+		const db = schema({
+			users: { id: { type: 'uuid', primaryKey: true } },
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				authorId: ref('users'),
+			},
+		});
+
+		const model = schemaToModelIR(db.definition);
+		const fk = model.tables.get('posts')?.foreignKeys?.[0];
+		expect(fk?.references.schema).toBeUndefined();
+	});
+
 	it('preserves options.references in ModelIR FK declaration', () => {
 		const db = schema({
 			users: {
