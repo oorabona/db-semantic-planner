@@ -592,6 +592,7 @@ function comparePrimaryKeys(
 			table: schema.name,
 			destructive: true,
 			details: `Drop primary key (${dbPK.join(', ')})`,
+			meta: { columns: dbPK },
 		});
 		return;
 	}
@@ -602,6 +603,7 @@ function comparePrimaryKeys(
 		table: schema.name,
 		destructive: true,
 		details: `Drop primary key (${dbPK.join(', ')})`,
+		meta: { columns: dbPK },
 	});
 	changes.push({
 		kind: 'add_primary_key',
