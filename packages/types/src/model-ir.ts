@@ -216,8 +216,9 @@ export interface ForeignKeyIR {
 	/** Local columns that form the FK */
 	readonly columns: readonly string[];
 
-	/** Referenced table and columns */
+	/** Referenced table and columns; schema is the referenced table's schema and defaults to the FK's own/migration schema when absent */
 	readonly references: {
+		readonly schema?: string;
 		readonly table: string;
 		readonly columns: readonly string[];
 	};
