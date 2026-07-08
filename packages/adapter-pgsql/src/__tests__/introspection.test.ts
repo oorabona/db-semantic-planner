@@ -517,16 +517,20 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// 12 queries total: columns, PKs, FKs, indexes, enums, comments, checks, partitions,
-		// extensions, sequences, rls state, policies
+		// 13 queries total: columns, PKs, FKs, indexes, unique columns, enums,
+		// comments, checks, partitions, extensions, sequences, rls state, policies
 		// Note: extensions query has no schema param (queries all extensions globally)
-		expect(mockQuery).toHaveBeenCalledTimes(12);
+		expect(mockQuery).toHaveBeenCalledTimes(13);
 		// All parameterized queries (those with a second arg) should pass 'tenant_1'
 		for (const call of mockQuery.mock.calls) {
 			if (call[1] !== undefined) {
 				expect(call[1]).toEqual(['tenant_1']);
 			}
 		}
+		const uniqueConstraintQuery = mockQuery.mock.calls.find((call) =>
+			String(call[0]).includes('array_length(c.conkey, 1) = 1'),
+		);
+		expect(uniqueConstraintQuery?.[0]).toContain("c.contype = 'u'");
 	});
 
 	it('should handle FK onDelete rules', async () => {
@@ -651,6 +655,28 @@ describe('introspect', () => {
 		expect(users.indexes).toHaveLength(0);
 		const posts = result.tables.get('posts')!;
 		expect(posts.indexes).toHaveLength(0);
+	});
+
+	it('should map single-column unique constraints to column unique', async () => {
+		const uniqueColumns = [{ table_name: 'users', column_name: 'email' }];
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+			[], // no user-defined indexes
+			uniqueColumns,
+		]);
+		const result = await introspect(pool);
+
+		const users = result.tables.get('users')!;
+		const email = users.columns.find((col) => col.name === 'email')!;
+		const name = users.columns.find((col) => col.name === 'name')!;
+		expect(email.unique).toBe(true);
+		expect(name.unique).toBeUndefined();
+
+		const posts = result.tables.get('posts')!;
+		const title = posts.columns.find((col) => col.name === 'title')!;
+		expect(title.unique).toBeUndefined();
 	});
 
 	it('should discover composite indexes', async () => {
@@ -994,5 +1020,158 @@ describe('introspect [P1-T2]: OnDeleteAction SET DEFAULT round-trip', () => {
 		const fk = posts.foreignKeys[0]!;
 		// buildTableIR omits onDelete when it is 'NO ACTION' (default)
 		expect(fk.onDelete).toBeUndefined();
+	});
+});
+
+describe('introspect: cross-schema foreign keys', () => {
+	it('keeps cross-schema FK targets outside tableNames and sets references.schema', async () => {
+		const columns = [
+			{
+				table_name: 'invoices',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'invoices',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [{ table_name: 'invoices', column_name: 'id' }];
+		const fks = [
+			{
+				constraint_name: 'invoices_customer_id_fkey',
+				source_table: 'invoices',
+				source_column: 'customer_id',
+				target_schema: 'auth',
+				target_table: 'customers',
+				target_column: 'id',
+				delete_rule: 'SET NULL',
+				update_rule: 'CASCADE',
+				is_deferrable: 'YES',
+				initially_deferred: 'YES',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		const invoices = result.tables.get('invoices')!;
+		expect(invoices.foreignKeys).toHaveLength(1);
+		const fk = invoices.foreignKeys[0]!;
+		expect(fk.columns).toEqual(['customer_id']);
+		expect(fk.references).toEqual({
+			schema: 'auth',
+			table: 'customers',
+			columns: ['id'],
+		});
+		expect(fk.onDelete).toBe('SET NULL');
+		expect(fk.onUpdate).toBe('CASCADE');
+		expect(fk.deferred).toBe(true);
+	});
+
+	it('omits references.schema for same-schema FK targets', async () => {
+		const columns = [
+			{
+				table_name: 'invoices',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'invoices',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'customers',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'invoices', column_name: 'id' },
+			{ table_name: 'customers', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'invoices_customer_id_fkey',
+				source_table: 'invoices',
+				source_column: 'customer_id',
+				target_schema: 'billing',
+				target_table: 'customers',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'YES',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		const invoices = result.tables.get('invoices')!;
+		expect(invoices.foreignKeys).toHaveLength(1);
+		const fk = invoices.foreignKeys[0]!;
+		expect(fk.references.table).toBe('customers');
+		expect(fk.references.columns).toEqual(['id']);
+		expect(fk.references.schema).toBeUndefined();
+		expect(fk.deferred).toBeUndefined();
+	});
+
+	it('skips same-schema FK targets that are absent from tableNames', async () => {
+		const columns = [
+			{
+				table_name: 'invoices',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'invoices',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [{ table_name: 'invoices', column_name: 'id' }];
+		const fks = [
+			{
+				constraint_name: 'invoices_customer_id_fkey',
+				source_table: 'invoices',
+				source_column: 'customer_id',
+				target_schema: 'billing',
+				target_table: 'customers',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		expect(result.tables.get('invoices')!.foreignKeys).toHaveLength(0);
 	});
 });

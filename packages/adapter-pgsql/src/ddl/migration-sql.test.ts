@@ -437,6 +437,56 @@ describe('generateMigrationSQL', () => {
 			);
 		});
 
+		it('should qualify a declared referenced schema for ADD FOREIGN KEY', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['ext_id'],
+				references: { schema: 'other', table: 'ext', columns: ['id'] },
+			};
+
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'add_foreign_key',
+						table: 'orders',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+				{ schemaName: 'app' },
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "app"."orders" ADD CONSTRAINT "fk_orders_ext_id" FOREIGN KEY ("ext_id") REFERENCES "other"."ext" ("id");',
+			]);
+		});
+
+		it('should reject an invalid declared referenced schema for ADD FOREIGN KEY', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['ext_id'],
+				references: {
+					schema: 'a"; DROP TABLE x',
+					table: 'ext',
+					columns: ['id'],
+				},
+			};
+
+			expect(() =>
+				generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'add_foreign_key',
+							table: 'orders',
+							destructive: false,
+							details: '',
+							meta: { fk },
+						},
+					]),
+					{ schemaName: 'app' },
+				),
+			).toThrow();
+		});
+
 		it('should generate DROP FOREIGN KEY', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],
@@ -1956,12 +2006,93 @@ describe('generateDownSQL', () => {
 			const diff = compareSchemata(schema, db);
 			const sql = generateMigrationSQL(diff);
 
-			expect(sql).toContain(
+			const fkSql = sql.find((statement) =>
+				statement.startsWith('ALTER TABLE "orders" ADD CONSTRAINT'),
+			);
+			expect(fkSql).toBe(
 				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_tenant_id" FOREIGN KEY ("tenant_id") REFERENCES "tenants" ("id");',
 			);
 			expect(
 				sql.some((statement) => statement.includes('CREATE TABLE "tenants"')),
 			).toBe(false);
+		});
+
+		it('emits an FK to a declared referenced schema while keeping the owning table in the migration schema', () => {
+			const ordersTable = makeFullTable(
+				'orders',
+				[
+					makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+					makeCol({ name: 'ext_id', type: 'integer', nullable: false }),
+				],
+				{
+					pk: 'id',
+					foreignKeys: [
+						{
+							columns: ['ext_id'],
+							references: {
+								schema: 'other',
+								table: 'ext',
+								columns: ['id'],
+							},
+						},
+					],
+				},
+			);
+			const schema = new ModelIRImpl(
+				new Map([['orders', ordersTable]]),
+				new Map(),
+				undefined,
+				undefined,
+				undefined,
+				['ext'],
+			);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff, { schemaName: 'app' });
+			const fkSql = sql.find((statement) =>
+				statement.startsWith('ALTER TABLE "app"."orders" ADD CONSTRAINT'),
+			);
+
+			expect(fkSql).toBe(
+				'ALTER TABLE "app"."orders" ADD CONSTRAINT "fk_orders_ext_id" FOREIGN KEY ("ext_id") REFERENCES "other"."ext" ("id");',
+			);
+		});
+
+		it('keeps same-schema FK targets qualified with the migration schema', () => {
+			const usersTable = makeFullTable(
+				'users',
+				[makeCol({ name: 'id', type: 'integer', autoIncrement: true })],
+				{ pk: 'id' },
+			);
+			const ordersTable = makeFullTable(
+				'orders',
+				[
+					makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+					makeCol({ name: 'user_id', type: 'integer', nullable: false }),
+				],
+				{
+					pk: 'id',
+					foreignKeys: [
+						{
+							columns: ['user_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+				},
+			);
+			const schema = makeModel([usersTable, ordersTable]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff, { schemaName: 'app' });
+			const fkSql = sql.find((statement) =>
+				statement.startsWith('ALTER TABLE "app"."orders" ADD CONSTRAINT'),
+			);
+
+			expect(fkSql).toBe(
+				'ALTER TABLE "app"."orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "app"."users" ("id");',
+			);
 		});
 
 		it('emits create_index for a new table with an index (CREATE TABLE before CREATE INDEX)', () => {

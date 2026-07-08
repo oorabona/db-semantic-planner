@@ -1549,8 +1549,11 @@ function generateAddFKSQL(
 	const qualTable = qualifyTable(tableName, schemaName);
 	const constraintName = quoteIdent(fkName(tableName, fk.columns), 'alias');
 	const fkCols = fk.columns.map((n) => quoteIdent(n, 'alias')).join(', ');
-	// Referenced table must also be schema-qualified to resolve within the same schema
-	const refTable = qualifyTable(fk.references.table, schemaName);
+	// Referenced table resolves to its declared schema, or the migration schema when absent.
+	const refTable = qualifyTable(
+		fk.references.table,
+		fk.references.schema ?? schemaName,
+	);
 	const refCols = fk.references.columns
 		.map((n) => quoteIdent(n, 'alias'))
 		.join(', ');

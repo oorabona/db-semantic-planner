@@ -32,12 +32,13 @@ function createMockPool(
 	pks: QueryResult<any>,
 	fks: QueryResult<any>,
 	indexes: QueryResult<any>,
+	uniqueColumns: QueryResult<any> = { rows: [] },
 	enums: QueryResult<any> = { rows: [] },
 	comments: QueryResult<any> = { rows: [] },
 	checks: QueryResult<any> = { rows: [] },
+	partitions: QueryResult<any> = { rows: [] },
 	extensions: QueryResult<any> = { rows: [] },
 	sequences: QueryResult<any> = { rows: [] },
-	partitions: QueryResult<any> = { rows: [] },
 	rlsState: QueryResult<any> = { rows: [] },
 	policies: QueryResult<any> = { rows: [] },
 ) {
@@ -48,6 +49,7 @@ function createMockPool(
 			.mockResolvedValueOnce(pks) // PKs
 			.mockResolvedValueOnce(fks) // FKs
 			.mockResolvedValueOnce(indexes) // indexes
+			.mockResolvedValueOnce(uniqueColumns) // single-column unique constraints
 			.mockResolvedValueOnce(enums) // ENUM types
 			.mockResolvedValueOnce(comments) // comments (pg_description)
 			.mockResolvedValueOnce(checks) // CHECK constraints
@@ -1952,8 +1954,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 12 queries: columns, PKs, FKs, indexes, enums, comments, checks, partitions, extensions, sequences, rls state, policies
-		expect(pool.query).toHaveBeenCalledTimes(12);
+		// Default schema = 'public' (passed to queries); 13 queries: columns, PKs, FKs, indexes, single-column unique constraints, enums, comments, checks, partitions, extensions, sequences, rls state, policies
+		expect(pool.query).toHaveBeenCalledTimes(13);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 

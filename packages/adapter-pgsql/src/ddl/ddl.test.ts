@@ -335,6 +335,87 @@ describe('DDL Generator', () => {
 			expect(alterStmt).toContain('ON DELETE CASCADE');
 		});
 
+		it('should qualify a declared referenced schema for foreign keys', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'orders',
+						{
+							name: 'orders',
+							columns: [
+								{
+									name: 'id',
+									type: 'integer',
+									nullable: false,
+									autoIncrement: true,
+								},
+								{ name: 'ext_id', type: 'integer', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['ext_id'],
+									references: {
+										schema: 'other',
+										table: 'ext',
+										columns: ['id'],
+									},
+								} satisfies ForeignKeyIR,
+							],
+							indexes: [],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			const ddl = generateDDL(schema, { schemaName: 'app', fkAutoIndex: false });
+			const alterStmt = ddl.find((stmt) => stmt.startsWith('ALTER TABLE'));
+
+			expect(alterStmt).toBe(
+				'ALTER TABLE "app"."orders" ADD CONSTRAINT "fk_orders_ext_id" FOREIGN KEY ("ext_id") REFERENCES "other"."ext" ("id");',
+			);
+		});
+
+		it('should reject an invalid declared referenced schema for foreign keys', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'orders',
+						{
+							name: 'orders',
+							columns: [
+								{
+									name: 'id',
+									type: 'integer',
+									nullable: false,
+									autoIncrement: true,
+								},
+								{ name: 'ext_id', type: 'integer', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['ext_id'],
+									references: {
+										schema: 'a"; DROP TABLE x',
+										table: 'ext',
+										columns: ['id'],
+									},
+								} satisfies ForeignKeyIR,
+							],
+							indexes: [],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			expect(() =>
+				generateDDL(schema, { schemaName: 'app', fkAutoIndex: false }),
+			).toThrow();
+		});
+
 		it('should support composite foreign keys', () => {
 			const schema = {
 				tables: new Map([
