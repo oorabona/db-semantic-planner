@@ -70,6 +70,11 @@ function fkName(table: string, columns: readonly string[]): string {
 	return `fk_${table}_${columns.join('_')}`;
 }
 
+/** Column UNIQUE constraint name convention. */
+function uniqueName(table: string, column: string): string {
+	return `${table}_${column}_key`;
+}
+
 /** Index name convention (custom name takes priority). */
 function idxName(
 	table: string,
@@ -288,7 +293,7 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
  * 6.  CREATE tables
  * 7.  ADD columns
  * 8.  ALTER columns (type, nullable, default)
- * 9.  ADD primary keys
+ * 9.  ADD primary keys / column UNIQUE constraints
  * 10. ADD FK constraints (must add after referenced tables exist)
  * 11. ALTER FK (drop + re-add)
  * 12. CREATE indexes
@@ -326,7 +331,7 @@ export function generateMigrationSQL(
 		[], // 6: create table
 		[], // 7: add column
 		[], // 8: alter column
-		[], // 9: add PK
+		[], // 9: add PK / column UNIQUE constraint
 		[], // 10: add FK
 		[], // 11: alter FK (drop + re-add)
 		[], // 12: create index
@@ -419,6 +424,7 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'alter_column_collation':
 		case 'alter_column_identity':
 			return 8;
+		case 'alter_column_unique':
 		case 'add_primary_key':
 			return 9;
 		case 'add_foreign_key':
@@ -494,6 +500,35 @@ function upAlterColumnDefault(
 		return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} DROP DEFAULT;`;
 	}
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(def)};`;
+}
+
+function addColumnUniqueSQL(
+	table: string,
+	column: string,
+	schemaName?: string,
+): string {
+	const constraintName = quoteIdent(uniqueName(table, column), 'alias');
+	return `ALTER TABLE ${qualifyTable(table, schemaName)} ADD CONSTRAINT ${constraintName} UNIQUE (${quoteIdent(column, 'alias')});`;
+}
+
+function dropColumnUniqueSQL(
+	table: string,
+	column: string,
+	schemaName?: string,
+): string {
+	const constraintName = quoteIdent(uniqueName(table, column), 'alias');
+	return `ALTER TABLE ${qualifyTable(table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
+}
+
+function upAlterColumnUnique(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
+	const unique = change.meta?.unique as boolean | undefined;
+	if (unique === undefined || !change.column) return undefined;
+	return unique
+		? addColumnUniqueSQL(change.table, change.column, schemaName)
+		: dropColumnUniqueSQL(change.table, change.column, schemaName);
 }
 
 function upAddPrimaryKey(change: SchemaChange, schemaName?: string): string {
@@ -779,6 +814,8 @@ function changeToUpSQL(
 			return upAlterColumnNullable(change, schemaName);
 		case 'alter_column_default':
 			return upAlterColumnDefault(change, schemaName);
+		case 'alter_column_unique':
+			return upAlterColumnUnique(change, schemaName);
 		case 'add_primary_key':
 			return upAddPrimaryKey(change, schemaName);
 		case 'drop_primary_key':
@@ -965,6 +1002,22 @@ function changeToDownSQL(
 			return {
 				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} SET DEFAULT ${formatDefault(oldDefault)};`,
 				// Allowlisted: restores the recorded prior default value.
+				destructive: false,
+			};
+		}
+
+		case 'alter_column_unique': {
+			const unique = change.meta?.unique as boolean | undefined;
+			if (unique === undefined || !change.column) {
+				return {
+					sql: `-- WARNING: Cannot reverse alter_column_unique "${change.table}"."${change.column}" -- missing migration metadata`,
+					destructive: true,
+				};
+			}
+			return {
+				sql: unique
+					? dropColumnUniqueSQL(change.table, change.column, schemaName)
+					: addColumnUniqueSQL(change.table, change.column, schemaName),
 				destructive: false,
 			};
 		}
@@ -1387,7 +1440,7 @@ export function generateDownMigrationSQL(
 		[], // 6: create table
 		[], // 7: add column
 		[], // 8: alter column
-		[], // 9: add PK
+		[], // 9: add PK / column UNIQUE constraint
 		[], // 10: add FK
 		[], // 11: alter FK (drop + re-add)
 		[], // 12: create index

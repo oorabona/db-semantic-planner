@@ -281,6 +281,80 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db);
 			expect(diff.changes).toHaveLength(0);
 		});
+
+		it('should detect unique added without emitting create_index', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+			const kinds = changeKinds(diff.changes);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_unique');
+			expect(diff.changes[0]!.column).toBe('email');
+			expect(diff.changes[0]!.destructive).toBe(false);
+			expect(diff.changes[0]!.meta).toEqual({ unique: true });
+			expect(diff.summary.columns.altered).toBe(1);
+			expect(kinds).not.toContain('create_index');
+		});
+
+		it('should detect unique removed without dropping the implicit unique index', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: false })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+					indexes: [
+						{ name: 'users_email_key', columns: ['email'], unique: true },
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+			const kinds = changeKinds(diff.changes);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_unique');
+			expect(diff.changes[0]!.column).toBe('email');
+			expect(diff.changes[0]!.destructive).toBe(false);
+			expect(diff.changes[0]!.meta).toEqual({ unique: false });
+			expect(kinds).not.toContain('drop_index');
+			expect(kinds).not.toContain('create_index');
+		});
+
+		it('should not flag unchanged missing and false unique values', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: false })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(0);
+		});
 	});
 
 	describe('primary key changes', () => {
@@ -811,6 +885,32 @@ describe('compareSchemata', () => {
 				const diff = compareSchemata(schema, db);
 				expect(diff.changes).toHaveLength(1);
 				expect(diff.changes[0]!.kind).toBe('drop_index');
+			});
+
+			it('should still emit drop_index for explicit unique indexes when dropping col.unique', () => {
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [
+							makeCol({ name: 'email', type: 'string', unique: false }),
+						],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string', unique: true })],
+						indexes: [
+							{ name: 'idx_users_email', columns: ['email'], unique: true },
+						],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(changeKinds(diff.changes)).toEqual([
+					'alter_column_unique',
+					'drop_index',
+				]);
 			});
 
 			it('should suppress drop_index for multiple unique columns', () => {

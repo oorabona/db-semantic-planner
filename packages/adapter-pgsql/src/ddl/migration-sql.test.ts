@@ -335,6 +335,44 @@ describe('generateMigrationSQL', () => {
 				'ALTER TABLE "users" ALTER COLUMN "created_at" SET DEFAULT now();',
 			);
 		});
+
+		it('should generate ADD CONSTRAINT for alter_column_unique true', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_unique',
+						table: 'users',
+						column: 'email',
+						destructive: false,
+						details: '',
+						meta: { unique: true },
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "users" ADD CONSTRAINT "users_email_key" UNIQUE ("email");',
+			]);
+		});
+
+		it('should generate DROP CONSTRAINT for alter_column_unique false', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_unique',
+						table: 'users',
+						column: 'email',
+						destructive: false,
+						details: '',
+						meta: { unique: false },
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
+			]);
+		});
 	});
 
 	describe('PRIMARY KEY', () => {
@@ -1072,6 +1110,32 @@ describe('generateDownSQL', () => {
 				},
 				expectedSql:
 					'CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE;',
+			},
+			{
+				name: 'alter_column_unique true DOWN drops the unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: { unique: true },
+				},
+				expectedSql:
+					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
+			},
+			{
+				name: 'alter_column_unique false DOWN adds the unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: { unique: false },
+				},
+				expectedSql:
+					'ALTER TABLE "users" ADD CONSTRAINT "users_email_key" UNIQUE ("email");',
 			},
 		] satisfies Array<{
 			name: string;
