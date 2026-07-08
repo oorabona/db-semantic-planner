@@ -68,6 +68,7 @@ export interface GeneratedColumn {
 	readonly autoIncrement?: boolean;
 	readonly default?: string;
 	readonly references?: {
+		readonly schema?: string;
 		readonly table: string;
 		readonly column?: string;
 		readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
@@ -88,6 +89,7 @@ export interface GeneratedColumn {
 export interface GeneratedForeignKey {
 	readonly columns: readonly string[];
 	readonly references: {
+		readonly schema?: string;
 		readonly table: string;
 		readonly columns: readonly string[];
 	};
@@ -464,6 +466,9 @@ function buildTableIRFromDefinition(
 				references: {
 					table: colDef.references.table,
 					columns: [colDef.references.column ?? 'id'],
+					...(colDef.references.schema !== undefined
+						? { schema: colDef.references.schema }
+						: {}),
 				},
 			};
 			if (colDef.references.onDelete) {
@@ -559,6 +564,9 @@ function buildTableIRFromDefinition(
 				references: {
 					table: fk.references.table,
 					columns: [...fk.references.columns],
+					...(fk.references.schema !== undefined
+						? { schema: fk.references.schema }
+						: {}),
 				},
 			};
 			if (fk.onDelete) foreignKey.onDelete = fk.onDelete;
@@ -979,6 +987,7 @@ function safeRecord<TValue extends v.GenericSchema>(valueSchema: TValue) {
 }
 
 const ForeignKeyReferenceSchema = v.object({
+	schema: v.optional(v.string()),
 	table: v.string(),
 	column: v.optional(v.string()),
 	onDelete: v.optional(
@@ -1022,6 +1031,7 @@ const TableDefWithConfigSchema = v.object({
 			v.object({
 				columns: v.array(v.string()),
 				references: v.object({
+					schema: v.optional(v.string()),
 					table: v.string(),
 					columns: v.array(v.string()),
 				}),
@@ -1246,6 +1256,9 @@ function convertColumn(
 	if (col.references) {
 		result.references = {
 			table: col.references.table,
+			...(col.references.schema !== undefined
+				? { schema: col.references.schema }
+				: {}),
 			...(col.references.column !== undefined
 				? { column: col.references.column }
 				: {}),

@@ -81,6 +81,9 @@ export interface SelfRefRoles {
  * Options for ref() foreign key declarations.
  */
 export interface RefOptions {
+	/** Target schema name (omit for same-schema references) */
+	schema?: string;
+
 	// FK column constraints
 	/** Is this FK nullable? → optional relation */
 	nullable?: boolean;
@@ -1179,6 +1182,9 @@ function buildRefColumn(
 		references: {
 			table: columnDef.target,
 			columns: columnDef.options.references ?? ['id'],
+			...(columnDef.options.schema !== undefined
+				? { schema: columnDef.options.schema }
+				: {}),
 		},
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
@@ -1378,6 +1384,9 @@ function buildTableConstraints(
 					columns: fkRef.options.references
 						? [...fkRef.options.references]
 						: ['id'],
+					...(fkRef.options.schema !== undefined
+						? { schema: fkRef.options.schema }
+						: {}),
 				},
 			};
 			if (fkRef.options.onDelete) fk.onDelete = fkRef.options.onDelete;
