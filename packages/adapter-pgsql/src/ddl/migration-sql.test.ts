@@ -689,6 +689,36 @@ describe('generateMigrationSQL', () => {
 				);
 			});
 
+			it('still rejects semicolon in index WHERE predicate', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_active',
+					columns: ['email'],
+					where: 'active = true; DROP TABLE users',
+				};
+
+				let error: unknown;
+				try {
+					generateMigrationSQL(
+						makeDiff([
+							{
+								kind: 'create_index',
+								table: 'users',
+								destructive: false,
+								details: '',
+								meta: { index: idx },
+							},
+						]),
+					);
+				} catch (caught) {
+					error = caught;
+				}
+
+				expect(error).toBeInstanceOf(Error);
+				expect((error as Error).message).toBe(
+					'Unsafe SQL expression in index WHERE predicate: contains forbidden characters (;, --, /*, */, "$$" (dollar-quoted strings), \\). Value: "active = true; DROP TABLE users"',
+				);
+			});
+
 			it('should generate CREATE INDEX with opclass', () => {
 				const idx: IndexIR = {
 					name: 'idx_posts_title_trgm',
@@ -2130,6 +2160,91 @@ describe('CHECK constraints migration SQL', () => {
 		);
 	});
 
+	it('should generate ADD CHECK CONSTRAINT with escaped semicolon and comment literals', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: 'Add CHECK',
+				meta: {
+					check: {
+						name: 'users_status_check',
+						expression: "CHECK (status IN ('a;b', 'c--d'))",
+					},
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toEqual([
+			`DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_status_check" CHECK (status IN ('a;b', 'c--d')); EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		]);
+	});
+
+	it('should generate ADD CHECK CONSTRAINT with canonical ANY array string literals', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: 'Add CHECK',
+				meta: {
+					check: {
+						name: 'users_status_any_check',
+						expression:
+							"CHECK (status = ANY (ARRAY['a;b'::text, 'c/*x*/d'::text]))",
+					},
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toEqual([
+			`DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_status_any_check" CHECK (status = ANY (ARRAY['a;b'::text, 'c/*x*/d'::text])); EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		]);
+	});
+
+	it('should generate ADD CHECK CONSTRAINT with doubled single quote literal', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: 'Add CHECK',
+				meta: {
+					check: {
+						name: 'users_note_check',
+						expression: "CHECK (note = 'it''s')",
+					},
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toEqual([
+			`DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_note_check" CHECK (note = 'it''s'); EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		]);
+	});
+
+	it('should generate ADD CHECK CONSTRAINT with safe dollar-quoted literal', () => {
+		const diff = makeDiff([
+			{
+				kind: 'add_check_constraint',
+				table: 'users',
+				destructive: false,
+				details: 'Add CHECK',
+				meta: {
+					check: {
+						name: 'users_note_check',
+						expression: 'CHECK (note = $$a;b$$)',
+					},
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		expect(sql).toEqual([
+			'DO $dbsp_check$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_note_check" CHECK (note = $$a;b$$); EXCEPTION WHEN duplicate_object THEN NULL; END $dbsp_check$;',
+		]);
+	});
+
 	it('should generate DROP CHECK CONSTRAINT IF EXISTS', () => {
 		const diff = makeDiff([
 			{
@@ -3432,6 +3547,27 @@ describe('generateDownSQL — drop_check_constraint dollar-quoting (F-002 regres
 		expect(sql[0]).toBe(
 			'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
 		);
+	});
+
+	it('re-adds dropped CHECK with escaped semicolon and comment literals', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_check_constraint',
+				table: 'users',
+				destructive: true,
+				details: '',
+				meta: {
+					check: {
+						name: 'users_status_check',
+						expression: "CHECK (status IN ('a;b', 'c--d'))",
+					},
+				},
+			},
+		]);
+		const sql = generateDownSQL(diff);
+		expect(sql).toEqual([
+			`DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_status_check" CHECK (status IN ('a;b', 'c--d')); EXCEPTION WHEN duplicate_object THEN NULL; END $$;`,
+		]);
 	});
 
 	it('F-002: DOWN SQL for drop_check_constraint with schema uses $$', () => {

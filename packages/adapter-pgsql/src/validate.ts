@@ -595,6 +595,132 @@ export function validateSqlExpression(sql: string, context: string): void {
 }
 
 /**
+ * Validate a raw CHECK constraint expression, allowing forbidden-looking tokens
+ * inside PostgreSQL string literals while still rejecting them outside literals.
+ *
+ * This intentionally does not parse CHECK semantics. It only tracks enough
+ * PostgreSQL literal context to prevent false positives for inert quoted text.
+ * Escape strings such as E'...' and U&'...' are treated as ordinary single-
+ * quoted strings; backslash-escaped quote cases may fail closed.
+ *
+ * @security Used only for CHECK constraint text sourced from ModelIR.
+ * @param sql The raw CHECK expression string to validate.
+ * @param context Human-readable context label for the error message.
+ * @throws Error if the expression contains unsafe tokens outside literals or an
+ * unterminated literal.
+ */
+export function validateCheckExpression(sql: string, context: string): void {
+	let i = 0;
+	let singleQuoted = false;
+	let dollarQuoteDelimiter: string | undefined;
+
+	while (i < sql.length) {
+		if (singleQuoted) {
+			if (sql[i] === "'") {
+				if (sql[i + 1] === "'") {
+					i += 2;
+					continue;
+				}
+				singleQuoted = false;
+			}
+			i++;
+			continue;
+		}
+
+		if (dollarQuoteDelimiter) {
+			if (sql.startsWith(dollarQuoteDelimiter, i)) {
+				i += dollarQuoteDelimiter.length;
+				dollarQuoteDelimiter = undefined;
+				continue;
+			}
+			i++;
+			continue;
+		}
+
+		if (sql[i] === "'") {
+			singleQuoted = true;
+			i++;
+			continue;
+		}
+
+		const dollarDelimiter = readDollarQuoteDelimiter(sql, i);
+		if (dollarDelimiter) {
+			dollarQuoteDelimiter = dollarDelimiter;
+			i += dollarDelimiter.length;
+			continue;
+		}
+
+		const forbiddenToken = forbiddenCheckTokenAt(sql, i);
+		if (forbiddenToken) {
+			throw new Error(
+				`Unsafe SQL expression in ${context}: contains forbidden token "${forbiddenToken}" outside string literal. Value: "${sql}"`,
+			);
+		}
+
+		i++;
+	}
+
+	if (singleQuoted) {
+		throw new Error(
+			`Unsafe SQL expression in ${context}: unterminated single-quoted string literal. Value: "${sql}"`,
+		);
+	}
+
+	if (dollarQuoteDelimiter) {
+		throw new Error(
+			`Unsafe SQL expression in ${context}: unterminated dollar-quoted string literal ${dollarQuoteDelimiter}. Value: "${sql}"`,
+		);
+	}
+}
+
+function forbiddenCheckTokenAt(sql: string, index: number): string | undefined {
+	const ch = sql[index];
+	if (ch === ';' || ch === '\\') return ch;
+
+	const pair = sql.slice(index, index + 2);
+	if (pair === '--' || pair === '/*' || pair === '*/') return pair;
+
+	return undefined;
+}
+
+function readDollarQuoteDelimiter(
+	sql: string,
+	index: number,
+): string | undefined {
+	if (sql[index] !== '$') return undefined;
+	const previous = index > 0 ? sql[index - 1] : undefined;
+	if (previous && isIdentifierContinuationBeforeDollarQuote(previous)) {
+		return undefined;
+	}
+
+	if (sql[index + 1] === '$') return '$$';
+	if (!isDollarQuoteTagStart(sql[index + 1])) return undefined;
+
+	let cursor = index + 2;
+	while (isDollarQuoteTagContinuation(sql[cursor])) {
+		cursor++;
+	}
+
+	if (sql[cursor] !== '$') return undefined;
+	return sql.slice(index, cursor + 1);
+}
+
+function isIdentifierContinuationBeforeDollarQuote(ch: string): boolean {
+	// PostgreSQL also permits "$" after the first identifier character; blocking
+	// a delimiter immediately after "$" prevents opening inside identifiers such
+	// as a$$tag$.
+	return /[A-Za-z0-9_$]/.test(ch);
+}
+
+function isDollarQuoteTagStart(ch: string | undefined): boolean {
+	return ch !== undefined && /[A-Za-z_]/.test(ch);
+}
+
+function isDollarQuoteTagContinuation(ch: string | undefined): boolean {
+	return ch !== undefined && /[A-Za-z0-9_]/.test(ch);
+}
+
+/**
  * Validate a PostgreSQL type name coming from `originalDbType` (populated by introspection).
  * Rejects strings that do not match the PostgreSQL type-name grammar to prevent injection.
  *

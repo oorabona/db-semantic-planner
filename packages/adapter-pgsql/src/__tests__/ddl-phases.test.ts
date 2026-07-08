@@ -247,6 +247,25 @@ describe('generateConstraintsPhase', () => {
 		expect(stmts).toHaveLength(1);
 		expect(stmts[0]).toContain('ADD CONSTRAINT "users_age_check"');
 	});
+
+	it('generates check constraints with escaped semicolon and comment literals', () => {
+		const users = makeTable('users', {
+			checkConstraints: [
+				{
+					name: 'users_status_check',
+					expression: "CHECK (status IN ('a;b', 'c--d'))",
+				},
+			] as never,
+		});
+		const ctx = makeCtx({
+			tables: [users],
+			caps: { supportsDDLCheckConstraints: true } as never,
+		});
+		const stmts = generateConstraintsPhase(ctx);
+		expect(stmts).toEqual([
+			`ALTER TABLE "users" ADD CONSTRAINT "users_status_check" CHECK (status IN ('a;b', 'c--d'));`,
+		]);
+	});
 });
 
 // ---------------------------------------------------------------------------
