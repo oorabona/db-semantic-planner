@@ -39,6 +39,7 @@ export type ChangeKind =
 	| 'alter_column_type'
 	| 'alter_column_nullable'
 	| 'alter_column_default'
+	| 'alter_column_unique'
 	// Constraints
 	| 'add_primary_key'
 	| 'drop_primary_key'
@@ -462,6 +463,20 @@ function compareColumnDetails(
 		});
 	}
 
+	// Unique change — missing unique is equivalent to false
+	const schemaUnique = schema.unique === true;
+	const dbUnique = db.unique === true;
+	if (schemaUnique !== dbUnique) {
+		changes.push({
+			kind: 'alter_column_unique',
+			table: tableName,
+			column: schema.name,
+			destructive: false,
+			details: `Change unique of "${schema.name}" from ${dbUnique} to ${schemaUnique}`,
+			meta: { unique: schemaUnique },
+		});
+	}
+
 	// Collation change
 	if ((schema.collation ?? null) !== (db.collation ?? null)) {
 		changes.push({
@@ -756,16 +771,19 @@ function compareIndexes(
 
 	// Auto-unique index keys: col.unique=true generates an implicit UNIQUE index in the DB,
 	// but this does not appear in ModelIR's indexes[] array.  These are auto-managed and must
-	// never trigger a drop_index diff.
-	const autoUniqueIndexKeys = new Set(
+	// never trigger a drop_index diff. Include either side when the column exists on both
+	// sides, because compareColumnDetails owns the col.unique toggle.
+	const dbColMap = new Map(db.columns.map((col) => [col.name, col]));
+	const autoUniqueIndexColumns = new Set(
 		schema.columns
-			.filter((col) => col.unique === true)
-			.map((col) =>
-				indexKey({
-					columns: [col.name],
-					unique: true,
-				}),
-			),
+			.filter((schemaCol) => {
+				const dbCol = dbColMap.get(schemaCol.name);
+				return (
+					dbCol !== undefined &&
+					(schemaCol.unique === true || dbCol.unique === true)
+				);
+			})
+			.map((col) => col.name),
 	);
 
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
@@ -773,7 +791,7 @@ function compareIndexes(
 		if (
 			!schemaIdxMap.has(key) &&
 			!autoFkIndexKeys.has(key) &&
-			!autoUniqueIndexKeys.has(key)
+			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
 		) {
 			changes.push({
 				kind: 'drop_index',
@@ -784,6 +802,29 @@ function compareIndexes(
 			});
 		}
 	}
+}
+
+function isAutoUniqueIndex(
+	tableName: string,
+	idx: IndexIR,
+	autoUniqueIndexColumns: ReadonlySet<string>,
+): boolean {
+	if (idx.columns.length !== 1) return false;
+	const column = idx.columns[0];
+	if (column === undefined || !autoUniqueIndexColumns.has(column)) return false;
+	if (idx.unique !== true) return false;
+	if (idx.name !== undefined && idx.name !== `${tableName}_${column}_key`) {
+		return false;
+	}
+	return (
+		idx.nullsNotDistinct !== true &&
+		(idx.method === undefined || idx.method === 'btree') &&
+		idx.where === undefined &&
+		(idx.expressions === undefined || idx.expressions.length === 0) &&
+		(idx.include === undefined || idx.include.length === 0) &&
+		(idx.opclass === undefined || Object.keys(idx.opclass).length === 0) &&
+		(idx.with === undefined || Object.keys(idx.with).length === 0)
+	);
 }
 
 function indexKey(idx: IndexIR): string {
@@ -1290,6 +1331,7 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 			case 'alter_column_type':
 			case 'alter_column_nullable':
 			case 'alter_column_default':
+			case 'alter_column_unique':
 				columns.altered++;
 				break;
 			case 'add_primary_key':
