@@ -675,9 +675,10 @@ function upAddCheckConstraint(
 ): string | undefined {
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
+	const expression = check.expression;
 	const notValid = check.notValid ? ' NOT VALID' : '';
 	validateCheckExpression(
-		check.expression,
+		expression,
 		'migration check constraint expression',
 	);
 	return buildDoBlock(
@@ -686,7 +687,7 @@ function upAddCheckConstraint(
 			' ADD CONSTRAINT ' +
 			quoteIdent(check.name, 'alias') +
 			' ' +
-			check.expression +
+			expression +
 			notValid +
 			'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 	);
@@ -1184,8 +1185,9 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
+			const expression = check.expression;
 			validateCheckExpression(
-				check.expression,
+				expression,
 				'migration check constraint (down)',
 			);
 			return {
@@ -1195,7 +1197,7 @@ function changeToDownSQL(
 						' ADD CONSTRAINT ' +
 						quoteIdent(check.name, 'alias') +
 						' ' +
-						check.expression +
+						expression +
 						'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 				),
 				// Allowlisted: re-adds the dropped CHECK constraint from metadata.
