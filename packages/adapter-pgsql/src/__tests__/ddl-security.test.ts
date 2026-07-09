@@ -15,20 +15,168 @@
 
 import { describe, expect, it } from 'vitest';
 import { generateDownSQL, generateMigrationSQL } from '../ddl/migration-sql.js';
+import { generateCommentsPhase } from '../ddl/phases/comments.js';
 import { generateEnumTypesPhase } from '../ddl/phases/enum-types.js';
-import { formatSqlDefault, quoteRoleName } from '../ddl/phases/utils.js';
+import {
+	formatSqlDefault,
+	quoteCollation,
+	quoteExtensionName,
+	quoteRoleName,
+} from '../ddl/phases/utils.js';
 import type { SchemaChange, SchemaDiff } from '../ddl/schema-diff.js';
 import { identityNaming } from '../naming-plugin.js';
 import {
 	InvalidIdentifierError,
+	validateCollationName,
 	validateDbTypeName,
 	validateExtensionName,
 	validateSqlExpression,
 } from '../validate.js';
 
+function forgedNonString(): string {
+	return {
+		toString: () => 'safe',
+		replace: () => "injected'; DROP TABLE users; --",
+	} as unknown as string;
+}
+
 // ---------------------------------------------------------------------------
 // Shared validate.ts helpers
 // ---------------------------------------------------------------------------
+
+describe('FIX-12: non-string type-confusion guards for SQL-splice helpers', () => {
+	function emptySummary(): SchemaDiff['summary'] {
+		return {
+			tables: { added: 0, dropped: 0 },
+			columns: { added: 0, dropped: 0, altered: 0 },
+			indexes: { added: 0, dropped: 0 },
+			constraints: { added: 0, dropped: 0, altered: 0 },
+		};
+	}
+
+	function makeCreateEnumDiff(value: string): SchemaDiff {
+		return {
+			changes: [
+				{
+					kind: 'create_enum',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: { name: 'status', values: [value] } },
+				},
+			],
+			hasDestructive: false,
+			summary: emptySummary(),
+		};
+	}
+
+	function makeAlterEnumAddValueDiff(value: string): SchemaDiff {
+		return {
+			changes: [
+				{
+					kind: 'alter_enum_add_value',
+					table: '',
+					destructive: false,
+					details: '',
+					meta: { enum: { name: 'status', values: ['active'] }, value },
+				},
+			],
+			hasDestructive: false,
+			summary: emptySummary(),
+		};
+	}
+
+	function makeAddCommentDiff(comment: string): SchemaDiff {
+		return {
+			changes: [
+				{
+					kind: 'add_comment',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: { target: 'table', comment },
+				},
+			],
+			hasDestructive: false,
+			summary: emptySummary(),
+		};
+	}
+
+	it('validateSqlExpression rejects a forged non-string object', () => {
+		expect(() =>
+			validateSqlExpression(forgedNonString(), 'raw index expression'),
+		).toThrow(
+			/Unsafe SQL expression in raw index expression: expected a string, received object/,
+		);
+	});
+
+	it('extension and collation validators reject a forged non-string object', () => {
+		expect(() => validateExtensionName(forgedNonString())).toThrow(
+			/Invalid extension identifier: expected a string, received object/,
+		);
+		expect(() => validateCollationName(forgedNonString())).toThrow(
+			/Invalid collation identifier: expected a string, received object/,
+		);
+	});
+
+	it('extension, collation, and role quote helpers reject a forged non-string object', () => {
+		expect(() => quoteExtensionName(forgedNonString())).toThrow(
+			/Invalid extension identifier: expected a string, received object/,
+		);
+		expect(() => quoteCollation(forgedNonString())).toThrow(
+			/Invalid collation identifier: expected a string, received object/,
+		);
+		expect(() => quoteRoleName(forgedNonString())).toThrow(
+			/quoteRoleName: role name: expected a string, received object/,
+		);
+	});
+
+	it('validateDbTypeName rejects a forged non-string object', () => {
+		expect(() => validateDbTypeName(forgedNonString())).toThrow(
+			/Unsafe database type name: expected a string, received object/,
+		);
+	});
+
+	it('migration enum literal escaping rejects a forged non-string value', () => {
+		expect(() =>
+			generateMigrationSQL(makeCreateEnumDiff(forgedNonString())),
+		).toThrow(/Invalid enum value: expected a string, received object/);
+		expect(() =>
+			generateMigrationSQL(makeAlterEnumAddValueDiff(forgedNonString())),
+		).toThrow(/Invalid enum value: expected a string, received object/);
+	});
+
+	it('DDL enum phase literal escaping rejects a forged non-string value', () => {
+		expect(() =>
+			generateEnumTypesPhase({
+				schema: {
+					enums: new Map([
+						['status', { name: 'status', values: [forgedNonString()] }],
+					]),
+				},
+				schemaName: undefined,
+				naming: identityNaming,
+				caps: { supportsDDLEnumTypes: true, supportsDDL: true },
+			} as any),
+		).toThrow(/Invalid enum value: expected a string, received object/);
+	});
+
+	it('comment literal escaping rejects a forged non-string value', () => {
+		expect(() =>
+			generateMigrationSQL(makeAddCommentDiff(forgedNonString())),
+		).toThrow(/migration comment: expected a string, received object/);
+		expect(() =>
+			generateCommentsPhase({
+				tables: [
+					{ name: 'users', columns: [], comment: forgedNonString() },
+				],
+				schemaName: undefined,
+				naming: identityNaming,
+				caps: { supportsDDLComments: true, supportsDDL: true },
+			} as any),
+		).toThrow(/table comment: expected a string, received object/);
+	});
+});
 
 describe('validateSqlExpression', () => {
 	it('rejects expressions containing a semicolon', () => {

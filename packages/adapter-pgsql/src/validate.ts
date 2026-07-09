@@ -136,6 +136,22 @@ export class InvalidIdentifierError extends Error {
 	}
 }
 
+/**
+ * Assert that a SQL-spliced value is a primitive string before validation or
+ * escaping. This blocks forged objects whose string-like methods can return
+ * different values between validation and rendering.
+ */
+export function assertString(
+	value: unknown,
+	context: string,
+): asserts value is string {
+	if (typeof value !== 'string') {
+		throw new Error(
+			`${context}: expected a string, received ${typeof value}`,
+		);
+	}
+}
+
 // ============================================================================
 // Validation Functions
 // ============================================================================
@@ -333,6 +349,8 @@ export function validateExtensionName(
 	name: string,
 	context = 'extension',
 ): void {
+	assertString(name, `Invalid ${context} identifier`);
+
 	if (!name || name.length === 0) {
 		throw new InvalidIdentifierError(name, context, 'cannot be empty');
 	}
@@ -449,6 +467,8 @@ export function validateCollationName(
 	name: string,
 	context = 'collation',
 ): void {
+	assertString(name, `Invalid ${context} identifier`);
+
 	if (!name || name.length === 0) {
 		throw new InvalidIdentifierError(name, context, 'cannot be empty');
 	}
@@ -589,6 +609,8 @@ const SAFE_TYPE_PATTERN =
  * @throws Error if the expression contains forbidden characters.
  */
 export function validateSqlExpression(sql: string, context: string): void {
+	assertString(sql, `Unsafe SQL expression in ${context}`);
+
 	// Forbidden: semicolons (statement injection), line comments (--),
 	// block comment openers (/*), block comment closers (*/) — defense-in-depth
 	// so a partial payload cannot close an enclosing comment to inject SQL —
@@ -742,6 +764,8 @@ function isDollarQuoteTagContinuation(ch: string | undefined): boolean {
  * @throws Error if the type name does not match the safe pattern.
  */
 export function validateDbTypeName(type: string): string {
+	assertString(type, 'Unsafe database type name');
+
 	if (!SAFE_TYPE_PATTERN.test(type)) {
 		throw new Error(
 			`Unsafe database type name: "${type}". Must match PostgreSQL type name rules.`,

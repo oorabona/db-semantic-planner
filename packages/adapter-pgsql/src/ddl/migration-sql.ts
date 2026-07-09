@@ -19,6 +19,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import {
+	assertString,
 	validateCheckExpression,
 	validateIdentifier,
 	validateSqlExpression,
@@ -610,8 +611,9 @@ function upCreateIndex(
 	);
 	const unique = idx.unique ? 'UNIQUE ' : '';
 	// S-1: validate index method against allowlist before interpolation into unquoted USING clause
-	if (idx.method) validateIndexMethod(idx.method, 'index method');
-	const method = idx.method ? ` USING ${idx.method}` : '';
+	const indexMethod = idx.method;
+	if (indexMethod) validateIndexMethod(indexMethod, 'index method');
+	const method = indexMethod ? ` USING ${indexMethod}` : '';
 
 	// Build column list: expressions first (validated), then named columns with optional opclass
 	// S-1: validate each expression and opclass before interpolation
@@ -649,8 +651,9 @@ function upCreateIndex(
 			: '';
 
 	// S-1: validate WHERE predicate expression before interpolation
-	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
-	const where = idx.where ? ` WHERE ${idx.where}` : '';
+	const whereExpr = idx.where;
+	if (whereExpr) validateSqlExpression(whereExpr, 'index WHERE predicate');
+	const where = whereExpr ? ` WHERE ${whereExpr}` : '';
 
 	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
 }
@@ -812,6 +815,7 @@ function upAlterColumnIdentity(
 function upAddComment(change: SchemaChange, schemaName?: string): string {
 	const comment = change.meta?.comment as string;
 	const target = change.meta?.target as string;
+	assertString(comment, 'migration comment');
 	const escaped = comment.replace(/'/g, "''");
 	if (target === 'table') {
 		return `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${escaped}';`;
@@ -1226,7 +1230,10 @@ function changeToDownSQL(
 				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
 				: quoteIdent(enumDef.name, 'alias');
 			const values = enumDef.values
-				.map((v) => `'${v.replace(/'/g, "''")}'`)
+				.map((v) => {
+					validateEnumLabel(v, 'enum value');
+					return `'${v.replace(/'/g, "''")}'`;
+				})
 				.join(', ');
 			return {
 				sql: `CREATE TYPE ${enumName} AS ENUM (${values});`,
@@ -1305,8 +1312,9 @@ function changeToDownSQL(
 
 		case 'drop_comment': {
 			const target = change.meta?.target as string | undefined;
-			const comment = change.meta?.comment as string | undefined;
-			if (typeof comment === 'string') {
+			const comment = change.meta?.comment;
+			if (comment !== undefined) {
+				assertString(comment, 'migration comment');
 				const escaped = comment.replace(/'/g, "''");
 				if (target === 'table') {
 					return {

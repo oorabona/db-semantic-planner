@@ -364,8 +364,9 @@ export function generateCreateIndex(
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
 	const unique = idx.unique ? 'UNIQUE ' : '';
 	// S-2: validate index method against allowlist before interpolation into unquoted USING clause
-	if (idx.method) validateIndexMethod(idx.method, 'index method');
-	const method = idx.method ? ` USING ${idx.method}` : '';
+	const indexMethod = idx.method;
+	if (indexMethod) validateIndexMethod(indexMethod, 'index method');
+	const method = indexMethod ? ` USING ${indexMethod}` : '';
 
 	// Build column list: expressions first (validated), then named columns with optional opclass
 	// S-1: validate each expression and opclass before interpolation
@@ -406,8 +407,9 @@ export function generateCreateIndex(
 			: '';
 
 	// S-1: validate WHERE predicate expression before interpolation
-	if (idx.where) validateSqlExpression(idx.where, 'index WHERE predicate');
-	const where = idx.where ? ` WHERE ${idx.where}` : '';
+	const whereExpr = idx.where;
+	if (whereExpr) validateSqlExpression(whereExpr, 'index WHERE predicate');
+	const where = whereExpr ? ` WHERE ${whereExpr}` : '';
 
 	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
 }
