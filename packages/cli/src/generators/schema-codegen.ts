@@ -297,6 +297,7 @@ function generateTableCode(
 		if (
 			fk.columns.length === 1 &&
 			fk.references.columns.length === 1 &&
+			fk.references.schema === undefined &&
 			localCol &&
 			refCol
 		) {
@@ -394,19 +395,22 @@ function stringArrayLiteral(values: readonly string[]): string {
 	return `[${values.map(singleQuoteEscape).join(', ')}]`;
 }
 
-function compositeForeignKeys(table: TableIR): TableIR['foreignKeys'] {
+function tableLevelForeignKeys(table: TableIR): TableIR['foreignKeys'] {
 	return table.foreignKeys.filter(
-		(fk) => fk.columns.length > 1 || fk.references.columns.length > 1,
+		(fk) =>
+			fk.references.schema !== undefined ||
+			fk.columns.length > 1 ||
+			fk.references.columns.length > 1,
 	);
 }
 
-function generateCompositeConstraintCode(
+function generateTableConstraintCode(
 	model: ModelIR,
 	options: SchemaCodegenOptions,
 ): string | undefined {
 	const tableBlocks: string[] = [];
 	for (const table of model.tables.values()) {
-		const fks = compositeForeignKeys(table);
+		const fks = tableLevelForeignKeys(table);
 		if (fks.length === 0) continue;
 		const fkLines = fks.map((fk) => {
 			const refOptions = [
@@ -490,9 +494,9 @@ export function generateSchemaFile(
 	const tableLines = tables.map((table) => generateTableCode(table, options));
 	lines.push(tableLines.join(',\n\n'));
 
-	const compositeConstraints = generateCompositeConstraintCode(model, options);
-	if (compositeConstraints) {
-		lines.push(`}, ${compositeConstraints});`);
+	const tableConstraints = generateTableConstraintCode(model, options);
+	if (tableConstraints) {
+		lines.push(`}, ${tableConstraints});`);
 	} else {
 		lines.push('});');
 	}

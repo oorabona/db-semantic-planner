@@ -867,7 +867,7 @@ describe('generateSchemaFile', () => {
 	});
 
 	describe('cross-schema foreign keys', () => {
-		it('emits schema option for a column-level foreign key reference', () => {
+		it('emits schema option for a single-column table-level foreign key reference', () => {
 			const model = makeCodegenModel([
 				{
 					name: 'users',
@@ -895,7 +895,11 @@ describe('generateSchemaFile', () => {
 
 			const result = generateSchemaFile(model);
 
-			expect(result).toContain("authorId: ref('users', { schema: 'auth' })");
+			expect(result).toContain("authorId: 'uuid'");
+			expect(result).not.toContain("authorId: ref('users', { schema: 'auth' })");
+			expect(result).toContain(
+				"ref('users', { schema: 'auth', columns: ['authorId'], references: ['id'] })",
+			);
 		});
 
 		it('emits schema option for a composite table-level foreign key reference', () => {
