@@ -476,9 +476,7 @@ function buildTableIRFromDefinition(
 
 		// Foreign key (with onDelete support)
 		if (colDef.references) {
-			const externalSchema = normalizeReferenceSchema(
-				colDef.references.schema,
-			);
+			const externalSchema = normalizeReferenceSchema(colDef.references.schema);
 			const fk: Mutable<ForeignKeyIR> = {
 				columns: [colName],
 				references: {

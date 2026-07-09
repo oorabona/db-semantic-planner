@@ -480,10 +480,10 @@ describe('generateMigrationSQL — error paths & edge cases', () => {
 	// ========================================================================
 	// 3. alter_column_type fallback
 	// ========================================================================
-		describe('alter_column_type fallback', () => {
-			it('should validate and use toType when meta.column is undefined', () => {
-				const sql = generateMigrationSQL(
-					makeDiff([
+	describe('alter_column_type fallback', () => {
+		it('should validate and use toType when meta.column is undefined', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
 					{
 						kind: 'alter_column_type',
 						table: 'users',
@@ -495,53 +495,53 @@ describe('generateMigrationSQL — error paths & edge cases', () => {
 				]),
 			);
 
-				expect(sql[0]).toBe(
-					'ALTER TABLE "users" ALTER COLUMN "age" TYPE bigint;',
-				);
-			});
+			expect(sql[0]).toBe(
+				'ALTER TABLE "users" ALTER COLUMN "age" TYPE bigint;',
+			);
+		});
 
-			it('rejects unsafe toType when meta.column is undefined', () => {
-				expect(() =>
-					generateMigrationSQL(
-						makeDiff([
-							{
-								kind: 'alter_column_type',
-								table: 'users',
-								column: 'age',
-								destructive: true,
-								details: '',
-								meta: {
-									fromType: 'integer',
-									toType: 'bigint; DROP TABLE users; --',
-								},
+		it('rejects unsafe toType when meta.column is undefined', () => {
+			expect(() =>
+				generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'alter_column_type',
+							table: 'users',
+							column: 'age',
+							destructive: true,
+							details: '',
+							meta: {
+								fromType: 'integer',
+								toType: 'bigint; DROP TABLE users; --',
 							},
-						]),
-					),
-				).toThrow(/Unsafe database type name/);
-			});
+						},
+					]),
+				),
+			).toThrow(/Unsafe database type name/);
+		});
 
-			it('rejects unsafe fromType when generating fallback rollback SQL', () => {
-				expect(() =>
-					generateDownSQL(
-						makeDiff([
-							{
-								kind: 'alter_column_type',
-								table: 'users',
-								column: 'age',
-								destructive: true,
-								details: '',
-								meta: {
-									fromType: 'integer; DROP TABLE users; --',
-									toType: 'bigint',
-								},
+		it('rejects unsafe fromType when generating fallback rollback SQL', () => {
+			expect(() =>
+				generateDownSQL(
+					makeDiff([
+						{
+							kind: 'alter_column_type',
+							table: 'users',
+							column: 'age',
+							destructive: true,
+							details: '',
+							meta: {
+								fromType: 'integer; DROP TABLE users; --',
+								toType: 'bigint',
 							},
-						]),
-					),
-				).toThrow(/Unsafe database type name/);
-			});
+						},
+					]),
+				),
+			).toThrow(/Unsafe database type name/);
+		});
 
-			it('should prefer mapColumnType(col) when meta.column is provided', () => {
-				const col = makeCol({ name: 'age', type: 'bigint' });
+		it('should prefer mapColumnType(col) when meta.column is provided', () => {
+			const col = makeCol({ name: 'age', type: 'bigint' });
 
 			const sql = generateMigrationSQL(
 				makeDiff([

@@ -370,7 +370,10 @@ describe('DDL Generator', () => {
 				relations: new Map(),
 			} as unknown as ModelIR;
 
-			const ddl = generateDDL(schema, { schemaName: 'app', fkAutoIndex: false });
+			const ddl = generateDDL(schema, {
+				schemaName: 'app',
+				fkAutoIndex: false,
+			});
 			const alterStmt = ddl.find((stmt) => stmt.startsWith('ALTER TABLE'));
 
 			expect(alterStmt).toBe(

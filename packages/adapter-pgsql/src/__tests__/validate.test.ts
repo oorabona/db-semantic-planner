@@ -31,7 +31,10 @@ describe('validateCheckExpression', () => {
 		};
 
 		expect(() =>
-			validateCheckExpression(forgedExpression as unknown as string, 'test check'),
+			validateCheckExpression(
+				forgedExpression as unknown as string,
+				'test check',
+			),
 		).toThrow(
 			'Unsafe SQL expression in test check: expected a string, received object',
 		);

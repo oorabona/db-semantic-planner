@@ -697,10 +697,7 @@ function upAddCheckConstraint(
 	if (!check) return undefined;
 	const expression = check.expression;
 	const notValid = check.notValid ? ' NOT VALID' : '';
-	validateCheckExpression(
-		expression,
-		'migration check constraint expression',
-	);
+	validateCheckExpression(expression, 'migration check constraint expression');
 	return buildDoBlock(
 		'BEGIN ALTER TABLE ' +
 			qualifyTable(change.table, schemaName) +
@@ -1208,10 +1205,7 @@ function changeToDownSQL(
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
 			const expression = check.expression;
-			validateCheckExpression(
-				expression,
-				'migration check constraint (down)',
-			);
+			validateCheckExpression(expression, 'migration check constraint (down)');
 			return {
 				sql: buildDoBlock(
 					'BEGIN ALTER TABLE ' +

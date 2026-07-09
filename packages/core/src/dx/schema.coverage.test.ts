@@ -1461,7 +1461,7 @@ describe('schema coverage', () => {
 				onUpdate: 'CASCADE',
 			});
 
-			let rebuilt;
+			let rebuilt!: ReturnType<typeof schema>;
 			expect(() => {
 				rebuilt = schema(result.definition, result.constraints);
 			}).not.toThrow();
@@ -1539,7 +1539,7 @@ describe('schema coverage', () => {
 				onUpdate: 'CASCADE',
 			});
 
-			let rebuilt;
+			let rebuilt!: ReturnType<typeof schema>;
 			expect(() => {
 				rebuilt = schema(result.definition, result.constraints);
 			}).not.toThrow();
@@ -1613,7 +1613,7 @@ describe('schema coverage', () => {
 				onDelete: 'CASCADE',
 			});
 
-			let rebuilt;
+			let rebuilt!: ReturnType<typeof schema>;
 			expect(() => {
 				rebuilt = schema(result.definition, result.constraints);
 			}).not.toThrow();

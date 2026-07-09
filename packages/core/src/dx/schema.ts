@@ -1917,8 +1917,10 @@ export async function getSchemaFromDb<
 					};
 					if (fk.unique) sourceColumn.unique = true;
 					tableDef[column.name] = sourceColumn;
-					const tableConstraints = (constraints[table.name] ??= {});
-					const foreignKeys = (tableConstraints.foreignKeys ??= []);
+					constraints[table.name] ??= {};
+					const tableConstraints = constraints[table.name]!;
+					tableConstraints.foreignKeys ??= [];
+					const foreignKeys = tableConstraints.foreignKeys;
 					foreignKeys.push(
 						ref(fk.target, {
 							schema: fk.schema,
@@ -1954,8 +1956,10 @@ export async function getSchemaFromDb<
 		for (const fk of compositeExternalFks) {
 			const externalSchema = fk.references.schema;
 			if (externalSchema === undefined) continue;
-			const tableConstraints = (constraints[table.name] ??= {});
-			const foreignKeys = (tableConstraints.foreignKeys ??= []);
+			constraints[table.name] ??= {};
+			const tableConstraints = constraints[table.name]!;
+			tableConstraints.foreignKeys ??= [];
+			const foreignKeys = tableConstraints.foreignKeys;
 			foreignKeys.push(
 				ref(fk.references.table, {
 					schema: externalSchema,

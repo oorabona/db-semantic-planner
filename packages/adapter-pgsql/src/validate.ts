@@ -146,9 +146,7 @@ export function assertString(
 	context: string,
 ): asserts value is string {
 	if (typeof value !== 'string') {
-		throw new Error(
-			`${context}: expected a string, received ${typeof value}`,
-		);
+		throw new Error(`${context}: expected a string, received ${typeof value}`);
 	}
 }
 

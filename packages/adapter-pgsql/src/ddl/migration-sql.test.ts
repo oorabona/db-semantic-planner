@@ -1782,9 +1782,9 @@ describe('generateDownSQL', () => {
 				expect(statement).not.toContain('\n');
 				expect(statement).not.toContain('\r');
 				for (const line of statement.split(/\r?\n/)) {
-					expect(line.startsWith('--') || !line.includes('DROP TABLE pwn')).toBe(
-						true,
-					);
+					expect(
+						line.startsWith('--') || !line.includes('DROP TABLE pwn'),
+					).toBe(true);
 				}
 			}
 

@@ -896,7 +896,9 @@ describe('generateSchemaFile', () => {
 			const result = generateSchemaFile(model);
 
 			expect(result).toContain("authorId: 'uuid'");
-			expect(result).not.toContain("authorId: ref('users', { schema: 'auth' })");
+			expect(result).not.toContain(
+				"authorId: ref('users', { schema: 'auth' })",
+			);
 			expect(result).toContain(
 				"ref('users', { schema: 'auth', columns: ['authorId'], references: ['id'] })",
 			);

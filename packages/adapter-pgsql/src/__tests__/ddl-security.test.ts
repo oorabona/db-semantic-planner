@@ -167,9 +167,7 @@ describe('FIX-12: non-string type-confusion guards for SQL-splice helpers', () =
 		).toThrow(/migration comment: expected a string, received object/);
 		expect(() =>
 			generateCommentsPhase({
-				tables: [
-					{ name: 'users', columns: [], comment: forgedNonString() },
-				],
+				tables: [{ name: 'users', columns: [], comment: forgedNonString() }],
 				schemaName: undefined,
 				naming: identityNaming,
 				caps: { supportsDDLComments: true, supportsDDL: true },
