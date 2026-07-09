@@ -27,7 +27,7 @@ import type {
 	RecursiveOptions,
 } from './raw-cte-builder.js';
 import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
-import type { DropIndexOptions } from './table-ddl-types.js';
+import type { DropIndexOptions, TableDDL } from './table-ddl-types.js';
 import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type {
 	ExpressionSpec,
@@ -276,10 +276,15 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 * Use destructuring to get individual table references, then pass
 	 * them to `from()` for type-safe queries.
 	 *
+	 * Each entry also carries the runtime DDL helpers (`.truncate()`,
+	 * `.indexes.list()`, `.alterColumn()`, …) via the `TableDDL` mixin, mirroring
+	 * what `wrapTablesProxyWithDDL` produces at runtime.
+	 *
 	 * @example
 	 * ```typescript
 	 * const { users, posts } = orm.tables;
 	 * const activeUsers = await orm.from(users).where(eq(users.active, true)).all();
+	 * const indexes = await orm.tables.users.indexes.list();
 	 * ```
 	 *
 	 * @since DX-040-SURFACE
@@ -290,8 +295,12 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 		// TODO(FIND-030): Thread a TSchema generic through OrmInstance to replace `any`
 		// with `RowToRelationRefs<K, DB, TSchema>` once the schema-tables-types
 		// infrastructure is wired through createOrm().
+		// The `& TableDDL` intersection reflects the runtime augmentation done by
+		// wrapTablesProxyWithDDL (Object.assign(tableRef, ddl)) — the query-building
+		// TableRef and the DDL runtime helpers coexist on the same object.
 		// biome-ignore lint/suspicious/noExplicitAny: TRelations generic is intentionally deferred — see TODO(FIND-030); full type requires schema-level information not available in OrmInstance<DB>
-		[K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any>;
+		[K in keyof DB & string]: TableRef<K, RowToColumnRefs<K, DB[K]>, any> &
+			TableDDL;
 	};
 
 	/**
