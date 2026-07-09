@@ -13,6 +13,7 @@ import type {
 } from '@dbsp/core';
 import { ModelIRImpl, POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { camelCaseNaming } from '../naming-plugin.js';
 import { generateDDL } from './ddl-generator.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
@@ -1234,6 +1235,52 @@ describe('FK enhancements in DDL', () => {
 		expect(fkStmt).toBeDefined();
 		expect(fkStmt).not.toContain('ON UPDATE');
 		expect(fkStmt).not.toContain('DEFERRABLE');
+	});
+
+	it('should emit declared referenced schema verbatim with naming transforms', () => {
+		const usersTable: TableIR = {
+			name: 'tenantUsers',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const tokensTable: TableIR = {
+			name: 'apiTokens',
+			columns: [{ name: 'tenantUserId', type: 'integer', nullable: false }],
+			foreignKeys: [
+				{
+					columns: ['tenantUserId'],
+					references: {
+						schema: 'authData',
+						table: 'tenantUsers',
+						columns: ['id'],
+					},
+				},
+			],
+			indexes: [],
+		};
+		const schema = {
+			tables: new Map([
+				['tenantUsers', usersTable],
+				['apiTokens', tokensTable],
+			]),
+			relations: new Map(),
+			enums: new Map(),
+			getTable: (name) =>
+				[usersTable, tokensTable].find((t) => t.name === name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema, { naming: camelCaseNaming });
+		const fkStmt = stmts.find((s) => s.includes('FOREIGN KEY'));
+
+		expect(fkStmt).toContain('ALTER TABLE "api_tokens"');
+		expect(fkStmt).toContain('FOREIGN KEY ("tenant_user_id")');
+		expect(fkStmt).toContain('REFERENCES "authData"."tenant_users" ("id")');
+		expect(fkStmt).not.toContain('"auth_data"');
 	});
 });
 

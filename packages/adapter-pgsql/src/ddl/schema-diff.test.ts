@@ -1565,7 +1565,7 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
-		it('should preserve referenced schema while normalizing FK casing', () => {
+		it('should preserve referenced physical schema while normalizing FK casing', () => {
 			const schema = makeModel(
 				[
 					makeTable({
@@ -1575,7 +1575,7 @@ describe('compareSchemata', () => {
 							{
 								columns: ['tenantUserId'],
 								references: {
-									schema: 'authSchema',
+									schema: 'authData',
 									table: 'tenantUsers',
 									columns: ['id'],
 								},
@@ -1594,7 +1594,7 @@ describe('compareSchemata', () => {
 							{
 								columns: ['tenant_user_id'],
 								references: {
-									schema: 'auth_schema',
+									schema: 'authData',
 									table: 'tenant_users',
 									columns: ['id'],
 								},
@@ -1608,6 +1608,48 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db, snakeCaseOpts);
 
 			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should diff when only referenced physical schema casing differs', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'apiTokens',
+					columns: [makeCol({ name: 'tenantUserId', type: 'uuid' })],
+					foreignKeys: [
+						{
+							columns: ['tenantUserId'],
+							references: {
+								schema: 'authData',
+								table: 'tenantUsers',
+								columns: ['id'],
+							},
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'api_tokens',
+					columns: [makeCol({ name: 'tenant_user_id', type: 'uuid' })],
+					foreignKeys: [
+						{
+							columns: ['tenant_user_id'],
+							references: {
+								schema: 'auth_data',
+								table: 'tenant_users',
+								columns: ['id'],
+							},
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(changeKinds(diff.changes).sort()).toEqual([
+				'add_foreign_key',
+				'drop_foreign_key',
+			]);
 		});
 
 		it('should match camelCase index columns to snake_case DB', () => {
