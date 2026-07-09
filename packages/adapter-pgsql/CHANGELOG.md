@@ -1,5 +1,37 @@
 # Changelog
 
+## [1.11.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.2...adapter-pgsql-v1.11.0) (2026-07-09)
+
+
+### Features
+
+* **adapter-pgsql:** Cross-schema FK references and column-unique introspection ([e65854c](https://github.com/oorabona/db-semantic-planner/commit/e65854c62b6bdd8639ccfffacc68187edcc521e9)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Accept safe escaped literals in CHECK constraint validation ([a024fdf](https://github.com/oorabona/db-semantic-planner/commit/a024fdf54d9d7b0a45fd2d5c3056d2e17465c278)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Detect column-level UNIQUE changes in schema diff ([d934e57](https://github.com/oorabona/db-semantic-planner/commit/d934e57c5462f2d206908d96a57871260e97716b)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Emit FK schema verbatim and gate destructive unique down-migrations ([1cc4937](https://github.com/oorabona/db-semantic-planner/commit/1cc493761e7e8a56a2be38d0520330b4e6f246c0)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Mark unique-constraint drops destructive; key FKs by table+name ([dcca2d7](https://github.com/oorabona/db-semantic-planner/commit/dcca2d717de42b9e04c06c9b9a64efa5ef0490ae)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Reject non-string CHECK constraint expressions ([0aba1bd](https://github.com/oorabona/db-semantic-planner/commit/0aba1bd35063121b07b62657f2c15abae0c86e3c)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Reject non-string identifiers before quoting ([dbc2324](https://github.com/oorabona/db-semantic-planner/commit/dbc2324b3f702c3e49d7e2f454e03363dccc599f)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Reject non-string values across SQL expression, name and literal helpers ([39420d4](https://github.com/oorabona/db-semantic-planner/commit/39420d49f44c875c1ca352d424dec6eaf9e0941d)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Reliable cross-schema FK casing, unique drop, CHECK lexer ([aafd0ec](https://github.com/oorabona/db-semantic-planner/commit/aafd0ecfbe89635d24fe72e12b949eddf3c68ba9)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Restore previous primary key on PK-change rollback ([09f18f0](https://github.com/oorabona/db-semantic-planner/commit/09f18f06ebe18a6c533a629afacdf6cbf36150a9)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Sanitize IR values interpolated into migration warning comments ([7221c93](https://github.com/oorabona/db-semantic-planner/commit/7221c937bc74df924f108190f4dc0c01a04d5edf)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Schema-aware relation inference and faithful unique-constraint rollback ([a3702ba](https://github.com/oorabona/db-semantic-planner/commit/a3702ba915fc07cb30289bc85620d94350121552)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Snapshot CHECK expression before validate and render ([06eb3dc](https://github.com/oorabona/db-semantic-planner/commit/06eb3dc181a87c8489c0f8fbdff9223b08ae6310)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **adapter-pgsql:** Validate storage-parameter, sequence, and type-name values before SQL ([fd7ffa9](https://github.com/oorabona/db-semantic-planner/commit/fd7ffa9547ae07df0aa7ce6c28807c943d99a63d)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.11.0
+    * @dbsp/types bumped to 1.9.0
+
 ## [1.10.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.1...adapter-pgsql-v1.10.2) (2026-07-07)
 
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## [1.11.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.10.1...core-v1.11.0) (2026-07-09)
+
+
+### Features
+
+* **core:** Thread FK referenced schema through the schema DSL ([887cad0](https://github.com/oorabona/db-semantic-planner/commit/887cad0f3e7d3b1913a07d6789ca7a7a314319b9)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
+
+### Bug Fixes
+
+* **core:** Allow SET DEFAULT foreign-key actions in generated and manifest schemas ([fcb95c4](https://github.com/oorabona/db-semantic-planner/commit/fcb95c48545f607ba8d8e4b1fb060a93da5bd425)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Keep local FK validation for external targets, reject uninferable external column type ([7775c80](https://github.com/oorabona/db-semantic-planner/commit/7775c80969529932a66e1dd80a7dee98f98ea5f3)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Preserve referenced columns and FK actions for same-schema FK round-trip ([3e3f814](https://github.com/oorabona/db-semantic-planner/commit/3e3f8141a523263ecb6f40fb9ba0743193edd44f)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Round-trip composite cross-schema foreign keys in getSchemaFromDb ([b99e2c9](https://github.com/oorabona/db-semantic-planner/commit/b99e2c902da49cc917d58871f9ca7fd883606af1)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Support foreign keys to external cross-schema tables ([e5908d5](https://github.com/oorabona/db-semantic-planner/commit/e5908d5fccb0245c084326fc8685099404f821b7)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Type Schema.constraints and keep full FK metadata in getSchemaFromDb round-trip ([ee0c8f9](https://github.com/oorabona/db-semantic-planner/commit/ee0c8f95073b3dc65b0a9d79bb03f5e1d8c80dbd)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **core:** Validate cross-schema FKs by declaration, exclude them from relation inference ([72bbf5a](https://github.com/oorabona/db-semantic-planner/commit/72bbf5aceea0fe9aabe40774389ae3b75bf892ac)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/nql bumped to 1.9.3
+    * @dbsp/types bumped to 1.9.0
+
 ## [1.10.1](https://github.com/oorabona/db-semantic-planner/compare/core-v1.10.0...core-v1.10.1) (2026-07-07)
 
 

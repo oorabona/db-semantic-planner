@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.9.0](https://github.com/oorabona/db-semantic-planner/compare/types-v1.8.1...types-v1.9.0) (2026-07-09)
+
+
+### Features
+
+* **types:** Add optional referenced schema to ForeignKeyIR ([51684b0](https://github.com/oorabona/db-semantic-planner/commit/51684b0ebde28c5de941fc747a9fb3ecb7bb5cd5)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **types:** Carry introspected unique-constraint name on ColumnIR ([f79f126](https://github.com/oorabona/db-semantic-planner/commit/f79f126d8cb8d13bc0509b7a5de4097fba36a439)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
 ## [1.8.1](https://github.com/oorabona/db-semantic-planner/compare/types-v1.8.0...types-v1.8.1) (2026-07-07)
 
 
