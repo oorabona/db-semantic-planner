@@ -25,6 +25,7 @@ export type DriftType =
 	| 'type_mismatch'
 	| 'nullable_mismatch'
 	| 'default_mismatch'
+	| 'unique_mismatch'
 	// Constraints
 	| 'primary_key_mismatch'
 	| 'missing_fk_in_db'
@@ -117,6 +118,7 @@ const CHANGE_TO_DRIFT: Record<
 	alter_column_type: { type: 'type_mismatch', severity: 'error' },
 	alter_column_nullable: { type: 'nullable_mismatch', severity: 'warning' },
 	alter_column_default: { type: 'default_mismatch', severity: 'warning' },
+	alter_column_unique: { type: 'unique_mismatch', severity: 'warning' },
 	add_primary_key: { type: 'primary_key_mismatch', severity: 'error' },
 	drop_primary_key: { type: 'primary_key_mismatch', severity: 'error' },
 	add_foreign_key: { type: 'missing_fk_in_db', severity: 'error' },

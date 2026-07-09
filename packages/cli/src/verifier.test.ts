@@ -329,6 +329,59 @@ describe('verify (via compareSchemata)', () => {
 				}),
 			);
 		});
+
+		it('should classify unique mismatch as a warning', () => {
+			const schemaModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{
+								name: 'email',
+								type: 'string',
+								nullable: false,
+								unique: true,
+							},
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const dbModel = makeModel([
+				[
+					'users',
+					makeTable({
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'uuid', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+					}),
+				],
+			]);
+
+			const result = verify(schemaModel, dbModel);
+
+			expect(result.diff.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+				}),
+			);
+			expect(result.issues).toContainEqual(
+				expect.objectContaining({
+					severity: 'warning',
+					type: 'unique_mismatch',
+					table: 'users',
+					column: 'email',
+				}),
+			);
+		});
 	});
 
 	describe('foreign key drift', () => {

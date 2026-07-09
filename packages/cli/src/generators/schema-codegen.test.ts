@@ -12,6 +12,16 @@ import {
 	type SchemaCodegenOptions,
 } from './schema-codegen.js';
 
+function makeCodegenModel(tables: readonly TableIR[]): ModelIR {
+	const tableMap = new Map(tables.map((table) => [table.name, table] as const));
+	return {
+		tables: tableMap,
+		relations: new Map(),
+		getTable: (name: string) => tableMap.get(name),
+		getRelation: () => undefined,
+	} as unknown as ModelIR;
+}
+
 describe('generateSchemaFile', () => {
 	describe('basic structure', () => {
 		it('generates valid schema file with imports (no FKs)', () => {
@@ -802,6 +812,7 @@ describe('generateSchemaFile', () => {
 			// Default PK FK should use bare ref() — no references option
 			expect(result).toContain("ref('users')");
 			expect(result).not.toContain('references:');
+			expect(result).not.toContain('schema:');
 		});
 
 		it('round-trips: schema → model → codegen → contains correct ref call', () => {
@@ -852,6 +863,80 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain("references: ['email']");
 			expect(result).toContain('nullable: true');
 			expect(result).toContain("onDelete: 'CASCADE'");
+		});
+	});
+
+	describe('cross-schema foreign keys', () => {
+		it('emits schema option for a column-level foreign key reference', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'posts',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'authorId', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['authorId'],
+							references: { schema: 'auth', table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [],
+				},
+			]);
+
+			const result = generateSchemaFile(model);
+
+			expect(result).toContain("authorId: ref('users', { schema: 'auth' })");
+		});
+
+		it('emits schema option for a composite table-level foreign key reference', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'orders',
+					columns: [
+						{ name: 'tenantId', type: 'uuid', nullable: false },
+						{ name: 'orderId', type: 'uuid', nullable: false },
+					],
+					primaryKey: ['tenantId', 'orderId'],
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'lineItems',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'tenantId', type: 'uuid', nullable: false },
+						{ name: 'orderId', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['tenantId', 'orderId'],
+							references: {
+								schema: 'billing',
+								table: 'orders',
+								columns: ['tenantId', 'orderId'],
+							},
+						},
+					],
+					indexes: [],
+				},
+			]);
+
+			const result = generateSchemaFile(model);
+
+			expect(result).toContain(
+				"ref('orders', { schema: 'billing', columns: ['tenantId', 'orderId'], references: ['tenantId', 'orderId'] })",
+			);
 		});
 	});
 });
