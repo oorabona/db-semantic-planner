@@ -703,7 +703,6 @@ export function schemaToModelIR(
 				]),
 			)
 		: undefined;
-	const externalTableNames = deriveExternalTableNames(tables);
 
 	return new ModelIRImpl(
 		tableMap,
@@ -711,24 +710,7 @@ export function schemaToModelIR(
 		undefined,
 		extensions,
 		sequenceMap,
-		externalTableNames,
 	);
-}
-
-function deriveExternalTableNames(tables: readonly TableIR[]): Set<string> {
-	const managedTableNames = new Set(tables.map((table) => table.name));
-	const externalTableNames = new Set<string>();
-	for (const table of tables) {
-		for (const fk of table.foreignKeys) {
-			if (
-				fk.references.schema !== undefined &&
-				!managedTableNames.has(fk.references.table)
-			) {
-				externalTableNames.add(fk.references.table);
-			}
-		}
-	}
-	return externalTableNames;
 }
 
 // ============================================================================
@@ -1186,7 +1168,7 @@ function buildRefColumn(
 	// This prevents a type mismatch when the FK points at a unique non-PK column
 	// that has a different type than the table's PK (e.g. email:string vs id:uuid).
 	const targetDef = definition[columnDef.target];
-	if (columnDef.options.schema !== undefined && !targetDef) {
+	if (columnDef.options.schema !== undefined) {
 		throw new SchemaValidationError(
 			`Cannot infer column type for foreign key column '${columnName}' to external table '${columnDef.options.schema}.${columnDef.target}'. Declare the source column with an explicit type and add the external foreign key at the table level with SchemaConstraints.foreignKeys.`,
 			undefined,
@@ -1829,13 +1811,25 @@ export async function getSchemaFromDb<
 		string,
 		Map<
 			string,
-			{ target: string; schema?: string; nullable: boolean; unique: boolean }
+			{
+				target: string;
+				refs: readonly string[];
+				schema?: string;
+				nullable: boolean;
+				unique: boolean;
+			}
 		>
 	>();
 	for (const table of model.tables.values()) {
 		const tableFks = new Map<
 			string,
-			{ target: string; schema?: string; nullable: boolean; unique: boolean }
+			{
+				target: string;
+				refs: readonly string[];
+				schema?: string;
+				nullable: boolean;
+				unique: boolean;
+			}
 		>();
 		for (const fk of table.foreignKeys) {
 			// Only handle single-column FKs for now (composite FKs are rare in schema defs)
@@ -1846,6 +1840,7 @@ export async function getSchemaFromDb<
 			const column = table.columns.find((c) => c.name === fkColumn);
 			tableFks.set(fkColumn, {
 				target: fk.references.table,
+				refs: fk.references.columns,
 				...(fk.references.schema !== undefined
 					? { schema: fk.references.schema }
 					: {}),
@@ -1858,6 +1853,7 @@ export async function getSchemaFromDb<
 
 	// Convert ModelIR to SchemaDefinition
 	const definition: Record<string, TableDef> = {};
+	const constraints: SchemaConstraints = {};
 
 	for (const table of model.tables.values()) {
 		const tableDef: TableDef = {};
@@ -1867,9 +1863,22 @@ export async function getSchemaFromDb<
 			const fk = tableFks.get(column.name);
 
 			if (fk) {
+				if (fk.schema !== undefined) {
+					tableDef[column.name] = columnTypeToJsType(column.type);
+					const tableConstraints = (constraints[table.name] ??= {});
+					const foreignKeys = (tableConstraints.foreignKeys ??= []);
+					foreignKeys.push(
+						ref(fk.target, {
+							schema: fk.schema,
+							columns: [column.name],
+							references: fk.refs,
+						}),
+					);
+					continue;
+				}
+
 				// FK column → ref() definition
 				tableDef[column.name] = ref(fk.target, {
-					...(fk.schema !== undefined ? { schema: fk.schema } : {}),
 					nullable: fk.nullable,
 					unique: fk.unique,
 				});
@@ -1883,6 +1892,8 @@ export async function getSchemaFromDb<
 	}
 
 	const tableNames = Object.keys(definition) as (keyof T)[];
+	const generatedConstraints =
+		Object.keys(constraints).length > 0 ? constraints : undefined;
 
 	// Create type-safe tables proxy
 	const tables = createTablesProxy(
@@ -1891,7 +1902,7 @@ export async function getSchemaFromDb<
 	) as InferTables<T>;
 
 	// Build result with optional properties only if defined
-	const result: Mutable<Schema<T>> = {
+	const result: Mutable<Schema<T>> & { constraints?: SchemaConstraints } = {
 		definition: definition as T,
 		model,
 		tableNames,
@@ -1899,6 +1910,9 @@ export async function getSchemaFromDb<
 	};
 
 	// Add optional properties only if they have values
+	if (generatedConstraints !== undefined) {
+		result.constraints = generatedConstraints;
+	}
 	if (adapter.dbCasing !== undefined) {
 		result.dbCasing = adapter.dbCasing;
 	}

@@ -203,7 +203,7 @@ describe('buildModelFromSchema', () => {
 			expect(tableFk?.references.schema).toBe('auth');
 		});
 
-		it('should track generated schema-qualified FK targets as external tables', () => {
+		it('should not track generated schema-qualified FK targets as external tables', () => {
 			const schema: GeneratedSchema = {
 				tables: {
 					posts: {
@@ -226,7 +226,7 @@ describe('buildModelFromSchema', () => {
 
 			const model = buildModelFromSchema(schema);
 			const fk = model.getTable('posts')?.foreignKeys[0];
-			expect(model.externalTables.has('users')).toBe(true);
+			expect(model.externalTables.has('users')).toBe(false);
 			expect(fk?.references).toMatchObject({
 				schema: 'auth',
 				table: 'users',
@@ -396,6 +396,62 @@ describe('buildModelFromSchema', () => {
 			expect(relation?.type).toBe('hasMany');
 			expect(relation?.foreignKey).toBe('authorId');
 			expect(relation?.cardinality).toBe('many');
+		});
+
+		it('should not use schema-qualified FK metadata for same-named local relations', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					accounts: {
+						id: { type: 'uuid', primaryKey: true },
+						externalId: { type: 'string', unique: true },
+					},
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						accountId: {
+							type: 'uuid',
+							references: {
+								schema: 'auth',
+								table: 'accounts',
+								column: 'externalId',
+							},
+						},
+					},
+				},
+				relations: {
+					'posts.account': {
+						kind: 'belongsTo',
+						target: 'accounts',
+						foreignKey: 'accountId',
+					},
+					'accounts.posts': {
+						kind: 'hasMany',
+						target: 'posts',
+						foreignKey: 'accountId',
+					},
+				},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const belongsTo = model.getRelation('posts.account') as unknown as Record<
+				string,
+				unknown
+			>;
+			const hasMany = model.getRelation('accounts.posts') as unknown as Record<
+				string,
+				unknown
+			>;
+
+			expect(belongsTo).toBeDefined();
+			expect(hasMany).toBeDefined();
+			expect('targetKey' in belongsTo).toBe(false);
+			expect('sourceKey' in hasMany).toBe(false);
 		});
 
 		it('should convert manyToMany relation', () => {

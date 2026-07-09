@@ -268,6 +268,33 @@ describe('detectForeignKeys() coverage', () => {
 		expect(fks[0]?.targetTable).toBe('users');
 	});
 
+	it('should skip explicit schema-qualified references for relation inference', () => {
+		const tables: SchemaTablesDefinition = {
+			accounts: {
+				id: { type: 'uuid', primaryKey: true },
+			},
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				accountId: {
+					type: 'uuid',
+					references: { schema: 'auth', table: 'accounts' },
+				},
+			},
+		};
+
+		const fks = detectForeignKeys(
+			'posts',
+			tables.posts!,
+			DEFAULT_CONVENTIONS,
+			new Set(Object.keys(tables)),
+		);
+		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
+
+		expect(fks).toEqual([]);
+		expect(relations['posts.account']).toBeUndefined();
+		expect(relations['accounts.posts']).toBeUndefined();
+	});
+
 	it('should detect convention-based FKs', () => {
 		const table: SchemaTableDefinition = {
 			id: { type: 'integer', primaryKey: true },

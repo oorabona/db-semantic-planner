@@ -31,8 +31,37 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 		);
 	});
 
-	it('round-trips declared referenced schema through typed column and table-level refs', () => {
+	it('rejects column-level external FK even when a same-named local table exists', () => {
+		expect(() =>
+			schema({
+				accounts: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+				sessions: {
+					id: { type: 'uuid', primaryKey: true },
+					accountId: ref('accounts', { schema: 'auth' }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining(
+					"Cannot infer column type for foreign key column 'accountId' to external table 'auth.accounts'",
+				),
+			}),
+		);
+	});
+
+	it('round-trips declared referenced schema through typed table-level refs', () => {
 		const constraints = {
+			posts: {
+				foreignKeys: [
+					ref('users', {
+						schema: 'auth',
+						columns: ['authorId'],
+						references: ['id'],
+					}),
+				],
+			},
 			memberships: {
 				foreignKeys: [
 					ref('users', {
@@ -51,7 +80,7 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 				},
 				posts: {
 					id: { type: 'uuid', primaryKey: true },
-					authorId: ref('users', { schema: 'auth' }),
+					authorId: 'uuid',
 				},
 				memberships: {
 					id: { type: 'uuid', primaryKey: true },
@@ -75,15 +104,17 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			table: 'users',
 			columns: ['tenantId', 'id'],
 		});
+		expect(model.externalTables.has('users')).toBe(false);
+		expect(model.getRelation('posts.author')).toBeUndefined();
 	});
 
-	it('accepts table-level external FK without validating a local target table', () => {
+	it('accepts table-level external FK without validating a local target table or adding externalTables membership', () => {
 		const constraints = {
 			memberships: {
 				foreignKeys: [
-					ref('users', {
+					ref('tenants', {
 						schema: 'auth',
-						columns: ['userId'],
+						columns: ['tenantId'],
 						references: ['id'],
 					}),
 				],
@@ -93,17 +124,17 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			{
 				memberships: {
 					id: { type: 'uuid', primaryKey: true },
-					userId: 'uuid',
+					tenantId: 'uuid',
 				},
 			},
 			constraints,
 		);
 
 		const fk = db.model.tables.get('memberships')?.foreignKeys[0];
-		expect(db.model.externalTables.has('users')).toBe(true);
+		expect(db.model.externalTables.has('tenants')).toBe(false);
 		expect(fk?.references).toMatchObject({
 			schema: 'auth',
-			table: 'users',
+			table: 'tenants',
 			columns: ['id'],
 		});
 	});
@@ -197,17 +228,31 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 		);
 	});
 
-	it('does not treat a schema-qualified same-name ref as self-referential', () => {
-		const db = schema({
-			accounts: {
-				id: { type: 'uuid', primaryKey: true },
-				parentId: ref('accounts', { schema: 'auth' }),
+	it('does not treat a schema-qualified same-name table-level FK as self-referential or relational', () => {
+		const db = schema(
+			{
+				accounts: {
+					id: { type: 'uuid', primaryKey: true },
+					parentId: 'uuid',
+				},
 			},
-		});
+			{
+				accounts: {
+					foreignKeys: [
+						ref('accounts', {
+							schema: 'auth',
+							columns: ['parentId'],
+							references: ['id'],
+						}),
+					],
+				},
+			},
+		);
 
 		const table = db.model.tables.get('accounts');
 		expect(table?.pseudoColumns ?? []).toHaveLength(0);
 		expect(db.model.externalTables.has('accounts')).toBe(false);
+		expect(db.model.getRelationsFrom('accounts')).toEqual([]);
 	});
 
 	it('leaves referenced schema undefined when no schema is declared', () => {

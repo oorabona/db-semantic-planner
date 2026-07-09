@@ -300,7 +300,10 @@ export function detectForeignKeys(
 		// PRIORITY 1: Explicit `references` takes precedence
 		if (colDef.references) {
 			const targetTable = colDef.references.table;
-			if (tableNames.has(targetTable)) {
+			if (
+				colDef.references.schema === undefined &&
+				tableNames.has(targetTable)
+			) {
 				// Infer relation name from column (remove 'Id' suffix if present)
 				const inferredName = colName.endsWith('Id')
 					? colName.slice(0, -2)
