@@ -799,6 +799,8 @@ const UNIQUE_CAPABLE_INDEX_METHODS = new Set(['btree', 'hash']);
  *
  * For ALL FKs (single-column and composite):
  *   - Source and target column counts must match.
+ *
+ * For local-target FKs:
  *   - Every referenced column must exist on the target table.
  *
  * For single-column FKs only (the case `buildRefColumn` produces where both
@@ -821,21 +823,6 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 
 	for (const table of tables) {
 		for (const fk of table.foreignKeys) {
-			if (fk.references.schema !== undefined) continue;
-
-			const target = tableMap.get(fk.references.table);
-			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
-			// but table-level constraints.foreignKeys bypass that — so this gate is
-			// the only barrier against constraint-based FKs to non-existent tables.
-			// Throw rather than skip silently.
-			if (!target) {
-				throw new SchemaValidationError(
-					`Foreign key in '${table.name}' references non-existent table '${fk.references.table}'`,
-					table.name,
-					fk.columns[0],
-				);
-			}
-
 			// R4-1: Source-column existence — guard against constraint-level FKs that
 			// declare `columns: [...]` referencing local columns that don't exist on
 			// the source table. Column-level FKs (via buildRefColumn) can't trigger
@@ -872,7 +859,22 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				);
 			}
 
-			// R6-3b: every referenced column must exist on the target table — applies to ALL FKs.
+			if (fk.references.schema !== undefined) continue;
+
+			const target = tableMap.get(fk.references.table);
+			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
+			// but table-level constraints.foreignKeys bypass that — so this gate is
+			// the only barrier against constraint-based FKs to non-existent tables.
+			// Throw rather than skip silently.
+			if (!target) {
+				throw new SchemaValidationError(
+					`Foreign key in '${table.name}' references non-existent table '${fk.references.table}'`,
+					table.name,
+					fk.columns[0],
+				);
+			}
+
+			// R6-3b: every referenced column must exist on local target tables.
 			for (const refCol of fk.references.columns) {
 				if (!target.columns.some((c) => c.name === refCol)) {
 					throw new SchemaValidationError(
@@ -1184,6 +1186,13 @@ function buildRefColumn(
 	// This prevents a type mismatch when the FK points at a unique non-PK column
 	// that has a different type than the table's PK (e.g. email:string vs id:uuid).
 	const targetDef = definition[columnDef.target];
+	if (columnDef.options.schema !== undefined && !targetDef) {
+		throw new SchemaValidationError(
+			`Cannot infer column type for foreign key column '${columnName}' to external table '${columnDef.options.schema}.${columnDef.target}'. Declare the source column with an explicit type and add the external foreign key at the table level with SchemaConstraints.foreignKeys.`,
+			undefined,
+			columnName,
+		);
+	}
 	const targetCol =
 		columnDef.options.references?.length === 1
 			? columnDef.options.references[0]
