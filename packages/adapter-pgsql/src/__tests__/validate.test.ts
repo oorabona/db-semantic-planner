@@ -142,6 +142,14 @@ describe('validateCheckExpression', () => {
 			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
 		);
 	});
+
+	it('does not treat a dollar tag after a non-ASCII identifier character as a string literal', () => {
+		const sql = 'xé$tag$; DROP TABLE t$tag$';
+		const error = getCheckValidationError(sql);
+		expect(error.message).toBe(
+			`Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "${sql}"`,
+		);
+	});
 });
 
 describe('Identifier Validation', () => {
