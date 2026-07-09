@@ -1931,9 +1931,18 @@ export async function getSchemaFromDb<
 				}
 
 				// FK column → ref() definition
+				const usesDefaultReferences =
+					fk.refs.length === 1 && fk.refs[0] === 'id';
 				tableDef[column.name] = ref(fk.target, {
 					nullable: fk.nullable,
 					unique: fk.unique,
+					...(!usesDefaultReferences ? { references: fk.refs } : {}),
+					...(fk.onDelete !== undefined && fk.onDelete !== 'NO ACTION'
+						? { onDelete: fk.onDelete }
+						: {}),
+					...(fk.onUpdate !== undefined && fk.onUpdate !== 'NO ACTION'
+						? { onUpdate: fk.onUpdate }
+						: {}),
 				});
 			} else {
 				// Regular column → JS type
