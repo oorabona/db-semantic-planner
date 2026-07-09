@@ -510,6 +510,7 @@ function buildTableIRFromDefinition(
 		const targetColumn = fk.references.columns[0];
 		if (
 			fk.references.table === tableName &&
+			fk.references.schema === undefined &&
 			fkColumn !== undefined &&
 			targetColumn !== undefined
 		) {
@@ -747,7 +748,34 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 		);
 	}
 
-	return new ModelIRImpl(tables, relations);
+	const externalTableNames = deriveExternalTableNames(tables);
+
+	return new ModelIRImpl(
+		tables,
+		relations,
+		undefined,
+		undefined,
+		undefined,
+		externalTableNames,
+	);
+}
+
+function deriveExternalTableNames(
+	tables: ReadonlyMap<string, TableIR>,
+): Set<string> {
+	const managedTableNames = new Set(tables.keys());
+	const externalTableNames = new Set<string>();
+	for (const table of tables.values()) {
+		for (const fk of table.foreignKeys) {
+			if (
+				fk.references.schema !== undefined &&
+				!managedTableNames.has(fk.references.table)
+			) {
+				externalTableNames.add(fk.references.table);
+			}
+		}
+	}
+	return externalTableNames;
 }
 
 /**

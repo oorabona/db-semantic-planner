@@ -1383,6 +1383,54 @@ describe('schema coverage', () => {
 			expect(postsDef).toBeDefined();
 		});
 
+		it('should preserve cross-schema FK columns via introspection', async () => {
+			const { getSchemaFromDb } = await import('./schema.js');
+
+			const mockModel = {
+				tables: new Map([
+					[
+						'invoices',
+						{
+							name: 'invoices',
+							columns: [
+								{ name: 'id', type: 'uuid', nullable: false },
+								{
+									name: 'customerId',
+									type: 'uuid',
+									nullable: false,
+									unique: false,
+								},
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['customerId'],
+									references: {
+										schema: 'auth',
+										table: 'customers',
+										columns: ['id'],
+									},
+								},
+							],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: (name) => mockModel.tables.get(name),
+				getRelation: () => undefined,
+				getRelationsFrom: () => [],
+			};
+
+			const adapter = { introspect: async () => mockModel };
+
+			const result = await getSchemaFromDb(adapter);
+			const customerRef = result.definition.invoices.customerId;
+			expect(isRef(customerRef)).toBe(true);
+			expect(customerRef.target).toBe('customers');
+			expect(customerRef.options.schema).toBe('auth');
+		});
+
 		it('should pass options to adapter introspect', async () => {
 			const { getSchemaFromDb } = await import('./schema.js');
 			let capturedOptions: unknown;
