@@ -14,6 +14,23 @@ import {
 } from '../schema.js';
 
 describe('buildRefColumn — column-level non-PK FK references', () => {
+	it('external FK builds without a local table', () => {
+		const db = schema({
+			posts: {
+				id: { type: 'uuid', primaryKey: true },
+				authorId: ref('users', { schema: 'auth' }),
+			},
+		});
+
+		const fk = db.model.tables.get('posts')?.foreignKeys[0];
+		expect(db.model.externalTables.has('users')).toBe(true);
+		expect(fk?.references).toEqual({
+			schema: 'auth',
+			table: 'users',
+			columns: ['id'],
+		});
+	});
+
 	it('round-trips declared referenced schema through typed column and table-level refs', () => {
 		const constraints = {
 			memberships: {
@@ -58,6 +75,50 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			table: 'users',
 			columns: ['tenantId', 'id'],
 		});
+	});
+
+	it('accepts table-level external FK without validating a local target table', () => {
+		const constraints = {
+			memberships: {
+				foreignKeys: [
+					ref('users', {
+						schema: 'auth',
+						columns: ['userId'],
+						references: ['id'],
+					}),
+				],
+			},
+		};
+		const db = schema(
+			{
+				memberships: {
+					id: { type: 'uuid', primaryKey: true },
+					userId: 'uuid',
+				},
+			},
+			constraints,
+		);
+
+		const fk = db.model.tables.get('memberships')?.foreignKeys[0];
+		expect(db.model.externalTables.has('users')).toBe(true);
+		expect(fk?.references).toMatchObject({
+			schema: 'auth',
+			table: 'users',
+			columns: ['id'],
+		});
+	});
+
+	it('does not treat a schema-qualified same-name ref as self-referential', () => {
+		const db = schema({
+			accounts: {
+				id: { type: 'uuid', primaryKey: true },
+				parentId: ref('accounts', { schema: 'auth' }),
+			},
+		});
+
+		const table = db.model.tables.get('accounts');
+		expect(table?.pseudoColumns ?? []).toHaveLength(0);
+		expect(db.model.externalTables.has('accounts')).toBe(false);
 	});
 
 	it('leaves referenced schema undefined when no schema is declared', () => {

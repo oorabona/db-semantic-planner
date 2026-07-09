@@ -703,6 +703,7 @@ export function schemaToModelIR(
 				]),
 			)
 		: undefined;
+	const externalTableNames = deriveExternalTableNames(tables);
 
 	return new ModelIRImpl(
 		tableMap,
@@ -710,7 +711,24 @@ export function schemaToModelIR(
 		undefined,
 		extensions,
 		sequenceMap,
+		externalTableNames,
 	);
+}
+
+function deriveExternalTableNames(tables: readonly TableIR[]): Set<string> {
+	const managedTableNames = new Set(tables.map((table) => table.name));
+	const externalTableNames = new Set<string>();
+	for (const table of tables) {
+		for (const fk of table.foreignKeys) {
+			if (
+				fk.references.schema !== undefined &&
+				!managedTableNames.has(fk.references.table)
+			) {
+				externalTableNames.add(fk.references.table);
+			}
+		}
+	}
+	return externalTableNames;
 }
 
 // ============================================================================
@@ -727,7 +745,10 @@ function validateRefs(
 		for (const [columnName, columnDef] of Object.entries(tableDef)) {
 			if (isRef(columnDef)) {
 				// Check target exists
-				if (!tableSet.has(columnDef.target)) {
+				if (
+					columnDef.options.schema === undefined &&
+					!tableSet.has(columnDef.target)
+				) {
 					throw new SchemaValidationError(
 						`Foreign key '${columnName}' references non-existent table '${columnDef.target}'`,
 						tableName,
@@ -736,7 +757,11 @@ function validateRefs(
 				}
 
 				// Self-ref requires roles
-				if (columnDef.target === tableName && !columnDef.options.roles) {
+				if (
+					columnDef.options.schema === undefined &&
+					columnDef.target === tableName &&
+					!columnDef.options.roles
+				) {
 					throw new SchemaValidationError(
 						`Self-referential FK '${columnName}' must have 'roles' option with parent/children names`,
 						tableName,
@@ -745,7 +770,11 @@ function validateRefs(
 				}
 
 				// Roles only valid for self-ref
-				if (columnDef.target !== tableName && columnDef.options.roles) {
+				if (
+					(columnDef.options.schema !== undefined ||
+						columnDef.target !== tableName) &&
+					columnDef.options.roles
+				) {
 					throw new SchemaValidationError(
 						`'roles' option is only valid for self-referential FKs, but '${columnName}' references '${columnDef.target}'`,
 						tableName,
@@ -792,6 +821,8 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 
 	for (const table of tables) {
 		for (const fk of table.foreignKeys) {
+			if (fk.references.schema !== undefined) continue;
+
 			const target = tableMap.get(fk.references.table);
 			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
 			// but table-level constraints.foreignKeys bypass that — so this gate is
@@ -1291,7 +1322,11 @@ function buildPseudoColumns(
 		typeof finalPk === 'string' ? finalPk : (finalPk?.[0] ?? 'id');
 
 	for (const ref of refs) {
-		if (ref.options.roles && ref.target === tableName) {
+		if (
+			ref.options.schema === undefined &&
+			ref.options.roles &&
+			ref.target === tableName
+		) {
 			pseudoColumns.push(
 				createPseudoColumnMetadata(
 					tableName,
@@ -1478,6 +1513,9 @@ function buildRelations(
 		const refs = refsByTable.get(tableName) || [];
 
 		for (const ref of refs) {
+			// RelationIR has no schema field; schema-qualified refs are DDL FKs only.
+			if (ref.options.schema !== undefined) continue;
+
 			if (ref.options.roles) {
 				// Self-referential - generate 4 relations
 				const roles = ref.options.roles;
@@ -1631,6 +1669,7 @@ function addCompositeConstraintRelations(
 		if (!foreignKeys) continue;
 
 		for (const fkRef of foreignKeys) {
+			if (fkRef.options.schema !== undefined) continue;
 			if (!tableSet.has(fkRef.target)) continue;
 
 			const columns = fkRef.options.columns;
@@ -1779,12 +1818,15 @@ export async function getSchemaFromDb<
 	// ForeignKeyIR uses columns[] array and references.table
 	const fkLookup = new Map<
 		string,
-		Map<string, { target: string; nullable: boolean; unique: boolean }>
+		Map<
+			string,
+			{ target: string; schema?: string; nullable: boolean; unique: boolean }
+		>
 	>();
 	for (const table of model.tables.values()) {
 		const tableFks = new Map<
 			string,
-			{ target: string; nullable: boolean; unique: boolean }
+			{ target: string; schema?: string; nullable: boolean; unique: boolean }
 		>();
 		for (const fk of table.foreignKeys) {
 			// Only handle single-column FKs for now (composite FKs are rare in schema defs)
@@ -1795,6 +1837,9 @@ export async function getSchemaFromDb<
 			const column = table.columns.find((c) => c.name === fkColumn);
 			tableFks.set(fkColumn, {
 				target: fk.references.table,
+				...(fk.references.schema !== undefined
+					? { schema: fk.references.schema }
+					: {}),
 				nullable: column?.nullable ?? true,
 				unique: column?.unique ?? false,
 			});
@@ -1815,6 +1860,7 @@ export async function getSchemaFromDb<
 			if (fk) {
 				// FK column → ref() definition
 				tableDef[column.name] = ref(fk.target, {
+					...(fk.schema !== undefined ? { schema: fk.schema } : {}),
 					nullable: fk.nullable,
 					unique: fk.unique,
 				});

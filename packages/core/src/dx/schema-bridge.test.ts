@@ -203,6 +203,64 @@ describe('buildModelFromSchema', () => {
 			expect(tableFk?.references.schema).toBe('auth');
 		});
 
+		it('should track generated schema-qualified FK targets as external tables', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					posts: {
+						id: { type: 'uuid', primaryKey: true },
+						authorId: {
+							type: 'uuid',
+							references: { schema: 'auth', table: 'users' },
+						},
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const fk = model.getTable('posts')?.foreignKeys[0];
+			expect(model.externalTables.has('users')).toBe(true);
+			expect(fk?.references).toMatchObject({
+				schema: 'auth',
+				table: 'users',
+				columns: ['id'],
+			});
+		});
+
+		it('should not create pseudo-columns for generated schema-qualified same-name FKs', () => {
+			const schema: GeneratedSchema = {
+				tables: {
+					accounts: {
+						id: { type: 'uuid', primaryKey: true },
+						parentId: {
+							type: 'uuid',
+							references: { schema: 'auth', table: 'accounts' },
+						},
+					},
+				},
+				relations: {},
+				hints: {},
+				conventions: {
+					fkPattern: '{singular}Id',
+					pluralize: true,
+					timestamps: [],
+					fkAutoIndex: false,
+				},
+			};
+
+			const model = buildModelFromSchema(schema);
+			const table = model.getTable('accounts');
+			expect(table?.pseudoColumns ?? []).toHaveLength(0);
+			expect(model.externalTables.has('accounts')).toBe(false);
+		});
+
 		it('should leave referenced schema undefined when omitted from generated foreign keys', () => {
 			const schema: GeneratedSchema = {
 				tables: {
