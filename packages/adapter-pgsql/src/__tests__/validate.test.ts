@@ -222,6 +222,25 @@ describe('Identifier Validation', () => {
 		});
 
 		describe('invalid identifiers', () => {
+			it('rejects forged non-string identifiers before coercion', () => {
+				const forgedIdentifier = {
+					length: 'users'.length,
+					toString: () => 'users',
+					replace: () => '"; DROP TABLE x; --',
+					includes: () => false,
+				};
+
+				expect(() =>
+					validateIdentifier(forgedIdentifier as unknown as string, 'alias'),
+				).toThrow(
+					'Invalid alias identifier: expected a string, received object',
+				);
+				expect(() => validateIdentifier('users', 'alias')).not.toThrow();
+				expect(() => validateIdentifier('bad-name', 'alias')).toThrow(
+					InvalidIdentifierError,
+				);
+			});
+
 			it('rejects empty string', () => {
 				expect(() => validateIdentifier('', 'table')).toThrow(
 					InvalidIdentifierError,
