@@ -17,7 +17,11 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
-import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	formatStorageParameterValue,
+	validateIdentifier,
+	validateSqlExpression,
+} from '../validate.js';
 import { generateCommentsPhase } from './phases/comments.js';
 import { generateConstraintsPhase } from './phases/constraints.js';
 import { generateDropStatementsPhase } from './phases/drop-statements.js';
@@ -395,13 +399,13 @@ export function generateCreateIndex(
 	const nullsNotDistinct =
 		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
 
-	// S-1: validate WITH storage parameter keys before interpolation
+	// Validate WITH storage parameter keys and format values before interpolation.
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
 			? ` WITH (${Object.entries(idx.with)
 					.map(([k, v]) => {
 						validateIdentifier(k, 'alias');
-						return `${k} = ${v}`;
+						return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
 					})
 					.join(', ')})`
 			: '';

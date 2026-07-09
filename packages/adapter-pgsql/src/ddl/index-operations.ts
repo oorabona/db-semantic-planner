@@ -12,7 +12,11 @@ import type {
 	DropIndexOptions,
 	IndexColumnDef,
 } from '@dbsp/core';
-import { validateIdentifier, validateSqlExpression } from '../validate.js';
+import {
+	formatStorageParameterValue,
+	validateIdentifier,
+	validateSqlExpression,
+} from '../validate.js';
 import { quoteIdent, validateIndexMethod } from './phases/utils.js';
 
 // ---------------------------------------------------------------------------
@@ -110,12 +114,12 @@ export function generateCreateIndexSQL(
 		parts.push('NULLS NOT DISTINCT');
 	}
 
-	// WITH storage parameters — S-1: validate keys via validateIdentifier (consistent with other paths)
+	// WITH storage parameters: validate keys and format values before interpolation.
 	if (options.with && Object.keys(options.with).length > 0) {
 		const withParams = Object.entries(options.with)
 			.map(([k, v]) => {
 				validateIdentifier(k, 'alias');
-				return `${k} = ${v}`;
+				return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
 			})
 			.join(', ');
 		parts.push(`WITH (${withParams})`);

@@ -19,8 +19,11 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import {
+	assertNumericLiteral,
 	assertString,
+	formatStorageParameterValue,
 	validateCheckExpression,
+	validateDbTypeName,
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
@@ -213,11 +216,22 @@ export function buildSequenceClause(
 	includeCycleNoCycle = false,
 ): string {
 	const parts: string[] = [`${verb} ${seqName}`];
-	if (seq.startWith !== undefined) parts.push(`START WITH ${seq.startWith}`);
+	if (seq.startWith !== undefined)
+		parts.push(
+			`START WITH ${assertNumericLiteral(seq.startWith, 'sequence START WITH')}`,
+		);
 	if (seq.incrementBy !== undefined)
-		parts.push(`INCREMENT BY ${seq.incrementBy}`);
-	if (seq.minValue !== undefined) parts.push(`MINVALUE ${seq.minValue}`);
-	if (seq.maxValue !== undefined) parts.push(`MAXVALUE ${seq.maxValue}`);
+		parts.push(
+			`INCREMENT BY ${assertNumericLiteral(seq.incrementBy, 'sequence INCREMENT BY')}`,
+		);
+	if (seq.minValue !== undefined)
+		parts.push(
+			`MINVALUE ${assertNumericLiteral(seq.minValue, 'sequence MINVALUE')}`,
+		);
+	if (seq.maxValue !== undefined)
+		parts.push(
+			`MAXVALUE ${assertNumericLiteral(seq.maxValue, 'sequence MAXVALUE')}`,
+		);
 	if (includeCycleNoCycle) {
 		// ALTER SEQUENCE: emit CYCLE or NO CYCLE when the flag is defined
 		if (seq.cycle !== undefined) parts.push(seq.cycle ? 'CYCLE' : 'NO CYCLE');
@@ -500,7 +514,9 @@ function upAddColumn(
 
 function upAlterColumnType(change: SchemaChange, schemaName?: string): string {
 	const col = change.meta?.column as ColumnIR | undefined;
-	const toType = col ? mapColumnType(col) : String(change.meta?.toType);
+	const toType = col
+		? mapColumnType(col)
+		: validateDbTypeName(change.meta?.toType as string);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${toType};`;
 }
 
@@ -639,13 +655,13 @@ function upCreateIndex(
 	const nullsNotDistinct =
 		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
 
-	// S-1: validate WITH storage parameter keys (values are numeric literals from IR)
+	// Validate WITH storage parameter keys and format values before interpolation.
 	const withParams =
 		idx.with && Object.keys(idx.with).length > 0
 			? ` WITH (${Object.entries(idx.with)
 					.map(([k, v]) => {
 						validateIdentifier(k, 'alias');
-						return `${k} = ${v}`;
+						return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
 					})
 					.join(', ')})`
 			: '';
@@ -997,15 +1013,16 @@ function changeToDownSQL(
 			};
 
 		case 'alter_column_type': {
-			const fromType = change.meta?.fromType as string | undefined;
-			if (!fromType) {
+			const fromType = change.meta?.fromType;
+			if (fromType == null) {
 				return {
 					sql: `-- WARNING: Cannot reverse alter_column_type "${change.table}"."${change.column}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
+			const safeFromType = validateDbTypeName(fromType as string);
 			return {
-				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${fromType};`,
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${safeFromType};`,
 				destructive: true,
 			};
 		}
