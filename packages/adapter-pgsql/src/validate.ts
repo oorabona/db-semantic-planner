@@ -610,6 +610,12 @@ export function validateSqlExpression(sql: string, context: string): void {
  * unterminated literal.
  */
 export function validateCheckExpression(sql: string, context: string): void {
+	if (typeof sql !== 'string') {
+		throw new Error(
+			`Unsafe SQL expression in ${context}: expected a string, received ${typeof sql}`,
+		);
+	}
+
 	let i = 0;
 	let singleQuoted = false;
 	let dollarQuoteDelimiter: string | undefined;

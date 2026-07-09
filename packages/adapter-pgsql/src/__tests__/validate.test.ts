@@ -25,6 +25,29 @@ function getCheckValidationError(sql: string): Error {
 }
 
 describe('validateCheckExpression', () => {
+	it('rejects non-string input before coercion', () => {
+		const forgedExpression = {
+			toString: () => 'CHECK (true); DROP TABLE users; --',
+		};
+
+		expect(() =>
+			validateCheckExpression(forgedExpression as unknown as string, 'test check'),
+		).toThrow(
+			'Unsafe SQL expression in test check: expected a string, received object',
+		);
+		expect(() =>
+			validateCheckExpression('CHECK (amount > 0)', 'test check'),
+		).not.toThrow();
+		expect(() =>
+			validateCheckExpression(
+				'CHECK (true); DROP TABLE users; --',
+				'test check',
+			),
+		).toThrow(
+			'Unsafe SQL expression in test check: contains forbidden token ";" outside string literal. Value: "CHECK (true); DROP TABLE users; --"',
+		);
+	});
+
 	it('accepts semicolon and line-comment marker inside single-quoted literals', () => {
 		expect(() =>
 			validateCheckExpression(
