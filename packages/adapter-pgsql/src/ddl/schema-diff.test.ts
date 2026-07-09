@@ -337,6 +337,37 @@ describe('compareSchemata', () => {
 			expect(kinds).not.toContain('create_index');
 		});
 
+		it('should carry the real DB unique constraint name when removing column unique', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string', unique: false })],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'email',
+							type: 'string',
+							unique: true,
+							uniqueConstraintName: 'users_email_custom_uq',
+						}),
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toHaveLength(1);
+			expect(diff.changes[0]!.kind).toBe('alter_column_unique');
+			expect(diff.changes[0]!.meta).toEqual({
+				unique: false,
+				constraintName: 'users_email_custom_uq',
+			});
+		});
+
 		it('should not flag unchanged missing and false unique values', () => {
 			const schema = makeModel([
 				makeTable({
@@ -1527,6 +1558,51 @@ describe('compareSchemata', () => {
 					],
 				}),
 			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should preserve referenced schema while normalizing FK casing', () => {
+			const schema = makeModel(
+				[
+					makeTable({
+						name: 'apiTokens',
+						columns: [makeCol({ name: 'tenantUserId', type: 'uuid' })],
+						foreignKeys: [
+							{
+								columns: ['tenantUserId'],
+								references: {
+									schema: 'authSchema',
+									table: 'tenantUsers',
+									columns: ['id'],
+								},
+							},
+						],
+					}),
+				],
+				['tenantUsers'],
+			);
+			const db = makeModel(
+				[
+					makeTable({
+						name: 'api_tokens',
+						columns: [makeCol({ name: 'tenant_user_id', type: 'uuid' })],
+						foreignKeys: [
+							{
+								columns: ['tenant_user_id'],
+								references: {
+									schema: 'auth_schema',
+									table: 'tenant_users',
+									columns: ['id'],
+								},
+							},
+						],
+					}),
+				],
+				['tenant_users'],
+			);
 
 			const diff = compareSchemata(schema, db, snakeCaseOpts);
 

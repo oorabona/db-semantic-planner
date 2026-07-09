@@ -339,6 +339,9 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 			references: {
 				table: toDb(fk.references.table),
 				columns: fk.references.columns.map(toDb),
+				...(fk.references.schema !== undefined
+					? { schema: toDb(fk.references.schema) }
+					: {}),
 			},
 		})),
 		indexes: table.indexes.map((idx) => ({
@@ -473,7 +476,12 @@ function compareColumnDetails(
 			column: schema.name,
 			destructive: false,
 			details: `Change unique of "${schema.name}" from ${dbUnique} to ${schemaUnique}`,
-			meta: { unique: schemaUnique },
+			meta: {
+				unique: schemaUnique,
+				...(db.uniqueConstraintName !== undefined
+					? { constraintName: db.uniqueConstraintName }
+					: {}),
+			},
 		});
 	}
 

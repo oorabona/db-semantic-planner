@@ -373,6 +373,28 @@ describe('generateMigrationSQL', () => {
 				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
 			]);
 		});
+
+		it('should use the real DB constraint name when dropping column unique', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_unique',
+						table: 'users',
+						column: 'email',
+						destructive: false,
+						details: '',
+						meta: {
+							unique: false,
+							constraintName: 'users_email_custom_uq',
+						},
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_custom_uq";',
+			]);
+		});
 	});
 
 	describe('PRIMARY KEY', () => {
@@ -1203,6 +1225,22 @@ describe('generateDownSQL', () => {
 				},
 				expectedSql:
 					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
+			},
+			{
+				name: 'alter_column_unique true DOWN drops the recorded unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: {
+						unique: true,
+						constraintName: 'users_email_custom_uq',
+					},
+				},
+				expectedSql:
+					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_custom_uq";',
 			},
 			{
 				name: 'alter_column_unique false DOWN adds the unique constraint',

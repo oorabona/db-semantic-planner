@@ -114,6 +114,7 @@ interface RawIndex {
 interface RawUniqueColumn {
 	table_name: string;
 	column_name: string;
+	constraint_name: string;
 }
 
 interface RawPartition {
@@ -365,14 +366,14 @@ async function queryAllCatalogs(
 		),
 		// 5. Single-column UNIQUE constraints tracked as ColumnIR.unique
 		pool.query<RawUniqueColumn>(
-			`SELECT rel.relname AS table_name, att.attname AS column_name
-			 FROM pg_constraint c
-			 JOIN pg_class rel ON rel.oid = c.conrelid
-			 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
-			 JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = c.conkey[1]
-			 WHERE c.contype = 'u'
-			   AND array_length(c.conkey, 1) = 1
-			   AND ns.nspname = $1`,
+			`SELECT rel.relname AS table_name, att.attname AS column_name, c.conname AS constraint_name
+				 FROM pg_constraint c
+				 JOIN pg_class rel ON rel.oid = c.conrelid
+				 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
+				 JOIN pg_attribute att ON att.attrelid = c.conrelid AND att.attnum = c.conkey[1]
+				 WHERE c.contype = 'u'
+				   AND array_length(c.conkey, 1) = 1
+				   AND ns.nspname = $1`,
 			[schema],
 		),
 		// 6. ENUM types
@@ -622,17 +623,20 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 	return result;
 }
 
-/** Build a Map<tableName, uniqueColumnNames> from raw unique constraint rows. */
+/** Build a Map<tableName, Map<columnName, constraintName>> from raw unique constraint rows. */
 function buildUniqueColumnMap(
 	rows: RawUniqueColumn[],
-): Map<string, Set<string>> {
-	const result = new Map<string, Set<string>>();
+): Map<string, Map<string, string>> {
+	const result = new Map<string, Map<string, string>>();
 	for (const row of rows) {
 		const existing = result.get(row.table_name);
 		if (existing) {
-			existing.add(row.column_name);
+			existing.set(row.column_name, row.constraint_name);
 		} else {
-			result.set(row.table_name, new Set([row.column_name]));
+			result.set(
+				row.table_name,
+				new Map([[row.column_name, row.constraint_name]]),
+			);
 		}
 	}
 	return result;
@@ -800,7 +804,7 @@ interface TableIRContext {
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
-	uniqueColumns: Map<string, Set<string>>;
+	uniqueColumns: Map<string, Map<string, string>>;
 	tableChecks: Map<string, CheckConstraintIR[]>;
 	tableComments: Map<string, string>;
 	columnComments: Map<string, string>;
@@ -835,6 +839,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 
 		const colComment =
 			ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+		const uniqueConstraintName = uniqueColumns?.get(col.column_name);
 
 		return {
 			name: col.column_name,
@@ -847,7 +852,9 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 				? { default: { sql: col.column_default } }
 				: {}),
 			originalDbType: col.udt_name,
-			...(uniqueColumns?.has(col.column_name) ? { unique: true } : {}),
+			...(uniqueConstraintName !== undefined
+				? { unique: true, uniqueConstraintName }
+				: {}),
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),
 			...(colComment ? { comment: colComment } : {}),
@@ -981,7 +988,12 @@ export async function introspect(
 	const extensions: string[] = raw.extensions.map((r) => r.name);
 	const sequenceMap = buildSequenceMap(raw.sequences);
 	const relations = inferRelations(fksByConstraint, tableNames);
-	const hierarchies = detectHierarchies(tables, fksByConstraint, tableNames);
+	const hierarchies = detectHierarchies(
+		tables,
+		fksByConstraint,
+		tableNames,
+		schema,
+	);
 	const externalTables = new Set<string>();
 	for (const fk of fksByConstraint.values()) {
 		if (
@@ -1106,6 +1118,7 @@ function detectHierarchies(
 	tables: Map<string, TableIR>,
 	fksByConstraint: Map<string, FKEntry>,
 	filteredTables: string[],
+	schema: string,
 ): DetectedHierarchy[] {
 	const hierarchies: DetectedHierarchy[] = [];
 	const filteredSet = new Set(filteredTables);
@@ -1120,7 +1133,11 @@ function detectHierarchies(
 		if (!filteredSet.has(fk.source) || !filteredSet.has(fk.target)) continue;
 
 		// Adjacency: self-referential FK
-		if (fk.source === fk.target && fk.cols.length === 1) {
+		if (
+			fk.source === fk.target &&
+			fk.cols.length === 1 &&
+			(fk.targetSchema === undefined || fk.targetSchema === schema)
+		) {
 			const table = tables.get(fk.source);
 			const pk = table?.primaryKey;
 			const nodeIdColumn =

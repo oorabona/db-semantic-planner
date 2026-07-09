@@ -536,9 +536,12 @@ function dropColumnUniqueSQL(
 	table: string,
 	column: string,
 	schemaName?: string,
+	constraintName?: string,
 ): string {
-	const constraintName = quoteIdent(uniqueName(table, column), 'alias');
-	return `ALTER TABLE ${qualifyTable(table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
+	const name = constraintName ?? uniqueName(table, column);
+	if (constraintName !== undefined) validateIdentifier(constraintName, 'alias');
+	const quotedConstraintName = quoteIdent(name, 'alias');
+	return `ALTER TABLE ${qualifyTable(table, schemaName)} DROP CONSTRAINT IF EXISTS ${quotedConstraintName};`;
 }
 
 function upAlterColumnUnique(
@@ -547,9 +550,15 @@ function upAlterColumnUnique(
 ): string | undefined {
 	const unique = change.meta?.unique as boolean | undefined;
 	if (unique === undefined || !change.column) return undefined;
+	const constraintName = change.meta?.constraintName as string | undefined;
 	return unique
 		? addColumnUniqueSQL(change.table, change.column, schemaName)
-		: dropColumnUniqueSQL(change.table, change.column, schemaName);
+		: dropColumnUniqueSQL(
+				change.table,
+				change.column,
+				schemaName,
+				constraintName,
+			);
 }
 
 function upAddPrimaryKey(change: SchemaChange, schemaName?: string): string {
@@ -1035,9 +1044,15 @@ function changeToDownSQL(
 					destructive: true,
 				};
 			}
+			const constraintName = change.meta?.constraintName as string | undefined;
 			return {
 				sql: unique
-					? dropColumnUniqueSQL(change.table, change.column, schemaName)
+					? dropColumnUniqueSQL(
+							change.table,
+							change.column,
+							schemaName,
+							constraintName,
+						)
 					: addColumnUniqueSQL(change.table, change.column, schemaName),
 				destructive: false,
 			};
@@ -1163,12 +1178,12 @@ function changeToDownSQL(
 			return {
 				sql: buildDoBlock(
 					'BEGIN ALTER TABLE ' +
-					qualifyTable(change.table, schemaName) +
-					' ADD CONSTRAINT ' +
-					quoteIdent(check.name, 'alias') +
-					' ' +
-					check.expression +
-					'; EXCEPTION WHEN duplicate_object THEN NULL; END',
+						qualifyTable(change.table, schemaName) +
+						' ADD CONSTRAINT ' +
+						quoteIdent(check.name, 'alias') +
+						' ' +
+						check.expression +
+						'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 				),
 				// Allowlisted: re-adds the dropped CHECK constraint from metadata.
 				destructive: false,

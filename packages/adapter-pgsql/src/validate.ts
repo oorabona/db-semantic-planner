@@ -709,7 +709,7 @@ function isIdentifierContinuationBeforeDollarQuote(ch: string): boolean {
 	// PostgreSQL also permits "$" after the first identifier character; blocking
 	// a delimiter immediately after "$" prevents opening inside identifiers such
 	// as a$$tag$.
-	return /[A-Za-z0-9_$]/.test(ch);
+	return /[A-Za-z0-9_$]/.test(ch) || (ch.codePointAt(0) ?? 0) > 127;
 }
 
 function isDollarQuoteTagStart(ch: string | undefined): boolean {

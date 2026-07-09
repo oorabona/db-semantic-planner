@@ -530,6 +530,9 @@ describe('introspect', () => {
 		const uniqueConstraintQuery = mockQuery.mock.calls.find((call) =>
 			String(call[0]).includes('array_length(c.conkey, 1) = 1'),
 		);
+		expect(uniqueConstraintQuery?.[0]).toContain(
+			'c.conname AS constraint_name',
+		);
 		expect(uniqueConstraintQuery?.[0]).toContain("c.contype = 'u'");
 	});
 
@@ -658,7 +661,13 @@ describe('introspect', () => {
 	});
 
 	it('should map single-column unique constraints to column unique', async () => {
-		const uniqueColumns = [{ table_name: 'users', column_name: 'email' }];
+		const uniqueColumns = [
+			{
+				table_name: 'users',
+				column_name: 'email',
+				constraint_name: 'users_email_custom_uq',
+			},
+		];
 		const pool = createMockPool([
 			usersPostsColumns,
 			usersPostsPKs,
@@ -672,6 +681,7 @@ describe('introspect', () => {
 		const email = users.columns.find((col) => col.name === 'email')!;
 		const name = users.columns.find((col) => col.name === 'name')!;
 		expect(email.unique).toBe(true);
+		expect(email.uniqueConstraintName).toBe('users_email_custom_uq');
 		expect(name.unique).toBeUndefined();
 
 		const posts = result.tables.get('posts')!;
@@ -1074,6 +1084,51 @@ describe('introspect: cross-schema foreign keys', () => {
 		expect(fk.onDelete).toBe('SET NULL');
 		expect(fk.onUpdate).toBe('CASCADE');
 		expect(fk.deferred).toBe(true);
+	});
+
+	it('does not detect a same-name cross-schema FK as adjacency hierarchy', async () => {
+		const columns = [
+			{
+				table_name: 'accounts',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'accounts',
+				column_name: 'parent_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'YES',
+				column_default: null,
+			},
+		];
+		const pks = [{ table_name: 'accounts', column_name: 'id' }];
+		const fks = [
+			{
+				constraint_name: 'accounts_parent_id_fkey',
+				source_table: 'accounts',
+				source_column: 'parent_id',
+				target_schema: 'auth',
+				target_table: 'accounts',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		const fk = result.tables.get('accounts')?.foreignKeys[0];
+		expect(fk?.references.schema).toBe('auth');
+		expect(result.hierarchies.find((h) => h.type === 'adjacency')).toBe(
+			undefined,
+		);
 	});
 
 	it('omits references.schema for same-schema FK targets', async () => {
