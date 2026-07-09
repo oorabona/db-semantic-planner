@@ -20,6 +20,7 @@ import {
 	type IndexIR,
 	type JoinDefault,
 	type ModelIR,
+	type OnDeleteAction,
 	type Optionality,
 	type PseudoColumnMetadata,
 	type RelationIR,
@@ -82,7 +83,7 @@ export interface GeneratedColumn {
 		readonly schema?: string;
 		readonly table: string;
 		readonly column?: string;
-		readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+		readonly onDelete?: OnDeleteAction;
 		/** Create an index on this FK column (matches ColumnDefinitionSchema index field) */
 		readonly index?: boolean;
 		/** Role name for parent traversal in self-ref hierarchies (e.g., 'parent') */
@@ -104,8 +105,8 @@ export interface GeneratedForeignKey {
 		readonly table: string;
 		readonly columns: readonly string[];
 	};
-	readonly onDelete?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
-	readonly onUpdate?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+	readonly onDelete?: OnDeleteAction;
+	readonly onUpdate?: OnDeleteAction;
 }
 
 export interface GeneratedIndex {
@@ -1007,13 +1008,21 @@ const OptionalReferenceSchemaNameSchema = v.optional(
 	),
 );
 
+const ForeignKeyActionValues = [
+	'CASCADE',
+	'SET NULL',
+	'SET DEFAULT',
+	'RESTRICT',
+	'NO ACTION',
+] as const satisfies readonly OnDeleteAction[];
+
+const ForeignKeyActionSchema = v.picklist(ForeignKeyActionValues);
+
 const ForeignKeyReferenceSchema = v.object({
 	schema: OptionalReferenceSchemaNameSchema,
 	table: v.string(),
 	column: v.optional(v.string()),
-	onDelete: v.optional(
-		v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
-	),
+	onDelete: v.optional(ForeignKeyActionSchema),
 	index: v.optional(v.boolean()),
 	parentRole: v.optional(v.string()),
 	childRole: v.optional(v.string()),
@@ -1056,12 +1065,8 @@ const TableDefWithConfigSchema = v.object({
 					table: v.string(),
 					columns: v.array(v.string()),
 				}),
-				onDelete: v.optional(
-					v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
-				),
-				onUpdate: v.optional(
-					v.picklist(['CASCADE', 'SET NULL', 'RESTRICT', 'NO ACTION']),
-				),
+				onDelete: v.optional(ForeignKeyActionSchema),
+				onUpdate: v.optional(ForeignKeyActionSchema),
 			}),
 		),
 	),
