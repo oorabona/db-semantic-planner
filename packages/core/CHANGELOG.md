@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.11.1](https://github.com/oorabona/db-semantic-planner/compare/core-v1.11.0...core-v1.11.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **core:** Expose TableDDL helpers on orm.tables[] type ([cfac331](https://github.com/oorabona/db-semantic-planner/commit/cfac33166c0ffb43db88828526749b12837b2737))
+* **core:** Remove PostgreSQL-specific index-list fallback from DB-agnostic core ([e742ae0](https://github.com/oorabona/db-semantic-planner/commit/e742ae05c9bf91a5bf78ec7bfed18ccb02a2dc10))
+
 ## [1.11.0](https://github.com/oorabona/db-semantic-planner/compare/core-v1.10.1...core-v1.11.0) (2026-07-09)
 
 
