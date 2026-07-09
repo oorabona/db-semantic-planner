@@ -1466,6 +1466,75 @@ describe('schema coverage', () => {
 			expect(rebuiltColumn?.unique).toBe(true);
 		});
 
+		it('round-trips composite cross-schema FK from introspection as one table-level constraint', async () => {
+			const { getSchemaFromDb } = await import('./schema.js');
+
+			const mockModel = {
+				tables: new Map([
+					[
+						'memberships',
+						{
+							name: 'memberships',
+							columns: [
+								{ name: 'id', type: 'uuid', nullable: false },
+								{ name: 'tenantKey', type: 'text', nullable: false },
+								{ name: 'userKey', type: 'uuid', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['tenantKey', 'userKey'],
+									references: {
+										schema: 'authData',
+										table: 'tenantUsers',
+										columns: ['tenantKey', 'userKey'],
+									},
+									onDelete: 'CASCADE',
+								},
+							],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: (name) => mockModel.tables.get(name),
+				getRelation: () => undefined,
+				getRelationsFrom: () => [],
+			};
+
+			const adapter = { introspect: async () => mockModel };
+
+			const result = await getSchemaFromDb(adapter);
+			expect(result.definition.memberships.tenantKey).toBe('string');
+			expect(result.definition.memberships.userKey).toBe('string');
+			expect(isRef(result.definition.memberships.tenantKey)).toBe(false);
+			expect(isRef(result.definition.memberships.userKey)).toBe(false);
+
+			const generatedFks = result.constraints?.memberships?.foreignKeys ?? [];
+			expect(generatedFks).toHaveLength(1);
+			expect(generatedFks[0]?.target).toBe('tenantUsers');
+			expect(generatedFks[0]?.options).toMatchObject({
+				schema: 'authData',
+				columns: ['tenantKey', 'userKey'],
+				references: ['tenantKey', 'userKey'],
+				onDelete: 'CASCADE',
+			});
+
+			let rebuilt;
+			expect(() => {
+				rebuilt = schema(result.definition, result.constraints);
+			}).not.toThrow();
+
+			const rebuiltFk = rebuilt.model.getTable('memberships')?.foreignKeys[0];
+			expect(rebuiltFk?.columns).toEqual(['tenantKey', 'userKey']);
+			expect(rebuiltFk?.references).toEqual({
+				schema: 'authData',
+				table: 'tenantUsers',
+				columns: ['tenantKey', 'userKey'],
+			});
+			expect(rebuiltFk?.onDelete).toBe('CASCADE');
+		});
+
 		it('should pass options to adapter introspect', async () => {
 			const { getSchemaFromDb } = await import('./schema.js');
 			let capturedOptions: unknown;
