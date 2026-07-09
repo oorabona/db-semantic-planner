@@ -28,6 +28,17 @@ import {
 } from '../model-ir.js';
 import type { ResolvedSchema } from '../schema-dsl-types.js';
 
+function normalizeReferenceSchema(
+	schemaName: string | null | undefined,
+): string | undefined {
+	if (schemaName == null) return undefined;
+	return schemaName.trim().length > 0 ? schemaName : undefined;
+}
+
+function hasExternalSchema(schemaName: string | null | undefined): boolean {
+	return normalizeReferenceSchema(schemaName) !== undefined;
+}
+
 // ============================================================================
 // Generated Schema Types (from dbsp generate manifest)
 // ============================================================================
@@ -393,7 +404,7 @@ function findRelationForeignKey(
 				.get(sourceTable)
 				?.foreignKeys.find(
 					(fk) =>
-						fk.references.schema === undefined &&
+						!hasExternalSchema(fk.references.schema) &&
 						fk.references.table === genRelation.target &&
 						columnListsEqual(fk.columns, genRelation.foreignKey),
 				);
@@ -402,7 +413,7 @@ function findRelationForeignKey(
 				.get(genRelation.target)
 				?.foreignKeys.find(
 					(fk) =>
-						fk.references.schema === undefined &&
+						!hasExternalSchema(fk.references.schema) &&
 						fk.references.table === sourceTable &&
 						columnListsEqual(fk.columns, genRelation.foreignKey),
 				);
@@ -463,14 +474,15 @@ function buildTableIRFromDefinition(
 
 		// Foreign key (with onDelete support)
 		if (colDef.references) {
+			const externalSchema = normalizeReferenceSchema(
+				colDef.references.schema,
+			);
 			const fk: Mutable<ForeignKeyIR> = {
 				columns: [colName],
 				references: {
 					table: colDef.references.table,
 					columns: [colDef.references.column ?? 'id'],
-					...(colDef.references.schema !== undefined
-						? { schema: colDef.references.schema }
-						: {}),
+					...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 				},
 			};
 			if (colDef.references.onDelete) {
@@ -512,7 +524,7 @@ function buildTableIRFromDefinition(
 		const targetColumn = fk.references.columns[0];
 		if (
 			fk.references.table === tableName &&
-			fk.references.schema === undefined &&
+			!hasExternalSchema(fk.references.schema) &&
 			fkColumn !== undefined &&
 			targetColumn !== undefined
 		) {
@@ -562,14 +574,13 @@ function buildTableIRFromDefinition(
 
 	if (isGeneratedTableWithConfig(genTable)) {
 		for (const fk of genTable.foreignKeys ?? []) {
+			const externalSchema = normalizeReferenceSchema(fk.references.schema);
 			const foreignKey: Mutable<ForeignKeyIR> = {
 				columns: [...fk.columns],
 				references: {
 					table: fk.references.table,
 					columns: [...fk.references.columns],
-					...(fk.references.schema !== undefined
-						? { schema: fk.references.schema }
-						: {}),
+					...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 				},
 			};
 			if (fk.onDelete) foreignKey.onDelete = fk.onDelete;
@@ -989,8 +1000,15 @@ function safeRecord<TValue extends v.GenericSchema>(valueSchema: TValue) {
 	);
 }
 
+const OptionalReferenceSchemaNameSchema = v.optional(
+	v.pipe(
+		v.string(),
+		v.transform((schemaName: string) => normalizeReferenceSchema(schemaName)),
+	),
+);
+
 const ForeignKeyReferenceSchema = v.object({
-	schema: v.optional(v.string()),
+	schema: OptionalReferenceSchemaNameSchema,
 	table: v.string(),
 	column: v.optional(v.string()),
 	onDelete: v.optional(
@@ -1034,7 +1052,7 @@ const TableDefWithConfigSchema = v.object({
 			v.object({
 				columns: v.array(v.string()),
 				references: v.object({
-					schema: v.optional(v.string()),
+					schema: OptionalReferenceSchemaNameSchema,
 					table: v.string(),
 					columns: v.array(v.string()),
 				}),
@@ -1257,11 +1275,10 @@ function convertColumn(
 		result.default = col.default as string;
 	}
 	if (col.references) {
+		const externalSchema = normalizeReferenceSchema(col.references.schema);
 		result.references = {
 			table: col.references.table,
-			...(col.references.schema !== undefined
-				? { schema: col.references.schema }
-				: {}),
+			...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 			...(col.references.column !== undefined
 				? { column: col.references.column }
 				: {}),

@@ -12,6 +12,10 @@ import type {
 	TableIR,
 } from './model-ir.js';
 
+function hasExternalSchema(schemaName: string | null | undefined): boolean {
+	return schemaName != null && schemaName.trim().length > 0;
+}
+
 /**
  * Immutable ModelIR implementation
  */
@@ -200,7 +204,7 @@ export class ModelIRImpl implements ModelIR {
 		for (const table of this.tables.values()) {
 			for (const fk of table.foreignKeys) {
 				if (
-					fk.references.schema === undefined &&
+					!hasExternalSchema(fk.references.schema) &&
 					!this.tables.has(fk.references.table) &&
 					!this.externalTables.has(fk.references.table)
 				) {
