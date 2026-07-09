@@ -22,6 +22,7 @@ export interface ManifestColumn {
 	default?: string | number | boolean;
 	references?: {
 		table: string;
+		schema?: string;
 		column?: string;
 	};
 }
@@ -134,6 +135,9 @@ function serializeColumn(col: SchemaColumnDefinition): ManifestColumn {
 
 	if (col.references) {
 		result.references = { table: col.references.table };
+		if (col.references.schema !== undefined) {
+			result.references.schema = col.references.schema;
+		}
 		if (col.references.column) {
 			result.references.column = col.references.column;
 		}

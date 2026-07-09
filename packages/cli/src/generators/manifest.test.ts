@@ -157,6 +157,41 @@ describe('generateManifest', () => {
 		});
 	});
 
+	it('round-trips cross-schema foreign key reference schema', () => {
+		const schemaWithCrossSchemaFk: ResolvedSchema = {
+			...sampleSchema,
+			tables: {
+				...sampleSchema.tables,
+				posts: {
+					...sampleSchema.tables.posts,
+					organizationId: {
+						type: 'uuid',
+						references: {
+							schema: 'auth',
+							table: 'organizations',
+							column: 'id',
+						},
+					},
+				},
+			},
+		};
+
+		const result = generateManifest(schemaWithCrossSchemaFk);
+		const manifest: SchemaManifest = JSON.parse(result.json);
+
+		expect(manifest.tables.posts!.organizationId).toEqual({
+			type: 'uuid',
+			references: { table: 'organizations', schema: 'auth', column: 'id' },
+		});
+		expect(manifest.tables.posts!.authorId).toEqual({
+			type: 'uuid',
+			references: { table: 'users' },
+		});
+		expect(manifest.tables.posts!.authorId!.references).not.toHaveProperty(
+			'schema',
+		);
+	});
+
 	it('handles table names with special characters', () => {
 		const schemaWithSpecialNames: ResolvedSchema = {
 			tables: {
