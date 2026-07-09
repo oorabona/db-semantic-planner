@@ -213,6 +213,32 @@ describe('ModelIRImpl validation — foreign keys', () => {
 		expect(model.externalTables.has('tenants')).toBe(true);
 	});
 
+	it('allows schema-declared FK references without externalTables membership', () => {
+		const invoices = makeTable('invoices', {
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'customer_id', type: 'integer', nullable: false },
+			],
+			foreignKeys: [
+				{
+					columns: ['customer_id'],
+					references: {
+						schema: 'auth',
+						table: 'customers',
+						columns: ['id'],
+					},
+				},
+			],
+		});
+
+		const model = new ModelIRImpl(new Map([['invoices', invoices]]), new Map());
+
+		expect(model.externalTables.has('customers')).toBe(false);
+		expect(model.getTable('invoices')?.foreignKeys[0]?.references.schema).toBe(
+			'auth',
+		);
+	});
+
 	it('throws when a table is both managed and external', () => {
 		const tenants = makeTable('tenants');
 

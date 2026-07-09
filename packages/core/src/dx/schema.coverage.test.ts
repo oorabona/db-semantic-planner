@@ -1383,7 +1383,7 @@ describe('schema coverage', () => {
 			expect(postsDef).toBeDefined();
 		});
 
-		it('should preserve cross-schema FK columns via introspection', async () => {
+		it('round-trips cross-schema FK from introspection as table-level constraint', async () => {
 			const { getSchemaFromDb } = await import('./schema.js');
 
 			const mockModel = {
@@ -1395,8 +1395,8 @@ describe('schema coverage', () => {
 							columns: [
 								{ name: 'id', type: 'uuid', nullable: false },
 								{
-									name: 'customerId',
-									type: 'uuid',
+									name: 'customerKey',
+									type: 'text',
 									nullable: false,
 									unique: false,
 								},
@@ -1404,11 +1404,11 @@ describe('schema coverage', () => {
 							primaryKey: 'id',
 							foreignKeys: [
 								{
-									columns: ['customerId'],
+									columns: ['customerKey'],
 									references: {
 										schema: 'auth',
 										table: 'customers',
-										columns: ['id'],
+										columns: ['externalCustomerKey'],
 									},
 								},
 							],
@@ -1425,10 +1425,30 @@ describe('schema coverage', () => {
 			const adapter = { introspect: async () => mockModel };
 
 			const result = await getSchemaFromDb(adapter);
-			const customerRef = result.definition.invoices.customerId;
-			expect(isRef(customerRef)).toBe(true);
-			expect(customerRef.target).toBe('customers');
-			expect(customerRef.options.schema).toBe('auth');
+			const customerColumn = result.definition.invoices.customerKey;
+			expect(customerColumn).toBe('string');
+			expect(isRef(customerColumn)).toBe(false);
+
+			const generatedFk = result.constraints?.invoices?.foreignKeys?.[0];
+			expect(generatedFk).toBeDefined();
+			expect(generatedFk.target).toBe('customers');
+			expect(generatedFk.options).toMatchObject({
+				schema: 'auth',
+				columns: ['customerKey'],
+				references: ['externalCustomerKey'],
+			});
+
+			let rebuilt;
+			expect(() => {
+				rebuilt = schema(result.definition, result.constraints);
+			}).not.toThrow();
+
+			const rebuiltFk = rebuilt.model.getTable('invoices')?.foreignKeys[0];
+			expect(rebuiltFk?.references).toEqual({
+				schema: 'auth',
+				table: 'customers',
+				columns: ['externalCustomerKey'],
+			});
 		});
 
 		it('should pass options to adapter introspect', async () => {

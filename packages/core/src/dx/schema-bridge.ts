@@ -393,6 +393,7 @@ function findRelationForeignKey(
 				.get(sourceTable)
 				?.foreignKeys.find(
 					(fk) =>
+						fk.references.schema === undefined &&
 						fk.references.table === genRelation.target &&
 						columnListsEqual(fk.columns, genRelation.foreignKey),
 				);
@@ -401,6 +402,7 @@ function findRelationForeignKey(
 				.get(genRelation.target)
 				?.foreignKeys.find(
 					(fk) =>
+						fk.references.schema === undefined &&
 						fk.references.table === sourceTable &&
 						columnListsEqual(fk.columns, genRelation.foreignKey),
 				);
@@ -748,34 +750,7 @@ export function buildModelFromSchema(schema: GeneratedSchema): ModelIR {
 		);
 	}
 
-	const externalTableNames = deriveExternalTableNames(tables);
-
-	return new ModelIRImpl(
-		tables,
-		relations,
-		undefined,
-		undefined,
-		undefined,
-		externalTableNames,
-	);
-}
-
-function deriveExternalTableNames(
-	tables: ReadonlyMap<string, TableIR>,
-): Set<string> {
-	const managedTableNames = new Set(tables.keys());
-	const externalTableNames = new Set<string>();
-	for (const table of tables.values()) {
-		for (const fk of table.foreignKeys) {
-			if (
-				fk.references.schema !== undefined &&
-				!managedTableNames.has(fk.references.table)
-			) {
-				externalTableNames.add(fk.references.table);
-			}
-		}
-	}
-	return externalTableNames;
+	return new ModelIRImpl(tables, relations);
 }
 
 /**

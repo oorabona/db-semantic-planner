@@ -200,6 +200,7 @@ export class ModelIRImpl implements ModelIR {
 		for (const table of this.tables.values()) {
 			for (const fk of table.foreignKeys) {
 				if (
+					fk.references.schema === undefined &&
 					!this.tables.has(fk.references.table) &&
 					!this.externalTables.has(fk.references.table)
 				) {
