@@ -152,6 +152,59 @@ export function assertString(
 	}
 }
 
+const SAFE_DECIMAL_LITERAL = /^[+-]?(?:\d+(?:\.\d+)?|\.\d+)$/;
+const SAFE_STORAGE_BOOLEAN_LITERAL = /^(?:true|false|on|off)$/i;
+const SAFE_SIMPLE_IDENTIFIER_VALUE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function assertNumericLiteral(value: unknown, context: string): string {
+	if (typeof value !== 'number' && typeof value !== 'string') {
+		throw new Error(
+			`${context}: expected a finite number or numeric string, received ${typeof value}`,
+		);
+	}
+
+	const literal = typeof value === 'number' ? String(value) : value;
+	if (
+		(typeof value === 'number' && !Number.isFinite(value)) ||
+		!SAFE_DECIMAL_LITERAL.test(literal)
+	) {
+		throw new Error(`${context}: unsafe numeric literal "${literal}"`);
+	}
+
+	return literal;
+}
+
+export function formatStorageParameterValue(
+	value: unknown,
+	context: string,
+): string {
+	if (typeof value !== 'number' && typeof value !== 'string') {
+		throw new Error(
+			`${context}: expected a string or number, received ${typeof value}`,
+		);
+	}
+
+	if (typeof value === 'number') {
+		return assertNumericLiteral(value, context);
+	}
+
+	if (value.includes('\0')) {
+		throw new Error(`${context}: contains null byte`);
+	}
+
+	if (
+		SAFE_DECIMAL_LITERAL.test(value) ||
+		SAFE_STORAGE_BOOLEAN_LITERAL.test(value) ||
+		(SAFE_SIMPLE_IDENTIFIER_VALUE.test(value) &&
+			!isReservedKeyword(value) &&
+			value.toLowerCase() !== 'null')
+	) {
+		return value;
+	}
+
+	return `'${value.replace(/'/g, "''")}'`;
+}
+
 // ============================================================================
 // Validation Functions
 // ============================================================================

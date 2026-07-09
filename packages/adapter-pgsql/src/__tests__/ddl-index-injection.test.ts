@@ -18,6 +18,8 @@ import { generateMigrationSQL } from '../ddl/migration-sql.js';
 import type { SchemaChange, SchemaDiff } from '../ddl/schema-diff.js';
 import { identityNaming } from '../naming-plugin.js';
 
+const unsafeWithValue = '70); DROP TABLE x; --';
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -207,6 +209,34 @@ describe('S-1 migration-sql upCreateIndex — WITH key injection', () => {
 			),
 		).not.toThrow();
 	});
+
+	it('quotes unsafe WITH storage parameter values instead of raw-splicing them', () => {
+		const sql = generateMigrationSQL(
+			makeDiff([
+				makeCreateIndexChange({
+					with: { fillfactor: unsafeWithValue },
+				}),
+			]),
+		);
+
+		expect(sql[0]).toContain(`WITH (fillfactor = '${unsafeWithValue}')`);
+		expect(sql[0]).not.toContain(`WITH (fillfactor = ${unsafeWithValue})`);
+	});
+
+	it('emits safe numeric and boolean WITH values unchanged', () => {
+		const sql = generateMigrationSQL(
+			makeDiff([
+				makeCreateIndexChange({
+					with: {
+						fillfactor: 70 as unknown as string,
+						fastupdate: 'on',
+					},
+				}),
+			]),
+		);
+
+		expect(sql[0]).toContain('WITH (fillfactor = 70, fastupdate = on)');
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -318,6 +348,40 @@ describe('S-1 ddl-generator generateCreateIndex — WITH key injection', () => {
 			),
 		).toThrow(/Invalid.*identifier/i);
 	});
+
+	it('quotes unsafe WITH storage parameter values instead of raw-splicing them', () => {
+		const sql = generateCreateIndex(
+			'users',
+			{
+				name: 'idx_test',
+				columns: ['id'],
+				with: { fillfactor: unsafeWithValue },
+			},
+			undefined,
+			naming,
+		);
+
+		expect(sql).toContain(`WITH (fillfactor = '${unsafeWithValue}')`);
+		expect(sql).not.toContain(`WITH (fillfactor = ${unsafeWithValue})`);
+	});
+
+	it('emits safe numeric and boolean WITH values unchanged', () => {
+		const sql = generateCreateIndex(
+			'users',
+			{
+				name: 'idx_test',
+				columns: ['id'],
+				with: {
+					fillfactor: 70 as unknown as string,
+					fastupdate: 'off',
+				},
+			},
+			undefined,
+			naming,
+		);
+
+		expect(sql).toContain('WITH (fillfactor = 70, fastupdate = off)');
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -385,6 +449,27 @@ describe('S-1 index-operations generateCreateIndexSQL — WITH key injection', (
 				with: { 'fillfactor = 10; DROP TABLE users --': '1' },
 			}),
 		).toThrow(/Invalid.*identifier/i);
+	});
+
+	it('quotes unsafe WITH storage parameter values instead of raw-splicing them', () => {
+		const sql = generateCreateIndexSQL('users', {
+			name: 'idx_test',
+			columns: ['id'],
+			with: { fillfactor: unsafeWithValue },
+		});
+
+		expect(sql).toContain(`WITH (fillfactor = '${unsafeWithValue}')`);
+		expect(sql).not.toContain(`WITH (fillfactor = ${unsafeWithValue})`);
+	});
+
+	it('emits safe numeric and boolean WITH values unchanged', () => {
+		const sql = generateCreateIndexSQL('users', {
+			name: 'idx_test',
+			columns: ['id'],
+			with: { fillfactor: 70, fastupdate: 'on' },
+		});
+
+		expect(sql).toContain('WITH (fillfactor = 70, fastupdate = on)');
 	});
 });
 

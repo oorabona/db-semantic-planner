@@ -3416,6 +3416,51 @@ describe('Sequences — migration SQL', () => {
 		expect(sql[0]).toBe('CREATE SEQUENCE "myschema"."order_seq" START WITH 1;');
 	});
 
+	it('should accept strict numeric strings in sequence options', () => {
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: '1' as unknown as number,
+			incrementBy: '-5' as unknown as number,
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+
+		const sql = generateMigrationSQL(diff);
+		expect(sql[0]).toBe(
+			'CREATE SEQUENCE "order_seq" START WITH 1 INCREMENT BY -5;',
+		);
+	});
+
+	it('rejects forged non-number sequence numeric fields before emission', () => {
+		const forgedStart = {
+			toString: () => '1; DROP TABLE users; --',
+		};
+		const seq: SequenceIR = {
+			name: 'order_seq',
+			startWith: forgedStart as unknown as number,
+		};
+		const diff = makeDiff([
+			{
+				kind: 'create_sequence',
+				table: '',
+				destructive: false,
+				details: '',
+				meta: { sequence: seq },
+			},
+		]);
+
+		expect(() => generateMigrationSQL(diff)).toThrow(
+			/sequence START WITH: expected a finite number or numeric string, received object/,
+		);
+	});
+
 	it('should generate ALTER SEQUENCE', () => {
 		const seq: SequenceIR = {
 			name: 'order_seq',
