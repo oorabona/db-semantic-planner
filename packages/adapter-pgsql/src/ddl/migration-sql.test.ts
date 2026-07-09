@@ -1747,6 +1747,61 @@ describe('generateDownSQL', () => {
 			expect(sql[0]).toContain('drop_column');
 		});
 
+		it('sanitizes newline payloads in DOWN warning comments', () => {
+			const payload = 'x"\nDROP TABLE pwn;--';
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_table',
+						table: payload,
+						destructive: true,
+						details: '',
+					},
+					{
+						kind: 'drop_column',
+						table: payload,
+						column: payload,
+						destructive: true,
+						details: '',
+					},
+				]),
+			);
+
+			const dropTableWarning = sql.find((statement) =>
+				statement.includes('drop_table'),
+			);
+			const dropColumnWarning = sql.find((statement) =>
+				statement.includes('drop_column'),
+			);
+
+			expect(dropTableWarning).toContain('x"DROP TABLE pwn;--');
+			expect(dropColumnWarning).toContain(
+				'"x"DROP TABLE pwn;--"."x"DROP TABLE pwn;--"',
+			);
+			for (const statement of sql) {
+				expect(statement).not.toContain('\n');
+				expect(statement).not.toContain('\r');
+				for (const line of statement.split(/\r?\n/)) {
+					expect(line.startsWith('--') || !line.includes('DROP TABLE pwn')).toBe(
+						true,
+					);
+				}
+			}
+
+			const normalSql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'drop_column',
+						table: 'users',
+						column: 'legacy',
+						destructive: true,
+						details: '',
+					},
+				]),
+			);
+			expect(normalSql[0]).toContain('"users"."legacy"');
+		});
+
 		it('drop_primary_key → WARNING comment', () => {
 			const sql = generateDownSQL(
 				makeDiff([
