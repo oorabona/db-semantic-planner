@@ -527,9 +527,12 @@ function addColumnUniqueSQL(
 	table: string,
 	column: string,
 	schemaName?: string,
+	constraintName?: string,
 ): string {
-	const constraintName = quoteIdent(uniqueName(table, column), 'alias');
-	return `ALTER TABLE ${qualifyTable(table, schemaName)} ADD CONSTRAINT ${constraintName} UNIQUE (${quoteIdent(column, 'alias')});`;
+	const name = constraintName ?? uniqueName(table, column);
+	if (constraintName !== undefined) validateIdentifier(constraintName, 'alias');
+	const quotedConstraintName = quoteIdent(name, 'alias');
+	return `ALTER TABLE ${qualifyTable(table, schemaName)} ADD CONSTRAINT ${quotedConstraintName} UNIQUE (${quoteIdent(column, 'alias')});`;
 }
 
 function dropColumnUniqueSQL(
@@ -552,7 +555,12 @@ function upAlterColumnUnique(
 	if (unique === undefined || !change.column) return undefined;
 	const constraintName = change.meta?.constraintName as string | undefined;
 	return unique
-		? addColumnUniqueSQL(change.table, change.column, schemaName)
+		? addColumnUniqueSQL(
+				change.table,
+				change.column,
+				schemaName,
+				constraintName,
+			)
 		: dropColumnUniqueSQL(
 				change.table,
 				change.column,
@@ -1053,7 +1061,12 @@ function changeToDownSQL(
 							schemaName,
 							constraintName,
 						)
-					: addColumnUniqueSQL(change.table, change.column, schemaName),
+					: addColumnUniqueSQL(
+							change.table,
+							change.column,
+							schemaName,
+							constraintName,
+						),
 				destructive: unique === true,
 			};
 		}

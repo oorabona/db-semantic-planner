@@ -1181,6 +1181,66 @@ describe('introspect: cross-schema foreign keys', () => {
 		expect(fk.deferred).toBe(true);
 	});
 
+	it('does not infer relations from a cross-schema FK to a same-named local table', async () => {
+		const columns = [
+			{
+				table_name: 'invoices',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'invoices',
+				column_name: 'customer_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'customers',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'invoices', column_name: 'id' },
+			{ table_name: 'customers', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'invoices_customer_id_fkey',
+				source_table: 'invoices',
+				source_column: 'customer_id',
+				target_schema: 'auth',
+				target_table: 'customers',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		const fk = result.tables.get('invoices')?.foreignKeys[0];
+		expect(fk?.references).toEqual({
+			schema: 'auth',
+			table: 'customers',
+			columns: ['id'],
+		});
+		expect(result.relations.get('invoices.customer')).toBeUndefined();
+		expect(result.relations.get('customers.invoices')).toBeUndefined();
+		expect(result.relations.size).toBe(0);
+	});
+
 	it('does not detect a same-name cross-schema FK as adjacency hierarchy', async () => {
 		const columns = [
 			{
@@ -1224,6 +1284,81 @@ describe('introspect: cross-schema foreign keys', () => {
 		expect(result.hierarchies.find((h) => h.type === 'adjacency')).toBe(
 			undefined,
 		);
+	});
+
+	it('does not detect an edge-table hierarchy from cross-schema FKs to same-named local tables', async () => {
+		const columns = [
+			{
+				table_name: 'nodes',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'edges',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'edges',
+				column_name: 'parent_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'edges',
+				column_name: 'child_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'nodes', column_name: 'id' },
+			{ table_name: 'edges', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'edges_parent_id_fkey',
+				source_table: 'edges',
+				source_column: 'parent_id',
+				target_schema: 'graph',
+				target_table: 'nodes',
+				target_column: 'id',
+				delete_rule: 'CASCADE',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+			{
+				constraint_name: 'edges_child_id_fkey',
+				source_table: 'edges',
+				source_column: 'child_id',
+				target_schema: 'graph',
+				target_table: 'nodes',
+				target_column: 'id',
+				delete_rule: 'CASCADE',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool, { schema: 'billing' });
+
+		expect(result.tables.get('edges')?.foreignKeys).toHaveLength(2);
+		expect(
+			result.hierarchies.find((h) => h.type === 'edge-table'),
+		).toBeUndefined();
 	});
 
 	it('omits references.schema for same-schema FK targets', async () => {
