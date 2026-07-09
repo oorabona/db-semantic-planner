@@ -7,6 +7,7 @@
  * @module ddl/phases/comments
  */
 
+import { assertString } from '../../validate.js';
 import { type PhaseContext, sup } from './types.js';
 import {
 	qualifyTableIdent as qualifyTable,
@@ -26,17 +27,21 @@ export function generateCommentsPhase(ctx: PhaseContext): string[] {
 	}
 	const statements: string[] = [];
 	for (const table of tables) {
-		if (table.comment) {
+		const tableComment = table.comment;
+		if (tableComment) {
+			assertString(tableComment, 'table comment');
 			const qualifiedTable = qualifyTable(table.name, schemaName, naming);
 			statements.push(
-				`COMMENT ON TABLE ${qualifiedTable} IS '${table.comment.replace(/'/g, "''")}';`,
+				`COMMENT ON TABLE ${qualifiedTable} IS '${tableComment.replace(/'/g, "''")}';`,
 			);
 		}
 		for (const col of table.columns) {
-			if (col.comment) {
+			const columnComment = col.comment;
+			if (columnComment) {
+				assertString(columnComment, 'column comment');
 				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
 				statements.push(
-					`COMMENT ON COLUMN ${qualifiedTable}.${quoteId(naming.toDatabase(col.name))} IS '${col.comment.replace(/'/g, "''")}';`,
+					`COMMENT ON COLUMN ${qualifiedTable}.${quoteId(naming.toDatabase(col.name))} IS '${columnComment.replace(/'/g, "''")}';`,
 				);
 			}
 		}

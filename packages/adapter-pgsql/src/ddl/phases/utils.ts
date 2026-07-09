@@ -8,6 +8,7 @@
  */
 
 import {
+	assertString,
 	validateCollationName,
 	validateExtensionName,
 	validateIdentifier,
@@ -52,6 +53,8 @@ export function validateIndexMethod(
 	method: string,
 	context = 'index method',
 ): void {
+	assertString(method, `Invalid ${context}`);
+
 	if (!VALID_INDEX_METHODS.has(method)) {
 		throw new Error(
 			`Invalid ${context}: "${method}". Must be one of: ${[...VALID_INDEX_METHODS].join(', ')}`,
@@ -76,6 +79,8 @@ export function validateIndexMethod(
  * @throws Error if the label contains forbidden characters
  */
 export function validateEnumLabel(value: string, context = 'enum label'): void {
+	assertString(value, `Invalid ${context}`);
+
 	// Reject NUL bytes — PostgreSQL truncates strings at the first NUL silently
 	if (/\x00/.test(value)) {
 		throw new Error(
@@ -164,6 +169,8 @@ export function quoteCollation(name: string): string {
  * @returns Double-quoted role name safe for DDL emission (e.g. `"app admin"`)
  */
 export function quoteRoleName(name: string): string {
+	assertString(name, 'quoteRoleName: role name');
+
 	if (!name) {
 		throw new Error('quoteRoleName: role name must not be empty');
 	}

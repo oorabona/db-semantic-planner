@@ -71,8 +71,9 @@ export function generateCreateIndexSQL(
 	schema?: string,
 ): string {
 	// Validate method if provided
-	if (options.method !== undefined) {
-		validateIndexMethod(options.method, 'index method');
+	const indexMethod = options.method;
+	if (indexMethod !== undefined) {
+		validateIndexMethod(indexMethod, 'index method');
 	}
 
 	const parts: string[] = ['CREATE'];
@@ -85,8 +86,8 @@ export function generateCreateIndexSQL(
 	parts.push(quoteIdentifier(options.name));
 	parts.push(`ON ${qualifyTable(table, schema)}`);
 
-	if (options.method) {
-		parts.push(`USING ${options.method}`);
+	if (indexMethod) {
+		parts.push(`USING ${indexMethod}`);
 	}
 
 	// Build column list
@@ -121,9 +122,10 @@ export function generateCreateIndexSQL(
 	}
 
 	// WHERE partial index predicate — S-1: validate before interpolation
-	if (options.where) {
-		validateSqlExpression(options.where, 'index WHERE predicate');
-		parts.push(`WHERE ${options.where}`);
+	const whereExpr = options.where;
+	if (whereExpr) {
+		validateSqlExpression(whereExpr, 'index WHERE predicate');
+		parts.push(`WHERE ${whereExpr}`);
 	}
 
 	return parts.join(' ');
@@ -147,11 +149,12 @@ function buildColumnPart(
 		return opclass ? `${quoted} ${opclass}` : quoted;
 	}
 	// Expression column — validate expression before interpolation (S-1)
-	validateSqlExpression(col.expression, 'index expression');
+	const expression = col.expression;
+	validateSqlExpression(expression, 'index expression');
 	const opclass = col.opclass;
 	// S-1: validate expression opclass name before interpolation
 	if (opclass) validateIdentifier(opclass, 'alias');
-	return opclass ? `${col.expression} ${opclass}` : col.expression;
+	return opclass ? `${expression} ${opclass}` : expression;
 }
 
 // ---------------------------------------------------------------------------
