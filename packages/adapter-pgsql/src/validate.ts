@@ -185,6 +185,12 @@ export function validateIdentifier(
 	value: string,
 	type: 'table' | 'column' | 'schema' | 'alias' | 'function',
 ): void {
+	if (typeof value !== 'string') {
+		throw new Error(
+			`Invalid ${type} identifier: expected a string, received ${typeof value}`,
+		);
+	}
+
 	// Rule 1: Not empty
 	if (!value || value.length === 0) {
 		throw new InvalidIdentifierError(value, type, 'cannot be empty');
