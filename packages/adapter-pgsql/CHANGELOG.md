@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.11.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.0...adapter-pgsql-v1.11.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Thread bound params in JOIN ON and CASE THEN/ELSE expressions ([38d0461](https://github.com/oorabona/db-semantic-planner/commit/38d0461749f3cb165f08c1ed105570d0c3e92034)), closes [#267](https://github.com/oorabona/db-semantic-planner/issues/267) [#268](https://github.com/oorabona/db-semantic-planner/issues/268) [#279](https://github.com/oorabona/db-semantic-planner/issues/279)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 1.11.1
+
 ## [1.11.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.10.2...adapter-pgsql-v1.11.0) (2026-07-09)
 
 
