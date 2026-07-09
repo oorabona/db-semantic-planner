@@ -94,7 +94,7 @@ export interface RefOptions {
 	/** ON DELETE action */
 	onDelete?: OnDeleteAction;
 	/** ON UPDATE action */
-	onUpdate?: 'CASCADE' | 'SET NULL' | 'RESTRICT' | 'NO ACTION';
+	onUpdate?: OnDeleteAction;
 
 	// Relation naming
 	/** Local relation name (e.g., 'createdBy' for createdById column) */
@@ -294,6 +294,8 @@ export interface SchemaOptions {
 export interface Schema<T extends SchemaDefinition> {
 	/** The raw schema definition */
 	readonly definition: T;
+	/** Table-level constraints supplied to schema() or reconstructed from introspection */
+	readonly constraints?: SchemaConstraints;
 	/** Converted ModelIR for use with ORM */
 	readonly model: ModelIR;
 	/** Table names */
@@ -498,6 +500,29 @@ export type InferSchemaDB<S extends Schema<SchemaDefinition>> =
 // Public API
 // ============================================================================
 
+function normalizeReferenceSchema(
+	schemaName: string | null | undefined,
+): string | undefined {
+	if (schemaName == null) return undefined;
+	return schemaName.trim().length > 0 ? schemaName : undefined;
+}
+
+function hasExternalSchema(schemaName: string | null | undefined): boolean {
+	return normalizeReferenceSchema(schemaName) !== undefined;
+}
+
+function normalizeRefOptions<TOptions extends RefOptions>(
+	options: TOptions,
+): TOptions {
+	const schemaName = normalizeReferenceSchema(options.schema);
+	if (schemaName === options.schema) return options;
+
+	const { schema: _schema, ...rest } = options;
+	return (
+		schemaName === undefined ? rest : { ...rest, schema: schemaName }
+	) as TOptions;
+}
+
 /**
  * Declares a foreign key reference to another table.
  *
@@ -530,7 +555,7 @@ export function ref<
 	return {
 		__brand: 'ref',
 		target,
-		options: (options ?? {}) as TOptions,
+		options: options ? normalizeRefOptions(options) : ({} as TOptions),
 	};
 }
 
@@ -604,6 +629,7 @@ export function schema<T extends SchemaDefinition>(
 
 	return {
 		definition,
+		...(constraints !== undefined ? { constraints } : {}),
 		model,
 		tableNames,
 		tables,
@@ -728,7 +754,7 @@ function validateRefs(
 			if (isRef(columnDef)) {
 				// Check target exists
 				if (
-					columnDef.options.schema === undefined &&
+					!hasExternalSchema(columnDef.options.schema) &&
 					!tableSet.has(columnDef.target)
 				) {
 					throw new SchemaValidationError(
@@ -740,7 +766,7 @@ function validateRefs(
 
 				// Self-ref requires roles
 				if (
-					columnDef.options.schema === undefined &&
+					!hasExternalSchema(columnDef.options.schema) &&
 					columnDef.target === tableName &&
 					!columnDef.options.roles
 				) {
@@ -753,7 +779,7 @@ function validateRefs(
 
 				// Roles only valid for self-ref
 				if (
-					(columnDef.options.schema !== undefined ||
+					(hasExternalSchema(columnDef.options.schema) ||
 						columnDef.target !== tableName) &&
 					columnDef.options.roles
 				) {
@@ -841,7 +867,7 @@ function validateFkTargets(tables: readonly TableIR[]): void {
 				);
 			}
 
-			if (fk.references.schema !== undefined) continue;
+			if (hasExternalSchema(fk.references.schema)) continue;
 
 			const target = tableMap.get(fk.references.table);
 			// Defensive: column-level FKs are pre-validated by validateRefs (Phase 1),
@@ -1168,9 +1194,10 @@ function buildRefColumn(
 	// This prevents a type mismatch when the FK points at a unique non-PK column
 	// that has a different type than the table's PK (e.g. email:string vs id:uuid).
 	const targetDef = definition[columnDef.target];
-	if (columnDef.options.schema !== undefined) {
+	const externalSchema = normalizeReferenceSchema(columnDef.options.schema);
+	if (externalSchema !== undefined) {
 		throw new SchemaValidationError(
-			`Cannot infer column type for foreign key column '${columnName}' to external table '${columnDef.options.schema}.${columnDef.target}'. Declare the source column with an explicit type and add the external foreign key at the table level with SchemaConstraints.foreignKeys.`,
+			`Cannot infer column type for foreign key column '${columnName}' to external table '${externalSchema}.${columnDef.target}'. Declare the source column with an explicit type and add the external foreign key at the table level with SchemaConstraints.foreignKeys.`,
 			undefined,
 			columnName,
 		);
@@ -1204,9 +1231,7 @@ function buildRefColumn(
 		references: {
 			table: columnDef.target,
 			columns: columnDef.options.references ?? ['id'],
-			...(columnDef.options.schema !== undefined
-				? { schema: columnDef.options.schema }
-				: {}),
+			...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 		},
 	};
 	if (columnDef.options.onDelete) fk.onDelete = columnDef.options.onDelete;
@@ -1314,7 +1339,7 @@ function buildPseudoColumns(
 
 	for (const ref of refs) {
 		if (
-			ref.options.schema === undefined &&
+			!hasExternalSchema(ref.options.schema) &&
 			ref.options.roles &&
 			ref.target === tableName
 		) {
@@ -1403,6 +1428,7 @@ function buildTableConstraints(
 					tableName,
 				);
 			}
+			const externalSchema = normalizeReferenceSchema(fkRef.options.schema);
 			const fk: Mutable<ForeignKeyIR> = {
 				columns: [...fkRef.options.columns],
 				references: {
@@ -1410,9 +1436,7 @@ function buildTableConstraints(
 					columns: fkRef.options.references
 						? [...fkRef.options.references]
 						: ['id'],
-					...(fkRef.options.schema !== undefined
-						? { schema: fkRef.options.schema }
-						: {}),
+					...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 				},
 			};
 			if (fkRef.options.onDelete) fk.onDelete = fkRef.options.onDelete;
@@ -1505,7 +1529,7 @@ function buildRelations(
 
 		for (const ref of refs) {
 			// RelationIR has no schema field; schema-qualified refs are DDL FKs only.
-			if (ref.options.schema !== undefined) continue;
+			if (hasExternalSchema(ref.options.schema)) continue;
 
 			if (ref.options.roles) {
 				// Self-referential - generate 4 relations
@@ -1660,7 +1684,7 @@ function addCompositeConstraintRelations(
 		if (!foreignKeys) continue;
 
 		for (const fkRef of foreignKeys) {
-			if (fkRef.options.schema !== undefined) continue;
+			if (hasExternalSchema(fkRef.options.schema)) continue;
 			if (!tableSet.has(fkRef.target)) continue;
 
 			const columns = fkRef.options.columns;
@@ -1817,6 +1841,8 @@ export async function getSchemaFromDb<
 				schema?: string;
 				nullable: boolean;
 				unique: boolean;
+				onDelete?: OnDeleteAction;
+				onUpdate?: RefOptions['onUpdate'];
 			}
 		>
 	>();
@@ -1829,6 +1855,8 @@ export async function getSchemaFromDb<
 				schema?: string;
 				nullable: boolean;
 				unique: boolean;
+				onDelete?: OnDeleteAction;
+				onUpdate?: RefOptions['onUpdate'];
 			}
 		>();
 		for (const fk of table.foreignKeys) {
@@ -1838,14 +1866,15 @@ export async function getSchemaFromDb<
 
 			// Find the column to check nullable/unique
 			const column = table.columns.find((c) => c.name === fkColumn);
+			const externalSchema = normalizeReferenceSchema(fk.references.schema);
 			tableFks.set(fkColumn, {
 				target: fk.references.table,
 				refs: fk.references.columns,
-				...(fk.references.schema !== undefined
-					? { schema: fk.references.schema }
-					: {}),
+				...(externalSchema !== undefined ? { schema: externalSchema } : {}),
 				nullable: column?.nullable ?? true,
 				unique: column?.unique ?? false,
+				...(fk.onDelete !== undefined ? { onDelete: fk.onDelete } : {}),
+				...(fk.onUpdate !== undefined ? { onUpdate: fk.onUpdate } : {}),
 			});
 		}
 		fkLookup.set(table.name, tableFks);
@@ -1864,7 +1893,12 @@ export async function getSchemaFromDb<
 
 			if (fk) {
 				if (fk.schema !== undefined) {
-					tableDef[column.name] = columnTypeToJsType(column.type);
+					const sourceColumn: Mutable<Exclude<ColumnDef, SchemaColumnType>> = {
+						type: columnTypeToJsType(column.type),
+						nullable: fk.nullable,
+					};
+					if (fk.unique) sourceColumn.unique = true;
+					tableDef[column.name] = sourceColumn;
 					const tableConstraints = (constraints[table.name] ??= {});
 					const foreignKeys = (tableConstraints.foreignKeys ??= []);
 					foreignKeys.push(
@@ -1872,6 +1906,8 @@ export async function getSchemaFromDb<
 							schema: fk.schema,
 							columns: [column.name],
 							references: fk.refs,
+							...(fk.onDelete !== undefined ? { onDelete: fk.onDelete } : {}),
+							...(fk.onUpdate !== undefined ? { onUpdate: fk.onUpdate } : {}),
 						}),
 					);
 					continue;
@@ -1902,7 +1938,7 @@ export async function getSchemaFromDb<
 	) as InferTables<T>;
 
 	// Build result with optional properties only if defined
-	const result: Mutable<Schema<T>> & { constraints?: SchemaConstraints } = {
+	const result: Mutable<Schema<T>> = {
 		definition: definition as T,
 		model,
 		tableNames,
@@ -1920,5 +1956,5 @@ export async function getSchemaFromDb<
 		result.introspectedAt = introspectedAt;
 	}
 
-	return result as Schema<T>;
+	return result;
 }

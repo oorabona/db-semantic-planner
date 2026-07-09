@@ -1397,8 +1397,8 @@ describe('schema coverage', () => {
 								{
 									name: 'customerKey',
 									type: 'text',
-									nullable: false,
-									unique: false,
+									nullable: true,
+									unique: true,
 								},
 							],
 							primaryKey: 'id',
@@ -1410,6 +1410,8 @@ describe('schema coverage', () => {
 										table: 'customers',
 										columns: ['externalCustomerKey'],
 									},
+									onDelete: 'SET NULL',
+									onUpdate: 'CASCADE',
 								},
 							],
 							indexes: [],
@@ -1426,7 +1428,11 @@ describe('schema coverage', () => {
 
 			const result = await getSchemaFromDb(adapter);
 			const customerColumn = result.definition.invoices.customerKey;
-			expect(customerColumn).toBe('string');
+			expect(customerColumn).toEqual({
+				type: 'string',
+				nullable: true,
+				unique: true,
+			});
 			expect(isRef(customerColumn)).toBe(false);
 
 			const generatedFk = result.constraints?.invoices?.foreignKeys?.[0];
@@ -1436,6 +1442,8 @@ describe('schema coverage', () => {
 				schema: 'auth',
 				columns: ['customerKey'],
 				references: ['externalCustomerKey'],
+				onDelete: 'SET NULL',
+				onUpdate: 'CASCADE',
 			});
 
 			let rebuilt;
@@ -1449,6 +1457,13 @@ describe('schema coverage', () => {
 				table: 'customers',
 				columns: ['externalCustomerKey'],
 			});
+			expect(rebuiltFk?.onDelete).toBe('SET NULL');
+			expect(rebuiltFk?.onUpdate).toBe('CASCADE');
+			const rebuiltColumn = rebuilt.model
+				.getTable('invoices')
+				?.columns.find((column) => column.name === 'customerKey');
+			expect(rebuiltColumn?.nullable).toBe(true);
+			expect(rebuiltColumn?.unique).toBe(true);
 		});
 
 		it('should pass options to adapter introspect', async () => {
