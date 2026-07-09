@@ -14,21 +14,21 @@ import {
 } from '../schema.js';
 
 describe('buildRefColumn — column-level non-PK FK references', () => {
-	it('external FK builds without a local table', () => {
-		const db = schema({
-			posts: {
-				id: { type: 'uuid', primaryKey: true },
-				authorId: ref('users', { schema: 'auth' }),
-			},
-		});
-
-		const fk = db.model.tables.get('posts')?.foreignKeys[0];
-		expect(db.model.externalTables.has('users')).toBe(true);
-		expect(fk?.references).toEqual({
-			schema: 'auth',
-			table: 'users',
-			columns: ['id'],
-		});
+	it('rejects column-level external FK without a local table because the source type cannot be inferred', () => {
+		expect(() =>
+			schema({
+				posts: {
+					id: { type: 'uuid', primaryKey: true },
+					authorId: ref('users', { schema: 'auth' }),
+				},
+			}),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining(
+					"Cannot infer column type for foreign key column 'authorId' to external table 'auth.users'",
+				),
+			}),
+		);
 	});
 
 	it('round-trips declared referenced schema through typed column and table-level refs', () => {
@@ -106,6 +106,95 @@ describe('buildRefColumn — column-level non-PK FK references', () => {
 			table: 'users',
 			columns: ['id'],
 		});
+	});
+
+	it('rejects table-level external FK whose source column does not exist locally', () => {
+		expect(() =>
+			schema(
+				{
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userId: 'uuid',
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', {
+								schema: 'auth',
+								columns: ['missingUserId'],
+								references: ['id'],
+							}),
+						],
+					},
+				},
+			),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining(
+					"uses non-existent source column 'missingUserId'",
+				),
+			}),
+		);
+	});
+
+	it('rejects table-level external FK with mismatched source and target column counts', () => {
+		expect(() =>
+			schema(
+				{
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						tenantId: 'uuid',
+						userId: 'uuid',
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', {
+								schema: 'auth',
+								columns: ['tenantId', 'userId'],
+								references: ['id'],
+							}),
+						],
+					},
+				},
+			),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining(
+					'has mismatched column counts: 2 source column(s) but 1 referenced column(s)',
+				),
+			}),
+		);
+	});
+
+	it('rejects table-level external FK with zero-length references array', () => {
+		expect(() =>
+			schema(
+				{
+					memberships: {
+						id: { type: 'uuid', primaryKey: true },
+						userId: 'uuid',
+					},
+				},
+				{
+					memberships: {
+						foreignKeys: [
+							ref('users', {
+								schema: 'auth',
+								columns: ['userId'],
+								references: [],
+							}),
+						],
+					},
+				},
+			),
+		).toThrow(
+			expect.objectContaining({
+				message: expect.stringContaining('has zero-length'),
+			}),
+		);
 	});
 
 	it('does not treat a schema-qualified same-name ref as self-referential', () => {
