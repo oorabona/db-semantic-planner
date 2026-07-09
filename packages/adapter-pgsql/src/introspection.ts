@@ -682,16 +682,17 @@ interface FKEntry {
 	deferred: boolean;
 }
 
-/** Build a Map<constraintName, FKEntry> from raw FK rows. */
+/** Build a Map<sourceTable + constraintName, FKEntry> from raw FK rows. */
 function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 	const result = new Map<string, FKEntry>();
 	for (const fk of rows) {
-		const existing = result.get(fk.constraint_name);
+		const key = JSON.stringify([fk.source_table, fk.constraint_name]);
+		const existing = result.get(key);
 		if (existing) {
 			existing.cols.push(fk.source_column);
 			existing.refs.push(fk.target_column);
 		} else {
-			result.set(fk.constraint_name, {
+			result.set(key, {
 				source: fk.source_table,
 				target: fk.target_table,
 				targetSchema: fk.target_schema,

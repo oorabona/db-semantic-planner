@@ -331,7 +331,7 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('alter_column_unique');
 			expect(diff.changes[0]!.column).toBe('email');
-			expect(diff.changes[0]!.destructive).toBe(false);
+			expect(diff.changes[0]!.destructive).toBe(true);
 			expect(diff.changes[0]!.meta).toEqual({ unique: false });
 			expect(kinds).not.toContain('drop_index');
 			expect(kinds).not.toContain('create_index');
@@ -362,6 +362,7 @@ describe('compareSchemata', () => {
 
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('alter_column_unique');
+			expect(diff.changes[0]!.destructive).toBe(true);
 			expect(diff.changes[0]!.meta).toEqual({
 				unique: false,
 				constraintName: 'users_email_custom_uq',

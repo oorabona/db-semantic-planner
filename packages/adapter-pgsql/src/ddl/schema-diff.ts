@@ -474,7 +474,7 @@ function compareColumnDetails(
 			kind: 'alter_column_unique',
 			table: tableName,
 			column: schema.name,
-			destructive: false,
+			destructive: schemaUnique === false,
 			details: `Change unique of "${schema.name}" from ${dbUnique} to ${schemaUnique}`,
 			meta: {
 				unique: schemaUnique,
