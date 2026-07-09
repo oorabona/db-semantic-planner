@@ -43,9 +43,10 @@ export function generateConstraintsPhase(ctx: PhaseContext): string[] {
 			for (const check of table.checkConstraints ?? []) {
 				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
 				const constraintName = quoteId(check.name);
-				validateCheckExpression(check.expression, 'check constraint expression');
+				const expression = check.expression;
+				validateCheckExpression(expression, 'check constraint expression');
 				statements.push(
-					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${check.expression};`,
+					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${expression};`,
 				);
 			}
 		}
