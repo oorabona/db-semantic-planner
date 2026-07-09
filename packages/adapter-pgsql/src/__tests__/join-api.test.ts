@@ -9,7 +9,7 @@
  * All assertions use exact `toEqual` SQL matching (normalised whitespace).
  */
 
-import { createOrm, eq, ref, schema } from '@dbsp/core';
+import { and, createOrm, eq, exprRef, param, ref, schema } from '@dbsp/core';
 import type { WhereComparisonIntent } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
@@ -35,6 +35,8 @@ const testSchema = schema({
 	},
 	embeddings: {
 		id: { type: 'integer', primaryKey: true },
+		symbol_id: { type: 'integer' },
+		model: { type: 'text' },
 		vector: { type: 'text' },
 	},
 } as const);
@@ -168,6 +170,72 @@ describe('FR-10 Block 2: JoinIntent SQL compilation', () => {
 		expect(sql).toMatch(/WHERE/i);
 		expect(sql).toMatch(/\$1/);
 		expect(dump.params).toEqual([42]);
+	});
+
+	it('T11: table mode — ON param and WHERE param keep distinct placeholders', () => {
+		const orm = buildOrm();
+		const onCond = and(
+			eq('symbols.id', exprRef('embeddings.symbol_id')),
+			eq('embeddings.model', param('text-embedding-3-small')),
+		);
+		const dump = (orm as any)
+			.select('symbols')
+			.join('embeddings', { type: 'left', on: onCond })
+			.where(eq('symbols.name', 'normalize.ts'))
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols LEFT JOIN embeddings AS embeddings ON symbols.id = embeddings.symbol_id AND embeddings.model = $2 WHERE symbols.name = $1',
+		);
+		expect(dump.params).toEqual(['normalize.ts', 'text-embedding-3-small']);
+	});
+
+	it('T12: table mode — two ON params are renumbered after the WHERE param', () => {
+		const orm = buildOrm();
+		const firstOn = and(
+			eq('symbols.id', exprRef('e_openai.symbol_id')),
+			eq('e_openai.model', param('text-embedding-3-small')),
+		);
+		const secondOn = and(
+			eq('symbols.id', exprRef('e_local.symbol_id')),
+			eq('e_local.model', param('bge-small-en')),
+		);
+		const dump = (orm as any)
+			.select('symbols')
+			.join('embeddings', { type: 'left', on: firstOn, as: 'e_openai' })
+			.join('embeddings', { type: 'left', on: secondOn, as: 'e_local' })
+			.where(eq('symbols.name', 'planner.ts'))
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols LEFT JOIN embeddings AS e_openai ON symbols.id = e_openai.symbol_id AND e_openai.model = $2 LEFT JOIN embeddings AS e_local ON symbols.id = e_local.symbol_id AND e_local.model = $3 WHERE symbols.name = $1',
+		);
+		expect(dump.params).toEqual([
+			'planner.ts',
+			'text-embedding-3-small',
+			'bge-small-en',
+		]);
+	});
+
+	it('T13: table mode — multiple bound params in one ON renumber contiguously', () => {
+		const orm = buildOrm();
+		const onCond = and(
+			eq('symbols.id', exprRef('embeddings.symbol_id')),
+			eq('embeddings.model', param('m1')),
+			eq('embeddings.vector', param('v1')),
+		);
+		// No `as any` cast: exercises the public table-mode .join(table, { on })
+		// contract directly (QueryBuilder types this overload).
+		const dump = orm
+			.select('symbols')
+			.join('embeddings', { type: 'left', on: onCond })
+			.where(eq('symbols.name', 'x'))
+			.dump();
+
+		expect(ws(dump.sql)).toEqual(
+			'SELECT symbols.* FROM symbols LEFT JOIN embeddings AS embeddings ON symbols.id = embeddings.symbol_id AND embeddings.model = $2 AND embeddings.vector = $3 WHERE symbols.name = $1',
+		);
+		expect(dump.params).toEqual(['x', 'm1', 'v1']);
 	});
 });
 

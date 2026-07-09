@@ -425,6 +425,7 @@ export interface JoinDecision extends PlanDecision {
 export interface PrecompiledJoinDecision extends JoinDecision {
 	readonly joinRarg: Node;
 	readonly joinOnNode: Node;
+	readonly joinOnParams?: readonly unknown[];
 }
 
 /**
@@ -656,6 +657,34 @@ function renumberNode(value: unknown, offset: number): unknown {
 		result[key] = renumberNode(obj[key], offset);
 	}
 	return result;
+}
+
+/**
+ * Largest `ParamRef.number` in an AST subtree (0 if none). Used to verify a
+ * precompiled JOIN ON node only references params it actually owns before
+ * renumbering them into the outer query's sequence.
+ */
+function maxParamRefNumber(value: unknown): number {
+	if (value === null || typeof value !== 'object') return 0;
+	if (Array.isArray(value)) {
+		let max = 0;
+		for (const item of value) max = Math.max(max, maxParamRefNumber(item));
+		return max;
+	}
+	const obj = value as Record<string, unknown>;
+	if (
+		'ParamRef' in obj &&
+		obj.ParamRef !== null &&
+		typeof obj.ParamRef === 'object'
+	) {
+		const n = (obj.ParamRef as Record<string, unknown>).number;
+		return typeof n === 'number' ? n : 0;
+	}
+	let max = 0;
+	for (const key of Object.keys(obj)) {
+		max = Math.max(max, maxParamRefNumber(obj[key]));
+	}
+	return max;
 }
 
 // ============================================================================
@@ -2085,7 +2114,7 @@ export class PlanCompiler {
 
 			case 'selectExpression': {
 				if (decision.expressionType === 'case') {
-					const caseNode = this.compileCaseExpression(decision);
+					const caseNode = this.compileCaseExpression(decision, plan);
 					const alias = decision.alias;
 					targetList.push({
 						ResTarget: {
@@ -2099,51 +2128,7 @@ export class PlanCompiler {
 
 			case 'selectCustomExpression': {
 				const exprIntent = decision.expressionIntent as ExpressionIntent;
-				const outerThis = this;
-				const ctx = {
-					...this.createHandlerContext(plan, plan.rootTable),
-					compileSubquery(
-						query: import('@dbsp/types').QueryIntent,
-						paramOffset: number,
-					): {
-						ast: import('@pgsql/types').Node;
-						parameters: readonly unknown[];
-					} {
-						return outerThis.compileExpressionSubquery(query, paramOffset);
-					},
-				} as HandlerCompilerContext;
-				const state = this.createHandlerState();
-				const node = compileExpressionIntent(exprIntent, ctx, state);
-				// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg FILTER (WHERE ...))
-				// Compiled at this level to use compileFilterCondition + convertWhereCondition
-				// without introducing circular deps in custom.ts.
-				if (
-					exprIntent.kind === 'customFn' &&
-					(exprIntent as import('@dbsp/types').CustomFnExpressionIntent).filter
-				) {
-					const filterIntent = (
-						exprIntent as import('@dbsp/types').CustomFnExpressionIntent
-					).filter!;
-					const filterDecision = convertWhereCondition(
-						filterIntent,
-						plan.rootTable,
-					);
-					if (filterDecision) {
-						const filterNode = compileFilterCondition(
-							filterDecision,
-							createWhereDispatcher(),
-							ctx,
-							state,
-						);
-						if (filterNode && 'FuncCall' in node) {
-							(
-								node as { FuncCall: Record<string, unknown> }
-							).FuncCall.agg_filter = filterNode;
-						}
-					}
-				}
-				// parameters are shared by reference; only sync paramIndex
-				this.state.paramIndex = state.paramIndex;
+				const node = this.compileCustomExpressionNode(exprIntent, plan);
 				const alias = decision.alias || decision.column || undefined;
 				targetList.push({
 					ResTarget: {
@@ -2502,14 +2487,36 @@ export class PlanCompiler {
 		if (isPrecompiledJoinDecision(decision)) {
 			// BatchValues: splice batch params into state BEFORE other query params
 			// so that $1, $2, ... in the RangeFunction align with parameters[0], [1], ...
-			if (isBatchValuesJoinDecision(decision)) {
+			const isBatchValues = isBatchValuesJoinDecision(decision);
+			if (isBatchValues) {
 				for (const p of decision.batchValuesParams) {
 					this.state.parameters.push(p);
 				}
 				this.state.paramIndex = this.state.parameters.length;
 			}
 			const jRarg = decision.joinRarg;
-			const jOn = decision.joinOnNode;
+			let jOn = decision.joinOnNode;
+			if (!isBatchValues && decision.joinOnParams?.length) {
+				// The ON was compiled in a fresh param state, so its ParamRefs are
+				// numbered 1..joinOnParams.length. A ref beyond that range means the
+				// ON references a param it does not own (an externally pre-assigned /
+				// bound param) — renumbering it would silently corrupt placeholders,
+				// so fail loud instead.
+				if (
+					maxParamRefNumber(decision.joinOnNode) > decision.joinOnParams.length
+				) {
+					throw new Error(
+						'Table-mode JOIN ON clauses support only inline param() values; ' +
+							'externally pre-assigned or bound parameters in an ON clause are not supported.',
+					);
+				}
+				const offset = this.state.parameters.length;
+				jOn = renumberParamRefsInAst(decision.joinOnNode, offset);
+				for (const p of decision.joinOnParams) {
+					this.state.parameters.push(p);
+				}
+				this.state.paramIndex = this.state.parameters.length;
+			}
 			from[0] =
 				decision.joinType === 'left'
 					? leftJoin(from[0] as Node, jRarg, jOn)
@@ -2866,7 +2873,10 @@ export class PlanCompiler {
 	// CASE Expression Compilation
 	// --------------------------------------------------------------------------
 
-	private compileCaseExpression(decision: PlanDecision): Node {
+	private compileCaseExpression(
+		decision: PlanDecision,
+		plan: SimplifiedPlanReport,
+	): Node {
 		// CASE decisions carry { when, then } tuples in `conditions` —
 		// structurally different from the base PlanDecision[].
 		const conditions = decision.conditions as
@@ -2880,7 +2890,7 @@ export class PlanCompiler {
 
 		const args: Node[] = conditions.map((cond) => {
 			const whenExpr = this.dispatchWhere(cond.when);
-			const thenResult = this.compileCaseValue(cond.then);
+			const thenResult = this.compileCaseValue(cond.then, plan);
 
 			return {
 				CaseWhen: {
@@ -2892,7 +2902,7 @@ export class PlanCompiler {
 
 		let defresult: Node | undefined;
 		if (elseValue !== undefined) {
-			defresult = this.compileCaseValue(elseValue);
+			defresult = this.compileCaseValue(elseValue, plan);
 		}
 
 		return {
@@ -2907,15 +2917,15 @@ export class PlanCompiler {
 	 * Compile a CASE THEN/ELSE value based on its ExpressionIntent kind.
 	 * Delegates to shared resolveCaseValue with nested CASE support.
 	 */
-	private compileCaseValue(value: unknown): Node {
+	private compileCaseValue(value: unknown, plan: SimplifiedPlanReport): Node {
 		return resolveCaseValueShared(
 			value,
 			this.currentRootTable,
 			undefined,
 			this.naming,
 			this.state,
-			(expr) =>
-				this.compileCaseExpression({
+			(expr) => {
+				const nestedDecision = {
 					type: 'selectExpression',
 					expressionType: 'case',
 					conditions: (
@@ -2927,8 +2937,63 @@ export class PlanCompiler {
 					})),
 					value: expr.else,
 					table: this.currentRootTable,
-				} as unknown as PlanDecision),
+				} as unknown as PlanDecision;
+				return this.compileCaseExpression(nestedDecision, plan);
+			},
+			(expr) =>
+				this.compileCustomExpressionNode(
+					expr as unknown as ExpressionIntent,
+					plan,
+				),
 		);
+	}
+
+	/**
+	 * Compile a custom ExpressionIntent (customFn, customOp, ref, cast, unary,
+	 * array, function, subquery, …) to an AST node, applying the customFn FILTER
+	 * clause. Shared by the `selectCustomExpression` target path and CASE
+	 * THEN/ELSE values so both render the full expression surface identically
+	 * (every expression kind + FILTER), rather than one path silently binding
+	 * expressions as parameters or dropping FILTER.
+	 */
+	private compileCustomExpressionNode(
+		exprIntent: ExpressionIntent,
+		plan: SimplifiedPlanReport,
+	): Node {
+		// createHandlerContext already wires compileSubquery → compileExpressionSubquery.
+		const ctx = this.createHandlerContext(plan, plan.rootTable);
+		const state = this.createHandlerState();
+		const node = compileExpressionIntent(exprIntent, ctx, state);
+		// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg
+		// FILTER (WHERE ...)). Compiled at this level to use compileFilterCondition
+		// + convertWhereCondition without introducing circular deps in custom.ts.
+		if (
+			exprIntent.kind === 'customFn' &&
+			(exprIntent as import('@dbsp/types').CustomFnExpressionIntent).filter
+		) {
+			const filterIntent = (
+				exprIntent as import('@dbsp/types').CustomFnExpressionIntent
+			).filter!;
+			const filterDecision = convertWhereCondition(
+				filterIntent,
+				plan.rootTable,
+			);
+			if (filterDecision) {
+				const filterNode = compileFilterCondition(
+					filterDecision,
+					createWhereDispatcher(),
+					ctx,
+					state,
+				);
+				if (filterNode && 'FuncCall' in node) {
+					(node as { FuncCall: Record<string, unknown> }).FuncCall.agg_filter =
+						filterNode;
+				}
+			}
+		}
+		// parameters are shared by reference; only sync paramIndex
+		this.state.paramIndex = state.paramIndex;
+		return node;
 	}
 
 	// --------------------------------------------------------------------------

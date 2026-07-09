@@ -5,7 +5,20 @@
  * SQL format note: createPgsqlCompileOnlyAdapter({ model }) uses identityNaming
  * which produces unquoted identifiers without table aliases (e.g. symbols.name, not "t0"."name").
  */
-import { caseWhen, createOrm, eq, gte, literal, schema } from '@dbsp/core';
+import {
+	array,
+	caseWhen,
+	createOrm,
+	eq,
+	exprRef,
+	fn,
+	gte,
+	isNotNull,
+	literal,
+	op,
+	param,
+	schema,
+} from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
 
@@ -13,6 +26,7 @@ const testSchema = schema({
 	symbols: {
 		id: { type: 'integer', primaryKey: true },
 		name: { type: 'text' },
+		source: { type: 'text' },
 		kind: { type: 'text' },
 		file_id: { type: 'integer' },
 		score: { type: 'integer' },
@@ -127,7 +141,112 @@ describe('5. caseWhen() without ELSE via toExpr()', () => {
 	});
 });
 
-describe('6. CaseBuilder immutability', () => {
+describe('6. caseWhen() THEN/ELSE expression values', () => {
+	it('renders fn() THEN and exprRef() ELSE as SQL expressions', () => {
+		const orm = buildOrm();
+		const pkg = caseWhen(
+			eq('kind', 'package'),
+			fn('split_part', exprRef('source'), literal('/'), literal(1)),
+		)
+			.else(exprRef('source'))
+			.as('pkg');
+		const dump = orm.select('symbols').columns(['name', pkg]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				"SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN split_part(source, '/', 1) ELSE source END AS pkg FROM symbols",
+			),
+		);
+		expect(dump.params).toEqual(['package']);
+	});
+
+	it('renders nested op() and fn() THEN expressions recursively', () => {
+		const orm = buildOrm();
+		const pkgPath = caseWhen(
+			eq('kind', 'module'),
+			op(
+				'||',
+				fn('split_part', exprRef('source'), literal('/'), literal(1)),
+				literal('/'),
+			),
+		)
+			.else(exprRef('source'))
+			.as('pkg_path');
+		const dump = orm.select('symbols').columns(['name', pkgPath]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				"SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN split_part(source, '/', 1) || '/' ELSE source END AS pkg_path FROM symbols",
+			),
+		);
+		expect(dump.params).toEqual(['module']);
+	});
+
+	it('renders exprRef() ELSE as a column reference with scalar THEN kept bound', () => {
+		const orm = buildOrm();
+		const label = caseWhen(eq('kind', 'workspace'), literal('workspace'))
+			.else(exprRef('source'))
+			.as('label');
+		const dump = orm.select('symbols').columns(['name', label]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN $2 ELSE source END AS label FROM symbols',
+			),
+		);
+		expect(dump.params).toEqual(['workspace', 'workspace']);
+	});
+
+	it('renders array() THEN/ELSE as ARRAY[...] instead of binding the intent', () => {
+		const orm = buildOrm();
+		const arr = caseWhen(eq('kind', 'list'), array(literal(1), literal(2)))
+			.else(array())
+			.as('arr');
+		const dump = orm.select('symbols').columns(['name', arr]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN ARRAY[1, 2] ELSE ARRAY[] END AS arr FROM symbols',
+			),
+		);
+		expect(dump.params).toEqual(['list']);
+	});
+
+	it('preserves the customFn FILTER clause on a THEN aggregate', () => {
+		const orm = buildOrm();
+		const agg = caseWhen(
+			eq('kind', 'module'),
+			fn('array_agg', exprRef('name')).filter(isNotNull('name')),
+		)
+			.else(literal('none'))
+			.as('agg');
+		const dump = orm.select('symbols').columns(['name', agg]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN array_agg(name) FILTER (WHERE symbols.name IS NOT NULL) ELSE $2 END AS agg FROM symbols',
+			),
+		);
+		expect(dump.params).toEqual(['module', 'none']);
+	});
+
+	it('threads a bound param nested inside a THEN expression', () => {
+		const orm = buildOrm();
+		const lc = caseWhen(eq('kind', 'file'), fn('lower', param('SECRET')))
+			.else(exprRef('name'))
+			.as('lc');
+		const dump = orm.select('symbols').columns(['name', lc]).dump();
+
+		expect(ws(dump.sql)).toEqual(
+			ws(
+				'SELECT symbols.name, CASE WHEN symbols.kind = $1 THEN lower($2) ELSE name END AS lc FROM symbols',
+			),
+		);
+		expect(dump.params).toEqual(['file', 'SECRET']);
+	});
+});
+
+describe('7. CaseBuilder immutability', () => {
 	it('.when() returns a new builder without mutating original', () => {
 		const base = caseWhen(eq('score', 100), literal('perfect'));
 		const extended = base.when(gte('score', 50), literal('pass'));
