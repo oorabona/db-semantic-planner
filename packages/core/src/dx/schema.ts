@@ -1846,6 +1846,7 @@ export async function getSchemaFromDb<
 			}
 		>
 	>();
+	const compositeExternalFkLookup = new Map<string, ForeignKeyIR[]>();
 	for (const table of model.tables.values()) {
 		const tableFks = new Map<
 			string,
@@ -1860,13 +1861,27 @@ export async function getSchemaFromDb<
 			}
 		>();
 		for (const fk of table.foreignKeys) {
-			// Only handle single-column FKs for now (composite FKs are rare in schema defs)
+			const externalSchema = normalizeReferenceSchema(fk.references.schema);
+			if (externalSchema !== undefined && fk.columns.length > 1) {
+				const tableCompositeFks =
+					compositeExternalFkLookup.get(table.name) ?? [];
+				tableCompositeFks.push({
+					...fk,
+					references: {
+						...fk.references,
+						schema: externalSchema,
+					},
+				});
+				compositeExternalFkLookup.set(table.name, tableCompositeFks);
+				continue;
+			}
+
+			// Existing per-column emission path for same-schema FKs and single-column external FKs.
 			const fkColumn = fk.columns[0];
 			if (!fkColumn) continue;
 
 			// Find the column to check nullable/unique
 			const column = table.columns.find((c) => c.name === fkColumn);
-			const externalSchema = normalizeReferenceSchema(fk.references.schema);
 			tableFks.set(fkColumn, {
 				target: fk.references.table,
 				refs: fk.references.columns,
@@ -1887,6 +1902,8 @@ export async function getSchemaFromDb<
 	for (const table of model.tables.values()) {
 		const tableDef: TableDef = {};
 		const tableFks = fkLookup.get(table.name) ?? new Map();
+		const compositeExternalFks =
+			compositeExternalFkLookup.get(table.name) ?? [];
 
 		for (const column of table.columns) {
 			const fk = tableFks.get(column.name);
@@ -1922,6 +1939,22 @@ export async function getSchemaFromDb<
 				// Regular column → JS type
 				tableDef[column.name] = columnTypeToJsType(column.type);
 			}
+		}
+
+		for (const fk of compositeExternalFks) {
+			const externalSchema = fk.references.schema;
+			if (externalSchema === undefined) continue;
+			const tableConstraints = (constraints[table.name] ??= {});
+			const foreignKeys = (tableConstraints.foreignKeys ??= []);
+			foreignKeys.push(
+				ref(fk.references.table, {
+					schema: externalSchema,
+					columns: fk.columns,
+					references: fk.references.columns,
+					...(fk.onDelete !== undefined ? { onDelete: fk.onDelete } : {}),
+					...(fk.onUpdate !== undefined ? { onUpdate: fk.onUpdate } : {}),
+				}),
+			);
 		}
 
 		definition[table.name] = tableDef;
