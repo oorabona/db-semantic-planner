@@ -240,31 +240,17 @@ function buildIndexAPI(
 					'indexes.list() requires an adapter.',
 				);
 			}
-			if (adapter.listIndexes) {
-				return adapter.listIndexes(tableName, schemaName, options);
+			// DB-agnostic core must not emit database-specific catalog SQL.
+			// Listing indexes requires the adapter to implement listIndexes()
+			// (mirrors indexes.exists() below); fail loud rather than fall back
+			// to a PostgreSQL-only pg_index/pg_indexes query.
+			if (!adapter.listIndexes) {
+				throw new InvalidOperationError(
+					'indexes.list',
+					'indexes.list() requires an adapter that implements listIndexes().',
+				);
 			}
-			// Fallback for adapters without listIndexes: use executeRaw if available
-			const sql =
-				`SELECT indexname AS name, indexdef AS definition, ` +
-				`(SELECT indisunique FROM pg_index WHERE indexrelid = (SELECT oid FROM pg_class WHERE relname = indexname)) AS unique, ` +
-				`CASE WHEN indexdef LIKE '%USING %' THEN split_part(indexdef, 'USING ', 2) ELSE 'btree' END AS method ` +
-				`FROM pg_indexes WHERE tablename = '${tableName.replace(/'/g, "''")}' ` +
-				(schemaName
-					? `AND schemaname = '${schemaName.replace(/'/g, "''")}' `
-					: '') +
-				`ORDER BY indexname`;
-			if ('executeRaw' in adapter && typeof adapter.executeRaw === 'function') {
-				const rows = await (
-					adapter.executeRaw as (
-						sql: string,
-						params: unknown[],
-					) => Promise<unknown[]>
-				)(sql, []);
-				return rows as IndexInfo[];
-			}
-			// Fallback: use executeDDL (adapter must handle SELECT)
-			if (adapter.executeDDL) await adapter.executeDDL(sql);
-			return [];
+			return adapter.listIndexes(tableName, schemaName, options);
 		},
 
 		async exists(name: string): Promise<boolean> {

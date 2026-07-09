@@ -775,13 +775,14 @@ describe('generateDropIndexSQL — option branches', () => {
 
 describe('buildIndexAPI — list and exists error branches', () => {
 	it('should throw when list is called on adapter that has executeRaw but no listIndexes', async () => {
-		// ormWithMock has executeRaw (throws "Not implemented"), no listIndexes — falls through to executeRaw branch
+		// no listIndexes → fail loud (InvalidOperationError); core must not emit
+		// database-specific catalog SQL as a fallback.
 		const ddl = ormWithMock.tables.users;
 		await expect(() =>
 			(
 				ddl as unknown as { indexes: { list(): Promise<unknown[]> } }
 			).indexes.list(),
-		).rejects.toThrow('Not implemented in mock adapter');
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('should throw InvalidOperationError when exists is called on adapter without indexExists method', async () => {
@@ -828,7 +829,7 @@ describe('buildIndexAPI — list and exists error branches', () => {
 		expect(result).toBe(true);
 	});
 
-	it('should fall back to executeRaw for list when adapter has no listIndexes but has executeRaw', async () => {
+	it('should throw (no executeRaw fallback) when list has no listIndexes but has executeRaw', async () => {
 		const executeRaw = vi.fn().mockResolvedValue([]);
 		const executeDDL = vi.fn().mockResolvedValue(undefined);
 		const ddlAdapter = makeDDLAdapter({ executeDDL, executeRaw });
@@ -836,11 +837,14 @@ describe('buildIndexAPI — list and exists error branches', () => {
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
-		const result = await (
-			orm.tables.users as unknown as { indexes: { list(): Promise<unknown[]> } }
-		).indexes.list();
-		expect(executeRaw).toHaveBeenCalledOnce();
-		expect(result).toEqual([]);
+		await expect(() =>
+			(
+				orm.tables.users as unknown as {
+					indexes: { list(): Promise<unknown[]> };
+				}
+			).indexes.list(),
+		).rejects.toThrow(InvalidOperationError);
+		expect(executeRaw).not.toHaveBeenCalled();
 	});
 });
 

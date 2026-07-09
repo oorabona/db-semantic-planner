@@ -1059,42 +1059,41 @@ describe('generateAlterColumnSQL edge cases', () => {
 // 23. buildIndexAPI.list() fallback paths
 // ============================================================================
 
-describe('buildIndexAPI.list() fallback paths', () => {
-	it('uses executeRaw when adapter has no listIndexes but has executeRaw', async () => {
-		const executeRaw = vi.fn().mockResolvedValue([{ name: 'idx_users_email' }]);
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
+describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
+	it('throws InvalidOperationError when adapter has no listIndexes (even with executeRaw)', async () => {
+		const { InvalidOperationError } = await import('../errors.js');
 		const adapter = {
 			...createMockAdapter(),
-			executeDDL,
-			executeRaw,
+			executeDDL: vi.fn(),
+			executeRaw: vi.fn(),
 			listIndexes: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		const result = await (
-			orm.tables.users as unknown as {
-				indexes: { list(): Promise<unknown[]> };
-			}
-		).indexes.list();
-		expect(executeRaw).toHaveBeenCalledOnce();
-		expect(result).toEqual([{ name: 'idx_users_email' }]);
+		await expect(
+			(
+				orm.tables.users as unknown as {
+					indexes: { list(): Promise<unknown[]> };
+				}
+			).indexes.list(),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
-	it('falls back to executeDDL when adapter has neither listIndexes nor executeRaw', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
+	it('throws InvalidOperationError when adapter has neither listIndexes nor executeRaw', async () => {
+		const { InvalidOperationError } = await import('../errors.js');
 		const adapter = {
 			...createMockAdapter(),
-			executeDDL,
+			executeDDL: vi.fn(),
 			listIndexes: undefined,
 			executeRaw: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		const result = await (
-			orm.tables.users as unknown as {
-				indexes: { list(): Promise<unknown[]> };
-			}
-		).indexes.list();
-		expect(executeDDL).toHaveBeenCalledOnce();
-		expect(result).toEqual([]);
+		await expect(
+			(
+				orm.tables.users as unknown as {
+					indexes: { list(): Promise<unknown[]> };
+				}
+			).indexes.list(),
+		).rejects.toThrow(InvalidOperationError);
 	});
 
 	it('throws InvalidOperationError when no adapter is set', async () => {
