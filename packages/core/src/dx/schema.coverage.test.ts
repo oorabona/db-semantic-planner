@@ -1383,6 +1383,99 @@ describe('schema coverage', () => {
 			expect(postsDef).toBeDefined();
 		});
 
+		it('round-trips same-schema FK references and actions from introspection', async () => {
+			const { getSchemaFromDb } = await import('./schema.js');
+
+			const mockModel = {
+				tables: new Map([
+					[
+						'emailCatalog',
+						{
+							name: 'emailCatalog',
+							columns: [{ name: 'id', type: 'text', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						},
+					],
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [
+								{ name: 'id', type: 'uuid', nullable: false },
+								{ name: 'email', type: 'text', nullable: false, unique: true },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['email'],
+									references: { table: 'emailCatalog', columns: ['id'] },
+								},
+							],
+							indexes: [],
+						},
+					],
+					[
+						'posts',
+						{
+							name: 'posts',
+							columns: [
+								{ name: 'id', type: 'uuid', nullable: false },
+								{
+									name: 'authorEmail',
+									type: 'text',
+									nullable: true,
+									unique: false,
+								},
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['authorEmail'],
+									references: { table: 'users', columns: ['email'] },
+									onDelete: 'SET NULL',
+									onUpdate: 'CASCADE',
+								},
+							],
+							indexes: [],
+						},
+					],
+				]),
+				relations: new Map(),
+				getTable: (name) => mockModel.tables.get(name),
+				getRelation: () => undefined,
+				getRelationsFrom: () => [],
+			};
+
+			const adapter = { introspect: async () => mockModel };
+
+			const result = await getSchemaFromDb(adapter);
+			const authorEmail = result.definition.posts.authorEmail;
+			expect(isRef(authorEmail)).toBe(true);
+			expect(authorEmail.options).toMatchObject({
+				nullable: true,
+				unique: false,
+				references: ['email'],
+				onDelete: 'SET NULL',
+				onUpdate: 'CASCADE',
+			});
+
+			let rebuilt;
+			expect(() => {
+				rebuilt = schema(result.definition, result.constraints);
+			}).not.toThrow();
+
+			const rebuiltFk = rebuilt.model.getTable('posts')?.foreignKeys[0];
+			expect(rebuiltFk?.columns).toEqual(['authorEmail']);
+			expect(rebuiltFk?.references).toEqual({
+				table: 'users',
+				columns: ['email'],
+			});
+			expect(rebuiltFk?.onDelete).toBe('SET NULL');
+			expect(rebuiltFk?.onUpdate).toBe('CASCADE');
+		});
+
 		it('round-trips cross-schema FK from introspection as table-level constraint', async () => {
 			const { getSchemaFromDb } = await import('./schema.js');
 
