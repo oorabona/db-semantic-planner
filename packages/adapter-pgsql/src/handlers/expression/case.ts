@@ -6,6 +6,7 @@
  * Produces CaseExpr nodes.
  */
 
+import type { ExpressionIntent } from '@dbsp/types';
 import type { CaseExpr, CaseWhen, Node } from '@pgsql/types';
 import { columnRef } from '../../ast-helpers.js';
 import { unwrapParamIntent } from '../../param-intent.js';
@@ -16,6 +17,7 @@ import type {
 	ExpressionHandler,
 } from '../types.js';
 import { resolveCaseValue as resolveCaseValueShared } from './case-value.js';
+import { compileExpressionIntent } from './custom.js';
 import { bindParameter } from './param-value.js';
 
 /**
@@ -33,7 +35,22 @@ function resolveCaseValue(
 	state: CompilerState,
 ): Node {
 	const alias = ctx.currentAlias ?? ctx.rootTable;
-	return resolveCaseValueShared(value, alias, undefined, ctx.naming, state);
+	return resolveCaseValueShared(
+		value,
+		alias,
+		undefined,
+		ctx.naming,
+		state,
+		undefined,
+		// Handler-level path: renders every expression kind via the shared
+		// expression compiler. It does NOT apply the customFn FILTER modifier
+		// (agg_filter) — that requires compiler-private compileFilterCondition,
+		// which cannot be reached here without a circular dependency. The primary
+		// DX caseWhen path (PlanCompiler.compileCustomExpressionNode) filter-patches
+		// correctly; use it for filtered aggregates as CASE branches.
+		(expr) =>
+			compileExpressionIntent(expr as unknown as ExpressionIntent, ctx, state),
+	);
 }
 
 export const caseHandler: ExpressionHandler = {

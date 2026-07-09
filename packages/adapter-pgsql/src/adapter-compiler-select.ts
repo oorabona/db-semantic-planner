@@ -26,6 +26,7 @@ import {
 	type CompilerOptions,
 	compilePlan,
 	type PlanDecision,
+	type PrecompiledJoinDecision,
 	type SimplifiedPlanReport,
 } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
@@ -359,8 +360,8 @@ function compileJoinIntents(
 		} else {
 			// ── Table mode: explicit ON condition ─────────────────────────────
 			// Compile the ON WhereIntent to an AST Node via compileWhereIntent.
-			// ON conditions for joins are typically column-to-column comparisons
-			// (no $N parameters), so a fresh param state is safe.
+			// ON conditions may include bound params; capture them with the precompiled
+			// join so compiler.ts can merge them into the query's live param sequence.
 			const paramState = createCompilerState();
 
 			const tableAlias = intent.alias ?? intent.table;
@@ -406,14 +407,16 @@ function compileJoinIntents(
 				naming,
 			);
 
-			results.push({
+			const joinDecision: PrecompiledJoinDecision = {
 				type: 'join',
 				targetTable: intent.table,
 				alias: tableAlias,
 				joinType: intent.type,
 				joinRarg: joinedRangeVar,
 				joinOnNode: onNode,
-			});
+				joinOnParams: paramState.parameters,
+			};
+			results.push(joinDecision);
 		}
 	}
 

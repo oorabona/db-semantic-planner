@@ -23,6 +23,27 @@ import { bindParameter } from './param-value.js';
  * the DX handler omits it (nested CASE falls through to default parameterization).
  */
 type NestedCaseHandler = (expr: Record<string, unknown>) => Node;
+type CaseExpressionHandler = (expr: Record<string, unknown>) => Node;
+
+/**
+ * Expression-intent kinds that compileExpressionIntent renders and that are
+ * valid as a standalone CASE branch value. Mirrors the relevant arm of the
+ * switch in handlers/expression/custom.ts, excluding the kinds this file
+ * handles inline (param, literal, column, arithmetic, case) AND the
+ * function-call-context-only kinds (`star`, `namedArg`) that are not valid
+ * standalone expressions — those must not render as a bare `*` / `name => ...`
+ * inside a CASE.
+ */
+const EXPRESSION_HANDLER_KINDS = new Set<string>([
+	'customOp',
+	'customFn',
+	'ref',
+	'cast',
+	'unary',
+	'array',
+	'subquery',
+	'relationColumn',
+]);
 
 /**
  * Resolve a CASE THEN/ELSE value to an AST node.
@@ -37,6 +58,7 @@ export function resolveCaseValue(
 	naming: NamingPlugin | undefined,
 	state: CompilerState,
 	nestedCaseHandler?: NestedCaseHandler,
+	expressionHandler?: CaseExpressionHandler,
 ): Node {
 	if (value === null || value === undefined) {
 		return nullConstNode();
@@ -78,6 +100,7 @@ export function resolveCaseValue(
 				naming,
 				state,
 				nestedCaseHandler,
+				expressionHandler,
 			);
 			const right = resolveCaseValue(
 				expr.right,
@@ -86,6 +109,7 @@ export function resolveCaseValue(
 				naming,
 				state,
 				nestedCaseHandler,
+				expressionHandler,
 			);
 			return {
 				A_Expr: {
@@ -104,6 +128,23 @@ export function resolveCaseValue(
 			}
 		// falls through
 		default: {
+			// Route the expression kinds that the shared expression compiler
+			// (compileExpressionIntent, handlers/expression/custom.ts) renders —
+			// customFn, customOp, ref, cast, unary, namedArg, star, array,
+			// subquery, relationColumn — through it, so functions, operators,
+			// column refs and arrays emit as SQL instead of binding the intent
+			// object as a parameter. Keep EXPRESSION_HANDLER_KINDS in sync with
+			// that switch. Kinds it does NOT render (function / coalesce /
+			// aggregate / json* / window) still bind as parameters here; rendering
+			// the full expression surface inside CASE branches is tracked
+			// separately. Scalars without a `kind` also bind as parameters.
+			if (
+				expressionHandler &&
+				typeof expr.kind === 'string' &&
+				EXPRESSION_HANDLER_KINDS.has(expr.kind)
+			) {
+				return expressionHandler(expr);
+			}
 			return bindParameter(value, state);
 		}
 	}
