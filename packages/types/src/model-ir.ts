@@ -196,6 +196,12 @@ export interface ColumnIR {
 	/** Whether column has a UNIQUE constraint */
 	readonly unique?: boolean;
 
+	/**
+	 * Actual database UNIQUE constraint name, populated by introspection.
+	 * Manually defined schemas may not have this field.
+	 */
+	readonly uniqueConstraintName?: string;
+
 	/** Whether column auto-increments (SERIAL, IDENTITY, AUTOINCREMENT) */
 	readonly autoIncrement?: boolean;
 
