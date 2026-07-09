@@ -340,7 +340,7 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 				table: toDb(fk.references.table),
 				columns: fk.references.columns.map(toDb),
 				...(fk.references.schema !== undefined
-					? { schema: toDb(fk.references.schema) }
+					? { schema: fk.references.schema }
 					: {}),
 			},
 		})),

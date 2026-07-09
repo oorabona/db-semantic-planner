@@ -2291,7 +2291,7 @@ describe('generateDownSQL', () => {
 	});
 
 	describe('options', () => {
-		it('should filter out destructive changes when includeDestructive is false', () => {
+		it('should filter out destructive down statements when includeDestructive is false', () => {
 			const table = makeTable('users', [
 				makeCol({ name: 'id', type: 'integer' }),
 			]);
@@ -2306,17 +2306,46 @@ describe('generateDownSQL', () => {
 						meta: { table },
 					},
 					{
-						kind: 'drop_table',
-						table: 'old_table',
+						kind: 'alter_column_nullable',
+						table: 'profiles',
+						column: 'bio',
 						destructive: true,
 						details: '',
+						meta: { oldNullable: true },
 					},
 				]),
 				{ includeDestructive: false },
 			);
 
 			expect(sql).toHaveLength(1);
-			expect(sql[0]).toContain('DROP TABLE IF EXISTS "users"');
+			expect(sql[0]).toBe(
+				'ALTER TABLE "profiles" ALTER COLUMN "bio" DROP NOT NULL;',
+			);
+		});
+
+		it('filters alter_column_unique add from DOWN unless destructive changes are included', () => {
+			const change: SchemaChange = {
+				kind: 'alter_column_unique',
+				table: 'users',
+				column: 'email',
+				destructive: false,
+				details: '',
+				meta: { unique: true },
+			};
+
+			const filtered = generateDownMigrationSQL(makeDiff([change]), {
+				includeDestructive: false,
+			});
+			const included = generateDownMigrationSQL(makeDiff([change]), {
+				includeDestructive: true,
+			});
+
+			expect(filtered.statements).toEqual([]);
+			expect(filtered.destructive).toBe(false);
+			expect(included.statements).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
+			]);
+			expect(included.destructive).toBe(true);
 		});
 
 		it('should return empty array for no changes', () => {

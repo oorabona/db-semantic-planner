@@ -1474,11 +1474,6 @@ export function generateDownMigrationSQL(
 	const schemaName = options?.schemaName;
 	const includeDestructive = options?.includeDestructive ?? true;
 
-	// Filter out destructive changes if not included
-	const changes = includeDestructive
-		? diff.changes
-		: diff.changes.filter((c) => !c.destructive);
-
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
 		[], // 0: drop FK, drop CHECK
@@ -1502,7 +1497,7 @@ export function generateDownMigrationSQL(
 		[], // 18: CREATE/DROP POLICY
 	];
 
-	for (const change of changes) {
+	for (const change of diff.changes) {
 		const phase = getPhase(change.kind);
 		phases[phase]!.push(change);
 	}
@@ -1513,6 +1508,7 @@ export function generateDownMigrationSQL(
 	for (let i = phases.length - 1; i >= 0; i--) {
 		for (const change of phases[i]!) {
 			const down = changeToDownSQL(change, schemaName);
+			if (!includeDestructive && down.destructive) continue;
 			destructive = down.destructive || destructive;
 			if (down.sql) statements.push(down.sql);
 		}

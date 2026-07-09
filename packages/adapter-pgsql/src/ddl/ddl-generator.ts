@@ -170,10 +170,12 @@ function qualifyTable(
 	tableName: string,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
+	transformSchema = true,
 ): string {
 	const table = quoteIdentifier(naming.toDatabase(tableName));
 	if (schemaName) {
-		return `${quoteIdentifier(naming.toDatabase(schemaName))}.${table}`;
+		const schema = transformSchema ? naming.toDatabase(schemaName) : schemaName;
+		return `${quoteIdentifier(schema)}.${table}`;
 	}
 	return table;
 }
@@ -325,11 +327,10 @@ export function generateAlterTableAddFK(
 		.join(', ');
 
 	// Referenced table and columns resolve to a declared schema, or the DDL schema when absent.
-	const refTable = qualifyTable(
-		fk.references.table,
-		fk.references.schema ?? schemaName,
-		naming,
-	);
+	const refTable =
+		fk.references.schema !== undefined
+			? qualifyTable(fk.references.table, fk.references.schema, naming, false)
+			: qualifyTable(fk.references.table, schemaName, naming);
 	const refCols = fk.references.columns
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))
 		.join(', ');
