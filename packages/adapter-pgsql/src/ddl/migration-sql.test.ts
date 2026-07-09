@@ -1255,6 +1255,22 @@ describe('generateDownSQL', () => {
 				expectedSql:
 					'ALTER TABLE "users" ADD CONSTRAINT "users_email_key" UNIQUE ("email");',
 			},
+			{
+				name: 'alter_column_unique false DOWN restores the recorded unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: {
+						unique: false,
+						constraintName: 'users_email_custom_uq',
+					},
+				},
+				expectedSql:
+					'ALTER TABLE "users" ADD CONSTRAINT "users_email_custom_uq" UNIQUE ("email");',
+			},
 		] satisfies Array<{
 			name: string;
 			change: SchemaChange;

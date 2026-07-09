@@ -988,7 +988,7 @@ export async function introspect(
 
 	const extensions: string[] = raw.extensions.map((r) => r.name);
 	const sequenceMap = buildSequenceMap(raw.sequences);
-	const relations = inferRelations(fksByConstraint, tableNames);
+	const relations = inferRelations(fksByConstraint, tableNames, schema);
 	const hierarchies = detectHierarchies(
 		tables,
 		fksByConstraint,
@@ -1033,11 +1033,13 @@ export async function introspect(
 function inferRelations(
 	fksByConstraint: Map<string, FKEntry>,
 	filteredTables: string[],
+	schema: string,
 ): Map<string, RelationIR> {
 	const relations = new Map<string, RelationIR>();
 	const filteredSet = new Set(filteredTables);
 
 	for (const [, fk] of fksByConstraint) {
+		if (fk.targetSchema !== undefined && fk.targetSchema !== schema) continue;
 		if (!filteredSet.has(fk.source) || !filteredSet.has(fk.target)) continue;
 
 		// Derive relation name from FK column
@@ -1131,6 +1133,7 @@ function detectHierarchies(
 	>();
 
 	for (const [, fk] of fksByConstraint) {
+		if (fk.targetSchema !== undefined && fk.targetSchema !== schema) continue;
 		if (!filteredSet.has(fk.source) || !filteredSet.has(fk.target)) continue;
 
 		// Adjacency: self-referential FK
