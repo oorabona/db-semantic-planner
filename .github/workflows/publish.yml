@@ -13,6 +13,15 @@ on:
     types: [completed]
   workflow_dispatch:
 
+concurrency:
+  # Serialize publishes: never let two Publish runs (a workflow_run chained after
+  # release-please AND a manual workflow_dispatch) race on the same npm PUT — that
+  # yields "409 Conflict / Failed to save packument". Queue rather than cancel so
+  # an in-flight publish always finishes; the per-version `npm view` guard makes
+  # the queued run a no-op if everything is already up.
+  group: npm-publish
+  cancel-in-progress: false
+
 jobs:
   publish:
     # Manual dispatch always runs; the chained run only when release-please succeeded.
