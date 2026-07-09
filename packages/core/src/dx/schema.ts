@@ -504,7 +504,8 @@ function normalizeReferenceSchema(
 	schemaName: string | null | undefined,
 ): string | undefined {
 	if (schemaName == null) return undefined;
-	return schemaName.trim().length > 0 ? schemaName : undefined;
+	const t = schemaName.trim();
+	return t.length > 0 ? t : undefined;
 }
 
 function hasExternalSchema(schemaName: string | null | undefined): boolean {

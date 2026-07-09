@@ -111,7 +111,6 @@ function generateColumnCode(
 	fkInfo:
 		| {
 				table: string;
-				schema?: string;
 				column?: string;
 				nullable?: boolean;
 				unique?: boolean;
@@ -181,7 +180,6 @@ function generateRefCode(
 	column: TableIR['columns'][number],
 	fkInfo: {
 		table: string;
-		schema?: string;
 		column?: string;
 		nullable?: boolean;
 		unique?: boolean;
@@ -193,10 +191,6 @@ function generateRefCode(
 	options: SchemaCodegenOptions,
 ): string {
 	const refOptions: string[] = [];
-
-	if (fkInfo.schema !== undefined) {
-		refOptions.push(`schema: ${singleQuoteEscape(fkInfo.schema)}`);
-	}
 
 	// C2: emit references option for non-PK FK target columns.
 	// Now that buildRefColumn plumbs options.references into ModelIR,
@@ -281,7 +275,6 @@ function generateTableCode(
 		string,
 		{
 			table: string;
-			schema?: string;
 			column?: string;
 			nullable?: boolean;
 			unique?: boolean;
@@ -310,7 +303,6 @@ function generateTableCode(
 
 			const entry: {
 				table: string;
-				schema?: string;
 				column?: string;
 				nullable?: boolean;
 				unique?: boolean;
@@ -323,10 +315,6 @@ function generateTableCode(
 					fk.references.schema === undefined &&
 					fk.references.table === table.name,
 			};
-
-			if (fk.references.schema !== undefined) {
-				entry.schema = fk.references.schema;
-			}
 
 			// Only include column if not 'id' (the default)
 			if (refCol !== 'id') {
