@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.1.9](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.8...cli-v1.1.9) (2026-07-09)
+
+
+### Bug Fixes
+
+* **cli:** Emit cross-schema single-column FKs as loadable table-level constraints ([48d22b3](https://github.com/oorabona/db-semantic-planner/commit/48d22b3336159c76405a658160d583774a79595b)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+* **cli:** Handle alter_column_unique drift and serialize FK referenced schema ([2914115](https://github.com/oorabona/db-semantic-planner/commit/29141159653d812581ec82ea6b421f68f8dbdbe6)), closes [#265](https://github.com/oorabona/db-semantic-planner/issues/265)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 1.11.0
+    * @dbsp/core bumped to 1.11.0
+    * @dbsp/nql bumped to 1.9.3
+    * @dbsp/types bumped to 1.9.0
+
 ## [1.1.8](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.7...cli-v1.1.8) (2026-07-07)
 
 
