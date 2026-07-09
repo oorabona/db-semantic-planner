@@ -372,7 +372,7 @@ export function validateIdentifiers(
 }
 
 // ============================================================================
-// Sanitization (for display/logging only - NOT for SQL)
+// Sanitization (for display/logging/comment text only - NOT for SQL tokens)
 // ============================================================================
 
 /**
@@ -382,6 +382,17 @@ export function validateIdentifiers(
 export function sanitizeForDisplay(value: string): string {
 	// Replace control characters with placeholders
 	return value.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 100); // Truncate for display
+}
+
+/**
+ * Sanitize display text before interpolating it into a single-line SQL comment.
+ *
+ * PostgreSQL `--` comments end at a line break, so any control character could
+ * let display-only text escape onto an executable SQL line.
+ */
+export function sanitizeCommentText(value: unknown): string {
+	assertString(value, 'SQL comment text');
+	return value.replace(/[\x00-\x1f\x7f]/g, '');
 }
 
 /**

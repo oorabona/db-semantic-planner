@@ -22,6 +22,7 @@ import {
 	assertNumericLiteral,
 	assertString,
 	formatStorageParameterValue,
+	sanitizeCommentText,
 	validateCheckExpression,
 	validateDbTypeName,
 	validateIdentifier,
@@ -269,7 +270,7 @@ interface DownChangeSQL {
 
 function failSafeUnknownDownChange(kind: never): DownChangeSQL {
 	return {
-		sql: `-- WARNING: Cannot reverse unsupported SchemaChange kind "${kind}"`,
+		sql: `-- WARNING: Cannot reverse unsupported SchemaChange kind "${sanitizeCommentText(kind)}"`,
 		destructive: true,
 	};
 }
@@ -996,7 +997,7 @@ function changeToDownSQL(
 
 		case 'drop_table':
 			return {
-				sql: `-- WARNING: Cannot reverse drop_table "${change.table}" -- table data was lost`,
+				sql: `-- WARNING: Cannot reverse drop_table "${sanitizeCommentText(change.table)}" -- table data was lost`,
 				destructive: true,
 			};
 
@@ -1008,7 +1009,7 @@ function changeToDownSQL(
 
 		case 'drop_column':
 			return {
-				sql: `-- WARNING: Cannot reverse drop_column "${change.table}"."${change.column}" -- column data was lost`,
+				sql: `-- WARNING: Cannot reverse drop_column "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- column data was lost`,
 				destructive: true,
 			};
 
@@ -1016,7 +1017,7 @@ function changeToDownSQL(
 			const fromType = change.meta?.fromType;
 			if (fromType == null) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_column_type "${change.table}"."${change.column}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_column_type "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1031,7 +1032,7 @@ function changeToDownSQL(
 			const oldNullable = change.meta?.oldNullable as boolean | undefined;
 			if (oldNullable === undefined) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_column_nullable "${change.table}"."${change.column}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_column_nullable "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1048,7 +1049,7 @@ function changeToDownSQL(
 			const oldDefault = change.meta?.oldDefault;
 			if (oldDefault === undefined) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_column_default "${change.table}"."${change.column}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_column_default "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1070,7 +1071,7 @@ function changeToDownSQL(
 			const unique = change.meta?.unique as boolean | undefined;
 			if (unique === undefined || !change.column) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_column_unique "${change.table}"."${change.column}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_column_unique "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1111,7 +1112,7 @@ function changeToDownSQL(
 				};
 			}
 			return {
-				sql: `-- WARNING: Cannot reverse drop_primary_key "${change.table}" -- columns unknown`,
+				sql: `-- WARNING: Cannot reverse drop_primary_key "${sanitizeCommentText(change.table)}" -- columns unknown`,
 				destructive: true,
 			};
 		}
@@ -1133,7 +1134,7 @@ function changeToDownSQL(
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
 			if (!fk) {
 				return {
-					sql: `-- WARNING: Cannot reverse drop_foreign_key "${change.table}" -- FK definition was lost`,
+					sql: `-- WARNING: Cannot reverse drop_foreign_key "${sanitizeCommentText(change.table)}" -- FK definition was lost`,
 					destructive: true,
 				};
 			}
@@ -1149,7 +1150,7 @@ function changeToDownSQL(
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
 			if (!oldFk || !fk) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_foreign_key "${change.table}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_foreign_key "${sanitizeCommentText(change.table)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1183,7 +1184,7 @@ function changeToDownSQL(
 			const idx = change.meta?.index as IndexIR | undefined;
 			if (!idx) {
 				return {
-					sql: `-- WARNING: Cannot reverse drop_index "${change.table}" -- index definition was lost`,
+					sql: `-- WARNING: Cannot reverse drop_index "${sanitizeCommentText(change.table)}" -- index definition was lost`,
 					destructive: true,
 				};
 			}
@@ -1269,7 +1270,7 @@ function changeToDownSQL(
 		case 'alter_column_collation': {
 			// DOWN: restore previous collation — stored in db state, not in meta; emit warning
 			return {
-				sql: `-- WARNING: Cannot reverse alter_column_collation "${change.table}"."${change.column}" -- previous collation unknown`,
+				sql: `-- WARNING: Cannot reverse alter_column_collation "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- previous collation unknown`,
 				destructive: true,
 			};
 		}
@@ -1299,7 +1300,7 @@ function changeToDownSQL(
 			}
 			if (!prevIdentity && !col.identity) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_column_identity "${change.table}"."${change.column}" -- missing previous identity metadata`,
+					sql: `-- WARNING: Cannot reverse alter_column_identity "${sanitizeCommentText(change.table)}"."${sanitizeCommentText(change.column)}" -- missing previous identity metadata`,
 					destructive: true,
 				};
 			}
@@ -1348,8 +1349,17 @@ function changeToDownSQL(
 					};
 				}
 			}
+			const columnTarget =
+				change.column === undefined
+					? ''
+					: `."${sanitizeCommentText(change.column)}"`;
 			return {
-				sql: `-- WARNING: Cannot reverse drop_comment "${change.table}"${change.column ? `."${change.column}"` : ''} -- comment text was lost`,
+				sql:
+					'-- WARNING: Cannot reverse drop_comment "' +
+					sanitizeCommentText(change.table) +
+					'"' +
+					columnTarget +
+					' -- comment text was lost',
 				destructive: true,
 			};
 		}
@@ -1393,7 +1403,7 @@ function changeToDownSQL(
 			const prevSeq = change.meta?.previousSequence as SequenceIR | undefined;
 			if (!prevSeq) {
 				return {
-					sql: `-- WARNING: Cannot reverse alter_sequence "${change.table}" -- missing migration metadata`,
+					sql: `-- WARNING: Cannot reverse alter_sequence "${sanitizeCommentText(change.table)}" -- missing migration metadata`,
 					destructive: true,
 				};
 			}
@@ -1424,7 +1434,7 @@ function changeToDownSQL(
 		case 'validate_constraint':
 			// DOWN: VALIDATE CONSTRAINT cannot be reversed in PostgreSQL
 			return {
-				sql: `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${change.table}")`,
+				sql: `-- VALIDATE CONSTRAINT cannot be reversed in PostgreSQL (table: "${sanitizeCommentText(change.table)}")`,
 				destructive: true,
 			};
 
