@@ -1069,13 +1069,9 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			listIndexes: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		await expect(
-			(
-				orm.tables.users as unknown as {
-					indexes: { list(): Promise<unknown[]> };
-				}
-			).indexes.list(),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('throws InvalidOperationError when adapter has neither listIndexes nor executeRaw', async () => {
@@ -1087,13 +1083,9 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			executeRaw: undefined,
 		} as unknown as Adapter;
 		const orm = createOrm({ schema: testSchema, adapter });
-		await expect(
-			(
-				orm.tables.users as unknown as {
-					indexes: { list(): Promise<unknown[]> };
-				}
-			).indexes.list(),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('throws InvalidOperationError when no adapter is set', async () => {
@@ -1114,13 +1106,9 @@ describe('buildIndexAPI.list() requires an adapter listIndexes()', () => {
 			undefined,
 			testSchema.tables as object,
 		);
-		await expect(
-			(
-				orm.tables.users as unknown as {
-					indexes: { list(): Promise<unknown[]> };
-				}
-			).indexes.list(),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(orm.tables.users.indexes.list()).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 });
 

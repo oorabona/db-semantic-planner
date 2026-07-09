@@ -778,23 +778,17 @@ describe('buildIndexAPI — list and exists error branches', () => {
 		// no listIndexes → fail loud (InvalidOperationError); core must not emit
 		// database-specific catalog SQL as a fallback.
 		const ddl = ormWithMock.tables.users;
-		await expect(() =>
-			(
-				ddl as unknown as { indexes: { list(): Promise<unknown[]> } }
-			).indexes.list(),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(() => ddl.indexes.list()).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('should throw InvalidOperationError when exists is called on adapter without indexExists method', async () => {
 		// mockAdapter has no indexExists method
 		const ddl = ormWithMock.tables.users;
-		await expect(() =>
-			(
-				ddl as unknown as {
-					indexes: { exists(name: string): Promise<boolean> };
-				}
-			).indexes.exists('idx'),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(() => ddl.indexes.exists('idx')).rejects.toThrow(
+			InvalidOperationError,
+		);
 	});
 
 	it('should delegate to adapter.listIndexes when available', async () => {
@@ -805,9 +799,7 @@ describe('buildIndexAPI — list and exists error branches', () => {
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
-		const result = await (
-			orm.tables.users as unknown as { indexes: { list(): Promise<unknown[]> } }
-		).indexes.list();
+		const result = await orm.tables.users.indexes.list();
 		expect(listIndexes).toHaveBeenCalledOnce();
 		expect(result).toEqual([{ name: 'idx_users_name' }]);
 	});
@@ -820,11 +812,7 @@ describe('buildIndexAPI — list and exists error branches', () => {
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
-		const result = await (
-			orm.tables.users as unknown as {
-				indexes: { exists(name: string): Promise<boolean> };
-			}
-		).indexes.exists('my_index');
+		const result = await orm.tables.users.indexes.exists('my_index');
 		expect(indexExists).toHaveBeenCalledOnce();
 		expect(result).toBe(true);
 	});
@@ -837,13 +825,9 @@ describe('buildIndexAPI — list and exists error branches', () => {
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
-		await expect(() =>
-			(
-				orm.tables.users as unknown as {
-					indexes: { list(): Promise<unknown[]> };
-				}
-			).indexes.list(),
-		).rejects.toThrow(InvalidOperationError);
+		await expect(() => orm.tables.users.indexes.list()).rejects.toThrow(
+			InvalidOperationError,
+		);
 		expect(executeRaw).not.toHaveBeenCalled();
 	});
 });
