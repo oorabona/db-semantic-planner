@@ -1054,7 +1054,7 @@ function changeToDownSQL(
 							constraintName,
 						)
 					: addColumnUniqueSQL(change.table, change.column, schemaName),
-				destructive: false,
+				destructive: unique === true,
 			};
 		}
 

@@ -1031,6 +1031,101 @@ describe('introspect [P1-T2]: OnDeleteAction SET DEFAULT round-trip', () => {
 		// buildTableIR omits onDelete when it is 'NO ACTION' (default)
 		expect(fk.onDelete).toBeUndefined();
 	});
+
+	it('keeps same-named foreign key constraints on different source tables distinct', async () => {
+		const columns = [
+			{
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'posts',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'posts',
+				column_name: 'owner_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'comments',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'comments',
+				column_name: 'owner_id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [
+			{ table_name: 'users', column_name: 'id' },
+			{ table_name: 'posts', column_name: 'id' },
+			{ table_name: 'comments', column_name: 'id' },
+		];
+		const fks = [
+			{
+				constraint_name: 'owner_id_fkey',
+				source_table: 'posts',
+				source_column: 'owner_id',
+				target_schema: 'public',
+				target_table: 'users',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+			{
+				constraint_name: 'owner_id_fkey',
+				source_table: 'comments',
+				source_column: 'owner_id',
+				target_schema: 'public',
+				target_table: 'users',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+			},
+		];
+
+		const pool = createMockPool([columns, pks, fks]);
+		const result = await introspect(pool);
+
+		const postsFk = result.tables.get('posts')?.foreignKeys[0];
+		const commentsFk = result.tables.get('comments')?.foreignKeys[0];
+
+		expect(result.tables.get('posts')?.foreignKeys).toHaveLength(1);
+		expect(result.tables.get('comments')?.foreignKeys).toHaveLength(1);
+		expect(postsFk?.columns).toEqual(['owner_id']);
+		expect(postsFk?.references).toEqual({
+			table: 'users',
+			columns: ['id'],
+		});
+		expect(commentsFk?.columns).toEqual(['owner_id']);
+		expect(commentsFk?.references).toEqual({
+			table: 'users',
+			columns: ['id'],
+		});
+	});
 });
 
 describe('introspect: cross-schema foreign keys', () => {

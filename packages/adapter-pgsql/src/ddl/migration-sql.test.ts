@@ -1168,6 +1168,35 @@ describe('generateDownSQL', () => {
 				expectedSql:
 					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
 			},
+			{
+				name: 'alter_column_unique true DOWN drops the unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: { unique: true },
+				},
+				expectedSql:
+					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
+			},
+			{
+				name: 'alter_column_unique true DOWN drops the recorded unique constraint',
+				change: {
+					kind: 'alter_column_unique',
+					table: 'users',
+					column: 'email',
+					destructive: false,
+					details: '',
+					meta: {
+						unique: true,
+						constraintName: 'users_email_custom_uq',
+					},
+				},
+				expectedSql:
+					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_custom_uq";',
+			},
 		] satisfies Array<{
 			name: string;
 			change: SchemaChange;
@@ -1212,35 +1241,6 @@ describe('generateDownSQL', () => {
 				},
 				expectedSql:
 					'CREATE POLICY "tenant_isolation" ON "documents" FOR ALL AS PERMISSIVE;',
-			},
-			{
-				name: 'alter_column_unique true DOWN drops the unique constraint',
-				change: {
-					kind: 'alter_column_unique',
-					table: 'users',
-					column: 'email',
-					destructive: false,
-					details: '',
-					meta: { unique: true },
-				},
-				expectedSql:
-					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_key";',
-			},
-			{
-				name: 'alter_column_unique true DOWN drops the recorded unique constraint',
-				change: {
-					kind: 'alter_column_unique',
-					table: 'users',
-					column: 'email',
-					destructive: false,
-					details: '',
-					meta: {
-						unique: true,
-						constraintName: 'users_email_custom_uq',
-					},
-				},
-				expectedSql:
-					'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_email_custom_uq";',
 			},
 			{
 				name: 'alter_column_unique false DOWN adds the unique constraint',
