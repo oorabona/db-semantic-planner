@@ -241,8 +241,9 @@ Running `pnpm install` automatically wires up two git hooks via [simple-git-hook
   `gui`) and as a fast feedback signal that source compiles cleanly.
 - **commit-msg** validates the commit message against
   `commitlint.config.mjs` (Conventional Commits, scope-enum, body/footer
-  rules). The rules mirror what CI enforces — local validation gives
-  fast feedback before push.
+  rules) — this mirrors what CI enforces — then runs the local
+  release-please parseability guard (see the parentheses watchpoint
+  below). Local validation gives fast feedback before push.
 
 CI is authoritative: even if you bypass the local hook with
 `git commit --no-verify`, the `commitlint` GitHub Action will catch any
@@ -255,6 +256,17 @@ appears in the commit body without a blank line before it, the rule
 - Move the reference to a real footer with a blank line before it, OR
 - Rephrase to break the `<word> #<digits>` shape (e.g. `PR 42`, `the prior PR`).
 
+**Watchpoint — parentheses in the body.** release-please parses each merged
+commit with its own grammar (`@conventional-commits/parser`), and a commit it
+cannot parse is **silently skipped** — no release PR is cut. A body line that
+**starts** with `name(...)` containing nested parentheses trips this
+(e.g. a paragraph beginning `fn(name, distinct(field)) routes through …`).
+A standalone guard (`scripts/check-release-please-parseable.mjs`, run by the
+commit-msg hook) rejects such a message locally. Keep commit **bodies** free of
+code-like parenthesised snippets — put runnable examples in the PR description
+instead. (Parentheses mid-line, like `the .avg(distinct(field)) builder`, are
+fine.)
+
 **Optional: chain a personal commit-msg hook.** If you have a global
 commit-msg validation script (e.g. one shared across multiple repos),
 opt in by exporting `DBSP_GLOBAL_COMMIT_MSG_HOOK` to its absolute
@@ -265,7 +277,8 @@ export DBSP_GLOBAL_COMMIT_MSG_HOOK="$HOME/path/to/your/commit-msg-hook.sh"
 ```
 
 The repo's commit-msg hook will run yours first, then the project's
-commitlint validation. Without the env var, only commitlint runs.
+commitlint validation and the release-please parseability guard. Without
+the env var, only the project checks run.
 
 ### Rebuilding after source changes
 
