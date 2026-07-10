@@ -888,7 +888,11 @@ function compareComments(
 				table: schema.name,
 				destructive: false,
 				details: `Set comment on table "${schema.name}"`,
-				meta: { comment: schema.comment, target: 'table' },
+				meta: {
+					comment: schema.comment,
+					previousComment: db.comment,
+					target: 'table',
+				},
 			});
 		} else {
 			changes.push({
@@ -896,7 +900,7 @@ function compareComments(
 				table: schema.name,
 				destructive: false,
 				details: `Remove comment from table "${schema.name}"`,
-				meta: { target: 'table' },
+				meta: { comment: db.comment, target: 'table' },
 			});
 		}
 	}
@@ -913,7 +917,11 @@ function compareComments(
 					column: schemaCol.name,
 					destructive: false,
 					details: `Set comment on "${schema.name}"."${schemaCol.name}"`,
-					meta: { comment: schemaCol.comment, target: 'column' },
+					meta: {
+						comment: schemaCol.comment,
+						previousComment: dbCol.comment,
+						target: 'column',
+					},
 				});
 			} else {
 				changes.push({
@@ -922,7 +930,7 @@ function compareComments(
 					column: schemaCol.name,
 					destructive: false,
 					details: `Remove comment from "${schema.name}"."${schemaCol.name}"`,
-					meta: { target: 'column' },
+					meta: { comment: dbCol.comment, target: 'column' },
 				});
 			}
 		}

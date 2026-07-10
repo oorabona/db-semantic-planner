@@ -1313,8 +1313,34 @@ function changeToDownSQL(
 		}
 
 		case 'add_comment': {
-			// DOWN: remove the comment that was added
+			// DOWN: restore the previous comment if this was a change; otherwise
+			// remove the fresh comment that was added.
 			const target = change.meta?.target as string;
+			const previousComment = change.meta?.previousComment;
+			// Restore a non-empty prior comment (this was a change, not a fresh add).
+			// An empty string, null, or undefined all roll back to IS NULL: PostgreSQL
+			// stores COMMENT ... IS '' identically to IS NULL (obj_description returns
+			// NULL) and introspection never yields '', so "empty comment" and "no
+			// comment" are the same state — consistent with compareComments treating
+			// an empty desired comment as no comment.
+			if (previousComment !== undefined && previousComment !== null) {
+				assertString(previousComment, 'previous migration comment');
+				if (previousComment.length > 0) {
+					const escaped = previousComment.replace(/'/g, "''");
+					if (target === 'table') {
+						return {
+							sql: `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS '${escaped}';`,
+							// Allowlisted: restores the recorded prior table comment.
+							destructive: false,
+						};
+					}
+					return {
+						sql: `COMMENT ON COLUMN ${qualifyTable(change.table, schemaName)}.${quoteIdent(change.column!, 'alias')} IS '${escaped}';`,
+						// Allowlisted: restores the recorded prior column comment.
+						destructive: false,
+					};
+				}
+			}
 			if (target === 'table') {
 				return {
 					sql: `COMMENT ON TABLE ${qualifyTable(change.table, schemaName)} IS NULL;`,
@@ -1330,7 +1356,10 @@ function changeToDownSQL(
 		case 'drop_comment': {
 			const target = change.meta?.target as string | undefined;
 			const comment = change.meta?.comment;
-			if (comment !== undefined) {
+			// Treat undefined AND null as "no recorded prior comment": the comparator
+			// stores db.comment, which may be null, and a null must fall through to the
+			// warning path rather than throwing in assertString.
+			if (comment !== undefined && comment !== null) {
 				assertString(comment, 'migration comment');
 				const escaped = comment.replace(/'/g, "''");
 				if (target === 'table') {
@@ -1538,11 +1567,20 @@ export function generateDownMigrationSQL(
 		phases[phase]!.push(change);
 	}
 
-	// Generate SQL in REVERSE phase order (index → FK → PK → alter → column → table)
+	// Generate SQL in reverse phase order. Within a phase, keep FORWARD change order
+	// so dependent restores run in sequence — e.g. a column's type must be restored
+	// before its default (a default is validated against the current column type),
+	// and compareColumnDetails emits type before default, so forward is correct on
+	// the way down too. The policy phase is the exception: a same-name policy change
+	// is emitted UP as drop-then-create, so its DOWN must DROP the new policy before
+	// re-CREATE-ing the old one — reverse only that phase so DROP precedes CREATE.
+	const policyPhase = getPhase('create_policy');
 	const statements: string[] = [];
 	let destructive = false;
 	for (let i = phases.length - 1; i >= 0; i--) {
-		for (const change of phases[i]!) {
+		const phaseChanges =
+			i === policyPhase ? [...phases[i]!].reverse() : phases[i]!;
+		for (const change of phaseChanges) {
 			const down = changeToDownSQL(change, schemaName);
 			if (!includeDestructive && down.destructive) continue;
 			destructive = down.destructive || destructive;

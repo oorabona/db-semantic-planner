@@ -1377,6 +1377,42 @@ describe('generateDownSQL', () => {
 			);
 		});
 
+		it('rolls back a column type+default change restoring type before default', () => {
+			// compareColumnDetails emits alter_column_type before alter_column_default.
+			// The DOWN must restore the OLD type before the OLD default, or SET DEFAULT
+			// would run against the still-new column type (e.g. SET DEFAULT 0 on a
+			// boolean). Down-migration keeps forward order within the column phase.
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'alter_column_type',
+						table: 'flags',
+						column: 'enabled',
+						destructive: true,
+						details: '',
+						meta: {
+							fromType: 'integer',
+							toType: 'boolean',
+							column: makeCol({ name: 'enabled', type: 'boolean' }),
+						},
+					},
+					{
+						kind: 'alter_column_default',
+						table: 'flags',
+						column: 'enabled',
+						destructive: false,
+						details: '',
+						meta: { default: 'false', oldDefault: '0' },
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "flags" ALTER COLUMN "enabled" TYPE integer;',
+				`ALTER TABLE "flags" ALTER COLUMN "enabled" SET DEFAULT '0';`,
+			]);
+		});
+
 		it('SC-03b: uses originalDbType in ALTER COLUMN TYPE rollback (vector precision)', () => {
 			// Simulates: schema has vector(1024), DB has vector(768).
 			// compareColumnDetails() sets meta.fromType = db.originalDbType = 'vector(768)'.
@@ -3799,6 +3835,26 @@ describe('Partitioning', () => {
 // ============================================================================
 
 describe('generateDownSQL — comment changes (F-001 regression)', () => {
+	function makeCommentModel(options: {
+		tableComment?: string;
+		columnComment?: string;
+	}) {
+		const emailColumn =
+			options.columnComment === undefined
+				? makeCol({ name: 'email' })
+				: makeCol({ name: 'email', comment: options.columnComment });
+		const table: TableIR = {
+			name: 'users',
+			columns: [emailColumn],
+			foreignKeys: [],
+			indexes: [],
+			...(options.tableComment === undefined
+				? {}
+				: { comment: options.tableComment }),
+		};
+		return new ModelIRImpl(new Map([['users', table]]), new Map());
+	}
+
 	it('F-001: add_comment in DOWN SQL does not crash (phase 15 present)', () => {
 		const diff = makeDiff([
 			{
@@ -3859,6 +3915,135 @@ describe('generateDownSQL — comment changes (F-001 regression)', () => {
 		const commentIdx = sql.findIndex((s) => s.includes('COMMENT ON TABLE'));
 		const dropIdx = sql.findIndex((s) => s.includes('DROP TABLE'));
 		expect(commentIdx).toBeLessThan(dropIdx);
+	});
+
+	it('restores previous table and column comments when comments change', () => {
+		const diff = compareSchemata(
+			makeCommentModel({
+				tableComment: 'new table',
+				columnComment: 'new column',
+			}),
+			makeCommentModel({
+				tableComment: 'old table',
+				columnComment: 'old column',
+			}),
+		);
+
+		expect(diff.changes.map((change) => change.kind)).toEqual([
+			'add_comment',
+			'add_comment',
+		]);
+		expect(generateMigrationSQL(diff)).toEqual([
+			`COMMENT ON TABLE "users" IS 'new table';`,
+			`COMMENT ON COLUMN "users"."email" IS 'new column';`,
+		]);
+
+		const down = generateDownMigrationSQL(diff);
+		expect(down.statements).toEqual([
+			`COMMENT ON TABLE "users" IS 'old table';`,
+			`COMMENT ON COLUMN "users"."email" IS 'old column';`,
+		]);
+		expect(down.destructive).toBe(false);
+	});
+
+	it('rolls back an empty-string previous comment to IS NULL (empty comment == no comment in PG)', () => {
+		// PostgreSQL stores COMMENT ... IS '' identically to IS NULL, so an empty
+		// prior comment is the same state as "no prior comment" and rolls back to
+		// IS NULL — consistent with an empty desired comment being treated as none.
+		const diff = compareSchemata(
+			makeCommentModel({ tableComment: 'new table' }),
+			makeCommentModel({ tableComment: '' }),
+		);
+
+		expect(diff.changes.map((change) => change.kind)).toEqual(['add_comment']);
+
+		const down = generateDownMigrationSQL(diff);
+		expect(down.statements).toEqual([`COMMENT ON TABLE "users" IS NULL;`]);
+	});
+
+	it('does not throw when a drop_comment change carries a null prior comment', () => {
+		// The comparator stores db.comment, which may be null for a public/JS caller
+		// or malformed IR; a null must fall through to the warning path, not throw.
+		const down = generateDownMigrationSQL(
+			makeDiff([
+				{
+					kind: 'drop_comment',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: { target: 'table', comment: null },
+				},
+			]),
+		);
+
+		expect(down.statements).toHaveLength(1);
+		expect(down.statements[0]).toContain('WARNING');
+	});
+
+	it('restores removed table and column comments from diff metadata', () => {
+		const diff = compareSchemata(
+			makeCommentModel({}),
+			makeCommentModel({
+				tableComment: 'old table',
+				columnComment: 'old column',
+			}),
+		);
+
+		expect(diff.changes.map((change) => change.kind)).toEqual([
+			'drop_comment',
+			'drop_comment',
+		]);
+		expect(generateMigrationSQL(diff)).toEqual([
+			`COMMENT ON TABLE "users" IS NULL;`,
+			`COMMENT ON COLUMN "users"."email" IS NULL;`,
+		]);
+
+		const down = generateDownMigrationSQL(diff);
+		expect(down.statements).toEqual([
+			`COMMENT ON TABLE "users" IS 'old table';`,
+			`COMMENT ON COLUMN "users"."email" IS 'old column';`,
+		]);
+		expect(down.destructive).toBe(false);
+	});
+
+	it('removes comments on rollback for fresh table and column comment adds', () => {
+		const diff = compareSchemata(
+			makeCommentModel({
+				tableComment: 'new table',
+				columnComment: 'new column',
+			}),
+			makeCommentModel({}),
+		);
+
+		expect(diff.changes.map((change) => change.kind)).toEqual([
+			'add_comment',
+			'add_comment',
+		]);
+		expect(generateMigrationSQL(diff)).toEqual([
+			`COMMENT ON TABLE "users" IS 'new table';`,
+			`COMMENT ON COLUMN "users"."email" IS 'new column';`,
+		]);
+
+		const down = generateDownMigrationSQL(diff);
+		expect(down.statements).toEqual([
+			`COMMENT ON TABLE "users" IS NULL;`,
+			`COMMENT ON COLUMN "users"."email" IS NULL;`,
+		]);
+		expect(down.destructive).toBe(true);
+	});
+
+	it('escapes quote-containing previous comments when restoring changed comments', () => {
+		const diff = compareSchemata(
+			makeCommentModel({ tableComment: 'new table' }),
+			makeCommentModel({ tableComment: "O'Brien" }),
+		);
+
+		expect(generateMigrationSQL(diff)).toEqual([
+			`COMMENT ON TABLE "users" IS 'new table';`,
+		]);
+		expect(generateDownSQL(diff)).toEqual([
+			`COMMENT ON TABLE "users" IS 'O''Brien';`,
+		]);
 	});
 });
 
@@ -5017,6 +5202,54 @@ describe('DDL-RLS: Row-Level Security', () => {
 			const diff = compareSchemata(schemaModel, dbModel);
 			expect(diff.changes.some((c) => c.kind === 'drop_policy')).toBe(true);
 			expect(diff.changes.some((c) => c.kind === 'create_policy')).toBe(true);
+		});
+
+		it('same-name policy replacement DOWN mirrors UP order', () => {
+			const oldPolicy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'SELECT',
+				roles: ['app_user'],
+				using: "tenant_id = current_setting('app.tenant')::uuid",
+			};
+			const newPolicy: PolicyIR = {
+				name: 'tenant_isolation',
+				command: 'SELECT',
+				roles: ['app_user'],
+				using:
+					"tenant_id = current_setting('app.tenant')::uuid AND archived_at IS NULL",
+			};
+			const schemaTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [newPolicy],
+			});
+			const dbTable = makeRlsTable({
+				name: 'documents',
+				rlsEnabled: true,
+				policies: [oldPolicy],
+			});
+			const schemaModel = new ModelIRImpl(
+				new Map([['documents', schemaTable]]),
+				new Map(),
+			);
+			const dbModel = new ModelIRImpl(
+				new Map([['documents', dbTable]]),
+				new Map(),
+			);
+			const diff = compareSchemata(schemaModel, dbModel);
+
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'drop_policy',
+				'create_policy',
+			]);
+			expect(generateMigrationSQL(diff)).toEqual([
+				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid AND archived_at IS NULL);`,
+			]);
+			expect(generateDownSQL(diff)).toEqual([
+				`DROP POLICY IF EXISTS "tenant_isolation" ON "documents";`,
+				`CREATE POLICY "tenant_isolation" ON "documents" FOR SELECT AS PERMISSIVE TO "app_user" USING (tenant_id = current_setting('app.tenant')::uuid);`,
+			]);
 		});
 
 		it('unchanged policy → no RLS changes', () => {
