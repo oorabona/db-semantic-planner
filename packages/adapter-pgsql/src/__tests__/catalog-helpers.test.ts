@@ -24,6 +24,12 @@ function makeMockPool(rows: Record<string, unknown>[] = []): Pool {
 	} as unknown as Pool;
 }
 
+/** The single catalog query call. */
+function catalogCall(pool: Pool): [string, unknown[]] {
+	const spy = pool.query as ReturnType<typeof vi.fn>;
+	return spy.mock.calls[0] as [string, unknown[]];
+}
+
 // ===========================================================================
 // listIndexes - namePattern filter
 // ===========================================================================
@@ -39,10 +45,12 @@ describe('PgsqlAdapter.listIndexes()', () => {
 		const adapter = createPgsqlAdapter(pool);
 		const result = await adapter.listIndexes('users');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [sql, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [sql, params] = catalogCall(pool);
 		expect(sql).not.toContain('LIKE');
-		expect(params).toEqual(['users', 'public']);
+		// No explicit/adapter schema → the schema is resolved search_path-aware in
+		// the same query (COALESCE + to_regclass), so it is not passed as a param.
+		expect(params).toEqual(['users', null]);
+		expect(sql).toContain('to_regclass');
 		expect(result).toHaveLength(1);
 		expect(result[0]!.name).toBe('idx_users_email');
 		expect(result[0]!.unique).toBe(false);
@@ -54,8 +62,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 		const adapter = createPgsqlAdapter(pool);
 		await adapter.listIndexes('users', 'myschema', { namePattern: 'idx_vec%' });
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [sql, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [sql, params] = catalogCall(pool);
 		expect(sql).toContain('LIKE $3');
 		expect(params).toEqual(['users', 'myschema', 'idx_vec%']);
 	});
@@ -65,8 +72,7 @@ describe('PgsqlAdapter.listIndexes()', () => {
 		const adapter = createPgsqlAdapter(pool, { schemaName: 'tenant_42' });
 		await adapter.listIndexes('orders');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [, params] = catalogCall(pool);
 		expect(params[1]).toBe('tenant_42');
 	});
 
@@ -95,11 +101,10 @@ describe('PgsqlAdapter.indexExists()', () => {
 		const result = await adapter.indexExists('idx_users_email', 'users');
 
 		expect(result).toBe(true);
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [sql, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [sql, params] = catalogCall(pool);
 		expect(sql).toContain('pg_indexes');
 		expect(sql).toContain('EXISTS');
-		expect(params).toEqual(['idx_users_email', 'users', 'public']);
+		expect(params).toEqual(['idx_users_email', 'users', null]);
 	});
 
 	it('returns false when index does not exist', async () => {
@@ -113,8 +118,7 @@ describe('PgsqlAdapter.indexExists()', () => {
 		const adapter = createPgsqlAdapter(pool);
 		await adapter.indexExists('idx_foo', 'users', 'tenant_42');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [, params] = catalogCall(pool);
 		expect(params).toEqual(['idx_foo', 'users', 'tenant_42']);
 	});
 
@@ -123,8 +127,7 @@ describe('PgsqlAdapter.indexExists()', () => {
 		const adapter = createPgsqlAdapter(pool, { schemaName: 'myschema' });
 		await adapter.indexExists('idx_foo', 'orders');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [, params] = catalogCall(pool);
 		expect(params[2]).toBe('myschema');
 	});
 
@@ -146,11 +149,10 @@ describe('PgsqlAdapter.storageSize()', () => {
 		const result = await adapter.storageSize('users');
 
 		expect(result).toBe(8192);
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [sql, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [sql, params] = catalogCall(pool);
 		expect(sql).toContain('pg_total_relation_size');
 		expect(sql).toContain('$1::regclass');
-		expect(params[0]).toBe('"public"."users"');
+		expect(params[0]).toBe('"users"');
 	});
 
 	it('uses the provided schema in the qualified identifier param', async () => {
@@ -158,8 +160,7 @@ describe('PgsqlAdapter.storageSize()', () => {
 		const adapter = createPgsqlAdapter(pool);
 		await adapter.storageSize('orders', 'tenant_42');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [, params] = catalogCall(pool);
 		expect(params[0]).toBe('"tenant_42"."orders"');
 	});
 
@@ -168,8 +169,7 @@ describe('PgsqlAdapter.storageSize()', () => {
 		const adapter = createPgsqlAdapter(pool, { schemaName: 'myschema' });
 		await adapter.storageSize('logs');
 
-		const querySpy = pool.query as ReturnType<typeof vi.fn>;
-		const [, params] = querySpy.mock.calls[0] as [string, unknown[]];
+		const [, params] = catalogCall(pool);
 		expect(params[0]).toBe('"myschema"."logs"');
 	});
 
