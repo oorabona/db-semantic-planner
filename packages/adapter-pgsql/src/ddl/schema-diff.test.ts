@@ -2450,6 +2450,24 @@ describe('Column enhancements', () => {
 		expect(change?.column).toBeUndefined();
 		expect(change?.meta?.target).toBe('table');
 		expect(change?.meta?.comment).toBe('User accounts');
+		expect(change?.meta?.previousComment).toBeUndefined();
+	});
+
+	it('should detect table comment changed and remember previous comment', () => {
+		const schema = makeModel([
+			makeTable({ name: 'users', columns: [], comment: 'New comment' }),
+		]);
+		const db = makeModel([
+			makeTable({ name: 'users', columns: [], comment: 'Old comment' }),
+		]);
+		const diff = compareSchemata(schema, db);
+		const change = diff.changes.find((c) => c.kind === 'add_comment');
+		expect(change).toBeDefined();
+		expect(change?.table).toBe('users');
+		expect(change?.column).toBeUndefined();
+		expect(change?.meta?.target).toBe('table');
+		expect(change?.meta?.comment).toBe('New comment');
+		expect(change?.meta?.previousComment).toBe('Old comment');
 	});
 
 	it('should detect column comment added', () => {
@@ -2468,6 +2486,7 @@ describe('Column enhancements', () => {
 		expect(change?.column).toBe('email');
 		expect(change?.meta?.target).toBe('column');
 		expect(change?.meta?.comment).toBe('Primary email');
+		expect(change?.meta?.previousComment).toBeUndefined();
 	});
 
 	it('should detect comment removed (→ drop_comment)', () => {
@@ -2485,6 +2504,7 @@ describe('Column enhancements', () => {
 		expect(change).toBeDefined();
 		expect(change?.column).toBe('email');
 		expect(change?.meta?.target).toBe('column');
+		expect(change?.meta?.comment).toBe('Old comment');
 	});
 
 	it('should ignore identical collation', () => {
