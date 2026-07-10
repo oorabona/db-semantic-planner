@@ -8,6 +8,7 @@
  */
 
 import type { ColumnIR, ColumnType } from '@dbsp/types';
+import { isPgBuiltInTypeName } from '../db-type.js';
 import { validateDbTypeName } from '../validate.js';
 
 /**
@@ -22,7 +23,14 @@ import { validateDbTypeName } from '../validate.js';
 export function mapColumnType(col: ColumnIR): string {
 	// Prefer original DB type if available (preserves precision/scale)
 	if (col.originalDbType) {
-		return validateDbTypeName(col.originalDbType.toUpperCase()).toUpperCase();
+		const originalDbType = validateDbTypeName(col.originalDbType);
+		// Built-in: apply the DDL UPPERCASE convention. Custom/UDT: emit as-is — a
+		// bare name folds per PostgreSQL's rules, and a case-sensitive type is
+		// already quoted upstream (introspection quotes catalog names). Re-quoting
+		// a bare name here would change its meaning.
+		return isPgBuiltInTypeName(originalDbType)
+			? uppercaseOutsideQuotedIdentifiers(originalDbType)
+			: originalDbType;
 	}
 
 	// Auto-increment columns use SERIAL/BIGSERIAL
@@ -32,6 +40,32 @@ export function mapColumnType(col: ColumnIR): string {
 
 	// Standard type mapping
 	return mapBaseType(col.type);
+}
+
+function uppercaseOutsideQuotedIdentifiers(type: string): string {
+	let result = '';
+	let inQuotedIdentifier = false;
+
+	for (let i = 0; i < type.length; i++) {
+		const char = type[i]!;
+
+		if (char === '"') {
+			result += char;
+
+			if (inQuotedIdentifier && type[i + 1] === '"') {
+				result += type[i + 1];
+				i++;
+				continue;
+			}
+
+			inQuotedIdentifier = !inQuotedIdentifier;
+			continue;
+		}
+
+		result += inQuotedIdentifier ? char : char.toUpperCase();
+	}
+
+	return result;
 }
 
 /**

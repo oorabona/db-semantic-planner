@@ -35,12 +35,36 @@ describe('mapColumnType', () => {
 			).toBe('CHARACTER VARYING(100)');
 		});
 
-		it('uppercases arbitrary originalDbType regardless of base type', () => {
+		it('uppercases recognized built-in originalDbType regardless of base type', () => {
 			expect(
 				mapColumnType(
 					col({ type: 'integer', originalDbType: 'numeric(10,2)' }),
 				),
 			).toBe('NUMERIC(10,2)');
+		});
+
+		it('renders custom originalDbType names without case folding', () => {
+			// A case-sensitive custom type is quoted (as introspection stores it);
+			// a lowercase custom name stays bare; a bare mixed-case built-in
+			// spelling (Money) folds to the built-in and follows the UPPER convention.
+			expect([
+				mapColumnType(col({ type: 'decimal', originalDbType: '"Money"' })),
+				mapColumnType(col({ type: 'string', originalDbType: 'status' })),
+				mapColumnType(col({ type: 'string', originalDbType: '"CamelType"' })),
+				mapColumnType(
+					col({
+						type: 'string',
+						originalDbType: '"My Schema"."a""b"',
+					}),
+				),
+				mapColumnType(col({ type: 'decimal', originalDbType: 'Money' })),
+			]).toEqual([
+				'"Money"',
+				'status',
+				'"CamelType"',
+				'"My Schema"."a""b"',
+				'MONEY',
+			]);
 		});
 	});
 

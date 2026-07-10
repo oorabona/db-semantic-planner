@@ -30,6 +30,7 @@ import {
 	type SimplifiedPlanReport,
 } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
+import { validateDbType } from './db-type.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import { createTypeCastParamRef } from './param-ref.js';
@@ -46,37 +47,7 @@ import {
 // ============================================================================
 
 /**
- * Fixed allowlist of known multi-word PostgreSQL base types (case-insensitive).
- * Mirrors the constant in @dbsp/core `batch-values.ts`.
- */
-const ADAPTER_MULTIWORD_BASE_TYPES: readonly string[] = [
-	'timestamp with time zone',
-	'timestamp without time zone',
-	'time with time zone',
-	'time without time zone',
-	'double precision',
-	'character varying',
-	'bit varying',
-];
-
-/** Match a strict SQL identifier: letter or underscore, then letters/digits/underscores. */
-const ADAPTER_IDENT_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-
-/**
- * Validate a PostgreSQL type name at compile time using the structured grammar.
- *
- * Mirrors the construction-time check in @dbsp/core `batchValues()` exactly,
- * so that a forged `BatchValuesRef` constructed directly (bypassing `batchValues()`)
- * still cannot inject SQL via the type cast.
- *
- * Accepted grammar:
- *   typeName = trim(base [modifier] [arraySuffix])
- *   arraySuffix = "[]"          — at most ONE level
- *   modifier    = "(" digits ")" | "(" digits "," digits ")"
- *   base        = multiWordType | ident | ident "." ident
- *
- * Anything outside this grammar throws, including injection strings like
- * "int[])) AS b(id) JOIN users ON true" or "int4) ; DROP TABLE x; --".
+ * Validate a PostgreSQL type name at compile time using the adapter db-type guard.
  */
 function assertSafeTypeName(typeName: string, colIndex: number): void {
 	const raw = typeName.trim();
@@ -86,55 +57,13 @@ function assertSafeTypeName(typeName: string, colIndex: number): void {
 		);
 	}
 
-	let rest = raw;
-
-	// Step 1: strip at most ONE trailing "[]"
-	if (rest.endsWith('[]')) {
-		rest = rest.slice(0, -2);
-		if (rest.endsWith('[]')) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					'At most one array suffix "[]" is allowed as a raw type-name input.',
-			);
-		}
-	}
-
-	// Step 2: strip optional modifier "(N)" or "(N,M)"
-	const modifierMatch = rest.match(/\(([^)]*)\)$/);
-	if (modifierMatch) {
-		const inner = modifierMatch[1] ?? '';
-		if (!/^\d+(?:,\d+)?$/.test(inner)) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					`Type modifier must be "(N)" or "(N,M)" with digits only; got "(${inner})".`,
-			);
-		}
-		rest = rest.slice(0, rest.length - modifierMatch[0].length).trimEnd();
-	}
-
-	// Step 3: validate the base type
-	const baseLower = rest.toLowerCase();
-
-	// (a) Multi-word allowlist
-	if (ADAPTER_MULTIWORD_BASE_TYPES.includes(baseLower)) {
-		return;
-	}
-
-	// (b) Strict identifier, optionally schema-qualified
-	const parts = rest.split('.');
-	if (parts.length > 2) {
+	try {
+		validateDbType(raw);
+	} catch (error) {
+		const reason = error instanceof Error ? ` ${error.message}` : '';
 		throw new Error(
-			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-				'Schema-qualified types allow at most one dot (schema.type).',
+			`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}.${reason}`,
 		);
-	}
-	for (const part of parts) {
-		if (!ADAPTER_IDENT_RE.test(part)) {
-			throw new Error(
-				`BatchValues compile error: unsafe type name '${typeName}' at column index ${colIndex}. ` +
-					`Base type "${part}" is not a valid SQL identifier and is not in the multi-word type allowlist.`,
-			);
-		}
 	}
 }
 

@@ -5,6 +5,8 @@
  * All table names, column names, schema names, and aliases MUST pass validation.
  */
 
+import { validateDbType } from './db-type.js';
+
 // ============================================================================
 // SQL Reserved Keywords (PostgreSQL)
 // ============================================================================
@@ -657,10 +659,6 @@ export function validateCollationName(
 	}
 }
 
-/** Safe PostgreSQL type name pattern: base_name, optional (precision,scale), optional [] */
-const SAFE_TYPE_PATTERN =
-	/^[a-zA-Z_][a-zA-Z0-9_ ]*(\(\d+(,\s*\d+)?\))?(\[\])?$/;
-
 /**
  * Validate a raw SQL expression used in DDL contexts (defaults, policy USING/CHECK).
  * Rejects injection vectors: semicolons, line-comment markers, block-comment markers.
@@ -827,11 +825,5 @@ function isDollarQuoteTagContinuation(ch: string | undefined): boolean {
  */
 export function validateDbTypeName(type: string): string {
 	assertString(type, 'Unsafe database type name');
-
-	if (!SAFE_TYPE_PATTERN.test(type)) {
-		throw new Error(
-			`Unsafe database type name: "${type}". Must match PostgreSQL type name rules.`,
-		);
-	}
-	return type;
+	return validateDbType(type);
 }

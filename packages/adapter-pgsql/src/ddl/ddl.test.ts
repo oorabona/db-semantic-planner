@@ -168,6 +168,43 @@ describe('DDL Generator', () => {
 			expect(ddl[0]).toContain('CONSTRAINT "pk_users" PRIMARY KEY ("id")');
 		});
 
+		it('should preserve custom type identity in generated CREATE TABLE DDL', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'payments',
+						{
+							name: 'payments',
+							columns: [
+								{
+									name: 'amount',
+									type: 'decimal',
+									nullable: false,
+									// Introspection stores a case-sensitive custom type quoted.
+									originalDbType: '"Money"',
+								},
+								{
+									name: 'status',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'status',
+								},
+							],
+							foreignKeys: [],
+							indexes: [],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			const ddl = generateDDL(schema);
+
+			expect(ddl).toEqual([
+				'CREATE TABLE "payments" (\n  "amount" "Money" NOT NULL,\n  "status" status NOT NULL\n);',
+			]);
+		});
+
 		it('should generate CREATE TABLE with composite primary key', () => {
 			const schema = {
 				tables: new Map([

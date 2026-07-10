@@ -41,6 +41,7 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
+import { dbTypeCastTarget, validateDbType } from './db-type.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import {
@@ -275,8 +276,27 @@ function getColumnTypes(
 		const columnIR = table.columns.find((c) => c.name === col);
 		if (columnIR) {
 			result ??= {};
-			// Prefer originalDbType (preserves introspection precision) over ColumnType
-			result[col] = columnIR.originalDbType ?? columnIR.type;
+			// Prefer originalDbType over ColumnType, resolved to a safe cast target.
+			// Validate the FULL originalDbType before deriving the cast target:
+			// dbTypeCastTarget strips the modifier for bounded built-ins, so a
+			// malformed input like numeric(foo) would otherwise be reduced to a
+			// valid `numeric` and slip past validation. A defined-but-empty
+			// originalDbType is treated as absent (fall back to ColumnType).
+			const authored = columnIR.originalDbType?.trim();
+			const castTarget =
+				authored !== undefined && authored !== ''
+					? dbTypeCastTarget(validateDbType(authored))
+					: columnIR.type;
+			// The batch path unnests a single-dimension array parameter into rows.
+			// unnest FLATTENS a multi-dimensional array, so a column whose type is
+			// itself an array cannot be batch-inserted via unnest — fail loud with a
+			// clear message instead of emitting SQL PostgreSQL rejects at runtime.
+			if (castTarget.trim().endsWith('[]')) {
+				throw new Error(
+					`Batch mutation of array-typed column '${col}' (${castTarget}) is not supported: unnest flattens multi-dimensional arrays. Use single-row mutations for array columns.`,
+				);
+			}
+			result[col] = castTarget;
 		}
 	}
 	return result;

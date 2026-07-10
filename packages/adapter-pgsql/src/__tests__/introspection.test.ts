@@ -199,6 +199,117 @@ describe('introspect', () => {
 		expect(table.columns[7]!.type).toBe('date');
 	});
 
+	it('should source originalDbType from format_type catalog rows', async () => {
+		const columns = [
+			{
+				table_name: 'metrics',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'label',
+				data_type: 'character varying',
+				udt_name: 'varchar',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'captured_at',
+				data_type: 'timestamp with time zone',
+				udt_name: 'timestamptz',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'embedding',
+				data_type: 'USER-DEFINED',
+				udt_name: 'vector',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pks = [{ table_name: 'metrics', column_name: 'id' }];
+		const formattedColumnTypes = [
+			{
+				table_name: 'metrics',
+				column_name: 'label',
+				db_type: 'character varying(120)',
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'captured_at',
+				db_type: 'timestamp(3) with time zone',
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'embedding',
+				db_type: 'vector(768)',
+			},
+		];
+		const pool = createMockPool([
+			columns,
+			pks,
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			formattedColumnTypes,
+		]);
+
+		const result = await introspect(pool);
+		const table = result.tables.get('metrics')!;
+
+		expect(
+			table.columns.map((column) => ({
+				name: column.name,
+				type: column.type,
+				originalDbType: column.originalDbType,
+			})),
+		).toEqual([
+			{ name: 'id', type: 'integer', originalDbType: 'int4' },
+			{
+				name: 'label',
+				type: 'string',
+				originalDbType: 'character varying(120)',
+			},
+			{
+				name: 'captured_at',
+				type: 'datetime',
+				originalDbType: 'timestamp(3) with time zone',
+			},
+			{ name: 'embedding', type: 'string', originalDbType: 'vector(768)' },
+		]);
+
+		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
+		const formatTypeCalls = mockQuery.mock.calls
+			.filter((call) =>
+				String(call[0]).includes('format_type(a.atttypid, a.atttypmod)'),
+			)
+			.map((call) => ({
+				sql: String(call[0]).replace(/\s+/g, ' ').trim(),
+				params: call[1],
+			}));
+		expect(formatTypeCalls).toEqual([
+			{
+				sql: "SELECT c.relname AS table_name, a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS db_type FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_type t ON t.oid = a.atttypid WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND a.attnum > 0 AND NOT a.attisdropped AND (a.atttypmod <> -1 OR t.typcategory = 'A')",
+				params: ['public'],
+			},
+		]);
+	});
+
 	it('should infer bidirectional relations from FK', async () => {
 		const pool = createMockPool([
 			usersPostsColumns,
@@ -517,10 +628,11 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// 13 queries total: columns, PKs, FKs, indexes, unique columns, enums,
-		// comments, checks, partitions, extensions, sequences, rls state, policies
+		// 14 queries total: columns, PKs, FKs, indexes, unique columns, enums,
+		// comments, checks, partitions, extensions, sequences, rls state, policies,
+		// formatted column types
 		// Note: extensions query has no schema param (queries all extensions globally)
-		expect(mockQuery).toHaveBeenCalledTimes(13);
+		expect(mockQuery).toHaveBeenCalledTimes(14);
 		// All parameterized queries (those with a second arg) should pass 'tenant_1'
 		for (const call of mockQuery.mock.calls) {
 			if (call[1] !== undefined) {

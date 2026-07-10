@@ -32,6 +32,7 @@ import type {
 import { buildRelationKeyFields } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
+import { quoteTypeIdentifier } from './db-type.js';
 
 // ============================================================================
 // Types
@@ -76,6 +77,12 @@ interface RawColumn {
 	collation_name: string | null;
 	is_identity: string;
 	identity_generation: string | null;
+}
+
+interface RawFormattedColumnType {
+	table_name: string;
+	column_name: string;
+	db_type: string;
 }
 
 interface RawPrimaryKey {
@@ -212,13 +219,14 @@ interface CatalogResults {
 		using_expr: string | null;
 		with_check_expr: string | null;
 	}>;
+	formattedColumnTypes: RawFormattedColumnType[];
 }
 
 /**
- * Run all 13 catalog queries in parallel.
+ * Run all 14 catalog queries in parallel.
  * Order matches the coverage test mock sequence: columns, pks, fks, indexes,
  * unique columns, enums, comments, checks, partitions, extensions (no schema
- * param), sequences, rls state, policies.
+ * param), sequences, rls state, policies, formatted column types.
  */
 async function queryAllCatalogs(
 	pool: Pool,
@@ -238,6 +246,7 @@ async function queryAllCatalogs(
 		sequencesResult,
 		rlsResult,
 		policiesResult,
+		formattedColumnTypesResult,
 	] = await Promise.all([
 		// 1. Columns (including identity and collation)
 		pool.query<RawColumn>(
@@ -495,6 +504,29 @@ async function queryAllCatalogs(
 			 WHERE n.nspname = $1`,
 			[schema],
 		),
+		// 14. Faithful SQL-facing column types via format_type, for two cases:
+		// (a) typmod-bearing columns (atttypmod <> -1) — varchar(120), numeric(10,2),
+		//     timestamptz(3), bit(8), vector(768) — to preserve modifier fidelity (#261);
+		// (b) array columns (typcategory 'A') — so integer[] is stored as `integer[]`
+		//     rather than the internal `_int4` udt_name.
+		// Other columns (plain base types, enums/composites/domains) fall back to
+		// quoteTypeIdentifier(udt_name) in buildTableIR, which keeps a bare typname for
+		// lowercase types and quotes a case-sensitive custom type (`"Money"`).
+		pool.query<RawFormattedColumnType>(
+			`SELECT c.relname AS table_name,
+			        a.attname AS column_name,
+			        format_type(a.atttypid, a.atttypmod) AS db_type
+			 FROM pg_catalog.pg_attribute a
+			 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+			 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			 JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+			 WHERE n.nspname = $1
+			   AND c.relkind IN ('r','p','v','m','f')
+			   AND a.attnum > 0
+			   AND NOT a.attisdropped
+			   AND (a.atttypmod <> -1 OR t.typcategory = 'A')`,
+			[schema],
+		),
 	]);
 
 	return {
@@ -511,6 +543,7 @@ async function queryAllCatalogs(
 		sequences: sequencesResult.rows,
 		rls: rlsResult.rows,
 		policies: policiesResult.rows,
+		formattedColumnTypes: formattedColumnTypesResult.rows,
 	};
 }
 
@@ -799,9 +832,25 @@ function buildRLSMaps(
 	return { tableRlsEnabled, tablePolicies };
 }
 
+function columnTypeMapKey(tableName: string, columnName: string): string {
+	return `${tableName}\0${columnName}`;
+}
+
+/** Build a Map<tableName+columnName, format_type result>. */
+function buildFormattedColumnTypeMap(
+	rows: RawFormattedColumnType[],
+): Map<string, string> {
+	const result = new Map<string, string>();
+	for (const row of rows) {
+		result.set(columnTypeMapKey(row.table_name, row.column_name), row.db_type);
+	}
+	return result;
+}
+
 /** Context bag passed to buildTableIR. */
 interface TableIRContext {
 	tableColumns: Map<string, RawColumn[]>;
+	formattedColumnTypes: Map<string, string>;
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
@@ -852,7 +901,14 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
 				: {}),
-			originalDbType: col.udt_name,
+			// format_type output (typmod-bearing + array columns) is already
+			// SQL-facing; the udt_name fallback is a bare catalog typname, so
+			// quote it when case-sensitive (`"Money"`) — a lowercase typname
+			// stays bare, preserving the common enum/UDT identity.
+			originalDbType:
+				ctx.formattedColumnTypes.get(
+					columnTypeMapKey(tableName, col.column_name),
+				) ?? quoteTypeIdentifier(col.udt_name),
 			...(uniqueConstraintName !== undefined
 				? { unique: true, uniqueConstraintName }
 				: {}),
@@ -951,6 +1007,9 @@ export async function introspect(
 	const tableIndexes = buildIndexMap(raw.indexes);
 	const uniqueColumns = buildUniqueColumnMap(raw.uniqueColumns);
 	const tableColumns = buildColumnMap(raw.columns);
+	const formattedColumnTypes = buildFormattedColumnTypeMap(
+		raw.formattedColumnTypes,
+	);
 	const tablePKs = buildPKMap(raw.pks);
 	const fksByConstraint = buildFKMap(raw.fks);
 	const enumMap = buildEnumMap(raw.enums);
@@ -969,6 +1028,7 @@ export async function introspect(
 	for (const tableName of tableNames) {
 		const table = buildTableIR(tableName, {
 			tableColumns,
+			formattedColumnTypes,
 			tablePKs,
 			fksByConstraint,
 			tableIndexes,

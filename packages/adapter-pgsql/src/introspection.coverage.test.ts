@@ -41,6 +41,7 @@ function createMockPool(
 	sequences: QueryResult<any> = { rows: [] },
 	rlsState: QueryResult<any> = { rows: [] },
 	policies: QueryResult<any> = { rows: [] },
+	formattedColumnTypes: QueryResult<any> = { rows: [] },
 ) {
 	return {
 		query: vi
@@ -57,7 +58,8 @@ function createMockPool(
 			.mockResolvedValueOnce(extensions) // extensions (pg_extension)
 			.mockResolvedValueOnce(sequences) // sequences (pg_sequences)
 			.mockResolvedValueOnce(rlsState) // RLS enabled state per table
-			.mockResolvedValueOnce(policies), // RLS policies
+			.mockResolvedValueOnce(policies) // RLS policies
+			.mockResolvedValueOnce(formattedColumnTypes), // formatted column types
 	} as any;
 }
 
@@ -1954,8 +1956,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 13 queries: columns, PKs, FKs, indexes, single-column unique constraints, enums, comments, checks, partitions, extensions, sequences, rls state, policies
-		expect(pool.query).toHaveBeenCalledTimes(13);
+		// Default schema = 'public' (passed to queries); 14 catalog queries.
+		expect(pool.query).toHaveBeenCalledTimes(14);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 
