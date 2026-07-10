@@ -4,8 +4,9 @@
  * Used by batch INSERT, batch UPDATE, batch UPSERT, and the CTE unnest builder.
  */
 
-import { InvalidOperationError, validateTypeName } from '@dbsp/core';
+import { InvalidOperationError } from '@dbsp/core';
 import type { Node } from '@pgsql/types';
+import { validateDbType } from './db-type.js';
 import { parseExpression } from './raw-expression-parser.js';
 
 // ============================================================================
@@ -55,11 +56,28 @@ export function inferPgArrayType(
  *      "string" → "text", "datetime" → "timestamptz", "number" → "float8"
  */
 function mapToPgBaseType(pgType: string): string {
-	// Strip length/precision qualifiers like VARCHAR(255), NUMERIC(10,2)
-	const normalized = pgType
+	const trimmedPgType = pgType.trim();
+	// Fail closed on any malformed type before mapping, regardless of caller: the
+	// built-in switch below strips the modifier, so numeric(foo) / varchar(1 2) /
+	// bit(8,-1) would otherwise be silently normalized to a valid base type and
+	// bypass the validation contract. Also rejects the invalid [][] element form.
+	try {
+		validateDbType(trimmedPgType);
+	} catch {
+		throw new Error(
+			`batchValues: invalid type name '${pgType}'. Must be a structurally valid PostgreSQL type name.`,
+		);
+	}
+	const elementType = stripArraySuffix(trimmedPgType);
+	// Strip length/precision qualifiers like VARCHAR(255), NUMERIC(10,2). The
+	// switch matches case-insensitively (normalized is upper-cased), so a
+	// mixed-case built-in spelling (VarChar, Numeric) maps like its canonical
+	// form; only a non-built-in name falls through to the custom default.
+	const normalized = elementType
 		.toUpperCase()
 		.replace(/\(.*\)/, '')
 		.trim();
+
 	switch (normalized) {
 		// ColumnType aliases (lowercase ColumnType values from ModelIR)
 		case 'STRING':
@@ -89,9 +107,10 @@ function mapToPgBaseType(pgType: string): string {
 		case 'DOUBLE PRECISION':
 		case 'FLOAT8':
 		case 'FLOAT':
+			return 'float8';
 		case 'NUMERIC':
 		case 'DECIMAL':
-			return 'float8';
+			return 'numeric';
 		case 'TEXT':
 		case 'VARCHAR':
 		case 'CHAR':
@@ -111,16 +130,11 @@ function mapToPgBaseType(pgType: string): string {
 			return 'timestamptz';
 		case 'DATE':
 			return 'date';
-		default: {
-			// Pass through for custom types (DX-050 dbType) — validate before use
-			// to prevent injection via schema-defined originalDbType values.
-			// Use validateTypeName (from @dbsp/core) to accept schema-qualified
-			// "schema.type" forms and multi-word PostgreSQL base types that
-			// batch/unnest types legitimately carry.
-			const customType = pgType.toLowerCase();
-			validateTypeName(customType);
-			return customType;
-		}
+		default:
+			// Custom types (DX-050 dbType) already validated above. Emit as-is: a
+			// bare name folds per PostgreSQL's rules, and a case-sensitive type is
+			// already quoted upstream (introspection quotes catalog names).
+			return elementType;
 	}
 }
 

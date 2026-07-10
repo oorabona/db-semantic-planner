@@ -211,22 +211,69 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		expect(sql).not.toContain('CAST');
 	});
 
-	it('handles complex originalDbType like varchar(255)', () => {
-		const { sql, parameters } = compileSelect(
-			'products',
-			[
-				{
+	it('routes faithful originalDbType through cast-safe WHERE targets', () => {
+		const cases = [
+			{
+				column: {
 					name: 'name',
 					type: 'string',
 					nullable: true,
-					originalDbType: 'varchar(255)',
+					originalDbType: 'varchar(120)',
 				},
-			],
-			'name',
-			'widget',
-		);
-		expect(sql).toContain('CAST($1 AS varchar(255))');
-		expect(parameters).toEqual(['widget']);
+				value: 'widget',
+			},
+			{
+				column: {
+					name: 'price',
+					type: 'decimal',
+					nullable: true,
+					originalDbType: 'numeric(10,2)',
+				},
+				value: 12.34,
+			},
+			{
+				column: {
+					name: 'created_at',
+					type: 'datetime',
+					nullable: true,
+					originalDbType: 'timestamp(3) with time zone',
+				},
+				value: '2024-01-01T00:00:00.000Z',
+			},
+			{
+				column: {
+					name: 'count',
+					type: 'integer',
+					nullable: true,
+					originalDbType: 'integer',
+				},
+				value: 7,
+			},
+		];
+
+		expect(
+			cases.map(({ column, value }) => {
+				const result = compileSelect('products', [column], column.name, value);
+				return { sql: result.sql, parameters: result.parameters };
+			}),
+		).toEqual([
+			{
+				sql: 'SELECT * FROM products WHERE products.name = CAST($1 AS varchar)',
+				parameters: ['widget'],
+			},
+			{
+				sql: 'SELECT * FROM products WHERE products.price = CAST($1 AS numeric)',
+				parameters: [12.34],
+			},
+			{
+				sql: 'SELECT * FROM products WHERE products.created_at = CAST($1 AS timestamp with time zone)',
+				parameters: ['2024-01-01T00:00:00.000Z'],
+			},
+			{
+				sql: 'SELECT * FROM products WHERE products.count = CAST($1 AS integer)',
+				parameters: [7],
+			},
+		]);
 	});
 });
 

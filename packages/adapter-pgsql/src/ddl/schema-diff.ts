@@ -20,6 +20,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import { dbTypesEqual, enumReferenceKind } from '../db-type.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -410,11 +411,15 @@ function compareColumnDetails(
 	db: ColumnIR,
 	changes: SchemaChange[],
 ): void {
-	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024))
-	const schemaDbType = schema.originalDbType?.toLowerCase();
-	const dbDbType = db.originalDbType?.toLowerCase();
-
-	if (schemaDbType && dbDbType && schemaDbType !== dbDbType) {
+	// Type change — prefer originalDbType when both sides carry it (e.g. vector(768) → vector(1024)).
+	// Compare via dbTypesEqual so equivalent spellings (varchar ≡ character varying,
+	// timestamptz ≡ timestamp with time zone, int4 ≡ integer) do NOT false-diff, while
+	// real modifier changes (timestamptz(3) → timestamptz(6)) still do.
+	if (
+		schema.originalDbType &&
+		db.originalDbType &&
+		!dbTypesEqual(schema.originalDbType, db.originalDbType)
+	) {
 		// Both have originalDbType and they differ → precision/type change
 		changes.push({
 			kind: 'alter_column_type',
@@ -1110,11 +1115,26 @@ function compareEnums(
 		if (!schemaEnums.has(name)) {
 			// Scan DB tables for columns still referencing this enum type.
 			// These must be cast to text before the DROP TYPE can succeed.
-			const referencingColumns: Array<{ table: string; column: string }> = [];
+			const referencingColumns: Array<{
+				table: string;
+				column: string;
+				isArray?: boolean;
+			}> = [];
 			for (const [tableName, tableIR] of db.tables) {
 				for (const col of tableIR.columns) {
-					if (col.originalDbType === name) {
-						referencingColumns.push({ table: tableName, column: col.name });
+					// originalDbType may be quoted (`"Status"`) while `name` is a bare
+					// catalog typname; a scalar reference is rewritten to text and an
+					// array reference to text[] before the DROP, so we track the kind.
+					const kind =
+						col.originalDbType !== undefined
+							? enumReferenceKind(col.originalDbType, name)
+							: null;
+					if (kind !== null) {
+						referencingColumns.push({
+							table: tableName,
+							column: col.name,
+							...(kind === 'array' ? { isArray: true } : {}),
+						});
 					}
 				}
 			}

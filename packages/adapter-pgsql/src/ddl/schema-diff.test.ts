@@ -213,6 +213,120 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.destructive).toBe(true);
 		});
 
+		it.each([
+			['varchar(120)', 'character varying(120)'],
+			['timestamptz', 'timestamp with time zone'],
+			['timestamptz(3)', 'timestamp(3) with time zone'],
+			['int4', 'integer'],
+			['varbit(8)', 'bit varying(8)'],
+			['numeric(10,2)', 'numeric(10,2)'],
+			['numeric(10, 2)', 'numeric(10,2)'],
+		])('does not false-diff equivalent originalDbType spellings (%s vs %s)', (authored, introspected) => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'c', type: 'string', originalDbType: authored }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType: introspected,
+						}),
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toHaveLength(0);
+		});
+
+		it('detects quoted UDT case changes while accepting exact quoted matches', () => {
+			const cases = [
+				{ authored: '"Money"', introspected: '"money"' },
+				{ authored: '"Money"', introspected: '"Money"' },
+			];
+
+			expect(
+				cases.map(({ authored, introspected }) => {
+					const schema = makeModel([
+						makeTable({
+							name: 'users',
+							columns: [
+								makeCol({
+									name: 'c',
+									type: 'string',
+									originalDbType: authored,
+								}),
+							],
+						}),
+					]);
+					const db = makeModel([
+						makeTable({
+							name: 'users',
+							columns: [
+								makeCol({
+									name: 'c',
+									type: 'string',
+									originalDbType: introspected,
+								}),
+							],
+						}),
+					]);
+
+					return {
+						authored,
+						introspected,
+						changes: changeKinds(compareSchemata(schema, db).changes),
+					};
+				}),
+			).toEqual([
+				{
+					authored: '"Money"',
+					introspected: '"money"',
+					changes: ['alter_column_type'],
+				},
+				{ authored: '"Money"', introspected: '"Money"', changes: [] },
+			]);
+		});
+
+		it.each([
+			['vector(1024)', 'vector(768)'],
+			['timestamptz(6)', 'timestamp(3) with time zone'],
+			['numeric(12,4)', 'numeric(10,2)'],
+			['varchar(200)', 'character varying(120)'],
+		])('detects a real modifier change in originalDbType (%s vs %s)', (authored, introspected) => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'c', type: 'string', originalDbType: authored }),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType: introspected,
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toContain(
+				'alter_column_type',
+			);
+		});
+
 		it('should detect nullable changes', () => {
 			const schema = makeModel([
 				makeTable({
@@ -2038,6 +2152,47 @@ describe('ENUM types', () => {
 		);
 		const diff = compareSchemata(schema, db);
 		expect(changeKinds(diff.changes)).toEqual(['drop_enum']);
+	});
+
+	it('should detect enum drop dependencies via bare originalDbType typname', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums(
+			[
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({
+							name: 'status',
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+				}),
+			],
+			new Map([['status', { name: 'status', values: ['active'] }]]),
+		);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(diff.changes).toEqual([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', values: ['active'] },
+					referencingColumns: [{ table: 'users', column: 'status' }],
+				},
+			},
+			{
+				kind: 'drop_table',
+				table: 'users',
+				destructive: true,
+				details: 'Drop table "users"',
+			},
+		]);
 	});
 
 	it('should detect new enum value', () => {

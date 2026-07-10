@@ -323,22 +323,28 @@ describe('PgsqlAdapter.storageSize', () => {
 
 function makeIntrospectPool(
 	columns: Record<string, unknown>[] = [],
-	overrides?: { pks?: Record<string, unknown>[] },
+	overrides?: {
+		pks?: Record<string, unknown>[];
+		formattedColumnTypes?: Record<string, unknown>[];
+	},
 ): Pool {
-	// queryAllCatalogs fires 12 queries in sequence
+	// queryAllCatalogs fires the 14 catalog queries in sequence via Promise.all;
+	// makePool returns these in call order, so the order MUST match queryAllCatalogs.
 	const results: Record<string, unknown>[][] = [
-		columns, // columns
-		overrides?.pks ?? [], // pks
-		[], // fks
-		[], // indexes
-		[], // partitions
-		[], // checks
-		[], // enums
-		[], // extensions
-		[], // sequences
-		[], // comments
-		[], // rls
-		[], // policies
+		columns, // 1. columns
+		overrides?.pks ?? [], // 2. pks
+		[], // 3. fks
+		[], // 4. indexes
+		[], // 5. uniqueColumns
+		[], // 6. enums
+		[], // 7. comments
+		[], // 8. checks
+		[], // 9. partitions
+		[], // 10. extensions
+		[], // 11. sequences
+		[], // 12. rls
+		[], // 13. policies
+		overrides?.formattedColumnTypes ?? [], // 14. formattedColumnTypes
 	];
 	return makePool(results);
 }
@@ -395,6 +401,46 @@ describe('introspection.filterTables', () => {
 		]);
 		const model = await introspect(pool, { include: ['users'] });
 		expect(Array.from(model.tables.keys())).toEqual(['users']);
+	});
+
+	it('sources originalDbType from the format_type catalog query verbatim', async () => {
+		const pool = makeIntrospectPool(
+			[
+				col({
+					table_name: 'events',
+					column_name: 'kinds',
+					data_type: 'ARRAY',
+					udt_name: '_int4',
+				}),
+				col({
+					table_name: 'events',
+					column_name: 'name',
+					data_type: 'character varying',
+					udt_name: 'varchar',
+				}),
+			],
+			{
+				formattedColumnTypes: [
+					// Array columns are sourced from format_type (integer[], not _int4).
+					{
+						table_name: 'events',
+						column_name: 'kinds',
+						db_type: 'integer[]',
+					},
+					// A built-in modifier is preserved verbatim.
+					{
+						table_name: 'events',
+						column_name: 'name',
+						db_type: 'character varying(120)',
+					},
+				],
+			},
+		);
+		const model = await introspect(pool);
+		const columns = model.getTable('events')?.columns ?? [];
+		const byName = new Map(columns.map((c) => [c.name, c.originalDbType]));
+		expect(byName.get('kinds')).toBe('integer[]');
+		expect(byName.get('name')).toBe('character varying(120)');
 	});
 
 	it('exclude filter — removes matching tables', async () => {

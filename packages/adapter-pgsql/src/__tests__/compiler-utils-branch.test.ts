@@ -106,12 +106,12 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 		expect(inferPgArrayType('val', { val: 'FLOAT' })).toBe('float8[]');
 	});
 
-	it('maps NUMERIC → float8[]', () => {
-		expect(inferPgArrayType('val', { val: 'NUMERIC' })).toBe('float8[]');
+	it('maps NUMERIC → numeric[]', () => {
+		expect(inferPgArrayType('val', { val: 'NUMERIC' })).toBe('numeric[]');
 	});
 
-	it('maps DECIMAL → float8[]', () => {
-		expect(inferPgArrayType('val', { val: 'DECIMAL' })).toBe('float8[]');
+	it('maps DECIMAL → numeric[]', () => {
+		expect(inferPgArrayType('val', { val: 'DECIMAL' })).toBe('numeric[]');
 	});
 
 	it('maps TEXT → text[]', () => {
@@ -174,14 +174,28 @@ describe('inferPgArrayType: schema-driven (columnTypes map provided)', () => {
 		expect(inferPgArrayType('col', { col: 'VARCHAR(255)' })).toBe('text[]');
 	});
 
-	it('maps NUMERIC(10,2) — strips precision/scale → float8[]', () => {
+	it('maps NUMERIC(10,2) — strips precision/scale → numeric[]', () => {
 		expect(inferPgArrayType('amount', { amount: 'NUMERIC(10,2)' })).toBe(
-			'float8[]',
+			'numeric[]',
 		);
 	});
 
-	it('passes through unknown type (custom, lowercased)', () => {
-		expect(inferPgArrayType('vec', { vec: 'vector' })).toBe('vector[]');
+	it('passes through custom and faithful PostgreSQL types', () => {
+		expect([
+			inferPgArrayType('vec', { vec: 'vector' }),
+			inferPgArrayType('shape', { shape: 'geometry(Point,4326)' }),
+			inferPgArrayType('label', { label: '"LabelType"' }),
+			inferPgArrayType('duration', {
+				duration: 'interval day to second(3)',
+			}),
+			inferPgArrayType('amount', { amount: '"Money"' }),
+		]).toEqual([
+			'vector[]',
+			'geometry(Point,4326)[]',
+			'"LabelType"[]',
+			'interval day to second(3)[]',
+			'"Money"[]',
+		]);
 	});
 
 	it('key not in columnTypes falls through to runtime inference', () => {

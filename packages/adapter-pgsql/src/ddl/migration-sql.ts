@@ -772,17 +772,22 @@ function upDropEnum(
 	const enumName = schemaName
 		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
 		: quoteIdent(enumDef.name, 'alias');
-	// Before dropping the type, cast any referencing columns to text
-	// to prevent "cannot drop type: still referenced" errors.
+	// Before dropping the type, cast any referencing columns off the enum to
+	// prevent "cannot drop type: still referenced" errors AND to avoid the
+	// trailing CASCADE silently dropping them: a scalar column becomes text, an
+	// array column becomes text[] (with an explicit USING cast, which array type
+	// changes require).
 	const refs = change.meta?.referencingColumns as
-		| Array<{ table: string; column: string }>
+		| Array<{ table: string; column: string; isArray?: boolean }>
 		| undefined;
 	const alterStatements =
 		refs && refs.length > 0
-			? refs.map(
-					(ref) =>
-						`ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${quoteIdent(ref.column, 'alias')} TYPE text;`,
-				)
+			? refs.map((ref) => {
+					const column = quoteIdent(ref.column, 'alias');
+					const targetType = ref.isArray ? 'text[]' : 'text';
+					const using = ref.isArray ? ` USING ${column}::text[]` : '';
+					return `ALTER TABLE ${qualifyTable(ref.table, schemaName)} ALTER COLUMN ${column} TYPE ${targetType}${using};`;
+				})
 			: [];
 	return [...alterStatements, `DROP TYPE IF EXISTS ${enumName} CASCADE;`].join(
 		'\n',

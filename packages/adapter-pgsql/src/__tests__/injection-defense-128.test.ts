@@ -721,10 +721,10 @@ describe('ITEM-6: namedArg name injection guard', () => {
 // ITEM 7: batch/unnest cast type via mapToPgBaseType custom path
 // ============================================================================
 
-describe('ITEM-7: inferPgArrayType custom-type path validates via validateDbTypeName', () => {
+describe('ITEM-7: inferPgArrayType custom-type path validates via adapter validateDbType', () => {
 	it('rejects injection in custom type via columnTypes map', () => {
-		// The custom-type default path in mapToPgBaseType calls validateTypeName from
-		// @dbsp/core. "vector; DROP TABLE x" is not a safe PostgreSQL type name.
+		// The custom-type default path in mapToPgBaseType calls the adapter's
+		// PostgreSQL-aware validateDbType. "vector; DROP TABLE x" is not safe.
 		expect(() =>
 			inferPgArrayType('embedding', {
 				embedding: 'vector; DROP TABLE x',
@@ -749,10 +749,10 @@ describe('ITEM-7: inferPgArrayType custom-type path validates via validateDbType
 	});
 
 	it('allows numeric type with precision: numeric(10,2)', () => {
-		// numeric(10,2) normalizes through the NUMERIC case to float8
+		// numeric(10,2) normalizes through the NUMERIC case to numeric
 		// so this exercises the switch-case path, not the custom default
 		const result = inferPgArrayType('price', { price: 'NUMERIC(10,2)' });
-		expect(result).toBe('float8[]');
+		expect(result).toBe('numeric[]');
 	});
 
 	it('allows custom extension type: tsvector', () => {
@@ -1318,7 +1318,7 @@ describe('FINDING-2: assertBatchTypeName — schema-qualified type regression fi
 	it('allows numeric with precision: numeric(10,2)', () => {
 		// numeric(10,2) hits the NUMERIC case branch, not the default custom path
 		const result = inferPgArrayType('price', { price: 'numeric(10,2)' });
-		expect(result).toBe('float8[]');
+		expect(result).toBe('numeric[]');
 	});
 
 	it('allows tsvector custom extension type', () => {
@@ -1354,11 +1354,11 @@ describe('FINDING-2: assertBatchTypeName — schema-qualified type regression fi
 
 // ============================================================================
 // FINDING 2 (continued): multi-word PostgreSQL base types now pass
-// The old local reimplementation omitted multi-word types. validateTypeName
-// from @dbsp/core includes the full allowlist; these must no longer throw.
+// The custom type path uses the adapter validator so faithful PostgreSQL type
+// spellings shared with WHERE/NQL/DDL must no longer throw.
 // ============================================================================
 
-describe('FINDING-2: multi-word PostgreSQL base types pass via validateTypeName', () => {
+describe('FINDING-2: multi-word PostgreSQL base types pass via validateDbType', () => {
 	it('allows timestamp without time zone', () => {
 		expect(() =>
 			inferPgArrayType('col', { col: 'timestamp without time zone' }),

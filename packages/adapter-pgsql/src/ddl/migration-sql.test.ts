@@ -2707,6 +2707,34 @@ describe('ENUM types', () => {
 		expect(lines[2]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
 	});
 
+	it('should cast an array-typed referencing column to text[] with USING before DROP TYPE', () => {
+		const diff = makeDiff([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', values: ['active', 'inactive'] },
+					referencingColumns: [
+						{ table: 'users', column: 'status' },
+						{ table: 'users', column: 'history', isArray: true },
+					],
+				},
+			},
+		]);
+		const sql = generateMigrationSQL(diff);
+		const lines = sql[0]!.split('\n');
+		expect(lines).toHaveLength(3);
+		expect(lines[0]).toBe(
+			'ALTER TABLE "users" ALTER COLUMN "status" TYPE text;',
+		);
+		expect(lines[1]).toBe(
+			'ALTER TABLE "users" ALTER COLUMN "history" TYPE text[] USING "history"::text[];',
+		);
+		expect(lines[2]).toBe('DROP TYPE IF EXISTS "status" CASCADE;');
+	});
+
 	it('should emit ALTER TABLE with schema prefix before DROP TYPE when schema is set', () => {
 		const diff = makeDiff([
 			{

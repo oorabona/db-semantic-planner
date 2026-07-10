@@ -5,14 +5,16 @@
  * These tests prove that the mock-based coverage in param-type-cast.test.ts and
  * the introspection unit tests actually match real PostgreSQL behaviour:
  *
- * S-2: introspect() sets originalDbType from udt_name ('int4' for integer columns),
- *      and the compiler emits CAST($1 AS int4) when querying nullable integer columns.
+ * originalDbType round-trip: introspect() sets originalDbType from udt_name
+ *      ('int4') for a plain integer column (no type modifier), and the compiler
+ *      emits CAST($1 AS int4) when querying nullable integer columns. Typmod-bearing
+ *      types instead get the faithful format_type value (varchar(120), ...) (#261).
  *
  * S-3: introspect() correctly maps PostgreSQL's "SET DEFAULT" delete_rule to the
  *      OnDeleteAction 'SET DEFAULT' — proving mapDeleteRule() is not mock-only.
  *
- * Regression gate for S-2:
- *   Comment out the `originalDbType: col.udt_name` line in buildTableIR → this test
+ * Regression gate for the originalDbType round-trip:
+ *   Break the format_type-sourced originalDbType in buildTableIR → this test
  *   fails because the column loses its originalDbType → no CAST in SQL.
  *   Restore → test passes.
  */
@@ -113,14 +115,14 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 			?.columns.find((c) => c.name === 'fk_id');
 
 		expect(col).toBeDefined();
-		// PostgreSQL returns udt_name = 'int4' for INTEGER columns.
-		// buildTableIR sets originalDbType: col.udt_name — so this must be 'int4'.
-		// If originalDbType is missing or differs, S-2 is broken at the introspection layer.
+		// A plain integer column has no type modifier (atttypmod = -1), so #261's
+		// format_type path is skipped and originalDbType keeps the bare udt_name
+		// 'int4'. Modifier fidelity via format_type applies only to typmod-bearing
+		// types (varchar(120), timestamptz(3), ...). dbTypesEqual reconciles
+		// int4 with integer, so an integer-authored schema does not false-diff.
 		expect(col?.originalDbType).toBe('int4');
-		// Negative guards: PG returns lowercase 'int4', not 'integer' or 'INT4'.
 		expect(col?.originalDbType).not.toBe('integer');
 		expect(col?.originalDbType).not.toBe('INT4');
-		expect(col?.originalDbType).not.toBe('INTEGER');
 	});
 
 	it('compiled SQL contains CAST($1 AS int4) for nullable integer WHERE clause', async () => {
@@ -140,8 +142,8 @@ describe('S-2: originalDbType + CAST round-trip (real PostgreSQL)', () => {
 			.where(eq('fk_id', 42))
 			.dump();
 
-		// The key assertion: originalDbType 'int4' propagated through to the
-		// WHERE compilation, producing an explicit CAST to avoid pg type ambiguity.
+		// The key assertion: originalDbType ('int4') propagated through to the WHERE
+		// compilation, producing an explicit CAST to avoid pg type ambiguity.
 		// If originalDbType was not set by introspection, this becomes plain $1.
 		expect(dump.sql).toContain('CAST($1 AS int4)');
 		expect(dump.params).toEqual([42]);
