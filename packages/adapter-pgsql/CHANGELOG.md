@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.11.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.1...adapter-pgsql-v1.11.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Faithful array/modifier introspection + SQL-safe catalog type rendering ([15b998b](https://github.com/oorabona/db-semantic-planner/commit/15b998b3cda5d10e692bd3fa14a076cfeb56b77d)), closes [#261](https://github.com/oorabona/db-semantic-planner/issues/261) [#262](https://github.com/oorabona/db-semantic-planner/issues/262) [#284](https://github.com/oorabona/db-semantic-planner/issues/284) [#285](https://github.com/oorabona/db-semantic-planner/issues/285) [#286](https://github.com/oorabona/db-semantic-planner/issues/286)
+
 ## [1.11.1](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.0...adapter-pgsql-v1.11.1) (2026-07-09)
 
 
