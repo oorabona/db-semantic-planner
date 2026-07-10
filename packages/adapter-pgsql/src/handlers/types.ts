@@ -73,6 +73,16 @@ export interface CompilerContext {
 		state: CompilerState,
 	) => Node;
 	/**
+	 * Optional callback to compile a custom fn() FILTER (WHERE ...) condition.
+	 * Set by PlanCompiler to keep WHERE-dispatcher dependencies out of expression
+	 * handlers while still applying FILTER in every expression position.
+	 */
+	readonly compileCustomFnFilter?: (
+		filterIntent: import('@dbsp/types').WhereIntent,
+		ctx: CompilerContext,
+		state: CompilerState,
+	) => Node | undefined;
+	/**
 	 * Optional ModelIR for type-aware parameter casting.
 	 * When provided, WHERE comparisons emit `$N::type` to eliminate
 	 * PostgreSQL type inference ambiguity for nullable columns.

@@ -28,6 +28,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
+import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
 import type { CompilerContext } from './handlers/index.js';
@@ -74,6 +75,7 @@ export function compileRecursive(
 			rootTable: table,
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
+			compileCustomFnFilter: buildCustomFnFilter,
 		};
 
 		// Get columns to select
@@ -130,6 +132,7 @@ export function compileRecursive(
 			rootTable: table,
 			...(schemaName !== undefined && { schema: schemaName }),
 			maxRecursiveDepth: intent.maxDepth,
+			compileCustomFnFilter: buildCustomFnFilter,
 		};
 
 		const startSelect = intent.start.select ?? [];

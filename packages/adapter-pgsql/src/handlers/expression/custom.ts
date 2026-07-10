@@ -174,6 +174,13 @@ export function compileExpressionIntent(
 
 		case 'customFn': {
 			const i = intent as CustomFnExpressionIntent;
+			// Fail loud BEFORE compiling any args (which would mutate state.parameters):
+			// a FILTER must never be silently dropped in a context lacking the hook.
+			if (i.filter && !ctx.compileCustomFnFilter) {
+				throw new Error(
+					'fn().filter() (FILTER (WHERE ...)) is not supported in this compilation context.',
+				);
+			}
 			// Schema-qualified: 'schema.func' → [String(schema), String(func)]
 			const nameParts = i.name.split('.');
 			const argNodes = i.args.map((arg) =>
@@ -192,11 +199,24 @@ export function compileExpressionIntent(
 							return sortBy(colNode, ob.direction === 'desc' ? 'DESC' : 'ASC');
 						})
 					: undefined;
-			// Note: FILTER (WHERE ...) on customFn is applied at the compiler level
-			// (selectCustomExpression branch in compiler.ts) to avoid circular deps.
+			// FILTER (WHERE ...) is supplied by the compiler through this hook to avoid
+			// importing WHERE-dispatcher machinery into expression handlers (the
+			// no-hook case already failed loud above, before any args were compiled).
+			const filterNode = i.filter
+				? ctx.compileCustomFnFilter?.(i.filter, ctx, state)
+				: undefined;
+			// The hook's return type permits undefined; a hook that returns undefined
+			// for a present filter must NOT silently drop it to an unfiltered aggregate.
+			if (i.filter && filterNode === undefined) {
+				throw new Error(
+					'fn().filter(): the FILTER (WHERE ...) compiler produced no filter node; ' +
+						'the filter would be silently dropped.',
+				);
+			}
 			return funcCall(nameParts, argNodes, {
 				distinct: i.distinct === true,
 				...(orderByNodes ? { orderBy: orderByNodes } : {}),
+				...(filterNode ? { filter: filterNode } : {}),
 			});
 		}
 
@@ -424,31 +444,6 @@ export function compileExpressionIntent(
 /**
  * Expression handler for custom expression intents in SELECT.
  * Dispatches customOp, customFn, ref, param, cast, unary to compileExpressionIntent.
- */
-
-/**
- * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
- *
- * Uses require() for createWhereDispatcher and convertWhereCondition to avoid circular
- * dependencies (compiler.ts → custom.ts). The PlanDecision from convertWhereCondition
- * is structurally compatible with Decision for simple filter conditions.
- */
-/**
- * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
- *
- * Uses direct imports (not require()) — both are safe:
- * - handlers/index.ts does not import custom.ts (no circular dep)
- * - intent-to-decisions.ts imports PlanDecision from compiler.ts as `import type` only
- *   (type-only imports have no runtime circular dep in ESM)
- */
-/**
- * Compile a WhereIntent FILTER clause to an AST Node for use in customFn expressions.
- *
- * Uses direct import for convertWhereCondition (safe: intent-to-decisions.ts only has
- * `import type` from compiler.ts, no runtime circular dep).
- *
- * Uses require() for createWhereDispatcher to avoid circular initialization:
- *   handlers/index.ts → where/index.ts → custom-expression.ts → custom.ts
  */
 
 export const customExpressionHandler: ExpressionHandler = {

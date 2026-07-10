@@ -53,6 +53,7 @@ import {
 	type BindingNameRegistry,
 	schemaForFromName,
 } from './binding-registry.js';
+import { buildCustomFnFilter } from './compiler.js';
 import type {
 	CompilerContext,
 	CompilerState,
@@ -162,6 +163,7 @@ function toHandlerContext(ctx: WhereCompilerCtx): CompilerContext {
 		...(ctx.bindingNames !== undefined && { bindingNames: ctx.bindingNames }),
 		...(ctx.model !== undefined && { model: ctx.model }),
 		...(ctx.outerTable !== undefined && { outerAlias: ctx.outerTable }),
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 }
 
