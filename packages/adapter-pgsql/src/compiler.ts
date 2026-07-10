@@ -286,6 +286,35 @@ function compileFilterCondition(
 	return dispatcher(mapped, ctx, state);
 }
 
+export function buildCustomFnFilter(
+	filterIntent: import('@dbsp/types').WhereIntent,
+	ctx: HandlerCompilerContext,
+	state: HandlerCompilerState,
+): Node {
+	// Fail loud rather than treat "could not lower" as "no filter": a filter that
+	// lowers to nothing (e.g. an empty or()/and(), or an unsupported condition kind)
+	// must NOT silently drop to an unfiltered aggregate, which would broaden results.
+	// Well-defined degenerate semantics (empty or -> FALSE, empty and -> TRUE) are a
+	// separate condition-compiler concern tracked in #296.
+	const filterDecision = convertWhereCondition(filterIntent, ctx.rootTable);
+	const filterNode = filterDecision
+		? compileFilterCondition(
+				filterDecision,
+				createWhereDispatcher(),
+				ctx,
+				state,
+			)
+		: undefined;
+	if (!filterNode) {
+		throw new Error(
+			'fn().filter(): the FILTER (WHERE ...) condition could not be compiled ' +
+				'(e.g. an empty or()/and() or an unsupported condition). ' +
+				'Provide a concrete filter condition.',
+		);
+	}
+	return filterNode;
+}
+
 // ============================================================================
 // Types (simplified for spike - would import from @dbsp/core)
 // ============================================================================
@@ -810,6 +839,7 @@ export class PlanCompiler {
 			}),
 			...(this.bindingNames != null && { bindingNames: this.bindingNames }),
 			...(this.model != null && { model: this.model }),
+			compileCustomFnFilter: buildCustomFnFilter,
 		} as HandlerCompilerContext;
 	}
 
@@ -1337,6 +1367,7 @@ export class PlanCompiler {
 				handlerCtx: HandlerCompilerContext,
 				state: HandlerCompilerState,
 			) => this.compileNqlFunctionArg(value, handlerCtx, state),
+			compileCustomFnFilter: buildCustomFnFilter,
 		} as HandlerCompilerContext;
 	}
 
@@ -2950,47 +2981,18 @@ export class PlanCompiler {
 
 	/**
 	 * Compile a custom ExpressionIntent (customFn, customOp, ref, cast, unary,
-	 * array, function, subquery, …) to an AST node, applying the customFn FILTER
-	 * clause. Shared by the `selectCustomExpression` target path and CASE
-	 * THEN/ELSE values so both render the full expression surface identically
-	 * (every expression kind + FILTER), rather than one path silently binding
-	 * expressions as parameters or dropping FILTER.
+	 * array, function, subquery, …) to an AST node through the shared expression
+	 * compiler. Shared by the `selectCustomExpression` target path and CASE
+	 * THEN/ELSE values so both render the full expression surface identically.
 	 */
 	private compileCustomExpressionNode(
 		exprIntent: ExpressionIntent,
 		plan: SimplifiedPlanReport,
 	): Node {
-		// createHandlerContext already wires compileSubquery → compileExpressionSubquery.
+		// createHandlerContext wires recursive expression hooks.
 		const ctx = this.createHandlerContext(plan, plan.rootTable);
 		const state = this.createHandlerState();
 		const node = compileExpressionIntent(exprIntent, ctx, state);
-		// Apply FILTER (WHERE ...) clause for customFn intents (e.g. array_agg
-		// FILTER (WHERE ...)). Compiled at this level to use compileFilterCondition
-		// + convertWhereCondition without introducing circular deps in custom.ts.
-		if (
-			exprIntent.kind === 'customFn' &&
-			(exprIntent as import('@dbsp/types').CustomFnExpressionIntent).filter
-		) {
-			const filterIntent = (
-				exprIntent as import('@dbsp/types').CustomFnExpressionIntent
-			).filter!;
-			const filterDecision = convertWhereCondition(
-				filterIntent,
-				plan.rootTable,
-			);
-			if (filterDecision) {
-				const filterNode = compileFilterCondition(
-					filterDecision,
-					createWhereDispatcher(),
-					ctx,
-					state,
-				);
-				if (filterNode && 'FuncCall' in node) {
-					(node as { FuncCall: Record<string, unknown> }).FuncCall.agg_filter =
-						filterNode;
-				}
-			}
-		}
 		// parameters are shared by reference; only sync paramIndex
 		this.state.paramIndex = state.paramIndex;
 		return node;

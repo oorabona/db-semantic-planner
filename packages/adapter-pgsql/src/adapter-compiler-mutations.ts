@@ -37,6 +37,7 @@ import {
 	compileWhereIntent,
 	type WhereCompilerCtx,
 } from './compile-where.js';
+import { buildCustomFnFilter } from './compiler.js';
 import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
@@ -364,6 +365,7 @@ export function compileInsert(
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 
@@ -450,6 +452,7 @@ export function compileInsertFrom(
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 	const resolvedWhere = intent.where
@@ -505,6 +508,7 @@ export function compileUpdate(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 
@@ -567,6 +571,7 @@ export function compileBatchUpdate(
 		}),
 		...(deps.bindingNames !== undefined && { bindingNames: deps.bindingNames }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 
@@ -689,6 +694,7 @@ export function compileDelete(
 		}),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
 		...(resolvedModel !== undefined && { model: resolvedModel }),
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 
@@ -740,6 +746,7 @@ export function compileUpsert(
 			dialectCapabilities: deps.dialectCapabilities,
 		}),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 
@@ -907,6 +914,7 @@ export function compileUpsertFrom(
 		}),
 		...(bindingNames !== undefined && { bindingNames }),
 		maxRecursiveDepth: MAX_DEPTH_LIMIT,
+		compileCustomFnFilter: buildCustomFnFilter,
 	};
 	const state = createCompilerState();
 	const resolvedWhere = intent.where

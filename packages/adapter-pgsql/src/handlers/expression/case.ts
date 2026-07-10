@@ -43,11 +43,8 @@ function resolveCaseValue(
 		state,
 		undefined,
 		// Handler-level path: renders every expression kind via the shared
-		// expression compiler. It does NOT apply the customFn FILTER modifier
-		// (agg_filter) — that requires compiler-private compileFilterCondition,
-		// which cannot be reached here without a circular dependency. The primary
-		// DX caseWhen path (PlanCompiler.compileCustomExpressionNode) filter-patches
-		// correctly; use it for filtered aggregates as CASE branches.
+		// expression compiler. Any customFn FILTER modifier is applied when the
+		// caller-provided CompilerContext supplies compileCustomFnFilter.
 		(expr) =>
 			compileExpressionIntent(expr as unknown as ExpressionIntent, ctx, state),
 	);

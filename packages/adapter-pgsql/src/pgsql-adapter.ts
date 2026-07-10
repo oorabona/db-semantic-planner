@@ -83,7 +83,11 @@ import {
 	emittedBindName,
 	hasBindingName,
 } from './binding-registry.js';
-import { PlanCompiler, renumberParamRefsInAst } from './compiler.js';
+import {
+	buildCustomFnFilter,
+	PlanCompiler,
+	renumberParamRefsInAst,
+} from './compiler.js';
 import { dbTypeCastTarget, validateDbType } from './db-type.js';
 import {
 	type GenerateDDLOptions,
@@ -1172,6 +1176,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			dialectCapabilities,
 			rootTable: '',
 			maxRecursiveDepth: MAX_DEPTH_LIMIT,
+			compileCustomFnFilter: buildCustomFnFilter,
 			// Wire compileSubquery so that SubqueryExpressionIntent nested inside
 			// expr (e.g. op('+', subquery(...).asExpr(), literal(1))) compiles
 			// correctly via a fresh inner PlanCompiler (same pattern as PlanCompiler
