@@ -392,10 +392,35 @@ export function convertWhereToDecisions(
 /**
  * Convert dotted field references (e.g., "author.name") to EXISTS subquery decisions.
  */
+// A dotted WHERE column lowers one nested EXISTS per hop; cap the depth so a
+// user-controlled path (e.g. a self-relation `manager.manager.…`) cannot produce
+// an unbounded EXISTS tree or exhaust the stack.
+const MAX_DOTTED_RELATION_DEPTH = 10;
+
 export function convertDottedFieldsToExists(
 	decisions: PlanDecision[],
 	rootTable: string,
 	model: ModelIR,
+): PlanDecision[] {
+	return convertDottedFieldsToExistsForSource(decisions, rootTable, model, []);
+}
+
+function parentKeyForRelation(
+	model: ModelIR,
+	sourceTable: string,
+	relationName: string,
+	relationType: ResolvedRelation['relationType'],
+): ColumnListInput | undefined {
+	const rel = model.getRelation(`${sourceTable}.${relationName}`);
+	if (!rel) return undefined;
+	return relationType === 'belongsTo' ? rel.targetKey : rel.sourceKey;
+}
+
+function convertDottedFieldsToExistsForSource(
+	decisions: PlanDecision[],
+	sourceTable: string,
+	model: ModelIR,
+	relationPathPrefix: readonly string[],
 ): PlanDecision[] {
 	return decisions.map((d) => {
 		// Recurse into compound conditions
@@ -407,10 +432,11 @@ export function convertDottedFieldsToExists(
 		) {
 			return {
 				...d,
-				conditions: convertDottedFieldsToExists(
+				conditions: convertDottedFieldsToExistsForSource(
 					d.conditions as PlanDecision[],
-					rootTable,
+					sourceTable,
 					model,
+					relationPathPrefix,
 				),
 			};
 		}
@@ -430,17 +456,30 @@ export function convertDottedFieldsToExists(
 		const targetColumn = d.column.substring(dotIndex + 1);
 
 		// Resolve relation from model
-		const resolved = resolveRelation(model, rootTable, relationName);
-		if (!resolved) return d; // No matching relation — leave as-is
-
-		return {
-			type: 'where',
-			operator: 'exists',
-			targetTable: resolved.target,
-			relationName,
-			...(resolved.foreignKey && { foreignKey: resolved.foreignKey }),
-			...(resolved.relationType && { relationType: resolved.relationType }),
-			conditions: [
+		const resolved = resolveRelation(model, sourceTable, relationName);
+		if (!resolved) {
+			// A resolved parent hop already committed this predicate to a relation
+			// path, so an unresolved intermediate/final hop is a broken path — not a
+			// qualified column reference. Fail closed rather than emit a dangling
+			// `typo.col` that binds to an accidental outer alias or invalid SQL. At
+			// the top level (no resolved parent) the prefix may legitimately be a
+			// table/alias qualifier, so leave it untouched.
+			if (relationPathPrefix.length > 0) {
+				throw new Error(
+					`Dotted relation path: no relation '${relationName}' is declared on table ` +
+						`'${sourceTable}' (in "${[...relationPathPrefix, relationName].join('.')}.${targetColumn}").`,
+				);
+			}
+			return d; // top-level: leave as-is (may be a qualified column reference)
+		}
+		if (relationPathPrefix.length >= MAX_DOTTED_RELATION_DEPTH) {
+			throw new Error(
+				`Dotted relation path exceeds the maximum depth of ${MAX_DOTTED_RELATION_DEPTH} hops: "${[...relationPathPrefix, relationName].join('.')}…".`,
+			);
+		}
+		const relationPath = [...relationPathPrefix, relationName].join('.');
+		const innerConditions = convertDottedFieldsToExistsForSource(
+			[
 				{
 					...d,
 					type: 'where',
@@ -448,6 +487,28 @@ export function convertDottedFieldsToExists(
 					table: resolved.target,
 				},
 			],
+			resolved.target,
+			model,
+			[...relationPathPrefix, relationName],
+		);
+		const parentKey = parentKeyForRelation(
+			model,
+			sourceTable,
+			relationName,
+			resolved.relationType,
+		);
+
+		return {
+			type: 'where',
+			operator: 'exists',
+			targetTable: resolved.target,
+			sourceTable,
+			relationName,
+			relationPath,
+			...(resolved.foreignKey && { foreignKey: resolved.foreignKey }),
+			...(resolved.relationType && { relationType: resolved.relationType }),
+			...(parentKey && { parentKey }),
+			conditions: innerConditions,
 		} as PlanDecision;
 	});
 }

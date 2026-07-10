@@ -142,10 +142,48 @@ function buildExistsSubquery(
 		throw new Error('EXISTS handler requires targetTable or relation');
 	}
 
-	// Generate unique alias
-	const existingAliases = state.aliases.size;
-	const targetAlias = `${targetTable}_exists_${existingAliases}`;
-	state.aliases.set(`exists_${targetTable}`, targetAlias);
+	// Allocate a unique alias. Start the suffix from the current map size (which
+	// preserves the established numbering for the common case) and bump until the
+	// candidate collides with no alias that is either already allocated or in
+	// scope. Keying on `exists_${targetTable}` used to overwrite in place for a
+	// self-relation / cyclic dotted path (same target table every hop), stalling
+	// state.aliases.size and reusing the suffix so the inner EXISTS correlated
+	// against itself. Keying on the alias itself fixes that, but a relation or
+	// include can still legitimately carry a key/value equal to a generated alias
+	// (e.g. a relation literally named `nodes_exists_1`) — Map#set on a duplicate
+	// key would overwrite and re-stall size — so the collision loop guarantees a
+	// genuinely fresh alias for every EXISTS (exists / notExists / every). The loop
+	// also excludes the outer aliases already in SQL scope (currentAlias, rootTable,
+	// outerAlias): a generated alias equal to one of those would shadow the outer
+	// reference and degenerate the correlation into a self-comparison. Collisions
+	// are compared in the DATABASE-name space the aliases actually emit in, so a
+	// naming plugin (e.g. dbCasing: 'snake_case') cannot fold two distinct model
+	// names onto the same emitted alias (`tExists_0` and `t_exists_0` both emit as
+	// `t_exists_0`).
+	const toDb = (identifier: string): string =>
+		ctx.naming ? ctx.naming.toDatabase(identifier) : identifier;
+	const outerAliases = new Set<string>();
+	if (ctx.currentAlias) outerAliases.add(toDb(ctx.currentAlias));
+	if (ctx.rootTable) outerAliases.add(toDb(ctx.rootTable));
+	if (ctx.outerAlias) outerAliases.add(toDb(ctx.outerAlias));
+	const aliasInUse = (candidate: string): boolean => {
+		const emitted = toDb(candidate);
+		if (outerAliases.has(emitted)) return true;
+		for (const key of state.aliases.keys()) {
+			if (toDb(key) === emitted) return true;
+		}
+		for (const value of state.aliases.values()) {
+			if (toDb(value) === emitted) return true;
+		}
+		return false;
+	};
+	let suffix = state.aliases.size;
+	let targetAlias = `${targetTable}_exists_${suffix}`;
+	while (aliasInUse(targetAlias)) {
+		suffix += 1;
+		targetAlias = `${targetTable}_exists_${suffix}`;
+	}
+	state.aliases.set(targetAlias, targetAlias);
 
 	const sourceAlias = ctx.currentAlias ?? ctx.rootTable;
 
