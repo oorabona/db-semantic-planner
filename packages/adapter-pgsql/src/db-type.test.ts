@@ -5,6 +5,7 @@ import {
 	enumReferenceKind,
 	isPgBuiltInTypeName,
 	quoteTypeIdentifier,
+	renderColumnDbType,
 	validateDbType,
 } from './db-type.js';
 
@@ -90,16 +91,240 @@ describe('db-type utilities', () => {
 	});
 
 	it('classifies scalar vs array enum references for drop-dependency', () => {
-		// Bare or quoted references match a bare catalog typname and report their
-		// arity (scalar -> text, array -> text[]); a schema-qualified reference is
-		// not matched.
+		// A reference reports its arity (scalar -> text, array -> text[]). Because
+		// older hand-built ModelIRs may carry bare custom types, a BARE reference
+		// matches by typname only (safe over-protection). A schema-QUALIFIED
+		// reference matches only when its schema matches.
 		expect([
-			enumReferenceKind('status', 'status'),
-			enumReferenceKind('"Status"', 'Status'),
-			enumReferenceKind('status[]', 'status'),
-			enumReferenceKind('audit.status', 'status'),
-			enumReferenceKind('numeric(10,2)', 'status'),
-		]).toEqual(['scalar', 'scalar', 'array', null, null]);
+			enumReferenceKind('status', 'status'), // bare, enum schema unknown -> scalar
+			enumReferenceKind('"Status"', 'Status'), // bare quoted, unknown -> scalar
+			enumReferenceKind('status[]', 'status', 'tenant_1'), // bare name-only match -> array
+			enumReferenceKind('status[]', 'status', 'public'), // bare name-only match -> array
+			enumReferenceKind('tenant_1.status[]', 'status', 'tenant_1'), // schema match -> array
+			enumReferenceKind('public.status[]', 'status', 'tenant_1'), // schema mismatch -> null
+			enumReferenceKind('tenant_1.status[]', 'status'), // qualified, enum schema unknown -> array
+			enumReferenceKind('numeric(10,2)', 'status'), // different type -> null
+		]).toEqual([
+			'scalar',
+			'scalar',
+			'array',
+			'array',
+			'array',
+			null,
+			'array',
+			null,
+		]);
+	});
+
+	it('quotes reserved schema names when qualifying custom db types', () => {
+		expect([
+			renderColumnDbType(
+				{
+					name: 'state',
+					type: 'string',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'tenant_1',
+					originalDbTypeSchemaScope: 'target',
+				},
+				'tenant_1',
+			),
+			renderColumnDbType(
+				{
+					name: 'state',
+					type: 'string',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'select',
+					originalDbTypeSchemaScope: 'target',
+				},
+				'select',
+			),
+			renderColumnDbType(
+				{
+					name: 'state',
+					type: 'string',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'copy',
+					originalDbTypeSchemaScope: 'target',
+				},
+				'copy',
+			),
+		]).toEqual(['"tenant_1".status', '"select".status', '"copy".status']);
+	});
+
+	it('renders column db types from structural schema identity', () => {
+		expect([
+			{
+				label: 'target scope retargets to explicit schema',
+				dbType: renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'status',
+						originalDbTypeSchema: 'tenant_1',
+						originalDbTypeSchemaScope: 'target',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'target scope falls back to source schema',
+				dbType: renderColumnDbType({
+					name: 'state',
+					type: 'string',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'tenant_1',
+					originalDbTypeSchemaScope: 'target',
+				}),
+			},
+			{
+				label: 'absolute scope ignores target schema',
+				dbType: renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'status',
+						originalDbTypeSchema: 'tenant_1',
+						originalDbTypeSchemaScope: 'absolute',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'absolute public qualifies',
+				dbType: renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'status',
+						originalDbTypeSchema: 'public',
+						originalDbTypeSchemaScope: 'absolute',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'target public stays bare',
+				dbType: renderColumnDbType({
+					name: 'state',
+					type: 'string',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'public',
+					originalDbTypeSchemaScope: 'target',
+				}),
+			},
+			{
+				label: 'built-in stays verbatim',
+				dbType: renderColumnDbType(
+					{
+						name: 'amount',
+						type: 'number',
+						originalDbType: 'numeric(10,2)',
+						originalDbTypeSchema: 'pg_catalog',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'array and modifier are preserved',
+				dbType: renderColumnDbType(
+					{
+						name: 'states',
+						type: 'string',
+						originalDbType: 'status(4)[]',
+						originalDbTypeSchema: 'tenant_1',
+						originalDbTypeSchemaScope: 'target',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'legacy qualified string stays as-is',
+				dbType: renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'tenant_1.status',
+					},
+					'tenant_2',
+				),
+			},
+			{
+				label: 'legacy bare string stays as-is',
+				dbType: renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'status',
+					},
+					'target',
+				),
+			},
+			{
+				label: 'authored extension type stays verbatim under target schema',
+				dbType: renderColumnDbType(
+					{
+						name: 'embedding',
+						type: 'string',
+						originalDbType: 'vector(768)',
+					},
+					'tenant_1',
+				),
+			},
+		]).toEqual([
+			{
+				label: 'target scope retargets to explicit schema',
+				dbType: '"tenant_2".status',
+			},
+			{
+				label: 'target scope falls back to source schema',
+				dbType: '"tenant_1".status',
+			},
+			{
+				label: 'absolute scope ignores target schema',
+				dbType: '"tenant_1".status',
+			},
+			{ label: 'absolute public qualifies', dbType: '"public".status' },
+			{ label: 'target public stays bare', dbType: 'status' },
+			{ label: 'built-in stays verbatim', dbType: 'numeric(10,2)' },
+			{
+				label: 'array and modifier are preserved',
+				dbType: '"tenant_2".status(4)[]',
+			},
+			{
+				label: 'legacy qualified string stays as-is',
+				dbType: 'tenant_1.status',
+			},
+			{
+				label: 'legacy bare string stays as-is',
+				dbType: 'status',
+			},
+			{
+				label: 'authored extension type stays verbatim under target schema',
+				dbType: 'vector(768)',
+			},
+		]);
+	});
+
+	it('always quotes schemas when rendering schema-qualified custom db types', () => {
+		expect(
+			['copy', 'select', 'tenant-x', 'MixedCase'].map((schema) =>
+				renderColumnDbType(
+					{
+						name: 'state',
+						type: 'string',
+						originalDbType: 'status',
+						originalDbTypeSchema: schema,
+						originalDbTypeSchemaScope: 'target',
+					},
+					schema,
+				),
+			),
+		).toEqual([
+			'"copy".status',
+			'"select".status',
+			'"tenant-x".status',
+			'"MixedCase".status',
+		]);
 	});
 
 	it('validates built-in modifiers with per-type arity', () => {
@@ -391,6 +616,26 @@ describe('db-type utilities', () => {
 				equal: dbTypesEqual('int4', 'integer'),
 			},
 			{
+				left: 'status',
+				right: 'tenant_1.status',
+				equal: dbTypesEqual('status', 'tenant_1.status'),
+			},
+			{
+				left: 'status[]',
+				right: 'tenant_1.status[]',
+				equal: dbTypesEqual('status[]', 'tenant_1.status[]'),
+			},
+			{
+				left: 'public.status',
+				right: 'tenant_1.status',
+				equal: dbTypesEqual('public.status', 'tenant_1.status'),
+			},
+			{
+				left: 'vector(768)',
+				right: 'tenant_1.vector(1024)',
+				equal: dbTypesEqual('vector(768)', 'tenant_1.vector(1024)'),
+			},
+			{
 				left: 'timestamptz',
 				right: 'timestamp with time zone',
 				equal: dbTypesEqual('timestamptz', 'timestamp with time zone'),
@@ -440,6 +685,14 @@ describe('db-type utilities', () => {
 		expect(comparisons).toEqual([
 			{ left: 'varchar', right: 'character varying', equal: true },
 			{ left: 'int4', right: 'integer', equal: true },
+			{ left: 'status', right: 'tenant_1.status', equal: false },
+			{ left: 'status[]', right: 'tenant_1.status[]', equal: false },
+			{ left: 'public.status', right: 'tenant_1.status', equal: false },
+			{
+				left: 'vector(768)',
+				right: 'tenant_1.vector(1024)',
+				equal: false,
+			},
 			{
 				left: 'timestamptz',
 				right: 'timestamp with time zone',

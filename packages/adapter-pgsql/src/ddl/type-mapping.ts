@@ -7,8 +7,8 @@
  * @module ddl/type-mapping
  */
 
-import type { ColumnIR, ColumnType } from '@dbsp/types';
-import { isPgBuiltInTypeName } from '../db-type.js';
+import type { ColumnIR } from '@dbsp/types';
+import { isPgBuiltInTypeName, renderColumnDbType } from '../db-type.js';
 import { validateDbTypeName } from '../validate.js';
 
 /**
@@ -20,17 +20,13 @@ import { validateDbTypeName } from '../validate.js';
  * @param col - Column definition from ModelIR
  * @returns PostgreSQL type string (e.g., 'VARCHAR(255)', 'SERIAL', 'JSONB')
  */
-export function mapColumnType(col: ColumnIR): string {
-	// Prefer original DB type if available (preserves precision/scale)
-	if (col.originalDbType) {
-		const originalDbType = validateDbTypeName(col.originalDbType);
-		// Built-in: apply the DDL UPPERCASE convention. Custom/UDT: emit as-is — a
-		// bare name folds per PostgreSQL's rules, and a case-sensitive type is
-		// already quoted upstream (introspection quotes catalog names). Re-quoting
-		// a bare name here would change its meaning.
-		return isPgBuiltInTypeName(originalDbType)
-			? uppercaseOutsideQuotedIdentifiers(originalDbType)
-			: originalDbType;
+export function mapColumnType(col: ColumnIR, targetSchema?: string): string {
+	// Prefer original DB type if available (preserves precision/scale).
+	if (col.originalDbType?.trim()) {
+		const dbType = validateDbTypeName(renderColumnDbType(col, targetSchema));
+		return isPgBuiltInTypeName(dbType)
+			? uppercaseOutsideQuotedIdentifiers(dbType)
+			: dbType;
 	}
 
 	// Auto-increment columns use SERIAL/BIGSERIAL
@@ -38,8 +34,10 @@ export function mapColumnType(col: ColumnIR): string {
 		return col.type === 'bigint' ? 'BIGSERIAL' : 'SERIAL';
 	}
 
-	// Standard type mapping
-	return mapBaseType(col.type);
+	const dbType = validateDbTypeName(renderColumnDbType(col, targetSchema));
+	return isPgBuiltInTypeName(dbType)
+		? uppercaseOutsideQuotedIdentifiers(dbType)
+		: dbType;
 }
 
 function uppercaseOutsideQuotedIdentifiers(type: string): string {
@@ -66,55 +64,6 @@ function uppercaseOutsideQuotedIdentifiers(type: string): string {
 	}
 
 	return result;
-}
-
-/**
- * Map base ColumnType to PostgreSQL type (without auto-increment handling).
- */
-function mapBaseType(type: ColumnType): string {
-	switch (type) {
-		case 'string':
-			return 'VARCHAR(255)';
-		case 'text':
-			return 'TEXT';
-		case 'number':
-		case 'integer':
-			return 'INTEGER';
-		case 'bigint':
-			return 'BIGINT';
-		case 'decimal':
-			return 'NUMERIC';
-		case 'boolean':
-			return 'BOOLEAN';
-		case 'date':
-			return 'DATE';
-		case 'time':
-			return 'TIME';
-		case 'datetime':
-		case 'timestamp':
-			return 'TIMESTAMPTZ';
-		case 'json':
-		case 'jsonb':
-			return 'JSONB';
-		case 'uuid':
-			return 'UUID';
-		// PostgreSQL-specific range types
-		case 'daterange':
-			return 'DATERANGE';
-		case 'tsrange':
-			return 'TSRANGE';
-		case 'tstzrange':
-			return 'TSTZRANGE';
-		case 'int4range':
-			return 'INT4RANGE';
-		case 'int8range':
-			return 'INT8RANGE';
-		case 'numrange':
-			return 'NUMRANGE';
-		default:
-			// Fallback for unknown types
-			return 'TEXT';
-	}
 }
 
 /**

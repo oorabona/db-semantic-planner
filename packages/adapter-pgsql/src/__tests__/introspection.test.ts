@@ -233,6 +233,14 @@ describe('introspect', () => {
 				is_nullable: 'NO',
 				column_default: null,
 			},
+			{
+				table_name: 'metrics',
+				column_name: 'state',
+				data_type: 'USER-DEFINED',
+				udt_name: 'status',
+				is_nullable: 'NO',
+				column_default: null,
+			},
 		];
 		const pks = [{ table_name: 'metrics', column_name: 'id' }];
 		const formattedColumnTypes = [
@@ -240,16 +248,25 @@ describe('introspect', () => {
 				table_name: 'metrics',
 				column_name: 'label',
 				db_type: 'character varying(120)',
+				type_schema: 'pg_catalog',
 			},
 			{
 				table_name: 'metrics',
 				column_name: 'captured_at',
 				db_type: 'timestamp(3) with time zone',
+				type_schema: 'pg_catalog',
 			},
 			{
 				table_name: 'metrics',
 				column_name: 'embedding',
 				db_type: 'vector(768)',
+				type_schema: 'public',
+			},
+			{
+				table_name: 'metrics',
+				column_name: 'state',
+				db_type: 'status',
+				type_schema: 'tenant_1',
 			},
 		];
 		const pool = createMockPool([
@@ -269,7 +286,7 @@ describe('introspect', () => {
 			formattedColumnTypes,
 		]);
 
-		const result = await introspect(pool);
+		const result = await introspect(pool, { schema: 'tenant_1' });
 		const table = result.tables.get('metrics')!;
 
 		expect(
@@ -277,20 +294,45 @@ describe('introspect', () => {
 				name: column.name,
 				type: column.type,
 				originalDbType: column.originalDbType,
+				originalDbTypeSchema: column.originalDbTypeSchema,
+				originalDbTypeSchemaScope: column.originalDbTypeSchemaScope,
 			})),
 		).toEqual([
-			{ name: 'id', type: 'integer', originalDbType: 'int4' },
+			{
+				name: 'id',
+				type: 'integer',
+				originalDbType: 'int4',
+				originalDbTypeSchema: undefined,
+				originalDbTypeSchemaScope: undefined,
+			},
 			{
 				name: 'label',
 				type: 'string',
 				originalDbType: 'character varying(120)',
+				originalDbTypeSchema: undefined,
+				originalDbTypeSchemaScope: undefined,
 			},
 			{
 				name: 'captured_at',
 				type: 'datetime',
 				originalDbType: 'timestamp(3) with time zone',
+				originalDbTypeSchema: undefined,
+				originalDbTypeSchemaScope: undefined,
 			},
-			{ name: 'embedding', type: 'string', originalDbType: 'vector(768)' },
+			{
+				name: 'embedding',
+				type: 'string',
+				originalDbType: 'vector(768)',
+				originalDbTypeSchema: 'public',
+				originalDbTypeSchemaScope: 'absolute',
+			},
+			{
+				name: 'state',
+				type: 'string',
+				originalDbType: 'status',
+				originalDbTypeSchema: 'tenant_1',
+				originalDbTypeSchemaScope: 'target',
+			},
 		]);
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
@@ -304,10 +346,43 @@ describe('introspect', () => {
 			}));
 		expect(formatTypeCalls).toEqual([
 			{
-				sql: "SELECT c.relname AS table_name, a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS db_type FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_type t ON t.oid = a.atttypid WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND a.attnum > 0 AND NOT a.attisdropped AND (a.atttypmod <> -1 OR t.typcategory = 'A')",
-				params: ['public'],
+				sql: "SELECT c.relname AS table_name, a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS db_type, tn.nspname AS type_schema FROM pg_catalog.pg_attribute a JOIN pg_catalog.pg_class c ON c.oid = a.attrelid JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace JOIN pg_catalog.pg_type t ON t.oid = a.atttypid JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace WHERE n.nspname = $1 AND c.relkind IN ('r','p','v','m','f') AND a.attnum > 0 AND NOT a.attisdropped AND ( a.atttypmod <> -1 OR t.typcategory = 'A' OR t.typnamespace <> 'pg_catalog'::regnamespace )",
+				params: ['tenant_1'],
 			},
 		]);
+	});
+
+	it('should populate enum schema from catalog rows', async () => {
+		const pool = createMockPool([
+			[],
+			[],
+			[],
+			[],
+			[],
+			[
+				{
+					name: 'status',
+					schema: 'tenant_1',
+					values: ['active', 'inactive'],
+				},
+			],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+		]);
+
+		const result = await introspect(pool, { schema: 'tenant_1' });
+
+		expect(result.enums?.get('status')).toEqual({
+			name: 'status',
+			schema: 'tenant_1',
+			values: ['active', 'inactive'],
+		});
 	});
 
 	it('should infer bidirectional relations from FK', async () => {

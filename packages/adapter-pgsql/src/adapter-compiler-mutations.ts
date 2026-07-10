@@ -42,7 +42,11 @@ import {
 	transposeToColumnArrays,
 	validateBatchCardinality,
 } from './compiler-utils.js';
-import { dbTypeCastTarget, validateDbType } from './db-type.js';
+import {
+	dbTypeCastTarget,
+	renderColumnDbType,
+	validateDbType,
+} from './db-type.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import {
@@ -273,6 +277,10 @@ function getColumnTypes(
 	const table = deps.model.getTable(tableName);
 	if (!table) return undefined;
 	let result: Record<string, string> | undefined;
+	const targetSchema =
+		deps.schemaName !== undefined
+			? deps.naming.toDatabase(deps.schemaName)
+			: undefined;
 	for (const col of columns) {
 		const columnIR = table.columns.find((c) => c.name === col);
 		if (columnIR) {
@@ -286,7 +294,9 @@ function getColumnTypes(
 			const authored = columnIR.originalDbType?.trim();
 			const castTarget =
 				authored !== undefined && authored !== ''
-					? dbTypeCastTarget(validateDbType(authored))
+					? dbTypeCastTarget(
+							validateDbType(renderColumnDbType(columnIR, targetSchema)),
+						)
 					: columnIR.type;
 			// The batch path unnests a single-dimension array parameter into rows.
 			// unnest FLATTENS a multi-dimensional array, so a column whose type is

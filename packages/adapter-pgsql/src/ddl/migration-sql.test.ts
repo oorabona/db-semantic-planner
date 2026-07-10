@@ -2645,6 +2645,86 @@ describe('ENUM types', () => {
 		);
 	});
 
+	it('should let schemaName win over EnumIR.schema for schema-qualified enum operations', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'Create enum',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'select',
+						values: ['active', 'inactive'],
+					},
+				},
+			},
+			{
+				kind: 'alter_enum_add_value',
+				table: '',
+				destructive: false,
+				details: 'Add enum value',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'select',
+						values: ['active', 'inactive', 'pending'],
+					},
+					value: 'pending',
+					after: 'inactive',
+				},
+			},
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'select',
+						values: ['active', 'inactive'],
+					},
+				},
+			},
+		]);
+
+		const sql = generateMigrationSQL(diff, { schemaName: 'ignored' });
+		expect(sql).toEqual([
+			'DROP TYPE IF EXISTS "ignored"."status" CASCADE;',
+			'CREATE TYPE "ignored"."status" AS ENUM (\'active\', \'inactive\');',
+			'ALTER TYPE "ignored"."status" ADD VALUE IF NOT EXISTS \'pending\' AFTER \'inactive\';',
+		]);
+		expect(generateMigrationSQL(diff)).toEqual([
+			'DROP TYPE IF EXISTS "select"."status" CASCADE;',
+			'CREATE TYPE "select"."status" AS ENUM (\'active\', \'inactive\');',
+			'ALTER TYPE "select"."status" ADD VALUE IF NOT EXISTS \'pending\' AFTER \'inactive\';',
+		]);
+	});
+
+	it('should use EnumIR.schema for enum DOWN SQL', () => {
+		const diff = makeDiff([
+			{
+				kind: 'create_enum',
+				table: '',
+				destructive: false,
+				details: 'Create enum',
+				meta: {
+					enum: {
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['active', 'inactive'],
+					},
+				},
+			},
+		]);
+
+		expect(generateDownSQL(diff)).toEqual([
+			'DROP TYPE IF EXISTS "tenant_1"."status" CASCADE;',
+		]);
+	});
+
 	it('should escape single quotes in enum values', () => {
 		const diff = makeDiff([
 			{

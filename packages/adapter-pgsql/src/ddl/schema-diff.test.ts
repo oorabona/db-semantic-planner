@@ -246,6 +246,106 @@ describe('compareSchemata', () => {
 			expect(compareSchemata(schema, db).changes).toHaveLength(0);
 		});
 
+		it.each([
+			'status',
+			'status[]',
+		])('does not false-diff target-scoped custom originalDbType identity (%s)', (originalDbType) => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType,
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType,
+							originalDbTypeSchema: 'tenant_1',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toHaveLength(0);
+		});
+
+		it('does not false-diff authored custom types against introspected absolute public identity', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'string',
+							originalDbType: 'public.status',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'status',
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'public',
+							originalDbTypeSchemaScope: 'absolute',
+						}),
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([]);
+		});
+
+		it('diffs absolute public custom type identity against target-scoped identity', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'public',
+							originalDbTypeSchemaScope: 'absolute',
+						}),
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({
+							name: 'c',
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'tenant_1',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+				}),
+			]);
+
+			expect(changeKinds(compareSchemata(schema, db).changes)).toEqual([
+				'alter_column_type',
+			]);
+		});
+
 		it('detects quoted UDT case changes while accepting exact quoted matches', () => {
 			const cases = [
 				{ authored: '"Money"', introspected: '"money"' },
@@ -300,6 +400,8 @@ describe('compareSchemata', () => {
 			['timestamptz(6)', 'timestamp(3) with time zone'],
 			['numeric(12,4)', 'numeric(10,2)'],
 			['varchar(200)', 'character varying(120)'],
+			['public.status', 'tenant_1.status'],
+			['vector(768)', 'tenant_1.vector(1024)'],
 		])('detects a real modifier change in originalDbType (%s vs %s)', (authored, introspected) => {
 			const schema = makeModel([
 				makeTable({
@@ -2127,7 +2229,7 @@ describe('CHECK constraints', () => {
 
 function makeModelWithEnums(
 	tables: TableIR[],
-	enums: Map<string, { name: string; values: string[] }>,
+	enums: Map<string, { name: string; schema?: string; values: string[] }>,
 ) {
 	const tableMap = new Map(tables.map((t) => [t.name, t]));
 	return new ModelIRImpl(tableMap, new Map(), enums as Map<string, EnumIR>);
@@ -2184,6 +2286,56 @@ describe('ENUM types', () => {
 				meta: {
 					enum: { name: 'status', values: ['active'] },
 					referencingColumns: [{ table: 'users', column: 'status' }],
+				},
+			},
+			{
+				kind: 'drop_table',
+				table: 'users',
+				destructive: true,
+				details: 'Drop table "users"',
+			},
+		]);
+	});
+
+	it('should detect qualified enum array drop dependencies only for the same schema', () => {
+		const schema = makeModel([]);
+		const db = makeModelWithEnums(
+			[
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({
+							name: 'history',
+							type: 'string',
+							originalDbType: 'tenant_1.status[]',
+						}),
+						makeCol({
+							name: 'public_history',
+							type: 'string',
+							originalDbType: 'public.status[]',
+						}),
+					],
+				}),
+			],
+			new Map([
+				['status', { name: 'status', schema: 'tenant_1', values: ['active'] }],
+			]),
+		);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(diff.changes).toEqual([
+			{
+				kind: 'drop_enum',
+				table: '',
+				destructive: true,
+				details: 'Drop enum "status"',
+				meta: {
+					enum: { name: 'status', schema: 'tenant_1', values: ['active'] },
+					referencingColumns: [
+						{ table: 'users', column: 'history', isArray: true },
+					],
 				},
 			},
 			{

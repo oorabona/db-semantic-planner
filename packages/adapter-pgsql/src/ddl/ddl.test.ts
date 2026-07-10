@@ -1162,11 +1162,20 @@ describe('ENUM types in DDL', () => {
 		);
 	});
 
-	it('should emit schema-qualified CREATE TYPE when schemaName is set', () => {
+	it('should let schemaName override EnumIR.schema for CREATE TYPE', () => {
 		const schema = {
 			tables: new Map(),
 			relations: new Map(),
-			enums: new Map([['role', { name: 'role', values: ['admin', 'user'] }]]),
+			enums: new Map([
+				[
+					'role',
+					{
+						name: 'role',
+						schema: 'ignored',
+						values: ['admin', 'user'],
+					},
+				],
+			]),
 			getTable: () => undefined,
 			getRelation: () => undefined,
 			getRelationsFrom: () => [],
@@ -1174,10 +1183,60 @@ describe('ENUM types in DDL', () => {
 			isAmbiguous: () => ({ ambiguous: false, options: [] }),
 		} as unknown as ModelIR;
 
-		const stmts = generateDDL(schema, { schemaName: 'public' });
-		expect(stmts).toContain(
-			'CREATE TYPE "public"."role" AS ENUM (\'admin\', \'user\');',
-		);
+		expect(generateDDL(schema, { schemaName: 'tenant_1' })).toEqual([
+			'CREATE TYPE "tenant_1"."role" AS ENUM (\'admin\', \'user\');',
+		]);
+	});
+
+	it('should use EnumIR.schema for introspected enum DDL without schemaName', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{
+								name: 'status',
+								type: 'string',
+								nullable: false,
+								originalDbType: 'status',
+								originalDbTypeSchema: 'tenant_1',
+								originalDbTypeSchemaScope: 'target',
+							},
+						],
+						foreignKeys: [],
+						indexes: [],
+					} satisfies import('@dbsp/types').TableIR,
+				],
+			]),
+			relations: new Map(),
+			enums: new Map([
+				[
+					'status',
+					{
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['active', 'inactive'],
+					},
+				],
+			]),
+			getTable: () => undefined,
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false, options: [] }),
+		} as unknown as ModelIR;
+
+		const stmts = generateDDL(schema);
+		expect(stmts).toEqual([
+			'CREATE TYPE "tenant_1"."status" AS ENUM (\'active\', \'inactive\');',
+			`CREATE TABLE "users" (
+  "id" INTEGER NOT NULL,
+  "status" "tenant_1".status NOT NULL
+);`,
+		]);
 	});
 
 	it('should skip ENUM pass when schema has no enums', () => {

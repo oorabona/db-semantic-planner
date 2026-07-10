@@ -184,6 +184,8 @@ export type NqlBindingColumnTypeInfo =
 			readonly kind: 'column';
 			readonly type: ColumnType;
 			readonly originalDbType?: string;
+			readonly originalDbTypeSchema?: string;
+			readonly originalDbTypeSchemaScope?: 'target' | 'absolute';
 	  }
 	| { readonly kind: 'aggregate'; readonly fn: 'count' };
 

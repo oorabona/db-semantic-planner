@@ -20,7 +20,13 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { dbTypesEqual, enumReferenceKind } from '../db-type.js';
+import {
+	columnDbTypeSchemaIdentity,
+	dbTypesEqual,
+	enumReferenceKind,
+	renderColumnDbType,
+	stripDbTypeSchema,
+} from '../db-type.js';
 import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
@@ -415,10 +421,22 @@ function compareColumnDetails(
 	// Compare via dbTypesEqual so equivalent spellings (varchar ≡ character varying,
 	// timestamptz ≡ timestamp with time zone, int4 ≡ integer) do NOT false-diff, while
 	// real modifier changes (timestamptz(3) → timestamptz(6)) still do.
+	const schemaTypeIdentity = columnDbTypeSchemaIdentity(schema);
+	const dbTypeIdentity = columnDbTypeSchemaIdentity(db);
+	const compareSchemaIdentity =
+		schemaTypeIdentity !== undefined && dbTypeIdentity !== undefined;
+	// Compare the BARE type spelling for equality (so `public.status` ≡ a bare
+	// `status` carrying an equal schema identity) and let the schema IDENTITY carry
+	// any schema difference — avoids double-counting the schema and false-diffing a
+	// qualified string against an equivalent bare+field column.
 	if (
 		schema.originalDbType &&
 		db.originalDbType &&
-		!dbTypesEqual(schema.originalDbType, db.originalDbType)
+		(!dbTypesEqual(
+			stripDbTypeSchema(schema.originalDbType),
+			stripDbTypeSchema(db.originalDbType),
+		) ||
+			(compareSchemaIdentity && schemaTypeIdentity !== dbTypeIdentity))
 	) {
 		// Both have originalDbType and they differ → precision/type change
 		changes.push({
@@ -426,11 +444,14 @@ function compareColumnDetails(
 			table: tableName,
 			column: schema.name,
 			destructive: true,
-			details: `Change type of "${schema.name}" from ${db.originalDbType} to ${schema.originalDbType}`,
+			// Render with the schema so a schema-only change reads e.g.
+			// `"tenant_1".status` to `"public".status`, not `status` to `status`.
+			details: `Change type of "${schema.name}" from ${renderColumnDbType(db)} to ${renderColumnDbType(schema)}`,
 			meta: {
 				fromType: db.originalDbType,
 				toType: schema.originalDbType,
 				column: schema,
+				fromColumn: db,
 			},
 		});
 	} else if (!areTypesEquivalent(schema.type, db.type)) {
@@ -1076,6 +1097,12 @@ function compareEnums(
 	const schemaEnums = schema.enums ?? new Map<string, EnumIR>();
 	const dbEnums = db.enums ?? new Map<string, EnumIR>();
 
+	// Enum maps are keyed by bare typname for today's single-schema model
+	// introspection. Authored enums are schema-unspecified, so strict
+	// (schema,name) keying would turn authored-vs-introspected comparisons into
+	// spurious drop+create changes. Revisit when multi-schema introspection can
+	// produce multiple enum schemas in one ModelIR — see #303.
+
 	// Enums in schema but not in DB → create
 	for (const [name, enumDef] of schemaEnums) {
 		if (!dbEnums.has(name)) {
@@ -1135,7 +1162,12 @@ function compareEnums(
 					// array reference to text[] before the DROP, so we track the kind.
 					const kind =
 						col.originalDbType !== undefined
-							? enumReferenceKind(col.originalDbType, name)
+							? enumReferenceKind(
+									col.originalDbType,
+									name,
+									enumDef.schema,
+									col.originalDbTypeSchema,
+								)
 							: null;
 					if (kind !== null) {
 						referencingColumns.push({

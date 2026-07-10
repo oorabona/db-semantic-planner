@@ -67,6 +67,18 @@ function qualifyTable(table: string, schemaName?: string): string {
 		: quoteIdent(table, 'table');
 }
 
+function qualifyEnumType(enumDef: EnumIR, schemaName?: string): string {
+	const effectiveSchema = schemaName ?? enumDef.schema;
+	if (
+		effectiveSchema &&
+		effectiveSchema !== 'public' &&
+		effectiveSchema !== 'pg_catalog'
+	) {
+		return `${quoteIdent(effectiveSchema, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`;
+	}
+	return quoteIdent(enumDef.name, 'alias');
+}
+
 function buildDoBlock(body: string): string {
 	const delimiter = chooseDoBlockDelimiter(body);
 	return `DO ${delimiter} ${body} ${delimiter};`;
@@ -505,7 +517,7 @@ function upAddColumn(
 ): string | undefined {
 	const col = change.meta?.column as ColumnIR | undefined;
 	if (!col) return undefined;
-	const typeName = mapColumnType(col);
+	const typeName = mapColumnType(col, schemaName);
 	const notNull = !col.nullable && !col.autoIncrement ? ' NOT NULL' : '';
 	const def =
 		col.default !== undefined ? ` DEFAULT ${formatDefault(col.default)}` : '';
@@ -516,7 +528,7 @@ function upAddColumn(
 function upAlterColumnType(change: SchemaChange, schemaName?: string): string {
 	const col = change.meta?.column as ColumnIR | undefined;
 	const toType = col
-		? mapColumnType(col)
+		? mapColumnType(col, schemaName)
 		: validateDbTypeName(change.meta?.toType as string);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${toType};`;
 }
@@ -731,10 +743,8 @@ function upCreateEnum(
 ): string | undefined {
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
-	const enumName = schemaName
-		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
-		: quoteIdent(enumDef.name, 'alias');
-	// M-2: validate each enum value against NUL/control-char injection before emission
+	const enumName = qualifyEnumType(enumDef, schemaName);
+	// Validate each enum value against NUL/control-char injection before emission
 	const values = enumDef.values
 		.map((v) => {
 			validateEnumLabel(v, 'enum value');
@@ -752,10 +762,8 @@ function upAlterEnumAddValue(
 	const value = change.meta?.value as string;
 	const after = change.meta?.after as string | undefined;
 	if (!enumDef || !value) return undefined;
-	// M-2: enum name validated via quoteIdent; enum labels validated against control-char injection
-	const enumName = schemaName
-		? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(enumDef.name, 'table')}`
-		: quoteIdent(enumDef.name, 'table');
+	// Enum identifiers are safely quoted; enum labels are validated against control-char injection
+	const enumName = qualifyEnumType(enumDef, schemaName);
 	validateEnumLabel(value, 'enum value');
 	if (after !== undefined) validateEnumLabel(after, 'enum AFTER position');
 	const escaped = value.replace(/'/g, "''");
@@ -769,9 +777,7 @@ function upDropEnum(
 ): string | undefined {
 	const enumDef = change.meta?.enum as EnumIR;
 	if (!enumDef) return undefined;
-	const enumName = schemaName
-		? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
-		: quoteIdent(enumDef.name, 'alias');
+	const enumName = qualifyEnumType(enumDef, schemaName);
 	// Before dropping the type, cast any referencing columns off the enum to
 	// prevent "cannot drop type: still referenced" errors AND to avoid the
 	// trailing CASCADE silently dropping them: a scalar column becomes text, an
@@ -806,7 +812,7 @@ function upAlterColumnCollation(
 	const collation = col.collation
 		? ` COLLATE ${quoteCollation(col.collation)}`
 		: '';
-	const typeName = mapColumnType(col);
+	const typeName = mapColumnType(col, schemaName);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${typeName}${collation};`;
 }
 
@@ -1016,6 +1022,13 @@ function changeToDownSQL(
 			};
 
 		case 'alter_column_type': {
+			const fromColumn = change.meta?.fromColumn as ColumnIR | undefined;
+			if (fromColumn !== undefined) {
+				return {
+					sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} ALTER COLUMN ${quoteIdent(change.column!, 'alias')} TYPE ${mapColumnType(fromColumn, schemaName)};`,
+					destructive: true,
+				};
+			}
 			const fromType = change.meta?.fromType;
 			if (fromType == null) {
 				return {
@@ -1230,9 +1243,7 @@ function changeToDownSQL(
 			// DOWN: drop the type that was created
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return { sql: undefined, destructive: true };
-			const enumName = schemaName
-				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
-				: quoteIdent(enumDef.name, 'alias');
+			const enumName = qualifyEnumType(enumDef, schemaName);
 			return {
 				sql: `DROP TYPE IF EXISTS ${enumName} CASCADE;`,
 				destructive: true,
@@ -1243,9 +1254,7 @@ function changeToDownSQL(
 			// DOWN: recreate the type that was dropped
 			const enumDef = change.meta?.enum as EnumIR | undefined;
 			if (!enumDef) return { sql: undefined, destructive: true };
-			const enumName = schemaName
-				? `${quoteIdent(schemaName, 'alias')}.${quoteIdent(enumDef.name, 'alias')}`
-				: quoteIdent(enumDef.name, 'alias');
+			const enumName = qualifyEnumType(enumDef, schemaName);
 			const values = enumDef.values
 				.map((v) => {
 					validateEnumLabel(v, 'enum value');
@@ -1598,7 +1607,10 @@ function generateCreateTableSQL(table: TableIR, schemaName?: string): string {
 
 	// Columns
 	for (const col of table.columns) {
-		const parts: string[] = [quoteIdent(col.name, 'alias'), mapColumnType(col)];
+		const parts: string[] = [
+			quoteIdent(col.name, 'alias'),
+			mapColumnType(col, schemaName),
+		];
 		if (!col.nullable && !col.autoIncrement) parts.push('NOT NULL');
 		if (col.default !== undefined)
 			parts.push(`DEFAULT ${formatDefault(col.default)}`);

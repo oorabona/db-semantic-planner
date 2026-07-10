@@ -36,6 +36,11 @@ const idsMutation: UpdateIntent = {
 	returning: ['id'],
 };
 
+type DbTypeSchemaInfo = {
+	readonly originalDbTypeSchema?: string;
+	readonly originalDbTypeSchemaScope?: 'target' | 'absolute';
+};
+
 function compileNqlBundle(nql: string): CompiledNqlQuery {
 	const result = compile(nql, testSchema.model);
 	if (!result.success || !result.ast) {
@@ -87,6 +92,7 @@ function withOriginalDbType<T>(
 	columnName: string,
 	originalDbType: string,
 	fn: () => T,
+	schemaInfo: DbTypeSchemaInfo = {},
 ): T {
 	const table = testSchema.model.getTable(tableName);
 	const column = table?.columns.find(
@@ -95,9 +101,23 @@ function withOriginalDbType<T>(
 	if (column === undefined) {
 		throw new Error(`Missing test column ${tableName}.${columnName}`);
 	}
-	const mutableColumn = column as { originalDbType?: string };
+	const mutableColumn = column as {
+		originalDbType?: string;
+		originalDbTypeSchema?: string;
+		originalDbTypeSchemaScope?: 'target' | 'absolute';
+	};
 	const previousOriginalDbType = mutableColumn.originalDbType;
+	const previousOriginalDbTypeSchema = mutableColumn.originalDbTypeSchema;
+	const previousOriginalDbTypeSchemaScope =
+		mutableColumn.originalDbTypeSchemaScope;
 	mutableColumn.originalDbType = originalDbType;
+	if (schemaInfo.originalDbTypeSchema !== undefined) {
+		mutableColumn.originalDbTypeSchema = schemaInfo.originalDbTypeSchema;
+	}
+	if (schemaInfo.originalDbTypeSchemaScope !== undefined) {
+		mutableColumn.originalDbTypeSchemaScope =
+			schemaInfo.originalDbTypeSchemaScope;
+	}
 	try {
 		return fn();
 	} finally {
@@ -105,6 +125,17 @@ function withOriginalDbType<T>(
 			delete mutableColumn.originalDbType;
 		} else {
 			mutableColumn.originalDbType = previousOriginalDbType;
+		}
+		if (previousOriginalDbTypeSchema === undefined) {
+			delete mutableColumn.originalDbTypeSchema;
+		} else {
+			mutableColumn.originalDbTypeSchema = previousOriginalDbTypeSchema;
+		}
+		if (previousOriginalDbTypeSchemaScope === undefined) {
+			delete mutableColumn.originalDbTypeSchemaScope;
+		} else {
+			mutableColumn.originalDbTypeSchemaScope =
+				previousOriginalDbTypeSchemaScope;
 		}
 	}
 }
@@ -675,6 +706,48 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 	});
 
+	it('preserves absolute schema scope carried by typed binding columnTypes', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'names',
+				select: {
+					type: 'fields',
+					fields: ['label'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'names',
+					{
+						columns: ['label'],
+						rows: [{ label: 'ok' }],
+						columnTypes: {
+							label: {
+								kind: 'column',
+								type: 'string',
+								originalDbType: 'status',
+								originalDbTypeSchema: 'shared_types',
+								originalDbTypeSchemaScope: 'absolute',
+							},
+						},
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle, {
+			schemaName: 'tenantOne',
+			dbCasing: 'snake_case',
+		});
+
+		expect({ error, params, sql }).toEqual({
+			error: undefined,
+			params: ['ok'],
+			sql: 'WITH "names" ("label") as (SELECT CAST(NULL AS "shared_types".status) AS "label" WHERE false UNION ALL VALUES ($1::"shared_types".status)) SELECT names.label FROM names',
+		});
+	});
+
 	it('rejects a hostile originalDbType carried via columnTypes before SQL emission (typed anchor surface, #213)', () => {
 		const payload = 'integer); DROP TABLE users; --';
 		const bundle: CompiledNqlQuery = {
@@ -845,6 +918,50 @@ describe('NQL bind CTE identifier injection defense', () => {
 			error: undefined,
 			params: [12.34],
 			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "items" WHERE false UNION ALL VALUES ($1::numeric)) SELECT ids.id FROM ids',
+		});
+	});
+
+	it('database-cases target schema for source-table runtime binding casts', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'ids',
+				select: {
+					type: 'fields',
+					fields: ['id'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'ids',
+					{
+						columns: ['id'],
+						rows: [{ id: 'active' }],
+					},
+				],
+			]),
+			mutationBindings: new Map([['ids', idsMutation]]),
+		};
+
+		const { error, params, sql } = withOriginalDbType(
+			'items',
+			'id',
+			'status',
+			() =>
+				tryCompileNqlBundle(bundle, {
+					schemaName: 'tenantOne',
+					dbCasing: 'snake_case',
+				}),
+			{
+				originalDbTypeSchema: 'tenant_one',
+				originalDbTypeSchemaScope: 'target',
+			},
+		);
+
+		expect({ error, params, sql }).toEqual({
+			error: undefined,
+			params: ['active'],
+			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "tenant_one"."items" WHERE false UNION ALL VALUES ($1::"tenant_one".status)) SELECT ids.id FROM ids',
 		});
 	});
 

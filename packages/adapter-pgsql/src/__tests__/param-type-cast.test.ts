@@ -11,13 +11,18 @@
 
 import type { ModelIR, TableIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import {
+	createPgsqlCompileOnlyAdapter,
+	type PgsqlAdapterOptions,
+} from '../pgsql-adapter.js';
 
 type ColumnDef = {
 	name: string;
 	type: string;
 	nullable?: boolean;
 	originalDbType?: string;
+	originalDbTypeSchema?: string;
+	originalDbTypeSchemaScope?: 'target' | 'absolute';
 };
 
 function buildModel(tableName: string, columns: ColumnDef[]): ModelIR {
@@ -26,6 +31,12 @@ function buildModel(tableName: string, columns: ColumnDef[]): ModelIR {
 		type: c.type,
 		nullable: c.nullable ?? false,
 		...(c.originalDbType !== undefined && { originalDbType: c.originalDbType }),
+		...(c.originalDbTypeSchema !== undefined && {
+			originalDbTypeSchema: c.originalDbTypeSchema,
+		}),
+		...(c.originalDbTypeSchemaScope !== undefined && {
+			originalDbTypeSchemaScope: c.originalDbTypeSchemaScope,
+		}),
 	}));
 	const table = {
 		name: tableName,
@@ -53,9 +64,10 @@ function compileSelect(
 	whereColumn: string,
 	whereValue: unknown,
 	operator = '=',
+	adapterOptions: Omit<PgsqlAdapterOptions, 'model'> = {},
 ): { sql: string; parameters: readonly unknown[] } {
 	const model = buildModel(tableName, columns);
-	const adapter = createPgsqlCompileOnlyAdapter({ model });
+	const adapter = createPgsqlCompileOnlyAdapter({ ...adapterOptions, model });
 	return adapter.compile({
 		rootTable: tableName,
 		decisions: [
@@ -274,6 +286,31 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 				parameters: [7],
 			},
 		]);
+	});
+
+	it('database-cases target schema for target-scoped custom type casts', () => {
+		const { sql, parameters } = compileSelect(
+			'events',
+			[
+				{
+					name: 'state',
+					type: 'string',
+					nullable: false,
+					originalDbType: 'status',
+					originalDbTypeSchema: 'tenant_one',
+					originalDbTypeSchemaScope: 'target',
+				},
+			],
+			'state',
+			'active',
+			'=',
+			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
+		);
+
+		expect({ sql, parameters }).toEqual({
+			sql: 'SELECT * FROM tenant_one.events WHERE events.state = CAST($1 AS "tenant_one".status)',
+			parameters: ['active'],
+		});
 	});
 });
 

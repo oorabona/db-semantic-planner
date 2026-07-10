@@ -198,6 +198,56 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 		expect(sql).not.toContain('text[]');
 	});
 
+	it('database-cases target schema for target-scoped custom batch casts', () => {
+		const columns = [
+			{
+				name: 'state',
+				type: 'string' as const,
+				nullable: false,
+				originalDbType: 'status',
+				originalDbTypeSchema: 'tenant_one',
+				originalDbTypeSchemaScope: 'target' as const,
+			},
+		];
+		const table = {
+			name: 'events',
+			columns,
+			relations: [],
+			indexes: [],
+			rlsEnabled: false,
+			policies: [],
+		} as unknown as TableIR;
+		const tables = new Map([['events', table]]);
+		const model = {
+			tables,
+			relations: new Map(),
+			getTable: (name: string) => tables.get(name),
+			getRelation: () => undefined,
+			getRelationsFrom: () => [],
+			getRelationsTo: () => [],
+			isAmbiguous: () => ({ ambiguous: false }),
+		} as unknown as ModelIR;
+		const adapter = createPgsqlCompileOnlyAdapter({
+			model,
+			schemaName: 'tenantOne',
+			dbCasing: 'snake_case',
+		});
+
+		const result = adapter.compileInsert(
+			{
+				type: 'insert' as const,
+				table: 'events',
+				values: [{ state: 'active' }],
+			},
+			UNNEST_OPTIONS,
+		);
+
+		expect({ sql: result.sql, parameters: result.parameters }).toEqual({
+			sql: 'INSERT INTO tenant_one.events (state) SELECT unnest(CAST($1 AS "tenant_one".status[])) AS state',
+			parameters: [['active']],
+		});
+	});
+
 	it('routes originalDbType through cast-safe batch array targets', () => {
 		const table = {
 			name: 'flags',
