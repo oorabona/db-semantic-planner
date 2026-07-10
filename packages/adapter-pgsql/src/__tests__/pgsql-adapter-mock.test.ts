@@ -48,6 +48,12 @@ function makePool(
 	} as unknown as Pool;
 }
 
+/** The first (single) catalog query call. */
+function catalogCall(pool: Pool): [string, unknown[]] {
+	const spy = pool.query as ReturnType<typeof vi.fn>;
+	return spy.mock.calls[0] as [string, unknown[]];
+}
+
 // ---------------------------------------------------------------------------
 // transaction() — BEGIN / COMMIT happy path
 // ---------------------------------------------------------------------------
@@ -332,14 +338,16 @@ describe('PgsqlAdapter.indexExists — false branch', () => {
 		expect(call![1]).toEqual(['my_idx', 'tbl', 'tenant_7']);
 	});
 
-	it('defaults schema to "public" when no adapter schema and no explicit schema', async () => {
+	it('resolves the schema search_path-aware in-query when no adapter/explicit schema', async () => {
 		const pool = makePool({ rows: [{ exists: true }] });
 		const adapter = createPgsqlAdapter(pool);
 
 		await adapter.indexExists('my_idx', 'tbl');
 
-		const call = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0];
-		expect(call![1]).toEqual(['my_idx', 'tbl', 'public']);
+		// No schema passed (null); resolved in the query, not hard-coded 'public'.
+		const [sql, params] = catalogCall(pool);
+		expect(params).toEqual(['my_idx', 'tbl', null]);
+		expect(sql).toContain('to_regclass');
 	});
 });
 
@@ -529,14 +537,15 @@ describe('PgsqlAdapter.listIndexes — schema fallback', () => {
 		expect(call[1]).toEqual(['tbl', 'my_schema']);
 	});
 
-	it('defaults to "public" when neither adapter nor explicit schema provided', async () => {
+	it('resolves the schema search_path-aware in-query when neither adapter nor explicit schema provided', async () => {
 		const pool = makePool({ rows: [] });
 		const adapter = createPgsqlAdapter(pool);
 
 		await adapter.listIndexes('tbl');
 
-		const call = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]!;
-		expect(call[1]).toEqual(['tbl', 'public']);
+		const [sql, params] = catalogCall(pool);
+		expect(params).toEqual(['tbl', null]);
+		expect(sql).toContain('to_regclass');
 	});
 });
 
@@ -556,15 +565,15 @@ describe('PgsqlAdapter.storageSize — schema fallback', () => {
 		expect(call[1][0]).toBe('"tenant_x"."events"');
 	});
 
-	it('defaults to "public" when no adapter schema', async () => {
+	it('leaves the table unqualified so ::regclass resolves it when no adapter schema', async () => {
 		const pool = makePool({ rows: [{ size: '512' }] });
 		const adapter = createPgsqlAdapter(pool);
 
 		const size = await adapter.storageSize('logs');
 
 		expect(size).toBe(512);
-		const call = (pool.query as ReturnType<typeof vi.fn>).mock.calls[0]!;
-		expect(call[1][0]).toBe('"public"."logs"');
+		// Unqualified → ::regclass resolves via search_path (not hard-coded public).
+		expect(catalogCall(pool)[1][0]).toBe('"logs"');
 	});
 });
 

@@ -135,6 +135,19 @@ type PgsqlInternalCompileOptions = CompileOptions & {
 
 const MAX_NQL_RUNTIME_BINDING_VALUES_PARAMETERS = 32_000;
 
+/**
+ * SQL that resolves a table name (bound as the given positional param, e.g. '$1')
+ * to its schema the way an unqualified reference does — the first search_path
+ * schema containing it — for catalog reads with no explicit schema. Evaluates to
+ * NULL when the table is not visible on the current search_path. Runs in the same
+ * query as the catalog read, so a pooled connection cannot resolve against one
+ * session and read against another.
+ */
+const RESOLVE_TABLE_SCHEMA_SQL = (tableParam: string): string =>
+	'(SELECT n.nspname FROM pg_catalog.pg_class c ' +
+	'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+	`WHERE c.oid = to_regclass(quote_ident(${tableParam})))`;
+
 function renumberSqlParams(sql: string, offset: number): string {
 	if (offset === 0) return sql;
 	return sql.replace(/\$(\d+)/g, (_match, num) => {
@@ -1691,10 +1704,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
+	 * Resolve the explicit schema for a catalog read: an explicit argument, else
+	 * the adapter's configured schema, else `undefined` (resolve in-query). NOT a
+	 * hard-coded 'public' — an unresolved schema is handled by the SQL, which
+	 * finds the table's schema search_path-aware, in the SAME session, so a
+	 * non-public search_path and a pooled connection both stay correct.
+	 */
+	private explicitSchema(schema?: string): string | undefined {
+		return schema ?? this.schemaName;
+	}
+
+	/**
 	 * List all indexes on a table by querying pg_indexes.
 	 *
 	 * @param table - Table name
-	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 * @param schema - Schema name (defaults to the search_path-resolved schema)
 	 */
 	async listIndexes(
 		table: string,
@@ -1702,10 +1726,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options?: { namePattern?: string },
 	): Promise<IndexInfo[]> {
 		const executor = this.requireConnection();
-		const schemaName = schema ?? this.schemaName ?? 'public';
-		const params: unknown[] = [table, schemaName];
+		const params: unknown[] = [table, this.explicitSchema(schema) ?? null];
 		let sql =
-			'SELECT indexname, indexdef FROM pg_indexes WHERE tablename = $1 AND schemaname = $2';
+			'SELECT indexname, indexdef FROM pg_indexes ' +
+			`WHERE tablename = $1 AND schemaname = COALESCE($2, ${RESOLVE_TABLE_SCHEMA_SQL('$1')})`;
 		if (options?.namePattern) {
 			sql += ' AND indexname LIKE $3';
 			params.push(options.namePattern);
@@ -1729,7 +1753,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 *
 	 * @param name - Index name
 	 * @param table - Table name
-	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 * @param schema - Schema name (defaults to the search_path-resolved schema)
 	 */
 	async indexExists(
 		name: string,
@@ -1737,38 +1761,37 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		schema?: string,
 	): Promise<boolean> {
 		const executor = this.requireConnection();
-		const schemaName = schema ?? this.schemaName ?? 'public';
 		const result = await executor.query<{ exists: boolean }>(
-			'SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = $1 AND tablename = $2 AND schemaname = $3) AS exists',
-			[name, table, schemaName],
+			'SELECT EXISTS (SELECT 1 FROM pg_indexes WHERE indexname = $1 AND tablename = $2 ' +
+				`AND schemaname = COALESCE($3, ${RESOLVE_TABLE_SCHEMA_SQL('$2')})) AS exists`,
+			[name, table, this.explicitSchema(schema) ?? null],
 		);
 		return result.rows[0]?.exists ?? false;
 	}
 
 	/**
-	 * Return the total storage size of a table in bytes.
-	 *
-	 * @param table - Table name
-	 * @param schema - Schema name (defaults to adapter schema or 'public')
-	 */
-	/**
 	 * Return the total storage size of a table in bytes (includes indexes and TOAST).
 	 *
 	 * The table name is a SQL identifier — it is double-quoted, not parameterized,
 	 * because PostgreSQL does not allow parameterized table names in FROM clauses.
+	 * With no known schema the table is left unqualified so ::regclass resolves it
+	 * through search_path (the same table an unqualified reference would hit).
 	 *
 	 * @param table - Table name
-	 * @param schema - Schema name (defaults to adapter schema or 'public')
+	 * @param schema - Schema name (defaults to the search_path-resolved schema)
 	 */
 	async storageSize(table: string, schema?: string): Promise<number> {
 		const executor = this.requireConnection();
-		const schemaName = schema ?? this.schemaName ?? 'public';
-		// Build a double-quoted, schema-qualified identifier string.
+		const schemaName = this.explicitSchema(schema);
 		// Double any embedded double-quotes to prevent injection.
-		const qualified = `"${schemaName.replace(/"/g, '""')}"."${table.replace(/"/g, '""')}"`;
+		const quotedTable = `"${table.replace(/"/g, '""')}"`;
+		const identifier =
+			schemaName !== undefined
+				? `"${schemaName.replace(/"/g, '""')}".${quotedTable}`
+				: quotedTable;
 		const result = await executor.query<{ size: string }>(
 			`SELECT pg_total_relation_size($1::regclass)::bigint AS size`,
-			[qualified],
+			[identifier],
 		);
 		return Number(result.rows[0]?.size ?? 0);
 	}
