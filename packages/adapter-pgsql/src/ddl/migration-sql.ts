@@ -39,6 +39,12 @@ import {
 	validateIndexMethod,
 } from './phases/utils.js';
 import type { SchemaChange, SchemaDiff } from './schema-diff.js';
+import {
+	assertSchemaName,
+	collectChangeScopeEvidence,
+	createSchemaScopeAccumulator,
+	MIGRATION_SCHEMA_SCOPE_SUBJECT,
+} from './schema-scope.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ── Helpers ─────────────────────────────────────────────────────
@@ -260,7 +266,11 @@ export function buildSequenceClause(
 // ============================================================================
 
 export interface MigrationSQLOptions {
-	/** Schema namespace (default: none — unqualified) */
+	/**
+	 * Schema namespace (default: none — unqualified).
+	 * Required when emitted migration SQL would otherwise mix non-default
+	 * target-scoped custom types/enums with unqualified table SQL.
+	 */
 	readonly schemaName?: string;
 	/** Whether to include destructive changes (drops) */
 	readonly includeDestructive?: boolean;
@@ -399,12 +409,17 @@ export function generateMigrationSQL(
 
 	// Generate SQL in phase order
 	const statements: string[] = [];
+	const scope = createSchemaScopeAccumulator();
 	for (const phase of phases) {
 		for (const change of phase) {
 			const sql = changeToUpSQL(change, schemaName);
-			if (sql) statements.push(sql);
+			if (sql) {
+				statements.push(sql);
+				collectChangeScopeEvidence(change, scope);
+			}
 		}
 	}
+	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
 	// FK auto-indexes for new tables (single-column FKs without explicit index)
 	if (options?.fkAutoIndex !== false) {
@@ -1571,7 +1586,15 @@ export function generateDownMigrationSQL(
 		[], // 18: CREATE/DROP POLICY
 	];
 
-	for (const change of diff.changes) {
+	// Filter out changes for unsupported DDL features, exactly as the UP path does:
+	// a feature the dialect cannot create is one it cannot roll back either, and an
+	// unfiltered DOWN would also disagree with UP on whether a schema is in scope.
+	const caps = options?.dialectCapabilities;
+	const changes = caps
+		? diff.changes.filter((c) => isChangeSupported(c.kind, caps))
+		: diff.changes;
+
+	for (const change of changes) {
 		const phase = getPhase(change.kind);
 		phases[phase]!.push(change);
 	}
@@ -1585,6 +1608,7 @@ export function generateDownMigrationSQL(
 	// re-CREATE-ing the old one — reverse only that phase so DROP precedes CREATE.
 	const policyPhase = getPhase('create_policy');
 	const statements: string[] = [];
+	const scope = createSchemaScopeAccumulator();
 	let destructive = false;
 	for (let i = phases.length - 1; i >= 0; i--) {
 		const phaseChanges =
@@ -1593,9 +1617,13 @@ export function generateDownMigrationSQL(
 			const down = changeToDownSQL(change, schemaName);
 			if (!includeDestructive && down.destructive) continue;
 			destructive = down.destructive || destructive;
-			if (down.sql) statements.push(down.sql);
+			if (down.sql) {
+				statements.push(down.sql);
+				collectChangeScopeEvidence(change, scope);
+			}
 		}
 	}
+	assertSchemaName(scope, schemaName, MIGRATION_SCHEMA_SCOPE_SUBJECT);
 
 	return { statements, destructive };
 }

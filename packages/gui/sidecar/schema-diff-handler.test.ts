@@ -12,6 +12,7 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 
 vi.mock('./connection-manager.js', () => ({
 	introspectConnection: vi.fn(),
+	getConnectionInfo: vi.fn(),
 }));
 
 vi.mock('./schema-loader.js', () => ({
@@ -29,7 +30,9 @@ vi.mock('./schema-loader.js', () => ({
 const { compareSchemata, generateMigrationSQL, generateDownSQL } = await import(
 	'@dbsp/adapter-pgsql'
 );
-const { introspectConnection } = await import('./connection-manager.js');
+const { introspectConnection, getConnectionInfo } = await import(
+	'./connection-manager.js'
+);
 const { findSchemaFile, loadSchema, SchemaLoadError } = await import(
 	'./schema-loader.js'
 );
@@ -308,8 +311,70 @@ describe('handleSchemaDiff', () => {
 				'ALTER TABLE "users" ADD COLUMN "legacy" text;',
 				'ALTER TABLE "users" DROP COLUMN "email";',
 			]);
-			expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges);
-			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges);
+			expect(generateMigrationSQL).toHaveBeenCalledWith(
+				diffWithChanges,
+				undefined,
+			);
+			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, undefined);
+		});
+
+		it('targets the connection schema when it is not the default one', async () => {
+			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
+			vi.mocked(loadSchema).mockResolvedValue({
+				definition: {},
+				model: minimalModel,
+				tableNames: ['users'],
+			});
+			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
+			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
+			vi.mocked(getConnectionInfo).mockReturnValue({
+				database: 'app',
+				host: 'localhost',
+				port: 5432,
+				user: 'app',
+				schema: 'tenant_1',
+			});
+
+			await handleSchemaDiff({
+				connectionId: 'test-conn',
+				schemaPath: '/project',
+			});
+
+			expect(generateMigrationSQL).toHaveBeenCalledWith(diffWithChanges, {
+				schemaName: 'tenant_1',
+			});
+			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, {
+				schemaName: 'tenant_1',
+			});
+		});
+
+		it('leaves SQL unqualified for a public connection schema', async () => {
+			vi.mocked(findSchemaFile).mockReturnValue('/project/dbsp.schema.ts');
+			vi.mocked(loadSchema).mockResolvedValue({
+				definition: {},
+				model: minimalModel,
+				tableNames: ['users'],
+			});
+			vi.mocked(introspectConnection).mockResolvedValue(introspectedModel);
+			vi.mocked(compareSchemata).mockReturnValue(diffWithChanges);
+			vi.mocked(getConnectionInfo).mockReturnValue({
+				database: 'app',
+				host: 'localhost',
+				port: 5432,
+				user: 'app',
+				schema: 'public',
+			});
+
+			await handleSchemaDiff({
+				connectionId: 'test-conn',
+				schemaPath: '/project',
+			});
+
+			expect(generateMigrationSQL).toHaveBeenCalledWith(
+				diffWithChanges,
+				undefined,
+			);
+			expect(generateDownSQL).toHaveBeenCalledWith(diffWithChanges, undefined);
 		});
 
 		it('returns empty SQL arrays for empty diff', async () => {

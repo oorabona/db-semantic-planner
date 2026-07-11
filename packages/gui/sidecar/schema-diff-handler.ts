@@ -13,7 +13,10 @@ import {
 	generateMigrationSQL,
 	type SchemaDiff,
 } from '@dbsp/adapter-pgsql';
-import { introspectConnection } from './connection-manager.js';
+import {
+	getConnectionInfo,
+	introspectConnection,
+} from './connection-manager.js';
 import {
 	findSchemaFile,
 	loadSchema,
@@ -83,9 +86,20 @@ export async function handleSchemaDiff(
 	// 4. Compare
 	const diff: SchemaDiff = compareSchemata(loaded.model, db);
 
+	// A diff introspected from a non-default schema is schema-scoped: its custom
+	// types and enums carry that schema, so the migration SQL must target it
+	// explicitly. `public` keeps the unqualified output.
+	const connectionSchema = getConnectionInfo(connectionId)?.schema;
+	const sqlOptions =
+		connectionSchema !== undefined && connectionSchema !== 'public'
+			? { schemaName: connectionSchema }
+			: undefined;
+
 	// 5. Generate UP and DOWN SQL
-	const upSQL = diff.changes.length > 0 ? generateMigrationSQL(diff) : [];
-	const downSQL = diff.changes.length > 0 ? generateDownSQL(diff) : [];
+	const upSQL =
+		diff.changes.length > 0 ? generateMigrationSQL(diff, sqlOptions) : [];
+	const downSQL =
+		diff.changes.length > 0 ? generateDownSQL(diff, sqlOptions) : [];
 
 	// 6. Serialize for JSON transport
 	return {

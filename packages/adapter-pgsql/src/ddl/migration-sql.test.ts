@@ -2696,14 +2696,9 @@ describe('ENUM types', () => {
 			'CREATE TYPE "ignored"."status" AS ENUM (\'active\', \'inactive\');',
 			'ALTER TYPE "ignored"."status" ADD VALUE IF NOT EXISTS \'pending\' AFTER \'inactive\';',
 		]);
-		expect(generateMigrationSQL(diff)).toEqual([
-			'DROP TYPE IF EXISTS "select"."status" CASCADE;',
-			'CREATE TYPE "select"."status" AS ENUM (\'active\', \'inactive\');',
-			'ALTER TYPE "select"."status" ADD VALUE IF NOT EXISTS \'pending\' AFTER \'inactive\';',
-		]);
 	});
 
-	it('should use EnumIR.schema for enum DOWN SQL', () => {
+	it('should use explicit schemaName for enum DOWN SQL', () => {
 		const diff = makeDiff([
 			{
 				kind: 'create_enum',
@@ -2720,7 +2715,7 @@ describe('ENUM types', () => {
 			},
 		]);
 
-		expect(generateDownSQL(diff)).toEqual([
+		expect(generateDownSQL(diff, { schemaName: 'tenant_1' })).toEqual([
 			'DROP TYPE IF EXISTS "tenant_1"."status" CASCADE;',
 		]);
 	});
