@@ -1188,7 +1188,7 @@ describe('ENUM types in DDL', () => {
 		]);
 	});
 
-	it('should use EnumIR.schema for introspected enum DDL without schemaName', () => {
+	it('should emit introspected enum DDL with an explicit schemaName', () => {
 		const schema = {
 			tables: new Map([
 				[
@@ -1229,10 +1229,10 @@ describe('ENUM types in DDL', () => {
 			isAmbiguous: () => ({ ambiguous: false, options: [] }),
 		} as unknown as ModelIR;
 
-		const stmts = generateDDL(schema);
+		const stmts = generateDDL(schema, { schemaName: 'tenant_1' });
 		expect(stmts).toEqual([
 			'CREATE TYPE "tenant_1"."status" AS ENUM (\'active\', \'inactive\');',
-			`CREATE TABLE "users" (
+			`CREATE TABLE "tenant_1"."users" (
   "id" INTEGER NOT NULL,
   "status" "tenant_1".status NOT NULL
 );`,

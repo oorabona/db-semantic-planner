@@ -172,6 +172,9 @@ describe('#261 introspection originalDbType fidelity (real PG)', () => {
 			schema: TENANT_SCHEMA,
 			values: ['active', 'inactive'],
 		});
+		expect(() => generateDDL(tenantModel)).toThrow(
+			/schemaName: this model is schema-scoped .*"tenant_1"/,
+		);
 
 		const createEnum = `CREATE TYPE "${TENANT_SCHEMA}"."status" AS ENUM ('active', 'inactive');`;
 		const createTable = `CREATE TABLE "${TENANT_SCHEMA}"."enum_identity" (

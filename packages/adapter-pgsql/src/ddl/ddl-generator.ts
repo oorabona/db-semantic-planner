@@ -31,13 +31,18 @@ import { generateIndexesPhase } from './phases/indexes.js';
 import { generateRlsPhase } from './phases/rls.js';
 import { generateSequencesPhase } from './phases/sequences.js';
 import { generateTablesPhase } from './phases/tables.js';
-import type { PhaseContext } from './phases/types.js';
+import { type PhaseContext, sup } from './phases/types.js';
 import {
 	formatSqlDefault,
 	quoteCollation,
 	quoteRoleName,
 	validateIndexMethod,
 } from './phases/utils.js';
+import {
+	assertSchemaName,
+	collectModelScopeEvidence,
+	MODEL_SCHEMA_SCOPE_SUBJECT,
+} from './schema-scope.js';
 import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 
 // ============================================================================
@@ -47,7 +52,11 @@ import { mapColumnType, mapOnDeleteAction } from './type-mapping.js';
 export interface GenerateDDLOptions {
 	/** Include DROP TABLE IF EXISTS statements before CREATE TABLE */
 	readonly includeDropStatements?: boolean;
-	/** Database schema name (e.g., 'public', 'tenant_123') */
+	/**
+	 * Database schema name (e.g., 'public', 'tenant_123').
+	 * Required when emitted DDL would otherwise mix non-default target-scoped
+	 * custom types/enums with unqualified table SQL.
+	 */
 	readonly schemaName?: string;
 	/**
 	 * Automatically create indexes on foreign key columns.
@@ -122,6 +131,10 @@ export function generateDDL(
 	} = options;
 
 	const tables = Array.from(schema.tables.values());
+	const scope = collectModelScopeEvidence(schema, {
+		includeEnums: sup(caps, caps?.supportsDDLEnumTypes),
+	});
+	assertSchemaName(scope, schemaName, MODEL_SCHEMA_SCOPE_SUBJECT);
 
 	const ctx: PhaseContext = {
 		schema,
