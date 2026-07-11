@@ -38,7 +38,11 @@ import {
 	validateEnumLabel,
 	validateIndexMethod,
 } from './phases/utils.js';
-import type { SchemaChange, SchemaDiff } from './schema-diff.js';
+import {
+	getAutoFkIndexName,
+	type SchemaChange,
+	type SchemaDiff,
+} from './schema-diff.js';
 import {
 	assertSchemaName,
 	collectChangeScopeEvidence,
@@ -335,6 +339,21 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
 	}
 }
 
+function changesAppliedByUp(
+	diff: SchemaDiff,
+	options?: MigrationSQLOptions,
+): readonly SchemaChange[] {
+	const includeDestructive = options?.includeDestructive ?? true;
+	const filteredChanges = includeDestructive
+		? diff.changes
+		: diff.changes.filter((c) => !c.destructive);
+
+	const caps = options?.dialectCapabilities;
+	return caps
+		? filteredChanges.filter((c) => isChangeSupported(c.kind, caps))
+		: filteredChanges;
+}
+
 // ============================================================================
 // SQL Generation
 // ============================================================================
@@ -365,19 +384,7 @@ export function generateMigrationSQL(
 	options?: MigrationSQLOptions,
 ): readonly string[] {
 	const schemaName = options?.schemaName;
-	const includeDestructive = options?.includeDestructive ?? true;
-
-	// Filter out destructive changes if not included
-	const filteredChanges = includeDestructive
-		? diff.changes
-		: diff.changes.filter((c) => !c.destructive);
-
-	const caps = options?.dialectCapabilities;
-
-	// Filter out changes for unsupported DDL features
-	const changes = caps
-		? filteredChanges.filter((c) => isChangeSupported(c.kind, caps))
-		: filteredChanges;
+	const changes = changesAppliedByUp(diff, options);
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
@@ -439,7 +446,14 @@ export function generateMigrationSQL(
 						fkCol &&
 						!explicitIndexColumns.has(fkCol)
 					) {
-						const indexName = quoteIdent(idxName(table.name, [fkCol]), 'alias');
+						// Migration diffs are normalized to database identifiers before SQL
+						// generation, matching the DDL path's naming.toDatabase inputs.
+						const dbTableName = table.name;
+						const dbFkCol = fkCol;
+						const indexName = quoteIdent(
+							getAutoFkIndexName(dbTableName, dbFkCol),
+							'alias',
+						);
 						statements.push(
 							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${quoteIdent(fkCol, 'alias')});`,
 						);
@@ -1586,13 +1600,10 @@ export function generateDownMigrationSQL(
 		[], // 18: CREATE/DROP POLICY
 	];
 
-	// Filter out changes for unsupported DDL features, exactly as the UP path does:
-	// a feature the dialect cannot create is one it cannot roll back either, and an
-	// unfiltered DOWN would also disagree with UP on whether a schema is in scope.
-	const caps = options?.dialectCapabilities;
-	const changes = caps
-		? diff.changes.filter((c) => isChangeSupported(c.kind, caps))
-		: diff.changes;
+	// DOWN mirrors UP's filter first: rollback may only reverse changes the
+	// forward migration actually applied. It still applies its own rollback-side
+	// destructiveness filter below.
+	const changes = changesAppliedByUp(diff, options);
 
 	for (const change of changes) {
 		const phase = getPhase(change.kind);

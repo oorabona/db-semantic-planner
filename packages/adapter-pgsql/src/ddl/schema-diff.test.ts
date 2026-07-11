@@ -10,6 +10,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
 	type CompareSchemataOptions,
 	compareSchemata,
@@ -903,6 +904,242 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.kind).toBe('drop_index');
 		});
 
+		it('treats database expression and unrepresentable indexes as unmanaged, while unique drops stay destructive', () => {
+			const plainIdx: IndexIR = {
+				name: 'idx_users_email',
+				columns: ['email'],
+			};
+			const uniqueIdx: IndexIR = {
+				name: 'uq_users_email',
+				columns: ['email'],
+				unique: true,
+			};
+			const expressionIdx: IndexIR = {
+				columns: [],
+				expressions: ['lower(email)'],
+			};
+			const rejectedNameIdx: IndexIR = {
+				name: 'idx-users-email',
+				columns: ['email'],
+			};
+			const rejectedMethodIdx: IndexIR = {
+				name: 'idx_users_email_rum',
+				columns: ['email'],
+				method: 'rum',
+			};
+			const rejectedPredicateIdx: IndexIR = {
+				name: 'idx_users_email_literal',
+				columns: ['email'],
+				where: "email = 'a;b'",
+			};
+			const rejectedOpclassIdx: IndexIR = {
+				name: 'idx_users_email_pattern',
+				columns: ['email'],
+				opclass: { email: 'text-pattern-ops' },
+			};
+			const schemaRejectedIdx: IndexIR = {
+				name: 'idx_users_email_nulls_not_distinct',
+				columns: ['email'],
+				unique: false,
+				nullsNotDistinct: true,
+			};
+
+			const modelWithoutIndex = () =>
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+					}),
+				]);
+			const modelWithIndex = (idx: IndexIR) =>
+				makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [idx],
+					}),
+				]);
+			const diffForDroppedIndex = (idx: IndexIR) =>
+				compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
+			const expectNoDbIndexChangesOrSql = (idx: IndexIR) => {
+				const diff = compareSchemata(modelWithoutIndex(), modelWithIndex(idx));
+				expect(diff.changes).toEqual([]);
+				for (const includeDestructive of [false, true]) {
+					expect(() =>
+						generateMigrationSQL(diff, { includeDestructive }),
+					).not.toThrow();
+					expect(generateMigrationSQL(diff, { includeDestructive })).toEqual(
+						[],
+					);
+					expect(() =>
+						generateDownSQL(diff, { includeDestructive }),
+					).not.toThrow();
+					expect(generateDownSQL(diff, { includeDestructive })).toEqual([]);
+				}
+			};
+
+			const plainDiff = diffForDroppedIndex(plainIdx);
+			const uniqueDiff = diffForDroppedIndex(uniqueIdx);
+
+			expect(plainDiff.changes[0]).toMatchObject({
+				kind: 'drop_index',
+				destructive: false,
+			});
+			expect(
+				generateMigrationSQL(plainDiff, { includeDestructive: false }),
+			).toEqual(['DROP INDEX IF EXISTS "idx_users_email";']);
+			expect(uniqueDiff.changes[0]).toMatchObject({
+				kind: 'drop_index',
+				destructive: true,
+			});
+			expect(
+				generateMigrationSQL(uniqueDiff, { includeDestructive: false }),
+			).toEqual([]);
+			expect(
+				generateDownSQL(uniqueDiff, { includeDestructive: false }),
+			).toEqual([]);
+
+			for (const idx of [
+				expressionIdx,
+				rejectedNameIdx,
+				rejectedMethodIdx,
+				rejectedPredicateIdx,
+				rejectedOpclassIdx,
+				schemaRejectedIdx,
+			]) {
+				expectNoDbIndexChangesOrSql(idx);
+			}
+		});
+
+		it('emits declared unsupported index requests on existing tables and fails loudly in SQL generation', () => {
+			const rumIdx: IndexIR = {
+				name: 'idx_users_email_rum',
+				columns: ['email'],
+				method: 'rum',
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [rumIdx],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'create_index',
+					table: 'users',
+					destructive: false,
+					meta: expect.objectContaining({ index: rumIdx }),
+				}),
+			]);
+			expect(diff.summary.indexes.added).toBe(1);
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				/Invalid index method: "rum"/,
+			);
+		});
+
+		it('emits declared unsupported index requests on new tables and fails loudly in SQL generation', () => {
+			const rumIdx: IndexIR = {
+				name: 'idx_users_email_rum',
+				columns: ['email'],
+				method: 'rum',
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'email', type: 'string' })],
+					indexes: [rumIdx],
+				}),
+			]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'create_table',
+				'create_index',
+			]);
+			expect(diff.changes[1]).toMatchObject({
+				kind: 'create_index',
+				table: 'users',
+				destructive: false,
+				meta: expect.objectContaining({ index: rumIdx }),
+			});
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				/Invalid index method: "rum"/,
+			);
+		});
+
+		it('does not drop an FK auto-index when a declared FK-column index is unsupported', () => {
+			const rumIdx: IndexIR = {
+				name: 'idx_posts_author_id_rum',
+				columns: ['author_id'],
+				method: 'rum',
+			};
+			const fk: ForeignKeyIR = {
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'author_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [rumIdx],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'author_id', type: 'integer' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [fk],
+					indexes: [
+						{
+							name: 'idx_posts_author_id',
+							columns: ['author_id'],
+							unique: false,
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+			const kinds = changeKinds(diff.changes);
+
+			expect(kinds).toContain('create_index');
+			expect(kinds).not.toContain('drop_index');
+			expect(() => generateMigrationSQL(diff)).toThrow(
+				/Invalid index method: "rum"/,
+			);
+		});
+
 		it('should match indexes by columns+unique, not name', () => {
 			const schemaIdx: IndexIR = {
 				name: 'new_name',
@@ -1029,6 +1266,131 @@ describe('compareSchemata', () => {
 				const kinds = changeKinds(diff.changes);
 				expect(kinds).toContain('create_index');
 				expect(kinds).toContain('drop_index');
+			});
+
+			it('should match identical unique NULLS NOT DISTINCT indexes', () => {
+				const idx: IndexIR = {
+					name: 'idx_users_email_unique',
+					columns: ['email'],
+					unique: true,
+					nullsNotDistinct: true,
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [idx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [idx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				expect(diff.changes).toHaveLength(0);
+			});
+
+			it('should detect drift from plain unique to NULLS NOT DISTINCT unique', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_users_email_unique',
+					columns: ['email'],
+					unique: true,
+				};
+				const dbIdx: IndexIR = {
+					name: 'idx_users_email_unique',
+					columns: ['email'],
+					unique: true,
+					nullsNotDistinct: true,
+				};
+
+				const schema = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [schemaIdx],
+					}),
+				]);
+				const db = makeModel([
+					makeTable({
+						name: 'users',
+						columns: [makeCol({ name: 'email', type: 'string' })],
+						indexes: [dbIdx],
+					}),
+				]);
+
+				const diff = compareSchemata(schema, db);
+				const kinds = changeKinds(diff.changes);
+				expect(kinds).toContain('create_index');
+				expect(kinds).toContain('drop_index');
+			});
+
+			it('should compare covering indexes by INCLUDE columns', () => {
+				const schemaIdx: IndexIR = {
+					name: 'idx_posts_slug_covering',
+					columns: ['slug'],
+					include: ['title'],
+				};
+				const matchingDbIdx: IndexIR = {
+					name: 'idx_posts_slug_covering_renamed',
+					columns: ['slug'],
+					include: ['title'],
+				};
+				const differentDbIdx: IndexIR = {
+					name: 'idx_posts_slug_covering',
+					columns: ['slug'],
+					include: ['summary'],
+				};
+				const schema = makeModel([
+					makeTable({
+						name: 'posts',
+						columns: [
+							makeCol({ name: 'slug', type: 'string' }),
+							makeCol({ name: 'title', type: 'string' }),
+							makeCol({ name: 'summary', type: 'string' }),
+						],
+						indexes: [schemaIdx],
+					}),
+				]);
+
+				const matchingDiff = compareSchemata(
+					schema,
+					makeModel([
+						makeTable({
+							name: 'posts',
+							columns: [
+								makeCol({ name: 'slug', type: 'string' }),
+								makeCol({ name: 'title', type: 'string' }),
+								makeCol({ name: 'summary', type: 'string' }),
+							],
+							indexes: [matchingDbIdx],
+						}),
+					]),
+				);
+				const differentDiff = compareSchemata(
+					schema,
+					makeModel([
+						makeTable({
+							name: 'posts',
+							columns: [
+								makeCol({ name: 'slug', type: 'string' }),
+								makeCol({ name: 'title', type: 'string' }),
+								makeCol({ name: 'summary', type: 'string' }),
+							],
+							indexes: [differentDbIdx],
+						}),
+					]),
+				);
+
+				expect(matchingDiff.changes).toHaveLength(0);
+				expect(changeKinds(differentDiff.changes)).toEqual([
+					'create_index',
+					'drop_index',
+				]);
 			});
 
 			it('should detect opclass change', () => {
@@ -1779,6 +2141,107 @@ describe('compareSchemata', () => {
 			const diff = compareSchemata(schema, db, snakeCaseOpts);
 
 			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('should not churn an existing old-name FK auto-index', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'authorId', type: 'uuid' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['authorId'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'uuid' })],
+					primaryKey: 'id',
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [
+						makeCol({ name: 'id', type: 'uuid' }),
+						makeCol({ name: 'author_id', type: 'uuid' }),
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['author_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [
+						{
+							name: 'idx_posts_authorId',
+							columns: ['author_id'],
+							unique: false,
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
+		it('normalizes index names so same-name replacements are all-or-nothing under dbCasing', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'authorId', type: 'uuid' })],
+					indexes: [
+						{
+							name: 'idx_posts_authorId',
+							columns: ['authorId'],
+							unique: false,
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'uuid' })],
+					indexes: [
+						{
+							name: 'idx_posts_author_id',
+							columns: ['author_id'],
+							unique: true,
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'create_index',
+					destructive: true,
+				}),
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: true,
+				}),
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
 		});
 
 		it('should preserve referenced physical schema while normalizing FK casing', () => {

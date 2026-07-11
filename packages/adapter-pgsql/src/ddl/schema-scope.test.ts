@@ -382,7 +382,7 @@ describe('schema-scoped DDL guard', () => {
 		).toThrowError(expectedDiffMessage(['tenant_1']));
 	});
 
-	it('returns the safe DOWN subset when the only schema-scoped change is destructively filtered', () => {
+	it('skips DOWN when the only safe rollback was destructively filtered from UP', () => {
 		const diff = makeDiff([
 			{
 				kind: 'create_table',
@@ -400,9 +400,7 @@ describe('schema-scoped DDL guard', () => {
 			},
 		]);
 
-		expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([
-			`ALTER TABLE "accounts" ADD CONSTRAINT "pk_accounts" PRIMARY KEY ("id");`,
-		]);
+		expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
 	});
 
 	it('makes UP and DOWN agree on requiring schemaName with default destructive filtering', () => {

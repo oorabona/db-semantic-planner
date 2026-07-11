@@ -372,7 +372,7 @@ export interface IndexIR {
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
 
-	/** PG15+ — for a UNIQUE index, treat NULLs as not distinct (`NULLS NOT DISTINCT`); ignored for non-unique indexes */
+	/** PG15+ — for UNIQUE indexes only; schema authoring rejects true on non-unique indexes */
 	readonly nullsNotDistinct?: boolean;
 
 	/** Index access method (default: btree) */

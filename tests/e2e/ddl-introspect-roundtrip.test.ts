@@ -92,10 +92,11 @@ describe.skip('DDL → Introspect Round-Trip [BLOCKED: adapter-pgsql Phase 4]', 
 		});
 
 		// 5. Generate TypeScript schema from introspection
-		const generatedCode = generateSchemaFile(introspectedModel, {
+		const generated = generateSchemaFile(introspectedModel, {
 			sourceUrl: 'test://localhost/testdb',
 			includeDbTypeComments: true,
 		});
+		const generatedCode = generated;
 
 		// 6. Verify the generated schema
 		// Check that all tables exist

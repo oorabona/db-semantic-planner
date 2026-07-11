@@ -33,10 +33,12 @@ export {
 	acquireMigrationLock,
 	type ChangeKind,
 	type CompareSchemataOptions,
+	canGenerateCreateIndex,
 	compareSchemata,
 	type DiffSummary,
 	ensureMigrationsTable,
 	type GenerateDDLOptions,
+	generateCreateIndex,
 	generateDDL,
 	generateDownSQL,
 	generateMigrationFile,
@@ -189,4 +191,5 @@ export {
 	validateIdentifier,
 	validateIdentifiers,
 	validateQualifiedIdentifier,
+	validateSqlExpression,
 } from './validate.js';

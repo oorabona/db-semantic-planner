@@ -436,6 +436,27 @@ export function generateCreateIndex(
 	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
 }
 
+/**
+ * Returns whether the PostgreSQL DDL generator can emit this IndexIR.
+ *
+ * Keep this as the single representability predicate for generated schema
+ * omission and destructive-drop classification: both sides must agree on the
+ * exact validation surface used by generateCreateIndex().
+ */
+export function canGenerateCreateIndex(
+	tableName: string,
+	idx: IndexIR,
+	schemaName: string | undefined = undefined,
+	naming: NamingPlugin = identityNaming,
+): boolean {
+	try {
+		generateCreateIndex(tableName, idx, schemaName, naming);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 // ============================================================================
 // generateCreatePolicy
 // ============================================================================

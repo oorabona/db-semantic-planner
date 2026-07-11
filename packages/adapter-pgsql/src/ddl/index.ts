@@ -4,7 +4,12 @@
  * @module ddl
  */
 
-export { type GenerateDDLOptions, generateDDL } from './ddl-generator.js';
+export {
+	canGenerateCreateIndex,
+	type GenerateDDLOptions,
+	generateCreateIndex,
+	generateDDL,
+} from './ddl-generator.js';
 export {
 	generateMigrationFile,
 	isDestructiveDown,

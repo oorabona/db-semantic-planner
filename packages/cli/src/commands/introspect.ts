@@ -8,10 +8,27 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { Command } from 'commander';
 import {
-	generateSchemaFile,
+	generateSchemaFileWithDiagnostics,
 	type SchemaCodegenOptions,
 } from '../generators/schema-codegen.js';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
+
+function uniqueWarnings(warnings: readonly string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const warning of warnings) {
+		if (seen.has(warning)) continue;
+		seen.add(warning);
+		unique.push(warning);
+	}
+	return unique;
+}
+
+function reportWarnings(warnings: readonly string[]): void {
+	for (const warning of warnings) {
+		console.log(`   ⚠️  ${warning}`);
+	}
+}
 
 export const introspectCommand = new Command('introspect')
 	.description('Generate schema.ts from database introspection')
@@ -80,28 +97,29 @@ export const introspectCommand = new Command('introspect')
 					console.log(
 						`📊 Found ${tableCount} tables, ${relationCount} relations, ${hierarchyCount} hierarchies`,
 					);
-					if (model.warnings?.length) {
-						for (const w of model.warnings) {
-							console.log(`   ⚠️  ${w}`);
-						}
-					}
-					console.log('');
 
 					// Generate schema file — pass metadata from introspection
 					const codegenOptions: SchemaCodegenOptions = {
 						sourceUrl: options.db,
 						includeDbTypeComments: options.dbTypeComments,
-						warnings: model.warnings,
 						introspectedAt: model.introspectedAt,
 						dbCasing: options.dbCasing,
 					};
 
-					const schemaCode = generateSchemaFile(model, codegenOptions);
+					const generated = generateSchemaFileWithDiagnostics(model, {
+						...codegenOptions,
+						warnings: model.warnings ?? [],
+					});
+					const warnings = uniqueWarnings(generated.warnings);
+					if (warnings.length > 0) {
+						reportWarnings(warnings);
+					}
+					console.log('');
 
 					// Write output file
 					const outPath = resolve(process.cwd(), options.out);
 					mkdirSync(dirname(outPath), { recursive: true });
-					writeFileSync(outPath, schemaCode, 'utf-8');
+					writeFileSync(outPath, generated.code, 'utf-8');
 
 					console.log(`✅ Generated schema: ${outPath}`);
 					console.log(`   Tables: ${tableCount}`);

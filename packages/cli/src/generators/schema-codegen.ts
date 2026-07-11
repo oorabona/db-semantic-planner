@@ -5,7 +5,17 @@
  * Used by `dbsp introspect` to create dbsp.schema.ts from a database.
  */
 
-import type { ModelIR, TableIR } from '@dbsp/core';
+import {
+	canGenerateCreateIndex,
+	generateCreateIndex,
+	identityNaming,
+} from '@dbsp/adapter-pgsql';
+import {
+	type ModelIR,
+	type TableIR,
+	validateSchemaIndexOptions,
+} from '@dbsp/core';
+import type { IndexIR } from '@dbsp/types';
 import { redactDbUrl } from '../utils/db-utils.js';
 
 /**
@@ -24,7 +34,15 @@ export interface SchemaCodegenOptions {
 	readonly sourceUrl?: string;
 	/** Include original DB types as comments */
 	readonly includeDbTypeComments?: boolean;
-	/** Warnings from introspection to include as comments */
+	/** Receive diagnostics as they are collected, including pass-through warnings. */
+	readonly onWarning?: (message: string) => void;
+	/**
+	 * Caller-provided diagnostics to pass through to returned diagnostics and to
+	 * onWarning. These are never written into generated source.
+	 *
+	 * @deprecated Prefer generateSchemaFileWithDiagnostics() to handle diagnostics
+	 * explicitly.
+	 */
 	readonly warnings?: readonly string[];
 	/** Timestamp of introspection */
 	readonly introspectedAt?: Date;
@@ -35,6 +53,22 @@ export interface SchemaCodegenOptions {
 	 * @default 'preserve'
 	 */
 	readonly dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
+}
+
+export interface SchemaCodegenDiagnosticsOptions extends SchemaCodegenOptions {
+	/**
+	 * Caller-provided diagnostics to pass through to returned diagnostics and to
+	 * onWarning. These are never written into generated source.
+	 *
+	 * @deprecated Prefer the same field on SchemaCodegenOptions; this interface is
+	 * retained for callers that already import it.
+	 */
+	readonly warnings?: readonly string[];
+}
+
+export interface SchemaCodegenResult {
+	readonly code: string;
+	readonly warnings: readonly string[];
 }
 
 /**
@@ -68,6 +102,20 @@ function singleQuoteEscape(s: string): string {
 		.replace(/\n/g, '\\n')
 		.replace(/\r/g, '\\r')
 		.replace(/\t/g, '\\t')}'`;
+}
+
+/**
+ * Neutralize text that must remain inside generated block comments.
+ *
+ * Catalog-derived values are otherwise capable of closing `/* ... *\/` comments
+ * and turning the rest of the generated file into executable TypeScript.
+ */
+function blockCommentText(s: string): string {
+	return s
+		.replace(/\*\//g, '* /')
+		.replace(/\n/g, '\\n')
+		.replace(/\r/g, '\\r')
+		.replace(/\t/g, '\\t');
 }
 
 /**
@@ -136,16 +184,16 @@ function generateColumnCode(
 
 	if (canUseShortForm) {
 		// Short form: 'type'
-		let code = `'${column.type}'`;
+		let code = singleQuoteEscape(column.type);
 		if (options.includeDbTypeComments && column.originalDbType) {
-			code += ` /* from: ${column.originalDbType} */`;
+			code += ` /* from: ${blockCommentText(column.originalDbType)} */`;
 		}
 		return code;
 	}
 
 	// Long form: { type, primaryKey?, nullable?, default?, unique? }
 	const props: string[] = [];
-	props.push(`type: '${column.type}'`);
+	props.push(`type: ${singleQuoteEscape(column.type)}`);
 
 	if (isPrimaryKey) {
 		props.push('primaryKey: true');
@@ -166,7 +214,7 @@ function generateColumnCode(
 	let code = `{ ${props.join(', ')} }`;
 
 	if (options.includeDbTypeComments && column.originalDbType) {
-		code += ` /* from: ${column.originalDbType} */`;
+		code += ` /* from: ${blockCommentText(column.originalDbType)} */`;
 	}
 
 	return code;
@@ -257,7 +305,7 @@ function generateRefCode(
 
 	// Add comment for original DB type if requested
 	if (options.includeDbTypeComments && column.originalDbType) {
-		code += ` /* from: ${column.originalDbType} */`;
+		code += ` /* from: ${blockCommentText(column.originalDbType)} */`;
 	}
 
 	return code;
@@ -383,6 +431,25 @@ function stringArrayLiteral(values: readonly string[]): string {
 	return `[${values.map(singleQuoteEscape).join(', ')}]`;
 }
 
+/**
+ * Emit a strict boolean literal. Interpolating the value itself would run a
+ * foreign object's toString into the generated source, which is later imported.
+ */
+function booleanLiteral(value: unknown): 'true' | 'false' {
+	return value === true ? 'true' : 'false';
+}
+
+function stringRecordLiteral(
+	values: Readonly<Record<string, string>>,
+	keyName: (name: string) => string = (name) => name,
+): string {
+	const entries = Object.entries(values).map(
+		([key, value]) =>
+			`[${singleQuoteEscape(keyName(key))}]: ${singleQuoteEscape(value)}`,
+	);
+	return `{ ${entries.join(', ')} }`;
+}
+
 function tableLevelForeignKeys(table: TableIR): TableIR['foreignKeys'] {
 	return table.foreignKeys.filter(
 		(fk) =>
@@ -392,6 +459,116 @@ function tableLevelForeignKeys(table: TableIR): TableIR['foreignKeys'] {
 	);
 }
 
+function hasExpressions(idx: IndexIR): boolean {
+	return (idx.expressions?.length ?? 0) > 0;
+}
+
+function tableLevelIndexes(table: TableIR): readonly IndexIR[] {
+	return table.indexes.filter(
+		(idx) => indexRepresentationWarning(table.name, idx) === undefined,
+	);
+}
+
+function warningName(name: string | undefined): string {
+	return name === undefined ? '<unnamed>' : JSON.stringify(name);
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function indexRepresentationWarning(
+	tableName: string,
+	idx: IndexIR,
+): string | undefined {
+	if (hasExpressions(idx)) {
+		return `Expression index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp. dbsp will neither drop nor recreate it; maintain it by hand.`;
+	}
+	const ddlWarning = ddlIndexRepresentationWarning(tableName, idx);
+	const schemaWarning = schemaIndexRepresentationWarning(tableName, idx);
+	return ddlWarning ?? schemaWarning;
+}
+
+function ddlIndexRepresentationWarning(
+	tableName: string,
+	idx: IndexIR,
+): string | undefined {
+	if (canGenerateCreateIndex(tableName, idx, undefined, identityNaming)) {
+		return undefined;
+	}
+	try {
+		generateCreateIndex(tableName, idx, undefined, identityNaming);
+	} catch (error) {
+		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it: ${errorMessage(error)}. dbsp will neither drop nor recreate it; maintain it by hand.`;
+	}
+	return undefined;
+}
+
+function schemaIndexRepresentationWarning(
+	tableName: string,
+	idx: IndexIR,
+): string | undefined {
+	try {
+		validateSchemaIndexOptions(tableName, idx);
+	} catch (error) {
+		return `Index ${warningName(idx.name)} on table ${warningName(tableName)} cannot be represented in the schema and is not managed by dbsp because schema() rejected it: ${errorMessage(error)}. dbsp will neither drop nor recreate it; maintain it by hand.`;
+	}
+	return undefined;
+}
+
+function schemaCodegenWarnings(model: ModelIR): string[] {
+	const warnings: string[] = [];
+	for (const table of model.tables.values()) {
+		for (const idx of table.indexes) {
+			const warning = indexRepresentationWarning(table.name, idx);
+			if (warning !== undefined) {
+				warnings.push(warning);
+			}
+		}
+	}
+	return warnings;
+}
+
+function generateIndexCode(
+	idx: IndexIR,
+	options: SchemaCodegenOptions,
+): string {
+	const indexOptions = [
+		`columns: ${stringArrayLiteral(idx.columns.map((col) => generatedName(col, options)))}`,
+	];
+	if (idx.unique !== undefined) {
+		indexOptions.push(`unique: ${booleanLiteral(idx.unique)}`);
+	}
+	if (idx.name !== undefined) {
+		indexOptions.push(`name: ${singleQuoteEscape(idx.name)}`);
+	}
+	if (idx.method !== undefined) {
+		indexOptions.push(`method: ${singleQuoteEscape(idx.method)}`);
+	}
+	if (idx.where !== undefined) {
+		indexOptions.push(`where: ${singleQuoteEscape(idx.where)}`);
+	}
+	if (idx.opclass !== undefined) {
+		indexOptions.push(
+			`opclass: ${stringRecordLiteral(idx.opclass, (key) => generatedName(key, options))}`,
+		);
+	}
+	if (idx.with !== undefined) {
+		indexOptions.push(`with: ${stringRecordLiteral(idx.with)}`);
+	}
+	if (idx.include !== undefined) {
+		indexOptions.push(
+			`include: ${stringArrayLiteral(idx.include.map((col) => generatedName(col, options)))}`,
+		);
+	}
+	if (idx.nullsNotDistinct !== undefined) {
+		indexOptions.push(
+			`nullsNotDistinct: ${booleanLiteral(idx.nullsNotDistinct)}`,
+		);
+	}
+	return `\t\t\t{ ${indexOptions.join(', ')} }`;
+}
+
 function generateTableConstraintCode(
 	model: ModelIR,
 	options: SchemaCodegenOptions,
@@ -399,25 +576,34 @@ function generateTableConstraintCode(
 	const tableBlocks: string[] = [];
 	for (const table of model.tables.values()) {
 		const fks = tableLevelForeignKeys(table);
-		if (fks.length === 0) continue;
-		const fkLines = fks.map((fk) => {
-			const refOptions = [
-				...(fk.references.schema !== undefined
-					? [`schema: ${singleQuoteEscape(fk.references.schema)}`]
-					: []),
-				`columns: ${stringArrayLiteral(fk.columns.map((col) => generatedName(col, options)))}`,
-				`references: ${stringArrayLiteral(fk.references.columns.map((col) => generatedName(col, options)))}`,
-			];
-			if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
-				refOptions.push(`onDelete: ${singleQuoteEscape(fk.onDelete)}`);
-			}
-			if (fk.onUpdate && fk.onUpdate !== 'NO ACTION') {
-				refOptions.push(`onUpdate: ${singleQuoteEscape(fk.onUpdate)}`);
-			}
-			return `\t\t\tref(${singleQuoteEscape(generatedName(fk.references.table, options))}, { ${refOptions.join(', ')} })`;
-		});
+		const indexes = tableLevelIndexes(table);
+		if (fks.length === 0 && indexes.length === 0) continue;
+		const tableOptions: string[] = [];
+		if (indexes.length > 0) {
+			const indexLines = indexes.map((idx) => generateIndexCode(idx, options));
+			tableOptions.push(`\t\tindexes: [\n${indexLines.join(',\n')}\n\t\t]`);
+		}
+		if (fks.length > 0) {
+			const fkLines = fks.map((fk) => {
+				const refOptions = [
+					...(fk.references.schema !== undefined
+						? [`schema: ${singleQuoteEscape(fk.references.schema)}`]
+						: []),
+					`columns: ${stringArrayLiteral(fk.columns.map((col) => generatedName(col, options)))}`,
+					`references: ${stringArrayLiteral(fk.references.columns.map((col) => generatedName(col, options)))}`,
+				];
+				if (fk.onDelete && fk.onDelete !== 'NO ACTION') {
+					refOptions.push(`onDelete: ${singleQuoteEscape(fk.onDelete)}`);
+				}
+				if (fk.onUpdate && fk.onUpdate !== 'NO ACTION') {
+					refOptions.push(`onUpdate: ${singleQuoteEscape(fk.onUpdate)}`);
+				}
+				return `\t\t\tref(${singleQuoteEscape(generatedName(fk.references.table, options))}, { ${refOptions.join(', ')} })`;
+			});
+			tableOptions.push(`\t\tforeignKeys: [\n${fkLines.join(',\n')}\n\t\t]`);
+		}
 		tableBlocks.push(
-			`\t${quoteKey(generatedName(table.name, options))}: {\n\t\tforeignKeys: [\n${fkLines.join(',\n')}\n\t\t]\n\t}`,
+			`\t${quoteKey(generatedName(table.name, options))}: {\n${tableOptions.join(',\n')}\n\t}`,
 		);
 	}
 	if (tableBlocks.length === 0) return undefined;
@@ -429,12 +615,60 @@ function generateTableConstraintCode(
  *
  * @param model - The ModelIR (or IntrospectedModelIR) to generate from
  * @param options - Code generation options
- * @returns TypeScript source code for a schema file
+ * @returns Generated source code
+ * @deprecated Use generateSchemaFileWithDiagnostics() to receive diagnostics
+ * explicitly. This function throws when diagnostics would otherwise be dropped,
+ * because emitting a schema after losing index diagnostics can hide unmanaged
+ * indexes. Pass onWarning or call generateSchemaFileWithDiagnostics() to opt
+ * into handling representability diagnostics.
  */
 export function generateSchemaFile(
 	model: ModelIR,
 	options: SchemaCodegenOptions = {},
 ): string {
+	const result = generateSchemaFileWithDiagnostics(model, options);
+	if (result.warnings.length > 0 && options.onWarning === undefined) {
+		throw new Error(formatDroppedDiagnosticsError(result.warnings));
+	}
+	return result.code;
+}
+
+function formatDroppedDiagnosticsError(warnings: readonly string[]): string {
+	const diagnostics = warnings.map((warning) =>
+		warning.replace(/\s+/g, ' ').trim(),
+	);
+	const preview = diagnostics
+		.slice(0, 5)
+		.map((warning) => `- ${warning}`)
+		.join('\n');
+	const extra =
+		diagnostics.length > 5 ? `\n- ... and ${diagnostics.length - 5} more` : '';
+	return (
+		`generateSchemaFile() produced ${diagnostics.length} diagnostic(s) without an onWarning handler:\n` +
+		`${preview}${extra}\n` +
+		'Use generateSchemaFileWithDiagnostics() or pass onWarning to receive diagnostics.'
+	);
+}
+
+/**
+ * Generate a TypeScript schema file from ModelIR and return diagnostics.
+ *
+ * @param model - The ModelIR (or IntrospectedModelIR) to generate from
+ * @param options - Code generation options
+ * @returns Generated source code and warnings
+ */
+export function generateSchemaFileWithDiagnostics(
+	model: ModelIR,
+	options: SchemaCodegenDiagnosticsOptions = {},
+): SchemaCodegenResult {
+	const warnings = [
+		...(options.warnings ?? []),
+		...schemaCodegenWarnings(model),
+	];
+	for (const warning of warnings) {
+		options.onWarning?.(warning);
+	}
+
 	const lines: string[] = [];
 
 	// Header comment
@@ -442,18 +676,12 @@ export function generateSchemaFile(
 	lines.push(' * Auto-generated by: dbsp introspect');
 	if (options.sourceUrl) {
 		const redactedUrl = redactDbUrl(options.sourceUrl);
-		lines.push(` * Source: ${redactedUrl}`);
+		lines.push(` * Source: ${blockCommentText(redactedUrl)}`);
 	}
 	if (options.introspectedAt) {
 		lines.push(` * Generated: ${options.introspectedAt.toISOString()}`);
 	}
 	lines.push(' *');
-	if (options.warnings && options.warnings.length > 0) {
-		lines.push(' * ⚠️ Warnings:');
-		for (const warning of options.warnings) {
-			lines.push(` *   - ${warning}`);
-		}
-	}
 	lines.push(' * Review before using in production.');
 	lines.push(' */');
 	lines.push('');
@@ -521,5 +749,8 @@ export function generateSchemaFile(
 		lines.push('');
 	}
 
-	return lines.join('\n');
+	return {
+		code: lines.join('\n'),
+		warnings,
+	};
 }
