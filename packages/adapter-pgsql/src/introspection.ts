@@ -32,7 +32,7 @@ import type {
 import { buildRelationKeyFields } from '@dbsp/types';
 import type { Pool } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
-import { quoteTypeIdentifier } from './db-type.js';
+import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
 // ============================================================================
 // Types
@@ -83,6 +83,13 @@ interface RawFormattedColumnType {
 	table_name: string;
 	column_name: string;
 	db_type: string;
+	/** nspname of the column type's own namespace (pg_type.typnamespace). */
+	type_schema: string;
+}
+
+interface FormattedColumnType {
+	dbType: string;
+	typeSchema: string;
 }
 
 interface RawPrimaryKey {
@@ -192,7 +199,7 @@ interface CatalogResults {
 	fks: RawForeignKey[];
 	indexes: RawIndex[];
 	uniqueColumns: RawUniqueColumn[];
-	enums: Array<{ name: string; values: string[] }>;
+	enums: Array<{ name: string; schema: string; values: string[] }>;
 	comments: Array<{
 		table_name: string;
 		column_name: string | null;
@@ -386,16 +393,17 @@ async function queryAllCatalogs(
 			[schema],
 		),
 		// 6. ENUM types
-		pool.query<{ name: string; values: string[] }>(
+		pool.query<{ name: string; schema: string; values: string[] }>(
 			`SELECT
 			   t.typname AS name,
+			   n.nspname AS schema,
 			   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
 			 FROM pg_type t
 			 JOIN pg_enum e ON e.enumtypid = t.oid
 			 JOIN pg_namespace n ON n.oid = t.typnamespace
 			 WHERE t.typtype = 'e'
 			   AND n.nspname = $1
-			 GROUP BY t.typname`,
+			 GROUP BY t.typname, n.nspname`,
 			[schema],
 		),
 		// 7. Comments (table and column level) from pg_description
@@ -504,27 +512,34 @@ async function queryAllCatalogs(
 			 WHERE n.nspname = $1`,
 			[schema],
 		),
-		// 14. Faithful SQL-facing column types via format_type, for two cases:
+		// 14. Faithful SQL-facing column types via format_type, for three cases:
 		// (a) typmod-bearing columns (atttypmod <> -1) — varchar(120), numeric(10,2),
 		//     timestamptz(3), bit(8), vector(768) — to preserve modifier fidelity (#261);
 		// (b) array columns (typcategory 'A') — so integer[] is stored as `integer[]`
-		//     rather than the internal `_int4` udt_name.
-		// Other columns (plain base types, enums/composites/domains) fall back to
-		// quoteTypeIdentifier(udt_name) in buildTableIR, which keeps a bare typname for
-		// lowercase types and quotes a case-sensitive custom type (`"Money"`).
+		//     rather than the internal `_int4` udt_name;
+		// (c) non-pg_catalog scalar types — enums/composites/domains in user schemas.
+		// `type_schema` is the type's OWN namespace (pg_type.typnamespace). The IR stores
+		// it structurally and keeps `originalDbType` bare, so DDL/cast emission can decide
+		// whether the type follows the target schema or remains absolute.
 		pool.query<RawFormattedColumnType>(
 			`SELECT c.relname AS table_name,
 			        a.attname AS column_name,
-			        format_type(a.atttypid, a.atttypmod) AS db_type
+			        format_type(a.atttypid, a.atttypmod) AS db_type,
+			        tn.nspname AS type_schema
 			 FROM pg_catalog.pg_attribute a
 			 JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
 			 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
 			 JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+			 JOIN pg_catalog.pg_namespace tn ON tn.oid = t.typnamespace
 			 WHERE n.nspname = $1
 			   AND c.relkind IN ('r','p','v','m','f')
 			   AND a.attnum > 0
 			   AND NOT a.attisdropped
-			   AND (a.atttypmod <> -1 OR t.typcategory = 'A')`,
+			   AND (
+			     a.atttypmod <> -1
+			     OR t.typcategory = 'A'
+			     OR t.typnamespace <> 'pg_catalog'::regnamespace
+			   )`,
 			[schema],
 		),
 	]);
@@ -742,7 +757,7 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 
 /** Build a Map<enumName, EnumIR> from raw enum rows. */
 function buildEnumMap(
-	rows: Array<{ name: string; values: string[] }>,
+	rows: Array<{ name: string; schema?: string; values: string[] }>,
 ): Map<string, EnumIR> {
 	const result = new Map<string, EnumIR>();
 	for (const row of rows) {
@@ -752,7 +767,11 @@ function buildEnumMap(
 					.replace(/^\{|}$/g, '')
 					.split(',')
 					.filter(Boolean);
-		result.set(row.name, { name: row.name, values });
+		result.set(row.name, {
+			name: row.name,
+			values,
+			...(row.schema !== undefined ? { schema: row.schema } : {}),
+		});
 	}
 	return result;
 }
@@ -836,13 +855,16 @@ function columnTypeMapKey(tableName: string, columnName: string): string {
 	return `${tableName}\0${columnName}`;
 }
 
-/** Build a Map<tableName+columnName, format_type result>. */
+/** Build a Map<tableName+columnName, bare format_type result + type schema>. */
 function buildFormattedColumnTypeMap(
 	rows: RawFormattedColumnType[],
-): Map<string, string> {
-	const result = new Map<string, string>();
+): Map<string, FormattedColumnType> {
+	const result = new Map<string, FormattedColumnType>();
 	for (const row of rows) {
-		result.set(columnTypeMapKey(row.table_name, row.column_name), row.db_type);
+		result.set(columnTypeMapKey(row.table_name, row.column_name), {
+			dbType: stripDbTypeSchema(row.db_type),
+			typeSchema: row.type_schema,
+		});
 	}
 	return result;
 }
@@ -850,7 +872,7 @@ function buildFormattedColumnTypeMap(
 /** Context bag passed to buildTableIR. */
 interface TableIRContext {
 	tableColumns: Map<string, RawColumn[]>;
-	formattedColumnTypes: Map<string, string>;
+	formattedColumnTypes: Map<string, FormattedColumnType>;
 	tablePKs: Map<string, string[]>;
 	fksByConstraint: Map<string, FKEntry>;
 	tableIndexes: Map<string, IndexIR[]>;
@@ -890,6 +912,16 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 		const colComment =
 			ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
 		const uniqueConstraintName = uniqueColumns?.get(col.column_name);
+		const formattedType = ctx.formattedColumnTypes.get(
+			columnTypeMapKey(tableName, col.column_name),
+		);
+		const originalDbType =
+			formattedType?.dbType ?? quoteTypeIdentifier(col.udt_name);
+		const originalDbTypeSchema =
+			formattedType?.typeSchema !== undefined &&
+			formattedType.typeSchema !== 'pg_catalog'
+				? formattedType.typeSchema
+				: undefined;
 
 		return {
 			name: col.column_name,
@@ -901,14 +933,17 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(col.column_default != null
 				? { default: { sql: col.column_default } }
 				: {}),
-			// format_type output (typmod-bearing + array columns) is already
-			// SQL-facing; the udt_name fallback is a bare catalog typname, so
-			// quote it when case-sensitive (`"Money"`) — a lowercase typname
-			// stays bare, preserving the common enum/UDT identity.
-			originalDbType:
-				ctx.formattedColumnTypes.get(
-					columnTypeMapKey(tableName, col.column_name),
-				) ?? quoteTypeIdentifier(col.udt_name),
+			// format_type preserves typmod/array fidelity; any schema qualification it
+			// adds is search_path-relative, so originalDbType is stored bare and the
+			// catalog schema/scope are stored structurally.
+			originalDbType,
+			...(originalDbTypeSchema !== undefined
+				? {
+						originalDbTypeSchema,
+						originalDbTypeSchemaScope:
+							originalDbTypeSchema === ctx.schema ? 'target' : 'absolute',
+					}
+				: {}),
 			...(uniqueConstraintName !== undefined
 				? { unique: true, uniqueConstraintName }
 				: {}),

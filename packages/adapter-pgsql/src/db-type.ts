@@ -1,3 +1,5 @@
+import type { ColumnIR, ColumnType } from '@dbsp/types';
+
 type SplitDbType = {
 	base: string;
 	modifier: string | undefined;
@@ -226,6 +228,31 @@ function isSchemaQualified(base: string): boolean {
 	return QUALIFIED_IDENTIFIER_RE.test(base);
 }
 
+export function splitQualifiedIdentifier(
+	base: string,
+): { schema: string; name: string } | null {
+	const normalized = normalizeBase(base);
+	if (!isSchemaQualified(normalized)) return null;
+
+	let inQuote = false;
+	for (let i = 0; i < normalized.length; i++) {
+		const ch = normalized[i];
+		if (ch === '"') {
+			if (inQuote && normalized[i + 1] === '"') {
+				i++;
+			} else {
+				inQuote = !inQuote;
+			}
+		} else if (ch === '.' && !inQuote) {
+			return {
+				schema: normalized.slice(0, i),
+				name: normalized.slice(i + 1),
+			};
+		}
+	}
+	return null;
+}
+
 function canonicalizeDbType(type: string): string {
 	const split = splitDbType(type);
 	const base = normalizeBase(split.base);
@@ -368,6 +395,15 @@ export function quoteTypeIdentifier(rawIdentifier: string): string {
 	return `"${rawIdentifier.replace(/"/g, '""')}"`;
 }
 
+/**
+ * Render a raw schema identifier for schema-qualified custom type names.
+ * Always quotes so reserved words, mixed case, and punctuation are valid without
+ * a separate keyword allowlist.
+ */
+export function quoteTypeSchemaIdentifier(rawIdentifier: string): string {
+	return `"${rawIdentifier.replace(/"/g, '""')}"`;
+}
+
 /** Unwrap one layer of SQL identifier quoting, collapsing doubled `""`. */
 function unquoteIdentifier(id: string): string {
 	const t = id.trim();
@@ -377,21 +413,180 @@ function unquoteIdentifier(id: string): string {
 	return t;
 }
 
+function normalizeIdentifierForComparison(id: string): string {
+	const normalized = normalizeBase(id);
+	return normalized.includes('"')
+		? unquoteIdentifier(normalized)
+		: unquoteIdentifier(normalized).toLowerCase();
+}
+
+function mapColumnTypeFallback(type: ColumnType): string {
+	switch (type) {
+		case 'string':
+			return 'VARCHAR(255)';
+		case 'text':
+			return 'TEXT';
+		case 'number':
+		case 'integer':
+			return 'INTEGER';
+		case 'bigint':
+			return 'BIGINT';
+		case 'decimal':
+			return 'NUMERIC';
+		case 'boolean':
+			return 'BOOLEAN';
+		case 'date':
+			return 'DATE';
+		case 'time':
+			return 'TIME';
+		case 'datetime':
+		case 'timestamp':
+			return 'TIMESTAMPTZ';
+		case 'json':
+		case 'jsonb':
+			return 'JSONB';
+		case 'uuid':
+			return 'UUID';
+		case 'daterange':
+			return 'DATERANGE';
+		case 'tsrange':
+			return 'TSRANGE';
+		case 'tstzrange':
+			return 'TSTZRANGE';
+		case 'int4range':
+			return 'INT4RANGE';
+		case 'int8range':
+			return 'INT8RANGE';
+		case 'numrange':
+			return 'NUMRANGE';
+		default:
+			return 'TEXT';
+	}
+}
+
+export function stripDbTypeSchema(dbType: string): string {
+	const split = splitDbType(dbType);
+	const qualified = splitQualifiedIdentifier(split.base);
+	// No schema qualifier → return verbatim. Reassembling base+modifier would
+	// mis-place the modifier for built-ins whose modifier is not a simple trailing
+	// group, e.g. `time(3) without time zone` → `time without time zone(3)`.
+	// Only schema-qualified custom types (no such tz suffix) need stripping.
+	if (!qualified) return dbType;
+	const modifier = split.modifier !== undefined ? `(${split.modifier})` : '';
+	return `${qualified.name}${modifier}${split.isArray ? '[]' : ''}`;
+}
+
+/**
+ * Render a column's PostgreSQL type at an emission site. Structural custom type
+ * identity lives in `originalDbTypeSchema`/`originalDbTypeSchemaScope`; this
+ * function decides whether and how to qualify against the current target schema.
+ */
+export function renderColumnDbType(
+	col: ColumnIR,
+	targetSchema?: string,
+): string {
+	const originalDbType = col.originalDbType?.trim();
+	if (!originalDbType) return mapColumnTypeFallback(col.type);
+
+	const originalSchema = col.originalDbTypeSchema;
+	// A defined non-pg_catalog schema means a CUSTOM type — qualify it even if its
+	// bare name collides with a built-in (a custom type literally named `text`).
+	if (
+		originalSchema !== undefined &&
+		originalSchema !== '' &&
+		originalSchema !== 'pg_catalog'
+	) {
+		// Missing scope defaults to 'absolute' so an explicitly-schema'd authored
+		// type is never silently retargeted; introspection always sets scope.
+		const scope = col.originalDbTypeSchemaScope ?? 'absolute';
+		const effectiveSchema =
+			scope === 'absolute' ? originalSchema : (targetSchema ?? originalSchema);
+		// A TARGET public type stays bare (no churn to the default output); an
+		// ABSOLUTE public type is qualified so it resolves regardless of search_path.
+		// An always-fully-qualify-public opt-in is a deferred policy question (#303).
+		if (effectiveSchema === 'public' && scope === 'target') {
+			return stripDbTypeSchema(originalDbType);
+		}
+		return `${quoteTypeSchemaIdentifier(effectiveSchema)}.${stripDbTypeSchema(originalDbType)}`;
+	}
+
+	// Built-in (pg_catalog or no structural schema field): emit verbatim.
+	if (originalSchema === 'pg_catalog' || isPgBuiltInTypeName(originalDbType)) {
+		return originalDbType;
+	}
+
+	// Legacy authored string with no schema field: emit exactly as authored — a
+	// qualified string stays qualified, a bare string stays bare, never retargeted.
+	return originalDbType;
+}
+
+export function columnDbTypeSchemaIdentity(col: ColumnIR): string | undefined {
+	const originalDbType = col.originalDbType?.trim();
+	if (!originalDbType) return undefined;
+
+	const originalSchema = col.originalDbTypeSchema;
+	// A defined non-pg_catalog schema is a CUSTOM type (even if its bare name
+	// collides with a built-in) — carry its schema identity so diffs see the drift.
+	if (
+		originalSchema !== undefined &&
+		originalSchema !== '' &&
+		originalSchema !== 'pg_catalog'
+	) {
+		const scope = col.originalDbTypeSchemaScope ?? 'absolute';
+		return scope === 'absolute' ? `absolute:${originalSchema}` : 'target';
+	}
+
+	// Built-ins get a distinct identity (not undefined) so a custom type whose bare
+	// name collides with a built-in (`tenant_1.text` vs pg_catalog `text`) is seen as
+	// a real change; only a schema-agnostic AUTHORED bare custom type stays undefined.
+	if (originalSchema === 'pg_catalog') return 'builtin';
+	if (isPgBuiltInTypeName(originalDbType)) return 'builtin';
+
+	// Legacy: no structural schema field. A QUALIFIED string carries an explicit
+	// schema (absolute identity), so two different qualified schemas must diff; a
+	// BARE string is schema-agnostic (authored — it matches an introspected type of
+	// the same base regardless of schema, so it never false-diffs).
+	const split = splitDbType(originalDbType);
+	const qualified = splitQualifiedIdentifier(split.base);
+	if (qualified !== null) {
+		return `absolute:${normalizeIdentifierForComparison(qualified.schema)}`;
+	}
+	return undefined;
+}
+
 /**
  * Classify how a rendered originalDbType references a given catalog typname, so
  * the enum drop-dependency scan can rewrite the column correctly before the type
  * is dropped: `scalar` -> cast to `text`, `array` -> cast to `text[]`. Returns
- * null when it does not reference the type. Bare or quoted names match; a
- * schema-qualified reference is not matched (cross-schema disambiguation needs
- * type-oid identity the column IR does not carry — a pre-existing limitation).
+ * null when it does not reference the type. A bare reference matches by typname
+ * only, regardless of enum schema, preferring a safe over-protective cast to
+ * missing a dependency before `DROP TYPE ... CASCADE`. A schema-qualified
+ * reference matches only when its schema also matches the enum schema.
  */
 export function enumReferenceKind(
 	originalDbType: string,
 	typname: string,
+	typschema?: string,
+	originalDbTypeSchema?: string,
 ): 'scalar' | 'array' | null {
 	const split = splitDbType(originalDbType);
-	if (split.schemaQualified) return null;
-	if (unquoteIdentifier(normalizeBase(split.base)) !== typname) return null;
+	const qualified = splitQualifiedIdentifier(split.base);
+	const baseName = unquoteIdentifier(
+		normalizeBase(qualified?.name ?? split.base),
+	);
+	if (baseName !== typname) return null;
+	const referenceSchema =
+		originalDbTypeSchema ??
+		(qualified !== null
+			? normalizeIdentifierForComparison(qualified.schema)
+			: undefined);
+	if (
+		referenceSchema !== undefined &&
+		typschema !== undefined &&
+		referenceSchema !== typschema
+	) {
+		return null;
+	}
 	return split.isArray ? 'array' : 'scalar';
 }
 

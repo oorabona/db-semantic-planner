@@ -35,8 +35,9 @@ export type BindingColumnTypesResult =
 
 /**
  * Deep-freeze a resolved column-types record. Values are flat objects
- * (`{kind:'column', type, originalDbType?}` | `{kind:'aggregate', fn}`) with
- * no nested mutable structures, so freezing each value plus the record
+ * (`{kind:'column', type, originalDbType?, originalDbTypeSchema?,
+ * originalDbTypeSchemaScope?}` | `{kind:'aggregate', fn}`) with no nested
+ * mutable structures, so freezing each value plus the record
  * itself is sufficient — mirrors the project's hand-written per-shape
  * freeze convention (see `freezeTrustedRelationFilterPayload`,
  * packages/types/src/internal.ts).

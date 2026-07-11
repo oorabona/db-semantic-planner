@@ -111,6 +111,12 @@ export class ColumnValidator {
 			...(columnInfo.originalDbType !== undefined && {
 				originalDbType: columnInfo.originalDbType,
 			}),
+			...(columnInfo.originalDbTypeSchema !== undefined && {
+				originalDbTypeSchema: columnInfo.originalDbTypeSchema,
+			}),
+			...(columnInfo.originalDbTypeSchemaScope !== undefined && {
+				originalDbTypeSchemaScope: columnInfo.originalDbTypeSchemaScope,
+			}),
 		};
 	}
 

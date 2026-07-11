@@ -49,6 +49,8 @@ export interface ColumnValidatorTableColumn {
 	readonly name: string;
 	readonly type?: ColumnType;
 	readonly originalDbType?: string;
+	readonly originalDbTypeSchema?: string;
+	readonly originalDbTypeSchemaScope?: 'target' | 'absolute';
 }
 
 export interface ColumnValidatorSchema {

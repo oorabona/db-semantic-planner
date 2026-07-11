@@ -9,8 +9,12 @@
  * 3. introspect -> compareSchemata is idempotent (no spurious drift).
  */
 
-import { compareSchemata } from '@dbsp/adapter-pgsql';
-import { createOrm, eq, getSchemaFromDb } from '@dbsp/core';
+import {
+	compareSchemata,
+	generateDDL,
+	generateMigrationSQL,
+} from '@dbsp/adapter-pgsql';
+import { createOrm, eq, getSchemaFromDb, ModelIRImpl } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
@@ -21,6 +25,9 @@ import {
 } from './testkit/index.js';
 
 const SCHEMA = 'dbtype_fidelity_test';
+const TENANT_SCHEMA = 'tenant_1';
+const PUBLIC_ENUM_TYPE = 'dbsp_285_status';
+const PUBLIC_TABLE = 'dbsp_285_public_status_holder';
 
 // pgvector is present in the project's -full test image but not in a stock
 // PostgreSQL image; gate the vector column so the suite still runs without it.
@@ -31,6 +38,10 @@ describe('#261 introspection originalDbType fidelity (real PG)', () => {
 		await dropSchema(SCHEMA);
 		await createSchema(SCHEMA);
 		const pool = await getTestPool();
+		await pool.query(`DROP SCHEMA IF EXISTS ${TENANT_SCHEMA} CASCADE`);
+		await pool.query(`CREATE SCHEMA ${TENANT_SCHEMA}`);
+		await pool.query(`DROP TABLE IF EXISTS public.${PUBLIC_TABLE}`);
+		await pool.query(`DROP TYPE IF EXISTS public.${PUBLIC_ENUM_TYPE} CASCADE`);
 		try {
 			await pool.query('CREATE EXTENSION IF NOT EXISTS vector');
 			hasVector = true;
@@ -59,9 +70,35 @@ describe('#261 introspection originalDbType fidelity (real PG)', () => {
 				`ALTER TABLE ${SCHEMA}.fidelity ADD COLUMN embedding vector(768)`,
 			);
 		}
+		await pool.query(
+			`CREATE TYPE ${TENANT_SCHEMA}.status AS ENUM ('active', 'inactive')`,
+		);
+		await pool.query(
+			`CREATE TYPE public.${PUBLIC_ENUM_TYPE} AS ENUM ('active', 'inactive')`,
+		);
+		await pool.query(
+			`CREATE TABLE ${TENANT_SCHEMA}.enum_identity (
+				id integer PRIMARY KEY,
+				state ${TENANT_SCHEMA}.status NOT NULL,
+				history ${TENANT_SCHEMA}.status[] NOT NULL,
+				public_state public.${PUBLIC_ENUM_TYPE} NOT NULL,
+				public_history public.${PUBLIC_ENUM_TYPE}[] NOT NULL
+			)`,
+		);
+		await pool.query(
+			`CREATE TABLE public.${PUBLIC_TABLE} (
+				id integer PRIMARY KEY,
+				state public.${PUBLIC_ENUM_TYPE} NOT NULL,
+				history public.${PUBLIC_ENUM_TYPE}[] NOT NULL
+			)`,
+		);
 	});
 
 	afterAll(async () => {
+		const pool = await getTestPool();
+		await pool.query(`DROP SCHEMA IF EXISTS ${TENANT_SCHEMA} CASCADE`);
+		await pool.query(`DROP TABLE IF EXISTS public.${PUBLIC_TABLE}`);
+		await pool.query(`DROP TYPE IF EXISTS public.${PUBLIC_ENUM_TYPE} CASCADE`);
 		await dropSchema(SCHEMA);
 		await closeTestDb();
 	});
@@ -74,6 +111,7 @@ describe('#261 introspection originalDbType fidelity (real PG)', () => {
 		const byName = new Map(
 			(table?.columns ?? []).map((c) => [c.name, c.originalDbType]),
 		);
+		const byColumn = new Map((table?.columns ?? []).map((c) => [c.name, c]));
 
 		expect(byName.get('ts')).toBe('timestamp(3) with time zone');
 		expect(byName.get('bits')).toBe('bit(8)');
@@ -87,11 +125,131 @@ describe('#261 introspection originalDbType fidelity (real PG)', () => {
 		// internal _int4 udt_name.
 		expect(byName.get('tags')).toBe('integer[]');
 		expect(byName.get('labels')).toBe('text[]');
-		// A lowercase custom (enum) type keeps its bare typname identity.
+		// Custom type schema identity is stored structurally, while the SQL type
+		// spelling remains bare.
 		expect(byName.get('feeling')).toBe('mood');
+		expect(byColumn.get('feeling')).toMatchObject({
+			originalDbTypeSchema: SCHEMA,
+			originalDbTypeSchemaScope: 'target',
+		});
 		if (hasVector) {
 			expect(byName.get('embedding')).toBe('vector(768)');
 		}
+	});
+
+	it('captures structural custom scalar/array types and protects enum array drops', async () => {
+		const adapter = await createPgsqlAdapterForSchema(SCHEMA);
+		const tenantModel = await adapter.introspect({ schema: TENANT_SCHEMA });
+		const table = tenantModel.getTable('enum_identity');
+		expect(table).toBeDefined();
+		const byName = new Map(
+			(table?.columns ?? []).map((c) => [c.name, c.originalDbType]),
+		);
+		const byColumn = new Map((table?.columns ?? []).map((c) => [c.name, c]));
+
+		expect(byName.get('state')).toBe('status');
+		expect(byName.get('history')).toBe('status[]');
+		expect(byColumn.get('state')).toMatchObject({
+			originalDbTypeSchema: TENANT_SCHEMA,
+			originalDbTypeSchemaScope: 'target',
+		});
+		expect(byColumn.get('history')).toMatchObject({
+			originalDbTypeSchema: TENANT_SCHEMA,
+			originalDbTypeSchemaScope: 'target',
+		});
+		expect(byName.get('public_state')).toBe(PUBLIC_ENUM_TYPE);
+		expect(byName.get('public_history')).toBe(`${PUBLIC_ENUM_TYPE}[]`);
+		expect(byColumn.get('public_state')).toMatchObject({
+			originalDbTypeSchema: 'public',
+			originalDbTypeSchemaScope: 'absolute',
+		});
+		expect(byColumn.get('public_history')).toMatchObject({
+			originalDbTypeSchema: 'public',
+			originalDbTypeSchemaScope: 'absolute',
+		});
+		expect(tenantModel.enums?.get('status')).toEqual({
+			name: 'status',
+			schema: TENANT_SCHEMA,
+			values: ['active', 'inactive'],
+		});
+
+		const createEnum = `CREATE TYPE "${TENANT_SCHEMA}"."status" AS ENUM ('active', 'inactive');`;
+		const createTable = `CREATE TABLE "${TENANT_SCHEMA}"."enum_identity" (
+  "id" INT4 NOT NULL,
+  "state" "${TENANT_SCHEMA}".status NOT NULL,
+  "history" "${TENANT_SCHEMA}".status[] NOT NULL,
+  "public_state" "public".${PUBLIC_ENUM_TYPE} NOT NULL,
+  "public_history" "public".${PUBLIC_ENUM_TYPE}[] NOT NULL,
+  CONSTRAINT "pk_enum_identity" PRIMARY KEY ("id")
+);`;
+		expect(
+			generateDDL(tenantModel, { schemaName: TENANT_SCHEMA }).filter(
+				(stmt) => stmt === createEnum || stmt === createTable,
+			),
+		).toEqual([createEnum, createTable]);
+
+		const withoutEnum = new ModelIRImpl(
+			new Map(tenantModel.tables),
+			new Map(tenantModel.relations),
+			new Map(),
+		);
+		const diff = compareSchemata(withoutEnum, tenantModel, {
+			ignoreUnmanagedExtensions: true,
+		});
+		expect(generateMigrationSQL(diff, { schemaName: TENANT_SCHEMA })).toEqual([
+			`ALTER TABLE "${TENANT_SCHEMA}"."enum_identity" ALTER COLUMN "state" TYPE text;
+ALTER TABLE "${TENANT_SCHEMA}"."enum_identity" ALTER COLUMN "history" TYPE text[] USING "history"::text[];
+DROP TYPE IF EXISTS "${TENANT_SCHEMA}"."status" CASCADE;`,
+		]);
+	});
+
+	it('retargets target-scoped custom types while preserving absolute public references', async () => {
+		const adapter = await createPgsqlAdapterForSchema(SCHEMA);
+		const tenantModel = await adapter.introspect({ schema: TENANT_SCHEMA });
+
+		const createEnum = `CREATE TYPE "tenant_2"."status" AS ENUM ('active', 'inactive');`;
+		const createTable = `CREATE TABLE "tenant_2"."enum_identity" (
+  "id" INT4 NOT NULL,
+  "state" "tenant_2".status NOT NULL,
+  "history" "tenant_2".status[] NOT NULL,
+  "public_state" "public".${PUBLIC_ENUM_TYPE} NOT NULL,
+  "public_history" "public".${PUBLIC_ENUM_TYPE}[] NOT NULL,
+  CONSTRAINT "pk_enum_identity" PRIMARY KEY ("id")
+);`;
+		expect(
+			generateDDL(tenantModel, { schemaName: 'tenant_2' }).filter(
+				(stmt) => stmt === createEnum || stmt === createTable,
+			),
+		).toEqual([createEnum, createTable]);
+	});
+
+	it('keeps public custom scalar and array type output unqualified', async () => {
+		const adapter = await createPgsqlAdapterForSchema('public');
+		const publicModel = await adapter.introspect({
+			schema: 'public',
+			include: [PUBLIC_TABLE],
+		});
+		const table = publicModel.getTable(PUBLIC_TABLE);
+		expect(table).toBeDefined();
+		const byName = new Map(
+			(table?.columns ?? []).map((c) => [c.name, c.originalDbType]),
+		);
+
+		expect(byName.get('state')).toBe(PUBLIC_ENUM_TYPE);
+		expect(byName.get('history')).toBe(`${PUBLIC_ENUM_TYPE}[]`);
+
+		const createEnum = `CREATE TYPE "${PUBLIC_ENUM_TYPE}" AS ENUM ('active', 'inactive');`;
+		const createTable = `CREATE TABLE "${PUBLIC_TABLE}" (
+  "id" INT4 NOT NULL,
+  "state" ${PUBLIC_ENUM_TYPE} NOT NULL,
+  "history" ${PUBLIC_ENUM_TYPE}[] NOT NULL,
+  CONSTRAINT "pk_${PUBLIC_TABLE}" PRIMARY KEY ("id")
+);`;
+		expect(
+			generateDDL(publicModel).filter(
+				(stmt) => stmt === createEnum || stmt === createTable,
+			),
+		).toEqual([createEnum, createTable]);
 	});
 
 	it('emits a truncation-safe CAST for a bounded introspected type in WHERE', async () => {

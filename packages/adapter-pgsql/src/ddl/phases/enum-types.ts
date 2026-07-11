@@ -23,10 +23,15 @@ export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
 	}
 	const statements: string[] = [];
 	for (const [, enumDef] of schema.enums) {
-		const enumName = schemaName
-			? `${quoteId(naming.toDatabase(schemaName), 'schema')}.${quoteId(enumDef.name, 'table')}`
-			: quoteId(enumDef.name, 'table');
-		// M-3: validate each enum value against NUL/control-char injection before emission
+		const effectiveSchema =
+			schemaName !== undefined ? naming.toDatabase(schemaName) : enumDef.schema;
+		const enumName =
+			effectiveSchema &&
+			effectiveSchema !== 'public' &&
+			effectiveSchema !== 'pg_catalog'
+				? `${quoteId(effectiveSchema, 'schema')}.${quoteId(enumDef.name, 'table')}`
+				: quoteId(enumDef.name, 'table');
+		// Validate each enum value against NUL/control-char injection before emission
 		const values = enumDef.values
 			.map((v) => {
 				validateEnumLabel(v, 'enum value');

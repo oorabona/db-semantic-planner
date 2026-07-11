@@ -207,11 +207,12 @@ export function generateCreateTable(
 	naming: NamingPlugin,
 ): string {
 	const qualifiedTable = qualifyTable(table.name, schemaName, naming);
+	const targetSchema = schemaName ? naming.toDatabase(schemaName) : undefined;
 	const elements: string[] = [];
 
 	// Add columns
 	for (const col of table.columns) {
-		elements.push(generateColumnDef(col, naming));
+		elements.push(generateColumnDef(col, naming, targetSchema));
 	}
 
 	// Add primary key constraint (omit if no PK defined)
@@ -255,12 +256,16 @@ export function generateCreateTable(
 /**
  * Generate a column definition string.
  */
-function generateColumnDef(col: ColumnIR, naming: NamingPlugin): string {
+function generateColumnDef(
+	col: ColumnIR,
+	naming: NamingPlugin,
+	targetSchema?: string,
+): string {
 	const parts: string[] = [];
 
 	// Column name and type
 	parts.push(quoteIdentifier(naming.toDatabase(col.name)));
-	parts.push(mapColumnType(col));
+	parts.push(mapColumnType(col, targetSchema));
 
 	// NOT NULL constraint (SERIAL/BIGSERIAL imply NOT NULL)
 	if (!col.nullable && !col.autoIncrement) {

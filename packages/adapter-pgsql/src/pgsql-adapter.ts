@@ -88,7 +88,11 @@ import {
 	PlanCompiler,
 	renumberParamRefsInAst,
 } from './compiler.js';
-import { dbTypeCastTarget, validateDbType } from './db-type.js';
+import {
+	dbTypeCastTarget,
+	renderColumnDbType,
+	validateDbType,
+} from './db-type.js';
 import {
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
@@ -361,10 +365,19 @@ function findRuntimeBindingSourceTable(
 	);
 }
 
+function runtimeCastTargetSchema(
+	schemaName: string | undefined,
+	naming: NamingPlugin,
+): string | undefined {
+	return schemaName !== undefined ? naming.toDatabase(schemaName) : undefined;
+}
+
 function resolveRuntimeBindingColumnType(
 	bindingName: string,
 	sourceTable: TableIR,
 	columnName: string,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
 ): string {
 	const column = sourceTable.columns.find(
 		(candidate) => candidate.name === columnName,
@@ -375,7 +388,10 @@ function resolveRuntimeBindingColumnType(
 		);
 	}
 	const originalDbType = column.originalDbType?.trim();
-	const dbType = originalDbType || mapRuntimeBindingColumnType(column.type);
+	const dbType =
+		originalDbType !== undefined
+			? renderColumnDbType(column, runtimeCastTargetSchema(schemaName, naming))
+			: mapRuntimeBindingColumnType(column.type);
 	if (dbType === undefined || dbType.trim() === '') {
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${columnName}' on source table '${sourceTable.name}'.`,
@@ -398,6 +414,8 @@ function resolveRuntimeBindingColumnTypes(
 	binding: NqlRuntimeBinding,
 	model: ModelIR | undefined,
 	sourceTableName: string,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
 ): readonly string[] {
 	if (model === undefined) {
 		throw new Error(
@@ -411,7 +429,13 @@ function resolveRuntimeBindingColumnTypes(
 		);
 	}
 	return binding.columns.map((column) =>
-		resolveRuntimeBindingColumnType(name, sourceTable, column),
+		resolveRuntimeBindingColumnType(
+			name,
+			sourceTable,
+			column,
+			schemaName,
+			naming,
+		),
 	);
 }
 
@@ -448,6 +472,8 @@ function resolvePgTypeForColumnTypeInfo(
 	bindingName: string,
 	column: string,
 	info: NqlBindingColumnTypeInfo,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
 ): string {
 	if (info.kind === 'aggregate' && info.fn !== 'count') {
 		throw new Error(
@@ -459,7 +485,23 @@ function resolvePgTypeForColumnTypeInfo(
 	const rawType =
 		info.kind === 'aggregate'
 			? 'bigint'
-			: originalDbType || mapRuntimeBindingColumnType(info.type);
+			: originalDbType !== undefined
+				? renderColumnDbType(
+						{
+							name: column,
+							type: info.type,
+							nullable: true,
+							originalDbType,
+							...(info.originalDbTypeSchema !== undefined && {
+								originalDbTypeSchema: info.originalDbTypeSchema,
+							}),
+							...(info.originalDbTypeSchemaScope !== undefined && {
+								originalDbTypeSchemaScope: info.originalDbTypeSchemaScope,
+							}),
+						},
+						runtimeCastTargetSchema(schemaName, naming),
+					)
+				: mapRuntimeBindingColumnType(info.type);
 	if (rawType === undefined || rawType.trim() === '') {
 		throw new Error(
 			`NQL runtime binding '${bindingName}' cannot resolve a PostgreSQL type for projected column '${column}'.`,
@@ -481,6 +523,8 @@ function resolvePgTypeForColumnTypeInfo(
 function resolveRuntimeBindingCteColumnTypes(
 	name: string,
 	binding: NqlRuntimeBinding,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
 ): readonly string[] {
 	const columnTypes = binding.columnTypes;
 	if (columnTypes === undefined) {
@@ -495,7 +539,13 @@ function resolveRuntimeBindingCteColumnTypes(
 				`NQL runtime binding '${name}' is missing type info for projected column '${column}'.`,
 			);
 		}
-		return resolvePgTypeForColumnTypeInfo(name, column, info);
+		return resolvePgTypeForColumnTypeInfo(
+			name,
+			column,
+			info,
+			schemaName,
+			naming,
+		);
 	});
 }
 
@@ -513,8 +563,14 @@ function compileTypedNqlRuntimeBindingCte(
 	parameterOffset: number,
 	cteName: string,
 	columnSql: string,
+	targetSchema: string | undefined,
 ): { cte: string; parameters: readonly unknown[] } {
-	const pgTypes = resolveRuntimeBindingCteColumnTypes(name, binding);
+	const pgTypes = resolveRuntimeBindingCteColumnTypes(
+		name,
+		binding,
+		targetSchema,
+		naming,
+	);
 	const anchorColumns = binding.columns
 		.map(
 			(column, columnIndex) =>
@@ -603,6 +659,7 @@ function compileNqlRuntimeBindingCte(
 			parameterOffset,
 			cteName,
 			columnSql,
+			schemaName,
 		);
 	}
 
@@ -630,6 +687,8 @@ function compileNqlRuntimeBindingCte(
 		{ ...binding, columns: binding.columns.map(sourceColumnFor) },
 		model,
 		sourceTable,
+		schemaName,
+		naming,
 	);
 	const parameters: unknown[] = [];
 	let nextParam = parameterOffset + 1;

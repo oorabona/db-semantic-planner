@@ -180,18 +180,41 @@ export interface ColumnIR {
 	readonly default?: unknown;
 
 	/**
-	 * Original database type string from introspection.
+	 * Original database type spelling from introspection or an authored dbType.
 	 * Preserves precision/scale/length info that may be lost in `type`.
+	 *
+	 * For custom database types, this is the bare type spelling only: type name,
+	 * modifiers, and array suffix, with no schema qualification. The type's
+	 * catalog schema and retargeting scope are carried separately by
+	 * `originalDbTypeSchema` and `originalDbTypeSchemaScope`.
 	 *
 	 * @example
 	 * - 'varchar(255)' when type is 'string'
 	 * - 'numeric(10,2)' when type is 'number'
 	 * - 'timestamptz' when type is 'datetime'
+	 * - 'status[]' for an enum array whose schema is in `originalDbTypeSchema`
 	 *
 	 * This is optional and only populated by introspection.
 	 * Manually defined schemas may not have this field.
 	 */
 	readonly originalDbType?: string;
+
+	/**
+	 * Catalog schema for `originalDbType` when it references a custom database
+	 * type. Undefined for PostgreSQL built-ins and for schemas that do not carry
+	 * structural custom type identity.
+	 */
+	readonly originalDbTypeSchema?: string;
+
+	/**
+	 * Scope of `originalDbTypeSchema` for custom database types.
+	 *
+	 * - `target`: type belongs to the managed/model schema and can be retargeted
+	 *   at SQL emission.
+	 * - `absolute`: type belongs to an external/shared schema and always emits
+	 *   against `originalDbTypeSchema`.
+	 */
+	readonly originalDbTypeSchemaScope?: 'target' | 'absolute';
 
 	/** Whether column has a UNIQUE constraint */
 	readonly unique?: boolean;
