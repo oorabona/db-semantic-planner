@@ -5,7 +5,7 @@
  */
 
 import { createRequire } from 'node:module';
-import type { ResolvedSchema } from '@dbsp/core';
+import type { LoadedSchema } from '@dbsp/types';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 
@@ -19,7 +19,7 @@ export interface McpServerOptions {
 	/**
 	 * The loaded schema to expose via MCP.
 	 */
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 
 	/**
 	 * Server name for MCP identification.

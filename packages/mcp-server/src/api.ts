@@ -5,6 +5,8 @@
  * programmatically without launching a subprocess.
  */
 
+export type { LoadedSchema } from '@dbsp/types';
+export { isValidSchema } from '@dbsp/types';
 export {
 	formatLogPath,
 	sanitizeErrorMessage,
@@ -24,7 +26,6 @@ export {
 	loadSchema,
 	SchemaLoadError,
 	validatePath,
-	validateResolvedSchema,
 } from './schema-loader.js';
 export type { McpServerOptions } from './server.js';
 export { createMcpServer, startMcpServer } from './server.js';

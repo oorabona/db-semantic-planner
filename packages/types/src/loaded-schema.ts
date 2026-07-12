@@ -14,13 +14,25 @@ export interface LoadedSchema {
 	readonly tableNames: readonly string[];
 }
 
+function isMap(value: unknown): value is Map<unknown, unknown> {
+	if (typeof value !== 'object' || value === null) return false;
+	try {
+		Map.prototype.has.call(value, undefined);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Runtime type guard for `LoadedSchema` — verifies the object has
- * `definition`, `model` (with nested `tables` + `relations`), and
- * `tableNames` as an array. Structural check only — does not validate
- * the inner values of any field.
+ * Runtime type guard for a `schema()` result. Checks the shapes, not just the
+ * key names: the model's `tables` and `relations` must be real Maps and its
+ * methods real functions, `definition` an object, and `tableNames` an array of
+ * strings. Callers load these from disk and then call `.get()` / `.entries()`
+ * on the model, so an object that merely has the right keys must not pass.
  *
- * Type guard for ARCH-005 schema() output.
+ * It does not validate the schema's contents — only that this is a `schema()`
+ * result rather than an arbitrary object.
  */
 export function isValidSchema(schema: unknown): schema is LoadedSchema {
 	if (
@@ -35,7 +47,11 @@ export function isValidSchema(schema: unknown): schema is LoadedSchema {
 	const s = schema as LoadedSchema;
 	if (typeof s.model !== 'object' || s.model === null) return false;
 	if (!('tables' in s.model) || !('relations' in s.model)) return false;
+	if (!isMap(s.model.tables)) return false;
+	if (!isMap(s.model.relations)) return false;
+	if (typeof s.definition !== 'object' || s.definition === null) return false;
 	if (!Array.isArray(s.tableNames)) return false;
+	if (s.tableNames.some((name) => typeof name !== 'string')) return false;
 	// Validate required ModelIR methods are present
 	if (typeof s.model.getTable !== 'function') return false;
 	if (typeof s.model.getRelation !== 'function') return false;

@@ -420,6 +420,9 @@ importers:
       '@dbsp/core':
         specifier: workspace:*
         version: link:../core
+      '@dbsp/types':
+        specifier: workspace:*
+        version: link:../types
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.29.0(zod@4.3.6)

@@ -15,7 +15,8 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, normalize, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ResolvedSchema } from '@dbsp/core';
+import type { LoadedSchema } from '@dbsp/types';
+import { isValidSchema } from '@dbsp/types';
 import { sanitizeErrorMessage, sanitizePath } from './format-error.js';
 import {
 	_resetWarnFlagForTests as _pvResetWarnFlag,
@@ -48,7 +49,7 @@ export interface SchemaLoaderResult {
 	/**
 	 * The loaded and validated schema.
 	 */
-	schema: ResolvedSchema;
+	schema: LoadedSchema;
 
 	/**
 	 * The resolved absolute path to the schema file.
@@ -292,11 +293,17 @@ export async function loadSchema(
 			);
 		}
 
-		// Validate schema structure
-		validateResolvedSchema(schema);
+		// ARCH-005: Validate schema() format
+		if (!isValidSchema(schema)) {
+			throw new SchemaLoadError(
+				`Invalid schema format in <schema-file>. ` +
+					`Use schema() from @dbsp/core to create schemas.`,
+				'INVALID_SCHEMA',
+			);
+		}
 
 		return {
-			schema: schema as ResolvedSchema,
+			schema,
 			resolvedPath: canonicalPath,
 			canonicalRoots,
 		};
@@ -357,104 +364,8 @@ export async function loadSchema(
 	}
 }
 
-/**
- * Validate that the loaded object has the expected ResolvedSchema structure.
- *
- * This performs a structural duck-type check mirroring the valibot validator at
- * packages/core/src/dx/schema-bridge.ts:911 (ResolvedSchemaValidation).
- * TODO: once @dbsp/core exports ResolvedSchemaValidation publicly, delegate to it
- * via v.safeParse(ResolvedSchemaValidation, schema) instead of this local check.
- *
- * Note: 'defaultFilters' is a valid field on ResolvedSchema but is not part of the
- * valibot validator — this gap is intentional (leave validation of that field for a
- * future public-export ticket).
- */
-
-/**
- * Returns true only for plain objects (Object.prototype or null proto).
- * Rejects Date, Map, Set, RegExp, Array, and other class instances that
- * pass typeof === 'object' but are not valid schema field values (M-D).
- */
-function isPlainObject(v: unknown): v is Record<string, unknown> {
-	if (v === null || typeof v !== 'object' || Array.isArray(v)) return false;
-	const proto = Object.getPrototypeOf(v) as unknown;
-	return proto === Object.prototype || proto === null;
-}
-
 /** @internal Test-only: reset the warn-once flag between test runs. */
 export function _resetWarnFlagForTests(): void {
 	// Delegate to path-validator where the flag now lives.
 	_pvResetWarnFlag();
-}
-
-export function validateResolvedSchema(schema: unknown): void {
-	// Arrays are not valid schemas even though typeof [] === 'object'
-	if (Array.isArray(schema)) {
-		throw new SchemaLoadError(
-			`Invalid schema: expected object, got array. Did you export an array instead of a schema?`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	if (!schema || typeof schema !== 'object') {
-		throw new SchemaLoadError(
-			`Invalid schema: expected object, got ${schema === null ? 'null' : typeof schema}`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	const obj = schema as Record<string, unknown>;
-
-	// Required field: tables must be a plain object (M-D: isPlainObject rejects
-	// Date, Map, Set, RegExp etc. that pass typeof === 'object')
-	if (!isPlainObject(obj.tables)) {
-		throw new SchemaLoadError(
-			`Invalid schema: 'tables' must be a plain object (got ${obj.tables === null ? 'null' : Array.isArray(obj.tables) ? 'array' : typeof obj.tables === 'object' ? Object.prototype.toString.call(obj.tables) : typeof obj.tables})`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	// Required field: relations must be a plain object
-	if (!isPlainObject(obj.relations)) {
-		throw new SchemaLoadError(
-			`Invalid schema: 'relations' must be a plain object (got ${obj.relations === null ? 'null' : Array.isArray(obj.relations) ? 'array' : typeof obj.relations === 'object' ? Object.prototype.toString.call(obj.relations) : typeof obj.relations}). ` +
-				`Did you forget to call defineSchema()?`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	// Required field: hints must be a plain object (may be empty {}).
-	// defineSchema() always populates this — missing means the schema was not
-	// built via the public API and is therefore invalid.
-	if (!isPlainObject(obj.hints)) {
-		throw new SchemaLoadError(
-			`Invalid schema: 'hints' is required and must be a plain object (defineSchema() should populate this)`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	// Required field: conventions must be a plain object.
-	// defineSchema() always populates this — missing means the schema was not
-	// built via the public API and is therefore invalid.
-	if (!isPlainObject(obj.conventions)) {
-		throw new SchemaLoadError(
-			`Invalid schema: 'conventions' is required and must be a plain object (defineSchema() should populate this)`,
-			'INVALID_SCHEMA',
-		);
-	}
-
-	// Required field: indexes must be a plain object.
-	// defineSchema() always populates this — missing means the schema was not
-	// built via the public API and is therefore invalid.
-	//
-	// Validates: tables, relations, hints, conventions, indexes (matches the
-	// ResolvedSchemaValidation valibot schema in @dbsp/core).
-	// Not validated (intentional gap until @dbsp/core exports its validator):
-	// 'defaultFilters' field.
-	if (!isPlainObject(obj.indexes)) {
-		throw new SchemaLoadError(
-			`Invalid schema: 'indexes' is required and must be a plain object (defineSchema() should populate this)`,
-			'INVALID_SCHEMA',
-		);
-	}
 }

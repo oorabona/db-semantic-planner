@@ -5,8 +5,8 @@
  */
 
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
 	afterAll,
 	afterEach,
@@ -22,31 +22,59 @@ import {
 	loadSchema,
 	SchemaLoadError,
 	validatePath,
-	validateResolvedSchema,
 } from './schema-loader.js';
+import { createMcpServer } from './server.js';
 
-// Create a temp directory for test files
-const testDir = join(tmpdir(), `dbsp-mcp-test-${Date.now()}`);
+// Create a temp directory for test files under this package so generated
+// TypeScript fixtures can import workspace source without relying on dist/.
+const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const testDir = join(
+	repoRoot,
+	'packages/mcp-server/.tmp',
+	`dbsp-mcp-test-${Date.now()}`,
+);
 const allowedDir = join(testDir, 'allowed');
 const outsideDir = join(testDir, 'outside');
+const coreEntryImport = relative(
+	allowedDir,
+	join(repoRoot, 'packages/core/src/index.ts'),
+).replaceAll('\\', '/');
 
 beforeAll(() => {
 	// Create test directories
 	mkdirSync(allowedDir, { recursive: true });
 	mkdirSync(outsideDir, { recursive: true });
 
-	// Create valid schema file in allowed dir.
-	// hints, conventions, and indexes are required fields (M4/M5/M6) — always present in defineSchema() output.
+	// Create live schema() files in allowed dir.
 	writeFileSync(
-		join(allowedDir, 'valid-schema.js'),
+		join(allowedDir, 'valid-schema.ts'),
 		`
-		module.exports.schema = {
-			tables: { users: { id: 'uuid', name: 'text' } },
-			relations: {},
-			hints: {},
-			conventions: {},
-				indexes: {}
-		};
+		import { ref, schema as dbSchema } from '${coreEntryImport}';
+
+		export const schema = dbSchema({
+			users: {
+				id: { type: 'integer', primaryKey: true },
+				email: 'string'
+			},
+			posts: {
+				id: { type: 'integer', primaryKey: true },
+				userId: ref('users')
+			}
+		});
+	`,
+	);
+
+	writeFileSync(
+		join(allowedDir, 'default-schema.ts'),
+		`
+		import { schema as dbSchema } from '${coreEntryImport}';
+
+		export default dbSchema({
+			projects: {
+				id: { type: 'integer', primaryKey: true },
+				name: 'string'
+			}
+		});
 	`,
 	);
 
@@ -64,14 +92,28 @@ beforeAll(() => {
 	`,
 	);
 
-	// Create invalid schema (missing relations)
+	// Create invalid schema (not the live schema() result shape)
 	writeFileSync(
 		join(allowedDir, 'invalid-schema.js'),
 		`
 		module.exports.schema = {
 			tables: { users: {} }
-			// missing relations
 		};
+	`,
+	);
+
+	// Create legacy defineSchema() output; MCP now accepts only the live schema() result.
+	writeFileSync(
+		join(allowedDir, 'legacy-schema.ts'),
+		`
+		import { defineSchema } from '${coreEntryImport}';
+
+		export const schema = defineSchema({
+			users: {
+				id: { type: 'uuid', primaryKey: true },
+				email: { type: 'string' }
+			}
+		});
 	`,
 	);
 
@@ -112,11 +154,11 @@ describe('validatePath', () => {
 			// passed to validatePath (path.join would normalize it away before validatePath
 			// sees it, defeating the test's intent of exercising the includes('..') guard).
 			// allowedDir/../allowed resolves to allowedDir itself, which is inside testDir.
-			const pathWithDotDot = `${testDir}/allowed/../allowed/valid-schema.js`;
+			const pathWithDotDot = `${testDir}/allowed/../allowed/valid-schema.ts`;
 			const result = validatePath(pathWithDotDot, [testDir]);
 			// Should resolve to the real path (includes('..') early-exit must NOT fire
 			// because testDir covers the resolved destination)
-			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
+			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.ts'));
 		});
 	});
 
@@ -142,7 +184,7 @@ describe('validatePath', () => {
 
 	describe('allowedRoots validation', () => {
 		it('should allow paths within allowed roots', () => {
-			const schemaPath = join(allowedDir, 'valid-schema.js');
+			const schemaPath = join(allowedDir, 'valid-schema.ts');
 			const result = validatePath(schemaPath, [allowedDir]);
 			expect(result.resolvedPath).toBe(schemaPath);
 		});
@@ -165,7 +207,7 @@ describe('validatePath', () => {
 		});
 
 		it('should handle relative allowed roots', () => {
-			const schemaPath = join(allowedDir, 'valid-schema.js');
+			const schemaPath = join(allowedDir, 'valid-schema.ts');
 			// Use relative path for allowedRoot
 			const result = validatePath(schemaPath, [allowedDir]);
 			expect(result.resolvedPath).toBe(schemaPath);
@@ -196,22 +238,43 @@ describe('loadSchema', () => {
 	describe('successful loading', () => {
 		it('should load a valid schema file', async () => {
 			const result = await loadSchema({
-				schemaPath: join(allowedDir, 'valid-schema.js'),
+				schemaPath: join(allowedDir, 'valid-schema.ts'),
 				allowedRoots: [testDir],
 			});
 
 			expect(result.schema).toBeDefined();
-			expect(result.schema.tables).toHaveProperty('users');
-			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
+			expect(result.schema.model.getTable('users')).toBeDefined();
+			expect(result.schema.tableNames).toContain('users');
+			expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.ts'));
 		});
 
 		it('should respect allowedRoots', async () => {
 			const result = await loadSchema({
-				schemaPath: join(allowedDir, 'valid-schema.js'),
+				schemaPath: join(allowedDir, 'valid-schema.ts'),
 				allowedRoots: [allowedDir],
 			});
 
-			expect(result.schema.tables).toHaveProperty('users');
+			expect(result.schema.model.getTable('users')).toBeDefined();
+		});
+
+		it('should load a live schema from default export', async () => {
+			const result = await loadSchema({
+				schemaPath: join(allowedDir, 'default-schema.ts'),
+				allowedRoots: [testDir],
+			});
+
+			expect(result.schema.model.getTable('projects')).toBeDefined();
+			expect(result.schema.tableNames).toEqual(['projects']);
+		});
+
+		it('should carry a loaded live schema through server creation', async () => {
+			const result = await loadSchema({
+				schemaPath: join(allowedDir, 'valid-schema.ts'),
+				allowedRoots: [testDir],
+			});
+
+			const server = createMcpServer({ schema: result.schema });
+			expect(server).toBeDefined();
 		});
 	});
 
@@ -234,7 +297,7 @@ describe('loadSchema', () => {
 			}
 		});
 
-		it('should throw INVALID_SCHEMA for missing relations', async () => {
+		it('should throw INVALID_SCHEMA for non-schema() format', async () => {
 			await expect(
 				loadSchema({
 					schemaPath: join(allowedDir, 'invalid-schema.js'),
@@ -249,7 +312,30 @@ describe('loadSchema', () => {
 				});
 			} catch (error) {
 				expect((error as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-				expect((error as SchemaLoadError).message).toContain('relations');
+				expect((error as SchemaLoadError).message).toBe(
+					'Invalid schema format in <schema-file>. Use schema() from @dbsp/core to create schemas.',
+				);
+			}
+		});
+
+		it('should reject legacy defineSchema() format with schema() guidance', async () => {
+			await expect(
+				loadSchema({
+					schemaPath: join(allowedDir, 'legacy-schema.ts'),
+					allowedRoots: [testDir],
+				}),
+			).rejects.toThrow(SchemaLoadError);
+
+			try {
+				await loadSchema({
+					schemaPath: join(allowedDir, 'legacy-schema.ts'),
+					allowedRoots: [testDir],
+				});
+			} catch (error) {
+				expect((error as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+				expect((error as SchemaLoadError).message).toBe(
+					'Invalid schema format in <schema-file>. Use schema() from @dbsp/core to create schemas.',
+				);
 			}
 		});
 
@@ -367,7 +453,7 @@ describe('C1 regression: path traversal to existing file', () => {
 
 describe('C1 regression: TOCTOU symlink swap', () => {
 	it('loadSchema should detect symlink swapped to outside allowed root', async () => {
-		// Create a symlink inside allowedDir that initially points to valid-schema.js
+		// Create a symlink inside allowedDir that initially points to valid-schema.ts
 		const symlinkPath = join(allowedDir, 'link-schema.js');
 
 		// Clean up first in case a previous test run left it
@@ -376,7 +462,7 @@ describe('C1 regression: TOCTOU symlink swap', () => {
 		}
 
 		// Create symlink → valid target
-		symlinkSync(join(allowedDir, 'valid-schema.js'), symlinkPath);
+		symlinkSync(join(allowedDir, 'valid-schema.ts'), symlinkPath);
 
 		// Swap symlink to outside target BEFORE loadSchema can import it.
 		// We simulate post-validatePath swap by directly invoking loadSchema with
@@ -437,7 +523,7 @@ describe('M3 regression: raw .. path resolving inside allowedRoots is not reject
 	});
 });
 
-describe('C5 regression: schema structure validation', () => {
+describe('C5 regression: schema format validation', () => {
 	it('should reject an array as schema', async () => {
 		// Write a file that exports an array
 		const arraySchemaPath = join(allowedDir, 'array-schema.js');
@@ -454,137 +540,74 @@ describe('C5 regression: schema structure validation', () => {
 			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-			expect((err as SchemaLoadError).message).toContain('array');
-		}
-	});
-
-	it('validateResolvedSchema rejects arrays directly', () => {
-		expect(() => validateResolvedSchema([])).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema([]);
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-		}
-	});
-
-	it('validateResolvedSchema rejects null', () => {
-		expect(() => validateResolvedSchema(null)).toThrow(SchemaLoadError);
-	});
-
-	it('validateResolvedSchema rejects missing tables', () => {
-		// hints/conventions present so the test isolates the tables check.
-		expect(() =>
-			validateResolvedSchema({ relations: {}, hints: {}, conventions: {} }),
-		).toThrow(SchemaLoadError);
-	});
-
-	it('validateResolvedSchema rejects missing relations', () => {
-		// hints/conventions present so the test isolates the relations check.
-		expect(() =>
-			validateResolvedSchema({ tables: {}, hints: {}, conventions: {} }),
-		).toThrow(SchemaLoadError);
-	});
-
-	it('validateResolvedSchema rejects tables as array', () => {
-		expect(() =>
-			validateResolvedSchema({
-				tables: [] as unknown,
-				relations: {},
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
-	});
-
-	it('validateResolvedSchema accepts valid minimal schema', () => {
-		// hints, conventions, and indexes are now REQUIRED (M4/M5/M6 fix) — defineSchema() always
-		// populates them; a schema without them is not built via the public API.
-		expect(() =>
-			validateResolvedSchema({
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: {},
-				indexes: {},
-			}),
-		).not.toThrow();
-	});
-
-	it('validateResolvedSchema rejects missing hints (M4)', () => {
-		expect(() =>
-			validateResolvedSchema({ tables: {}, relations: {}, conventions: {} }),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({ tables: {}, relations: {}, conventions: {} });
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-			expect((err as SchemaLoadError).message).toContain("'hints' is required");
-		}
-	});
-
-	it('validateResolvedSchema rejects missing conventions (M5)', () => {
-		expect(() =>
-			validateResolvedSchema({ tables: {}, relations: {}, hints: {} }),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({ tables: {}, relations: {}, hints: {} });
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-			expect((err as SchemaLoadError).message).toContain(
-				"'conventions' is required",
+			expect((err as SchemaLoadError).message).toBe(
+				'Invalid schema format in <schema-file>. Use schema() from @dbsp/core to create schemas.',
 			);
 		}
 	});
 
-	it('validateResolvedSchema rejects missing indexes (M6)', () => {
-		// defineSchema() always populates indexes — a schema without it was not
-		// built via the public API and must be rejected before consumers access .indexes.<name>.
-		expect(() =>
-			validateResolvedSchema({
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
+	it('should reject null as schema', async () => {
+		const nullSchemaPath = join(allowedDir, 'null-schema.mjs');
+		writeFileSync(nullSchemaPath, 'export const schema = null;');
+
+		await expect(
+			loadSchema({ schemaPath: nullSchemaPath, allowedRoots: [testDir] }),
+		).rejects.toThrow(SchemaLoadError);
+
 		try {
-			validateResolvedSchema({
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: {},
+			await loadSchema({
+				schemaPath: nullSchemaPath,
+				allowedRoots: [testDir],
 			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-			expect((err as SchemaLoadError).message).toContain(
-				"'indexes' is required",
+			expect((err as SchemaLoadError).message).toBe(
+				"Schema file must export 'schema' or default export: <schema-file>",
 			);
 		}
 	});
 
-	it('validateResolvedSchema rejects indexes as array (M6)', () => {
-		// indexes must be a plain object — an array (e.g. []) is not valid.
-		expect(() =>
-			validateResolvedSchema({
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: {},
-				indexes: [] as unknown,
-			}),
-		).toThrow(SchemaLoadError);
+	it('should reject an object that is not a schema() result', async () => {
+		const manualSchemaPath = join(allowedDir, 'manual-schema.js');
+		writeFileSync(
+			manualSchemaPath,
+			'module.exports.schema = { definition: {}, model: {}, tableNames: [] };',
+		);
+
+		await expect(
+			loadSchema({ schemaPath: manualSchemaPath, allowedRoots: [testDir] }),
+		).rejects.toThrow(SchemaLoadError);
+
 		try {
-			validateResolvedSchema({
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: {},
-				indexes: [] as unknown,
+			await loadSchema({
+				schemaPath: manualSchemaPath,
+				allowedRoots: [testDir],
 			});
 		} catch (err) {
 			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-			expect((err as SchemaLoadError).message).toContain(
-				"'indexes' is required",
+			expect((err as SchemaLoadError).message).toBe(
+				'Invalid schema format in <schema-file>. Use schema() from @dbsp/core to create schemas.',
+			);
+		}
+	});
+
+	it('should reject legacy defineSchema() output with schema() guidance', async () => {
+		await expect(
+			loadSchema({
+				schemaPath: join(allowedDir, 'legacy-schema.ts'),
+				allowedRoots: [testDir],
+			}),
+		).rejects.toThrow(SchemaLoadError);
+
+		try {
+			await loadSchema({
+				schemaPath: join(allowedDir, 'legacy-schema.ts'),
+				allowedRoots: [testDir],
+			});
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
+			expect((err as SchemaLoadError).message).toBe(
+				'Invalid schema format in <schema-file>. Use schema() from @dbsp/core to create schemas.',
 			);
 		}
 	});
@@ -665,23 +688,23 @@ describe('S-A: URL-encoded path traversal bypass', () => {
 
 describe('S-B: TOCTOU re-check uses canonicalRoots from validatePath', () => {
 	it('validatePath returns canonicalRoots, not the raw allowedRoots', () => {
-		const schemaPath = join(allowedDir, 'valid-schema.js');
+		const schemaPath = join(allowedDir, 'valid-schema.ts');
 		// Pass a relative allowed root — validatePath must resolve it
 		const result = validatePath(schemaPath, [allowedDir]);
 		// canonicalRoots should be present and match the resolved allowedDir
 		expect(result).toHaveProperty('canonicalRoots');
 		expect(result.canonicalRoots.length).toBeGreaterThan(0);
 		// resolvedPath must be an absolute path
-		expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.js'));
+		expect(result.resolvedPath).toBe(join(allowedDir, 'valid-schema.ts'));
 	});
 
 	it('loadSchema uses canonicalRoots from validatePath for TOCTOU re-check', async () => {
 		// Verify the TOCTOU code path receives consistent roots by loading a valid schema
 		const result = await loadSchema({
-			schemaPath: join(allowedDir, 'valid-schema.js'),
+			schemaPath: join(allowedDir, 'valid-schema.ts'),
 			allowedRoots: [allowedDir],
 		});
-		expect(result.schema.tables).toHaveProperty('users');
+		expect(result.schema.model.getTable('users')).toBeDefined();
 	});
 });
 
@@ -741,100 +764,40 @@ describe('M-C: error message sanitization (replaceAll + dirname + cap)', () => {
 	});
 });
 
-describe('M-D: validateResolvedSchema rejects non-plain-object instances', () => {
-	it('rejects Date as tables', () => {
-		expect(() =>
-			validateResolvedSchema({
-				tables: new Date(),
-				relations: {},
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({
-				tables: new Date(),
-				relations: {},
-				hints: {},
-				conventions: {},
-			});
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-		}
+describe('M-D: TypeScript loader fallback remains actionable', () => {
+	afterEach(() => {
+		vi.doUnmock('tsx/esm/api');
 	});
 
-	it('rejects Map as tables', () => {
-		expect(() =>
-			validateResolvedSchema({
-				tables: new Map(),
-				relations: {},
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({
-				tables: new Map(),
-				relations: {},
-				hints: {},
-				conventions: {},
-			});
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-		}
-	});
+	it('reports install-tsx guidance when tsx is absent for a .ts schema', async () => {
+		vi.doMock('tsx/esm/api', () => ({
+			tsImport: async () => {
+				throw new Error("Cannot find package 'tsx' imported from test");
+			},
+		}));
 
-	it('rejects RegExp as tables', () => {
-		expect(() =>
-			validateResolvedSchema({
-				tables: /regex/,
-				relations: {},
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({
-				tables: /regex/,
-				relations: {},
-				hints: {},
-				conventions: {},
-			});
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-		}
-	});
+		const tsSchemaPath = join(allowedDir, 'needs-tsx.ts');
+		writeFileSync(
+			tsSchemaPath,
+			`
+			import { schema as dbSchema } from './missing-helper.ts';
+			export const schema = dbSchema({ users: { id: 'integer' } });
+		`,
+		);
 
-	it('rejects Set as relations', () => {
-		expect(() =>
-			validateResolvedSchema({
-				tables: {},
-				relations: new Set(),
-				hints: {},
-				conventions: {},
-			}),
-		).toThrow(SchemaLoadError);
-		try {
-			validateResolvedSchema({
-				tables: {},
-				relations: new Set(),
-				hints: {},
-				conventions: {},
-			});
-		} catch (err) {
-			expect((err as SchemaLoadError).code).toBe('INVALID_SCHEMA');
-		}
-	});
+		await expect(
+			loadSchema({ schemaPath: tsSchemaPath, allowedRoots: [testDir] }),
+		).rejects.toThrow(SchemaLoadError);
 
-	it('accepts plain-object schema (null proto)', () => {
-		// Null-proto objects must also have hints, conventions, and indexes (M4/M5/M6).
-		const nullProtoObj = Object.create(null) as Record<string, unknown>;
-		nullProtoObj.tables = {};
-		nullProtoObj.relations = {};
-		nullProtoObj.hints = {};
-		nullProtoObj.conventions = {};
-		nullProtoObj.indexes = {};
-		expect(() => validateResolvedSchema(nullProtoObj)).not.toThrow();
+		try {
+			await loadSchema({ schemaPath: tsSchemaPath, allowedRoots: [testDir] });
+		} catch (err) {
+			expect((err as SchemaLoadError).code).toBe('LOAD_FAILED');
+			expect((err as SchemaLoadError).message).toContain(
+				"Install 'tsx' as a peer dependency",
+			);
+			expect((err as SchemaLoadError).message).toContain('pnpm add -D tsx');
+		}
 	});
 });
 

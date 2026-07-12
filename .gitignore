@@ -54,6 +54,9 @@ pnpm-debug.log*
 
 # Temporary files
 tmp/
+# Test fixtures written next to a package (the loader only accepts paths under
+# its canonical roots, so they cannot live in the OS temp dir).
+.tmp/
 temp/
 
 # Personal config files (symlinked from home)
