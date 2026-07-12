@@ -63,7 +63,7 @@ function normalizeLiveDiffSql(sql: string): string {
 	return sql.replace(/\s+/g, ' ').trim();
 }
 
-class PoolClientBackedLiveDiffClient {
+class LiveDiffClient {
 	readonly queries: string[] = [];
 	readonly release = vi.fn();
 
@@ -136,6 +136,16 @@ class PoolClientBackedLiveDiffClient {
 	}
 }
 
+function createLiveDiffPool(client: LiveDiffClient): Pool {
+	return {
+		query: vi.fn((sql: string, parameters?: readonly unknown[]) =>
+			client.query(sql, parameters),
+		),
+		connect: vi.fn(async () => client as unknown as PoolClient),
+		end: vi.fn(),
+	} as unknown as Pool;
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -178,6 +188,15 @@ describe('PgsqlAdapter', () => {
 	});
 
 	describe('compareDatabaseSchema', () => {
+		it('does not accept a PoolClient through createPgsqlAdapter', () => {
+			expectTypeOf<
+				Parameters<typeof createPgsqlAdapter>[0]
+			>().toEqualTypeOf<Pool>();
+			expectTypeOf<PoolClient>().not.toMatchTypeOf<
+				Parameters<typeof createPgsqlAdapter>[0]
+			>();
+		});
+
 		it('is callable through scoped and transaction Adapter types without a cast', () => {
 			type DB = { users: { id: number } };
 
@@ -198,9 +217,10 @@ describe('PgsqlAdapter', () => {
 			>();
 		});
 
-		it('uses a PoolClient-backed adapter inside savepoints without releasing or ending the caller transaction', async () => {
-			const client = new PoolClientBackedLiveDiffClient();
-			const adapter = new PgsqlAdapter(client as unknown as PoolClient, {
+		it('uses the adapter pool for live CHECK canonicalization', async () => {
+			const client = new LiveDiffClient();
+			const pool = createLiveDiffPool(client);
+			const adapter = createPgsqlAdapter(pool, {
 				dbCasing: 'snake_case',
 			});
 			const desired = makeLiveDiffModel([
@@ -216,21 +236,21 @@ describe('PgsqlAdapter', () => {
 			const diff = await adapter.compareDatabaseSchema(desired);
 
 			expect(diff.changes).toEqual([]);
-			expect(client.release).not.toHaveBeenCalled();
-			const rootSavepoint = client.queries.find((query) =>
-				/^SAVEPOINT dbsp_check_canon_[a-z0-9]+_root$/iu.test(query),
-			);
-			expect(rootSavepoint).toBeDefined();
-			const rootSavepointName = rootSavepoint!.replace(/^SAVEPOINT /u, '');
-			expect(client.queries).toContain(
-				`ROLLBACK TO SAVEPOINT ${rootSavepointName}`,
-			);
-			expect(client.queries).toContain(
-				`RELEASE SAVEPOINT ${rootSavepointName}`,
-			);
-			expect(client.queries).not.toContain('BEGIN');
+			expect(pool.connect).toHaveBeenCalledOnce();
+			expect(client.release).toHaveBeenCalledOnce();
+			expect(client.queries).toContain('BEGIN');
+			expect(
+				client.queries.some((query) =>
+					/^SAVEPOINT dbsp_check_canon_[a-z0-9]+_sp_0$/iu.test(query),
+				),
+			).toBe(true);
+			expect(
+				client.queries.some((query) =>
+					/^RELEASE SAVEPOINT dbsp_check_canon_[a-z0-9]+_sp_0$/iu.test(query),
+				),
+			).toBe(true);
+			expect(client.queries).toContain('ROLLBACK');
 			expect(client.queries).not.toContain('COMMIT');
-			expect(client.queries).not.toContain('ROLLBACK');
 		});
 	});
 

@@ -31,7 +31,6 @@ export type DriftType =
 	| 'missing_fk_in_db'
 	| 'missing_fk_in_schema'
 	| 'fk_on_delete_mismatch'
-	| 'fk_name_mismatch'
 	// Indexes
 	| 'missing_index_in_db'
 	| 'missing_index_in_schema'
@@ -105,7 +104,6 @@ const CHANGE_TO_DRIFT: Record<
 	add_foreign_key: { type: 'missing_fk_in_db', severity: 'error' },
 	drop_foreign_key: { type: 'missing_fk_in_schema', severity: 'warning' },
 	alter_foreign_key: { type: 'fk_on_delete_mismatch', severity: 'warning' },
-	rename_foreign_key: { type: 'fk_name_mismatch', severity: 'warning' },
 	create_index: { type: 'missing_index_in_db', severity: 'warning' },
 	drop_index: { type: 'missing_index_in_schema', severity: 'info' },
 	// CHECK constraints

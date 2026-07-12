@@ -468,30 +468,6 @@ describe('generateMigrationSQL', () => {
 			);
 		});
 
-		it('should use an explicit FK constraint name when adding', () => {
-			const fk: ForeignKeyIR = {
-				constraintName: 'posts_author_id_fkey',
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-
-			const sql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'add_foreign_key',
-						table: 'posts',
-						destructive: false,
-						details: '',
-						meta: { fk },
-					},
-				]),
-			);
-
-			expect(sql[0]).toBe(
-				'ALTER TABLE "posts" ADD CONSTRAINT "posts_author_id_fkey" FOREIGN KEY ("author_id") REFERENCES "users" ("id");',
-			);
-		});
-
 		it('should qualify a declared referenced schema for ADD FOREIGN KEY', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['ext_id'],
@@ -565,30 +541,6 @@ describe('generateMigrationSQL', () => {
 			);
 		});
 
-		it('should use an explicit FK constraint name when dropping', () => {
-			const fk: ForeignKeyIR = {
-				constraintName: 'posts_author_id_fkey',
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-
-			const sql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'drop_foreign_key',
-						table: 'posts',
-						destructive: true,
-						details: '',
-						meta: { fk },
-					},
-				]),
-			);
-
-			expect(sql[0]).toBe(
-				'ALTER TABLE "posts" DROP CONSTRAINT IF EXISTS "posts_author_id_fkey";',
-			);
-		});
-
 		it('should generate ALTER FOREIGN KEY as drop+add', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],
@@ -613,93 +565,6 @@ describe('generateMigrationSQL', () => {
 			expect(sql[0]).toContain('DROP CONSTRAINT IF EXISTS "fk_posts_user_id"');
 			expect(sql[0]).toContain('ADD CONSTRAINT "fk_posts_user_id"');
 			expect(sql[0]).toContain('ON DELETE SET NULL');
-		});
-
-		it('should drop the old named FK when altering', () => {
-			const fk: ForeignKeyIR = {
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-				onDelete: 'SET NULL',
-			};
-			const oldFk: ForeignKeyIR = {
-				...fk,
-				constraintName: 'posts_author_id_fkey',
-				onDelete: 'CASCADE',
-			};
-
-			const sql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'alter_foreign_key',
-						table: 'posts',
-						destructive: false,
-						details: '',
-						meta: { fk, oldFk },
-					},
-				]),
-			);
-
-			expect(sql[0]).toContain(
-				'DROP CONSTRAINT IF EXISTS "posts_author_id_fkey"',
-			);
-			expect(sql[0]).toContain('ADD CONSTRAINT "fk_posts_author_id"');
-			expect(sql[0]).toContain('ON DELETE SET NULL');
-		});
-
-		it('should generate RENAME CONSTRAINT for an FK rename', () => {
-			const oldFk: ForeignKeyIR = {
-				constraintName: 'posts_author_id_fkey',
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-			const fk: ForeignKeyIR = {
-				...oldFk,
-				constraintName: 'custom_posts_author_fk',
-			};
-
-			const sql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'rename_foreign_key',
-						table: 'posts',
-						destructive: false,
-						details: '',
-						meta: { fk, oldFk },
-					},
-				]),
-			);
-
-			expect(sql).toEqual([
-				'ALTER TABLE "posts" RENAME CONSTRAINT "posts_author_id_fkey" TO "custom_posts_author_fk";',
-			]);
-		});
-
-		it('should reverse an FK rename in DOWN SQL', () => {
-			const oldFk: ForeignKeyIR = {
-				constraintName: 'posts_author_id_fkey',
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-			const fk: ForeignKeyIR = {
-				...oldFk,
-				constraintName: 'custom_posts_author_fk',
-			};
-
-			const sql = generateDownSQL(
-				makeDiff([
-					{
-						kind: 'rename_foreign_key',
-						table: 'posts',
-						destructive: false,
-						details: '',
-						meta: { fk, oldFk },
-					},
-				]),
-			);
-
-			expect(sql).toEqual([
-				'ALTER TABLE "posts" RENAME CONSTRAINT "custom_posts_author_fk" TO "posts_author_id_fkey";',
-			]);
 		});
 	});
 
@@ -1384,6 +1249,61 @@ describe('generateMigrationSQL', () => {
 					'CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" USING hash ("email");',
 				],
 			);
+		});
+
+		it('filters both halves of a same-name CHECK expression replacement when destructive changes are disabled', () => {
+			const schemaTable: TableIR = {
+				...makeTable('users', [
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'age', type: 'integer' }),
+				]),
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age >= 18))',
+					},
+				],
+			};
+			const dbTable: TableIR = {
+				...makeTable('users', [
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'age', type: 'integer' }),
+				]),
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 18))',
+					},
+				],
+			};
+
+			const diff = compareSchemata(
+				makeModel([schemaTable]),
+				makeModel([dbTable]),
+			);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'drop_check_constraint',
+					destructive: true,
+				}),
+				expect.objectContaining({
+					kind: 'add_check_constraint',
+					destructive: true,
+				}),
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age >= 18)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			]);
+			expect(
+				compareSchemata(makeModel([schemaTable]), makeModel([schemaTable]))
+					.changes,
+			).toEqual([]);
 		});
 
 		it('should include destructive changes by default', () => {
@@ -4998,29 +4918,6 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			);
 		});
 
-		it('should generate VALIDATE CONSTRAINT with an explicit FK constraint name', () => {
-			const fk: ForeignKeyIR = {
-				constraintName: 'posts_author_id_fkey',
-				columns: ['author_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-			const sql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'validate_constraint',
-						table: 'posts',
-						destructive: false,
-						details: '',
-						meta: { fk },
-					},
-				]),
-			);
-
-			expect(sql[0]).toBe(
-				'ALTER TABLE "posts" VALIDATE CONSTRAINT "posts_author_id_fkey";',
-			);
-		});
-
 		it('should generate VALIDATE CONSTRAINT for CHECK', () => {
 			const sql = generateMigrationSQL(
 				makeDiff([
@@ -5135,7 +5032,6 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 	describe('compareSchemata emits validate_constraint', () => {
 		it('should emit validate_constraint when FK transitions from notValid to valid', () => {
 			const fkDB: ForeignKeyIR = {
-				constraintName: 'posts_user_id_fkey',
 				columns: ['user_id'],
 				references: { table: 'users', columns: ['id'] },
 				notValid: true,
@@ -5184,129 +5080,7 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			expect(validate).toBeDefined();
 			expect(validate?.table).toBe('posts');
 			expect(generateMigrationSQL(diff)).toEqual([
-				'ALTER TABLE "posts" VALIDATE CONSTRAINT "posts_user_id_fkey";',
-			]);
-		});
-
-		it('should not validate separately when altering a NOT VALID FK', () => {
-			const fkDB: ForeignKeyIR = {
-				constraintName: 'posts_user_id_fkey',
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-				notValid: true,
-			};
-			const fkSchema: ForeignKeyIR = {
-				constraintName: 'custom_posts_user_fk',
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-				onDelete: 'CASCADE',
-			};
-			const usersTable: TableIR = {
-				name: 'users',
-				columns: [],
-				foreignKeys: [],
-				indexes: [],
-			};
-			const diff = compareSchemata(
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						[
-							'posts',
-							{
-								name: 'posts',
-								columns: [],
-								foreignKeys: [fkSchema],
-								indexes: [],
-							},
-						],
-					]),
-					new Map(),
-				),
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						[
-							'posts',
-							{
-								name: 'posts',
-								columns: [],
-								foreignKeys: [fkDB],
-								indexes: [],
-							},
-						],
-					]),
-					new Map(),
-				),
-			);
-
-			expect(diff.changes.map((change) => change.kind)).toEqual([
-				'alter_foreign_key',
-			]);
-			expect(generateMigrationSQL(diff)).toEqual([
-				'ALTER TABLE "posts" DROP CONSTRAINT IF EXISTS "posts_user_id_fkey";\n' +
-					'ALTER TABLE "posts" ADD CONSTRAINT "custom_posts_user_fk" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;',
-			]);
-		});
-
-		it('should rename before validating a NOT VALID FK with an explicit desired name', () => {
-			const fkDB: ForeignKeyIR = {
-				constraintName: 'posts_user_id_fkey',
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-				notValid: true,
-			};
-			const fkSchema: ForeignKeyIR = {
-				constraintName: 'custom_posts_user_fk',
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-			const usersTable: TableIR = {
-				name: 'users',
-				columns: [],
-				foreignKeys: [],
-				indexes: [],
-			};
-			const diff = compareSchemata(
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						[
-							'posts',
-							{
-								name: 'posts',
-								columns: [],
-								foreignKeys: [fkSchema],
-								indexes: [],
-							},
-						],
-					]),
-					new Map(),
-				),
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						[
-							'posts',
-							{
-								name: 'posts',
-								columns: [],
-								foreignKeys: [fkDB],
-								indexes: [],
-							},
-						],
-					]),
-					new Map(),
-				),
-			);
-
-			expect(diff.changes.map((change) => change.kind)).toEqual([
-				'rename_foreign_key',
-				'validate_constraint',
-			]);
-			expect(generateMigrationSQL(diff)).toEqual([
-				'ALTER TABLE "posts" RENAME CONSTRAINT "posts_user_id_fkey" TO "custom_posts_user_fk";',
-				'ALTER TABLE "posts" VALIDATE CONSTRAINT "custom_posts_user_fk";',
+				'ALTER TABLE "posts" VALIDATE CONSTRAINT "fk_posts_user_id";',
 			]);
 		});
 
@@ -5389,66 +5163,6 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			expect(generateMigrationSQL(diff)).toEqual([
 				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
 				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
-			]);
-			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
-				[],
-			);
-		});
-
-		it('should drop and re-add FK NOT VALID when schema asks to unvalidate a validated constraint', () => {
-			const fkSchema: ForeignKeyIR = {
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-				notValid: true,
-			};
-			const fkDB: ForeignKeyIR = {
-				constraintName: 'posts_user_id_fkey',
-				columns: ['user_id'],
-				references: { table: 'users', columns: ['id'] },
-			};
-			const usersTable: TableIR = {
-				name: 'users',
-				columns: [],
-				foreignKeys: [],
-				indexes: [],
-			};
-			const tableSchema: TableIR = {
-				name: 'posts',
-				columns: [],
-				foreignKeys: [fkSchema],
-				indexes: [],
-			};
-			const tableDB: TableIR = {
-				name: 'posts',
-				columns: [],
-				foreignKeys: [fkDB],
-				indexes: [],
-			};
-			const diff = compareSchemata(
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						['posts', tableSchema],
-					]),
-					new Map(),
-				),
-				new ModelIRImpl(
-					new Map([
-						['users', usersTable],
-						['posts', tableDB],
-					]),
-					new Map(),
-				),
-			);
-
-			expect(diff.changes.map((change) => change.kind)).toEqual([
-				'drop_foreign_key',
-				'add_foreign_key',
-			]);
-			expect(diff.changes.every((change) => change.destructive)).toBe(true);
-			expect(generateMigrationSQL(diff)).toEqual([
-				'ALTER TABLE "posts" DROP CONSTRAINT IF EXISTS "posts_user_id_fkey";',
-				'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") NOT VALID;',
 			]);
 			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
 				[],

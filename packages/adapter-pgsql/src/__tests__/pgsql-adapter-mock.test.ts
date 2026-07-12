@@ -27,7 +27,9 @@ import {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeClient(queryImpl?: () => Promise<QueryResult>): PoolClient {
+function makeClient(
+	queryImpl?: (sql?: string) => Promise<QueryResult>,
+): PoolClient {
 	return {
 		query: queryImpl
 			? vi.fn().mockImplementation(queryImpl)
@@ -165,23 +167,35 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 describe('PgsqlAdapter.transaction — reuse existing client', () => {
 	it('returns same adapter instance when already in transaction', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		let capturedAdapter: unknown;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+		let outerAdapter: unknown;
+		let nestedAdapter: unknown;
 
 		await adapter.transaction(async (tx) => {
-			capturedAdapter = tx;
+			outerAdapter = tx;
+			await tx.transaction(async (nested) => {
+				nestedAdapter = nested;
+			});
 		});
 
-		expect(capturedAdapter).toBe(adapter);
+		expect(nestedAdapter).toBe(outerAdapter);
 	});
 
 	it('does NOT issue BEGIN/COMMIT when already in transaction', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
 
-		await adapter.transaction(async () => {});
+		await adapter.transaction(async (tx) => {
+			await tx.transaction(async () => {});
+		});
 
-		expect(client.query).not.toHaveBeenCalled();
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(call) => call[0],
+		);
+		expect(calls.filter((sql) => sql === 'BEGIN')).toHaveLength(1);
+		expect(calls.filter((sql) => sql === 'COMMIT')).toHaveLength(1);
 	});
 });
 
@@ -442,23 +456,29 @@ describe('PgsqlAdapter.stream — with existing client (inTransaction=true)', ()
 	it('uses existing client directly without pool.connect', async () => {
 		const rows: Record<string, unknown>[] = [{ id: 1 }];
 		let callIdx = 0;
-		const client = makeClient(async () => {
+		const client = makeClient(async (sql?: string) => {
+			if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') {
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}
 			callIdx++;
 			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
 			if (callIdx === 2) return { rows, rowCount: 1 } as QueryResult; // FETCH → 1 row
 			if (callIdx === 3) return { rows: [], rowCount: 0 } as QueryResult; // FETCH → done
 			return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
 		});
-
-		const adapter = createPgsqlAdapter(client);
-		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
 
 		const collected: unknown[] = [];
-		for await (const row of iter) {
-			collected.push(row);
-		}
+		await adapter.transaction(async (tx) => {
+			const iter = tx.stream({ sql: 'SELECT * FROM t', parameters: [] });
+			for await (const row of iter) {
+				collected.push(row);
+			}
+		});
 
 		expect(collected).toEqual([{ id: 1 }]);
+		expect(pool.connect).toHaveBeenCalledOnce();
 	});
 });
 

@@ -109,7 +109,6 @@ interface RawForeignKey {
 	update_rule: string;
 	is_deferrable: string;
 	initially_deferred: string;
-	not_valid?: boolean;
 }
 
 interface RawIndex {
@@ -309,8 +308,7 @@ async function queryAllCatalogs(
 			     ELSE 'NO ACTION'
 			   END AS update_rule,
 			   CASE WHEN c.condeferrable THEN 'YES' ELSE 'NO' END AS is_deferrable,
-			   CASE WHEN c.condeferred THEN 'YES' ELSE 'NO' END AS initially_deferred,
-			   NOT c.convalidated AS not_valid
+			   CASE WHEN c.condeferred THEN 'YES' ELSE 'NO' END AS initially_deferred
 			 FROM pg_constraint c
 			 JOIN pg_class source_rel ON source_rel.oid = c.conrelid
 			 JOIN pg_namespace source_ns ON source_ns.oid = source_rel.relnamespace
@@ -738,7 +736,6 @@ function buildPKMap(rows: RawPrimaryKey[]): Map<string, string[]> {
 
 /** FK entry used internally for relation/hierarchy inference. */
 interface FKEntry {
-	constraintName: string;
 	source: string;
 	target: string;
 	targetSchema?: string;
@@ -747,7 +744,6 @@ interface FKEntry {
 	deleteRule: string;
 	updateRule: string;
 	deferred: boolean;
-	notValid: boolean;
 }
 
 /** Build a Map<sourceTable + constraintName, FKEntry> from raw FK rows. */
@@ -759,10 +755,8 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 		if (existing) {
 			existing.cols.push(fk.source_column);
 			existing.refs.push(fk.target_column);
-			existing.notValid ||= fk.not_valid === true;
 		} else {
 			result.set(key, {
-				constraintName: fk.constraint_name,
 				source: fk.source_table,
 				target: fk.target_table,
 				targetSchema: fk.target_schema,
@@ -771,7 +765,6 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 				deleteRule: fk.delete_rule,
 				updateRule: fk.update_rule,
 				deferred: fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
-				notValid: fk.not_valid === true,
 			});
 		}
 	}
@@ -988,7 +981,6 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 		const onDelete = mapDeleteRule(fk.deleteRule);
 		const onUpdate = mapDeleteRule(fk.updateRule);
 		foreignKeys.push({
-			constraintName: fk.constraintName,
 			columns: fk.cols,
 			references: {
 				table: fk.target,
@@ -998,7 +990,6 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
 			...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
 			...(fk.deferred ? { deferred: true } : {}),
-			...(fk.notValid ? { notValid: true } : {}),
 		});
 	}
 

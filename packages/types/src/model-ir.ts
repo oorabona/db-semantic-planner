@@ -242,9 +242,6 @@ export interface ColumnIR {
  * Foreign key constraint
  */
 export interface ForeignKeyIR {
-	/** Database constraint name, when known from introspection or an explicit model */
-	readonly constraintName?: string;
-
 	/** Local columns that form the FK */
 	readonly columns: readonly string[];
 

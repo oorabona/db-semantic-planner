@@ -9,7 +9,6 @@ import {
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
 	generateDDL,
-	generateDownSQL,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl, schema } from '@dbsp/core';
@@ -266,6 +265,74 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			'ALTER TABLE "check_canonicalization_test"."payments" DROP CONSTRAINT IF EXISTS "payments_amount_check";',
 			'DO $$ BEGIN ALTER TABLE "check_canonicalization_test"."payments" ADD CONSTRAINT "payments_amount_check" CHECK ((amount >= 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
 		]);
+		await executeDdl(pool, statements);
+
+		const rediff = await comparePgsqlDatabaseSchema(pool, changed.model, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		expect(rediff.changes).toEqual([]);
+	});
+
+	it('emits neither half of a changed CHECK replacement in additive mode', async () => {
+		const initial = schema(
+			{
+				payments: {
+					id: { type: 'integer', primaryKey: true },
+					amount: 'integer',
+				},
+			},
+			{
+				payments: {
+					checkConstraints: [
+						{ name: 'payments_amount_check', expression: 'amount > 0' },
+					],
+				},
+			},
+		);
+		const changed = schema(
+			{
+				payments: {
+					id: { type: 'integer', primaryKey: true },
+					amount: 'integer',
+				},
+			},
+			{
+				payments: {
+					checkConstraints: [
+						{ name: 'payments_amount_check', expression: 'amount >= 0' },
+					],
+				},
+			},
+		);
+		await executeDdl(pool, generateDDL(initial.model, { schemaName: SCHEMA }));
+
+		const diff = await comparePgsqlDatabaseSchema(pool, changed.model, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		const statements = generateMigrationSQL(diff, {
+			includeDestructive: false,
+			schemaName: SCHEMA,
+		});
+
+		expect(changeKinds(diff)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+		expect(statements).toEqual([]);
+
+		const definition = await pool.query<{ definition: string }>(
+			`SELECT pg_get_constraintdef(c.oid, false) AS definition
+				   FROM pg_constraint c
+				   JOIN pg_class r ON r.oid = c.conrelid
+				   JOIN pg_namespace n ON n.oid = r.relnamespace
+				  WHERE n.nspname = $1
+				    AND r.relname = 'payments'
+				    AND c.conname = 'payments_amount_check'`,
+			[SCHEMA],
+		);
+		expect(definition.rows[0]?.definition).toBe('CHECK ((amount > 0))');
 	});
 
 	it('emits validation change only when CHECK differs by NOT VALID state', async () => {
@@ -365,384 +432,6 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		expect(statements).toEqual([
 			'ALTER TABLE "check_canonicalization_test"."measurements" VALIDATE CONSTRAINT "measurements_amount_check";',
 		]);
-	});
-
-	it('validates introspected NOT VALID FKs using their real default and custom names', async () => {
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.users (
-				id integer PRIMARY KEY
-			)
-		`);
-		// NOT VALID must be added through ALTER TABLE. PostgreSQL accepts the clause
-		// inside CREATE TABLE and then silently ignores it — the constraint comes out
-		// validated (probed: convalidated = true). Leaving it unnamed makes PostgreSQL
-		// assign its own default name, which is the point of this test.
-		await pool.query(`
-			CREATE TABLE ${SCHEMA}.default_posts (
-				id integer PRIMARY KEY,
-				author_id integer NOT NULL
-			)
-		`);
-		await pool.query(`
-			ALTER TABLE ${SCHEMA}.default_posts
-			ADD FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id) NOT VALID
-		`);
-		await pool.query(`
-			CREATE TABLE ${SCHEMA}.custom_posts (
-				id integer PRIMARY KEY,
-				author_id integer NOT NULL
-			)
-		`);
-		await pool.query(`
-			ALTER TABLE ${SCHEMA}.custom_posts
-			ADD CONSTRAINT custom_posts_author_fk
-			FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id) NOT VALID
-		`);
-		const desired = new ModelIRImpl(
-			new Map([
-				[
-					'users',
-					{
-						name: 'users',
-						columns: [makeCol('id')],
-						primaryKey: 'id',
-						foreignKeys: [],
-						indexes: [],
-					},
-				],
-				[
-					'default_posts',
-					{
-						name: 'default_posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-							},
-						],
-						indexes: [],
-					},
-				],
-				[
-					'custom_posts',
-					{
-						name: 'custom_posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-							},
-						],
-						indexes: [],
-					},
-				],
-			]),
-			new Map(),
-		);
-
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		const statements = generateMigrationSQL(diff, {
-			includeDestructive: true,
-			schemaName: SCHEMA,
-		});
-
-		expect(changeKinds(diff)).toEqual([
-			'validate_constraint',
-			'validate_constraint',
-		]);
-		expect(diff.summary.constraints.altered).toBe(2);
-		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."default_posts" VALIDATE CONSTRAINT "default_posts_author_id_fkey";',
-			'ALTER TABLE "check_canonicalization_test"."custom_posts" VALIDATE CONSTRAINT "custom_posts_author_fk";',
-		]);
-		await executeDdl(pool, statements);
-
-		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		expect(rediff.changes).toEqual([]);
-	});
-
-	it('does not validate separately when a NOT VALID FK is altered', async () => {
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.users (
-					id integer PRIMARY KEY
-				)
-			`);
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.posts (
-					id integer PRIMARY KEY,
-					author_id integer NOT NULL
-				)
-			`);
-		await pool.query(`
-				ALTER TABLE ${SCHEMA}.posts
-				ADD CONSTRAINT posts_author_id_fkey
-				FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id) NOT VALID
-			`);
-		const desired = new ModelIRImpl(
-			new Map<string, TableIR>([
-				[
-					'users',
-					{
-						name: 'users',
-						columns: [makeCol('id')],
-						primaryKey: 'id',
-						foreignKeys: [],
-						indexes: [],
-					},
-				],
-				[
-					'posts',
-					{
-						name: 'posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								constraintName: 'custom_posts_author_fk',
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-								onDelete: 'CASCADE',
-							},
-						],
-						indexes: [],
-					},
-				],
-			]),
-			new Map(),
-		);
-
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		const statements = generateMigrationSQL(diff, {
-			includeDestructive: true,
-			schemaName: SCHEMA,
-		});
-
-		expect(changeKinds(diff)).toEqual(['alter_foreign_key']);
-		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" DROP CONSTRAINT IF EXISTS "posts_author_id_fkey";\n' +
-				'ALTER TABLE "check_canonicalization_test"."posts" ADD CONSTRAINT "custom_posts_author_fk" FOREIGN KEY ("author_id") REFERENCES "check_canonicalization_test"."users" ("id") ON DELETE CASCADE;',
-		]);
-		expect(statements.join('\n')).not.toContain('VALIDATE CONSTRAINT');
-		await executeDdl(pool, statements);
-
-		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		expect(rediff.changes).toEqual([]);
-	});
-
-	it('renames an explicitly declared FK constraint and leaves absent names alone', async () => {
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.users (
-					id integer PRIMARY KEY
-				)
-			`);
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.posts (
-					id integer PRIMARY KEY,
-					author_id integer NOT NULL
-				)
-			`);
-		await pool.query(`
-				ALTER TABLE ${SCHEMA}.posts
-				ADD CONSTRAINT old_posts_author_fk
-				FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id)
-			`);
-		const baseTables = new Map<string, TableIR>([
-			[
-				'users',
-				{
-					name: 'users',
-					columns: [makeCol('id')],
-					primaryKey: 'id',
-					foreignKeys: [],
-					indexes: [],
-				},
-			],
-		]);
-		const desiredWithoutName = new ModelIRImpl(
-			new Map<string, TableIR>([
-				...baseTables,
-				[
-					'posts',
-					{
-						name: 'posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-							},
-						],
-						indexes: [],
-					},
-				],
-			]),
-			new Map(),
-		);
-		const desiredWithName = new ModelIRImpl(
-			new Map<string, TableIR>([
-				...baseTables,
-				[
-					'posts',
-					{
-						name: 'posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								constraintName: 'custom_posts_author_fk',
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-							},
-						],
-						indexes: [],
-					},
-				],
-			]),
-			new Map(),
-		);
-
-		const noNameDiff = await comparePgsqlDatabaseSchema(
-			pool,
-			desiredWithoutName,
-			{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
-		);
-		expect(noNameDiff.changes).toEqual([]);
-
-		const diff = await comparePgsqlDatabaseSchema(pool, desiredWithName, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		const statements = generateMigrationSQL(diff, {
-			includeDestructive: true,
-			schemaName: SCHEMA,
-		});
-
-		expect(changeKinds(diff)).toEqual(['rename_foreign_key']);
-		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" RENAME CONSTRAINT "old_posts_author_fk" TO "custom_posts_author_fk";',
-		]);
-		await executeDdl(pool, statements);
-
-		const rediff = await comparePgsqlDatabaseSchema(pool, desiredWithName, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		expect(rediff.changes).toEqual([]);
-
-		const down = generateDownSQL(diff, { schemaName: SCHEMA });
-		expect(down).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" RENAME CONSTRAINT "custom_posts_author_fk" TO "old_posts_author_fk";',
-		]);
-		await executeDdl(pool, down);
-
-		const restored = await pool.query<{ conname: string }>(
-			`SELECT c.conname
-				   FROM pg_constraint c
-				   JOIN pg_class r ON r.oid = c.conrelid
-				   JOIN pg_namespace n ON n.oid = r.relnamespace
-				  WHERE n.nspname = $1
-				    AND r.relname = 'posts'
-				    AND c.contype = 'f'`,
-			[SCHEMA],
-		);
-		expect(restored.rows[0]?.conname).toBe('old_posts_author_fk');
-	});
-
-	it('drops and re-adds FK NOT VALID when desired asks for NOT VALID on a validated FK', async () => {
-		await pool.query(`
-				CREATE TABLE ${SCHEMA}.users (
-				id integer PRIMARY KEY
-			)
-		`);
-		await pool.query(`
-			CREATE TABLE ${SCHEMA}.posts (
-				id integer PRIMARY KEY,
-				author_id integer NOT NULL,
-				FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id)
-			)
-		`);
-		const desired = new ModelIRImpl(
-			new Map([
-				[
-					'users',
-					{
-						name: 'users',
-						columns: [makeCol('id')],
-						primaryKey: 'id',
-						foreignKeys: [],
-						indexes: [],
-					},
-				],
-				[
-					'posts',
-					{
-						name: 'posts',
-						columns: [makeCol('id'), makeCol('author_id')],
-						primaryKey: 'id',
-						foreignKeys: [
-							{
-								columns: ['author_id'],
-								references: { table: 'users', columns: ['id'] },
-								notValid: true,
-							},
-						],
-						indexes: [],
-					},
-				],
-			]),
-			new Map(),
-		);
-
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		const statements = generateMigrationSQL(diff, {
-			includeDestructive: true,
-			schemaName: SCHEMA,
-		});
-
-		expect(changeKinds(diff)).toEqual(['drop_foreign_key', 'add_foreign_key']);
-		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" DROP CONSTRAINT IF EXISTS "posts_author_id_fkey";',
-			'ALTER TABLE "check_canonicalization_test"."posts" ADD CONSTRAINT "fk_posts_author_id" FOREIGN KEY ("author_id") REFERENCES "check_canonicalization_test"."users" ("id") NOT VALID;',
-		]);
-		await executeDdl(pool, statements);
-
-		const fkCount = await pool.query<{ count: string }>(
-			`SELECT count(*)::text AS count
-				   FROM pg_constraint c
-				   JOIN pg_class r ON r.oid = c.conrelid
-				   JOIN pg_namespace n ON n.oid = r.relnamespace
-				  WHERE n.nspname = $1
-				    AND r.relname = 'posts'
-				    AND c.contype = 'f'`,
-			[SCHEMA],
-		);
-		expect(fkCount.rows[0]?.count).toBe('1');
-
-		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
-		expect(rediff.changes).toEqual([]);
 	});
 
 	it('canonicalizes a bare hand-built ModelIR predicate to the full CHECK clause', async () => {

@@ -751,6 +751,24 @@ export interface PgsqlAdapterOptions {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
+const PGSQL_ADAPTER_CLIENT = Symbol('PgsqlAdapter.client');
+
+interface PgsqlAdapterClientConnection {
+	readonly [PGSQL_ADAPTER_CLIENT]: PoolClient;
+}
+
+function clientConnection(client: PoolClient): PgsqlAdapterClientConnection {
+	return { [PGSQL_ADAPTER_CLIENT]: client };
+}
+
+function isClientConnection(
+	value: Pool | PgsqlAdapterClientConnection | undefined,
+): value is PgsqlAdapterClientConnection {
+	return (
+		typeof value === 'object' && value !== null && PGSQL_ADAPTER_CLIENT in value
+	);
+}
+
 // ============================================================================
 // PgsqlAdapter
 // ============================================================================
@@ -785,22 +803,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Create a new PgsqlAdapter.
 	 *
-	 * @param pool - pg.Pool instance, PoolClient (transactions), or undefined (compile-only mode)
+	 * @param pool - pg.Pool instance, or undefined (compile-only mode)
 	 * @param options - Optional configuration
 	 */
+	constructor(pool?: Pool | undefined, options?: PgsqlAdapterOptions);
 	constructor(
-		pool?: Pool | PoolClient | undefined,
+		poolOrClient?: Pool | PgsqlAdapterClientConnection | undefined,
 		options?: PgsqlAdapterOptions,
 	) {
-		if (pool != null) {
-			// Detect if this is a PoolClient (transaction context)
-			if ('release' in pool && typeof pool.release === 'function') {
-				this.client = pool as PoolClient;
-				this.pool = undefined;
-			} else {
-				this.pool = pool as Pool;
-				this.client = undefined;
-			}
+		if (isClientConnection(poolOrClient)) {
+			this.client = poolOrClient[PGSQL_ADAPTER_CLIENT];
+			this.pool = undefined;
+		} else if (poolOrClient != null) {
+			this.pool = poolOrClient;
+			this.client = undefined;
 		} else {
 			// Compile-only mode — no pool/client
 			this.pool = undefined;
@@ -819,11 +835,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this._capabilities = {
 			supportsReturning: true,
 			supportsSchemas: true,
-			supportsStreaming: pool != null,
+			supportsStreaming: this.pool !== undefined || this.client !== undefined,
 			supportsRecursiveCTE: true,
 			supportsWindowFunctions: true,
 			supportsArrayType: true,
 		};
+	}
+
+	private static fromClient<DB = unknown>(
+		client: PoolClient,
+		options?: PgsqlAdapterOptions,
+	): PgsqlAdapter<DB> {
+		return new PgsqlAdapter<DB>(
+			clientConnection(client) as unknown as Pool,
+			options,
+		);
 	}
 
 	/**
@@ -1150,6 +1176,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Get the underlying pg Pool instance.
 	 */
 	getPoolInstance(): Pool {
+		if (this.pool) return this.pool;
+		if (this.client) {
+			throw new Error(
+				'PgsqlAdapter is scoped to a transaction client and has no underlying pg Pool instance.',
+			);
+		}
 		return this.requireConnection() as Pool;
 	}
 
@@ -1702,7 +1734,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 			// Create transaction-scoped adapter preserving all configuration
 			const txOptions: PgsqlAdapterOptions = this.cloneOptions({});
-			const txAdapter = new PgsqlAdapter<DB>(client, txOptions);
+			const txAdapter = PgsqlAdapter.fromClient<DB>(client, txOptions);
 
 			const result = await fn(txAdapter);
 
@@ -1725,7 +1757,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		// Create new adapter preserving all configuration, only overriding schemaName
 		const options: PgsqlAdapterOptions = this.cloneOptions({ schemaName });
-		return new PgsqlAdapter<DB>(this.client ?? this.pool ?? undefined, options);
+		return this.client
+			? PgsqlAdapter.fromClient<DB>(this.client, options)
+			: new PgsqlAdapter<DB>(this.pool, options);
 	}
 
 	// =========================================================================
@@ -1989,7 +2023,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
  * ```
  */
 export function createPgsqlAdapter<DB = unknown>(
-	pool: Pool | PoolClient,
+	pool: Pool,
 	options?: PgsqlAdapterOptions,
 ): PgsqlAdapter<DB> {
 	return new PgsqlAdapter<DB>(pool, options);

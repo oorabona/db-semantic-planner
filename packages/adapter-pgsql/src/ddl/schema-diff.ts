@@ -58,7 +58,6 @@ export type ChangeKind =
 	| 'add_foreign_key'
 	| 'drop_foreign_key'
 	| 'alter_foreign_key'
-	| 'rename_foreign_key'
 	| 'validate_constraint'
 	// Indexes
 	| 'create_index'
@@ -811,7 +810,7 @@ function compareForeignKeys(
 				meta: { fk },
 			});
 		} else {
-			// FK exists in both: column identity is stable; compare properties.
+			// FK exists in both — check onDelete, onUpdate, deferred, and notValid
 			const dbFK = dbFKMap.get(key)!;
 			const schemaOnDelete = fk.onDelete ?? 'NO ACTION';
 			const dbOnDelete = dbFK.onDelete ?? 'NO ACTION';
@@ -819,17 +818,11 @@ function compareForeignKeys(
 			const dbOnUpdate = dbFK.onUpdate ?? 'NO ACTION';
 			const schemaDeferred = fk.deferred ?? false;
 			const dbDeferred = dbFK.deferred ?? false;
-			const dbNotValid = dbFK.notValid ?? false;
-			const schemaNotValid = fk.notValid ?? false;
-			const needsBehaviorReplacement =
+			if (
 				schemaOnDelete !== dbOnDelete ||
 				schemaOnUpdate !== dbOnUpdate ||
-				schemaDeferred !== dbDeferred;
-			const needsRename =
-				fk.constraintName !== undefined &&
-				fk.constraintName !== dbFK.constraintName;
-
-			if (needsBehaviorReplacement) {
+				schemaDeferred !== dbDeferred
+			) {
 				changes.push({
 					kind: 'alter_foreign_key',
 					table: schema.name,
@@ -837,45 +830,17 @@ function compareForeignKeys(
 					details: `Alter FK (${fk.columns.join(', ')}) — onDelete/onUpdate/deferred changed`,
 					meta: { fk, previousOnDelete: dbOnDelete, oldFk: dbFK },
 				});
-			} else if (dbNotValid && !schemaNotValid) {
-				if (needsRename) {
-					changes.push({
-						kind: 'rename_foreign_key',
-						table: schema.name,
-						destructive: false,
-						details: `Rename FK constraint "${dbFK.constraintName ?? ''}" to "${fk.constraintName}"`,
-						meta: { fk, oldFk: dbFK },
-					});
-				}
+			}
+			// notValid: true in DB but false/undefined in schema → emit validate_constraint
+			const dbNotValid = dbFK.notValid ?? false;
+			const schemaNotValid = fk.notValid ?? false;
+			if (dbNotValid && !schemaNotValid) {
 				changes.push({
 					kind: 'validate_constraint',
 					table: schema.name,
 					destructive: false,
 					details: `Validate FK constraint on (${fk.columns.join(', ')})`,
-					meta: { fk: needsRename ? fk : dbFK },
-				});
-			} else if (!dbNotValid && schemaNotValid) {
-				changes.push({
-					kind: 'drop_foreign_key',
-					table: schema.name,
-					destructive: true,
-					details: `Drop FK (${dbFK.columns.join(', ')}) → ${dbFK.references.table}(${dbFK.references.columns.join(', ')}) to re-add NOT VALID`,
-					meta: { fk: dbFK },
-				});
-				changes.push({
-					kind: 'add_foreign_key',
-					table: schema.name,
-					destructive: true,
-					details: `Re-add FK (${fk.columns.join(', ')}) → ${fk.references.table}(${fk.references.columns.join(', ')}) NOT VALID`,
 					meta: { fk },
-				});
-			} else if (needsRename) {
-				changes.push({
-					kind: 'rename_foreign_key',
-					table: schema.name,
-					destructive: false,
-					details: `Rename FK constraint "${dbFK.constraintName ?? ''}" to "${fk.constraintName}"`,
-					meta: { fk, oldFk: dbFK },
 				});
 			}
 		}
@@ -1331,7 +1296,7 @@ function compareCheckConstraints(
 				changes.push({
 					kind: 'add_check_constraint',
 					table: schema.name,
-					destructive: false,
+					destructive: true,
 					details: `Add CHECK constraint "${name}" ${check.expression}`,
 					meta: { check },
 				});
@@ -1726,7 +1691,6 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				constraints.dropped++;
 				break;
 			case 'alter_foreign_key':
-			case 'rename_foreign_key':
 			case 'validate_constraint':
 				constraints.altered++;
 				break;

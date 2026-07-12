@@ -95,10 +95,15 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 		expect(adapter.capabilities.supportsStreaming).toBe(true);
 	});
 
-	it('constructor detects PoolClient (has release method) — inTransaction=true', () => {
+	it('transaction-scoped adapter reports inTransaction=true', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		expect(adapter.inTransaction).toBe(true);
+		const pool = makePool();
+		(pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async (tx) => {
+			expect((tx as { inTransaction: boolean }).inTransaction).toBe(true);
+		});
 	});
 
 	it('inTransaction is false when created from pool', () => {
@@ -149,14 +154,24 @@ describe('PgsqlAdapter.introspect', () => {
 describe('PgsqlAdapter.transaction', () => {
 	it('reuses existing client when already in transaction', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		let capturedAdapter: unknown;
+		const pool = makePool();
+		(pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
+		const adapter = createPgsqlAdapter(pool);
+		let outerAdapter: unknown;
+		let nestedAdapter: unknown;
+
 		await adapter.transaction(async (tx) => {
-			capturedAdapter = tx;
+			outerAdapter = tx;
+			await tx.transaction(async (nested) => {
+				nestedAdapter = nested;
+			});
 		});
-		expect(capturedAdapter).toBe(adapter);
-		// BEGIN/COMMIT should NOT have been issued
-		expect(client.query).not.toHaveBeenCalled();
+		expect(nestedAdapter).toBe(outerAdapter);
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0],
+		);
+		expect(calls.filter((sql) => sql === 'BEGIN')).toHaveLength(1);
+		expect(calls.filter((sql) => sql === 'COMMIT')).toHaveLength(1);
 	});
 
 	it('rolls back on fn error', async () => {

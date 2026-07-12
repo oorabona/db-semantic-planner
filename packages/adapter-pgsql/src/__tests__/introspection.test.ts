@@ -736,32 +736,6 @@ describe('introspect', () => {
 		expect(posts.foreignKeys[0]!.onDelete).toBe('CASCADE');
 	});
 
-	it('should include FK NOT VALID state from pg_constraint', async () => {
-		const fks = [
-			{
-				constraint_name: 'fk_posts_author_id',
-				source_table: 'posts',
-				source_column: 'author_id',
-				target_schema: 'public',
-				target_table: 'users',
-				target_column: 'id',
-				delete_rule: 'NO ACTION',
-				update_rule: 'NO ACTION',
-				is_deferrable: 'NO',
-				initially_deferred: 'NO',
-				not_valid: true,
-			},
-		];
-		const pool = createMockPool([usersPostsColumns, usersPostsPKs, fks]);
-
-		const result = await introspect(pool);
-
-		const posts = result.tables.get('posts')!;
-		expect(posts.foreignKeys).toHaveLength(1);
-		expect(posts.foreignKeys[0]!.constraintName).toBe('fk_posts_author_id');
-		expect(posts.foreignKeys[0]!.notValid).toBe(true);
-	});
-
 	it('should include column defaults', async () => {
 		const columns = [
 			{
@@ -1328,8 +1302,6 @@ describe('introspect [P1-T2]: OnDeleteAction SET DEFAULT round-trip', () => {
 
 		expect(result.tables.get('posts')?.foreignKeys).toHaveLength(1);
 		expect(result.tables.get('comments')?.foreignKeys).toHaveLength(1);
-		expect(postsFk?.constraintName).toBe('owner_id_fkey');
-		expect(commentsFk?.constraintName).toBe('owner_id_fkey');
 		expect(postsFk?.columns).toEqual(['owner_id']);
 		expect(postsFk?.references).toEqual({
 			table: 'users',

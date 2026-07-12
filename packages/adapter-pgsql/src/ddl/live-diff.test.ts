@@ -8,7 +8,6 @@ import {
 	comparePgsqlDatabaseSchema,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
-import { generateMigrationSQL } from './migration-sql.js';
 import type { SchemaDiff } from './schema-diff.js';
 
 function checkExpressionDiff(
@@ -180,92 +179,6 @@ interface FakeQueryableClient {
 	): Promise<QueryResult<T>>;
 }
 
-class FakeForeignKeyLiveDiffClient implements FakeQueryableClient {
-	readonly queries: string[] = [];
-	readonly release = vi.fn();
-
-	async query<T extends Record<string, unknown> = Record<string, unknown>>(
-		sql: string,
-	): Promise<QueryResult<T>> {
-		const normalized = normalizeSql(sql);
-		this.queries.push(normalized);
-
-		if (normalized.includes('FROM information_schema.columns')) {
-			return {
-				rows: [
-					{
-						table_name: 'users',
-						column_name: 'id',
-						data_type: 'integer',
-						udt_name: 'int4',
-						is_nullable: 'NO',
-						column_default: null,
-						collation_name: null,
-						is_identity: 'NO',
-						identity_generation: null,
-					},
-					{
-						table_name: 'posts',
-						column_name: 'id',
-						data_type: 'integer',
-						udt_name: 'int4',
-						is_nullable: 'NO',
-						column_default: null,
-						collation_name: null,
-						is_identity: 'NO',
-						identity_generation: null,
-					},
-					{
-						table_name: 'posts',
-						column_name: 'author_id',
-						data_type: 'integer',
-						udt_name: 'int4',
-						is_nullable: 'NO',
-						column_default: null,
-						collation_name: null,
-						is_identity: 'NO',
-						identity_generation: null,
-					},
-				] as T[],
-				rowCount: 3,
-			} as QueryResult<T>;
-		}
-
-		if (normalized.includes('FROM information_schema.table_constraints')) {
-			return {
-				rows: [
-					{ table_name: 'users', column_name: 'id' },
-					{ table_name: 'posts', column_name: 'id' },
-				] as T[],
-				rowCount: 2,
-			} as QueryResult<T>;
-		}
-
-		if (normalized.includes("c.contype = 'f'")) {
-			return {
-				rows: [
-					{
-						constraint_name: 'posts_author_id_fkey',
-						source_table: 'posts',
-						source_column: 'author_id',
-						target_schema: 'public',
-						target_table: 'users',
-						target_column: 'id',
-						delete_rule: 'NO ACTION',
-						update_rule: 'NO ACTION',
-						is_deferrable: 'NO',
-						initially_deferred: 'NO',
-						not_valid: true,
-					},
-				] as T[],
-				rowCount: 1,
-			} as QueryResult<T>;
-		}
-
-		return { rows: [], rowCount: 0 } as QueryResult<T>;
-	}
-}
-
 class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 	readonly queries: string[] = [];
 	readonly release = vi.fn();
@@ -418,43 +331,6 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
-	it('emits validation SQL when an introspected foreign key is NOT VALID but desired is validated', async () => {
-		const desired = makeModel([
-			makeTable({
-				name: 'users',
-				columns: [makeCol('id')],
-				primaryKey: 'id',
-			}),
-			makeTable({
-				name: 'posts',
-				columns: [makeCol('id'), makeCol('author_id')],
-				primaryKey: 'id',
-				foreignKeys: [
-					{
-						columns: ['author_id'],
-						references: { table: 'users', columns: ['id'] },
-					},
-				],
-			}),
-		]);
-		const client = new FakeForeignKeyLiveDiffClient();
-		const pool = new FakeLiveDiffPool(client);
-
-		const diff = await comparePgsqlDatabaseSchema(
-			pool as unknown as Pool,
-			desired,
-		);
-		const statements = generateMigrationSQL(diff);
-
-		expect(diff.changes.map((change) => change.kind)).toEqual([
-			'validate_constraint',
-		]);
-		expect(diff.summary.constraints.altered).toBe(1);
-		expect(statements).toEqual([
-			'ALTER TABLE "posts" VALIDATE CONSTRAINT "posts_author_id_fkey";',
-		]);
-	});
-
 	it('refuses a CHECK on an existing enum column without desired originalDbType when the diff adds the enum value', async () => {
 		const desired = makeModelWithEnums(
 			[
