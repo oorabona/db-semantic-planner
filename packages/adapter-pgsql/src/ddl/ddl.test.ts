@@ -1404,6 +1404,113 @@ describe('ENUM types in DDL', () => {
 		]);
 	});
 
+	it('should treat schemaName as a verbatim database identifier under naming plugins', () => {
+		const ownersTable: TableIR = {
+			name: 'tenantOwners',
+			columns: [{ name: 'id', type: 'integer', nullable: false }],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const jobsTable: TableIR = {
+			name: 'jobQueue',
+			columns: [
+				{ name: 'id', type: 'integer', nullable: false },
+				{ name: 'ownerId', type: 'integer', nullable: false },
+				{
+					name: 'status',
+					type: 'string',
+					nullable: false,
+					comment: 'Current status',
+					originalDbType: 'status',
+					originalDbTypeSchema: 'tenantOne',
+					originalDbTypeSchemaScope: 'target',
+				},
+				{ name: 'priority', type: 'integer', nullable: false },
+			],
+			primaryKey: 'id',
+			foreignKeys: [
+				{
+					columns: ['ownerId'],
+					references: { table: 'tenantOwners', columns: ['id'] },
+					onDelete: 'CASCADE',
+				},
+			],
+			indexes: [{ name: 'idx_job_queue_status', columns: ['status'] }],
+			checkConstraints: [
+				{
+					name: 'jobQueuePriorityCheck',
+					expression: 'CHECK ((priority >= 0))',
+				},
+			],
+			rlsEnabled: true,
+			comment: 'Job queue',
+		};
+		const model = new ModelIRImpl(
+			new Map([
+				[ownersTable.name, ownersTable],
+				[jobsTable.name, jobsTable],
+			]),
+			new Map(),
+			new Map([
+				[
+					'status',
+					{
+						name: 'status',
+						schema: 'tenantOne',
+						values: ['queued', 'done'],
+					},
+				],
+			]),
+			undefined,
+			new Map([['job_id_seq', { name: 'job_id_seq' } satisfies SequenceIR]]),
+		);
+
+		const statements = generateDDL(model, {
+			schemaName: 'tenantOne',
+			naming: camelCaseNaming,
+		});
+
+		// This used to be wrongly transformed to "tenant_one" by the naming plugin.
+		expect(statements.join('\n')).not.toContain('"tenant_one"');
+		expect(statements).toContain('CREATE SEQUENCE "tenantOne"."job_id_seq";');
+		expect(statements).toContain(
+			'CREATE TYPE "tenantOne"."status" AS ENUM (\'queued\', \'done\');',
+		);
+		expect(statements).toContain(`CREATE TABLE "tenantOne"."tenant_owners" (
+  "id" INTEGER NOT NULL,
+  CONSTRAINT "pk_tenantOwners" PRIMARY KEY ("id")
+);`);
+		expect(statements).toContain(`CREATE TABLE "tenantOne"."job_queue" (
+  "id" INTEGER NOT NULL,
+  "owner_id" INTEGER NOT NULL,
+  "status" "tenantOne".status NOT NULL,
+  "priority" INTEGER NOT NULL,
+  CONSTRAINT "pk_jobQueue" PRIMARY KEY ("id")
+);`);
+		expect(statements).toContain(
+			'ALTER TABLE "tenantOne"."job_queue" ADD CONSTRAINT "fk_jobQueue_ownerId" FOREIGN KEY ("owner_id") REFERENCES "tenantOne"."tenant_owners" ("id") ON DELETE CASCADE;',
+		);
+		expect(statements).toContain(
+			'ALTER TABLE "tenantOne"."job_queue" ADD CONSTRAINT "job_queue_priority_check" CHECK ((priority >= 0));',
+		);
+		expect(statements).toContain(
+			'CREATE INDEX "idx_job_queue_status" ON "tenantOne"."job_queue" ("status");',
+		);
+		expect(statements).toContain(
+			'CREATE INDEX "idx_job_queue_owner_id" ON "tenantOne"."job_queue" ("owner_id");',
+		);
+		expect(statements).toContain(
+			'ALTER TABLE "tenantOne"."job_queue" ENABLE ROW LEVEL SECURITY;',
+		);
+		expect(statements).toContain(
+			'COMMENT ON TABLE "tenantOne"."job_queue" IS \'Job queue\';',
+		);
+		expect(statements).toContain(
+			'COMMENT ON COLUMN "tenantOne"."job_queue"."status" IS \'Current status\';',
+		);
+	});
+
 	it('should skip ENUM pass when schema has no enums', () => {
 		const schema = {
 			tables: new Map([

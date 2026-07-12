@@ -15,6 +15,7 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
+import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
 
@@ -39,9 +40,10 @@ export function compileSubqueryInclude(
 
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
+		const dbTargetTable = deps.naming.toDatabase(info.targetTable);
 		const tableName = schemaName
-			? `"${deps.naming.toDatabase(schemaName)}"."${deps.naming.toDatabase(info.targetTable)}"`
-			: `"${deps.naming.toDatabase(info.targetTable)}"`;
+			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
+			: quoteIdent(dbTargetTable, 'table');
 
 		return {
 			sql: `SELECT * FROM ${tableName} WHERE FALSE`,
@@ -81,7 +83,7 @@ export function compileSubqueryInclude(
 				inh: true,
 				relpersistence: 'p',
 				...(schemaName && {
-					schemaname: deps.naming.toDatabase(schemaName),
+					schemaname: schemaName,
 				}),
 			},
 		},

@@ -94,7 +94,10 @@ export function supportsIntrospection(
 ): adapter is IntrospectingAdapter {
 	return (
 		'introspect' in adapter &&
-		typeof (adapter as IntrospectingAdapter).introspect === 'function'
+		'compareDatabaseSchema' in adapter &&
+		typeof (adapter as IntrospectingAdapter).introspect === 'function' &&
+		typeof (adapter as IntrospectingAdapter).compareDatabaseSchema ===
+			'function'
 	);
 }
 

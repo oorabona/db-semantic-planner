@@ -2801,14 +2801,15 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 	});
 
 	describe('constructor — PoolClient detection', () => {
-		it('detects PoolClient via release method', () => {
+		it('rejects PoolClient via release method', () => {
 			const fakeClient = {
 				release: () => {},
 				query: async () => ({ rows: [] }),
 			} as any;
 
-			const adapter = new PgsqlAdapter(fakeClient);
-			expect(adapter.capabilities.supportsStreaming).toBe(true);
+			expect(() => new PgsqlAdapter(fakeClient)).toThrow(
+				/createPgsqlAdapter\(\) expects a pg Pool, but received a PoolClient\. Pass the Pool itself/,
+			);
 		});
 	});
 });

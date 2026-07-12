@@ -690,7 +690,7 @@ export function compileInsertFrom(
 		relpersistence: 'p',
 	};
 	if (sourceSchema) {
-		sourceRelation.schemaname = naming.toDatabase(sourceSchema);
+		sourceRelation.schemaname = sourceSchema;
 	}
 
 	const selectQuery: Node = {
@@ -808,7 +808,7 @@ export function compileUpsertFrom(
 		relpersistence: 'p',
 	};
 	if (sourceSchema) {
-		sourceRelation.schemaname = naming.toDatabase(sourceSchema);
+		sourceRelation.schemaname = sourceSchema;
 	}
 
 	const selectQuery: Node = {

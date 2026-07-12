@@ -277,10 +277,7 @@ function getColumnTypes(
 	const table = deps.model.getTable(tableName);
 	if (!table) return undefined;
 	let result: Record<string, string> | undefined;
-	const targetSchema =
-		deps.schemaName !== undefined
-			? deps.naming.toDatabase(deps.schemaName)
-			: undefined;
+	const targetSchema = deps.schemaName;
 	for (const col of columns) {
 		const columnIR = table.columns.find((c) => c.name === col);
 		if (columnIR) {

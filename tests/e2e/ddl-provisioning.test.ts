@@ -10,12 +10,14 @@
  */
 
 import {
+	camelCaseNaming,
 	compareSchemata,
 	generateDDL,
 	generateMigrationSQL,
 	introspect,
 } from '@dbsp/adapter-pgsql';
-import { ref, schema } from '@dbsp/core';
+import { ModelIRImpl, ref, schema } from '@dbsp/core';
+import type { SequenceIR, TableIR } from '@dbsp/types';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
 import {
@@ -131,6 +133,103 @@ describe('DDL Provisioning E2E', () => {
 			const result = await executeDdl(pool, statements);
 			expect(result.statementsExecuted).toBeGreaterThan(0);
 			expect(result.dryRun).toBe(false);
+		});
+
+		it('applies generated DDL with a verbatim mixed-case schemaName under a naming plugin', async () => {
+			const tenantSchema = 'ddlTenantOne';
+			const ownersTable: TableIR = {
+				name: 'tenantOwners',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			const jobsTable: TableIR = {
+				name: 'jobQueue',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'ownerId', type: 'integer', nullable: false },
+					{
+						name: 'status',
+						type: 'string',
+						nullable: false,
+						comment: 'Current status',
+						originalDbType: 'status',
+						originalDbTypeSchema: tenantSchema,
+						originalDbTypeSchemaScope: 'target',
+					},
+					{ name: 'priority', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['ownerId'],
+						references: { table: 'tenantOwners', columns: ['id'] },
+						onDelete: 'CASCADE',
+					},
+				],
+				indexes: [{ name: 'idx_job_queue_status', columns: ['status'] }],
+				checkConstraints: [
+					{
+						name: 'jobQueuePriorityCheck',
+						expression: 'CHECK ((priority >= 0))',
+					},
+				],
+				rlsEnabled: true,
+				comment: 'Job queue',
+			};
+			const schemaModel = new ModelIRImpl(
+				new Map([
+					[ownersTable.name, ownersTable],
+					[jobsTable.name, jobsTable],
+				]),
+				new Map(),
+				new Map([
+					[
+						'status',
+						{
+							name: 'status',
+							schema: tenantSchema,
+							values: ['queued', 'done'],
+						},
+					],
+				]),
+				undefined,
+				new Map([['job_id_seq', { name: 'job_id_seq' } satisfies SequenceIR]]),
+			);
+
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				const statements = generateDDL(schemaModel, {
+					schemaName: tenantSchema,
+					naming: camelCaseNaming,
+				});
+				expect(statements.join('\n')).not.toContain('"ddl_tenant_one"');
+
+				const result = await executeDdl(pool, statements);
+				expect(result.statementsExecuted).toBe(statements.length);
+
+				const tables = await pool.query<{ table_name: string }>(
+					`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`,
+					[tenantSchema],
+				);
+				expect(tables.rows.map((row) => row.table_name)).toEqual([
+					'job_queue',
+					'tenant_owners',
+				]);
+
+				const enumType = await pool.query<{ typname: string }>(
+					`SELECT t.typname
+					 FROM pg_type t
+					 JOIN pg_namespace n ON n.oid = t.typnamespace
+					 WHERE n.nspname = $1 AND t.typname = $2`,
+					[tenantSchema, 'status'],
+				);
+				expect(enumType.rows).toHaveLength(1);
+			} finally {
+				await dropSchema(tenantSchema);
+			}
 		});
 
 		it('should be idempotent — no changes when schema matches', async () => {

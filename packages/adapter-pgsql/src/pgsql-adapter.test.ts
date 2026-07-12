@@ -185,6 +185,17 @@ describe('PgsqlAdapter', () => {
 
 			expect(adapter).toBeInstanceOf(PgsqlAdapter);
 		});
+
+		it('rejects a checked-out PoolClient passed as the pool', () => {
+			const client = {
+				query: vi.fn(),
+				release: vi.fn(),
+			} as unknown as PoolClient;
+
+			expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
+				/createPgsqlAdapter\(\) expects a pg Pool, but received a PoolClient\. Pass the Pool itself/,
+			);
+		});
 	});
 
 	describe('compareDatabaseSchema', () => {

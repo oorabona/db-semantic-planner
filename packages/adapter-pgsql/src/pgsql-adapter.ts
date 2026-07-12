@@ -368,19 +368,11 @@ function findRuntimeBindingSourceTable(
 	);
 }
 
-function runtimeCastTargetSchema(
-	schemaName: string | undefined,
-	naming: NamingPlugin,
-): string | undefined {
-	return schemaName !== undefined ? naming.toDatabase(schemaName) : undefined;
-}
-
 function resolveRuntimeBindingColumnType(
 	bindingName: string,
 	sourceTable: TableIR,
 	columnName: string,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): string {
 	const column = sourceTable.columns.find(
 		(candidate) => candidate.name === columnName,
@@ -393,7 +385,7 @@ function resolveRuntimeBindingColumnType(
 	const originalDbType = column.originalDbType?.trim();
 	const dbType =
 		originalDbType !== undefined
-			? renderColumnDbType(column, runtimeCastTargetSchema(schemaName, naming))
+			? renderColumnDbType(column, schemaName)
 			: mapRuntimeBindingColumnType(column.type);
 	if (dbType === undefined || dbType.trim() === '') {
 		throw new Error(
@@ -418,7 +410,6 @@ function resolveRuntimeBindingColumnTypes(
 	model: ModelIR | undefined,
 	sourceTableName: string,
 	schemaName: string | undefined,
-	naming: NamingPlugin,
 ): readonly string[] {
 	if (model === undefined) {
 		throw new Error(
@@ -432,13 +423,7 @@ function resolveRuntimeBindingColumnTypes(
 		);
 	}
 	return binding.columns.map((column) =>
-		resolveRuntimeBindingColumnType(
-			name,
-			sourceTable,
-			column,
-			schemaName,
-			naming,
-		),
+		resolveRuntimeBindingColumnType(name, sourceTable, column, schemaName),
 	);
 }
 
@@ -502,7 +487,7 @@ function resolvePgTypeForColumnTypeInfo(
 								originalDbTypeSchemaScope: info.originalDbTypeSchemaScope,
 							}),
 						},
-						runtimeCastTargetSchema(schemaName, naming),
+						schemaName,
 					)
 				: mapRuntimeBindingColumnType(info.type);
 	if (rawType === undefined || rawType.trim() === '') {
@@ -691,7 +676,6 @@ function compileNqlRuntimeBindingCte(
 		model,
 		sourceTable,
 		schemaName,
-		naming,
 	);
 	const parameters: unknown[] = [];
 	let nextParam = parameterOffset + 1;
@@ -769,6 +753,15 @@ function isClientConnection(
 	);
 }
 
+function isPoolClientLike(value: unknown): value is PoolClient {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		typeof (value as { query?: unknown }).query === 'function' &&
+		typeof (value as { release?: unknown }).release === 'function'
+	);
+}
+
 // ============================================================================
 // PgsqlAdapter
 // ============================================================================
@@ -815,6 +808,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.client = poolOrClient[PGSQL_ADAPTER_CLIENT];
 			this.pool = undefined;
 		} else if (poolOrClient != null) {
+			if (isPoolClientLike(poolOrClient)) {
+				throw new Error(
+					'createPgsqlAdapter() expects a pg Pool, but received a PoolClient. ' +
+						'Pass the Pool itself, or use adapter.transaction((tx) => ...) for transaction-scoped work.',
+				);
+			}
 			this.pool = poolOrClient;
 			this.client = undefined;
 		} else {

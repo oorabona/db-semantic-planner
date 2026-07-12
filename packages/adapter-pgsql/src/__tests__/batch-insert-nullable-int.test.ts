@@ -198,7 +198,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 		expect(sql).not.toContain('text[]');
 	});
 
-	it('database-cases target schema for target-scoped custom batch casts', () => {
+	it('keeps target schema verbatim for target-scoped custom batch casts', () => {
 		const columns = [
 			{
 				name: 'state',
@@ -243,7 +243,7 @@ describe('BATCH-INSERT-NULLABLE-INT: schema-driven int4[] for nullable integer c
 		);
 
 		expect({ sql: result.sql, parameters: result.parameters }).toEqual({
-			sql: 'INSERT INTO tenant_one.events (state) SELECT unnest(CAST($1 AS "tenant_one".status[])) AS state',
+			sql: 'INSERT INTO "tenantOne".events (state) SELECT unnest(CAST($1 AS "tenantOne".status[])) AS state',
 			parameters: [['active']],
 		});
 	});
