@@ -6,7 +6,7 @@
  *
  * Usage:
  *   pnpm dbsp repl --schema ./examples/ecommerce.schema.ts
- *   pnpm dbsp generate kysely --schema ./examples/ecommerce.schema.ts
+ *   pnpm dbsp generate ddl --schema ./examples/ecommerce.schema.ts
  */
 
 // ARCH-005: Use ref() alias to avoid conflict with subquery ref()

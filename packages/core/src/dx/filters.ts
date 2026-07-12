@@ -831,10 +831,10 @@ export function raw(sqlFragment: string, as: string): ExpressionSpec {
 }
 
 /**
- * Creates a column alias expression using native Kysely API.
+ * Creates a column alias expression as a typed dbsp expression intent.
  * Preferred over raw() for simple column aliasing as it's type-safe and dialect-portable.
  *
- * Uses Kysely's `eb.ref(column).as(alias)` internally - no raw SQL.
+ * Compilers render the alias from structured column and alias fields - no raw SQL.
  *
  * @param column - Column name to select
  * @param alias - Alias for the result column
@@ -868,8 +868,8 @@ export function col(column: string, alias: string): ExpressionSpec {
  * Creates a relation column expression for selecting a column from a related table.
  * Auto-creates JOINs via the include mechanism and selects with custom alias.
  *
- * Uses native Kysely API internally - no raw SQL. The compiler resolves the relation
- * to its join alias and uses `eb.ref(alias.column).as(as)`.
+ * Uses structured relation-column intent - no raw SQL. The compiler resolves the
+ * relation to its join alias and renders a dialect-specific aliased column.
  *
  * @param relation - Relation path to traverse (dot-separated for multi-level)
  * @param column - Column name to select from the target relation

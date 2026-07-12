@@ -8,7 +8,7 @@
  *
  * Usage:
  *   pnpm dbsp repl --schema ./examples/scheduling.schema.ts
- *   pnpm dbsp generate kysely --schema ./examples/scheduling.schema.ts
+ *   pnpm dbsp generate ddl --schema ./examples/scheduling.schema.ts
  *
  * Example queries (NQL uses logical camelCase names):
  *   > roomBookings | where bookingPeriod overlaps [2024-01-15,2024-01-20)

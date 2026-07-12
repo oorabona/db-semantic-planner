@@ -56,7 +56,7 @@ export interface ColumnExpressionIntent {
 
 /**
  * Column alias expression: simple column reference with alias
- * Uses native Kysely eb.ref().as() - type-safe and dialect-portable
+ * Represents an aliased column as structured intent for dialect compilers
  * @example { kind: 'columnAlias', column: 'name', alias: 'userName' }
  *          → SELECT "name" AS "userName"
  */

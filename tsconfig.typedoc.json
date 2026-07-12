@@ -1,0 +1,5 @@
+{
+	"extends": "./tsconfig.json",
+	"include": ["packages/core/src", "packages/adapter-pgsql/src"],
+	"exclude": ["**/*.test.ts", "**/__tests__/**", "**/dist/**"]
+}

@@ -29,7 +29,6 @@ export type {
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
-	OrmOptionsWithSchema,
 	SelectExpressionResult,
 } from './orm-instance-types.js';
 export type {

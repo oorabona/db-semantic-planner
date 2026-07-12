@@ -9,8 +9,8 @@
  * - ddl: Generate SQL DDL (CREATE TABLE statements)
  *
  * Deprecated targets (removed in ARCH-005):
- * - manifest: Was for legacy defineSchema() format
- * - kysely: Was for legacy defineSchema() format
+ * - manifest: Removed legacy manifest generator
+ * - kysely: Removed legacy Kysely generator
  */
 
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -48,6 +48,19 @@ export const generateCommand = new Command('generate')
 			},
 		) => {
 			try {
+				// Reject the target BEFORE loading the schema: loading it executes the
+				// user's schema module, and there is no reason to run their code for a
+				// target we are going to refuse anyway.
+				if (target === 'manifest' || target === 'kysely') {
+					throw new Error(
+						`Target '${target}' has been removed. ` +
+							`Use 'ddl' for SQL generation, or the 'introspect' command to generate a schema file.`,
+					);
+				}
+				if (target !== 'ddl') {
+					throw new Error(`Unknown target: ${target}. Available targets: ddl`);
+				}
+
 				// Load schema (ARCH-005: only schema() format supported)
 				let schema: Awaited<ReturnType<typeof loadSchema>>;
 				let schemaPath: string;
@@ -134,21 +147,6 @@ export const generateCommand = new Command('generate')
 						}
 						break;
 					}
-
-					case 'manifest':
-					case 'kysely':
-						// EH-10: Throw instead of process.exit(1) inside try — outer catch handles exit
-						throw new Error(
-							`Target '${target}' has been removed in ARCH-005. ` +
-								`These generators required the legacy defineSchema() format. ` +
-								`Use 'ddl' target for SQL generation.`,
-						);
-
-					default:
-						// EH-10: Throw instead of process.exit(1) inside try — outer catch handles exit
-						throw new Error(
-							`Unknown target: ${target}. Available targets: ddl`,
-						);
 				}
 			} catch (error) {
 				const message = error instanceof Error ? error.message : String(error);

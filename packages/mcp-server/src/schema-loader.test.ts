@@ -102,18 +102,18 @@ beforeAll(() => {
 	`,
 	);
 
-	// Create legacy defineSchema() output; MCP now accepts only the live schema() result.
+	// Create an unsupported object shape; MCP accepts only the live schema() result.
 	writeFileSync(
-		join(allowedDir, 'legacy-schema.ts'),
+		join(allowedDir, 'unsupported-schema.ts'),
 		`
-		import { defineSchema } from '${coreEntryImport}';
-
-		export const schema = defineSchema({
-			users: {
-				id: { type: 'uuid', primaryKey: true },
-				email: { type: 'string' }
+		export const schema = {
+			tables: {
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+					email: { type: 'string' }
+				}
 			}
-		});
+		};
 	`,
 	);
 
@@ -318,17 +318,17 @@ describe('loadSchema', () => {
 			}
 		});
 
-		it('should reject legacy defineSchema() format with schema() guidance', async () => {
+		it('should reject unsupported object format with schema() guidance', async () => {
 			await expect(
 				loadSchema({
-					schemaPath: join(allowedDir, 'legacy-schema.ts'),
+					schemaPath: join(allowedDir, 'unsupported-schema.ts'),
 					allowedRoots: [testDir],
 				}),
 			).rejects.toThrow(SchemaLoadError);
 
 			try {
 				await loadSchema({
-					schemaPath: join(allowedDir, 'legacy-schema.ts'),
+					schemaPath: join(allowedDir, 'unsupported-schema.ts'),
 					allowedRoots: [testDir],
 				});
 			} catch (error) {
@@ -591,17 +591,17 @@ describe('C5 regression: schema format validation', () => {
 		}
 	});
 
-	it('should reject legacy defineSchema() output with schema() guidance', async () => {
+	it('should reject unsupported object output with schema() guidance', async () => {
 		await expect(
 			loadSchema({
-				schemaPath: join(allowedDir, 'legacy-schema.ts'),
+				schemaPath: join(allowedDir, 'unsupported-schema.ts'),
 				allowedRoots: [testDir],
 			}),
 		).rejects.toThrow(SchemaLoadError);
 
 		try {
 			await loadSchema({
-				schemaPath: join(allowedDir, 'legacy-schema.ts'),
+				schemaPath: join(allowedDir, 'unsupported-schema.ts'),
 				allowedRoots: [testDir],
 			});
 		} catch (err) {

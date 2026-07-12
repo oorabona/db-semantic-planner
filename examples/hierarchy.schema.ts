@@ -9,7 +9,7 @@
  *
  * Usage:
  *   pnpm dbsp repl --schema ./examples/hierarchy.schema.ts
- *   pnpm dbsp generate kysely --schema ./examples/hierarchy.schema.ts
+ *   pnpm dbsp generate ddl --schema ./examples/hierarchy.schema.ts
  *
  * Example NQL queries:
  *   > employees | select name, manager.name

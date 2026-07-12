@@ -144,39 +144,32 @@ The planner uses these relations to auto-resolve `.include()` calls and choose o
 
 The schema you pass to `createOrm()` drives full TypeScript inference from schema definition to query result. Understanding how this inference works helps you avoid the subtle type loss patterns that defeat it.
 
-### Schema() vs ResolvedSchema vs GeneratedSchema
+### schema() and ModelIR
 
-`@dbsp/core` works with three related schema shapes:
+`@dbsp/core` uses `schema({ ... })` as the public schema authoring API. The object returned by `schema()` keeps the original TypeScript definition for inference and includes a compiled `ModelIR` for the planner.
 
-| Shape | Created by | Purpose |
-|-------|------------|---------|
-| `Schema<T>` | `schema({ ... })` call in your code | User-facing DSL — the object you write |
-| `GeneratedSchema` | Internal format expected by `createOrm({ schema })` | Normalized flat structure consumed by the planner |
-| `ResolvedSchema` | External `@dbsp/schema` package or migration tools | PostgreSQL-specific column types (`jsonb`, `tstzrange`, etc.) that differ from `@dbsp/core` types |
-
-When you call `schema({ ... })`, the result is a `Schema<T>` that wraps both the original definition and a compiled `ModelIR`. `createOrm({ schema })` accepts this object directly.
-
-If you receive a schema from an external source (e.g. an introspection tool, `@dbsp/schema`), use `resolvedSchemaToGeneratedSchema()` to validate and convert it before passing to `createOrm()`. Source: `packages/core/src/dx/schema-bridge.ts:1186`.
+Pass that `Schema<T>` object directly to `createOrm({ schema })`:
 
 ```typescript
-// doctest: skip — illustrative external schema conversion
-import { resolvedSchemaToGeneratedSchema, createOrm } from '@dbsp/core';
+import { createOrm, ref, schema } from '@dbsp/core';
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
-const externalSchema = loadSchemaFromFile('./schema.json');
-const result = resolvedSchemaToGeneratedSchema(externalSchema);
+const db = schema({
+  users: {
+    id: 'uuid',
+    email: { type: 'text', unique: true },
+  },
+  posts: {
+    id: 'uuid',
+    authorId: ref('users', { inverse: 'posts' }),
+    title: 'text',
+  },
+} as const);
 
-if (!result.success) {
-  console.error('Schema validation failed:', result.errors);
-  process.exit(1);
-}
-
-const orm = createOrm({ schema: result.schema, adapter: createPgsqlAdapter(pool) });
+const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
 ```
 
-Use `assertResolvedSchemaToGeneratedSchema(input)` for a throwing variant when you are certain the input is valid.
-
-Use `isResolvedSchema(value)` to check at runtime whether an unknown object is a ResolvedSchema (detects PostgreSQL-specific types not present in the core schema DSL). Source: `packages/core/src/dx/schema-bridge.ts:682`.
+The planner consumes the compiled model, while TypeScript keeps the literal table and column definitions available for query result inference.
 
 ### TypeScript inference flow
 

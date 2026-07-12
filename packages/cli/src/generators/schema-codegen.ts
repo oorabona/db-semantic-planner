@@ -691,7 +691,7 @@ export function generateSchemaFileWithDiagnostics(
 		(table) => table.foreignKeys.length > 0,
 	);
 
-	// Imports - ARCH-005: Use schema() + ref() instead of defineSchema()
+	// Imports for the live schema() + ref() authoring API.
 	const coreImports = ['schema'];
 	if (hasForeignKeys) {
 		coreImports.push('ref');
@@ -702,7 +702,7 @@ export function generateSchemaFileWithDiagnostics(
 	}
 	lines.push('');
 
-	// Schema definition - ARCH-005: Use schema() instead of defineSchema()
+	// Schema definition.
 	lines.push('export const dbSchema = schema({');
 
 	// Generate each table

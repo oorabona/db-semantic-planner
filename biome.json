@@ -106,9 +106,6 @@
 		},
 		{
 			"includes": [
-				"packages/adapter-kysely/src/compiler/handlers/where/index.ts",
-				"packages/adapter-kysely/src/compiler/handlers/where/relation-filter.ts",
-				"packages/adapter-kysely/src/compiler/types.ts",
 				"packages/core/src/dx/functions.ts",
 				"packages/core/src/dx/typed-query-builder.ts"
 			],

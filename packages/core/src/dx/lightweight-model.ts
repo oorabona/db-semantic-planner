@@ -1,7 +1,7 @@
 /**
  * DX-023: Lightweight ModelIR Definition
  *
- * Provides a simplified API for defining relations when using Kysely's Database type.
+ * Provides a simplified API for defining relations from a database row map type.
  * Instead of verbose column definitions, developers can focus solely on relations
  * using shorthand syntax with automatic FK inference.
  *

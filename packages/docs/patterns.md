@@ -247,15 +247,11 @@ Strategies:
 
 ### Example
 
-Schema-level hint:
+Runtime include planning:
 
 ```typescript
-// doctest: skip — illustrative fragment (defineSchema and `table`/`hasMany` helpers are not in the doctest preamble)
-const schema = defineSchema({
-  users: table({
-    posts: hasMany(() => posts, { includeStrategy: 'lateral' }),
-  }),
-});
+const plan = orm.select('users').include('posts', { limit: 10 }).plan();
+// The planner records the concrete include strategy in plan.decisions.
 ```
 
 Auto-resolution (planner, `planner.ts`):
@@ -272,7 +268,7 @@ cardinality='many' → dialect.supportsJsonAgg ? 'json_agg'
 - `'auto'` is always resolved to a concrete strategy before `PlanReport` is emitted — it never reaches the compiler
 - Adapter handlers match the strategy name exactly (file name = strategy name)
 - New strategies require: a new literal in `IncludeStrategy`, a capability flag in `DialectCapabilities`, a handler in `include/`, and a planner rule
-- Schema-level `includeStrategy` overrides auto, but is validated against `DialectCapabilities`
+- Query-level include options such as `join` and `limit` influence strategy resolution; the planner validates the resolved strategy against `DialectCapabilities`
 
 ### When to use
 
@@ -574,4 +570,3 @@ IntentAST → (same pipeline from IntentAST above)
 
 All layers: 3-Layer AST Pipeline (Pattern 6) governs how layers relate
 ```
-
