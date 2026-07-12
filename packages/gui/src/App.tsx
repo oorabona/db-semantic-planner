@@ -18,7 +18,12 @@ import {
 	X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
+import {
+	Group,
+	Panel,
+	Separator,
+	useDefaultLayout,
+} from 'react-resizable-panels';
 import { Toaster, toast } from 'sonner';
 import { AppLogModal } from '@/components/AppLogModal';
 import {
@@ -79,6 +84,13 @@ import { useProjectStore } from '@/stores/project-store';
 import { useResultsStore } from '@/stores/results-store';
 import { useSchemaDiffStore } from '@/stores/schema-diff-store';
 import { useUserSettingsStore } from '@/stores/user-settings-store';
+
+const MAIN_LAYOUT_ID = 'dbsp-main-layout';
+const RIGHT_LAYOUT_ID = 'dbsp-right-layout';
+const SIDEBAR_PANEL_ID = 'dbsp-main-sidebar';
+const MAIN_PANEL_ID = 'dbsp-main-content';
+const EDITOR_PANEL_ID = 'dbsp-right-editor';
+const RESULTS_PANEL_ID = 'dbsp-right-results';
 
 // ── App Log Popover ──────────────────────────────────────────────
 
@@ -195,6 +207,25 @@ export default function App() {
 
 	const [showAppLogs, setShowAppLogs] = useState(false);
 	const [showAppLogModal, setShowAppLogModal] = useState(false);
+
+	const mainLayoutPanelIds = useMemo(
+		() =>
+			sidebarVisible ? [SIDEBAR_PANEL_ID, MAIN_PANEL_ID] : [MAIN_PANEL_ID],
+		[sidebarVisible],
+	);
+	const rightLayoutPanelIds = useMemo(
+		() =>
+			resultsVisible ? [EDITOR_PANEL_ID, RESULTS_PANEL_ID] : [EDITOR_PANEL_ID],
+		[resultsVisible],
+	);
+	const mainLayout = useDefaultLayout({
+		id: MAIN_LAYOUT_ID,
+		panelIds: mainLayoutPanelIds,
+	});
+	const rightLayout = useDefaultLayout({
+		id: RIGHT_LAYOUT_ID,
+		panelIds: rightLayoutPanelIds,
+	});
 
 	const status = useConnectionStore((s) => s.status);
 	const projectMode = useProjectStore((s) => s.mode);
@@ -1063,11 +1094,21 @@ export default function App() {
 			)}
 			{/* Main layout */}
 			<div className="flex-1 overflow-hidden">
-				<PanelGroup autoSaveId="dbsp-main-layout" direction="horizontal">
+				<Group
+					id={MAIN_LAYOUT_ID}
+					defaultLayout={mainLayout.defaultLayout}
+					onLayoutChanged={mainLayout.onLayoutChanged}
+					orientation="horizontal"
+				>
 					{/* Left: Schema sidebar (toggleable via Cmd+B) */}
 					{sidebarVisible && (
 						<>
-							<Panel defaultSize={20} minSize={15} maxSize={40} order={1}>
+							<Panel
+								id={SIDEBAR_PANEL_ID}
+								defaultSize="20%"
+								minSize="15%"
+								maxSize="40%"
+							>
 								<Sidebar
 									onConnect={() => setDialogOpen(true)}
 									onFileSelect={handleFileSelect}
@@ -1075,15 +1116,20 @@ export default function App() {
 									onEditSchema={handleEditSchema}
 								/>
 							</Panel>
-							<PanelResizeHandle />
+							<Separator />
 						</>
 					)}
 
 					{/* Right: Editor + Results (vertical split) */}
-					<Panel defaultSize={80} minSize={40} order={2}>
-						<PanelGroup autoSaveId="dbsp-right-layout" direction="vertical">
+					<Panel id={MAIN_PANEL_ID} defaultSize="80%" minSize="40%">
+						<Group
+							id={RIGHT_LAYOUT_ID}
+							defaultLayout={rightLayout.defaultLayout}
+							onLayoutChanged={rightLayout.onLayoutChanged}
+							orientation="vertical"
+						>
 							{/* Top-right: Editor */}
-							<Panel defaultSize={55} minSize={20} order={1}>
+							<Panel id={EDITOR_PANEL_ID} defaultSize="55%" minSize="20%">
 								<EditorPanel
 									onConnect={() => setDialogOpen(true)}
 									onNewProject={() => setWizardOpen(true)}
@@ -1096,15 +1142,15 @@ export default function App() {
 							{/* Bottom-right: Results (toggleable via Cmd+J) */}
 							{resultsVisible && (
 								<>
-									<PanelResizeHandle />
-									<Panel defaultSize={45} minSize={15} order={2}>
+									<Separator />
+									<Panel id={RESULTS_PANEL_ID} defaultSize="45%" minSize="15%">
 										<ResultsPanel />
 									</Panel>
 								</>
 							)}
-						</PanelGroup>
+						</Group>
 					</Panel>
-				</PanelGroup>
+				</Group>
 			</div>
 
 			{/* Status bar */}
