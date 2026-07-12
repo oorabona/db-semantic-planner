@@ -1169,10 +1169,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Get the underlying pg Pool instance.
+	 * Get the underlying pg executor.
+	 *
+	 * Outside a transaction this returns the adapter's pg Pool. Inside
+	 * adapter.transaction(...) this returns the checked-out pg PoolClient backing
+	 * that transaction. Callers that need pool-only lifecycle methods must narrow
+	 * the result first; assuming a Pool inside a transaction was never safe.
 	 */
-	getPoolInstance(): Pool {
-		return this.requireConnection() as Pool;
+	getPoolInstance(): Pool | PoolClient {
+		return this.requireConnection();
 	}
 
 	// =========================================================================

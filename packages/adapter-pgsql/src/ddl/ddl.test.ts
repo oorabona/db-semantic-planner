@@ -1164,6 +1164,40 @@ describe('CHECK constraints in DDL', () => {
 		);
 	});
 
+	it('should reject authored CHECK constraint names that collide after casing', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'age', type: 'integer', nullable: false },
+						],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{
+								name: 'myCheck',
+								expression: 'CHECK ((age > 0))',
+							},
+							{
+								name: 'my_check',
+								expression: 'CHECK ((age < 150))',
+							},
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		expect(() => generateDDL(schema, { naming: camelCaseNaming })).toThrow(
+			'authored constraints "myCheck" and "my_check" both resolve to physical name "my_check"',
+		);
+	});
+
 	it('should emit no CHECK statements when table has no checkConstraints', () => {
 		const schema = {
 			tables: new Map([

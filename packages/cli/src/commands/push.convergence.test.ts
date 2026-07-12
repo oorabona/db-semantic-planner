@@ -176,4 +176,86 @@ describe('push — #315 casing and convergence wiring', () => {
 		);
 		expect(pool.end).toHaveBeenCalledOnce();
 	});
+
+	it('fails when post-apply re-diff still has non-declined drift', async () => {
+		const firstDiff = makeDiff([
+			{
+				kind: 'add_column',
+				table: 'users',
+				column: 'display_name',
+				details: 'Add column "display_name"',
+			},
+		]);
+		mockComparePgsqlDatabaseSchema
+			.mockResolvedValueOnce(firstDiff)
+			.mockResolvedValueOnce(
+				makeDiff([
+					{
+						kind: 'add_column',
+						table: 'users',
+						column: 'display_name',
+						details: 'Add column "display_name"',
+					},
+				]),
+			);
+
+		await expect(
+			pushCommand.parseAsync(
+				['--schema', 'dbsp.schema.ts', '--db', 'postgres://localhost/db'],
+				{ from: 'user' },
+			),
+		).rejects.toThrow('process.exit:1');
+
+		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledTimes(2);
+		expect(mockExecuteDdl).toHaveBeenCalledOnce();
+		expect(console.error).toHaveBeenCalledWith(
+			expect.stringContaining('outstanding change(s) remain'),
+		);
+		expect(console.error).toHaveBeenCalledWith(
+			expect.stringContaining('Add column "display_name"'),
+		);
+		expect(console.log).not.toHaveBeenCalledWith(
+			expect.stringContaining('Push complete'),
+		);
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
+	it('allows residual destructive changes that additive push deliberately skipped', async () => {
+		const skippedDrop = {
+			kind: 'drop_column',
+			table: 'users',
+			column: 'legacy_name',
+			destructive: true,
+			details: 'Drop column "legacy_name"',
+		} satisfies Partial<SchemaChange>;
+		const firstDiff = makeDiff([
+			{
+				kind: 'add_column',
+				table: 'users',
+				column: 'display_name',
+				details: 'Add column "display_name"',
+			},
+			skippedDrop,
+		]);
+		mockComparePgsqlDatabaseSchema
+			.mockResolvedValueOnce(firstDiff)
+			.mockResolvedValueOnce(makeDiff([skippedDrop]));
+
+		await pushCommand.parseAsync(
+			['--schema', 'dbsp.schema.ts', '--db', 'postgres://localhost/db'],
+			{ from: 'user' },
+		);
+
+		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledTimes(2);
+		expect(mockExecuteDdl).toHaveBeenCalledOnce();
+		expect(console.log).toHaveBeenCalledWith(
+			'⚠️  1 non-additive change(s) skipped:',
+		);
+		expect(console.log).toHaveBeenCalledWith('   - Drop column "legacy_name"');
+		expect(console.log).toHaveBeenCalledWith(
+			expect.stringContaining('Push complete'),
+		);
+		expect(console.error).not.toHaveBeenCalled();
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
 });

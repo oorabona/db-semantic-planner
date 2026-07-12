@@ -2181,6 +2181,41 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
+		it('throws when authored CHECK names collide after database casing', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'age', type: 'integer' }),
+					],
+					checkConstraints: [
+						{
+							name: 'myCheck',
+							expression: 'CHECK ((age > 0))',
+						},
+						{
+							name: 'my_check',
+							expression: 'CHECK ((age < 150))',
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'age', type: 'integer' }),
+					],
+				}),
+			]);
+
+			expect(() => compareSchemata(schema, db, snakeCaseOpts)).toThrow(
+				'authored constraints "myCheck" and "my_check" both resolve to physical name "my_check"',
+			);
+		});
+
 		it('should not churn an existing old-name FK auto-index', () => {
 			const schema = makeModel([
 				makeTable({

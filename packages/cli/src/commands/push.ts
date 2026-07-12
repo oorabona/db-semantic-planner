@@ -6,6 +6,7 @@
  * With --drop: recreates from scratch (preserves _dbsp_migrations).
  */
 
+import type { SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 import {
 	comparePgsqlDatabaseSchema,
 	generateDDL,
@@ -185,10 +186,15 @@ export const pushCommand = new Command('push')
 						});
 
 						if (!options.dryRun) {
-							await comparePgsqlDatabaseSchema(pool, schemaModel, {
-								...compareOptions,
-								previouslyAppliedDiff: diff,
-							});
+							const postApplyDiff = await comparePgsqlDatabaseSchema(
+								pool,
+								schemaModel,
+								{
+									...compareOptions,
+									previouslyAppliedDiff: diff,
+								},
+							);
+							assertNoUnexpectedResidualDrift(postApplyDiff, skippedChanges);
 						}
 
 						if (options.json) {
@@ -242,4 +248,38 @@ function outputResult(
 			console.log(`${stmt};\n`);
 		}
 	}
+}
+
+function assertNoUnexpectedResidualDrift(
+	postApplyDiff: SchemaDiff,
+	skippedChanges: readonly SchemaChange[],
+): void {
+	const skippedKeys = new Set(skippedChanges.map(changeIdentity));
+	const unexpected = postApplyDiff.changes.filter(
+		(change) =>
+			!(change.destructive && skippedKeys.has(changeIdentity(change))),
+	);
+	if (unexpected.length === 0) return;
+
+	throw new Error(
+		`Push did not converge after applying DDL; ${unexpected.length} outstanding change(s) remain:\n` +
+			unexpected.map(formatOutstandingChange).join('\n'),
+	);
+}
+
+function changeIdentity(change: SchemaChange): string {
+	return JSON.stringify([
+		change.kind,
+		change.table,
+		change.column ?? null,
+		change.details,
+		change.destructive,
+	]);
+}
+
+function formatOutstandingChange(change: SchemaChange): string {
+	const target = change.column
+		? `${change.table}.${change.column}`
+		: change.table || 'schema';
+	return `   - ${change.details} (${change.kind}: ${target})`;
 }

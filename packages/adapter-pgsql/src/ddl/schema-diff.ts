@@ -22,7 +22,10 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
-import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
+import {
+	assertNoCheckConstraintNameCollisions,
+	getCheckConstraintDatabaseName,
+} from '../check-constraint-name.js';
 import { splitCheckConstraintState } from '../check-expression.js';
 import {
 	columnDbTypeSchemaIdentity,
@@ -33,6 +36,7 @@ import {
 } from '../db-type.js';
 import {
 	getNamingPluginForDbCasing,
+	identityNaming,
 	type NamingPlugin,
 } from '../naming-plugin.js';
 import { canGenerateCreateIndex } from './ddl-generator.js';
@@ -199,10 +203,14 @@ export function compareSchemata(
 
 	const changes: SchemaChange[] = [];
 
-	const plugin =
+	const schemaNaming =
 		options?.dbCasing !== undefined
 			? getNamingPluginForDbCasing(options.dbCasing)
-			: undefined;
+			: identityNaming;
+	for (const table of schema.tables.values()) {
+		assertNoCheckConstraintNameCollisions(table, schemaNaming);
+	}
+	const plugin = options?.dbCasing !== undefined ? schemaNaming : undefined;
 	const schemaTables = plugin
 		? normalizeTableMap(schema.tables, plugin)
 		: new Map(schema.tables);

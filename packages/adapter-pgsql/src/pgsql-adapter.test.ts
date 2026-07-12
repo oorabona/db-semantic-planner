@@ -89,6 +89,16 @@ describe('PgsqlAdapter', () => {
 		});
 	});
 
+	describe('getPoolInstance', () => {
+		it('declares that the current executor can be a pool or transaction client', () => {
+			const adapter = createPgsqlAdapter(createMockPool());
+
+			expectTypeOf(adapter.getPoolInstance()).toEqualTypeOf<
+				Pool | PoolClient
+			>();
+		});
+	});
+
 	describe('capabilities', () => {
 		it('should report full PostgreSQL capabilities', () => {
 			const pool = createMockPool();
