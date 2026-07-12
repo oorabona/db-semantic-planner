@@ -309,6 +309,9 @@ async function canonicalizeTableChecksBestEffort(
 	} catch (error) {
 		await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
 		await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+		if (error instanceof CheckConstraintCanonicalizationError) {
+			throw error;
+		}
 		if (options?.requireCanonicalization) {
 			throw new CheckConstraintCanonicalizationError(
 				target.dbTableName,
@@ -343,16 +346,38 @@ async function canonicalizeTableChecks(
 		`CREATE TEMP TABLE ${tempTable} (${columnDefs.join(', ')}) ON COMMIT DROP`,
 	);
 
-	const tempConstraintNames: string[] = [];
+	const tempConstraintNamesByIndex = new Map<number, string>();
+	const canonicalChecks = [...target.checks];
 	for (let i = 0; i < target.checks.length; i++) {
 		const check = target.checks[i]!;
 		const tempConstraintName = `${names.tempPrefix}_${targetIndex}_${i}`;
-		tempConstraintNames.push(tempConstraintName);
-		const expression = renderCheckConstraintClause(check);
-		validateCheckExpression(expression, 'canonicalized check constraint');
-		await client.query(
-			`ALTER TABLE ${tempTable} ADD CONSTRAINT ${quoteIdent(tempConstraintName, 'alias')} ${expression}`,
-		);
+		const savepoint = `${names.savepointPrefix}_sp_${targetIndex}_${i}`;
+		await client.query(`SAVEPOINT ${savepoint}`);
+		try {
+			const expression = renderCheckConstraintClause(check);
+			validateCheckExpression(expression, 'canonicalized check constraint');
+			await client.query(
+				`ALTER TABLE ${tempTable} ADD CONSTRAINT ${quoteIdent(tempConstraintName, 'alias')} ${expression}`,
+			);
+			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+			tempConstraintNamesByIndex.set(i, tempConstraintName);
+		} catch (error) {
+			await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+			if (options?.requireCanonicalization) {
+				throw new CheckConstraintCanonicalizationError(
+					target.dbTableName,
+					[target.dbCheckNames[i]!],
+					error,
+				);
+			}
+			reportConstraintCanonicalizationFailure(target, i, error, options);
+		}
+	}
+
+	const tempConstraintNames = [...tempConstraintNamesByIndex.values()];
+	if (tempConstraintNames.length === 0) {
+		return canonicalChecks;
 	}
 
 	const result = await client.query<{
@@ -372,21 +397,32 @@ async function canonicalizeTableChecks(
 		result.rows.map((row) => [row.name, stripNotValidSuffix(row.expression)]),
 	);
 
-	return target.checks.map((check, i) => {
-		const tempConstraintName = tempConstraintNames[i]!;
+	for (const [i, tempConstraintName] of tempConstraintNamesByIndex) {
+		const check = target.checks[i]!;
 		const expression = canonicalByTempName.get(tempConstraintName);
 		if (expression === undefined) {
-			throw new Error(
+			const error = new Error(
 				`PostgreSQL did not return canonical CHECK expression for "${target.modelTable.name}" constraint "${check.name}"`,
 			);
+			if (options?.requireCanonicalization) {
+				throw new CheckConstraintCanonicalizationError(
+					target.dbTableName,
+					[target.dbCheckNames[i]!],
+					error,
+				);
+			}
+			reportConstraintCanonicalizationFailure(target, i, error, options);
+			continue;
 		}
 		const notValid = isCheckConstraintNotValid(check);
-		return {
+		canonicalChecks[i] = {
 			...check,
 			expression,
 			...(notValid ? { notValid: true } : {}),
 		};
-	});
+	}
+
+	return canonicalChecks;
 }
 
 function generateScratchColumnDef(
@@ -481,22 +517,31 @@ function reportCanonicalizationFailure(
 	options: CanonicalizeCheckConstraintsOptions | undefined,
 ): void {
 	for (let i = 0; i < target.checks.length; i++) {
-		const dbCheckName = target.dbCheckNames[i]!;
-		const message =
-			`Could not canonicalize CHECK constraint "${target.dbTableName}"."${dbCheckName}" ` +
-			`with PostgreSQL; falling back to best-effort raw string comparison. ` +
-			`Reason: ${errorMessage(cause)}`;
-		const warning: CheckConstraintCanonicalizationWarning = {
-			table: target.dbTableName,
-			constraint: dbCheckName,
-			message,
-			cause,
-		};
-		if (options?.onWarning) {
-			options.onWarning(warning);
-		} else {
-			console.warn(`Warning: ${message}`);
-		}
+		reportConstraintCanonicalizationFailure(target, i, cause, options);
+	}
+}
+
+function reportConstraintCanonicalizationFailure(
+	target: CheckConstraintTarget,
+	checkIndex: number,
+	cause: unknown,
+	options: CanonicalizeCheckConstraintsOptions | undefined,
+): void {
+	const dbCheckName = target.dbCheckNames[checkIndex]!;
+	const message =
+		`Could not canonicalize CHECK constraint "${target.dbTableName}"."${dbCheckName}" ` +
+		`with PostgreSQL; falling back to best-effort raw string comparison. ` +
+		`Reason: ${errorMessage(cause)}`;
+	const warning: CheckConstraintCanonicalizationWarning = {
+		table: target.dbTableName,
+		constraint: dbCheckName,
+		message,
+		cause,
+	};
+	if (options?.onWarning) {
+		options.onWarning(warning);
+	} else {
+		console.warn(`Warning: ${message}`);
 	}
 }
 

@@ -46,7 +46,7 @@ function normalizeSql(sql: string): string {
 function normalizeCanonicalizationSql(sql: string): string {
 	return normalizeSql(sql)
 		.replace(
-			/\bdbsp_check_canon_[a-z0-9]+_(root|sp_\d+|enum_\d+)\b/giu,
+			/\bdbsp_check_canon_[a-z0-9]+_(root|sp_\d+(?:_\d+)?|enum_\d+)\b/giu,
 			'dbsp_check_canon_$1',
 		)
 		.replace(
@@ -68,6 +68,7 @@ class FakePgClient {
 		readonly parameters: readonly unknown[] | undefined;
 	}> = [];
 	readonly tempTables = new Set<string>();
+	readonly savepointTempTables = new Map<string, Set<string>>();
 	readonly preexistingTempTables = new Set<string>();
 	readonly canonicalExpressions = new Map<string, string>();
 	failOnSql: RegExp | undefined;
@@ -95,6 +96,13 @@ class FakePgClient {
 				code: '25P01',
 			});
 		}
+		const savepointMatch = /^SAVEPOINT ([^\s]+)$/u.exec(normalized);
+		if (savepointMatch) {
+			this.savepointTempTables.set(
+				savepointMatch[1]!,
+				new Set(this.tempTables),
+			);
+		}
 		if (normalized === 'BEGIN') {
 			this.inTransaction = true;
 		}
@@ -111,11 +119,26 @@ class FakePgClient {
 			this.tempTables.add(tempTableName);
 		}
 
-		if (
-			normalized === 'ROLLBACK' ||
-			normalized.startsWith('ROLLBACK TO SAVEPOINT')
-		) {
+		if (normalized === 'ROLLBACK') {
 			this.tempTables.clear();
+			this.savepointTempTables.clear();
+			this.inTransaction = false;
+		} else {
+			const rollbackMatch = /^ROLLBACK TO SAVEPOINT ([^\s]+)$/u.exec(
+				normalized,
+			);
+			if (rollbackMatch) {
+				const snapshot = this.savepointTempTables.get(rollbackMatch[1]!);
+				this.tempTables.clear();
+				for (const table of snapshot ?? []) {
+					this.tempTables.add(table);
+				}
+			}
+		}
+
+		const releaseMatch = /^RELEASE SAVEPOINT ([^\s]+)$/u.exec(normalized);
+		if (releaseMatch) {
+			this.savepointTempTables.delete(releaseMatch[1]!);
 		}
 
 		if (normalized.startsWith('SELECT conname AS name,')) {
@@ -217,13 +240,19 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER, "status" VARCHAR(255)) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_check_canon_sp_0_1',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_1" CHECK (status = \'active\')',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_1',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'SAVEPOINT dbsp_check_canon_sp_1',
 			'CREATE TEMP TABLE "_dbsp_check_canon_1" ("id" INTEGER, "price" INTEGER) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_1_0',
 			'ALTER TABLE "_dbsp_check_canon_1" ADD CONSTRAINT "_dbsp_check_canon_1_0" CHECK (price > 0)',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_1_0',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_1',
 			'ROLLBACK',
@@ -284,7 +313,9 @@ describe('canonicalizeCheckConstraints', () => {
 			'SAVEPOINT dbsp_check_canon_root',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'ROLLBACK TO SAVEPOINT dbsp_check_canon_root',
@@ -383,7 +414,9 @@ describe('canonicalizeCheckConstraints', () => {
 			'RELEASE SAVEPOINT dbsp_check_canon_enum_0',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'active\')',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'ROLLBACK',
@@ -523,11 +556,103 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0',
+			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0_0',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'ROLLBACK',
 		]);
+	});
+
+	it('keeps canonicalizing sibling CHECK constraints when one ADD CONSTRAINT is refused', async () => {
+		const enumValueError = new Error(
+			'unsafe use of new value "pending" of enum type status',
+		);
+		const client = new FakePgClient();
+		client.failOnSql = /^ALTER TABLE .*CHECK \(status = 'pending'\)$/u;
+		client.failOnSqlError = enumValueError;
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			'CHECK ((age > 0))',
+		);
+		const pool = new FakePgPool(client);
+		const warnings: Array<{
+			readonly constraint: string;
+			readonly message: string;
+		}> = [];
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('age'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					checkConstraints: [
+						{ name: 'jobs_age_check', expression: 'age > 0' },
+						{ name: 'jobs_status_check', expression: "status = 'pending'" },
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active', 'pending'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('age'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+						}),
+					],
+					checkConstraints: [
+						{ name: 'jobs_age_check', expression: 'CHECK ((age > 0))' },
+					],
+				}),
+			],
+			[{ name: 'status', values: ['active'] }],
+		);
+
+		const canonical = await canonicalizeCheckConstraints(
+			pool as unknown as Pool,
+			desired,
+			dbModel,
+			{ onWarning: (warning) => warnings.push(warning) },
+		);
+
+		expect(canonical.tables.get('jobs')?.checkConstraints).toEqual([
+			{ name: 'jobs_age_check', expression: 'CHECK ((age > 0))' },
+			{ name: 'jobs_status_check', expression: "status = 'pending'" },
+		]);
+		expect(warnings).toEqual([
+			expect.objectContaining({
+				constraint: 'jobs_status_check',
+				message: expect.stringContaining(
+					'Could not canonicalize CHECK constraint "jobs"."jobs_status_check"',
+				),
+			}),
+		]);
+		expect(createdTempTableNames(client)).toHaveLength(1);
+
+		const checkChanges = compareSchemata(canonical, dbModel)
+			.changes.filter(
+				(change) =>
+					change.kind === 'add_check_constraint' ||
+					change.kind === 'drop_check_constraint',
+			)
+			.map(
+				(change) =>
+					`${change.kind}:${(change.meta?.check as { name: string }).name}`,
+			);
+		expect(checkChanges).toEqual(['add_check_constraint:jobs_status_check']);
 	});
 
 	it('throws in strict mode when a CHECK references an enum value added by the same diff', async () => {
@@ -582,7 +707,10 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
+			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0_0',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'ROLLBACK',
@@ -619,7 +747,9 @@ describe('canonicalizeCheckConstraints', () => {
 			'BEGIN',
 			'SAVEPOINT dbsp_check_canon_sp_0',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "amount" INTEGER) ON COMMIT DROP',
+			'SAVEPOINT dbsp_check_canon_sp_0_0',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (amount > 0)',
+			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
 			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
 			'ROLLBACK',

@@ -1016,6 +1016,58 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		// Every spelling PostgreSQL accepts for the literal. The refusal must not
 		// depend on any of them: a scan for the exact text `'pending'` sees the first
 		// and misses the rest, which is precisely why there is no scan any more.
+		it('refuses only the constraint PostgreSQL rejected, not its innocent sibling', async () => {
+			// Two CHECKs on one table: PostgreSQL refuses the first (the enum value does
+			// not exist yet) and accepts the second. Canonicalisation is per constraint,
+			// so the sibling must keep its canonical form and stay out of the refusal.
+			const desired = new ModelIRImpl(
+				new Map<string, TableIR>([
+					[
+						'jobs',
+						{
+							name: 'jobs',
+							columns: [
+								makeCol('id'),
+								{ name: 'state', type: 'string', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+							checkConstraints: [
+								{
+									name: 'jobs_state_pending_check',
+									expression: 'state = $$pending$$',
+								},
+								{
+									name: 'jobs_state_known_check',
+									expression: "state <> 'done'",
+								},
+							],
+						},
+					],
+				]),
+				new Map(),
+				new Map([
+					[
+						'status',
+						{
+							name: 'status',
+							values: ['queued', 'done', 'pending'],
+							schema: SCHEMA,
+						},
+					],
+				]),
+			);
+
+			const error = await comparePgsqlDatabaseSchema(pool, desired, {
+				schema: SCHEMA,
+				ignoreUnmanagedExtensions: true,
+			}).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+
+			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
+			expect(error.constraint).toBe('jobs_state_pending_check');
+		});
+
 		it.each([
 			['single-quoted', "state = 'pending'"],
 			['dollar-quoted', 'state = $$pending$$'],

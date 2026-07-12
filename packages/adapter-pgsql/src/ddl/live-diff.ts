@@ -108,7 +108,9 @@ export async function comparePgsqlDatabaseSchema(
 	options?: ComparePgsqlDatabaseSchemaOptions,
 ): Promise<SchemaDiff> {
 	const dbModel = await introspect(pool, toIntrospectionOptions(options));
-	const useCanonicalizer = options?.canonicalizeExpressions ?? true;
+	const compareCheckConstraints = supportsDDLCheckConstraints(options);
+	const useCanonicalizer =
+		compareCheckConstraints && (options?.canonicalizeExpressions ?? true);
 	const rawCheckExpressionSurfaces = new Set<string>();
 	const desiredForCompare = useCanonicalizer
 		? await canonicalizeCheckConstraints(
@@ -118,13 +120,21 @@ export async function comparePgsqlDatabaseSchema(
 				toCanonicalizerOptions(options, rawCheckExpressionSurfaces),
 			)
 		: desired;
-	if (useCanonicalizer && options?.requireExpressionCanonicalization) {
+	if (
+		options?.requireExpressionCanonicalization &&
+		(useCanonicalizer || !compareCheckConstraints)
+	) {
 		assertNoUncanonicalizedLiveExpressionSurfaces(desiredForCompare, dbModel);
 	}
 	const diff = compareSchemata(
 		desiredForCompare,
 		dbModel,
-		toCompareOptions(options, useCanonicalizer),
+		toCompareOptions(options, {
+			delegateExpressionCanonicalization:
+				options?.requireExpressionCanonicalization === true &&
+				!useCanonicalizer &&
+				compareCheckConstraints,
+		}),
 	);
 
 	if (useCanonicalizer && rawCheckExpressionSurfaces.size > 0) {
@@ -320,6 +330,13 @@ function toIntrospectionOptions(
 	};
 }
 
+function supportsDDLCheckConstraints(
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+): boolean {
+	const caps = options?.dialectCapabilities;
+	return caps === undefined || caps.supportsDDLCheckConstraints === true;
+}
+
 function toCanonicalizerOptions(
 	options: ComparePgsqlDatabaseSchemaOptions | undefined,
 	rawCheckExpressionSurfaces: Set<string>,
@@ -350,7 +367,9 @@ function recordRawCheckExpressionSurface(
 
 function toCompareOptions(
 	options: ComparePgsqlDatabaseSchemaOptions | undefined,
-	useCanonicalizer: boolean,
+	strictness: {
+		readonly delegateExpressionCanonicalization: boolean;
+	},
 ): CompareSchemataOptions {
 	return {
 		...(options?.dbCasing !== undefined ? { dbCasing: options.dbCasing } : {}),
@@ -360,11 +379,9 @@ function toCompareOptions(
 		...(options?.ignoreUnmanagedExtensions !== undefined
 			? { ignoreUnmanagedExtensions: options.ignoreUnmanagedExtensions }
 			: {}),
-		...(!useCanonicalizer &&
-		options?.requireExpressionCanonicalization !== undefined
+		...(strictness.delegateExpressionCanonicalization
 			? {
-					requireExpressionCanonicalization:
-						options.requireExpressionCanonicalization,
+					requireExpressionCanonicalization: true,
 				}
 			: {}),
 	};

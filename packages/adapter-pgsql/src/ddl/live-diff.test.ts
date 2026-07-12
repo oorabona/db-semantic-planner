@@ -272,6 +272,7 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 
 	async query<T extends Record<string, unknown> = Record<string, unknown>>(
 		sql: string,
+		parameters?: readonly unknown[],
 	): Promise<QueryResult<T>> {
 		const normalized = normalizeSql(sql);
 		this.queries.push(normalized);
@@ -283,6 +284,17 @@ class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
 			throw new Error(
 				'unsafe use of new value "pending" of enum type tenant_1.status',
 			);
+		}
+
+		if (normalized.startsWith('SELECT conname AS name,')) {
+			const names = parameters?.[1] as readonly string[];
+			return {
+				rows: names.map((name) => ({
+					name,
+					expression: "CHECK (((state)::text <> 'blocked'::text))",
+				})) as T[],
+				rowCount: names.length,
+			} as QueryResult<T>;
 		}
 
 		if (normalized.includes('FROM information_schema.columns')) {
@@ -488,6 +500,58 @@ describe('comparePgsqlDatabaseSchema', () => {
 		).toBe(true);
 	});
 
+	it('attributes new-enum-value refusal to the CHECK PostgreSQL refused, not its sibling', async () => {
+		const desired = makeModelWithEnums(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						{
+							name: 'state',
+							type: 'string',
+							nullable: false,
+						},
+					],
+					primaryKey: 'id',
+					checkConstraints: [
+						{
+							name: 'jobs_state_sibling_check',
+							expression: "state <> 'blocked'",
+						},
+						{ name: 'jobs_state_check', expression: "state = 'pending'" },
+					],
+				}),
+			],
+			[
+				{
+					name: 'status',
+					schema: 'tenant_1',
+					values: ['queued', 'done', 'pending'],
+				},
+			],
+		);
+		const client = new FakeEnumValueLiveDiffClient();
+		const pool = new FakeLiveDiffPool(client);
+		const onWarning = vi.fn();
+
+		await expect(
+			comparePgsqlDatabaseSchema(pool as unknown as Pool, desired, {
+				schema: 'tenant_1',
+				onWarning,
+			}),
+		).rejects.toMatchObject({
+			constraint: 'jobs_state_check',
+		});
+		expect(onWarning).toHaveBeenCalledOnce();
+		expect(onWarning.mock.calls[0]![0]).toContain(
+			'Could not canonicalize CHECK constraint "jobs"."jobs_state_check"',
+		);
+		expect(onWarning.mock.calls[0]![0]).not.toContain(
+			'jobs_state_sibling_check',
+		);
+	});
+
 	it('throws repeated drift when CHECK canonicalization falls back under dbCasing', async () => {
 		const desiredExpression = 'CHECK ((age > 0))';
 		const databaseExpression = 'CHECK ((age >= 0))';
@@ -517,5 +581,39 @@ describe('comparePgsqlDatabaseSchema', () => {
 		).rejects.toThrow(NonConvergentSchemaDiffError);
 		expect(client.queries).toContain('ROLLBACK');
 		expect(client.release).toHaveBeenCalledOnce();
+	});
+
+	it('skips scratch CHECK canonicalization and CHECK diffs when the dialect disables CHECK constraints', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol('id'), makeCol('age')],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const client = new FakeLiveDiffClient('CHECK ((age >= 0))', true);
+		const pool = new FakeLiveDiffPool(client);
+		const onWarning = vi.fn();
+
+		const diff = await comparePgsqlDatabaseSchema(
+			pool as unknown as Pool,
+			desired,
+			{
+				dialectCapabilities: { supportsDDLCheckConstraints: false },
+				requireExpressionCanonicalization: true,
+				onWarning,
+			},
+		);
+
+		expect(diff.changes).toEqual([]);
+		expect(onWarning).not.toHaveBeenCalled();
+		expect(
+			client.queries.some((query) => query.startsWith('CREATE TEMP TABLE')),
+		).toBe(false);
+		expect(
+			client.queries.some((query) => query.startsWith('ALTER TABLE')),
+		).toBe(false);
 	});
 });
