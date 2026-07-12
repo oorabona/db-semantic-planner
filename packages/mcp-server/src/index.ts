@@ -243,12 +243,12 @@ EXAMPLES:
   dbsp-mcp -s ./schema.js
 
 SCHEMA FILE FORMAT:
-  The schema file must export a ResolvedSchema object:
+  The schema file must export the result of schema():
 
     // dbsp.schema.ts
-    import { defineSchema } from '@dbsp/core';
+    import { schema as dbSchema } from '@dbsp/core';
 
-    export const schema = defineSchema({
+    export const schema = dbSchema({
       users: {
         id: { type: 'uuid', primaryKey: true },
         email: { type: 'string', unique: true },

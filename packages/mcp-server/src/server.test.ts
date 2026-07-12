@@ -4,34 +4,22 @@
  * Tests for MCP server creation and configuration.
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { schema as dbSchema, ref } from '../../core/src/index.ts';
 import { createMcpServer } from './server.js';
 
-// Mock schema for testing - minimal structure that passes validation
-const mockSchema = {
-	tables: {
-		users: { id: 'uuid', email: 'text' },
-		posts: { id: 'uuid', title: 'text', userId: 'uuid' },
+// Mock schema for testing - live schema() result shape
+const mockSchema = dbSchema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		email: 'string',
 	},
-	relations: {
-		posts_userId_users: {
-			kind: 'belongsTo',
-			from: 'posts',
-			to: 'users',
-			foreignKey: 'userId',
-		},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: 'string',
+		userId: ref('users'),
 	},
-	hints: {},
-	conventions: {
-		primaryKey: 'id',
-		timestamps: false,
-		softDelete: false,
-		namingConvention: 'camelCase',
-	},
-	indexes: {},
-	defaultFilters: {},
-} as unknown as ResolvedSchema;
+});
 
 describe('createMcpServer', () => {
 	describe('basic creation', () => {
@@ -68,23 +56,17 @@ describe('createMcpServer', () => {
 		});
 
 		it('should handle schema with no relations', () => {
-			const schemaNoRelations = {
-				...mockSchema,
-				relations: {},
-			} as unknown as ResolvedSchema;
+			const schemaNoRelations = dbSchema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+				},
+			});
 			const server = createMcpServer({ schema: schemaNoRelations });
 			expect(server).toBeDefined();
 		});
 
 		it('should handle empty schema', () => {
-			const emptySchema = {
-				tables: {},
-				relations: {},
-				hints: {},
-				conventions: mockSchema.conventions,
-				indexes: {},
-				defaultFilters: {},
-			} as unknown as ResolvedSchema;
+			const emptySchema = dbSchema({});
 			const server = createMcpServer({ schema: emptySchema });
 			expect(server).toBeDefined();
 		});

@@ -55,6 +55,7 @@
 	},
 	"dependencies": {
 		"@dbsp/core": "workspace:*",
+		"@dbsp/types": "workspace:*",
 		"@modelcontextprotocol/sdk": "catalog:"
 	},
 	"peerDependencies": {
