@@ -11,6 +11,7 @@ import {
 	comparePgsqlDatabaseSchema,
 	generateDDL,
 	generateMigrationSQL,
+	getNamingPluginForDbCasing,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { executeDdl } from '../ddl-executor.js';
@@ -69,6 +70,9 @@ export const pushCommand = new Command('push')
 						const statements = generateDDL(schemaModel, {
 							includeDropStatements: true,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
+							...(loaded.dbCasing !== undefined
+								? { naming: getNamingPluginForDbCasing(loaded.dbCasing) }
+								: {}),
 						});
 
 						const migrationsPattern =

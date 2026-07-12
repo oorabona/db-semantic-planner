@@ -55,7 +55,12 @@ export const verifyCommand = new Command('verify')
 					});
 
 					// Compare using the comparison engine
-					const diff = compareSchemata(schemaModel, dbModel);
+					const diff =
+						loaded.dbCasing !== undefined
+							? compareSchemata(schemaModel, dbModel, {
+									dbCasing: loaded.dbCasing,
+								})
+							: compareSchemata(schemaModel, dbModel);
 
 					// Convert to verify result
 					const schemaTables = Array.from(schemaModel.tables.keys());

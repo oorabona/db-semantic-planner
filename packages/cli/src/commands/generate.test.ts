@@ -1,30 +1,126 @@
 /**
- * Generate command tests
+ * `dbsp generate` — the command's options must reach the DDL generator, and the
+ * casing the schema declares must be honoured.
  *
- * E01 regression: Verify CLI options are applied correctly.
+ * Everything here drives `generateCommand` and asserts on what the adapter was
+ * asked to do. Only the adapter and the schema loader are mocked; the command's
+ * own wiring is the thing under test.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock the adapter module
-vi.mock('@dbsp/adapter-pgsql', () => ({
-	createPgsqlCompileOnlyAdapter: vi.fn(() => ({
-		generateDDL: vi.fn((_schema, options) => {
-			// Return different content based on options to verify they're passed
-			const statements = ['CREATE TABLE test (id INTEGER)'];
-			if (options?.includeDropStatements) {
-				statements.unshift('DROP TABLE IF EXISTS test');
-			}
-			return statements;
-		}),
+const mockAdapterGenerateDDL = vi.hoisted(() =>
+	vi.fn((_schema, options) => {
+		// Return different content based on options to verify they're passed
+		const statements = ['CREATE TABLE test (id INTEGER)'];
+		if (options?.includeDropStatements) {
+			statements.unshift('DROP TABLE IF EXISTS test');
+		}
+		return statements;
+	}),
+);
+const mockCreatePgsqlCompileOnlyAdapter = vi.hoisted(() =>
+	vi.fn(() => ({
+		generateDDL: mockAdapterGenerateDDL,
 	})),
+);
+
+vi.mock('@dbsp/adapter-pgsql', () => ({
+	createPgsqlCompileOnlyAdapter: (...args: unknown[]) =>
+		mockCreatePgsqlCompileOnlyAdapter(...args),
 }));
 
 const loadSchema = vi.hoisted(() => vi.fn());
+const loadSchemaFromCwd = vi.hoisted(() => vi.fn());
 vi.mock('../utils/schema-loader.js', () => ({
 	loadSchema,
-	loadSchemaFromCwd: loadSchema,
+	loadSchemaFromCwd,
 }));
+
+function makeLoadedSchema(dbCasing?: 'snake_case' | 'camelCase' | 'preserve') {
+	return {
+		model: { tables: new Map() },
+		definition: {},
+		tableNames: ['userProfiles'],
+		...(dbCasing !== undefined ? { dbCasing } : {}),
+	};
+}
+
+describe('generate command casing wiring', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		loadSchema.mockResolvedValue(makeLoadedSchema('snake_case'));
+		loadSchemaFromCwd.mockResolvedValue({
+			schema: makeLoadedSchema('snake_case'),
+			path: 'dbsp.schema.ts',
+		});
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('uses the schema dbCasing export as the generate ddl default', async () => {
+		// The declared casing must differ from the dialect default (snake_case),
+		// or the assertion cannot tell "read the export" from "fell back".
+		loadSchema.mockResolvedValue(makeLoadedSchema('camelCase'));
+		loadSchemaFromCwd.mockResolvedValue({
+			schema: makeLoadedSchema('camelCase'),
+			path: 'dbsp.schema.ts',
+		});
+		const { generateCommand } = await import('./generate.js');
+
+		await generateCommand.parseAsync(['ddl', '--schema', 'dbsp.schema.ts'], {
+			from: 'user',
+		});
+
+		expect(mockCreatePgsqlCompileOnlyAdapter).toHaveBeenCalledWith(
+			expect.objectContaining({ dbCasing: 'camelCase' }),
+		);
+	});
+
+	it('lets explicit --casing win over the schema declaration', async () => {
+		const { generateCommand } = await import('./generate.js');
+
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--casing', 'none'],
+			{ from: 'user' },
+		);
+
+		expect(mockCreatePgsqlCompileOnlyAdapter).toHaveBeenCalledWith(
+			expect.objectContaining({ dbCasing: 'preserve' }),
+		);
+	});
+
+	it('maps explicit --casing camel to camelCase dbCasing', async () => {
+		const { generateCommand } = await import('./generate.js');
+
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--casing', 'camel'],
+			{ from: 'user' },
+		);
+
+		expect(mockCreatePgsqlCompileOnlyAdapter).toHaveBeenCalledWith(
+			expect.objectContaining({ dbCasing: 'camelCase' }),
+		);
+	});
+
+	it('keeps the historical snake_case default when the schema has no dbCasing export', async () => {
+		loadSchema.mockResolvedValue(makeLoadedSchema());
+		const { generateCommand } = await import('./generate.js');
+
+		await generateCommand.parseAsync(['ddl', '--schema', 'dbsp.schema.ts'], {
+			from: 'user',
+		});
+
+		expect(mockCreatePgsqlCompileOnlyAdapter).toHaveBeenCalledWith(
+			expect.objectContaining({ dbCasing: 'snake_case' }),
+		);
+	});
+});
 
 describe('generate: a refused target never runs the user schema', () => {
 	// Loading a schema executes the user's module. A target we are going to
@@ -54,62 +150,71 @@ describe('generate: a refused target never runs the user schema', () => {
 	});
 });
 
-describe('E01 Regression: generate command options', () => {
-	describe('--drop option', () => {
-		it('includeDropStatements is passed to generateDDL when --drop is set', async () => {
-			const { createPgsqlCompileOnlyAdapter } = await import(
-				'@dbsp/adapter-pgsql'
-			);
+describe('generate: the command options reach the generator', () => {
+	// These go through generateCommand. An earlier version of this block called the
+	// mocked adapter directly and defined its own `isDialectSupported`, so it passed
+	// no matter what the command did.
 
-			// Simulate what the CLI does
-			const adapter = createPgsqlCompileOnlyAdapter({
-				dbCasing: 'snake_case',
-			});
-
-			// Without --drop
-			const withoutDrop = adapter.generateDDL({} as any, {});
-			expect(withoutDrop).not.toContain('DROP TABLE');
-
-			// With --drop
-			const withDrop = adapter.generateDDL({} as any, {
-				includeDropStatements: true,
-			});
-			expect(withDrop).toContain('DROP TABLE IF EXISTS test');
-		});
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
 	});
 
-	describe('--dialect option', () => {
-		function isDialectSupported(dialect: string): boolean {
-			return dialect === 'postgresql';
-		}
+	it('asks for DROP statements when --drop is set, and not otherwise', async () => {
+		loadSchema.mockResolvedValue(makeLoadedSchema());
+		const { generateCommand } = await import('./generate.js');
 
-		it('warns when dialect is not postgresql', () => {
-			// The CLI should warn but continue with postgresql
-			expect(isDialectSupported('mysql')).toBe(false);
-			expect(isDialectSupported('sqlite')).toBe(false);
-			expect(isDialectSupported('mssql')).toBe(false);
-		});
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--drop'],
+			{ from: 'user' },
+		);
+		expect(mockAdapterGenerateDDL).toHaveBeenLastCalledWith(
+			expect.anything(),
+			expect.objectContaining({ includeDropStatements: true }),
+		);
 
-		it('accepts postgresql dialect without warning', () => {
-			expect(isDialectSupported('postgresql')).toBe(true);
+		await generateCommand.parseAsync(['ddl', '--schema', 'dbsp.schema.ts'], {
+			from: 'user',
 		});
+		expect(mockAdapterGenerateDDL).toHaveBeenLastCalledWith(
+			expect.anything(),
+			expect.not.objectContaining({ includeDropStatements: true }),
+		);
 	});
 
-	describe('--casing option', () => {
-		function mapCasingToDbCasing(casing: string): 'snake_case' | 'preserve' {
-			return casing === 'snake' ? 'snake_case' : 'preserve';
-		}
+	it.each([
+		'mysql',
+		'sqlite',
+		'mssql',
+	])('warns that %s is unsupported and carries on with postgresql', async (dialect) => {
+		loadSchema.mockResolvedValue(makeLoadedSchema());
+		const { generateCommand } = await import('./generate.js');
 
-		it('maps snake to snake_case dbCasing', () => {
-			expect(mapCasingToDbCasing('snake')).toBe('snake_case');
-		});
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--dialect', dialect],
+			{ from: 'user' },
+		);
 
-		it('maps camel to preserve dbCasing', () => {
-			expect(mapCasingToDbCasing('camel')).toBe('preserve');
-		});
+		expect(console.error).toHaveBeenCalledWith(
+			expect.stringContaining("Only 'postgresql' dialect"),
+		);
+		// It warns, but it does not stop — the schema is still generated.
+		expect(mockAdapterGenerateDDL).toHaveBeenCalled();
+	});
 
-		it('maps none to preserve dbCasing', () => {
-			expect(mapCasingToDbCasing('none')).toBe('preserve');
-		});
+	it('says nothing about the dialect when it is postgresql', async () => {
+		loadSchema.mockResolvedValue(makeLoadedSchema());
+		const { generateCommand } = await import('./generate.js');
+
+		await generateCommand.parseAsync(
+			['ddl', '--schema', 'dbsp.schema.ts', '--dialect', 'postgresql'],
+			{ from: 'user' },
+		);
+
+		expect(console.error).not.toHaveBeenCalledWith(
+			expect.stringContaining('dialect'),
+		);
+		expect(mockAdapterGenerateDDL).toHaveBeenCalled();
 	});
 });

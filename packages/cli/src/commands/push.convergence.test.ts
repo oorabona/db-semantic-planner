@@ -8,13 +8,17 @@ const mockExecuteDdl = vi.hoisted(() => vi.fn());
 const mockCreateDbConnection = vi.hoisted(() => vi.fn());
 const mockLoadSchema = vi.hoisted(() => vi.fn());
 
-vi.mock('@dbsp/adapter-pgsql', () => ({
-	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
-		mockComparePgsqlDatabaseSchema(...args),
-	generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
-	generateMigrationSQL: (...args: unknown[]) =>
-		mockGenerateMigrationSQL(...args),
-}));
+vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	return {
+		comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+			mockComparePgsqlDatabaseSchema(...args),
+		generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
+		generateMigrationSQL: (...args: unknown[]) =>
+			mockGenerateMigrationSQL(...args),
+		getNamingPluginForDbCasing: actual.getNamingPluginForDbCasing,
+	};
+});
 
 vi.mock('../ddl-executor.js', () => ({
 	executeDdl: (...args: unknown[]) => mockExecuteDdl(...args),
@@ -56,6 +60,7 @@ describe('push — #315 casing and convergence wiring', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		mockGenerateDDL.mockReset();
 		schemaModel = { tables: new Map() };
 		pool = { end: vi.fn().mockResolvedValue(undefined) };
 		mockCreateDbConnection.mockResolvedValue({ pool });
@@ -123,6 +128,71 @@ describe('push — #315 casing and convergence wiring', () => {
 		);
 		expect(mockExecuteDdl.mock.invocationCallOrder[0]!).toBeLessThan(
 			mockComparePgsqlDatabaseSchema.mock.invocationCallOrder[1]!,
+		);
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
+	it('passes loaded dbCasing to drop-mode generateDDL as a naming plugin', async () => {
+		mockGenerateDDL.mockImplementation((_model, options) => {
+			const naming = options.naming as {
+				toDatabase(identifier: string): string;
+			};
+			const tableName = naming.toDatabase('userProfiles');
+			return [
+				`DROP TABLE IF EXISTS "${tableName}" CASCADE;`,
+				`CREATE TABLE "${tableName}" ("id" integer);`,
+			];
+		});
+
+		await pushCommand.parseAsync(
+			[
+				'--schema',
+				'dbsp.schema.ts',
+				'--db',
+				'postgres://localhost/db',
+				'--drop',
+				'--json',
+			],
+			{ from: 'user' },
+		);
+
+		const generateOptions = mockGenerateDDL.mock.calls[0]![1] as {
+			naming?: { toDatabase(identifier: string): string };
+		};
+		expect(generateOptions.naming?.toDatabase('userProfiles')).toBe(
+			'user_profiles',
+		);
+		expect(mockExecuteDdl).toHaveBeenCalledWith(
+			pool,
+			expect.arrayContaining(['DROP TABLE IF EXISTS "user_profiles" CASCADE;']),
+			expect.any(Object),
+		);
+		expect(pool.end).toHaveBeenCalledOnce();
+	});
+
+	it('keeps drop-mode generateDDL options unchanged when schema has no dbCasing export', async () => {
+		mockLoadSchema.mockResolvedValue({
+			model: schemaModel,
+			definition: {},
+			tableNames: [],
+		});
+		mockGenerateDDL.mockReturnValue(['DROP TABLE IF EXISTS "userProfiles";']);
+
+		await pushCommand.parseAsync(
+			[
+				'--schema',
+				'dbsp.schema.ts',
+				'--db',
+				'postgres://localhost/db',
+				'--drop',
+				'--json',
+			],
+			{ from: 'user' },
+		);
+
+		expect(mockGenerateDDL).toHaveBeenCalledWith(
+			schemaModel,
+			expect.not.objectContaining({ naming: expect.anything() }),
 		);
 		expect(pool.end).toHaveBeenCalledOnce();
 	});

@@ -197,8 +197,22 @@ export function compareSchemata(
 	db: ModelIR,
 	options?: CompareSchemataOptions,
 ): SchemaDiff {
+	const caps = options?.dialectCapabilities;
+	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
+	/**
+	 * Check whether a DDL feature is supported.
+	 *
+	 * - `undefined`: capability flag not set → feature is on by default (no caps = all features).
+	 * - `false`: capability explicitly disabled → feature is skipped.
+	 * - `true`: capability explicitly enabled → feature is included.
+	 */
+	const sup = (flag: boolean | undefined) => !caps || flag === true;
+	const supportsCheckConstraints = sup(caps?.supportsDDLCheckConstraints);
+
 	if (options?.requireExpressionCanonicalization) {
-		assertNoExpressionSurfaces(schema, db);
+		assertNoExpressionSurfaces(schema, db, {
+			includeCheckConstraints: supportsCheckConstraints,
+		});
 	}
 
 	const changes: SchemaChange[] = [];
@@ -207,8 +221,10 @@ export function compareSchemata(
 		options?.dbCasing !== undefined
 			? getNamingPluginForDbCasing(options.dbCasing)
 			: identityNaming;
-	for (const table of schema.tables.values()) {
-		assertNoCheckConstraintNameCollisions(table, schemaNaming);
+	if (supportsCheckConstraints) {
+		for (const table of schema.tables.values()) {
+			assertNoCheckConstraintNameCollisions(table, schemaNaming);
+		}
 	}
 	const plugin = options?.dbCasing !== undefined ? schemaNaming : undefined;
 	const schemaTables = plugin
@@ -220,18 +236,6 @@ export function compareSchemata(
 			plugin ? plugin.toDatabase(name) : name,
 		),
 	);
-
-	const caps = options?.dialectCapabilities;
-	// Helper: feature is supported if no caps provided (backward compat) OR flag is true
-	/**
-	 * Check whether a DDL feature is supported.
-	 *
-	 * - `undefined`: capability flag not set → feature is on by default (no caps = all features).
-	 * - `false`: capability explicitly disabled → feature is skipped.
-	 * - `true`: capability explicitly enabled → feature is included.
-	 */
-	const sup = (flag: boolean | undefined) => !caps || flag === true;
-
 	// 0. Compare ENUM types (schema-level, before tables)
 	if (sup(caps?.supportsDDLEnumTypes)) {
 		compareEnums(schema, db, changes);
@@ -280,7 +284,7 @@ export function compareSchemata(
 				});
 			}
 			// Emit CHECK constraints for new table (phase 12, after indexes)
-			if (sup(caps?.supportsDDLCheckConstraints)) {
+			if (supportsCheckConstraints) {
 				for (const check of schemaTable.checkConstraints ?? []) {
 					changes.push({
 						kind: 'add_check_constraint',
@@ -320,7 +324,7 @@ export function compareSchemata(
 		comparePrimaryKeys(schemaTable, dbTable, changes);
 		compareForeignKeys(schemaTable, dbTable, changes);
 		compareIndexes(schemaTable, dbTable, changes);
-		if (sup(caps?.supportsDDLCheckConstraints)) {
+		if (supportsCheckConstraints) {
 			compareCheckConstraints(schemaTable, dbTable, changes);
 		}
 		if (sup(caps?.supportsDDLComments)) {
@@ -355,10 +359,14 @@ export function compareSchemata(
 // Name Normalization (camelCase → DB format)
 // ============================================================================
 
-function assertNoExpressionSurfaces(schema: ModelIR, db: ModelIR): void {
+function assertNoExpressionSurfaces(
+	schema: ModelIR,
+	db: ModelIR,
+	options?: CollectExpressionSurfaceOptions,
+): void {
 	const surfaces = [
-		...collectExpressionSurfaces('schema', schema),
-		...collectExpressionSurfaces('database', db),
+		...collectExpressionSurfaces('schema', schema, options),
+		...collectExpressionSurfaces('database', db, options),
 	];
 	if (surfaces.length > 0) {
 		throw new ExpressionCanonicalizationUnavailableError(surfaces);

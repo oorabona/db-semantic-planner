@@ -3965,6 +3965,124 @@ describe('compareSchemata with Capabilities (CAPS-003)', () => {
 		expect(diff.changes.some((c) => c.kind === 'create_table')).toBe(true);
 	});
 
+	it('does not run CHECK name collision preflight when supportsDDLCheckConstraints is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLCheckConstraints: false,
+		};
+		const schema = makeModel([
+			makeTable({
+				name: 'userProfiles',
+				columns: [makeCol({ name: 'id' }), makeCol({ name: 'profileAge' })],
+				checkConstraints: [
+					{ name: 'profileAgeCheck', expression: 'CHECK ((profileAge > 0))' },
+					{
+						name: 'profile_age_check',
+						expression: 'CHECK ((profileAge < 150))',
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'user_profiles',
+				columns: [makeCol({ name: 'id' }), makeCol({ name: 'profile_age' })],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db, {
+			dbCasing: 'snake_case',
+			dialectCapabilities: caps,
+		});
+
+		expect(
+			diff.changes.filter(
+				(c) =>
+					c.kind === 'add_check_constraint' ||
+					c.kind === 'drop_check_constraint',
+			),
+		).toHaveLength(0);
+		expect(diff.changes).toHaveLength(0);
+	});
+
+	it('does not require CHECK expression canonicalization when supportsDDLCheckConstraints is false', () => {
+		const caps: DialectCapabilities = {
+			...POSTGRESQL_CAPABILITIES,
+			supportsDDLCheckConstraints: false,
+		};
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db, {
+			dialectCapabilities: caps,
+			requireExpressionCanonicalization: true,
+		});
+
+		expect(diff.changes).toHaveLength(0);
+	});
+
+	it('still runs CHECK name collision preflight when supportsDDLCheckConstraints is true', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'userProfiles',
+				columns: [makeCol({ name: 'id' }), makeCol({ name: 'profileAge' })],
+				checkConstraints: [
+					{ name: 'profileAgeCheck', expression: 'CHECK ((profileAge > 0))' },
+					{
+						name: 'profile_age_check',
+						expression: 'CHECK ((profileAge < 150))',
+					},
+				],
+			}),
+		]);
+		const db = makeModel([]);
+
+		expect(() =>
+			compareSchemata(schema, db, {
+				dbCasing: 'snake_case',
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+			}),
+		).toThrow(/CHECK constraint name collision/);
+	});
+
+	it('still requires CHECK expression canonicalization when supportsDDLCheckConstraints is true', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+
+		expect(() =>
+			compareSchemata(schema, db, {
+				dialectCapabilities: POSTGRESQL_CAPABILITIES,
+				requireExpressionCanonicalization: true,
+			}),
+		).toThrow(ExpressionCanonicalizationUnavailableError);
+	});
+
 	it('should emit check constraints with POSTGRESQL_CAPABILITIES', () => {
 		const schema = makeModel([
 			makeTable({
