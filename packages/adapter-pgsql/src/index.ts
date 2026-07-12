@@ -30,7 +30,6 @@ export {
 } from './compiler.js';
 // DDL Generation
 export {
-	acquireMigrationLock,
 	type ChangeKind,
 	type CompareSchemataOptions,
 	canGenerateCreateIndex,
@@ -54,7 +53,6 @@ export {
 	type ParsedMigrationFile,
 	parseMigrationFile,
 	recordMigration,
-	releaseMigrationLock,
 	removeMigrationRecord,
 	type SchemaChange,
 	type SchemaDiff,

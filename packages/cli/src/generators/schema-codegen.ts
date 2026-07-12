@@ -34,16 +34,8 @@ export interface SchemaCodegenOptions {
 	readonly sourceUrl?: string;
 	/** Include original DB types as comments */
 	readonly includeDbTypeComments?: boolean;
-	/** Receive diagnostics as they are collected, including pass-through warnings. */
+	/** Receive diagnostics as they are collected, including model warnings. */
 	readonly onWarning?: (message: string) => void;
-	/**
-	 * Caller-provided diagnostics to pass through to returned diagnostics and to
-	 * onWarning. These are never written into generated source.
-	 *
-	 * @deprecated Prefer generateSchemaFileWithDiagnostics() to handle diagnostics
-	 * explicitly.
-	 */
-	readonly warnings?: readonly string[];
 	/** Timestamp of introspection */
 	readonly introspectedAt?: Date;
 	/**
@@ -55,16 +47,7 @@ export interface SchemaCodegenOptions {
 	readonly dbCasing?: 'snake_case' | 'camelCase' | 'preserve';
 }
 
-export interface SchemaCodegenDiagnosticsOptions extends SchemaCodegenOptions {
-	/**
-	 * Caller-provided diagnostics to pass through to returned diagnostics and to
-	 * onWarning. These are never written into generated source.
-	 *
-	 * @deprecated Prefer the same field on SchemaCodegenOptions; this interface is
-	 * retained for callers that already import it.
-	 */
-	readonly warnings?: readonly string[];
-}
+export type SchemaCodegenDiagnosticsOptions = SchemaCodegenOptions;
 
 export interface SchemaCodegenResult {
 	readonly code: string;
@@ -529,6 +512,14 @@ function schemaCodegenWarnings(model: ModelIR): string[] {
 	return warnings;
 }
 
+function modelWarnings(model: ModelIR): readonly string[] {
+	const warnings = (model as ModelIR & { readonly warnings?: unknown })
+		.warnings;
+	return Array.isArray(warnings) && warnings.every((w) => typeof w === 'string')
+		? warnings
+		: [];
+}
+
 function generateIndexCode(
 	idx: IndexIR,
 	options: SchemaCodegenOptions,
@@ -611,46 +602,6 @@ function generateTableConstraintCode(
 }
 
 /**
- * Generate a TypeScript schema file from ModelIR.
- *
- * @param model - The ModelIR (or IntrospectedModelIR) to generate from
- * @param options - Code generation options
- * @returns Generated source code
- * @deprecated Use generateSchemaFileWithDiagnostics() to receive diagnostics
- * explicitly. This function throws when diagnostics would otherwise be dropped,
- * because emitting a schema after losing index diagnostics can hide unmanaged
- * indexes. Pass onWarning or call generateSchemaFileWithDiagnostics() to opt
- * into handling representability diagnostics.
- */
-export function generateSchemaFile(
-	model: ModelIR,
-	options: SchemaCodegenOptions = {},
-): string {
-	const result = generateSchemaFileWithDiagnostics(model, options);
-	if (result.warnings.length > 0 && options.onWarning === undefined) {
-		throw new Error(formatDroppedDiagnosticsError(result.warnings));
-	}
-	return result.code;
-}
-
-function formatDroppedDiagnosticsError(warnings: readonly string[]): string {
-	const diagnostics = warnings.map((warning) =>
-		warning.replace(/\s+/g, ' ').trim(),
-	);
-	const preview = diagnostics
-		.slice(0, 5)
-		.map((warning) => `- ${warning}`)
-		.join('\n');
-	const extra =
-		diagnostics.length > 5 ? `\n- ... and ${diagnostics.length - 5} more` : '';
-	return (
-		`generateSchemaFile() produced ${diagnostics.length} diagnostic(s) without an onWarning handler:\n` +
-		`${preview}${extra}\n` +
-		'Use generateSchemaFileWithDiagnostics() or pass onWarning to receive diagnostics.'
-	);
-}
-
-/**
  * Generate a TypeScript schema file from ModelIR and return diagnostics.
  *
  * @param model - The ModelIR (or IntrospectedModelIR) to generate from
@@ -661,10 +612,7 @@ export function generateSchemaFileWithDiagnostics(
 	model: ModelIR,
 	options: SchemaCodegenDiagnosticsOptions = {},
 ): SchemaCodegenResult {
-	const warnings = [
-		...(options.warnings ?? []),
-		...schemaCodegenWarnings(model),
-	];
+	const warnings = [...modelWarnings(model), ...schemaCodegenWarnings(model)];
 	for (const warning of warnings) {
 		options.onWarning?.(warning);
 	}

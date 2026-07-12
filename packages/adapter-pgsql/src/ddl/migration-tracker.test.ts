@@ -3,14 +3,15 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import * as adapterSurface from '../index.js';
+import * as ddlSurface from './index.js';
+import * as migrationTracker from './migration-tracker.js';
 import {
-	acquireMigrationLock,
 	ensureMigrationsTable,
 	getAppliedMigrations,
 	getNextSchemaVersion,
 	isMigrationApplied,
 	recordMigration,
-	releaseMigrationLock,
 	removeMigrationRecord,
 	withMigrationLock,
 } from './migration-tracker.js';
@@ -34,26 +35,16 @@ function createMockClient(queryResult: { rows: unknown[] } = { rows: [] }) {
 }
 
 // ============================================================================
-// Advisory Lock (legacy)
+// Advisory Lock public surface
 // ============================================================================
 
-describe('acquireMigrationLock', () => {
-	it('should execute pg_advisory_lock', async () => {
-		const pool = createMockPool();
-		await acquireMigrationLock(pool as never);
-		expect(pool.query).toHaveBeenCalledWith(
-			expect.stringContaining('pg_advisory_lock'),
-		);
-	});
-});
-
-describe('releaseMigrationLock', () => {
-	it('should execute pg_advisory_unlock', async () => {
-		const pool = createMockPool();
-		await releaseMigrationLock(pool as never);
-		expect(pool.query).toHaveBeenCalledWith(
-			expect.stringContaining('pg_advisory_unlock'),
-		);
+describe('migration lock public surface', () => {
+	it('exports only withMigrationLock for advisory migration locking', () => {
+		for (const surface of [migrationTracker, ddlSurface, adapterSurface]) {
+			expect(Object.hasOwn(surface, 'acquireMigrationLock')).toBe(false);
+			expect(Object.hasOwn(surface, 'releaseMigrationLock')).toBe(false);
+			expect(Object.hasOwn(surface, 'withMigrationLock')).toBe(true);
+		}
 	});
 });
 

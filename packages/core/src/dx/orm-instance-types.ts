@@ -167,16 +167,15 @@ export interface OrmOptionsWithAdapter<DB = unknown>
 /**
  * PUBLIC ORM instance type — the interface consumers see from createOrm().
  *
- * String-based table entry points (select, insert, update, delete, upsert) are
- * intentionally absent. Use the typed TableRef-based methods instead:
- *   - `orm.from(table)` — SELECT
- *   - `orm.into(table)` — INSERT
- *   - `orm.modify(table)` — UPDATE
- *   - `orm.removeFrom(table)` — DELETE
- *   - `orm.upsertInto(table)` — UPSERT (INSERT ... ON CONFLICT)
+ * SELECT queries can start from either first-class table entry point:
+ *   - `orm.select(name)` - concise table-name form
+ *   - `orm.from(table)` - TableRef form with column-level types
  *
- * Internal code (NQL, planner, tests) that needs string-based access should
- * cast to `OrmInstanceInternal<DB>`.
+ * Mutations use the typed TableRef-based methods:
+ *   - `orm.into(table)` - INSERT
+ *   - `orm.modify(table)` - UPDATE
+ *   - `orm.removeFrom(table)` - DELETE
+ *   - `orm.upsertInto(table)` - UPSERT (INSERT ... ON CONFLICT)
  *
  * @typeParam DB - Database row map type.
  *   Keys are table names, values are row types.
@@ -279,7 +278,29 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	};
 
 	/**
-	 * Start a type-safe SELECT query from a TableRef.
+	 * Start building a SELECT query from a table name (string-based API).
+	 *
+	 * This is the ordinary table-name API used throughout guides and examples.
+	 * Use `orm.from(orm.tables.<table>)` when you want the stricter TableRef-based
+	 * form with column-level type information for filters, ordering, and result
+	 * inference.
+	 *
+	 * @typeParam K - Table name (inferred from DB keys when typed)
+	 * @typeParam TResult - Override result type (defaults to DB[K])
+	 * @param from - The root table name to select from
+	 * @returns A QueryBuilder for constructing the select
+	 */
+	select<K extends keyof DB & string, TResult = DB[K]>(
+		from: K,
+	): QueryBuilder<TResult>;
+
+	/**
+	 * Start building a SELECT query from a typed TableRef.
+	 *
+	 * This is the stricter table-reference API. Use it when you want column refs
+	 * from `orm.tables.<table>` to carry column-level types into filters and other
+	 * query clauses. Use `orm.select('<table>')` when the shorter table-name form is
+	 * enough.
 	 *
 	 * @typeParam TTable - The TableRef type (inferred from the argument)
 	 * @param table - A TableRef from `orm.tables`
@@ -293,21 +314,6 @@ export interface OrmInstance<DB = Record<string, unknown>> {
 	 *
 	 * @since DX-040-SURFACE
 	 */
-	/**
-	 * Start building a SELECT query from a table name (string-based API).
-	 *
-	 * @deprecated Use `orm.from(orm.tables.<table>)` for type-safe queries.
-	 * String-based select is kept for backward compatibility and test convenience.
-	 *
-	 * @typeParam K - Table name (inferred from DB keys when typed)
-	 * @typeParam TResult - Override result type (defaults to DB[K])
-	 * @param from - The root table name to select from
-	 * @returns A QueryBuilder for constructing the select
-	 */
-	select<K extends keyof DB & string, TResult = DB[K]>(
-		from: K,
-	): QueryBuilder<TResult>;
-
 	// biome-ignore lint/suspicious/noExplicitAny: polymorphic constraint — TTable is inferred by callers; TableRef generics are statically erased in this overload signature
 	from<TTable extends TableRef<any, any, any>>(
 		table: TTable,

@@ -22,14 +22,12 @@ export {
 	type MigrationSQLOptions,
 } from './migration-sql.js';
 export {
-	acquireMigrationLock,
 	ensureMigrationsTable,
 	getAppliedMigrations,
 	getNextSchemaVersion,
 	isMigrationApplied,
 	type MigrationRecord,
 	recordMigration,
-	releaseMigrationLock,
 	removeMigrationRecord,
 	withMigrationLock,
 } from './migration-tracker.js';

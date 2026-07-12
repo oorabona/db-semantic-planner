@@ -81,7 +81,7 @@ function makeInSubqueryIntent(extraSubqueryFields: Record<string, unknown>) {
 	};
 }
 
-function makeScalarSubqueryIntent(
+function makeScalarSubqueryWhereIntent(
 	extraSubqueryFields: Record<string, unknown>,
 ) {
 	return {
@@ -195,14 +195,14 @@ describe('IN-subquery: unsupported modifiers throw clear error (filter-broadenin
 
 describe('scalar subquery: unsupported modifiers throw clear error (filter-broadening guard)', () => {
 	it('throws when subquery has GROUP BY', () => {
-		const intent = makeScalarSubqueryIntent({ groupBy: ['category'] });
+		const intent = makeScalarSubqueryWhereIntent({ groupBy: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/scalar subquery with GROUP BY is not supported/,
 		);
 	});
 
 	it('throws when subquery has HAVING', () => {
-		const intent = makeScalarSubqueryIntent({
+		const intent = makeScalarSubqueryWhereIntent({
 			having: {
 				kind: 'comparison' as const,
 				field: 'count',
@@ -216,28 +216,28 @@ describe('scalar subquery: unsupported modifiers throw clear error (filter-broad
 	});
 
 	it('throws when subquery has OFFSET', () => {
-		const intent = makeScalarSubqueryIntent({ offset: 10 });
+		const intent = makeScalarSubqueryWhereIntent({ offset: 10 });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/scalar subquery with OFFSET is not supported/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT', () => {
-		const intent = makeScalarSubqueryIntent({ distinct: true });
+		const intent = makeScalarSubqueryWhereIntent({ distinct: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/scalar subquery with DISTINCT is not supported/,
 		);
 	});
 
 	it('throws when subquery has DISTINCT ON', () => {
-		const intent = makeScalarSubqueryIntent({ distinctOn: ['category'] });
+		const intent = makeScalarSubqueryWhereIntent({ distinctOn: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/scalar subquery with DISTINCT ON is not supported/,
 		);
 	});
 
 	it('error message mentions restructuring or CTE', () => {
-		const intent = makeScalarSubqueryIntent({ groupBy: ['category'] });
+		const intent = makeScalarSubqueryWhereIntent({ groupBy: ['category'] });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/restructure the query or use a CTE/,
 		);
@@ -575,7 +575,7 @@ describe('IN/scalar subquery: existsWrap, lock, batchValuesSource throw', () => 
 	});
 
 	it('scalar subquery throws when existsWrap is set', () => {
-		const intent = makeScalarSubqueryIntent({ existsWrap: true });
+		const intent = makeScalarSubqueryWhereIntent({ existsWrap: true });
 		expect(() => convertWhereCondition(intent as any, 'products')).toThrow(
 			/scalar subquery with existsWrap is not supported/,
 		);
@@ -621,7 +621,7 @@ describe('IN/scalar subquery: expression-based orderBy throws', () => {
 	});
 
 	it('scalar subquery throws when orderBy uses an expression', () => {
-		const intent = makeScalarSubqueryIntent({
+		const intent = makeScalarSubqueryWhereIntent({
 			orderBy: [
 				{
 					expression: { kind: 'ref' as const, column: 'price' },

@@ -56,8 +56,15 @@ const orm = createOrm({
   adapter: createPgsqlAdapter(pgPool)
 });
 
-// Query with type-safe API
+// Query with the concise table-name API
 const users = await orm.select('users').where(eq('active', true)).all();
+
+// Use the TableRef API when column refs should carry column-level types
+const { users: usersTable } = orm.tables;
+const usersFromRef = await orm
+  .from(usersTable)
+  .where(eq(usersTable.active, true))
+  .all();
 ```
 
 ### Dependency Rules (STRICT)

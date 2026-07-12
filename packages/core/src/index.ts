@@ -110,7 +110,6 @@ export type {
 	RecursiveTraversal,
 	RelationColumnIntent,
 	RelationOperator,
-	ScalarSubqueryIntent,
 	SelectAggregateIntent,
 	// Select
 	SelectAllIntent,

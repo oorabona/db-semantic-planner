@@ -83,26 +83,6 @@ export interface VerifyResult {
 	diff: SchemaDiff;
 }
 
-/**
- * @deprecated Use DbTableInfo from introspection instead.
- * Kept for backward compatibility with existing tests.
- */
-export interface DbTableInfo {
-	name: string;
-	columns: DbColumnInfo[];
-}
-
-/**
- * @deprecated Use ColumnIR from introspection instead.
- */
-export interface DbColumnInfo {
-	name: string;
-	dataType: string;
-	isNullable: boolean;
-	isPrimaryKey?: boolean;
-	hasDefault?: boolean;
-}
-
 // ============================================================================
 // Change → Drift Mapping
 // ============================================================================

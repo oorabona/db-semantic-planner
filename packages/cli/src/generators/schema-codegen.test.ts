@@ -1,7 +1,7 @@
 /**
  * CLI-DDL: Schema Codegen Tests
  *
- * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
+ * Tests for schema code generation from ModelIR.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -19,8 +19,8 @@ import type { IndexIR } from '@dbsp/types';
 import * as ts from 'typescript';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { loadSchema } from '../utils/schema-loader.js';
+import * as schemaCodegen from './schema-codegen.js';
 import {
-	generateSchemaFile,
 	generateSchemaFileWithDiagnostics,
 	type SchemaCodegenOptions,
 } from './schema-codegen.js';
@@ -50,6 +50,13 @@ function expectValidTypeScript(source: string): void {
 	expect(errors.map((diagnostic) => diagnostic.messageText)).toEqual([]);
 }
 
+function generateSchemaCode(
+	model: ModelIR,
+	options: SchemaCodegenOptions = {},
+): string {
+	return generateSchemaFileWithDiagnostics(model, options).code;
+}
+
 async function loadEmittedSchemaCode(source: string) {
 	const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-schema-codegen-'));
 	try {
@@ -65,7 +72,14 @@ afterEach(() => {
 	vi.restoreAllMocks();
 });
 
-describe('generateSchemaFile', () => {
+describe('generateSchemaFileWithDiagnostics', () => {
+	it('does not export the removed string-only legacy entry point', () => {
+		expect(Object.hasOwn(schemaCodegen, 'generateSchemaFile')).toBe(false);
+		expect(
+			Object.hasOwn(schemaCodegen, 'generateSchemaFileWithDiagnostics'),
+		).toBe(true);
+	});
+
 	describe('basic structure', () => {
 		it('returns a string', () => {
 			const model = schema({
@@ -74,7 +88,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(typeof result).toBe('string');
 		});
@@ -88,7 +102,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("import { schema } from '@dbsp/core';");
 			expect(result).toContain('export const dbSchema = schema({');
@@ -107,7 +121,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("import { schema, ref } from '@dbsp/core';");
 			expect(result).toContain('export const dbSchema = schema({');
@@ -120,7 +134,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('users: {');
 			expect(result).toContain("id: { type: 'uuid', primaryKey: true }");
@@ -136,7 +150,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('users: {');
 			expect(result).toContain('posts: {');
@@ -155,7 +169,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// id has primaryKey, so long form
 			expect(result).toContain("id: { type: 'uuid', primaryKey: true }");
@@ -175,7 +189,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("id: { type: 'uuid', primaryKey: true }");
 			expect(result).not.toContain(
@@ -192,7 +206,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Only id should have primaryKey: true
 			const matches = result.match(/primaryKey: true/g);
@@ -210,7 +224,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("bio: { type: 'string', nullable: true }");
 		});
@@ -224,7 +238,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// ARCH-005: name uses short form since it's non-nullable
 			expect(result).toContain("name: 'string'");
@@ -239,7 +253,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("default: 'gen_random_uuid()'");
 		});
@@ -252,7 +266,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('default: 0');
 		});
@@ -265,7 +279,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('default: true');
 		});
@@ -284,7 +298,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// ARCH-005: ref() instead of references: {}
 			expect(result).toContain("author_id: ref('users')");
@@ -305,7 +319,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// ARCH-005: ref() only references table (always targets PK)
 			expect(result).toContain("author_email: ref('users')");
@@ -323,7 +337,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("authorId: ref('users', { nullable: true })");
 		});
@@ -341,7 +355,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Self-ref should have roles inferred from column name
 			expect(result).toContain("ref('categories'");
@@ -363,7 +377,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Role must be 'parent', NOT 'parent_id'
 			expect(result).toContain("parent: 'parent'");
@@ -383,7 +397,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// onDelete must appear as a properly single-quoted string literal
 			expect(result).toContain("onDelete: 'CASCADE'");
@@ -402,7 +416,7 @@ describe('generateSchemaFile', () => {
 				sourceUrl: 'postgresql://user:secret123@localhost/mydb',
 			};
 
-			const result = generateSchemaFile(model, options);
+			const result = generateSchemaCode(model, options);
 
 			expect(result).toContain('Source: postgresql://user:***@localhost/mydb');
 			expect(result).not.toContain('secret123');
@@ -419,7 +433,7 @@ describe('generateSchemaFile', () => {
 				introspectedAt: new Date('2026-01-18T12:00:00Z'),
 			};
 
-			const result = generateSchemaFile(model, options);
+			const result = generateSchemaCode(model, options);
 
 			expect(result).toContain('Generated: 2026-01-18T12:00:00.000Z');
 		});
@@ -433,7 +447,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(typeof result).toBe('string');
 			expect(error).not.toHaveBeenCalled();
@@ -467,7 +481,7 @@ describe('generateSchemaFile', () => {
 				includeDbTypeComments: true,
 			};
 
-			const result = generateSchemaFile(model, options);
+			const result = generateSchemaCode(model, options);
 
 			expect(result).toContain('/* from: uuid */');
 			expect(result).toContain('/* from: jsonb */');
@@ -487,7 +501,7 @@ describe('generateSchemaFile', () => {
 					"jsonb */\nthrow new Error('injected');\n/*";
 			}
 
-			const result = generateSchemaFile(model, {
+			const result = generateSchemaCode(model, {
 				includeDbTypeComments: true,
 			});
 
@@ -507,7 +521,7 @@ describe('generateSchemaFile', () => {
 				includeDbTypeComments: false,
 			};
 
-			const result = generateSchemaFile(model, options);
+			const result = generateSchemaCode(model, options);
 
 			expect(result).not.toContain('/* from:');
 		});
@@ -521,7 +535,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('Auto-generated by: dbsp introspect');
 			expect(result).toContain('Review before using in production.');
@@ -539,7 +553,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain('firstName:');
 			expect(result).toContain('lastName:');
@@ -561,7 +575,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("authorId: ref('users')");
 			expect(result).not.toMatch(/\tauthor_id:/);
@@ -578,7 +592,7 @@ describe('generateSchemaFile', () => {
 					user_email: ref('users', { references: ['email_address'] }),
 				},
 			}).model;
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 			// FK source column: snake_case → camelCase
 			expect(result).toContain('userEmail:');
 			expect(result).not.toMatch(/\tuser_email:/);
@@ -600,7 +614,7 @@ describe('generateSchemaFile', () => {
 					user_email: ref('users', { references: ['email_address'] }),
 				},
 			}).model;
-			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+			const result = generateSchemaCode(model, { dbCasing: 'preserve' });
 			// references[] entry must NOT be camelCase-transformed in preserve mode
 			expect(result).toContain("references: ['email_address']");
 			expect(result).not.toContain("references: ['emailAddress']");
@@ -617,7 +631,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+			const result = generateSchemaCode(model, { dbCasing: 'preserve' });
 
 			expect(result).toContain('first_name:');
 			expect(result).not.toContain('firstName:');
@@ -631,7 +645,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('first_name:');
 		});
@@ -643,7 +657,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain(
 				"export const dbCasing = 'snake_case' as const;",
@@ -657,7 +671,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain(
 				"import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';",
@@ -671,7 +685,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'preserve' });
+			const result = generateSchemaCode(model, { dbCasing: 'preserve' });
 
 			expect(result).not.toContain('export const dbCasing');
 		});
@@ -683,7 +697,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("dbCasing: 'snake_case'");
 			expect(result).toContain('createPgsqlAdapter(pool');
@@ -697,7 +711,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			// Table name becomes camelCase
 			expect(result).toContain('userProfiles: {');
@@ -717,7 +731,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("ref('userProfiles')");
 			expect(result).not.toContain("ref('user_profiles')");
@@ -751,7 +765,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain('indexes: [');
 			expect(result).toContain("columns: ['emailAddress']");
@@ -851,7 +865,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("authorId: ref('users')");
 			expect(result).toContain('indexes: [');
@@ -891,7 +905,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("authorId: ref('users')");
 			expect(result).toContain('indexes: [');
@@ -931,7 +945,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+			const result = generateSchemaCode(model, { dbCasing: 'snake_case' });
 
 			expect(result).toContain("authorId: ref('users')");
 			expect(result).toContain('indexes: [');
@@ -958,7 +972,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, {
+			const result = generateSchemaCode(model, {
 				onWarning: (message) => warnings.push(message),
 			});
 			const warningText = warnings.join('\n');
@@ -976,7 +990,7 @@ describe('generateSchemaFile', () => {
 			expect(result).not.toContain('indexes: [');
 		});
 
-		it('throws expression-index warnings without onWarning', () => {
+		it('returns expression-index diagnostics without onWarning', () => {
 			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
 			const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 			const model = makeCodegenModel([
@@ -994,15 +1008,18 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			expect(() => generateSchemaFile(model)).toThrowError(
-				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*idx_users_lower_email.*generateSchemaFileWithDiagnostics\(\).*onWarning/s,
-			);
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx_users_lower_email');
+			expect(result.warnings).toEqual([
+				expect.stringContaining('idx_users_lower_email'),
+			]);
 
 			expect(error).not.toHaveBeenCalled();
 			expect(log).not.toHaveBeenCalled();
 		});
 
-		it('throws emitter-rejected index warnings without onWarning', () => {
+		it('returns emitter-rejected index diagnostics without onWarning', () => {
 			const model = makeCodegenModel([
 				{
 					name: 'users',
@@ -1017,46 +1034,39 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			expect(() => generateSchemaFile(model)).toThrowError(
-				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*idx-users-email.*generateSchemaFileWithDiagnostics\(\).*onWarning/s,
-			);
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx-users-email');
+			expect(result.warnings).toEqual([
+				expect.stringContaining('idx-users-email'),
+			]);
 		});
 
-		it('throws legacy caller-supplied warnings without onWarning', () => {
-			const model = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
+		it('returns model warnings through diagnostics and onWarning', () => {
+			const model = Object.assign(
+				schema({
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+					},
+				}).model,
+				{
+					warnings: [
+						"model warning */\nthrow new Error('source injection');\n${",
+					],
 				},
-			}).model;
-			const callerWarning = 'caller warning: missing production-only index';
-
-			expect(() =>
-				generateSchemaFile(model, {
-					warnings: [callerWarning],
-				}),
-			).toThrowError(
-				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*caller warning: missing production-only index/s,
 			);
-		});
-
-		it('reports legacy caller-supplied warnings through onWarning', () => {
-			const model = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-				},
-			}).model;
-			const callerWarning = 'caller warning: missing production-only index';
 			const streamed: string[] = [];
 
-			const result = generateSchemaFile(model, {
-				warnings: [callerWarning],
+			const result = generateSchemaFileWithDiagnostics(model, {
 				onWarning: (message) => streamed.push(message),
 			});
 
-			expect(typeof result).toBe('string');
-			expect(streamed).toEqual([callerWarning]);
-			expect(result).not.toContain(callerWarning);
-			expectValidTypeScript(result);
+			expect(result.warnings).toEqual(model.warnings);
+			expect(streamed).toEqual(result.warnings);
+			expect(result.code).not.toContain('source injection');
+			expect(result.code).not.toContain('model warning */');
+			expect(result.code).not.toContain('${');
+			expectValidTypeScript(result.code);
 		});
 
 		it('keeps malicious expression-index warning text out of generated source', () => {
@@ -1079,7 +1089,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model, {
+			const result = generateSchemaCode(model, {
 				onWarning: (message) => warnings.push(message),
 			});
 			const warningText = warnings.join('\n');
@@ -1091,43 +1101,47 @@ describe('generateSchemaFile', () => {
 			expectValidTypeScript(result);
 		});
 
-		it('returns code plus pass-through and discovered diagnostics', () => {
-			const callerWarning =
-				"no primary key */\nthrow new Error('source injection');\n${";
+		it('returns code plus model and discovered diagnostics', () => {
 			const streamed: string[] = [];
-			const model = makeCodegenModel([
+			const model = Object.assign(
+				makeCodegenModel([
+					{
+						name: 'notes',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'note', type: 'string', nullable: false },
+							{ name: 'email', type: 'string', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [
+							{
+								name: 'idx_notes_lower_email',
+								columns: [],
+								expressions: ['lower(email)'],
+							},
+							{
+								name: 'idx_notes_note_literal',
+								columns: ['note'],
+								where: "note = 'a;b'",
+							},
+						],
+					},
+				]),
 				{
-					name: 'notes',
-					columns: [
-						{ name: 'id', type: 'integer', nullable: false },
-						{ name: 'note', type: 'string', nullable: false },
-						{ name: 'email', type: 'string', nullable: false },
-					],
-					primaryKey: 'id',
-					foreignKeys: [],
-					indexes: [
-						{
-							name: 'idx_notes_lower_email',
-							columns: [],
-							expressions: ['lower(email)'],
-						},
-						{
-							name: 'idx_notes_note_literal',
-							columns: ['note'],
-							where: "note = 'a;b'",
-						},
+					warnings: [
+						"no primary key */\nthrow new Error('source injection');\n${",
 					],
 				},
-			]);
+			);
 
 			const result = generateSchemaFileWithDiagnostics(model, {
-				warnings: [callerWarning],
 				onWarning: (message) => streamed.push(message),
 			});
 
 			expect(typeof result.code).toBe('string');
 			expect(result.warnings).toHaveLength(3);
-			expect(result.warnings[0]).toBe(callerWarning);
+			expect(result.warnings[0]).toBe(model.warnings[0]);
 			expect(result.warnings).toContainEqual(
 				expect.stringContaining(
 					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema and is not managed by dbsp.',
@@ -1144,26 +1158,6 @@ describe('generateSchemaFile', () => {
 			expect(result.code).not.toContain('${');
 			expect(result.code).not.toContain('idx_notes_lower_email');
 			expect(result.code).not.toContain('idx_notes_note_literal');
-			expectValidTypeScript(result.code);
-		});
-
-		it('keeps caller-supplied warnings out of generated source', () => {
-			const callerWarning =
-				"*/\nthrow new Error('caller warning injection');\n${";
-			const model = schema({
-				users: {
-					id: { type: 'uuid', primaryKey: true },
-				},
-			}).model;
-
-			const result = generateSchemaFileWithDiagnostics(model, {
-				warnings: [callerWarning],
-			});
-
-			expect(result.warnings).toEqual([callerWarning]);
-			expect(result.code).not.toContain('caller warning injection');
-			expect(result.code).not.toContain('*/\nthrow');
-			expect(result.code).not.toContain('${');
 			expectValidTypeScript(result.code);
 		});
 
@@ -1436,7 +1430,7 @@ describe('generateSchemaFile', () => {
 				dbCasing: 'snake_case',
 			};
 
-			const result = generateSchemaFile(model, options);
+			const result = generateSchemaCode(model, options);
 
 			// --- Header ---
 			expect(result).toContain('Auto-generated by: dbsp introspect');
@@ -1508,7 +1502,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Everything stays snake_case (preserve is default)
 			expect(result).toContain('user_profiles: {');
@@ -1532,7 +1526,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// The non-PK FK should emit references option
 			expect(result).toContain("references: ['email']");
@@ -1551,7 +1545,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Default PK FK should use bare ref() — no references option
 			expect(result).toContain("ref('users')");
@@ -1563,7 +1557,7 @@ describe('generateSchemaFile', () => {
 			// This test verifies the full round-trip:
 			// ref('users', { references: ['email'] })
 			//   → ModelIR FK { references: { table: 'users', columns: ['email'] } }
-			//   → generateSchemaFile → ref('users', { references: ['email'] })
+			//   → schema codegen → ref('users', { references: ['email'] })
 			const model = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
@@ -1575,7 +1569,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Verify the FK column references the non-PK column
 			const fk = model.tables.get('posts')?.foreignKeys[0];
@@ -1601,7 +1595,7 @@ describe('generateSchemaFile', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// All options should be emitted
 			expect(result).toContain("references: ['email']");
@@ -1637,7 +1631,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("authorId: 'uuid'");
 			expect(result).not.toContain(
@@ -1682,7 +1676,7 @@ describe('generateSchemaFile', () => {
 				},
 			]);
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain(
 				"ref('orders', { schema: 'billing', columns: ['tenantId', 'orderId'], references: ['tenantId', 'orderId'] })",
@@ -1696,11 +1690,11 @@ describe('generateSchemaFile', () => {
 // ============================================================================
 //
 // schema-loader.loadSchema() accepts module.schema || module.default.
-// generateSchemaFile() previously only emitted `export const dbSchema = ...`
+// Schema codegen previously only emitted `export const dbSchema = ...`
 // which satisfies neither — the generated file could NOT be loaded by other
 // commands.  The fix adds `export default dbSchema`.
 
-describe('generateSchemaFile — schema-loader interoperability (item 4)', () => {
+describe('schema codegen — schema-loader interoperability (item 4)', () => {
 	it('emits "export default dbSchema" so schema-loader can load via module.default', () => {
 		const model = schema({
 			users: {
@@ -1709,7 +1703,7 @@ describe('generateSchemaFile — schema-loader interoperability (item 4)', () =>
 			},
 		}).model;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// schema-loader does: const schema = module.schema ?? module.default
 		// The generated file must satisfy at least module.default.
@@ -1725,11 +1719,11 @@ describe('generateSchemaFile — schema-loader interoperability (item 4)', () =>
 		// Old output has no 'export default' line — loader would fail.
 		expect(oldOutput).not.toContain('export default');
 
-		// New output (from generateSchemaFile) includes it.
+		// New output from schema codegen includes it.
 		const model = schema({
 			users: { id: { type: 'uuid', primaryKey: true } },
 		}).model;
-		const newOutput = generateSchemaFile(model);
+		const newOutput = generateSchemaCode(model);
 		expect(newOutput).toContain('export default dbSchema');
 	});
 
@@ -1739,7 +1733,7 @@ describe('generateSchemaFile — schema-loader interoperability (item 4)', () =>
 			users: { id: { type: 'uuid', primaryKey: true } },
 		}).model;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		expect(result).toContain('export const dbSchema = schema({');
 		expect(result).toContain('export default dbSchema');
@@ -1753,7 +1747,7 @@ describe('generateSchemaFile — schema-loader interoperability (item 4)', () =>
 // ref('${refTable}') without singleQuoteEscape produces a syntax error when
 // refTable contains a single-quote, backslash, or newline.
 
-describe('generateSchemaFile — FK target name escaping (item 6)', () => {
+describe('schema codegen — FK target name escaping (item 6)', () => {
 	it('generates valid output for a normal FK target (smoke test, no regression)', () => {
 		const model = schema({
 			users: {
@@ -1765,7 +1759,7 @@ describe('generateSchemaFile — FK target name escaping (item 6)', () => {
 			},
 		}).model;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// Standard table name should still appear as a properly quoted string.
 		expect(result).toContain("ref('users')");
@@ -1806,7 +1800,7 @@ describe('generateSchemaFile — FK target name escaping (item 6)', () => {
 			indexes: [],
 		};
 
-		// Build a ModelIR-shaped object.  generateSchemaFile only reads
+		// Build a ModelIR-shaped object. The code generator only reads
 		// model.tables.values() and model.relations.values(), so a plain Map suffices.
 		const model = {
 			tables: new Map<string, TableIR>([
@@ -1819,7 +1813,7 @@ describe('generateSchemaFile — FK target name escaping (item 6)', () => {
 			getRelation: () => undefined,
 		} as unknown as ModelIR;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// Must contain the properly escaped form — NOT the broken bare form.
 		expect(result).toContain("ref('o\\'brien')"); // escaped ✓
