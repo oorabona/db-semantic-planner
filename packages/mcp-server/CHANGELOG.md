@@ -1,5 +1,29 @@
 # Changelog
 
+## [2.0.0](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v1.0.18...mcp-server-v2.0.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **core:** The legacy schema surface is gone. Removed from @dbsp/core: defineSchema, ResolvedSchema and its Schema* definition types, isBelongsTo, isHasMany, isManyToMany, DEFAULT_CONVENTIONS, detectForeignKeys, detectManyToMany, inferRelationsFromSchema, OrmOptionsWithSchema, GeneratedSchema and its Generated* types, ColumnTypeToTS, InferRowType, InferDBFromSchema, buildModelFromSchema, buildModelFromResolvedSchema, isGeneratedSchema, isResolvedSchema, normalizeSchema, ResolvedSchemaValidation, ValidatedResolvedSchema, SchemaConversionResult, resolvedSchemaToGeneratedSchema and assertResolvedSchemaToGeneratedSchema. Removed from @dbsp/cli: generateManifest and its manifest types. The exported name SchemaColumnType now refers to the IR column-type union, which is wider than the legacy DSL union it used to name — it gains number and datetime. Define schemas with schema() and ref() from @dbsp/core.
+
+### Features
+
+* **core:** Remove the legacy defineSchema and GeneratedSchema surface ([#312](https://github.com/oorabona/db-semantic-planner/issues/312)) ([f743b28](https://github.com/oorabona/db-semantic-planner/commit/f743b289200444e65e28bb6840df012d59710078))
+
+
+### Bug Fixes
+
+* **mcp-server:** Accept the same schema format as the CLI ([#311](https://github.com/oorabona/db-semantic-planner/issues/311)) ([b25fed4](https://github.com/oorabona/db-semantic-planner/commit/b25fed40fbda2e19e114b6981bc133c070322ae0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 2.0.0
+    * @dbsp/types bumped to 2.0.0
+
 ## [1.0.18](https://github.com/oorabona/db-semantic-planner/compare/mcp-server-v1.0.17...mcp-server-v1.0.18) (2026-07-09)
 
 

@@ -1,5 +1,35 @@
 # Changelog
 
+## [2.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.2...adapter-pgsql-v2.0.0) (2026-07-12)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** Removed the deprecated exports. From @dbsp/adapter-pgsql: acquireMigrationLock and releaseMigrationLock — use withMigrationLock, which holds and releases the lock on a single connection. From @dbsp/cli: generateSchemaFile and the deprecated warnings option on its codegen interface — use generateSchemaFileWithDiagnostics, which returns the generated code together with every warning, so no diagnostic can be lost silently. From @dbsp/types: the ScalarSubqueryIntent alias — use QueryIntent. The string-based orm.select('table') is NOT deprecated and is not going anywhere.
+
+### Features
+
+* **adapter-pgsql:** Drop the deprecated surface, and prove orm.from() works ([#316](https://github.com/oorabona/db-semantic-planner/issues/316)) ([c3f4871](https://github.com/oorabona/db-semantic-planner/commit/c3f48719bd1ca10877561da6faa2acecbe9ba684))
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Correct DOWN rollback for RLS policy replacement and comment changes ([#300](https://github.com/oorabona/db-semantic-planner/issues/300)) ([9c72d13](https://github.com/oorabona/db-semantic-planner/commit/9c72d13b0050ddf255a8390ac809b0b531a4c948)), closes [#264](https://github.com/oorabona/db-semantic-planner/issues/264)
+* **adapter-pgsql:** Honor fn().filter() FILTER in every expression position ([#297](https://github.com/oorabona/db-semantic-planner/issues/297)) ([d0fc7bc](https://github.com/oorabona/db-semantic-planner/commit/d0fc7bc9b516169bdabaa280259a9da1d03deb1d)), closes [#251](https://github.com/oorabona/db-semantic-planner/issues/251) [#296](https://github.com/oorabona/db-semantic-planner/issues/296)
+* **adapter-pgsql:** Lower multi-hop dotted WHERE via nested EXISTS with per-hop aliases ([#295](https://github.com/oorabona/db-semantic-planner/issues/295)) ([399ab8e](https://github.com/oorabona/db-semantic-planner/commit/399ab8e37107dbd79af9a42eb89ff61f6b84cb97)), closes [#256](https://github.com/oorabona/db-semantic-planner/issues/256)
+* **adapter-pgsql:** Require an explicit schemaName for schema-scoped DDL ([#305](https://github.com/oorabona/db-semantic-planner/issues/305)) ([280bb0c](https://github.com/oorabona/db-semantic-planner/commit/280bb0c7e56a15cdc23940df768b435308402072))
+* **adapter-pgsql:** Resolve catalog-read schema search_path-aware, not literal 'public' ([5927878](https://github.com/oorabona/db-semantic-planner/commit/5927878517c98b2ea47932b46a79ebc6f8326435)), closes [#283](https://github.com/oorabona/db-semantic-planner/issues/283)
+* **adapter-pgsql:** Schema-aware custom type identity for multi-tenant DDL ([#304](https://github.com/oorabona/db-semantic-planner/issues/304)) ([5e16d79](https://github.com/oorabona/db-semantic-planner/commit/5e16d7948d47ff4f2311043f56bf46f3a1e4c6df)), closes [#285](https://github.com/oorabona/db-semantic-planner/issues/285)
+* **cli:** Keep the database's indexes when regenerating a schema ([#306](https://github.com/oorabona/db-semantic-planner/issues/306)) ([7dcfaad](https://github.com/oorabona/db-semantic-planner/commit/7dcfaadf22b88f2c7f92cd38e973fa489f6ad772))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 2.0.0
+    * @dbsp/types bumped to 2.0.0
+
 ## [1.11.2](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.1...adapter-pgsql-v1.11.2) (2026-07-10)
 
 

@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.9.4](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.9.3...nql-v1.9.4) (2026-07-12)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Schema-aware custom type identity for multi-tenant DDL ([#304](https://github.com/oorabona/db-semantic-planner/issues/304)) ([5e16d79](https://github.com/oorabona/db-semantic-planner/commit/5e16d7948d47ff4f2311043f56bf46f3a1e4c6df)), closes [#285](https://github.com/oorabona/db-semantic-planner/issues/285)
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/types bumped to 2.0.0
+
 ## [1.9.3](https://github.com/oorabona/db-semantic-planner/compare/nql-v1.9.2...nql-v1.9.3) (2026-07-09)
 
 
