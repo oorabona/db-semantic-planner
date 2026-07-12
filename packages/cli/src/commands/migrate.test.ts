@@ -14,10 +14,9 @@ import { hasExecutableSql, migrateCommand } from './migrate.js';
 // Mock adapter
 // ============================================================================
 
-const mockCompareSchemata = vi.fn();
+const mockComparePgsqlDatabaseSchema = vi.fn();
 const mockGenerateMigrationSQL = vi.fn();
 const mockGenerateMigrationFile = vi.fn();
-const mockIntrospect = vi.fn();
 const mockEnsureMigrationsTable = vi.fn();
 const mockGetAppliedMigrations = vi.fn();
 const mockGetNextSchemaVersion = vi.fn();
@@ -28,12 +27,12 @@ const mockParseMigrationFile = vi.fn();
 const mockIsDestructiveDown = vi.fn();
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
-	compareSchemata: (...args: unknown[]) => mockCompareSchemata(...args),
+	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+		mockComparePgsqlDatabaseSchema(...args),
 	generateMigrationSQL: (...args: unknown[]) =>
 		mockGenerateMigrationSQL(...args),
 	generateMigrationFile: (...args: unknown[]) =>
 		mockGenerateMigrationFile(...args),
-	introspect: (...args: unknown[]) => mockIntrospect(...args),
 	ensureMigrationsTable: (...args: unknown[]) =>
 		mockEnsureMigrationsTable(...args),
 	getAppliedMigrations: (...args: unknown[]) =>
@@ -102,15 +101,18 @@ function makeDiff(
 // ============================================================================
 
 describe('migrate dev — diff and generate logic', () => {
-	it('should pass schema model and db model to compareSchemata', () => {
+	it('should pass pool and schema model to comparePgsqlDatabaseSchema', () => {
 		const schemaModel = new Map([['users', { name: 'users' }]]);
-		const dbModel = new Map([['posts', { name: 'posts' }]]);
+		const pool = { query: vi.fn() };
 
-		mockCompareSchemata.mockReturnValue(makeDiff([]));
+		mockComparePgsqlDatabaseSchema.mockResolvedValue(makeDiff([]));
 
-		mockCompareSchemata(schemaModel, dbModel);
+		mockComparePgsqlDatabaseSchema(pool, schemaModel);
 
-		expect(mockCompareSchemata).toHaveBeenCalledWith(schemaModel, dbModel);
+		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledWith(
+			pool,
+			schemaModel,
+		);
 	});
 
 	it('should detect no changes when diff is empty', () => {

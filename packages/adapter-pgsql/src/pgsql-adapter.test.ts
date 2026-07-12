@@ -4,9 +4,16 @@
  * Tests adapter interface implementation without database connection.
  */
 
-import type { PlanReport } from '@dbsp/core';
-import type { Pool } from 'pg';
-import { describe, expect, it, vi } from 'vitest';
+import { ModelIRImpl, type PlanReport } from '@dbsp/core';
+import type {
+	Adapter,
+	ColumnIR,
+	ModelIR,
+	SchemaDiff,
+	TableIR,
+} from '@dbsp/types';
+import type { Pool, PoolClient, QueryResult } from 'pg';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
 	createPgsqlAdapter,
 	createPgsqlCompileOnlyAdapter,
@@ -24,6 +31,109 @@ function createMockPool(): Pool {
 		end: vi.fn(),
 		// Add other Pool methods as needed
 	} as unknown as Pool;
+}
+
+function makeLiveDiffCol(name: string): ColumnIR {
+	return {
+		name,
+		type: 'integer',
+		nullable: false,
+	};
+}
+
+function makeLiveDiffTable(
+	overrides: Partial<TableIR> & { name: string },
+): TableIR {
+	return {
+		columns: [makeLiveDiffCol('id')],
+		foreignKeys: [],
+		indexes: [],
+		...overrides,
+	};
+}
+
+function makeLiveDiffModel(tables: readonly TableIR[]): ModelIR {
+	return new ModelIRImpl(
+		new Map(tables.map((table) => [table.name, table])),
+		new Map(),
+	);
+}
+
+function normalizeLiveDiffSql(sql: string): string {
+	return sql.replace(/\s+/g, ' ').trim();
+}
+
+class PoolClientBackedLiveDiffClient {
+	readonly queries: string[] = [];
+	readonly release = vi.fn();
+
+	async query<T extends Record<string, unknown> = Record<string, unknown>>(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<QueryResult<T>> {
+		const normalized = normalizeLiveDiffSql(sql);
+		this.queries.push(normalized);
+
+		if (normalized.startsWith('SELECT conname AS name,')) {
+			const names = parameters?.[1] as readonly string[];
+			return {
+				rows: names.map((name) => ({
+					name,
+					expression: 'CHECK ((age > 0))',
+				})) as T[],
+				rowCount: names.length,
+			} as QueryResult<T>;
+		}
+
+		if (normalized.includes('FROM information_schema.columns')) {
+			return {
+				rows: [
+					{
+						table_name: 'users',
+						column_name: 'id',
+						data_type: 'integer',
+						udt_name: 'int4',
+						is_nullable: 'NO',
+						column_default: null,
+						collation_name: null,
+						is_identity: 'NO',
+						identity_generation: null,
+					},
+					{
+						table_name: 'users',
+						column_name: 'age',
+						data_type: 'integer',
+						udt_name: 'int4',
+						is_nullable: 'NO',
+						column_default: null,
+						collation_name: null,
+						is_identity: 'NO',
+						identity_generation: null,
+					},
+				] as T[],
+				rowCount: 2,
+			} as QueryResult<T>;
+		}
+
+		if (
+			normalized.includes("c.contype = 'c'") &&
+			!normalized.startsWith('SELECT conname AS name,')
+		) {
+			return {
+				rows: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						not_valid: false,
+						raw_table: 'users',
+					},
+				] as T[],
+				rowCount: 1,
+			} as QueryResult<T>;
+		}
+
+		return { rows: [], rowCount: 0 } as QueryResult<T>;
+	}
 }
 
 // ============================================================================
@@ -64,6 +174,63 @@ describe('PgsqlAdapter', () => {
 			});
 
 			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+		});
+	});
+
+	describe('compareDatabaseSchema', () => {
+		it('is callable through scoped and transaction Adapter types without a cast', () => {
+			type DB = { users: { id: number } };
+
+			const compareViaScopedAdapter = (
+				adapter: Adapter<DB>,
+				desired: ModelIR,
+			) => adapter.withSchema('tenant_1').compareDatabaseSchema(desired);
+			const compareViaTransactionAdapter = (
+				adapter: Adapter<DB>,
+				desired: ModelIR,
+			) => adapter.transaction((tx) => tx.compareDatabaseSchema(desired));
+
+			expectTypeOf(compareViaScopedAdapter).returns.toEqualTypeOf<
+				Promise<SchemaDiff>
+			>();
+			expectTypeOf(compareViaTransactionAdapter).returns.toEqualTypeOf<
+				Promise<SchemaDiff>
+			>();
+		});
+
+		it('uses a PoolClient-backed adapter inside savepoints without releasing or ending the caller transaction', async () => {
+			const client = new PoolClientBackedLiveDiffClient();
+			const adapter = new PgsqlAdapter(client as unknown as PoolClient, {
+				dbCasing: 'snake_case',
+			});
+			const desired = makeLiveDiffModel([
+				makeLiveDiffTable({
+					name: 'users',
+					columns: [makeLiveDiffCol('id'), makeLiveDiffCol('age')],
+					checkConstraints: [
+						{ name: 'usersAgeCheck', expression: 'CHECK ((age > 0))' },
+					],
+				}),
+			]);
+
+			const diff = await adapter.compareDatabaseSchema(desired);
+
+			expect(diff.changes).toEqual([]);
+			expect(client.release).not.toHaveBeenCalled();
+			const rootSavepoint = client.queries.find((query) =>
+				/^SAVEPOINT dbsp_check_canon_[a-z0-9]+_root$/iu.test(query),
+			);
+			expect(rootSavepoint).toBeDefined();
+			const rootSavepointName = rootSavepoint!.replace(/^SAVEPOINT /u, '');
+			expect(client.queries).toContain(
+				`ROLLBACK TO SAVEPOINT ${rootSavepointName}`,
+			);
+			expect(client.queries).toContain(
+				`RELEASE SAVEPOINT ${rootSavepointName}`,
+			);
+			expect(client.queries).not.toContain('BEGIN');
+			expect(client.queries).not.toContain('COMMIT');
+			expect(client.queries).not.toContain('ROLLBACK');
 		});
 	});
 

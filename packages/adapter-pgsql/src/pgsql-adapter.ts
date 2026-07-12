@@ -94,8 +94,11 @@ import {
 	validateDbType,
 } from './db-type.js';
 import {
+	type ComparePgsqlDatabaseSchemaOptions,
+	comparePgsqlDatabaseSchema,
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
+	type SchemaDiff,
 } from './ddl/index.js';
 import {
 	generateCreateIndexSQL,
@@ -793,9 +796,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// Detect if this is a PoolClient (transaction context)
 			if ('release' in pool && typeof pool.release === 'function') {
 				this.client = pool as PoolClient;
-				// For clients, we need to get the pool reference
-				// This is a limitation - we'll use the client directly
-				this.pool = pool as unknown as Pool;
+				this.pool = undefined;
 			} else {
 				this.pool = pool as Pool;
 				this.client = undefined;
@@ -1645,12 +1646,39 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async introspect(
 		options?: IntrospectionOptions,
 	): Promise<IntrospectedModelIR> {
-		if (!this.pool) {
+		if (!this.client && !this.pool) {
 			throw new Error(
 				'Cannot introspect without a database connection (compile-only adapter)',
 			);
 		}
-		return introspectDb(this.pool, options);
+		const executor = this.requireConnection();
+		return introspectDb(executor, options);
+	}
+
+	/**
+	 * Live schema diff with PostgreSQL CHECK constraint canonicalisation.
+	 *
+	 * This performs introspection, canonicalises CHECK constraint expressions on
+	 * the desired model using temporary scratch tables inside a rolled-back
+	 * transaction, then delegates to the pure synchronous comparator. Partial
+	 * index predicates and index expressions are not canonicalised. Compile-only
+	 * adapters cannot provide the CHECK convergence guarantee and throw here.
+	 */
+	async compareDatabaseSchema(
+		desired: ModelIR,
+		options?: ComparePgsqlDatabaseSchemaOptions,
+	): Promise<SchemaDiff> {
+		if (!this.client && !this.pool) {
+			throw new Error(
+				'Cannot compare live database schema without a database connection (compile-only adapter)',
+			);
+		}
+		const executor = this.requireConnection();
+		return comparePgsqlDatabaseSchema(executor, desired, {
+			dbCasing: this._dbCasing,
+			...(this.schemaName !== undefined ? { schema: this.schemaName } : {}),
+			...options,
+		});
 	}
 
 	// =========================================================================
@@ -1751,10 +1779,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @since DDL-TABLE-001
 	 */
 	async executeDDL(sql: string): Promise<void> {
-		if (!this.pool) {
+		if (!this.client && !this.pool) {
 			throw new Error('Cannot execute DDL on compile-only adapter');
 		}
-		await this.pool.query(sql);
+		const executor = this.requireConnection();
+		await executor.query(sql);
 	}
 
 	/**
@@ -1960,7 +1989,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
  * ```
  */
 export function createPgsqlAdapter<DB = unknown>(
-	pool: Pool,
+	pool: Pool | PoolClient,
 	options?: PgsqlAdapterOptions,
 ): PgsqlAdapter<DB> {
 	return new PgsqlAdapter<DB>(pool, options);
@@ -1971,6 +2000,12 @@ export function createPgsqlAdapter<DB = unknown>(
  *
  * All compilation methods (compile, compileInsert, etc.), createDump(), and generateDDL()
  * work normally. Execution methods (execute, stream, transaction, etc.) throw an error.
+ * Pure model-vs-model diffs through compareSchemata() remain best-effort for
+ * raw-SQL expression surfaces such as CHECK expressions, partial-index
+ * predicates, and index expressions; use requireExpressionCanonicalization for
+ * a strict compile-only failure or comparePgsqlDatabaseSchema() for live
+ * PostgreSQL CHECK constraint canonicalisation. The live helper does not
+ * canonicalise index predicates or index expressions.
  *
  * @example
  * ```typescript

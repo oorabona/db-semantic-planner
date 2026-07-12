@@ -30,8 +30,9 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { buildRelationKeyFields } from '@dbsp/types';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
+import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
 // ============================================================================
@@ -108,6 +109,7 @@ interface RawForeignKey {
 	update_rule: string;
 	is_deferrable: string;
 	initially_deferred: string;
+	not_valid?: boolean;
 }
 
 interface RawIndex {
@@ -205,7 +207,12 @@ interface CatalogResults {
 		column_name: string | null;
 		comment: string;
 	}>;
-	checks: Array<{ name: string; expression: string; raw_table: string }>;
+	checks: Array<{
+		name: string;
+		expression: string;
+		not_valid: boolean;
+		raw_table: string;
+	}>;
 	partitions: RawPartition[];
 	extensions: Array<{ name: string }>;
 	sequences: Array<{
@@ -235,8 +242,10 @@ interface CatalogResults {
  * unique columns, enums, comments, checks, partitions, extensions (no schema
  * param), sequences, rls state, policies, formatted column types.
  */
+type PgsqlQueryable = Pick<Pool | PoolClient, 'query'>;
+
 async function queryAllCatalogs(
-	pool: Pool,
+	pool: PgsqlQueryable,
 	schema: string,
 ): Promise<CatalogResults> {
 	const [
@@ -300,7 +309,8 @@ async function queryAllCatalogs(
 			     ELSE 'NO ACTION'
 			   END AS update_rule,
 			   CASE WHEN c.condeferrable THEN 'YES' ELSE 'NO' END AS is_deferrable,
-			   CASE WHEN c.condeferred THEN 'YES' ELSE 'NO' END AS initially_deferred
+			   CASE WHEN c.condeferred THEN 'YES' ELSE 'NO' END AS initially_deferred,
+			   NOT c.convalidated AS not_valid
 			 FROM pg_constraint c
 			 JOIN pg_class source_rel ON source_rel.oid = c.conrelid
 			 JOIN pg_namespace source_ns ON source_ns.oid = source_rel.relnamespace
@@ -428,11 +438,13 @@ async function queryAllCatalogs(
 		pool.query<{
 			name: string;
 			expression: string;
+			not_valid: boolean;
 			raw_table: string;
 		}>(
 			`SELECT
 			   c.conname AS name,
 			   pg_get_constraintdef(c.oid, false) AS expression,
+			   NOT c.convalidated AS not_valid,
 			   c.conrelid::regclass::text AS raw_table
 			 FROM pg_constraint c
 			 JOIN pg_namespace n ON n.oid = c.connamespace
@@ -586,14 +598,20 @@ function buildPartitionMap(rows: RawPartition[]): Map<string, PartitionIR> {
 
 /** Build a Map<tableName, CheckConstraintIR[]> from raw check rows. */
 function buildCheckMap(
-	rows: Array<{ name: string; expression: string; raw_table: string }>,
+	rows: Array<{
+		name: string;
+		expression: string;
+		not_valid: boolean;
+		raw_table: string;
+	}>,
 ): Map<string, CheckConstraintIR[]> {
 	const result = new Map<string, CheckConstraintIR[]>();
 	for (const ck of rows) {
 		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
 		const checkIR: CheckConstraintIR = {
 			name: ck.name,
-			expression: ck.expression,
+			expression: stripNotValidSuffix(ck.expression),
+			...(ck.not_valid ? { notValid: true } : {}),
 		};
 		const existing = result.get(tableName);
 		if (existing) {
@@ -728,6 +746,7 @@ interface FKEntry {
 	deleteRule: string;
 	updateRule: string;
 	deferred: boolean;
+	notValid: boolean;
 }
 
 /** Build a Map<sourceTable + constraintName, FKEntry> from raw FK rows. */
@@ -739,6 +758,7 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 		if (existing) {
 			existing.cols.push(fk.source_column);
 			existing.refs.push(fk.target_column);
+			existing.notValid ||= fk.not_valid === true;
 		} else {
 			result.set(key, {
 				source: fk.source_table,
@@ -749,6 +769,7 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 				deleteRule: fk.delete_rule,
 				updateRule: fk.update_rule,
 				deferred: fk.is_deferrable === 'YES' && fk.initially_deferred === 'YES',
+				notValid: fk.not_valid === true,
 			});
 		}
 	}
@@ -974,6 +995,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 			...(onDelete !== 'NO ACTION' ? { onDelete } : {}),
 			...(onUpdate !== 'NO ACTION' ? { onUpdate } : {}),
 			...(fk.deferred ? { deferred: true } : {}),
+			...(fk.notValid ? { notValid: true } : {}),
 		});
 	}
 
@@ -1029,7 +1051,7 @@ function buildSequenceMap(
 }
 
 export async function introspect(
-	pool: Pool,
+	pool: PgsqlQueryable,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';

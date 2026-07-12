@@ -18,6 +18,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import { renderCheckConstraintClause } from '../check-expression.js';
 import {
 	assertNumericLiteral,
 	assertString,
@@ -736,8 +737,7 @@ function upAddCheckConstraint(
 ): string | undefined {
 	const check = change.meta?.check as CheckConstraintIR;
 	if (!check) return undefined;
-	const expression = check.expression;
-	const notValid = check.notValid ? ' NOT VALID' : '';
+	const expression = renderCheckConstraintClause(check);
 	validateCheckExpression(expression, 'migration check constraint expression');
 	return buildDoBlock(
 		'BEGIN ALTER TABLE ' +
@@ -746,7 +746,6 @@ function upAddCheckConstraint(
 			quoteIdent(check.name, 'alias') +
 			' ' +
 			expression +
-			notValid +
 			'; EXCEPTION WHEN duplicate_object THEN NULL; END',
 	);
 }
@@ -1251,7 +1250,7 @@ function changeToDownSQL(
 		case 'drop_check_constraint': {
 			const check = change.meta?.check as CheckConstraintIR | undefined;
 			if (!check) return { sql: undefined, destructive: true };
-			const expression = check.expression;
+			const expression = renderCheckConstraintClause(check);
 			validateCheckExpression(expression, 'migration check constraint (down)');
 			return {
 				sql: buildDoBlock(

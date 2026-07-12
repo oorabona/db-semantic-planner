@@ -2348,6 +2348,31 @@ describe('generateDownSQL', () => {
 			).toBe(false);
 		});
 
+		it('wraps a bare CHECK predicate for a new table constraint', () => {
+			const schema = makeModel([
+				{
+					...makeFullTable('payments', [
+						makeCol({ name: 'id', type: 'integer', autoIncrement: true }),
+						makeCol({ name: 'amount', type: 'number' }),
+					]),
+					checkConstraints: [
+						{ name: 'payments_amount_check', expression: 'amount > 0' },
+					],
+				},
+			]);
+			const db = makeModel([]);
+
+			const diff = compareSchemata(schema, db);
+			const sql = generateMigrationSQL(diff);
+			const checkSql = sql.find((statement) =>
+				statement.includes('payments_amount_check'),
+			);
+
+			expect(checkSql).toBe(
+				'DO $$ BEGIN ALTER TABLE "payments" ADD CONSTRAINT "payments_amount_check" CHECK (amount > 0); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			);
+		});
+
 		it('emits an FK to a declared referenced schema while keeping the owning table in the migration schema', () => {
 			const ordersTable = makeFullTable(
 				'orders',
@@ -4747,6 +4772,73 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
 			);
 		});
+
+		it('should emit inline legacy NOT VALID exactly once', () => {
+			const diff = makeDiff([
+				{
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						check: {
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0)) NOT VALID',
+						},
+					},
+				},
+			]);
+			const sql = generateMigrationSQL(diff);
+			expect(sql[0]).toBe(
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			);
+		});
+
+		it('should let explicit notValid false override inline legacy NOT VALID', () => {
+			const diff = makeDiff([
+				{
+					kind: 'add_check_constraint',
+					table: 'users',
+					destructive: false,
+					details: '',
+					meta: {
+						check: {
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0)) NOT VALID',
+							notValid: false,
+						},
+					},
+				},
+			]);
+			const sql = generateMigrationSQL(diff);
+			expect(sql[0]).toBe(
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)); EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			);
+		});
+
+		it('should re-add a dropped NOT VALID CHECK in the down migration', () => {
+			const down = generateDownMigrationSQL(
+				makeDiff([
+					{
+						kind: 'drop_check_constraint',
+						table: 'users',
+						destructive: true,
+						details: '',
+						meta: {
+							check: {
+								name: 'users_age_check',
+								expression: 'CHECK ((age > 0))',
+								notValid: true,
+							},
+						},
+					},
+				]),
+			);
+			expect(down.statements).toEqual([
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			]);
+			expect(down.destructive).toBe(false);
+		});
 	});
 
 	describe('validate_constraint', () => {
@@ -4972,6 +5064,110 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			);
 			expect(validate).toBeDefined();
 			expect(validate?.table).toBe('users');
+		});
+
+		it('should drop and re-add CHECK NOT VALID when schema asks to unvalidate a validated constraint', () => {
+			const tableSchema: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: true,
+					},
+				],
+			};
+			const tableDB: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+					},
+				],
+			};
+			const diff = compareSchemata(
+				new ModelIRImpl(new Map([['users', tableSchema]]), new Map()),
+				new ModelIRImpl(new Map([['users', tableDB]]), new Map()),
+			);
+
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'drop_check_constraint',
+				'add_check_constraint',
+			]);
+			expect(diff.changes.every((change) => change.destructive)).toBe(true);
+			expect(generateMigrationSQL(diff)).toEqual([
+				'ALTER TABLE "users" DROP CONSTRAINT IF EXISTS "users_age_check";',
+				'DO $$ BEGIN ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID; EXCEPTION WHEN duplicate_object THEN NULL; END $$;',
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+		});
+
+		it('should drop and re-add FK NOT VALID when schema asks to unvalidate a validated constraint', () => {
+			const fkSchema: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const fkDB: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const usersTable: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const tableSchema: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fkSchema],
+				indexes: [],
+			};
+			const tableDB: TableIR = {
+				name: 'posts',
+				columns: [],
+				foreignKeys: [fkDB],
+				indexes: [],
+			};
+			const diff = compareSchemata(
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						['posts', tableSchema],
+					]),
+					new Map(),
+				),
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						['posts', tableDB],
+					]),
+					new Map(),
+				),
+			);
+
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'drop_foreign_key',
+				'add_foreign_key',
+			]);
+			expect(diff.changes.every((change) => change.destructive)).toBe(true);
+			expect(generateMigrationSQL(diff)).toEqual([
+				'ALTER TABLE "posts" DROP CONSTRAINT IF EXISTS "fk_posts_user_id";',
+				'ALTER TABLE "posts" ADD CONSTRAINT "fk_posts_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id") NOT VALID;',
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
 		});
 
 		it('should NOT emit validate_constraint when both are notValid', () => {

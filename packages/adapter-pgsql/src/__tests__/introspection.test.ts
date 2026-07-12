@@ -736,6 +736,31 @@ describe('introspect', () => {
 		expect(posts.foreignKeys[0]!.onDelete).toBe('CASCADE');
 	});
 
+	it('should include FK NOT VALID state from pg_constraint', async () => {
+		const fks = [
+			{
+				constraint_name: 'fk_posts_author_id',
+				source_table: 'posts',
+				source_column: 'author_id',
+				target_schema: 'public',
+				target_table: 'users',
+				target_column: 'id',
+				delete_rule: 'NO ACTION',
+				update_rule: 'NO ACTION',
+				is_deferrable: 'NO',
+				initially_deferred: 'NO',
+				not_valid: true,
+			},
+		];
+		const pool = createMockPool([usersPostsColumns, usersPostsPKs, fks]);
+
+		const result = await introspect(pool);
+
+		const posts = result.tables.get('posts')!;
+		expect(posts.foreignKeys).toHaveLength(1);
+		expect(posts.foreignKeys[0]!.notValid).toBe(true);
+	});
+
 	it('should include column defaults', async () => {
 		const columns = [
 			{

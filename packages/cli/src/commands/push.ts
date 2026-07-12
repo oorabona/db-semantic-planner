@@ -7,10 +7,9 @@
  */
 
 import {
-	compareSchemata,
+	comparePgsqlDatabaseSchema,
 	generateDDL,
 	generateMigrationSQL,
-	introspect,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { executeDdl } from '../ddl-executor.js';
@@ -126,12 +125,11 @@ export const pushCommand = new Command('push')
 							);
 						}
 					} else {
-						// Additive mode: introspect → diff → generate migration SQL (additive only)
-						const dbModel = await introspect(pool, {
+						// Additive mode: live diff -> generate migration SQL (additive only)
+						const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
+							onWarning: (message) => console.warn(`⚠️  ${message}`),
 						});
-
-						const diff = compareSchemata(schemaModel, dbModel);
 
 						// Generate SQL for additive changes only (no destructive)
 						const statements = generateMigrationSQL(diff, {

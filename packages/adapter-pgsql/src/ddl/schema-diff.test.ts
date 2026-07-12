@@ -14,6 +14,7 @@ import { generateDownSQL, generateMigrationSQL } from './migration-sql.js';
 import {
 	type CompareSchemataOptions,
 	compareSchemata,
+	ExpressionCanonicalizationUnavailableError,
 	type SchemaChange,
 } from './schema-diff.js';
 
@@ -807,6 +808,72 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(1);
 			expect(diff.changes[0]!.kind).toBe('alter_foreign_key');
 			expect(diff.summary.constraints.altered).toBe(1);
+		});
+
+		it('should count FK validation as a constraint alteration', () => {
+			const dbFk: ForeignKeyIR = { ...usersFk, notValid: true };
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [usersFk],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [dbFk],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual(['validate_constraint']);
+			expect(diff.summary.constraints.altered).toBe(1);
+		});
+
+		it('should drop and re-add FK when schema asks for NOT VALID on a validated constraint', () => {
+			const schemaFk: ForeignKeyIR = { ...usersFk, notValid: true };
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [schemaFk],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [usersFk],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'drop_foreign_key',
+				'add_foreign_key',
+			]);
+			expect(diff.changes.every((change) => change.destructive)).toBe(true);
+			expect(diff.hasDestructive).toBe(true);
 		});
 
 		it('should treat referenced schema changes as drop and add', () => {
@@ -2143,6 +2210,43 @@ describe('compareSchemata', () => {
 			expect(diff.changes).toHaveLength(0);
 		});
 
+		it('should match camelCase CHECK constraint names to snake_case DB names', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'age', type: 'integer' }),
+					],
+					checkConstraints: [
+						{
+							name: 'usersAgeCheck',
+							expression: 'CHECK ((age > 0))',
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [
+						makeCol({ name: 'id', type: 'integer' }),
+						makeCol({ name: 'age', type: 'integer' }),
+					],
+					checkConstraints: [
+						{
+							name: 'users_age_check',
+							expression: 'CHECK ((age > 0))',
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db, snakeCaseOpts);
+
+			expect(diff.changes).toHaveLength(0);
+		});
+
 		it('should not churn an existing old-name FK auto-index', () => {
 			const schema = makeModel([
 				makeTable({
@@ -2645,6 +2749,139 @@ describe('CHECK constraints', () => {
 		]);
 	});
 
+	it('should emit validation change only when CHECK differs only by NOT VALID state', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: false,
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: true,
+					},
+				],
+			}),
+		]);
+		const diff = compareSchemata(schema, db);
+		expect(changeKinds(diff.changes)).toEqual(['validate_constraint']);
+		expect(diff.summary.constraints.altered).toBe(1);
+	});
+
+	it('should not churn when schema uses inline CHECK NOT VALID and database has split state', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0)) NOT VALID',
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: true,
+					},
+				],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should let explicit CHECK notValid false override an inline legacy suffix', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0)) NOT VALID',
+						notValid: false,
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+					},
+				],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('should drop and re-add CHECK when schema asks for NOT VALID on a validated constraint', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+						notValid: true,
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{
+						name: 'users_age_check',
+						expression: 'CHECK ((age > 0))',
+					},
+				],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(changeKinds(diff.changes)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+		expect(diff.changes.every((change) => change.destructive)).toBe(true);
+		expect(diff.hasDestructive).toBe(true);
+	});
+
 	it('should emit no changes for identical CHECK constraints', () => {
 		const schema = makeModel([
 			makeTable({
@@ -2683,6 +2920,107 @@ describe('CHECK constraints', () => {
 		const kinds = changeKinds(diff.changes);
 		expect(kinds).toContain('create_table');
 		expect(kinds).toContain('add_check_constraint');
+	});
+
+	it('compile-only comparison remains best-effort by default for CHECK strings', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age >= 0))' },
+				],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db);
+
+		expect(changeKinds(diff.changes)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+	});
+
+	it('strict compile-only comparison throws when PostgreSQL canonicalization is required but unavailable', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+				checkConstraints: [
+					{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'age', type: 'number' })],
+			}),
+		]);
+
+		expect(() =>
+			compareSchemata(schema, db, {
+				requireExpressionCanonicalization: true,
+			}),
+		).toThrow(ExpressionCanonicalizationUnavailableError);
+	});
+
+	it('strict compile-only comparison still works when no raw expression surfaces exist', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+			}),
+		]);
+
+		const diff = compareSchemata(schema, db, {
+			requireExpressionCanonicalization: true,
+		});
+
+		expect(diff.changes).toEqual([]);
+	});
+
+	it('strict compile-only comparison throws for index predicates because they are raw expression surfaces', () => {
+		const schema = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+				indexes: [
+					{
+						name: 'idx_users_positive_id',
+						columns: ['id'],
+						where: 'id > 0',
+					},
+				],
+			}),
+		]);
+		const db = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol({ name: 'id', type: 'integer' })],
+			}),
+		]);
+
+		expect(() =>
+			compareSchemata(schema, db, {
+				requireExpressionCanonicalization: true,
+			}),
+		).toThrow(ExpressionCanonicalizationUnavailableError);
 	});
 });
 

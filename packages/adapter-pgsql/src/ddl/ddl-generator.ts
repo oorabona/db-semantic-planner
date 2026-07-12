@@ -269,7 +269,7 @@ export function generateCreateTable(
 /**
  * Generate a column definition string.
  */
-function generateColumnDef(
+export function generateColumnDef(
 	col: ColumnIR,
 	naming: NamingPlugin,
 	targetSchema?: string,

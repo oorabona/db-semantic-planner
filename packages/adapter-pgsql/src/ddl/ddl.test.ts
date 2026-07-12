@@ -1093,6 +1093,77 @@ describe('CHECK constraints in DDL', () => {
 		);
 	});
 
+	it('should preserve NOT VALID on CHECK constraints', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								autoIncrement: true,
+							},
+							{ name: 'age', type: 'integer', nullable: false },
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{
+								name: 'users_age_check',
+								expression: 'CHECK ((age > 0))',
+								notValid: true,
+							},
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const checkStmt = generateDDL(schema).find((s) => s.includes('CHECK'));
+		expect(checkStmt).toBe(
+			'ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0)) NOT VALID;',
+		);
+	});
+
+	it('should emit CHECK constraint names through the configured database casing', () => {
+		const schema = {
+			tables: new Map([
+				[
+					'users',
+					{
+						name: 'users',
+						columns: [
+							{ name: 'id', type: 'integer', nullable: false },
+							{ name: 'age', type: 'integer', nullable: false },
+						],
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{
+								name: 'usersAgeCheck',
+								expression: 'CHECK ((age > 0))',
+							},
+						],
+					} satisfies TableIR,
+				],
+			]),
+			relations: new Map(),
+		} as unknown as ModelIR;
+
+		const checkStmt = generateDDL(schema, { naming: camelCaseNaming }).find(
+			(s) => s.includes('CHECK'),
+		);
+		expect(checkStmt).toBe(
+			'ALTER TABLE "users" ADD CONSTRAINT "users_age_check" CHECK ((age > 0));',
+		);
+	});
+
 	it('should emit no CHECK statements when table has no checkConstraints', () => {
 		const schema = {
 			tables: new Map([

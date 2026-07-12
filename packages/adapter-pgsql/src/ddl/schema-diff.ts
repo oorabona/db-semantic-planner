@@ -9,6 +9,7 @@
 
 import { validateSchemaIndexOptions } from '@dbsp/core';
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	DbCasing,
 	DialectCapabilities,
@@ -21,6 +22,8 @@ import type {
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';
+import { getCheckConstraintDatabaseName } from '../check-constraint-name.js';
+import { splitCheckConstraintState } from '../check-expression.js';
 import {
 	columnDbTypeSchemaIdentity,
 	dbTypesEqual,
@@ -140,6 +143,37 @@ export interface CompareSchemataOptions {
 	 * `drop_extension` entry).
 	 */
 	readonly ignoreUnmanagedExtensions?: boolean;
+	/**
+	 * Strict compile-only mode for callers that require convergence guarantees.
+	 *
+	 * `compareSchemata()` is intentionally pure and cannot ask PostgreSQL to
+	 * canonicalise raw-SQL expression surfaces. By default it keeps the historic
+	 * best-effort raw string comparison for CHECK expressions, partial-index
+	 * predicates, and index expressions. Set this flag to throw when either model
+	 * contains one of those surfaces so a caller cannot accidentally rely on a
+	 * compile-only diff for a convergence-sensitive check.
+	 *
+	 * Live PostgreSQL callers should use `comparePgsqlDatabaseSchema()`, which
+	 * canonicalises CHECK constraint expressions before calling this function.
+	 * Partial-index predicates and index expressions are not canonicalised by the
+	 * live helper and are rejected there when this strict flag is set.
+	 */
+	readonly requireExpressionCanonicalization?: boolean;
+}
+
+export class ExpressionCanonicalizationUnavailableError extends Error {
+	constructor(public readonly surfaces: readonly string[]) {
+		super(
+			'compareSchemata strict expression canonicalization was requested, ' +
+				'but this pure compile-only path cannot ask PostgreSQL to canonicalise ' +
+				'raw SQL expression surfaces. Use comparePgsqlDatabaseSchema() for live ' +
+				'CHECK constraint canonicalization; index predicates and index expressions ' +
+				'are not covered by the live canonicalizer. Omit ' +
+				'requireExpressionCanonicalization for best-effort raw string comparison. ' +
+				`Surfaces: ${surfaces.join(', ')}`,
+		);
+		this.name = 'ExpressionCanonicalizationUnavailableError';
+	}
 }
 
 // ============================================================================
@@ -159,6 +193,10 @@ export function compareSchemata(
 	db: ModelIR,
 	options?: CompareSchemataOptions,
 ): SchemaDiff {
+	if (options?.requireExpressionCanonicalization) {
+		assertNoExpressionSurfaces(schema, db);
+	}
+
 	const changes: SchemaChange[] = [];
 
 	const plugin =
@@ -309,6 +347,60 @@ export function compareSchemata(
 // Name Normalization (camelCase → DB format)
 // ============================================================================
 
+function assertNoExpressionSurfaces(schema: ModelIR, db: ModelIR): void {
+	const surfaces = [
+		...collectExpressionSurfaces('schema', schema),
+		...collectExpressionSurfaces('database', db),
+	];
+	if (surfaces.length > 0) {
+		throw new ExpressionCanonicalizationUnavailableError(surfaces);
+	}
+}
+
+export interface CollectExpressionSurfaceOptions {
+	readonly includeCheckConstraints?: boolean;
+	readonly includeIndexPredicates?: boolean;
+	readonly includeIndexExpressions?: boolean;
+}
+
+export function collectExpressionSurfaces(
+	label: string,
+	model: ModelIR,
+	options?: CollectExpressionSurfaceOptions,
+): string[] {
+	const includeCheckConstraints = options?.includeCheckConstraints ?? true;
+	const includeIndexPredicates = options?.includeIndexPredicates ?? true;
+	const includeIndexExpressions = options?.includeIndexExpressions ?? true;
+	const surfaces: string[] = [];
+	for (const table of model.tables.values()) {
+		if (includeCheckConstraints) {
+			for (const check of table.checkConstraints ?? []) {
+				surfaces.push(
+					`${label}.${table.name}.CHECK(${formatConstraintName(check)})`,
+				);
+			}
+		}
+		for (const index of table.indexes) {
+			const indexName = index.name ?? `<unnamed:${index.columns.join(',')}>`;
+			if (includeIndexPredicates && index.where !== undefined) {
+				surfaces.push(`${label}.${table.name}.INDEX(${indexName}).WHERE`);
+			}
+			if (includeIndexExpressions) {
+				for (let i = 0; i < (index.expressions?.length ?? 0); i++) {
+					surfaces.push(
+						`${label}.${table.name}.INDEX(${indexName}).EXPRESSION[${i}]`,
+					);
+				}
+			}
+		}
+	}
+	return surfaces;
+}
+
+function formatConstraintName(check: CheckConstraintIR): string {
+	return check.name || '<unnamed>';
+}
+
 /**
  * Convert all identifiers in a table map from model format to database format.
  * This allows comparing a schema definition (camelCase) against an introspected
@@ -369,6 +461,14 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 					}
 				: {}),
 		})),
+		...(table.checkConstraints !== undefined
+			? {
+					checkConstraints: table.checkConstraints.map((check) => ({
+						...check,
+						name: getCheckConstraintDatabaseName(check, plugin),
+					})),
+				}
+			: {}),
 		...(table.partition
 			? {
 					partition: {
@@ -718,10 +818,14 @@ function compareForeignKeys(
 			const dbOnUpdate = dbFK.onUpdate ?? 'NO ACTION';
 			const schemaDeferred = fk.deferred ?? false;
 			const dbDeferred = dbFK.deferred ?? false;
+			const dbNotValid = dbFK.notValid ?? false;
+			const schemaNotValid = fk.notValid ?? false;
+			const needsNotValidReplacement = !dbNotValid && schemaNotValid;
 			if (
-				schemaOnDelete !== dbOnDelete ||
-				schemaOnUpdate !== dbOnUpdate ||
-				schemaDeferred !== dbDeferred
+				!needsNotValidReplacement &&
+				(schemaOnDelete !== dbOnDelete ||
+					schemaOnUpdate !== dbOnUpdate ||
+					schemaDeferred !== dbDeferred)
 			) {
 				changes.push({
 					kind: 'alter_foreign_key',
@@ -732,14 +836,27 @@ function compareForeignKeys(
 				});
 			}
 			// notValid: true in DB but false/undefined in schema → emit validate_constraint
-			const dbNotValid = dbFK.notValid ?? false;
-			const schemaNotValid = fk.notValid ?? false;
 			if (dbNotValid && !schemaNotValid) {
 				changes.push({
 					kind: 'validate_constraint',
 					table: schema.name,
 					destructive: false,
 					details: `Validate FK constraint on (${fk.columns.join(', ')})`,
+					meta: { fk },
+				});
+			} else if (!dbNotValid && schemaNotValid) {
+				changes.push({
+					kind: 'drop_foreign_key',
+					table: schema.name,
+					destructive: true,
+					details: `Drop FK (${dbFK.columns.join(', ')}) → ${dbFK.references.table}(${dbFK.references.columns.join(', ')}) to re-add NOT VALID`,
+					meta: { fk: dbFK },
+				});
+				changes.push({
+					kind: 'add_foreign_key',
+					table: schema.name,
+					destructive: true,
+					details: `Re-add FK (${fk.columns.join(', ')}) → ${fk.references.table}(${fk.references.columns.join(', ')}) NOT VALID`,
 					meta: { fk },
 				});
 			}
@@ -1163,11 +1280,16 @@ function compareCheckConstraints(
 	const dbChecks = db.checkConstraints ?? [];
 
 	// Build map by constraint name
-	const schemaMap = new Map(schemaChecks.map((c) => [c.name, c]));
-	const dbMap = new Map(dbChecks.map((c) => [c.name, c]));
+	const schemaMap = new Map(
+		schemaChecks.map((check) => [check.name, normalizeCheckForDiff(check)]),
+	);
+	const dbMap = new Map(
+		dbChecks.map((check) => [check.name, normalizeCheckForDiff(check)]),
+	);
 
 	// In schema but not in DB → add
-	for (const [name, check] of schemaMap) {
+	for (const [name, checkEntry] of schemaMap) {
+		const { check } = checkEntry;
 		if (!dbMap.has(name)) {
 			changes.push({
 				kind: 'add_check_constraint',
@@ -1178,15 +1300,15 @@ function compareCheckConstraints(
 			});
 		} else {
 			// Both have it — compare expression and notValid
-			const dbCheck = dbMap.get(name)!;
-			if (check.expression !== dbCheck.expression) {
+			const dbCheckEntry = dbMap.get(name)!;
+			if (checkEntry.expression !== dbCheckEntry.expression) {
 				// Expression changed → drop + re-add
 				changes.push({
 					kind: 'drop_check_constraint',
 					table: schema.name,
 					destructive: true,
 					details: `Drop CHECK constraint "${name}" (expression changed)`,
-					meta: { check: dbCheck },
+					meta: { check: dbCheckEntry.check },
 				});
 				changes.push({
 					kind: 'add_check_constraint',
@@ -1197,8 +1319,8 @@ function compareCheckConstraints(
 				});
 			} else {
 				// notValid: true in DB but false/undefined in schema → emit validate_constraint
-				const dbNotValid = dbCheck.notValid ?? false;
-				const schemaNotValid = check.notValid ?? false;
+				const dbNotValid = dbCheckEntry.notValid;
+				const schemaNotValid = checkEntry.notValid;
 				if (dbNotValid && !schemaNotValid) {
 					changes.push({
 						kind: 'validate_constraint',
@@ -1207,23 +1329,55 @@ function compareCheckConstraints(
 						details: `Validate CHECK constraint "${name}"`,
 						meta: { check },
 					});
+				} else if (!dbNotValid && schemaNotValid) {
+					changes.push({
+						kind: 'drop_check_constraint',
+						table: schema.name,
+						destructive: true,
+						details: `Drop CHECK constraint "${name}" to re-add NOT VALID`,
+						meta: { check: dbCheckEntry.check },
+					});
+					changes.push({
+						kind: 'add_check_constraint',
+						table: schema.name,
+						destructive: true,
+						details: `Re-add CHECK constraint "${name}" ${check.expression} NOT VALID`,
+						meta: { check },
+					});
 				}
 			}
 		}
 	}
 
 	// In DB but not in schema → drop
-	for (const [name, check] of dbMap) {
+	for (const [name, checkEntry] of dbMap) {
 		if (!schemaMap.has(name)) {
 			changes.push({
 				kind: 'drop_check_constraint',
 				table: schema.name,
 				destructive: true,
 				details: `Drop CHECK constraint "${name}"`,
-				meta: { check },
+				meta: { check: checkEntry.check },
 			});
 		}
 	}
+}
+
+interface NormalizedCheckForDiff {
+	readonly check: CheckConstraintIR;
+	readonly expression: string;
+	readonly notValid: boolean;
+}
+
+function normalizeCheckForDiff(
+	check: CheckConstraintIR,
+): NormalizedCheckForDiff {
+	const state = splitCheckConstraintState(check);
+	return {
+		check,
+		expression: state.expression,
+		notValid: state.notValid,
+	};
 }
 
 // ============================================================================
@@ -1554,6 +1708,7 @@ function buildSummary(changes: readonly SchemaChange[]): DiffSummary {
 				constraints.dropped++;
 				break;
 			case 'alter_foreign_key':
+			case 'validate_constraint':
 				constraints.altered++;
 				break;
 			case 'create_index':

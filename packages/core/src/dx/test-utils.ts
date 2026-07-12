@@ -93,6 +93,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		transaction: notImplemented,
 		withSchema: () => createMockAdapter(options),
 		introspect: notImplemented,
+		compareDatabaseSchema: notImplemented,
 		executeRaw: notImplemented,
 		generateDDL: notImplemented,
 		compileSelectExpression: notImplemented,

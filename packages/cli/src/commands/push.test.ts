@@ -13,17 +13,16 @@ import { describe, expect, it, vi } from 'vitest';
 // Mock adapter
 // ============================================================================
 
-const mockCompareSchemata = vi.fn();
+const mockComparePgsqlDatabaseSchema = vi.fn();
 const mockGenerateDDL = vi.fn();
 const mockGenerateMigrationSQL = vi.fn();
-const mockIntrospect = vi.fn();
 
 vi.mock('@dbsp/adapter-pgsql', () => ({
-	compareSchemata: (...args: unknown[]) => mockCompareSchemata(...args),
+	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+		mockComparePgsqlDatabaseSchema(...args),
 	generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
 	generateMigrationSQL: (...args: unknown[]) =>
 		mockGenerateMigrationSQL(...args),
-	introspect: (...args: unknown[]) => mockIntrospect(...args),
 }));
 
 // ============================================================================
@@ -96,7 +95,7 @@ describe('push — migrations table protection', () => {
 });
 
 // ============================================================================
-// Tests: Additive push (compareSchemata → generateMigrationSQL)
+// Tests: Additive push (comparePgsqlDatabaseSchema -> generateMigrationSQL)
 // ============================================================================
 
 describe('push — additive mode logic', () => {
