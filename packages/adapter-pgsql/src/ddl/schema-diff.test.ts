@@ -811,7 +811,11 @@ describe('compareSchemata', () => {
 		});
 
 		it('should count FK validation as a constraint alteration', () => {
-			const dbFk: ForeignKeyIR = { ...usersFk, notValid: true };
+			const dbFk: ForeignKeyIR = {
+				...usersFk,
+				constraintName: 'posts_author_id_fkey',
+				notValid: true,
+			};
 			const schema = makeModel([
 				makeTable({
 					name: 'users',
@@ -839,10 +843,15 @@ describe('compareSchemata', () => {
 
 			expect(changeKinds(diff.changes)).toEqual(['validate_constraint']);
 			expect(diff.summary.constraints.altered).toBe(1);
+			expect(diff.changes[0]!.meta?.fk).toEqual(dbFk);
 		});
 
 		it('should drop and re-add FK when schema asks for NOT VALID on a validated constraint', () => {
 			const schemaFk: ForeignKeyIR = { ...usersFk, notValid: true };
+			const dbFk: ForeignKeyIR = {
+				...usersFk,
+				constraintName: 'posts_author_id_fkey',
+			};
 			const schema = makeModel([
 				makeTable({
 					name: 'users',
@@ -862,7 +871,7 @@ describe('compareSchemata', () => {
 				makeTable({
 					name: 'posts',
 					columns: [makeCol({ name: 'author_id', type: 'integer' })],
-					foreignKeys: [usersFk],
+					foreignKeys: [dbFk],
 				}),
 			]);
 
@@ -873,7 +882,45 @@ describe('compareSchemata', () => {
 				'add_foreign_key',
 			]);
 			expect(diff.changes.every((change) => change.destructive)).toBe(true);
+			expect(diff.changes[0]!.meta?.fk).toEqual(dbFk);
 			expect(diff.hasDestructive).toBe(true);
+		});
+
+		it('should ignore FK constraint name differences for identity', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [
+						{
+							...usersFk,
+							constraintName: 'fk_authored_posts_author',
+						},
+					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [
+						{
+							...usersFk,
+							constraintName: 'posts_author_id_fkey',
+						},
+					],
+				}),
+			]);
+
+			expect(compareSchemata(schema, db).changes).toEqual([]);
 		});
 
 		it('should treat referenced schema changes as drop and add', () => {

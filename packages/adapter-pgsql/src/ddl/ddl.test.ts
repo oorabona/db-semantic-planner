@@ -373,6 +373,49 @@ describe('DDL Generator', () => {
 			expect(alterStmt).toContain('ON DELETE CASCADE');
 		});
 
+		it('should use an explicit FK constraint name', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						} satisfies TableIR,
+					],
+					[
+						'posts',
+						{
+							name: 'posts',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'author_id', type: 'integer', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									constraintName: 'posts_author_id_fkey',
+									columns: ['author_id'],
+									references: { table: 'users', columns: ['id'] },
+								} satisfies ForeignKeyIR,
+							],
+							indexes: [],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			const alterStmt = generateDDL(schema).find((stmt) =>
+				stmt.includes('ALTER TABLE'),
+			);
+
+			expect(alterStmt).toContain('ADD CONSTRAINT "posts_author_id_fkey"');
+		});
+
 		it('should qualify a declared referenced schema for foreign keys', () => {
 			const schema = {
 				tables: new Map([

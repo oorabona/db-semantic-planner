@@ -1,10 +1,12 @@
 /**
  * PostgreSQL CHECK constraint expression canonicalisation.
  *
- * CHECK scratch tables intentionally use only the desired column names and
- * PostgreSQL types. Defaults, identity, uniqueness, nullability, and other
- * table-shape clauses are not needed for `pg_get_constraintdef()` rendering and
- * must not be allowed to block expression canonicalisation.
+ * CHECK scratch tables intentionally use only column names and PostgreSQL types.
+ * Desired column types are preferred; existing database column types are used
+ * when the desired column omits `originalDbType` and the base type is unchanged.
+ * Defaults, identity, uniqueness, nullability, and other table-shape clauses are
+ * not needed for `pg_get_constraintdef()` rendering and must not be allowed to
+ * block expression canonicalisation.
  *
  * Deliberate bound: a CHECK that references an enum value being added to an
  * existing enum by the same migration cannot produce an executable PostgreSQL
@@ -64,6 +66,7 @@ export interface CanonicalizeCheckConstraintsOptions {
 interface CheckConstraintTarget {
 	readonly modelKey: string;
 	readonly modelTable: TableIR;
+	readonly dbTable?: TableIR;
 	readonly dbTableName: string;
 	readonly checks: readonly CheckConstraintIR[];
 	readonly dbCheckNames: readonly string[];
@@ -95,10 +98,12 @@ export class CheckConstraintCanonicalizationError extends Error {
  * Canonicalise PostgreSQL CHECK constraint expressions in a desired model.
  *
  * CHECK constraints are canonicalised by creating a transaction-local temp table
- * with the desired table's column definitions, adding the authored CHECK
- * constraints to that temp table, reading PostgreSQL's `pg_get_constraintdef()`
- * rendering, then rolling the transaction back. Missing desired enum types are
- * also created inside the same rolled-back transaction before scratch tables.
+ * with the desired table's column definitions (borrowing live database type
+ * detail for existing columns when the desired model omits it), adding the
+ * authored CHECK constraints to that temp table, reading PostgreSQL's
+ * `pg_get_constraintdef()` rendering, then rolling the transaction back.
+ * Missing desired enum types are also created inside the same rolled-back
+ * transaction before scratch tables.
  * Scratch columns include only names and types; defaults, identity, uniqueness,
  * nullability, and other table-shape clauses are deliberately omitted.
  *
@@ -251,7 +256,7 @@ function isNoActiveTransactionError(error: unknown): boolean {
 
 function collectCheckConstraintTargets(
 	desired: ModelIR,
-	_dbModel: ModelIR,
+	dbModel: ModelIR,
 	options: CanonicalizeCheckConstraintsOptions | undefined,
 ): CheckConstraintTarget[] {
 	const plugin =
@@ -265,10 +270,12 @@ function collectCheckConstraintTargets(
 		if (checks.length === 0) continue;
 
 		const dbTableName = plugin.toDatabase(table.name);
+		const dbTable = dbModel.tables.get(dbTableName);
 
 		targets.push({
 			modelKey,
 			modelTable: table,
+			...(dbTable !== undefined ? { dbTable } : {}),
 			dbTableName,
 			checks,
 			dbCheckNames: checks.map((check) =>
@@ -328,8 +335,11 @@ async function canonicalizeTableChecks(
 		options?.schemaName !== undefined
 			? naming.toDatabase(options.schemaName)
 			: undefined;
+	const dbColumnsByName = new Map(
+		(target.dbTable?.columns ?? []).map((column) => [column.name, column]),
+	);
 	const columnDefs = target.modelTable.columns.map((column) =>
-		generateScratchColumnDef(column, naming, targetSchema),
+		generateScratchColumnDef(column, dbColumnsByName, naming, targetSchema),
 	);
 
 	await client.query(
@@ -384,14 +394,22 @@ async function canonicalizeTableChecks(
 
 function generateScratchColumnDef(
 	column: TableIR['columns'][number],
+	dbColumnsByName: ReadonlyMap<string, TableIR['columns'][number]>,
 	naming: NamingPlugin,
 	targetSchema: string | undefined,
 ): string {
+	const dbColumn = dbColumnsByName.get(naming.toDatabase(column.name));
 	const typeColumn =
-		column.autoIncrement === true
-			? { ...column, autoIncrement: false }
+		!column.originalDbType?.trim() &&
+		dbColumn?.originalDbType?.trim() &&
+		column.type === dbColumn.type
+			? dbColumn
 			: column;
-	return `${quoteIdent(naming.toDatabase(column.name), 'column')} ${mapColumnType(typeColumn, targetSchema)}`;
+	const scratchColumn =
+		typeColumn.autoIncrement === true
+			? { ...typeColumn, autoIncrement: false }
+			: typeColumn;
+	return `${quoteIdent(naming.toDatabase(column.name), 'column')} ${mapColumnType(scratchColumn, targetSchema)}`;
 }
 
 async function createMissingDesiredEnumTypes(

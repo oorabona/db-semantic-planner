@@ -304,21 +304,35 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		]);
 	});
 
-	it('emits validation change only when FK differs by NOT VALID state', async () => {
+	it('validates introspected NOT VALID FKs using their real default and custom names', async () => {
 		await pool.query(`
 			CREATE TABLE ${SCHEMA}.users (
 				id integer PRIMARY KEY
 			)
 		`);
+		// NOT VALID must be added through ALTER TABLE. PostgreSQL accepts the clause
+		// inside CREATE TABLE and then silently ignores it — the constraint comes out
+		// validated (probed: convalidated = true). Leaving it unnamed makes PostgreSQL
+		// assign its own default name, which is the point of this test.
 		await pool.query(`
-			CREATE TABLE ${SCHEMA}.posts (
+			CREATE TABLE ${SCHEMA}.default_posts (
 				id integer PRIMARY KEY,
 				author_id integer NOT NULL
 			)
 		`);
 		await pool.query(`
-			ALTER TABLE ${SCHEMA}.posts
-			ADD CONSTRAINT fk_posts_author_id
+			ALTER TABLE ${SCHEMA}.default_posts
+			ADD FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id) NOT VALID
+		`);
+		await pool.query(`
+			CREATE TABLE ${SCHEMA}.custom_posts (
+				id integer PRIMARY KEY,
+				author_id integer NOT NULL
+			)
+		`);
+		await pool.query(`
+			ALTER TABLE ${SCHEMA}.custom_posts
+			ADD CONSTRAINT custom_posts_author_fk
 			FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id) NOT VALID
 		`);
 		const desired = new ModelIRImpl(
@@ -334,9 +348,24 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 					},
 				],
 				[
-					'posts',
+					'default_posts',
 					{
-						name: 'posts',
+						name: 'default_posts',
+						columns: [makeCol('id'), makeCol('author_id')],
+						primaryKey: 'id',
+						foreignKeys: [
+							{
+								columns: ['author_id'],
+								references: { table: 'users', columns: ['id'] },
+							},
+						],
+						indexes: [],
+					},
+				],
+				[
+					'custom_posts',
+					{
+						name: 'custom_posts',
 						columns: [makeCol('id'), makeCol('author_id')],
 						primaryKey: 'id',
 						foreignKeys: [
@@ -361,11 +390,22 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			schemaName: SCHEMA,
 		});
 
-		expect(changeKinds(diff)).toEqual(['validate_constraint']);
-		expect(diff.summary.constraints.altered).toBe(1);
-		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" VALIDATE CONSTRAINT "fk_posts_author_id";',
+		expect(changeKinds(diff)).toEqual([
+			'validate_constraint',
+			'validate_constraint',
 		]);
+		expect(diff.summary.constraints.altered).toBe(2);
+		expect(statements).toEqual([
+			'ALTER TABLE "check_canonicalization_test"."default_posts" VALIDATE CONSTRAINT "default_posts_author_id_fkey";',
+			'ALTER TABLE "check_canonicalization_test"."custom_posts" VALIDATE CONSTRAINT "custom_posts_author_fk";',
+		]);
+		await executeDdl(pool, statements);
+
+		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		expect(rediff.changes).toEqual([]);
 	});
 
 	it('drops and re-adds FK NOT VALID when desired asks for NOT VALID on a validated FK', async () => {
@@ -378,8 +418,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			CREATE TABLE ${SCHEMA}.posts (
 				id integer PRIMARY KEY,
 				author_id integer NOT NULL,
-				CONSTRAINT fk_posts_author_id
-					FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id)
+				FOREIGN KEY (author_id) REFERENCES ${SCHEMA}.users (id)
 			)
 		`);
 		const desired = new ModelIRImpl(
@@ -425,9 +464,28 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 		expect(changeKinds(diff)).toEqual(['drop_foreign_key', 'add_foreign_key']);
 		expect(statements).toEqual([
-			'ALTER TABLE "check_canonicalization_test"."posts" DROP CONSTRAINT IF EXISTS "fk_posts_author_id";',
+			'ALTER TABLE "check_canonicalization_test"."posts" DROP CONSTRAINT IF EXISTS "posts_author_id_fkey";',
 			'ALTER TABLE "check_canonicalization_test"."posts" ADD CONSTRAINT "fk_posts_author_id" FOREIGN KEY ("author_id") REFERENCES "check_canonicalization_test"."users" ("id") NOT VALID;',
 		]);
+		await executeDdl(pool, statements);
+
+		const fkCount = await pool.query<{ count: string }>(
+			`SELECT count(*)::text AS count
+				   FROM pg_constraint c
+				   JOIN pg_class r ON r.oid = c.conrelid
+				   JOIN pg_namespace n ON n.oid = r.relnamespace
+				  WHERE n.nspname = $1
+				    AND r.relname = 'posts'
+				    AND c.contype = 'f'`,
+			[SCHEMA],
+		);
+		expect(fkCount.rows[0]?.count).toBe('1');
+
+		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		expect(rediff.changes).toEqual([]);
 	});
 
 	it('canonicalizes a bare hand-built ModelIR predicate to the full CHECK clause', async () => {
@@ -455,6 +513,130 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		});
 
 		expect(diff.changes).toEqual([]);
+	});
+
+	it('canonicalizes a CHECK against the desired column type when the same diff changes that type', async () => {
+		await pool.query(`
+			CREATE TABLE ${SCHEMA}.type_changes (
+				id integer PRIMARY KEY,
+				code integer NOT NULL
+			)
+		`);
+		const desired = makeModel({
+			name: 'type_changes',
+			columns: [makeCol('id'), makeCol('code', 'string')],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			checkConstraints: [
+				{ name: 'type_changes_code_check', expression: 'length(code) > 0' },
+			],
+		});
+
+		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+			requireExpressionCanonicalization: true,
+		});
+		const statements = generateMigrationSQL(diff, {
+			includeDestructive: true,
+			schemaName: SCHEMA,
+		});
+
+		expect(changeKinds(diff)).toContain('alter_column_type');
+		expect(changeKinds(diff)).toContain('add_check_constraint');
+		expect(
+			statements.some((statement) =>
+				statement.includes('ADD CONSTRAINT "type_changes_code_check" CHECK'),
+			),
+		).toBe(true);
+		await executeDdl(pool, statements);
+
+		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+			requireExpressionCanonicalization: true,
+		});
+		expect(rediff.changes).toEqual([]);
+	});
+
+	it('emits a bare predicate ending in a boolean column named valid intact', async () => {
+		await pool.query(`
+			CREATE TABLE ${SCHEMA}.valid_flags (
+				id integer PRIMARY KEY,
+				enabled boolean NOT NULL,
+				valid boolean NOT NULL
+			)
+		`);
+		await pool.query(`
+			CREATE TABLE ${SCHEMA}.valid_flags_not_valid (
+				id integer PRIMARY KEY,
+				enabled boolean NOT NULL,
+				valid boolean NOT NULL
+			)
+		`);
+		const desired = new ModelIRImpl(
+			new Map<string, TableIR>([
+				[
+					'valid_flags',
+					{
+						name: 'valid_flags',
+						columns: [
+							makeCol('id'),
+							makeCol('enabled', 'boolean'),
+							makeCol('valid', 'boolean'),
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{
+								name: 'valid_flags_enabled_check',
+								expression: 'enabled AND NOT valid',
+							},
+						],
+					},
+				],
+				[
+					'valid_flags_not_valid',
+					{
+						name: 'valid_flags_not_valid',
+						columns: [
+							makeCol('id'),
+							makeCol('enabled', 'boolean'),
+							makeCol('valid', 'boolean'),
+						],
+						primaryKey: 'id',
+						foreignKeys: [],
+						indexes: [],
+						checkConstraints: [
+							{
+								name: 'valid_flags_not_valid_enabled_check',
+								expression: 'enabled AND NOT valid',
+								notValid: true,
+							},
+						],
+					},
+				],
+			]),
+			new Map(),
+		);
+
+		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		const statements = generateMigrationSQL(diff, {
+			includeDestructive: true,
+			schemaName: SCHEMA,
+		});
+
+		expect(statements).toHaveLength(2);
+		expect(statements[0]).toContain('NOT valid');
+		expect(statements[0]).not.toContain('enabled AND)');
+		expect(statements[1]).toContain('NOT valid');
+		expect(statements[1]).toContain('NOT VALID');
+		await executeDdl(pool, statements);
 	});
 
 	describe('a CHECK that cannot be canonicalised while the diff adds enum values', () => {
@@ -485,15 +667,12 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 							name: 'jobs',
 							columns: [
 								makeCol('id'),
-								// Shaped exactly as introspection reports an enum column, so the
-								// scratch table really is typed with the live enum.
+								// Authored desired schemas usually only know this is a string.
+								// The scratch table must borrow the live enum type from introspection.
 								{
 									name: 'state',
 									type: 'string',
 									nullable: false,
-									originalDbType: 'status',
-									originalDbTypeSchema: SCHEMA,
-									originalDbTypeSchemaScope: 'target',
 								},
 							],
 							primaryKey: 'id',

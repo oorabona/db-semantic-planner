@@ -738,6 +738,7 @@ function buildPKMap(rows: RawPrimaryKey[]): Map<string, string[]> {
 
 /** FK entry used internally for relation/hierarchy inference. */
 interface FKEntry {
+	constraintName: string;
 	source: string;
 	target: string;
 	targetSchema?: string;
@@ -761,6 +762,7 @@ function buildFKMap(rows: RawForeignKey[]): Map<string, FKEntry> {
 			existing.notValid ||= fk.not_valid === true;
 		} else {
 			result.set(key, {
+				constraintName: fk.constraint_name,
 				source: fk.source_table,
 				target: fk.target_table,
 				targetSchema: fk.target_schema,
@@ -986,6 +988,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 		const onDelete = mapDeleteRule(fk.deleteRule);
 		const onUpdate = mapDeleteRule(fk.updateRule);
 		foreignKeys.push({
+			constraintName: fk.constraintName,
 			columns: fk.cols,
 			references: {
 				table: fk.target,

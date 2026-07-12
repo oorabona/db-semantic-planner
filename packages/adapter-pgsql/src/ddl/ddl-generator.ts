@@ -340,7 +340,7 @@ export function generateAlterTableAddFK(
 ): string {
 	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
 	const constraintName = quoteIdentifier(
-		`fk_${tableName}_${fk.columns.join('_')}`,
+		fk.constraintName ?? `fk_${tableName}_${fk.columns.join('_')}`,
 	);
 
 	// Local columns

@@ -119,6 +119,10 @@ function fkName(table: string, columns: readonly string[]): string {
 	return `fk_${table}_${columns.join('_')}`;
 }
 
+function fkConstraintName(table: string, fk: ForeignKeyIR): string {
+	return fk.constraintName ?? fkName(table, fk.columns);
+}
+
 /** Column UNIQUE constraint name convention. */
 function uniqueName(table: string, column: string): string {
 	return `${table}_${column}_key`;
@@ -641,7 +645,10 @@ function upDropForeignKey(
 ): string | undefined {
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
+	const constraintName = quoteIdent(
+		fkConstraintName(change.table, fk),
+		'alias',
+	);
 	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 }
 
@@ -652,7 +659,11 @@ function upAlterForeignKey(
 	// Drop + re-add with new onDelete
 	const fk = change.meta?.fk as ForeignKeyIR;
 	if (!fk) return undefined;
-	const constraintName = quoteIdent(fkName(change.table, fk.columns), 'alias');
+	const oldFk = change.meta?.oldFk as ForeignKeyIR | undefined;
+	const constraintName = quoteIdent(
+		fkConstraintName(change.table, oldFk ?? fk),
+		'alias',
+	);
 	const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 	const add = generateAddFKSQL(change.table, fk, schemaName);
 	return `${drop}\n${add}`;
@@ -757,7 +768,7 @@ function upValidateConstraint(
 	const fk = change.meta?.fk as ForeignKeyIR | undefined;
 	const check = change.meta?.check as CheckConstraintIR | undefined;
 	const constraintName = fk
-		? quoteIdent(fkName(change.table, fk.columns), 'alias')
+		? quoteIdent(fkConstraintName(change.table, fk), 'alias')
 		: check
 			? quoteIdent(check.name, 'alias')
 			: undefined;
@@ -1164,7 +1175,7 @@ function changeToDownSQL(
 			const fk = change.meta?.fk as ForeignKeyIR | undefined;
 			if (!fk) return { sql: undefined, destructive: true };
 			const constraintName = quoteIdent(
-				fkName(change.table, fk.columns),
+				fkConstraintName(change.table, fk),
 				'alias',
 			);
 			return {
@@ -1198,7 +1209,7 @@ function changeToDownSQL(
 				};
 			}
 			const constraintName = quoteIdent(
-				fkName(change.table, fk.columns),
+				fkConstraintName(change.table, fk),
 				'alias',
 			);
 			const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
@@ -1695,7 +1706,7 @@ function generateAddFKSQL(
 	schemaName?: string,
 ): string {
 	const qualTable = qualifyTable(tableName, schemaName);
-	const constraintName = quoteIdent(fkName(tableName, fk.columns), 'alias');
+	const constraintName = quoteIdent(fkConstraintName(tableName, fk), 'alias');
 	const fkCols = fk.columns.map((n) => quoteIdent(n, 'alias')).join(', ');
 	// Referenced table resolves to its declared schema, or the migration schema when absent.
 	const refTable = qualifyTable(

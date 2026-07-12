@@ -577,6 +577,112 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(client.tempTables.size).toBe(0);
 	});
 
+	it('types an existing desired column from the database column when originalDbType is absent', async () => {
+		const client = new FakePgClient();
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			"CHECK (((state)::text <> 'done'::text))",
+		);
+		const pool = new FakePgPool(client);
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('state', {
+							type: 'string',
+						}),
+					],
+					checkConstraints: [
+						{ name: 'jobs_state_check', expression: "state <> 'done'" },
+					],
+				}),
+			],
+			[{ name: 'status', schema: 'tenant_1', values: ['queued', 'done'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('state', {
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'tenant_1',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+				}),
+			],
+			[{ name: 'status', schema: 'tenant_1', values: ['queued', 'done'] }],
+		);
+
+		await canonicalizeCheckConstraints(
+			pool as unknown as Pool,
+			desired,
+			dbModel,
+			{ schemaName: 'tenant_1' },
+		);
+
+		expect(
+			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
+		).toContain(
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" "tenant_1".status) ON COMMIT DROP',
+		);
+	});
+
+	it('keeps the desired type when the same diff changes a column type', async () => {
+		const client = new FakePgClient();
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			'CHECK ((state > 0))',
+		);
+		const pool = new FakePgPool(client);
+		const desired = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('state', {
+						type: 'integer',
+					}),
+				],
+				checkConstraints: [
+					{ name: 'jobs_state_check', expression: 'state > 0' },
+				],
+			}),
+		]);
+		const dbModel = makeModel([
+			makeTable({
+				name: 'jobs',
+				columns: [
+					makeCol('id'),
+					makeCol('state', {
+						type: 'string',
+						originalDbType: 'status',
+						originalDbTypeSchema: 'tenant_1',
+						originalDbTypeSchemaScope: 'target',
+					}),
+				],
+			}),
+		]);
+
+		await canonicalizeCheckConstraints(
+			pool as unknown as Pool,
+			desired,
+			dbModel,
+			{ schemaName: 'tenant_1' },
+		);
+
+		expect(
+			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
+		).toContain(
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" INTEGER) ON COMMIT DROP',
+		);
+	});
+
 	for (const testCase of [
 		{
 			label: 'DEFAULT',

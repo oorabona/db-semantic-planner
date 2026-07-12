@@ -1,9 +1,10 @@
 import { ModelIRImpl } from '@dbsp/core';
-import type { ColumnIR, ModelIR, TableIR } from '@dbsp/types';
+import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
+	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
 	NonConvergentSchemaDiffError,
 } from './live-diff.js';
@@ -68,6 +69,17 @@ function makeModel(tables: readonly TableIR[]): ModelIR {
 	return new ModelIRImpl(
 		new Map(tables.map((table) => [table.name, table])),
 		new Map(),
+	);
+}
+
+function makeModelWithEnums(
+	tables: readonly TableIR[],
+	enums: readonly EnumIR[],
+): ModelIR {
+	return new ModelIRImpl(
+		new Map(tables.map((table) => [table.name, table])),
+		new Map(),
+		new Map(enums.map((enumDef) => [enumDef.name, enumDef])),
 	);
 }
 
@@ -233,7 +245,7 @@ class FakeForeignKeyLiveDiffClient implements FakeQueryableClient {
 			return {
 				rows: [
 					{
-						constraint_name: 'fk_posts_author_id',
+						constraint_name: 'posts_author_id_fkey',
 						source_table: 'posts',
 						source_column: 'author_id',
 						target_schema: 'public',
@@ -244,6 +256,93 @@ class FakeForeignKeyLiveDiffClient implements FakeQueryableClient {
 						is_deferrable: 'NO',
 						initially_deferred: 'NO',
 						not_valid: true,
+					},
+				] as T[],
+				rowCount: 1,
+			} as QueryResult<T>;
+		}
+
+		return { rows: [], rowCount: 0 } as QueryResult<T>;
+	}
+}
+
+class FakeEnumValueLiveDiffClient implements FakeQueryableClient {
+	readonly queries: string[] = [];
+	readonly release = vi.fn();
+
+	async query<T extends Record<string, unknown> = Record<string, unknown>>(
+		sql: string,
+	): Promise<QueryResult<T>> {
+		const normalized = normalizeSql(sql);
+		this.queries.push(normalized);
+
+		if (
+			normalized.startsWith('ALTER TABLE') &&
+			normalized.includes("CHECK (state = 'pending')")
+		) {
+			throw new Error(
+				'unsafe use of new value "pending" of enum type tenant_1.status',
+			);
+		}
+
+		if (normalized.includes('FROM information_schema.columns')) {
+			return {
+				rows: [
+					{
+						table_name: 'jobs',
+						column_name: 'id',
+						data_type: 'integer',
+						udt_name: 'int4',
+						is_nullable: 'NO',
+						column_default: null,
+						collation_name: null,
+						is_identity: 'NO',
+						identity_generation: null,
+					},
+					{
+						table_name: 'jobs',
+						column_name: 'state',
+						data_type: 'USER-DEFINED',
+						udt_name: 'status',
+						is_nullable: 'NO',
+						column_default: null,
+						collation_name: null,
+						is_identity: 'NO',
+						identity_generation: null,
+					},
+				] as T[],
+				rowCount: 2,
+			} as QueryResult<T>;
+		}
+
+		if (normalized.includes('FROM information_schema.table_constraints')) {
+			return {
+				rows: [{ table_name: 'jobs', column_name: 'id' }] as T[],
+				rowCount: 1,
+			} as QueryResult<T>;
+		}
+
+		if (normalized.includes('JOIN pg_enum')) {
+			return {
+				rows: [
+					{
+						name: 'status',
+						schema: 'tenant_1',
+						values: ['queued', 'done'],
+					},
+				] as T[],
+				rowCount: 1,
+			} as QueryResult<T>;
+		}
+
+		if (normalized.includes('format_type(a.atttypid')) {
+			return {
+				rows: [
+					{
+						table_name: 'jobs',
+						column_name: 'state',
+						db_type: 'status',
+						type_schema: 'tenant_1',
 					},
 				] as T[],
 				rowCount: 1,
@@ -340,8 +439,53 @@ describe('comparePgsqlDatabaseSchema', () => {
 		]);
 		expect(diff.summary.constraints.altered).toBe(1);
 		expect(statements).toEqual([
-			'ALTER TABLE "posts" VALIDATE CONSTRAINT "fk_posts_author_id";',
+			'ALTER TABLE "posts" VALIDATE CONSTRAINT "posts_author_id_fkey";',
 		]);
+	});
+
+	it('refuses a CHECK on an existing enum column without desired originalDbType when the diff adds the enum value', async () => {
+		const desired = makeModelWithEnums(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						{
+							name: 'state',
+							type: 'string',
+							nullable: false,
+						},
+					],
+					primaryKey: 'id',
+					checkConstraints: [
+						{ name: 'jobs_state_check', expression: "state = 'pending'" },
+					],
+				}),
+			],
+			[
+				{
+					name: 'status',
+					schema: 'tenant_1',
+					values: ['queued', 'done', 'pending'],
+				},
+			],
+		);
+		const client = new FakeEnumValueLiveDiffClient();
+		const pool = new FakeLiveDiffPool(client);
+
+		await expect(
+			comparePgsqlDatabaseSchema(pool as unknown as Pool, desired, {
+				schema: 'tenant_1',
+				onWarning: vi.fn(),
+			}),
+		).rejects.toThrow(CheckConstraintNewEnumValueError);
+		expect(
+			client.queries.some(
+				(query) =>
+					query.startsWith('CREATE TEMP TABLE') &&
+					query.includes('"state" "tenant_1".status'),
+			),
+		).toBe(true);
 	});
 
 	it('throws repeated drift when CHECK canonicalization falls back under dbCasing', async () => {

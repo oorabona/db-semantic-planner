@@ -758,6 +758,7 @@ describe('introspect', () => {
 
 		const posts = result.tables.get('posts')!;
 		expect(posts.foreignKeys).toHaveLength(1);
+		expect(posts.foreignKeys[0]!.constraintName).toBe('fk_posts_author_id');
 		expect(posts.foreignKeys[0]!.notValid).toBe(true);
 	});
 
@@ -1327,6 +1328,8 @@ describe('introspect [P1-T2]: OnDeleteAction SET DEFAULT round-trip', () => {
 
 		expect(result.tables.get('posts')?.foreignKeys).toHaveLength(1);
 		expect(result.tables.get('comments')?.foreignKeys).toHaveLength(1);
+		expect(postsFk?.constraintName).toBe('owner_id_fkey');
+		expect(commentsFk?.constraintName).toBe('owner_id_fkey');
 		expect(postsFk?.columns).toEqual(['owner_id']);
 		expect(postsFk?.references).toEqual({
 			table: 'users',

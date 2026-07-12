@@ -842,7 +842,7 @@ function compareForeignKeys(
 					table: schema.name,
 					destructive: false,
 					details: `Validate FK constraint on (${fk.columns.join(', ')})`,
-					meta: { fk },
+					meta: { fk: dbFK },
 				});
 			} else if (!dbNotValid && schemaNotValid) {
 				changes.push({

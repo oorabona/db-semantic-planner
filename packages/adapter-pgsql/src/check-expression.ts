@@ -1,6 +1,7 @@
 import type { CheckConstraintIR } from '@dbsp/types';
 
-const NOT_VALID_SUFFIX = /\s+NOT\s+VALID\s*$/iu;
+const CHECK_NOT_VALID_SUFFIX =
+	/^(?<clause>\s*CHECK\s*\(.*\))\s+NOT\s+VALID\s*$/isu;
 
 function toCheckConstraintClause(expression: string): string {
 	const trimmed = stripNotValidSuffix(expression.trim()).trim();
@@ -41,9 +42,9 @@ export function isCheckConstraintNotValid(
 }
 
 export function stripNotValidSuffix(expression: string): string {
-	return expression.replace(NOT_VALID_SUFFIX, '');
+	return expression.replace(CHECK_NOT_VALID_SUFFIX, '$<clause>');
 }
 
 function hasNotValidSuffix(expression: string): boolean {
-	return NOT_VALID_SUFFIX.test(expression);
+	return CHECK_NOT_VALID_SUFFIX.test(expression);
 }
