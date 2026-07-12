@@ -4,11 +4,24 @@
  * Tests for generateSchemaFile() which generates TypeScript schema from ModelIR.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import {
+	compareSchemata,
+	generateCreateIndex,
+	generateDDL,
+	generateMigrationSQL,
+	identityNaming,
+} from '@dbsp/adapter-pgsql';
 import type { ModelIR, TableIR } from '@dbsp/core';
 import { ref, schema } from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
+import type { IndexIR } from '@dbsp/types';
+import * as ts from 'typescript';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { loadSchema } from '../utils/schema-loader.js';
 import {
 	generateSchemaFile,
+	generateSchemaFileWithDiagnostics,
 	type SchemaCodegenOptions,
 } from './schema-codegen.js';
 
@@ -22,8 +35,50 @@ function makeCodegenModel(tables: readonly TableIR[]): ModelIR {
 	} as unknown as ModelIR;
 }
 
+function expectValidTypeScript(source: string): void {
+	const result = ts.transpileModule(source, {
+		compilerOptions: {
+			module: ts.ModuleKind.ESNext,
+			target: ts.ScriptTarget.ES2022,
+		},
+		reportDiagnostics: true,
+	});
+	const errors =
+		result.diagnostics?.filter(
+			(diagnostic) => diagnostic.category === ts.DiagnosticCategory.Error,
+		) ?? [];
+	expect(errors.map((diagnostic) => diagnostic.messageText)).toEqual([]);
+}
+
+async function loadGeneratedSchemaCode(source: string) {
+	const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-schema-codegen-'));
+	try {
+		const schemaPath = join(tmpDir, 'dbsp.schema.ts');
+		writeFileSync(schemaPath, source, 'utf8');
+		return await loadSchema(schemaPath);
+	} finally {
+		rmSync(tmpDir, { recursive: true, force: true });
+	}
+}
+
+afterEach(() => {
+	vi.restoreAllMocks();
+});
+
 describe('generateSchemaFile', () => {
 	describe('basic structure', () => {
+		it('returns a string', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFile(model);
+
+			expect(typeof result).toBe('string');
+		});
+
 		it('generates valid schema file with imports (no FKs)', () => {
 			// ARCH-005: When no FKs, only schema is imported
 			const model = schema({
@@ -369,25 +424,22 @@ describe('generateSchemaFile', () => {
 			expect(result).toContain('Generated: 2026-01-18T12:00:00.000Z');
 		});
 
-		it('includes warnings in header', () => {
+		it('returns a string and writes no diagnostics without onWarning', () => {
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 			const model = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
 				},
 			}).model;
 
-			const options: SchemaCodegenOptions = {
-				warnings: [
-					'Type mapping lossy: jsonb → json',
-					'Unknown type: custom_enum',
-				],
-			};
+			const result = generateSchemaFile(model);
 
-			const result = generateSchemaFile(model, options);
-
-			expect(result).toContain('Warnings:');
-			expect(result).toContain('Type mapping lossy: jsonb → json');
-			expect(result).toContain('Unknown type: custom_enum');
+			expect(typeof result).toBe('string');
+			expect(error).not.toHaveBeenCalled();
+			expect(log).not.toHaveBeenCalled();
+			expect(result).not.toContain('Warnings:');
+			expectValidTypeScript(result);
 		});
 
 		it('includes DB type comments when enabled', () => {
@@ -420,6 +472,29 @@ describe('generateSchemaFile', () => {
 
 			expect(result).toContain('/* from: uuid */');
 			expect(result).toContain('/* from: jsonb */');
+		});
+
+		it('neutralizes catalog-derived DB type comments', () => {
+			const model = schema({
+				users: {
+					payload: { type: 'json', nullable: true },
+				},
+			}).model;
+
+			const usersTable = model.tables.get('users');
+			const payloadCol = usersTable?.columns.find((c) => c.name === 'payload');
+			if (payloadCol) {
+				(payloadCol as { originalDbType?: string }).originalDbType =
+					"jsonb */\nthrow new Error('injected');\n/*";
+			}
+
+			const result = generateSchemaFile(model, {
+				includeDbTypeComments: true,
+			});
+
+			expect(result).toContain('jsonb * /\\nthrow');
+			expect(result).not.toContain('jsonb */');
+			expectValidTypeScript(result);
 		});
 
 		it('omits DB type comments when disabled', () => {
@@ -650,6 +725,677 @@ describe('generateSchemaFile', () => {
 		});
 	});
 
+	describe('table-level indexes', () => {
+		it('emits every expressible index option and converts column-like names', () => {
+			const index: IndexIR = {
+				name: 'uq_user_profiles_email_covering',
+				columns: ['email_address'],
+				unique: true,
+				method: 'btree',
+				where: 'email_address IS NOT NULL',
+				opclass: { email_address: 'text_pattern_ops' },
+				with: { fillfactor: '70' },
+				include: ['display_name'],
+				nullsNotDistinct: true,
+			};
+			const model = makeCodegenModel([
+				{
+					name: 'user_profiles',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'email_address', type: 'string', nullable: false },
+						{ name: 'display_name', type: 'string', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [index],
+				},
+			]);
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain('indexes: [');
+			expect(result).toContain("columns: ['emailAddress']");
+			expect(result).toContain('unique: true');
+			expect(result).toContain("name: 'uq_user_profiles_email_covering'");
+			expect(result).toContain("method: 'btree'");
+			expect(result).toContain("where: 'email_address IS NOT NULL'");
+			expect(result).toContain(
+				"opclass: { ['emailAddress']: 'text_pattern_ops' }",
+			);
+			expect(result).toContain("with: { ['fillfactor']: '70' }");
+			expect(result).toContain("include: ['displayName']");
+			expect(result).toContain('nullsNotDistinct: true');
+		});
+
+		it('omits indexes rejected by the DDL emitter and leaves them unmanaged', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'email', type: 'string', nullable: false },
+						{ name: 'body', type: 'string', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx-users-email',
+							columns: ['email'],
+						},
+						{
+							name: 'idx_users_body_rum',
+							columns: ['body'],
+							method: 'rum',
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx-users-email');
+			expect(result.code).not.toContain('idx_users_body_rum');
+			expect(result.warnings).toHaveLength(2);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining('Index "idx-users-email" on table "users"'),
+			);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining('Invalid alias identifier'),
+			);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining('Index "idx_users_body_rum" on table "users"'),
+			);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining('Invalid index method: "rum"'),
+			);
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			expect(() => generateDDL(loaded.model)).not.toThrow();
+			const diff = compareSchemata(loaded.model, model);
+			expect(diff.changes).toEqual([]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+		});
+
+		it('deliberately emits FK-column indexes with database auto-index names', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'posts',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'author_id', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['author_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [
+						{
+							name: 'idx_posts_author_id',
+							columns: ['author_id'],
+							unique: false,
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain("authorId: ref('users')");
+			expect(result).toContain('indexes: [');
+			expect(result).toContain("columns: ['authorId']");
+			expect(result).toContain("name: 'idx_posts_author_id'");
+		});
+
+		it('emits FK indexes whose name does not match the database-form auto-index name', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'posts',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'author_id', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['author_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [
+						{
+							name: 'idx_posts_authorId',
+							columns: ['author_id'],
+							unique: false,
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain("authorId: ref('users')");
+			expect(result).toContain('indexes: [');
+			expect(result).toContain("columns: ['authorId']");
+			expect(result).toContain("name: 'idx_posts_authorId'");
+		});
+
+		it('emits user-named plain indexes on FK columns', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+				{
+					name: 'posts',
+					columns: [
+						{ name: 'id', type: 'uuid', nullable: false },
+						{ name: 'author_id', type: 'uuid', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [
+						{
+							columns: ['author_id'],
+							references: { table: 'users', columns: ['id'] },
+						},
+					],
+					indexes: [
+						{
+							name: 'my_lookup_idx',
+							columns: ['author_id'],
+							unique: false,
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFile(model, { dbCasing: 'snake_case' });
+
+			expect(result).toContain("authorId: ref('users')");
+			expect(result).toContain('indexes: [');
+			expect(result).toContain("columns: ['authorId']");
+			expect(result).toContain("name: 'my_lookup_idx'");
+		});
+
+		it('calls onWarning and does not emit expression indexes', () => {
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+			const warnings: string[] = [];
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'email', type: 'string', nullable: false }],
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_users_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFile(model, {
+				onWarning: (message) => warnings.push(message),
+			});
+			const warningText = warnings.join('\n');
+
+			expect(error).not.toHaveBeenCalled();
+			expect(log).not.toHaveBeenCalled();
+			expect(warningText).toContain(
+				'Expression index "idx_users_lower_email" on table "users" cannot be represented in the schema and is not managed by dbsp.',
+			);
+			expect(warningText).toContain(
+				'dbsp will neither drop nor recreate it; maintain it by hand.',
+			);
+			expect(result).not.toContain('Warnings:');
+			expect(result).not.toContain('idx_users_lower_email');
+			expect(result).not.toContain('indexes: [');
+		});
+
+		it('throws expression-index warnings without onWarning', () => {
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'email', type: 'string', nullable: false }],
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_users_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+					],
+				},
+			]);
+
+			expect(() => generateSchemaFile(model)).toThrowError(
+				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*idx_users_lower_email.*generateSchemaFileWithDiagnostics\(\).*onWarning/s,
+			);
+
+			expect(error).not.toHaveBeenCalled();
+			expect(log).not.toHaveBeenCalled();
+		});
+
+		it('throws emitter-rejected index warnings without onWarning', () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'email', type: 'string', nullable: false }],
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx-users-email',
+							columns: ['email'],
+						},
+					],
+				},
+			]);
+
+			expect(() => generateSchemaFile(model)).toThrowError(
+				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*idx-users-email.*generateSchemaFileWithDiagnostics\(\).*onWarning/s,
+			);
+		});
+
+		it('throws legacy caller-supplied warnings without onWarning', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+			const callerWarning = 'caller warning: missing production-only index';
+
+			expect(() =>
+				generateSchemaFile(model, {
+					warnings: [callerWarning],
+				}),
+			).toThrowError(
+				/generateSchemaFile\(\) produced 1 diagnostic\(s\).*caller warning: missing production-only index/s,
+			);
+		});
+
+		it('reports legacy caller-supplied warnings through onWarning', () => {
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+			const callerWarning = 'caller warning: missing production-only index';
+			const streamed: string[] = [];
+
+			const result = generateSchemaFile(model, {
+				warnings: [callerWarning],
+				onWarning: (message) => streamed.push(message),
+			});
+
+			expect(typeof result).toBe('string');
+			expect(streamed).toEqual([callerWarning]);
+			expect(result).not.toContain(callerWarning);
+			expectValidTypeScript(result);
+		});
+
+		it('keeps malicious expression-index warning text out of generated source', () => {
+			const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+			const warnings: string[] = [];
+			const injected =
+				"*/\nthrow new Error('generated source injection');\n/*`${";
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [{ name: 'email', type: 'string', nullable: false }],
+					foreignKeys: [],
+					indexes: [
+						{
+							name: `idx_users_email_${injected}`,
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFile(model, {
+				onWarning: (message) => warnings.push(message),
+			});
+			const warningText = warnings.join('\n');
+
+			expect(error).not.toHaveBeenCalled();
+			expect(warningText).toContain('generated source injection');
+			expect(result).not.toContain('generated source injection');
+			expect(result).not.toContain('Warnings:');
+			expectValidTypeScript(result);
+		});
+
+		it('returns code plus pass-through and discovered diagnostics', () => {
+			const callerWarning =
+				"no primary key */\nthrow new Error('source injection');\n${";
+			const streamed: string[] = [];
+			const model = makeCodegenModel([
+				{
+					name: 'notes',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'note', type: 'string', nullable: false },
+						{ name: 'email', type: 'string', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_notes_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+						{
+							name: 'idx_notes_note_literal',
+							columns: ['note'],
+							where: "note = 'a;b'",
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model, {
+				warnings: [callerWarning],
+				onWarning: (message) => streamed.push(message),
+			});
+
+			expect(typeof result.code).toBe('string');
+			expect(result.warnings).toHaveLength(3);
+			expect(result.warnings[0]).toBe(callerWarning);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining(
+					'Expression index "idx_notes_lower_email" on table "notes" cannot be represented in the schema and is not managed by dbsp.',
+				),
+			);
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining(
+					'Index "idx_notes_note_literal" on table "notes" cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it',
+				),
+			);
+			expect(streamed).toEqual(result.warnings);
+			expect(result.code).not.toContain('source injection');
+			expect(result.code).not.toContain('no primary key */');
+			expect(result.code).not.toContain('${');
+			expect(result.code).not.toContain('idx_notes_lower_email');
+			expect(result.code).not.toContain('idx_notes_note_literal');
+			expectValidTypeScript(result.code);
+		});
+
+		it('keeps caller-supplied warnings out of generated source', () => {
+			const callerWarning =
+				"*/\nthrow new Error('caller warning injection');\n${";
+			const model = schema({
+				users: {
+					id: { type: 'uuid', primaryKey: true },
+				},
+			}).model;
+
+			const result = generateSchemaFileWithDiagnostics(model, {
+				warnings: [callerWarning],
+			});
+
+			expect(result.warnings).toEqual([callerWarning]);
+			expect(result.code).not.toContain('caller warning injection');
+			expect(result.code).not.toContain('*/\nthrow');
+			expect(result.code).not.toContain('${');
+			expectValidTypeScript(result.code);
+		});
+
+		it('omits partial indexes whose predicates the DDL validator rejects and leaves them unmanaged', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'notes',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'note', type: 'string', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_notes_note_literal',
+							columns: ['note'],
+							unique: false,
+							where: "note = 'a;b'",
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx_notes_note_literal');
+			expect(result.code).not.toContain("where: 'note = \\'a;b\\''");
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining(
+					'Index "idx_notes_note_literal" on table "notes" cannot be represented in the schema and is not managed by dbsp because the DDL emitter rejected it',
+				),
+			);
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			expect(() => generateDDL(loaded.model)).not.toThrow();
+			const diff = compareSchemata(loaded.model, model);
+			expect(diff.changes).toEqual([]);
+		});
+
+		it('omits non-unique NULLS NOT DISTINCT indexes rejected by schema() and leaves them unmanaged', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'users',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'email', type: 'string', nullable: true },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_users_email_nulls_not_distinct',
+							columns: ['email'],
+							unique: false,
+							nullsNotDistinct: true,
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx_users_email_nulls_not_distinct');
+			expect(result.code).not.toContain('nullsNotDistinct: true');
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining(
+					'Index "idx_users_email_nulls_not_distinct" on table "users" cannot be represented in the schema and is not managed by dbsp because schema() rejected it',
+				),
+			);
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			expect(() => generateDDL(loaded.model)).not.toThrow();
+			const diff = compareSchemata(loaded.model, model);
+			expect(diff.changes).toEqual([]);
+		});
+
+		it('emits ordinary partial indexes and the loaded schema has no drift', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'notes',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'deleted_at', type: 'datetime', nullable: true },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_notes_active',
+							columns: ['deleted_at'],
+							unique: false,
+							where: 'deleted_at IS NULL',
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.warnings).toEqual([]);
+			expect(result.code).toContain("name: 'idx_notes_active'");
+			expect(result.code).toContain("where: 'deleted_at IS NULL'");
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			expect(() => generateDDL(loaded.model)).not.toThrow();
+			expect(compareSchemata(loaded.model, model).changes).toEqual([]);
+		});
+
+		it('round-trip invariant: generated schema loads through schema() and re-emits through generateDDL', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'notes',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'note', type: 'string', nullable: false },
+						{ name: 'email', type: 'string', nullable: false },
+						{ name: 'deleted_at', type: 'datetime', nullable: true },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_notes_lower_email',
+							columns: [],
+							expressions: ['lower(email)'],
+						},
+						{
+							name: 'idx_notes_note_literal',
+							columns: ['note'],
+							where: "note = 'a;b'",
+						},
+						{
+							name: 'idx_notes_active',
+							columns: ['deleted_at'],
+							where: 'deleted_at IS NULL',
+						},
+						{
+							name: 'idx_notes_email_pattern',
+							columns: ['email'],
+							opclass: { email: 'text_pattern_ops' },
+						},
+						{
+							name: 'idx_notes_email_covering',
+							columns: ['email'],
+							include: ['note'],
+							with: { fillfactor: '70' },
+						},
+						{
+							name: 'idx-notes-email',
+							columns: ['email'],
+						},
+						{
+							name: 'idx_notes_email_rum',
+							columns: ['email'],
+							method: 'rum',
+						},
+						{
+							name: 'idx_notes_email_nonunique_nulls',
+							columns: ['email'],
+							unique: false,
+							nullsNotDistinct: true,
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.code).not.toContain('idx_notes_lower_email');
+			expect(result.code).not.toContain('idx_notes_note_literal');
+			expect(result.code).not.toContain('idx-notes-email');
+			expect(result.code).not.toContain('idx_notes_email_rum');
+			expect(result.code).not.toContain('idx_notes_email_nonunique_nulls');
+			expect(result.code).toContain('idx_notes_active');
+			expect(result.warnings).toContainEqual(
+				expect.stringContaining(
+					'Index "idx_notes_email_nonunique_nulls" on table "notes" cannot be represented in the schema and is not managed by dbsp because schema() rejected it',
+				),
+			);
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			for (const table of loaded.model.tables.values()) {
+				for (const idx of table.indexes) {
+					expect(() =>
+						generateCreateIndex(table.name, idx, undefined, identityNaming),
+					).not.toThrow();
+				}
+			}
+			expect(() => generateDDL(loaded.model)).not.toThrow();
+			expect(compareSchemata(loaded.model, model).changes).toEqual([]);
+		});
+
+		it('emits opclass and with __proto__ keys as own computed properties', async () => {
+			const model = makeCodegenModel([
+				{
+					name: 'notes',
+					columns: [
+						{ name: 'id', type: 'integer', nullable: false },
+						{ name: 'email', type: 'string', nullable: false },
+					],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [
+						{
+							name: 'idx_notes_email_proto',
+							columns: ['email'],
+							opclass: { ['__proto__']: 'text_pattern_ops' },
+							with: { ['__proto__']: '70' },
+						},
+					],
+				},
+			]);
+
+			const result = generateSchemaFileWithDiagnostics(model);
+
+			expect(result.warnings).toEqual([]);
+			expect(result.code).toContain(
+				"opclass: { ['__proto__']: 'text_pattern_ops' }",
+			);
+			expect(result.code).toContain("with: { ['__proto__']: '70' }");
+
+			const loaded = await loadGeneratedSchemaCode(result.code);
+			const idx = loaded.model.getTable('notes')?.indexes[0];
+			expect(Object.hasOwn(idx?.opclass ?? {}, '__proto__')).toBe(true);
+			expect(Object.hasOwn(idx?.with ?? {}, '__proto__')).toBe(true);
+			expect(idx?.opclass?.['__proto__']).toBe('text_pattern_ops');
+			expect(idx?.with?.['__proto__']).toBe('70');
+		});
+	});
+
 	describe('E2E: introspected ModelIR → codegen → valid schema code', () => {
 		it('generates complete schema from a realistic introspection result', () => {
 			// Simulate what introspect() returns: snake_case tables with FKs,
@@ -688,7 +1434,6 @@ describe('generateSchemaFile', () => {
 				sourceUrl: 'postgresql://admin:s3cret@db.example.com/myapp',
 				includeDbTypeComments: true,
 				introspectedAt: new Date('2026-01-31T10:00:00Z'),
-				warnings: ['Type mapping lossy: jsonb → json'],
 				dbCasing: 'snake_case',
 			};
 
@@ -701,7 +1446,7 @@ describe('generateSchemaFile', () => {
 			);
 			expect(result).not.toContain('s3cret');
 			expect(result).toContain('Generated: 2026-01-31T10:00:00.000Z');
-			expect(result).toContain('Type mapping lossy');
+			expect(result).not.toContain('Type mapping lossy');
 
 			// --- Imports ---
 			expect(result).toContain("import { schema, ref } from '@dbsp/core';");

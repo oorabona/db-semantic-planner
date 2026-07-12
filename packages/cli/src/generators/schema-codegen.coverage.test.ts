@@ -6,7 +6,7 @@
  * Focus: unique columns, composite primary keys, multi-column FKs,
  * non-'id' FK reference columns, onDelete actions, originalDbType on short-form + ref columns,
  * FK with both nullable and unique, self-ref with non-'parent' base name,
- * empty model, empty warnings array, camelCase dbCasing option.
+ * empty model, absent warnings section, camelCase dbCasing option.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -494,15 +494,15 @@ describe('generateSchemaFile — coverage', () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// Empty warnings array
+	// No warnings section
 	// -----------------------------------------------------------------------
-	describe('empty warnings array', () => {
-		it('does not output warnings section when array is empty', () => {
+	describe('warnings', () => {
+		it('does not output a warnings section', () => {
 			const model = schema({
 				users: { id: { type: 'uuid', primaryKey: true } },
 			}).model;
 
-			const result = generateSchemaFile(model, { warnings: [] });
+			const result = generateSchemaFile(model);
 
 			expect(result).not.toContain('Warnings');
 		});

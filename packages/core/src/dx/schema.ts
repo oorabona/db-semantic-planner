@@ -174,16 +174,36 @@ export interface SchemaIndexOptions {
 	columns: string[];
 	/** Whether this is a unique index */
 	unique?: boolean;
+	/**
+	 * PG15+ — for a UNIQUE index, treat NULLs as not distinct
+	 * (`NULLS NOT DISTINCT`); true is rejected for non-unique indexes. Emitted
+	 * as declared; coherent server-version capability gating for all index
+	 * features is tracked together in #245.
+	 */
+	nullsNotDistinct?: boolean;
 	/** Custom index name (auto-generated if not provided) */
 	name?: string;
 	/** Index access method (default: btree). E.g. 'gin', 'gist', 'hnsw', 'bm25' */
 	method?: string;
 	/** Partial index predicate (WHERE clause) */
 	where?: string;
+	/**
+	 * Non-key columns to include (INCLUDE clause, PG11+).
+	 * Emitted as declared; coherent server-version capability gating for all
+	 * index features is tracked together in #245.
+	 */
+	include?: string[];
 	/** Per-column operator class overrides. Key = column name, value = opclass name */
 	opclass?: Record<string, string>;
 	/** Index storage parameters (WITH clause). Key = param name, value = param value */
 	with?: Record<string, string>;
+}
+
+export interface SchemaIndexValidationInput {
+	readonly columns: readonly string[];
+	readonly unique?: boolean;
+	readonly nullsNotDistinct?: boolean;
+	readonly name?: string;
 }
 
 export interface SchemaTableOptions {
@@ -653,6 +673,17 @@ export class SchemaValidationError extends Error {
 	) {
 		super(message);
 		this.name = 'SchemaValidationError';
+	}
+}
+
+export function validateSchemaIndexOptions(
+	tableName: string,
+	idx: SchemaIndexValidationInput,
+): void {
+	if (idx.nullsNotDistinct === true && idx.unique !== true) {
+		throw new SchemaValidationError(
+			`Index "${idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`}" on "${tableName}" cannot use nullsNotDistinct unless unique is true`,
+		);
 	}
 }
 
@@ -1399,13 +1430,18 @@ function buildTableConstraints(
 
 	if (tableConstraints.indexes) {
 		for (const idx of tableConstraints.indexes) {
+			validateSchemaIndexOptions(tableName, idx);
 			const indexIR: Mutable<IndexIR> = {
 				name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
 				columns: idx.columns,
 				unique: idx.unique ?? false,
 			};
+			if (idx.nullsNotDistinct !== undefined) {
+				indexIR.nullsNotDistinct = idx.nullsNotDistinct;
+			}
 			if (idx.method) indexIR.method = idx.method;
 			if (idx.where) indexIR.where = idx.where;
+			if (idx.include !== undefined) indexIR.include = idx.include;
 			if (idx.opclass) indexIR.opclass = idx.opclass;
 			if (idx.with) indexIR.with = idx.with;
 			extraIndexes.push(indexIR as IndexIR);

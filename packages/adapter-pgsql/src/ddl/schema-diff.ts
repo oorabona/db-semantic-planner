@@ -7,6 +7,7 @@
  * @module schema-diff
  */
 
+import { validateSchemaIndexOptions } from '@dbsp/core';
 import type {
 	ColumnIR,
 	DbCasing,
@@ -31,6 +32,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from '../naming-plugin.js';
+import { canGenerateCreateIndex } from './ddl-generator.js';
 
 // ============================================================================
 // Types
@@ -353,7 +355,19 @@ function normalizeTable(table: TableIR, plugin: NamingPlugin): TableIR {
 		})),
 		indexes: table.indexes.map((idx) => ({
 			...idx,
+			...(idx.name !== undefined ? { name: toDb(idx.name) } : {}),
 			columns: idx.columns.map(toDb),
+			...(idx.include !== undefined ? { include: idx.include.map(toDb) } : {}),
+			...(idx.opclass !== undefined
+				? {
+						opclass: Object.fromEntries(
+							Object.entries(idx.opclass).map(([key, value]) => [
+								toDb(key),
+								value,
+							]),
+						),
+					}
+				: {}),
 		})),
 		...(table.partition
 			? {
@@ -768,6 +782,16 @@ function compareIndexes(
 			idx.columns.length === 1 ? idx.columns : [],
 		),
 	);
+	// These declared indexes still stay in schemaIdxMap below. This set only keeps an
+	// existing FK auto-index from being dropped before the requested index reaches
+	// the emitter and fails loudly.
+	const declaredUnemittableFkIndexCols = new Set(
+		schema.indexes.flatMap((idx) =>
+			idx.columns.length === 1 && !isManagedIndex(schema.name, idx)
+				? idx.columns
+				: [],
+		),
+	);
 	const autoFkIndexKeys = new Set(
 		schema.foreignKeys
 			.filter(
@@ -783,22 +807,43 @@ function compareIndexes(
 				}),
 			),
 	);
+	const declaredUnemittableFkAutoIndexKeys = new Set(
+		schema.foreignKeys
+			.filter((fk) => {
+				const fkCol = fk.columns[0];
+				return (
+					fk.columns.length === 1 &&
+					fkCol !== undefined &&
+					declaredUnemittableFkIndexCols.has(fkCol)
+				);
+			})
+			.map((fk) =>
+				indexKey({
+					columns: fk.columns,
+					unique: false,
+				}),
+			),
+	);
 
 	// Index identity: structural definition (name is cosmetic)
 	const schemaIdxMap = new Map(
 		schema.indexes.map((idx) => [indexKey(idx), idx]),
 	);
-	const dbIdxMap = new Map(db.indexes.map((idx) => [indexKey(idx), idx]));
+	const dbIdxMap = new Map(
+		db.indexes
+			.filter((idx) => isManagedIndex(schema.name, idx))
+			.map((idx) => [indexKey(idx), idx]),
+	);
+	const pendingCreates: PendingIndexCreate[] = [];
 
 	// Explicit indexes in schema but not in DB → create
 	for (const [key, idx] of schemaIdxMap) {
 		if (!dbIdxMap.has(key)) {
-			changes.push({
-				kind: 'create_index',
-				table: schema.name,
-				destructive: false,
+			pendingCreates.push({
+				index: idx,
+				replacementKey: indexReplacementKey(schema.name, idx),
 				details: `Create ${idx.unique ? 'unique ' : ''}index on (${idx.columns.join(', ')})`,
-				meta: { index: idx },
+				destructive: false,
 			});
 		}
 	}
@@ -821,21 +866,108 @@ function compareIndexes(
 	);
 
 	// Indexes in DB but not in schema → drop (skip auto-FK and auto-unique indexes — they are auto-managed)
+	const pendingDrops: PendingIndexDrop[] = [];
 	for (const [key, idx] of dbIdxMap) {
 		if (
 			!schemaIdxMap.has(key) &&
 			!autoFkIndexKeys.has(key) &&
+			!declaredUnemittableFkAutoIndexKeys.has(key) &&
 			!isAutoUniqueIndex(schema.name, idx, autoUniqueIndexColumns)
 		) {
-			changes.push({
-				kind: 'drop_index',
-				table: schema.name,
-				destructive: false,
-				details: `Drop index ${idx.name ?? `on (${idx.columns.join(', ')})`}`,
-				meta: { index: idx },
+			pendingDrops.push({
+				index: idx,
+				replacementKey: indexReplacementKey(schema.name, idx),
+				destructive: idx.unique === true,
+				details: `Drop index ${idx.name ?? `on (${formatIndexTargets(idx)})`}`,
 			});
 		}
 	}
+
+	// Same-name replacements must be all-or-nothing: with destructive changes
+	// skipped, CREATE INDEX IF NOT EXISTS would no-op against the still-existing
+	// old index name and report success without changing the database.
+	markDestructiveReplacementCreates(pendingCreates, pendingDrops);
+
+	for (const create of pendingCreates) {
+		changes.push({
+			kind: 'create_index',
+			table: schema.name,
+			destructive: create.destructive,
+			details: create.details,
+			meta: { index: create.index },
+		});
+	}
+	for (const drop of pendingDrops) {
+		changes.push({
+			kind: 'drop_index',
+			table: schema.name,
+			destructive: drop.destructive,
+			details: drop.details,
+			meta: { index: drop.index },
+		});
+	}
+}
+
+interface PendingIndexCreate {
+	readonly index: IndexIR;
+	readonly replacementKey: string;
+	readonly details: string;
+	destructive: boolean;
+}
+
+interface PendingIndexDrop {
+	readonly index: IndexIR;
+	readonly replacementKey: string;
+	readonly destructive: boolean;
+	readonly details: string;
+}
+
+function markDestructiveReplacementCreates(
+	creates: PendingIndexCreate[],
+	drops: readonly PendingIndexDrop[],
+): void {
+	const createsByReplacementKey = new Map<string, PendingIndexCreate[]>();
+	for (const create of creates) {
+		const group = createsByReplacementKey.get(create.replacementKey);
+		if (group === undefined) {
+			createsByReplacementKey.set(create.replacementKey, [create]);
+		} else {
+			group.push(create);
+		}
+	}
+
+	for (const drop of drops) {
+		if (!drop.destructive) continue;
+		const candidates = createsByReplacementKey.get(drop.replacementKey);
+		const replacementCreate = candidates?.find((create) => !create.destructive);
+		if (replacementCreate !== undefined) {
+			replacementCreate.destructive = true;
+		}
+	}
+}
+
+function isManagedIndex(tableName: string, idx: IndexIR): boolean {
+	return (
+		(idx.expressions === undefined || idx.expressions.length === 0) &&
+		canGenerateCreateIndex(tableName, idx) &&
+		canValidateSchemaIndex(tableName, idx)
+	);
+}
+
+function canValidateSchemaIndex(tableName: string, idx: IndexIR): boolean {
+	try {
+		validateSchemaIndexOptions(tableName, idx);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+export function getAutoFkIndexName(
+	tableName: string,
+	columnName: string,
+): string {
+	return `idx_${tableName}_${columnName}`;
 }
 
 function isAutoUniqueIndex(
@@ -869,6 +1001,7 @@ function indexKey(idx: IndexIR): string {
 		idx.method ?? 'btree',
 		idx.where ?? '',
 		(idx.expressions ?? []).join(','),
+		(idx.include ?? []).join(','),
 		idx.opclass
 			? Object.entries(idx.opclass)
 					.sort()
@@ -883,6 +1016,14 @@ function indexKey(idx: IndexIR): string {
 			: '',
 	];
 	return parts.join(':');
+}
+
+function indexReplacementKey(tableName: string, idx: IndexIR): string {
+	return idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`;
+}
+
+function formatIndexTargets(idx: IndexIR): string {
+	return [...(idx.expressions ?? []), ...idx.columns].join(', ');
 }
 
 // ============================================================================

@@ -624,6 +624,100 @@ describe('DDL Generator', () => {
 			expect(autoIndex).toContain('ON "posts" ("user_id")');
 		});
 
+		it('should emit main-compatible DDL when an FK column has a partial index', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						} satisfies TableIR,
+					],
+					[
+						'orders',
+						{
+							name: 'orders',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'user_id', type: 'integer', nullable: false },
+								{ name: 'deleted_at', type: 'timestamp', nullable: true },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['user_id'],
+									references: { table: 'users', columns: ['id'] },
+								} satisfies ForeignKeyIR,
+							],
+							indexes: [
+								{
+									name: 'idx_orders_user_id_active',
+									columns: ['user_id'],
+									where: 'deleted_at IS NULL',
+								} satisfies IndexIR,
+							],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			const ddl = generateDDL(schema, { fkAutoIndex: true });
+
+			expect(ddl).toEqual([
+				'CREATE TABLE "users" (\n  "id" INTEGER NOT NULL,\n  CONSTRAINT "pk_users" PRIMARY KEY ("id")\n);',
+				'CREATE TABLE "orders" (\n  "id" INTEGER NOT NULL,\n  "user_id" INTEGER NOT NULL,\n  "deleted_at" TIMESTAMPTZ,\n  CONSTRAINT "pk_orders" PRIMARY KEY ("id")\n);',
+				'ALTER TABLE "orders" ADD CONSTRAINT "fk_orders_user_id" FOREIGN KEY ("user_id") REFERENCES "users" ("id");',
+				'CREATE INDEX "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
+			]);
+		});
+
+		it('should name snake_case FK auto-indexes with database identifiers', () => {
+			const schema = {
+				tables: new Map([
+					[
+						'users',
+						{
+							name: 'users',
+							columns: [{ name: 'id', type: 'integer', nullable: false }],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+						} satisfies TableIR,
+					],
+					[
+						'posts',
+						{
+							name: 'posts',
+							columns: [
+								{ name: 'id', type: 'integer', nullable: false },
+								{ name: 'authorId', type: 'integer', nullable: false },
+							],
+							primaryKey: 'id',
+							foreignKeys: [
+								{
+									columns: ['authorId'],
+									references: { table: 'users', columns: ['id'] },
+								} satisfies ForeignKeyIR,
+							],
+							indexes: [],
+						} satisfies TableIR,
+					],
+				]),
+				relations: new Map(),
+			} as unknown as ModelIR;
+
+			const ddl = generateDDL(schema, { naming: camelCaseNaming });
+
+			expect(ddl).toContain(
+				'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+			);
+		});
+
 		it('should skip auto-index if fkAutoIndex is false', () => {
 			const schema = {
 				tables: new Map([

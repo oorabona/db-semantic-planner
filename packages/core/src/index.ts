@@ -215,12 +215,14 @@ export {
 	type SchemaColumnType as NewSchemaColumnType,
 	type SchemaConstraints,
 	type SchemaDefinition,
+	type SchemaIndexValidationInput,
 	type SchemaTableOptions,
 	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
 	schema,
 	schemaToModelIR,
 	type TableDef,
+	validateSchemaIndexOptions,
 } from './dx/schema.js';
 
 // Legacy Schema DSL (prefer schema() + ref() from ARCH-005)

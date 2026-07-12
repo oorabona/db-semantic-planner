@@ -1721,6 +1721,65 @@ describe('schema.tables runtime metadata (DX-040)', () => {
 			expect(compositeIdx!.columns).toEqual(['email', 'tenantId']);
 			expect(compositeIdx!.unique).toBe(true);
 		});
+
+		it('should preserve include columns and NULLS NOT DISTINCT in table-level indexes', () => {
+			const s = schema(
+				{
+					users: {
+						id: { type: 'uuid', primaryKey: true },
+						email: 'string',
+						displayName: 'string',
+					},
+				},
+				{
+					users: {
+						indexes: [
+							{
+								columns: ['email'],
+								unique: true,
+								name: 'uq_users_email_covering',
+								include: ['displayName'],
+								nullsNotDistinct: true,
+							},
+						],
+					},
+				},
+			);
+
+			const table = s.model.tables.get('users');
+			const idx = table!.indexes.find(
+				(i) => i.name === 'uq_users_email_covering',
+			);
+			expect(idx).toMatchObject({
+				columns: ['email'],
+				unique: true,
+				include: ['displayName'],
+				nullsNotDistinct: true,
+			});
+		});
+
+		it('should reject NULLS NOT DISTINCT on non-unique indexes', () => {
+			expect(() =>
+				schema(
+					{
+						users: {
+							id: { type: 'uuid', primaryKey: true },
+							email: 'string',
+						},
+					},
+					{
+						users: {
+							indexes: [
+								{
+									columns: ['email'],
+									nullsNotDistinct: true,
+								},
+							],
+						},
+					},
+				),
+			).toThrow(SchemaValidationError);
+		});
 	});
 
 	describe('dbType escape hatch', () => {

@@ -13,6 +13,7 @@
 
 import type { IndexIR } from '@dbsp/types';
 import { generateCreateIndex } from '../ddl-generator.js';
+import { getAutoFkIndexName } from '../schema-diff.js';
 import type { PhaseContext } from './types.js';
 
 /**
@@ -47,8 +48,13 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 					fkCol &&
 					!explicitIndexColumns.has(fkCol)
 				) {
+					const dbTableName = naming.toDatabase(table.name);
+					const dbFkCol = naming.toDatabase(fkCol);
 					const autoIdx: IndexIR = {
-						name: `idx_${table.name}_${fkCol}`,
+						// Auto-index names are derived from emitted DB identifiers. Existing
+						// old-style names do not churn because compareIndexes tracks auto-FK
+						// identity structurally (columns + unique), not by index name.
+						name: getAutoFkIndexName(dbTableName, dbFkCol),
 						columns: [fkCol],
 						unique: false,
 					};

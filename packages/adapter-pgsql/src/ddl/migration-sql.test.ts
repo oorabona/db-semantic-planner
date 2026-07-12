@@ -21,6 +21,8 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { camelCaseNaming } from '../naming-plugin.js';
+import { generateDDL } from './ddl-generator.js';
 import {
 	generateDownMigrationSQL,
 	generateDownSQL,
@@ -69,6 +71,13 @@ function makeTable(
 		foreignKeys: [],
 		indexes: [],
 	};
+}
+
+function makeModel(tables: readonly TableIR[]): ModelIRImpl {
+	return new ModelIRImpl(
+		new Map(tables.map((table) => [table.name, table] as const)),
+		new Map(),
+	);
 }
 
 // ============================================================================
@@ -1063,6 +1072,183 @@ describe('generateMigrationSQL', () => {
 			expect(sql).toHaveLength(1);
 			expect(sql[0]).toContain('ADD COLUMN');
 			expect(sql.some((s) => s.includes('DROP'))).toBe(false);
+		});
+
+		it('leaves expression-index drops unmanaged and emits no SQL', () => {
+			const schemaTable = makeTable('users', [
+				makeCol({ name: 'email', type: 'string' }),
+			]);
+			const dbTable: TableIR = {
+				...schemaTable,
+				indexes: [
+					{
+						name: 'idx_users_lower_email',
+						columns: [],
+						expressions: ['lower(email)'],
+					},
+				],
+			};
+			const diff = compareSchemata(
+				new ModelIRImpl(new Map([['users', schemaTable]]), new Map()),
+				new ModelIRImpl(new Map([['users', dbTable]]), new Map()),
+			);
+
+			expect(diff.changes).toEqual([]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual(
+				[],
+			);
+			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
+			expect(generateDownSQL(diff, { includeDestructive: true })).toEqual([]);
+		});
+
+		it('filters both halves of a unique NULLS NOT DISTINCT index replacement with the same name', () => {
+			const schemaTable: TableIR = {
+				...makeTable('users', [makeCol({ name: 'email', type: 'string' })]),
+				indexes: [
+					{
+						name: 'idx_users_email',
+						columns: ['email'],
+						unique: true,
+						nullsNotDistinct: true,
+					},
+				],
+			};
+			const dbTable: TableIR = {
+				...makeTable('users', [makeCol({ name: 'email', type: 'string' })]),
+				indexes: [
+					{
+						name: 'idx_users_email',
+						columns: ['email'],
+						unique: true,
+					},
+				],
+			};
+
+			const diff = compareSchemata(
+				makeModel([schemaTable]),
+				makeModel([dbTable]),
+			);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'create_index',
+					destructive: true,
+				}),
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: true,
+				}),
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'DROP INDEX IF EXISTS "idx_users_email";',
+				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email" ON "users" ("email") NULLS NOT DISTINCT;',
+			]);
+		});
+
+		it('keeps a differently named safe index create when a destructive drop is skipped', () => {
+			const schemaTable: TableIR = {
+				...makeTable('users', [
+					makeCol({ name: 'email', type: 'string' }),
+					makeCol({ name: 'active', type: 'boolean' }),
+				]),
+				indexes: [
+					{
+						name: 'idx_users_email_active',
+						columns: ['email'],
+						unique: false,
+						where: 'active = true',
+					},
+				],
+			};
+			const dbTable: TableIR = {
+				...makeTable('users', [
+					makeCol({ name: 'email', type: 'string' }),
+					makeCol({ name: 'active', type: 'boolean' }),
+				]),
+				indexes: [
+					{
+						name: 'idx_users_email_unique',
+						columns: ['email'],
+						unique: true,
+					},
+				],
+			};
+
+			const diff = compareSchemata(
+				makeModel([schemaTable]),
+				makeModel([dbTable]),
+			);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'create_index',
+					destructive: false,
+				}),
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: true,
+				}),
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[
+					'CREATE INDEX IF NOT EXISTS "idx_users_email_active" ON "users" ("email") WHERE active = true;',
+				],
+			);
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'DROP INDEX IF EXISTS "idx_users_email_unique";',
+				'CREATE INDEX IF NOT EXISTS "idx_users_email_active" ON "users" ("email") WHERE active = true;',
+			]);
+		});
+
+		it('filters neither half of a non-unique index replacement when destructive changes are disabled', () => {
+			const schemaTable: TableIR = {
+				...makeTable('users', [makeCol({ name: 'email', type: 'string' })]),
+				indexes: [
+					{
+						name: 'idx_users_email',
+						columns: ['email'],
+						method: 'hash',
+					},
+				],
+			};
+			const dbTable: TableIR = {
+				...makeTable('users', [makeCol({ name: 'email', type: 'string' })]),
+				indexes: [
+					{
+						name: 'idx_users_email',
+						columns: ['email'],
+					},
+				],
+			};
+
+			const diff = compareSchemata(
+				makeModel([schemaTable]),
+				makeModel([dbTable]),
+			);
+
+			expect(diff.changes).toEqual([
+				expect.objectContaining({
+					kind: 'create_index',
+					destructive: false,
+				}),
+				expect.objectContaining({
+					kind: 'drop_index',
+					destructive: false,
+				}),
+			]);
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[
+					'DROP INDEX IF EXISTS "idx_users_email";',
+					'CREATE INDEX IF NOT EXISTS "idx_users_email" ON "users" USING hash ("email");',
+				],
+			);
 		});
 
 		it('should include destructive changes by default', () => {
@@ -2400,7 +2586,7 @@ describe('generateDownSQL', () => {
 						kind: 'alter_column_nullable',
 						table: 'profiles',
 						column: 'bio',
-						destructive: true,
+						destructive: false,
 						details: '',
 						meta: { oldNullable: true },
 					},
@@ -2412,6 +2598,69 @@ describe('generateDownSQL', () => {
 			expect(sql[0]).toBe(
 				'ALTER TABLE "profiles" ALTER COLUMN "bio" DROP NOT NULL;',
 			);
+		});
+
+		it('skips DOWN for destructive drop_index changes skipped by UP', () => {
+			const idx: IndexIR = {
+				name: 'uq_users_email',
+				columns: ['email'],
+				unique: true,
+			};
+			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: '',
+					meta: { index: idx },
+				},
+			]);
+
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
+		});
+
+		it('recreates a destructive dropped index when destructive changes are included', () => {
+			const idx: IndexIR = {
+				name: 'uq_users_email',
+				columns: ['email'],
+				unique: true,
+			};
+			const diff = makeDiff([
+				{
+					kind: 'drop_index',
+					table: 'users',
+					destructive: true,
+					details: '',
+					meta: { index: idx },
+				},
+			]);
+
+			expect(generateMigrationSQL(diff, { includeDestructive: true })).toEqual([
+				'DROP INDEX IF EXISTS "uq_users_email";',
+			]);
+			expect(generateDownSQL(diff, { includeDestructive: true })).toEqual([
+				'CREATE UNIQUE INDEX IF NOT EXISTS "uq_users_email" ON "users" ("email");',
+			]);
+		});
+
+		it('skips DOWN for destructive drop_column changes skipped by UP', () => {
+			const diff = makeDiff([
+				{
+					kind: 'drop_column',
+					table: 'users',
+					column: 'legacy',
+					destructive: true,
+					details: '',
+				},
+			]);
+
+			expect(generateMigrationSQL(diff, { includeDestructive: false })).toEqual(
+				[],
+			);
+			expect(generateDownSQL(diff, { includeDestructive: false })).toEqual([]);
 		});
 
 		it('filters alter_column_unique add from DOWN unless destructive changes are included', () => {
@@ -3182,6 +3431,55 @@ describe('FK enhancements — migration SQL', () => {
 		).toBe(true);
 	});
 
+	it('should use the same database-form FK auto-index name as generateDDL', () => {
+		const usersTable: TableIR = {
+			name: 'users',
+			columns: [makeCol({ name: 'id', type: 'integer' })],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+		};
+		const postsTable: TableIR = {
+			name: 'posts',
+			columns: [
+				makeCol({ name: 'id', type: 'integer' }),
+				makeCol({ name: 'authorId', type: 'integer' }),
+			],
+			primaryKey: 'id',
+			foreignKeys: [
+				{
+					columns: ['authorId'],
+					references: { table: 'users', columns: ['id'] },
+				},
+			],
+			indexes: [],
+		};
+		const schema = new ModelIRImpl(
+			new Map([
+				['users', usersTable],
+				['posts', postsTable],
+			]),
+			new Map(),
+		);
+
+		const ddl = generateDDL(schema, { naming: camelCaseNaming });
+		const diff = compareSchemata(
+			schema,
+			new ModelIRImpl(new Map(), new Map()),
+			{
+				dbCasing: 'snake_case',
+			},
+		);
+		const sql = generateMigrationSQL(diff);
+
+		expect(ddl).toContain(
+			'CREATE INDEX "idx_posts_author_id" ON "posts" ("author_id");',
+		);
+		expect(sql).toContain(
+			'CREATE INDEX IF NOT EXISTS "idx_posts_author_id" ON "posts" ("author_id");',
+		);
+	});
+
 	it('should NOT generate FK auto-index when fkAutoIndex=false', () => {
 		const table = makeTable('orders', [
 			makeCol({ name: 'user_id', type: 'integer' }),
@@ -3229,6 +3527,52 @@ describe('FK enhancements — migration SQL', () => {
 		).length;
 		// Only the explicit index from create_index phase (none here), no duplicates
 		expect(autoIndexCount).toBe(0);
+	});
+
+	it('should not generate FK auto-index when only a partial index covers the FK column', () => {
+		const usersTable = makeTable(
+			'users',
+			[makeCol({ name: 'id', type: 'integer' })],
+			'id',
+		);
+		const ordersTable: TableIR = {
+			...makeTable(
+				'orders',
+				[
+					makeCol({ name: 'id', type: 'integer' }),
+					makeCol({ name: 'user_id', type: 'integer' }),
+					makeCol({ name: 'deleted_at', type: 'timestamp', nullable: true }),
+				],
+				'id',
+			),
+			foreignKeys: [baseFk],
+			indexes: [
+				{
+					name: 'idx_orders_user_id_active',
+					columns: ['user_id'],
+					where: 'deleted_at IS NULL',
+				},
+			],
+		};
+		const diff = compareSchemata(
+			new ModelIRImpl(
+				new Map([
+					['users', usersTable],
+					['orders', ordersTable],
+				]),
+				new Map(),
+			),
+			new ModelIRImpl(new Map(), new Map()),
+		);
+
+		const sql = generateMigrationSQL(diff);
+
+		expect(sql).toContain(
+			'CREATE INDEX IF NOT EXISTS "idx_orders_user_id_active" ON "orders" ("user_id") WHERE deleted_at IS NULL;',
+		);
+		expect(sql).not.toContain(
+			'CREATE INDEX IF NOT EXISTS "idx_orders_user_id" ON "orders" ("user_id");',
+		);
 	});
 
 	it('should not generate FK auto-index when explicit FK index uses nullsNotDistinct', () => {
