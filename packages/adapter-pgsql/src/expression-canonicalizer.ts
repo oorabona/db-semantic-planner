@@ -134,82 +134,119 @@ export async function canonicalizeCheckConstraints(
 	const client = ownsClient ? await connection.connect() : connection;
 	const names = createCheckCanonicalizationNameScope();
 	const rootSavepoint = `${names.savepointPrefix}_root`;
+	let ownsTransaction = false;
 	let rootSavepointOpen = false;
-	let releaseError: Error | undefined;
+	let lifecycleError: Error | undefined;
+	let workError: unknown;
+
 	try {
-		if (ownsClient) {
-			await client.query('BEGIN');
-		} else {
-			await client.query(`SAVEPOINT ${rootSavepoint}`);
-			rootSavepointOpen = true;
+		try {
+			await openScratchScope();
+		} catch (error) {
+			lifecycleError = toError(error);
+			throw lifecycleError;
 		}
-		await createMissingDesiredEnumTypes(
-			client,
-			desired,
-			dbModel,
-			options,
-			names,
-		);
-		for (let i = 0; i < targets.length; i++) {
-			const target = targets[i]!;
-			const canonicalChecks = await canonicalizeTableChecksBestEffort(
+
+		// The scratch work is best-effort: a role that may not create temp tables,
+		// or an expression PostgreSQL refuses, degrades to raw comparison.
+		try {
+			await createMissingDesiredEnumTypes(
 				client,
-				target,
-				i,
+				desired,
+				dbModel,
 				options,
 				names,
 			);
-			if (canonicalChecks !== undefined) {
-				canonicalChecksByTable.set(target.modelKey, canonicalChecks);
+			for (let i = 0; i < targets.length; i++) {
+				const target = targets[i]!;
+				const canonicalChecks = await canonicalizeTableChecksBestEffort(
+					client,
+					target,
+					i,
+					options,
+					names,
+				);
+				if (canonicalChecks !== undefined) {
+					canonicalChecksByTable.set(target.modelKey, canonicalChecks);
+				}
 			}
+		} catch (error) {
+			workError = error;
 		}
-		if (ownsClient) {
-			try {
-				await client.query('ROLLBACK');
-			} catch (rollbackError) {
-				releaseError = toError(rollbackError);
-				throw rollbackError;
-			}
-		} else {
-			await client.query(`ROLLBACK TO SAVEPOINT ${rootSavepoint}`);
-			await client.query(`RELEASE SAVEPOINT ${rootSavepoint}`);
-			rootSavepointOpen = false;
-		}
-	} catch (error) {
-		if (ownsClient && releaseError === undefined) {
-			try {
-				await client.query('ROLLBACK');
-			} catch (rollbackError) {
-				releaseError = toError(rollbackError);
-			}
-		} else if (!ownsClient && rootSavepointOpen) {
-			try {
-				await client.query(`ROLLBACK TO SAVEPOINT ${rootSavepoint}`);
-				await client.query(`RELEASE SAVEPOINT ${rootSavepoint}`);
-				rootSavepointOpen = false;
-			} catch (cleanupError) {
-				throw cleanupError;
-			}
-		}
-		if (options?.requireCanonicalization) {
-			throw error;
-		}
-		for (const target of targets) {
-			if (!canonicalChecksByTable.has(target.modelKey)) {
-				reportCanonicalizationFailure(target, error, options);
-			}
+
+		// Undoing the scratch DDL is NOT best-effort. A failure here leaves the
+		// connection in an unknown transaction state, so the canonicalised model
+		// cannot be trusted: it surfaces even in non-strict mode.
+		try {
+			await closeScratchScope();
+		} catch (error) {
+			lifecycleError = toError(error);
+			throw lifecycleError;
 		}
 	} finally {
 		if (ownsClient) {
-			if (releaseError !== undefined) {
-				client.release(releaseError);
+			if (lifecycleError !== undefined) {
+				client.release(lifecycleError);
 			} else {
 				client.release();
 			}
 		}
 	}
 
+	if (workError !== undefined) {
+		if (options?.requireCanonicalization) {
+			throw workError;
+		}
+		for (const target of targets) {
+			if (!canonicalChecksByTable.has(target.modelKey)) {
+				reportCanonicalizationFailure(target, workError, options);
+			}
+		}
+	}
+
 	return cloneModelWithCanonicalChecks(desired, canonicalChecksByTable);
+
+	/**
+	 * A pool client is ours, so the transaction is ours. A caller-owned client may
+	 * or may not already be inside one, and PostgreSQL answers that question
+	 * itself: SAVEPOINT outside a transaction block fails with 25P01. That is the
+	 * signal to open a transaction here rather than nest inside the caller's.
+	 */
+	async function openScratchScope(): Promise<void> {
+		if (!ownsClient) {
+			try {
+				await client.query(`SAVEPOINT ${rootSavepoint}`);
+				rootSavepointOpen = true;
+				return;
+			} catch (error) {
+				if (!isNoActiveTransactionError(error)) throw error;
+			}
+		}
+		await client.query('BEGIN');
+		ownsTransaction = true;
+	}
+
+	async function closeScratchScope(): Promise<void> {
+		if (ownsTransaction) {
+			await client.query('ROLLBACK');
+			ownsTransaction = false;
+			return;
+		}
+		if (rootSavepointOpen) {
+			await client.query(`ROLLBACK TO SAVEPOINT ${rootSavepoint}`);
+			await client.query(`RELEASE SAVEPOINT ${rootSavepoint}`);
+			rootSavepointOpen = false;
+		}
+	}
+}
+
+/** PostgreSQL 25P01 — `SAVEPOINT` issued outside a transaction block. */
+function isNoActiveTransactionError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		(error as { code?: unknown }).code === '25P01'
+	);
 }
 
 function collectCheckConstraintTargets(

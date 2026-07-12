@@ -11,6 +11,7 @@ export {
 	generateDDL,
 } from './ddl-generator.js';
 export {
+	type AddedEnumValue,
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
 	type ComparePgsqlDatabaseSchemaOptions,

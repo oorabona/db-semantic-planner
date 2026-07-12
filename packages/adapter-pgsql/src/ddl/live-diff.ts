@@ -1,13 +1,11 @@
-import type { CheckConstraintIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
+import type { CheckConstraintIR, EnumIR, ModelIR } from '@dbsp/types';
 import type { Pool, PoolClient } from 'pg';
-import { enumReferenceKind } from '../db-type.js';
 import {
 	type CanonicalizeCheckConstraintsOptions,
 	type CheckConstraintCanonicalizationWarning,
 	canonicalizeCheckConstraints,
 } from '../expression-canonicalizer.js';
 import { type IntrospectionOptions, introspect } from '../introspection.js';
-import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import {
 	type CompareSchemataOptions,
 	collectExpressionSurfaces,
@@ -61,19 +59,28 @@ export class NonConvergentSchemaDiffError extends Error {
 	}
 }
 
+/** An enum value this diff adds, reported as a candidate cause — never asserted. */
+export interface AddedEnumValue {
+	readonly enumName: string;
+	readonly value: string;
+}
+
 export class CheckConstraintNewEnumValueError extends Error {
 	constructor(
 		public readonly table: string,
 		public readonly constraint: string,
-		public readonly enumName: string,
-		public readonly value: string,
+		public readonly addedEnumValues: readonly AddedEnumValue[],
 	) {
+		const candidates = addedEnumValues
+			.map(({ enumName, value }) => `"${value}" (enum "${enumName}")`)
+			.join(', ');
 		super(
-			`CHECK constraint "${table}"."${constraint}" references enum value ` +
-				`"${value}" for enum "${enumName}", but this migration also adds ` +
-				'that enum value. PostgreSQL cannot use a new enum value in the ' +
-				'transaction that adds it. Apply the enum change on its own first, ' +
-				'then add or update the constraint.',
+			`PostgreSQL could not canonicalise CHECK constraint "${table}"."${constraint}", ` +
+				`and this migration also adds enum value(s): ${candidates}. PostgreSQL ` +
+				'cannot use an enum value in the transaction that adds it, and dbsp applies ' +
+				'each migration in one transaction, so this constraint cannot be proven ' +
+				'applicable. Apply the enum change on its own first, then add or update the ' +
+				'constraint.',
 		);
 		this.name = 'CheckConstraintNewEnumValueError';
 	}
@@ -121,13 +128,7 @@ export async function comparePgsqlDatabaseSchema(
 	);
 
 	if (useCanonicalizer && rawCheckExpressionSurfaces.size > 0) {
-		assertNoCheckFallbackUsesAddedEnumValue(
-			diff,
-			desiredForCompare,
-			dbModel,
-			rawCheckExpressionSurfaces,
-			options,
-		);
+		assertNoCheckFallbackUsesAddedEnumValue(diff, rawCheckExpressionSurfaces);
 	}
 
 	if (options?.previouslyAppliedDiff !== undefined) {
@@ -251,18 +252,27 @@ function driftKey(table: string, constraint: string): string {
 	return JSON.stringify([table, constraint]);
 }
 
-interface AddedEnumValue {
-	readonly enumDef: EnumIR;
-	readonly enumName: string;
-	readonly value: string;
-}
-
+/**
+ * Refuse a CHECK constraint the diff intends to ADD when PostgreSQL itself
+ * refused to canonicalise it while the same diff adds enum values.
+ *
+ * The trigger is the engine's own verdict: `rawCheckExpressionSurfaces` holds
+ * exactly the constraints PostgreSQL would not accept against a scratch table
+ * carrying the desired columns and types. Reading the expression text to work
+ * out *which* added enum value is to blame would be a heuristic, and every
+ * literal spelling PostgreSQL accepts — single-quoted, dollar-quoted,
+ * Unicode-escaped, concatenated — would be another way past it. So the text is
+ * not read at all.
+ *
+ * Declared bound: a CHECK that failed canonicalisation for an unrelated reason,
+ * in a diff that happens to also add an enum value elsewhere, is refused too.
+ * That is deliberate — an expression PostgreSQL rejected in the scratch table is
+ * not one this layer can prove executable — and it is why the added values are
+ * reported as candidates rather than as an asserted cause.
+ */
 function assertNoCheckFallbackUsesAddedEnumValue(
 	diff: SchemaDiff,
-	desired: ModelIR,
-	dbModel: ModelIR,
 	rawCheckExpressionSurfaces: ReadonlySet<string>,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
 ): void {
 	const addedEnumValues = collectAddedEnumValues(diff);
 	if (addedEnumValues.length === 0) return;
@@ -274,27 +284,11 @@ function assertNoCheckFallbackUsesAddedEnumValue(
 		if (!rawCheckExpressionSurfaces.has(driftKey(change.table, check.name))) {
 			continue;
 		}
-
-		const table =
-			findTableByDatabaseName(desired, change.table, options) ??
-			findTableByDatabaseName(dbModel, change.table, options);
-		for (const addedEnum of addedEnumValues) {
-			if (
-				checkCouldPlausiblyUseAddedEnumValue(
-					check,
-					table,
-					addedEnum.enumDef,
-					addedEnum.value,
-				)
-			) {
-				throw new CheckConstraintNewEnumValueError(
-					change.table,
-					check.name,
-					addedEnum.enumName,
-					addedEnum.value,
-				);
-			}
-		}
+		throw new CheckConstraintNewEnumValueError(
+			change.table,
+			check.name,
+			addedEnumValues,
+		);
 	}
 }
 
@@ -305,75 +299,9 @@ function collectAddedEnumValues(diff: SchemaDiff): AddedEnumValue[] {
 		const enumDef = change.meta?.enum as EnumIR | undefined;
 		const value = change.meta?.value;
 		if (enumDef === undefined || typeof value !== 'string') continue;
-		added.push({
-			enumDef,
-			enumName: formatEnumName(enumDef),
-			value,
-		});
+		added.push({ enumName: formatEnumName(enumDef), value });
 	}
 	return added;
-}
-
-function checkCouldPlausiblyUseAddedEnumValue(
-	check: CheckConstraintIR,
-	table: TableIR | undefined,
-	enumDef: EnumIR,
-	value: string,
-): boolean {
-	if (!expressionMentionsEnumValue(check.expression, value)) {
-		return false;
-	}
-	if (table === undefined) {
-		return true;
-	}
-	if (table.columns.some((column) => columnReferencesEnum(column, enumDef))) {
-		return true;
-	}
-	return check.expression.includes(enumDef.name);
-}
-
-function expressionMentionsEnumValue(
-	expression: string,
-	value: string,
-): boolean {
-	const sqlLiteral = `'${value.replace(/'/gu, "''")}'`;
-	return expression.includes(sqlLiteral);
-}
-
-function columnReferencesEnum(
-	column: TableIR['columns'][number],
-	enumDef: EnumIR,
-): boolean {
-	if (
-		column.originalDbType !== undefined &&
-		enumReferenceKind(
-			column.originalDbType,
-			enumDef.name,
-			enumDef.schema,
-			column.originalDbTypeSchema,
-		) !== null
-	) {
-		return true;
-	}
-	return column.type === enumDef.name;
-}
-
-function findTableByDatabaseName(
-	model: ModelIR,
-	dbTableName: string,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
-): TableIR | undefined {
-	const plugin =
-		options?.dbCasing !== undefined
-			? getNamingPluginForDbCasing(options.dbCasing)
-			: undefined;
-	for (const table of model.tables.values()) {
-		const candidate = plugin ? plugin.toDatabase(table.name) : table.name;
-		if (candidate === dbTableName) {
-			return table;
-		}
-	}
-	return undefined;
 }
 
 function formatEnumName(enumDef: EnumIR): string {

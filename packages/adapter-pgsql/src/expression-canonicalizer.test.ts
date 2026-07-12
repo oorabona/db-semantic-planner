@@ -72,6 +72,12 @@ class FakePgClient {
 	readonly canonicalExpressions = new Map<string, string>();
 	failOnSql: RegExp | undefined;
 	failOnSqlError: Error | undefined;
+	/**
+	 * Whether the client starts inside a transaction. A caller-owned client handed
+	 * to the canonicaliser may be either; PostgreSQL rejects SAVEPOINT outside a
+	 * transaction block with 25P01, and this fake reproduces that.
+	 */
+	inTransaction = true;
 	readonly release = vi.fn();
 
 	async query<T extends Record<string, unknown> = Record<string, unknown>>(
@@ -82,6 +88,15 @@ class FakePgClient {
 		const normalized = normalizeSql(sql);
 		if (this.failOnSql?.test(normalized)) {
 			throw this.failOnSqlError ?? new Error('DDL refused');
+		}
+
+		if (normalized.startsWith('SAVEPOINT ') && !this.inTransaction) {
+			throw Object.assign(new Error('no transaction is in progress'), {
+				code: '25P01',
+			});
+		}
+		if (normalized === 'BEGIN') {
+			this.inTransaction = true;
 		}
 
 		const createMatch = /^CREATE TEMP TABLE "([^"]+)"/u.exec(normalized);
@@ -748,7 +763,10 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 	});
 
-	it('discards the pool client when the full rollback fails', async () => {
+	it('surfaces a failed rollback in non-strict mode and discards the pool client', async () => {
+		// Undoing the scratch DDL is not best-effort. Every CHECK here canonicalises
+		// successfully, so nothing would warn: without this the caller would get a
+		// canonicalised model back after the transaction was left in an unknown state.
 		const rollbackError = new Error('rollback connection lost');
 		const client = new FakePgClient();
 		client.failOnSql = /^ROLLBACK$/u;
@@ -767,14 +785,77 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
-		await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		await expect(
+			canonicalizeCheckConstraints(pool as unknown as Pool, desired, dbModel),
+		).rejects.toThrow('rollback connection lost');
+
+		expect(client.release).toHaveBeenCalledTimes(1);
+		expect(client.release).toHaveBeenCalledWith(rollbackError);
+	});
+
+	it('opens its own transaction on a caller-owned client that has none', async () => {
+		// PostgreSQL rejects SAVEPOINT outside a transaction block with 25P01. That
+		// answer is the signal to open a transaction rather than nest in the caller's.
+		const client = new FakePgClient();
+		client.inTransaction = false;
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			'CHECK ((age > 0))',
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol('id'), makeCol('age')],
+				checkConstraints: [{ name: 'users_age_check', expression: 'age > 0' }],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'users' })]);
+
+		const canonical = await canonicalizeCheckConstraints(
+			client as unknown as PoolClient,
 			desired,
 			dbModel,
 		);
 
-		expect(client.release).toHaveBeenCalledTimes(1);
-		expect(client.release).toHaveBeenCalledWith(rollbackError);
+		expect(
+			canonical.tables.get('users')?.checkConstraints?.[0]?.expression,
+		).toBe('CHECK ((age > 0))');
+		const issued = client.queries.map((q) => normalizeSql(q.sql));
+		expect(issued).toContain('BEGIN');
+		expect(issued).toContain('ROLLBACK');
+		// The caller's client is theirs — never released by the canonicaliser.
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('does not open a transaction on a caller-owned client that already has one', async () => {
+		const client = new FakePgClient();
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			'CHECK ((age > 0))',
+		);
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				columns: [makeCol('id'), makeCol('age')],
+				checkConstraints: [{ name: 'users_age_check', expression: 'age > 0' }],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'users' })]);
+
+		await canonicalizeCheckConstraints(
+			client as unknown as PoolClient,
+			desired,
+			dbModel,
+		);
+
+		const issued = client.queries.map((q) => normalizeSql(q.sql));
+		expect(issued).not.toContain('BEGIN');
+		expect(issued).not.toContain('ROLLBACK');
+		expect(issued.some((sql) => sql.startsWith('SAVEPOINT '))).toBe(true);
+		expect(issued.some((sql) => sql.startsWith('ROLLBACK TO SAVEPOINT '))).toBe(
+			true,
+		);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 
 	it('does not touch the database when no desired table declares a CHECK constraint', async () => {

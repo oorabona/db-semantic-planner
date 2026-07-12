@@ -30,6 +30,7 @@ export {
 } from './compiler.js';
 // DDL Generation
 export {
+	type AddedEnumValue,
 	assertNoRepeatedExpressionSurfaceDrift,
 	type ChangeKind,
 	CheckConstraintNewEnumValueError,

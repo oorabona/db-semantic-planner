@@ -6,6 +6,7 @@
  */
 
 import {
+	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
 	generateDDL,
 	generateMigrationSQL,
@@ -454,5 +455,114 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		});
 
 		expect(diff.changes).toEqual([]);
+	});
+
+	describe('a CHECK that cannot be canonicalised while the diff adds enum values', () => {
+		/**
+		 * PostgreSQL cannot use an enum value in the transaction that adds it, and
+		 * dbsp applies each migration in one transaction. The refusal must not depend
+		 * on how the value is *spelled* in the expression: PostgreSQL refusing to
+		 * canonicalise the constraint is the whole signal.
+		 */
+		beforeEach(async () => {
+			await pool.query(
+				`CREATE TYPE ${SCHEMA}.status AS ENUM ('queued', 'done')`,
+			);
+			await pool.query(`
+				CREATE TABLE ${SCHEMA}.jobs (
+					id integer PRIMARY KEY,
+					state ${SCHEMA}.status NOT NULL
+				)
+			`);
+		});
+
+		function desiredWithPendingValue(expression: string): ModelIRImpl {
+			return new ModelIRImpl(
+				new Map<string, TableIR>([
+					[
+						'jobs',
+						{
+							name: 'jobs',
+							columns: [
+								makeCol('id'),
+								// Shaped exactly as introspection reports an enum column, so the
+								// scratch table really is typed with the live enum.
+								{
+									name: 'state',
+									type: 'string',
+									nullable: false,
+									originalDbType: 'status',
+									originalDbTypeSchema: SCHEMA,
+									originalDbTypeSchemaScope: 'target',
+								},
+							],
+							primaryKey: 'id',
+							foreignKeys: [],
+							indexes: [],
+							checkConstraints: [{ name: 'jobs_state_check', expression }],
+						},
+					],
+				]),
+				new Map(),
+				new Map([
+					[
+						'status',
+						{
+							name: 'status',
+							values: ['queued', 'done', 'pending'],
+							schema: SCHEMA,
+						},
+					],
+				]),
+			);
+		}
+
+		// Every spelling PostgreSQL accepts for the literal. The refusal must not
+		// depend on any of them: a scan for the exact text `'pending'` sees the first
+		// and misses the rest, which is precisely why there is no scan any more.
+		it.each([
+			['single-quoted', "state = 'pending'"],
+			['dollar-quoted', 'state = $$pending$$'],
+			['tagged dollar-quoted', 'state = $lit$pending$lit$'],
+		])('refuses a %s reference to the added enum value', async (_kind, expr) => {
+			await expect(
+				comparePgsqlDatabaseSchema(pool, desiredWithPendingValue(expr), {
+					schema: SCHEMA,
+					ignoreUnmanagedExtensions: true,
+				}),
+			).rejects.toThrow(CheckConstraintNewEnumValueError);
+		});
+
+		it('names the added enum values as candidates, without asserting a cause', async () => {
+			const error = await comparePgsqlDatabaseSchema(
+				pool,
+				desiredWithPendingValue('state = $$pending$$'),
+				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
+			).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
+
+			expect(error).toBeInstanceOf(CheckConstraintNewEnumValueError);
+			expect(error.table).toBe('jobs');
+			expect(error.constraint).toBe('jobs_state_check');
+			expect(error.addedEnumValues).toEqual([
+				{ enumName: `${SCHEMA}.status`, value: 'pending' },
+			]);
+		});
+
+		it('does not refuse a CHECK that PostgreSQL canonicalises fine', async () => {
+			// The same diff still adds 'pending' to the enum, but this constraint uses
+			// only values the database already knows, so it canonicalises and applies.
+			const diff = await comparePgsqlDatabaseSchema(
+				pool,
+				desiredWithPendingValue("state <> 'done'"),
+				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
+			);
+
+			expect(changeKinds(diff)).toContain('alter_enum_add_value');
+			expect(changeKinds(diff)).toContain('add_check_constraint');
+			await executeDdl(
+				pool,
+				generateMigrationSQL(diff, { schemaName: SCHEMA }) as string[],
+			);
+		});
 	});
 });
