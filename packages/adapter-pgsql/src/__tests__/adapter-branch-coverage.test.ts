@@ -95,10 +95,17 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 		expect(adapter.capabilities.supportsStreaming).toBe(true);
 	});
 
-	it('constructor detects PoolClient (has release method) — inTransaction=true', () => {
+	it('factory rejects a PoolClient unless borrowedClient: true is declared', () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		expect(adapter.inTransaction).toBe(true);
+		expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
+			/borrowedClient: true/,
+		);
+	});
+
+	it('borrowed client adapters are not inTransaction merely because they have release()', () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		expect(adapter.inTransaction).toBe(false);
 	});
 
 	it('inTransaction is false when created from pool', () => {
@@ -147,15 +154,12 @@ describe('PgsqlAdapter.introspect', () => {
 });
 
 describe('PgsqlAdapter.transaction', () => {
-	it('reuses existing client when already in transaction', async () => {
+	it('throws for a borrowed client without managedTransactions', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		let capturedAdapter: unknown;
-		await adapter.transaction(async (tx) => {
-			capturedAdapter = tx;
-		});
-		expect(capturedAdapter).toBe(adapter);
-		// BEGIN/COMMIT should NOT have been issued
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		await expect(adapter.transaction(async () => undefined)).rejects.toThrow(
+			/managedTransactions: true/,
+		);
 		expect(client.query).not.toHaveBeenCalled();
 	});
 

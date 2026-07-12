@@ -159,29 +159,99 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 });
 
 // ---------------------------------------------------------------------------
-// transaction() — reuse existing client (nested transaction)
+// transaction() — borrowed client contract
 // ---------------------------------------------------------------------------
 
-describe('PgsqlAdapter.transaction — reuse existing client', () => {
-	it('returns same adapter instance when already in transaction', async () => {
+describe('PgsqlAdapter.transaction — borrowed client contract', () => {
+	it('throws by default for a borrowed client and names managedTransactions', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
-		let capturedAdapter: unknown;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
-		await adapter.transaction(async (tx) => {
-			capturedAdapter = tx;
-		});
-
-		expect(capturedAdapter).toBe(adapter);
+		await expect(adapter.transaction(async () => undefined)).rejects.toThrow(
+			/managedTransactions: true/,
+		);
+		expect(client.query).not.toHaveBeenCalled();
+		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('does NOT issue BEGIN/COMMIT when already in transaction', async () => {
+	it('uses a savepoint when managedTransactions is true and a transaction is already open', async () => {
 		const client = makeClient();
-		const adapter = createPgsqlAdapter(client);
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		let innerInTransaction: boolean | undefined;
 
-		await adapter.transaction(async () => {});
+		const result = await adapter.transaction(async (tx) => {
+			innerInTransaction = (tx as PgsqlAdapter).inTransaction;
+			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+			return 'ok';
+		});
 
-		expect(client.query).not.toHaveBeenCalled();
+		expect(result).toBe('ok');
+		expect(adapter.inTransaction).toBe(false);
+		expect(innerInTransaction).toBe(true);
+		expect(client.release).not.toHaveBeenCalled();
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls).toContain('SELECT 1');
+		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(calls).not.toContain('BEGIN');
+		expect(calls).not.toContain('COMMIT');
+	});
+
+	it('rolls back to the savepoint on callback failure without releasing the caller client', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const boom = new Error('boom');
+
+		await expect(
+			adapter.transaction(async (tx) => {
+				await tx.execute({ sql: 'INSERT INTO t VALUES (1)', parameters: [] });
+				throw boom;
+			}),
+		).rejects.toBe(boom);
+
+		expect(client.release).not.toHaveBeenCalled();
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toContain('INSERT INTO t VALUES (1)');
+		expect(calls.some((sql) => /^ROLLBACK TO SAVEPOINT /.test(sql))).toBe(true);
+		expect(calls).not.toContain('ROLLBACK');
+	});
+
+	it('opens and closes a transaction when managedTransactions is true and none is active', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (/^SAVEPOINT /.test(sql)) {
+				throw Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = {
+			query,
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await adapter.transaction(async (tx) => {
+			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+		});
+
+		expect(client.release).not.toHaveBeenCalled();
+		const calls = query.mock.calls.map((c) => c[0] as string);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls.slice(1)).toEqual(['BEGIN', 'SELECT 1', 'COMMIT']);
 	});
 });
 
@@ -220,6 +290,44 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 		await expect(adapter.executeDDL('INVALID SQL')).rejects.toThrow(
 			'syntax error',
 		);
+	});
+
+	it('probes and refuses transaction-forbidden DDL on a borrowed client in a caller transaction', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		await expect(adapter.executeDDL('VACUUM "users"')).rejects.toThrow(
+			'VACUUM cannot run inside a transaction block',
+		);
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls[1]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(calls).not.toContain('VACUUM "users"');
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('allows transaction-forbidden DDL on a borrowed client when the probe finds no active transaction', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (/^SAVEPOINT /.test(sql)) {
+				throw Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		await adapter.executeDDL('VACUUM "users"');
+
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'VACUUM "users"',
+		]);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 });
 
@@ -312,6 +420,12 @@ describe('PgsqlAdapter.getPoolInstance', () => {
 		const adapter = createPgsqlAdapter(pool);
 		expect(adapter.getPoolInstance()).toBe(pool);
 	});
+
+	it('returns the caller-owned client when created with a borrowed client', () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		expect(adapter.getPoolInstance()).toBe(client);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -382,6 +496,20 @@ describe('PgsqlAdapter.withSchema — pool inheritance', () => {
 		const scoped = adapter.withSchema('s1');
 		expect(scoped).not.toBe(adapter);
 	});
+
+	it('scoped borrowed-client adapter preserves declared ownership', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const scoped = adapter.withSchema('tenant_10') as PgsqlAdapter;
+
+		expect(scoped).not.toBe(adapter);
+		expect(scoped.getPoolInstance()).toBe(client);
+		expect(scoped.inTransaction).toBe(false);
+		await expect(scoped.transaction(async () => undefined)).rejects.toThrow(
+			/managedTransactions: true/,
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -438,19 +566,34 @@ describe('PgsqlAdapter.compileWithIncludes — include decisions', () => {
 // stream() — all branches
 // ---------------------------------------------------------------------------
 
-describe('PgsqlAdapter.stream — with existing client (inTransaction=true)', () => {
-	it('uses existing client directly without pool.connect', async () => {
+describe('PgsqlAdapter.stream — borrowed client contract', () => {
+	it('refuses an unmanaged borrowed client before opening a cursor', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+
+		await expect(iter.next()).rejects.toThrow(/managedTransactions: true/);
+		expect(client.query).not.toHaveBeenCalled();
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('uses a savepoint for a managed borrowed client inside a caller transaction', async () => {
 		const rows: Record<string, unknown>[] = [{ id: 1 }];
 		let callIdx = 0;
 		const client = makeClient(async () => {
 			callIdx++;
-			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
-			if (callIdx === 2) return { rows, rowCount: 1 } as QueryResult; // FETCH → 1 row
-			if (callIdx === 3) return { rows: [], rowCount: 0 } as QueryResult; // FETCH → done
-			return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
+			if (callIdx === 1) return { rows: [], rowCount: 0 } as QueryResult; // SAVEPOINT
+			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
+			if (callIdx === 3) return { rows, rowCount: 1 } as QueryResult; // FETCH -> 1 row
+			if (callIdx === 4) return { rows: [], rowCount: 0 } as QueryResult; // FETCH -> done
+			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } as QueryResult; // RELEASE
 		});
 
-		const adapter = createPgsqlAdapter(client);
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
 		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
 
 		const collected: unknown[] = [];
@@ -459,6 +602,58 @@ describe('PgsqlAdapter.stream — with existing client (inTransaction=true)', ()
 		}
 
 		expect(collected).toEqual([{ id: 1 }]);
+		expect(client.release).not.toHaveBeenCalled();
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls.some((sql) => /^DECLARE /.test(sql))).toBe(true);
+		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(calls).not.toContain('BEGIN');
+		expect(calls).not.toContain('COMMIT');
+	});
+
+	it('opens a transaction for a managed borrowed client when none is active', async () => {
+		const rows: Record<string, unknown>[] = [{ id: 2 }];
+		let callIdx = 0;
+		const query = vi.fn(async (sql: string) => {
+			callIdx++;
+			if (callIdx === 1) {
+				expect(sql).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+				throw Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+			}
+			if (callIdx === 2) return { rows: [], rowCount: 0 } as QueryResult; // BEGIN
+			if (callIdx === 3) return { rows: [], rowCount: 0 } as QueryResult; // DECLARE
+			if (callIdx === 4) return { rows, rowCount: 1 } as QueryResult; // FETCH -> 1 row
+			if (callIdx === 5) return { rows: [], rowCount: 0 } as QueryResult; // FETCH -> done
+			if (callIdx === 6) return { rows: [], rowCount: 0 } as QueryResult; // CLOSE
+			return { rows: [], rowCount: 0 } as QueryResult; // COMMIT
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const collected: unknown[] = [];
+		for await (const row of adapter.stream({
+			sql: 'SELECT * FROM t',
+			parameters: [],
+		})) {
+			collected.push(row);
+		}
+
+		expect(collected).toEqual([{ id: 2 }]);
+		expect(client.release).not.toHaveBeenCalled();
+		expect(query.mock.calls.map((c) => c[0] as string).slice(1)).toEqual([
+			'BEGIN',
+			expect.stringMatching(/^DECLARE /),
+			expect.stringMatching(/^FETCH FORWARD 100 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			'COMMIT',
+		]);
 	});
 });
 

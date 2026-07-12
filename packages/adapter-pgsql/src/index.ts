@@ -148,6 +148,8 @@ export {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 	type PgsqlAdapterOptions,
+	type PgsqlBorrowedClientAdapterOptions,
+	type PgsqlPoolAdapterOptions,
 } from './pgsql-adapter.js';
 // Redaction (params logging safety)
 export {

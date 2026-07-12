@@ -156,6 +156,30 @@ const RESOLVE_TABLE_SCHEMA_SQL = (tableParam: string): string =>
 	'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
 	`WHERE c.oid = to_regclass(quote_ident(${tableParam})))`;
 
+const NO_ACTIVE_SQL_TRANSACTION = '25P01';
+
+let savepointCounter = 0;
+
+function isPoolClientLike(
+	connection: Pool | PoolClient,
+): connection is PoolClient {
+	return 'release' in connection && typeof connection.release === 'function';
+}
+
+function isPgErrorWithCode(error: unknown, code: string): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'code' in error &&
+		(error as { code?: unknown }).code === code
+	);
+}
+
+function nextSavepointName(): string {
+	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
+	return `dbsp_savepoint_${savepointCounter}`;
+}
+
 function renumberSqlParams(sql: string, offset: number): string {
 	if (offset === 0) return sql;
 	return sql.replace(/\$(\d+)/g, (_match, num) => {
@@ -748,6 +772,86 @@ export interface PgsqlAdapterOptions {
 	readonly deriveFkColumnName?: FkColumnDerivation;
 }
 
+export interface PgsqlPoolAdapterOptions extends PgsqlAdapterOptions {
+	readonly borrowedClient?: false;
+}
+
+export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
+	/** This connection belongs to the caller. dbsp never releases it. */
+	readonly borrowedClient: true;
+
+	/**
+	 * Let dbsp run transactions on your connection, through a savepoint.
+	 *
+	 * When your connection is already inside a transaction, dbsp creates a
+	 * savepoint and rolls back dbsp's changes after that savepoint if the callback
+	 * fails. `RELEASE SAVEPOINT` does not commit; it merges the work into your
+	 * surrounding transaction, so a callback that succeeded is still undone if you
+	 * later roll back. Deferred constraints or triggers can still make your outer
+	 * `COMMIT` fail after dbsp has returned. `SET LOCAL` changes inside the callback
+	 * remain in effect for the rest of your transaction after the savepoint is
+	 * released. `ON COMMIT DROP` and `ON COMMIT DELETE ROWS` fire at your transaction
+	 * boundary, not at the savepoint. Sequences are not transactional:
+	 * `nextval`/`setval` are not reclaimed by a savepoint rollback. Session-level
+	 * advisory locks ignore rollback; transaction-level advisory locks taken by a
+	 * successful callback last until your transaction ends. Transaction control
+	 * issued through raw SQL inside a dbsp-managed scope (`COMMIT`, `ROLLBACK`,
+	 * `BEGIN`) is unsupported: dbsp does not parse SQL, cannot detect it, and
+	 * cleanup will misbehave.
+	 */
+	readonly managedTransactions?: true;
+}
+
+interface PgsqlAdapterInternalOptions
+	extends PgsqlBorrowedClientAdapterOptions {
+	readonly adapterManagedTransaction?: true;
+}
+
+type PgsqlAdapterConstructionOptions =
+	| PgsqlAdapterOptions
+	| PgsqlPoolAdapterOptions
+	| PgsqlBorrowedClientAdapterOptions
+	| PgsqlAdapterInternalOptions;
+
+type PgsqlAdapterConstructionOverrides = Partial<PgsqlAdapterOptions> & {
+	readonly borrowedClient?: true | false;
+	readonly managedTransactions?: true;
+	readonly adapterManagedTransaction?: true;
+};
+
+function hasBorrowedClientOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): options is PgsqlBorrowedClientAdapterOptions | PgsqlAdapterInternalOptions {
+	return (
+		typeof options === 'object' &&
+		options !== null &&
+		'borrowedClient' in options &&
+		options.borrowedClient === true
+	);
+}
+
+function hasManagedTransactionsOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		typeof options === 'object' &&
+		options !== null &&
+		'managedTransactions' in options &&
+		options.managedTransactions === true
+	);
+}
+
+function isAdapterManagedTransactionOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): boolean {
+	return (
+		typeof options === 'object' &&
+		options !== null &&
+		'adapterManagedTransaction' in options &&
+		options.adapterManagedTransaction === true
+	);
+}
+
 // ============================================================================
 // PgsqlAdapter
 // ============================================================================
@@ -770,6 +874,9 @@ export interface PgsqlAdapterOptions {
 export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly pool: Pool | undefined;
 	private readonly client: PoolClient | undefined;
+	private readonly borrowedClient: boolean;
+	private readonly managedTransactions: boolean;
+	private readonly adapterManagedTransaction: boolean;
 	private readonly schemaName: string | undefined;
 	private readonly _dbCasing: DbCasing;
 	private readonly naming: NamingPlugin;
@@ -782,29 +889,59 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	/**
 	 * Create a new PgsqlAdapter.
 	 *
-	 * @param pool - pg.Pool instance, PoolClient (transactions), or undefined (compile-only mode)
-	 * @param options - Optional configuration
+	 * Ownership of the connection is **declared**, never inferred. Handing over a
+	 * `PoolClient` means nothing on its own — it says the object has a `release()`
+	 * method, not that a transaction is open or that the caller owns the lifecycle.
+	 * Pass `borrowedClient: true` to say so.
+	 *
+	 * @param pool - a pg.Pool, a caller-owned pg.PoolClient (with `borrowedClient: true`),
+	 *   or nothing at all for compile-only mode
+	 * @param options - configuration; declares connection ownership
 	 */
 	constructor(
 		pool?: Pool | PoolClient | undefined,
-		options?: PgsqlAdapterOptions,
+		options?: PgsqlAdapterConstructionOptions,
 	) {
+		const declaredBorrowed = hasBorrowedClientOption(options);
+
 		if (pool != null) {
-			// Detect if this is a PoolClient (transaction context)
-			if ('release' in pool && typeof pool.release === 'function') {
-				this.client = pool as PoolClient;
-				// For clients, we need to get the pool reference
-				// This is a limitation - we'll use the client directly
-				this.pool = pool as unknown as Pool;
+			// The shape is only ever used to *reject* a mismatch. It never decides how
+			// the connection is treated — the declaration does.
+			if (isPoolClientLike(pool)) {
+				if (!declaredBorrowed) {
+					throw new Error(
+						'PgsqlAdapter received a pg PoolClient without borrowedClient: true. ' +
+							'A checked-out client belongs to whoever checked it out: declare it with ' +
+							'borrowedClient: true, and pass managedTransactions: true if dbsp should run ' +
+							'transactions on it.',
+					);
+				}
+				this.client = pool;
+				this.pool = undefined;
+				this.borrowedClient = true;
 			} else {
-				this.pool = pool as Pool;
+				if (declaredBorrowed) {
+					throw new Error(
+						'borrowedClient: true requires a pg PoolClient, not a pg Pool.',
+					);
+				}
+				this.pool = pool;
 				this.client = undefined;
+				this.borrowedClient = false;
 			}
 		} else {
+			if (declaredBorrowed) {
+				throw new Error(
+					'borrowedClient: true requires a pg PoolClient; no connection was given.',
+				);
+			}
 			// Compile-only mode — no pool/client
 			this.pool = undefined;
 			this.client = undefined;
+			this.borrowedClient = false;
 		}
+		this.managedTransactions = hasManagedTransactionsOption(options);
+		this.adapterManagedTransaction = isAdapterManagedTransactionOption(options);
 
 		this.schemaName = options?.schemaName;
 		this._dbCasing = options?.dbCasing ?? 'preserve';
@@ -836,8 +973,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * deriveFkColumnName, etc.) are propagated to scoped/transactional adapters.
 	 */
 	private cloneOptions(
-		overrides: Partial<PgsqlAdapterOptions>,
-	): PgsqlAdapterOptions {
+		overrides: PgsqlAdapterConstructionOverrides,
+	): PgsqlAdapterConstructionOptions {
 		return {
 			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
 			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
@@ -845,6 +982,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this.logger !== undefined && { logger: this.logger }),
 			defaultPkColumnName: this.defaultPk,
 			deriveFkColumnName: this.deriveFk,
+			...(this.borrowedClient && { borrowedClient: true as const }),
+			...(this.managedTransactions && { managedTransactions: true as const }),
+			...(this.adapterManagedTransaction && {
+				adapterManagedTransaction: true as const,
+			}),
 			...overrides,
 		};
 	}
@@ -1146,10 +1288,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	/**
-	 * Get the underlying pg Pool instance.
+	 * Get the underlying pg Pool or borrowed PoolClient instance.
 	 */
-	getPoolInstance(): Pool {
-		return this.requireConnection() as Pool;
+	getPoolInstance(): Pool | PoolClient {
+		return this.requireConnection();
 	}
 
 	// =========================================================================
@@ -1542,9 +1684,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		// Use a wrapper to create the async generator
 		async function* streamGenerator(): AsyncIterableIterator<T> {
-			// If already in transaction (has client), use it directly
 			if (adapter.client) {
-				yield* adapter.streamWithClient<T>(adapter.client, query, chunkSize);
+				if (!adapter.managedTransactions) {
+					throw new Error(
+						'stream() requires a PostgreSQL transaction because cursors do not survive outside one. ' +
+							'This adapter uses a borrowed PoolClient; pass managedTransactions: true ' +
+							'to let dbsp open a transaction or savepoint for the stream.',
+					);
+				}
+				yield* adapter.streamWithManagedClient<T>(
+					adapter.client,
+					query,
+					chunkSize,
+				);
 				return;
 			}
 
@@ -1625,6 +1777,62 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
+	private async *streamWithManagedClient<T>(
+		client: PoolClient,
+		query: CompiledQuery<T>,
+		chunkSize: number,
+	): AsyncIterableIterator<T> {
+		const savepointName = nextSavepointName();
+		try {
+			await client.query(`SAVEPOINT ${savepointName}`);
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				yield* this.streamWithClientTransaction(client, query, chunkSize);
+				return;
+			}
+			throw error;
+		}
+
+		let completed = false;
+		try {
+			yield* this.streamWithClient<T>(client, query, chunkSize);
+			completed = true;
+		} finally {
+			if (completed) {
+				await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+			} else {
+				await this.rollbackAndReleaseSavepointQuietly(client, savepointName);
+			}
+		}
+	}
+
+	private async *streamWithClientTransaction<T>(
+		client: PoolClient,
+		query: CompiledQuery<T>,
+		chunkSize: number,
+	): AsyncIterableIterator<T> {
+		let begun = false;
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			begun = true;
+			yield* this.streamWithClient<T>(client, query, chunkSize);
+			await client.query('COMMIT');
+			committed = true;
+		} finally {
+			if (begun && !committed) {
+				try {
+					await client.query('ROLLBACK');
+				} catch (rollbackErr) {
+					this.logger?.debug?.(
+						'Rollback failed during stream cleanup',
+						rollbackErr,
+					);
+				}
+			}
+		}
+	}
+
 	// =========================================================================
 	// IntrospectingAdapter Methods
 	// =========================================================================
@@ -1645,12 +1853,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async introspect(
 		options?: IntrospectionOptions,
 	): Promise<IntrospectedModelIR> {
-		if (!this.pool) {
+		const executor = this.client ?? this.pool;
+		if (!executor) {
 			throw new Error(
 				'Cannot introspect without a database connection (compile-only adapter)',
 			);
 		}
-		return introspectDb(this.pool, options);
+		return introspectDb(executor, options);
 	}
 
 	// =========================================================================
@@ -1661,30 +1870,112 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Execute a callback within a database transaction.
 	 */
 	async transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T> {
-		// If already in a transaction (this.client exists), reuse it
 		if (this.client) {
-			return fn(this);
+			if (!this.managedTransactions) {
+				throw new Error(
+					'transaction() was called on a PgsqlAdapter created with a borrowed PoolClient. ' +
+						'This connection is yours, so the transaction is yours. Pass managedTransactions: true ' +
+						'to let dbsp run transactions on it through a savepoint, and read the managedTransactions option documentation for the limits of that contract.',
+				);
+			}
+			return this.transactionWithManagedClient(this.client, fn);
 		}
 
 		// Otherwise, acquire a client and start transaction
 		const pool = this.requireConnection() as Pool;
 		const client = await pool.connect();
 		try {
-			await client.query('BEGIN');
-
-			// Create transaction-scoped adapter preserving all configuration
-			const txOptions: PgsqlAdapterOptions = this.cloneOptions({});
-			const txAdapter = new PgsqlAdapter<DB>(client, txOptions);
-
-			const result = await fn(txAdapter);
-
-			await client.query('COMMIT');
-			return result;
-		} catch (error) {
-			await client.query('ROLLBACK');
-			throw error;
+			return await this.transactionWithClientTransaction(client, fn);
 		} finally {
 			client.release();
+		}
+	}
+
+	private createManagedClientAdapter(client: PoolClient): PgsqlAdapter<DB> {
+		return new PgsqlAdapter<DB>(
+			client,
+			this.cloneOptions({
+				borrowedClient: true,
+				managedTransactions: true,
+				adapterManagedTransaction: true,
+			}),
+		);
+	}
+
+	private async transactionWithManagedClient<T>(
+		client: PoolClient,
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+	): Promise<T> {
+		const savepointName = nextSavepointName();
+		try {
+			await client.query(`SAVEPOINT ${savepointName}`);
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				return this.transactionWithClientTransaction(client, fn);
+			}
+			throw error;
+		}
+
+		const txAdapter = this.createManagedClientAdapter(client);
+		try {
+			const result = await fn(txAdapter);
+			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+			return result;
+		} catch (error) {
+			await this.rollbackAndReleaseSavepointQuietly(client, savepointName);
+			throw error;
+		}
+	}
+
+	private async transactionWithClientTransaction<T>(
+		client: PoolClient,
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+	): Promise<T> {
+		let begun = false;
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			begun = true;
+			const txAdapter = this.createManagedClientAdapter(client);
+			const result = await fn(txAdapter);
+			await client.query('COMMIT');
+			committed = true;
+			return result;
+		} catch (error) {
+			if (begun && !committed) {
+				try {
+					await client.query('ROLLBACK');
+				} catch (rollbackErr) {
+					this.logger?.debug?.(
+						'Rollback failed during transaction cleanup',
+						rollbackErr,
+					);
+				}
+			}
+			throw error;
+		}
+	}
+
+	private async rollbackAndReleaseSavepointQuietly(
+		client: PoolClient,
+		savepointName: string,
+	): Promise<void> {
+		try {
+			await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+		} catch (rollbackErr) {
+			this.logger?.debug?.(
+				'Rollback to savepoint failed during cleanup',
+				rollbackErr,
+			);
+			return;
+		}
+		try {
+			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+		} catch (releaseErr) {
+			this.logger?.debug?.(
+				'Release savepoint failed during cleanup',
+				releaseErr,
+			);
 		}
 	}
 
@@ -1696,7 +1987,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		validateIdentifier(schemaName, 'schema');
 
 		// Create new adapter preserving all configuration, only overriding schemaName
-		const options: PgsqlAdapterOptions = this.cloneOptions({ schemaName });
+		const options = this.cloneOptions({ schemaName });
 		return new PgsqlAdapter<DB>(this.client ?? this.pool ?? undefined, options);
 	}
 
@@ -1751,20 +2042,77 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @since DDL-TABLE-001
 	 */
 	async executeDDL(sql: string): Promise<void> {
-		if (!this.pool) {
+		const executor = this.client ?? this.pool;
+		if (!executor) {
 			throw new Error('Cannot execute DDL on compile-only adapter');
 		}
-		await this.pool.query(sql);
+		await this.assertDDLAllowed(sql);
+		await executor.query(sql);
 	}
 
 	/**
 	 * Whether this adapter instance is scoped inside a transaction.
-	 * Guards unsafe DDL operations (VACUUM, CREATE INDEX CONCURRENTLY).
+	 * True only while the adapter is inside a transaction it manages.
 	 *
 	 * @since DDL-TABLE-001
 	 */
 	get inTransaction(): boolean {
-		return this.client !== undefined;
+		return this.adapterManagedTransaction;
+	}
+
+	private transactionForbiddenDDLMessage(sql: string): string | undefined {
+		const normalized = sql.trim().replace(/\s+/g, ' ').toUpperCase();
+		if (/^VACUUM\b/.test(normalized)) {
+			return 'VACUUM cannot run inside a transaction block';
+		}
+		if (/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/.test(normalized)) {
+			return 'CREATE INDEX CONCURRENTLY cannot run inside a transaction block';
+		}
+		if (/^DROP\s+INDEX\s+CONCURRENTLY\b/.test(normalized)) {
+			return 'DROP INDEX CONCURRENTLY cannot run inside a transaction block';
+		}
+		return undefined;
+	}
+
+	private async assertDDLAllowed(sql: string): Promise<void> {
+		const message = this.transactionForbiddenDDLMessage(sql);
+		if (!message) return;
+
+		if (this.inTransaction) {
+			throw new Error(message);
+		}
+
+		if (!this.client) return;
+
+		let hasActiveTransaction: boolean;
+		try {
+			hasActiveTransaction = await this.probeActiveTransaction(this.client);
+		} catch (error) {
+			this.logger?.debug?.(
+				'Could not probe transaction state before DDL',
+				error,
+			);
+			throw new Error(
+				`${message}. Could not confirm the borrowed client is outside a transaction.`,
+			);
+		}
+		if (hasActiveTransaction) {
+			throw new Error(message);
+		}
+	}
+
+	private async probeActiveTransaction(client: PoolClient): Promise<boolean> {
+		const savepointName = nextSavepointName();
+		try {
+			await client.query(`SAVEPOINT ${savepointName}`);
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				return false;
+			}
+			throw error;
+		}
+		await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+		return true;
 	}
 
 	/**
@@ -1961,9 +2309,30 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
  */
 export function createPgsqlAdapter<DB = unknown>(
 	pool: Pool,
-	options?: PgsqlAdapterOptions,
+	options?: PgsqlPoolAdapterOptions,
+): PgsqlAdapter<DB>;
+export function createPgsqlAdapter<DB = unknown>(
+	client: PoolClient,
+	options: PgsqlBorrowedClientAdapterOptions,
+): PgsqlAdapter<DB>;
+export function createPgsqlAdapter<DB = unknown>(
+	connection: Pool | PoolClient,
+	options?: PgsqlPoolAdapterOptions | PgsqlBorrowedClientAdapterOptions,
 ): PgsqlAdapter<DB> {
-	return new PgsqlAdapter<DB>(pool, options);
+	if (isPoolClientLike(connection)) {
+		if (!hasBorrowedClientOption(options)) {
+			throw new Error(
+				'createPgsqlAdapter() received a pg PoolClient. Pass borrowedClient: true ' +
+					'to declare that the caller owns this connection.',
+			);
+		}
+	} else if (hasBorrowedClientOption(options)) {
+		throw new Error(
+			'createPgsqlAdapter() received borrowedClient: true with a pg Pool. ' +
+				'Pass a PoolClient when borrowing a caller-owned connection.',
+		);
+	}
+	return new PgsqlAdapter<DB>(connection, options);
 }
 
 /**

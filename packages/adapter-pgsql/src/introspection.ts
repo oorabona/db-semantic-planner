@@ -30,7 +30,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { buildRelationKeyFields } from '@dbsp/types';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
@@ -236,7 +236,7 @@ interface CatalogResults {
  * param), sequences, rls state, policies, formatted column types.
  */
 async function queryAllCatalogs(
-	pool: Pool,
+	pool: Pool | PoolClient,
 	schema: string,
 ): Promise<CatalogResults> {
 	const [
@@ -1029,7 +1029,7 @@ function buildSequenceMap(
 }
 
 export async function introspect(
-	pool: Pool,
+	pool: Pool | PoolClient,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';
