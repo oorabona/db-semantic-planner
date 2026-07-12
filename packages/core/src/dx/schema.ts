@@ -1,8 +1,8 @@
 /**
  * ARCH-005: Unified Schema API
  *
- * Replaces defineSchema(), TypedSchema, and GeneratedSchema with a single
- * schema() + ref() API. Relations are auto-inferred from FK declarations.
+ * Provides the schema() + ref() API. Relations are auto-inferred from FK
+ * declarations.
  *
  * @example
  * ```typescript

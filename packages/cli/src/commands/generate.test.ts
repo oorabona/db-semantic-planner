@@ -20,6 +20,40 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	})),
 }));
 
+const loadSchema = vi.hoisted(() => vi.fn());
+vi.mock('../utils/schema-loader.js', () => ({
+	loadSchema,
+	loadSchemaFromCwd: loadSchema,
+}));
+
+describe('generate: a refused target never runs the user schema', () => {
+	// Loading a schema executes the user's module. A target we are going to
+	// refuse must be refused first.
+	it.each([
+		'manifest',
+		'kysely',
+		'typo',
+	])('rejects %s without loading the schema', async (target) => {
+		loadSchema.mockClear();
+		const { generateCommand } = await import('./generate.js');
+		const exit = vi
+			.spyOn(process, 'exit')
+			.mockImplementation((() => undefined) as never);
+		const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		await generateCommand.parseAsync(['node', 'dbsp', target]);
+
+		expect(loadSchema).not.toHaveBeenCalled();
+		expect(stderr).toHaveBeenCalledWith(
+			expect.stringContaining(
+				target === 'typo' ? 'Unknown target' : 'has been removed',
+			),
+		);
+		exit.mockRestore();
+		stderr.mockRestore();
+	});
+});
+
 describe('E01 Regression: generate command options', () => {
 	describe('--drop option', () => {
 		it('includeDropStatements is passed to generateDDL when --drop is set', async () => {

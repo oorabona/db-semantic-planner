@@ -9,19 +9,10 @@
  * Two FKs to the same table already generate distinct inverses via
  * the `${localRelation}_${sourceTable}` convention: caller_calls, callee_calls.
  *
- * --- defineSchema / conventions path (conventions.ts → inferRelationsFromSchema) ---
- * Uses camelCase column name inference (callerId → 'caller', calleeId → 'callee').
- * Fix: when inferredName differs from singularize(targetTable), use pluralize(inferredName)
- * so both FKs get distinct hasMany names: 'callers', 'callees'.
  */
 
 import { describe, expect, it } from 'vitest';
 import { createPgsqlCompileOnlyAdapter } from '../../../../adapter-pgsql/src/pgsql-adapter.js';
-import {
-	DEFAULT_CONVENTIONS,
-	inferRelationsFromSchema,
-} from '../../conventions.js';
-import type { SchemaTablesDefinition } from '../../schema-dsl-types.js';
 import { createOrm } from '../orm.js';
 import { ref, schema } from '../schema.js';
 
@@ -61,56 +52,6 @@ function buildOrm(db: typeof callGraphSchema) {
 	const adapter = createPgsqlCompileOnlyAdapter({ model: db.model });
 	return createOrm({ model: db.model, adapter });
 }
-
-// ---------------------------------------------------------------------------
-// Tests: conventions path (inferRelationsFromSchema)
-// ---------------------------------------------------------------------------
-
-describe('hasMany disambiguation — conventions path (inferRelationsFromSchema)', () => {
-	const tables: SchemaTablesDefinition = {
-		symbols: {
-			id: { type: 'integer', primaryKey: true },
-		},
-		calls: {
-			id: { type: 'integer', primaryKey: true },
-			// Business column prevents junction-table detection (needs > 2 FK-only cols)
-			lineNumber: { type: 'integer' },
-			// camelCase columns: callerId → inferredName='caller', calleeId → inferredName='callee'
-			callerId: { type: 'integer', references: { table: 'symbols' } },
-			calleeId: { type: 'integer', references: { table: 'symbols' } },
-		},
-	};
-
-	it('symbols should have TWO distinct hasMany relations: callers and callees', () => {
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		expect(relations['symbols.callers']).toBeDefined();
-		expect(relations['symbols.callees']).toBeDefined();
-	});
-
-	it('both should be hasMany kind', () => {
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		expect(relations['symbols.callers']?.kind).toBe('hasMany');
-		expect(relations['symbols.callees']?.kind).toBe('hasMany');
-	});
-
-	it('callers hasMany should reference callerId FK', () => {
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		expect(relations['symbols.callers']?.foreignKey).toBe('callerId');
-	});
-
-	it('callees hasMany should reference calleeId FK', () => {
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		expect(relations['symbols.callees']?.foreignKey).toBe('calleeId');
-	});
-
-	it('forward belongsTo relations on calls are also distinct', () => {
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		expect(relations['calls.caller']).toBeDefined();
-		expect(relations['calls.callee']).toBeDefined();
-		expect(relations['calls.caller']?.kind).toBe('belongsTo');
-		expect(relations['calls.callee']?.kind).toBe('belongsTo');
-	});
-});
 
 // ---------------------------------------------------------------------------
 // Tests: schema() DSL path (buildRelations via schema())
@@ -186,20 +127,5 @@ describe('hasMany disambiguation — backward compat, single FK', () => {
 		// localRelation='author' (from authorId), inverse='author_posts'
 		expect(hasManyRelation?.name).toBe('author_posts');
 		expect(hasManyRelation?.foreignKey).toBe('authorId');
-	});
-
-	it('conventions path: single FK uses pluralize(tableName) when no custom alias', () => {
-		const tables: SchemaTablesDefinition = {
-			users: { id: { type: 'integer', primaryKey: true } },
-			posts: {
-				id: { type: 'integer', primaryKey: true },
-				// userId → inferredName='user' = singularize('users') → no custom alias → 'posts'
-				userId: { type: 'integer', references: { table: 'users' } },
-			},
-		};
-		const relations = inferRelationsFromSchema(tables, DEFAULT_CONVENTIONS);
-		// 'user' === singularize('users') → use pluralize(singularize('posts')) = 'posts'
-		expect(relations['users.posts']).toBeDefined();
-		expect(relations['users.posts']?.kind).toBe('hasMany');
 	});
 });

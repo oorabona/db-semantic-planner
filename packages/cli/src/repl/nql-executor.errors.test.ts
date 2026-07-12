@@ -6,11 +6,7 @@
  * intent summary edge cases, isNqlQuery edge cases.
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
-import {
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
-} from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	compileNqlToSql,
@@ -21,45 +17,21 @@ import {
 } from './nql-executor.js';
 
 // Minimal schema for error path testing
-const testSchema: ResolvedSchema = {
-	tables: {
-		users: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string', nullable: false },
-			email: { type: 'string', nullable: false },
-			active: { type: 'boolean', default: 'true' },
-		},
-		posts: {
-			id: { type: 'integer', primaryKey: true },
-			title: { type: 'string', nullable: false },
-			user_id: { type: 'integer', references: { table: 'users' } },
-		},
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'string', nullable: false },
+		email: { type: 'string', nullable: false },
+		active: { type: 'boolean', default: 'true' },
 	},
-	relations: {
-		'posts.author': {
-			kind: 'belongsTo',
-			target: 'users',
-			foreignKey: 'user_id',
-		},
-		'users.posts': {
-			kind: 'hasMany',
-			target: 'posts',
-			foreignKey: 'user_id',
-		},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: { type: 'string', nullable: false },
+		user_id: ref('users', { as: 'author', inverse: 'posts' }),
 	},
-	hints: {},
-	indexes: {},
-	defaultFilters: {},
-	conventions: {
-		fkPattern: '{singular}_id',
-		pluralize: true,
-		timestamps: ['created_at', 'updated_at'],
-		fkAutoIndex: true,
-	},
-};
+});
 
-const generated = assertResolvedSchemaToGeneratedSchema(testSchema);
-const model = buildModelFromSchema(generated);
+const model = testSchema.model;
 
 // ============================================================================
 // NqlParseError

@@ -3,8 +3,6 @@
  * Developer Experience enhancements - strict mode, disambiguation, type-safe queries.
  */
 
-// Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
-export { defineSchema, SchemaValidationError } from '../schema-dsl.js';
 // BatchValues (FR-3)
 export {
 	type BatchValuesOptions,
@@ -77,7 +75,7 @@ export {
 	any,
 	// Expression
 	coalesce,
-	// Column alias (native Kysely API)
+	// Column alias expression helper
 	col,
 	type DistinctField,
 	// Window function builders (DX-021)
@@ -319,43 +317,13 @@ export {
 	// E17: Schema options with default filters
 	type SchemaOptions,
 	type SchemaTableOptions,
+	SchemaValidationError,
 	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
 	schema,
 	schemaToModelIR,
 	type TableDef,
 } from './schema.js';
-// Schema Bridge (ARCH-002 codegen-first)
-export {
-	// CORE-005: ResolvedSchema → GeneratedSchema converter with Valibot
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromResolvedSchema,
-	buildModelFromSchema,
-	// DX-102: Type inference utilities for createOrm
-	type ColumnTypeToTS,
-	type GeneratedBelongsTo,
-	type GeneratedColumn,
-	type GeneratedColumnType,
-	type GeneratedConventions,
-	type GeneratedHasMany,
-	type GeneratedHint,
-	type GeneratedManyToMany,
-	type GeneratedRelation,
-	type GeneratedRelationKind,
-	type GeneratedSchema,
-	type GeneratedTable,
-	// DX-102: Infer DB type from schema
-	type InferDBFromSchema,
-	type InferRowType,
-	isGeneratedSchema,
-	// DX-100: Schema type unification - auto-detect and convert ResolvedSchema
-	isResolvedSchema,
-	normalizeSchema,
-	ResolvedSchemaValidation,
-	resolvedSchemaToGeneratedSchema,
-	type SchemaConversionResult,
-	type ValidatedResolvedSchema,
-} from './schema-bridge.js';
 // DX-040-SURFACE: InferTables utility type for typed table refs
 export type { InferTables } from './schema-tables-types.js';
 // Set Operation Builder (UNION / INTERSECT / EXCEPT)
@@ -442,8 +410,6 @@ export type {
 	OrmOptions,
 	OrmOptionsWithAdapter,
 	OrmOptionsWithModel,
-	// ARCH-002: Codegen-first schema option
-	OrmOptionsWithSchema,
 	PaginatedResult,
 	PaginateOptions,
 	QueryBuilder,

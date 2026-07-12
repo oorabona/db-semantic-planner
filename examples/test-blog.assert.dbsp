@@ -94,7 +94,7 @@ sql.equals: SELECT DISTINCT posts.* FROM posts
 
 # ──────────────────────────────────────────────────────────────────
 # TODO: Aggregate query assertions - uncomment when NQL aggregate
-# expressions are integrated with adapter-kysely compiler.
+# expressions are enabled in the active SQL compiler.
 # See TODO_NQL_MIGRATION.md for tracking.
 # ──────────────────────────────────────────────────────────────────
 

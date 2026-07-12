@@ -46,7 +46,7 @@ export interface BatchState {
 
 /**
  * Format table list as text
- * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
+ * Uses schema.model (ModelIR) from the loaded schema.
  */
 function formatTables(schema: LoadedSchema): string {
 	const tables = schema.tableNames;
@@ -55,7 +55,7 @@ function formatTables(schema: LoadedSchema): string {
 
 /**
  * Format table schema as text
- * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
+ * Uses schema.model (ModelIR) from the loaded schema.
  */
 function formatTableSchema(schema: LoadedSchema, tableName: string): string {
 	const table = schema.model.tables.get(tableName);
@@ -81,7 +81,7 @@ function getRelationDescription(rel: { type: string; target: string }): string {
 
 /**
  * Format relations as text
- * ARCH-005: Uses schema.model (ModelIR) instead of ResolvedSchema
+ * Uses schema.model (ModelIR) from the loaded schema.
  */
 function formatRelations(schema: LoadedSchema, tableName?: string): string {
 	const relations = Array.from(schema.model.relations.entries());
@@ -667,7 +667,7 @@ const DOT_COMMAND_HANDLERS: Map<string, DotCommandHandler> = new Map([
 
 /**
  * Process a dot command (async to support .import)
- * ARCH-005: Uses LoadedSchema instead of ResolvedSchema
+ * Uses the loaded schema for dot-command metadata.
  * @internal - Exported for testing
  */
 export async function processDotCommand(

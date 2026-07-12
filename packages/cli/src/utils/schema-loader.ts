@@ -55,7 +55,7 @@ export function findSchemaFile(cwd: string): string | null {
 /**
  * Load a schema from a TypeScript or JavaScript file.
  *
- * ARCH-005: Only accepts new schema() format, not legacy defineSchema().
+ * ARCH-005: Only accepts schema() results.
  * For TypeScript files, this uses tsx loader via dynamic import.
  */
 export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
@@ -139,7 +139,7 @@ export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 				`Failed to load TypeScript schema. Make sure 'tsx' is installed:\n` +
 					`  pnpm add -D tsx\n\n` +
 					`Then run dbsp via tsx:\n` +
-					`  pnpm tsx node_modules/.bin/dbsp generate manifest\n\n` +
+					`  pnpm tsx node_modules/.bin/dbsp generate ddl\n\n` +
 					`Original error: ${message}`,
 			);
 		}

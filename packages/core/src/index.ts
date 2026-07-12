@@ -212,11 +212,13 @@ export {
 	type RefOptions,
 	ref,
 	type Schema,
+	type SchemaColumnType,
 	type SchemaColumnType as NewSchemaColumnType,
 	type SchemaConstraints,
 	type SchemaDefinition,
 	type SchemaIndexValidationInput,
 	type SchemaTableOptions,
+	SchemaValidationError,
 	SchemaValidationError as SchemaError,
 	type SelfRefRoles,
 	schema,
@@ -225,61 +227,14 @@ export {
 	validateSchemaIndexOptions,
 } from './dx/schema.js';
 
-// Legacy Schema DSL (prefer schema() + ref() from ARCH-005)
-export {
-	defineSchema,
-	SchemaValidationError,
-} from './schema-dsl.js';
-export type {
-	// Output
-	ResolvedSchema,
-	SchemaBelongsToRelation,
-	SchemaCardinality,
-	SchemaColumnDefinition,
-	// Column types
-	SchemaColumnType,
-	// Config
-	SchemaConfigInput,
-	// Conventions
-	SchemaConventionsDefinition,
-	SchemaDefinitionInput,
-	// Hints
-	SchemaFilterStrategy,
-	SchemaForeignKeyReference,
-	SchemaHasManyRelation,
-	SchemaHintDefinition,
-	SchemaHintsDefinition,
-	// Index types
-	SchemaIndexDefinition,
-	SchemaIndexesDefinition,
-	SchemaManyToManyRelation,
-	SchemaOnDeleteAction,
-	SchemaRelationDefinition,
-	// Relation types
-	SchemaRelationKind,
-	SchemaRelationsDefinition,
-	SchemaTableDefinition,
-	SchemaTablesDefinition,
-} from './schema-dsl-types.js';
-export {
-	// Type guards
-	isBelongsTo,
-	isHasMany,
-	isManyToMany,
-} from './schema-dsl-types.js';
-
 // ============================================================================
-// Conventions (FK detection, pluralization)
+// Conventions (pluralization and casing)
 // ============================================================================
 
 export {
 	capitalize,
-	DEFAULT_CONVENTIONS,
 	decapitalize,
-	detectForeignKeys,
-	detectManyToMany,
 	IRREGULAR_PLURALS,
-	inferRelationsFromSchema,
 	pluralize,
 	singularize,
 } from './conventions.js';

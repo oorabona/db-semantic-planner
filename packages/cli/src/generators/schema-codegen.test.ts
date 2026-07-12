@@ -50,7 +50,7 @@ function expectValidTypeScript(source: string): void {
 	expect(errors.map((diagnostic) => diagnostic.messageText)).toEqual([]);
 }
 
-async function loadGeneratedSchemaCode(source: string) {
+async function loadEmittedSchemaCode(source: string) {
 	const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-schema-codegen-'));
 	try {
 		const schemaPath = join(tmpDir, 'dbsp.schema.ts');
@@ -443,8 +443,7 @@ describe('generateSchemaFile', () => {
 		});
 
 		it('includes DB type comments when enabled', () => {
-			// For this test, we need to manually create a model with originalDbType
-			// since defineSchema doesn't include that field
+			// For this test, we need to manually create a model with originalDbType.
 			const model = schema({
 				users: {
 					id: { type: 'uuid', primaryKey: true },
@@ -811,7 +810,7 @@ describe('generateSchemaFile', () => {
 				expect.stringContaining('Invalid index method: "rum"'),
 			);
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
 			expect(diff.changes).toEqual([]);
@@ -1199,7 +1198,7 @@ describe('generateSchemaFile', () => {
 				),
 			);
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
 			expect(diff.changes).toEqual([]);
@@ -1236,7 +1235,7 @@ describe('generateSchemaFile', () => {
 				),
 			);
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			const diff = compareSchemata(loaded.model, model);
 			expect(diff.changes).toEqual([]);
@@ -1269,7 +1268,7 @@ describe('generateSchemaFile', () => {
 			expect(result.code).toContain("name: 'idx_notes_active'");
 			expect(result.code).toContain("where: 'deleted_at IS NULL'");
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			expect(() => generateDDL(loaded.model)).not.toThrow();
 			expect(compareSchemata(loaded.model, model).changes).toEqual([]);
 		});
@@ -1346,7 +1345,7 @@ describe('generateSchemaFile', () => {
 				),
 			);
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			for (const table of loaded.model.tables.values()) {
 				for (const idx of table.indexes) {
 					expect(() =>
@@ -1387,7 +1386,7 @@ describe('generateSchemaFile', () => {
 			);
 			expect(result.code).toContain("with: { ['__proto__']: '70' }");
 
-			const loaded = await loadGeneratedSchemaCode(result.code);
+			const loaded = await loadEmittedSchemaCode(result.code);
 			const idx = loaded.model.getTable('notes')?.indexes[0];
 			expect(Object.hasOwn(idx?.opclass ?? {}, '__proto__')).toBe(true);
 			expect(Object.hasOwn(idx?.with ?? {}, '__proto__')).toBe(true);

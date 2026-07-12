@@ -55,7 +55,7 @@ export function findSchemaFile(cwd: string): string | null {
 /**
  * Load a schema from a TypeScript or JavaScript file.
  *
- * ARCH-005: Only accepts new schema() format, not legacy defineSchema().
+ * ARCH-005: Only accepts schema() results.
  *
  * @param schemaPath - Absolute or relative path to the schema file
  * @returns The loaded schema with definition, ModelIR, and table names

@@ -4,11 +4,7 @@
  * Part of NQLM (NQL CLI Migration) - Block 2
  */
 
-import type { ResolvedSchema } from '@dbsp/core';
-import {
-	assertResolvedSchemaToGeneratedSchema,
-	buildModelFromSchema,
-} from '@dbsp/core';
+import { ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
 import {
 	compileNqlToSql,
@@ -17,59 +13,33 @@ import {
 	NqlParseError,
 } from './nql-executor.js';
 
-// Test schema: ResolvedSchema → assertResolvedSchemaToGeneratedSchema → buildModelFromSchema
-const testSchema: ResolvedSchema = {
-	tables: {
-		users: {
-			id: { type: 'integer', primaryKey: true },
-			name: { type: 'string', nullable: false },
-			email: { type: 'string', nullable: false },
-			active: { type: 'boolean', default: 'true' },
-			age: { type: 'integer', nullable: true },
-			created_at: { type: 'timestamp', nullable: true },
-		},
-		posts: {
-			id: { type: 'integer', primaryKey: true },
-			title: { type: 'string', nullable: false },
-			content: { type: 'string', nullable: true },
-			published: { type: 'boolean', default: 'false' },
-			user_id: { type: 'integer', references: { table: 'users' } },
-			created_at: { type: 'timestamp', nullable: true },
-		},
-		orders: {
-			id: { type: 'integer', primaryKey: true },
-			status: { type: 'string', nullable: false },
-			total: { type: 'decimal', nullable: false },
-			user_id: { type: 'integer', references: { table: 'users' } },
-			created_at: { type: 'timestamp', nullable: true },
-		},
+const testSchema = schema({
+	users: {
+		id: { type: 'integer', primaryKey: true },
+		name: { type: 'string', nullable: false },
+		email: { type: 'string', nullable: false },
+		active: { type: 'boolean', default: 'true' },
+		age: { type: 'integer', nullable: true },
+		created_at: { type: 'timestamp', nullable: true },
 	},
-	relations: {
-		'posts.author': {
-			kind: 'belongsTo',
-			target: 'users',
-			foreignKey: 'user_id',
-		},
-		'users.posts': {
-			kind: 'hasMany',
-			target: 'posts',
-			foreignKey: 'user_id',
-		},
+	posts: {
+		id: { type: 'integer', primaryKey: true },
+		title: { type: 'string', nullable: false },
+		content: { type: 'string', nullable: true },
+		published: { type: 'boolean', default: 'false' },
+		user_id: ref('users', { as: 'author', inverse: 'posts' }),
+		created_at: { type: 'timestamp', nullable: true },
 	},
-	hints: {},
-	indexes: {},
-	defaultFilters: {},
-	conventions: {
-		fkPattern: '{singular}_id',
-		pluralize: true,
-		timestamps: ['created_at', 'updated_at'],
-		fkAutoIndex: true,
+	orders: {
+		id: { type: 'integer', primaryKey: true },
+		status: { type: 'string', nullable: false },
+		total: { type: 'decimal', nullable: false },
+		user_id: ref('users'),
+		created_at: { type: 'timestamp', nullable: true },
 	},
-};
+});
 
-// Convert to GeneratedSchema, then to ModelIR
-const generatedSchema = assertResolvedSchemaToGeneratedSchema(testSchema);
-const testModel = buildModelFromSchema(generatedSchema);
+const testModel = testSchema.model;
 
 describe('nql-executor', () => {
 	describe('isNqlQuery', () => {

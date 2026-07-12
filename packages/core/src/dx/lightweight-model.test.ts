@@ -652,9 +652,9 @@ describe('Type Safety', () => {
 // Feature 7: Backward Compatibility
 // ============================================================================
 
-describe('Backward Compatibility', () => {
+describe('ModelIR interface', () => {
 	describe('Scenario 5.2: API produces equivalent ModelIR', () => {
-		it('should produce ModelIR with same interface as defineSchema', () => {
+		it('should produce a complete ModelIR interface', () => {
 			const model = defineModel<TestDatabase>({
 				relations: {
 					'users.posts': '1:N',

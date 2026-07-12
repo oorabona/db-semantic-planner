@@ -26,7 +26,6 @@ import type {
 	RawCteQueryBuilder,
 	RecursiveOptions,
 } from './raw-cte-builder.js';
-import type { GeneratedSchema, InferDBFromSchema } from './schema-bridge.js';
 import type { DropIndexOptions, TableDDL } from './table-ddl-types.js';
 import type { ColumnRef, InferTableRow, TableRef } from './table-ref.js';
 import type {
@@ -56,11 +55,10 @@ import type {
  */
 /**
  * Union type for all ORM options.
- * Prefer specific option types (OrmOptionsWithModel, OrmOptionsWithSchema, OrmOptionsWithAdapter).
+ * Prefer specific option types (OrmOptionsWithModel, OrmOptionsWithAdapter).
  */
 export type OrmOptions<DB = unknown> =
 	| OrmOptionsWithModel<DB>
-	| OrmOptionsWithSchema<GeneratedSchema, DB>
 	| OrmOptionsWithAdapter<DB>;
 
 /**
@@ -126,33 +124,10 @@ interface OrmOptionsBase<DB = unknown> {
 
 /**
  * OrmOptions with explicit model (sync creation).
- * Prefer OrmOptionsWithSchema for codegen-first approach.
  */
 export interface OrmOptionsWithModel<DB = unknown> extends OrmOptionsBase<DB> {
 	readonly model: ModelIR;
 	readonly schema?: never;
-}
-
-/**
- * OrmOptions with generated schema (sync creation, codegen-first).
- * Preferred approach for ARCH-002 codegen-first architecture.
- *
- * @typeParam TSchema - The schema type (inferred from schema value)
- * @typeParam DB - The database type (inferred from TSchema when possible)
- *
- * @example
- * ```typescript
- * const schema = { tables: { users: { id: { type: 'uuid' } } } } as const satisfies GeneratedSchema;
- * const orm = createOrm({ schema, adapter });
- * // DB is inferred as { users: { id: string } }
- * ```
- */
-export interface OrmOptionsWithSchema<
-	TSchema extends GeneratedSchema = GeneratedSchema,
-	DB = InferDBFromSchema<TSchema>,
-> extends OrmOptionsBase<DB> {
-	readonly schema: TSchema;
-	readonly model?: never;
 }
 
 /**
@@ -168,7 +143,7 @@ export interface OrmOptionsWithAdapter<DB = unknown>
 /**
  * ORM instance created by createOrm().
  *
- * @typeParam DB - Database schema type (Kysely-like).
+ * @typeParam DB - Database row map type.
  *   Keys are table names, values are row types.
  *   When provided, query() method provides autocomplete for table names
  *   and infers result types automatically.
@@ -203,7 +178,7 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  * Internal code (NQL, planner, tests) that needs string-based access should
  * cast to `OrmInstanceInternal<DB>`.
  *
- * @typeParam DB - Database schema type (Kysely-like).
+ * @typeParam DB - Database row map type.
  *   Keys are table names, values are row types.
  *
  * @example
@@ -221,7 +196,7 @@ export interface OrmOptionsWithAdapter<DB = unknown>
  *
  * @example
  * ```typescript
- * // With Schema wrapper (from schema() / defineSchema())
+ * // With Schema wrapper from schema()
  * const db = schema({ users: { id: 'integer', name: 'string' } });
  * type MyOrm = OrmOf<typeof db>;  // unwraps Schema<T> → InferDB<T>
  *

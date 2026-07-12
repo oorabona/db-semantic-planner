@@ -166,7 +166,7 @@ export interface SimplifiedOrmOptions<
 /**
  * Create an ORM instance with the specified configuration.
  *
- * @typeParam DB - Database schema type (Kysely-like).
+ * @typeParam DB - Database row map type.
  *   Keys are table names, values are row types.
  *   When provided, query() provides autocomplete and type inference.
  *

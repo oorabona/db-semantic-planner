@@ -3,7 +3,7 @@
 	"name": "db-semantic-planner",
 	"entryPoints": [
 		"packages/core/src/index.ts",
-		"packages/adapter-kysely/src/index.ts"
+		"packages/adapter-pgsql/src/index.ts"
 	],
 	"entryPointStrategy": "expand",
 	"out": "docs/api",
@@ -40,5 +40,5 @@
 		"notDocumented": false
 	},
 	"plugin": [],
-	"tsconfig": "packages/core/tsconfig.json"
+	"tsconfig": "tsconfig.typedoc.json"
 }

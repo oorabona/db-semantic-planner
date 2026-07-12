@@ -24,7 +24,7 @@ posts | select distinct *
 
 # ──────────────────────────────────────────────────────────────────
 # TODO: Aggregate queries - NQL produces { kind: 'aggregate' } but
-# adapter-kysely doesn't handle it yet. Uncomment when implemented.
+# aggregate expression compilation is not enabled here yet. Uncomment when implemented.
 # See TODO_NQL_MIGRATION.md for tracking.
 # ──────────────────────────────────────────────────────────────────
 # posts | select count(*)
