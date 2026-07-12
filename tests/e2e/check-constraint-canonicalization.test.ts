@@ -15,7 +15,16 @@ import {
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl, schema } from '@dbsp/core';
 import type { ColumnIR, TableIR } from '@dbsp/types';
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from 'vitest';
+import { verifyCommand } from '../../packages/cli/src/commands/verify.js';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
 import { loadSchema } from '../../packages/cli/src/utils/schema-loader.js';
 import {
@@ -43,6 +52,202 @@ function changeKinds(
 	diff: Awaited<ReturnType<typeof comparePgsqlDatabaseSchema>>,
 ): string[] {
 	return diff.changes.map((change) => change.kind);
+}
+
+interface VerifyCommandResult {
+	readonly stdout: string;
+	readonly stderr: string;
+	readonly exitCode: string | number | undefined;
+}
+
+function writeTempSchemaFile(contents: string): {
+	readonly schemaPath: string;
+	readonly tmpDir: string;
+} {
+	const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-check-verify-'));
+	const schemaPath = join(tmpDir, 'dbsp.schema.ts');
+	writeFileSync(schemaPath, contents, 'utf8');
+	return { schemaPath, tmpDir };
+}
+
+async function runVerifyCommand(
+	args: readonly string[],
+): Promise<VerifyCommandResult> {
+	const stdout: string[] = [];
+	const stderr: string[] = [];
+	const previousExitCode = process.exitCode;
+	process.exitCode = undefined;
+	const logSpy = vi
+		.spyOn(console, 'log')
+		.mockImplementation((message?: unknown, ...rest: unknown[]) => {
+			stdout.push([message, ...rest].map(String).join(' '));
+		});
+	const warnSpy = vi
+		.spyOn(console, 'warn')
+		.mockImplementation((message?: unknown, ...rest: unknown[]) => {
+			stderr.push([message, ...rest].map(String).join(' '));
+		});
+	const errorSpy = vi
+		.spyOn(console, 'error')
+		.mockImplementation((message?: unknown, ...rest: unknown[]) => {
+			stderr.push([message, ...rest].map(String).join(' '));
+		});
+	const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+		code?: string | number | null | undefined,
+	) => {
+		throw new Error(`process.exit:${code}`);
+	}) as typeof process.exit);
+
+	try {
+		await verifyCommand.parseAsync([...args], { from: 'user' });
+		return {
+			stdout: stdout.join('\n'),
+			stderr: stderr.join('\n'),
+			exitCode: process.exitCode,
+		};
+	} finally {
+		process.exitCode = previousExitCode;
+		logSpy.mockRestore();
+		warnSpy.mockRestore();
+		errorSpy.mockRestore();
+		exitSpy.mockRestore();
+	}
+}
+
+function parseVerifyJson(result: VerifyCommandResult): Record<string, unknown> {
+	return JSON.parse(result.stdout) as Record<string, unknown>;
+}
+
+/**
+ * The CHECK constraint drift `verify` reports.
+ *
+ * `verify` also reports every extension installed in the database that the schema
+ * does not declare — 57 of them on the e2e image — because `compareSchemata`
+ * defaults to managing extensions it was never told about (#317). That noise is
+ * not what these tests are about, and it predates the live-diff work, so they look
+ * at the CHECK constraint drift only.
+ */
+function checkIssues(
+	json: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+	const issues = (json.issues ?? []) as Array<Record<string, unknown>>;
+	return issues.filter(
+		(issue) => typeof issue.type === 'string' && issue.type.includes('check'),
+	);
+}
+
+function quoteIdent(name: string): string {
+	return `"${name.replace(/"/gu, '""')}"`;
+}
+
+function quoteLiteral(value: string): string {
+	return `'${value.replace(/'/gu, "''")}'`;
+}
+
+async function publicHasTempPrivilege(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+): Promise<boolean> {
+	const result = await pool.query<{ acl: string[] | null }>(
+		`SELECT datacl::text[] AS acl
+		 FROM pg_database
+		 WHERE datname = current_database()`,
+	);
+	const acl = result.rows[0]?.acl;
+	if (acl === null || acl === undefined) return true;
+	return acl.some((item) => {
+		const grantee = item.slice(0, item.indexOf('='));
+		const privileges = item.slice(item.indexOf('=') + 1, item.indexOf('/'));
+		return grantee === '' && privileges.includes('T');
+	});
+}
+
+async function roleExists(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	role: string,
+): Promise<boolean> {
+	const result = await pool.query<{ exists: boolean }>(
+		'SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists',
+		[role],
+	);
+	return result.rows[0]?.exists === true;
+}
+
+async function setupNoTempRole(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	role: string,
+	password: string,
+	schemaName: string,
+): Promise<{ readonly database: string; readonly publicHadTemp: boolean }> {
+	const databaseResult = await pool.query<{ name: string }>(
+		'SELECT current_database() AS name',
+	);
+	const database = databaseResult.rows[0]!.name;
+	const publicHadTemp = await publicHasTempPrivilege(pool);
+	if (await roleExists(pool, role)) {
+		await cleanupNoTempRole(pool, role, schemaName, database, publicHadTemp);
+	}
+	try {
+		await pool.query(
+			`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
+		);
+		await pool.query(
+			`GRANT CONNECT ON DATABASE ${quoteIdent(database)} TO ${quoteIdent(role)}`,
+		);
+		await pool.query(
+			`GRANT USAGE ON SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
+		);
+		await pool.query(
+			`GRANT SELECT ON ALL TABLES IN SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
+		);
+		await pool.query(
+			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM PUBLIC`,
+		);
+		await pool.query(
+			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM ${quoteIdent(role)}`,
+		);
+		return { database, publicHadTemp };
+	} catch (error) {
+		if (await roleExists(pool, role)) {
+			await cleanupNoTempRole(pool, role, schemaName, database, publicHadTemp);
+		}
+		throw error;
+	}
+}
+
+async function cleanupNoTempRole(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	role: string,
+	schemaName: string,
+	database: string,
+	publicHadTemp: boolean,
+): Promise<void> {
+	if (publicHadTemp) {
+		await pool.query(
+			`GRANT TEMPORARY ON DATABASE ${quoteIdent(database)} TO PUBLIC`,
+		);
+	} else {
+		await pool.query(
+			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM PUBLIC`,
+		);
+	}
+	await pool.query(
+		`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${quoteIdent(schemaName)} FROM ${quoteIdent(role)}`,
+	);
+	await pool.query(
+		`REVOKE ALL PRIVILEGES ON SCHEMA ${quoteIdent(schemaName)} FROM ${quoteIdent(role)}`,
+	);
+	await pool.query(
+		`REVOKE ALL PRIVILEGES ON DATABASE ${quoteIdent(database)} FROM ${quoteIdent(role)}`,
+	);
+	await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);
+	await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
+}
+
+function databaseUrlForRole(role: string, password: string): string {
+	const url = new URL(process.env.DATABASE_URL!);
+	url.username = role;
+	url.password = password;
+	return url.toString();
 }
 
 describe('#315 CHECK constraint canonicalization live diff', () => {
@@ -635,6 +840,313 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		} finally {
 			rmSync(tmpDir, { recursive: true, force: true });
 		}
+	});
+
+	describe('verify command', () => {
+		it('reports no drift when a CHECK differs only by PostgreSQL rendering', async () => {
+			const desired = schema(
+				{
+					jobs: {
+						id: { type: 'integer', primaryKey: true },
+						status: 'string',
+						skipped_at: { type: 'timestamp', nullable: true },
+					},
+				},
+				{
+					jobs: {
+						checkConstraints: [
+							{
+								name: 'jobs_status_skipped_check',
+								expression:
+									"status IS NOT DISTINCT FROM 'skipped' OR (status <> 'skipped' AND skipped_at IS NULL)",
+							},
+						],
+					},
+				},
+			);
+			await executeDdl(
+				pool,
+				generateDDL(desired.model, { schemaName: SCHEMA }),
+			);
+			const { schemaPath, tmpDir } = writeTempSchemaFile(`
+				import { schema } from '@dbsp/core';
+
+				export const dbSchema = schema(
+					{
+						jobs: {
+							id: { type: 'integer', primaryKey: true },
+							status: 'string',
+							skipped_at: { type: 'timestamp', nullable: true },
+						},
+					},
+					{
+						jobs: {
+							checkConstraints: [
+								{
+									name: 'jobs_status_skipped_check',
+									expression:
+										"status IS NOT DISTINCT FROM 'skipped' OR (status <> 'skipped' AND skipped_at IS NULL)",
+								},
+							],
+						},
+					},
+				);
+
+				export default dbSchema;
+			`);
+
+			try {
+				const result = await runVerifyCommand([
+					'--schema',
+					schemaPath,
+					'--db',
+					process.env.DATABASE_URL!,
+					'--schema-name',
+					SCHEMA,
+					'--json',
+				]);
+				const json = parseVerifyJson(result);
+
+				// The whole point: PostgreSQL re-printed the author's expression, and
+				// verify must not call that drift.
+				expect(checkIssues(json)).toEqual([]);
+				expect(json).toMatchObject({
+					schemaTables: ['jobs'],
+					dbTables: ['jobs'],
+				});
+				expect(json).not.toHaveProperty('diff');
+				expect(result.stderr).toBe('');
+			} finally {
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
+
+		it('reports genuine CHECK expression drift with the existing JSON shape and exit code', async () => {
+			await pool.query(`
+				CREATE TABLE ${SCHEMA}.checked_numbers (
+					id integer PRIMARY KEY,
+					age integer NOT NULL,
+					CONSTRAINT checked_numbers_age_check CHECK (age >= 0)
+				)
+			`);
+			const { schemaPath, tmpDir } = writeTempSchemaFile(`
+				import { schema } from '@dbsp/core';
+
+				export const dbSchema = schema(
+					{
+						checked_numbers: {
+							id: { type: 'integer', primaryKey: true },
+							age: 'integer',
+						},
+					},
+					{
+						checked_numbers: {
+							checkConstraints: [
+								{
+									name: 'checked_numbers_age_check',
+									expression: 'age > 0',
+								},
+							],
+						},
+					},
+				);
+
+				export default dbSchema;
+			`);
+
+			try {
+				const result = await runVerifyCommand([
+					'--schema',
+					schemaPath,
+					'--db',
+					process.env.DATABASE_URL!,
+					'--schema-name',
+					SCHEMA,
+					'--json',
+				]);
+				const json = parseVerifyJson(result);
+
+				expect(json).toMatchObject({
+					schemaTables: ['checked_numbers'],
+					dbTables: ['checked_numbers'],
+					summary: {
+						tables: { added: 0, dropped: 0 },
+						columns: { added: 0, dropped: 0, altered: 0 },
+						constraints: { added: 1, dropped: 1, altered: 0 },
+					},
+				});
+				expect(json).not.toHaveProperty('diff');
+				// A real expression change is still drift, reported in the same shape.
+				expect(checkIssues(json)).toEqual([
+					expect.objectContaining({
+						severity: 'warning',
+						type: 'missing_check_in_db',
+						table: 'checked_numbers',
+					}),
+					expect.objectContaining({
+						severity: 'info',
+						type: 'missing_check_in_schema',
+						table: 'checked_numbers',
+					}),
+				]);
+			} finally {
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
+
+		it('falls back to raw CHECK comparison with a warning when the role cannot create temp tables', async () => {
+			const desired = schema(
+				{
+					jobs: {
+						id: { type: 'integer', primaryKey: true },
+						status: 'string',
+						skipped_at: { type: 'timestamp', nullable: true },
+					},
+				},
+				{
+					jobs: {
+						checkConstraints: [
+							{
+								name: 'jobs_status_skipped_check',
+								expression:
+									"status IS NOT DISTINCT FROM 'skipped' OR (status <> 'skipped' AND skipped_at IS NULL)",
+							},
+						],
+					},
+				},
+			);
+			await executeDdl(
+				pool,
+				generateDDL(desired.model, { schemaName: SCHEMA }),
+			);
+			const { schemaPath, tmpDir } = writeTempSchemaFile(`
+				import { schema } from '@dbsp/core';
+
+				export const dbSchema = schema(
+					{
+						jobs: {
+							id: { type: 'integer', primaryKey: true },
+							status: 'string',
+							skipped_at: { type: 'timestamp', nullable: true },
+						},
+					},
+					{
+						jobs: {
+							checkConstraints: [
+								{
+									name: 'jobs_status_skipped_check',
+									expression:
+										"status IS NOT DISTINCT FROM 'skipped' OR (status <> 'skipped' AND skipped_at IS NULL)",
+								},
+							],
+						},
+					},
+				);
+
+				export default dbSchema;
+			`);
+			const role = 'check_canon_verify_no_temp';
+			const password = 'check-canon-verify-no-temp';
+			let roleState: Awaited<ReturnType<typeof setupNoTempRole>> | undefined;
+
+			try {
+				roleState = await setupNoTempRole(pool, role, password, SCHEMA);
+				const result = await runVerifyCommand([
+					'--schema',
+					schemaPath,
+					'--db',
+					databaseUrlForRole(role, password),
+					'--schema-name',
+					SCHEMA,
+					'--json',
+				]);
+				const json = parseVerifyJson(result);
+
+				expect(result.stderr).toContain(
+					'Could not canonicalize CHECK constraint',
+				);
+				expect(result.stderr).toContain('falling back');
+				expect(json).toMatchObject({
+					schemaTables: ['jobs'],
+					dbTables: ['jobs'],
+				});
+				// It warned and carried on: the raw comparison reports the drift it
+				// could not canonicalise away, rather than failing the command.
+				expect(checkIssues(json)).toEqual([
+					expect.objectContaining({
+						severity: 'warning',
+						type: 'missing_check_in_db',
+						table: 'jobs',
+					}),
+					expect.objectContaining({
+						severity: 'info',
+						type: 'missing_check_in_schema',
+						table: 'jobs',
+					}),
+				]);
+			} finally {
+				if (roleState !== undefined) {
+					await cleanupNoTempRole(
+						pool,
+						role,
+						SCHEMA,
+						roleState.database,
+						roleState.publicHadTemp,
+					);
+				}
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
+
+		it('honours dbCasing exported by the loaded schema', async () => {
+			await pool.query(`
+				CREATE TABLE ${SCHEMA}.user_profiles (
+					id integer PRIMARY KEY,
+					display_name varchar(255) NOT NULL
+				)
+			`);
+			const { schemaPath, tmpDir } = writeTempSchemaFile(`
+				import { schema } from '@dbsp/core';
+
+				export const dbSchema = schema({
+					userProfiles: {
+						id: { type: 'integer', primaryKey: true },
+						displayName: 'string',
+					},
+				});
+
+				export default dbSchema;
+				export const dbCasing = 'snake_case' as const;
+			`);
+
+			try {
+				const result = await runVerifyCommand([
+					'--schema',
+					schemaPath,
+					'--db',
+					process.env.DATABASE_URL!,
+					'--schema-name',
+					SCHEMA,
+					'--json',
+				]);
+				const json = parseVerifyJson(result);
+
+				// The schema calls it userProfiles and declares snake_case; the database
+				// has user_profiles. verify must reconcile them, not report a drop and
+				// an add.
+				expect(json).toMatchObject({
+					schemaTables: ['userProfiles'],
+					dbTables: ['user_profiles'],
+					summary: {
+						tables: { added: 0, dropped: 0 },
+						columns: { added: 0, dropped: 0, altered: 0 },
+					},
+				});
+				expect(checkIssues(json)).toEqual([]);
+			} finally {
+				rmSync(tmpDir, { recursive: true, force: true });
+			}
+		});
 	});
 
 	it('emits a bare predicate ending in a boolean column named valid intact', async () => {

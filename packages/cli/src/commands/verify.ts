@@ -5,7 +5,7 @@
  * Detects drift in tables, columns, types, nullable, defaults, FKs, indexes.
  */
 
-import { compareSchemata, introspect } from '@dbsp/adapter-pgsql';
+import { comparePgsqlDatabaseSchema, introspect } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';
@@ -49,20 +49,22 @@ export const verifyCommand = new Command('verify')
 				const { pool } = await createDbConnection(options.db);
 
 				try {
-					// Introspect database → ModelIR
+					// Live diff: introspect database and canonicalise PostgreSQL CHECK
+					// expressions before comparing.
+					const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
+						...(options.schemaName ? { schema: options.schemaName } : {}),
+						...(loaded.dbCasing !== undefined
+							? { dbCasing: loaded.dbCasing }
+							: {}),
+						onWarning: (message) => console.warn(`⚠️  ${message}`),
+					});
+
+					// Convert to verify result
+					// Keep the legacy reporting fields sourced from introspection so
+					// --json consumers continue to see database table names as before.
 					const dbModel = await introspect(pool, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
 					});
-
-					// Compare using the comparison engine
-					const diff =
-						loaded.dbCasing !== undefined
-							? compareSchemata(schemaModel, dbModel, {
-									dbCasing: loaded.dbCasing,
-								})
-							: compareSchemata(schemaModel, dbModel);
-
-					// Convert to verify result
 					const schemaTables = Array.from(schemaModel.tables.keys());
 					const dbTables = Array.from(dbModel.tables.keys());
 					const result = verifyFromDiff(diff, schemaTables, dbTables);
