@@ -591,11 +591,6 @@ export interface IntrospectingAdapter extends BaseAdapter {
 	readonly dbCasing?: DbCasing;
 	/** Introspect the database schema and return a ModelIR. */
 	introspect(options?: IntrospectionOptions): Promise<IntrospectionResult>;
-	/**
-	 * Compare the live database schema with a desired model and return the
-	 * database-neutral diff needed to converge.
-	 */
-	compareDatabaseSchema(desired: ModelIR): Promise<SchemaDiff>;
 }
 
 /**
@@ -825,7 +820,6 @@ export type CompileOnlyAdapter = CompilingAdapter &
 		readonly executeOneOrThrow?: never;
 		readonly stream?: never;
 		readonly introspect?: never;
-		readonly compareDatabaseSchema?: never;
 		readonly transaction?: never;
 		readonly executeRaw?: never;
 		readonly executeDDL?: never;

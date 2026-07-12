@@ -84,16 +84,8 @@ describe('supportsIntrospection', () => {
 		expect(supportsIntrospection(adapter)).toBe(false);
 	});
 
-	it('returns false when compareDatabaseSchema is missing', () => {
+	it('returns true when introspect is a function', () => {
 		const adapter = { introspect: () => {} } as unknown as BaseAdapter;
-		expect(supportsIntrospection(adapter)).toBe(false);
-	});
-
-	it('returns true when introspect and compareDatabaseSchema are functions', () => {
-		const adapter = {
-			introspect: () => {},
-			compareDatabaseSchema: () => {},
-		} as unknown as BaseAdapter;
 		expect(supportsIntrospection(adapter)).toBe(true);
 	});
 });

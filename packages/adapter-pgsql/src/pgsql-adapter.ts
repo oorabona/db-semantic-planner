@@ -94,11 +94,8 @@ import {
 	validateDbType,
 } from './db-type.js';
 import {
-	type ComparePgsqlDatabaseSchemaOptions,
-	comparePgsqlDatabaseSchema,
 	type GenerateDDLOptions,
 	generateDDL as generateDDLStatements,
-	type SchemaDiff,
 } from './ddl/index.js';
 import {
 	generateCreateIndexSQL,
@@ -1684,32 +1681,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		const executor = this.requireConnection();
 		return introspectDb(executor, options);
-	}
-
-	/**
-	 * Live schema diff with PostgreSQL CHECK constraint canonicalisation.
-	 *
-	 * This performs introspection, canonicalises CHECK constraint expressions on
-	 * the desired model using temporary scratch tables inside a rolled-back
-	 * transaction, then delegates to the pure synchronous comparator. Partial
-	 * index predicates and index expressions are not canonicalised. Compile-only
-	 * adapters cannot provide the CHECK convergence guarantee and throw here.
-	 */
-	async compareDatabaseSchema(
-		desired: ModelIR,
-		options?: ComparePgsqlDatabaseSchemaOptions,
-	): Promise<SchemaDiff> {
-		if (!this.client && !this.pool) {
-			throw new Error(
-				'Cannot compare live database schema without a database connection (compile-only adapter)',
-			);
-		}
-		const executor = this.requireConnection();
-		return comparePgsqlDatabaseSchema(executor, desired, {
-			dbCasing: this._dbCasing,
-			...(this.schemaName !== undefined ? { schema: this.schemaName } : {}),
-			...options,
-		});
 	}
 
 	// =========================================================================
