@@ -12,13 +12,13 @@
 		"moduleDetection": "force",
 		"noEmit": true,
 		"jsx": "react-jsx",
+		"types": ["vite/client"],
 
 		"strict": true,
 		"noUncheckedIndexedAccess": true,
 		"noImplicitOverride": true,
 		"forceConsistentCasingInFileNames": true,
 
-		"baseUrl": ".",
 		"paths": {
 			"@/*": ["./src/*"]
 		}

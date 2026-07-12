@@ -111,26 +111,26 @@
 }
 
 /* Resizable panels handle styling */
-[data-panel-group-direction="horizontal"] > [data-resize-handle] {
+[data-group] > [data-separator][aria-orientation="vertical"] {
 	width: 4px;
 	background: var(--border);
 	transition: background 0.15s;
 }
 
-[data-panel-group-direction="horizontal"] > [data-resize-handle]:hover,
-[data-panel-group-direction="horizontal"]
-	> [data-resize-handle][data-resize-handle-active] {
+[data-group] > [data-separator][aria-orientation="vertical"]:hover,
+[data-group]
+	> [data-separator][aria-orientation="vertical"][data-separator="active"] {
 	background: var(--ring);
 }
 
-[data-panel-group-direction="vertical"] > [data-resize-handle] {
+[data-group] > [data-separator][aria-orientation="horizontal"] {
 	height: 4px;
 	background: var(--border);
 	transition: background 0.15s;
 }
 
-[data-panel-group-direction="vertical"] > [data-resize-handle]:hover,
-[data-panel-group-direction="vertical"]
-	> [data-resize-handle][data-resize-handle-active] {
+[data-group] > [data-separator][aria-orientation="horizontal"]:hover,
+[data-group]
+	> [data-separator][aria-orientation="horizontal"][data-separator="active"] {
 	background: var(--ring);
 }
