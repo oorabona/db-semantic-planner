@@ -71,19 +71,8 @@ export const pushCommand = new Command('push')
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
 						});
 
-						// SEC-7: Escape MIGRATIONS_TABLE before interpolating into RegExp
-						const escapedTable = MIGRATIONS_TABLE.replace(
-							/[.*+?^${}()|[\]\\]/g,
-							'\\$&',
-						);
-						// CC-11: Token-based check — match DROP TABLE ... "tableName" (no greedy .*
-						// across statement boundaries). The pattern anchors on the quoted table name
-						// appearing anywhere in the statement, which is safe for single-statement
-						// inputs (generateDDL returns one statement per array entry).
-						const migrationsPattern = new RegExp(
-							`DROP\\s+TABLE(?:\\s+IF\\s+EXISTS)?(?:\\s+"[^"]*"\\s*\\.)?\\s*"${escapedTable}"`,
-							'i',
-						);
+						const migrationsPattern =
+							buildMigrationsTableDropPattern(MIGRATIONS_TABLE);
 						const filtered = statements.filter(
 							(stmt) => !migrationsPattern.test(stmt),
 						);
@@ -96,17 +85,11 @@ export const pushCommand = new Command('push')
 								: {}),
 						});
 
-						// CC-1: --drop --json must emit JSON to stdout on success
 						if (options.json) {
 							const droppedTables = statements
 								.filter((s) => /DROP\s+TABLE/i.test(s))
 								.filter((s) => !migrationsPattern.test(s))
-								.map((s) => {
-									// M6: handle CASCADE between last quoted identifier and semicolon
-									// e.g. DROP TABLE IF EXISTS "public"."users" CASCADE;
-									const m = s.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/i);
-									return m ? m[1] : s;
-								})
+								.map(extractDroppedTableName)
 								.filter((t): t is string => t !== undefined);
 							console.log(
 								JSON.stringify(
@@ -238,6 +221,40 @@ export const pushCommand = new Command('push')
 /**
  * Output SQL statements (dry-run or --json mode).
  */
+/**
+ * Match a `DROP TABLE` statement that targets the migrations table, so `--drop`
+ * can never destroy dbsp's own migration history.
+ *
+ * The table name is escaped before it reaches the pattern: an unescaped `.` or
+ * `$` in it would otherwise match characters it should not, and a table whose
+ * name merely resembles the migrations table would be spared — or worse, one
+ * that should be spared would be dropped.
+ *
+ * The pattern matches the quoted name anywhere in the statement rather than
+ * anchoring to the end. That is safe because `generateDDL` returns one statement
+ * per array entry, so a match can never jump across a statement boundary.
+ */
+export function buildMigrationsTableDropPattern(tableName: string): RegExp {
+	const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+	return new RegExp(
+		`DROP\\s+TABLE(?:\\s+IF\\s+EXISTS)?(?:\\s+"[^"]*"\\s*\\.)?\\s*"${escaped}"`,
+		'i',
+	);
+}
+
+/**
+ * Read the table name out of a `DROP TABLE` statement for the JSON report.
+ *
+ * The name is the last quoted identifier, which skips the schema in
+ * `"public"."users"`, and it may be followed by `CASCADE` before the semicolon.
+ * Returns the statement itself when nothing matches, so the report never silently
+ * loses a table.
+ */
+export function extractDroppedTableName(statement: string): string {
+	const match = statement.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/iu);
+	return match?.[1] ?? statement;
+}
+
 function outputResult(
 	statements: readonly string[],
 	options: { dryRun?: boolean; json?: boolean },
