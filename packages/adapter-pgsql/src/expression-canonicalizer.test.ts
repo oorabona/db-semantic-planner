@@ -397,6 +397,59 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 	});
 
+	it('creates missing desired enum types in the verbatim database schemaName', async () => {
+		const client = new FakePgClient();
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			"CHECK (((status)::text = 'active'::text))",
+		);
+		const pool = new FakePgPool(client);
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('status', {
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'tenantOne',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+					checkConstraints: [
+						{ name: 'jobsStatusCheck', expression: "status = 'active'" },
+					],
+				}),
+			],
+			[
+				{
+					name: 'status',
+					schema: 'tenantOne',
+					values: ['active', 'inactive'],
+				},
+			],
+		);
+		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
+
+		await canonicalizeCheckConstraints(
+			pool as unknown as Pool,
+			desired,
+			dbModel,
+			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
+		);
+
+		const normalizedQueries = client.queries.map((q) =>
+			normalizeCanonicalizationSql(q.sql),
+		);
+		expect(normalizedQueries).toContain(
+			'CREATE TYPE "tenantOne"."status" AS ENUM (\'active\', \'inactive\');',
+		);
+		expect(normalizedQueries).not.toContain(
+			'CREATE TYPE "tenant_one"."status" AS ENUM (\'active\', \'inactive\');',
+		);
+	});
+
 	it('falls back with a warning when a CHECK references an enum value added by the same diff', async () => {
 		const enumValueError = new Error(
 			'unsafe use of new value "pending" of enum type status',
@@ -631,6 +684,68 @@ describe('canonicalizeCheckConstraints', () => {
 		).toContain(
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" "tenant_1".status) ON COMMIT DROP',
 		);
+	});
+
+	it('uses the database schemaName verbatim when dbCasing is configured', async () => {
+		const client = new FakePgClient();
+		client.canonicalExpressions.set(
+			'_dbsp_check_canon_0_0',
+			"CHECK (((state)::text = 'queued'::text))",
+		);
+		const pool = new FakePgPool(client);
+		const desired = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('state', {
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'tenantOne',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+					checkConstraints: [
+						{ name: 'jobsStateCheck', expression: "state = 'queued'" },
+					],
+				}),
+			],
+			[{ name: 'status', schema: 'tenantOne', values: ['queued', 'done'] }],
+		);
+		const dbModel = makeModel(
+			[
+				makeTable({
+					name: 'jobs',
+					columns: [
+						makeCol('id'),
+						makeCol('state', {
+							type: 'string',
+							originalDbType: 'status',
+							originalDbTypeSchema: 'tenantOne',
+							originalDbTypeSchemaScope: 'target',
+						}),
+					],
+				}),
+			],
+			[{ name: 'status', schema: 'tenantOne', values: ['queued', 'done'] }],
+		);
+
+		await canonicalizeCheckConstraints(
+			pool as unknown as Pool,
+			desired,
+			dbModel,
+			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
+		);
+
+		expect(
+			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
+		).toContain(
+			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "state" "tenantOne".status) ON COMMIT DROP',
+		);
+		expect(
+			client.queries.some((q) => q.sql.includes('"tenant_one".status')),
+		).toBe(false);
 	});
 
 	it('keeps the desired type when the same diff changes a column type', async () => {

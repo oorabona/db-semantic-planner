@@ -645,6 +645,62 @@ describe('generateMigrationSQL', () => {
 			expect(sql[0]).toContain('ADD CONSTRAINT "fk_posts_author_id"');
 			expect(sql[0]).toContain('ON DELETE SET NULL');
 		});
+
+		it('should generate RENAME CONSTRAINT for an FK rename', () => {
+			const oldFk: ForeignKeyIR = {
+				constraintName: 'posts_author_id_fkey',
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const fk: ForeignKeyIR = {
+				...oldFk,
+				constraintName: 'custom_posts_author_fk',
+			};
+
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'rename_foreign_key',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk, oldFk },
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "posts" RENAME CONSTRAINT "posts_author_id_fkey" TO "custom_posts_author_fk";',
+			]);
+		});
+
+		it('should reverse an FK rename in DOWN SQL', () => {
+			const oldFk: ForeignKeyIR = {
+				constraintName: 'posts_author_id_fkey',
+				columns: ['author_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const fk: ForeignKeyIR = {
+				...oldFk,
+				constraintName: 'custom_posts_author_fk',
+			};
+
+			const sql = generateDownSQL(
+				makeDiff([
+					{
+						kind: 'rename_foreign_key',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk, oldFk },
+					},
+				]),
+			);
+
+			expect(sql).toEqual([
+				'ALTER TABLE "posts" RENAME CONSTRAINT "custom_posts_author_fk" TO "posts_author_id_fkey";',
+			]);
+		});
 	});
 
 	describe('INDEX', () => {
@@ -5129,6 +5185,128 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			expect(validate?.table).toBe('posts');
 			expect(generateMigrationSQL(diff)).toEqual([
 				'ALTER TABLE "posts" VALIDATE CONSTRAINT "posts_user_id_fkey";',
+			]);
+		});
+
+		it('should not validate separately when altering a NOT VALID FK', () => {
+			const fkDB: ForeignKeyIR = {
+				constraintName: 'posts_user_id_fkey',
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const fkSchema: ForeignKeyIR = {
+				constraintName: 'custom_posts_user_fk',
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				onDelete: 'CASCADE',
+			};
+			const usersTable: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const diff = compareSchemata(
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [],
+								foreignKeys: [fkSchema],
+								indexes: [],
+							},
+						],
+					]),
+					new Map(),
+				),
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [],
+								foreignKeys: [fkDB],
+								indexes: [],
+							},
+						],
+					]),
+					new Map(),
+				),
+			);
+
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'alter_foreign_key',
+			]);
+			expect(generateMigrationSQL(diff)).toEqual([
+				'ALTER TABLE "posts" DROP CONSTRAINT IF EXISTS "posts_user_id_fkey";\n' +
+					'ALTER TABLE "posts" ADD CONSTRAINT "custom_posts_user_fk" FOREIGN KEY ("user_id") REFERENCES "users" ("id") ON DELETE CASCADE;',
+			]);
+		});
+
+		it('should rename before validating a NOT VALID FK with an explicit desired name', () => {
+			const fkDB: ForeignKeyIR = {
+				constraintName: 'posts_user_id_fkey',
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+				notValid: true,
+			};
+			const fkSchema: ForeignKeyIR = {
+				constraintName: 'custom_posts_user_fk',
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const usersTable: TableIR = {
+				name: 'users',
+				columns: [],
+				foreignKeys: [],
+				indexes: [],
+			};
+			const diff = compareSchemata(
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [],
+								foreignKeys: [fkSchema],
+								indexes: [],
+							},
+						],
+					]),
+					new Map(),
+				),
+				new ModelIRImpl(
+					new Map([
+						['users', usersTable],
+						[
+							'posts',
+							{
+								name: 'posts',
+								columns: [],
+								foreignKeys: [fkDB],
+								indexes: [],
+							},
+						],
+					]),
+					new Map(),
+				),
+			);
+
+			expect(diff.changes.map((change) => change.kind)).toEqual([
+				'rename_foreign_key',
+				'validate_constraint',
+			]);
+			expect(generateMigrationSQL(diff)).toEqual([
+				'ALTER TABLE "posts" RENAME CONSTRAINT "posts_user_id_fkey" TO "custom_posts_user_fk";',
+				'ALTER TABLE "posts" VALIDATE CONSTRAINT "custom_posts_user_fk";',
 			]);
 		});
 

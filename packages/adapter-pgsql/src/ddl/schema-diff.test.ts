@@ -846,6 +846,88 @@ describe('compareSchemata', () => {
 			expect(diff.changes[0]!.meta?.fk).toEqual(dbFk);
 		});
 
+		it('should not emit separate validation when altering a NOT VALID FK', () => {
+			const schemaFk: ForeignKeyIR = { ...usersFk, onDelete: 'SET NULL' };
+			const dbFk: ForeignKeyIR = {
+				...usersFk,
+				constraintName: 'posts_author_id_fkey',
+				notValid: true,
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [schemaFk],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [dbFk],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual(['alter_foreign_key']);
+			expect(diff.changes[0]!.meta?.oldFk).toEqual(dbFk);
+			expect(
+				diff.changes.some((change) => change.kind === 'validate_constraint'),
+			).toBe(false);
+		});
+
+		it('should rename then validate a NOT VALID FK when desired explicitly changes the name', () => {
+			const schemaFk: ForeignKeyIR = {
+				...usersFk,
+				constraintName: 'custom_posts_author_fk',
+			};
+			const dbFk: ForeignKeyIR = {
+				...usersFk,
+				constraintName: 'posts_author_id_fkey',
+				notValid: true,
+			};
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [schemaFk],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [dbFk],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual([
+				'rename_foreign_key',
+				'validate_constraint',
+			]);
+			expect(diff.changes[0]!.meta?.oldFk).toEqual(dbFk);
+			expect(diff.changes[1]!.meta?.fk).toEqual(schemaFk);
+		});
+
 		it('should drop and re-add FK when schema asks for NOT VALID on a validated constraint', () => {
 			const schemaFk: ForeignKeyIR = { ...usersFk, notValid: true };
 			const dbFk: ForeignKeyIR = {
@@ -886,7 +968,7 @@ describe('compareSchemata', () => {
 			expect(diff.hasDestructive).toBe(true);
 		});
 
-		it('should ignore FK constraint name differences for identity', () => {
+		it('should rename an FK when desired explicitly declares a different constraint name', () => {
 			const schema = makeModel([
 				makeTable({
 					name: 'users',
@@ -901,6 +983,50 @@ describe('compareSchemata', () => {
 							constraintName: 'fk_authored_posts_author',
 						},
 					],
+				}),
+			]);
+			const db = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [
+						{
+							...usersFk,
+							constraintName: 'posts_author_id_fkey',
+						},
+					],
+				}),
+			]);
+
+			const diff = compareSchemata(schema, db);
+
+			expect(changeKinds(diff.changes)).toEqual(['rename_foreign_key']);
+			expect(diff.summary.constraints.altered).toBe(1);
+			expect(diff.changes[0]!.destructive).toBe(false);
+			expect(diff.changes[0]!.meta?.oldFk).toEqual({
+				...usersFk,
+				constraintName: 'posts_author_id_fkey',
+			});
+			expect(diff.changes[0]!.meta?.fk).toEqual({
+				...usersFk,
+				constraintName: 'fk_authored_posts_author',
+			});
+		});
+
+		it('should ignore FK constraint name differences when desired has no constraintName', () => {
+			const schema = makeModel([
+				makeTable({
+					name: 'users',
+					columns: [makeCol({ name: 'id', type: 'integer' })],
+				}),
+				makeTable({
+					name: 'posts',
+					columns: [makeCol({ name: 'author_id', type: 'integer' })],
+					foreignKeys: [usersFk],
 				}),
 			]);
 			const db = makeModel([

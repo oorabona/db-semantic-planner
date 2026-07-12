@@ -513,6 +513,7 @@ function getPhase(kind: SchemaChange['kind']): number {
 		case 'add_foreign_key':
 			return 10;
 		case 'alter_foreign_key':
+		case 'rename_foreign_key':
 			return 11;
 		case 'create_index':
 			return 12;
@@ -667,6 +668,18 @@ function upAlterForeignKey(
 	const drop = `ALTER TABLE ${qualifyTable(change.table, schemaName)} DROP CONSTRAINT IF EXISTS ${constraintName};`;
 	const add = generateAddFKSQL(change.table, fk, schemaName);
 	return `${drop}\n${add}`;
+}
+
+function upRenameForeignKey(
+	change: SchemaChange,
+	schemaName?: string,
+): string | undefined {
+	const oldFk = change.meta?.oldFk as ForeignKeyIR | undefined;
+	const fk = change.meta?.fk as ForeignKeyIR | undefined;
+	if (!oldFk || !fk) return undefined;
+	const oldName = quoteIdent(fkConstraintName(change.table, oldFk), 'alias');
+	const newName = quoteIdent(fkConstraintName(change.table, fk), 'alias');
+	return `ALTER TABLE ${qualifyTable(change.table, schemaName)} RENAME CONSTRAINT ${oldName} TO ${newName};`;
 }
 
 function upCreateIndex(
@@ -935,6 +948,8 @@ function changeToUpSQL(
 			return upDropForeignKey(change, schemaName);
 		case 'alter_foreign_key':
 			return upAlterForeignKey(change, schemaName);
+		case 'rename_foreign_key':
+			return upRenameForeignKey(change, schemaName);
 		case 'create_index':
 			return upCreateIndex(change, schemaName);
 		case 'drop_index':
@@ -1216,6 +1231,24 @@ function changeToDownSQL(
 			const add = generateAddFKSQL(change.table, oldFk, schemaName);
 			// Allowlisted: swaps the current FK back to the recorded prior FK.
 			return { sql: `${drop}\n${add}`, destructive: false };
+		}
+
+		case 'rename_foreign_key': {
+			const oldFk = change.meta?.oldFk as ForeignKeyIR | undefined;
+			const fk = change.meta?.fk as ForeignKeyIR | undefined;
+			if (!oldFk || !fk) return { sql: undefined, destructive: true };
+			const currentName = quoteIdent(
+				fkConstraintName(change.table, fk),
+				'alias',
+			);
+			const previousName = quoteIdent(
+				fkConstraintName(change.table, oldFk),
+				'alias',
+			);
+			return {
+				sql: `ALTER TABLE ${qualifyTable(change.table, schemaName)} RENAME CONSTRAINT ${currentName} TO ${previousName};`,
+				destructive: false,
+			};
 		}
 
 		case 'create_index': {

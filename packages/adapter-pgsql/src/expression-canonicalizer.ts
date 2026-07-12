@@ -331,10 +331,7 @@ async function canonicalizeTableChecks(
 	const tempTableName = `${names.tempPrefix}_${targetIndex}`;
 	const tempTable = quoteIdent(tempTableName, 'table');
 	const naming = namingForOptions(options);
-	const targetSchema =
-		options?.schemaName !== undefined
-			? naming.toDatabase(options.schemaName)
-			: undefined;
+	const targetSchema = options?.schemaName;
 	const dbColumnsByName = new Map(
 		(target.dbTable?.columns ?? []).map((column) => [column.name, column]),
 	);

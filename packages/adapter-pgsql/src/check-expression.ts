@@ -1,7 +1,7 @@
 import type { CheckConstraintIR } from '@dbsp/types';
 
 const CHECK_NOT_VALID_SUFFIX =
-	/^(?<clause>\s*CHECK\s*\(.*\))\s+NOT\s+VALID\s*$/isu;
+	/^(?<clause>\s*CHECK\s*\(.*\)(?:\s+NO\s+INHERIT)?)\s+NOT\s+VALID\s*$/isu;
 
 function toCheckConstraintClause(expression: string): string {
 	const trimmed = stripNotValidSuffix(expression.trim()).trim();

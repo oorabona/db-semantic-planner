@@ -17,14 +17,14 @@ import { quoteIdent as quoteId, validateEnumLabel } from './utils.js';
  * @returns Array of DDL statements, or empty if enum types are unsupported / absent
  */
 export function generateEnumTypesPhase(ctx: PhaseContext): string[] {
-	const { schema, schemaName, naming, caps } = ctx;
+	const { schema, schemaName, caps } = ctx;
 	if (!schema.enums || !sup(caps, caps?.supportsDDLEnumTypes)) {
 		return [];
 	}
 	const statements: string[] = [];
 	for (const [, enumDef] of schema.enums) {
 		const effectiveSchema =
-			schemaName !== undefined ? naming.toDatabase(schemaName) : enumDef.schema;
+			schemaName !== undefined ? schemaName : enumDef.schema;
 		const enumName =
 			effectiveSchema &&
 			effectiveSchema !== 'public' &&

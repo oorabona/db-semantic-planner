@@ -39,4 +39,21 @@ describe('check-expression NOT VALID handling', () => {
 			}),
 		).toBe('CHECK (enabled AND NOT valid) NOT VALID');
 	});
+
+	it('preserves NO INHERIT while stripping and detecting the trailing NOT VALID modifier', () => {
+		expect(stripNotValidSuffix('CHECK ((x > 0)) NO INHERIT NOT VALID')).toBe(
+			'CHECK ((x > 0)) NO INHERIT',
+		);
+		expect(
+			renderCheckConstraintClause({
+				expression: 'CHECK ((x > 0)) NO INHERIT NOT VALID',
+			}),
+		).toBe('CHECK ((x > 0)) NO INHERIT NOT VALID');
+		expect(
+			renderCheckConstraintClause({
+				expression: 'CHECK ((x > 0)) NO INHERIT NOT VALID',
+				notValid: false,
+			}),
+		).toBe('CHECK ((x > 0)) NO INHERIT');
+	});
 });
