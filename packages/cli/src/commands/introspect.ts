@@ -106,10 +106,10 @@ export const introspectCommand = new Command('introspect')
 						dbCasing: options.dbCasing,
 					};
 
-					const generated = generateSchemaFileWithDiagnostics(model, {
-						...codegenOptions,
-						warnings: model.warnings ?? [],
-					});
+					const generated = generateSchemaFileWithDiagnostics(
+						model,
+						codegenOptions,
+					);
 					const warnings = uniqueWarnings(generated.warnings);
 					if (warnings.length > 0) {
 						reportWarnings(warnings);

@@ -115,9 +115,9 @@ describe('createOrmInstance.from() BatchValuesRef path', () => {
 			['int4', 'text'],
 		);
 		const builder = orm.from(bv as unknown as Parameters<typeof orm.from>[0]);
-		expect(builder).toBeDefined();
 		const planResult = builder.plan();
-		expect(planResult).toBeDefined();
+		expect(planResult.rootTable).toBe('batch');
+		expect(planResult.intent.from).toBe('batch');
 	});
 });
 

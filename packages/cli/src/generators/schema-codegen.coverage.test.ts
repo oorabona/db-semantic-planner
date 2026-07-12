@@ -16,9 +16,19 @@ import { ref, schema } from '@dbsp/core';
 import type { ForeignKeyIR } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { loadSchema } from '../utils/schema-loader.js';
-import { generateSchemaFile } from './schema-codegen.js';
+import {
+	generateSchemaFileWithDiagnostics,
+	type SchemaCodegenOptions,
+} from './schema-codegen.js';
 
-describe('generateSchemaFile — coverage', () => {
+function generateSchemaCode(
+	model: ModelIR,
+	options: SchemaCodegenOptions = {},
+): string {
+	return generateSchemaFileWithDiagnostics(model, options).code;
+}
+
+describe('generateSchemaFileWithDiagnostics — coverage', () => {
 	// -----------------------------------------------------------------------
 	// unique columns
 	// -----------------------------------------------------------------------
@@ -31,7 +41,7 @@ describe('generateSchemaFile — coverage', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("email: { type: 'string', unique: true }");
 		});
@@ -69,7 +79,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain(
 				"orderId: { type: 'integer', primaryKey: true }",
@@ -131,7 +141,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Single-column ref() lowering remains skipped, but the composite
 			// table-level constraint is preserved.
@@ -204,7 +214,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Simple ref (targets id → no column option)
 			expect(result).toContain("authorId: ref('users')");
@@ -247,7 +257,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("onDelete: 'CASCADE'");
 		});
@@ -284,7 +294,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).not.toContain('onDelete');
 		});
@@ -330,7 +340,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('unique: true');
 			expect(result).toContain("ref('users'");
@@ -372,7 +382,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Self-ref with managerId → roles: { parent: 'manager', children: 'managers' }
 			expect(result).toContain("ref('employees'");
@@ -421,7 +431,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model, { includeDbTypeComments: true });
+			const result = generateSchemaCode(model, { includeDbTypeComments: true });
 
 			expect(result).toContain("ref('users') /* from: int4 */");
 		});
@@ -462,7 +472,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model, { includeDbTypeComments: true });
+			const result = generateSchemaCode(model, { includeDbTypeComments: true });
 
 			expect(result).toContain("'string' /* from: varchar(255) */");
 		});
@@ -483,7 +493,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain("import { schema } from '@dbsp/core'");
 			expect(result).toContain('export const dbSchema = schema({');
@@ -502,7 +512,7 @@ describe('generateSchemaFile — coverage', () => {
 				users: { id: { type: 'uuid', primaryKey: true } },
 			}).model;
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).not.toContain('Warnings');
 		});
@@ -520,7 +530,7 @@ describe('generateSchemaFile — coverage', () => {
 				},
 			}).model;
 
-			const result = generateSchemaFile(model, { dbCasing: 'camelCase' });
+			const result = generateSchemaCode(model, { dbCasing: 'camelCase' });
 
 			// camelCase dbCasing is not 'preserve', so it triggers the import and export
 			expect(result).toContain(
@@ -569,7 +579,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			// Should match via snakeToCamelCase fallback
 			expect(result).toContain("authorId: ref('users')");
@@ -585,7 +595,7 @@ describe('generateSchemaFile — coverage', () => {
 				users: { id: { type: 'uuid', primaryKey: true } },
 			}).model;
 
-			const result = generateSchemaFile(model, {});
+			const result = generateSchemaCode(model, {});
 
 			expect(result).toContain('Auto-generated by: dbsp introspect');
 			expect(result).not.toContain('Source:');
@@ -628,7 +638,7 @@ describe('generateSchemaFile — coverage', () => {
 				isAmbiguous: () => ({ ambiguous: false, options: [] }),
 			};
 
-			const result = generateSchemaFile(model);
+			const result = generateSchemaCode(model);
 
 			expect(result).toContain('nullable: true');
 			expect(result).toContain('unique: true');
@@ -666,7 +676,7 @@ describe('[C7] invalid JS identifier names are quoted in generated schema', () =
 			isAmbiguous: () => ({ ambiguous: false, options: [] }),
 		};
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// Bare key `user-profile` is invalid JS; must be quoted
 		expect(result).toMatch(/'user-profile':|"user-profile":/);
@@ -681,7 +691,7 @@ describe('[C7] invalid JS identifier names are quoted in generated schema', () =
 			},
 		}).model;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// 'users' is a valid identifier — no quoting needed
 		expect(result).toContain('\tusers: {');
@@ -694,7 +704,7 @@ describe('[C7] invalid JS identifier names are quoted in generated schema', () =
 // ============================================================================
 
 describe('[F3] quoteKey escapes control characters in identifiers', () => {
-	// We test via generateSchemaFile by injecting a table whose name contains
+	// We test via generated code by injecting a table whose name contains
 	// control characters (simulating an introspected schema with exotic names).
 
 	it('identifier with newline produces valid TS output', () => {
@@ -714,7 +724,7 @@ describe('[F3] quoteKey escapes control characters in identifiers', () => {
 			tables,
 			getTable: (n: string) => tables.get(n),
 		};
-		const result = generateSchemaFile(injected as never);
+		const result = generateSchemaCode(injected as never);
 		// The key must appear as 'line\\nnewline' — not a literal newline inside quotes
 		expect(result).toContain("'line\\nnewline'");
 		// No raw newline should appear inside a string literal on the key line
@@ -740,7 +750,7 @@ describe('[F3] quoteKey escapes control characters in identifiers', () => {
 			tables,
 			getTable: (n: string) => tables.get(n),
 		};
-		const result = generateSchemaFile(injected as never);
+		const result = generateSchemaCode(injected as never);
 		expect(result).toContain("'tab\\there'");
 	});
 });
@@ -764,7 +774,7 @@ describe('CODEX-11: SQL-expression defaults round-trip', () => {
 			?.columns.find((c) => c.name === 'created_at');
 		if (col) (col as { default: unknown }).default = { sql: 'now()' };
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		expect(result).toContain("{ sql: 'now()' }");
 		expect(result).not.toContain('[object Object]');
@@ -784,7 +794,7 @@ describe('CODEX-11: SQL-expression defaults round-trip', () => {
 		if (col)
 			(col as { default: unknown }).default = { sql: 'CURRENT_TIMESTAMP' };
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("{ sql: 'CURRENT_TIMESTAMP' }");
 		expect(result).not.toContain('[object Object]');
 	});
@@ -803,7 +813,7 @@ describe('CODEX-11: SQL-expression defaults round-trip', () => {
 				sql: "nextval('seq'::regclass)",
 			};
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		// Apostrophes inside sql expr are escaped as \'
 		expect(result).toContain("{ sql: 'nextval(\\'seq\\'::regclass)' }");
 		expect(result).not.toContain('[object Object]');
@@ -818,7 +828,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				label: { type: 'string', default: 'say "hi"' },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		// Double-quotes don't need escaping inside single-quoted strings
 		expect(result).toContain('default: \'say "hi"\'');
 		expect(result).not.toContain('[object Object]');
@@ -831,7 +841,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				path: { type: 'string', default: 'C:\\Users' },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("default: 'C:\\\\Users'");
 	});
 
@@ -842,7 +852,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				name: { type: 'string', default: "O'Brien" },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("default: 'O\\'Brien'");
 	});
 
@@ -854,7 +864,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				score: { type: 'number', default: 0 },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain('default: 42');
 		expect(result).toContain('default: 0');
 		expect(result).not.toContain("default: '42'");
@@ -868,7 +878,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				archived: { type: 'boolean', default: false },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain('default: true');
 		expect(result).toContain('default: false');
 	});
@@ -883,7 +893,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 		const col = model.tables.get('t')?.columns.find((c) => c.name === 'opt');
 		if (col) (col as { default: unknown }).default = null;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain('default: null');
 	});
 
@@ -894,7 +904,7 @@ describe('CODEX-14: string defaults are properly escaped', () => {
 				note: { type: 'string', default: 'line1\nline2' },
 			},
 		}).model;
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		// \n becomes \\n in the TS source literal
 		expect(result).toContain("default: 'line1\\nline2'");
 	});
@@ -922,7 +932,7 @@ describe('CODEX-12: FK onUpdate preserved in generated ref()', () => {
 			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'CASCADE';
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("onUpdate: 'CASCADE'");
 	});
 
@@ -943,7 +953,7 @@ describe('CODEX-12: FK onUpdate preserved in generated ref()', () => {
 			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'NO ACTION';
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).not.toContain('onUpdate:');
 	});
 
@@ -969,7 +979,7 @@ describe('CODEX-12: FK onUpdate preserved in generated ref()', () => {
 			}
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("onDelete: 'RESTRICT'");
 		expect(result).toContain("onUpdate: 'SET DEFAULT'");
 	});
@@ -991,7 +1001,7 @@ describe('CODEX-12: FK onUpdate preserved in generated ref()', () => {
 			if (fk) (fk as unknown as { onUpdate: string }).onUpdate = 'SET NULL';
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain("onUpdate: 'SET NULL'");
 	});
 });
@@ -1020,7 +1030,7 @@ describe('CODEX-13: FK + PK overlap', () => {
 			});
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// Must emit ref() (FK wins the code structure)
 		expect(result).toContain("ref('users'");
@@ -1039,7 +1049,7 @@ describe('CODEX-13: FK + PK overlap', () => {
 			},
 		}).model;
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 
 		// author_id is FK but not PK — isPrimaryKey must not appear
 		expect(result).toContain("author_id: ref('users')");
@@ -1067,7 +1077,7 @@ describe('CODEX-13: FK + PK overlap', () => {
 			if (col) (col as { nullable: boolean }).nullable = true;
 		}
 
-		const result = generateSchemaFile(model);
+		const result = generateSchemaCode(model);
 		expect(result).toContain('isPrimaryKey: true');
 		expect(result).toContain('nullable: true');
 		expect(result).toContain("ref('users'");

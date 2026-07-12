@@ -45,25 +45,6 @@ CREATE TABLE IF NOT EXISTS "${MIGRATIONS_TABLE}" (
 // ============================================================================
 
 /**
- * Acquire a session-level advisory lock for migration operations.
- *
- * @deprecated Use {@link withMigrationLock} instead — pool.query may release
- * the connection (and the lock) before the migration completes.
- */
-export async function acquireMigrationLock(pool: Pool): Promise<void> {
-	await pool.query(`SELECT pg_advisory_lock(hashtext('dbsp_migrate'))`);
-}
-
-/**
- * Release the session-level advisory lock for migration operations.
- *
- * @deprecated Use {@link withMigrationLock} instead.
- */
-export async function releaseMigrationLock(pool: Pool): Promise<void> {
-	await pool.query(`SELECT pg_advisory_unlock(hashtext('dbsp_migrate'))`);
-}
-
-/**
  * Execute a callback under an advisory lock using a dedicated client.
  * The lock is held for the duration of the callback.
  * The client is released (and lock freed) after the callback completes.

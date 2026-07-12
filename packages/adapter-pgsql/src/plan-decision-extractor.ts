@@ -1639,11 +1639,6 @@ export function enrichExistsDecisionsInPlace(
 }
 
 /**
- * Extract EXISTS/NOT EXISTS subquery decisions from filter-strategy plan decisions.
- * @deprecated Use enrichExistsDecisionsInPlace for new code — it preserves inline
- * boolean position. This function remains for direct-call tests in coverage tests.
- */
-/**
  * Extract ALL include decisions from include-strategy plan decisions.
  * Produces decisions with type 'includeStrategy' for all strategies:
  * - json_agg, subquery → tree-structured with children (like extractJsonAggDecisions)

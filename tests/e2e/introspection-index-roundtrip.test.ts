@@ -103,10 +103,11 @@ describe('#245 introspection index intent round-trip (real PG)', () => {
 	it('regenerates FK-column indexes deliberately and leaves unmanaged indexes untouched', async () => {
 		const adapter = await createPgsqlAdapterForSchema(SCHEMA);
 		const dbModel = await adapter.introspect({ schema: SCHEMA });
+		// The generator reads the model's own warnings; there is no option to pass
+		// them back in, so a caller cannot drop them by forgetting to.
 		const generated = generateSchemaFileWithDiagnostics(dbModel, {
 			dbCasing: 'snake_case',
 			includeDbTypeComments: true,
-			warnings: dbModel.warnings ?? [],
 		});
 		const warnings = generated.warnings;
 		const generatedCode = generated.code;

@@ -19,8 +19,6 @@ const mockGenerateMigrationSQL = vi.fn();
 const mockGenerateMigrationFile = vi.fn();
 const mockIntrospect = vi.fn();
 const mockEnsureMigrationsTable = vi.fn();
-const mockAcquireMigrationLock = vi.fn();
-const mockReleaseMigrationLock = vi.fn();
 const mockGetAppliedMigrations = vi.fn();
 const mockGetNextSchemaVersion = vi.fn();
 const mockRecordMigration = vi.fn();
@@ -38,10 +36,6 @@ vi.mock('@dbsp/adapter-pgsql', () => ({
 	introspect: (...args: unknown[]) => mockIntrospect(...args),
 	ensureMigrationsTable: (...args: unknown[]) =>
 		mockEnsureMigrationsTable(...args),
-	acquireMigrationLock: (...args: unknown[]) =>
-		mockAcquireMigrationLock(...args),
-	releaseMigrationLock: (...args: unknown[]) =>
-		mockReleaseMigrationLock(...args),
 	getAppliedMigrations: (...args: unknown[]) =>
 		mockGetAppliedMigrations(...args),
 	getNextSchemaVersion: (...args: unknown[]) =>

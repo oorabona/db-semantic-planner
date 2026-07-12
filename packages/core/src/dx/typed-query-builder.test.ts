@@ -2,7 +2,9 @@
  * @fileoverview Tests for typed-query-builder (DX-040 Block 4).
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import { createPgsqlCompileOnlyAdapter } from '../../../adapter-pgsql/src/pgsql-adapter.js';
+import { normalizeSQL } from '../sql-utils.js';
 import { eq, gt } from './filters.js';
 import { ref, schema, schemaToModelIR } from './schema.js';
 import { createTypedOrm } from './typed-query-builder.js';
@@ -40,32 +42,36 @@ function createTestSchema() {
 
 describe('DX-040 Block 4: Typed Query Builder', () => {
 	describe('createTypedOrm', () => {
-		it('creates a TypedOrm instance with from() method', () => {
+		it('from() compiles a table-ref query to SQL and params', () => {
 			const s = createTestSchema();
 			const model = schemaToModelIR(s.definition);
-			const orm = createTypedOrm(model);
-
-			expect(orm).toBeDefined();
-			expect(typeof orm.from).toBe('function');
-		});
-
-		it('from() returns a FromBuilder', () => {
-			const s = createTestSchema();
-			const model = schemaToModelIR(s.definition);
-			const orm = createTypedOrm(model);
+			const orm = createTypedOrm(model, createPgsqlCompileOnlyAdapter());
 			const { users } = s.tables;
 
-			const builder = orm.from(users);
+			const dump = orm.from(users).where(eq(users.active, true)).dump();
 
-			expect(builder).toBeDefined();
-			expect(typeof builder.all).toBe('function');
-			expect(typeof builder.first).toBe('function');
-			expect(typeof builder.pick).toBe('function');
-			expect(typeof builder.where).toBe('function');
-			expect(typeof builder.orderBy).toBe('function');
-			expect(typeof builder.limit).toBe('function');
-			expect(typeof builder.offset).toBe('function');
-			expect(typeof builder.plan).toBe('function');
+			expect(normalizeSQL(dump.sql)).toBe(
+				'select users.* from users where users.active = $1',
+			);
+			expect(dump.params).toEqual([true]);
+		});
+
+		it('from() compiles picked columns using table-ref column names', () => {
+			const s = createTestSchema();
+			const model = schemaToModelIR(s.definition);
+			const orm = createTypedOrm(model, createPgsqlCompileOnlyAdapter());
+			const { users } = s.tables;
+
+			const dump = orm
+				.from(users)
+				.pick(users.id, users.name)
+				.where(eq(users.email, 'alice@example.com'))
+				.dump();
+
+			expect(normalizeSQL(dump.sql)).toBe(
+				'select users.id, users.name from users where users.email = $1',
+			);
+			expect(dump.params).toEqual(['alice@example.com']);
 		});
 	});
 
@@ -269,7 +275,7 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 	});
 
 	describe('Type inference', () => {
-		it('from() returns builder for table', () => {
+		it('from() preserves the inferred full row type', () => {
 			const s = createTestSchema();
 			const model = schemaToModelIR(s.definition);
 			const orm = createTypedOrm(model);
@@ -277,9 +283,16 @@ describe('DX-040 Block 4: Typed Query Builder', () => {
 
 			const builder = orm.from(users);
 
-			// Type test: builder should be a FromBuilder
-			expect(builder).toBeDefined();
-			expect(typeof builder.all).toBe('function');
+			expectTypeOf(builder.all).returns.resolves.toEqualTypeOf<
+				Array<{
+					id: string;
+					name: string;
+					email: string;
+					age: number | null;
+					active: boolean;
+					createdAt: Date;
+				}>
+			>();
 		});
 
 		it('pick() changes the result fields', () => {

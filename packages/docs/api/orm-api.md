@@ -94,7 +94,11 @@ schema({ users: { id: 'uuid', name: 'string' } })
 Schema<T>  →  createOrm({ schema })  →  OrmInstance<DB>
                                             │
                                             ▼
-                              orm.select('users')  →  QueryBuilder<{ id: string; name: string }>
+                              orm.select('users')
+                              orm.from(orm.tables.users)
+                                      │
+                                      ▼
+                              QueryBuilder<{ id: string; name: string }>
                                                           │
                                                           ▼
                                                 .all()  →  Promise<Array<{ id: string; name: string }>>
@@ -477,8 +481,39 @@ All query builder methods return a new immutable instance. Safe to branch and re
 
 ### `select()` — Start a Query
 
+`select(name)` is the ordinary table-name entry point. It is concise and typed by table name when the ORM is created from a typed schema. Use `from(orm.tables.<table>)` when you want the stricter TableRef form with column-level types.
+
 ```typescript
 const users = await orm.select('users').dump();
+```
+
+The same query using both forms:
+
+```typescript
+const activeUsersQuery = await orm
+  .select('users')
+  .where(eq('active', true))
+  .dump();
+
+const { users } = orm.tables;
+const activeUsersFromRefQuery = await orm
+  .from(users)
+  .where(eq(users.active, true))
+  .dump();
+```
+
+### `from()` - Start a Query from a TableRef
+
+`from(tableRef)` starts from a table reference in `orm.tables`. It returns the same query builder surface as `select(name)`, while carrying column-level types into filters and result inference.
+
+```typescript
+const { users } = orm.tables;
+
+const aliceQuery = await orm
+  .from(users)
+  .where(eq(users.email, 'alice@example.com'))
+  .columns(['id', 'name'])
+  .dump();
 ```
 
 ### `columns()` — Select Specific Columns

@@ -215,7 +215,7 @@ describe('S-1 — Lock client: same client used for advisory lock AND DDL', () =
 		 */
 		const migrateTs = await import('./migrate.js');
 		// The module must NOT export or use acquireMigrationLock/releaseMigrationLock
-		// (they were @deprecated pool.query-based functions).
+		// (they were unsafe pool.query-based functions).
 		// Structural: the module exports are known.
 		expect(typeof migrateTs.MigrationError).toBe('function');
 		expect(typeof migrateTs.withMigratePool).toBe('function');
@@ -616,10 +616,10 @@ describe('M-1 — Cleanup masking: original error propagates through cleanup fai
 });
 
 // ============================================================================
-// Integration-level: verify no deprecated lock functions used in module
+// Integration-level: verify no removed lock functions used in module
 // ============================================================================
 
-describe('Lock API — no deprecated acquireMigrationLock in migrate.ts', () => {
+describe('Lock API — no acquireMigrationLock in migrate.ts', () => {
 	it('should not import acquireMigrationLock or releaseMigrationLock', async () => {
 		// Read the source file to verify import list
 		const fs = await import('node:fs/promises');
@@ -629,7 +629,7 @@ describe('Lock API — no deprecated acquireMigrationLock in migrate.ts', () => 
 		const filePath = path.resolve(__dirname, 'migrate.ts');
 		const source = await fs.readFile(filePath, 'utf8');
 
-		// These deprecated functions must NOT be imported
+		// These removed functions must NOT be imported
 		expect(source).not.toContain('acquireMigrationLock');
 		expect(source).not.toContain('releaseMigrationLock');
 		// The correct function IS used

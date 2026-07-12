@@ -85,7 +85,7 @@ describe('DX-040-SURFACE: orm.from() SQL output', () => {
 	it('SC-03: from() produces identical SQL to select() for same table', () => {
 		const { users } = orm.tables;
 		const fromDump = orm.from(users).dump();
-		// select() is deprecated but still on the public type for backward compatibility
+		// select() remains the ordinary string-based public API
 		const selectDump = orm.select('users').dump();
 		expect(fromDump.sql).toBe(selectDump.sql);
 	});
@@ -192,8 +192,8 @@ describe('DX-040-SURFACE: typed mutations via TableRef', () => {
 		expect(dump.params).toEqual([true]);
 	});
 
-	it('SC-12: string-based select() is on public OrmInstance type (deprecated but available)', () => {
-		// select() is deprecated but kept on public OrmInstance for backward compatibility
+	it('SC-12: string-based select() is on public OrmInstance type', () => {
+		// select() remains on public OrmInstance as the string-based table API
 		orm.select('users');
 	});
 
@@ -270,8 +270,8 @@ describe('DX-040-SURFACE: Type-level safety', () => {
 			.values({ name: 'Alice', email: 'test@test.com', active: 'not boolean' });
 	});
 
-	it('OrmInstance exposes string-based select() as deprecated', () => {
-		// select() is deprecated but retained on public OrmInstance for backward compatibility
+	it('OrmInstance exposes string-based select()', () => {
+		// select() remains on public OrmInstance as the string-based table API
 		orm.select('users');
 	});
 

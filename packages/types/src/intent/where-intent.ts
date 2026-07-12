@@ -383,13 +383,6 @@ export interface WhereSubqueryIntent {
 	readonly subquery: QueryIntent;
 }
 
-/**
- * Scalar subquery intent - produces a single value.
- * Simplified QueryIntent for subquery context.
- */
-/** @deprecated Use QueryIntent instead — subqueries are full queries with contextual validation */
-export type ScalarSubqueryIntent = QueryIntent;
-
 // ============================================================================
 // JSON/JSONB WHERE Intents (E13)
 // ============================================================================

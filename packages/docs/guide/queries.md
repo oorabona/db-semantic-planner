@@ -10,6 +10,26 @@ title: Queries
 
 ## Basic Select
 
+DBSP has two first-class SELECT entry points:
+
+- `orm.select('users')` is the shorter table-name form. It is typed by table name when your ORM has a typed schema.
+- `orm.from(orm.tables.users)` is the stricter TableRef form. It carries column-level types from `orm.tables.users` into filters and other query clauses.
+
+The same query can be written either way:
+
+```typescript
+const activeUsersQuery = await orm
+  .select('users')
+  .where(eq('active', true))
+  .dump();
+
+const { users } = orm.tables;
+const activeUsersFromRefQuery = await orm
+  .from(users)
+  .where(eq(users.active, true))
+  .dump();
+```
+
 ```typescript
 // Assumes `db` from `schema({...})` and `orm` from `createOrm({ schema: db, adapter })` are in scope.
 import { createOrm, eq } from '@dbsp/core';
@@ -146,15 +166,21 @@ if (
 
 ---
 
-## Type-Safe `from()`
+## Table-Ref `from()`
 
-Use `orm.tables` references for compile-time table name safety:
+Use `orm.from()` when you want to start from an `orm.tables` reference and keep column refs available for typed filters:
 
 ```typescript
-const users = await orm.from(orm.tables.users).dump();
+const { users } = orm.tables;
+
+const result = await orm
+  .from(users)
+  .where(eq(users.email, 'alice@example.com'))
+  .columns(['id', 'name'])
+  .dump();
 ```
 
-This is equivalent to `orm.select('users')` but avoids string literals in code.
+It returns the same query builder surface as `orm.select('users')`, including `.columns()`, `.include()`, `.withPlanOptions()`, `.dump()`, and execution methods.
 
 ---
 
