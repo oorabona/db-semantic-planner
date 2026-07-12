@@ -4897,6 +4897,35 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 	});
 
 	describe('validate_constraint', () => {
+		type DialectCapabilitiesWithForeignKeys = DialectCapabilities & {
+			readonly supportsDDLForeignKeys?: boolean;
+		};
+
+		function makeCaps(
+			overrides: Partial<DialectCapabilitiesWithForeignKeys>,
+		): DialectCapabilitiesWithForeignKeys {
+			return {
+				name: 'test',
+				supportsReturning: false,
+				supportsRecursiveCTE: false,
+				supportsWindowFunctions: false,
+				supportsArrayType: false,
+				supportsRangeTypes: false,
+				supportsJsonType: false,
+				supportsJsonOperators: false,
+				supportsSchemas: false,
+				supportsLateralJoin: false,
+				supportsJsonAgg: false,
+				recursivePathStyle: 'string',
+				stringConcatStyle: 'operator',
+				identifierQuote: '"',
+				parameterStyle: 'dollar',
+				limitStyle: 'limit-offset',
+				booleanStyle: 'native',
+				...overrides,
+			};
+		}
+
 		it('should generate VALIDATE CONSTRAINT for FK', () => {
 			const fk: ForeignKeyIR = {
 				columns: ['user_id'],
@@ -4938,6 +4967,55 @@ describe('NOT VALID / VALIDATE CONSTRAINT', () => {
 			expect(sql[0]).toBe(
 				'ALTER TABLE "users" VALIDATE CONSTRAINT "users_age_check";',
 			);
+		});
+
+		it('skips CHECK validation when CHECK DDL is disabled', () => {
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'users',
+						destructive: false,
+						details: '',
+						meta: {
+							check: {
+								name: 'users_age_check',
+								expression: 'CHECK ((age > 0))',
+							},
+						},
+					},
+				]),
+				{
+					dialectCapabilities: makeCaps({
+						supportsDDLCheckConstraints: false,
+					}),
+				},
+			);
+			expect(sql).toEqual([]);
+		});
+
+		it('skips FK validation when FK DDL is disabled', () => {
+			const fk: ForeignKeyIR = {
+				columns: ['user_id'],
+				references: { table: 'users', columns: ['id'] },
+			};
+			const sql = generateMigrationSQL(
+				makeDiff([
+					{
+						kind: 'validate_constraint',
+						table: 'posts',
+						destructive: false,
+						details: '',
+						meta: { fk },
+					},
+				]),
+				{
+					dialectCapabilities: makeCaps({
+						supportsDDLForeignKeys: false,
+					}),
+				},
+			);
+			expect(sql).toEqual([]);
 		});
 
 		it('should generate VALIDATE CONSTRAINT with schema prefix', () => {

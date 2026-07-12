@@ -1172,12 +1172,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Get the underlying pg Pool instance.
 	 */
 	getPoolInstance(): Pool {
-		if (this.pool) return this.pool;
-		if (this.client) {
-			throw new Error(
-				'PgsqlAdapter is scoped to a transaction client and has no underlying pg Pool instance.',
-			);
-		}
 		return this.requireConnection() as Pool;
 	}
 

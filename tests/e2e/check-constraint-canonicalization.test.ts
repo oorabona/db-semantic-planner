@@ -5,6 +5,8 @@
  * by the agent verification command for this change.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
@@ -15,6 +17,7 @@ import { ModelIRImpl, schema } from '@dbsp/core';
 import type { ColumnIR, TableIR } from '@dbsp/types';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
+import { loadSchema } from '../../packages/cli/src/utils/schema-loader.js';
 import {
 	closeTestDb,
 	createSchema,
@@ -563,6 +566,74 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			expect(diff.changes).toEqual([]);
 		} finally {
 			await dropSchema(tenantSchema);
+		}
+	});
+
+	it('uses dbCasing loaded from a generated schema file for snake_case CHECK canonicalization', async () => {
+		await pool.query(`
+			CREATE TABLE ${SCHEMA}.order_items (
+				id integer PRIMARY KEY,
+				order_total integer NOT NULL,
+				CONSTRAINT order_items_total_check
+					CHECK (order_total >= 0 AND order_total IS NOT DISTINCT FROM order_total)
+			)
+		`);
+
+		const tmpDir = mkdtempSync(join(process.cwd(), '.tmp-check-loader-'));
+		try {
+			const schemaPath = join(tmpDir, 'dbsp.schema.ts');
+			writeFileSync(
+				schemaPath,
+				`
+					import { schema } from '@dbsp/core';
+
+					export const dbSchema = schema({
+						orderItems: {
+							id: { type: 'integer', primaryKey: true },
+							orderTotal: 'integer',
+						},
+					}, {
+						orderItems: {
+							checkConstraints: [
+								{
+									name: 'order_items_total_check',
+									expression: 'order_total >= 0 AND order_total IS NOT DISTINCT FROM order_total',
+								},
+							],
+						},
+					});
+
+					export default dbSchema;
+					export const dbCasing = 'snake_case' as const;
+				`,
+				'utf8',
+			);
+
+			const loaded = await loadSchema(schemaPath);
+			const dbCasing = loaded.dbCasing;
+			expect(dbCasing).toBe('snake_case');
+			if (dbCasing === undefined) {
+				throw new Error('expected generated schema to export dbCasing');
+			}
+			const warnings: string[] = [];
+			const first = await comparePgsqlDatabaseSchema(pool, loaded.model, {
+				schema: SCHEMA,
+				dbCasing,
+				ignoreUnmanagedExtensions: true,
+				onWarning: (message) => warnings.push(message),
+			});
+			const second = await comparePgsqlDatabaseSchema(pool, loaded.model, {
+				schema: SCHEMA,
+				dbCasing,
+				ignoreUnmanagedExtensions: true,
+				onWarning: (message) => warnings.push(message),
+			});
+
+			expect(warnings).toEqual([]);
+			expect(first.changes).toEqual([]);
+			expect(second.changes).toEqual([]);
+		} finally {
+			rmSync(tmpDir, { recursive: true, force: true });
 		}
 	});
 

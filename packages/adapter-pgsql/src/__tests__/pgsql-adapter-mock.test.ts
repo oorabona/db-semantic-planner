@@ -326,6 +326,24 @@ describe('PgsqlAdapter.getPoolInstance', () => {
 		const adapter = createPgsqlAdapter(pool);
 		expect(adapter.getPoolInstance()).toBe(pool);
 	});
+
+	it('returns the transaction client inside transaction and allows querying through it', async () => {
+		const txClient = makeClient(async (sql?: string) => ({
+			rows: sql === 'SELECT 1' ? [{ ok: true }] : [],
+			rowCount: sql === 'SELECT 1' ? 1 : 0,
+		}));
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		let result: QueryResult | undefined;
+		await adapter.transaction(async (tx) => {
+			const connection = (tx as PgsqlAdapter).getPoolInstance();
+			expect(connection).toBe(txClient);
+			result = await connection.query('SELECT 1');
+		});
+
+		expect(result?.rows).toEqual([{ ok: true }]);
+	});
 });
 
 // ---------------------------------------------------------------------------

@@ -169,6 +169,7 @@ const devCommand = new Command('dev')
 				await withMigratePool(options.db, async (pool) => {
 					const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
+						...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
 						onWarning: (message) => console.warn(`⚠️  ${message}`),
 					});
 

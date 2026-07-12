@@ -126,10 +126,16 @@ export const pushCommand = new Command('push')
 						}
 					} else {
 						// Additive mode: live diff -> generate migration SQL (additive only)
-						const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
+						const compareOptions = {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
-							onWarning: (message) => console.warn(`⚠️  ${message}`),
-						});
+							...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
+							onWarning: (message: string) => console.warn(`⚠️  ${message}`),
+						};
+						const diff = await comparePgsqlDatabaseSchema(
+							pool,
+							schemaModel,
+							compareOptions,
+						);
 
 						// Generate SQL for additive changes only (no destructive)
 						const statements = generateMigrationSQL(diff, {
@@ -177,6 +183,13 @@ export const pushCommand = new Command('push')
 								? { dryRun: options.dryRun }
 								: {}),
 						});
+
+						if (!options.dryRun) {
+							await comparePgsqlDatabaseSchema(pool, schemaModel, {
+								...compareOptions,
+								previouslyAppliedDiff: diff,
+							});
+						}
 
 						if (options.json) {
 							console.log(

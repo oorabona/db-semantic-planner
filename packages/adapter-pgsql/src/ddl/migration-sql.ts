@@ -307,8 +307,15 @@ function failSafeUnknownDownChange(kind: never): DownChangeSQL {
 // ============================================================================
 
 /** Check if a change kind is supported by the dialect capabilities */
-function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
-	switch (kind) {
+type DialectCapabilitiesWithForeignKeys = DialectCapabilities & {
+	readonly supportsDDLForeignKeys?: boolean;
+};
+
+function isChangeSupported(
+	change: SchemaChange,
+	caps: DialectCapabilities,
+): boolean {
+	switch (change.kind) {
 		case 'create_enum':
 		case 'drop_enum':
 		case 'alter_enum_add_value':
@@ -323,6 +330,8 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
 		case 'add_check_constraint':
 		case 'drop_check_constraint':
 			return caps.supportsDDLCheckConstraints === true;
+		case 'validate_constraint':
+			return isValidateConstraintSupported(change, caps);
 		case 'add_comment':
 		case 'drop_comment':
 			return caps.supportsDDLComments === true;
@@ -340,6 +349,22 @@ function isChangeSupported(kind: string, caps: DialectCapabilities): boolean {
 	}
 }
 
+function isValidateConstraintSupported(
+	change: SchemaChange,
+	caps: DialectCapabilities,
+): boolean {
+	if (change.meta?.check !== undefined) {
+		return caps.supportsDDLCheckConstraints === true;
+	}
+	if (change.meta?.fk !== undefined) {
+		return (
+			(caps as DialectCapabilitiesWithForeignKeys).supportsDDLForeignKeys !==
+			false
+		);
+	}
+	return true;
+}
+
 function changesAppliedByUp(
 	diff: SchemaDiff,
 	options?: MigrationSQLOptions,
@@ -351,7 +376,7 @@ function changesAppliedByUp(
 
 	const caps = options?.dialectCapabilities;
 	return caps
-		? filteredChanges.filter((c) => isChangeSupported(c.kind, caps))
+		? filteredChanges.filter((c) => isChangeSupported(c, caps))
 		: filteredChanges;
 }
 
