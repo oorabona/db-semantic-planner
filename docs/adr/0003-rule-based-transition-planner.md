@@ -164,6 +164,10 @@ Expressions inside such an operation — a CHECK body, a `USING` clause — rema
 
 A rule that insists on emitting raw SQL is not verified. It is treated exactly as a manual step (§6b): it carries a `user-blast-radius` assumption, it taints what depends on it, and no plan containing it is reported as proven.
 
+**And this moves the trust into core, so core's share is named too.** *"The effects are read off the object"* is only true if `effectsOf(operation)` is right — and it is a semantic model, not a fact. `serial` creates an implicit sequence. `CreateIndex` drags in operator classes, collations, and functions. `AlterColumnType` invalidates evidence about the indexes, constraints, generated columns and comparison semantics that depended on the old type. If core's effect calculator under-declares any of that, the planner will prove a composition on stale evidence — and the rule authors will be blameless.
+
+So the operation kinds, their renderers, and their effect calculators are **versioned, engine-scoped artefacts with stable ids**, and what they claim is an assumption of class **`core-operation-semantics`**, with core as its trust root. It sits in the same graph as everything else. Conformance testing does not remove that trust; it is what makes accepting it reasonable.
+
 #### Does this refuse everything?
 
 It is a fair objection: if every rule declaration is an assumption, and assumptions taint what rests on them, does anything ever ship?
@@ -384,8 +388,8 @@ Not one enum on one axis. Six outcomes that demand six different things:
 
 | Outcome | Meaning | Action |
 |---|---|---|
-| `proven-applicable` | a rule covers the engine, version, objects, transaction context, data preconditions and dependencies | may run |
-| `proven-inapplicable` | a precondition is explicitly violated — duplicates exist, so the `UNIQUE` index cannot be added | refuse; report the violating fact |
+| `proven-applicable` | a rule covers the engine, version, objects, transaction context and dependencies, **and every volatile guard it needs has a valid execution protocol on this engine** | may run — its guards are evaluated at apply time, not now |
+| `proven-inapplicable` | a **durable** precondition is violated: the engine version does not support the operation, the role lacks the privilege, a dependency cannot be satisfied | refuse; report the violating fact |
 | `context-mismatch` | the plan was proven under a context that is no longer the one in force | re-prove |
 | `insufficient-evidence` | equivalence or safety could not be established | refuse; say which obligation is undischarged |
 | `unsupported-transition` | no rule in this adapter knows this change | refuse; do not improvise |
@@ -393,7 +397,19 @@ Not one enum on one axis. Six outcomes that demand six different things:
 | `uncomposable` | the rules are individually proven, and their composition is not — conflicting locks, incompatible transaction boundaries, one postcondition invalidating another's evidence | refuse; do not emit them in declaration order and hope |
 | `ambiguous-intent` | several business transformations fit the same end state | refuse; ask for the missing fact |
 
-Plus three that belong to **execution** rather than planning — `guard-timeout`, `partially-applied`, `resume-required` (§5b).
+**Planning never says anything about the data.** It cannot: a predicate over live rows is not a durable fact (§4b), and that is as true of *"duplicates exist, so this is inapplicable"* as it is of *"no duplicates, so this is safe"*. The duplicates may be cleaned up before the maintenance window; they may appear after the probe. **Planning proves only that a volatile guard has a valid execution protocol on this engine.** The predicate's *value* belongs to apply, under that protocol, or nowhere.
+
+An early probe still earns its keep — telling someone their plan will fail before they book the window is worth a great deal — but it is an `AdvisoryObservation` (§4b), and it is reported as one.
+
+So the outcomes that concern **execution** are:
+
+| Outcome | Meaning |
+|---|---|
+| `guard-failed` | the predicate did not hold when it was evaluated under its protocol — the duplicates were there, the null was there. Nothing was applied for that step |
+| `guard-timeout` | the lock could not be taken within its bound. Nothing was applied for that step |
+| `partially-applied` | earlier steps are in the database; the plan stopped; here is the journal and the re-introspected state |
+| `unknown-step-result` | a step ran and its outcome cannot be established (§5b). Stop; a human decides |
+| `resume-required` | the remaining work is known and can be resumed, from the observed state, under a re-proven context |
 
 **None of the refusals may produce an automatic `DROP` and `CREATE`.** A spurious replacement of an index on a billion-row table can lock, run for hours, destroy planner statistics, or drop a uniqueness guarantee. That is not the safe side of the trade — it is a larger risk wearing safety's clothes.
 
@@ -461,6 +477,20 @@ Stable logical ids make a rename **representable**. They make it **provable** on
 - with **no** id and no trusted prior snapshot, a rename is `heuristic`, and a heuristic never applies a destructive plan on its own.
 
 **No IR type carries a logical id today.** Until one does, "already attached in the database" is not a fact this system can observe, and every rename is a guess.
+
+#### Adoption is a transition, and it must not launder a human's guess into evidence
+
+Day one is an existing production database: no ids, no journal, no evidence, and no rule that knows how it got that way. Something has to attach the first ids — a person, or a heuristic.
+
+And here is the trap. Someone baselining a database attaches `app.user.email` to `users.email`, when they meant `customers.email`. Six months later the desired schema moves that id. The planner looks, sees an id **already attached in the database**, and calls the move a **provable rename**. The human's mistake has been laundered into "system catalog evidence", and the design's own rule — *a human's word is an assumption, never evidence* (§0) — has been evaded by writing that word into the catalog first.
+
+So **adoption is a first-class transition**, and what it creates is an assumption, not a fact:
+
+- every identity attached during a baseline carries an `Assumption` of class **`baseline-identity-attachment`**, with its asserter, its scope, and how it was chosen (a person, or a heuristic, and which);
+- **every later proof that rests on that identity rests on that assumption, transitively.** A rename "proven" from a baselined id is `proven-under-assumption`, and it names the baseline and the human who made it;
+- an id that dbsp itself attached, in a plan it proved and applied, is a different thing — *that* is evidence, because dbsp watched it happen.
+
+An identity is only as trustworthy as the act that attached it, and the design has to remember which act that was.
 
 ### 9. Rehearsal is stronger evidence than a shadow — and still not proof
 
