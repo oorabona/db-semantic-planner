@@ -59,6 +59,17 @@ function deferred<T = void>(): {
 	return { promise, resolve, reject };
 }
 
+async function captureRejection(
+	action: () => Promise<unknown>,
+): Promise<unknown> {
+	try {
+		await action();
+	} catch (error) {
+		return error;
+	}
+	throw new Error('Expected promise to reject');
+}
+
 function queryText(input: unknown): string {
 	if (typeof input === 'string') return input;
 	if (
@@ -332,6 +343,73 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		await sleeper?.catch(() => undefined);
 		await insert?.catch(() => undefined);
 		expect(await itemIds()).toEqual([]);
+	});
+
+	it('reports unawaited raw COMMIT over a callback error and leaves the row committed in a pool-owned transaction', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		const callbackError = new Error('validation failed');
+		let rawCommit: Promise<unknown> | undefined;
+
+		const error = await captureRejection(() =>
+			orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 38, label: 'committed by unawaited raw commit' })
+					.execute();
+				rawCommit = tx.raw('COMMIT');
+				void rawCommit.catch(() => undefined);
+				throw callbackError;
+			}),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as Error).cause).toBe(callbackError);
+		await rawCommit?.catch(() => undefined);
+		expect(await itemIds()).toEqual([38]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [38]);
+	});
+
+	it('reports unawaited raw COMMIT over a callback error and leaves the row committed in a managed borrowed transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const callbackError = new Error('validation failed');
+		let rawCommit: Promise<unknown> | undefined;
+		let transactionGone = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+
+			const error = await captureRejection(() =>
+				orm.transaction(async (tx) => {
+					await tx
+						.into(tx.tables.items)
+						.values({ id: 39, label: 'committed by borrowed raw commit' })
+						.execute();
+					rawCommit = tx.raw('COMMIT');
+					void rawCommit.catch(() => undefined);
+					throw callbackError;
+				}),
+			);
+
+			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+			expect((error as Error).cause).toBe(callbackError);
+			await rawCommit?.catch(() => undefined);
+			transactionGone = true;
+		} finally {
+			if (!transactionGone) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).toEqual([39]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [39]);
 	});
 
 	it('rejects after a caught raw COMMIT and never sends the post-COMMIT ORM statement', async () => {
@@ -986,9 +1064,17 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			);
 			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
-			await expect(
+			const error = await captureRejection(() =>
 				adapter.listIndexes('items', 'bad\u0000schema'),
-			).rejects.toThrow();
+			);
+
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).not.toContain(
+				'rolled back the failed raw SQL to a savepoint',
+			);
+			expect(
+				(error as { readonly dbspRawSqlContext?: unknown }).dbspRawSqlContext,
+			).toBeUndefined();
 
 			await client.query(
 				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,

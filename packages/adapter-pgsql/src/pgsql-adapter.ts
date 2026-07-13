@@ -248,8 +248,11 @@ type DbspChildTransactionObserver = {
 	release: (failure?: DbspScopeFailure) => void;
 };
 
+type DbspScopePoisonOrigin = 'caller' | 'cleanup';
+
 type DbspScopePoison = {
 	readonly error: Error;
+	readonly origin: DbspScopePoisonOrigin;
 };
 
 type DbspScopeFailure = {
@@ -274,6 +277,7 @@ type StatementExecutionOptions = {
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
+	readonly rawSqlStatement?: boolean;
 };
 
 type MaybeMultipleQueryResults<T extends QueryResultRow = QueryResultRow> =
@@ -522,6 +526,16 @@ function addRawSqlTransactionContext(error: unknown): unknown {
 		});
 	}
 	return error;
+}
+
+function protectedStatementCleanupAction(
+	rawSqlStatement: boolean,
+	detail: string,
+): string {
+	const prefix = rawSqlStatement
+		? 'PostgreSQL raw SQL cleanup failed'
+		: 'PostgreSQL protected statement cleanup failed';
+	return `${prefix}: ${detail}`;
 }
 
 function raise(error: unknown): never {
@@ -2786,10 +2800,64 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		try {
-			const result = await fn(txAdapter);
-			this.closeScopeAndAssertChildren(scopeState);
-			await this.drainScopeWork(scopeState);
-			this.throwIfScopePoisoned(scopeState);
+			let result: T;
+			try {
+				result = await fn(txAdapter);
+				this.closeScopeAndAssertChildren(scopeState);
+				await this.drainScopeWork(scopeState);
+				this.throwIfScopePoisoned(scopeState);
+			} catch (error) {
+				let transactionError = error;
+				try {
+					this.closeScopeAndAssertChildren(scopeState);
+				} catch (scopeError) {
+					transactionError = scopeError;
+				}
+				let cleanupErr: unknown;
+				try {
+					const rolledBack = await this.rollbackSavepoint(
+						client,
+						savepointName,
+						scopeToken,
+						scopeState,
+					);
+					await this.drainScopeChildren(scopeState);
+					if (rolledBack) {
+						await this.releaseSavepoint(
+							client,
+							savepointName,
+							scopeToken,
+							scopeState,
+						);
+					}
+				} catch (error) {
+					cleanupErr = error;
+				}
+				if (cleanupErr !== undefined) {
+					await this.drainScopeChildren(scopeState);
+					if (
+						isRawSqlTransactionControlError(transactionError) &&
+						isSavepointUnavailableError(cleanupErr)
+					) {
+						scopeFailure = { error: transactionError };
+						throw transactionError;
+					}
+					const cleanupFailure = createCleanupFailureError(
+						'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed; the caller transaction may now be in an unknown state',
+						transactionError,
+						cleanupErr,
+					);
+					scopeFailure = { error: cleanupFailure };
+					throw cleanupFailure;
+				}
+				await this.drainScopeChildren(scopeState);
+				transactionError = this.scopePoisonOutranksError(
+					scopeState,
+					transactionError,
+				);
+				scopeFailure = { error: transactionError };
+				throw transactionError;
+			}
 			try {
 				await this.executeScopeBoundaryStatement(
 					client,
@@ -2801,61 +2869,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					},
 				);
 			} catch (releaseErr) {
-				throw await this.classifySavepointReleaseFailure(
-					client,
-					scopeToken,
-					releaseErr,
-					'PostgreSQL transaction cleanup failed: RELEASE SAVEPOINT failed after the transaction body returned',
-				);
-			}
-			return result;
-		} catch (error) {
-			let transactionError = error;
-			try {
-				this.closeScopeAndAssertChildren(scopeState);
-			} catch (scopeError) {
-				transactionError = scopeError;
-			}
-			let cleanupErr: unknown;
-			try {
-				const rolledBack = await this.rollbackSavepoint(
+				const cleanupFailure = await this.rollbackSavepointAfterReleaseFailure(
 					client,
 					savepointName,
 					scopeToken,
 					scopeState,
-				);
-				await this.drainScopeChildren(scopeState);
-				if (rolledBack) {
-					await this.releaseSavepoint(
-						client,
-						savepointName,
-						scopeToken,
-						scopeState,
-					);
-				}
-			} catch (error) {
-				cleanupErr = error;
-			}
-			if (cleanupErr !== undefined) {
-				await this.drainScopeChildren(scopeState);
-				if (
-					isRawSqlTransactionControlError(transactionError) &&
-					isSavepointUnavailableError(cleanupErr)
-				) {
-					scopeFailure = { error: transactionError };
-					throw transactionError;
-				}
-				const cleanupFailure = createCleanupFailureError(
-					'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed; the caller transaction may now be in an unknown state',
-					transactionError,
-					cleanupErr,
+					releaseErr,
+					'PostgreSQL transaction cleanup failed: RELEASE SAVEPOINT failed after the transaction body returned',
 				);
 				scopeFailure = { error: cleanupFailure };
 				throw cleanupFailure;
 			}
-			await this.drainScopeChildren(scopeState);
-			scopeFailure = { error: transactionError };
-			throw transactionError;
+			return result;
 		} finally {
 			releaseScope(scopeFailure);
 		}
@@ -2927,8 +2952,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					throw cleanupFailure;
 				}
 			}
-			scopeFailure = { error: transactionError };
 			await this.drainScopeChildren(scopeState);
+			transactionError = this.scopePoisonOutranksError(
+				scopeState,
+				transactionError,
+			);
+			scopeFailure = { error: transactionError };
 			throw transactionError;
 		} finally {
 			if (releaseScope === undefined) {
@@ -3123,7 +3152,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		) {
 			return this.poisonClientScopeStack(
 				client,
-				new PgsqlRawSqlTransactionControlError(releaseErr),
+				createCleanupOnlyError(cleanupAction, releaseErr),
+				'cleanup',
 			);
 		}
 		if (directState === 'transaction-aborted') {
@@ -3131,6 +3161,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				client,
 				allowedScopeToken,
 				new PgsqlTransactionAbortedError(releaseErr),
+				'cleanup',
 			);
 		}
 
@@ -3141,7 +3172,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (probedState === 'no-active-transaction') {
 			return this.poisonClientScopeStack(
 				client,
-				new PgsqlRawSqlTransactionControlError(releaseErr),
+				createCleanupOnlyError(cleanupAction, releaseErr),
+				'cleanup',
 			);
 		}
 		if (probedState === 'transaction-aborted') {
@@ -3149,6 +3181,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				client,
 				allowedScopeToken,
 				new PgsqlTransactionAbortedError(releaseErr),
+				'cleanup',
 			);
 		}
 		return createCleanupOnlyError(cleanupAction, releaseErr);
@@ -3427,29 +3460,68 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
-	private poisonScopeState(scopeState: DbspScopeState, error: Error): Error {
-		if (scopeState.poisoned === undefined) {
-			scopeState.poisoned = { error };
+	private scopePoisonOutranksError(
+		scopeState: DbspScopeState | undefined,
+		error: unknown,
+	): unknown {
+		const poison = scopeState?.poisoned;
+		if (poison === undefined || poison.error === error) return error;
+		if (poison.origin === 'cleanup') {
+			if (error instanceof Error && !Object.hasOwn(error, 'cause')) {
+				Object.defineProperty(error, 'cause', {
+					value: poison.error,
+					configurable: true,
+				});
+			}
+			return error;
 		}
-		return scopeState.poisoned.error;
+		if (!isRawSqlTransactionControlError(poison.error)) {
+			return error;
+		}
+		Object.defineProperty(poison.error, 'cause', {
+			value: error,
+			configurable: true,
+		});
+		return poison.error;
+	}
+
+	private poisonScopeState(
+		scopeState: DbspScopeState,
+		error: Error,
+		origin: DbspScopePoisonOrigin = 'caller',
+	): Error {
+		const poison = scopeState.poisoned;
+		if (
+			poison === undefined ||
+			(poison.origin === 'cleanup' && origin === 'caller')
+		) {
+			scopeState.poisoned = { error, origin };
+			return error;
+		}
+		return poison.error;
 	}
 
 	private poisonClientScope(
 		client: PoolClient,
 		scopeToken: DbspScopeToken | undefined,
 		error: Error,
+		origin?: DbspScopePoisonOrigin,
 	): Error {
 		const scope = this.findClientScope(client, scopeToken);
 		if (scope === undefined) return error;
-		return this.poisonScopeState(scope.state, error);
+		return this.poisonScopeState(scope.state, error, origin);
 	}
 
-	private poisonClientScopeStack(client: PoolClient, error: Error): Error {
+	private poisonClientScopeStack(
+		client: PoolClient,
+		error: Error,
+		origin?: DbspScopePoisonOrigin,
+	): Error {
 		const stack = activeClientScopes.get(client);
 		if (stack === undefined || stack.length === 0) return error;
 		let poisonedError: Error | undefined;
 		for (const scope of stack) {
-			const scopeError = this.poisonScopeState(scope.state, error);
+			const scopeError = this.poisonScopeState(scope.state, error, origin);
 			poisonedError ??= scopeError;
 		}
 		return poisonedError ?? error;
@@ -3606,6 +3678,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await this.executeQueryProtectingOpenTransaction<QueryResultRow>(
 				sql,
 				parameters,
+				{ rawSqlStatement: true },
 			);
 		return result.rows as T[];
 	}
@@ -3679,12 +3752,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async executeQueryProtectingOpenTransaction<
 		T extends QueryResultRow = QueryResultRow,
-	>(sql: string, parameters?: readonly unknown[]): Promise<QueryResult<T>> {
+	>(
+		sql: string,
+		parameters?: readonly unknown[],
+		options: StatementExecutionOptions = {},
+	): Promise<QueryResult<T>> {
 		return this.executeConnectionStatement<T>(
 			this.requireConnection(),
 			sql,
 			parameters,
 			{
+				...options,
 				protectBorrowedClientTransaction:
 					this.client !== undefined && !this.adapterManagedTransaction,
 			},
@@ -3819,6 +3897,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		parameters?: readonly unknown[],
 		options: StatementExecutionOptions = {},
 	): Promise<QueryResult<T>> {
+		const rawSqlStatement = options.rawSqlStatement ?? false;
 		const savepointName = nextSavepointName();
 		const scopeToken = this.scopeToken ?? createScopeToken();
 		const scopeState = this.scopeState ?? createScopeState();
@@ -3881,7 +3960,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					throw error;
 				}
 				throw createCleanupFailureError(
-					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after the protected statement failed; the caller transaction may now be in an unknown state',
+					protectedStatementCleanupAction(
+						rawSqlStatement,
+						'savepoint cleanup failed after the protected statement failed; the caller transaction may now be in an unknown state',
+					),
 					error,
 					cleanupErr,
 				);
@@ -3891,7 +3973,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			if (isRawSqlTransactionControlError(error)) {
 				throw error;
 			}
-			throw addRawSqlTransactionContext(error);
+			if (rawSqlStatement) {
+				throw addRawSqlTransactionContext(error);
+			}
+			throw error;
 		}
 		try {
 			this.closeScopeAndAssertChildren(scopeState);
@@ -3913,7 +3998,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				scopeToken,
 				scopeState,
 				releaseErr,
-				'PostgreSQL raw SQL cleanup failed: RELEASE SAVEPOINT failed after the protected statement succeeded',
+				protectedStatementCleanupAction(
+					rawSqlStatement,
+					'RELEASE SAVEPOINT failed after the protected statement succeeded',
+				),
 			);
 		} finally {
 			releaseScope();

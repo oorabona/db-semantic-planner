@@ -420,6 +420,52 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		expect(txClient.release).toHaveBeenCalledOnce();
 	});
 
+	it('surfaces raw COMMIT poison over a callback error when cleanup drains unawaited work', async () => {
+		const callbackError = new Error('validation failed');
+		const commitResult = {
+			rows: [],
+			rowCount: 0,
+			command: 'COMMIT',
+		} as QueryResult;
+		let transactionOpen = false;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'BEGIN') {
+				transactionOpen = true;
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			if (sql === 'COMMIT') {
+				transactionOpen = false;
+				return commitResult;
+			}
+			if (sql === 'ROLLBACK') {
+				if (!transactionOpen) throw noActiveTransactionError();
+				transactionOpen = false;
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+		let rawCommit: Promise<unknown> | undefined;
+
+		const error = await captureRejection(() =>
+			orm.transaction(async (tx) => {
+				rawCommit = tx.raw('COMMIT');
+				void rawCommit.catch(() => undefined);
+				throw callbackError;
+			}),
+		);
+
+		expectRawSqlTransactionControlError(error, callbackError);
+		expect(error).not.toBe(callbackError);
+		await rawCommit?.catch(() => undefined);
+		expect(queryCalls(query)).toEqual(['BEGIN', 'COMMIT', 'ROLLBACK']);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
 	it('refuses statements issued after the transaction callback has returned', async () => {
 		const firstStarted = deferred();
 		const releaseFirst = deferred();
@@ -1502,17 +1548,17 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect((error as AggregateError).errors).toContain(releaseError);
 		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
 		const calls = queryCalls(query);
-		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls[1]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
-		expect(calls[2]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls[3]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
-		expect(
-			calls.some((sql) => /^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql)),
-		).toBe(true);
+		const savepointName = calls[0]?.replace(/^SAVEPOINT /, '');
+		expect(calls).toEqual([
+			`SAVEPOINT ${savepointName}`,
+			`RELEASE SAVEPOINT ${savepointName}`,
+			`ROLLBACK TO SAVEPOINT ${savepointName}`,
+			`RELEASE SAVEPOINT ${savepointName}`,
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('classifies a missing dbsp savepoint on RELEASE as transaction control', async () => {
+	it('surfaces a missing dbsp savepoint on RELEASE as cleanup failure', async () => {
 		const savepointGoneError = Object.assign(
 			new Error('savepoint does not exist'),
 			{ code: '3B001' },
@@ -1536,8 +1582,16 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			adapter.transaction(async () => 'callback returned normally'),
 		);
 
-		expectRawSqlTransactionControlError(error, savepointGoneError);
-		expect(error).not.toBeInstanceOf(AggregateError);
+		expect(error).toBeInstanceOf(AggregateError);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			savepointGoneError,
+		);
+		expect((error as AggregateError).errors).toContain(savepointGoneError);
+		expect((error as Error).message).toContain(
+			'PostgreSQL transaction cleanup failed',
+		);
+		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
 		expect(queryCalls(query)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
@@ -2000,6 +2054,57 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
+	it('surfaces raw COMMIT poison over a managed borrowed callback error when cleanup drains unawaited work', async () => {
+		const callbackError = new Error('validation failed');
+		const commitResult = {
+			rows: [],
+			rowCount: 0,
+			command: 'COMMIT',
+		} as QueryResult;
+		let transactionOpen = true;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) {
+				if (!transactionOpen) throw noActiveTransactionError();
+				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+			}
+			if (sql === 'COMMIT') {
+				transactionOpen = false;
+				return commitResult;
+			}
+			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
+				if (!transactionOpen) throw noActiveTransactionError();
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+		let rawCommit: Promise<unknown> | undefined;
+
+		const error = await captureRejection(() =>
+			orm.transaction(async (tx) => {
+				rawCommit = tx.raw('COMMIT');
+				void rawCommit.catch(() => undefined);
+				throw callbackError;
+			}),
+		);
+
+		expectRawSqlTransactionControlError(error, callbackError);
+		expect(error).not.toBe(callbackError);
+		await rawCommit?.catch(() => undefined);
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'COMMIT',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('rolls back the managed scope when one concurrent statement fails without per-statement savepoints', async () => {
 		const pgError = new Error('statement failed');
 		const query = vi.fn(async (input: MockQueryInput) => {
@@ -2086,6 +2191,90 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(queryCalls(query)).not.toContain(
 			'SELECT child before parent release',
 		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('keeps the unawaited child diagnosis when child RELEASE cleanup fails', async () => {
+		const childScopeStarted = deferred();
+		const resumeChild = deferred();
+		const savepointGoneError = Object.assign(
+			new Error('savepoint does not exist'),
+			{ code: '3B001' },
+		);
+		let parentSavepoint: string | undefined;
+		let childSavepoint: string | undefined;
+		let parentRolledBack = false;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) {
+				const savepointName = sql.replace(/^SAVEPOINT /, '');
+				parentSavepoint ??= savepointName;
+				if (savepointName !== parentSavepoint) {
+					childSavepoint ??= savepointName;
+				}
+				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+			}
+			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
+				if (
+					parentRolledBack &&
+					childSavepoint !== undefined &&
+					sql === `ROLLBACK TO SAVEPOINT ${childSavepoint}`
+				) {
+					throw savepointGoneError;
+				}
+				if (sql === `ROLLBACK TO SAVEPOINT ${parentSavepoint}`) {
+					parentRolledBack = true;
+				}
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			if (
+				parentRolledBack &&
+				childSavepoint !== undefined &&
+				sql === `RELEASE SAVEPOINT ${childSavepoint}`
+			) {
+				throw savepointGoneError;
+			}
+			return { rows: [], rowCount: 0, command: 'RELEASE' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		let child: Promise<unknown> | undefined;
+		const transaction = adapter.transaction(async (tx) => {
+			child = tx.transaction(async () => {
+				childScopeStarted.resolve();
+				await resumeChild.promise;
+			});
+			await childScopeStarted.promise;
+		});
+
+		await childScopeStarted.promise;
+		await waitForCondition(
+			() =>
+				queryCalls(query).some((sql) =>
+					/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql),
+				),
+			'expected the managed parent savepoint to roll back while the child was live',
+		);
+		resumeChild.resolve();
+
+		const error = await captureRejection(() => transaction);
+
+		expect(error).toBeInstanceOf(Error);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as Error).message).toContain('must be awaited');
+		await child?.catch(() => undefined);
+		expect(queryCalls(query)).toEqual([
+			`SAVEPOINT ${parentSavepoint}`,
+			`SAVEPOINT ${childSavepoint}`,
+			`ROLLBACK TO SAVEPOINT ${parentSavepoint}`,
+			`RELEASE SAVEPOINT ${childSavepoint}`,
+			`ROLLBACK TO SAVEPOINT ${childSavepoint}`,
+			`RELEASE SAVEPOINT ${parentSavepoint}`,
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
@@ -2542,9 +2731,12 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 		);
 
 		expect(error).toBe(pgError);
-		expect((error as Error).message).toContain(
+		expect((error as Error).message).not.toContain(
 			'rolled back the failed raw SQL to a savepoint',
 		);
+		expect(
+			(error as { readonly dbspRawSqlContext?: unknown }).dbspRawSqlContext,
+		).toBeUndefined();
 		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
 		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
@@ -2611,7 +2803,7 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		);
 	});
 
-	it('classifies a missing savepoint during raw cleanup rollback as transaction control', async () => {
+	it('surfaces a missing savepoint during raw cleanup rollback as cleanup failure', async () => {
 		const sql = 'INSERT INTO t VALUES (1)';
 		const releaseError = new Error('release savepoint failed');
 		const savepointGoneError = Object.assign(
@@ -2637,8 +2829,13 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 
 		const error = await captureRejection(() => adapter.executeRaw(sql));
 
-		expectRawSqlTransactionControlError(error, savepointGoneError);
-		expect(error).not.toBeInstanceOf(AggregateError);
+		expectCleanupFailure(
+			error,
+			releaseError,
+			savepointGoneError,
+			/ROLLBACK TO SAVEPOINT also failed/,
+		);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
 		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			sql,
@@ -3321,7 +3518,7 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('classifies a missing savepoint during completed-stream cleanup rollback as transaction control', async () => {
+	it('surfaces a missing savepoint during completed-stream cleanup rollback as cleanup failure', async () => {
 		const releaseError = new Error('stream release failed');
 		const savepointGoneError = Object.assign(
 			new Error('savepoint does not exist'),
@@ -3364,8 +3561,13 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		});
 
 		expect(collected).toEqual([{ id: 1 }]);
-		expectRawSqlTransactionControlError(error, savepointGoneError);
-		expect(error).not.toBeInstanceOf(AggregateError);
+		expectCleanupFailure(
+			error,
+			releaseError,
+			savepointGoneError,
+			/ROLLBACK TO SAVEPOINT also failed/,
+		);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
 		expect(queryCalls(query)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^DECLARE /),
@@ -3856,9 +4058,12 @@ describe('PgsqlAdapter.listIndexes — schema fallback', () => {
 		const error = await captureRejection(() => adapter.listIndexes('tbl'));
 
 		expect(error).toBe(pgError);
-		expect((error as Error).message).toContain(
+		expect((error as Error).message).not.toContain(
 			'rolled back the failed raw SQL to a savepoint',
 		);
+		expect(
+			(error as { readonly dbspRawSqlContext?: unknown }).dbspRawSqlContext,
+		).toBeUndefined();
 		expect(queryCalls(query)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringContaining('FROM pg_indexes'),
@@ -3889,9 +4094,12 @@ describe('PgsqlAdapter.listIndexes — schema fallback', () => {
 		);
 
 		expect(error).toBe(pgError);
-		expect((error as Error).message).toContain(
+		expect((error as Error).message).not.toContain(
 			'rolled back the failed raw SQL to a savepoint',
 		);
+		expect(
+			(error as { readonly dbspRawSqlContext?: unknown }).dbspRawSqlContext,
+		).toBeUndefined();
 		expect(queryCalls(query)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringContaining('FROM information_schema.columns'),
