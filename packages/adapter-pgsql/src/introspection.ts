@@ -30,7 +30,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { buildRelationKeyFields } from '@dbsp/types';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
@@ -137,6 +137,14 @@ interface RawPartition {
 	columns: string[];
 }
 
+interface CatalogQueryExecutor {
+	query<T extends QueryResultRow = QueryResultRow>(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<QueryResult<T>>;
+	readonly sequentialCatalogReads?: boolean;
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -236,37 +244,24 @@ interface CatalogResults {
  * param), sequences, rls state, policies, formatted column types.
  */
 async function queryAllCatalogs(
-	pool: Pool | PoolClient,
+	pool: CatalogQueryExecutor,
 	schema: string,
 ): Promise<CatalogResults> {
-	const [
-		columnsResult,
-		pksResult,
-		fksResult,
-		indexesResult,
-		uniqueColumnsResult,
-		enumsResult,
-		commentsResult,
-		checksResult,
-		partitionsResult,
-		extensionsResult,
-		sequencesResult,
-		rlsResult,
-		policiesResult,
-		formattedColumnTypesResult,
-	] = await Promise.all([
-		// 1. Columns (including identity and collation)
-		pool.query<RawColumn>(
-			`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
+	const catalogQueries = [
+		() =>
+			// 1. Columns (including identity and collation)
+			pool.query<RawColumn>(
+				`SELECT table_name, column_name, data_type, udt_name, is_nullable, column_default,
 			        collation_name, is_identity, identity_generation
 			 FROM information_schema.columns
 			 WHERE table_schema = $1
 			 ORDER BY table_name, ordinal_position`,
-			[schema],
-		),
-		// 2. Primary keys
-		pool.query<RawPrimaryKey>(
-			`SELECT tc.table_name, kcu.column_name
+				[schema],
+			),
+		() =>
+			// 2. Primary keys
+			pool.query<RawPrimaryKey>(
+				`SELECT tc.table_name, kcu.column_name
 			 FROM information_schema.table_constraints tc
 			 JOIN information_schema.key_column_usage kcu
 			   ON tc.constraint_name = kcu.constraint_name
@@ -274,11 +269,12 @@ async function queryAllCatalogs(
 			 WHERE tc.constraint_type = 'PRIMARY KEY'
 			   AND tc.table_schema = $1
 			 ORDER BY tc.table_name, kcu.ordinal_position`,
-			[schema],
-		),
-		// 3. Foreign keys
-		pool.query<RawForeignKey>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 3. Foreign keys
+			pool.query<RawForeignKey>(
+				`SELECT
 			   c.conname AS constraint_name,
 			   source_rel.relname AS source_table,
 			   source_attr.attname AS source_column,
@@ -317,18 +313,19 @@ async function queryAllCatalogs(
 			   AND c.conparentid = 0
 			   AND source_ns.nspname = $1
 			 ORDER BY c.conname, cols.ord`,
-			[schema],
-		),
-		// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
-		// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
-		// backing index that is NOT a user-defined index — it is tracked via col.unique on the
-		// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
-		// Enhanced to capture:
-		//   - INCLUDE columns (PG11+): indkey positions > indnkeyatts
-		//   - Expression index entries: attnum = 0 in indkey → pg_get_expr(indexprs)
-		//   - Per-column operator classes: pg_opclass join on indclass, non-default only
-		pool.query<RawIndex>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 4. Indexes (excluding PK-backing indexes and unique-constraint-backing indexes).
+			// Unique constraints created via col.unique / UNIQUE keyword in DDL produce an implicit
+			// backing index that is NOT a user-defined index — it is tracked via col.unique on the
+			// ColumnIR instead. Including it here would cause spurious drop_index diffs on roundtrip.
+			// Enhanced to capture:
+			//   - INCLUDE columns (PG11+): indkey positions > indnkeyatts
+			//   - Expression index entries: attnum = 0 in indkey → pg_get_expr(indexprs)
+			//   - Per-column operator classes: pg_opclass join on indclass, non-default only
+			pool.query<RawIndex>(
+				`SELECT
 			   i.relname AS index_name,
 			   t.relname AS table_name,
 			   -- Key columns (attnum != 0 means real column, within key positions)
@@ -378,11 +375,12 @@ async function queryAllCatalogs(
 			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname,
 			          ix.indpred, ix.indrelid, ix.indexprs, i.reloptions
 			 ORDER BY t.relname, i.relname`,
-			[schema],
-		),
-		// 5. Single-column UNIQUE constraints tracked as ColumnIR.unique
-		pool.query<RawUniqueColumn>(
-			`SELECT rel.relname AS table_name, att.attname AS column_name, c.conname AS constraint_name
+				[schema],
+			),
+		() =>
+			// 5. Single-column UNIQUE constraints tracked as ColumnIR.unique
+			pool.query<RawUniqueColumn>(
+				`SELECT rel.relname AS table_name, att.attname AS column_name, c.conname AS constraint_name
 				 FROM pg_constraint c
 				 JOIN pg_class rel ON rel.oid = c.conrelid
 				 JOIN pg_namespace ns ON ns.oid = rel.relnamespace
@@ -390,11 +388,12 @@ async function queryAllCatalogs(
 				 WHERE c.contype = 'u'
 				   AND array_length(c.conkey, 1) = 1
 				   AND ns.nspname = $1`,
-			[schema],
-		),
-		// 6. ENUM types
-		pool.query<{ name: string; schema: string; values: string[] }>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 6. ENUM types
+			pool.query<{ name: string; schema: string; values: string[] }>(
+				`SELECT
 			   t.typname AS name,
 			   n.nspname AS schema,
 			   array_agg(e.enumlabel ORDER BY e.enumsortorder) AS values
@@ -404,15 +403,16 @@ async function queryAllCatalogs(
 			 WHERE t.typtype = 'e'
 			   AND n.nspname = $1
 			 GROUP BY t.typname, n.nspname`,
-			[schema],
-		),
-		// 7. Comments (table and column level) from pg_description
-		pool.query<{
-			table_name: string;
-			column_name: string | null;
-			comment: string;
-		}>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 7. Comments (table and column level) from pg_description
+			pool.query<{
+				table_name: string;
+				column_name: string | null;
+				comment: string;
+			}>(
+				`SELECT
 			   c.relname AS table_name,
 			   a.attname AS column_name,
 			   d.description AS comment
@@ -422,15 +422,16 @@ async function queryAllCatalogs(
 			 LEFT JOIN pg_attribute a ON a.attrelid = d.objoid AND a.attnum = d.objsubid
 			 WHERE n.nspname = $1
 			   AND d.objsubid >= 0`,
-			[schema],
-		),
-		// 8. CHECK constraints
-		pool.query<{
-			name: string;
-			expression: string;
-			raw_table: string;
-		}>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 8. CHECK constraints
+			pool.query<{
+				name: string;
+				expression: string;
+				raw_table: string;
+			}>(
+				`SELECT
 			   c.conname AS name,
 			   pg_get_constraintdef(c.oid, false) AS expression,
 			   c.conrelid::regclass::text AS raw_table
@@ -438,11 +439,12 @@ async function queryAllCatalogs(
 			 JOIN pg_namespace n ON n.oid = c.connamespace
 			 WHERE c.contype = 'c'
 			   AND n.nspname = $1`,
-			[schema],
-		),
-		// 9. Partition configurations
-		pool.query<RawPartition>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 9. Partition configurations
+			pool.query<RawPartition>(
+				`SELECT
 			   c.relname AS table_name,
 			   p.partstrat AS strategy,
 			   array_agg(a.attname ORDER BY pk.n) AS columns
@@ -453,52 +455,56 @@ async function queryAllCatalogs(
 			 JOIN pg_attribute a ON a.attrelid = p.partrelid AND a.attnum = pk.attnum
 			 WHERE n.nspname = $1
 			 GROUP BY c.relname, p.partstrat`,
-			[schema],
-		),
-		// 10. Installed extensions (no schema param — queries globally; skip plpgsql)
-		pool.query<{ name: string }>(
-			`SELECT extname AS name
+				[schema],
+			),
+		() =>
+			// 10. Installed extensions (no schema param — queries globally; skip plpgsql)
+			pool.query<{ name: string }>(
+				`SELECT extname AS name
 			 FROM pg_extension
 			 WHERE extname != 'plpgsql'`,
-		),
-		// 11. Sequences not backed by SERIAL
-		pool.query<{
-			name: string;
-			start_value: string;
-			increment_by: string;
-			min_value: string;
-			max_value: string;
-			cycle: boolean;
-		}>(
-			`SELECT s.sequencename AS name, s.start_value, s.increment_by, s.min_value, s.max_value, s.cycle
+			),
+		() =>
+			// 11. Sequences not backed by SERIAL
+			pool.query<{
+				name: string;
+				start_value: string;
+				increment_by: string;
+				min_value: string;
+				max_value: string;
+				cycle: boolean;
+			}>(
+				`SELECT s.sequencename AS name, s.start_value, s.increment_by, s.min_value, s.max_value, s.cycle
 			 FROM pg_sequences s
 			 LEFT JOIN pg_class c ON c.relname = s.sequencename AND c.relkind = 'S'
 			   AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
 			 LEFT JOIN pg_depend d ON d.objid = c.oid AND d.deptype = 'a'
 			 WHERE s.schemaname = $1
 			   AND d.objid IS NULL`,
-			[schema],
-		),
-		// 12. RLS enabled state per table
-		pool.query<{ table_name: string; rls_enabled: boolean }>(
-			`SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled
+				[schema],
+			),
+		() =>
+			// 12. RLS enabled state per table
+			pool.query<{ table_name: string; rls_enabled: boolean }>(
+				`SELECT c.relname AS table_name, c.relrowsecurity AS rls_enabled
 			 FROM pg_class c
 			 JOIN pg_namespace n ON n.oid = c.relnamespace
 			 WHERE n.nspname = $1
 			   AND c.relkind = 'r'`,
-			[schema],
-		),
-		// 13. Row-Level Security policies
-		pool.query<{
-			table_name: string;
-			policy_name: string;
-			cmd: string;
-			roles: string[];
-			permissive: boolean;
-			using_expr: string | null;
-			with_check_expr: string | null;
-		}>(
-			`SELECT
+				[schema],
+			),
+		() =>
+			// 13. Row-Level Security policies
+			pool.query<{
+				table_name: string;
+				policy_name: string;
+				cmd: string;
+				roles: string[];
+				permissive: boolean;
+				using_expr: string | null;
+				with_check_expr: string | null;
+			}>(
+				`SELECT
 			   c.relname AS table_name,
 			   p.polname AS policy_name,
 			   p.polcmd AS cmd,
@@ -510,19 +516,20 @@ async function queryAllCatalogs(
 			 JOIN pg_class c ON c.oid = p.polrelid
 			 JOIN pg_namespace n ON n.oid = c.relnamespace
 			 WHERE n.nspname = $1`,
-			[schema],
-		),
-		// 14. Faithful SQL-facing column types via format_type, for three cases:
-		// (a) typmod-bearing columns (atttypmod <> -1) — varchar(120), numeric(10,2),
-		//     timestamptz(3), bit(8), vector(768) — to preserve modifier fidelity (#261);
-		// (b) array columns (typcategory 'A') — so integer[] is stored as `integer[]`
-		//     rather than the internal `_int4` udt_name;
-		// (c) non-pg_catalog scalar types — enums/composites/domains in user schemas.
-		// `type_schema` is the type's OWN namespace (pg_type.typnamespace). The IR stores
-		// it structurally and keeps `originalDbType` bare, so DDL/cast emission can decide
-		// whether the type follows the target schema or remains absolute.
-		pool.query<RawFormattedColumnType>(
-			`SELECT c.relname AS table_name,
+				[schema],
+			),
+		() =>
+			// 14. Faithful SQL-facing column types via format_type, for three cases:
+			// (a) typmod-bearing columns (atttypmod <> -1) — varchar(120), numeric(10,2),
+			//     timestamptz(3), bit(8), vector(768) — to preserve modifier fidelity (#261);
+			// (b) array columns (typcategory 'A') — so integer[] is stored as `integer[]`
+			//     rather than the internal `_int4` udt_name;
+			// (c) non-pg_catalog scalar types — enums/composites/domains in user schemas.
+			// `type_schema` is the type's OWN namespace (pg_type.typnamespace). The IR stores
+			// it structurally and keeps `originalDbType` bare, so DDL/cast emission can decide
+			// whether the type follows the target schema or remains absolute.
+			pool.query<RawFormattedColumnType>(
+				`SELECT c.relname AS table_name,
 			        a.attname AS column_name,
 			        format_type(a.atttypid, a.atttypmod) AS db_type,
 			        tn.nspname AS type_schema
@@ -540,9 +547,69 @@ async function queryAllCatalogs(
 			     OR t.typcategory = 'A'
 			     OR t.typnamespace <> 'pg_catalog'::regnamespace
 			   )`,
-			[schema],
-		),
-	]);
+				[schema],
+			),
+	] as const;
+
+	const results = pool.sequentialCatalogReads
+		? []
+		: await Promise.all(catalogQueries.map((query) => query()));
+	if (pool.sequentialCatalogReads) {
+		for (const query of catalogQueries) {
+			results.push(await query());
+		}
+	}
+
+	const [
+		columnsResult,
+		pksResult,
+		fksResult,
+		indexesResult,
+		uniqueColumnsResult,
+		enumsResult,
+		commentsResult,
+		checksResult,
+		partitionsResult,
+		extensionsResult,
+		sequencesResult,
+		rlsResult,
+		policiesResult,
+		formattedColumnTypesResult,
+	] = results as [
+		QueryResult<RawColumn>,
+		QueryResult<RawPrimaryKey>,
+		QueryResult<RawForeignKey>,
+		QueryResult<RawIndex>,
+		QueryResult<RawUniqueColumn>,
+		QueryResult<{ name: string; schema: string; values: string[] }>,
+		QueryResult<{
+			table_name: string;
+			column_name: string | null;
+			comment: string;
+		}>,
+		QueryResult<{ name: string; expression: string; raw_table: string }>,
+		QueryResult<RawPartition>,
+		QueryResult<{ name: string }>,
+		QueryResult<{
+			name: string;
+			start_value: string;
+			increment_by: string;
+			min_value: string;
+			max_value: string;
+			cycle: boolean;
+		}>,
+		QueryResult<{ table_name: string; rls_enabled: boolean }>,
+		QueryResult<{
+			table_name: string;
+			policy_name: string;
+			cmd: string;
+			roles: string[];
+			permissive: boolean;
+			using_expr: string | null;
+			with_check_expr: string | null;
+		}>,
+		QueryResult<RawFormattedColumnType>,
+	];
 
 	return {
 		columns: columnsResult.rows,
@@ -1029,7 +1096,7 @@ function buildSequenceMap(
 }
 
 export async function introspect(
-	pool: Pool | PoolClient,
+	pool: Pool | PoolClient | CatalogQueryExecutor,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';

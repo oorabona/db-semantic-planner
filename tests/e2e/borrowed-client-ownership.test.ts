@@ -175,6 +175,28 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([4]);
 	});
 
+	it('throws when raw COMMIT ends a dbsp-owned transaction before later statements run', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+
+		await expect(
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw(
+					`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+					[15, 'committed by raw commit'],
+				);
+				await tx.executeRaw('COMMIT');
+				await tx.executeRaw(
+					`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+					[16, 'must not run after raw commit'],
+				);
+			}),
+		).rejects.toThrow(/Transaction control through raw SQL/);
+
+		expect(await itemIds()).toEqual([15]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
+	});
+
 	it('runs nested managed transactions on a borrowed client', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
@@ -472,5 +494,196 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 
 		expect(await itemIds()).not.toContain(6);
+	});
+
+	it('runs withSchema inside orm.transaction on a managed borrowed client', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[32, 'schema scoped select'],
+			);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			const orm = createOrm({ schema: ormSchema, adapter });
+
+			const rows = await orm.transaction(async (tx) => {
+				return tx
+					.withSchema(SCHEMA)
+					.select('items')
+					.columns(['id', 'label'])
+					.execute();
+			});
+
+			expect(rows.map((row) => row.id)).toEqual([32]);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+	});
+
+	it('runs a nested transaction from a schema-scoped transaction ORM', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			const orm = createOrm({ schema: ormSchema, adapter });
+
+			await orm.transaction(async (tx) => {
+				const scoped = tx.withSchema(SCHEMA);
+				await scoped.transaction(async (inner) => {
+					await inner
+						.into(inner.tables.items)
+						.values({ id: 33, label: 'nested schema scoped insert' })
+						.execute();
+				});
+			});
+
+			const inside = await client.query<{ label: string }>(
+				`SELECT label FROM "${SCHEMA}".items WHERE id = $1`,
+				[33],
+			);
+			expect(inside.rows.map((row) => row.label)).toEqual([
+				'nested schema scoped insert',
+			]);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+	});
+
+	it('still refuses an adapter from outside the active dbsp scope', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+
+			await adapter.transaction(async (tx) => {
+				await expect(
+					adapter.executeRaw(
+						`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+						[34, 'ancestor should be refused'],
+					),
+				).rejects.toThrow(/transaction adapter passed to the callback/);
+				await tx.executeRaw(
+					`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+					[35, 'transaction adapter still works'],
+				);
+			});
+
+			const inside = await client.query<{ id: number }>(
+				`SELECT id FROM "${SCHEMA}".items ORDER BY id`,
+			);
+			expect(inside.rows.map((row) => row.id)).toEqual([35]);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+	});
+
+	it('keeps a caller transaction usable after a failing borrowed-client listIndexes call', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[36, 'before failing catalog read'],
+			);
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			await expect(
+				adapter.listIndexes('items', 'bad\u0000schema'),
+			).rejects.toThrow();
+
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[37, 'after failing catalog read'],
+			);
+			await client.query('COMMIT');
+			committed = true;
+		} finally {
+			if (!committed) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).toEqual([36, 37]);
+	});
+
+	it('keeps a borrowed client usable when a parent scope unwinds before a live child', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			let resumeChild!: () => void;
+			let childStarted!: () => void;
+			const childStartedPromise = new Promise<void>((resolve) => {
+				childStarted = resolve;
+			});
+			let child: Promise<unknown> | undefined;
+
+			await expect(
+				adapter.transaction(async (tx) => {
+					child = tx.transaction(async () => {
+						childStarted();
+						await new Promise<void>((resolve) => {
+							resumeChild = resolve;
+						});
+					});
+					await childStartedPromise;
+					throw new Error('parent unwound first');
+				}),
+			).rejects.toThrow('parent unwound first');
+
+			await adapter.executeRaw('SELECT 1');
+			resumeChild();
+			await expect(child).rejects.toThrow();
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
 	});
 });
