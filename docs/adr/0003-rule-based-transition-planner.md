@@ -168,6 +168,24 @@ A rule that insists on emitting raw SQL is not verified. It is treated exactly a
 
 So the operation kinds, their renderers, and their effect calculators are **versioned, engine-scoped artefacts with stable ids**, and what they claim is an assumption of class **`core-operation-semantics`**, with core as its trust root. It sits in the same graph as everything else. Conformance testing does not remove that trust; it is what makes accepting it reasonable.
 
+#### And the general rule, because naming them one at a time will always miss one
+
+Every fix to this ADR moved the trust and named where it landed — the rule's declarations, then core's effect calculator. That is a game that cannot be won one square at a time. So the rule, not the instances:
+
+> **Anything in core that produces a *judgement* is a versioned artefact with a stable id, and what it claims is an `Assumption` whose trust root is core.**
+
+A judgement is anything that decides something the design then treats as settled:
+
+- **the effect calculator** — what an operation touches, and whose evidence it invalidates (`core-operation-semantics`);
+- **the invalidation model** — *what must be fingerprinted, and when evidence goes stale* (`core-invalidation-semantics`). `catalogFingerprint: string` is **not** the proof; the trusted thing is the model that decided what belongs in it. `CREATE OR REPLACE FUNCTION public.is_email(…)` can keep the same name and the same OID and change what it means — and a fingerprint that did not think to look inside the function will report that nothing changed;
+- **the guard protocols** — including their **failure effects** (`core-guard-semantics`), see §4b;
+- **the composition prover** — which lock orderings, transaction boundaries and evidence invalidations it considers (`core-composition-semantics`);
+- **the identity model** — what counts as the same object across a change (`core-identity-semantics`).
+
+Each is versioned. Each is recorded in the proof graph as an assumption of core's. And when one of them is later found to have under-declared, **every plan that rested on that version can be enumerated** — which is the entire point of writing them down.
+
+If core cannot say something, it does not get to be silent about it.
+
 #### Does this refuse everything?
 
 It is a fair objection: if every rule declaration is an assumption, and assumptions taint what rests on them, does anything ever ship?
@@ -349,6 +367,23 @@ impossible            no protocol on this engine can discharge this guard withou
 
 A rule names the protocol its guard requires. A rule whose guard is `impossible` on this engine does **not** get to fall back to a lock-taking variant and quietly change its own locking behaviour — that would be a different rule, with a different risk, chosen by nobody.
 
+#### A protocol declares what its *failure* leaves behind, not only what its success does
+
+`lock-and-check` fails cleanly: the predicate did not hold, the lock is released, nothing happened. It is tempting to generalise that — and wrong.
+
+`CREATE UNIQUE INDEX CONCURRENTLY` that finds duplicates **fails, and leaves an `INVALID` index in the catalog.** The guard failed and something *was* applied. A step that reports "the guard failed, therefore nothing happened" has just lied about the state of the database, and the next plan will diff against a catalog containing an object nobody knows about.
+
+So a protocol declares its **failure effects**, and they are part of the step:
+
+```ts
+interface GuardProtocol {
+  kind: 'lock-and-check' | 'engine-validated' | 'multi-resource' | 'impossible';
+  onFailureLeaves: RecoveryArtefact[];   // e.g. an INVALID index that must be dropped
+}
+```
+
+`guard-failed` therefore does **not** mean *"nothing was applied"*. It means *"the predicate did not hold, and here is what the attempt left behind"* — which the executor then has to recover from or hand to a human, exactly as it would after any other partial application (§5b).
+
 #### A protocol must also bind the target, not just the predicate
 
 The predicate is not the only thing that moves. dbsp plans `CREATE INDEX CONCURRENTLY` on `public.users`, confirms at apply time that `public.users` is still the object it planned against, and then runs the statement — which **resolves by name**. Between the confirmation and the statement, another actor renames or replaces `public.users`, and the index is built on a different object. A name-based postcondition passes on the wrong table; an identity-based one fails only *after* the wrong side effect exists.
@@ -405,7 +440,7 @@ So the outcomes that concern **execution** are:
 
 | Outcome | Meaning |
 |---|---|
-| `guard-failed` | the predicate did not hold when it was evaluated under its protocol — the duplicates were there, the null was there. Nothing was applied for that step |
+| `guard-failed` | the predicate did not hold under its protocol — the duplicates were there, the null was there. **Whether anything was applied depends on the protocol's declared failure effects** (§4b): `lock-and-check` leaves nothing; a failed concurrent index build leaves an `INVALID` index that must be recovered |
 | `guard-timeout` | the lock could not be taken within its bound. Nothing was applied for that step |
 | `partially-applied` | earlier steps are in the database; the plan stopped; here is the journal and the re-introspected state |
 | `unknown-step-result` | a step ran and its outcome cannot be established (§5b). Stop; a human decides |
@@ -488,7 +523,9 @@ So **adoption is a first-class transition**, and what it creates is an assumptio
 
 - every identity attached during a baseline carries an `Assumption` of class **`baseline-identity-attachment`**, with its asserter, its scope, and how it was chosen (a person, or a heuristic, and which);
 - **every later proof that rests on that identity rests on that assumption, transitively.** A rename "proven" from a baselined id is `proven-under-assumption`, and it names the baseline and the human who made it;
-- an id that dbsp itself attached, in a plan it proved and applied, is a different thing — *that* is evidence, because dbsp watched it happen.
+- an id that **dbsp itself attached**, in a plan it proved and applied, is a different thing — *that* is evidence, because dbsp watched it happen. **But only if the attachment stores the `ProofClaim` that produced it, with its transitive `restsOn`.** A plan that attached an identity while resting on an `external-ddl-exclusion` assumption produced an identity that rests on it too. If the carrier records only *"attached by dbsp"*, the assumptions have been washed out through a second door — the same laundering as the baseline case, wearing dbsp's own badge.
+
+**Every identity attachment carries the proof it was born under.** Otherwise "dbsp attached it" is just another word nobody can audit.
 
 An identity is only as trustworthy as the act that attached it, and the design has to remember which act that was.
 
