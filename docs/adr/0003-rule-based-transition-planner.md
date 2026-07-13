@@ -1,10 +1,22 @@
 # ADR 0003: dbsp Is a Rule-Based Transition Planner, and Every Plan Carries Its Proof
 
-Status: Accepted
+Status: Accepted — normative.
 
 Decision maturity: the architecture is accepted. The type-level contracts below are the *shape* of the decision, not its final signature — they are subject to validation by implementation, and a further objection will not invalidate the decision, only refine the contract.
 
-The chapter *"Four contracts the shape above still owes an implementation"* is **acceptance criteria, not a backlog.** It is the list of places where this document knows its own contract is not yet closed, and each item is binding on the implementation that claims to satisfy this ADR. A debt that is allowed to be deferred indefinitely is a decision made by silence, which is the failure mode this whole document exists to name.
+## What this document is, and where it stops
+
+This ADR decides what makes a schema transition **safe to apply**. It is normative for v1 in full.
+
+It deliberately does **not** decide how to *audit* one afterwards. A formal proof graph, versioned trust roots with retroactive enumeration, an append-only ledger of applied plans, and cryptographically authenticated object identities are all sound, and they are all expensive — and their justification is invariably some form of *"when a trust root is later found defective, every plan that rested on it can be enumerated."* That is recovery **after** the fact. None of it stops a bad migration. They are severed into [ADR 0004](0004-high-assurance-provenance-and-audit.md), which nothing here waits on.
+
+The line is not "simple versus rigorous". It is:
+
+> **Here: everything the planner, the policy, the executor or the resume logic consumes *before or during* apply. There: what is used only to reconstruct, attribute, enumerate or audit *after* a completed apply.**
+
+Four mechanisms look like provenance and fail that test, so they stay here and are normative: the **semantic pack id and version**, recorded in the plan and re-checked at apply; the **coverage of a step's expected state** — what its digest includes and what it is blind to; the **per-step assumption closure**, because a plan-level list rots into a label; and the **execution journal and recovery semantics**, because a step that fails leaving an INVALID index behind is the next step's *input*, not its audit trail.
+
+The chapter *"Acceptance contracts"* is **criteria, not a backlog.** Each item is binding on any implementation claiming to satisfy this ADR. A debt allowed to be deferred indefinitely is a decision made by silence, which is the failure mode this whole document exists to name.
 
 Supersedes part of [ADR 0002](0002-engine-recovery-primitives.md) — see *Corrections*.
 
@@ -97,15 +109,25 @@ interface Assumption {
 interface ProofClaim {
   proposition: Proposition;       // WHAT was established — not "some evidence exists"
   scope: ResourceAddress[];       // over which objects
-  derivedFrom: ClaimId[];         // which other claims it was inferred from
-  supportedBy: EvidenceRef[];     // and which observations support it directly
+  supportedBy: ObservationId[];   // which observations support it
   assumes: AssumptionId[];        // what it took for granted
-  semantics: SemanticArtifactRef[];  // under whose judgement — the trust roots (§0)
+  semantics: SemanticArtifactRef[];  // under whose judgement, at which version
   conclusion: 'established' | 'established-under-assumptions' | 'undischarged' | 'refuted';
 }
 ```
 
-**This is a graph, and it must be one.** A claim that carried only `{ evidence, restsOn }` could not say *what* it proved, *which* other claims it was inferred from, or *under whose* semantics — and a pre-flattened `restsOn` denormalises exactly the causal path you will need to walk. The question this design exists to answer — *"`effectsOf@v3` under-declared; which plans are now suspect?"* — must be a **query**, not an archaeology. That is the whole return on writing any of this down.
+**And the assumptions must close over each step, not over the plan.** This is the whole difference between a working device and a label:
+
+```ts
+interface GuardedPlanStep {
+  …
+  restsOnAssumptions: AssumptionId[];   // the TRANSITIVE closure, for THIS step
+}
+```
+
+A plan-level list of assumption *classes* is `proven-under-assumption` with better spelling — a policy that accepts "the class" accepts everything, and nobody can say which step was the one that needed it. The list earns its keep only if it answers, mechanically: **"which exact step is safe only under X?"** So a policy consumes the per-step closure, and accepting an assumption never erases it from the plan or from the applied record.
+
+The **causal structure** — which claim was derived from which, by which inference — is what turns *"`effectsOf@4.2.0` under-declared; which of the last two years of plans are now suspect?"* into a query rather than an archaeology. That is real, and it is [ADR 0004](0004-high-assurance-provenance-and-audit.md): the flat closure here is its compiled projection, so adding the graph later is a widening, not a rewrite.
 
 A policy does not decide on the word `proven-under-assumption`. It decides on **which assumption classes, from which trust roots, over which scopes** it is willing to accept — and every step names the assumptions it rests on, so that accepting one is a decision and not a shrug.
 
@@ -164,7 +186,9 @@ interface PhysicalOperation {
 }
 ```
 
-So the trust root of an effect claim is `dbsp.postgresql.operations.pg17@4.2.0`, not "core" — and the day that pack is found to have under-declared what `AlterColumnType` invalidates, **every plan that rested on that version can be enumerated, and no other engine is touched.**
+So the trust root of an effect claim is `dbsp.postgresql.operations.pg17@4.2.0`, not "core" — and the day that pack is found to have under-declared what `AlterColumnType` invalidates, **no other engine is touched**, and every plan artefact that was retained can be checked against that version.
+
+**That id is not bookkeeping — the executor reads it.** A plan proven under `@4.2.0` and applied under `@4.3.0` would run under lock, failure and effect semantics that are *not the ones it was proven against*. So the pack id and version are recorded in the plan and **re-checked at apply**, and a mismatch stops it. Finding *every* affected plan, across everything ever applied, is what the ledger in [ADR 0004](0004-high-assurance-provenance-and-audit.md) buys; recording the id is what keeps this apply honest, and it is normative here.
 
 A judgement is anything that decides something the design then treats as settled. **Each one is an assumption of whichever artefact actually owns it** — and getting that attribution wrong is not bookkeeping: an assumption class filed under `core` says a defect in it taints every engine, and an assumption class filed under a pack says a fix ships without touching the others. The whole point of naming a trust root is to bound the blast radius, so a misattributed root is a *wrong* bound, not an untidy one.
 
@@ -181,7 +205,7 @@ A judgement is anything that decides something the design then treats as settled
 
 One judgement sits across the line and is worth calling out: **the invalidation model** — *what must be fingerprinted, and when a claim goes stale*. `catalogFingerprint: string` is **not** the proof; the trusted thing is the model that decided what belongs in it. `CREATE OR REPLACE FUNCTION public.is_email(…)` can keep the same name and the same OID and change what it means, and a fingerprint that never thought to look inside the function will report that nothing changed. *Which* objects a proof depends on comes from the operation pack; *how* their identity is fingerprinted and how staleness propagates through the graph is core's.
 
-Each of these is versioned, and each is recorded in the proof graph as an assumption of **the artefact that made it**. When one is later found to have under-declared, every plan that rested on that version can be enumerated — and nothing else is touched. That is the entire point of writing them down.
+Each of these is versioned, and each is recorded on the steps that rest on it as an assumption of **the artefact that made it**. When one is later found to have under-declared, nothing else is touched, and every retained plan artefact can be checked against that version. That is the return on writing them down, and it is the honest size of it.
 
 If an artefact cannot say something, it does not get to be silent about it.
 
@@ -790,9 +814,11 @@ A restore tool copies it. A migration script edits it. A person pastes it onto t
 
 > **Catalog bytes prove only that the catalog currently contains those bytes.** They do not prove dbsp wrote them, that the proof they reference is authentic or retained, or that either has anything to do with the object they are sitting on.
 
-So an identity attachment is **evidence only if its provenance is authenticated** — signed proof material, an append-only dbsp ledger the attachment can be verified against, or a prior snapshot dbsp trusts. Absent that, it is a `baseline-identity-attachment` **assumption**, no matter how convincingly the string in the catalog describes itself.
+So an identity attachment is **evidence only if its provenance is authenticated** — signed material bound to this database's incarnation, a dbsp ledger it can be verified against, or a prior snapshot dbsp trusts. Absent that, it is a `baseline-identity-attachment` **assumption**, no matter how convincingly the string in the catalog describes itself.
 
 An identity is only as trustworthy as the act that attached it, and the design has to remember which act that was.
+
+**This is what dbsp promises today, and it is the honest half of the pair.** The machinery that makes a persisted identity *proof-grade* — signatures, a database incarnation, a ledger sequence, an explicit event on restore, clone, adoption and rebind — is [ADR 0004](0004-high-assurance-provenance-and-audit.md), and it is not needed to be safe. What **is** needed to be safe, and is normative here, is to stop calling the unauthenticated thing a proof: **an identity dbsp did not observe being written is an assumption**, the rename that uses it is `established-under-assumptions`, and a policy that does not accept `baseline-identity-attachment` in that scope **blocks the rename**. Deferring the signatures costs auditability. Deferring *this* would cost a table.
 
 ### 9. Rehearsal buys operational confidence, not proof about the run that has not happened
 
@@ -838,33 +864,35 @@ It is **too strong**: with an identity attached in the database, a rename is pro
 
 ADR 0002's engine analysis — savepoint containment, MySQL's implicit commit, SQLite's `ON CONFLICT ROLLBACK` — stands, and so does its rule: **an adapter declares its recovery primitives and never inherits PostgreSQL's.**
 
-## Two invariants an implementation will be tempted to break
+## Three invariants an implementation will be tempted to break
 
-These are the places where the proof graph will quietly be dropped, and dropping it in either one voids everything above.
+These are the places where what a plan rests on will quietly be dropped, and dropping it in any one of them voids everything above.
 
-**1. An empty plan carries a proof graph too.** *"Nothing changed"* is a **claim**, not the absence of one — and it is the strongest claim the system makes, because it is the one on which somebody goes home. It rests on core's diff, equivalence and invalidation semantics, on the evidence those were computed from, and on whatever assumptions those rest on. A `verify` that reports *no drift* and carries no graph has put the system's most consequential verdict **outside the system**.
+**1. An empty plan rests on something too.** *"Nothing changed"* is a **claim**, not the absence of one — and it is the strongest claim the system makes, because it is the one on which somebody goes home. It rests on the diff, on the equivalence and invalidation semantics, on the observations those were computed from, and on whatever assumptions those rest on. A `verify` that reports *no drift* and carries none of that has put the system's most consequential verdict **outside the system**.
 
-**2. Policy acceptance does not erase `restsOn`.** A policy decides what is **acceptable**, never what is **true**. When it accepts an assumption class from a trusted rule pack, the assumption stays in the graph — because the entire purpose of writing it down is that, the day `postgresql.pg16.unique-index.effects.v3` is found to have under-declared, you can enumerate every plan that rested on it. A `proven-applicable` that hides the assumptions underneath it is the `destructive: boolean` of this design, resurrected at the last possible moment.
+**2. Policy acceptance does not erase an assumption.** A policy decides what is **acceptable**, never what is **true**. When it accepts an assumption class from a trusted pack, the assumption stays on the step — because the entire point of writing it down is to be able to say, later, exactly which steps were safe only under it. A `proven-applicable` that hides the assumptions beneath it is the `destructive: boolean` of this design, resurrected at the last possible moment.
 
-**3. Enumeration needs somewhere to enumerate *from*.** This document repeatedly promises that when a trust root is found defective, **every plan that rested on it can be found**. That promise is load-bearing — it is the whole reason for recording assumptions rather than merely respecting them — and *carrying a proof graph inside each plan does not deliver it*. A plan whose JSON was deleted, whose CI log expired, or which someone ran from a laptop is not enumerable, however scrupulously it recorded what it rested on.
+**3. Enumeration promises what it cannot keep.** This document says, in several places, that when a trust root is found defective *every plan that rested on it can be found*. **In this design that is not true, and it must not be written as though it were.** Carrying the assumptions inside each plan does not make plans enumerable: the one whose JSON was deleted, whose CI log expired, or which someone ran from a laptop is gone.
 
-So the promise needs a durable place to live: an **append-only ledger of applied plans**, with identity and a retention policy, is part of the contract — not an operational nicety. Without one, the honest statement is *"enumerable among the plan artefacts that were retained"*, and the design should say that instead of the stronger thing, because the stronger thing is what somebody will rely on the day it matters.
+The honest claim is *"enumerable among the plan artefacts that were retained"* — and it is the claim to make, because the stronger one is what somebody will rely on the day it matters. The durable, append-only ledger that would make the stronger claim true is [ADR 0004](0004-high-assurance-provenance-and-audit.md). Until it exists, do not promise what it buys.
 
 ## The residual trusted computing base
 
 Stated once, plainly, so that anyone adopting this design knows exactly what they are being asked to believe:
 
-> **Trust the operation packs and rule packs you installed to version and declare their judgements honestly; trust dbsp's core to preserve the proof graph faithfully and to keep an append-only record of what it applied; and trust the target engine's catalog and DDL behaviour to be the evidence source they claim to be.**
+> **Trust the operation packs and rule packs you installed to version and declare their judgements honestly; trust dbsp's core to carry, faithfully and without losing them, the assumptions each step rests on; and trust the target engine's catalog and DDL behaviour to be the evidence source they claim to be.**
 
 Everything else is proven, or named as an assumption, or refused.
 
 Two things that are **not** in it, and are worth saying out loud because they look like they might be: **the bytes in the catalog are not one of the trust roots** — an identity attachment is evidence only if its provenance is authenticated (§8), and otherwise it is an assumption however convincingly it describes itself. And **nothing is trusted to hold still during execution**: everything a proof depends on is either bound through the statement, or covered by a named exclusion somebody accepted, or the step blocks.
 
-## Four contracts the shape above still owes an implementation
+## Acceptance contracts
 
-These are known, and they are what "the type contracts are subject to validation by implementation" means.
+Binding on any implementation claiming to satisfy this ADR. Not a backlog.
 
-**~~The proof graph must actually be a graph.~~ — closed, in §0.** It was owed, and leaving it owed was itself the defect: the document carried a `{ evidence, restsOn }` claim in its body and the *real* contract in its debt list, so an implementer would have built the first and never read the second. Two competing forms of one contract in one document is a decision made by whoever reads least. The claim now carries its proposition, scope, `derivedFrom`, `supportedBy`, `assumes` and `semantics` where anyone implementing it will actually meet them.
+**~~The proof graph must actually be a graph.~~ — settled.** The claim carries its proposition, scope, `supportedBy`, `assumes` and `semantics`, and **each step carries the transitive closure of the assumptions it rests on** — which is what a policy consumes, and what answers *"which step is safe only under X?"*. The causal structure itself — which claim was derived from which, by which inference — is [ADR 0004](0004-high-assurance-provenance-and-audit.md), and the closure here is its compiled projection.
+
+Leaving this owed was itself the defect it describes: the document had carried a weaker `{ evidence, restsOn }` in its body and the real contract in its debt list, so an implementer would have built the first and never reached the second. Two competing forms of one contract in one document is a decision made by whoever reads least.
 
 **"Durable evidence versus volatile guard" is too binary.** The instinct is right and the line is in the wrong place: privileges change, extensions are upgraded, a function is replaced, an object is renamed, a rehearsal is *already* historical the moment it finishes, and the catalog can change immediately after it is read. The real criterion is not *data or not-data* — it is the **validity protocol** of the observation:
 
