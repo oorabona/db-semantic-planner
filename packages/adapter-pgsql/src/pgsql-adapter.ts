@@ -316,10 +316,26 @@ export class PgsqlTransactionAbortedError extends Error {
 	}
 }
 
+/**
+ * A `pg.PoolClient` is a `pg.Pool` plus `release()`, and that difference is the one
+ * that matters: a client is checked out, so it may be sitting in somebody's
+ * transaction.
+ *
+ * Read only to REJECT a mismatch, never to decide how a connection is treated —
+ * the caller's declaration decides that. And it must not throw: the type says
+ * `Pool | PoolClient`, but a JavaScript caller reaches this with whatever they
+ * like, and a shape check that raises a TypeError on `undefined` tells them
+ * nothing about what they did wrong.
+ */
 function isPoolClientLike(
-	connection: Pool | PoolClient,
+	connection: Pool | PoolClient | undefined,
 ): connection is PoolClient {
-	return 'release' in connection && typeof connection.release === 'function';
+	return (
+		typeof connection === 'object' &&
+		connection !== null &&
+		'release' in connection &&
+		typeof connection.release === 'function'
+	);
 }
 
 function poolClientTransactionOpen(client: PoolClient): boolean | undefined {

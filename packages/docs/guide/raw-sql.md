@@ -26,6 +26,7 @@ You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express s
 **Raw SQL that ends the transaction ends it.**
 
 ```ts
+// doctest: skip — this demonstrates the hazard. Running it would commit.
 await orm.transaction(async (tx) => {
   await tx.into(tx.tables.orders).values({ id: 1 }).execute();
   await tx.raw('COMMIT');                       // ← this commits. Right now.
@@ -48,6 +49,7 @@ This is not an oversight. It is what an escape hatch *is*, and the alternative �
 If you need transaction control, **own the transaction**:
 
 ```ts
+// doctest: real-db-only — checks out a real client and owns a real transaction
 const client = await pool.connect();
 let committed = false;
 try {

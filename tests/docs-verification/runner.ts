@@ -137,8 +137,16 @@ import {
 } from '@dbsp/adapter-pgsql';
 
 // Mocked Pool avoids real DB connections in doctests.
+//
+// A Pool must NOT have release() and connect() must NOT return the pool itself.
+// That is the whole difference between a pool and a checked-out client, and the
+// adapter reads it to refuse a client that was handed over without being declared
+// (#322). A fake that conflates the two is a fake that cannot exercise the check —
+// and it made every doctest look like it was passing a client.
 // biome-ignore lint/suspicious/noExplicitAny: stub
-class Pool { constructor(_: any) {} async query() { return { rows: [], rowCount: 0 }; } async connect() { return this; } async end() {} release() {} }
+class PoolClient { async query() { return { rows: [], rowCount: 0 }; } release() {} }
+// biome-ignore lint/suspicious/noExplicitAny: stub
+class Pool { constructor(_: any) {} async query() { return { rows: [], rowCount: 0 }; } async connect() { return new PoolClient(); } async end() {} }
 
 // Deterministic fake env for blocks referencing process.env
 process.env.DATABASE_URL ||= 'postgres://doctest:doctest@localhost:5432/doctest';
