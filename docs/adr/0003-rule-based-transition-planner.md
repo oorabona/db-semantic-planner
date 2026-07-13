@@ -117,9 +117,68 @@ So the trusted computing base is **declared, not hidden**, and three rules follo
 
 1. **An unverified declaration is an assumption, and is recorded as one.** It never becomes evidence by being written down. A plan states which of its steps rest on assumptions, and whose.
 2. **An assumption taints what depends on it.** A step proven *on top of* an unverified declaration is not `proven-applicable`. It is `proven-under-assumption`, and the policy decides whether that is enough. Manual and opaque SQL taint everything downstream of them unless a policy accepts the author's declared blast radius — **as an assumption, not as a proven fact**.
-3. **Unknown effects widen; they do not vanish.** A rule that cannot say what it touches is not thereby touching nothing. Its blast radius is *the widest one consistent with what it might do*, and the planner must reason with that — or refuse. Where the generated SQL can be checked against the declared read and write sets, it is; where a declaration and the SQL disagree, the SQL wins and the rule is rejected.
+3. **Unknown effects widen; they do not vanish.** A rule that cannot say what it touches is not thereby touching nothing. Its blast radius is *the widest one consistent with what it might do*, and the planner must reason with that — or refuse.
 
-There is always a trusted computing base. The only question is whether the design **says so**. Every earlier version of this one did not.
+#### An assumption is a first-class object, not a label
+
+`proven-under-assumption` as a single flag would be this design's `destructive: boolean` — one word, checked once, ignored everywhere downstream. And it would be *ubiquitous*: if every rule's `readSet` and `invalidates` are unverified, then nearly every composition is proven under some assumption, and a policy that accepts "that class" accepts everything.
+
+So an assumption is a node, and the proof is a graph:
+
+```ts
+interface Assumption {
+  id: AssumptionId;
+  class: 'rule-effect-declaration' | 'user-blast-radius' | 'external-ddl-exclusion' | …;
+  asserter: TrustRoot;            // which rule pack, which human, which policy
+  statement: string;              // what is being assumed, machine-readable where possible
+  scope: ResourceAddress[];
+}
+
+interface ProofClaim {
+  evidence: EvidenceRef[];        // what was actually established
+  restsOn: AssumptionId[];        // and what it took for granted, transitively
+}
+```
+
+A policy does not decide on the word `proven-under-assumption`. It decides on **which assumption classes, from which trust roots, over which scopes** it is willing to accept — and every step names the assumptions it rests on, so that accepting one is a decision and not a shrug.
+
+**`user-assertion` is not an `Evidence.source`.** It never was. It is an `Assumption`, and it belongs in this graph, not in the evidence union — putting it there was the same error as putting `data-probe` there.
+
+#### Rules emit structure; core renders the SQL
+
+An earlier version of this section said: *"where the generated SQL can be checked against the declared read and write sets, it is."* **That is impossible without a parser, and the parser is banned.** Consider a rule that emits:
+
+```sql
+ALTER TABLE users ALTER COLUMN email TYPE citext USING lower(email COLLATE "tr_TR");
+```
+
+To check that against a declared effect set, something must read the string and infer the writes, the collation dependency, the function dependency, and the evidence it invalidates. That is a parser. And trusting an effect trace the *same rule* produced is not an independent check — it is one more unverified declaration.
+
+The way out is to remove the gap rather than police it:
+
+> **A rule does not emit SQL. It emits a structured operation, and core renders it.**
+
+`AddColumn { table, column, type, nullable }` — not `"ALTER TABLE …"`. The **effects are read off the structure**, by core, from the same object that produces the statement. The declaration and the SQL are then not two artefacts that might disagree; they are one artefact seen twice.
+
+Expressions inside such an operation — a CHECK body, a `USING` clause — remain **opaque values carried by the structure**. Core does not read them, and so their contribution to the read set is `unknown` — which, by rule 3, **widens** the radius rather than vanishing from it.
+
+A rule that insists on emitting raw SQL is not verified. It is treated exactly as a manual step (§6b): it carries a `user-blast-radius` assumption, it taints what depends on it, and no plan containing it is reported as proven.
+
+#### Does this refuse everything?
+
+It is a fair objection: if every rule declaration is an assumption, and assumptions taint what rests on them, does anything ever ship?
+
+Yes — because **naming a trust root is not the same as distrusting it.** A rule pack shipped with dbsp, tested by a conformance suite, is a trust root a user accepts by installing it, exactly as they accept the compiler. What §0 forbids is not *trusting* it; it is **claiming its declarations were proven when they were assumed**, and then being unable to say what breaks when one is wrong.
+
+The practical shape:
+
+- an assumption from a **shipped, conformance-tested rule pack** is accepted by default. The plan still records it — so when a rule turns out to have under-declared its effects, every plan that rested on it can be found;
+- an assumption from a **human** — a manual step's blast radius — is not accepted by default. Someone says yes, and their name is on it;
+- an **`external-ddl-exclusion`** assumption is accepted in a maintenance window and refused in a shared production database at noon, because that is a decision about the world, not about the code.
+
+The default policy is therefore neither `allow-everything` nor `refuse-everything`. It is: **trust the rule packs you installed; do not trust prose; and make every acceptance visible in the plan.**
+
+There is always a trusted computing base. The only question is whether the design **says so** — and whether, when one of its assumptions is later found to be false, you can enumerate what you built on top of it. Every earlier version of this one could not.
 
 ### 1b. Composition is itself a transition to be proven
 
@@ -197,8 +256,9 @@ Naming a prover is a label. Evidence is what the prover actually did, and the co
 ```ts
 interface Evidence {
   source: 'system-catalog' | 'vendor-deparser' | 'privilege-probe'
-        | 'configuration-probe' | 'dependency-catalog' | 'rehearsal' | 'user-assertion';
-        // NOTE: there is no 'data-probe'. The state of the data is not evidence — see §4b.
+        | 'configuration-probe' | 'dependency-catalog' | 'rehearsal';
+        // No 'data-probe': the state of the data is not evidence — see §4b.
+        // No 'user-assertion': a human's word is an Assumption, not evidence — see §0.
   collectedAt: Date;
   target: {
     engine: string; engineVersion: string; databaseId: string;
@@ -213,7 +273,9 @@ interface Evidence {
 }
 ```
 
-A data probe records the predicate it ran, the relation by stable address, the role, the isolation level, the result. A catalog reading records which dependency classes it asked for. An engine canonicalisation records the DDL it emitted and the context it ran in.
+A catalog reading records which dependency classes it asked for, under which `search_path`, and what it could not establish. An engine canonicalisation records the DDL it emitted, the scratch context, and what the engine gave back. A privilege probe records the role it asked about and the grant it found.
+
+**The state of the data is not on this list**, and there is no `data-probe`. A predicate over live rows is not a durable fact about the system — it is an `ApplyGuard` (§4b), discharged under a protocol at execution time, or not at all.
 
 **These sources are not interchangeable.** A shadow compilation cannot discharge a data obligation. A catalog reading cannot discharge a lock obligation. Saying "we proved it" without saying *how* is the compression this ADR exists to stop.
 
@@ -238,7 +300,7 @@ So the separation is **at the type level**, and the wrong state is unrepresentab
 // Durable. Collected by prove(). Valid until the context fingerprint moves.
 interface Evidence {
   source: 'system-catalog' | 'vendor-deparser' | 'dependency-catalog'
-        | 'configuration-probe' | 'privilege-probe' | 'rehearsal' | 'user-assertion';
+        | 'configuration-probe' | 'privilege-probe' | 'rehearsal';
   …
 }
 
@@ -282,6 +344,18 @@ impossible            no protocol on this engine can discharge this guard withou
 `SET NOT NULL` is *"attempted under a lock, having confirmed under that lock that no row is null"*. `CREATE UNIQUE INDEX CONCURRENTLY` is not that at all, and pretending one protocol covers both is how a planner ends up racing a probe it believed it had frozen.
 
 A rule names the protocol its guard requires. A rule whose guard is `impossible` on this engine does **not** get to fall back to a lock-taking variant and quietly change its own locking behaviour — that would be a different rule, with a different risk, chosen by nobody.
+
+#### A protocol must also bind the target, not just the predicate
+
+The predicate is not the only thing that moves. dbsp plans `CREATE INDEX CONCURRENTLY` on `public.users`, confirms at apply time that `public.users` is still the object it planned against, and then runs the statement — which **resolves by name**. Between the confirmation and the statement, another actor renames or replaces `public.users`, and the index is built on a different object. A name-based postcondition passes on the wrong table; an identity-based one fails only *after* the wrong side effect exists.
+
+Holding a lock across it is exactly what `engine-validated` cannot do. So target binding is part of the protocol, and there are only three honest answers:
+
+- the adapter offers **stable identity binding** — the statement can be addressed to the object, not to a name that will be resolved again later;
+- or the step carries an explicit **`external-ddl-exclusion` assumption**: *nobody else is changing this schema while we run*. It is an assumption, it is named as one (§0), it taints what depends on it, and a policy decides whether it is acceptable — typically it is, inside a maintenance window, and is not, in a shared production database at noon;
+- or the step is **`impossible`** and blocks.
+
+There is no fourth answer, and the design does not pretend there is.
 
 `prove` may still run the probe early — telling a user their plan is going to fail *before* they book a maintenance window is worth a great deal. But its result is an `AdvisoryObservation`, it is typed as one, and it discharges nothing.
 
@@ -363,7 +437,7 @@ A user hits `unsupported-transition` on something dbsp simply has no rule for ye
 
 So the trust boundary is stated, and it is visible in the artefact:
 
-- **A manual step may enter a guarded plan** — but only as one, carrying what a rule would have had to carry: a `user-assertion` naming what the author is claiming, the **blast radius** they declare it touches, its preconditions and postconditions, and the policy that permits it to run. dbsp does not verify the assertion. It **records** it, checks the pre- and postconditions it was given, and names the human who asserted it.
+- **A manual step may enter a guarded plan** — but only as one, carrying what a rule would have had to carry: an `Assumption` of class `user-blast-radius` (§0) naming what the author claims it touches, its preconditions and postconditions, and the policy that permits it to run. dbsp does not verify the claim, and it does not pretend to: the assumption is a **node in the proof graph**, it taints every step that rests on it, and the plan names the human who made it.
 - **Raw SQL that carries none of that is outside the contract.** It still runs — dbsp is not in the business of preventing people from operating their database — but the plan is marked as containing unproven steps, the marking survives into the migration artefact and the log, and dbsp never reports such a plan as proven.
 
 A plan is proven, or it is partly asserted, or it is unproven. It says which. It never averages them into a green tick.
@@ -416,7 +490,7 @@ That is exactly why the obligation is a separate stage.
 
 ## Consequences
 
-- **#324** — `SET NOT NULL` stops being `destructive: false`. It carries `NO_NULLS(relation.column)`, and `apply` refuses it until a probe discharges it. The same shape applies to a `UNIQUE` index over possible duplicates, a `CHECK` existing rows may violate, and a type change whose cast may fail.
+- **#324** — `SET NOT NULL` stops being `destructive: false`. It carries `NO_NULLS(relation.column)` as an `ApplyGuard`, discharged only by the executor under the `lock-and-check` protocol — never "proven" at plan time. The same shape applies to a `UNIQUE` index over possible duplicates, a `CHECK` existing rows may violate, and a type change whose cast may fail — though a `UNIQUE` index built *concurrently* needs `engine-validated`, not `lock-and-check`, and cannot be made safe the same way.
 - **#315** — the CHECK canonicalisation stays, reframed as an **evidence source** (`vendor-deparser`), carrying its provenance. It is not the desired model.
 - **#321** — the enum guard is a **transition-feasibility** obligation, owned by the rule that knows PostgreSQL's transaction visibility for `ALTER TYPE … ADD VALUE`. No shadow can discharge it.
 - **#318** — the naming-plugin gap is a claim about what an expression *refers to*. Nothing available can discharge it without structure, so it stays a **declared limit** — stated, not guessed.
