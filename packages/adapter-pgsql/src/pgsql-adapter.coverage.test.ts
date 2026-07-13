@@ -2822,7 +2822,8 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			} as any;
 
 			const adapter = new PgsqlAdapter(fakeClient, { borrowedClient: true });
-			expect(adapter.capabilities.supportsStreaming).toBe(true);
+			expect(adapter.capabilities.supportsStreaming).toBe(false);
+			expect(adapter.capabilities.supportsTransactions).toBe(false);
 			expect(adapter.inTransaction).toBe(false);
 			await expect(adapter.transaction(async () => 'inline')).rejects.toThrow(
 				/managedTransactions: true/,

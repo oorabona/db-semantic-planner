@@ -42,6 +42,7 @@ describe('PgsqlAdapter', () => {
 				supportsReturning: true,
 				supportsSchemas: true,
 				supportsStreaming: true,
+				supportsTransactions: true,
 				supportsRecursiveCTE: true,
 				supportsWindowFunctions: true,
 				supportsArrayType: true,
@@ -75,6 +76,7 @@ describe('PgsqlAdapter', () => {
 			expect(adapter.capabilities.supportsReturning).toBe(true);
 			expect(adapter.capabilities.supportsSchemas).toBe(true);
 			expect(adapter.capabilities.supportsStreaming).toBe(true);
+			expect(adapter.capabilities.supportsTransactions).toBe(true);
 			expect(adapter.capabilities.supportsRecursiveCTE).toBe(true);
 			expect(adapter.capabilities.supportsWindowFunctions).toBe(true);
 			expect(adapter.capabilities.supportsArrayType).toBe(true);

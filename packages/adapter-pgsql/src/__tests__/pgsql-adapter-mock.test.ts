@@ -54,6 +54,30 @@ function catalogCall(pool: Pool): [string, unknown[]] {
 	return spy.mock.calls[0] as [string, unknown[]];
 }
 
+async function captureRejection(
+	action: () => Promise<unknown>,
+): Promise<unknown> {
+	try {
+		await action();
+	} catch (error) {
+		return error;
+	}
+	throw new Error('Expected promise to reject');
+}
+
+function expectCleanupFailure(
+	error: unknown,
+	originalError: Error,
+	cleanupError: Error,
+	messagePattern: RegExp,
+): void {
+	expect(error).toBeInstanceOf(AggregateError);
+	expect((error as Error).message).toMatch(messagePattern);
+	expect((error as Error).cause).toBe(originalError);
+	expect((error as AggregateError).errors).toContain(originalError);
+	expect((error as AggregateError).errors).toContain(cleanupError);
+}
+
 // ---------------------------------------------------------------------------
 // transaction() — BEGIN / COMMIT happy path
 // ---------------------------------------------------------------------------
@@ -156,6 +180,34 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 			}),
 		).rejects.toBe(boom);
 	});
+
+	it('surfaces rollback failure and releases a pool-owned client as broken', async () => {
+		const callbackError = new Error('callback failed');
+		const rollbackError = new Error('rollback failed');
+		const txClient = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === 'ROLLBACK') throw rollbackError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => {
+				throw callbackError;
+			}),
+		);
+
+		expectCleanupFailure(
+			error,
+			callbackError,
+			rollbackError,
+			/ROLLBACK failed/,
+		);
+		expect(txClient.release).toHaveBeenCalledWith(rollbackError);
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -226,6 +278,66 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(calls).not.toContain('ROLLBACK');
 	});
 
+	it('surfaces savepoint rollback failure with the callback error as cause', async () => {
+		const callbackError = new Error('callback failed');
+		const rollbackError = new Error('savepoint rollback failed');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw rollbackError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => {
+				throw callbackError;
+			}),
+		);
+
+		expectCleanupFailure(
+			error,
+			callbackError,
+			rollbackError,
+			/savepoint cleanup failed/,
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('surfaces savepoint release failure after rollback with the callback error as cause', async () => {
+		const callbackError = new Error('callback failed');
+		const releaseError = new Error('savepoint release failed');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (/^RELEASE SAVEPOINT /.test(sql)) throw releaseError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => {
+				throw callbackError;
+			}),
+		);
+
+		expectCleanupFailure(
+			error,
+			callbackError,
+			releaseError,
+			/savepoint cleanup failed/,
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('opens and closes a transaction when managedTransactions is true and none is active', async () => {
 		const query = vi.fn(async (sql: string) => {
 			if (/^SAVEPOINT /.test(sql)) {
@@ -292,24 +404,43 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 		);
 	});
 
-	it('probes and refuses transaction-forbidden DDL on a borrowed client in a caller transaction', async () => {
-		const client = makeClient();
+	it('wraps borrowed-client DDL in a savepoint and preserves PostgreSQL rejection context', async () => {
+		const ddl = 'CREATE INDEX CONCURRENTLY idx_users_name ON users (name)';
+		const pgError = Object.assign(
+			new Error(
+				'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
+			),
+			{ code: '25001' },
+		);
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql === ddl) throw pgError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
-		await expect(adapter.executeDDL('VACUUM "users"')).rejects.toThrow(
-			'VACUUM cannot run inside a transaction block',
-		);
+		const error = await captureRejection(() => adapter.executeDDL(ddl));
 
+		expect(error).toBe(pgError);
+		expect((error as Error).message).toContain(
+			'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
+		);
+		expect((error as Error).message).toContain(
+			'rolled back the failed raw SQL to a savepoint',
+		);
 		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
 			(c) => c[0] as string,
 		);
 		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls[1]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
-		expect(calls).not.toContain('VACUUM "users"');
+		expect(calls[1]).toBe(ddl);
+		expect(calls[2]).toMatch(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/);
+		expect(calls[3]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('allows transaction-forbidden DDL on a borrowed client when the probe finds no active transaction', async () => {
+	it('runs borrowed-client DDL normally when the savepoint probe finds no active transaction', async () => {
 		const query = vi.fn(async (sql: string) => {
 			if (/^SAVEPOINT /.test(sql)) {
 				throw Object.assign(new Error('no active transaction'), {
@@ -328,6 +459,22 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 			'VACUUM "users"',
 		]);
 		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('does not guess SQL shape before executing DDL in an active transaction', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		await adapter.executeDDL('VACUUM "users"');
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'VACUUM "users"',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
 	});
 });
 
@@ -613,6 +760,34 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(calls).not.toContain('COMMIT');
 	});
 
+	it('surfaces savepoint rollback failure when managed borrowed stream setup fails', async () => {
+		const streamError = new Error('cursor declare failed');
+		const rollbackError = new Error('stream savepoint rollback failed');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (/^DECLARE /.test(sql)) throw streamError;
+				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw rollbackError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const error = await captureRejection(() => iter.next());
+
+		expectCleanupFailure(
+			error,
+			streamError,
+			rollbackError,
+			/stream cleanup failed/,
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('opens a transaction for a managed borrowed client when none is active', async () => {
 		const rows: Record<string, unknown>[] = [{ id: 2 }];
 		let callIdx = 0;
@@ -654,6 +829,32 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			expect.stringMatching(/^CLOSE /),
 			'COMMIT',
 		]);
+	});
+
+	it('surfaces rollback failure when managed borrowed stream opens its own transaction', async () => {
+		const streamError = new Error('cursor declare failed');
+		const rollbackError = new Error('stream rollback failed');
+		const query = vi.fn(async (sql: string) => {
+			if (/^SAVEPOINT /.test(sql)) {
+				throw Object.assign(new Error('no active transaction'), {
+					code: '25P01',
+				});
+			}
+			if (/^DECLARE /.test(sql)) throw streamError;
+			if (sql === 'ROLLBACK') throw rollbackError;
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const error = await captureRejection(() => iter.next());
+
+		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 });
 
@@ -714,6 +915,27 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 			streamClient.query as ReturnType<typeof vi.fn>
 		).mock.calls.map((c) => c[0] as string);
 		expect(queryCalls).toContain('ROLLBACK');
+	});
+
+	it('surfaces rollback failure during pool-owned stream cleanup and releases client as broken', async () => {
+		const streamError = new Error('cursor error');
+		const rollbackError = new Error('stream rollback failed');
+		const streamClient = {
+			query: vi.fn(async (sql: string) => {
+				if (/^DECLARE /.test(sql)) throw streamError;
+				if (sql === 'ROLLBACK') throw rollbackError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, streamClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const iter = adapter.stream({ sql: 'SELECT * FROM t', parameters: [] });
+		const error = await captureRejection(() => iter.next());
+
+		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
+		expect(streamClient.release).toHaveBeenCalledWith(rollbackError);
 	});
 });
 
@@ -926,51 +1148,27 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		expect(innerInTransaction).toBe(true);
 	});
 
-	it('logger option reaches the non-tx stream cleanup path — proves the option is honored on the adapter', async () => {
-		// Scope clarification: this test exercises the NON-TRANSACTION stream
-		// cleanup path because that is where logger.debug is observable from
-		// outside. It does NOT call transaction() and does NOT assert anything
-		// about a tx-scoped adapter cloning the logger option. Tests that
-		// directly exercise transaction() live earlier in this describe block.
-		//
-		// The non-transaction stream path calls logger.debug when a cleanup
-		// ROLLBACK throws in the finally block. We set up a pool where:
-		//  1. pool.connect() returns a mock client
-		//  2. client.query('BEGIN') succeeds
-		//  3. client.query('DECLARE ...') (first streamWithClient call) throws
-		//  4. client.query('ROLLBACK') in catch succeeds — committed stays false
-		//  5. client.query('ROLLBACK') in finally (cleanup) throws → logger.debug
+	it('non-tx stream cleanup surfaces rollback failure instead of logging it away', async () => {
 		const logger = { debug: vi.fn(), error: vi.fn() };
-		let callIdx = 0;
-		const streamClient = makeClient(
-			vi.fn().mockImplementation(async () => {
-				callIdx++;
-				if (callIdx === 1) return { rows: [], rowCount: 0 }; // BEGIN
-				if (callIdx === 2) throw new Error('DECLARE failed'); // triggers catch ROLLBACK
-				if (callIdx === 3) return { rows: [], rowCount: 0 }; // catch ROLLBACK succeeds
-				// finally cleanup ROLLBACK (committed=false) → throws → logger.debug
-				throw new Error('cleanup ROLLBACK failed');
+		const streamError = new Error('DECLARE failed');
+		const rollbackError = new Error('cleanup ROLLBACK failed');
+		const streamClient = {
+			query: vi.fn(async (sql: string) => {
+				if (/^DECLARE /.test(sql)) throw streamError;
+				if (sql === 'ROLLBACK') throw rollbackError;
+				return { rows: [], rowCount: 0 } as QueryResult;
 			}),
-		);
+			release: vi.fn(),
+		} as unknown as PoolClient;
 		const pool = makePool({ rows: [] }, streamClient);
 		const adapter = new PgsqlAdapter(pool, { logger });
 
-		// Use the non-transaction adapter directly for streaming (no .transaction())
-		// so it takes the pool-acquire path that has the cleanup ROLLBACK + logger.debug.
 		const gen = adapter.stream<unknown>({ sql: 'SELECT 1', parameters: [] });
-		try {
-			await gen.next();
-		} catch {
-			// expected
-		}
+		const error = await captureRejection(() => gen.next());
 
-		// logger.debug being called proves the logger option was set on the adapter.
-		// For transaction() propagation specifically, logger is tested transitively:
-		// cloneOptions() uses the same spread for both withSchema() and transaction().
-		expect(logger.debug).toHaveBeenCalledWith(
-			'Rollback failed during cleanup',
-			expect.any(Error),
-		);
+		expectCleanupFailure(error, streamError, rollbackError, /ROLLBACK failed/);
+		expect(logger.debug).not.toHaveBeenCalled();
+		expect(streamClient.release).toHaveBeenCalledWith(rollbackError);
 	});
 });
 

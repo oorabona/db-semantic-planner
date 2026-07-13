@@ -12,6 +12,7 @@
  *  - assert-field.ts              (75% → missing value with/without context)
  */
 
+import { supportsTransactions } from '@dbsp/core';
 import type { RecursivePlanReport } from '@dbsp/types';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
@@ -87,12 +88,42 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 	it('capabilities.supportsStreaming is false for compile-only adapter', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		expect(adapter.capabilities.supportsStreaming).toBe(false);
+		expect(adapter.capabilities.supportsTransactions).toBe(false);
 	});
 
 	it('capabilities.supportsStreaming is true when pool is provided', () => {
 		const pool = makePool();
 		const adapter = createPgsqlAdapter(pool);
 		expect(adapter.capabilities.supportsStreaming).toBe(true);
+		expect(adapter.capabilities.supportsTransactions).toBe(true);
+	});
+
+	it('unmanaged borrowed clients do not pass core transaction or streaming feature detection', () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		expect(adapter.capabilities.supportsStreaming).toBe(false);
+		expect(supportsTransactions(adapter)).toBe(false);
+	});
+
+	it('managed borrowed clients pass core transaction detection and run a savepoint transaction', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		expect(supportsTransactions(adapter)).toBe(true);
+		await adapter.transaction(async (tx) => {
+			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+		});
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls).toContain('SELECT 1');
+		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
 	});
 
 	it('factory rejects a PoolClient unless borrowedClient: true is declared', () => {

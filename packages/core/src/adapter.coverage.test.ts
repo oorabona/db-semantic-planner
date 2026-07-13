@@ -19,6 +19,16 @@ import {
 	UnsupportedCapabilityError,
 } from './adapter.js';
 
+const baseCapabilities = {
+	supportsReturning: false,
+	supportsSchemas: false,
+	supportsStreaming: false,
+	supportsTransactions: false,
+	supportsRecursiveCTE: false,
+	supportsWindowFunctions: false,
+	supportsArrayType: false,
+};
+
 // ============================================================================
 // supportsExecution
 // ============================================================================
@@ -60,12 +70,26 @@ describe('supportsStreaming', () => {
 	});
 
 	it('returns false when stream is not a function', () => {
-		const adapter = { stream: 'notFunction' } as unknown as BaseAdapter;
+		const adapter = {
+			capabilities: { ...baseCapabilities, supportsStreaming: true },
+			stream: 'notFunction',
+		} as unknown as BaseAdapter;
 		expect(supportsStreaming(adapter)).toBe(false);
 	});
 
-	it('returns true when stream is a function', () => {
-		const adapter = { stream: () => {} } as unknown as BaseAdapter;
+	it('returns false when stream method exists but capability is false', () => {
+		const adapter = {
+			capabilities: { ...baseCapabilities, supportsStreaming: false },
+			stream: () => {},
+		} as unknown as BaseAdapter;
+		expect(supportsStreaming(adapter)).toBe(false);
+	});
+
+	it('returns true when stream is a function and capability is true', () => {
+		const adapter = {
+			capabilities: { ...baseCapabilities, supportsStreaming: true },
+			stream: () => {},
+		} as unknown as BaseAdapter;
 		expect(supportsStreaming(adapter)).toBe(true);
 	});
 });
@@ -100,20 +124,34 @@ describe('supportsTransactions', () => {
 	});
 
 	it('returns false when only transaction is present (missing withSchema)', () => {
-		const adapter = { transaction: () => {} } as unknown as BaseAdapter;
+		const adapter = {
+			capabilities: { ...baseCapabilities, supportsTransactions: true },
+			transaction: () => {},
+		} as unknown as BaseAdapter;
 		expect(supportsTransactions(adapter)).toBe(false);
 	});
 
 	it('returns false when transaction is not a function', () => {
 		const adapter = {
+			capabilities: { ...baseCapabilities, supportsTransactions: true },
 			transaction: 'notFunction',
 			withSchema: () => {},
 		} as unknown as BaseAdapter;
 		expect(supportsTransactions(adapter)).toBe(false);
 	});
 
-	it('returns true when transaction and withSchema are both present as functions', () => {
+	it('returns false when methods exist but transaction capability is false', () => {
 		const adapter = {
+			capabilities: { ...baseCapabilities, supportsTransactions: false },
+			transaction: () => {},
+			withSchema: () => {},
+		} as unknown as BaseAdapter;
+		expect(supportsTransactions(adapter)).toBe(false);
+	});
+
+	it('returns true when methods and transaction capability are present', () => {
+		const adapter = {
+			capabilities: { ...baseCapabilities, supportsTransactions: true },
 			transaction: () => {},
 			withSchema: () => {},
 		} as unknown as BaseAdapter;
@@ -217,12 +255,7 @@ describe('assertCapability', () => {
 	): Adapter {
 		return {
 			capabilities: {
-				supportsReturning: false,
-				supportsSchemas: false,
-				supportsStreaming: false,
-				supportsRecursiveCTE: false,
-				supportsWindowFunctions: false,
-				supportsArrayType: false,
+				...baseCapabilities,
 				...overrides,
 			},
 		} as unknown as Adapter;
@@ -259,6 +292,7 @@ describe('assertCapability', () => {
 			'supportsReturning',
 			'supportsSchemas',
 			'supportsStreaming',
+			'supportsTransactions',
 			'supportsRecursiveCTE',
 			'supportsWindowFunctions',
 			'supportsArrayType',

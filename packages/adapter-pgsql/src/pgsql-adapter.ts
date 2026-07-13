@@ -52,7 +52,7 @@ import type {
 	UpsertIntent,
 } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
-import type { Pool, PoolClient } from 'pg';
+import type { Pool, PoolClient, QueryResult } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
 import {
@@ -160,6 +160,16 @@ const NO_ACTIVE_SQL_TRANSACTION = '25P01';
 
 let savepointCounter = 0;
 
+type CleanupFailureError = AggregateError & {
+	readonly cleanupError: unknown;
+	readonly originalError?: unknown;
+};
+
+type SavepointHandle = {
+	readonly client: PoolClient;
+	readonly name: string;
+};
+
 function isPoolClientLike(
 	connection: Pool | PoolClient,
 ): connection is PoolClient {
@@ -178,6 +188,82 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 function nextSavepointName(): string {
 	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
 	return `dbsp_savepoint_${savepointCounter}`;
+}
+
+function describeThrown(error: unknown): string {
+	if (error instanceof Error && error.message) return error.message;
+	if (typeof error === 'string') return error;
+	return String(error);
+}
+
+function createCleanupFailureError(
+	action: string,
+	originalError: unknown,
+	cleanupError: unknown,
+): CleanupFailureError {
+	const error = new AggregateError(
+		[originalError, cleanupError],
+		`${action}: ${describeThrown(cleanupError)}. The original failure is available as cause.`,
+	) as CleanupFailureError;
+	Object.defineProperties(error, {
+		cause: { value: originalError, configurable: true },
+		cleanupError: { value: cleanupError, configurable: true },
+		originalError: { value: originalError, configurable: true },
+	});
+	return error;
+}
+
+function createCleanupOnlyError(
+	action: string,
+	cleanupError: unknown,
+): CleanupFailureError {
+	const error = new AggregateError(
+		[cleanupError],
+		`${action}: ${describeThrown(cleanupError)}.`,
+	) as CleanupFailureError;
+	Object.defineProperty(error, 'cleanupError', {
+		value: cleanupError,
+		configurable: true,
+	});
+	return error;
+}
+
+function cleanupReleaseReason(error: unknown): Error | boolean | undefined {
+	if (
+		typeof error !== 'object' ||
+		error === null ||
+		!('cleanupError' in error)
+	) {
+		return undefined;
+	}
+	const cleanupError = (error as { readonly cleanupError?: unknown })
+		.cleanupError;
+	return cleanupError instanceof Error ? cleanupError : true;
+}
+
+function summarizeSql(sql: string): string {
+	const normalized = sql.trim().replace(/\s+/g, ' ');
+	return normalized.length <= 200
+		? normalized
+		: `${normalized.slice(0, 197)}...`;
+}
+
+function addRawSqlTransactionContext(error: unknown, sql: string): unknown {
+	const context =
+		'dbsp rolled back the failed raw SQL to a savepoint, so the surrounding transaction is still usable. ' +
+		`SQL: ${summarizeSql(sql)}`;
+	if (error instanceof Error) {
+		error.message = `${error.message}; ${context}`;
+		Object.defineProperty(error, 'dbspRawSqlContext', {
+			value: context,
+			configurable: true,
+		});
+	}
+	return error;
+}
+
+function raise(error: unknown): never {
+	throw error;
 }
 
 function renumberSqlParams(sql: string, offset: number): string {
@@ -951,11 +1037,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.defaultPk = options?.defaultPkColumnName ?? DEFAULT_PK_COLUMN;
 		this.deriveFk = options?.deriveFkColumnName ?? defaultFkDerivation;
 
-		// PostgreSQL capabilities — streaming requires a connection
+		const supportsManagedTransactions =
+			this.pool != null || (this.client != null && this.managedTransactions);
+
+		// PostgreSQL capabilities — streaming requires a managed transaction.
 		this._capabilities = {
 			supportsReturning: true,
 			supportsSchemas: true,
-			supportsStreaming: pool != null,
+			supportsStreaming: supportsManagedTransactions,
+			supportsTransactions: supportsManagedTransactions,
 			supportsRecursiveCTE: true,
 			supportsWindowFunctions: true,
 			supportsArrayType: true,
@@ -1703,31 +1793,50 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			// Otherwise, acquire a client and create a transaction
 			const pool = adapter.requireConnection() as Pool;
 			const client = await pool.connect();
+			let begun = false;
 			let committed = false;
+			let streamFailed = false;
+			let releaseError: Error | boolean | undefined;
+			let cleanupErrorToThrow: unknown;
 			try {
 				await client.query('BEGIN');
+				begun = true;
 				yield* adapter.streamWithClient<T>(client, query, chunkSize);
 				await client.query('COMMIT');
 				committed = true;
 			} catch (error) {
-				await client.query('ROLLBACK');
-				throw error;
-			} finally {
-				// On early break, yield* returns without reaching COMMIT.
-				// ROLLBACK the open transaction to avoid leaking it to the pool.
-				if (!committed) {
+				streamFailed = true;
+				if (begun && !committed) {
 					try {
 						await client.query('ROLLBACK');
 					} catch (rollbackErr) {
-						// Rollback errors during cleanup are non-actionable;
-						// the connection returns to the pool regardless.
-						adapter.logger?.debug?.(
-							'Rollback failed during cleanup',
+						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
+						throw createCleanupFailureError(
+							'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream failed',
+							error,
 							rollbackErr,
 						);
 					}
 				}
-				client.release();
+				throw error;
+			} finally {
+				// On early break, yield* returns without reaching COMMIT.
+				// ROLLBACK the open transaction to avoid leaking it to the pool.
+				if (begun && !committed && !streamFailed) {
+					try {
+						await client.query('ROLLBACK');
+					} catch (rollbackErr) {
+						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
+						cleanupErrorToThrow = createCleanupOnlyError(
+							'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
+							rollbackErr,
+						);
+					}
+				}
+				adapter.releaseClient(client, releaseError);
+				if (cleanupErrorToThrow !== undefined) {
+					raise(cleanupErrorToThrow);
+				}
 			}
 		}
 
@@ -1794,14 +1903,36 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 
 		let completed = false;
+		let streamError: unknown;
 		try {
 			yield* this.streamWithClient<T>(client, query, chunkSize);
 			completed = true;
+		} catch (error) {
+			streamError = error;
+			throw error;
 		} finally {
 			if (completed) {
 				await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 			} else {
-				await this.rollbackAndReleaseSavepointQuietly(client, savepointName);
+				try {
+					await this.rollbackAndReleaseSavepoint(client, savepointName);
+				} catch (cleanupErr) {
+					if (streamError !== undefined) {
+						raise(
+							createCleanupFailureError(
+								'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream failed',
+								streamError,
+								cleanupErr,
+							),
+						);
+					}
+					raise(
+						createCleanupOnlyError(
+							'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream was closed early',
+							cleanupErr,
+						),
+					);
+				}
 			}
 		}
 	}
@@ -1813,22 +1944,41 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): AsyncIterableIterator<T> {
 		let begun = false;
 		let committed = false;
+		let streamFailed = false;
+		let cleanupErrorToThrow: unknown;
 		try {
 			await client.query('BEGIN');
 			begun = true;
 			yield* this.streamWithClient<T>(client, query, chunkSize);
 			await client.query('COMMIT');
 			committed = true;
-		} finally {
+		} catch (error) {
+			streamFailed = true;
 			if (begun && !committed) {
 				try {
 					await client.query('ROLLBACK');
 				} catch (rollbackErr) {
-					this.logger?.debug?.(
-						'Rollback failed during stream cleanup',
+					throw createCleanupFailureError(
+						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream failed',
+						error,
 						rollbackErr,
 					);
 				}
+			}
+			throw error;
+		} finally {
+			if (begun && !committed && !streamFailed) {
+				try {
+					await client.query('ROLLBACK');
+				} catch (rollbackErr) {
+					cleanupErrorToThrow = createCleanupOnlyError(
+						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
+						rollbackErr,
+					);
+				}
+			}
+			if (cleanupErrorToThrow !== undefined) {
+				raise(cleanupErrorToThrow);
 			}
 		}
 	}
@@ -1884,10 +2034,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		// Otherwise, acquire a client and start transaction
 		const pool = this.requireConnection() as Pool;
 		const client = await pool.connect();
+		let releaseError: Error | boolean | undefined;
 		try {
 			return await this.transactionWithClientTransaction(client, fn);
+		} catch (error) {
+			releaseError = cleanupReleaseReason(error);
+			throw error;
 		} finally {
-			client.release();
+			this.releaseClient(client, releaseError);
 		}
 	}
 
@@ -1922,7 +2076,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 			return result;
 		} catch (error) {
-			await this.rollbackAndReleaseSavepointQuietly(client, savepointName);
+			try {
+				await this.rollbackAndReleaseSavepoint(client, savepointName);
+			} catch (cleanupErr) {
+				throw createCleanupFailureError(
+					'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed',
+					error,
+					cleanupErr,
+				);
+			}
 			throw error;
 		}
 	}
@@ -1946,8 +2108,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				try {
 					await client.query('ROLLBACK');
 				} catch (rollbackErr) {
-					this.logger?.debug?.(
-						'Rollback failed during transaction cleanup',
+					throw createCleanupFailureError(
+						'PostgreSQL transaction cleanup failed: ROLLBACK failed after the transaction body failed',
+						error,
 						rollbackErr,
 					);
 				}
@@ -1956,27 +2119,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
-	private async rollbackAndReleaseSavepointQuietly(
+	private releaseClient(client: PoolClient, error?: Error | boolean): void {
+		if (error === undefined) {
+			client.release();
+			return;
+		}
+		client.release(error);
+	}
+
+	private async rollbackAndReleaseSavepoint(
 		client: PoolClient,
 		savepointName: string,
 	): Promise<void> {
-		try {
-			await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
-		} catch (rollbackErr) {
-			this.logger?.debug?.(
-				'Rollback to savepoint failed during cleanup',
-				rollbackErr,
-			);
-			return;
-		}
-		try {
-			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-		} catch (releaseErr) {
-			this.logger?.debug?.(
-				'Release savepoint failed during cleanup',
-				releaseErr,
-			);
-		}
+		await client.query(`ROLLBACK TO SAVEPOINT ${savepointName}`);
+		await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 	}
 
 	/**
@@ -2004,8 +2160,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters: readonly unknown[] = [],
 	): Promise<T[]> {
-		const executor = this.requireConnection();
-		const result = await executor.query(sql, [...parameters]);
+		const result = await this.executeQueryProtectingOpenTransaction(
+			sql,
+			parameters,
+		);
 		return result.rows as T[];
 	}
 
@@ -2042,12 +2200,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @since DDL-TABLE-001
 	 */
 	async executeDDL(sql: string): Promise<void> {
-		const executor = this.client ?? this.pool;
-		if (!executor) {
+		if (!this.client && !this.pool) {
 			throw new Error('Cannot execute DDL on compile-only adapter');
 		}
-		await this.assertDDLAllowed(sql);
-		await executor.query(sql);
+		await this.executeQueryProtectingOpenTransaction(sql);
 	}
 
 	/**
@@ -2060,59 +2216,70 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return this.adapterManagedTransaction;
 	}
 
-	private transactionForbiddenDDLMessage(sql: string): string | undefined {
-		const normalized = sql.trim().replace(/\s+/g, ' ').toUpperCase();
-		if (/^VACUUM\b/.test(normalized)) {
-			return 'VACUUM cannot run inside a transaction block';
-		}
-		if (/^CREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/.test(normalized)) {
-			return 'CREATE INDEX CONCURRENTLY cannot run inside a transaction block';
-		}
-		if (/^DROP\s+INDEX\s+CONCURRENTLY\b/.test(normalized)) {
-			return 'DROP INDEX CONCURRENTLY cannot run inside a transaction block';
-		}
-		return undefined;
-	}
-
-	private async assertDDLAllowed(sql: string): Promise<void> {
-		const message = this.transactionForbiddenDDLMessage(sql);
-		if (!message) return;
-
-		if (this.inTransaction) {
-			throw new Error(message);
+	private async executeQueryProtectingOpenTransaction(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<QueryResult> {
+		const executor = this.requireConnection();
+		const savepoint = await this.openRawSqlSavepointIfInTransaction();
+		if (savepoint === undefined) {
+			return this.queryExecutor(executor, sql, parameters);
 		}
 
-		if (!this.client) return;
-
-		let hasActiveTransaction: boolean;
+		let result: QueryResult;
 		try {
-			hasActiveTransaction = await this.probeActiveTransaction(this.client);
+			result = await this.queryExecutor(executor, sql, parameters);
 		} catch (error) {
-			this.logger?.debug?.(
-				'Could not probe transaction state before DDL',
-				error,
-			);
-			throw new Error(
-				`${message}. Could not confirm the borrowed client is outside a transaction.`,
-			);
+			try {
+				await this.rollbackAndReleaseSavepoint(
+					savepoint.client,
+					savepoint.name,
+				);
+			} catch (cleanupErr) {
+				throw createCleanupFailureError(
+					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after PostgreSQL rejected the statement',
+					error,
+					cleanupErr,
+				);
+			}
+			throw addRawSqlTransactionContext(error, sql);
 		}
-		if (hasActiveTransaction) {
-			throw new Error(message);
-		}
+		await savepoint.client.query(`RELEASE SAVEPOINT ${savepoint.name}`);
+		return result;
 	}
 
-	private async probeActiveTransaction(client: PoolClient): Promise<boolean> {
+	private async queryExecutor(
+		executor: Pool | PoolClient,
+		sql: string,
+		parameters: readonly unknown[] | undefined,
+	): Promise<QueryResult> {
+		if (parameters === undefined) {
+			return executor.query(sql);
+		}
+		return executor.query(sql, [...parameters]);
+	}
+
+	private async openRawSqlSavepointIfInTransaction(): Promise<
+		SavepointHandle | undefined
+	> {
+		const client = this.client;
+		if (!client) return undefined;
+
 		const savepointName = nextSavepointName();
+		if (this.inTransaction) {
+			await client.query(`SAVEPOINT ${savepointName}`);
+			return { client, name: savepointName };
+		}
+
 		try {
 			await client.query(`SAVEPOINT ${savepointName}`);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				return false;
+				return undefined;
 			}
 			throw error;
 		}
-		await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-		return true;
+		return { client, name: savepointName };
 	}
 
 	/**

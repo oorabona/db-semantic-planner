@@ -67,6 +67,7 @@ export interface AdapterCapabilities {
 	readonly supportsReturning: boolean;
 	readonly supportsSchemas: boolean;
 	readonly supportsStreaming: boolean;
+	readonly supportsTransactions: boolean;
 	readonly supportsRecursiveCTE: boolean;
 	readonly supportsWindowFunctions: boolean;
 	readonly supportsArrayType: boolean;

@@ -66,6 +66,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 			supportsReturning: dialectCaps.supportsReturning,
 			supportsSchemas: dialectCaps.supportsSchemas,
 			supportsStreaming: false,
+			supportsTransactions: false,
 			supportsRecursiveCTE: dialectCaps.supportsRecursiveCTE,
 			supportsWindowFunctions: dialectCaps.supportsWindowFunctions,
 			supportsArrayType: dialectCaps.supportsArrayType,

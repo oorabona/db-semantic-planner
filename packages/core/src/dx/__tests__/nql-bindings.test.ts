@@ -15,6 +15,16 @@ import type { MutationDump } from '../mutation-builders.js';
 import { createNqlTag, nqlRaw } from '../nql.js';
 import { ref, schema } from '../schema.js';
 
+function markSupportsTransactions(adapter: Adapter): void {
+	Object.defineProperty(adapter, 'capabilities', {
+		value: {
+			...adapter.capabilities,
+			supportsTransactions: true,
+		},
+		configurable: true,
+	});
+}
+
 function createBindingTag(executeResult: readonly unknown[] = []) {
 	const db = schema({
 		users: {
@@ -198,6 +208,7 @@ function createMutationBindingTag(
 		vi.fn(async (fn) => {
 			return fn(adapter);
 		});
+	markSupportsTransactions(adapter);
 
 	return {
 		adapter,
@@ -780,6 +791,7 @@ b | select id`.dump();
 				.mockResolvedValueOnce([{ name: 'Alice' }])
 				.mockResolvedValueOnce([{ name: 'Alice' }]);
 			adapter.transaction = vi.fn(async (fn) => fn(adapter));
+			markSupportsTransactions(adapter);
 			const nql = createNqlTag(db.definition, model, adapter);
 
 			await nql`insert into users set name = ${'Alice'} | select name | bind m
@@ -1135,6 +1147,7 @@ users | select id`.dump();
 			const compile = vi.spyOn(adapter, 'compile');
 			adapter.execute = execute;
 			adapter.transaction = vi.fn(async (fn) => fn(adapter));
+			markSupportsTransactions(adapter);
 			return {
 				adapter,
 				compile,
