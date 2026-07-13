@@ -225,6 +225,7 @@ type DbspClientScope = {
 type DbspScopeState = {
 	poisoned: DbspScopePoison | undefined;
 	statementLock: DbspScopeStatementLock;
+	childScopes: Set<Promise<void>>;
 	closing: boolean;
 };
 
@@ -326,7 +327,12 @@ function createScopeToken(): DbspScopeToken {
 function createScopeState(
 	statementLock: DbspScopeStatementLock = { tail: undefined },
 ): DbspScopeState {
-	return { poisoned: undefined, statementLock, closing: false };
+	return {
+		poisoned: undefined,
+		statementLock,
+		childScopes: new Set(),
+		closing: false,
+	};
 }
 
 function rememberPreparedStatementObligation(
@@ -2126,7 +2132,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					scopeToken,
 				);
 				adapter.closeScope(scopeState);
-				await adapter.drainScopeStatements(scopeState);
+				await adapter.drainScopeWork(scopeState);
 				adapter.throwIfScopePoisoned(scopeState);
 				const commitResult = await adapter.executeScopeBoundaryStatement(
 					client,
@@ -2228,9 +2234,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			query.parameters as unknown[],
 			{
 				...(allowedScopeToken !== undefined && { allowedScopeToken }),
+				forceSingleCommand: true,
 			},
 		);
 
+		let streamError: unknown;
 		try {
 			// Fetch in batches
 			while (true) {
@@ -2256,16 +2264,38 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					break;
 				}
 			}
+		} catch (error) {
+			streamError = error;
+			throw error;
 		} finally {
 			// Always close the cursor
-			await this.executeConnectionStatement(
-				client,
-				`CLOSE ${cursorName}`,
-				undefined,
-				{
-					...(allowedScopeToken !== undefined && { allowedScopeToken }),
-				},
-			);
+			try {
+				await this.executeConnectionStatement(
+					client,
+					`CLOSE ${cursorName}`,
+					undefined,
+					{
+						...(allowedScopeToken !== undefined && { allowedScopeToken }),
+						allowPoisonedScope: true,
+					},
+				);
+			} catch (cleanupErr) {
+				if (streamError !== undefined) {
+					raise(
+						createCleanupFailureError(
+							'PostgreSQL stream cleanup failed: CLOSE cursor failed after the stream failed',
+							streamError,
+							cleanupErr,
+						),
+					);
+				}
+				raise(
+					createCleanupOnlyError(
+						'PostgreSQL stream cleanup failed: CLOSE cursor failed',
+						cleanupErr,
+					),
+				);
+			}
 		}
 	}
 
@@ -2336,7 +2366,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			try {
 				this.closeScope(scopeState);
 				if (completed) {
-					await this.drainScopeStatements(scopeState);
+					await this.drainScopeWork(scopeState);
 					this.throwIfScopePoisoned(scopeState);
 					try {
 						await this.executeScopeBoundaryStatement(
@@ -2412,7 +2442,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
 			this.closeScope(scopeState);
-			await this.drainScopeStatements(scopeState);
+			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			const commitResult = await this.executeScopeBoundaryStatement(
 				client,
@@ -2616,7 +2646,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			const result = await fn(txAdapter);
 			this.closeScope(scopeState);
-			await this.drainScopeStatements(scopeState);
+			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
 			try {
@@ -2690,7 +2720,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			const result = await fn(txAdapter);
 			this.closeScope(scopeState);
-			await this.drainScopeStatements(scopeState);
+			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
 			const commitResult = await this.executeScopeBoundaryStatement(
@@ -2932,6 +2962,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			const ownScope =
+				this.scopeToken === undefined
+					? undefined
+					: this.findClientScope(client, this.scopeToken);
+			if (ownScope?.state.closing) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			if (current.state.closing) {
 				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 			}
@@ -2959,6 +2996,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			const ownScope =
+				this.scopeToken === undefined
+					? undefined
+					: this.findClientScope(client, this.scopeToken);
+			if (ownScope?.state.closing) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			if (current.state.closing) {
 				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 			}
@@ -2991,6 +3035,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		scope: DbspClientScope,
 	): () => void {
 		const stack = activeClientScopes.get(client);
+		const parentScope = stack?.at(-1);
+		let resolveClosed!: () => void;
+		const closed = new Promise<void>((resolve) => {
+			resolveClosed = resolve;
+		});
+		parentScope?.state.childScopes.add(closed);
 		if (stack === undefined) {
 			activeClientScopes.set(client, [scope]);
 		} else {
@@ -3000,14 +3050,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return () => {
 			if (released) return;
 			released = true;
-			const currentStack = activeClientScopes.get(client);
-			if (currentStack === undefined) return;
-			const index = currentStack.indexOf(scope);
-			if (index === -1) return;
-			currentStack.splice(index);
-			if (currentStack.length === 0) {
-				activeClientScopes.delete(client);
-				return;
+			try {
+				const currentStack = activeClientScopes.get(client);
+				if (currentStack === undefined) return;
+				const index = currentStack.indexOf(scope);
+				if (index === -1) return;
+				currentStack.splice(index, 1);
+				if (currentStack.length === 0) {
+					activeClientScopes.delete(client);
+				}
+			} finally {
+				parentScope?.state.childScopes.delete(closed);
+				resolveClosed();
 			}
 		};
 	}
@@ -3039,10 +3093,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			return;
 		}
 		const allowedScope = this.findClientScope(client, allowedScopeToken);
+		if (allowedScope?.state.closing && !allowClosingScope) {
+			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+		}
 		if (allowAncestorScopeToken && allowedScope !== undefined) {
-			if (allowedScope.state.closing && !allowClosingScope) {
-				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
-			}
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(allowedScope);
 			}
@@ -3143,6 +3197,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		await scopeState.statementLock.tail?.catch(() => undefined);
 	}
 
+	private async drainScopeChildren(scopeState: DbspScopeState): Promise<void> {
+		while (scopeState.childScopes.size > 0) {
+			await Promise.all([...scopeState.childScopes]);
+		}
+	}
+
+	private async drainScopeWork(scopeState: DbspScopeState): Promise<void> {
+		await this.drainScopeChildren(scopeState);
+		await this.drainScopeStatements(scopeState);
+	}
+
 	private async executeScopeBoundaryStatement<
 		T extends QueryResultRow = QueryResultRow,
 	>(
@@ -3159,6 +3224,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			inspectTransactionControl: false,
 			protectBorrowedClientTransaction: false,
 		};
+		await this.drainScopeChildren(scopeState);
 		return this.runWithScopeStatementLock(scopeState, () =>
 			this.executeConnectionStatementUnlocked<T>(
 				client,
@@ -3526,7 +3592,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		try {
 			this.closeScope(scopeState);
-			await this.drainScopeStatements(scopeState);
+			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
 			await this.executeScopeBoundaryStatement(

@@ -1021,48 +1021,24 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([45, 46]);
 	});
 
-	it('refuses a child scope orphaned when a parent scope unwinds before it resumes', async () => {
+	it('rolls back an unawaited nested transaction failure before the parent unwinds', async () => {
 		const pool = await getTestPool();
-		const client = await pool.connect();
-		let rolledBack = false;
-		try {
-			await client.query('BEGIN');
-			const adapter = createPgsqlAdapter(client, {
-				borrowedClient: true,
-				managedTransactions: true,
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		let child: Promise<unknown> | undefined;
+
+		await orm.transaction(async (tx) => {
+			child = tx.transaction(async (inner) => {
+				await inner
+					.into(inner.tables.items)
+					.values({ id: 47, label: 'unawaited nested rollback' })
+					.execute();
+				throw new Error('unawaited nested failure');
 			});
-			let resumeChild!: () => void;
-			let childStarted!: () => void;
-			const childStartedPromise = new Promise<void>((resolve) => {
-				childStarted = resolve;
-			});
-			let child: Promise<unknown> | undefined;
+			void child.catch(() => undefined);
+		});
 
-			await expect(
-				adapter.transaction(async (tx) => {
-					child = tx.transaction(async (inner) => {
-						childStarted();
-						await new Promise<void>((resolve) => {
-							resumeChild = resolve;
-						});
-						await inner.executeRaw('SELECT 2');
-					});
-					await childStartedPromise;
-					throw new Error('parent unwound first');
-				}),
-			).rejects.toThrow('parent unwound first');
-
-			await adapter.executeRaw('SELECT 1');
-			resumeChild();
-			await expect(child).rejects.toThrow(/transaction that has ended/);
-
-			await client.query('ROLLBACK');
-			rolledBack = true;
-		} finally {
-			if (!rolledBack) {
-				await client.query('ROLLBACK').catch(() => undefined);
-			}
-			client.release();
-		}
+		await expect(child).rejects.toThrow('unawaited nested failure');
+		expect(await itemIds()).toEqual([]);
 	});
 });
