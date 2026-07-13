@@ -820,26 +820,40 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				return Promise.reject(createUnsupportedTransactionError());
 			}
 
-			// Passthrough to adapter's transaction API
-			return adapter.transaction(async (txAdapter) => {
-				// Create a transaction-scoped ORM instance with inTransaction=true
-				const txOrm = createOrmInstance<DB>(
-					model,
-					strictMode,
-					relationHints,
-					txAdapter as Adapter<DB>,
-					schemaName,
-					dialectCapabilities,
-					schemaDefinition,
-					globalPlanOptions,
-					defaultFilters,
-					hookStore,
-					onHookError,
-					true, // inTransaction
-					tablesProxy,
-				);
-				return fn(txOrm);
-			});
+			// Passthrough to adapter's transaction API.
+			//
+			// The try/catch is not decoration. This method is NOT async (see above), so
+			// an adapter throwing synchronously out of transaction() would throw
+			// synchronously out of here — and a method typed `Promise<T>` must reject
+			// rather than throw, or `.catch()` and `await expect(...).rejects` stop
+			// working on it. The async wrapper converted that for free; dropping it to
+			// keep the adapter's promise identity means converting it by hand.
+			//
+			// The promise itself is still returned untouched. Only a synchronous throw
+			// becomes a rejection.
+			try {
+				return adapter.transaction(async (txAdapter) => {
+					// Create a transaction-scoped ORM instance with inTransaction=true
+					const txOrm = createOrmInstance<DB>(
+						model,
+						strictMode,
+						relationHints,
+						txAdapter as Adapter<DB>,
+						schemaName,
+						dialectCapabilities,
+						schemaDefinition,
+						globalPlanOptions,
+						defaultFilters,
+						hookStore,
+						onHookError,
+						true, // inTransaction
+						tablesProxy,
+					);
+					return fn(txOrm);
+				});
+			} catch (error) {
+				return Promise.reject(error);
+			}
 		},
 
 		// =====================================================================

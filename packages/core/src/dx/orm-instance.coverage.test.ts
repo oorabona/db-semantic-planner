@@ -12,6 +12,76 @@ import { InvalidOperationError } from './errors.js';
 import { createOrmInstance } from './orm-instance.js';
 import { createMockAdapter } from './test-utils.js';
 
+// `orm.transaction()` is deliberately NOT an async method: an async method awaits
+// what it returns and re-wraps it, which destroys the adapter's promise identity —
+// and the pgsql adapter needs that identity to tell whether the CALLER awaited a
+// nested transaction. The cost of dropping `async` is that a synchronous throw would
+// escape synchronously from a method typed `Promise<T>`. These two hold both ends
+// shut, so a future `async` cannot quietly take the guarantee back.
+describe('orm.transaction() promise contract', () => {
+	const model = new ModelIRImpl(
+		new Map<string, TableIR>([
+			[
+				'users',
+				{
+					name: 'users',
+					columns: [{ name: 'id', type: 'uuid', nullable: false }],
+					primaryKey: 'id',
+					foreignKeys: [],
+					indexes: [],
+				},
+			],
+		]),
+		new Map(),
+	);
+
+	it('rejects rather than throwing when the adapter throws synchronously', async () => {
+		const adapter = createMockAdapter();
+		// The mock declares supportsTransactions: false, and core refuses before it
+		// ever reaches the adapter — which would make this test pass for the wrong
+		// reason. Say the adapter supports them, so the transaction path is real.
+		(
+			adapter.capabilities as { supportsTransactions: boolean }
+		).supportsTransactions = true;
+		const boom = new Error('adapter exploded synchronously');
+		adapter.transaction = () => {
+			throw boom;
+		};
+
+		const orm = createOrmInstance(model, false, undefined, adapter);
+
+		// The point: a `.catch()` must see it. A synchronous throw would sail past.
+		let caught: unknown;
+		await orm
+			.transaction(async () => undefined)
+			.catch((error) => {
+				caught = error;
+			});
+		expect(caught).toBe(boom);
+	});
+
+	it('returns the adapter promise itself, so the adapter can observe the caller', async () => {
+		const adapter = createMockAdapter();
+		(
+			adapter.capabilities as { supportsTransactions: boolean }
+		).supportsTransactions = true;
+		const marker = Symbol('adapter promise identity');
+		const adapterPromise = Object.assign(Promise.resolve(undefined), {
+			[marker]: true,
+		});
+		adapter.transaction = () => adapterPromise as Promise<undefined>;
+
+		const orm = createOrmInstance(model, false, undefined, adapter);
+		const returned = orm.transaction(async () => undefined);
+
+		// Not merely "resolves to the same value" — the SAME object. An async wrapper
+		// would hand back a fresh promise here, and the adapter would never learn
+		// whether the caller attached anything to its own.
+		expect(returned).toBe(adapterPromise);
+		await returned;
+	});
+});
+
 describe('orm-instance coverage', () => {
 	const tables = new Map<string, TableIR>([
 		[
