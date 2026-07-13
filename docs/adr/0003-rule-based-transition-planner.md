@@ -86,6 +86,70 @@ interface TransitionRule {
 
 A change no rule recognises is `unsupported-transition`. It is **not** a `DROP` and `CREATE`.
 
+**The registry must arbitrate explicitly, because otherwise declaration order will.** Two rules can recognise the same change — *add a `NOT NULL` column with a default* and *add it nullable, backfill, then `SET NOT NULL`* both reach the same end state, and one of them locks the table while the other does not. If nothing decides between them, first-match-wins becomes the arbiter, and **rule order silently decides semantics**. That is this ADR's own mistake, one level up: a fact ("which strategy, and why") compressed into a position in a list.
+
+So:
+
+- **no match** → `unsupported-transition`. Refuse.
+- **exactly one match** → that rule, and the plan records which.
+- **several matches** → they must either **compose — provably, not by assertion** (below), or a **declared precedence** decides, carrying its *justification*, with the plan recording which rule was selected and why it beat the others.
+- **several matches, no proven composition and no declared precedence** → `ambiguous-rule`. Refuse. Do not pick one.
+
+A plan that cannot say why it chose the strategy it chose is not a proven plan.
+
+### 0. The trusted computing base is named, because it never goes away
+
+Every version of this design pushed the proof one level deeper, and every time the trust moved rather than disappeared:
+
+| what was supposed to prove it | what actually decided |
+|---|---|
+| the expression | **a string**, recovered by a deparser |
+| the shadow schema | **a final catalog**, which says nothing about the transition |
+| the rule registry | **a position in a list** |
+| "these rules compose" | **a declaration** |
+| *the planner proves the composition* | **the rule's own hand-written metadata, unchecked** |
+
+That last one is not a bug in rule authors. It is the design claiming *proof* where it has an **assumption**.
+
+A rule declares its `readSet`, `writeSet`, `locks`, `invalidates`. Nothing verifies them. If a rule that rewrites `users.email` from `text` to `citext` fails to declare that it invalidates collation and operator-class evidence, the planner will happily "prove" that a later rule building a unique index on `lower(users.email)` composes with it — using evidence gathered before the comparison semantics changed. **That is trust in rule order, with a better name.**
+
+So the trusted computing base is **declared, not hidden**, and three rules follow from it:
+
+1. **An unverified declaration is an assumption, and is recorded as one.** It never becomes evidence by being written down. A plan states which of its steps rest on assumptions, and whose.
+2. **An assumption taints what depends on it.** A step proven *on top of* an unverified declaration is not `proven-applicable`. It is `proven-under-assumption`, and the policy decides whether that is enough. Manual and opaque SQL taint everything downstream of them unless a policy accepts the author's declared blast radius — **as an assumption, not as a proven fact**.
+3. **Unknown effects widen; they do not vanish.** A rule that cannot say what it touches is not thereby touching nothing. Its blast radius is *the widest one consistent with what it might do*, and the planner must reason with that — or refuse. Where the generated SQL can be checked against the declared read and write sets, it is; where a declaration and the SQL disagree, the SQL wins and the rule is rejected.
+
+There is always a trusted computing base. The only question is whether the design **says so**. Every earlier version of this one did not.
+
+### 1b. Composition is itself a transition to be proven
+
+Letting rules *declare* that they compose would put the same mistake one level deeper: **"declared composable" becomes the new hidden arbiter**, exactly as rule order was. Two individually proven steps can compose into an unproven plan.
+
+The ways it goes wrong are concrete:
+
+- one rule needs its own transaction boundary; another assumes it runs in the caller's;
+- two rules take locks in opposite orders, and the plan deadlocks with itself;
+- one rule's postcondition **invalidates the durable evidence another rule was proven on**;
+- one rule's guard must be evaluated *before* a table rewrite, another's only *after*;
+- **the enum case, again**: adding an enum value and adding a CHECK that uses it requires knowing PostgreSQL's transaction visibility rules *across both rules*. Neither can establish it alone, and both are individually correct.
+
+So a rule declares what the planner needs in order to *prove* a composition, not a claim that one exists:
+
+```ts
+interface TransitionRule {
+  …
+  readSet: ResourceAddress[];        // what it reads
+  writeSet: ResourceAddress[];       // what it changes
+  locks: { object: ResourceAddress; mode: LockMode }[];
+  transactionBoundary: 'requires-own' | 'joins-caller' | 'forbids-transaction';
+  contextMutations: ContextFact[];   // what it changes about the execution context
+  invalidates: EvidenceKind[];       // whose durable evidence its postcondition destroys
+  guardPhase: 'before-rewrite' | 'after-rewrite';
+}
+```
+
+The **planner** then proves the composition: lock orders are consistent, transaction boundaries are compatible, no step's postcondition invalidates evidence a later step was proven on, and guard phases are satisfiable. If it cannot, the outcome is `uncomposable`, and the plan is refused — it is not silently emitted in declaration order and hoped for.
+
 ### 2. The diff stays pure; the prover is separate; apply refuses
 
 ```
@@ -119,12 +183,12 @@ interface TargetSnapshot {
   dependencies: DependencySnapshot;            // what refers to what — and what could not be established
   executionContext: ExecutionContextSnapshot;  // engine version, effective role, privileges, search_path,
                                                // session settings, extensions + versions, collation provider
-  runtimePreconditions: RuntimePreconditionSnapshot; // convertible data, no duplicates, no nulls, table sizes,
-                                               // whether the required locks can actually be taken
 }
 ```
 
-`SET NOT NULL` fails on the fourth. The enum bug lives in the third. Neither is in the catalog.
+The enum bug lives in the third dimension, and nothing about it is in the catalog.
+
+**There is no fourth dimension.** An earlier draft added one — *"runtime preconditions: convertible data, no duplicates, no nulls, whether the required locks can be taken"* — and that was wrong. The state of the data and the availability of a lock are **not properties of the system**; they are outcomes of *trying*, at a moment, and they are stale the instant you look away. Putting them in a snapshot dresses a race in the language of proof. They are `ApplyGuard`s (§4b), and they live at execution time, under the lock. `SET NOT NULL` fails on one of those — and no snapshot could ever have caught it.
 
 ### 4. Evidence is a record, and it expires
 
@@ -132,8 +196,9 @@ Naming a prover is a label. Evidence is what the prover actually did, and the co
 
 ```ts
 interface Evidence {
-  source: 'system-catalog' | 'vendor-deparser' | 'data-probe' | 'privilege-probe'
+  source: 'system-catalog' | 'vendor-deparser' | 'privilege-probe'
         | 'configuration-probe' | 'dependency-catalog' | 'rehearsal' | 'user-assertion';
+        // NOTE: there is no 'data-probe'. The state of the data is not evidence — see §4b.
   collectedAt: Date;
   target: {
     engine: string; engineVersion: string; databaseId: string;
@@ -154,6 +219,72 @@ A data probe records the predicate it ran, the relation by stable address, the r
 
 When the context moves — a minor upgrade, a new extension, a different `search_path`, a collation change — evidence gathered under the old one is **stale, not wrong**, and the outcome is *"re-prove"*, never *"drift"*.
 
+### 4b. Some facts cannot be evidence at all — and the *type* must say so, not the prose
+
+`NO_NULLS(users.age)` is proven at 10:00. At 10:01 another session inserts a null. `LOCK_ACCEPTABLE(users)` is checked, and a moment later a DBA takes the lock first.
+
+**A predicate about live data, or about whether a lock can be taken, is not a durable fact.** A preflight `SELECT … WHERE age IS NULL` is stale the instant it returns. Recording it as *evidence*, with a `collectedAt` timestamp and an expiry, dresses a race in the language of proof.
+
+Obligations therefore split in two, and they are discharged in different places:
+
+- **Durable evidence**, collected at `prove` time: the catalog's structure, the engine version, the effective role, the installed extensions, the engine's canonical rendering of an expression, what dbsp applied last. These are facts about the *system*, and they hold until the context changes — which the plan's fingerprint detects.
+- **Volatile guards**, evaluated *at apply time, under the lock that freezes them*: the state of the data, and the availability of the lock itself.
+
+**A paragraph forbidding this is not enough, and this ADR's own first draft proves it.** If `Evidence` has a `source: 'data-probe'` and `prove()` returns `Evidence[]`, then an implementer *can* put `NO_NULLS(users.age)` in there and call it discharged — and one will, because the type invited it. Prose does not constrain an implementation. Types do.
+
+So the separation is **at the type level**, and the wrong state is unrepresentable:
+
+```ts
+// Durable. Collected by prove(). Valid until the context fingerprint moves.
+interface Evidence {
+  source: 'system-catalog' | 'vendor-deparser' | 'dependency-catalog'
+        | 'configuration-probe' | 'privilege-probe' | 'rehearsal' | 'user-assertion';
+  …
+}
+
+// Volatile. NOT evidence. Cannot be returned by prove() as discharged. Discharged
+// only by the guarded executor, under the protocol the rule declares it needs.
+interface ApplyGuard {
+  predicate: GuardPredicate;        // NO_NULLS(users.age), NO_DUPLICATES(users.email)
+  protocol: GuardProtocol;          // see below — there is more than one
+}
+
+// Advisory only. Says "this plan looks like it will fail". Discharges nothing.
+interface AdvisoryObservation { … }
+```
+
+`prove()` returns `Evidence[]` and `ApplyGuard[]`. It **cannot** return an `ApplyGuard` as discharged, because the type has nowhere to say that. There is no `data-probe` in `Evidence.source`, and **lock availability appears nowhere in the snapshot vocabulary at all** — it is not a property of the system, it is an outcome of trying.
+
+#### There is no single guard protocol
+
+A lock-shaped protocol is not implementable for the transitions that matter most:
+
+```
+lock-and-check        take the lock (bounded timeout) → evaluate the predicate while
+                      holding it → run the DDL, still holding it.
+                      SET NOT NULL. A UNIQUE index built non-concurrently.
+
+engine-validated      the engine checks the predicate as part of the statement, and the
+                      statement cannot be wrapped in a lock we hold.
+                      CREATE UNIQUE INDEX CONCURRENTLY cannot run inside a transaction
+                      block, and an explicit table lock IS transaction-scoped — so
+                      "hold a lock, then run it" is impossible. The engine's own refusal
+                      discharges the guard, and the artefact it can leave behind (an
+                      INVALID index) is part of the step, not an afterthought.
+
+multi-resource        the predicate spans objects that must be locked together, in the
+                      order the composition proof declared (§1b) — or not at all.
+
+impossible            no protocol on this engine can discharge this guard without a race.
+                      The step is BLOCKED. It is not attempted "carefully".
+```
+
+`SET NOT NULL` is *"attempted under a lock, having confirmed under that lock that no row is null"*. `CREATE UNIQUE INDEX CONCURRENTLY` is not that at all, and pretending one protocol covers both is how a planner ends up racing a probe it believed it had frozen.
+
+A rule names the protocol its guard requires. A rule whose guard is `impossible` on this engine does **not** get to fall back to a lock-taking variant and quietly change its own locking behaviour — that would be a different rule, with a different risk, chosen by nobody.
+
+`prove` may still run the probe early — telling a user their plan is going to fail *before* they book a maintenance window is worth a great deal. But its result is an `AdvisoryObservation`, it is typed as one, and it discharges nothing.
+
 ### 5. The plan is guarded, and re-checked at execution
 
 ```ts
@@ -167,9 +298,11 @@ interface GuardedPlan {
 }
 ```
 
-Before each step: re-evaluate its preconditions, confirm the context has not changed, confirm the objects it depends on are still the ones it was planned against. After each step: re-introspect what it touched and check the postcondition.
+Before each step: confirm the context fingerprint still matches, confirm the objects it depends on are still the ones it was planned against, then **take the lock the step needs and evaluate its volatile guards while holding it** (§4b). After each step: re-introspect what it touched and check the postcondition.
 
 A plan proven under `role = owner` and applied under `role = migration_runner` is **`context-mismatch`**, and it stops. That is a first-class outcome, not an edge case.
+
+The step also records **which rule generated it, and why that rule was chosen over the others that recognised the change** (§1). A plan that cannot answer that question has an arbiter it never declared.
 
 ### 6. Outcomes are distinct, because their actions are
 
@@ -182,9 +315,58 @@ Not one enum on one axis. Six outcomes that demand six different things:
 | `context-mismatch` | the plan was proven under a context that is no longer the one in force | re-prove |
 | `insufficient-evidence` | equivalence or safety could not be established | refuse; say which obligation is undischarged |
 | `unsupported-transition` | no rule in this adapter knows this change | refuse; do not improvise |
+| `ambiguous-rule` | several rules recognise the change, and nothing declares which wins | refuse; do not let list order decide |
+| `uncomposable` | the rules are individually proven, and their composition is not — conflicting locks, incompatible transaction boundaries, one postcondition invalidating another's evidence | refuse; do not emit them in declaration order and hope |
 | `ambiguous-intent` | several business transformations fit the same end state | refuse; ask for the missing fact |
 
-**None of the last four may produce an automatic `DROP` and `CREATE`.** A spurious replacement of an index on a billion-row table can lock, run for hours, destroy planner statistics, or drop a uniqueness guarantee. That is not the safe side of the trade — it is a larger risk wearing safety's clothes.
+Plus three that belong to **execution** rather than planning — `guard-timeout`, `partially-applied`, `resume-required` (§5b).
+
+**None of the refusals may produce an automatic `DROP` and `CREATE`.** A spurious replacement of an index on a billion-row table can lock, run for hours, destroy planner statistics, or drop a uniqueness guarantee. That is not the safe side of the trade — it is a larger risk wearing safety's clothes.
+
+### 5b. A guard failing mid-plan is a state, not an exception
+
+A plan is not one statement:
+
+```
+1. add the replacement column, nullable
+2. backfill it
+3. SET NOT NULL — under a lock, with a bounded timeout
+4. drop the old column
+```
+
+Step 3's lock times out. Steps 1 and 2 have run — and on an engine without transactional DDL, they have **committed**. "The step does not run" says nothing about the four things that matter: does apply stop, continue with steps that do not depend on 3, roll back, or resume later? And from *what* state?
+
+The executor is a state machine, and it says so:
+
+- it **journals before and after every step** — but the journal is **itself an adapter recovery primitive** ([ADR 0002](0002-engine-recovery-primitives.md)), not a table dbsp assumes it can trust. On PostgreSQL the before-record and the DDL can commit together. On MySQL they cannot: the before-record commits, `ALTER TABLE` **implicitly commits**, and if the process dies there is a durable *"about to run"*, no *"ran"*, and a database that may already hold the change. **A journal that cannot be written atomically with the step it describes is not a proof of what happened.**
+
+  So: the durable before-record must land *before* the step starts; the journal must live **outside the blast radius** of the plan, or its being inside must be modelled explicitly; a missing after-record yields **`unknown-step-result`**, never an assumed rollback; and resume derives state from **re-introspection plus the adapter's recovery rules**, never from the journal alone. Re-introspection can tell you a column exists. It cannot always distinguish *completed*, *partially completed*, and *completed with side effects the catalog does not show* — a data rewrite, a trigger's writes, an invalid index left behind by an interrupted concurrent build. Where it cannot, the outcome is `unknown-step-result` and the plan stops for a human;
+- a volatile guard failing **stops the plan**, unless the dependency graph *proves* that the remaining steps are independent of the one that failed. Independence is proven from the read and write sets (§1b), never assumed;
+- after any partial application it **re-introspects**, because the state it must resume from is the one the database is actually in, not the one the plan expected;
+- resuming or replanning uses the **adapter's declared recovery primitives** ([ADR 0002](0002-engine-recovery-primitives.md)) — which is precisely where an engine without transactional DDL cannot promise what PostgreSQL can, and must say so rather than pretend.
+
+Three outcomes are therefore about **execution**, not planning, and they belong in the outcome table beside the others:
+
+| Outcome | Meaning |
+|---|---|
+| `guard-timeout` | a lock could not be taken within its bound; nothing was applied for that step |
+| `partially-applied` | earlier steps are in the database; the plan stopped; here is the journal and the re-introspected state |
+| `resume-required` | the remaining work is known and can be resumed, from the observed state, under a re-proven context |
+
+A planner that cannot say *"we applied steps 1 and 2, we stopped at 3, and here is exactly where you are"* has not planned anything. It has hoped.
+
+### 6b. The escape hatch, or everything above is optional
+
+A user hits `unsupported-transition` on something dbsp simply has no rule for yet — a comment, a dialect-specific online index, a backfill. They still have to ship. So they write raw SQL, and today `migrate apply` and the DDL executor will run it, statement by statement, with no proof of anything.
+
+**The guarded planner would then be optional exactly where it is weakest.** And an apply path that accepts opaque SQL cannot, at the same time, claim that every plan it applies carries its proof. That claim would be false, and a false safety claim is worse than an honest unsafe one.
+
+So the trust boundary is stated, and it is visible in the artefact:
+
+- **A manual step may enter a guarded plan** — but only as one, carrying what a rule would have had to carry: a `user-assertion` naming what the author is claiming, the **blast radius** they declare it touches, its preconditions and postconditions, and the policy that permits it to run. dbsp does not verify the assertion. It **records** it, checks the pre- and postconditions it was given, and names the human who asserted it.
+- **Raw SQL that carries none of that is outside the contract.** It still runs — dbsp is not in the business of preventing people from operating their database — but the plan is marked as containing unproven steps, the marking survives into the migration artefact and the log, and dbsp never reports such a plan as proven.
+
+A plan is proven, or it is partly asserted, or it is unproven. It says which. It never averages them into a green tick.
 
 ### 7. Dependencies: unknown is not absent
 
