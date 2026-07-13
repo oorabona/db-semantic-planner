@@ -96,6 +96,17 @@ describe('orm-instance coverage', () => {
 
 	const model = new ModelIRImpl(tables, relations);
 
+	const createTransactionalMockAdapter = () => {
+		const adapter = createMockAdapter();
+		return {
+			...adapter,
+			capabilities: {
+				...adapter.capabilities,
+				supportsTransactions: true,
+			},
+		};
+	};
+
 	describe('createOrmInstance - basic creation', () => {
 		it('should create ORM with minimal options', () => {
 			const orm = createOrmInstance(model, false, {});
@@ -447,8 +458,26 @@ describe('orm-instance coverage', () => {
 			).rejects.toThrow('transaction() requires an adapter');
 		});
 
+		it('should refuse before calling adapter.transaction when transactions are unsupported', async () => {
+			const transactionSpy = vi.fn(async () => {
+				throw new Error('adapter transaction should not be called');
+			});
+			const adapter = {
+				...createMockAdapter(),
+				transaction: transactionSpy,
+			};
+			const orm = createOrmInstance(model, false, {}, adapter);
+
+			await expect(
+				orm.transaction(async () => {
+					return 42;
+				}),
+			).rejects.toThrow(/managedTransactions: true/);
+			expect(transactionSpy).not.toHaveBeenCalled();
+		});
+
 		it('should delegate to adapter.transaction', async () => {
-			const adapter = createMockAdapter();
+			const adapter = createTransactionalMockAdapter();
 			const transactionSpy = vi
 				.spyOn(adapter, 'transaction')
 				.mockImplementation(async (fn) => {
@@ -462,7 +491,7 @@ describe('orm-instance coverage', () => {
 		});
 
 		it('should create transaction-scoped ORM with inTransaction=true', async () => {
-			const adapter = createMockAdapter();
+			const adapter = createTransactionalMockAdapter();
 			adapter.transaction = vi.fn().mockImplementation(async (fn) => {
 				return fn(adapter);
 			});
@@ -476,7 +505,7 @@ describe('orm-instance coverage', () => {
 		});
 
 		it('should propagate all options to transaction ORM', async () => {
-			const adapter = createMockAdapter();
+			const adapter = createTransactionalMockAdapter();
 			adapter.transaction = vi.fn().mockImplementation(async (fn) => {
 				return fn(adapter);
 			});

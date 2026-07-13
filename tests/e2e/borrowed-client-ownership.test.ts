@@ -1,5 +1,6 @@
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { createOrm, schema } from '@dbsp/core';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -9,6 +10,13 @@ import {
 import { sql } from './testkit/sql.js';
 
 const SCHEMA = 'borrowed_client_ownership_e2e';
+
+const ormSchema = schema({
+	items: {
+		id: { type: 'integer', primaryKey: true },
+		label: 'string',
+	},
+});
 
 async function itemIds(): Promise<number[]> {
 	const pool = await getTestPool();
@@ -144,5 +152,72 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 
 		expect(await itemIds()).toEqual([1, 4]);
+	});
+
+	it('refuses orm.transaction on an unmanaged borrowed client at the ORM boundary', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		try {
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+			const callback = vi.fn(async () => 'should not run');
+
+			let thrown: unknown;
+			try {
+				await orm.transaction(callback);
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(thrown).toBeInstanceOf(Error);
+			const message = (thrown as Error).message;
+			expect(message).toContain('adapter declares');
+			expect(message).toContain('connection is yours');
+			expect(message).toContain('managedTransactions: true');
+			expect(message).toContain('savepoint');
+			expect(message).not.toContain('PoolClient');
+			expect(callback).not.toHaveBeenCalled();
+		} finally {
+			client.release();
+		}
+	});
+
+	it('runs orm.transaction on a borrowed client when managedTransactions is true', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+
+			await orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 6, label: 'orm managed transaction' })
+					.execute();
+			});
+
+			const inside = await client.query<{ label: string }>(
+				`SELECT label FROM "${SCHEMA}".items WHERE id = $1`,
+				[6],
+			);
+			expect(inside.rows.map((row) => row.label)).toEqual([
+				'orm managed transaction',
+			]);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).not.toContain(6);
 	});
 });

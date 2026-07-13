@@ -837,10 +837,10 @@ describe('buildIndexAPI — list and exists error branches', () => {
 // ---------------------------------------------------------------------------
 
 describe('createOrmInstance — transaction and raw error branches', () => {
-	it('should throw when transaction is called with adapter that throws not-implemented', async () => {
+	it('should throw when transaction is called with adapter that declares no transaction support', async () => {
 		await expect(() =>
 			ormWithMock.transaction(async () => 'result'),
-		).rejects.toThrow('Not implemented in mock adapter');
+		).rejects.toThrow(/managedTransactions: true/);
 	});
 
 	it('should throw when raw is called with adapter that throws not-implemented', async () => {

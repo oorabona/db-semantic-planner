@@ -8,9 +8,10 @@
  * @internal
  */
 
-import type { Dump } from '../adapter.js';
+import { type Dump, supportsStreaming } from '../adapter.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
+import { ExecutionError } from './errors.js';
 import type { QueryHookContext } from './hooks.js';
 import {
 	hasHooks,
@@ -20,6 +21,18 @@ import {
 } from './hooks.js';
 import type { QueryBuilderImpl } from './query-builder.js';
 import type { StreamOptions } from './types.js';
+
+function createUnsupportedStreamingError(): ExecutionError {
+	return new ExecutionError({
+		operation: 'stream()',
+		reason:
+			'The adapter declares supportsStreaming: false for this ORM instance. ' +
+			'When that is because you lent dbsp a caller-owned connection, the connection is yours, so dbsp will not open the transaction required for streaming unless you opt into adapter-managed transactions.',
+		fix:
+			'Pass managedTransactions: true when constructing the adapter if you want dbsp to run the transaction required for streaming. ' +
+			'If that connection is already inside your transaction, dbsp can only use a savepoint: it can roll back its own work to that savepoint, but your outer transaction still controls the final commit or rollback.',
+	});
+}
 
 /**
  * Create a lazy AsyncIterableIterator for streaming query results.
@@ -70,6 +83,10 @@ export function stream<TResult>(
 			return this;
 		},
 		async next() {
+			if (!supportsStreaming(adapter)) {
+				throw createUnsupportedStreamingError();
+			}
+
 			// E17b: Fire beforeQuery on first iteration (lazy), then compile with
 			// the hook-modified intent.
 			if (!hooksFired) {

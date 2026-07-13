@@ -1,11 +1,15 @@
-import type { Adapter } from '../adapter.js';
+import { type Adapter, supportsTransactions } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import { batchValues } from './batch-values.js';
 import { CteBuilder } from './cte-builder.js';
-import { InvalidOperationError, validateIdentifier } from './errors.js';
+import {
+	ExecutionError,
+	InvalidOperationError,
+	validateIdentifier,
+} from './errors.js';
 import { eq } from './filters.js';
 import {
 	extractRecursiveField,
@@ -98,6 +102,18 @@ function generateVacuumSQL(
 	if (options?.analyze) modifiers.push('ANALYZE');
 	const mod = modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
 	return `VACUUM ${mod}${buildQualifiedTable(tableName, schemaName)}`;
+}
+
+function createUnsupportedTransactionError(): ExecutionError {
+	return new ExecutionError({
+		operation: 'transaction()',
+		reason:
+			'The adapter declares supportsTransactions: false for this ORM instance. ' +
+			'When that is because you lent dbsp a caller-owned connection, the connection is yours, so dbsp will not open a transaction on it unless you opt into adapter-managed transactions.',
+		fix:
+			'Pass managedTransactions: true when constructing the adapter if you want dbsp to run the transaction. ' +
+			'If that connection is already inside your transaction, dbsp can only use a savepoint: it can roll back its own work to that savepoint, but your outer transaction still controls the final commit or rollback.',
+	});
 }
 
 function generateAlterColumnSQL(
@@ -792,6 +808,10 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 					'transaction() requires an adapter. ' +
 						'Pass an adapter when creating the ORM.',
 				);
+			}
+
+			if (!supportsTransactions<DB>(adapter)) {
+				throw createUnsupportedTransactionError();
 			}
 
 			// Passthrough to adapter's transaction API
