@@ -955,14 +955,31 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'executeDDL() requires an adapter that supports DDL execution.',
 					);
 				}
+				// The table-scoped `.indexes.drop()` refuses this; so must the global
+				// shortcut. PostgreSQL cannot run DROP INDEX CONCURRENTLY inside a
+				// transaction block, and reaching the database to be told so aborts the
+				// transaction you were in.
+				if (options?.concurrently && adapter.inTransaction) {
+					throw new InvalidOperationError(
+						'dropIndex',
+						'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
+					);
+				}
 				// FIND-003: Validate index name and optional schema before building SQL
 				validateIdentifier(name, 'index');
 				const sc = options?.schema ?? schemaName;
 				if (sc) {
 					validateIdentifier(sc, 'schema');
 				}
+				// `sc` resolves the ORM's schema scope, and the adapter must be given it:
+				// passing only the caller's options drops `withSchema('tenant')` on the
+				// floor and leaves PostgreSQL to resolve the name through search_path —
+				// which, in a multi-tenant database, can drop an index in another schema.
+				const scopedOptions: DropIndexOptions | undefined = sc
+					? { ...options, schema: sc }
+					: options;
 				const sql = adapter.generateDropIndex
-					? adapter.generateDropIndex(name, options)
+					? adapter.generateDropIndex(name, scopedOptions)
 					: (() => {
 							const parts: string[] = ['DROP INDEX'];
 							if (options?.concurrently) parts.push('CONCURRENTLY');

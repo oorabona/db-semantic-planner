@@ -684,6 +684,67 @@ describe('orm.ddl.dropIndex()', () => {
 			'executeDDL() requires an adapter',
 		);
 	});
+
+	// The table-scoped `.indexes.drop()` refuses this. The global shortcut is the
+	// same statement reaching the same database, and it must refuse it too — going
+	// there to be told so aborts the transaction the caller was in.
+	it('refuses DROP INDEX CONCURRENTLY inside a transaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		(adapter as { inTransaction: boolean }).inTransaction = true;
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			undefined,
+		);
+
+		await expect(
+			orm.ddl.dropIndex('idx_foo', { concurrently: true }),
+		).rejects.toThrow(
+			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
+		);
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
+
+	// withSchema('tenant') must reach the adapter. Passing only the caller's options
+	// leaves PostgreSQL to resolve the bare name through search_path — which, in a
+	// multi-tenant database, can drop an index belonging to a different tenant.
+	it('passes the ORM schema scope to the adapter', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			'tenant_7',
+		);
+
+		await orm.ddl.dropIndex('idx_foo', { ifExists: true });
+
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', {
+			ifExists: true,
+			schema: 'tenant_7',
+		});
+	});
+
+	it('lets an explicit schema option win over the ORM scope', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			'tenant_7',
+		);
+
+		await orm.ddl.dropIndex('idx_foo', { schema: 'other' });
+
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', {
+			schema: 'other',
+		});
+	});
 });
 
 // -----------------------------------------------------------------------
