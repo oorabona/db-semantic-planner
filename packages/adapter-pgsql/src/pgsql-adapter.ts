@@ -175,6 +175,9 @@ const SAVEPOINT_SCOPE_BUSY_MESSAGE =
 const SAVEPOINT_SCOPE_OWNER_MESSAGE =
 	'This PostgreSQL connection is currently inside a dbsp-managed scope owned by another transaction adapter. Use the transaction adapter passed to the callback instead of an ancestor adapter.';
 
+const TRANSACTION_SCOPE_ENDED_MESSAGE =
+	'This PostgreSQL transaction adapter belongs to a transaction that has ended.';
+
 const TRANSACTION_CONTROL_COMMAND_TAGS = new Set([
 	'BEGIN',
 	'START',
@@ -1952,22 +1955,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				adapter.assertCommitSucceeded(commitResult);
 			} catch (error) {
 				streamFailed = true;
-				if (isRawSqlTransactionControlError(error)) {
-					throw error;
-				}
 				if (begun && !committed) {
 					try {
-						await adapter.executeConnectionStatement(
-							client,
-							'ROLLBACK',
-							undefined,
-							{
-								...(scopeToken !== undefined && {
-									allowedScopeToken: scopeToken,
-								}),
-								inspectTransactionControl: false,
-							},
-						);
+						await adapter.rollbackTransactionIfOpen(client, scopeToken);
 					} catch (rollbackErr) {
 						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
 						throw createCleanupFailureError(
@@ -1983,17 +1973,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				// ROLLBACK the open transaction to avoid leaking it to the pool.
 				if (begun && !committed && !streamFailed) {
 					try {
-						await adapter.executeConnectionStatement(
-							client,
-							'ROLLBACK',
-							undefined,
-							{
-								...(scopeToken !== undefined && {
-									allowedScopeToken: scopeToken,
-								}),
-								inspectTransactionControl: false,
-							},
-						);
+						await adapter.rollbackTransactionIfOpen(client, scopeToken);
 					} catch (rollbackErr) {
 						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
 						cleanupErrorToThrow = createCleanupOnlyError(
@@ -2136,10 +2116,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw error;
 		} finally {
 			try {
-				if (isRawSqlTransactionControlError(streamError)) {
-					// The caller ended or rewired the transaction; do not issue cleanup
-					// SQL into a scope that no longer matches PostgreSQL's state.
-				} else if (completed) {
+				if (completed) {
 					try {
 						await this.executeConnectionStatement(
 							client,
@@ -2216,15 +2193,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.assertCommitSucceeded(commitResult);
 		} catch (error) {
 			streamFailed = true;
-			if (isRawSqlTransactionControlError(error)) {
-				throw error;
-			}
 			if (begun && !committed) {
 				try {
-					await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
-						...(scopeToken !== undefined && { allowedScopeToken: scopeToken }),
-						inspectTransactionControl: false,
-					});
+					await this.rollbackTransactionIfOpen(client, scopeToken);
 				} catch (rollbackErr) {
 					throw createCleanupFailureError(
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream failed',
@@ -2237,10 +2208,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		} finally {
 			if (begun && !committed && !streamFailed) {
 				try {
-					await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
-						...(scopeToken !== undefined && { allowedScopeToken: scopeToken }),
-						inspectTransactionControl: false,
-					});
+					await this.rollbackTransactionIfOpen(client, scopeToken);
 				} catch (rollbackErr) {
 					cleanupErrorToThrow = createCleanupOnlyError(
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
@@ -2399,9 +2367,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 			return result;
 		} catch (error) {
-			if (isRawSqlTransactionControlError(error)) {
-				throw error;
-			}
 			try {
 				await this.rollbackAndReleaseSavepoint(
 					client,
@@ -2410,7 +2375,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 			} catch (cleanupErr) {
 				throw createCleanupFailureError(
-					'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed',
+					'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed; the caller transaction may now be in an unknown state',
 					error,
 					cleanupErr,
 				);
@@ -2451,15 +2416,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
-			if (isRawSqlTransactionControlError(error)) {
-				throw error;
-			}
 			if (begun && !committed) {
 				try {
-					await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
-						...(scopeToken !== undefined && { allowedScopeToken: scopeToken }),
-						inspectTransactionControl: false,
-					});
+					await this.rollbackTransactionIfOpen(client, scopeToken);
 				} catch (rollbackErr) {
 					throw createCleanupFailureError(
 						'PostgreSQL transaction cleanup failed: ROLLBACK failed after the transaction body failed',
@@ -2487,16 +2446,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		savepointName: string,
 		allowedScopeToken: DbspScopeToken,
 	): Promise<void> {
-		await this.executeConnectionStatement(
-			client,
-			`ROLLBACK TO SAVEPOINT ${savepointName}`,
-			undefined,
-			{
-				allowedScopeToken,
-				allowAncestorScopeToken: true,
-				inspectTransactionControl: false,
-			},
-		);
+		try {
+			await this.executeConnectionStatement(
+				client,
+				`ROLLBACK TO SAVEPOINT ${savepointName}`,
+				undefined,
+				{
+					allowedScopeToken,
+					allowAncestorScopeToken: true,
+					inspectTransactionControl: false,
+				},
+			);
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				return;
+			}
+			throw error;
+		}
 		await this.executeConnectionStatement(
 			client,
 			`RELEASE SAVEPOINT ${savepointName}`,
@@ -2509,11 +2475,31 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		);
 	}
 
+	private async rollbackTransactionIfOpen(
+		client: PoolClient,
+		allowedScopeToken: DbspScopeToken | undefined,
+	): Promise<void> {
+		try {
+			await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
+				...(allowedScopeToken !== undefined && { allowedScopeToken }),
+				inspectTransactionControl: false,
+			});
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				return;
+			}
+			throw error;
+		}
+	}
+
 	private enterTransactionScope(
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 	): () => void {
 		const current = this.currentClientScope(client);
+		if (current === undefined && this.scopeToken !== undefined) {
+			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+		}
 		if (current !== undefined) {
 			if (current.token !== this.scopeToken) {
 				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
@@ -2532,6 +2518,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		purpose: 'statement' | 'transaction',
 	): () => void {
 		const current = this.currentClientScope(client);
+		if (current === undefined && this.scopeToken !== undefined) {
+			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+		}
 		if (current !== undefined) {
 			if (current.kind === 'statement-savepoint') {
 				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
@@ -2587,22 +2576,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		allowedScopeToken = this.scopeToken,
 		allowAncestorScopeToken = false,
 	): void {
-		const current = this.currentClientScope(client);
-		if (current === undefined || current.token === allowedScopeToken) {
-			return;
-		}
-		if (
-			allowAncestorScopeToken &&
-			allowedScopeToken !== undefined &&
-			activeClientScopes
-				.get(client)
-				?.some((scope) => scope.token === allowedScopeToken)
-		) {
-			return;
-		}
-		if (current !== undefined) {
+		const stack = activeClientScopes.get(client);
+		const current = stack?.at(-1);
+		if (allowedScopeToken === undefined) {
+			if (current === undefined) return;
 			throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 		}
+		if (current?.token === allowedScopeToken) {
+			return;
+		}
+		const tokenIsPresent =
+			stack?.some((scope) => scope.token === allowedScopeToken) ?? false;
+		if (allowAncestorScopeToken && tokenIsPresent) {
+			return;
+		}
+		if (!tokenIsPresent) {
+			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+		}
+		throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 	}
 
 	private assertCommitSucceeded(result: QueryResult): void {
@@ -2808,10 +2799,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			);
 		} catch (error) {
-			if (isRawSqlTransactionControlError(error)) {
-				releaseScope();
-				throw error;
-			}
 			try {
 				await this.rollbackAndReleaseSavepoint(
 					client,
@@ -2820,12 +2807,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 			} catch (cleanupErr) {
 				throw createCleanupFailureError(
-					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after PostgreSQL rejected the statement',
+					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after the protected statement failed; the caller transaction may now be in an unknown state',
 					error,
 					cleanupErr,
 				);
 			} finally {
 				releaseScope();
+			}
+			if (isRawSqlTransactionControlError(error)) {
+				throw error;
 			}
 			throw addRawSqlTransactionContext(error);
 		}

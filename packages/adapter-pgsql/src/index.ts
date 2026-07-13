@@ -150,6 +150,8 @@ export {
 	type PgsqlAdapterOptions,
 	type PgsqlBorrowedClientAdapterOptions,
 	type PgsqlPoolAdapterOptions,
+	PgsqlRawSqlTransactionControlError,
+	PgsqlTransactionAbortedCommitError,
 } from './pgsql-adapter.js';
 // Redaction (params logging safety)
 export {

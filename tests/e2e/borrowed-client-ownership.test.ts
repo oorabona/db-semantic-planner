@@ -197,6 +197,33 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
 	});
 
+	it('returns a clean pooled connection after raw SAVEPOINT in orm.transaction throws', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+
+		await expect(
+			orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 38, label: 'must be rolled back' })
+					.execute();
+				await tx.raw('SAVEPOINT s');
+			}),
+		).rejects.toThrow(/Transaction control through raw SQL/);
+
+		expect(await itemIds()).toEqual([]);
+
+		await orm.transaction(async (tx) => {
+			await tx
+				.into(tx.tables.items)
+				.values({ id: 39, label: 'next transaction works' })
+				.execute();
+		});
+
+		expect(await itemIds()).toEqual([39]);
+	});
+
 	it('runs nested managed transactions on a borrowed client', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
@@ -314,6 +341,38 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 
 		expect(await itemIds()).toEqual([25, 27]);
+	});
+
+	it('rolls back only dbsp savepoint when borrowed-client raw SAVEPOINT is detected', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[28, 'caller before raw savepoint'],
+			);
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			await expect(adapter.executeRaw('SAVEPOINT s')).rejects.toThrow(
+				/Transaction control through raw SQL/,
+			);
+
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[29, 'caller after raw savepoint'],
+			);
+			await client.query('COMMIT');
+			committed = true;
+		} finally {
+			if (!committed) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).toEqual([28, 29]);
 	});
 
 	it('rolls back the managed scope when one concurrent statement fails and preserves the caller transaction', async () => {
@@ -643,7 +702,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([36, 37]);
 	});
 
-	it('keeps a borrowed client usable when a parent scope unwinds before a live child', async () => {
+	it('refuses a child scope orphaned when a parent scope unwinds before it resumes', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
 		let rolledBack = false;
@@ -662,11 +721,12 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 			await expect(
 				adapter.transaction(async (tx) => {
-					child = tx.transaction(async () => {
+					child = tx.transaction(async (inner) => {
 						childStarted();
 						await new Promise<void>((resolve) => {
 							resumeChild = resolve;
 						});
+						await inner.executeRaw('SELECT 2');
 					});
 					await childStartedPromise;
 					throw new Error('parent unwound first');
@@ -675,7 +735,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 			await adapter.executeRaw('SELECT 1');
 			resumeChild();
-			await expect(child).rejects.toThrow();
+			await expect(child).rejects.toThrow(/transaction that has ended/);
 
 			await client.query('ROLLBACK');
 			rolledBack = true;
