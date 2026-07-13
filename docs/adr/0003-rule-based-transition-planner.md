@@ -497,9 +497,25 @@ Holding a lock across it is exactly what `engine-validated` cannot do. So target
 
 Stated as a property rather than a closed list, because a vendor may one day offer a primitive nobody here imagined:
 
-> **A supported protocol must either guarantee stable target binding, or explicitly declare the external-DDL exclusion it depends on. With neither, the transition is blocked.**
+> **A supported protocol must either guarantee stable binding of everything the proof depends on, or explicitly declare the external-DDL exclusion it depends on. With neither, the transition is blocked.**
 
 A new primitive that satisfies the property is welcome. One that satisfies neither is not a fourth answer — it is the same refusal.
+
+#### "The target" is not the table. It is everything the proof rests on.
+
+Binding the object the statement names is not enough, and the failure this misses is the worst kind: **not a stale proof, but the successful application of the wrong transition.**
+
+```sql
+CHECK (public.is_email(email))
+```
+
+dbsp proves this against the function's body — call it H1. It re-checks the context fingerprint, takes its lock on `public.users`, and runs the `ALTER TABLE`. In between, another session runs `CREATE OR REPLACE FUNCTION public.is_email(text) … SELECT true`.
+
+The table is exactly the object dbsp planned against. The **meaning** is not. The constraint installs, the postcondition "the constraint exists" passes, and the database now holds a constraint that enforces nothing — under a proof that was about a function which no longer exists in that form. A postcondition that hashes the function body would notice, *after* the wrong constraint is already there.
+
+So binding covers **every semantic dependency the proof or the rendered statement resolves**: the functions it calls, the operators and casts it uses, the collations, the types and their operator classes, the extensions that define any of them, and the `search_path` that decided which of them it meant.
+
+Where the adapter cannot hold all of that stable through execution, the step needs an `external-ddl-exclusion` assumption **scoped to exactly those objects** — named, so somebody accepts it — or it blocks.
 
 `prove` may still run the probe early — telling a user their plan is going to fail *before* they book a maintenance window is worth a great deal. But its result is an `AdvisoryObservation`, it is typed as one, and it discharges nothing.
 
@@ -656,6 +672,20 @@ So **adoption is a first-class transition**, and what it creates is an assumptio
 
 **Every identity attachment carries the proof it was born under.** Otherwise "dbsp attached it" is just another word nobody can audit.
 
+#### And the carrier must be authenticated, or it is an assumption whatever it says
+
+Closing the human-baseline door left the *other* one open. Suppose the identity lives in a column comment:
+
+```json
+{ "id": "app.users.email", "attachedBy": "dbsp", "proofClaim": "…" }
+```
+
+A restore tool copies it. A migration script edits it. A person pastes it onto the wrong column. dbsp then reads an identity that **says** it was attached by dbsp, calls it evidence, and proves a destructive rename on it.
+
+> **Catalog bytes prove only that the catalog currently contains those bytes.** They do not prove dbsp wrote them, that the proof they reference is authentic or retained, or that either has anything to do with the object they are sitting on.
+
+So an identity attachment is **evidence only if its provenance is authenticated** — signed proof material, an append-only dbsp ledger the attachment can be verified against, or a prior snapshot dbsp trusts. Absent that, it is a `baseline-identity-attachment` **assumption**, no matter how convincingly the string in the catalog describes itself.
+
 An identity is only as trustworthy as the act that attached it, and the design has to remember which act that was.
 
 ### 9. Rehearsal is stronger evidence than a shadow — and still not proof
@@ -710,13 +740,19 @@ These are the places where the proof graph will quietly be dropped, and dropping
 
 **2. Policy acceptance does not erase `restsOn`.** A policy decides what is **acceptable**, never what is **true**. When it accepts an assumption class from a trusted rule pack, the assumption stays in the graph — because the entire purpose of writing it down is that, the day `postgresql.pg16.unique-index.effects.v3` is found to have under-declared, you can enumerate every plan that rested on it. A `proven-applicable` that hides the assumptions underneath it is the `destructive: boolean` of this design, resurrected at the last possible moment.
 
+**3. Enumeration needs somewhere to enumerate *from*.** This document repeatedly promises that when a trust root is found defective, **every plan that rested on it can be found**. That promise is load-bearing — it is the whole reason for recording assumptions rather than merely respecting them — and *carrying a proof graph inside each plan does not deliver it*. A plan whose JSON was deleted, whose CI log expired, or which someone ran from a laptop is not enumerable, however scrupulously it recorded what it rested on.
+
+So the promise needs a durable place to live: an **append-only ledger of applied plans**, with identity and a retention policy, is part of the contract — not an operational nicety. Without one, the honest statement is *"enumerable among the plan artefacts that were retained"*, and the design should say that instead of the stronger thing, because the stronger thing is what somebody will rely on the day it matters.
+
 ## The residual trusted computing base
 
 Stated once, plainly, so that anyone adopting this design knows exactly what they are being asked to believe:
 
-> **Trust dbsp's core and the rule packs you installed to version, record and faithfully preserve their judgements and the proof graph built on them — and trust the target engine's catalog and DDL behaviour to be the evidence source they claim to be.**
+> **Trust the operation packs and rule packs you installed to version and declare their judgements honestly; trust dbsp's core to preserve the proof graph faithfully and to keep an append-only record of what it applied; and trust the target engine's catalog and DDL behaviour to be the evidence source they claim to be.**
 
 Everything else is proven, or named as an assumption, or refused.
+
+Two things that are **not** in it, and are worth saying out loud because they look like they might be: **the bytes in the catalog are not one of the trust roots** — an identity attachment is evidence only if its provenance is authenticated (§8), and otherwise it is an assumption however convincingly it describes itself. And **nothing is trusted to hold still during execution**: everything a proof depends on is either bound through the statement, or covered by a named exclusion somebody accepted, or the step blocks.
 
 ## Four contracts the shape above still owes an implementation
 
