@@ -19,6 +19,7 @@ import { createOrm, schema } from '@dbsp/core';
 import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
+	introspect,
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
@@ -277,6 +278,24 @@ void assertPublicConstructorRejectsInternalOptions;
 // ---------------------------------------------------------------------------
 // transaction() — BEGIN / COMMIT happy path
 // ---------------------------------------------------------------------------
+
+describe('introspect() refuses a checked-out client', () => {
+	// The signature says Pool, and a signature is a compile-time boundary: a
+	// JavaScript caller, or anyone with a cast, walks straight past it. A client
+	// that got in here would run its catalog reads unprotected inside whatever
+	// transaction its owner had open.
+	it('throws instead of running catalog reads inside somebody else transaction', async () => {
+		const client = {
+			query: vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
+			release: vi.fn(),
+		} as unknown as Pool;
+
+		await expect(introspect(client)).rejects.toThrow(
+			/takes a pg\.Pool, and was given a checked-out pg\.PoolClient/,
+		);
+		expect((client as unknown as PoolClient).query).not.toHaveBeenCalled();
+	});
+});
 
 describe('@dbsp/adapter-pgsql public API', () => {
 	// Both classes are imported from the package entry point, NOT from the module

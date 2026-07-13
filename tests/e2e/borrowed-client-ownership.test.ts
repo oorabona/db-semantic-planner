@@ -336,6 +336,16 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([42]);
 	});
 
+	// A plain PREPARE is not transaction control, so dbsp lets it through — the
+	// command tag alone could not tell it apart from PREPARE TRANSACTION, and dbsp
+	// asks the engine whether its transaction survived rather than guessing.
+	//
+	// It is NOT a blessing of the leak underneath. The statement the CALLER prepared
+	// is session-duration state on a connection that goes back to the pool, and dbsp
+	// deallocates only what dbsp created. That holds for an advisory lock, a SET, a
+	// LISTEN and a temp table too: raw SQL creates session state, and no savepoint
+	// rollback undoes it. The contract is written down in #327; this test deallocates
+	// by hand because it is the caller here, and the caller is who owes it.
 	it('allows server-side PREPARE inside a borrowed-client dbsp transaction', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();

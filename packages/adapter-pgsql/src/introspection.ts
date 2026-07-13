@@ -155,6 +155,24 @@ export interface CatalogQueryExecutor {
 	readonly sequentialCatalogReads?: boolean;
 }
 
+/**
+ * A `pg.PoolClient` is a `pg.Pool` plus `release()` — that is the whole of the
+ * difference, and it is the one that matters: a client is checked out, so it may
+ * be sitting inside somebody's transaction.
+ *
+ * This is used ONLY to refuse, never to decide how a connection is treated. The
+ * declaration decides that. Reading the shape to guess what the caller meant is
+ * the defect this adapter was rewritten to remove.
+ */
+function isCheckedOutClient(connection: unknown): boolean {
+	return (
+		typeof connection === 'object' &&
+		connection !== null &&
+		'release' in connection &&
+		typeof (connection as { release?: unknown }).release === 'function'
+	);
+}
+
 // ============================================================================
 // Helpers
 // ============================================================================
@@ -1129,6 +1147,22 @@ export async function introspect(
 	pool: Pool,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
+	// The type is a compile-time boundary and this is a public entry point: a
+	// JavaScript caller, or anyone with a cast, reaches it regardless. A checked-out
+	// client that got in here would have its catalog reads run unprotected inside
+	// whatever transaction its owner had open — the exact class this adapter was
+	// rewritten to close. So refuse it at runtime too, and say what to do instead.
+	if (isCheckedOutClient(pool)) {
+		throw new Error(
+			'introspect() takes a pg.Pool, and was given a checked-out pg.PoolClient. ' +
+				'That client may be sitting inside a transaction that belongs to you, and a ' +
+				'catalog query that fails there would abort it. dbsp will not guess whose ' +
+				'transaction it is: declare it — ' +
+				'new PgsqlAdapter(client, { borrowedClient: true }).introspect() — and the ' +
+				'declaration is what buys the savepoint protection.',
+		);
+	}
+
 	// A pool checks out its own connection per query, so there is no caller
 	// transaction to damage and nothing to protect. That is precisely why this
 	// entry point can take a pool and not a client.
