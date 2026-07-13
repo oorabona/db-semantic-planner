@@ -1082,10 +1082,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				await childClosed.promise;
 			});
 
-			await expect(transaction).rejects.toThrow(
-				/Nested transactions must be awaited/,
-			);
-			await expect(transaction).rejects.toHaveProperty('cause', childError);
+			await expect(transaction).rejects.toBe(childError);
 
 			await client.query('ROLLBACK');
 			rolledBack = true;
@@ -1112,23 +1109,26 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		const resume = deferred();
 		let child: Promise<unknown> | undefined;
 
-		await expect(
-			orm.transaction(async (tx) => {
-				await tx
-					.into(tx.tables.items)
-					.values({ id: 49, label: 'parent rolled back by open child' })
-					.execute();
-				child = tx.transaction(async (inner) => {
-					started.resolve();
-					await resume.promise;
-					await inner.raw('SELECT 1');
-				});
-				await started.promise;
-			}),
-		).rejects.toThrow(/Nested transactions must be awaited/);
+		const transaction = orm.transaction(async (tx) => {
+			await tx
+				.into(tx.tables.items)
+				.values({ id: 49, label: 'parent rolled back by open child' })
+				.execute();
+			child = tx.transaction(async (inner) => {
+				started.resolve();
+				await resume.promise;
+				await inner.raw('SELECT 1');
+			});
+			await started.promise;
+		});
+
+		await started.promise;
+		resume.resolve();
+		await expect(transaction).rejects.toThrow(
+			/Nested transactions must be awaited/,
+		);
 
 		expect(await itemIds()).toEqual([]);
-		resume.resolve();
 		await child?.catch(() => undefined);
 	});
 
@@ -1142,23 +1142,26 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		let first: Promise<unknown> | undefined;
 		let second: Promise<unknown> | undefined;
 
-		await expect(
-			orm.transaction(async (tx) => {
-				first = tx.transaction(async () => {
-					throw firstError;
-				});
-				await first.catch(() => undefined);
+		const transaction = orm.transaction(async (tx) => {
+			first = tx.transaction(async () => {
+				throw firstError;
+			});
+			await first.catch(() => undefined);
 
-				second = tx.transaction(async (inner) => {
-					secondStarted.resolve();
-					await resumeSecond.promise;
-					await inner.raw('SELECT 1');
-				});
-				await secondStarted.promise;
-			}),
-		).rejects.toThrow(/Nested transactions must be awaited/);
+			second = tx.transaction(async (inner) => {
+				secondStarted.resolve();
+				await resumeSecond.promise;
+				await inner.raw('SELECT 1');
+			});
+			await secondStarted.promise;
+		});
 
+		await secondStarted.promise;
 		resumeSecond.resolve();
+		await expect(transaction).rejects.toThrow(
+			/Nested transactions must be awaited/,
+		);
+
 		await first?.catch(() => undefined);
 		await second?.catch(() => undefined);
 		expect(await itemIds()).toEqual([]);

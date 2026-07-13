@@ -236,6 +236,9 @@ type DbspScopeChildren = {
 type DbspChildTransaction = {
 	observed: boolean;
 	failure: DbspScopeFailure | undefined;
+	settled: boolean;
+	settledPromise: Promise<void>;
+	resolveSettled: () => void;
 };
 
 type DbspChildTransactionObserver = {
@@ -2769,14 +2772,28 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			} catch (scopeError) {
 				transactionError = scopeError;
 			}
+			let cleanupErr: unknown;
 			try {
-				await this.rollbackAndReleaseSavepoint(
+				const rolledBack = await this.rollbackSavepoint(
 					client,
 					savepointName,
 					scopeToken,
 					scopeState,
 				);
-			} catch (cleanupErr) {
+				await this.drainScopeChildren(scopeState);
+				if (rolledBack) {
+					await this.releaseSavepoint(
+						client,
+						savepointName,
+						scopeToken,
+						scopeState,
+					);
+				}
+			} catch (error) {
+				cleanupErr = error;
+			}
+			if (cleanupErr !== undefined) {
+				await this.drainScopeChildren(scopeState);
 				if (
 					isRawSqlTransactionControlError(transactionError) &&
 					isSavepointUnavailableError(cleanupErr)
@@ -2792,6 +2809,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				scopeFailure = { error: cleanupFailure };
 				throw cleanupFailure;
 			}
+			await this.drainScopeChildren(scopeState);
 			scopeFailure = { error: transactionError };
 			throw transactionError;
 		} finally {
@@ -2858,10 +2876,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						rollbackErr,
 					);
 					scopeFailure = { error: cleanupFailure };
+					await this.drainScopeChildren(scopeState);
 					throw cleanupFailure;
 				}
 			}
 			scopeFailure = { error: transactionError };
+			await this.drainScopeChildren(scopeState);
 			throw transactionError;
 		} finally {
 			releaseScope?.(scopeFailure);
@@ -2882,6 +2902,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		allowedScopeToken: DbspScopeToken,
 		scopeState: DbspScopeState,
 	): Promise<void> {
+		const rolledBack = await this.rollbackSavepoint(
+			client,
+			savepointName,
+			allowedScopeToken,
+			scopeState,
+		);
+		if (!rolledBack) return;
+		await this.releaseSavepoint(
+			client,
+			savepointName,
+			allowedScopeToken,
+			scopeState,
+		);
+	}
+
+	private async rollbackSavepoint(
+		client: PoolClient,
+		savepointName: string,
+		allowedScopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+	): Promise<boolean> {
 		try {
 			await this.executeScopeBoundaryStatement(
 				client,
@@ -2895,10 +2936,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				return;
+				return false;
 			}
 			throw error;
 		}
+		return true;
+	}
+
+	private async releaseSavepoint(
+		client: PoolClient,
+		savepointName: string,
+		allowedScopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+	): Promise<void> {
 		await this.executeScopeBoundaryStatement(
 			client,
 			allowedScopeToken,
@@ -3075,6 +3125,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			);
 		} catch (rollbackErr) {
+			const classifiedRollbackFailure =
+				await this.classifySavepointReleaseFailure(
+					client,
+					allowedScopeToken,
+					rollbackErr,
+					cleanupAction,
+				);
+			if (
+				isRawSqlTransactionControlError(classifiedRollbackFailure) ||
+				classifiedRollbackFailure instanceof PgsqlTransactionAbortedError
+			) {
+				return classifiedRollbackFailure;
+			}
 			return createCleanupFailureError(
 				`${cleanupAction}; ROLLBACK TO SAVEPOINT also failed and the caller transaction may now be in an unknown state`,
 				releaseErr,
@@ -3188,10 +3251,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const parentChildren = parentScope?.state.children;
 		const child: DbspChildTransaction | undefined =
 			parentChildren !== undefined && scope.kind === 'transaction-savepoint'
-				? {
-						observed: childObserver?.observed ?? false,
-						failure: undefined,
-					}
+				? (() => {
+						let resolveSettled!: () => void;
+						const settledPromise = new Promise<void>((resolve) => {
+							resolveSettled = resolve;
+						});
+						return {
+							observed: childObserver?.observed ?? false,
+							failure: undefined,
+							settled: false,
+							settledPromise,
+							resolveSettled,
+						};
+					})()
 				: undefined;
 		if (parentChildren !== undefined && child !== undefined) {
 			parentChildren.open++;
@@ -3232,6 +3304,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			} finally {
 				if (parentChildren !== undefined && child !== undefined) {
 					parentChildren.open--;
+					child.settled = true;
+					child.resolveSettled();
 				}
 			}
 		};
@@ -3255,6 +3329,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 		}
 		if (current?.token === allowedScopeToken) {
+			this.assertUsableScopeAncestors(
+				stack!,
+				stack!.length - 1,
+				allowClosingScope,
+				allowPoisonedScope,
+			);
 			if (current.state.closing && !allowClosingScope) {
 				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 			}
@@ -3268,6 +3348,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (allowAncestorScopeToken && allowedScope !== undefined) {
+			this.assertUsableScopeAncestors(
+				stack!,
+				stack!.indexOf(allowedScope),
+				allowClosingScope,
+				allowPoisonedScope,
+			);
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(allowedScope);
 			}
@@ -3277,6 +3363,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
+	}
+
+	private assertUsableScopeAncestors(
+		stack: DbspClientScope[],
+		scopeIndex: number,
+		allowClosingScope: boolean,
+		allowPoisonedScope: boolean,
+	): void {
+		for (let index = 0; index < scopeIndex; index++) {
+			const ancestor = stack[index];
+			if (ancestor === undefined) continue;
+			if (ancestor.state.closing && !allowClosingScope) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
+			if (!allowPoisonedScope) {
+				this.assertScopeNotPoisoned(ancestor);
+			}
+		}
 	}
 
 	private findClientScope(
@@ -3377,15 +3481,29 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		await scopeState.statementLock.tail?.catch(() => undefined);
 	}
 
+	private async drainScopeChildren(
+		scopeState: DbspScopeState | undefined,
+	): Promise<void> {
+		if (scopeState === undefined) return;
+		while (scopeState.children.open > 0) {
+			const pending = [...scopeState.children.transactions].filter(
+				(child) => !child.settled,
+			);
+			if (pending.length === 0) return;
+			await Promise.all(pending.map((child) => child.settledPromise));
+		}
+	}
+
 	private assertScopeChildrenSettled(scopeState: DbspScopeState): void {
+		const failure = scopeState.children.failure;
+		if (failure !== undefined) {
+			throw failure.error;
+		}
+		if (scopeState.children.open > 0) {
+			throw new Error(NESTED_TRANSACTION_NOT_AWAITED_MESSAGE);
+		}
 		for (const child of scopeState.children.transactions) {
 			if (!child.observed) {
-				const failure = scopeState.children.failure;
-				if (failure !== undefined) {
-					throw new Error(NESTED_TRANSACTION_NOT_AWAITED_MESSAGE, {
-						cause: failure.error,
-					});
-				}
 				throw new Error(NESTED_TRANSACTION_NOT_AWAITED_MESSAGE);
 			}
 		}

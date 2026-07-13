@@ -10,7 +10,7 @@ You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express s
 |---|---|
 | Raw SQL **outside** a dbsp transaction | Nothing to think about. It is your statement, on a pooled connection. |
 | Raw SQL **inside** `orm.transaction()` | Read the rest of this page. |
-| Raw SQL inside **your own** transaction, on a borrowed client | Safe by construction — dbsp contains its own statements inside yours. Prefer this if you need transaction control. |
+| Raw SQL inside **your own** transaction, on a borrowed client | dbsp savepoints statements **it** issues so dbsp failures do not poison your transaction. Your raw transaction-control SQL is no safer here: `COMMIT` still commits, `ROLLBACK` still rolls back, and savepoint control still changes your savepoint stack. |
 
 ## What dbsp guarantees inside a transaction it manages
 
@@ -52,8 +52,8 @@ const client = await pool.connect();
 try {
   await client.query('BEGIN');
 
-  // dbsp works inside YOUR transaction, and contains its own statements
-  // in a savepoint so a failure of its own does not poison it.
+  // dbsp works inside YOUR transaction, and savepoints statements it
+  // issues so a failure of its own does not poison it.
   const orm = createOrm({
     schema: db,
     adapter: createPgsqlAdapter(client, { borrowedClient: true }),
@@ -68,6 +68,8 @@ try {
 ```
 
 Note the missing `managedTransactions: true`. Without it, `orm.transaction()` **throws** rather than running a transaction on a connection that is not dbsp's — which is the point. The connection is yours, so the transaction is yours, and dbsp says so instead of guessing.
+
+This does not make raw transaction control safe through dbsp. If you call `orm.raw('COMMIT')` on that borrowed client, PostgreSQL commits your transaction; dbsp can report what happened, but it cannot undo it. Send transaction-control commands through the client you own, where that control is explicit.
 
 ## Gotchas
 
