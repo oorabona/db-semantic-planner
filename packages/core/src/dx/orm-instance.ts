@@ -240,8 +240,18 @@ function buildIndexAPI(
 					'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
 				);
 			}
+			// Every other generator on this port takes the schema as an explicit
+			// parameter — generateCreateIndex, generateTruncate, generateVacuum,
+			// generateAlterColumn — so none of them can forget it. generateDropIndex
+			// expects it inside `options`, so it can, and it did: the fallback below
+			// used `schemaName` while the adapter path handed PostgreSQL a bare name to
+			// resolve through search_path, which in a multi-tenant database drops an
+			// index — just possibly somebody else's. An explicit option still wins.
+			const scopedOptions: DropIndexOptions | undefined = schemaName
+				? { ...options, schema: options?.schema ?? schemaName }
+				: options;
 			const sql = a.generateDropIndex
-				? a.generateDropIndex(name, options)
+				? a.generateDropIndex(name, scopedOptions)
 				: generateDropIndexSQL(name, schemaName, options);
 			await a.executeDDL?.(sql);
 		},

@@ -498,6 +498,18 @@ describe('orm.tables.X.indexes.drop()', () => {
 		return proxy.users.indexes as IndexProxy;
 	}
 
+	function getScopedIndexes(
+		adapter: Adapter<unknown>,
+		schema: string,
+	): IndexProxy {
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			schema,
+		) as Record<string, Record<string, unknown>>;
+		return proxy.users.indexes as IndexProxy;
+	}
+
 	it('delegates to adapter.generateDropIndex and calls executeDDL', async () => {
 		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
 		await getIndexes(adapter).drop('idx_users_email');
@@ -508,6 +520,28 @@ describe('orm.tables.X.indexes.drop()', () => {
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('DROP INDEX'),
 		);
+	});
+
+	// Every other generator on this port takes the schema as a parameter, so none of
+	// them can forget it. generateDropIndex expects it inside `options` — so it can,
+	// and it did. A bare name resolves through search_path, and in a multi-tenant
+	// database that drops an index; just possibly somebody else's.
+	it('passes the ORM schema scope to the adapter', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		await getScopedIndexes(adapter, 'tenant_7').drop('idx_users_email');
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', {
+			schema: 'tenant_7',
+		});
+	});
+
+	it('lets an explicit schema option win over the ORM scope', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		await getScopedIndexes(adapter, 'tenant_7').drop('idx_users_email', {
+			schema: 'other',
+		});
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', {
+			schema: 'other',
+		});
 	});
 
 	it('passes options to adapter.generateDropIndex', async () => {
