@@ -227,7 +227,7 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | Param type casting | Automatic `CAST($N AS type)` via ModelIR `originalDbType` | Prevents nullable column type mismatch |
 | CASE expressions | `caseWhen().when(cond, val).when(...).else(val).as(alias)` — in columns + orderBy | `caseWhen<string>().when("status='a'", 'Active').else('Other').as('label')` |
 | Range operators (PostgreSQL) | `rangeOverlaps()`, `rangeContains()`, `rangeContainedBy()` | `rangeOverlaps('period', ['2024-01-01', '2024-01-31'])` — covers `daterange`, `int4range`, `tsrange`, etc. |
-| Guides | `docs/guides/how-to-use-expression-primitives.md`, `docs/guides/how-to-use-extensions.md`, `docs/guides/how-to-use-rls-policies.md`, `docs/guides/how-to-use-case-expressions.md`, `docs/guides/how-to-use-ddl-helpers.md`, `docs/guides/how-to-use-joins.md`, `docs/guides/how-to-use-recursive-cte.md`, `docs/guides/how-to-use-batch-values.md`, `docs/guides/how-to-use-full-text-search.md`, `docs/guides/how-to-use-schema-versioning.md`, `docs/guides/how-to-understand-result-hydration.md`, `docs/guides/how-to-use-raw-sql-safely.md` | |
+| Guides | **`packages/docs/guide/`** — the docs live there (VitePress), not in `docs/guides/`: `expression-primitives`, `extensions`, `rls-policies`, `case-expressions`, `ddl-provisioning`, `joins`, `recursive-cte`, `batch-values`, `full-text-search`, `schema-versioning`, `result-hydration`, `transactions`, `raw-sql`. Nav lives in `packages/docs/.vitepress/config.ts` — a new page must be wired in there or nobody finds it. | |
 
 ## Observability
 
@@ -249,10 +249,10 @@ type Dump = {
 ## Documentation
 
 - **How-to guides:** `docs/guides/` — feature-specific walkthroughs (joins, CTEs, RLS, DDL helpers, etc.)
-- **Comparison:** `docs/COMPARISON.md` — how this project compares to other query builders and ORMs
-- **Patterns:** `docs/PATTERNS.md` — recommended query patterns and best practices
-- **Production:** `docs/PRODUCTION.md` — deployment, connection pooling, schema scoping for multi-tenancy
-- **CLI usage:** `docs/CLI_USAGE.md` — command-line interface reference
+- **Comparison:** `packages/docs/comparison.md` — how this project compares to other query builders and ORMs
+- **Patterns:** `packages/docs/patterns.md` — recommended query patterns and best practices
+- **Production:** `packages/docs/guide/production.md` — deployment, connection pooling, schema scoping for multi-tenancy
+- **CLI usage:** `packages/docs/guide/cli-usage.md` — command-line interface reference
 - **E2E / integration tests:** `docs/guides/how-to-write-e2e-integration-tests.md` — real-DB row-asserting tests (`pnpm test:e2e`, testcontainers harness)
 
 ## Build Order
