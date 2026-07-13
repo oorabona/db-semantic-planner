@@ -2,7 +2,9 @@
 
 Status: Accepted
 
-Decision maturity: the architecture is accepted. The type-level contracts below are the *shape* of the decision, not its final signature — they are subject to validation by implementation, and an eighth objection will not invalidate the decision, only refine the contract.
+Decision maturity: the architecture is accepted. The type-level contracts below are the *shape* of the decision, not its final signature — they are subject to validation by implementation, and a further objection will not invalidate the decision, only refine the contract.
+
+The chapter *"Four contracts the shape above still owes an implementation"* is **acceptance criteria, not a backlog.** It is the list of places where this document knows its own contract is not yet closed, and each item is binding on the implementation that claims to satisfy this ADR. A debt that is allowed to be deferred indefinitely is a decision made by silence, which is the failure mode this whole document exists to name.
 
 Supersedes part of [ADR 0002](0002-engine-recovery-primitives.md) — see *Corrections*.
 
@@ -122,9 +124,9 @@ Expressions inside such an operation — a CHECK body, a `USING` clause — rema
 
 A rule that insists on emitting raw SQL is not verified. It is treated exactly as a manual step (§6b): it carries a `user-blast-radius` assumption, it taints what depends on it, and no plan containing it is reported as proven.
 
-**And this moves the trust into core, so core's share is named too.** *"The effects are read off the object"* is only true if `effectsOf(operation)` is right — and it is a semantic model, not a fact. `serial` creates an implicit sequence. `CreateIndex` drags in operator classes, collations, and functions. `AlterColumnType` invalidates evidence about the indexes, constraints, generated columns and comparison semantics that depended on the old type. If core's effect calculator under-declares any of that, the planner will prove a composition on stale evidence — and the rule authors will be blameless.
+**And this moves the trust somewhere, so that somewhere is named too.** *"The effects are read off the object"* is only true if `effectsOf(operation)` is right — and it is a semantic model, not a fact. `serial` creates an implicit sequence. `CreateIndex` drags in operator classes, collations, and functions. `AlterColumnType` invalidates claims about the indexes, constraints, generated columns and comparison semantics that depended on the old type. If the effect calculator under-declares any of that, the planner will prove a composition on stale evidence — and the rule authors will be blameless.
 
-So the operation kinds, their renderers, and their effect calculators are **versioned, engine-scoped artefacts with stable ids**, and what they claim is an assumption of class **`core-operation-semantics`**, with core as its trust root. It sits in the same graph as everything else. Conformance testing does not remove that trust; it is what makes accepting it reasonable.
+That trust does **not** land in core. Every sentence above is a claim about *PostgreSQL* — its `serial`, its operator classes, its type-change semantics — and core has no business holding it, because a correction to it would then ship new Oracle semantics with the PostgreSQL fix. So the operation kinds, their renderers, and their effect calculators are **versioned, engine-scoped artefacts with stable ids**, and what they claim is an assumption of class **`operation-pack-semantics`**, whose trust root is the pack itself: `dbsp.postgresql.operations.pg17@4.2.0`. It sits in the same graph as everything else. Conformance testing does not remove that trust; it is what makes accepting it reasonable.
 
 #### And the general rule, because naming them one at a time will always miss one
 
@@ -157,17 +159,24 @@ interface PhysicalOperation {
 
 So the trust root of an effect claim is `dbsp.postgresql.operations.pg17@4.2.0`, not "core" — and the day that pack is found to have under-declared what `AlterColumnType` invalidates, **every plan that rested on that version can be enumerated, and no other engine is touched.**
 
-A judgement is anything that decides something the design then treats as settled:
+A judgement is anything that decides something the design then treats as settled. **Each one is an assumption of whichever artefact actually owns it** — and getting that attribution wrong is not bookkeeping: an assumption class filed under `core` says a defect in it taints every engine, and an assumption class filed under a pack says a fix ships without touching the others. The whole point of naming a trust root is to bound the blast radius, so a misattributed root is a *wrong* bound, not an untidy one.
 
-- **the effect calculator** — what an operation touches, and whose evidence it invalidates (`core-operation-semantics`);
-- **the invalidation model** — *what must be fingerprinted, and when evidence goes stale* (`core-invalidation-semantics`). `catalogFingerprint: string` is **not** the proof; the trusted thing is the model that decided what belongs in it. `CREATE OR REPLACE FUNCTION public.is_email(…)` can keep the same name and the same OID and change what it means — and a fingerprint that did not think to look inside the function will report that nothing changed;
-- **the guard protocols** — including their **failure effects** (`core-guard-semantics`), see §4b;
-- **the composition prover** — which lock orderings, transaction boundaries and evidence invalidations it considers (`core-composition-semantics`);
-- **the identity model** — what counts as the same object across a change (`core-identity-semantics`).
+| Judgement | Trust root |
+|---|---|
+| How `ALTER COLUMN` renders on this engine | the engine's **operation pack** (`operation-pack-semantics`) |
+| What that operation reads, writes, locks, invalidates | the engine's **operation pack** |
+| The guard protocols, and their **failure effects** (§4b) | the engine's **operation pack** |
+| Recovering from an artefact the engine left behind (an INVALID index) | the engine's **operation pack** |
+| What the catalog actually says, and what it could not establish | the **introspection pack** (`adapter-introspection-semantics`) |
+| The generic composition algorithm — which orderings and invalidations it considers | **core** (`core-composition-semantics`) |
+| Arbitration between candidate rules | **core** (`core-policy-semantics`) |
+| Building the claim graph, and preserving it faithfully | **core** (`core-proof-graph-semantics`) |
 
-Each is versioned. Each is recorded in the proof graph as an assumption of core's. And when one of them is later found to have under-declared, **every plan that rested on that version can be enumerated** — which is the entire point of writing them down.
+One judgement sits across the line and is worth calling out: **the invalidation model** — *what must be fingerprinted, and when a claim goes stale*. `catalogFingerprint: string` is **not** the proof; the trusted thing is the model that decided what belongs in it. `CREATE OR REPLACE FUNCTION public.is_email(…)` can keep the same name and the same OID and change what it means, and a fingerprint that never thought to look inside the function will report that nothing changed. *Which* objects a proof depends on comes from the operation pack; *how* their identity is fingerprinted and how staleness propagates through the graph is core's.
 
-If core cannot say something, it does not get to be silent about it.
+Each of these is versioned, and each is recorded in the proof graph as an assumption of **the artefact that made it**. When one is later found to have under-declared, every plan that rested on that version can be enumerated — and nothing else is touched. That is the entire point of writing them down.
+
+If an artefact cannot say something, it does not get to be silent about it.
 
 #### Does this refuse everything?
 
@@ -293,22 +302,32 @@ The ways it goes wrong are concrete:
 - one rule's guard must be evaluated *before* a table rewrite, another's only *after*;
 - **the enum case, again**: adding an enum value and adding a CHECK that uses it requires knowing PostgreSQL's transaction visibility rules *across both rules*. Neither can establish it alone, and both are individually correct.
 
-So a rule declares what the planner needs in order to *prove* a composition, not a claim that one exists:
+So a rule declares what the planner needs in order to *prove* a composition, not a claim that one exists. And what it declares is **only what is true of the rule regardless of which object it is applied to** — its shape, not its reach:
 
 ```ts
 interface TransitionRule {
   …
-  readSet: ResourceAddress[];        // what it reads
-  writeSet: ResourceAddress[];       // what it changes
-  locks: { object: ResourceAddress; mode: LockMode }[];
   transactionBoundary: 'requires-own' | 'joins-caller' | 'forbids-transaction';
-  contextMutations: ContextFact[];   // what it changes about the execution context
-  invalidates: EvidenceKind[];       // whose durable evidence its postcondition destroys
   guardPhase: 'before-rewrite' | 'after-rewrite';
 }
 ```
 
-The **planner** then proves the composition: lock orders are consistent, transaction boundaries are compatible, no step's postcondition invalidates evidence a later step was proven on, and guard phases are satisfiable. If it cannot, the outcome is `uncomposable`, and the plan is refused — it is not silently emitted in declaration order and hoped for.
+A rule may **not** declare a `readSet`, a `writeSet`, its locks, its context mutations, or whose claims it invalidates — those are the reach of a *concrete operation on a concrete object*, and §1 has already said where they come from. A static reach on a rule is the same lie in a smaller box: it is right for the object the author had in mind and wrong for the next one.
+
+So the composition prover reads the effects, not the rule:
+
+```ts
+interface CompositionInput {
+  operation: PhysicalOperation;
+  effects: OperationEffects;         // from the operation pack — §1
+  obligations: ProofObligation[];
+  guards: ApplyGuard[];
+  boundary: TransitionRule['transactionBoundary'];
+  guardPhase: TransitionRule['guardPhase'];
+}
+```
+
+The **planner** then proves the composition over those: lock orders are consistent, transaction boundaries are compatible, no step's postcondition invalidates a claim a later step was proven on, and guard phases are satisfiable. If it cannot, the outcome is `uncomposable`, and the plan is refused — it is not silently emitted in declaration order and hoped for.
 
 ### 1c. Comparison is ternary, and this is the question the ADR was born from
 
@@ -337,7 +356,8 @@ Every expression surface answers this way — CHECK constraints, column defaults
 ```
 compareSchemata(desired, current)   →  pure, synchronous, no I/O
     ↓  candidate changes, each carrying its PROOF OBLIGATIONS
-prove(plan, connection, context)     →  async; rules collect evidence against the live database
+prove(plan, connection, context)     →  async; rules REQUEST observations, which only the
+                                        issuer produces, against the live database (§4)
     ↓  a GuardedPlan, or a blocked transition that says what it lacked
 apply(plan, policy)                  →  re-checks the context and the preconditions before each step;
                                          refuses anything undischarged
@@ -379,9 +399,10 @@ Naming a prover is a label. Evidence is what the prover actually did, and the co
 ```ts
 interface Evidence {
   source: 'system-catalog' | 'vendor-deparser' | 'privilege-probe'
-        | 'configuration-probe' | 'dependency-catalog' | 'rehearsal';
+        | 'configuration-probe' | 'dependency-catalog';
         // No 'data-probe': the state of the data is not evidence — see §4b.
         // No 'user-assertion': a human's word is an Assumption, not evidence — see §0.
+        // No 'rehearsal': a rehearsal is historical the moment it ends — see §9.
   collectedAt: Date;
   target: {
     engine: string; engineVersion: string; databaseId: string;
@@ -398,7 +419,7 @@ interface Evidence {
 
 A catalog reading records which dependency classes it asked for, under which `search_path`, and what it could not establish. An engine canonicalisation records the DDL it emitted, the scratch context, and what the engine gave back. A privilege probe records the role it asked about and the grant it found.
 
-**The state of the data is not on this list**, and there is no `data-probe`. A predicate over live rows is not a durable fact about the system — it is an `ApplyGuard` (§4b), discharged under a protocol at execution time, or not at all.
+**The state of the data is not on this list**, and there is no `data-probe`. An observation of the data cannot, on its own, discharge an obligation about a *future* execution — it stays valid as an advisory observation, or inside the protocol that freezes it. So it is an `ApplyGuard` (§4b), discharged under that protocol at execution time, or not at all.
 
 **These sources are not interchangeable.** A shadow compilation cannot discharge a data obligation. A catalog reading cannot discharge a lock obligation. Saying "we proved it" without saying *how* is the compression this ADR exists to stop.
 
@@ -423,7 +444,7 @@ So the separation is **at the type level**, and the wrong state is unrepresentab
 // Durable. Collected by prove(). Valid until the context fingerprint moves.
 interface Evidence {
   source: 'system-catalog' | 'vendor-deparser' | 'dependency-catalog'
-        | 'configuration-probe' | 'privilege-probe' | 'rehearsal';
+        | 'configuration-probe' | 'privilege-probe';
   …
 }
 
@@ -436,6 +457,15 @@ interface ApplyGuard {
 
 // Advisory only. Says "this plan looks like it will fail". Discharges nothing.
 interface AdvisoryObservation { … }
+
+// A rehearsal is an advisory observation, and the type says so. It ran against a
+// clone, in the past, and it is historical the moment it ends (§9) — so it raises
+// confidence and discharges nothing about the run that has not happened yet.
+interface RehearsalObservation extends AdvisoryObservation {
+  stability: 'historical-only';
+  cloneContext: CloneContextManifest;   // how faithful the clone was, and where it was not
+  executedPlanDigest: string;           // WHICH plan ran — a rehearsal of another plan is not this plan's
+}
 ```
 
 `prove()` returns `Evidence[]` and `ApplyGuard[]`. It **cannot** return an `ApplyGuard` as discharged, because the type has nowhere to say that. There is no `data-probe` in `Evidence.source`, and **lock availability appears nowhere in the snapshot vocabulary at all** — it is not a property of the system, it is an outcome of trying.
@@ -521,18 +551,41 @@ Where the adapter cannot hold all of that stable through execution, the step nee
 
 ### 5. The plan is guarded, and re-checked at execution
 
+**A plan-wide "expected catalog" is incoherent, because the plan changes the catalog.** One fingerprint taken at `prove` time and re-checked before every step would, from step 2 onward, report a mismatch that *the plan itself caused* — and there is no honest way to tell that apart from the concurrent DDL the check exists to catch. A guard that cannot distinguish its own footprints from an intruder's is not a guard; it either fires on everything or, once someone silences it, on nothing.
+
+So expectation is **per step**, and it is a rolling state:
+
+```
+S₀ ──step₁──▶ S₁ ──step₂──▶ S₂ ──step₃──▶ S₃
+```
+
+Each step declares the state it expects to find and the state it should leave, over **only the objects it actually depends on** — not the whole catalog, which is both unaffordable and wrong:
+
 ```ts
 interface GuardedPlan {
-  contextFingerprint: string;
-  catalogFingerprint: string;
   evidence: Evidence[];
   preconditions: ExecutableAssertion[];
   steps: GuardedPlanStep[];
   postconditions: ExecutableAssertion[];
 }
+
+interface GuardedPlanStep {
+  operation: PhysicalOperation;
+
+  expectedBefore: FingerprintManifest;   // scoped to this step's dependencies (§8)
+  expectedAfter: FingerprintManifest;    // what this step is supposed to have made true
+
+  requiredClaims: ClaimId[];             // what it is proven on
+  establishesClaims: ClaimId[];
+  invalidatesClaims: ClaimSelector[];    // by scope — not "every claim of kind X"
+
+  guards: ApplyGuard[];
+}
 ```
 
-Before each step: confirm the context fingerprint still matches, confirm the objects it depends on are still the ones it was planned against, then **take the lock the step needs and evaluate its volatile guards while holding it** (§4b). After each step: re-introspect what it touched and check the postcondition.
+Before each step: confirm the observed state is compatible with `expectedBefore`, then **take the lock the step needs and evaluate its volatile guards while holding it** (§4b). After each step: re-introspect what it touched and confirm the observed state is compatible with `expectedAfter` — which both checks the postcondition and hands the next step a baseline it can trust.
+
+**The same applies to the execution context**, and for the same reason: a step that deliberately changes the role, the `search_path`, the transaction state or a session setting must *say so* in `expectedAfter`, or the next step's context check will fire on a change its own plan made.
 
 A plan proven under `role = owner` and applied under `role = migration_runner` is **`context-mismatch`**, and it stops. That is a first-class outcome, not an edge case.
 
@@ -609,7 +662,7 @@ The reasons below are the vocabulary those axes are built from — not a single 
 | `uncomposable` | the rules are individually proven, and their composition is not — conflicting locks, incompatible transaction boundaries, one postcondition invalidating another's evidence | refuse; do not emit them in declaration order and hope |
 | `ambiguous-intent` | several business transformations fit the same end state | refuse; ask for the missing fact |
 
-**Planning never says anything about the data.** It cannot: a predicate over live rows is not a durable fact (§4b), and that is as true of *"duplicates exist, so this is inapplicable"* as it is of *"no duplicates, so this is safe"*. The duplicates may be cleaned up before the maintenance window; they may appear after the probe. **Planning proves only that a volatile guard has a valid execution protocol on this engine.** The predicate's *value* belongs to apply, under that protocol, or nowhere.
+**Planning may observe the data. It may never treat a volatile guard as discharged before its protocol has run.** A predicate over live rows is not a durable fact (§4b), and that is as true of *"duplicates exist, so this is inapplicable"* as it is of *"no duplicates, so this is safe"*. The duplicates may be cleaned up before the maintenance window; they may appear after the probe. So `prove` is free to look — telling someone their plan will fail *before* they book the window is worth a great deal — but what it produces is an `AdvisoryObservation`, and **what it proves is that the guard has a valid execution protocol on this engine**. The predicate's *value* belongs to apply, under that protocol, or nowhere.
 
 An early probe still earns its keep — telling someone their plan will fail before they book the window is worth a great deal — but it is an `AdvisoryObservation` (§4b), and it is reported as one.
 
