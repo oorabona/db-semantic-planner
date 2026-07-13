@@ -227,6 +227,41 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
 	});
 
+	it('reports SELECT plus COMMIT as transaction control in a managed borrowed transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let transactionGone = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+			let error: unknown;
+
+			try {
+				await adapter.transaction(async (tx) => {
+					await tx.executeRaw('SELECT 1; COMMIT');
+				});
+			} catch (caught) {
+				error = caught;
+			}
+			transactionGone = true;
+
+			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+			expect(error).not.toBeInstanceOf(AggregateError);
+			expect((error as Error).message).not.toContain(
+				'dbsp cannot reason about a multi-command raw call',
+			);
+			expect((error as Error).message).not.toContain('cleanup failed');
+		} finally {
+			if (!transactionGone) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+	});
+
 	it('serializes concurrent raw statements so raw COMMIT poisons the sibling before it is sent', async () => {
 		const pool = await getTestPool();
 		const adapter = createPgsqlAdapter(pool);
@@ -986,17 +1021,26 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
 		let child: Promise<unknown> | undefined;
 
-		await orm.transaction(async (tx) => {
-			child = tx.transaction(async (inner) => {
-				await inner
-					.into(inner.tables.items)
-					.values({ id: 47, label: 'unawaited nested rollback' })
+		await expect(
+			orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 48, label: 'parent rolled back by child failure' })
 					.execute();
-				throw new Error('unawaited nested failure');
-			});
-			void child.catch(() => undefined);
-		});
+				child = tx.transaction(async (inner) => {
+					await inner
+						.into(inner.tables.items)
+						.values({ id: 47, label: 'unawaited nested rollback' })
+						.execute();
+					throw new Error('unawaited nested failure');
+				});
+				void child.catch(() => undefined);
+			}),
+		).rejects.toThrow('unawaited nested failure');
 
+		if (child === undefined) {
+			throw new Error('expected child transaction to be captured');
+		}
 		await expect(child).rejects.toThrow('unawaited nested failure');
 		expect(await itemIds()).toEqual([]);
 	});

@@ -1689,6 +1689,58 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
+	it('rolls back the parent when an unawaited child transaction fails', async () => {
+		const childScopeStarted = deferred();
+		const resumeChild = deferred();
+		const childError = new Error('unawaited child failed');
+		const query = vi.fn(async () => {
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		let child: Promise<unknown> | undefined;
+		const transaction = adapter.transaction(async (tx) => {
+			await tx.executeRaw('INSERT parent before child');
+			child = tx.transaction(async (inner) => {
+				childScopeStarted.resolve();
+				await resumeChild.promise;
+				await inner.executeRaw('INSERT child before failure');
+				throw childError;
+			});
+			void child.catch(() => undefined);
+			await childScopeStarted.promise;
+		});
+
+		await childScopeStarted.promise;
+		await Promise.resolve();
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'INSERT parent before child',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+		]);
+
+		resumeChild.resolve();
+		await expect(transaction).rejects.toBe(childError);
+		if (child === undefined) {
+			throw new Error('expected child transaction to be captured');
+		}
+		await expect(child).rejects.toBe(childError);
+
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'INSERT parent before child',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'INSERT child before failure',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'ROLLBACK',
+		]);
+		expect(queryCalls(query)).not.toContain('COMMIT');
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
 	it('refuses a child transaction started after the parent callback has returned', async () => {
 		const firstStarted = deferred();
 		const releaseFirst = deferred();
@@ -2131,6 +2183,99 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).not.toContain(
 			'SELECT after poison',
 		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('does not expose rows from a multi-command raw result in the surfaced error', async () => {
+		const literal = 'dbsp_secret_literal_multi_command_mock';
+		const multiResult = [
+			{ rows: [{ secret_column: literal }], rowCount: 1, command: 'SELECT' },
+			{ rows: [{ value: 1 }], rowCount: 1, command: 'SELECT' },
+		] as QueryResult[];
+		const client = {
+			query: vi.fn(async (input: MockQueryInput) => {
+				const sql = queryText(input);
+				if (sql === 'SELECT secret_column FROM secrets; SELECT 1') {
+					return multiResult;
+				}
+				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('SELECT secret_column FROM secrets; SELECT 1');
+			}),
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			'dbsp cannot reason about a multi-command raw call inside a transaction it manages',
+		);
+		expect((error as Error).cause).toEqual([
+			{ command: 'SELECT', rowCount: 1 },
+			{ command: 'SELECT', rowCount: 1 },
+		]);
+		const reachable = collectReachableStrings(error).join('\n');
+		expect(reachable).not.toContain(literal);
+		expect(reachable).not.toContain(
+			'SELECT secret_column FROM secrets; SELECT 1',
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('reports transaction control before the generic multi-command raw error', async () => {
+		const multiResult = [
+			{ rows: [{ value: 1 }], rowCount: 1, command: 'SELECT' },
+			{ rows: [], rowCount: 0, command: 'COMMIT' },
+		] as QueryResult[];
+		let transactionOpen = true;
+		const client = {
+			query: vi.fn(async (input: MockQueryInput) => {
+				const sql = queryText(input);
+				if (/^SAVEPOINT /.test(sql)) {
+					if (!transactionOpen) throw noActiveTransactionError();
+					return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+				}
+				if (sql === 'SELECT 1; COMMIT') {
+					transactionOpen = false;
+					return multiResult;
+				}
+				if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
+					if (!transactionOpen) throw noActiveTransactionError();
+					return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+				}
+				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const error = await captureRejection(() =>
+			adapter.executeRaw('SELECT 1; COMMIT'),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as Error).message).toBe(TRANSACTION_CONTROL_BOUNDARY);
+		expect((error as Error).message).not.toContain(
+			'dbsp cannot reason about a multi-command raw call',
+		);
+		expect(error).not.toBeInstanceOf(AggregateError);
+		expect((error as Error).message).not.toContain('cleanup failed');
+		expect((error as Error).cause).toEqual([
+			{ command: 'SELECT', rowCount: 1 },
+			{ command: 'COMMIT', rowCount: 0 },
+		]);
+		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT 1; COMMIT',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
@@ -2844,9 +2989,14 @@ describe('PgsqlAdapter.stream — pool-acquired path', () => {
 		const iter = adapter.stream({ sql: 'SELECT 1; COMMIT', parameters: [] });
 		const error = await captureRejection(() => iter.next());
 
-		expect((error as Error).message).toContain(
-			'dbsp cannot reason about a multi-command raw call inside a transaction it manages',
+		expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as Error).message).not.toContain(
+			'dbsp cannot reason about a multi-command raw call',
 		);
+		expect((error as Error).cause).toEqual([
+			{ command: 'DECLARE', rowCount: 0 },
+			{ command: 'COMMIT', rowCount: 0 },
+		]);
 		const calls = queryCalls(streamClient.query as ReturnType<typeof vi.fn>);
 		expect(calls).toEqual([
 			'BEGIN',
