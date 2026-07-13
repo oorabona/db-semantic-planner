@@ -29,6 +29,49 @@ async function itemIds(ids: readonly number[]): Promise<number[]> {
 	return result.rows.map((row) => row.id);
 }
 
+function expectTransactionControlError(error: unknown): void {
+	expect(error).toBeInstanceOf(Error);
+	expect(error).not.toBeInstanceOf(AggregateError);
+	expect((error as Error).name).toBe('PgsqlRawSqlTransactionControlError');
+	expect((error as Error).message).toContain(
+		'raw SQL performed transaction control',
+	);
+	expect((error as Error).message).toContain(
+		'transaction dbsp was working inside no longer exists',
+	);
+	expect((error as Error).message).toContain("state of the caller's data");
+	expect((error as Error).message).toContain(
+		'surrounding transaction is still alive',
+	);
+	expect((error as Error).message).not.toContain('cleanup failed');
+	expect(
+		(error as { readonly dbspRawSqlTransactionControl?: unknown })
+			.dbspRawSqlTransactionControl,
+	).toBe(true);
+}
+
+function collectReachableStrings(
+	value: unknown,
+	seen = new Set<object>(),
+): string[] {
+	if (typeof value === 'string') return [value];
+	if (typeof value !== 'object' || value === null) return [];
+	if (seen.has(value)) return [];
+	seen.add(value);
+
+	const strings: string[] = [];
+	for (const key of [
+		...Object.getOwnPropertyNames(value),
+		...Object.getOwnPropertySymbols(value),
+	]) {
+		const descriptor = Object.getOwnPropertyDescriptor(value, key);
+		if (descriptor && 'value' in descriptor) {
+			strings.push(...collectReachableStrings(descriptor.value, seen));
+		}
+	}
+	return strings;
+}
+
 describe('raw SQL inside caller transactions', () => {
 	beforeAll(async () => {
 		await dropSchema(SCHEMA);
@@ -69,9 +112,19 @@ describe('raw SQL inside caller transactions', () => {
 			);
 
 			expect((error as { code?: string }).code).toBe('25001');
+			expect((error as Error).name).not.toBe(
+				'PgsqlRawSqlTransactionControlError',
+			);
+			expect(
+				(error as { readonly dbspRawSqlTransactionControl?: unknown })
+					.dbspRawSqlTransactionControl,
+			).not.toBe(true);
 			expect((error as Error).message).toContain('CREATE INDEX CONCURRENTLY');
 			expect((error as Error).message).toContain(
 				'rolled back the failed raw SQL to a savepoint',
+			);
+			expect((error as Error).message).not.toContain(
+				'transaction dbsp was working inside no longer exists',
 			);
 
 			await client.query(
@@ -88,6 +141,97 @@ describe('raw SQL inside caller transactions', () => {
 		}
 
 		expect(await itemIds([1, 2])).toEqual([1, 2]);
+	});
+
+	it('reports transaction control when raw COMMIT ends the caller transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let transactionGone = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[20, 'committed by raw commit'],
+			);
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			const error = await captureRejection(() => adapter.executeRaw('COMMIT'));
+			transactionGone = true;
+
+			expectTransactionControlError(error);
+		} finally {
+			if (!transactionGone) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds([20])).toEqual([20]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [20]);
+	});
+
+	it('reports transaction control when raw ROLLBACK ends the caller transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let transactionGone = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[21, 'rolled back by raw rollback'],
+			);
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			const error = await captureRejection(() =>
+				adapter.executeRaw('ROLLBACK'),
+			);
+			transactionGone = true;
+
+			expectTransactionControlError(error);
+		} finally {
+			if (!transactionGone) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds([21])).toEqual([]);
+	});
+
+	it('does not echo failing raw SQL text into the surfaced error', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const literal = 'dbsp_secret_literal_322_round4_e2e';
+		const rawSql = `SELECT dbsp_missing_function('${literal}')`;
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			const error = await captureRejection(() => adapter.executeRaw(rawSql));
+
+			expect((error as Error).message).toContain(
+				'rolled back the failed raw SQL to a savepoint',
+			);
+			const reachable = collectReachableStrings(error).join('\n');
+			expect(reachable).not.toContain(literal);
+			expect(reachable).not.toContain(rawSql);
+
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[22, 'after literal failure'],
+			);
+			await client.query('COMMIT');
+			committed = true;
+		} finally {
+			if (!committed) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds([22])).toEqual([22]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [22]);
 	});
 
 	it('keeps the caller transaction usable after REINDEX INDEX CONCURRENTLY is rejected', async () => {

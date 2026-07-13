@@ -160,6 +160,12 @@ const NO_ACTIVE_SQL_TRANSACTION = '25P01';
 
 let savepointCounter = 0;
 
+const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
+	'PostgreSQL raw SQL performed transaction control inside a dbsp-managed scope. ' +
+	'The transaction dbsp was working inside no longer exists. ' +
+	"The state of the caller's data is whatever their own raw SQL statement made it. " +
+	'Do not continue as if the surrounding transaction is still alive.';
+
 type CleanupFailureError = AggregateError & {
 	readonly cleanupError: unknown;
 	readonly originalError?: unknown;
@@ -169,6 +175,15 @@ type SavepointHandle = {
 	readonly client: PoolClient;
 	readonly name: string;
 };
+
+export class PgsqlRawSqlTransactionControlError extends Error {
+	readonly dbspRawSqlTransactionControl = true;
+
+	constructor(cause: unknown) {
+		super(RAW_SQL_TRANSACTION_CONTROL_MESSAGE, { cause });
+		this.name = 'PgsqlRawSqlTransactionControlError';
+	}
+}
 
 function isPoolClientLike(
 	connection: Pool | PoolClient,
@@ -241,17 +256,19 @@ function cleanupReleaseReason(error: unknown): Error | boolean | undefined {
 	return cleanupError instanceof Error ? cleanupError : true;
 }
 
-function summarizeSql(sql: string): string {
-	const normalized = sql.trim().replace(/\s+/g, ' ');
-	return normalized.length <= 200
-		? normalized
-		: `${normalized.slice(0, 197)}...`;
+function isRawSqlTransactionControlError(error: unknown): boolean {
+	return (
+		typeof error === 'object' &&
+		error !== null &&
+		'dbspRawSqlTransactionControl' in error &&
+		(error as { readonly dbspRawSqlTransactionControl?: unknown })
+			.dbspRawSqlTransactionControl === true
+	);
 }
 
-function addRawSqlTransactionContext(error: unknown, sql: string): unknown {
+function addRawSqlTransactionContext(error: unknown): unknown {
 	const context =
-		'dbsp rolled back the failed raw SQL to a savepoint, so the surrounding transaction is still usable. ' +
-		`SQL: ${summarizeSql(sql)}`;
+		'dbsp rolled back the failed raw SQL to a savepoint, so the surrounding transaction is still usable.';
 	if (error instanceof Error) {
 		error.message = `${error.message}; ${context}`;
 		Object.defineProperty(error, 'dbspRawSqlContext', {
@@ -881,9 +898,11 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 	 * `nextval`/`setval` are not reclaimed by a savepoint rollback. Session-level
 	 * advisory locks ignore rollback; transaction-level advisory locks taken by a
 	 * successful callback last until your transaction ends. Transaction control
-	 * issued through raw SQL inside a dbsp-managed scope (`COMMIT`, `ROLLBACK`,
-	 * `BEGIN`) is unsupported: dbsp does not parse SQL, cannot detect it, and
-	 * cleanup will misbehave.
+	 * issued through raw SQL inside a dbsp-managed scope is unsupported: dbsp
+	 * cannot stop it and cannot undo it. If PostgreSQL destroys dbsp's savepoint,
+	 * dbsp reports PgsqlRawSqlTransactionControlError; the transaction dbsp was
+	 * working inside is already gone, and your data state is whatever your own
+	 * statement made it.
 	 */
 	readonly managedTransactions?: true;
 }
@@ -2076,6 +2095,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 			return result;
 		} catch (error) {
+			if (isRawSqlTransactionControlError(error)) {
+				throw error;
+			}
 			try {
 				await this.rollbackAndReleaseSavepoint(client, savepointName);
 			} catch (cleanupErr) {
@@ -2155,6 +2177,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Execute raw SQL directly.
 	 *
 	 * ⚠️  WARNING: Use parameter placeholders ($1, $2, etc.) for all values.
+	 * Transaction control inside a dbsp-managed scope is unsupported: dbsp
+	 * cannot stop it, cannot undo it, and reports it only after PostgreSQL has
+	 * already destroyed the savepoint.
 	 */
 	async executeRaw<T = unknown>(
 		sql: string,
@@ -2242,9 +2267,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					cleanupErr,
 				);
 			}
-			throw addRawSqlTransactionContext(error, sql);
+			throw addRawSqlTransactionContext(error);
 		}
-		await savepoint.client.query(`RELEASE SAVEPOINT ${savepoint.name}`);
+		try {
+			await savepoint.client.query(`RELEASE SAVEPOINT ${savepoint.name}`);
+		} catch (releaseErr) {
+			throw new PgsqlRawSqlTransactionControlError(releaseErr);
+		}
 		return result;
 	}
 
