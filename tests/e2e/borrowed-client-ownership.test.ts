@@ -200,6 +200,55 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
 	});
 
+	it('rejects after a caught raw COMMIT and never sends the post-COMMIT ORM statement', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		let rawCommitError: unknown;
+		let postCommitError: unknown;
+		let transactionError: unknown;
+
+		try {
+			await orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 40, label: 'committed by swallowed raw commit' })
+					.execute();
+				try {
+					await tx.raw('COMMIT');
+				} catch (error) {
+					rawCommitError = error;
+				}
+				try {
+					await tx
+						.into(tx.tables.items)
+						.values({ id: 41, label: 'must not reach PostgreSQL' })
+						.execute();
+				} catch (error) {
+					postCommitError = error;
+				}
+				return 'callback returned normally';
+			});
+		} catch (error) {
+			transactionError = error;
+		}
+
+		expect(rawCommitError).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect(postCommitError).toBe(rawCommitError);
+		expect(transactionError).toBe(rawCommitError);
+		expect(await itemIds()).toEqual([40]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [40]);
+
+		await orm.transaction(async (tx) => {
+			await tx
+				.into(tx.tables.items)
+				.values({ id: 42, label: 'next pooled transaction works' })
+				.execute();
+		});
+
+		expect(await itemIds()).toEqual([42]);
+	});
+
 	it('allows server-side PREPARE inside a borrowed-client dbsp transaction', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();

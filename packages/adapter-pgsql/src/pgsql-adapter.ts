@@ -157,6 +157,8 @@ const RESOLVE_TABLE_SCHEMA_SQL = (tableParam: string): string =>
 	`WHERE c.oid = to_regclass(quote_ident(${tableParam})))`;
 
 const NO_ACTIVE_SQL_TRANSACTION = '25P01';
+const IN_FAILED_SQL_TRANSACTION = '25P02';
+const INVALID_SAVEPOINT_SPECIFICATION = '3B001';
 
 let savepointCounter = 0;
 
@@ -168,6 +170,9 @@ const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 
 const ABORTED_COMMIT_MESSAGE =
 	'PostgreSQL returned ROLLBACK for COMMIT. The transaction was already aborted, no changes were committed, and dbsp is reporting that failed commit explicitly.';
+
+const TRANSACTION_ABORTED_MESSAGE =
+	'PostgreSQL transaction is aborted because a statement failed inside a dbsp-managed scope and that failure was caught. Roll back the surrounding transaction; the swallowed statement failure is the cause worth reporting.';
 
 const SAVEPOINT_SCOPE_BUSY_MESSAGE =
 	'Cannot start another dbsp savepoint scope on this PostgreSQL connection because one is already active. Savepoint scopes are single-flight per connection; await the active dbsp operation before starting another.';
@@ -204,6 +209,15 @@ type DbspScopeToken = symbol;
 type DbspClientScope = {
 	readonly kind: DbspClientScopeKind;
 	readonly token: DbspScopeToken;
+	readonly state: DbspScopeState;
+};
+
+type DbspScopeState = {
+	poisoned: DbspScopePoison | undefined;
+};
+
+type DbspScopePoison = {
+	readonly error: Error;
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
@@ -211,6 +225,7 @@ const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
 	readonly allowAncestorScopeToken?: boolean;
+	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
 };
@@ -242,6 +257,15 @@ export class PgsqlTransactionAbortedCommitError extends Error {
 	}
 }
 
+export class PgsqlTransactionAbortedError extends Error {
+	readonly dbspTransactionAborted = true;
+
+	constructor(cause: unknown) {
+		super(TRANSACTION_ABORTED_MESSAGE, { cause });
+		this.name = 'PgsqlTransactionAbortedError';
+	}
+}
+
 function isPoolClientLike(
 	connection: Pool | PoolClient,
 ): connection is PoolClient {
@@ -264,6 +288,10 @@ function nextSavepointName(): string {
 
 function createScopeToken(): DbspScopeToken {
 	return Symbol('dbsp-pgsql-scope');
+}
+
+function createScopeState(): DbspScopeState {
+	return { poisoned: undefined };
 }
 
 function normalizeCommandTag(command: string | undefined): string | undefined {
@@ -358,6 +386,13 @@ function isRawSqlTransactionControlError(error: unknown): boolean {
 		'dbspRawSqlTransactionControl' in error &&
 		(error as { readonly dbspRawSqlTransactionControl?: unknown })
 			.dbspRawSqlTransactionControl === true
+	);
+}
+
+function isSavepointUnavailableError(error: unknown): boolean {
+	return (
+		isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION) ||
+		isPgErrorWithCode(error, INVALID_SAVEPOINT_SPECIFICATION)
 	);
 }
 
@@ -1009,6 +1044,7 @@ interface PgsqlAdapterInternalOptions
 	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	readonly adapterManagedTransaction?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
+	readonly dbspScopeState?: DbspScopeState;
 }
 
 type PgsqlPublicAdapterConstructionOptions =
@@ -1029,6 +1065,7 @@ type PgsqlAdapterInternalConstructionOverrides =
 	PgsqlAdapterConstructionOverrides & {
 		readonly adapterManagedTransaction?: true;
 		readonly dbspScopeToken?: DbspScopeToken;
+		readonly dbspScopeState?: DbspScopeState;
 	};
 
 function isPgsqlAdapterInternalOptions(
@@ -1081,6 +1118,14 @@ function getDbspScopeTokenOption(
 		: undefined;
 }
 
+function getDbspScopeStateOption(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): DbspScopeState | undefined {
+	return isPgsqlAdapterInternalOptions(options)
+		? options.dbspScopeState
+		: undefined;
+}
+
 function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
 	connection: Pool | PoolClient | undefined,
 	options: PgsqlAdapterConstructionOptions,
@@ -1117,6 +1162,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private readonly managedTransactions: boolean;
 	private readonly adapterManagedTransaction: boolean;
 	private readonly scopeToken: DbspScopeToken | undefined;
+	private readonly scopeState: DbspScopeState | undefined;
 	private readonly schemaName: string | undefined;
 	private readonly _dbCasing: DbCasing;
 	private readonly naming: NamingPlugin;
@@ -1187,6 +1233,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		this.managedTransactions = hasManagedTransactionsOption(options);
 		this.adapterManagedTransaction = isAdapterManagedTransactionOption(options);
 		this.scopeToken = getDbspScopeTokenOption(options);
+		this.scopeState = getDbspScopeStateOption(options);
 
 		this.schemaName = options?.schemaName;
 		this._dbCasing = options?.dbCasing ?? 'preserve';
@@ -1229,8 +1276,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				? true
 				: undefined;
 		const scopeToken = overrides.dbspScopeToken ?? this.scopeToken;
+		const scopeState = overrides.dbspScopeState ?? this.scopeState;
 		const hasInternalOptions =
-			adapterManagedTransaction === true || scopeToken !== undefined;
+			adapterManagedTransaction === true ||
+			scopeToken !== undefined ||
+			scopeState !== undefined;
 		return {
 			...(hasInternalOptions && {
 				[pgsqlAdapterInternalOptionsKey]: true as const,
@@ -1245,6 +1295,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this.managedTransactions && { managedTransactions: true as const }),
 			...(adapterManagedTransaction === true && { adapterManagedTransaction }),
 			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
+			...(scopeState !== undefined && { dbspScopeState: scopeState }),
 			...overrides,
 		};
 	}
@@ -1967,21 +2018,28 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			let streamFailed = false;
 			let releaseScope: (() => void) | undefined;
 			let scopeToken: DbspScopeToken | undefined;
+			let scopeState: DbspScopeState | undefined;
 			let releaseError: Error | boolean | undefined;
 			let cleanupErrorToThrow: unknown;
 			try {
 				scopeToken = createScopeToken();
+				scopeState = createScopeState();
 				await adapter.executeConnectionStatement(client, 'BEGIN', undefined, {
 					inspectTransactionControl: false,
 				});
 				begun = true;
-				releaseScope = adapter.enterTransactionScope(client, scopeToken);
+				releaseScope = adapter.enterTransactionScope(
+					client,
+					scopeToken,
+					scopeState,
+				);
 				yield* adapter.streamWithClient<T>(
 					client,
 					query,
 					chunkSize,
 					scopeToken,
 				);
+				adapter.throwIfScopePoisoned(scopeState);
 				const commitResult = await adapter.executeConnectionStatement(
 					client,
 					'COMMIT',
@@ -2122,9 +2180,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): AsyncIterableIterator<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = this.scopeToken ?? createScopeToken();
+		const scopeState = this.scopeState ?? createScopeState();
 		const releaseScope = this.enterSavepointScope(
 			client,
 			scopeToken,
+			scopeState,
 			'statement',
 		);
 		try {
@@ -2157,6 +2217,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		} finally {
 			try {
 				if (completed) {
+					this.throwIfScopePoisoned(scopeState);
 					try {
 						await this.executeConnectionStatement(
 							client,
@@ -2168,7 +2229,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							},
 						);
 					} catch (releaseErr) {
-						raise(new PgsqlRawSqlTransactionControlError(releaseErr));
+						raise(
+							await this.classifySavepointReleaseFailure(
+								client,
+								scopeToken,
+								releaseErr,
+								'PostgreSQL stream cleanup failed: RELEASE SAVEPOINT failed after the stream completed',
+							),
+						);
 					}
 				} else {
 					try {
@@ -2212,14 +2280,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let cleanupErrorToThrow: unknown;
 		let releaseScope: (() => void) | undefined;
 		let scopeToken: DbspScopeToken | undefined;
+		let scopeState: DbspScopeState | undefined;
 		try {
 			scopeToken = createScopeToken();
+			scopeState = createScopeState();
 			await this.executeConnectionStatement(client, 'BEGIN', undefined, {
 				inspectTransactionControl: false,
 			});
 			begun = true;
-			releaseScope = this.enterTransactionScope(client, scopeToken);
+			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
+			this.throwIfScopePoisoned(scopeState);
 			const commitResult = await this.executeConnectionStatement(
 				client,
 				'COMMIT',
@@ -2341,6 +2412,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private createManagedClientAdapter(
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
 	): PgsqlAdapter<DB> {
 		return createPgsqlAdapterFromConstructionOptions<DB>(
 			client,
@@ -2349,6 +2421,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				managedTransactions: true,
 				adapterManagedTransaction: true,
 				dbspScopeToken: scopeToken,
+				dbspScopeState: scopeState,
 			}),
 		);
 	}
@@ -2366,10 +2439,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): Promise<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = createScopeToken();
-		const txAdapter = this.createManagedClientAdapter(client, scopeToken);
+		const scopeState = createScopeState();
+		const txAdapter = this.createManagedClientAdapter(
+			client,
+			scopeToken,
+			scopeState,
+		);
 		const releaseScope = this.enterSavepointScope(
 			client,
 			scopeToken,
+			scopeState,
 			'transaction',
 		);
 		try {
@@ -2392,6 +2471,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		try {
 			const result = await fn(txAdapter);
+			this.throwIfScopePoisoned(scopeState);
 			try {
 				await this.executeConnectionStatement(
 					client,
@@ -2403,7 +2483,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					},
 				);
 			} catch (releaseErr) {
-				throw new PgsqlRawSqlTransactionControlError(releaseErr);
+				throw await this.classifySavepointReleaseFailure(
+					client,
+					scopeToken,
+					releaseErr,
+					'PostgreSQL transaction cleanup failed: RELEASE SAVEPOINT failed after the transaction body returned',
+				);
 			}
 			return result;
 		} catch (error) {
@@ -2414,6 +2499,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					scopeToken,
 				);
 			} catch (cleanupErr) {
+				if (
+					isRawSqlTransactionControlError(error) &&
+					isSavepointUnavailableError(cleanupErr)
+				) {
+					throw error;
+				}
 				throw createCleanupFailureError(
 					'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed; the caller transaction may now be in an unknown state',
 					error,
@@ -2434,15 +2525,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let committed = false;
 		let releaseScope: (() => void) | undefined;
 		let scopeToken: DbspScopeToken | undefined;
+		let scopeState: DbspScopeState | undefined;
 		try {
 			scopeToken = createScopeToken();
+			scopeState = createScopeState();
 			await this.executeConnectionStatement(client, 'BEGIN', undefined, {
 				inspectTransactionControl: false,
 			});
 			begun = true;
-			const txAdapter = this.createManagedClientAdapter(client, scopeToken);
-			releaseScope = this.enterTransactionScope(client, scopeToken);
+			const txAdapter = this.createManagedClientAdapter(
+				client,
+				scopeToken,
+				scopeState,
+			);
+			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			const result = await fn(txAdapter);
+			this.throwIfScopePoisoned(scopeState);
 			const commitResult = await this.executeConnectionStatement(
 				client,
 				'COMMIT',
@@ -2494,6 +2592,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				{
 					allowedScopeToken,
 					allowAncestorScopeToken: true,
+					allowPoisonedScope: true,
 					inspectTransactionControl: false,
 				},
 			);
@@ -2510,6 +2609,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			{
 				allowedScopeToken,
 				allowAncestorScopeToken: true,
+				allowPoisonedScope: true,
 				inspectTransactionControl: false,
 			},
 		);
@@ -2522,6 +2622,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
 				...(allowedScopeToken !== undefined && { allowedScopeToken }),
+				allowPoisonedScope: true,
 				inspectTransactionControl: false,
 			});
 		} catch (error) {
@@ -2532,15 +2633,128 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 	}
 
+	private classifyTransactionStateError(
+		error: unknown,
+	):
+		| 'no-active-transaction'
+		| 'transaction-aborted'
+		| 'savepoint-gone'
+		| undefined {
+		if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+			return 'no-active-transaction';
+		}
+		if (isPgErrorWithCode(error, IN_FAILED_SQL_TRANSACTION)) {
+			return 'transaction-aborted';
+		}
+		if (isPgErrorWithCode(error, INVALID_SAVEPOINT_SPECIFICATION)) {
+			return 'savepoint-gone';
+		}
+		return undefined;
+	}
+
+	private async probeTransactionState(
+		client: PoolClient,
+		allowedScopeToken: DbspScopeToken | undefined,
+	): Promise<
+		'live' | 'no-active-transaction' | 'transaction-aborted' | 'unknown'
+	> {
+		const probeSavepointName = nextSavepointName();
+		try {
+			await this.executeConnectionStatement(
+				client,
+				`SAVEPOINT ${probeSavepointName}`,
+				undefined,
+				{
+					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					allowPoisonedScope: true,
+					inspectTransactionControl: false,
+					protectBorrowedClientTransaction: false,
+				},
+			);
+		} catch (error) {
+			const state = this.classifyTransactionStateError(error);
+			if (state === 'no-active-transaction' || state === 'savepoint-gone') {
+				return 'no-active-transaction';
+			}
+			if (state === 'transaction-aborted') return 'transaction-aborted';
+			return 'unknown';
+		}
+
+		try {
+			await this.executeConnectionStatement(
+				client,
+				`RELEASE SAVEPOINT ${probeSavepointName}`,
+				undefined,
+				{
+					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					allowPoisonedScope: true,
+					inspectTransactionControl: false,
+					protectBorrowedClientTransaction: false,
+				},
+			);
+		} catch {
+			return 'unknown';
+		}
+		return 'live';
+	}
+
+	private async classifySavepointReleaseFailure(
+		client: PoolClient,
+		allowedScopeToken: DbspScopeToken | undefined,
+		releaseErr: unknown,
+		cleanupAction: string,
+	): Promise<Error> {
+		const directState = this.classifyTransactionStateError(releaseErr);
+		if (
+			directState === 'no-active-transaction' ||
+			directState === 'savepoint-gone'
+		) {
+			return this.poisonClientScope(
+				client,
+				allowedScopeToken,
+				new PgsqlRawSqlTransactionControlError(releaseErr),
+			);
+		}
+		if (directState === 'transaction-aborted') {
+			return this.poisonClientScope(
+				client,
+				allowedScopeToken,
+				new PgsqlTransactionAbortedError(releaseErr),
+			);
+		}
+
+		const probedState = await this.probeTransactionState(
+			client,
+			allowedScopeToken,
+		);
+		if (probedState === 'no-active-transaction') {
+			return this.poisonClientScope(
+				client,
+				allowedScopeToken,
+				new PgsqlRawSqlTransactionControlError(releaseErr),
+			);
+		}
+		if (probedState === 'transaction-aborted') {
+			return this.poisonClientScope(
+				client,
+				allowedScopeToken,
+				new PgsqlTransactionAbortedError(releaseErr),
+			);
+		}
+		return createCleanupOnlyError(cleanupAction, releaseErr);
+	}
+
 	private enterTransactionScope(
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
 	): () => void {
 		const current = this.currentClientScope(client);
 		if (current === undefined && this.scopeToken !== undefined) {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			this.assertScopeNotPoisoned(current);
 			if (current.token !== this.scopeToken) {
 				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 			}
@@ -2549,12 +2763,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return this.pushClientScope(client, {
 			kind: 'transaction',
 			token: scopeToken,
+			state: scopeState,
 		});
 	}
 
 	private enterSavepointScope(
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
 		purpose: 'statement' | 'transaction',
 	): () => void {
 		const current = this.currentClientScope(client);
@@ -2562,6 +2778,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			this.assertScopeNotPoisoned(current);
 			if (current.kind === 'statement-savepoint') {
 				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
 			}
@@ -2578,6 +2795,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					? 'transaction-savepoint'
 					: 'statement-savepoint',
 			token: scopeToken,
+			state: scopeState,
 		});
 	}
 
@@ -2615,6 +2833,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		allowedScopeToken = this.scopeToken,
 		allowAncestorScopeToken = false,
+		allowPoisonedScope = false,
 	): void {
 		const stack = activeClientScopes.get(client);
 		const current = stack?.at(-1);
@@ -2623,17 +2842,64 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 		}
 		if (current?.token === allowedScopeToken) {
+			if (!allowPoisonedScope) {
+				this.assertScopeNotPoisoned(current);
+			}
 			return;
 		}
-		const tokenIsPresent =
-			stack?.some((scope) => scope.token === allowedScopeToken) ?? false;
-		if (allowAncestorScopeToken && tokenIsPresent) {
+		const allowedScope = this.findClientScope(client, allowedScopeToken);
+		if (allowAncestorScopeToken && allowedScope !== undefined) {
+			if (!allowPoisonedScope) {
+				this.assertScopeNotPoisoned(allowedScope);
+			}
 			return;
 		}
-		if (!tokenIsPresent) {
+		if (allowedScope === undefined) {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
+	}
+
+	private findClientScope(
+		client: PoolClient,
+		scopeToken: DbspScopeToken | undefined,
+	): DbspClientScope | undefined {
+		const stack = activeClientScopes.get(client);
+		if (stack === undefined) return undefined;
+		if (scopeToken === undefined) return stack.at(-1);
+		for (let index = stack.length - 1; index >= 0; index--) {
+			const scope = stack[index];
+			if (scope?.token === scopeToken) return scope;
+		}
+		return undefined;
+	}
+
+	private assertScopeNotPoisoned(scope: DbspClientScope): void {
+		this.throwIfScopePoisoned(scope.state);
+	}
+
+	private throwIfScopePoisoned(scopeState: DbspScopeState): void {
+		const poison = scopeState.poisoned;
+		if (poison !== undefined) {
+			throw poison.error;
+		}
+	}
+
+	private poisonScopeState(scopeState: DbspScopeState, error: Error): Error {
+		if (scopeState.poisoned === undefined) {
+			scopeState.poisoned = { error };
+		}
+		return scopeState.poisoned.error;
+	}
+
+	private poisonClientScope(
+		client: PoolClient,
+		scopeToken: DbspScopeToken | undefined,
+		error: Error,
+	): Error {
+		const scope = this.findClientScope(client, scopeToken);
+		if (scope === undefined) return error;
+		return this.poisonScopeState(scope.state, error);
 	}
 
 	private assertCommitSucceeded(result: QueryResult): void {
@@ -2772,14 +3038,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				executor,
 				allowedScopeToken,
 				options.allowAncestorScopeToken ?? false,
+				options.allowPoisonedScope ?? false,
 			);
 		}
 
-		const rawResult = await this.issueConnectionQuery<T>(
-			executor,
-			sql,
-			parameters,
-		);
+		let rawResult: MaybeMultipleQueryResults<T>;
+		try {
+			rawResult = await this.issueConnectionQuery<T>(executor, sql, parameters);
+		} catch (error) {
+			if (
+				isPoolClientLike(executor) &&
+				options.inspectTransactionControl !== false &&
+				options.allowPoisonedScope !== true
+			) {
+				this.poisonClientScope(
+					executor,
+					allowedScopeToken,
+					new PgsqlTransactionAbortedError(error),
+				);
+			}
+			throw error;
+		}
 		if (options.inspectTransactionControl !== false) {
 			await this.assertNoTransactionControlCommand(
 				executor,
@@ -2800,9 +3079,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): Promise<QueryResult<T>> {
 		const savepointName = nextSavepointName();
 		const scopeToken = this.scopeToken ?? createScopeToken();
+		const scopeState = this.scopeState ?? createScopeState();
 		const releaseScope = this.enterSavepointScope(
 			client,
 			scopeToken,
+			scopeState,
 			'statement',
 		);
 		try {
@@ -2849,6 +3130,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					scopeToken,
 				);
 			} catch (cleanupErr) {
+				if (
+					isRawSqlTransactionControlError(error) &&
+					isSavepointUnavailableError(cleanupErr)
+				) {
+					throw error;
+				}
 				throw createCleanupFailureError(
 					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after the protected statement failed; the caller transaction may now be in an unknown state',
 					error,
@@ -2863,6 +3150,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw addRawSqlTransactionContext(error);
 		}
 		try {
+			this.throwIfScopePoisoned(scopeState);
 			await this.executeConnectionStatement(
 				client,
 				`RELEASE SAVEPOINT ${savepointName}`,
@@ -2874,7 +3162,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			);
 		} catch (releaseErr) {
-			throw new PgsqlRawSqlTransactionControlError(releaseErr);
+			throw await this.classifySavepointReleaseFailure(
+				client,
+				scopeToken,
+				releaseErr,
+				'PostgreSQL raw SQL cleanup failed: RELEASE SAVEPOINT failed after the protected statement succeeded',
+			);
 		} finally {
 			releaseScope();
 		}
@@ -2912,7 +3205,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				continue;
 			}
 			if (isTransactionControlCommandTag(queryResult.command)) {
-				throw new PgsqlRawSqlTransactionControlError(queryResult);
+				throw this.poisonClientScope(
+					executor,
+					allowedScopeToken,
+					new PgsqlRawSqlTransactionControlError(queryResult),
+				);
 			}
 		}
 	}
@@ -2936,7 +3233,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				throw new PgsqlRawSqlTransactionControlError(queryResult);
+				throw this.poisonClientScope(
+					client,
+					allowedScopeToken,
+					new PgsqlRawSqlTransactionControlError(queryResult),
+				);
 			}
 			throw error;
 		}

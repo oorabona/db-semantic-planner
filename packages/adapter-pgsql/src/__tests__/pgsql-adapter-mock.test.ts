@@ -21,6 +21,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	PgsqlRawSqlTransactionControlError,
 	PgsqlTransactionAbortedCommitError,
+	PgsqlTransactionAbortedError,
 } from '../index.js';
 import {
 	createPgsqlAdapter,
@@ -355,6 +356,129 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
 			'BEGIN',
 			'COMMIT',
+			'ROLLBACK',
+		]);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		{ command: 'COMMIT', statement: 'COMMIT' },
+		{ command: 'ROLLBACK', statement: 'ROLLBACK' },
+		{ command: 'PREPARE', statement: "PREPARE TRANSACTION 'x'" },
+	])('keeps a caught raw $statement poison live until orm.transaction rejects', async ({
+		command,
+		statement,
+	}) => {
+		const postControlSql = 'INSERT INTO items VALUES (99)';
+		let transactionOpen = false;
+		const commandResult = {
+			rows: [],
+			rowCount: 0,
+			command,
+		} as QueryResult;
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'BEGIN') {
+				transactionOpen = true;
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			if (/^SAVEPOINT /.test(sql)) {
+				if (!transactionOpen) throw noActiveTransactionError();
+				return {
+					rows: [],
+					rowCount: 0,
+					command: 'SAVEPOINT',
+				} as QueryResult;
+			}
+			if (sql === statement) {
+				transactionOpen = false;
+				return commandResult;
+			}
+			if (sql === 'ROLLBACK') {
+				if (!transactionOpen) throw noActiveTransactionError();
+				transactionOpen = false;
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'INSERT' } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+		let firstError: unknown;
+		let secondError: unknown;
+
+		const transactionError = await captureRejection(() =>
+			orm.transaction(async (tx) => {
+				try {
+					await tx.raw(statement);
+				} catch (error) {
+					firstError = error;
+				}
+				try {
+					await tx.raw(postControlSql);
+				} catch (error) {
+					secondError = error;
+				}
+				return 'callback returned normally';
+			}),
+		);
+
+		expectRawSqlTransactionControlError(firstError, commandResult);
+		expect(secondError).toBe(firstError);
+		expect(transactionError).toBe(firstError);
+		const calls = query.mock.calls.map((c) => c[0] as string);
+		expect(calls).not.toContain(postControlSql);
+		expect(calls.filter((sql) => sql === 'COMMIT')).toHaveLength(
+			statement === 'COMMIT' ? 1 : 0,
+		);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
+	it('rolls back and releases a pool-owned transaction after a swallowed poisoned-scope error', async () => {
+		const savepointResult = {
+			rows: [],
+			rowCount: 0,
+			command: 'SAVEPOINT',
+		} as QueryResult;
+		let openTransaction = false;
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'BEGIN') {
+				openTransaction = true;
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			if (sql === 'SAVEPOINT s') return savepointResult;
+			if (sql === 'ROLLBACK') {
+				openTransaction = false;
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const txClient = {
+			query,
+			release: vi.fn(() => {
+				expect(openTransaction).toBe(false);
+			}),
+		} as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		let swallowed: unknown;
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				try {
+					await tx.executeRaw('SAVEPOINT s');
+				} catch (caught) {
+					swallowed = caught;
+				}
+				return 'callback returned normally';
+			}),
+		);
+
+		expectRawSqlTransactionControlError(swallowed, savepointResult);
+		expect(error).toBe(swallowed);
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			'BEGIN',
+			'SAVEPOINT s',
 			'ROLLBACK',
 		]);
 		expect(txClient.release).toHaveBeenCalledOnce();
@@ -807,6 +931,123 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			releaseError,
 			/savepoint cleanup failed/,
 		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('reports a swallowed statement failure as an aborted transaction, not transaction control', async () => {
+		const statementError = Object.assign(new Error('duplicate key value'), {
+			code: '23505',
+		});
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'INSERT duplicate') throw statementError;
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = {
+			query,
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		let swallowed: unknown;
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				try {
+					await tx.executeRaw('INSERT duplicate');
+				} catch (caught) {
+					swallowed = caught;
+				}
+				return 'callback returned normally';
+			}),
+		);
+
+		expect(swallowed).toBe(statementError);
+		expect(error).toBeInstanceOf(PgsqlTransactionAbortedError);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as Error).message).toContain('transaction is aborted');
+		expect((error as Error).cause).toBe(statementError);
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'INSERT duplicate',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('surfaces a connection-level RELEASE SAVEPOINT failure as cleanup, not transaction control', async () => {
+		const releaseError = new Error('connection terminated unexpectedly');
+		let releaseAttempts = 0;
+		const query = vi.fn(async (sql: string) => {
+			if (/^RELEASE SAVEPOINT /.test(sql)) {
+				releaseAttempts++;
+				if (releaseAttempts === 1) throw releaseError;
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = {
+			query,
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => 'callback returned normally'),
+		);
+
+		expect(error).toBeInstanceOf(AggregateError);
+		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			releaseError,
+		);
+		expect((error as AggregateError).errors).toContain(releaseError);
+		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
+		const calls = query.mock.calls.map((c) => c[0] as string);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls[1]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(calls[2]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls[3]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(
+			calls.some((sql) => /^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql)),
+		).toBe(true);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('classifies a missing dbsp savepoint on RELEASE as transaction control', async () => {
+		const savepointGoneError = Object.assign(
+			new Error('savepoint does not exist'),
+			{ code: '3B001' },
+		);
+		const query = vi.fn(async (sql: string) => {
+			if (/^RELEASE SAVEPOINT /.test(sql)) throw savepointGoneError;
+			if (/^ROLLBACK TO SAVEPOINT /.test(sql)) throw savepointGoneError;
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = {
+			query,
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async () => 'callback returned normally'),
+		);
+
+		expectRawSqlTransactionControlError(error, savepointGoneError);
+		expect(error).not.toBeInstanceOf(AggregateError);
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
