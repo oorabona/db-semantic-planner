@@ -1,6 +1,6 @@
 # ADR 0003: dbsp Is a Rule-Based Transition Planner, and Every Plan Carries Its Proof
 
-Status: canonical
+Status: canonical — accepted without reservation after seven adversarial rounds; eighteen attacks landed and were closed
 
 Supersedes part of [ADR 0002](0002-engine-recovery-primitives.md) — see *Corrections*.
 
@@ -52,50 +52,6 @@ Semantic facts are compressed into strings, booleans and phase numbers, then rec
 The question is not *"what changed?"* It is:
 
 > **"Which transition rule knows this change — for this engine, this version, this context?"**
-
-### 1. Rules, not a universal model — this is the scalability answer
-
-Portability does not come from a model that understands every database. It comes from a **small core** plus **versioned rule packs**:
-
-```
-core                        adapter/postgresql          adapter/sqlserver
-├── object model            ├── introspection           ├── introspection
-├── dependency graph        ├── rules: pg 14            ├── rules: 2019
-├── evidence registry       ├── rules: pg 15            ├── rules: 2022
-├── planner                 ├── rules: pg 16            └── rules: azure sql
-├── policy engine           └── rules: pg 17
-└── guarded executor
-```
-
-A rule covers **one transformation**: add a nullable column; add a `NOT NULL` column with a backfill; widen a `varchar`; add an enum value; rename a column; add an index online; rebuild a SQLite table. Nobody writes "an Oracle adapter that understands Oracle". They write rules, one transition at a time.
-
-Each rule declares what it needs before it can claim anything:
-
-```ts
-interface TransitionRule {
-  id: string;                                    // 'postgresql.enum.add-value'
-  support: { engine: string; versions: VersionRange[]; requiredCapabilities: string[] };
-
-  recognize(current, desired): RecognitionResult;
-  declareRequiredEvidence(input): EvidenceRequirement[];
-  collectEvidence(input, context: ReadOnlyTargetContext): Promise<Evidence[]>;
-  prove(input, evidence): ProofResult;
-  generate(input, evidence): GuardedPlan;
-}
-```
-
-A change no rule recognises is `unsupported-transition`. It is **not** a `DROP` and `CREATE`.
-
-**The registry must arbitrate explicitly, because otherwise declaration order will.** Two rules can recognise the same change — *add a `NOT NULL` column with a default* and *add it nullable, backfill, then `SET NOT NULL`* both reach the same end state, and one of them locks the table while the other does not. If nothing decides between them, first-match-wins becomes the arbiter, and **rule order silently decides semantics**. That is this ADR's own mistake, one level up: a fact ("which strategy, and why") compressed into a position in a list.
-
-So:
-
-- **no match** → `unsupported-transition`. Refuse.
-- **exactly one match** → that rule, and the plan records which.
-- **several matches** → they must either **compose — provably, not by assertion** (below), or a **declared precedence** decides, carrying its *justification*, with the plan recording which rule was selected and why it beat the others.
-- **several matches, no proven composition and no declared precedence** → `ambiguous-rule`. Refuse. Do not pick one.
-
-A plan that cannot say why it chose the strategy it chose is not a proven plan.
 
 ### 0. The trusted computing base is named, because it never goes away
 
@@ -202,6 +158,50 @@ The default policy is therefore neither `allow-everything` nor `refuse-everythin
 
 There is always a trusted computing base. The only question is whether the design **says so** — and whether, when one of its assumptions is later found to be false, you can enumerate what you built on top of it. Every earlier version of this one could not.
 
+### 1. Rules, not a universal model — this is the scalability answer
+
+Portability does not come from a model that understands every database. It comes from a **small core** plus **versioned rule packs**:
+
+```
+core                        adapter/postgresql          adapter/sqlserver
+├── object model            ├── introspection           ├── introspection
+├── dependency graph        ├── rules: pg 14            ├── rules: 2019
+├── evidence registry       ├── rules: pg 15            ├── rules: 2022
+├── planner                 ├── rules: pg 16            └── rules: azure sql
+├── policy engine           └── rules: pg 17
+└── guarded executor
+```
+
+A rule covers **one transformation**: add a nullable column; add a `NOT NULL` column with a backfill; widen a `varchar`; add an enum value; rename a column; add an index online; rebuild a SQLite table. Nobody writes "an Oracle adapter that understands Oracle". They write rules, one transition at a time.
+
+Each rule declares what it needs before it can claim anything:
+
+```ts
+interface TransitionRule {
+  id: string;                                    // 'postgresql.enum.add-value'
+  support: { engine: string; versions: VersionRange[]; requiredCapabilities: string[] };
+
+  recognize(current, desired): RecognitionResult;
+  declareRequiredEvidence(input): EvidenceRequirement[];
+  collectEvidence(input, context: ReadOnlyTargetContext): Promise<Evidence[]>;
+  prove(input, evidence): ProofResult;
+  generate(input, evidence): GuardedPlan;
+}
+```
+
+A change no rule recognises is `unsupported-transition`. It is **not** a `DROP` and `CREATE`.
+
+**The registry must arbitrate explicitly, because otherwise declaration order will.** Two rules can recognise the same change — *add a `NOT NULL` column with a default* and *add it nullable, backfill, then `SET NOT NULL`* both reach the same end state, and one of them locks the table while the other does not. If nothing decides between them, first-match-wins becomes the arbiter, and **rule order silently decides semantics**. That is this ADR's own mistake, one level up: a fact ("which strategy, and why") compressed into a position in a list.
+
+So:
+
+- **no match** → `unsupported-transition`. Refuse.
+- **exactly one match** → that rule, and the plan records which.
+- **several matches** → they must either **compose — provably, not by assertion** (below), or a **declared precedence** decides, carrying its *justification*, with the plan recording which rule was selected and why it beat the others.
+- **several matches, no proven composition and no declared precedence** → `ambiguous-rule`. Refuse. Do not pick one.
+
+A plan that cannot say why it chose the strategy it chose is not a proven plan.
+
 ### 1b. Composition is itself a transition to be proven
 
 Letting rules *declare* that they compose would put the same mistake one level deeper: **"declared composable" becomes the new hidden arbiter**, exactly as rule order was. Two individually proven steps can compose into an unproven plan.
@@ -254,7 +254,7 @@ An obligation is **data** — inspectable, serialisable, visible in `dump()`.
 
 **The refusal boundary is `apply`.** Not the diff, which only states. Today the CLI gates on `diff.hasDestructive`, and it will keep doing the wrong thing until the plan carries something better than a boolean.
 
-### 3. A snapshot has four dimensions, not one
+### 3. A snapshot has three dimensions — and the fourth was a mistake
 
 We introspect the catalog. That is a quarter of what a transition depends on.
 
@@ -417,37 +417,6 @@ A plan proven under `role = owner` and applied under `role = migration_runner` i
 
 The step also records **which rule generated it, and why that rule was chosen over the others that recognised the change** (§1). A plan that cannot answer that question has an arbiter it never declared.
 
-### 6. Outcomes are distinct, because their actions are
-
-Not one enum on one axis. Six outcomes that demand six different things:
-
-| Outcome | Meaning | Action |
-|---|---|---|
-| `proven-applicable` | a rule covers the engine, version, objects, transaction context and dependencies, **and every volatile guard it needs has a valid execution protocol on this engine** | may run — its guards are evaluated at apply time, not now |
-| `proven-inapplicable` | a **durable** precondition is violated: the engine version does not support the operation, the role lacks the privilege, a dependency cannot be satisfied | refuse; report the violating fact |
-| `context-mismatch` | the plan was proven under a context that is no longer the one in force | re-prove |
-| `insufficient-evidence` | equivalence or safety could not be established | refuse; say which obligation is undischarged |
-| `unsupported-transition` | no rule in this adapter knows this change | refuse; do not improvise |
-| `ambiguous-rule` | several rules recognise the change, and nothing declares which wins | refuse; do not let list order decide |
-| `uncomposable` | the rules are individually proven, and their composition is not — conflicting locks, incompatible transaction boundaries, one postcondition invalidating another's evidence | refuse; do not emit them in declaration order and hope |
-| `ambiguous-intent` | several business transformations fit the same end state | refuse; ask for the missing fact |
-
-**Planning never says anything about the data.** It cannot: a predicate over live rows is not a durable fact (§4b), and that is as true of *"duplicates exist, so this is inapplicable"* as it is of *"no duplicates, so this is safe"*. The duplicates may be cleaned up before the maintenance window; they may appear after the probe. **Planning proves only that a volatile guard has a valid execution protocol on this engine.** The predicate's *value* belongs to apply, under that protocol, or nowhere.
-
-An early probe still earns its keep — telling someone their plan will fail before they book the window is worth a great deal — but it is an `AdvisoryObservation` (§4b), and it is reported as one.
-
-So the outcomes that concern **execution** are:
-
-| Outcome | Meaning |
-|---|---|
-| `guard-failed` | the predicate did not hold under its protocol — the duplicates were there, the null was there. **Whether anything was applied depends on the protocol's declared failure effects** (§4b): `lock-and-check` leaves nothing; a failed concurrent index build leaves an `INVALID` index that must be recovered |
-| `guard-timeout` | the lock could not be taken within its bound. Nothing was applied for that step |
-| `partially-applied` | earlier steps are in the database; the plan stopped; here is the journal and the re-introspected state |
-| `unknown-step-result` | a step ran and its outcome cannot be established (§5b). Stop; a human decides |
-| `resume-required` | the remaining work is known and can be resumed, from the observed state, under a re-proven context |
-
-**None of the refusals may produce an automatic `DROP` and `CREATE`.** A spurious replacement of an index on a billion-row table can lock, run for hours, destroy planner statistics, or drop a uniqueness guarantee. That is not the safe side of the trade — it is a larger risk wearing safety's clothes.
-
 ### 5b. A guard failing mid-plan is a state, not an exception
 
 A plan is not one statement:
@@ -479,6 +448,37 @@ Three outcomes are therefore about **execution**, not planning, and they belong 
 | `resume-required` | the remaining work is known and can be resumed, from the observed state, under a re-proven context |
 
 A planner that cannot say *"we applied steps 1 and 2, we stopped at 3, and here is exactly where you are"* has not planned anything. It has hoped.
+
+### 6. Outcomes are distinct, because their actions are
+
+Not one enum on one axis. Six outcomes that demand six different things:
+
+| Outcome | Meaning | Action |
+|---|---|---|
+| `proven-applicable` | a rule covers the engine, version, objects, transaction context and dependencies, **and every volatile guard it needs has a valid execution protocol on this engine** | may run — its guards are evaluated at apply time, not now |
+| `proven-inapplicable` | a **durable** precondition is violated: the engine version does not support the operation, the role lacks the privilege, a dependency cannot be satisfied | refuse; report the violating fact |
+| `context-mismatch` | the plan was proven under a context that is no longer the one in force | re-prove |
+| `insufficient-evidence` | equivalence or safety could not be established | refuse; say which obligation is undischarged |
+| `unsupported-transition` | no rule in this adapter knows this change | refuse; do not improvise |
+| `ambiguous-rule` | several rules recognise the change, and nothing declares which wins | refuse; do not let list order decide |
+| `uncomposable` | the rules are individually proven, and their composition is not — conflicting locks, incompatible transaction boundaries, one postcondition invalidating another's evidence | refuse; do not emit them in declaration order and hope |
+| `ambiguous-intent` | several business transformations fit the same end state | refuse; ask for the missing fact |
+
+**Planning never says anything about the data.** It cannot: a predicate over live rows is not a durable fact (§4b), and that is as true of *"duplicates exist, so this is inapplicable"* as it is of *"no duplicates, so this is safe"*. The duplicates may be cleaned up before the maintenance window; they may appear after the probe. **Planning proves only that a volatile guard has a valid execution protocol on this engine.** The predicate's *value* belongs to apply, under that protocol, or nowhere.
+
+An early probe still earns its keep — telling someone their plan will fail before they book the window is worth a great deal — but it is an `AdvisoryObservation` (§4b), and it is reported as one.
+
+So the outcomes that concern **execution** are:
+
+| Outcome | Meaning |
+|---|---|
+| `guard-failed` | the predicate did not hold under its protocol — the duplicates were there, the null was there. **Whether anything was applied depends on the protocol's declared failure effects** (§4b): `lock-and-check` leaves nothing; a failed concurrent index build leaves an `INVALID` index that must be recovered |
+| `guard-timeout` | the lock could not be taken within its bound. Nothing was applied for that step |
+| `partially-applied` | earlier steps are in the database; the plan stopped; here is the journal and the re-introspected state |
+| `unknown-step-result` | a step ran and its outcome cannot be established (§5b). Stop; a human decides |
+| `resume-required` | the remaining work is known and can be resumed, from the observed state, under a re-proven context |
+
+**None of the refusals may produce an automatic `DROP` and `CREATE`.** A spurious replacement of an index on a billion-row table can lock, run for hours, destroy planner statistics, or drop a uniqueness guarantee. That is not the safe side of the trade — it is a larger risk wearing safety's clothes.
 
 ### 6b. The escape hatch, or everything above is optional
 
@@ -572,6 +572,22 @@ ADR 0002 says *"a state diff cannot recover intent"* and concludes that versione
 It is **too strong**: with an identity attached in the database, a rename is provable. It is also **not weak enough**: even with identity, a diff cannot establish transition feasibility — data, locks, privileges, transaction rules — which is what actually decides whether a migration is safe.
 
 ADR 0002's engine analysis — savepoint containment, MySQL's implicit commit, SQLite's `ON CONFLICT ROLLBACK` — stands, and so does its rule: **an adapter declares its recovery primitives and never inherits PostgreSQL's.**
+
+## Two invariants an implementation will be tempted to break
+
+These are the places where the proof graph will quietly be dropped, and dropping it in either one voids everything above.
+
+**1. An empty plan carries a proof graph too.** *"Nothing changed"* is a **claim**, not the absence of one — and it is the strongest claim the system makes, because it is the one on which somebody goes home. It rests on core's diff, equivalence and invalidation semantics, on the evidence those were computed from, and on whatever assumptions those rest on. A `verify` that reports *no drift* and carries no graph has put the system's most consequential verdict **outside the system**.
+
+**2. Policy acceptance does not erase `restsOn`.** A policy decides what is **acceptable**, never what is **true**. When it accepts an assumption class from a trusted rule pack, the assumption stays in the graph — because the entire purpose of writing it down is that, the day `postgresql.pg16.unique-index.effects.v3` is found to have under-declared, you can enumerate every plan that rested on it. A `proven-applicable` that hides the assumptions underneath it is the `destructive: boolean` of this design, resurrected at the last possible moment.
+
+## The residual trusted computing base
+
+Stated once, plainly, so that anyone adopting this design knows exactly what they are being asked to believe:
+
+> **Trust dbsp's core and the rule packs you installed to version, record and faithfully preserve their judgements and the proof graph built on them — and trust the target engine's catalog and DDL behaviour to be the evidence source they claim to be.**
+
+Everything else is proven, or named as an assumption, or refused.
 
 ## The rule
 
