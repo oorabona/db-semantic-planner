@@ -7,7 +7,6 @@
  * @module pgsql-adapter
  */
 
-import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
 	AlterColumnOptions,
 	CreateIndexOptions,
@@ -167,19 +166,31 @@ const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 	'A `SAVEPOINT` you establish inside a dbsp call is released when dbsp releases its own, and dbsp cannot tell you that happened. ' +
 	"Manage your transaction outside dbsp's calls.";
 
-const savepointScopeQueues = new WeakMap<PoolClient, Promise<void>>();
-const activeSavepointScopeClients = new AsyncLocalStorage<
-	ReadonlySet<PoolClient>
->();
+const ABORTED_COMMIT_MESSAGE =
+	'PostgreSQL returned ROLLBACK for COMMIT. The transaction was already aborted, no changes were committed, and dbsp is reporting that failed commit explicitly.';
+
+const SAVEPOINT_SCOPE_BUSY_MESSAGE =
+	'Cannot start another dbsp savepoint scope on this PostgreSQL connection because one is already active. Savepoint scopes are single-flight per connection; await the active dbsp operation before starting another.';
+
+const SAVEPOINT_SCOPE_OWNER_MESSAGE =
+	'This PostgreSQL connection is currently inside a dbsp-managed scope owned by another transaction adapter. Use the transaction adapter passed to the callback instead of an ancestor adapter.';
+
+type DbspClientScopeKind =
+	| 'transaction'
+	| 'transaction-savepoint'
+	| 'statement-savepoint';
+
+type DbspClientScope = {
+	readonly kind: DbspClientScopeKind;
+	readonly owner: PgsqlAdapter<unknown>;
+	readonly parent?: DbspClientScope;
+};
+
+const activeClientScopes = new WeakMap<PoolClient, DbspClientScope>();
 
 type CleanupFailureError = AggregateError & {
 	readonly cleanupError: unknown;
 	readonly originalError?: unknown;
-};
-
-type SavepointHandle = {
-	readonly client: PoolClient;
-	readonly name: string;
 };
 
 export class PgsqlRawSqlTransactionControlError extends Error {
@@ -188,6 +199,15 @@ export class PgsqlRawSqlTransactionControlError extends Error {
 	constructor(cause: unknown) {
 		super(RAW_SQL_TRANSACTION_CONTROL_MESSAGE, { cause });
 		this.name = 'PgsqlRawSqlTransactionControlError';
+	}
+}
+
+export class PgsqlTransactionAbortedCommitError extends Error {
+	readonly dbspTransactionAbortedCommit = true;
+
+	constructor(cause: unknown) {
+		super(ABORTED_COMMIT_MESSAGE, { cause });
+		this.name = 'PgsqlTransactionAbortedCommitError';
 	}
 }
 
@@ -209,27 +229,6 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 function nextSavepointName(): string {
 	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
 	return `dbsp_savepoint_${savepointCounter}`;
-}
-
-async function acquireSavepointScopeQueue(
-	client: PoolClient,
-): Promise<() => void> {
-	const previous = savepointScopeQueues.get(client) ?? Promise.resolve();
-	let releaseCurrent!: () => void;
-	const current = new Promise<void>((resolve) => {
-		releaseCurrent = resolve;
-	});
-	const tail = previous.catch(() => undefined).then(() => current);
-	savepointScopeQueues.set(client, tail);
-
-	await previous.catch(() => undefined);
-
-	return () => {
-		releaseCurrent();
-		if (savepointScopeQueues.get(client) === tail) {
-			savepointScopeQueues.delete(client);
-		}
-	};
 }
 
 function describeThrown(error: unknown): string {
@@ -1852,8 +1851,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				await client.query('BEGIN');
 				begun = true;
 				yield* adapter.streamWithClient<T>(client, query, chunkSize);
-				await client.query('COMMIT');
+				const commitResult = await client.query('COMMIT');
 				committed = true;
+				adapter.assertCommitSucceeded(commitResult);
 			} catch (error) {
 				streamFailed = true;
 				if (begun && !committed) {
@@ -1941,8 +1941,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		query: CompiledQuery<T>,
 		chunkSize: number,
 	): AsyncIterableIterator<T> {
-		yield* this.streamWithSerializedSavepointScope(client, () =>
-			this.streamWithManagedClientSavepointScope<T>(client, query, chunkSize),
+		if (this.adapterManagedTransaction) {
+			this.assertCanUseClient(client);
+			yield* this.streamWithClient<T>(client, query, chunkSize);
+			return;
+		}
+		yield* this.streamWithManagedClientSavepointScope<T>(
+			client,
+			query,
+			chunkSize,
 		);
 	}
 
@@ -1952,9 +1959,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		chunkSize: number,
 	): AsyncIterableIterator<T> {
 		const savepointName = nextSavepointName();
+		const releaseScope = this.enterSavepointScope(client, this, 'statement');
 		try {
 			await client.query(`SAVEPOINT ${savepointName}`);
 		} catch (error) {
+			releaseScope();
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
 				yield* this.streamWithClientTransaction(client, query, chunkSize);
 				return;
@@ -1971,28 +1980,36 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			streamError = error;
 			throw error;
 		} finally {
-			if (completed) {
-				await client.query(`RELEASE SAVEPOINT ${savepointName}`);
-			} else {
-				try {
-					await this.rollbackAndReleaseSavepoint(client, savepointName);
-				} catch (cleanupErr) {
-					if (streamError !== undefined) {
+			try {
+				if (completed) {
+					try {
+						await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+					} catch (releaseErr) {
+						raise(new PgsqlRawSqlTransactionControlError(releaseErr));
+					}
+				} else {
+					try {
+						await this.rollbackAndReleaseSavepoint(client, savepointName);
+					} catch (cleanupErr) {
+						if (streamError !== undefined) {
+							raise(
+								createCleanupFailureError(
+									'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream failed',
+									streamError,
+									cleanupErr,
+								),
+							);
+						}
 						raise(
-							createCleanupFailureError(
-								'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream failed',
-								streamError,
+							createCleanupOnlyError(
+								'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream was closed early',
 								cleanupErr,
 							),
 						);
 					}
-					raise(
-						createCleanupOnlyError(
-							'PostgreSQL stream cleanup failed: savepoint cleanup failed after the stream was closed early',
-							cleanupErr,
-						),
-					);
 				}
+			} finally {
+				releaseScope();
 			}
 		}
 	}
@@ -2006,12 +2023,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let committed = false;
 		let streamFailed = false;
 		let cleanupErrorToThrow: unknown;
+		let releaseScope: (() => void) | undefined;
 		try {
 			await client.query('BEGIN');
 			begun = true;
+			releaseScope = this.enterTransactionScope(client, this);
 			yield* this.streamWithClient<T>(client, query, chunkSize);
-			await client.query('COMMIT');
+			const commitResult = await client.query('COMMIT');
 			committed = true;
+			this.assertCommitSucceeded(commitResult);
 		} catch (error) {
 			streamFailed = true;
 			if (begun && !committed) {
@@ -2037,6 +2057,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					);
 				}
 			}
+			releaseScope?.();
 			if (cleanupErrorToThrow !== undefined) {
 				raise(cleanupErrorToThrow);
 			}
@@ -2120,9 +2141,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		fn: (adapter: Adapter<DB>) => Promise<T>,
 	): Promise<T> {
-		return this.withSerializedSavepointScope(client, () =>
-			this.transactionWithManagedClientSavepointScope(client, fn),
-		);
+		return this.transactionWithManagedClientSavepointScope(client, fn);
 	}
 
 	private async transactionWithManagedClientSavepointScope<T>(
@@ -2130,19 +2149,29 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		fn: (adapter: Adapter<DB>) => Promise<T>,
 	): Promise<T> {
 		const savepointName = nextSavepointName();
+		const txAdapter = this.createManagedClientAdapter(client);
+		const releaseScope = this.enterSavepointScope(
+			client,
+			txAdapter,
+			'transaction',
+		);
 		try {
 			await client.query(`SAVEPOINT ${savepointName}`);
 		} catch (error) {
+			releaseScope();
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
 				return this.transactionWithClientTransaction(client, fn);
 			}
 			throw error;
 		}
 
-		const txAdapter = this.createManagedClientAdapter(client);
 		try {
 			const result = await fn(txAdapter);
-			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+			try {
+				await client.query(`RELEASE SAVEPOINT ${savepointName}`);
+			} catch (releaseErr) {
+				throw new PgsqlRawSqlTransactionControlError(releaseErr);
+			}
 			return result;
 		} catch (error) {
 			if (isRawSqlTransactionControlError(error)) {
@@ -2158,6 +2187,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 			}
 			throw error;
+		} finally {
+			releaseScope();
 		}
 	}
 
@@ -2167,13 +2198,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): Promise<T> {
 		let begun = false;
 		let committed = false;
+		let releaseScope: (() => void) | undefined;
 		try {
 			await client.query('BEGIN');
 			begun = true;
 			const txAdapter = this.createManagedClientAdapter(client);
+			releaseScope = this.enterTransactionScope(client, txAdapter);
 			const result = await fn(txAdapter);
-			await client.query('COMMIT');
+			const commitResult = await client.query('COMMIT');
 			committed = true;
+			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
 			if (begun && !committed) {
@@ -2188,6 +2222,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 			}
 			throw error;
+		} finally {
+			releaseScope?.();
 		}
 	}
 
@@ -2207,64 +2243,75 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 	}
 
-	private async withSerializedSavepointScope<T>(
+	private enterTransactionScope(
 		client: PoolClient,
-		action: () => Promise<T>,
-	): Promise<T> {
-		const activeClients = activeSavepointScopeClients.getStore();
-		if (activeClients?.has(client)) {
-			return action();
+		owner: PgsqlAdapter<DB>,
+	): () => void {
+		const current = activeClientScopes.get(client);
+		if (current !== undefined) {
+			if (current.owner !== this) {
+				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
+			}
+			throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
 		}
+		return this.pushClientScope(client, {
+			kind: 'transaction',
+			owner: owner as PgsqlAdapter<unknown>,
+		});
+	}
 
-		const releaseQueue = await acquireSavepointScopeQueue(client);
-		const nextActiveClients = new Set(activeClients);
-		nextActiveClients.add(client);
-		try {
-			return await activeSavepointScopeClients.run(nextActiveClients, action);
-		} finally {
-			releaseQueue();
+	private enterSavepointScope(
+		client: PoolClient,
+		owner: PgsqlAdapter<DB>,
+		purpose: 'statement' | 'transaction',
+	): () => void {
+		const current = activeClientScopes.get(client);
+		if (current !== undefined) {
+			if (current.owner !== this) {
+				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
+			}
+			if (purpose !== 'transaction' || current.kind === 'statement-savepoint') {
+				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
+			}
+		}
+		return this.pushClientScope(client, {
+			kind:
+				purpose === 'transaction'
+					? 'transaction-savepoint'
+					: 'statement-savepoint',
+			owner: owner as PgsqlAdapter<unknown>,
+			...(current !== undefined && { parent: current }),
+		});
+	}
+
+	private pushClientScope(
+		client: PoolClient,
+		scope: DbspClientScope,
+	): () => void {
+		activeClientScopes.set(client, scope);
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			if (activeClientScopes.get(client) !== scope) return;
+			if (scope.parent !== undefined) {
+				activeClientScopes.set(client, scope.parent);
+				return;
+			}
+			activeClientScopes.delete(client);
+		};
+	}
+
+	private assertCanUseClient(client: PoolClient): void {
+		const current = activeClientScopes.get(client);
+		if (current !== undefined && current.owner !== this) {
+			throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 		}
 	}
 
-	private async *streamWithSerializedSavepointScope<T>(
-		client: PoolClient,
-		action: () => AsyncIterableIterator<T>,
-	): AsyncIterableIterator<T> {
-		const activeClients = activeSavepointScopeClients.getStore();
-		if (activeClients?.has(client)) {
-			yield* action();
-			return;
-		}
-
-		const releaseQueue = await acquireSavepointScopeQueue(client);
-		const nextActiveClients = new Set(activeClients);
-		nextActiveClients.add(client);
-		const iterator = activeSavepointScopeClients.run(nextActiveClients, () =>
-			action()[Symbol.asyncIterator](),
-		);
-		let completed = false;
-		try {
-			while (true) {
-				const next = await activeSavepointScopeClients.run(
-					nextActiveClients,
-					() => iterator.next(),
-				);
-				if (next.done === true) {
-					completed = true;
-					return;
-				}
-				yield next.value;
-			}
-		} finally {
-			try {
-				if (!completed && iterator.return !== undefined) {
-					await activeSavepointScopeClients.run(nextActiveClients, () =>
-						iterator.return?.(),
-					);
-				}
-			} finally {
-				releaseQueue();
-			}
+	private assertCommitSucceeded(result: QueryResult): void {
+		if (result.command === 'ROLLBACK') {
+			throw new PgsqlTransactionAbortedCommitError(result);
 		}
 	}
 
@@ -2360,48 +2407,69 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters?: readonly unknown[],
 	): Promise<QueryResult> {
+		if (this.adapterManagedTransaction) {
+			return this.executeQuery(sql, parameters);
+		}
 		if (this.client) {
-			return this.withSerializedSavepointScope(this.client, () =>
-				this.executeQueryProtectingOpenTransactionInScope(sql, parameters),
+			return this.executeQueryProtectingBorrowedClientTransaction(
+				this.client,
+				sql,
+				parameters,
 			);
 		}
-		return this.executeQueryProtectingOpenTransactionInScope(sql, parameters);
+		return this.executeQuery(sql, parameters);
 	}
 
-	private async executeQueryProtectingOpenTransactionInScope(
+	private async executeQueryProtectingBorrowedClientTransaction(
+		client: PoolClient,
 		sql: string,
 		parameters?: readonly unknown[],
 	): Promise<QueryResult> {
-		const executor = this.requireConnection();
-		const savepoint = await this.openRawSqlSavepointIfInTransaction();
-		if (savepoint === undefined) {
-			return this.queryExecutor(executor, sql, parameters);
+		const savepointName = nextSavepointName();
+		const releaseScope = this.enterSavepointScope(client, this, 'statement');
+		try {
+			await client.query(`SAVEPOINT ${savepointName}`);
+		} catch (error) {
+			releaseScope();
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				return this.queryExecutor(client, sql, parameters);
+			}
+			throw error;
 		}
 
 		let result: QueryResult;
 		try {
-			result = await this.queryExecutor(executor, sql, parameters);
+			result = await this.queryExecutor(client, sql, parameters);
 		} catch (error) {
 			try {
-				await this.rollbackAndReleaseSavepoint(
-					savepoint.client,
-					savepoint.name,
-				);
+				await this.rollbackAndReleaseSavepoint(client, savepointName);
 			} catch (cleanupErr) {
 				throw createCleanupFailureError(
 					'PostgreSQL raw SQL cleanup failed: savepoint cleanup failed after PostgreSQL rejected the statement',
 					error,
 					cleanupErr,
 				);
+			} finally {
+				releaseScope();
 			}
 			throw addRawSqlTransactionContext(error);
 		}
 		try {
-			await savepoint.client.query(`RELEASE SAVEPOINT ${savepoint.name}`);
+			await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 		} catch (releaseErr) {
 			throw new PgsqlRawSqlTransactionControlError(releaseErr);
+		} finally {
+			releaseScope();
 		}
 		return result;
+	}
+
+	private async executeQuery(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<QueryResult> {
+		const executor = this.requireConnection();
+		return this.queryExecutor(executor, sql, parameters);
 	}
 
 	private async queryExecutor(
@@ -2409,33 +2477,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		sql: string,
 		parameters: readonly unknown[] | undefined,
 	): Promise<QueryResult> {
+		if (isPoolClientLike(executor)) {
+			this.assertCanUseClient(executor);
+		}
 		if (parameters === undefined) {
 			return executor.query(sql);
 		}
 		return executor.query(sql, [...parameters]);
-	}
-
-	private async openRawSqlSavepointIfInTransaction(): Promise<
-		SavepointHandle | undefined
-	> {
-		const client = this.client;
-		if (!client) return undefined;
-
-		const savepointName = nextSavepointName();
-		if (this.inTransaction) {
-			await client.query(`SAVEPOINT ${savepointName}`);
-			return { client, name: savepointName };
-		}
-
-		try {
-			await client.query(`SAVEPOINT ${savepointName}`);
-		} catch (error) {
-			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				return undefined;
-			}
-			throw error;
-		}
-		return { client, name: savepointName };
 	}
 
 	/**

@@ -22,6 +22,7 @@ import {
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
 	PgsqlRawSqlTransactionControlError,
+	PgsqlTransactionAbortedCommitError,
 } from '../pgsql-adapter.js';
 
 const TRANSACTION_CONTROL_BOUNDARY =
@@ -160,6 +161,39 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		expect(txClient.release).toHaveBeenCalledOnce();
 	});
 
+	it('throws when COMMIT reports that PostgreSQL rolled the transaction back', async () => {
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'COMMIT') {
+				return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: sql } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('SELECT 1');
+			}),
+		);
+
+		expect(error).toBeInstanceOf(PgsqlTransactionAbortedCommitError);
+		expect((error as Error).name).toBe('PgsqlTransactionAbortedCommitError');
+		expect((error as Error).message).toContain('returned ROLLBACK for COMMIT');
+		expect((error as Error).cause).toEqual({
+			rows: [],
+			rowCount: 0,
+			command: 'ROLLBACK',
+		});
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			'BEGIN',
+			'SELECT 1',
+			'COMMIT',
+		]);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
 	it('releases client even after COMMIT', async () => {
 		const txClient = makeClient();
 		const pool = makePool({ rows: [] }, txClient);
@@ -270,6 +304,150 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 });
 
 // ---------------------------------------------------------------------------
+// transaction() — nested savepoint contract
+// ---------------------------------------------------------------------------
+
+describe('PgsqlAdapter.transaction — nested savepoints', () => {
+	it('opens a savepoint for nested transaction() and releases it on success', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async (tx) => {
+			await tx.executeRaw('SELECT outer');
+			await tx.transaction(async (inner) => {
+				await inner.executeRaw('SELECT inner');
+			});
+			await tx.executeRaw('SELECT after');
+		});
+
+		const calls = (txClient.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			'BEGIN',
+			'SELECT outer',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT inner',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'SELECT after',
+			'COMMIT',
+		]);
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+	});
+
+	it('rolls back to and releases the nested savepoint on failure', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const boom = new Error('inner boom');
+
+		await expect(
+			adapter.transaction(async (tx) => {
+				await tx.transaction(async (inner) => {
+					await inner.executeRaw('SELECT inner');
+					throw boom;
+				});
+			}),
+		).rejects.toBe(boom);
+
+		const calls = (txClient.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			'BEGIN',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT inner',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'ROLLBACK',
+		]);
+	});
+
+	it('lets a caught nested failure leave the outer transaction usable', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const boom = new Error('inner rollback');
+
+		await adapter.transaction(async (tx) => {
+			await tx.executeRaw('INSERT outer');
+			await expect(
+				tx.transaction(async (inner) => {
+					await inner.executeRaw('INSERT inner');
+					throw boom;
+				}),
+			).rejects.toBe(boom);
+			await tx.executeRaw('SELECT outer still usable');
+		});
+
+		const calls = (txClient.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			'BEGIN',
+			'INSERT outer',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'INSERT inner',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'SELECT outer still usable',
+			'COMMIT',
+		]);
+	});
+
+	it('throws instead of interleaving two concurrent nested transactions on one scope', async () => {
+		const firstStatementStarted = deferred();
+		const releaseFirstStatement = deferred();
+		const calls: string[] = [];
+		const query = vi.fn(async (sql: string) => {
+			calls.push(sql);
+			if (sql === 'SELECT first nested') {
+				firstStatementStarted.resolve();
+				await releaseFirstStatement.promise;
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async (tx) => {
+			const first = tx.transaction(async (inner) => {
+				await inner.executeRaw('SELECT first nested');
+			});
+			await firstStatementStarted.promise;
+
+			const secondError = await captureRejection(() =>
+				tx.transaction(async (inner) => {
+					await inner.executeRaw('SELECT second nested');
+				}),
+			);
+			expect(secondError).toBeInstanceOf(Error);
+			expect((secondError as Error).message).toContain(
+				'transaction adapter passed to the callback',
+			);
+
+			releaseFirstStatement.resolve();
+			await first;
+		});
+
+		expect(calls).toEqual([
+			'BEGIN',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first nested',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'COMMIT',
+		]);
+		expect(calls).not.toContain('SELECT second nested');
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+		expect(calls.filter((sql) => /^RELEASE SAVEPOINT /.test(sql))).toHaveLength(
+			1,
+		);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // transaction() — borrowed client contract
 // ---------------------------------------------------------------------------
 
@@ -306,6 +484,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
 			(c) => c[0] as string,
 		);
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
 		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
 		expect(calls).toContain('SELECT 1');
 		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
@@ -333,6 +512,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			(c) => c[0] as string,
 		);
 		expect(calls).toContain('INSERT INTO t VALUES (1)');
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
 		expect(calls.some((sql) => /^ROLLBACK TO SAVEPOINT /.test(sql))).toBe(true);
 		expect(calls).not.toContain('ROLLBACK');
 	});
@@ -422,7 +602,6 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(error).not.toBeInstanceOf(AggregateError);
 		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'COMMIT',
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
@@ -453,7 +632,6 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expectRawSqlTransactionControlError(error, releaseError);
 		expect(error).not.toBeInstanceOf(AggregateError);
 		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'COMMIT',
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
@@ -487,13 +665,92 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 		const calls = query.mock.calls.map((c) => c[0] as string);
 		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls.slice(1)).toEqual([
-			'BEGIN',
+		expect(calls.slice(1)).toEqual(['BEGIN', 'SELECT 1', 'COMMIT']);
+	});
+
+	it('throws instead of hanging when the ancestor adapter is used inside the transaction callback', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await expect(
+			adapter.transaction(async () => {
+				await adapter.executeRaw('SELECT through ancestor');
+			}),
+		).rejects.toThrow(/transaction adapter passed to the callback/);
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			'SELECT 1',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-			'COMMIT',
 		]);
+		expect(calls).not.toContain('SELECT through ancestor');
+		expect(client.release).not.toHaveBeenCalled();
+	}, 500);
+
+	it('does not take per-statement savepoints for concurrent work inside a managed borrowed transaction', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await adapter.transaction(async (tx) => {
+			await Promise.all([
+				tx.executeRaw('SELECT first'),
+				tx.executeRaw('SELECT second'),
+			]);
+		});
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first',
+			'SELECT second',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rolls back the managed scope when one concurrent statement fails without per-statement savepoints', async () => {
+		const pgError = new Error('statement failed');
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'SELECT fail') throw pgError;
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await expect(
+			adapter.transaction(async (tx) => {
+				await Promise.all([
+					tx.executeRaw('SELECT ok'),
+					tx.executeRaw('SELECT fail'),
+				]);
+			}),
+		).rejects.toBe(pgError);
+
+		const calls = query.mock.calls.map((c) => c[0] as string);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT ok',
+			'SELECT fail',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 });
 
@@ -855,8 +1112,8 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 	});
 });
 
-describe('PgsqlAdapter borrowed-client savepoint serialization', () => {
-	it('serializes overlapping savepoint-protected operations on the same client', async () => {
+describe('PgsqlAdapter borrowed-client savepoint scope guard', () => {
+	it('refuses overlapping savepoint-protected operations on the same client', async () => {
 		const firstSqlStarted = deferred();
 		const releaseFirstSql = deferred();
 		const calls: string[] = [];
@@ -878,32 +1135,31 @@ describe('PgsqlAdapter borrowed-client savepoint serialization', () => {
 		const first = adapter.executeRaw<{ value: number }>('SELECT first');
 		await firstSqlStarted.promise;
 
-		const second = adapter.execute<{ value: number }>({
-			sql: 'SELECT second',
-			parameters: [],
-		});
-		await Promise.resolve();
-		await Promise.resolve();
+		const secondError = await captureRejection(() =>
+			adapter.execute<{ value: number }>({
+				sql: 'SELECT second',
+				parameters: [],
+			}),
+		);
 
+		expect(secondError).toBeInstanceOf(Error);
+		expect((secondError as Error).message).toContain(
+			'Savepoint scopes are single-flight per connection',
+		);
 		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'SELECT first',
 		]);
 
 		releaseFirstSql.resolve();
-		await expect(Promise.all([first, second])).resolves.toEqual([
-			[{ value: 1 }],
-			[{ value: 2 }],
-		]);
+		await expect(first).resolves.toEqual([{ value: 1 }]);
 
 		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'SELECT first',
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			'SELECT second',
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
+		expect(calls).not.toContain('SELECT second');
 		expect(client.release).not.toHaveBeenCalled();
 	});
 });
@@ -1109,6 +1365,74 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
 		expect(calls).not.toContain('BEGIN');
 		expect(calls).not.toContain('COMMIT');
+	});
+
+	it('does not take per-cursor savepoints for concurrent streams inside a managed borrowed transaction', async () => {
+		const cursorKinds = new Map<string, 'first' | 'second'>();
+		const fetchCounts = new Map<string, number>();
+		const query = vi.fn(async (sql: string) => {
+			const declare =
+				/^DECLARE (\S+) NO SCROLL CURSOR FOR SELECT (first|second)$/.exec(sql);
+			if (declare) {
+				cursorKinds.set(declare[1]!, declare[2] as 'first' | 'second');
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}
+
+			const fetch = /^FETCH FORWARD 1 FROM (\S+)$/.exec(sql);
+			if (fetch) {
+				const cursor = fetch[1]!;
+				const count = fetchCounts.get(cursor) ?? 0;
+				fetchCounts.set(cursor, count + 1);
+				if (count > 0) {
+					return { rows: [], rowCount: 0 } as QueryResult;
+				}
+				return {
+					rows: [{ stream: cursorKinds.get(cursor) }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const collect = async (
+			iterable: AsyncIterable<{ stream: string }>,
+		): Promise<string[]> => {
+			const rows: string[] = [];
+			for await (const row of iterable) {
+				rows.push(row.stream);
+			}
+			return rows;
+		};
+
+		const result = await adapter.transaction(async (tx) => {
+			const first = collect(
+				tx.stream<{ stream: string }>(
+					{ sql: 'SELECT first', parameters: [] },
+					{ chunkSize: 1 },
+				),
+			);
+			const second = collect(
+				tx.stream<{ stream: string }>(
+					{ sql: 'SELECT second', parameters: [] },
+					{ chunkSize: 1 },
+				),
+			);
+			return Promise.all([first, second]);
+		});
+
+		expect(result).toEqual([['first'], ['second']]);
+		const calls = query.mock.calls.map((c) => c[0] as string);
+		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+		expect(calls.filter((sql) => /^DECLARE /.test(sql))).toHaveLength(2);
+		expect(calls.filter((sql) => /^CLOSE /.test(sql))).toHaveLength(2);
+		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 
 	it('surfaces savepoint rollback failure when managed borrowed stream setup fails', async () => {
