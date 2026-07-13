@@ -2474,6 +2474,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	/**
 	 * Execute a callback within a database transaction.
+	 *
+	 * ## What this guarantees
+	 *
+	 * The callback's work commits together or not at all; a statement issued inside
+	 * the transaction never executes after its boundary, even if you forget to
+	 * `await` it; a nested `transaction()` is a real savepoint; and the connection
+	 * never goes back to the pool with a transaction still open on it.
+	 *
+	 * ## What it cannot guarantee, and you should know before you reach for raw SQL
+	 *
+	 * **Raw SQL that ends the transaction ends it.** `COMMIT`, `ROLLBACK` and
+	 * `PREPARE TRANSACTION` issued through `executeRaw` — or through several commands
+	 * in one call — reach PostgreSQL and take effect *before* dbsp is told what they
+	 * were: the command tag arrives after the statement has run. dbsp detects it, kills
+	 * the scope so nothing else escapes, and throws — but **it cannot un-run what your
+	 * statement already did**, and `transaction()` rejecting does not mean nothing was
+	 * committed.
+	 *
+	 * The same holds for session state raw SQL creates: a sequence that advanced stays
+	 * advanced, an advisory lock stays held, a `PREPARE` or a `SET` you issued survives
+	 * on a pooled connection. dbsp cleans up only what dbsp created.
+	 *
+	 * This is the contract of an escape hatch, not an oversight — see #327. If you need
+	 * transaction control, own the transaction: take a client, `BEGIN` on it yourself,
+	 * and hand dbsp a `borrowedClient` **without** `managedTransactions`. dbsp will then
+	 * contain its own statements inside *your* transaction instead of the other way round.
 	 */
 	async transaction<T>(fn: (adapter: Adapter<DB>) => Promise<T>): Promise<T> {
 		if (this.client) {
