@@ -1,6 +1,8 @@
 # ADR 0003: dbsp Is a Rule-Based Transition Planner, and Every Plan Carries Its Proof
 
-Status: canonical — accepted without reservation after seven adversarial rounds; eighteen attacks landed and were closed
+Status: Accepted
+
+Decision maturity: the architecture is accepted. The type-level contracts below are the *shape* of the decision, not its final signature — they are subject to validation by implementation, and an eighth objection will not invalidate the decision, only refine the contract.
 
 Supersedes part of [ADR 0002](0002-engine-recovery-primitives.md) — see *Corrections*.
 
@@ -128,7 +130,32 @@ So the operation kinds, their renderers, and their effect calculators are **vers
 
 Every fix to this ADR moved the trust and named where it landed — the rule's declarations, then core's effect calculator. That is a game that cannot be won one square at a time. So the rule, not the instances:
 
-> **Anything in core that produces a *judgement* is a versioned artefact with a stable id, and what it claims is an `Assumption` whose trust root is core.**
+> **Anything that produces a *judgement* is a versioned artefact with a stable id, and what it claims is an `Assumption` whose trust root is that artefact — not the thing that happens to call it.**
+
+**And the trust root is usually not core.** An earlier version of this rule said it was, and that was wrong in a way that would have hollowed out the whole design: if core owns the effect calculators and the renderers for PostgreSQL *and* SQL Server *and* Oracle *and* MySQL *and* every version of each, then **core is the universal SQL generator this architecture exists to avoid** — and a fix for PostgreSQL 17 ships a new SQL Server semantics with it.
+
+The judgements live in **engine-scoped operation packs**, co-versioned as one artefact:
+
+```
+core                          dbsp.postgresql.operations.pg17@4.2.0
+├── orchestration             ├── the structured operations
+├── the claim graph           ├── their renderers
+├── arbitration               ├── effectsOf()
+├── policy                    ├── the invalidation model
+└── the guarded executor      ├── the guard protocols (and their failure effects)
+                              └── the recovery rules
+```
+
+Core handles a **stable envelope** and never looks inside it:
+
+```ts
+interface PhysicalOperation {
+  operationKind: SemanticArtifactId;   // 'dbsp.postgresql.operations.pg17@4.2.0#AddColumn'
+  payload: unknown;                    // core does not read this
+}
+```
+
+So the trust root of an effect claim is `dbsp.postgresql.operations.pg17@4.2.0`, not "core" — and the day that pack is found to have under-declared what `AlterColumnType` invalidates, **every plan that rested on that version can be enumerated, and no other engine is touched.**
 
 A judgement is anything that decides something the design then treats as settled:
 
@@ -182,12 +209,64 @@ interface TransitionRule {
   support: { engine: string; versions: VersionRange[]; requiredCapabilities: string[] };
 
   recognize(current, desired): RecognitionResult;
-  declareRequiredEvidence(input): EvidenceRequirement[];
-  collectEvidence(input, context: ReadOnlyTargetContext): Promise<Evidence[]>;
-  prove(input, evidence): ProofResult;
-  generate(input, evidence): GuardedPlan;
+
+  // A rule REQUESTS observations. It does not collect them, and it cannot mint them.
+  requiredObservations(input): ObservationRequest[];
+
+  evaluate(input, observations: IssuedObservation[]): RuleEvaluation;
+
+  // A rule proposes a FRAGMENT. It does not build the plan.
+  generateCandidate(input, evaluation): TransitionFragment;
 }
 ```
+
+**A rule cannot manufacture its own evidence.** An interface of the shape `collectEvidence(): Promise<Evidence[]>` lets the same extension decide what it needs, run whatever it likes, **construct an object stamped `source: 'system-catalog'` without having queried the catalog**, interpret it, and conclude that it was right. The provenance would be *declared*, not *guaranteed* — and this design's entire claim is that provenance is guaranteed.
+
+So only a controlled component mints an observation:
+
+```ts
+interface ObservationIssuer {
+  execute(request: ObservationRequest, target: TargetConnection): Promise<IssuedObservation>;
+}
+```
+
+and an `IssuedObservation` carries what makes it checkable: the collector's id **and version**, the exact query or operation it ran, the transaction context, the raw result or its digest, when it was taken, and the precise scope it covers. A rule receives these. It never builds one.
+
+**And a rule does not build the plan.** `generate(): GuardedPlan` would let a rule assemble the very thing — ordering, guards, composition — that it is supposed to be *subject to*. It emits a fragment, and the planner composes:
+
+```ts
+interface TransitionFragment {
+  generatedBy: RuleId;
+  operations: PhysicalOperation[];
+  obligations: ProofObligation[];
+  guards: ApplyGuard[];
+  selectionRationale: RuleSelectionRationale;   // why this rule, over the others that matched
+}
+```
+
+```
+fragments → arbitration → effects computed from the concrete operations → the claim graph
+         → composition proof → the GuardedPlan
+```
+
+**Effects belong to the operation, not to the rule.** A static `readSet` on a rule cannot be right: what `AlterColumnType` reads depends on *which column*, and what a `CreateIndex` locks depends on *which expression*. They are computed, per operation, by the operation pack that owns it:
+
+```ts
+interface OperationSemantics {                       // owned by the engine's operation pack
+  effectsOf(operation: PhysicalOperation, context: TargetContext): OperationEffects;
+}
+
+interface OperationEffects {
+  reads: ResourceSelector[];
+  writes: ResourceSelector[];
+  locks: LockRequirement[];
+  invalidates: ClaimSelector[];        // claims, by scope — not "all evidence of kind X"
+  contextMutations: ContextMutation[];
+  externalEffects: ExternalEffectCoverage;   // and what it could NOT account for
+}
+```
+
+`invalidates: EvidenceKind[]` was too coarse: invalidating *every* claim of a type because one object changed is how a planner ends up re-proving the world, or — worse — how it convinces itself that a scoped change had no reach.
 
 A change no rule recognises is `unsupported-transition`. It is **not** a `DROP` and `CREATE`.
 
@@ -230,6 +309,28 @@ interface TransitionRule {
 ```
 
 The **planner** then proves the composition: lock orders are consistent, transaction boundaries are compatible, no step's postcondition invalidates evidence a later step was proven on, and guard phases are satisfiable. If it cannot, the outcome is `uncomposable`, and the plan is refused — it is not silently emitted in declaration order and hoped for.
+
+### 1c. Comparison is ternary, and this is the question the ADR was born from
+
+This document exists because two CHECK constraints would not compare. It is therefore inexcusable that an earlier draft never said what a *comparison* returns.
+
+```
+Blueprint : CHECK (status = 'active')
+Catalogue : CHECK (((status)::text = 'active'::text))
+```
+
+A binary diff must answer `same` or `different`, and both answers are lies. They are almost certainly the same thing, and nothing available can *prove* it. So:
+
+```ts
+type EquivalenceResult =
+  | { kind: 'equivalent'; claim: ClaimId }   // proven, by a named prover, under a recorded context
+  | { kind: 'different';  claim: ClaimId }   // proven different — not merely "not proven equal"
+  | { kind: 'unknown';    obligations: ProofObligation[] };
+```
+
+**`unknown` is not `different`.** It produces **no** candidate transition, no replacement, no `DROP` and `CREATE` — it produces an obligation, and a rule that knows how to discharge it may exist, or may not. This is where the CHECK canonicalisation (#315) lives: it is an *equivalence prover*, and a good one, and it turns some `unknown`s into `equivalent`s. The ones it cannot turn stay `unknown` and stay blocked.
+
+Every expression surface answers this way — CHECK constraints, column defaults, index predicates, index expressions, RLS policies, view bodies, generated columns. Today they answer `different` when they mean `unknown`, and that single lie is what the regexes, the deparser round-trips and the hand-written parser were all built to paper over.
 
 ### 2. The diff stays pure; the prover is separate; apply refuses
 
@@ -394,7 +495,11 @@ Holding a lock across it is exactly what `engine-validated` cannot do. So target
 - or the step carries an explicit **`external-ddl-exclusion` assumption**: *nobody else is changing this schema while we run*. It is an assumption, it is named as one (§0), it taints what depends on it, and a policy decides whether it is acceptable — typically it is, inside a maintenance window, and is not, in a shared production database at noon;
 - or the step is **`impossible`** and blocks.
 
-There is no fourth answer, and the design does not pretend there is.
+Stated as a property rather than a closed list, because a vendor may one day offer a primitive nobody here imagined:
+
+> **A supported protocol must either guarantee stable target binding, or explicitly declare the external-DDL exclusion it depends on. With neither, the transition is blocked.**
+
+A new primitive that satisfies the property is welcome. One that satisfies neither is not a fourth answer — it is the same refusal.
 
 `prove` may still run the probe early — telling a user their plan is going to fail *before* they book a maintenance window is worth a great deal. But its result is an `AdvisoryObservation`, it is typed as one, and it discharges nothing.
 
@@ -432,9 +537,21 @@ Step 3's lock times out. Steps 1 and 2 have run — and on an engine without tra
 
 The executor is a state machine, and it says so:
 
-- it **journals before and after every step** — but the journal is **itself an adapter recovery primitive** ([ADR 0002](0002-engine-recovery-primitives.md)), not a table dbsp assumes it can trust. On PostgreSQL the before-record and the DDL can commit together. On MySQL they cannot: the before-record commits, `ALTER TABLE` **implicitly commits**, and if the process dies there is a durable *"about to run"*, no *"ran"*, and a database that may already hold the change. **A journal that cannot be written atomically with the step it describes is not a proof of what happened.**
+- it **journals**, and the journal is **an adapter recovery primitive** ([ADR 0002](0002-engine-recovery-primitives.md)), not a table dbsp assumes it can trust.
 
-  So: the durable before-record must land *before* the step starts; the journal must live **outside the blast radius** of the plan, or its being inside must be modelled explicitly; a missing after-record yields **`unknown-step-result`**, never an assumed rollback; and resume derives state from **re-introspection plus the adapter's recovery rules**, never from the journal alone. Re-introspection can tell you a column exists. It cannot always distinguish *completed*, *partially completed*, and *completed with side effects the catalog does not show* — a data rewrite, a trigger's writes, an invalid index left behind by an interrupted concurrent build. Where it cannot, the outcome is `unknown-step-result` and the plan stops for a human;
+  An earlier draft asked for two things that cannot both be true of one record in one transaction: *"the before-record and the DDL commit together"* and *"the durable before-record lands before the step starts"*. If it commits with the DDL it was not durable beforehand; if it was durable beforehand it was written in an earlier transaction. **Three events, not one:**
+
+  ```ts
+  interface StepJournal {
+    intent: DurableIntentRecord;                          // committed BEFORE the step, on its own
+    transactionalCompletion?: TransactionalCompletionRecord;  // with the DDL, where the engine allows it
+    observedOutcome?: ObservedOutcomeRecord;              // after re-introspection
+  }
+  ```
+
+  On PostgreSQL: write the intent durably and separately, then run the DDL **and** the completion in one transaction, then record the observation. On MySQL the completion **cannot** be atomic with a DDL that implicitly commits — and the model says so rather than pretending. An external journal moves the problem into distributed consistency; it does not make it atomic, and must not be sold as if it did.
+
+  The journal must live **outside the blast radius** of the plan, or its being inside must be modelled explicitly. A missing completion record yields **`unknown-step-result`**, never an assumed rollback. Resume derives state from **re-introspection plus the adapter's recovery rules**, never from the journal alone: re-introspection can tell you a column exists, but it cannot always distinguish *completed* from *partially completed* from *completed with side effects the catalog does not show* — a data rewrite, a trigger's writes, an INVALID index left by an interrupted concurrent build. Where it cannot, the plan stops for a human;
 - a volatile guard failing **stops the plan**, unless the dependency graph *proves* that the remaining steps are independent of the one that failed. Independence is proven from the read and write sets (§1b), never assumed;
 - after any partial application it **re-introspects**, because the state it must resume from is the one the database is actually in, not the one the plan expected;
 - resuming or replanning uses the **adapter's declared recovery primitives** ([ADR 0002](0002-engine-recovery-primitives.md)) — which is precisely where an engine without transactional DDL cannot promise what PostgreSQL can, and must say so rather than pretend.
@@ -449,9 +566,21 @@ Three outcomes are therefore about **execution**, not planning, and they belong 
 
 A planner that cannot say *"we applied steps 1 and 2, we stopped at 3, and here is exactly where you are"* has not planned anything. It has hoped.
 
-### 6. Outcomes are distinct, because their actions are
+### 6. Outcomes are several axes, because a plan is several things at once
 
-Not one enum on one axis. Six outcomes that demand six different things:
+An earlier draft of this section opened with *"not one enum on one axis"* — and then produced one enum. A plan can be, **simultaneously**: accepted under assumptions, partially applied, stopped on a failed guard, and resumable. Those are not alternatives, and forcing them into one word would make `proven-applicable` the new `destructive: boolean` — the exact compression this document exists to destroy, reappearing in the document that destroys it.
+
+```ts
+interface PlanAssessment {
+  decision:     'applicable' | 'inapplicable' | 'blocked';
+  assurance:    'established' | 'accepted-under-assumptions' | 'unproven';
+  lifecycle:    'planned' | 'running' | 'completed' | 'partially-applied' | 'outcome-unknown';
+  continuation: 'none' | 'resume-possible' | 'replan-required' | 'human-intervention-required';
+  reasons:      OutcomeReason[];      // and every one of them names its claim
+}
+```
+
+The reasons below are the vocabulary those axes are built from — not a single verdict to choose between:
 
 | Outcome | Meaning | Action |
 |---|---|---|
@@ -589,9 +718,42 @@ Stated once, plainly, so that anyone adopting this design knows exactly what the
 
 Everything else is proven, or named as an assumption, or refused.
 
+## Four contracts the shape above still owes an implementation
+
+These are known, and they are what "the type contracts are subject to validation by implementation" means.
+
+**The proof graph must actually be a graph.** `{ evidence, restsOn }` cannot say *what was proven*, *which other claims it was derived from*, *by which inference*, or *under which semantic artefacts* — and a pre-flattened `restsOn` denormalises the very thing whose causal path you will need to walk. A claim carries its `proposition`, its `scope`, its `derivedFrom: ClaimId[]`, its `supportedBy`, its `assumes`, the `semantics` that produced it, and a conclusion of `established | established-under-assumptions | undischarged | refuted`. That is what makes *"which plans does a defect in `effectsOf@v3` invalidate?"* a query rather than an archaeology.
+
+**"Durable evidence versus volatile guard" is too binary.** The instinct is right and the line is in the wrong place: privileges change, extensions are upgraded, a function is replaced, an object is renamed, a rehearsal is *already* historical the moment it finishes, and the catalog can change immediately after it is read. The real criterion is not *data or not-data* — it is the **validity protocol** of the observation:
+
+```ts
+stability: 'connection-constant' | 'session-bound' | 'transaction-snapshot'
+         | 'lock-protected' | 'externally-mutable' | 'historical-only'
+```
+
+An observation of the data *is* legitimate for preflight and estimation. What it cannot do, alone, is discharge an obligation about a *future* execution. And `rehearsal` is `historical-only` — it belongs with the advisory observations, not with the durable evidence.
+
+**An opaque expression must not be able to leave its syntactic slot.** `CheckExpression { sql: string }` carrying an unexamined fragment is not merely *unanalysed* — it can close the parenthesis and append a statement. Widening the read set does nothing about that. So an expression value is one of `PortableExpression | VendorValidatedExpression | UnsafeNativeFragment`, where **vendor-validated** means the engine's *own* parser or validator confirmed it for a specific grammatical category — a scalar expression, a predicate, a qualified name — and an `UnsafeNativeFragment` stays an explicit assumption in the graph and is never presented as a fully structured operation.
+
+This also sharpens the standing rule, which was stated too broadly. **Core implements no universal or hand-rolled SQL grammar** — that ban stands, and it is what `parseExpressionsList()` violated. But an adapter *may* use the engine's own parser or validator, with explicit provenance, because that is not guessing: it is asking. Refusing that would forbid the one authority that can actually answer.
+
+**A fingerprint must keep its manifest.** `contextFingerprint: string` alone is a bucket, and this document knows what buckets do. The digest is for fast comparison; the manifest is what makes it auditable, explainable, invalidatable, reproducible — and, above all, what lets you see **what the fingerprint forgot**:
+
+```ts
+interface FingerprintManifest {
+  algorithm: string;
+  semanticModel: SemanticArtifactRef;      // the versioned model that decided what belongs here
+  includedFacts: ContextFact[];
+  excludedOrUnknownFacts: UnknownCoverage[];   // ← the field that will save someone
+  digest: string;
+}
+```
+
 ## The rule
 
-> **Never compress a semantic fact into a string, a boolean, a phase number, or a bucket name and expect to recover it later.**
+An earlier version of this said: *"never compress a semantic fact into a string, a boolean, a phase number, or a bucket name."* Taken literally, this document violates it on every page — it uses string ids, string versions, string digests, and SQL. The rule it was actually reaching for is narrower and harder to argue with:
+
+> **Never let a scalar or lossy representation be the *sole source* of a decision whose structure, provenance or scope will be needed downstream.**
 >
 > **State the claim. State what would prove it. Discharge it against a recorded context, or refuse to act.**
 >
