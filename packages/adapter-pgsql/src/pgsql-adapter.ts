@@ -243,7 +243,9 @@ type DbspChildTransaction = {
 
 type DbspChildTransactionObserver = {
 	observed: boolean;
-	child: DbspChildTransaction | undefined;
+	child: DbspChildTransaction;
+	parentChildren: DbspScopeChildren;
+	release: (failure?: DbspScopeFailure) => void;
 };
 
 type DbspScopePoison = {
@@ -2642,8 +2644,40 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private createChildTransactionObserver():
 		| DbspChildTransactionObserver
 		| undefined {
-		if (this.scopeState === undefined) return undefined;
-		return { observed: false, child: undefined };
+		if (!this.adapterManagedScopeIsLive()) return undefined;
+		const parentChildren = this.scopeState?.children;
+		if (parentChildren === undefined) return undefined;
+
+		let resolveSettled!: () => void;
+		const settledPromise = new Promise<void>((resolve) => {
+			resolveSettled = resolve;
+		});
+		const child: DbspChildTransaction = {
+			observed: false,
+			failure: undefined,
+			settled: false,
+			settledPromise,
+			resolveSettled,
+		};
+		parentChildren.open++;
+		parentChildren.transactions.add(child);
+
+		let released = false;
+		const release = (failure?: DbspScopeFailure) => {
+			if (released) return;
+			released = true;
+			if (failure !== undefined && child.failure === undefined) {
+				child.failure = failure;
+				if (!child.observed && parentChildren.failure === undefined) {
+					parentChildren.failure = failure;
+				}
+			}
+			parentChildren.open--;
+			child.settled = true;
+			child.resolveSettled();
+		};
+
+		return { observed: false, child, parentChildren, release };
 	}
 
 	private observeChildTransaction<T>(
@@ -2667,11 +2701,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (observer.observed) return;
 		observer.observed = true;
 		const child = observer.child;
-		if (child === undefined) return;
 		child.observed = true;
-		const parentChildren = this.scopeState?.children;
+		const parentChildren = observer.parentChildren;
 		if (
-			parentChildren !== undefined &&
 			child.failure !== undefined &&
 			parentChildren.failure === child.failure
 		) {
@@ -2714,13 +2746,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			scopeToken,
 			scopeState,
 		);
-		const releaseScope = this.enterSavepointScope(
-			client,
-			scopeToken,
-			scopeState,
-			'transaction',
-			childObserver,
-		);
+		let releaseScope: (failure?: DbspScopeFailure) => void;
+		try {
+			releaseScope = this.enterSavepointScope(
+				client,
+				scopeToken,
+				scopeState,
+				'transaction',
+				childObserver,
+			);
+		} catch (error) {
+			childObserver?.release({ error });
+			throw error;
+		}
 		let scopeFailure: DbspScopeFailure | undefined;
 		try {
 			await this.executeConnectionStatement(
@@ -2884,7 +2922,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await this.drainScopeChildren(scopeState);
 			throw transactionError;
 		} finally {
-			releaseScope?.(scopeFailure);
+			if (releaseScope === undefined) {
+				if (scopeFailure !== undefined) {
+					childObserver?.release(scopeFailure);
+				}
+			} else {
+				releaseScope(scopeFailure);
+			}
 		}
 	}
 
@@ -3145,12 +3189,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 
-		return this.classifySavepointReleaseFailure(
-			client,
-			allowedScopeToken,
-			releaseErr,
-			cleanupAction,
-		);
+		try {
+			await this.releaseSavepoint(
+				client,
+				savepointName,
+				allowedScopeToken,
+				scopeState,
+			);
+		} catch (releaseAfterRollbackErr) {
+			return createCleanupFailureError(
+				`${cleanupAction}; RELEASE SAVEPOINT also failed after ROLLBACK TO SAVEPOINT and the caller transaction may now be in an unknown state`,
+				releaseErr,
+				releaseAfterRollbackErr,
+			);
+		}
+
+		return createCleanupOnlyError(cleanupAction, releaseErr);
 	}
 
 	private enterTransactionScope(
@@ -3247,31 +3301,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		childObserver?: DbspChildTransactionObserver,
 	): (failure?: DbspScopeFailure) => void {
 		const stack = activeClientScopes.get(client);
-		const parentScope = stack?.at(-1);
-		const parentChildren = parentScope?.state.children;
-		const child: DbspChildTransaction | undefined =
-			parentChildren !== undefined && scope.kind === 'transaction-savepoint'
-				? (() => {
-						let resolveSettled!: () => void;
-						const settledPromise = new Promise<void>((resolve) => {
-							resolveSettled = resolve;
-						});
-						return {
-							observed: childObserver?.observed ?? false,
-							failure: undefined,
-							settled: false,
-							settledPromise,
-							resolveSettled,
-						};
-					})()
-				: undefined;
-		if (parentChildren !== undefined && child !== undefined) {
-			parentChildren.open++;
-			parentChildren.transactions.add(child);
-			if (childObserver !== undefined) {
-				childObserver.child = child;
-			}
-		}
 		if (stack === undefined) {
 			activeClientScopes.set(client, [scope]);
 		} else {
@@ -3281,17 +3310,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return (failure?: DbspScopeFailure) => {
 			if (released) return;
 			released = true;
-			if (
-				parentChildren !== undefined &&
-				child !== undefined &&
-				failure !== undefined &&
-				child.failure === undefined
-			) {
-				child.failure = failure;
-				if (!child.observed && parentChildren.failure === undefined) {
-					parentChildren.failure = failure;
-				}
-			}
 			try {
 				const currentStack = activeClientScopes.get(client);
 				if (currentStack === undefined) return;
@@ -3302,11 +3320,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					activeClientScopes.delete(client);
 				}
 			} finally {
-				if (parentChildren !== undefined && child !== undefined) {
-					parentChildren.open--;
-					child.settled = true;
-					child.resolveSettled();
-				}
+				childObserver?.release(failure);
 			}
 		};
 	}
@@ -3638,9 +3652,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * @since DDL-TABLE-001
 	 */
 	get inTransaction(): boolean {
-		if (this.adapterManagedTransaction) return true;
+		if (this.adapterManagedTransaction) return this.adapterManagedScopeIsLive();
 		if (this.client === undefined) return false;
 		return poolClientTransactionOpen(this.client) !== false;
+	}
+
+	private adapterManagedScopeIsLive(): boolean {
+		if (
+			!this.adapterManagedTransaction ||
+			this.client === undefined ||
+			this.scopeToken === undefined ||
+			this.scopeState === undefined
+		) {
+			return false;
+		}
+		return (
+			this.findClientScope(this.client, this.scopeToken)?.state ===
+			this.scopeState
+		);
 	}
 
 	private async executeQueryProtectingOpenTransaction<

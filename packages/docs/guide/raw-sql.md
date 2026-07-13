@@ -2,13 +2,13 @@
 
 ## When
 
-You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express something. That is what it is for. This guide is about the one place raw SQL and dbsp genuinely collide: **inside a transaction dbsp is managing.**
+You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express something. That is what it is for. This guide is about the places raw SQL and dbsp genuinely collide: **inside a transaction dbsp is managing**, and anywhere raw SQL leaves session state on a pooled PostgreSQL connection.
 
 ## The short version
 
 | | |
 |---|---|
-| Raw SQL **outside** a dbsp transaction | Nothing to think about. It is your statement, on a pooled connection. |
+| Raw SQL **outside** a dbsp transaction | It is your statement on a pooled connection. Data changes are just PostgreSQL, but session state you create — `SET`, `LISTEN`, prepared statements, temp tables, session advisory locks — can outlive the call and affect the next borrower. |
 | Raw SQL **inside** `orm.transaction()` | Read the rest of this page. |
 | Raw SQL inside **your own** transaction, on a borrowed client | dbsp savepoints statements **it** issues so dbsp failures do not poison your transaction. Your raw transaction-control SQL is no safer here: `COMMIT` still commits, `ROLLBACK` still rolls back, and savepoint control still changes your savepoint stack. |
 
@@ -73,6 +73,7 @@ This does not make raw transaction control safe through dbsp. If you call `orm.r
 
 ## Gotchas
 
+- **Raw SQL outside a dbsp transaction still runs on a pooled session.** Avoid session-level changes unless you also reset them, or use a client whose lifetime you control.
 - **`transaction()` rejecting is not proof nothing committed** — if the callback used raw transaction control, read the error. `PgsqlRawSqlTransactionControlError` means exactly this happened.
 - **Catch an error inside `orm.transaction()` and the transaction stays poisoned.** dbsp does not savepoint each statement, so a failed statement aborts the transaction, as PostgreSQL intends. Swallowing the error does not give you a usable transaction back; it gives you a poisoned one, and dbsp will refuse the next statement rather than let it run outside the transaction you think you are in.
 - **On a borrowed client that is inside *your* transaction, dbsp does savepoint its own statements** — because breaking a transaction that belongs to you is not dbsp's right.

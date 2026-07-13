@@ -1167,7 +1167,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([]);
 	});
 
-	it('rolls back a successful borrowed-client statement when RELEASE SAVEPOINT fails', async () => {
+	it('rolls back and releases its savepoint when RELEASE SAVEPOINT fails after a successful borrowed-client statement', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
 		const releaseError = new Error('forced release failure');
@@ -1189,9 +1189,10 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				}
 				return originalQuery(...args);
 			};
-		let rolledBack = false;
+		let completed = false;
 		try {
 			await client.query('BEGIN');
+			await client.query('SAVEPOINT caller_before_release_failure');
 			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
 			await expect(
@@ -1209,11 +1210,29 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			expect(
 				trace.some((sql) => /^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql)),
 			).toBe(true);
+			const rollbackSql = trace.find((sql) =>
+				/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql),
+			);
+			if (rollbackSql === undefined) {
+				throw new Error('expected dbsp savepoint rollback');
+			}
+			const savepointName = rollbackSql.replace(/^ROLLBACK TO SAVEPOINT /, '');
+			const rollbackIndex = trace.indexOf(rollbackSql);
+			const cleanupReleaseIndex = trace.findIndex(
+				(sql, index) =>
+					index > rollbackIndex && sql === `RELEASE SAVEPOINT ${savepointName}`,
+			);
+			expect(cleanupReleaseIndex).toBeGreaterThan(rollbackIndex);
 
-			await client.query('ROLLBACK');
-			rolledBack = true;
+			await client.query('SAVEPOINT caller_after_release_failure');
+			await client.query('RELEASE SAVEPOINT caller_after_release_failure');
+			await client.query('ROLLBACK TO SAVEPOINT caller_before_release_failure');
+			await client.query('RELEASE SAVEPOINT caller_before_release_failure');
+
+			await client.query('COMMIT');
+			completed = true;
 		} finally {
-			if (!rolledBack) {
+			if (!completed) {
 				await client.query('ROLLBACK').catch(() => undefined);
 			}
 			client.release();

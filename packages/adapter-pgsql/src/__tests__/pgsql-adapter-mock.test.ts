@@ -1253,6 +1253,49 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 			queryCalls(query).filter((sql) => /^RELEASE SAVEPOINT /.test(sql)),
 		).toHaveLength(1);
 	});
+
+	it('rolls back the parent when an unawaited nested transaction fails during scope entry', async () => {
+		const firstStatementStarted = deferred();
+		const releaseFirstStatement = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT first statement') {
+				firstStatementStarted.resolve();
+				await releaseFirstStatement.promise;
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				const statement = tx.executeRaw('SELECT first statement');
+				await firstStatementStarted.promise;
+
+				void tx.transaction(async (inner) => {
+					await inner.executeRaw('SELECT second nested');
+				});
+
+				releaseFirstStatement.resolve();
+				await statement;
+			}),
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			'Savepoint scopes are single-flight per connection',
+		);
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'SELECT first statement',
+			'ROLLBACK',
+		]);
+		expect(queryCalls(query)).not.toContain('COMMIT');
+		expect(queryCalls(query)).not.toContain('SELECT second nested');
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -2381,13 +2424,13 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			releaseError,
 		);
 		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
+		const savepointName = calls[0]?.replace(/^SAVEPOINT /, '');
 		expect(calls).toEqual([
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			`SAVEPOINT ${savepointName}`,
 			sql,
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			`RELEASE SAVEPOINT ${savepointName}`,
+			`ROLLBACK TO SAVEPOINT ${savepointName}`,
+			`RELEASE SAVEPOINT ${savepointName}`,
 		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
@@ -2443,6 +2486,45 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			sql,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('surfaces a second RELEASE SAVEPOINT failure after rollback as cleanup failure', async () => {
+		const sql = 'INSERT INTO t VALUES (1)';
+		const releaseError = new Error('release savepoint failed');
+		const secondReleaseError = new Error('release savepoint failed again');
+		let releaseAttempts = 0;
+		const client = {
+			query: vi.fn(async (input: MockQueryInput) => {
+				const statement = queryText(input);
+				if (/^RELEASE SAVEPOINT /.test(statement)) {
+					releaseAttempts++;
+					if (releaseAttempts === 1) throw releaseError;
+					if (releaseAttempts === 2) throw secondReleaseError;
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const error = await captureRejection(() => adapter.executeRaw(sql));
+
+		expectCleanupFailure(
+			error,
+			releaseError,
+			secondReleaseError,
+			/RELEASE SAVEPOINT also failed after ROLLBACK TO SAVEPOINT/,
+		);
+		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
+		const savepointName = calls[0]?.replace(/^SAVEPOINT /, '');
+		expect(calls).toEqual([
+			`SAVEPOINT ${savepointName}`,
+			sql,
+			`RELEASE SAVEPOINT ${savepointName}`,
+			`ROLLBACK TO SAVEPOINT ${savepointName}`,
+			`RELEASE SAVEPOINT ${savepointName}`,
 		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
@@ -3066,16 +3148,17 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
 			releaseError,
 		);
-		expect(queryCalls(query)).toEqual([
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+		const calls = queryCalls(query);
+		const savepointName = calls[0]?.replace(/^SAVEPOINT /, '');
+		expect(calls).toEqual([
+			`SAVEPOINT ${savepointName}`,
 			expect.stringMatching(/^DECLARE /),
 			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
 			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
 			expect.stringMatching(/^CLOSE /),
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			`RELEASE SAVEPOINT ${savepointName}`,
+			`ROLLBACK TO SAVEPOINT ${savepointName}`,
+			`RELEASE SAVEPOINT ${savepointName}`,
 		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
@@ -3729,6 +3812,57 @@ describe('PgsqlAdapter [P2-T5b]: transaction() preserves full config', () => {
 		});
 
 		expect(innerInTransaction).toBe(true);
+	});
+
+	it('captured transaction adapters stop reporting inTransaction after commit so core does not refuse concurrent index DDL', async () => {
+		type ItemsIndexOrm = {
+			readonly tables: {
+				readonly items: {
+					readonly indexes: {
+						create(options: {
+							readonly name: string;
+							readonly columns: readonly string[];
+							readonly concurrently: true;
+						}): Promise<void>;
+					};
+				};
+			};
+		};
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = new PgsqlAdapter(pool, {});
+		let capturedAdapter: PgsqlAdapter | undefined;
+		let capturedOrm: ItemsIndexOrm | undefined;
+
+		await adapter.transaction(async (tx) => {
+			capturedAdapter = tx as PgsqlAdapter;
+			capturedOrm = createOrm({
+				schema: ownershipOrmSchema,
+				adapter: tx,
+			}) as ItemsIndexOrm;
+		});
+
+		if (capturedAdapter === undefined || capturedOrm === undefined) {
+			throw new Error('expected transaction adapter and ORM to be captured');
+		}
+		expect(capturedAdapter.inTransaction).toBe(false);
+		expect(capturedAdapter.withSchema('tenant_1').inTransaction).toBe(false);
+
+		const error = await captureRejection(() =>
+			capturedOrm.tables.items.indexes.create({
+				name: 'idx_items_label_after_commit',
+				columns: ['label'],
+				concurrently: true,
+			}),
+		);
+
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain(
+			'transaction adapter belongs to a transaction that has ended',
+		);
+		expect((error as Error).message).not.toContain(
+			'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
+		);
 	});
 
 	it('non-tx stream cleanup surfaces rollback failure instead of logging it away', async () => {
