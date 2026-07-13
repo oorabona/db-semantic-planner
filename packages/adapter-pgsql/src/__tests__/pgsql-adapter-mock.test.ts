@@ -1696,6 +1696,164 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(calls.slice(1)).toEqual(['BEGIN', 'SELECT 1', 'COMMIT']);
 	});
 
+	it('registers the borrowed transaction fallback before BEGIN reaches PostgreSQL', async () => {
+		const beginStarted = deferred();
+		const releaseBegin = deferred();
+		let savepointAttempts = 0;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) {
+				savepointAttempts++;
+				if (savepointAttempts === 1) throw noActiveTransactionError();
+				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+			}
+			if (sql === 'BEGIN') {
+				beginStarted.resolve();
+				await releaseBegin.promise;
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const first = adapter.transaction(async (tx) => {
+			await tx.executeRaw('SELECT first');
+		});
+		void first.catch(() => undefined);
+		await beginStarted.promise;
+
+		let secondError: unknown;
+		const second = adapter
+			.transaction(async (tx) => {
+				await tx.executeRaw('SELECT second');
+			})
+			.catch((error) => {
+				secondError = error;
+				throw error;
+			});
+		const secondState = await Promise.race([
+			second.then(
+				() => 'resolved' as const,
+				() => 'rejected' as const,
+			),
+			new Promise<'pending'>((resolve) =>
+				setTimeout(() => resolve('pending'), 0),
+			),
+		]);
+
+		try {
+			expect(secondState).toBe('rejected');
+			expect(secondError).toBeInstanceOf(Error);
+			expect((secondError as Error).message).toMatch(
+				/single-flight|owned by another transaction adapter/,
+			);
+			expect(queryCalls(query)).toEqual([
+				expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+				'BEGIN',
+			]);
+		} finally {
+			releaseBegin.resolve();
+		}
+
+		await expect(first).resolves.toBeUndefined();
+		await second.catch(() => undefined);
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'BEGIN',
+			'SELECT first',
+			'COMMIT',
+		]);
+		expect(queryCalls(query)).not.toContain('SELECT second');
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('unwinds the borrowed transaction fallback scope when BEGIN fails', async () => {
+		const beginStarted = deferred();
+		const failFirstBegin = deferred();
+		const beginError = new Error('BEGIN failed');
+		let beginAttempts = 0;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) throw noActiveTransactionError();
+			if (sql === 'BEGIN') {
+				beginAttempts++;
+				if (beginAttempts === 1) {
+					beginStarted.resolve();
+					await failFirstBegin.promise;
+				}
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const first = adapter.transaction(async (tx) => {
+			await tx.executeRaw('SELECT unreachable');
+		});
+		void first.catch(() => undefined);
+		await beginStarted.promise;
+
+		let secondError: unknown;
+		const second = adapter
+			.transaction(async (tx) => {
+				await tx.executeRaw('SELECT during failed begin');
+			})
+			.catch((error) => {
+				secondError = error;
+				throw error;
+			});
+		const secondState = await Promise.race([
+			second.then(
+				() => 'resolved' as const,
+				() => 'rejected' as const,
+			),
+			new Promise<'pending'>((resolve) =>
+				setTimeout(() => resolve('pending'), 0),
+			),
+		]);
+
+		try {
+			expect(secondState).toBe('rejected');
+			expect(secondError).toBeInstanceOf(Error);
+			expect((secondError as Error).message).toMatch(
+				/single-flight|owned by another transaction adapter/,
+			);
+			expect(queryCalls(query)).toEqual([
+				expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+				'BEGIN',
+			]);
+		} finally {
+			failFirstBegin.reject(beginError);
+		}
+
+		await expect(first).rejects.toBe(beginError);
+		await second.catch(() => undefined);
+		await expect(
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('SELECT after failed begin');
+			}),
+		).resolves.toBeUndefined();
+
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'BEGIN',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'BEGIN',
+			'SELECT after failed begin',
+			'COMMIT',
+		]);
+		expect(queryCalls(query)).not.toContain('SELECT during failed begin');
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('throws instead of hanging when the ancestor adapter is used inside the transaction callback', async () => {
 		const client = makeClient();
 		const adapter = createPgsqlAdapter(client, {
@@ -3396,6 +3554,118 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 			expect.stringMatching(/^CLOSE /),
 			'COMMIT',
 		]);
+	});
+
+	it('registers the borrowed stream fallback before BEGIN reaches PostgreSQL', async () => {
+		const beginStarted = deferred();
+		const releaseBegin = deferred();
+		const cursorKinds = new Map<string, 'first' | 'second'>();
+		const fetchCounts = new Map<string, number>();
+		let savepointAttempts = 0;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^SAVEPOINT /.test(sql)) {
+				savepointAttempts++;
+				if (savepointAttempts === 1) throw noActiveTransactionError();
+				return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+			}
+			if (sql === 'BEGIN') {
+				beginStarted.resolve();
+				await releaseBegin.promise;
+				return { rows: [], rowCount: 0, command: 'BEGIN' } as QueryResult;
+			}
+			const declare =
+				/^DECLARE (\S+) NO SCROLL CURSOR FOR SELECT (first|second)$/.exec(sql);
+			if (declare) {
+				cursorKinds.set(declare[1]!, declare[2] as 'first' | 'second');
+				return { rows: [], rowCount: 0, command: 'DECLARE' } as QueryResult;
+			}
+			const fetch = /^FETCH FORWARD 1 FROM (\S+)$/.exec(sql);
+			if (fetch) {
+				const cursor = fetch[1]!;
+				const count = fetchCounts.get(cursor) ?? 0;
+				fetchCounts.set(cursor, count + 1);
+				if (count > 0) return { rows: [], rowCount: 0 } as QueryResult;
+				return {
+					rows: [{ stream: cursorKinds.get(cursor) }],
+					rowCount: 1,
+				} as QueryResult;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const collect = async (
+			iterable: AsyncIterable<{ stream: string }>,
+		): Promise<string[]> => {
+			const rows: string[] = [];
+			for await (const row of iterable) {
+				rows.push(row.stream);
+			}
+			return rows;
+		};
+
+		const first = collect(
+			adapter.stream<{ stream: string }>(
+				{ sql: 'SELECT first', parameters: [] },
+				{ chunkSize: 1 },
+			),
+		);
+		void first.catch(() => undefined);
+		await beginStarted.promise;
+
+		let secondError: unknown;
+		const secondNext = adapter
+			.stream<{ stream: string }>(
+				{ sql: 'SELECT second', parameters: [] },
+				{ chunkSize: 1 },
+			)
+			.next()
+			.catch((error) => {
+				secondError = error;
+				throw error;
+			});
+		const secondState = await Promise.race([
+			secondNext.then(
+				() => 'resolved' as const,
+				() => 'rejected' as const,
+			),
+			new Promise<'pending'>((resolve) =>
+				setTimeout(() => resolve('pending'), 0),
+			),
+		]);
+
+		try {
+			expect(secondState).toBe('rejected');
+			expect(secondError).toBeInstanceOf(Error);
+			expect((secondError as Error).message).toMatch(
+				/single-flight|owned by another transaction adapter/,
+			);
+			expect(queryCalls(query)).toEqual([
+				expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+				'BEGIN',
+			]);
+		} finally {
+			releaseBegin.resolve();
+		}
+
+		await expect(first).resolves.toEqual(['first']);
+		await secondNext.catch(() => undefined);
+		const calls = queryCalls(query);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'BEGIN',
+			expect.stringMatching(/^DECLARE \S+ NO SCROLL CURSOR FOR SELECT first$/),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			'COMMIT',
+		]);
+		expect(calls.some((sql) => /SELECT second/.test(sql))).toBe(false);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 
 	it('surfaces rollback failure when managed borrowed stream opens its own transaction', async () => {

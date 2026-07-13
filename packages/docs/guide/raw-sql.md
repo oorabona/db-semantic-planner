@@ -49,6 +49,7 @@ If you need transaction control, **own the transaction**:
 
 ```ts
 const client = await pool.connect();
+let committed = false;
 try {
   await client.query('BEGIN');
 
@@ -62,7 +63,14 @@ try {
   await client.query('SAVEPOINT my_own');       // yours to manage
 
   await client.query('COMMIT');
+  committed = true;
 } finally {
+  // The transaction is yours, so ending it is yours too. Release a client while
+  // a transaction is still open on it and the next borrower inherits it — which
+  // is the whole hazard this page is about. `finally` alone does not save you.
+  if (!committed) {
+    await client.query('ROLLBACK').catch(() => undefined);
+  }
   client.release();
 }
 ```

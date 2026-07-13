@@ -2141,15 +2141,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			try {
 				scopeToken = createScopeToken();
 				scopeState = createScopeState();
-				await adapter.executeConnectionStatement(client, 'BEGIN', undefined, {
-					inspectTransactionControl: false,
-				});
-				begun = true;
 				releaseScope = adapter.enterTransactionScope(
 					client,
 					scopeToken,
 					scopeState,
 				);
+				await adapter.executeScopeBoundaryStatement(
+					client,
+					scopeToken,
+					scopeState,
+					'BEGIN',
+				);
+				begun = true;
 				yield* adapter.streamWithClient<T>(
 					client,
 					query,
@@ -2444,11 +2447,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			scopeToken = createScopeToken();
 			scopeState = createScopeState();
-			await this.executeConnectionStatement(client, 'BEGIN', undefined, {
-				inspectTransactionControl: false,
-			});
-			begun = true;
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
+			await this.executeScopeBoundaryStatement(
+				client,
+				scopeToken,
+				scopeState,
+				'BEGIN',
+			);
+			begun = true;
 			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
 			this.closeScopeAndAssertChildren(scopeState);
 			await this.drainScopeWork(scopeState);
@@ -2869,20 +2875,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			scopeToken = createScopeToken();
 			scopeState = createScopeState();
-			await this.executeConnectionStatement(client, 'BEGIN', undefined, {
-				inspectTransactionControl: false,
-			});
-			begun = true;
-			const txAdapter = this.createManagedClientAdapter(
-				client,
-				scopeToken,
-				scopeState,
-			);
 			releaseScope = this.enterTransactionScope(
 				client,
 				scopeToken,
 				scopeState,
 				childObserver,
+			);
+			await this.executeScopeBoundaryStatement(
+				client,
+				scopeToken,
+				scopeState,
+				'BEGIN',
+			);
+			begun = true;
+			const txAdapter = this.createManagedClientAdapter(
+				client,
+				scopeToken,
+				scopeState,
 			);
 			const result = await fn(txAdapter);
 			this.closeScopeAndAssertChildren(scopeState);
@@ -3010,26 +3019,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		allowedScopeToken: DbspScopeToken | undefined,
 		scopeState: DbspScopeState | undefined,
 	): Promise<void> {
+		if (allowedScopeToken === undefined || scopeState === undefined) {
+			throw new Error(
+				'Cannot roll back a dbsp-managed PostgreSQL transaction without a registered dbsp scope.',
+			);
+		}
 		try {
-			if (allowedScopeToken !== undefined && scopeState !== undefined) {
-				await this.executeScopeBoundaryStatement(
-					client,
-					allowedScopeToken,
-					scopeState,
-					'ROLLBACK',
-					{
-						allowAncestorScopeToken: true,
-						allowPoisonedScope: true,
-					},
-				);
-			} else {
-				await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
-					...(allowedScopeToken !== undefined && { allowedScopeToken }),
-					allowClosingScope: true,
+			await this.executeScopeBoundaryStatement(
+				client,
+				allowedScopeToken,
+				scopeState,
+				'ROLLBACK',
+				{
+					allowAncestorScopeToken: true,
 					allowPoisonedScope: true,
-					inspectTransactionControl: false,
-				});
-			}
+				},
+			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
 				return;

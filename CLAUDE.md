@@ -188,7 +188,7 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 
 - Tables, columns, types (enums, sequences), extensions
 - Indexes, check constraints, foreign keys, comments
-- **Row-Level Security (RLS):** `rlsEnabled` + `policies[]` on TableIR — see `docs/guides/how-to-use-rls-policies.md`
+- **Row-Level Security (RLS):** `rlsEnabled` + `policies[]` on TableIR — see `packages/docs/guide/rls-policies.md`
 - Feature support is gated by `DialectCapabilities` flags (e.g. `supportsDDLRowLevelSecurity`)
 
 ### Runtime DDL Helpers (`orm.tables.<name>`)
@@ -205,7 +205,7 @@ The PostgreSQL adapter supports the following DDL schema features via `compareSc
 | `.indexes.exists(name)` | Returns `boolean` — whether index exists on this table |
 | `orm.ddl.dropIndex(name, options?)` | Global shortcut — drop by name without a table reference |
 
-All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.md`.
+All helpers respect `orm.withSchema()`. See `packages/docs/guide/ddl-provisioning.md`.
 
 ## Query Features
 
@@ -214,7 +214,7 @@ All helpers respect `orm.withSchema()`. See `docs/guides/how-to-use-ddl-helpers.
 | Expression primitives | `op()`, `fn()`, `ref()`, `param()`, `cast()`, `literal()`, `unary()`, `namedArg()` | `op('<=>', ref('vector'), cast(param(qv), 'vector'))` |
 | pgvector | `cosineDistance()`, `rawDistance()`, `l2Distance()`, `innerProduct()` | `cosineDistance('vector', qv).as('score')` |
 | ParadeDB (low-level) | `score()`, `bm25Search()`, `parse()`, `boost()`, `booleanSearch()` | `bm25Search('s', term, { name: 3.0 })` |
-| Full-text search | `fullTextSearch()`, `textScore()` | `fullTextSearch({ query, fields, tableAlias })` — preferred over `bm25Search`; see `docs/guides/how-to-use-full-text-search.md` |
+| Full-text search | `fullTextSearch()`, `textScore()` | `fullTextSearch({ query, fields, tableAlias })` — preferred over `bm25Search`; see `packages/docs/guide/full-text-search.md` |
 | PG builtins | `generateSeries()`, `nextval()`, `isDistinctFrom()` | `generateSeries(1, 100)`, `nextval('seq')` |
 | INNER JOIN | `include('rel', { join: 'inner' })` | Filters root rows by relation |
 | Manual JOIN | `.join(rel)` / `.join(table, { on, as, type })` — flat, non-hydrating | `orm.select('calls').join('caller')` / `.join('t', { on: eq(...), as: 'alias' })` |
@@ -248,7 +248,7 @@ type Dump = {
 
 ## Documentation
 
-- **How-to guides:** `docs/guides/` — feature-specific walkthroughs (joins, CTEs, RLS, DDL helpers, etc.)
+- **How-to guides:** `packages/docs/guide/` — feature-specific walkthroughs (joins, CTEs, RLS, DDL helpers, raw SQL, etc.). NOT `docs/guides/`, which holds only the e2e-testing guide.
 - **Comparison:** `packages/docs/comparison.md` — how this project compares to other query builders and ORMs
 - **Patterns:** `packages/docs/patterns.md` — recommended query patterns and best practices
 - **Production:** `packages/docs/guide/production.md` — deployment, connection pooling, schema scoping for multi-tenancy
