@@ -52,7 +52,13 @@ import type {
 	UpsertIntent,
 } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
-import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import type {
+	Pool,
+	PoolClient,
+	QueryConfig,
+	QueryResult,
+	QueryResultRow,
+} from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
 import {
@@ -161,12 +167,16 @@ const IN_FAILED_SQL_TRANSACTION = '25P02';
 const INVALID_SAVEPOINT_SPECIFICATION = '3B001';
 
 let savepointCounter = 0;
+let preparedStatementCounter = 0;
 
 const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
-	'`COMMIT` and `ROLLBACK` end the transaction dbsp is working inside — dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
-	'A `SAVEPOINT` you establish inside a dbsp call is released when dbsp releases its own, and dbsp cannot tell you that happened. ' +
+	'`COMMIT`, `ROLLBACK`, and `PREPARE TRANSACTION` end the transaction dbsp is working inside; dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
+	'Raw savepoint control (`SAVEPOINT`, `RELEASE SAVEPOINT`, `ROLLBACK TO SAVEPOINT`) can alter the savepoint stack before dbsp sees the command tag; dbsp poisons the scope, but it cannot make that command un-run. ' +
 	"Manage your transaction outside dbsp's calls.";
+
+const RAW_SQL_SINGLE_COMMAND_MESSAGE =
+	'PostgreSQL rejected this raw SQL because dbsp sends one command per raw call inside a transaction it manages, and the caller passed several commands.';
 
 const ABORTED_COMMIT_MESSAGE =
 	'PostgreSQL returned ROLLBACK for COMMIT. The transaction was already aborted, no changes were committed, and dbsp is reporting that failed commit explicitly.';
@@ -214,10 +224,15 @@ type DbspClientScope = {
 
 type DbspScopeState = {
 	poisoned: DbspScopePoison | undefined;
+	statementLock: DbspScopeStatementLock;
 };
 
 type DbspScopePoison = {
 	readonly error: Error;
+};
+
+type DbspScopeStatementLock = {
+	tail: Promise<void> | undefined;
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
@@ -228,6 +243,7 @@ type StatementExecutionOptions = {
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
+	readonly forceSingleCommand?: boolean;
 };
 
 type MaybeMultipleQueryResults<T extends QueryResultRow = QueryResultRow> =
@@ -281,17 +297,33 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 	);
 }
 
+function isPgErrorWithMessage(error: unknown, pattern: RegExp): boolean {
+	return (
+		error instanceof Error &&
+		typeof (error as { code?: unknown }).code === 'string' &&
+		pattern.test(error.message)
+	);
+}
+
 function nextSavepointName(): string {
 	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
 	return `dbsp_savepoint_${savepointCounter}`;
+}
+
+function nextPreparedStatementName(): string {
+	preparedStatementCounter =
+		(preparedStatementCounter + 1) % Number.MAX_SAFE_INTEGER;
+	return `dbsp_raw_${process.pid}_${preparedStatementCounter}`;
 }
 
 function createScopeToken(): DbspScopeToken {
 	return Symbol('dbsp-pgsql-scope');
 }
 
-function createScopeState(): DbspScopeState {
-	return { poisoned: undefined };
+function createScopeState(
+	statementLock: DbspScopeStatementLock = { tail: undefined },
+): DbspScopeState {
+	return { poisoned: undefined, statementLock };
 }
 
 function normalizeCommandTag(command: string | undefined): string | undefined {
@@ -398,13 +430,32 @@ function isSavepointUnavailableError(error: unknown): boolean {
 
 function addRawSqlTransactionContext(error: unknown): unknown {
 	const context =
-		'dbsp rolled back the failed raw SQL to a savepoint, so the surrounding transaction is still usable.';
+		'dbsp rolled back the failed raw SQL to a savepoint, so the surrounding transaction is still usable. Side effects that do not participate in transactional rollback, including sequence advancement and session-level advisory locks, are not undone.';
 	if (error instanceof Error) {
 		error.message = `${error.message}; ${context}`;
 		Object.defineProperty(error, 'dbspRawSqlContext', {
 			value: context,
 			configurable: true,
 		});
+	}
+	return error;
+}
+
+function addRawSqlSingleCommandContext(error: unknown): unknown {
+	if (
+		isPgErrorWithMessage(
+			error,
+			/cannot insert multiple commands into a prepared statement/i,
+		)
+	) {
+		const context = RAW_SQL_SINGLE_COMMAND_MESSAGE;
+		if (error instanceof Error && !error.message.includes(context)) {
+			error.message = `${error.message}; ${context}`;
+			Object.defineProperty(error, 'dbspRawSqlSingleCommandContext', {
+				value: context,
+				configurable: true,
+			});
+		}
 	}
 	return error;
 }
@@ -1030,11 +1081,13 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 	 * successful callback last until your transaction ends.
 	 *
 	 * Transaction control through raw SQL inside a scope dbsp is managing is
-	 * unsupported. `COMMIT` and `ROLLBACK` end the transaction dbsp is working
-	 * inside — dbsp detects that and fails loudly, but the data is already
-	 * whatever your statement made it. A `SAVEPOINT` you establish inside a dbsp
-	 * call is released when dbsp releases its own, and dbsp cannot tell you that
-	 * happened. Manage your transaction outside dbsp's calls.
+	 * unsupported. `COMMIT`, `ROLLBACK`, and `PREPARE TRANSACTION` end the
+	 * transaction dbsp is working inside; dbsp detects that and fails loudly, but
+	 * the data is already whatever your statement made it. Raw savepoint control
+	 * (`SAVEPOINT`, `RELEASE SAVEPOINT`, `ROLLBACK TO SAVEPOINT`) can alter the
+	 * savepoint stack before dbsp sees the command tag; dbsp poisons the scope, but
+	 * it cannot make that command un-run. Manage your transaction outside dbsp's
+	 * calls.
 	 */
 	readonly managedTransactions?: true;
 }
@@ -1924,7 +1977,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
-		>(query.sql, query.parameters);
+		>(query.sql, query.parameters, { forceSingleCommand: true });
 		return this.transformResultRows(result.rows) as T[];
 	}
 
@@ -2439,7 +2492,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	): Promise<T> {
 		const savepointName = nextSavepointName();
 		const scopeToken = createScopeToken();
-		const scopeState = createScopeState();
+		const scopeState = createScopeState(this.scopeState?.statementLock);
 		const txAdapter = this.createManagedClientAdapter(
 			client,
 			scopeToken,
@@ -2709,9 +2762,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			directState === 'no-active-transaction' ||
 			directState === 'savepoint-gone'
 		) {
-			return this.poisonClientScope(
+			return this.poisonClientScopeStack(
 				client,
-				allowedScopeToken,
 				new PgsqlRawSqlTransactionControlError(releaseErr),
 			);
 		}
@@ -2728,9 +2780,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			allowedScopeToken,
 		);
 		if (probedState === 'no-active-transaction') {
-			return this.poisonClientScope(
+			return this.poisonClientScopeStack(
 				client,
-				allowedScopeToken,
 				new PgsqlRawSqlTransactionControlError(releaseErr),
 			);
 		}
@@ -2779,6 +2830,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		if (current !== undefined) {
 			this.assertScopeNotPoisoned(current);
+			if (current.state.statementLock.tail !== undefined) {
+				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
+			}
 			if (current.kind === 'statement-savepoint') {
 				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
 			}
@@ -2902,6 +2956,41 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return this.poisonScopeState(scope.state, error);
 	}
 
+	private poisonClientScopeStack(client: PoolClient, error: Error): Error {
+		const stack = activeClientScopes.get(client);
+		if (stack === undefined || stack.length === 0) return error;
+		let poisonedError: Error | undefined;
+		for (const scope of stack) {
+			const scopeError = this.poisonScopeState(scope.state, error);
+			poisonedError ??= scopeError;
+		}
+		return poisonedError ?? error;
+	}
+
+	private async runWithScopeStatementLock<T>(
+		scopeState: DbspScopeState,
+		fn: () => Promise<T>,
+	): Promise<T> {
+		const lock = scopeState.statementLock;
+		const previous = lock.tail ?? Promise.resolve();
+		let release!: () => void;
+		const next = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const tail = previous.catch(() => undefined).then(() => next);
+		lock.tail = tail;
+
+		await previous.catch(() => undefined);
+		try {
+			return await fn();
+		} finally {
+			release();
+			if (lock.tail === tail) {
+				lock.tail = undefined;
+			}
+		}
+	}
+
 	private assertCommitSucceeded(result: QueryResult): void {
 		if (result.command === 'ROLLBACK') {
 			throw new PgsqlTransactionAbortedCommitError(result);
@@ -2933,11 +3022,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * ⚠️  WARNING: Use parameter placeholders ($1, $2, etc.) for all values.
 	 *
 	 * Transaction control through raw SQL inside a scope dbsp is managing is
-	 * unsupported. `COMMIT` and `ROLLBACK` end the transaction dbsp is working
-	 * inside — dbsp detects that and fails loudly, but the data is already
-	 * whatever your statement made it. A `SAVEPOINT` you establish inside a dbsp
-	 * call is released when dbsp releases its own, and dbsp cannot tell you that
-	 * happened. Manage your transaction outside dbsp's calls.
+	 * unsupported. `COMMIT`, `ROLLBACK`, and `PREPARE TRANSACTION` end the
+	 * transaction dbsp is working inside; dbsp detects that and fails loudly, but
+	 * the data is already whatever your statement made it. Raw savepoint control
+	 * (`SAVEPOINT`, `RELEASE SAVEPOINT`, `ROLLBACK TO SAVEPOINT`) can alter the
+	 * savepoint stack before dbsp sees the command tag; dbsp poisons the scope, but
+	 * it cannot make that command un-run. Manage your transaction outside dbsp's
+	 * calls.
 	 */
 	async executeRaw<T = unknown>(
 		sql: string,
@@ -2947,6 +3038,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await this.executeQueryProtectingOpenTransaction<QueryResultRow>(
 				sql,
 				parameters,
+				{ forceSingleCommand: true },
 			);
 		return result.rows as T[];
 	}
@@ -2987,7 +3079,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (!this.client && !this.pool) {
 			throw new Error('Cannot execute DDL on compile-only adapter');
 		}
-		await this.executeQueryProtectingOpenTransaction(sql);
+		await this.executeQueryProtectingOpenTransaction(sql, undefined, {
+			forceSingleCommand: true,
+		});
 	}
 
 	/**
@@ -3002,12 +3096,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 	private async executeQueryProtectingOpenTransaction<
 		T extends QueryResultRow = QueryResultRow,
-	>(sql: string, parameters?: readonly unknown[]): Promise<QueryResult<T>> {
+	>(
+		sql: string,
+		parameters?: readonly unknown[],
+		options: Pick<StatementExecutionOptions, 'forceSingleCommand'> = {},
+	): Promise<QueryResult<T>> {
 		return this.executeConnectionStatement<T>(
 			this.requireConnection(),
 			sql,
 			parameters,
 			{
+				...options,
 				protectBorrowedClientTransaction:
 					this.client !== undefined && !this.adapterManagedTransaction,
 			},
@@ -3042,10 +3141,79 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 
-		let rawResult: MaybeMultipleQueryResults<T>;
+		const managedScope =
+			isPoolClientLike(executor) &&
+			options.inspectTransactionControl !== false &&
+			options.allowPoisonedScope !== true
+				? this.findClientScope(executor, allowedScopeToken)
+				: undefined;
+		if (managedScope !== undefined) {
+			return this.runWithScopeStatementLock(managedScope.state, () =>
+				this.executeConnectionStatementUnlocked<T>(
+					executor,
+					sql,
+					parameters,
+					options,
+					allowedScopeToken,
+				),
+			);
+		}
+
+		return this.executeConnectionStatementUnlocked<T>(
+			executor,
+			sql,
+			parameters,
+			options,
+			allowedScopeToken,
+		);
+	}
+
+	private async executeConnectionStatementUnlocked<
+		T extends QueryResultRow = QueryResultRow,
+	>(
+		executor: Pool | PoolClient,
+		sql: string,
+		parameters: readonly unknown[] | undefined,
+		options: StatementExecutionOptions,
+		allowedScopeToken: DbspScopeToken | undefined,
+	): Promise<QueryResult<T>> {
+		if (isPoolClientLike(executor)) {
+			this.assertCanUseClient(
+				executor,
+				allowedScopeToken,
+				options.allowAncestorScopeToken ?? false,
+				options.allowPoisonedScope ?? false,
+			);
+		}
+
+		const preparedStatementName = this.shouldUseSingleCommandPreparedStatement(
+			executor,
+			parameters,
+			options,
+			allowedScopeToken,
+		)
+			? nextPreparedStatementName()
+			: undefined;
+
+		let pendingError: unknown;
+		let result: QueryResult<T> | undefined;
 		try {
-			rawResult = await this.issueConnectionQuery<T>(executor, sql, parameters);
+			const rawResult = await this.issueConnectionQuery<T>(
+				executor,
+				sql,
+				parameters,
+				preparedStatementName,
+			);
+			if (options.inspectTransactionControl !== false) {
+				await this.assertNoTransactionControlCommand(
+					executor,
+					rawResult,
+					allowedScopeToken,
+				);
+			}
+			result = lastQueryResult(rawResult);
 		} catch (error) {
+			pendingError = error;
 			if (
 				isPoolClientLike(executor) &&
 				options.inspectTransactionControl !== false &&
@@ -3057,16 +3225,28 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					new PgsqlTransactionAbortedError(error),
 				);
 			}
-			throw error;
 		}
-		if (options.inspectTransactionControl !== false) {
-			await this.assertNoTransactionControlCommand(
-				executor,
-				rawResult,
-				allowedScopeToken,
-			);
+
+		if (preparedStatementName !== undefined && isPoolClientLike(executor)) {
+			try {
+				await this.deallocatePreparedStatement(executor, preparedStatementName);
+			} catch (cleanupErr) {
+				if (pendingError === undefined) {
+					throw createCleanupOnlyError(
+						'PostgreSQL raw SQL cleanup failed: DEALLOCATE prepared statement failed after the protected statement completed',
+						cleanupErr,
+					);
+				}
+			}
 		}
-		return lastQueryResult(rawResult);
+
+		if (pendingError !== undefined) {
+			throw addRawSqlSingleCommandContext(pendingError);
+		}
+		if (result === undefined) {
+			throw new Error('PostgreSQL returned no query results');
+		}
+		return result;
 	}
 
 	private async executeConnectionStatementInSavepoint<
@@ -3174,11 +3354,41 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return result;
 	}
 
+	private shouldUseSingleCommandPreparedStatement(
+		executor: Pool | PoolClient,
+		parameters: readonly unknown[] | undefined,
+		options: StatementExecutionOptions,
+		allowedScopeToken: DbspScopeToken | undefined,
+	): boolean {
+		return (
+			options.forceSingleCommand === true &&
+			isPoolClientLike(executor) &&
+			this.findClientScope(executor, allowedScopeToken) !== undefined &&
+			(parameters === undefined || parameters.length === 0)
+		);
+	}
+
+	private async deallocatePreparedStatement(
+		client: PoolClient,
+		statementName: string,
+	): Promise<void> {
+		await client.query(`DEALLOCATE ${quoteIdent(statementName)}`);
+	}
+
 	private async issueConnectionQuery<T extends QueryResultRow>(
 		executor: Pool | PoolClient,
 		sql: string,
 		parameters: readonly unknown[] | undefined,
+		preparedStatementName: string | undefined,
 	): Promise<MaybeMultipleQueryResults<T>> {
+		if (preparedStatementName !== undefined) {
+			const query: QueryConfig<unknown[]> = {
+				name: preparedStatementName,
+				text: sql,
+				values: [],
+			};
+			return executor.query<T>(query) as Promise<MaybeMultipleQueryResults<T>>;
+		}
 		if (parameters === undefined) {
 			return executor.query<T>(sql) as Promise<MaybeMultipleQueryResults<T>>;
 		}
@@ -3205,9 +3415,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				continue;
 			}
 			if (isTransactionControlCommandTag(queryResult.command)) {
-				throw this.poisonClientScope(
+				throw this.poisonClientScopeStack(
 					executor,
-					allowedScopeToken,
 					new PgsqlRawSqlTransactionControlError(queryResult),
 				);
 			}
@@ -3233,9 +3442,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				throw this.poisonClientScope(
+				throw this.poisonClientScopeStack(
 					client,
-					allowedScopeToken,
 					new PgsqlRawSqlTransactionControlError(queryResult),
 				);
 			}

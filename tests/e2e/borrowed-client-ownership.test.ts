@@ -200,6 +200,48 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
 	});
 
+	it('lets PostgreSQL reject multi-command raw SQL inside orm.transaction before any command runs', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+
+		let thrown: unknown;
+		try {
+			await orm.transaction(async (tx) => {
+				await tx.raw(
+					`COMMIT; INSERT INTO "${SCHEMA}".items (id, label) VALUES (17, 'must not run')`,
+				);
+			});
+		} catch (error) {
+			thrown = error;
+		}
+
+		expect(thrown).toMatchObject({ code: '42601' });
+		expect((thrown as Error).message).toContain(
+			'dbsp sends one command per raw call inside a transaction it manages',
+		);
+		expect(await itemIds()).toEqual([]);
+	});
+
+	it('serializes concurrent raw statements so raw COMMIT poisons the sibling before it is sent', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+
+		await expect(
+			orm.transaction(async (tx) => {
+				await Promise.all([
+					tx.raw('COMMIT'),
+					tx.raw(
+						`INSERT INTO "${SCHEMA}".items (id, label) VALUES (18, 'must not reach PostgreSQL')`,
+					),
+				]);
+			}),
+		).rejects.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+
+		expect(await itemIds()).toEqual([]);
+	});
+
 	it('rejects after a caught raw COMMIT and never sends the post-COMMIT ORM statement', async () => {
 		const pool = await getTestPool();
 		const adapter = createPgsqlAdapter(pool);
@@ -375,6 +417,48 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 
 		expect(await itemIds()).toEqual([20, 21]);
+	});
+
+	it('poisons a parent scope when raw COMMIT inside a nested transaction ends the physical transaction', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		let innerError: unknown;
+		let parentStatementError: unknown;
+		let transactionError: unknown;
+
+		try {
+			await orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 43, label: 'committed before nested raw commit' })
+					.execute();
+				try {
+					await tx.transaction(async (inner) => {
+						await inner.raw('COMMIT');
+					});
+				} catch (error) {
+					innerError = error;
+				}
+				try {
+					await tx
+						.into(tx.tables.items)
+						.values({ id: 44, label: 'must not reach PostgreSQL' })
+						.execute();
+				} catch (error) {
+					parentStatementError = error;
+				}
+				return 'callback returned normally';
+			});
+		} catch (error) {
+			transactionError = error;
+		}
+
+		expect(innerError).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		expect(parentStatementError).toBe(innerError);
+		expect(transactionError).toBe(innerError);
+		expect(await itemIds()).toEqual([43]);
+		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [43]);
 	});
 
 	it('rolls back a caught nested managed transaction and keeps the outer transaction usable', async () => {
@@ -818,6 +902,42 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 
 		expect(await itemIds()).toEqual([36, 37]);
+	});
+
+	// The standalone introspect() does NOT take a PoolClient: it cannot know whose
+	// transaction the client is sitting in, and guessing that from the object's shape
+	// is the defect this adapter was rewritten to remove. A caller holding a client
+	// declares it, and that declaration is what buys the savepoint protection.
+	it('keeps a caller transaction usable after a failing introspect() on a borrowed client', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let committed = false;
+		try {
+			await client.query('BEGIN');
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[45, 'before exported introspect failure'],
+			);
+
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			await expect(
+				adapter.introspect({ schema: 'bad\u0000schema' }),
+			).rejects.toThrow();
+
+			await client.query(
+				`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+				[46, 'after exported introspect failure'],
+			);
+			await client.query('COMMIT');
+			committed = true;
+		} finally {
+			if (!committed) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).toEqual([45, 46]);
 	});
 
 	it('refuses a child scope orphaned when a parent scope unwinds before it resumes', async () => {

@@ -14,7 +14,7 @@
 
 import { supportsTransactions } from '@dbsp/core';
 import type { RecursivePlanReport } from '@dbsp/types';
-import type { Pool, PoolClient, QueryResult } from 'pg';
+import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	compileCteQuery,
@@ -63,6 +63,10 @@ function makeClient(queryFn?: ReturnType<typeof vi.fn>): PoolClient {
 		query: queryFn ?? vi.fn().mockResolvedValue({ rows: [], rowCount: 0 }),
 		release: vi.fn(),
 	} as unknown as PoolClient;
+}
+
+function queryText(input: string | QueryConfig<unknown[]>): string {
+	return typeof input === 'string' ? input : input.text;
 }
 
 const defaultDeps = {
@@ -119,7 +123,7 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 		});
 
 		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
-			(c) => c[0] as string,
+			(c) => queryText(c[0] as string | QueryConfig<unknown[]>),
 		);
 		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
 		expect(calls).toContain('SELECT 1');

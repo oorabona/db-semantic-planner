@@ -30,7 +30,7 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { buildRelationKeyFields } from '@dbsp/types';
-import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
@@ -1095,8 +1095,22 @@ function buildSequenceMap(
 	return result;
 }
 
+/**
+ * Introspect a database through a pool.
+ *
+ * This does NOT accept a checked-out `PoolClient`, and that is deliberate. A
+ * client may be sitting inside a transaction that belongs to its owner, and a
+ * catalog query that fails there aborts *their* transaction. Protecting that
+ * needs a savepoint, and knowing whether to take one needs the caller to say
+ * whose transaction it is — which is what `PgsqlAdapter`'s `borrowedClient`
+ * declaration is for. Guessing it from the object's shape is the exact defect
+ * this adapter was rewritten to remove.
+ *
+ * So: hold a client, use `new PgsqlAdapter(client, { borrowedClient: true })`
+ * and call `.introspect()` on it.
+ */
 export async function introspect(
-	pool: Pool | PoolClient | CatalogQueryExecutor,
+	pool: Pool | CatalogQueryExecutor,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';
