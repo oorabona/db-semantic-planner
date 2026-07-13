@@ -95,16 +95,23 @@ interface Assumption {
 }
 
 interface ProofClaim {
-  evidence: EvidenceRef[];        // what was actually established
-  restsOn: AssumptionId[];        // and what it took for granted, transitively
+  proposition: Proposition;       // WHAT was established — not "some evidence exists"
+  scope: ResourceAddress[];       // over which objects
+  derivedFrom: ClaimId[];         // which other claims it was inferred from
+  supportedBy: EvidenceRef[];     // and which observations support it directly
+  assumes: AssumptionId[];        // what it took for granted
+  semantics: SemanticArtifactRef[];  // under whose judgement — the trust roots (§0)
+  conclusion: 'established' | 'established-under-assumptions' | 'undischarged' | 'refuted';
 }
 ```
+
+**This is a graph, and it must be one.** A claim that carried only `{ evidence, restsOn }` could not say *what* it proved, *which* other claims it was inferred from, or *under whose* semantics — and a pre-flattened `restsOn` denormalises exactly the causal path you will need to walk. The question this design exists to answer — *"`effectsOf@v3` under-declared; which plans are now suspect?"* — must be a **query**, not an archaeology. That is the whole return on writing any of this down.
 
 A policy does not decide on the word `proven-under-assumption`. It decides on **which assumption classes, from which trust roots, over which scopes** it is willing to accept — and every step names the assumptions it rests on, so that accepting one is a decision and not a shrug.
 
 **`user-assertion` is not an `Evidence.source`.** It never was. It is an `Assumption`, and it belongs in this graph, not in the evidence union — putting it there was the same error as putting `data-probe` there.
 
-#### Rules emit structure; core renders the SQL
+#### Rules emit structure; operation packs render the SQL
 
 An earlier version of this section said: *"where the generated SQL can be checked against the declared read and write sets, it is."* **That is impossible without a parser, and the parser is banned.** Consider a rule that emits:
 
@@ -116,9 +123,9 @@ To check that against a declared effect set, something must read the string and 
 
 The way out is to remove the gap rather than police it:
 
-> **A rule does not emit SQL. It emits a structured operation, and core renders it.**
+> **A rule does not emit SQL. It emits a structured operation. The engine-scoped operation pack that owns that operation validates its payload, renders it, and computes its effects. Core only carries the envelope, and never looks inside.**
 
-`AddColumn { table, column, type, nullable }` — not `"ALTER TABLE …"`. The **effects are read off the structure**, by core, from the same object that produces the statement. The declaration and the SQL are then not two artefacts that might disagree; they are one artefact seen twice.
+`AddColumn { table, column, type, nullable }` — not `"ALTER TABLE …"`. The **effects are read off the structure**, by the pack that also produces the statement from it. The declaration and the SQL are then not two artefacts that might disagree; they are one artefact seen twice.
 
 Expressions inside such an operation — a CHECK body, a `USING` clause — remain **opaque values carried by the structure**. Core does not read them, and so their contribution to the read set is `unknown` — which, by rule 3, **widens** the radius rather than vanishing from it.
 
@@ -241,6 +248,32 @@ interface ObservationIssuer {
 
 and an `IssuedObservation` carries what makes it checkable: the collector's id **and version**, the exact query or operation it ran, the transaction context, the raw result or its digest, when it was taken, and the precise scope it covers. A rule receives these. It never builds one.
 
+**But a rule must not be able to turn an observation into a proof, either** — and the step from one to the other is where that would happen, so it is named and it is owned:
+
+```ts
+interface IssuedObservation {
+  id: ObservationId;
+  issuer: SemanticArtifactId;      // WHO ran it, at which version
+  request: ObservationRequest;     // what was asked
+  result: ObservationResult;
+  context: ObservationContext;     // engine, version, role, search_path, session, transaction
+  stability: ObservationStability; // how long it is good for — see the owed contracts
+}
+
+interface ClaimDerivation {
+  semantics: SemanticArtifactId;   // under whose judgement the inference was made
+  inputs: ObservationId[];         // from which observations
+  proposition: Proposition;
+  conclusion: 'established' | 'established-under-assumptions' | 'undischarged' | 'refuted';
+}
+```
+
+```
+ObservationIssuer → IssuedObservation → a versioned semantic artefact → ClaimDerivation → ProofClaim
+```
+
+A rule can ask for an observation and it can propose a derivation, but the derivation records **which artefact, at which version, drew the inference** — so an unsound step is attributable and every plan that rested on it is enumerable. An untyped `Evidence[]` hanging off the plan would leave that step anonymous, which is the same compression as everything else this document refuses: a judgement made, and no record of who made it.
+
 **And a rule does not build the plan.** `generate(): GuardedPlan` would let a rule assemble the very thing — ordering, guards, composition — that it is supposed to be *subject to*. It emits a fragment, and the planner composes:
 
 ```ts
@@ -302,28 +335,46 @@ The ways it goes wrong are concrete:
 - one rule's guard must be evaluated *before* a table rewrite, another's only *after*;
 - **the enum case, again**: adding an enum value and adding a CHECK that uses it requires knowing PostgreSQL's transaction visibility rules *across both rules*. Neither can establish it alone, and both are individually correct.
 
-So a rule declares what the planner needs in order to *prove* a composition, not a claim that one exists. And what it declares is **only what is true of the rule regardless of which object it is applied to** — its shape, not its reach:
+So a rule declares what the planner needs in order to *prove* a composition, not a claim that one exists. And the honest answer to *"what does a rule declare?"* turns out to be: **almost nothing.** A rule chooses a strategy. Everything the composition prover needs is a fact about the **concrete operations** that strategy produced.
+
+That includes the execution semantics, which look rule-shaped and are not. One rule can emit operations that disagree with each other:
+
+```
+add the enum value          → forbids a transaction (PostgreSQL cannot see a new
+                              enum value in the transaction that added it)
+backfill the column         → joins the current transaction
+add the CHECK using it      → requires a new transaction, after the first committed
+```
+
+That is one strategy, three operations, three different transaction requirements — and it is precisely the enum bug this document was born from. A `transactionBoundary` on the rule would have to pick one of the three and be wrong about the other two.
+
+So the execution semantics live where the reach does — on the operation, computed by the pack that owns it:
 
 ```ts
-interface TransitionRule {
-  …
-  transactionBoundary: 'requires-own' | 'joins-caller' | 'forbids-transaction';
-  guardPhase: 'before-rewrite' | 'after-rewrite';
+interface OperationExecutionSemantics {           // owned by the engine's operation pack
+  transaction: { kind: 'joins-current' }
+             | { kind: 'requires-new' }
+             | { kind: 'forbids-transaction' };
+  guardPhase: 'before-operation' | 'during-operation' | 'after-operation';
+  commitBoundary: 'none' | 'before' | 'after' | 'before-and-after';
+}
+
+interface OperationEffects {
+  …                                               // reads, writes, locks, invalidates — §1
+  execution: OperationExecutionSemantics;
 }
 ```
 
-A rule may **not** declare a `readSet`, a `writeSet`, its locks, its context mutations, or whose claims it invalidates — those are the reach of a *concrete operation on a concrete object*, and §1 has already said where they come from. A static reach on a rule is the same lie in a smaller box: it is right for the object the author had in mind and wrong for the next one.
+`guardPhase` needed the third value for the same reason: `CREATE UNIQUE INDEX CONCURRENTLY` has the engine check the predicate *during* the operation, and neither `before` nor `after` can express that (§4b).
 
-So the composition prover reads the effects, not the rule:
+So the composition prover reads operations and their effects. It does not read rules:
 
 ```ts
 interface CompositionInput {
   operation: PhysicalOperation;
-  effects: OperationEffects;         // from the operation pack — §1
+  effects: OperationEffects;         // reach AND execution semantics — from the operation pack
   obligations: ProofObligation[];
   guards: ApplyGuard[];
-  boundary: TransitionRule['transactionBoundary'];
-  guardPhase: TransitionRule['guardPhase'];
 }
 ```
 
@@ -563,7 +614,9 @@ Each step declares the state it expects to find and the state it should leave, o
 
 ```ts
 interface GuardedPlan {
-  evidence: Evidence[];
+  observations: IssuedObservation[];   // what was actually looked at, and by whom (§4)
+  claims: ProofClaim[];                // what was concluded from them, and under whose judgement
+  assumptions: Assumption[];           // and what was taken for granted (§0)
   preconditions: ExecutableAssertion[];
   steps: GuardedPlanStep[];
   postconditions: ExecutableAssertion[];
@@ -741,7 +794,7 @@ So an identity attachment is **evidence only if its provenance is authenticated*
 
 An identity is only as trustworthy as the act that attached it, and the design has to remember which act that was.
 
-### 9. Rehearsal is stronger evidence than a shadow — and still not proof
+### 9. Rehearsal buys operational confidence, not proof about the run that has not happened
 
 Replaying the exact plan against a clone of production — same version, same extensions, same data, same collations, same settings, same roles — is the strongest evidence available. It still does not prove:
 
@@ -763,9 +816,9 @@ That is not a product failure. It is the safety property the product exists to p
 
 ## The first wall, named in advance
 
-`compareSchemata()` is pure, synchronous, and cannot run a probe. The first person to implement this will either make the whole diff pipeline async and context-aware — or they will write `evidence: { source: 'data-probe' }` **without a probe**, and this ADR will have changed nothing.
+`compareSchemata()` is pure, synchronous, and cannot run a probe. The first implementer will be tempted by two ways out, **and both violate this ADR**: make the pure diff context-aware and let it reach for the database, or leave it pure and fabricate the evidence inside it — `{ source: 'data-probe' }` **without a probe** — in which case this document will have changed nothing.
 
-That is exactly why the obligation is a separate stage.
+Neither is the answer. The obligation crosses out of the diff **unresolved**, and it is discharged in the separate `prove` stage, which has the connection and the context. That is exactly why the stages are separate, and the temptation to collapse them is the first thing that will happen.
 
 ## Consequences
 
@@ -811,7 +864,7 @@ Two things that are **not** in it, and are worth saying out loud because they lo
 
 These are known, and they are what "the type contracts are subject to validation by implementation" means.
 
-**The proof graph must actually be a graph.** `{ evidence, restsOn }` cannot say *what was proven*, *which other claims it was derived from*, *by which inference*, or *under which semantic artefacts* — and a pre-flattened `restsOn` denormalises the very thing whose causal path you will need to walk. A claim carries its `proposition`, its `scope`, its `derivedFrom: ClaimId[]`, its `supportedBy`, its `assumes`, the `semantics` that produced it, and a conclusion of `established | established-under-assumptions | undischarged | refuted`. That is what makes *"which plans does a defect in `effectsOf@v3` invalidate?"* a query rather than an archaeology.
+**~~The proof graph must actually be a graph.~~ — closed, in §0.** It was owed, and leaving it owed was itself the defect: the document carried a `{ evidence, restsOn }` claim in its body and the *real* contract in its debt list, so an implementer would have built the first and never read the second. Two competing forms of one contract in one document is a decision made by whoever reads least. The claim now carries its proposition, scope, `derivedFrom`, `supportedBy`, `assumes` and `semantics` where anyone implementing it will actually meet them.
 
 **"Durable evidence versus volatile guard" is too binary.** The instinct is right and the line is in the wrong place: privileges change, extensions are upgraded, a function is replaced, an object is renamed, a rehearsal is *already* historical the moment it finishes, and the catalog can change immediately after it is read. The real criterion is not *data or not-data* — it is the **validity protocol** of the observation:
 
