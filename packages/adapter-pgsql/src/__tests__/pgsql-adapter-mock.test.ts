@@ -79,6 +79,26 @@ function queryCalls(
 	return calls.filter((sql) => !/^DEALLOCATE /.test(sql));
 }
 
+const PREPARED_STATEMENT_CATALOG_SQL =
+	'SELECT 1 FROM pg_prepared_statements WHERE name = $1';
+
+function preparedStatementCatalogResult(exists: boolean): QueryResult {
+	return {
+		rows: exists ? [{ '?column?': 1 }] : [],
+		rowCount: exists ? 1 : 0,
+		command: 'SELECT',
+	} as QueryResult;
+}
+
+function preparedStatementCatalogResultFor(
+	params: readonly unknown[] | undefined,
+	statementName: string | undefined,
+): QueryResult {
+	return preparedStatementCatalogResult(
+		statementName !== undefined && params?.[0] === statementName,
+	);
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -297,6 +317,11 @@ describe('@dbsp/adapter-pgsql public API', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT fail') throw statementError;
+			if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+				// This test is about forged options, not prepared cleanup; model the
+				// statement failure as one where PostgreSQL never created the statement.
+				return preparedStatementCatalogResult(false);
+			}
 			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
@@ -313,10 +338,11 @@ describe('@dbsp/adapter-pgsql public API', () => {
 		expect((error as Error).message).toContain(
 			'rolled back the failed raw SQL to a savepoint',
 		);
-		expect(queryCalls(query)).toEqual([
+		expect(queryCalls(query, { includePreparedCleanup: true })).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'SELECT fail',
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(client.release).not.toHaveBeenCalled();
@@ -1037,11 +1063,24 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const statementError = Object.assign(new Error('duplicate key value'), {
 			code: '23505',
 		});
-		const query = vi.fn(async (input: MockQueryInput) => {
-			const sql = queryText(input);
-			if (sql === 'INSERT duplicate') throw statementError;
-			return { rows: [], rowCount: 0 } as QueryResult;
-		});
+		let preparedStatementName: string | undefined;
+		const query = vi.fn(
+			async (input: MockQueryInput, params?: readonly unknown[]) => {
+				const sql = queryText(input);
+				const config = queryConfig(input);
+				if (config?.text === 'INSERT duplicate') {
+					preparedStatementName = config.name;
+					throw statementError;
+				}
+				if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+					return preparedStatementCatalogResultFor(
+						params,
+						preparedStatementName,
+					);
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			},
+		);
 		const client = {
 			query,
 			release: vi.fn(),
@@ -1068,10 +1107,15 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(error).not.toBeInstanceOf(PgsqlRawSqlTransactionControlError);
 		expect((error as Error).message).toContain('transaction is aborted');
 		expect((error as Error).cause).toBe(statementError);
-		expect(queryCalls(query)).toEqual([
+		if (preparedStatementName === undefined) {
+			throw new Error('expected dbsp to prepare the duplicate insert');
+		}
+		expect(queryCalls(query, { includePreparedCleanup: true })).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'INSERT duplicate',
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
+			`DEALLOCATE "${preparedStatementName}"`,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(client.release).not.toHaveBeenCalled();
@@ -1471,6 +1515,11 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (sql === 'SELECT fail') throw pgError;
+			if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+				// This test only cares that the managed scope rolls back once; the
+				// ambiguous failed statement is modeled as not present in the catalog.
+				return preparedStatementCatalogResult(false);
+			}
 			return { rows: [], rowCount: 0 } as QueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
@@ -1494,6 +1543,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			'SELECT ok',
 			'SELECT fail',
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
@@ -1587,12 +1637,25 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 			),
 			{ code: '25001' },
 		);
+		let preparedStatementName: string | undefined;
 		const client = {
-			query: vi.fn(async (input: MockQueryInput) => {
-				const sql = queryText(input);
-				if (sql === ddl) throw pgError;
-				return { rows: [], rowCount: 0 } as QueryResult;
-			}),
+			query: vi.fn(
+				async (input: MockQueryInput, params?: readonly unknown[]) => {
+					const sql = queryText(input);
+					const config = queryConfig(input);
+					if (config?.text === ddl) {
+						preparedStatementName = config.name;
+						throw pgError;
+					}
+					if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+						return preparedStatementCatalogResultFor(
+							params,
+							preparedStatementName,
+						);
+					}
+					return { rows: [], rowCount: 0 } as QueryResult;
+				},
+			),
 			release: vi.fn(),
 		} as unknown as PoolClient;
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
@@ -1606,11 +1669,21 @@ describe('PgsqlAdapter.executeDDL — success path', () => {
 		expect((error as Error).message).toContain(
 			'rolled back the failed raw SQL to a savepoint',
 		);
-		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
-		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls[1]).toBe(ddl);
-		expect(calls[2]).toMatch(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/);
-		expect(calls[3]).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+		if (preparedStatementName === undefined) {
+			throw new Error('expected dbsp to prepare the borrowed-client DDL');
+		}
+		expect(
+			queryCalls(client.query as ReturnType<typeof vi.fn>, {
+				includePreparedCleanup: true,
+			}),
+		).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			ddl,
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
+			`DEALLOCATE "${preparedStatementName}"`,
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
@@ -1845,7 +1918,9 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 				const config = queryConfig(input);
 				const sql = queryText(input);
 				if (config?.text === 'COMMIT; SELECT 1') throw pgError;
-				if (/^DEALLOCATE /.test(sql)) return { rows: [], rowCount: 0 };
+				if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+					return preparedStatementCatalogResult(false);
+				}
 				return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
 			}),
 			release: vi.fn(),
@@ -1865,13 +1940,149 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		expect((error as Error).message).toContain(
 			'dbsp sends one command per raw call inside a transaction it manages',
 		);
-		expect(queryCalls(client.query as ReturnType<typeof vi.fn>)).toEqual([
+		expect(
+			queryCalls(client.query as ReturnType<typeof vi.fn>, {
+				includePreparedCleanup: true,
+			}),
+		).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			'COMMIT; SELECT 1',
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('deallocates a failed zero-parameter raw statement after transaction rollback and before pool release', async () => {
+		const rawSql = 'SELECT 1 / x FROM (VALUES (0)) AS v(x)';
+		const pgError = Object.assign(new Error('division by zero'), {
+			code: '22012',
+		});
+		let preparedStatementName: string | undefined;
+		const events: string[] = [];
+		const query = vi.fn(
+			async (input: MockQueryInput, params?: readonly unknown[]) => {
+				const config = queryConfig(input);
+				const sql = queryText(input);
+				events.push(`sql:${sql}`);
+				if (config?.text === rawSql) {
+					preparedStatementName = config.name;
+					throw pgError;
+				}
+				if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+					return preparedStatementCatalogResultFor(
+						params,
+						preparedStatementName,
+					);
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			},
+		);
+		const client = {
+			query,
+			release: vi.fn(() => {
+				events.push('release');
+			}),
+		} as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		await expect(
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw(rawSql);
+			}),
+		).rejects.toBe(pgError);
+
+		if (preparedStatementName === undefined) {
+			throw new Error('expected dbsp to prepare the raw statement');
+		}
+		const deallocateSql = `DEALLOCATE "${preparedStatementName}"`;
+		expect(queryCalls(query, { includePreparedCleanup: true })).toEqual([
+			'BEGIN',
+			rawSql,
+			'ROLLBACK',
+			PREPARED_STATEMENT_CATALOG_SQL,
+			deallocateSql,
+		]);
+		expect(events).toEqual([
+			'sql:BEGIN',
+			`sql:${rawSql}`,
+			'sql:ROLLBACK',
+			`sql:${PREPARED_STATEMENT_CATALOG_SQL}`,
+			`sql:${deallocateSql}`,
+			'release',
+		]);
+		expect(client.release).toHaveBeenCalledOnce();
+		expect(
+			(client.release as unknown as ReturnType<typeof vi.fn>).mock.calls[0],
+		).toEqual([]);
+	});
+
+	it('retries prepared-statement deallocation when a caught raw COMMIT poisons the transaction scope', async () => {
+		const commitResult = {
+			rows: [],
+			rowCount: 0,
+			command: 'COMMIT',
+		} as QueryResult;
+		let preparedStatementName: string | undefined;
+		let deallocateAttempts = 0;
+		let rawCommitError: unknown;
+		const query = vi.fn(
+			async (input: MockQueryInput, params?: readonly unknown[]) => {
+				const config = queryConfig(input);
+				const sql = queryText(input);
+				if (config?.text === 'COMMIT') {
+					preparedStatementName = config.name;
+					return commitResult;
+				}
+				if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+					return preparedStatementCatalogResultFor(
+						params,
+						preparedStatementName,
+					);
+				}
+				if (/^DEALLOCATE /.test(sql)) {
+					deallocateAttempts++;
+					if (deallocateAttempts === 1) {
+						throw Object.assign(new Error('current transaction is aborted'), {
+							code: '25P02',
+						});
+					}
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			},
+		);
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, client);
+		const adapter = createPgsqlAdapter(pool);
+
+		const transactionError = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				try {
+					await tx.executeRaw('COMMIT');
+				} catch (error) {
+					rawCommitError = error;
+				}
+			}),
+		);
+
+		expectRawSqlTransactionControlError(rawCommitError, commitResult);
+		expect(transactionError).toBe(rawCommitError);
+		if (preparedStatementName === undefined) {
+			throw new Error('expected dbsp to prepare the raw COMMIT');
+		}
+		const deallocateSql = `DEALLOCATE "${preparedStatementName}"`;
+		expect(queryCalls(query, { includePreparedCleanup: true })).toEqual([
+			'BEGIN',
+			'COMMIT',
+			deallocateSql,
+			'ROLLBACK',
+			PREPARED_STATEMENT_CATALOG_SQL,
+			deallocateSql,
+		]);
+		expect(deallocateAttempts).toBe(2);
+		expect(client.release).toHaveBeenCalledOnce();
 	});
 
 	it.each([
@@ -1960,6 +2171,9 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			query: vi.fn(async (input: MockQueryInput) => {
 				const sql = queryText(input);
 				if (sql === rawSql) throw pgError;
+				if (sql === PREPARED_STATEMENT_CATALOG_SQL) {
+					return preparedStatementCatalogResult(false);
+				}
 				return { rows: [], rowCount: 0 } as QueryResult;
 			}),
 			release: vi.fn(),
@@ -1977,11 +2191,14 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		const reachable = collectReachableStrings(error).join('\n');
 		expect(reachable).not.toContain(literal);
 		expect(reachable).not.toContain(rawSql);
-		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
+		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>, {
+			includePreparedCleanup: true,
+		});
 		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			rawSql,
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			PREPARED_STATEMENT_CATALOG_SQL,
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 	});

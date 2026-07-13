@@ -137,7 +137,17 @@ interface RawPartition {
 	columns: string[];
 }
 
-interface CatalogQueryExecutor {
+/**
+ * The adapter's own executor for catalog reads, already carrying whatever
+ * savepoint protection the connection's ownership calls for.
+ *
+ * The brand is load-bearing. Structurally, a `pg.PoolClient` has a `query()` and
+ * would satisfy this interface — so without it, a checked-out client could be
+ * passed straight into the catalog reads, unprotected, and nothing but a comment
+ * would say otherwise. Only the adapter sets the brand.
+ */
+export interface CatalogQueryExecutor {
+	readonly dbspProtectedCatalogExecutor: true;
 	query<T extends QueryResultRow = QueryResultRow>(
 		sql: string,
 		parameters?: readonly unknown[],
@@ -1106,11 +1116,45 @@ function buildSequenceMap(
  * declaration is for. Guessing it from the object's shape is the exact defect
  * this adapter was rewritten to remove.
  *
+ * Saying so in a comment is not enough: `CatalogQueryExecutor` is structural, so
+ * a `PoolClient` — which has a `query()` — satisfies it, and the prose would have
+ * been the only thing standing in the way. It is branded instead, and only the
+ * adapter's own protected executor carries the brand. A client cannot be passed
+ * here at all.
+ *
  * So: hold a client, use `new PgsqlAdapter(client, { borrowedClient: true })`
  * and call `.introspect()` on it.
  */
 export async function introspect(
-	pool: Pool | CatalogQueryExecutor,
+	pool: Pool,
+	options?: IntrospectionOptions,
+): Promise<IntrospectedModelIR> {
+	// A pool checks out its own connection per query, so there is no caller
+	// transaction to damage and nothing to protect. That is precisely why this
+	// entry point can take a pool and not a client.
+	return introspectWithExecutor(
+		{
+			dbspProtectedCatalogExecutor: true as const,
+			query: <T extends QueryResultRow = QueryResultRow>(
+				sql: string,
+				parameters?: readonly unknown[],
+			) =>
+				parameters === undefined
+					? pool.query<T>(sql)
+					: pool.query<T>(sql, [...parameters]),
+		},
+		options,
+	);
+}
+
+/**
+ * The path `PgsqlAdapter.introspect()` takes, with an executor that already
+ * carries the savepoint protection appropriate to whoever owns the connection.
+ * Not exported from the package: reaching the catalog reads unprotected is the
+ * thing the public entry point exists to prevent.
+ */
+export async function introspectWithExecutor(
+	pool: CatalogQueryExecutor,
 	options?: IntrospectionOptions,
 ): Promise<IntrospectedModelIR> {
 	const schema = options?.schema ?? 'public';

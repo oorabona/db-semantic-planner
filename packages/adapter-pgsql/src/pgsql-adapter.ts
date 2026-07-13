@@ -120,7 +120,7 @@ import { intentToDecisions } from './intent-to-decisions.js';
 import {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
-	introspect as introspectDb,
+	introspectWithExecutor as introspectDb,
 } from './introspection.js';
 import {
 	getNamingPluginForDbCasing,
@@ -236,6 +236,7 @@ type DbspScopeStatementLock = {
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
+const preparedStatementObligations = new WeakMap<PoolClient, Set<string>>();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -324,6 +325,36 @@ function createScopeState(
 	statementLock: DbspScopeStatementLock = { tail: undefined },
 ): DbspScopeState {
 	return { poisoned: undefined, statementLock };
+}
+
+function rememberPreparedStatementObligation(
+	client: PoolClient,
+	statementName: string,
+): void {
+	let statements = preparedStatementObligations.get(client);
+	if (statements === undefined) {
+		statements = new Set();
+		preparedStatementObligations.set(client, statements);
+	}
+	statements.add(statementName);
+}
+
+function forgetPreparedStatementObligation(
+	client: PoolClient,
+	statementName: string,
+): void {
+	const statements = preparedStatementObligations.get(client);
+	if (statements === undefined) return;
+	statements.delete(statementName);
+	if (statements.size === 0) {
+		preparedStatementObligations.delete(client);
+	}
+}
+
+function pendingPreparedStatementObligations(
+	client: PoolClient,
+): readonly string[] {
+	return [...(preparedStatementObligations.get(client) ?? [])];
 }
 
 function normalizeCommandTag(command: string | undefined): string | undefined {
@@ -2117,6 +2148,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							rollbackErr,
 						);
 					}
+					try {
+						await adapter.dischargePreparedStatementObligations(client);
+					} catch (deallocateErr) {
+						releaseError =
+							deallocateErr instanceof Error ? deallocateErr : true;
+						throw createCleanupFailureError(
+							'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
+							error,
+							deallocateErr,
+						);
+					}
 				}
 				throw error;
 			} finally {
@@ -2131,6 +2173,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
 							rollbackErr,
 						);
+					}
+					if (cleanupErrorToThrow === undefined) {
+						try {
+							await adapter.dischargePreparedStatementObligations(client);
+						} catch (deallocateErr) {
+							releaseError =
+								deallocateErr instanceof Error ? deallocateErr : true;
+							cleanupErrorToThrow = createCleanupOnlyError(
+								'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
+								deallocateErr,
+							);
+						}
 					}
 				}
 				releaseScope?.();
@@ -2367,6 +2421,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						rollbackErr,
 					);
 				}
+				try {
+					await this.dischargePreparedStatementObligations(client);
+				} catch (deallocateErr) {
+					throw createCleanupFailureError(
+						'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
+						error,
+						deallocateErr,
+					);
+				}
 			}
 			throw error;
 		} finally {
@@ -2378,6 +2441,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
 						rollbackErr,
 					);
+				}
+				if (cleanupErrorToThrow === undefined) {
+					try {
+						await this.dischargePreparedStatementObligations(client);
+					} catch (deallocateErr) {
+						cleanupErrorToThrow = createCleanupOnlyError(
+							'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
+							deallocateErr,
+						);
+					}
 				}
 			}
 			releaseScope?.();
@@ -2415,6 +2488,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		return introspectDb(
 			{
+				// The brand says this executor already carries the savepoint protection
+				// the connection's ownership calls for. A bare PoolClient cannot get here.
+				dbspProtectedCatalogExecutor: true as const,
 				query: <T extends QueryResultRow = QueryResultRow>(
 					sql: string,
 					parameters?: readonly unknown[],
@@ -2525,6 +2601,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		try {
 			const result = await fn(txAdapter);
 			this.throwIfScopePoisoned(scopeState);
+			await this.dischargePreparedStatementObligations(client);
 			try {
 				await this.executeConnectionStatement(
 					client,
@@ -2594,6 +2671,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			const result = await fn(txAdapter);
 			this.throwIfScopePoisoned(scopeState);
+			await this.dischargePreparedStatementObligations(client);
 			const commitResult = await this.executeConnectionStatement(
 				client,
 				'COMMIT',
@@ -2604,6 +2682,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			);
 			committed = true;
+			await this.dischargePreparedStatementObligations(client);
 			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
@@ -2615,6 +2694,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						'PostgreSQL transaction cleanup failed: ROLLBACK failed after the transaction body failed',
 						error,
 						rollbackErr,
+					);
+				}
+				try {
+					await this.dischargePreparedStatementObligations(client);
+				} catch (deallocateErr) {
+					throw createCleanupFailureError(
+						'PostgreSQL transaction cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
+						error,
+						deallocateErr,
 					);
 				}
 			}
@@ -2651,10 +2739,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				await this.dischargePreparedStatementObligations(client);
 				return;
+			}
+			if (isPgErrorWithCode(error, INVALID_SAVEPOINT_SPECIFICATION)) {
+				await this.dischargePreparedStatementObligations(client);
 			}
 			throw error;
 		}
+		await this.dischargePreparedStatementObligations(client);
 		await this.executeConnectionStatement(
 			client,
 			`RELEASE SAVEPOINT ${savepointName}`,
@@ -3197,6 +3290,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		let pendingError: unknown;
 		let result: QueryResult<T> | undefined;
+		let statementCompleted = false;
+		if (preparedStatementName !== undefined && isPoolClientLike(executor)) {
+			rememberPreparedStatementObligation(executor, preparedStatementName);
+		}
 		try {
 			const rawResult = await this.issueConnectionQuery<T>(
 				executor,
@@ -3204,6 +3301,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				parameters,
 				preparedStatementName,
 			);
+			statementCompleted = true;
 			if (options.inspectTransactionControl !== false) {
 				await this.assertNoTransactionControlCommand(
 					executor,
@@ -3227,9 +3325,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 		}
 
-		if (preparedStatementName !== undefined && isPoolClientLike(executor)) {
+		if (
+			preparedStatementName !== undefined &&
+			isPoolClientLike(executor) &&
+			(pendingError === undefined || statementCompleted)
+		) {
 			try {
-				await this.deallocatePreparedStatement(executor, preparedStatementName);
+				await this.dischargePreparedStatementObligation(
+					executor,
+					preparedStatementName,
+				);
 			} catch (cleanupErr) {
 				if (pendingError === undefined) {
 					throw createCleanupOnlyError(
@@ -3331,6 +3436,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		try {
 			this.throwIfScopePoisoned(scopeState);
+			await this.dischargePreparedStatementObligations(client);
 			await this.executeConnectionStatement(
 				client,
 				`RELEASE SAVEPOINT ${savepointName}`,
@@ -3368,11 +3474,65 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		);
 	}
 
+	/**
+	 * A statement dbsp prepared is an obligation dbsp owes — but only if it was
+	 * ever prepared. When PostgreSQL rejects the statement while parsing it (a
+	 * multi-command string, an unknown function, a syntax error), nothing was
+	 * created, and dbsp cannot tell that apart from a statement that parsed and
+	 * then failed while running.
+	 *
+	 * Sending the `DEALLOCATE` anyway and tolerating the error does NOT work, and
+	 * the trace says why: inside a transaction, *any* failing command aborts it.
+	 * So a `DEALLOCATE` that finds nothing to deallocate re-aborts a transaction
+	 * that the savepoint rollback had just made usable again, and the `RELEASE`
+	 * behind it dies with 25P02. Swallowing the error in JavaScript does not
+	 * un-abort anything on the server.
+	 *
+	 * So ask, rather than guess: the catalog knows whether the statement exists.
+	 * This runs only on cleanup paths, and only once the connection can accept a
+	 * statement at all.
+	 */
 	private async deallocatePreparedStatement(
 		client: PoolClient,
 		statementName: string,
+		mayNotExist = false,
 	): Promise<void> {
+		// After the statement ran, dbsp knows it exists — it just used it. The
+		// question only arises where the answer is genuinely unknown: the statement
+		// failed, and dbsp cannot tell a parse failure (nothing was created) from a
+		// runtime one (it was).
+		if (mayNotExist) {
+			const existing = await client.query(
+				'SELECT 1 FROM pg_prepared_statements WHERE name = $1',
+				[statementName],
+			);
+			if (existing.rowCount === 0) return;
+		}
 		await client.query(`DEALLOCATE ${quoteIdent(statementName)}`);
+	}
+
+	private async dischargePreparedStatementObligation(
+		client: PoolClient,
+		statementName: string,
+	): Promise<void> {
+		await this.deallocatePreparedStatement(client, statementName);
+		forgetPreparedStatementObligation(client, statementName);
+	}
+
+	/**
+	 * The cleanup path, reached because something already failed — so dbsp cannot
+	 * tell whether the statement was ever created. It asks the catalog first: a
+	 * `DEALLOCATE` that finds nothing would itself fail, and a failing command
+	 * inside a transaction aborts it again, right after the savepoint rollback had
+	 * made it usable.
+	 */
+	private async dischargePreparedStatementObligations(
+		client: PoolClient,
+	): Promise<void> {
+		for (const statementName of pendingPreparedStatementObligations(client)) {
+			await this.deallocatePreparedStatement(client, statementName, true);
+			forgetPreparedStatementObligation(client, statementName);
+		}
 	}
 
 	private async issueConnectionQuery<T extends QueryResultRow>(
