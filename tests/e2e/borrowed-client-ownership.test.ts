@@ -45,6 +45,33 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 	return rows;
 }
 
+function deferred<T = void>(): {
+	readonly promise: Promise<T>;
+	readonly resolve: (value?: T | PromiseLike<T>) => void;
+	readonly reject: (error: unknown) => void;
+} {
+	let resolve!: (value?: T | PromiseLike<T>) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+function queryText(input: unknown): string {
+	if (typeof input === 'string') return input;
+	if (
+		typeof input === 'object' &&
+		input !== null &&
+		'text' in input &&
+		typeof (input as { readonly text?: unknown }).text === 'string'
+	) {
+		return (input as { readonly text: string }).text;
+	}
+	return String(input);
+}
+
 function pgTransactionStatus(client: unknown): unknown {
 	return (client as { readonly _txStatus?: unknown })._txStatus;
 }
@@ -1015,33 +1042,180 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([45, 46]);
 	});
 
-	it('rolls back an unawaited nested transaction failure before the parent unwinds', async () => {
+	it('rolls back an unawaited nested transaction that failed before the parent closes', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const originalQuery = client.query.bind(client) as (
+			...args: unknown[]
+		) => Promise<unknown>;
+		const patchedClient = client as {
+			query: (...args: unknown[]) => Promise<unknown>;
+		};
+		const childClosed = deferred();
+		patchedClient.query = async (...args: unknown[]) => {
+			const sqlText = queryText(args[0]);
+			const result = await originalQuery(...args);
+			if (/^RELEASE SAVEPOINT dbsp_savepoint_/.test(sqlText)) {
+				setTimeout(() => childClosed.resolve(), 0);
+			}
+			return result;
+		};
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		let child: Promise<unknown> | undefined;
+		const childError = new Error('unawaited nested failure');
+		let rolledBack = false;
+
+		try {
+			await client.query('BEGIN');
+			const transaction = orm.transaction(async (tx) => {
+				await tx
+					.into(tx.tables.items)
+					.values({ id: 48, label: 'parent rolled back by child failure' })
+					.execute();
+				child = tx.transaction(async () => {
+					throw childError;
+				});
+				await childClosed.promise;
+			});
+
+			await expect(transaction).rejects.toThrow(
+				/Nested transactions must be awaited/,
+			);
+			await expect(transaction).rejects.toHaveProperty('cause', childError);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			patchedClient.query = originalQuery;
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		if (child === undefined) {
+			throw new Error('expected child transaction to be captured');
+		}
+		await expect(child).rejects.toBe(childError);
+		expect(await itemIds()).toEqual([]);
+	});
+
+	it('refuses an unawaited nested transaction still running when the callback returns', async () => {
 		const pool = await getTestPool();
 		const adapter = createPgsqlAdapter(pool);
 		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		const started = deferred();
+		const resume = deferred();
 		let child: Promise<unknown> | undefined;
 
 		await expect(
 			orm.transaction(async (tx) => {
 				await tx
 					.into(tx.tables.items)
-					.values({ id: 48, label: 'parent rolled back by child failure' })
+					.values({ id: 49, label: 'parent rolled back by open child' })
 					.execute();
 				child = tx.transaction(async (inner) => {
-					await inner
-						.into(inner.tables.items)
-						.values({ id: 47, label: 'unawaited nested rollback' })
-						.execute();
-					throw new Error('unawaited nested failure');
+					started.resolve();
+					await resume.promise;
+					await inner.raw('SELECT 1');
 				});
-				void child.catch(() => undefined);
+				await started.promise;
 			}),
-		).rejects.toThrow('unawaited nested failure');
+		).rejects.toThrow(/Nested transactions must be awaited/);
 
-		if (child === undefined) {
-			throw new Error('expected child transaction to be captured');
+		expect(await itemIds()).toEqual([]);
+		resume.resolve();
+		await child?.catch(() => undefined);
+	});
+
+	it('refuses a later unobserved child after an observed child failure', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		const firstError = new Error('first nested child failed');
+		const secondStarted = deferred();
+		const resumeSecond = deferred();
+		let first: Promise<unknown> | undefined;
+		let second: Promise<unknown> | undefined;
+
+		await expect(
+			orm.transaction(async (tx) => {
+				first = tx.transaction(async () => {
+					throw firstError;
+				});
+				await first.catch(() => undefined);
+
+				second = tx.transaction(async (inner) => {
+					secondStarted.resolve();
+					await resumeSecond.promise;
+					await inner.raw('SELECT 1');
+				});
+				await secondStarted.promise;
+			}),
+		).rejects.toThrow(/Nested transactions must be awaited/);
+
+		resumeSecond.resolve();
+		await first?.catch(() => undefined);
+		await second?.catch(() => undefined);
+		expect(await itemIds()).toEqual([]);
+	});
+
+	it('rolls back a successful borrowed-client statement when RELEASE SAVEPOINT fails', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const releaseError = new Error('forced release failure');
+		const trace: string[] = [];
+		const originalQuery = client.query.bind(client) as (
+			...args: unknown[]
+		) => Promise<unknown>;
+		let failNextDbspRelease = true;
+		(client as { query: (...args: unknown[]) => Promise<unknown> }).query =
+			async (...args: unknown[]) => {
+				const sqlText = queryText(args[0]);
+				trace.push(sqlText);
+				if (
+					failNextDbspRelease &&
+					/^RELEASE SAVEPOINT dbsp_savepoint_/.test(sqlText)
+				) {
+					failNextDbspRelease = false;
+					throw releaseError;
+				}
+				return originalQuery(...args);
+			};
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			await expect(
+				adapter.executeRaw(
+					`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2)`,
+					[50, 'must be rolled back after release failure'],
+				),
+			).rejects.toThrow(/RELEASE SAVEPOINT failed/);
+
+			const inside = await client.query<{ id: number }>(
+				`SELECT id FROM "${SCHEMA}".items WHERE id = $1`,
+				[50],
+			);
+			expect(inside.rows).toEqual([]);
+			expect(
+				trace.some((sql) => /^ROLLBACK TO SAVEPOINT dbsp_savepoint_/.test(sql)),
+			).toBe(true);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
 		}
-		await expect(child).rejects.toThrow('unawaited nested failure');
+
 		expect(await itemIds()).toEqual([]);
 	});
 });

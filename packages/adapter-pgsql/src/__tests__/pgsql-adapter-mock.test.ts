@@ -932,6 +932,95 @@ describe('PgsqlAdapter.transaction — nested savepoints', () => {
 		]);
 	});
 
+	it('treats catch on a nested transaction as observation', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const boom = new Error('inner handled by catch');
+		const handle = vi.fn();
+
+		await adapter.transaction(async (tx) => {
+			await tx.executeRaw('INSERT outer');
+			await tx
+				.transaction(async (inner) => {
+					await inner.executeRaw('INSERT inner');
+					throw boom;
+				})
+				.catch((error) => {
+					handle(error);
+				});
+			await tx.executeRaw('SELECT outer still usable');
+		});
+
+		expect(handle).toHaveBeenCalledWith(boom);
+		const calls = queryCalls(txClient.query as ReturnType<typeof vi.fn>);
+		expect(calls).toEqual([
+			'BEGIN',
+			'INSERT outer',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'INSERT inner',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'SELECT outer still usable',
+			'COMMIT',
+		]);
+	});
+
+	it('returns a Promise instance for nested transaction observation', async () => {
+		const txClient = makeClient();
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		await adapter.transaction(async (tx) => {
+			const child = tx.transaction(async (inner) => {
+				await inner.executeRaw('SELECT inner');
+				return 'ok';
+			});
+
+			expect(child).toBeInstanceOf(Promise);
+			await expect(Promise.all([child])).resolves.toEqual(['ok']);
+		});
+	});
+
+	it('refuses an unobserved nested transaction that already succeeded', async () => {
+		const childClosed = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^RELEASE SAVEPOINT /.test(sql)) {
+				setTimeout(() => childClosed.resolve(), 0);
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+
+		let child: Promise<unknown> | undefined;
+		const transactionError = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('INSERT parent before child');
+				child = tx.transaction(async (inner) => {
+					await inner.executeRaw('INSERT child');
+				});
+				await childClosed.promise;
+			}),
+		);
+
+		expect(transactionError).toBeInstanceOf(Error);
+		expect((transactionError as Error).message).toContain('must be awaited');
+		expect((transactionError as Error).cause).toBeUndefined();
+		await child;
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'INSERT parent before child',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'INSERT child',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'ROLLBACK',
+		]);
+		expect(queryCalls(query)).not.toContain('COMMIT');
+	});
+
 	it('poisons the parent when raw COMMIT inside a nested transaction kills the physical transaction', async () => {
 		const commitResult = {
 			rows: [],
@@ -1635,7 +1724,7 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('waits for an unawaited child transaction before releasing a managed borrowed transaction savepoint', async () => {
+	it('refuses an unawaited child transaction still running when the managed callback returns', async () => {
 		const childScopeStarted = deferred();
 		const resumeChild = deferred();
 		const query = vi.fn(async () => {
@@ -1648,52 +1737,42 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		});
 
 		let child: Promise<unknown> | undefined;
-		const transaction = adapter.transaction(async (tx) => {
-			child = tx.transaction(async (inner) => {
-				childScopeStarted.resolve();
-				await resumeChild.promise;
-				await inner.executeRaw('SELECT child before parent release');
-			});
-			await childScopeStarted.promise;
-		});
-		await childScopeStarted.promise;
-		await Promise.resolve();
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				child = tx.transaction(async (inner) => {
+					childScopeStarted.resolve();
+					await resumeChild.promise;
+					await inner.executeRaw('SELECT child before parent release');
+				});
+				await childScopeStarted.promise;
+			}),
+		);
 
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('must be awaited');
 		expect(queryCalls(query)).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
-		await expect(
-			Promise.race([
-				transaction.then(
-					() => 'resolved',
-					() => 'rejected',
-				),
-				new Promise<'pending'>((resolve) =>
-					setTimeout(() => resolve('pending'), 0),
-				),
-			]),
-		).resolves.toBe('pending');
+		expect(queryCalls(query)).not.toContain(
+			'SELECT child before parent release',
+		);
 
 		resumeChild.resolve();
-		await transaction;
-		await child;
-
-		expect(queryCalls(query)).toEqual([
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			'SELECT child before parent release',
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
-		]);
+		await child?.catch(() => undefined);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('rolls back the parent when an unawaited child transaction fails', async () => {
-		const childScopeStarted = deferred();
-		const resumeChild = deferred();
-		const childError = new Error('unawaited child failed');
-		const query = vi.fn(async () => {
+	it('rolls back the parent when an unawaited child transaction fails immediately', async () => {
+		const childError = new Error('immediate unawaited child failed');
+		const childClosed = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^RELEASE SAVEPOINT /.test(sql)) {
+				setTimeout(() => childClosed.resolve(), 0);
+			}
 			return { rows: [], rowCount: 0 } as QueryResult;
 		});
 		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
@@ -1701,28 +1780,19 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		const adapter = createPgsqlAdapter(pool);
 
 		let child: Promise<unknown> | undefined;
-		const transaction = adapter.transaction(async (tx) => {
-			await tx.executeRaw('INSERT parent before child');
-			child = tx.transaction(async (inner) => {
-				childScopeStarted.resolve();
-				await resumeChild.promise;
-				await inner.executeRaw('INSERT child before failure');
-				throw childError;
-			});
-			void child.catch(() => undefined);
-			await childScopeStarted.promise;
-		});
+		const transactionError = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw('INSERT parent before child');
+				child = tx.transaction(async () => {
+					throw childError;
+				});
+				await childClosed.promise;
+			}),
+		);
 
-		await childScopeStarted.promise;
-		await Promise.resolve();
-		expect(queryCalls(query)).toEqual([
-			'BEGIN',
-			'INSERT parent before child',
-			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-		]);
-
-		resumeChild.resolve();
-		await expect(transaction).rejects.toBe(childError);
+		expect(transactionError).toBeInstanceOf(Error);
+		expect((transactionError as Error).message).toContain('must be awaited');
+		expect((transactionError as Error).cause).toBe(childError);
 		if (child === undefined) {
 			throw new Error('expected child transaction to be captured');
 		}
@@ -1732,7 +1802,6 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			'BEGIN',
 			'INSERT parent before child',
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
-			'INSERT child before failure',
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 			'ROLLBACK',
@@ -2106,6 +2175,44 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			sql,
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rolls back a successful borrowed-client statement when RELEASE SAVEPOINT fails', async () => {
+		const sql = 'INSERT INTO t VALUES (1)';
+		const releaseError = new Error('release savepoint failed');
+		let releaseAttempts = 0;
+		const client = {
+			query: vi.fn(async (input: MockQueryInput) => {
+				const statement = queryText(input);
+				if (/^RELEASE SAVEPOINT /.test(statement)) {
+					releaseAttempts++;
+					if (releaseAttempts === 1) throw releaseError;
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const error = await captureRejection(() =>
+			adapter.execute({ sql, parameters: [] }),
+		);
+
+		expect(error).toBeInstanceOf(AggregateError);
+		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			releaseError,
+		);
+		const calls = queryCalls(client.query as ReturnType<typeof vi.fn>);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			sql,
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(client.release).not.toHaveBeenCalled();
@@ -2705,6 +2812,61 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
 		expect(calls).not.toContain('BEGIN');
 		expect(calls).not.toContain('COMMIT');
+	});
+
+	it('rolls back a completed managed borrowed stream when RELEASE SAVEPOINT fails', async () => {
+		const releaseError = new Error('stream release failed');
+		let fetchCount = 0;
+		let releaseAttempts = 0;
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (/^FETCH /.test(sql)) {
+				fetchCount++;
+				if (fetchCount === 1) {
+					return { rows: [{ id: 1 }], rowCount: 1 } as QueryResult;
+				}
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}
+			if (/^RELEASE SAVEPOINT /.test(sql)) {
+				releaseAttempts++;
+				if (releaseAttempts === 1) throw releaseError;
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+		const collected: unknown[] = [];
+
+		const error = await captureRejection(async () => {
+			for await (const row of adapter.stream(
+				{ sql: 'SELECT * FROM t', parameters: [] },
+				{ chunkSize: 1 },
+			)) {
+				collected.push(row);
+			}
+		});
+
+		expect(collected).toEqual([{ id: 1 }]);
+		expect(error).toBeInstanceOf(AggregateError);
+		expect((error as Error).message).toContain('RELEASE SAVEPOINT failed');
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			releaseError,
+		);
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^DECLARE /),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^FETCH FORWARD 1 FROM /),
+			expect.stringMatching(/^CLOSE /),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 
 	it('does not take per-cursor savepoints for concurrent streams inside a managed borrowed transaction', async () => {

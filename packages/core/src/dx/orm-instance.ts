@@ -799,16 +799,25 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Transaction Methods (DX-025)
 		// =====================================================================
 
-		async transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
+		// NOT `async`, and that is load-bearing. An async method awaits whatever it
+		// returns and re-wraps it in a fresh Promise — which would mean the language
+		// itself attaches to the adapter's promise, and an adapter that needs to know
+		// whether the CALLER awaited a nested transaction would see every one of them
+		// as awaited, by core, before the caller ever touched it. So the adapter's
+		// promise is passed through untouched. The guards still reject rather than
+		// throwing synchronously, because that is what callers already rely on.
+		transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
 			if (!adapter) {
-				throw new Error(
-					'transaction() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
+				return Promise.reject(
+					new Error(
+						'transaction() requires an adapter. ' +
+							'Pass an adapter when creating the ORM.',
+					),
 				);
 			}
 
 			if (!supportsTransactions<DB>(adapter)) {
-				throw createUnsupportedTransactionError();
+				return Promise.reject(createUnsupportedTransactionError());
 			}
 
 			// Passthrough to adapter's transaction API
