@@ -287,6 +287,32 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		expect(await itemIds()).toEqual([]);
 	});
 
+	it('rolls back an unawaited ORM insert queued before a throwing callback returns', async () => {
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
+		const callbackError = new Error('rollback unawaited insert');
+		let sleeper: Promise<unknown> | undefined;
+		let insert: Promise<unknown> | undefined;
+
+		await expect(
+			orm.transaction(async (tx) => {
+				sleeper = tx.raw('SELECT pg_sleep(0.1)');
+				void sleeper.catch(() => undefined);
+				insert = tx
+					.into(tx.tables.items)
+					.values({ id: 19, label: 'must be rolled back' })
+					.execute();
+				void insert.catch(() => undefined);
+				throw callbackError;
+			}),
+		).rejects.toBe(callbackError);
+
+		await sleeper?.catch(() => undefined);
+		await insert?.catch(() => undefined);
+		expect(await itemIds()).toEqual([]);
+	});
+
 	it('rejects after a caught raw COMMIT and never sends the post-COMMIT ORM statement', async () => {
 		const pool = await getTestPool();
 		const adapter = createPgsqlAdapter(pool);

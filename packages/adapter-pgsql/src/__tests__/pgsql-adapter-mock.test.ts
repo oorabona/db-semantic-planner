@@ -415,6 +415,117 @@ describe('PgsqlAdapter.transaction — BEGIN/COMMIT success path', () => {
 		expect(txClient.release).toHaveBeenCalledOnce();
 	});
 
+	it('drains unawaited orm.transaction statements before COMMIT', async () => {
+		const firstStarted = deferred();
+		const releaseFirst = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT first') {
+				firstStarted.resolve();
+				await releaseFirst.promise;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+
+		const transaction = orm.transaction(async (tx) => {
+			void tx.raw('SELECT first');
+			void tx.raw('SELECT second');
+		});
+
+		await firstStarted.promise;
+		await Promise.resolve();
+		expect(queryCalls(query)).toEqual(['BEGIN', 'SELECT first']);
+
+		releaseFirst.resolve();
+		await transaction;
+
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'SELECT first',
+			'SELECT second',
+			'COMMIT',
+		]);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
+	it('refuses statements issued after the transaction callback has returned', async () => {
+		const firstStarted = deferred();
+		const releaseFirst = deferred();
+		const releaseCommit = deferred();
+		const callbackReturned = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT first') {
+				firstStarted.resolve();
+				await releaseFirst.promise;
+			}
+			if (sql === 'COMMIT') {
+				await releaseCommit.promise;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+		let txAfterReturn:
+			| {
+					raw<T = unknown>(
+						sql: string,
+						parameters?: readonly unknown[],
+					): Promise<T[]>;
+			  }
+			| undefined;
+
+		const transaction = orm.transaction(async (tx) => {
+			txAfterReturn = tx;
+			void tx.raw('SELECT first');
+			setTimeout(() => callbackReturned.resolve(), 0);
+		});
+
+		await firstStarted.promise;
+		await callbackReturned.promise;
+		if (txAfterReturn === undefined) {
+			throw new Error('expected transaction adapter to be captured');
+		}
+
+		let lateError: unknown;
+		const late = txAfterReturn.raw('SELECT after callback');
+		const lateState = await Promise.race([
+			late.then(
+				() => 'resolved',
+				(error) => {
+					lateError = error;
+					return 'rejected';
+				},
+			),
+			new Promise<'pending'>((resolve) =>
+				setTimeout(() => resolve('pending'), 0),
+			),
+		]);
+
+		try {
+			expect(lateState).toBe('rejected');
+			expect(lateError).toBeInstanceOf(Error);
+			expect((lateError as Error).message).toContain(
+				'transaction that has ended',
+			);
+			expect(queryCalls(query)).not.toContain('SELECT after callback');
+		} finally {
+			releaseFirst.resolve();
+			releaseCommit.resolve();
+			await transaction.catch(() => undefined);
+			await late.catch(() => undefined);
+		}
+
+		expect(queryCalls(query)).toEqual(['BEGIN', 'SELECT first', 'COMMIT']);
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
 	it('detects tx.executeRaw transaction control before issuing any further statement', async () => {
 		const commitResult = {
 			rows: [],
@@ -692,6 +803,45 @@ describe('PgsqlAdapter.transaction — ROLLBACK on fn error', () => {
 		const calls = queryCalls(txClient.query as ReturnType<typeof vi.fn>);
 		expect(calls).toContain('ROLLBACK');
 		expect(calls).not.toContain('COMMIT');
+		expect(txClient.release).toHaveBeenCalledOnce();
+	});
+
+	it('drains unawaited orm.transaction statements before ROLLBACK', async () => {
+		const firstStarted = deferred();
+		const releaseFirst = deferred();
+		const callbackError = new Error('callback failed');
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT first') {
+				firstStarted.resolve();
+				await releaseFirst.promise;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const txClient = { query, release: vi.fn() } as unknown as PoolClient;
+		const pool = makePool({ rows: [] }, txClient);
+		const adapter = createPgsqlAdapter(pool);
+		const orm = createOrm({ schema: ownershipOrmSchema, adapter });
+
+		const transaction = orm.transaction(async (tx) => {
+			void tx.raw('SELECT first');
+			void tx.raw('SELECT second');
+			throw callbackError;
+		});
+
+		await firstStarted.promise;
+		await Promise.resolve();
+		expect(queryCalls(query)).toEqual(['BEGIN', 'SELECT first']);
+
+		releaseFirst.resolve();
+		await expect(transaction).rejects.toBe(callbackError);
+
+		expect(queryCalls(query)).toEqual([
+			'BEGIN',
+			'SELECT first',
+			'SELECT second',
+			'ROLLBACK',
+		]);
 		expect(txClient.release).toHaveBeenCalledOnce();
 	});
 
@@ -1526,6 +1676,47 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(calls.filter((sql) => /^SAVEPOINT /.test(sql))).toHaveLength(1);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('drains unawaited statements before releasing a managed borrowed transaction savepoint', async () => {
+		const firstStarted = deferred();
+		const releaseFirst = deferred();
+		const query = vi.fn(async (input: MockQueryInput) => {
+			const sql = queryText(input);
+			if (sql === 'SELECT first') {
+				firstStarted.resolve();
+				await releaseFirst.promise;
+			}
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const transaction = adapter.transaction(async (tx) => {
+			void tx.executeRaw('SELECT first');
+			void tx.executeRaw('SELECT second');
+		});
+
+		await firstStarted.promise;
+		await Promise.resolve();
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first',
+		]);
+
+		releaseFirst.resolve();
+		await transaction;
+
+		expect(queryCalls(query)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first',
+			'SELECT second',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
 		expect(client.release).not.toHaveBeenCalled();
 	});
 

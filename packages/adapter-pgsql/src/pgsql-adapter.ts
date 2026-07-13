@@ -225,6 +225,7 @@ type DbspClientScope = {
 type DbspScopeState = {
 	poisoned: DbspScopePoison | undefined;
 	statementLock: DbspScopeStatementLock;
+	closing: boolean;
 };
 
 type DbspScopePoison = {
@@ -241,6 +242,7 @@ const preparedStatementObligations = new WeakMap<PoolClient, Set<string>>();
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
 	readonly allowAncestorScopeToken?: boolean;
+	readonly allowClosingScope?: boolean;
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
@@ -324,7 +326,7 @@ function createScopeToken(): DbspScopeToken {
 function createScopeState(
 	statementLock: DbspScopeStatementLock = { tail: undefined },
 ): DbspScopeState {
-	return { poisoned: undefined, statementLock };
+	return { poisoned: undefined, statementLock, closing: false };
 }
 
 function rememberPreparedStatementObligation(
@@ -2123,23 +2125,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					chunkSize,
 					scopeToken,
 				);
+				adapter.closeScope(scopeState);
+				await adapter.drainScopeStatements(scopeState);
 				adapter.throwIfScopePoisoned(scopeState);
-				const commitResult = await adapter.executeConnectionStatement(
+				const commitResult = await adapter.executeScopeBoundaryStatement(
 					client,
+					scopeToken,
+					scopeState,
 					'COMMIT',
-					undefined,
-					{
-						allowedScopeToken: scopeToken,
-						inspectTransactionControl: false,
-					},
 				);
 				committed = true;
 				adapter.assertCommitSucceeded(commitResult);
 			} catch (error) {
+				adapter.closeScope(scopeState);
 				streamFailed = true;
 				if (begun && !committed) {
 					try {
-						await adapter.rollbackTransactionIfOpen(client, scopeToken);
+						await adapter.rollbackTransactionIfOpen(
+							client,
+							scopeToken,
+							scopeState,
+						);
 					} catch (rollbackErr) {
 						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
 						throw createCleanupFailureError(
@@ -2165,8 +2171,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				// On early break, yield* returns without reaching COMMIT.
 				// ROLLBACK the open transaction to avoid leaking it to the pool.
 				if (begun && !committed && !streamFailed) {
+					adapter.closeScope(scopeState);
 					try {
-						await adapter.rollbackTransactionIfOpen(client, scopeToken);
+						await adapter.rollbackTransactionIfOpen(
+							client,
+							scopeToken,
+							scopeState,
+						);
 					} catch (rollbackErr) {
 						releaseError = rollbackErr instanceof Error ? rollbackErr : true;
 						cleanupErrorToThrow = createCleanupOnlyError(
@@ -2323,16 +2334,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw error;
 		} finally {
 			try {
+				this.closeScope(scopeState);
 				if (completed) {
+					await this.drainScopeStatements(scopeState);
 					this.throwIfScopePoisoned(scopeState);
 					try {
-						await this.executeConnectionStatement(
+						await this.executeScopeBoundaryStatement(
 							client,
+							scopeToken,
+							scopeState,
 							`RELEASE SAVEPOINT ${savepointName}`,
-							undefined,
 							{
-								allowedScopeToken: scopeToken,
-								inspectTransactionControl: false,
+								allowAncestorScopeToken: true,
 							},
 						);
 					} catch (releaseErr) {
@@ -2351,6 +2364,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							client,
 							savepointName,
 							scopeToken,
+							scopeState,
 						);
 					} catch (cleanupErr) {
 						if (streamError !== undefined) {
@@ -2397,23 +2411,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			begun = true;
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
+			this.closeScope(scopeState);
+			await this.drainScopeStatements(scopeState);
 			this.throwIfScopePoisoned(scopeState);
-			const commitResult = await this.executeConnectionStatement(
+			const commitResult = await this.executeScopeBoundaryStatement(
 				client,
+				scopeToken,
+				scopeState,
 				'COMMIT',
-				undefined,
-				{
-					allowedScopeToken: scopeToken,
-					inspectTransactionControl: false,
-				},
 			);
 			committed = true;
 			this.assertCommitSucceeded(commitResult);
 		} catch (error) {
+			this.closeScope(scopeState);
 			streamFailed = true;
 			if (begun && !committed) {
 				try {
-					await this.rollbackTransactionIfOpen(client, scopeToken);
+					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				} catch (rollbackErr) {
 					throw createCleanupFailureError(
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream failed',
@@ -2434,8 +2448,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw error;
 		} finally {
 			if (begun && !committed && !streamFailed) {
+				this.closeScope(scopeState);
 				try {
-					await this.rollbackTransactionIfOpen(client, scopeToken);
+					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				} catch (rollbackErr) {
 					cleanupErrorToThrow = createCleanupOnlyError(
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
@@ -2600,16 +2615,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		try {
 			const result = await fn(txAdapter);
+			this.closeScope(scopeState);
+			await this.drainScopeStatements(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
 			try {
-				await this.executeConnectionStatement(
+				await this.executeScopeBoundaryStatement(
 					client,
+					scopeToken,
+					scopeState,
 					`RELEASE SAVEPOINT ${savepointName}`,
-					undefined,
 					{
-						allowedScopeToken: scopeToken,
-						inspectTransactionControl: false,
+						allowAncestorScopeToken: true,
 					},
 				);
 			} catch (releaseErr) {
@@ -2622,11 +2639,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 			return result;
 		} catch (error) {
+			this.closeScope(scopeState);
 			try {
 				await this.rollbackAndReleaseSavepoint(
 					client,
 					savepointName,
 					scopeToken,
+					scopeState,
 				);
 			} catch (cleanupErr) {
 				if (
@@ -2670,25 +2689,25 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 			releaseScope = this.enterTransactionScope(client, scopeToken, scopeState);
 			const result = await fn(txAdapter);
+			this.closeScope(scopeState);
+			await this.drainScopeStatements(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
-			const commitResult = await this.executeConnectionStatement(
+			const commitResult = await this.executeScopeBoundaryStatement(
 				client,
+				scopeToken,
+				scopeState,
 				'COMMIT',
-				undefined,
-				{
-					allowedScopeToken: scopeToken,
-					inspectTransactionControl: false,
-				},
 			);
 			committed = true;
 			await this.dischargePreparedStatementObligations(client);
 			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
+			this.closeScope(scopeState);
 			if (begun && !committed) {
 				try {
-					await this.rollbackTransactionIfOpen(client, scopeToken);
+					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				} catch (rollbackErr) {
 					throw createCleanupFailureError(
 						'PostgreSQL transaction cleanup failed: ROLLBACK failed after the transaction body failed',
@@ -2724,17 +2743,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		savepointName: string,
 		allowedScopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
 	): Promise<void> {
 		try {
-			await this.executeConnectionStatement(
+			await this.executeScopeBoundaryStatement(
 				client,
+				allowedScopeToken,
+				scopeState,
 				`ROLLBACK TO SAVEPOINT ${savepointName}`,
-				undefined,
 				{
-					allowedScopeToken,
 					allowAncestorScopeToken: true,
 					allowPoisonedScope: true,
-					inspectTransactionControl: false,
 				},
 			);
 		} catch (error) {
@@ -2748,15 +2767,14 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw error;
 		}
 		await this.dischargePreparedStatementObligations(client);
-		await this.executeConnectionStatement(
+		await this.executeScopeBoundaryStatement(
 			client,
+			allowedScopeToken,
+			scopeState,
 			`RELEASE SAVEPOINT ${savepointName}`,
-			undefined,
 			{
-				allowedScopeToken,
 				allowAncestorScopeToken: true,
 				allowPoisonedScope: true,
-				inspectTransactionControl: false,
 			},
 		);
 	}
@@ -2764,13 +2782,27 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	private async rollbackTransactionIfOpen(
 		client: PoolClient,
 		allowedScopeToken: DbspScopeToken | undefined,
+		scopeState: DbspScopeState | undefined,
 	): Promise<void> {
 		try {
-			await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
-				...(allowedScopeToken !== undefined && { allowedScopeToken }),
-				allowPoisonedScope: true,
-				inspectTransactionControl: false,
-			});
+			if (allowedScopeToken !== undefined && scopeState !== undefined) {
+				await this.executeScopeBoundaryStatement(
+					client,
+					allowedScopeToken,
+					scopeState,
+					'ROLLBACK',
+					{
+						allowPoisonedScope: true,
+					},
+				);
+			} else {
+				await this.executeConnectionStatement(client, 'ROLLBACK', undefined, {
+					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					allowClosingScope: true,
+					allowPoisonedScope: true,
+					inspectTransactionControl: false,
+				});
+			}
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
 				return;
@@ -2812,6 +2844,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				undefined,
 				{
 					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					allowClosingScope: true,
 					allowPoisonedScope: true,
 					inspectTransactionControl: false,
 					protectBorrowedClientTransaction: false,
@@ -2833,6 +2866,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				undefined,
 				{
 					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					allowClosingScope: true,
 					allowPoisonedScope: true,
 					inspectTransactionControl: false,
 					protectBorrowedClientTransaction: false,
@@ -2898,6 +2932,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			if (current.state.closing) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			this.assertScopeNotPoisoned(current);
 			if (current.token !== this.scopeToken) {
 				throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
@@ -2922,6 +2959,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
 		}
 		if (current !== undefined) {
+			if (current.state.closing) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			this.assertScopeNotPoisoned(current);
 			if (current.state.statementLock.tail !== undefined) {
 				throw new Error(SAVEPOINT_SCOPE_BUSY_MESSAGE);
@@ -2980,6 +3020,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		allowedScopeToken = this.scopeToken,
 		allowAncestorScopeToken = false,
+		allowClosingScope = false,
 		allowPoisonedScope = false,
 	): void {
 		const stack = activeClientScopes.get(client);
@@ -2989,6 +3030,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw new Error(SAVEPOINT_SCOPE_OWNER_MESSAGE);
 		}
 		if (current?.token === allowedScopeToken) {
+			if (current.state.closing && !allowClosingScope) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(current);
 			}
@@ -2996,6 +3040,9 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		}
 		const allowedScope = this.findClientScope(client, allowedScopeToken);
 		if (allowAncestorScopeToken && allowedScope !== undefined) {
+			if (allowedScope.state.closing && !allowClosingScope) {
+				throw new Error(TRANSACTION_SCOPE_ENDED_MESSAGE);
+			}
 			if (!allowPoisonedScope) {
 				this.assertScopeNotPoisoned(allowedScope);
 			}
@@ -3082,6 +3129,45 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				lock.tail = undefined;
 			}
 		}
+	}
+
+	private closeScope(scopeState: DbspScopeState | undefined): void {
+		if (scopeState !== undefined) {
+			scopeState.closing = true;
+		}
+	}
+
+	private async drainScopeStatements(
+		scopeState: DbspScopeState,
+	): Promise<void> {
+		await scopeState.statementLock.tail?.catch(() => undefined);
+	}
+
+	private async executeScopeBoundaryStatement<
+		T extends QueryResultRow = QueryResultRow,
+	>(
+		client: PoolClient,
+		scopeToken: DbspScopeToken,
+		scopeState: DbspScopeState,
+		sql: string,
+		options: StatementExecutionOptions = {},
+	): Promise<QueryResult<T>> {
+		const boundaryOptions: StatementExecutionOptions = {
+			...options,
+			allowedScopeToken: scopeToken,
+			allowClosingScope: true,
+			inspectTransactionControl: false,
+			protectBorrowedClientTransaction: false,
+		};
+		return this.runWithScopeStatementLock(scopeState, () =>
+			this.executeConnectionStatementUnlocked<T>(
+				client,
+				sql,
+				undefined,
+				boundaryOptions,
+				scopeToken,
+			),
+		);
 	}
 
 	private assertCommitSucceeded(result: QueryResult): void {
@@ -3230,6 +3316,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				executor,
 				allowedScopeToken,
 				options.allowAncestorScopeToken ?? false,
+				options.allowClosingScope ?? false,
 				options.allowPoisonedScope ?? false,
 			);
 		}
@@ -3246,7 +3333,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					executor,
 					sql,
 					parameters,
-					options,
+					{ ...options, allowClosingScope: true },
 					allowedScopeToken,
 				),
 			);
@@ -3275,6 +3362,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				executor,
 				allowedScopeToken,
 				options.allowAncestorScopeToken ?? false,
+				options.allowClosingScope ?? false,
 				options.allowPoisonedScope ?? false,
 			);
 		}
@@ -3408,11 +3496,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				},
 			);
 		} catch (error) {
+			this.closeScope(scopeState);
 			try {
 				await this.rollbackAndReleaseSavepoint(
 					client,
 					savepointName,
 					scopeToken,
+					scopeState,
 				);
 			} catch (cleanupErr) {
 				if (
@@ -3435,15 +3525,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw addRawSqlTransactionContext(error);
 		}
 		try {
+			this.closeScope(scopeState);
+			await this.drainScopeStatements(scopeState);
 			this.throwIfScopePoisoned(scopeState);
 			await this.dischargePreparedStatementObligations(client);
-			await this.executeConnectionStatement(
+			await this.executeScopeBoundaryStatement(
 				client,
+				scopeToken,
+				scopeState,
 				`RELEASE SAVEPOINT ${savepointName}`,
-				undefined,
 				{
-					allowedScopeToken: scopeToken,
-					inspectTransactionControl: false,
 					protectBorrowedClientTransaction: false,
 				},
 			);
