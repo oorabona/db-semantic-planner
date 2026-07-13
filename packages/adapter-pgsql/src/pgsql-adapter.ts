@@ -7,6 +7,7 @@
  * @module pgsql-adapter
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type {
 	AlterColumnOptions,
 	CreateIndexOptions,
@@ -161,10 +162,15 @@ const NO_ACTIVE_SQL_TRANSACTION = '25P01';
 let savepointCounter = 0;
 
 const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
-	'PostgreSQL raw SQL performed transaction control inside a dbsp-managed scope. ' +
-	'The transaction dbsp was working inside no longer exists. ' +
-	"The state of the caller's data is whatever their own raw SQL statement made it. " +
-	'Do not continue as if the surrounding transaction is still alive.';
+	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
+	'`COMMIT` and `ROLLBACK` end the transaction dbsp is working inside — dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
+	'A `SAVEPOINT` you establish inside a dbsp call is released when dbsp releases its own, and dbsp cannot tell you that happened. ' +
+	"Manage your transaction outside dbsp's calls.";
+
+const savepointScopeQueues = new WeakMap<PoolClient, Promise<void>>();
+const activeSavepointScopeClients = new AsyncLocalStorage<
+	ReadonlySet<PoolClient>
+>();
 
 type CleanupFailureError = AggregateError & {
 	readonly cleanupError: unknown;
@@ -203,6 +209,27 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 function nextSavepointName(): string {
 	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
 	return `dbsp_savepoint_${savepointCounter}`;
+}
+
+async function acquireSavepointScopeQueue(
+	client: PoolClient,
+): Promise<() => void> {
+	const previous = savepointScopeQueues.get(client) ?? Promise.resolve();
+	let releaseCurrent!: () => void;
+	const current = new Promise<void>((resolve) => {
+		releaseCurrent = resolve;
+	});
+	const tail = previous.catch(() => undefined).then(() => current);
+	savepointScopeQueues.set(client, tail);
+
+	await previous.catch(() => undefined);
+
+	return () => {
+		releaseCurrent();
+		if (savepointScopeQueues.get(client) === tail) {
+			savepointScopeQueues.delete(client);
+		}
+	};
 }
 
 function describeThrown(error: unknown): string {
@@ -897,12 +924,14 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 	 * boundary, not at the savepoint. Sequences are not transactional:
 	 * `nextval`/`setval` are not reclaimed by a savepoint rollback. Session-level
 	 * advisory locks ignore rollback; transaction-level advisory locks taken by a
-	 * successful callback last until your transaction ends. Transaction control
-	 * issued through raw SQL inside a dbsp-managed scope is unsupported: dbsp
-	 * cannot stop it and cannot undo it. If PostgreSQL destroys dbsp's savepoint,
-	 * dbsp reports PgsqlRawSqlTransactionControlError; the transaction dbsp was
-	 * working inside is already gone, and your data state is whatever your own
-	 * statement made it.
+	 * successful callback last until your transaction ends.
+	 *
+	 * Transaction control through raw SQL inside a scope dbsp is managing is
+	 * unsupported. `COMMIT` and `ROLLBACK` end the transaction dbsp is working
+	 * inside — dbsp detects that and fails loudly, but the data is already
+	 * whatever your statement made it. A `SAVEPOINT` you establish inside a dbsp
+	 * call is released when dbsp releases its own, and dbsp cannot tell you that
+	 * happened. Manage your transaction outside dbsp's calls.
 	 */
 	readonly managedTransactions?: true;
 }
@@ -1722,8 +1751,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Results are transformed to use model naming convention (e.g., snake_case → camelCase)
 	 */
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
-		const executor = this.requireConnection();
-		const result = await executor.query(query.sql, [...query.parameters]);
+		const result = await this.executeQueryProtectingOpenTransaction(
+			query.sql,
+			query.parameters,
+		);
 		return this.transformResultRows(result.rows) as T[];
 	}
 
@@ -1910,6 +1941,16 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		query: CompiledQuery<T>,
 		chunkSize: number,
 	): AsyncIterableIterator<T> {
+		yield* this.streamWithSerializedSavepointScope(client, () =>
+			this.streamWithManagedClientSavepointScope<T>(client, query, chunkSize),
+		);
+	}
+
+	private async *streamWithManagedClientSavepointScope<T>(
+		client: PoolClient,
+		query: CompiledQuery<T>,
+		chunkSize: number,
+	): AsyncIterableIterator<T> {
 		const savepointName = nextSavepointName();
 		try {
 			await client.query(`SAVEPOINT ${savepointName}`);
@@ -2079,6 +2120,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		fn: (adapter: Adapter<DB>) => Promise<T>,
 	): Promise<T> {
+		return this.withSerializedSavepointScope(client, () =>
+			this.transactionWithManagedClientSavepointScope(client, fn),
+		);
+	}
+
+	private async transactionWithManagedClientSavepointScope<T>(
+		client: PoolClient,
+		fn: (adapter: Adapter<DB>) => Promise<T>,
+	): Promise<T> {
 		const savepointName = nextSavepointName();
 		try {
 			await client.query(`SAVEPOINT ${savepointName}`);
@@ -2157,6 +2207,67 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		await client.query(`RELEASE SAVEPOINT ${savepointName}`);
 	}
 
+	private async withSerializedSavepointScope<T>(
+		client: PoolClient,
+		action: () => Promise<T>,
+	): Promise<T> {
+		const activeClients = activeSavepointScopeClients.getStore();
+		if (activeClients?.has(client)) {
+			return action();
+		}
+
+		const releaseQueue = await acquireSavepointScopeQueue(client);
+		const nextActiveClients = new Set(activeClients);
+		nextActiveClients.add(client);
+		try {
+			return await activeSavepointScopeClients.run(nextActiveClients, action);
+		} finally {
+			releaseQueue();
+		}
+	}
+
+	private async *streamWithSerializedSavepointScope<T>(
+		client: PoolClient,
+		action: () => AsyncIterableIterator<T>,
+	): AsyncIterableIterator<T> {
+		const activeClients = activeSavepointScopeClients.getStore();
+		if (activeClients?.has(client)) {
+			yield* action();
+			return;
+		}
+
+		const releaseQueue = await acquireSavepointScopeQueue(client);
+		const nextActiveClients = new Set(activeClients);
+		nextActiveClients.add(client);
+		const iterator = activeSavepointScopeClients.run(nextActiveClients, () =>
+			action()[Symbol.asyncIterator](),
+		);
+		let completed = false;
+		try {
+			while (true) {
+				const next = await activeSavepointScopeClients.run(
+					nextActiveClients,
+					() => iterator.next(),
+				);
+				if (next.done === true) {
+					completed = true;
+					return;
+				}
+				yield next.value;
+			}
+		} finally {
+			try {
+				if (!completed && iterator.return !== undefined) {
+					await activeSavepointScopeClients.run(nextActiveClients, () =>
+						iterator.return?.(),
+					);
+				}
+			} finally {
+				releaseQueue();
+			}
+		}
+	}
+
 	/**
 	 * Create a schema-scoped adapter for multi-tenant queries.
 	 */
@@ -2177,9 +2288,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * Execute raw SQL directly.
 	 *
 	 * ⚠️  WARNING: Use parameter placeholders ($1, $2, etc.) for all values.
-	 * Transaction control inside a dbsp-managed scope is unsupported: dbsp
-	 * cannot stop it, cannot undo it, and reports it only after PostgreSQL has
-	 * already destroyed the savepoint.
+	 *
+	 * Transaction control through raw SQL inside a scope dbsp is managing is
+	 * unsupported. `COMMIT` and `ROLLBACK` end the transaction dbsp is working
+	 * inside — dbsp detects that and fails loudly, but the data is already
+	 * whatever your statement made it. A `SAVEPOINT` you establish inside a dbsp
+	 * call is released when dbsp releases its own, and dbsp cannot tell you that
+	 * happened. Manage your transaction outside dbsp's calls.
 	 */
 	async executeRaw<T = unknown>(
 		sql: string,
@@ -2242,6 +2357,18 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	}
 
 	private async executeQueryProtectingOpenTransaction(
+		sql: string,
+		parameters?: readonly unknown[],
+	): Promise<QueryResult> {
+		if (this.client) {
+			return this.withSerializedSavepointScope(this.client, () =>
+				this.executeQueryProtectingOpenTransactionInScope(sql, parameters),
+			);
+		}
+		return this.executeQueryProtectingOpenTransactionInScope(sql, parameters);
+	}
+
+	private async executeQueryProtectingOpenTransactionInScope(
 		sql: string,
 		parameters?: readonly unknown[],
 	): Promise<QueryResult> {

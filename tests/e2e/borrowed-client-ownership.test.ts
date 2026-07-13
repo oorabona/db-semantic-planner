@@ -1,6 +1,14 @@
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 import { createOrm, schema } from '@dbsp/core';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import {
+	afterAll,
+	beforeAll,
+	beforeEach,
+	describe,
+	expect,
+	it,
+	vi,
+} from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -37,6 +45,11 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 				label text NOT NULL
 			)
 		`.execute(pool);
+	});
+
+	beforeEach(async () => {
+		const pool = await getTestPool();
+		await pool.query(`DELETE FROM "${SCHEMA}".items`);
 	});
 
 	afterAll(async () => {
@@ -119,7 +132,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			client.release();
 		}
 
-		expect(await itemIds()).toEqual([1]);
+		expect(await itemIds()).toEqual([]);
 	});
 
 	it('opens its own transaction on a borrowed client when none is active', async () => {
@@ -151,7 +164,7 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 			client.release();
 		}
 
-		expect(await itemIds()).toEqual([1, 4]);
+		expect(await itemIds()).toEqual([4]);
 	});
 
 	it('refuses orm.transaction on an unmanaged borrowed client at the ORM boundary', async () => {

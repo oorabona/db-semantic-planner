@@ -24,6 +24,12 @@ import {
 	PgsqlRawSqlTransactionControlError,
 } from '../pgsql-adapter.js';
 
+const TRANSACTION_CONTROL_BOUNDARY =
+	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
+	'`COMMIT` and `ROLLBACK` end the transaction dbsp is working inside — dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
+	'A `SAVEPOINT` you establish inside a dbsp call is released when dbsp releases its own, and dbsp cannot tell you that happened. ' +
+	"Manage your transaction outside dbsp's calls.";
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -85,15 +91,11 @@ function expectRawSqlTransactionControlError(
 ): void {
 	expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
 	expect((error as Error).name).toBe('PgsqlRawSqlTransactionControlError');
+	expect((error as Error).message).toBe(TRANSACTION_CONTROL_BOUNDARY);
+	expect((error as Error).message).toContain('`COMMIT` and `ROLLBACK`');
+	expect((error as Error).message).toContain('A `SAVEPOINT` you establish');
 	expect((error as Error).message).toContain(
-		'raw SQL performed transaction control',
-	);
-	expect((error as Error).message).toContain(
-		'transaction dbsp was working inside no longer exists',
-	);
-	expect((error as Error).message).toContain("state of the caller's data");
-	expect((error as Error).message).toContain(
-		'surrounding transaction is still alive',
+		"Manage your transaction outside dbsp's calls.",
 	);
 	expect((error as Error).message).not.toContain('cleanup failed');
 	expect((error as Error).cause).toBe(releaseError);
@@ -119,6 +121,20 @@ function collectReachableStrings(
 		}
 	}
 	return strings;
+}
+
+function deferred<T = void>(): {
+	readonly promise: Promise<T>;
+	readonly resolve: (value?: T | PromiseLike<T>) => void;
+	readonly reject: (error: unknown) => void;
+} {
+	let resolve!: (value?: T | PromiseLike<T>) => void;
+	let reject!: (error: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
 }
 
 // ---------------------------------------------------------------------------
@@ -413,9 +429,42 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('opens and closes a transaction when managedTransactions is true and none is active', async () => {
+	it('propagates execute() transaction-control failure without savepoint cleanup wrapping', async () => {
+		const releaseError = new Error('savepoint no longer exists');
 		const query = vi.fn(async (sql: string) => {
-			if (/^SAVEPOINT /.test(sql)) {
+			if (/^RELEASE SAVEPOINT /.test(sql)) throw releaseError;
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = {
+			query,
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.execute({ sql: 'COMMIT', parameters: [] });
+			}),
+		);
+
+		expectRawSqlTransactionControlError(error, releaseError);
+		expect(error).not.toBeInstanceOf(AggregateError);
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'COMMIT',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('opens and closes a transaction when managedTransactions is true and none is active', async () => {
+		let savepointAttempts = 0;
+		const query = vi.fn(async (sql: string) => {
+			if (/^SAVEPOINT /.test(sql) && savepointAttempts++ === 0) {
 				throw Object.assign(new Error('no active transaction'), {
 					code: '25P01',
 				});
@@ -438,7 +487,13 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 		const calls = query.mock.calls.map((c) => c[0] as string);
 		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
-		expect(calls.slice(1)).toEqual(['BEGIN', 'SELECT 1', 'COMMIT']);
+		expect(calls.slice(1)).toEqual([
+			'BEGIN',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT 1',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			'COMMIT',
+		]);
 	});
 });
 
@@ -644,6 +699,73 @@ describe('PgsqlAdapter.execute — row transformation', () => {
 			adapter.execute({ sql: 'SELECT 1', parameters: [] }),
 		).rejects.toThrow('connection refused');
 	});
+
+	it('reports transaction control distinctly when borrowed-client execute destroys the savepoint', async () => {
+		const releaseError = new Error(
+			'RELEASE SAVEPOINT can only be used in transaction blocks',
+		);
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (/^RELEASE SAVEPOINT /.test(sql)) throw releaseError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const error = await captureRejection(() =>
+			adapter.execute({ sql: 'COMMIT', parameters: [] }),
+		);
+
+		expectRawSqlTransactionControlError(error, releaseError);
+		expect(error).not.toBeInstanceOf(AggregateError);
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'COMMIT',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(calls.some((sql) => /^ROLLBACK TO SAVEPOINT /.test(sql))).toBe(
+			false,
+		);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rolls back to the savepoint when borrowed-client execute is rejected by PostgreSQL', async () => {
+		const sql = 'SELECT * FROM missing_table WHERE id = $1';
+		const pgError = Object.assign(new Error('relation does not exist'), {
+			code: '42P01',
+		});
+		const client = {
+			query: vi.fn(async (statement: string) => {
+				if (statement === sql) throw pgError;
+				return { rows: [], rowCount: 0 } as QueryResult;
+			}),
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const error = await captureRejection(() =>
+			adapter.execute({ sql, parameters: [1] }),
+		);
+
+		expect(error).toBe(pgError);
+		expect((error as Error).message).toContain(
+			'rolled back the failed raw SQL to a savepoint',
+		);
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => c[0] as string,
+		);
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			sql,
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -730,6 +852,59 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
+	});
+});
+
+describe('PgsqlAdapter borrowed-client savepoint serialization', () => {
+	it('serializes overlapping savepoint-protected operations on the same client', async () => {
+		const firstSqlStarted = deferred();
+		const releaseFirstSql = deferred();
+		const calls: string[] = [];
+		const query = vi.fn(async (sql: string) => {
+			calls.push(sql);
+			if (sql === 'SELECT first') {
+				firstSqlStarted.resolve();
+				await releaseFirstSql.promise;
+				return { rows: [{ value: 1 }], rowCount: 1 } as QueryResult;
+			}
+			if (sql === 'SELECT second') {
+				return { rows: [{ value: 2 }], rowCount: 1 } as QueryResult;
+			}
+			return { rows: [], rowCount: 0 } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		const first = adapter.executeRaw<{ value: number }>('SELECT first');
+		await firstSqlStarted.promise;
+
+		const second = adapter.execute<{ value: number }>({
+			sql: 'SELECT second',
+			parameters: [],
+		});
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first',
+		]);
+
+		releaseFirstSql.resolve();
+		await expect(Promise.all([first, second])).resolves.toEqual([
+			[{ value: 1 }],
+			[{ value: 2 }],
+		]);
+
+		expect(calls).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT first',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT second',
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 });
 

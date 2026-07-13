@@ -1,5 +1,5 @@
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
 	closeTestDb,
 	createSchema,
@@ -8,6 +8,11 @@ import {
 } from './testkit/index.js';
 
 const SCHEMA = 'raw_sql_transaction_savepoint_e2e';
+const TRANSACTION_CONTROL_BOUNDARY =
+	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
+	'`COMMIT` and `ROLLBACK` end the transaction dbsp is working inside — dbsp detects that and fails loudly, but the data is already whatever your statement made it. ' +
+	'A `SAVEPOINT` you establish inside a dbsp call is released when dbsp releases its own, and dbsp cannot tell you that happened. ' +
+	"Manage your transaction outside dbsp's calls.";
 
 async function captureRejection(
 	action: () => Promise<unknown>,
@@ -33,16 +38,8 @@ function expectTransactionControlError(error: unknown): void {
 	expect(error).toBeInstanceOf(Error);
 	expect(error).not.toBeInstanceOf(AggregateError);
 	expect((error as Error).name).toBe('PgsqlRawSqlTransactionControlError');
-	expect((error as Error).message).toContain(
-		'raw SQL performed transaction control',
-	);
-	expect((error as Error).message).toContain(
-		'transaction dbsp was working inside no longer exists',
-	);
-	expect((error as Error).message).toContain("state of the caller's data");
-	expect((error as Error).message).toContain(
-		'surrounding transaction is still alive',
-	);
+	expect((error as Error).message).toBe(TRANSACTION_CONTROL_BOUNDARY);
+	expect((error as Error).message).toContain('A `SAVEPOINT` you establish');
 	expect((error as Error).message).not.toContain('cleanup failed');
 	expect(
 		(error as { readonly dbspRawSqlTransactionControl?: unknown })
@@ -88,6 +85,11 @@ describe('raw SQL inside caller transactions', () => {
 		);
 	});
 
+	beforeEach(async () => {
+		const pool = await getTestPool();
+		await pool.query(`DELETE FROM "${SCHEMA}".items`);
+	});
+
 	afterAll(async () => {
 		await dropSchema(SCHEMA);
 		await closeTestDb();
@@ -124,7 +126,7 @@ describe('raw SQL inside caller transactions', () => {
 				'rolled back the failed raw SQL to a savepoint',
 			);
 			expect((error as Error).message).not.toContain(
-				'transaction dbsp was working inside no longer exists',
+				'Transaction control through raw SQL',
 			);
 
 			await client.query(
@@ -292,11 +294,15 @@ describe('raw SQL inside caller transactions', () => {
 	it('runs REINDEX INDEX CONCURRENTLY normally outside any transaction', async () => {
 		const pool = await getTestPool();
 		const adapter = createPgsqlAdapter(pool);
+		await pool.query(
+			`INSERT INTO "${SCHEMA}".items (id, label) VALUES ($1, $2), ($3, $4)`,
+			[30, 'before outside reindex', 31, 'after outside reindex'],
+		);
 
 		await adapter.executeRaw(
 			`REINDEX INDEX CONCURRENTLY "${SCHEMA}"."idx_raw_sql_tx_items_label"`,
 		);
 
-		expect(await itemIds([1, 2, 3, 4])).toEqual([1, 2, 3, 4]);
+		expect(await itemIds([30, 31])).toEqual([30, 31]);
 	});
 });
