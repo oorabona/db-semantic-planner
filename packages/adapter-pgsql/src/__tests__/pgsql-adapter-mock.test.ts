@@ -26,6 +26,7 @@ import {
 	createPgsqlAdapter,
 	createPgsqlCompileOnlyAdapter,
 	PgsqlAdapter,
+	type PgsqlBorrowedClientAdapterOptions,
 } from '../pgsql-adapter.js';
 
 const TRANSACTION_CONTROL_BOUNDARY =
@@ -66,6 +67,49 @@ function makePool(
 		connect: vi.fn().mockResolvedValue(_client),
 		end: vi.fn(),
 	} as unknown as Pool;
+}
+
+function noActiveTransactionError(): Error & { code: string } {
+	return Object.assign(new Error('no active transaction'), {
+		code: '25P01',
+	});
+}
+
+function makePrepareTagClient(prepareEndsTransaction: boolean): {
+	readonly client: PoolClient;
+	readonly prepareResult: QueryResult;
+} {
+	let transactionOpen = true;
+	let prepareTagReturned = false;
+	const prepareResult = {
+		rows: [],
+		rowCount: 0,
+		command: 'PREPARE',
+	} as QueryResult;
+	const query = vi.fn(async (sql: string) => {
+		if (/^SAVEPOINT /.test(sql)) {
+			if (!transactionOpen) throw noActiveTransactionError();
+			return { rows: [], rowCount: 0, command: 'SAVEPOINT' } as QueryResult;
+		}
+		if (/^ROLLBACK TO SAVEPOINT /.test(sql)) {
+			if (!transactionOpen) throw noActiveTransactionError();
+			return { rows: [], rowCount: 0, command: 'ROLLBACK' } as QueryResult;
+		}
+		if (/^RELEASE SAVEPOINT /.test(sql)) {
+			if (!transactionOpen) throw noActiveTransactionError();
+			return { rows: [], rowCount: 0, command: 'RELEASE' } as QueryResult;
+		}
+		if (!prepareTagReturned) {
+			prepareTagReturned = true;
+			if (prepareEndsTransaction) transactionOpen = false;
+			return prepareResult;
+		}
+		return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+	});
+	return {
+		client: { query, release: vi.fn() } as unknown as PoolClient,
+		prepareResult,
+	};
 }
 
 /** The first (single) catalog query call. */
@@ -150,6 +194,22 @@ function deferred<T = void>(): {
 	return { promise, resolve, reject };
 }
 
+function assertPublicConstructorRejectsInternalOptions(
+	client: PoolClient,
+): void {
+	// @ts-expect-error adapterManagedTransaction is an internal option, not public API.
+	new PgsqlAdapter(client, {
+		borrowedClient: true,
+		adapterManagedTransaction: true,
+	});
+	// @ts-expect-error dbspScopeToken is an internal option, not public API.
+	new PgsqlAdapter(client, {
+		borrowedClient: true,
+		dbspScopeToken: Symbol('forged'),
+	});
+}
+void assertPublicConstructorRejectsInternalOptions;
+
 // ---------------------------------------------------------------------------
 // transaction() — BEGIN / COMMIT happy path
 // ---------------------------------------------------------------------------
@@ -186,6 +246,35 @@ describe('@dbsp/adapter-pgsql public API', () => {
 		await expect(
 			adapter.transaction(async () => undefined),
 		).rejects.toBeInstanceOf(PgsqlTransactionAbortedCommitError);
+	});
+
+	it('ignores forged internal options and still savepoints borrowed-client statements', async () => {
+		const statementError = new Error('raw statement failed');
+		const query = vi.fn(async (sql: string) => {
+			if (sql === 'SELECT fail') throw statementError;
+			return { rows: [], rowCount: 0, command: 'SELECT' } as QueryResult;
+		});
+		const client = { query, release: vi.fn() } as unknown as PoolClient;
+		const adapter = new PgsqlAdapter(client, {
+			borrowedClient: true,
+			adapterManagedTransaction: true,
+		} as unknown as PgsqlBorrowedClientAdapterOptions);
+
+		const error = await captureRejection(() =>
+			adapter.executeRaw('SELECT fail'),
+		);
+
+		expect(error).toBe(statementError);
+		expect((error as Error).message).toContain(
+			'rolled back the failed raw SQL to a savepoint',
+		);
+		expect(query.mock.calls.map((c) => c[0] as string)).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'SELECT fail',
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
 	});
 });
 
@@ -799,13 +888,65 @@ describe('PgsqlAdapter.transaction — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
+	it('allows server-side PREPARE when the transaction survives', async () => {
+		const { client } = makePrepareTagClient(false);
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		await adapter.transaction(async (tx) => {
+			await expect(tx.executeRaw('PREPARE p1 AS SELECT 1')).resolves.toEqual(
+				[],
+			);
+		});
+
+		expect(
+			(client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+				(c) => c[0] as string,
+			),
+		).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			'PREPARE p1 AS SELECT 1',
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
+	it('rejects PREPARE TRANSACTION when the transaction is gone after the PREPARE tag', async () => {
+		const { client, prepareResult } = makePrepareTagClient(true);
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
+		});
+
+		const error = await captureRejection(() =>
+			adapter.transaction(async (tx) => {
+				await tx.executeRaw("PREPARE TRANSACTION 'x'");
+			}),
+		);
+
+		expectRawSqlTransactionControlError(error, prepareResult);
+		expect(
+			(client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+				(c) => c[0] as string,
+			),
+		).toEqual([
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			"PREPARE TRANSACTION 'x'",
+			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+		]);
+		expect(client.release).not.toHaveBeenCalled();
+	});
+
 	it('opens and closes a transaction when managedTransactions is true and none is active', async () => {
 		let savepointAttempts = 0;
 		const query = vi.fn(async (sql: string) => {
 			if (/^SAVEPOINT /.test(sql) && savepointAttempts++ === 0) {
-				throw Object.assign(new Error('no active transaction'), {
-					code: '25P01',
-				});
+				throw noActiveTransactionError();
 			}
 			return { rows: [], rowCount: 0 } as QueryResult;
 		});

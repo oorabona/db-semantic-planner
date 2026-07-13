@@ -854,7 +854,7 @@ Neither is the answer. The obligation crosses out of the diff **unresolved**, an
 - **#318** — the naming-plugin gap is a claim about what an expression *refers to*. Nothing available can discharge it without structure, so it stays a **declared limit** — stated, not guessed.
 - **#319** — foreign keys that cannot be addressed by name are an identity gap, and identity is evidence.
 - **#323** — capabilities are context-dependent (version, SQL mode, extensions, transaction context, privileges) and core must enforce them at the boundary the user touches.
-- The default-comparison cast regex and `parseExpressionsList()` are `unknown` dressed as certainty. They go.
+- **#326** — the default-comparison cast regex and `parseExpressionsList()` are `unknown` dressed as certainty, and they are **still in the code**. This ADR is normative, so they are a violation it owes a fix for, not a change it has already made. PostgreSQL can render an index's expressions one column at a time; asking it is not guessing.
 
 ## Corrections to ADR 0002
 
@@ -905,7 +905,7 @@ An observation of the data *is* legitimate for preflight and estimation. What it
 
 **An opaque expression must not be able to leave its syntactic slot.** `CheckExpression { sql: string }` carrying an unexamined fragment is not merely *unanalysed* — it can close the parenthesis and append a statement. Widening the read set does nothing about that. So an expression value is one of `PortableExpression | VendorValidatedExpression | UnsafeNativeFragment`, where **vendor-validated** means the engine's *own* parser or validator confirmed it for a specific grammatical category — a scalar expression, a predicate, a qualified name — and an `UnsafeNativeFragment` stays an explicit assumption in the graph and is never presented as a fully structured operation.
 
-This also sharpens the standing rule, which was stated too broadly. **Core implements no universal or hand-rolled SQL grammar** — that ban stands, and it is what `parseExpressionsList()` violated. But an adapter *may* use the engine's own parser or validator, with explicit provenance, because that is not guessing: it is asking. Refusing that would forbid the one authority that can actually answer.
+This also sharpens the standing rule, which was stated too broadly. **Core implements no universal or hand-rolled SQL grammar** — that ban stands, and it is what `parseExpressionsList()` violates today (#326). But an adapter *may* use the engine's own parser or validator, with explicit provenance, because that is not guessing: it is asking. Refusing that would forbid the one authority that can actually answer.
 
 **A fingerprint must keep its manifest.** `contextFingerprint: string` alone is a bucket, and this document knows what buckets do. The digest is for fast comparison; the manifest is what makes it auditable, explainable, invalidatable, reproducible — and, above all, what lets you see **what the fingerprint forgot**:
 

@@ -26,11 +26,8 @@ function createUnsupportedStreamingError(): ExecutionError {
 	return new ExecutionError({
 		operation: 'stream()',
 		reason:
-			'The adapter declares supportsStreaming: false for this ORM instance. ' +
-			'When that is because you lent dbsp a caller-owned connection, the connection is yours, so dbsp will not open the transaction required for streaming unless you opt into adapter-managed transactions.',
-		fix:
-			'Pass managedTransactions: true when constructing the adapter if you want dbsp to run the transaction required for streaming. ' +
-			'If that connection is already inside your transaction, dbsp can only use a savepoint: it can roll back its own work to that savepoint, but your outer transaction still controls the final commit or rollback.',
+			'The adapter declares supportsStreaming: false for this ORM instance.',
+		fix: 'Use an adapter configuration that supports streaming.',
 	});
 }
 

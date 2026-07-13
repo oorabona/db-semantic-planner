@@ -178,7 +178,15 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 		const orm = createOrm({ adapter, schema: simpleSchema });
 		const iterator = orm.select('users').stream();
 
-		await expect(iterator.next()).rejects.toThrow(/managedTransactions: true/);
+		let error: unknown;
+		try {
+			await iterator.next();
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('supportsStreaming: false');
+		expect((error as Error).message).not.toContain('managedTransactions');
 		expect(streamSpy).not.toHaveBeenCalled();
 	});
 	it('transaction() and stream() delegate when the adapter declares both capabilities', async () => {

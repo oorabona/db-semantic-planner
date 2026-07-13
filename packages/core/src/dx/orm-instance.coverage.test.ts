@@ -468,11 +468,17 @@ describe('orm-instance coverage', () => {
 			};
 			const orm = createOrmInstance(model, false, {}, adapter);
 
-			await expect(
-				orm.transaction(async () => {
+			let error: unknown;
+			try {
+				await orm.transaction(async () => {
 					return 42;
-				}),
-			).rejects.toThrow(/managedTransactions: true/);
+				});
+			} catch (caught) {
+				error = caught;
+			}
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain('supportsTransactions: false');
+			expect((error as Error).message).not.toContain('managedTransactions');
 			expect(transactionSpy).not.toHaveBeenCalled();
 		});
 

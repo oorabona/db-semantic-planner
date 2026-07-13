@@ -189,6 +189,10 @@ const TRANSACTION_CONTROL_COMMAND_TAGS = new Set([
 	'PREPARE',
 	'PREPARE TRANSACTION',
 ]);
+const PREPARE_COMMAND_TAG = 'PREPARE';
+const pgsqlAdapterInternalOptionsKey: unique symbol = Symbol(
+	'dbsp-pgsql-adapter-internal-options',
+);
 
 type DbspClientScopeKind =
 	| 'transaction'
@@ -271,6 +275,10 @@ function isTransactionControlCommandTag(command: string | undefined): boolean {
 	return (
 		normalized !== undefined && TRANSACTION_CONTROL_COMMAND_TAGS.has(normalized)
 	);
+}
+
+function isPrepareCommandTag(command: string | undefined): boolean {
+	return normalizeCommandTag(command) === PREPARE_COMMAND_TAG;
 }
 
 function queryResults<T extends QueryResultRow>(
@@ -998,22 +1006,41 @@ export interface PgsqlBorrowedClientAdapterOptions extends PgsqlAdapterOptions {
 
 interface PgsqlAdapterInternalOptions
 	extends PgsqlBorrowedClientAdapterOptions {
+	readonly [pgsqlAdapterInternalOptionsKey]: true;
 	readonly adapterManagedTransaction?: true;
 	readonly dbspScopeToken?: DbspScopeToken;
 }
 
-type PgsqlAdapterConstructionOptions =
+type PgsqlPublicAdapterConstructionOptions =
 	| PgsqlAdapterOptions
 	| PgsqlPoolAdapterOptions
-	| PgsqlBorrowedClientAdapterOptions
+	| PgsqlBorrowedClientAdapterOptions;
+
+type PgsqlAdapterConstructionOptions =
+	| PgsqlPublicAdapterConstructionOptions
 	| PgsqlAdapterInternalOptions;
 
 type PgsqlAdapterConstructionOverrides = Partial<PgsqlAdapterOptions> & {
 	readonly borrowedClient?: true | false;
 	readonly managedTransactions?: true;
-	readonly adapterManagedTransaction?: true;
-	readonly dbspScopeToken?: DbspScopeToken;
 };
+
+type PgsqlAdapterInternalConstructionOverrides =
+	PgsqlAdapterConstructionOverrides & {
+		readonly adapterManagedTransaction?: true;
+		readonly dbspScopeToken?: DbspScopeToken;
+	};
+
+function isPgsqlAdapterInternalOptions(
+	options: PgsqlAdapterConstructionOptions | undefined,
+): options is PgsqlAdapterInternalOptions {
+	return (
+		typeof options === 'object' &&
+		options !== null &&
+		pgsqlAdapterInternalOptionsKey in options &&
+		options[pgsqlAdapterInternalOptionsKey] === true
+	);
+}
 
 function hasBorrowedClientOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
@@ -1041,9 +1068,7 @@ function isAdapterManagedTransactionOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): boolean {
 	return (
-		typeof options === 'object' &&
-		options !== null &&
-		'adapterManagedTransaction' in options &&
+		isPgsqlAdapterInternalOptions(options) &&
 		options.adapterManagedTransaction === true
 	);
 }
@@ -1051,14 +1076,19 @@ function isAdapterManagedTransactionOption(
 function getDbspScopeTokenOption(
 	options: PgsqlAdapterConstructionOptions | undefined,
 ): DbspScopeToken | undefined {
-	if (
-		typeof options === 'object' &&
-		options !== null &&
-		'dbspScopeToken' in options
-	) {
-		return options.dbspScopeToken;
-	}
-	return undefined;
+	return isPgsqlAdapterInternalOptions(options)
+		? options.dbspScopeToken
+		: undefined;
+}
+
+function createPgsqlAdapterFromConstructionOptions<DB = unknown>(
+	connection: Pool | PoolClient | undefined,
+	options: PgsqlAdapterConstructionOptions,
+): PgsqlAdapter<DB> {
+	return new PgsqlAdapter<DB>(
+		connection as Pool | undefined,
+		options as PgsqlPoolAdapterOptions,
+	);
 }
 
 // ============================================================================
@@ -1108,6 +1138,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 *   or nothing at all for compile-only mode
 	 * @param options - configuration; declares connection ownership
 	 */
+	constructor(pool?: Pool | undefined, options?: PgsqlPoolAdapterOptions);
+	constructor(pool: Pool, options?: PgsqlPoolAdapterOptions);
+	constructor(client: PoolClient, options: PgsqlBorrowedClientAdapterOptions);
+	constructor(pool: undefined, options?: PgsqlAdapterOptions);
 	constructor(
 		pool?: Pool | PoolClient | undefined,
 		options?: PgsqlAdapterConstructionOptions,
@@ -1188,9 +1222,19 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 * deriveFkColumnName, etc.) are propagated to scoped/transactional adapters.
 	 */
 	private cloneOptions(
-		overrides: PgsqlAdapterConstructionOverrides,
+		overrides: PgsqlAdapterInternalConstructionOverrides,
 	): PgsqlAdapterConstructionOptions {
+		const adapterManagedTransaction =
+			(overrides.adapterManagedTransaction ?? this.adapterManagedTransaction)
+				? true
+				: undefined;
+		const scopeToken = overrides.dbspScopeToken ?? this.scopeToken;
+		const hasInternalOptions =
+			adapterManagedTransaction === true || scopeToken !== undefined;
 		return {
+			...(hasInternalOptions && {
+				[pgsqlAdapterInternalOptionsKey]: true as const,
+			}),
 			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
 			...(this._dbCasing !== undefined && { dbCasing: this._dbCasing }),
 			...(this.model !== undefined && { model: this.model }),
@@ -1199,12 +1243,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			deriveFkColumnName: this.deriveFk,
 			...(this.borrowedClient && { borrowedClient: true as const }),
 			...(this.managedTransactions && { managedTransactions: true as const }),
-			...(this.adapterManagedTransaction && {
-				adapterManagedTransaction: true as const,
-			}),
-			...(this.scopeToken !== undefined && {
-				dbspScopeToken: this.scopeToken,
-			}),
+			...(adapterManagedTransaction === true && { adapterManagedTransaction }),
+			...(scopeToken !== undefined && { dbspScopeToken: scopeToken }),
 			...overrides,
 		};
 	}
@@ -2302,7 +2342,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		client: PoolClient,
 		scopeToken: DbspScopeToken,
 	): PgsqlAdapter<DB> {
-		return new PgsqlAdapter<DB>(
+		return createPgsqlAdapterFromConstructionOptions<DB>(
 			client,
 			this.cloneOptions({
 				borrowedClient: true,
@@ -2611,7 +2651,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		// Create new adapter preserving all configuration, only overriding schemaName
 		const options = this.cloneOptions({ schemaName });
-		return new PgsqlAdapter<DB>(this.client ?? this.pool ?? undefined, options);
+		return createPgsqlAdapterFromConstructionOptions<DB>(
+			this.client ?? this.pool ?? undefined,
+			options,
+		);
 	}
 
 	// =========================================================================
@@ -2738,7 +2781,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			parameters,
 		);
 		if (options.inspectTransactionControl !== false) {
-			this.assertNoTransactionControlCommand(
+			await this.assertNoTransactionControlCommand(
 				executor,
 				rawResult,
 				allowedScopeToken,
@@ -2851,19 +2894,62 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		>;
 	}
 
-	private assertNoTransactionControlCommand<T extends QueryResultRow>(
+	private async assertNoTransactionControlCommand<T extends QueryResultRow>(
 		executor: Pool | PoolClient,
 		result: MaybeMultipleQueryResults<T>,
 		allowedScopeToken: DbspScopeToken | undefined,
-	): void {
+	): Promise<void> {
 		if (!isPoolClientLike(executor)) return;
 		const current = this.currentClientScope(executor);
 		if (current === undefined || current.token !== allowedScopeToken) return;
 		for (const queryResult of queryResults(result)) {
+			if (isPrepareCommandTag(queryResult.command)) {
+				await this.assertPrepareDidNotEndTransaction(
+					executor,
+					allowedScopeToken,
+					queryResult,
+				);
+				continue;
+			}
 			if (isTransactionControlCommandTag(queryResult.command)) {
 				throw new PgsqlRawSqlTransactionControlError(queryResult);
 			}
 		}
+	}
+
+	private async assertPrepareDidNotEndTransaction<T extends QueryResultRow>(
+		client: PoolClient,
+		allowedScopeToken: DbspScopeToken | undefined,
+		queryResult: QueryResult<T>,
+	): Promise<void> {
+		const probeSavepointName = nextSavepointName();
+		try {
+			await this.executeConnectionStatement(
+				client,
+				`SAVEPOINT ${probeSavepointName}`,
+				undefined,
+				{
+					...(allowedScopeToken !== undefined && { allowedScopeToken }),
+					inspectTransactionControl: false,
+					protectBorrowedClientTransaction: false,
+				},
+			);
+		} catch (error) {
+			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
+				throw new PgsqlRawSqlTransactionControlError(queryResult);
+			}
+			throw error;
+		}
+		await this.executeConnectionStatement(
+			client,
+			`RELEASE SAVEPOINT ${probeSavepointName}`,
+			undefined,
+			{
+				...(allowedScopeToken !== undefined && { allowedScopeToken }),
+				inspectTransactionControl: false,
+				protectBorrowedClientTransaction: false,
+			},
+		);
 	}
 
 	/**
@@ -3083,7 +3169,10 @@ export function createPgsqlAdapter<DB = unknown>(
 				'Pass a PoolClient when borrowing a caller-owned connection.',
 		);
 	}
-	return new PgsqlAdapter<DB>(connection, options);
+	return createPgsqlAdapterFromConstructionOptions<DB>(
+		connection,
+		options ?? {},
+	);
 }
 
 /**

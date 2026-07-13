@@ -1,4 +1,7 @@
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+import {
+	createPgsqlAdapter,
+	PgsqlRawSqlTransactionControlError,
+} from '@dbsp/adapter-pgsql';
 import { createOrm, schema } from '@dbsp/core';
 import {
 	afterAll,
@@ -195,6 +198,71 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 		expect(await itemIds()).toEqual([15]);
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
+	});
+
+	it('allows server-side PREPARE inside a borrowed-client dbsp transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const statementName = 'dbsp_prepare_statement_e2e';
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+
+			await adapter.transaction(async (tx) => {
+				await tx.executeRaw(`PREPARE ${statementName} AS SELECT 1 AS value`);
+				const rows = await tx.executeRaw<{ value: number }>(
+					`EXECUTE ${statementName}`,
+				);
+				expect(rows).toEqual([{ value: 1 }]);
+			});
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			await client.query(`DEALLOCATE ${statementName}`).catch(() => undefined);
+			client.release();
+		}
+	});
+
+	it('throws when PREPARE TRANSACTION ends a borrowed-client dbsp transaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const transactionId = `dbsp_prepare_tx_${process.pid}_${Date.now()}`;
+		let transactionGone = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				managedTransactions: true,
+			});
+
+			let error: unknown;
+			try {
+				await adapter.transaction(async (tx) => {
+					await tx.executeRaw(`PREPARE TRANSACTION '${transactionId}'`);
+				});
+			} catch (caught) {
+				error = caught;
+			}
+			transactionGone = true;
+
+			expect(error).toBeInstanceOf(PgsqlRawSqlTransactionControlError);
+		} finally {
+			if (!transactionGone) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+			await pool
+				.query(`ROLLBACK PREPARED '${transactionId}'`)
+				.catch(() => undefined);
+		}
 	});
 
 	it('returns a clean pooled connection after raw SAVEPOINT in orm.transaction throws', async () => {
@@ -505,10 +573,11 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 			expect(thrown).toBeInstanceOf(Error);
 			const message = (thrown as Error).message;
-			expect(message).toContain('adapter declares');
-			expect(message).toContain('connection is yours');
-			expect(message).toContain('managedTransactions: true');
-			expect(message).toContain('savepoint');
+			expect(message).toContain('supportsTransactions: false');
+			expect(message).toContain(
+				'adapter configuration that supports transactions',
+			);
+			expect(message).not.toContain('managedTransactions');
 			expect(message).not.toContain('PoolClient');
 			expect(callback).not.toHaveBeenCalled();
 		} finally {
