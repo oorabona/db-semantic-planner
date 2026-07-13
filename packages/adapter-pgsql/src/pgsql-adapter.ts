@@ -52,13 +52,7 @@ import type {
 	UpsertIntent,
 } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
-import type {
-	Pool,
-	PoolClient,
-	QueryConfig,
-	QueryResult,
-	QueryResultRow,
-} from 'pg';
+import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSubqueryInclude as compileSubqueryIncludeImpl } from './adapter-compiler-includes.js';
 import {
@@ -167,7 +161,6 @@ const IN_FAILED_SQL_TRANSACTION = '25P02';
 const INVALID_SAVEPOINT_SPECIFICATION = '3B001';
 
 let savepointCounter = 0;
-let preparedStatementCounter = 0;
 
 const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
@@ -175,8 +168,10 @@ const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 	'Raw savepoint control (`SAVEPOINT`, `RELEASE SAVEPOINT`, `ROLLBACK TO SAVEPOINT`) can alter the savepoint stack before dbsp sees the command tag; dbsp poisons the scope, but it cannot make that command un-run. ' +
 	"Manage your transaction outside dbsp's calls.";
 
-const RAW_SQL_SINGLE_COMMAND_MESSAGE =
-	'PostgreSQL rejected this raw SQL because dbsp sends one command per raw call inside a transaction it manages, and the caller passed several commands.';
+const RAW_SQL_MULTI_COMMAND_MESSAGE =
+	'dbsp cannot reason about a multi-command raw call inside a transaction it manages. ' +
+	'Those commands have already run, and dbsp cannot undo what they already did. ' +
+	'Send one command per call, or manage the transaction yourself.';
 
 const ABORTED_COMMIT_MESSAGE =
 	'PostgreSQL returned ROLLBACK for COMMIT. The transaction was already aborted, no changes were committed, and dbsp is reporting that failed commit explicitly.';
@@ -238,7 +233,6 @@ type DbspScopeStatementLock = {
 };
 
 const activeClientScopes = new WeakMap<PoolClient, DbspClientScope[]>();
-const preparedStatementObligations = new WeakMap<PoolClient, Set<string>>();
 
 type StatementExecutionOptions = {
 	readonly allowedScopeToken?: DbspScopeToken;
@@ -247,7 +241,6 @@ type StatementExecutionOptions = {
 	readonly allowPoisonedScope?: boolean;
 	readonly inspectTransactionControl?: boolean;
 	readonly protectBorrowedClientTransaction?: boolean;
-	readonly forceSingleCommand?: boolean;
 };
 
 type MaybeMultipleQueryResults<T extends QueryResultRow = QueryResultRow> =
@@ -292,6 +285,13 @@ function isPoolClientLike(
 	return 'release' in connection && typeof connection.release === 'function';
 }
 
+function poolClientTransactionOpen(client: PoolClient): boolean | undefined {
+	const status = (client as { readonly _txStatus?: unknown })._txStatus;
+	if (status === 'T' || status === 'E') return true;
+	if (status === 'I') return false;
+	return undefined;
+}
+
 function isPgErrorWithCode(error: unknown, code: string): boolean {
 	return (
 		typeof error === 'object' &&
@@ -301,23 +301,9 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 	);
 }
 
-function isPgErrorWithMessage(error: unknown, pattern: RegExp): boolean {
-	return (
-		error instanceof Error &&
-		typeof (error as { code?: unknown }).code === 'string' &&
-		pattern.test(error.message)
-	);
-}
-
 function nextSavepointName(): string {
 	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
 	return `dbsp_savepoint_${savepointCounter}`;
-}
-
-function nextPreparedStatementName(): string {
-	preparedStatementCounter =
-		(preparedStatementCounter + 1) % Number.MAX_SAFE_INTEGER;
-	return `dbsp_raw_${process.pid}_${preparedStatementCounter}`;
 }
 
 function createScopeToken(): DbspScopeToken {
@@ -333,36 +319,6 @@ function createScopeState(
 		childScopes: new Set(),
 		closing: false,
 	};
-}
-
-function rememberPreparedStatementObligation(
-	client: PoolClient,
-	statementName: string,
-): void {
-	let statements = preparedStatementObligations.get(client);
-	if (statements === undefined) {
-		statements = new Set();
-		preparedStatementObligations.set(client, statements);
-	}
-	statements.add(statementName);
-}
-
-function forgetPreparedStatementObligation(
-	client: PoolClient,
-	statementName: string,
-): void {
-	const statements = preparedStatementObligations.get(client);
-	if (statements === undefined) return;
-	statements.delete(statementName);
-	if (statements.size === 0) {
-		preparedStatementObligations.delete(client);
-	}
-}
-
-function pendingPreparedStatementObligations(
-	client: PoolClient,
-): readonly string[] {
-	return [...(preparedStatementObligations.get(client) ?? [])];
 }
 
 function normalizeCommandTag(command: string | undefined): string | undefined {
@@ -476,25 +432,6 @@ function addRawSqlTransactionContext(error: unknown): unknown {
 			value: context,
 			configurable: true,
 		});
-	}
-	return error;
-}
-
-function addRawSqlSingleCommandContext(error: unknown): unknown {
-	if (
-		isPgErrorWithMessage(
-			error,
-			/cannot insert multiple commands into a prepared statement/i,
-		)
-	) {
-		const context = RAW_SQL_SINGLE_COMMAND_MESSAGE;
-		if (error instanceof Error && !error.message.includes(context)) {
-			error.message = `${error.message}; ${context}`;
-			Object.defineProperty(error, 'dbspRawSqlSingleCommandContext', {
-				value: context,
-				configurable: true,
-			});
-		}
 	}
 	return error;
 }
@@ -2016,7 +1953,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	async execute<T>(query: CompiledQuery<T>): Promise<T[]> {
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
-		>(query.sql, query.parameters, { forceSingleCommand: true });
+		>(query.sql, query.parameters);
 		return this.transformResultRows(result.rows) as T[];
 	}
 
@@ -2160,17 +2097,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							rollbackErr,
 						);
 					}
-					try {
-						await adapter.dischargePreparedStatementObligations(client);
-					} catch (deallocateErr) {
-						releaseError =
-							deallocateErr instanceof Error ? deallocateErr : true;
-						throw createCleanupFailureError(
-							'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
-							error,
-							deallocateErr,
-						);
-					}
 				}
 				throw error;
 			} finally {
@@ -2190,18 +2116,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 							'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
 							rollbackErr,
 						);
-					}
-					if (cleanupErrorToThrow === undefined) {
-						try {
-							await adapter.dischargePreparedStatementObligations(client);
-						} catch (deallocateErr) {
-							releaseError =
-								deallocateErr instanceof Error ? deallocateErr : true;
-							cleanupErrorToThrow = createCleanupOnlyError(
-								'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
-								deallocateErr,
-							);
-						}
 					}
 				}
 				releaseScope?.();
@@ -2234,7 +2148,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			query.parameters as unknown[],
 			{
 				...(allowedScopeToken !== undefined && { allowedScopeToken }),
-				forceSingleCommand: true,
 			},
 		);
 
@@ -2465,15 +2378,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						rollbackErr,
 					);
 				}
-				try {
-					await this.dischargePreparedStatementObligations(client);
-				} catch (deallocateErr) {
-					throw createCleanupFailureError(
-						'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
-						error,
-						deallocateErr,
-					);
-				}
 			}
 			throw error;
 		} finally {
@@ -2486,16 +2390,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						'PostgreSQL stream cleanup failed: ROLLBACK failed after the stream was closed early',
 						rollbackErr,
 					);
-				}
-				if (cleanupErrorToThrow === undefined) {
-					try {
-						await this.dischargePreparedStatementObligations(client);
-					} catch (deallocateErr) {
-						cleanupErrorToThrow = createCleanupOnlyError(
-							'PostgreSQL stream cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
-							deallocateErr,
-						);
-					}
 				}
 			}
 			releaseScope?.();
@@ -2648,7 +2542,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.closeScope(scopeState);
 			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
-			await this.dischargePreparedStatementObligations(client);
 			try {
 				await this.executeScopeBoundaryStatement(
 					client,
@@ -2722,7 +2615,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.closeScope(scopeState);
 			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
-			await this.dischargePreparedStatementObligations(client);
 			const commitResult = await this.executeScopeBoundaryStatement(
 				client,
 				scopeToken,
@@ -2730,7 +2622,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				'COMMIT',
 			);
 			committed = true;
-			await this.dischargePreparedStatementObligations(client);
 			this.assertCommitSucceeded(commitResult);
 			return result;
 		} catch (error) {
@@ -2743,15 +2634,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						'PostgreSQL transaction cleanup failed: ROLLBACK failed after the transaction body failed',
 						error,
 						rollbackErr,
-					);
-				}
-				try {
-					await this.dischargePreparedStatementObligations(client);
-				} catch (deallocateErr) {
-					throw createCleanupFailureError(
-						'PostgreSQL transaction cleanup failed: DEALLOCATE prepared statement failed after ROLLBACK made the connection usable',
-						error,
-						deallocateErr,
 					);
 				}
 			}
@@ -2788,15 +2670,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		} catch (error) {
 			if (isPgErrorWithCode(error, NO_ACTIVE_SQL_TRANSACTION)) {
-				await this.dischargePreparedStatementObligations(client);
 				return;
-			}
-			if (isPgErrorWithCode(error, INVALID_SAVEPOINT_SPECIFICATION)) {
-				await this.dischargePreparedStatementObligations(client);
 			}
 			throw error;
 		}
-		await this.dischargePreparedStatementObligations(client);
 		await this.executeScopeBoundaryStatement(
 			client,
 			allowedScopeToken,
@@ -3283,7 +3160,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			await this.executeQueryProtectingOpenTransaction<QueryResultRow>(
 				sql,
 				parameters,
-				{ forceSingleCommand: true },
 			);
 		return result.rows as T[];
 	}
@@ -3324,34 +3200,30 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		if (!this.client && !this.pool) {
 			throw new Error('Cannot execute DDL on compile-only adapter');
 		}
-		await this.executeQueryProtectingOpenTransaction(sql, undefined, {
-			forceSingleCommand: true,
-		});
+		await this.executeQueryProtectingOpenTransaction(sql);
 	}
 
 	/**
-	 * Whether this adapter instance is scoped inside a transaction.
-	 * True only while the adapter is inside a transaction it manages.
+	 * Whether a transaction is open on this adapter's connection.
+	 * This is true for dbsp-managed scopes and for borrowed pg clients whose
+	 * ReadyForQuery status says the caller has an open transaction.
 	 *
 	 * @since DDL-TABLE-001
 	 */
 	get inTransaction(): boolean {
-		return this.adapterManagedTransaction;
+		if (this.adapterManagedTransaction) return true;
+		if (this.client === undefined) return false;
+		return poolClientTransactionOpen(this.client) !== false;
 	}
 
 	private async executeQueryProtectingOpenTransaction<
 		T extends QueryResultRow = QueryResultRow,
-	>(
-		sql: string,
-		parameters?: readonly unknown[],
-		options: Pick<StatementExecutionOptions, 'forceSingleCommand'> = {},
-	): Promise<QueryResult<T>> {
+	>(sql: string, parameters?: readonly unknown[]): Promise<QueryResult<T>> {
 		return this.executeConnectionStatement<T>(
 			this.requireConnection(),
 			sql,
 			parameters,
 			{
-				...options,
 				protectBorrowedClientTransaction:
 					this.client !== undefined && !this.adapterManagedTransaction,
 			},
@@ -3433,30 +3305,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			);
 		}
 
-		const preparedStatementName = this.shouldUseSingleCommandPreparedStatement(
-			executor,
-			parameters,
-			options,
-			allowedScopeToken,
-		)
-			? nextPreparedStatementName()
-			: undefined;
-
 		let pendingError: unknown;
 		let result: QueryResult<T> | undefined;
-		let statementCompleted = false;
-		if (preparedStatementName !== undefined && isPoolClientLike(executor)) {
-			rememberPreparedStatementObligation(executor, preparedStatementName);
-		}
 		try {
 			const rawResult = await this.issueConnectionQuery<T>(
 				executor,
 				sql,
 				parameters,
-				preparedStatementName,
 			);
-			statementCompleted = true;
 			if (options.inspectTransactionControl !== false) {
+				this.assertNoMultiCommandRawCall(
+					executor,
+					rawResult,
+					allowedScopeToken,
+				);
 				await this.assertNoTransactionControlCommand(
 					executor,
 					rawResult,
@@ -3479,28 +3341,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 		}
 
-		if (
-			preparedStatementName !== undefined &&
-			isPoolClientLike(executor) &&
-			(pendingError === undefined || statementCompleted)
-		) {
-			try {
-				await this.dischargePreparedStatementObligation(
-					executor,
-					preparedStatementName,
-				);
-			} catch (cleanupErr) {
-				if (pendingError === undefined) {
-					throw createCleanupOnlyError(
-						'PostgreSQL raw SQL cleanup failed: DEALLOCATE prepared statement failed after the protected statement completed',
-						cleanupErr,
-					);
-				}
-			}
-		}
-
 		if (pendingError !== undefined) {
-			throw addRawSqlSingleCommandContext(pendingError);
+			throw pendingError;
 		}
 		if (result === undefined) {
 			throw new Error('PostgreSQL returned no query results');
@@ -3594,7 +3436,6 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			this.closeScope(scopeState);
 			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
-			await this.dischargePreparedStatementObligations(client);
 			await this.executeScopeBoundaryStatement(
 				client,
 				scopeToken,
@@ -3617,101 +3458,32 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		return result;
 	}
 
-	private shouldUseSingleCommandPreparedStatement(
-		executor: Pool | PoolClient,
-		parameters: readonly unknown[] | undefined,
-		options: StatementExecutionOptions,
-		allowedScopeToken: DbspScopeToken | undefined,
-	): boolean {
-		return (
-			options.forceSingleCommand === true &&
-			isPoolClientLike(executor) &&
-			this.findClientScope(executor, allowedScopeToken) !== undefined &&
-			(parameters === undefined || parameters.length === 0)
-		);
-	}
-
-	/**
-	 * A statement dbsp prepared is an obligation dbsp owes — but only if it was
-	 * ever prepared. When PostgreSQL rejects the statement while parsing it (a
-	 * multi-command string, an unknown function, a syntax error), nothing was
-	 * created, and dbsp cannot tell that apart from a statement that parsed and
-	 * then failed while running.
-	 *
-	 * Sending the `DEALLOCATE` anyway and tolerating the error does NOT work, and
-	 * the trace says why: inside a transaction, *any* failing command aborts it.
-	 * So a `DEALLOCATE` that finds nothing to deallocate re-aborts a transaction
-	 * that the savepoint rollback had just made usable again, and the `RELEASE`
-	 * behind it dies with 25P02. Swallowing the error in JavaScript does not
-	 * un-abort anything on the server.
-	 *
-	 * So ask, rather than guess: the catalog knows whether the statement exists.
-	 * This runs only on cleanup paths, and only once the connection can accept a
-	 * statement at all.
-	 */
-	private async deallocatePreparedStatement(
-		client: PoolClient,
-		statementName: string,
-		mayNotExist = false,
-	): Promise<void> {
-		// After the statement ran, dbsp knows it exists — it just used it. The
-		// question only arises where the answer is genuinely unknown: the statement
-		// failed, and dbsp cannot tell a parse failure (nothing was created) from a
-		// runtime one (it was).
-		if (mayNotExist) {
-			const existing = await client.query(
-				'SELECT 1 FROM pg_prepared_statements WHERE name = $1',
-				[statementName],
-			);
-			if (existing.rowCount === 0) return;
-		}
-		await client.query(`DEALLOCATE ${quoteIdent(statementName)}`);
-	}
-
-	private async dischargePreparedStatementObligation(
-		client: PoolClient,
-		statementName: string,
-	): Promise<void> {
-		await this.deallocatePreparedStatement(client, statementName);
-		forgetPreparedStatementObligation(client, statementName);
-	}
-
-	/**
-	 * The cleanup path, reached because something already failed — so dbsp cannot
-	 * tell whether the statement was ever created. It asks the catalog first: a
-	 * `DEALLOCATE` that finds nothing would itself fail, and a failing command
-	 * inside a transaction aborts it again, right after the savepoint rollback had
-	 * made it usable.
-	 */
-	private async dischargePreparedStatementObligations(
-		client: PoolClient,
-	): Promise<void> {
-		for (const statementName of pendingPreparedStatementObligations(client)) {
-			await this.deallocatePreparedStatement(client, statementName, true);
-			forgetPreparedStatementObligation(client, statementName);
-		}
-	}
-
 	private async issueConnectionQuery<T extends QueryResultRow>(
 		executor: Pool | PoolClient,
 		sql: string,
 		parameters: readonly unknown[] | undefined,
-		preparedStatementName: string | undefined,
 	): Promise<MaybeMultipleQueryResults<T>> {
-		if (preparedStatementName !== undefined) {
-			const query: QueryConfig<unknown[]> = {
-				name: preparedStatementName,
-				text: sql,
-				values: [],
-			};
-			return executor.query<T>(query) as Promise<MaybeMultipleQueryResults<T>>;
-		}
 		if (parameters === undefined) {
 			return executor.query<T>(sql) as Promise<MaybeMultipleQueryResults<T>>;
 		}
 		return executor.query<T>(sql, [...parameters]) as Promise<
 			MaybeMultipleQueryResults<T>
 		>;
+	}
+
+	private assertNoMultiCommandRawCall<T extends QueryResultRow>(
+		executor: Pool | PoolClient,
+		result: MaybeMultipleQueryResults<T>,
+		allowedScopeToken: DbspScopeToken | undefined,
+	): void {
+		if (!Array.isArray(result) || !isPoolClientLike(executor)) return;
+		const current = this.currentClientScope(executor);
+		if (current === undefined || current.token !== allowedScopeToken) return;
+		throw this.poisonClientScope(
+			executor,
+			allowedScopeToken,
+			new Error(RAW_SQL_MULTI_COMMAND_MESSAGE, { cause: result }),
+		);
 	}
 
 	private async assertNoTransactionControlCommand<T extends QueryResultRow>(

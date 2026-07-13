@@ -3,7 +3,6 @@ import {
 	PgsqlRawSqlTransactionControlError,
 } from '@dbsp/adapter-pgsql';
 import { createOrm, schema } from '@dbsp/core';
-import pg from 'pg';
 import {
 	afterAll,
 	beforeAll,
@@ -21,7 +20,6 @@ import {
 } from './testkit/index.js';
 import { sql } from './testkit/sql.js';
 
-const { Pool } = pg;
 const SCHEMA = 'borrowed_client_ownership_e2e';
 
 const ormSchema = schema({
@@ -47,6 +45,10 @@ async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
 	return rows;
 }
 
+function pgTransactionStatus(client: unknown): unknown {
+	return (client as { readonly _txStatus?: unknown })._txStatus;
+}
+
 describe('PgsqlAdapter borrowed client ownership', () => {
 	beforeAll(async () => {
 		await dropSchema(SCHEMA);
@@ -68,6 +70,29 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 	afterAll(async () => {
 		await dropSchema(SCHEMA);
 		await closeTestDb();
+	});
+
+	it('locks pg PoolClient _txStatus values used by adapter.inTransaction', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		let rolledBack = false;
+		try {
+			expect(pgTransactionStatus(client)).toBe('I');
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+			expect(adapter.inTransaction).toBe(false);
+
+			await client.query('BEGIN');
+			expect(pgTransactionStatus(client)).toBe('T');
+			expect(adapter.inTransaction).toBe(true);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
 	});
 
 	it('uses a savepoint inside the caller transaction and preserves caller work after callback failure', async () => {
@@ -200,72 +225,6 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 		expect(await itemIds()).toEqual([15]);
 		await pool.query(`DELETE FROM "${SCHEMA}".items WHERE id = $1`, [15]);
-	});
-
-	it('lets PostgreSQL reject multi-command raw SQL inside orm.transaction before any command runs', async () => {
-		const pool = await getTestPool();
-		const adapter = createPgsqlAdapter(pool);
-		const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
-
-		let thrown: unknown;
-		try {
-			await orm.transaction(async (tx) => {
-				await tx.raw(
-					`COMMIT; INSERT INTO "${SCHEMA}".items (id, label) VALUES (17, 'must not run')`,
-				);
-			});
-		} catch (error) {
-			thrown = error;
-		}
-
-		expect(thrown).toMatchObject({ code: '42601' });
-		expect((thrown as Error).message).toContain(
-			'dbsp sends one command per raw call inside a transaction it manages',
-		);
-		expect(await itemIds()).toEqual([]);
-	});
-
-	it('does not leave dbsp prepared statements after failing zero-parameter raw SQL inside orm.transaction', async () => {
-		const connectionString = process.env.DATABASE_URL;
-		if (!connectionString) {
-			throw new Error(
-				'DATABASE_URL not set. Did globalSetup run successfully?',
-			);
-		}
-		const pool = new Pool({ connectionString, max: 1 });
-		try {
-			const adapter = createPgsqlAdapter(pool);
-			const orm = createOrm({ schema: ormSchema, adapter }).withSchema(SCHEMA);
-			let transactionBackendPid: number | undefined;
-
-			await expect(
-				orm.transaction(async (tx) => {
-					const pidRows = await tx.raw<{ pid: number }>(
-						'SELECT pg_backend_pid() AS pid',
-					);
-					transactionBackendPid = pidRows[0]?.pid;
-					await tx.raw(
-						`SELECT * FROM "${SCHEMA}".missing_dbsp_prepared_cleanup_table`,
-					);
-				}),
-			).rejects.toMatchObject({ code: '42P01' });
-
-			const client = await pool.connect();
-			try {
-				const checkoutPid = await client.query<{ pid: number }>(
-					'SELECT pg_backend_pid() AS pid',
-				);
-				expect(checkoutPid.rows[0]?.pid).toBe(transactionBackendPid);
-				const prepared = await client.query<{ name: string }>(
-					"SELECT name FROM pg_prepared_statements WHERE name LIKE 'dbsp_raw_%'",
-				);
-				expect(prepared.rows).toEqual([]);
-			} finally {
-				client.release();
-			}
-		} finally {
-			await pool.end();
-		}
 	});
 
 	it('serializes concurrent raw statements so raw COMMIT poisons the sibling before it is sent', async () => {

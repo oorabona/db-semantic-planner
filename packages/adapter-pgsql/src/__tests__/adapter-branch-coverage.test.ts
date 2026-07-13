@@ -137,10 +137,16 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 		);
 	});
 
-	it('borrowed client adapters are not inTransaction merely because they have release()', () => {
-		const client = makeClient();
+	it('borrowed client adapters are not inTransaction when pg reports idle', () => {
+		const client = Object.assign(makeClient(), { _txStatus: 'I' });
 		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 		expect(adapter.inTransaction).toBe(false);
+	});
+
+	it('borrowed client adapters fail closed when pg transaction status is unavailable', () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		expect(adapter.inTransaction).toBe(true);
 	});
 
 	it('inTransaction is false when created from pool', () => {

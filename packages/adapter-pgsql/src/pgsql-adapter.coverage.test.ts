@@ -2819,6 +2819,7 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 			const fakeClient = {
 				release: () => {},
 				query: async () => ({ rows: [] }),
+				_txStatus: 'I',
 			} as any;
 
 			const adapter = new PgsqlAdapter(fakeClient, { borrowedClient: true });
