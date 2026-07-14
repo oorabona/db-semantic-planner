@@ -5,20 +5,53 @@ description: What orm.transaction() guarantees, what it refuses, and what it can
 
 # Transactions
 
-By default every `orm.select()`, `orm.insert()`, `orm.update()` and `orm.delete()` runs as its own auto-committed statement on a pooled connection. `orm.transaction()` puts a group of them behind one boundary: they commit together, or none of them does.
+By default every `orm.select('users')` read and every executed mutation builder (`orm.into(...)`, `orm.modify(...)`, `orm.removeFrom(...)`, `orm.upsertInto(...)`) runs as its own auto-committed statement on a pooled connection. `orm.transaction()` puts a group of them behind one boundary: they commit together, or none of them does.
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 import { eq } from '@dbsp/core';
+
+const adaId = crypto.randomUUID();
+const graceId = crypto.randomUUID();
+await orm
+  .into(orm.tables.users)
+  .values([
+    {
+      id: adaId,
+      name: 'Ada',
+      email: 'ada@example.com',
+      createdAt: new Date(),
+      active: true,
+    },
+    {
+      id: graceId,
+      name: 'Grace',
+      email: 'grace@example.com',
+      createdAt: new Date(),
+      active: false,
+    },
+  ])
+  .execute();
 
 const result = await orm.transaction(async (tx) => {
   // Use `tx`, never the outer `orm`, for anything that must be inside.
-  await tx.update('accounts').set({ balance: 900 }).where(eq('id', 1)).execute();
-  await tx.update('accounts').set({ balance: 600 }).where(eq('id', 2)).execute();
-  return { transferred: 100 };
+  const { users } = tx.tables;
+  await tx
+    .modify(users)
+    .set({ active: false })
+    .where(eq(users.id, adaId))
+    .execute();
+  await tx
+    .modify(users)
+    .set({ active: true })
+    .where(eq(users.id, graceId))
+    .execute();
+  return { updated: 2 };
 });
 
-result.transferred; // 100 — both updates committed together
+if (result.updated !== 2) {
+  throw new Error('both updates should commit together');
+}
 ```
 
 The callback receives `tx`, an ORM instance bound to the connection the transaction is running on. Its return value becomes the resolved value of `orm.transaction()`.
@@ -34,22 +67,64 @@ The callback receives `tx`, an ORM instance bound to the connection the transact
 
 ## Errors, and the one thing that surprises people
 
-Any `throw` inside the callback rolls the transaction back and re-throws, so your `catch` sees the original error. You never call rollback yourself.
+Usually, a `throw` inside the callback rolls the transaction back and re-throws the same error. You never call rollback yourself. The important exception is cleanup: raw transaction control such as an unawaited `tx.raw('COMMIT')`, or a rollback/release failure while dbsp is closing the scope, can surface over the callback error. In that case the callback error is retained as the surfaced error's `cause`.
 
 But **catching a database error *inside* the callback does not give you a usable transaction back.**
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection
-await orm.transaction(async (tx) => {
-  try {
-    await tx.insert('users').values({ id: 1, email: 'duplicate@example.com' }).execute();
-  } catch {
-    // Swallowing the error does NOT put the transaction back in a usable state.
-  }
+// doctest: real-db-only — requires a live PostgreSQL connection
+const existingId = crypto.randomUUID();
+await orm
+  .into(orm.tables.users)
+  .values({
+    id: existingId,
+    name: 'Ada',
+    email: 'ada@example.com',
+    createdAt: new Date(),
+    active: true,
+  })
+  .execute();
 
-  // This statement is refused. The transaction was aborted by the failure above.
-  await tx.insert('audit').values({ note: 'carrying on' }).execute();
-});
+let refused = false;
+try {
+  await orm.transaction(async (tx) => {
+    const { users } = tx.tables;
+    try {
+      await tx
+        .into(users)
+        .values({
+          id: existingId,
+          name: 'Ada again',
+          email: 'ada2@example.com',
+          createdAt: new Date(),
+          active: true,
+        })
+        .execute();
+    } catch {
+      // Swallowing the error does NOT put the transaction back in a usable state.
+    }
+
+    // This statement is refused. The transaction was aborted by the failure above.
+    await tx
+      .into(users)
+      .values({
+        id: crypto.randomUUID(),
+        name: 'Grace',
+        email: 'grace@example.com',
+        createdAt: new Date(),
+        active: true,
+      })
+      .execute();
+  });
+} catch (error) {
+  if (error instanceof Error && error.name === 'PgsqlTransactionAbortedError') {
+    refused = true;
+  }
+}
+
+if (!refused) {
+  throw new Error('the aborted transaction should refuse the second insert');
+}
 ```
 
 This is PostgreSQL's own semantics, not a dbsp choice: **a failed statement aborts the whole transaction**, and every statement after it is rejected until the transaction ends. dbsp does not savepoint each statement behind your back, so it cannot hide this from you — and it will not pretend otherwise. It refuses the next statement rather than let it run outside the transaction you believe you are still in.
@@ -154,13 +229,38 @@ If you genuinely need to carry on past a statement that may fail, isolate it in 
 A `transaction()` inside a `transaction()` is a real `SAVEPOINT`, so a failure inside it can be caught and survived without losing the parent's work:
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
+import { inArray } from '@dbsp/core';
+
+const orderId = crypto.randomUUID();
+const extraId = crypto.randomUUID();
+const auditId = crypto.randomUUID();
+
 await orm.transaction(async (tx) => {
-  await tx.insert('orders').values({ id: 1, total: 250 }).execute();
+  const { users } = tx.tables;
+  await tx
+    .into(users)
+    .values({
+      id: orderId,
+      name: 'Order owner',
+      email: 'order@example.com',
+      createdAt: new Date(),
+      active: true,
+    })
+    .execute();
 
   try {
     await tx.transaction(async (nested) => {
-      await nested.insert('optional_extras').values({ orderId: 1 }).execute();
+      await nested
+        .into(nested.tables.users)
+        .values({
+          id: extraId,
+          name: 'Optional extra',
+          email: 'extra@example.com',
+          createdAt: new Date(),
+          active: true,
+        })
+        .execute();
       throw new Error('extras unavailable');
     });
   } catch {
@@ -168,8 +268,25 @@ await orm.transaction(async (tx) => {
     // and the transaction is still usable.
   }
 
-  await tx.insert('audit').values({ note: 'order placed' }).execute();
-}); // commits: the order and the audit row, without the extras
+  await tx
+    .into(users)
+    .values({
+      id: auditId,
+      name: 'Audit row',
+      email: 'audit@example.com',
+      createdAt: new Date(),
+      active: true,
+    })
+    .execute();
+}); // commits the outer rows, without the nested row
+
+const rows = await orm
+  .select('users')
+  .where(inArray('id', [orderId, extraId, auditId]))
+  .all();
+if (rows.length !== 2 || rows.some((row) => row.id === extraId)) {
+  throw new Error('the nested insert should have rolled back to its savepoint');
+}
 ```
 
 The savepoint's name is unguessable by design — see [Raw SQL](./raw-sql) for why that matters.
@@ -185,11 +302,14 @@ Before 3.0.0 a nested `transaction()` did nothing at all — it simply ran your 
 `orm.transaction()` runs a transaction on the connection, which means it has to be dbsp's to run one on.
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection
+// doctest: real-db-only — requires a live PostgreSQL connection
 import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
 
 // dbsp owns the pool: it checks out a connection, and transaction() works.
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+const owned = createOrm({ schema: db, adapter: createPgsqlAdapter(pool) });
+await owned.transaction(async (tx) => {
+  await tx.raw('SELECT 1');
+});
 
 // You own the client: dbsp is a guest on it.
 const client = await pool.connect();
@@ -198,10 +318,15 @@ try {
     schema: db,
     adapter: createPgsqlAdapter(client, { borrowedClient: true }),
   });
+  let refusedBorrowedTransaction = false;
   try {
     await guest.transaction(async () => {});
   } catch {
     // Expected: the connection is not dbsp's.
+    refusedBorrowedTransaction = true;
+  }
+  if (!refusedBorrowedTransaction) {
+    throw new Error('borrowed clients must opt in to managed transactions');
   }
 
   // Unless you say otherwise:
@@ -236,11 +361,24 @@ Inside the callback, the outer `orm` is a different connection. Statements sent 
 
 ```typescript
 // doctest: skip — illustrates the wrong pattern
-await orm.transaction(async (tx) => {
-  await tx.insert('events').values({ type: 'start' }).execute();
+import { eq } from '@dbsp/core';
 
-  await orm.select('events').all(); // WRONG — different connection, cannot see the insert
-  await tx.select('events').all();  // right
+await orm.transaction(async (tx) => {
+  const id = crypto.randomUUID();
+  await tx
+    .into(tx.tables.users)
+    .values({
+      id,
+      name: 'Uncommitted user',
+      email: 'uncommitted@example.com',
+      createdAt: new Date(),
+      active: true,
+    })
+    .execute();
+
+  // WRONG — different connection, cannot see the insert
+  await orm.select('users').where(eq('id', id)).all();
+  await tx.select('users').where(eq('id', id)).all(); // right
 });
 ```
 
@@ -251,18 +389,44 @@ await orm.transaction(async (tx) => {
 Hooks fire inside transactions. `QueryHookContext` and `MutationHookContext` both carry `inTransaction?: boolean`; inside `transaction()` it is `true`, and outside a transaction the property is omitted. A hook can still tell the difference — useful when an effect should only happen once the work is actually committed:
 
 ```typescript
-// doctest: skip — requires a real PostgreSQL connection
-import { createHookManager, createOrm } from '@dbsp/core';
-import { createPgsqlAdapter } from '@dbsp/adapter-pgsql';
+// doctest: real-db-only — verifies hooks can see transaction scope
+const { createHookManager } = await import('@dbsp/core');
 
+const seenScopes: Array<boolean | undefined> = [];
 const hooks = createHookManager().afterMutation((ctx, results) => {
-  if (!ctx.inTransaction) {
-    metrics.increment(`mutation.${ctx.operation}`);
-  }
+  seenScopes.push(ctx.inTransaction);
   return results;
 });
 
-const orm = createOrm({ schema: db, adapter: createPgsqlAdapter(pool), hooks });
+const hookedOrm = createOrm({ schema: db, adapter, hooks });
+
+await hookedOrm.transaction(async (tx) => {
+  await tx
+    .into(tx.tables.users)
+    .values({
+      id: crypto.randomUUID(),
+      name: 'Inside transaction',
+      email: 'inside@example.com',
+      createdAt: new Date(),
+      active: true,
+    })
+    .execute();
+});
+
+await hookedOrm
+  .into(hookedOrm.tables.users)
+  .values({
+    id: crypto.randomUUID(),
+    name: 'Outside transaction',
+    email: 'outside@example.com',
+    createdAt: new Date(),
+    active: true,
+  })
+  .execute();
+
+if (seenScopes[0] !== true || seenScopes[1] !== undefined) {
+  throw new Error('mutation hooks should distinguish transaction scope');
+}
 ```
 
 For anything that must happen only after a successful commit — publishing an event, sending a mail — do it after `await orm.transaction(...)` returns. A hook cannot know whether the commit will succeed.
