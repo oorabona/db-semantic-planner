@@ -1,5 +1,29 @@
 # Changelog
 
+## [3.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v2.0.0...adapter-pgsql-v3.0.0) (2026-07-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* **adapter-pgsql:** dbsp no longer savepoints each statement inside a transaction it opened. PostgreSQL's own semantics stand — a failed statement poisons the transaction. 2.0.0 rolled back the one statement and committed the rest, turning a fail-closed database error into a durable partial business transaction; catching an error inside `transaction()` and continuing no longer works, and that is the point. A nested `transaction()` that was never awaited is refused rather than guessed about. `inTransaction` and `supportsTransactions` are now required members of the adapter contract: an adapter that cannot state whether a transaction is open is one dbsp will not run concurrent DDL through. A `PoolClient` must be declared with `borrowedClient: true`, and `introspect()` takes a `Pool`.
+
+### Features
+
+* **adapter-pgsql:** The caller declares who owns the connection ([#330](https://github.com/oorabona/db-semantic-planner/issues/330)) ([8077cd2](https://github.com/oorabona/db-semantic-planner/commit/8077cd249452ca30ac003dbb4470d1002397e89a)), closes [#325](https://github.com/oorabona/db-semantic-planner/issues/325)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Let PostgreSQL canonicalise CHECK expressions so migrations converge ([#335](https://github.com/oorabona/db-semantic-planner/issues/335)) ([5cbed9c](https://github.com/oorabona/db-semantic-planner/commit/5cbed9c663afec724a62f738429f67287ec8e44a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/core bumped to 3.0.0
+    * @dbsp/types bumped to 3.0.0
+
 ## [2.0.0](https://github.com/oorabona/db-semantic-planner/compare/adapter-pgsql-v1.11.2...adapter-pgsql-v2.0.0) (2026-07-12)
 
 

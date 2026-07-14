@@ -1,5 +1,22 @@
 # Changelog
 
+## [2.0.1](https://github.com/oorabona/db-semantic-planner/compare/cli-v2.0.0...cli-v2.0.1) (2026-07-14)
+
+
+### Bug Fixes
+
+* **adapter-pgsql:** Let PostgreSQL canonicalise CHECK expressions so migrations converge ([#335](https://github.com/oorabona/db-semantic-planner/issues/335)) ([5cbed9c](https://github.com/oorabona/db-semantic-planner/commit/5cbed9c663afec724a62f738429f67287ec8e44a))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @dbsp/adapter-pgsql bumped to 3.0.0
+    * @dbsp/core bumped to 3.0.0
+    * @dbsp/nql bumped to 1.9.5
+    * @dbsp/types bumped to 3.0.0
+
 ## [2.0.0](https://github.com/oorabona/db-semantic-planner/compare/cli-v1.1.11...cli-v2.0.0) (2026-07-12)
 
 
