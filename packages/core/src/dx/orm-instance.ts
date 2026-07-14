@@ -1,11 +1,15 @@
-import type { Adapter } from '../adapter.js';
+import { type Adapter, supportsTransactions } from '../adapter.js';
 import type { DialectCapabilities } from '../dialects/index.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import type { BatchValuesOptions, BatchValuesRef } from './batch-values.js';
 import { batchValues } from './batch-values.js';
 import { CteBuilder } from './cte-builder.js';
-import { InvalidOperationError, validateIdentifier } from './errors.js';
+import {
+	ExecutionError,
+	InvalidOperationError,
+	validateIdentifier,
+} from './errors.js';
 import { eq } from './filters.js';
 import {
 	extractRecursiveField,
@@ -98,6 +102,44 @@ function generateVacuumSQL(
 	if (options?.analyze) modifiers.push('ANALYZE');
 	const mod = modifiers.length > 0 ? `(${modifiers.join(', ')}) ` : '';
 	return `VACUUM ${mod}${buildQualifiedTable(tableName, schemaName)}`;
+}
+
+function createUnsupportedTransactionError(): ExecutionError {
+	return new ExecutionError({
+		operation: 'transaction()',
+		reason:
+			'The adapter does not declare capabilities.supportsTransactions: true for this ORM instance.',
+		fix: 'Use an adapter that implements transaction() and withSchema(), and declare adapter.capabilities.supportsTransactions: true.',
+	});
+}
+
+function adapterTransactionState(
+	adapter: Adapter<unknown>,
+	operation: string,
+	statement: string,
+): boolean {
+	const inTransaction = (adapter as { readonly inTransaction?: unknown })
+		.inTransaction;
+	if (typeof inTransaction !== 'boolean') {
+		throw new InvalidOperationError(
+			operation,
+			`${statement} requires an adapter that exposes inTransaction: boolean; dbsp refuses to run it when transaction state is unknown.`,
+		);
+	}
+	return inTransaction;
+}
+
+function assertOutsideTransaction(
+	adapter: Adapter<unknown>,
+	operation: string,
+	statement: string,
+): void {
+	if (adapterTransactionState(adapter, operation, statement)) {
+		throw new InvalidOperationError(
+			operation,
+			`${statement} cannot run inside a transaction block`,
+		);
+	}
 }
 
 function generateAlterColumnSQL(
@@ -207,11 +249,8 @@ function buildIndexAPI(
 	return {
 		async create(opts: CreateIndexOptions): Promise<void> {
 			const a = requireAdapter();
-			if (opts.concurrently && a.inTransaction) {
-				throw new InvalidOperationError(
-					'createIndex',
-					'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
-				);
+			if (opts.concurrently) {
+				assertOutsideTransaction(a, 'createIndex', 'CREATE INDEX CONCURRENTLY');
 			}
 			const sql = a.generateCreateIndex
 				? a.generateCreateIndex(tableName, opts, schemaName)
@@ -221,14 +260,21 @@ function buildIndexAPI(
 
 		async drop(name: string, options?: DropIndexOptions): Promise<void> {
 			const a = requireAdapter();
-			if (options?.concurrently && a.inTransaction) {
-				throw new InvalidOperationError(
-					'dropIndex',
-					'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
-				);
+			if (options?.concurrently) {
+				assertOutsideTransaction(a, 'dropIndex', 'DROP INDEX CONCURRENTLY');
 			}
+			// Every other generator on this port takes the schema as an explicit
+			// parameter — generateCreateIndex, generateTruncate, generateVacuum,
+			// generateAlterColumn — so none of them can forget it. generateDropIndex
+			// expects it inside `options`, so it can, and it did: the fallback below
+			// used `schemaName` while the adapter path handed PostgreSQL a bare name to
+			// resolve through search_path, which in a multi-tenant database drops an
+			// index — just possibly somebody else's. An explicit option still wins.
+			const scopedOptions: DropIndexOptions | undefined = schemaName
+				? { ...options, schema: options?.schema ?? schemaName }
+				: options;
 			const sql = a.generateDropIndex
-				? a.generateDropIndex(name, options)
+				? a.generateDropIndex(name, scopedOptions)
 				: generateDropIndexSQL(name, schemaName, options);
 			await a.executeDDL?.(sql);
 		},
@@ -303,12 +349,7 @@ function buildTableDDL(
 
 		async vacuum(options?: VacuumOptions): Promise<void> {
 			const a = requireAdapter();
-			if (a.inTransaction) {
-				throw new InvalidOperationError(
-					'vacuum',
-					'VACUUM cannot run inside a transaction block',
-				);
-			}
+			assertOutsideTransaction(a, 'vacuum', 'VACUUM');
 			const sql = a.generateVacuum
 				? a.generateVacuum(tableName, schemaName, options)
 				: generateVacuumSQL(tableName, schemaName, options);
@@ -786,34 +827,61 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 		// Transaction Methods (DX-025)
 		// =====================================================================
 
-		async transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
+		// NOT `async`, and that is load-bearing. An async method awaits whatever it
+		// returns and re-wraps it in a fresh Promise — which would mean the language
+		// itself attaches to the adapter's promise, and an adapter that needs to know
+		// whether the CALLER awaited a nested transaction would see every one of them
+		// as awaited, by core, before the caller ever touched it. So the adapter's
+		// promise is passed through untouched. The guards still reject rather than
+		// throwing synchronously, because that is what callers already rely on.
+		transaction<T>(fn: (tx: OrmInstance<DB>) => Promise<T>): Promise<T> {
 			if (!adapter) {
-				throw new Error(
-					'transaction() requires an adapter. ' +
-						'Pass an adapter when creating the ORM.',
+				return Promise.reject(
+					new Error(
+						'transaction() requires an adapter. ' +
+							'Pass an adapter when creating the ORM.',
+					),
 				);
 			}
 
-			// Passthrough to adapter's transaction API
-			return adapter.transaction(async (txAdapter) => {
-				// Create a transaction-scoped ORM instance with inTransaction=true
-				const txOrm = createOrmInstance<DB>(
-					model,
-					strictMode,
-					relationHints,
-					txAdapter as Adapter<DB>,
-					schemaName,
-					dialectCapabilities,
-					schemaDefinition,
-					globalPlanOptions,
-					defaultFilters,
-					hookStore,
-					onHookError,
-					true, // inTransaction
-					tablesProxy,
-				);
-				return fn(txOrm);
-			});
+			if (!supportsTransactions<DB>(adapter)) {
+				return Promise.reject(createUnsupportedTransactionError());
+			}
+
+			// Passthrough to adapter's transaction API.
+			//
+			// The try/catch is not decoration. This method is NOT async (see above), so
+			// an adapter throwing synchronously out of transaction() would throw
+			// synchronously out of here — and a method typed `Promise<T>` must reject
+			// rather than throw, or `.catch()` and `await expect(...).rejects` stop
+			// working on it. The async wrapper converted that for free; dropping it to
+			// keep the adapter's promise identity means converting it by hand.
+			//
+			// The promise itself is still returned untouched. Only a synchronous throw
+			// becomes a rejection.
+			try {
+				return adapter.transaction(async (txAdapter) => {
+					// Create a transaction-scoped ORM instance with inTransaction=true
+					const txOrm = createOrmInstance<DB>(
+						model,
+						strictMode,
+						relationHints,
+						txAdapter as Adapter<DB>,
+						schemaName,
+						dialectCapabilities,
+						schemaDefinition,
+						globalPlanOptions,
+						defaultFilters,
+						hookStore,
+						onHookError,
+						true, // inTransaction
+						tablesProxy,
+					);
+					return fn(txOrm);
+				});
+			} catch (error) {
+				return Promise.reject(error);
+			}
 		},
 
 		// =====================================================================
@@ -915,14 +983,32 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 						'executeDDL() requires an adapter that supports DDL execution.',
 					);
 				}
+				// The table-scoped `.indexes.drop()` refuses this; so must the global
+				// shortcut. PostgreSQL cannot run DROP INDEX CONCURRENTLY inside a
+				// transaction block, and reaching the database to be told so aborts the
+				// transaction you were in.
+				if (options?.concurrently) {
+					assertOutsideTransaction(
+						adapter,
+						'dropIndex',
+						'DROP INDEX CONCURRENTLY',
+					);
+				}
 				// FIND-003: Validate index name and optional schema before building SQL
 				validateIdentifier(name, 'index');
 				const sc = options?.schema ?? schemaName;
 				if (sc) {
 					validateIdentifier(sc, 'schema');
 				}
+				// `sc` resolves the ORM's schema scope, and the adapter must be given it:
+				// passing only the caller's options drops `withSchema('tenant')` on the
+				// floor and leaves PostgreSQL to resolve the name through search_path —
+				// which, in a multi-tenant database, can drop an index in another schema.
+				const scopedOptions: DropIndexOptions | undefined = sc
+					? { ...options, schema: sc }
+					: options;
 				const sql = adapter.generateDropIndex
-					? adapter.generateDropIndex(name, options)
+					? adapter.generateDropIndex(name, scopedOptions)
 					: (() => {
 							const parts: string[] = ['DROP INDEX'];
 							if (options?.concurrently) parts.push('CONCURRENTLY');

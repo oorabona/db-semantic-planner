@@ -60,6 +60,10 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 	);
 	const adapter = {
 		...base,
+		capabilities: {
+			...base.capabilities,
+			supportsStreaming: true,
+		},
 		compile: compileSpy,
 		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
@@ -158,6 +162,65 @@ describe('FIND-017: stream() compiles SQL AFTER beforeQuery hooks run', () => {
 		expect(compileSpy).toHaveBeenCalledTimes(0);
 		await iterator.next();
 		expect(compileSpy).toHaveBeenCalledTimes(1);
+	});
+	it('stream() refuses before calling adapter.stream when streaming is unsupported', async () => {
+		const base = createMockAdapter();
+		const streamSpy = vi.fn(
+			// biome-ignore lint/correctness/useYield: core must refuse before the adapter is reached, so this never gets far enough to yield
+			async function* () {
+				throw new Error('adapter stream should not be called');
+			},
+		);
+		const adapter = {
+			...base,
+			stream: streamSpy,
+		} as unknown as Adapter;
+		const orm = createOrm({ adapter, schema: simpleSchema });
+		const iterator = orm.select('users').stream();
+
+		let error: unknown;
+		try {
+			await iterator.next();
+		} catch (caught) {
+			error = caught;
+		}
+		expect(error).toBeInstanceOf(Error);
+		expect((error as Error).message).toContain('supportsStreaming: false');
+		expect((error as Error).message).not.toContain('managedTransactions');
+		expect(streamSpy).not.toHaveBeenCalled();
+	});
+	it('transaction() and stream() delegate when the adapter declares both capabilities', async () => {
+		const baseAdapter = createSpyAdapter([{ id: 1 }]);
+		let capableAdapter: Adapter;
+		const transactionSpy = vi.fn(
+			async (fn: (txAdapter: Adapter) => Promise<unknown>) => {
+				return fn(capableAdapter);
+			},
+		);
+		capableAdapter = {
+			...baseAdapter,
+			capabilities: {
+				...baseAdapter.capabilities,
+				supportsStreaming: true,
+				supportsTransactions: true,
+			},
+			transaction: transactionSpy,
+			withSchema: (_schemaName: string) => capableAdapter,
+		} as unknown as Adapter;
+		const orm = createOrm({ adapter: capableAdapter, schema: simpleSchema });
+
+		await expect(
+			orm.transaction(async () => {
+				return 'ok';
+			}),
+		).resolves.toBe('ok');
+
+		const collected: unknown[] = [];
+		for await (const row of orm.select('users').stream()) collected.push(row);
+
+		expect(collected).toEqual([{ id: 1 }]);
+		expect(transactionSpy).toHaveBeenCalledTimes(1);
+		expect(capableAdapter.stream).toHaveBeenCalledTimes(1);
 	});
 	it('stream() without hooks yields all rows', async () => {
 		const rows = [{ id: 1 }, { id: 2 }, { id: 3 }];

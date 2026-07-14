@@ -67,6 +67,7 @@ export interface AdapterCapabilities {
 	readonly supportsReturning: boolean;
 	readonly supportsSchemas: boolean;
 	readonly supportsStreaming: boolean;
+	readonly supportsTransactions: boolean;
 	readonly supportsRecursiveCTE: boolean;
 	readonly supportsWindowFunctions: boolean;
 	readonly supportsArrayType: boolean;
@@ -399,6 +400,12 @@ export interface Dump {
 export interface BaseAdapter {
 	/** Adapter capabilities for feature detection */
 	readonly capabilities: AdapterCapabilities;
+
+	/**
+	 * Whether this adapter instance is scoped inside a transaction.
+	 * Compile-only adapters and adapters without an active transaction report false.
+	 */
+	readonly inTransaction: boolean;
 
 	/**
 	 * Dialect capabilities for planner strategy selection.
@@ -857,14 +864,6 @@ export interface Adapter<DB = unknown>
 	 * @since DDL-TABLE-001
 	 */
 	executeDDL?(sql: string): Promise<void>;
-
-	/**
-	 * Whether this adapter instance is scoped inside a transaction.
-	 * Used by table DDL methods to guard against unsafe operations (e.g. VACUUM).
-	 *
-	 * @since DDL-TABLE-001
-	 */
-	readonly inTransaction?: boolean;
 }
 
 // ============================================================================

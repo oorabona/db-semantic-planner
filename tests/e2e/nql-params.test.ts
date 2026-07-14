@@ -523,22 +523,34 @@ authors | where id in (new_author) | select id`;
 			VALUES (${postId}, ${'NQL Bound Draft'}, ${'draft'}, ${author.rows[0]!.id}, ${false}, NOW())
 			RETURNING id
 		`.execute(pool);
-		const adapter = createPgsqlAdapter(pool, { dbCasing: 'snake_case' });
-		const orm = createOrm({ schema: blogSchema, adapter }).withSchema(SCHEMA);
-		const mutation = orm.nql<{
-			id: number;
-			published: boolean;
-		}>`authors | where email = ${email} | select id | bind target_author
-update posts set published = ${true} where authorId in (target_author) | select id, published`;
-		const dump = mutation.dump();
-		const rows = await mutation.all();
+		const client = await pool.connect();
 
-		expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
-		expect((dump as { parameters: readonly unknown[] }).parameters).toEqual([
-			email,
-			true,
-		]);
-		expect(rows).toEqual([{ id: post.rows[0]!.id, published: true }]);
+		try {
+			const searchPath = sql`SET search_path TO ${sql.ref(SCHEMA)}`.compile();
+			await client.query(searchPath.sql, searchPath.parameters as unknown[]);
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				dbCasing: 'snake_case',
+			});
+			const orm = createOrm({ schema: blogSchema, adapter });
+			const mutation = orm.nql<{
+				id: number;
+				published: boolean;
+			}>`authors | where email = ${email} | select id | bind target_author
+update posts set published = ${true} where authorId in (target_author) | select id, published`;
+			const dump = mutation.dump();
+			const rows = await mutation.all();
+
+			expect(dump.sql).toMatch(/^WITH "target_author" as \(/);
+			expect((dump as { parameters: readonly unknown[] }).parameters).toEqual([
+				email,
+				true,
+			]);
+			expect(rows).toEqual([{ id: post.rows[0]!.id, published: true }]);
+		} finally {
+			await client.query('RESET search_path');
+			client.release();
+		}
 	});
 
 	it('executes schema-scoped bound mutation pipelines through WITH CTEs', async () => {

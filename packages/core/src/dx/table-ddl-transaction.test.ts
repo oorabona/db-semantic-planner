@@ -5,6 +5,9 @@ import { wrapTablesProxyWithDDL } from './orm-instance.js';
 describe('Transaction Safety Checks (DDL-TABLE-001)', () => {
 	function makeTxAdapter(inTransaction = true) {
 		const executeDDL = vi.fn().mockResolvedValue(undefined);
+		const generateVacuum = vi.fn().mockReturnValue('VACUUM users');
+		const generateCreateIndex = vi.fn().mockReturnValue('CREATE INDEX idx');
+		const generateDropIndex = vi.fn().mockReturnValue('DROP INDEX idx');
 		const adapter = {
 			executeDDL,
 			inTransaction,
@@ -16,16 +19,25 @@ describe('Transaction Safety Checks (DDL-TABLE-001)', () => {
 			transaction: vi.fn(),
 			withSchema: vi.fn().mockReturnThis(),
 			validateIdentifier: vi.fn(),
+			generateVacuum,
+			generateCreateIndex,
+			generateDropIndex,
 			generateDDL: vi.fn(),
 			dbCasing: 'snake_case',
 		} as unknown as Adapter<unknown>;
-		return { adapter, executeDDL };
+		return {
+			adapter,
+			executeDDL,
+			generateVacuum,
+			generateCreateIndex,
+			generateDropIndex,
+		};
 	}
 
 	const mockTable = {};
 
 	it('throws when running VACUUM inside a transaction', async () => {
-		const { adapter, executeDDL } = makeTxAdapter(true);
+		const { adapter, executeDDL, generateVacuum } = makeTxAdapter(true);
 		const tables = wrapTablesProxyWithDDL(
 			{ users: mockTable },
 			adapter,
@@ -36,10 +48,11 @@ describe('Transaction Safety Checks (DDL-TABLE-001)', () => {
 			'VACUUM cannot run inside a transaction block',
 		);
 		expect(executeDDL).not.toHaveBeenCalled();
+		expect(generateVacuum).not.toHaveBeenCalled();
 	});
 
-	it('throws when creating index CONCURRENTLY inside a transaction', async () => {
-		const { adapter, executeDDL } = makeTxAdapter(true);
+	it('refuses borrowed-client CREATE INDEX CONCURRENTLY at the core boundary', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeTxAdapter(true);
 		const tables = wrapTablesProxyWithDDL(
 			{ users: mockTable },
 			adapter,
@@ -56,10 +69,11 @@ describe('Transaction Safety Checks (DDL-TABLE-001)', () => {
 			'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
 		);
 		expect(executeDDL).not.toHaveBeenCalled();
+		expect(generateCreateIndex).not.toHaveBeenCalled();
 	});
 
 	it('throws when dropping index CONCURRENTLY inside a transaction', async () => {
-		const { adapter, executeDDL } = makeTxAdapter(true);
+		const { adapter, executeDDL, generateDropIndex } = makeTxAdapter(true);
 		const tables = wrapTablesProxyWithDDL(
 			{ users: mockTable },
 			adapter,
@@ -72,5 +86,6 @@ describe('Transaction Safety Checks (DDL-TABLE-001)', () => {
 			'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
 		);
 		expect(executeDDL).not.toHaveBeenCalled();
+		expect(generateDropIndex).not.toHaveBeenCalled();
 	});
 });

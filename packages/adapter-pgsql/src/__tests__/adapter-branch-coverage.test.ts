@@ -12,8 +12,9 @@
  *  - assert-field.ts              (75% → missing value with/without context)
  */
 
+import { supportsTransactions } from '@dbsp/core';
 import type { RecursivePlanReport } from '@dbsp/types';
-import type { Pool, PoolClient, QueryResult } from 'pg';
+import type { Pool, PoolClient, QueryConfig, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	compileCteQuery,
@@ -64,6 +65,10 @@ function makeClient(queryFn?: ReturnType<typeof vi.fn>): PoolClient {
 	} as unknown as PoolClient;
 }
 
+function queryText(input: string | QueryConfig<unknown[]>): string {
+	return typeof input === 'string' ? input : input.text;
+}
+
 const defaultDeps = {
 	naming: preserveNaming,
 	schemaName: undefined as string | undefined,
@@ -87,23 +92,61 @@ describe('PgsqlAdapter constructor + compile-only mode', () => {
 	it('capabilities.supportsStreaming is false for compile-only adapter', () => {
 		const adapter = createPgsqlCompileOnlyAdapter();
 		expect(adapter.capabilities.supportsStreaming).toBe(false);
+		expect(adapter.capabilities.supportsTransactions).toBe(false);
 	});
 
 	it('capabilities.supportsStreaming is true when pool is provided', () => {
 		const pool = makePool();
 		const adapter = createPgsqlAdapter(pool);
 		expect(adapter.capabilities.supportsStreaming).toBe(true);
+		expect(adapter.capabilities.supportsTransactions).toBe(true);
 	});
 
-	it('transaction-scoped adapter reports inTransaction=true', async () => {
+	it('unmanaged borrowed clients do not pass core transaction or streaming feature detection', () => {
 		const client = makeClient();
-		const pool = makePool();
-		(pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
-		const adapter = createPgsqlAdapter(pool);
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
 
-		await adapter.transaction(async (tx) => {
-			expect((tx as { inTransaction: boolean }).inTransaction).toBe(true);
+		expect(adapter.capabilities.supportsStreaming).toBe(false);
+		expect(supportsTransactions(adapter)).toBe(false);
+	});
+
+	it('managed borrowed clients pass core transaction detection and run a savepoint transaction', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, {
+			borrowedClient: true,
+			managedTransactions: true,
 		});
+
+		expect(supportsTransactions(adapter)).toBe(true);
+		await adapter.transaction(async (tx) => {
+			await tx.execute({ sql: 'SELECT 1', parameters: [] });
+		});
+
+		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
+			(c) => queryText(c[0] as string | QueryConfig<unknown[]>),
+		);
+		expect(calls[0]).toMatch(/^SAVEPOINT dbsp_savepoint_/);
+		expect(calls).toContain('SELECT 1');
+		expect(calls.at(-1)).toMatch(/^RELEASE SAVEPOINT dbsp_savepoint_/);
+	});
+
+	it('factory rejects a PoolClient unless borrowedClient: true is declared', () => {
+		const client = makeClient();
+		expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
+			/borrowedClient: true/,
+		);
+	});
+
+	it('borrowed client adapters are not inTransaction when pg reports idle', () => {
+		const client = Object.assign(makeClient(), { _txStatus: 'I' });
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		expect(adapter.inTransaction).toBe(false);
+	});
+
+	it('borrowed client adapters fail closed when pg transaction status is unavailable', () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		expect(adapter.inTransaction).toBe(true);
 	});
 
 	it('inTransaction is false when created from pool', () => {
@@ -152,26 +195,13 @@ describe('PgsqlAdapter.introspect', () => {
 });
 
 describe('PgsqlAdapter.transaction', () => {
-	it('reuses existing client when already in transaction', async () => {
+	it('throws for a borrowed client without managedTransactions', async () => {
 		const client = makeClient();
-		const pool = makePool();
-		(pool.connect as ReturnType<typeof vi.fn>).mockResolvedValue(client);
-		const adapter = createPgsqlAdapter(pool);
-		let outerAdapter: unknown;
-		let nestedAdapter: unknown;
-
-		await adapter.transaction(async (tx) => {
-			outerAdapter = tx;
-			await tx.transaction(async (nested) => {
-				nestedAdapter = nested;
-			});
-		});
-		expect(nestedAdapter).toBe(outerAdapter);
-		const calls = (client.query as ReturnType<typeof vi.fn>).mock.calls.map(
-			(c) => c[0],
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+		await expect(adapter.transaction(async () => undefined)).rejects.toThrow(
+			/managedTransactions: true/,
 		);
-		expect(calls.filter((sql) => sql === 'BEGIN')).toHaveLength(1);
-		expect(calls.filter((sql) => sql === 'COMMIT')).toHaveLength(1);
+		expect(client.query).not.toHaveBeenCalled();
 	});
 
 	it('rolls back on fn error', async () => {

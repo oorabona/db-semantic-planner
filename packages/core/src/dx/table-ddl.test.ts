@@ -128,6 +128,7 @@ function makeDDLAdapter() {
 		withSchema: vi.fn().mockReturnThis(),
 		validateIdentifier: vi.fn(),
 		generateDDL: vi.fn(),
+		inTransaction: false,
 		dbCasing: 'snake_case' as const,
 	} as unknown as Adapter<unknown>;
 	return {
@@ -481,6 +482,26 @@ describe('orm.tables.X.indexes.create()', () => {
 			'CREATE INDEX CONCURRENTLY cannot run inside a transaction',
 		);
 	});
+
+	it('refuses CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as Record<string, Record<string, Record<string, unknown>>>;
+
+		await expect(
+			(idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
+				name: 'idx_x',
+				columns: ['id'],
+				concurrently: true,
+			}),
+		).rejects.toThrow('inTransaction: boolean');
+		expect(generateCreateIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
 });
 
 // -----------------------------------------------------------------------
@@ -498,6 +519,18 @@ describe('orm.tables.X.indexes.drop()', () => {
 		return proxy.users.indexes as IndexProxy;
 	}
 
+	function getScopedIndexes(
+		adapter: Adapter<unknown>,
+		schema: string,
+	): IndexProxy {
+		const proxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			schema,
+		) as Record<string, Record<string, unknown>>;
+		return proxy.users.indexes as IndexProxy;
+	}
+
 	it('delegates to adapter.generateDropIndex and calls executeDDL', async () => {
 		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
 		await getIndexes(adapter).drop('idx_users_email');
@@ -508,6 +541,28 @@ describe('orm.tables.X.indexes.drop()', () => {
 		expect(executeDDL).toHaveBeenCalledWith(
 			expect.stringContaining('DROP INDEX'),
 		);
+	});
+
+	// Every other generator on this port takes the schema as a parameter, so none of
+	// them can forget it. generateDropIndex expects it inside `options` — so it can,
+	// and it did. A bare name resolves through search_path, and in a multi-tenant
+	// database that drops an index; just possibly somebody else's.
+	it('passes the ORM schema scope to the adapter', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		await getScopedIndexes(adapter, 'tenant_7').drop('idx_users_email');
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', {
+			schema: 'tenant_7',
+		});
+	});
+
+	it('lets an explicit schema option win over the ORM scope', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		await getScopedIndexes(adapter, 'tenant_7').drop('idx_users_email', {
+			schema: 'other',
+		});
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_users_email', {
+			schema: 'other',
+		});
 	});
 
 	it('passes options to adapter.generateDropIndex', async () => {
@@ -532,6 +587,17 @@ describe('orm.tables.X.indexes.drop()', () => {
 		).rejects.toThrow(
 			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
 		);
+	});
+
+	it('refuses CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+
+		await expect(
+			getIndexes(adapter).drop('idx_users_email', { concurrently: true }),
+		).rejects.toThrow('inTransaction: boolean');
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
 	});
 });
 
@@ -683,6 +749,85 @@ describe('orm.ddl.dropIndex()', () => {
 		await expect(orm.ddl.dropIndex('idx_foo')).rejects.toThrow(
 			'executeDDL() requires an adapter',
 		);
+	});
+
+	// The table-scoped `.indexes.drop()` refuses this. The global shortcut is the
+	// same statement reaching the same database, and it must refuse it too — going
+	// there to be told so aborts the transaction the caller was in.
+	it('refuses DROP INDEX CONCURRENTLY inside a transaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		(adapter as { inTransaction: boolean }).inTransaction = true;
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			undefined,
+		);
+
+		await expect(
+			orm.ddl.dropIndex('idx_foo', { concurrently: true }),
+		).rejects.toThrow(
+			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
+		);
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
+
+	it('refuses DROP INDEX CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			undefined,
+		);
+
+		await expect(
+			orm.ddl.dropIndex('idx_foo', { concurrently: true }),
+		).rejects.toThrow('inTransaction: boolean');
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
+
+	// withSchema('tenant') must reach the adapter. Passing only the caller's options
+	// leaves PostgreSQL to resolve the bare name through search_path — which, in a
+	// multi-tenant database, can drop an index belonging to a different tenant.
+	it('passes the ORM schema scope to the adapter', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			'tenant_7',
+		);
+
+		await orm.ddl.dropIndex('idx_foo', { ifExists: true });
+
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', {
+			ifExists: true,
+			schema: 'tenant_7',
+		});
+	});
+
+	it('lets an explicit schema option win over the ORM scope', async () => {
+		const { adapter, generateDropIndex } = makeDDLAdapter();
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			'tenant_7',
+		);
+
+		await orm.ddl.dropIndex('idx_foo', { schema: 'other' });
+
+		expect(generateDropIndex).toHaveBeenCalledWith('idx_foo', {
+			schema: 'other',
+		});
 	});
 });
 

@@ -108,6 +108,7 @@ export default withMermaid(
 							{ text: 'Result Hydration', link: '/guide/result-hydration' },
 							{ text: 'Mutations', link: '/guide/mutations' },
 							{ text: 'Transactions', link: '/guide/transactions' },
+							{ text: 'Raw SQL', link: '/guide/raw-sql' },
 							{ text: 'Observability', link: '/guide/observability' },
 						],
 					},

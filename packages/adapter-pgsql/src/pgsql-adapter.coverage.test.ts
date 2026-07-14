@@ -2800,15 +2800,34 @@ describe('PgsqlAdapter - Coverage Tests', () => {
 		});
 	});
 
-	describe('constructor — PoolClient detection', () => {
-		it('rejects PoolClient via release method', () => {
+	describe('constructor — direct PoolClient compatibility', () => {
+		it('refuses a client that was not declared as borrowed', () => {
+			// A checked-out client belongs to whoever checked it out. Passing one used
+			// to be enough for the adapter to assume it was inside a transaction; the
+			// caller has to say so now.
 			const fakeClient = {
 				release: () => {},
 				query: async () => ({ rows: [] }),
 			} as any;
 
 			expect(() => new PgsqlAdapter(fakeClient)).toThrow(
-				/createPgsqlAdapter\(\) expects a pg Pool, but received a PoolClient\. Pass the Pool itself/,
+				/borrowedClient: true/,
+			);
+		});
+
+		it('runs no transaction on a borrowed client unless asked to manage one', async () => {
+			const fakeClient = {
+				release: () => {},
+				query: async () => ({ rows: [] }),
+				_txStatus: 'I',
+			} as any;
+
+			const adapter = new PgsqlAdapter(fakeClient, { borrowedClient: true });
+			expect(adapter.capabilities.supportsStreaming).toBe(false);
+			expect(adapter.capabilities.supportsTransactions).toBe(false);
+			expect(adapter.inTransaction).toBe(false);
+			await expect(adapter.transaction(async () => 'inline')).rejects.toThrow(
+				/managedTransactions: true/,
 			);
 		});
 	});
