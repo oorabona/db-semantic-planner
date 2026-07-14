@@ -33,7 +33,15 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+
+      # --ignore-scripts is not a nicety. This workflow is triggered by
+      # `pull_request`, so the tree it installs from belongs to whoever opened the
+      # PR — and lifecycle scripts in a package.json are arbitrary code. Without
+      # this flag, a fork could run anything it liked on the runner, from a job
+      # whose entire purpose is to read commit messages.
+      #
+      # Linting text does not need anyone's postinstall to have run.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Lint commit messages
         env:
