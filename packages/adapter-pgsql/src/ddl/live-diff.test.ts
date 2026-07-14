@@ -336,38 +336,6 @@ describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 });
 
 describe('comparePgsqlDatabaseSchema', () => {
-	it('applies include filters to desired before comparing with the filtered database model', async () => {
-		const users = makeTable({ name: 'users' });
-		const posts = makeTable({ name: 'posts' });
-		const desired = makeModel([users, posts]);
-		const introspect = vi.fn(async () => makeModel([users]));
-		const adapter = { introspect } as unknown as PgsqlAdapter;
-
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
-			include: ['users'],
-			canonicalizeExpressions: false,
-		});
-
-		expect(introspect).toHaveBeenCalledWith({ include: ['users'] });
-		expect(diff.changes).toEqual([]);
-	});
-
-	it('applies exclude filters to desired before comparing with the filtered database model', async () => {
-		const users = makeTable({ name: 'users' });
-		const posts = makeTable({ name: 'posts' });
-		const desired = makeModel([users, posts]);
-		const introspect = vi.fn(async () => makeModel([users]));
-		const adapter = { introspect } as unknown as PgsqlAdapter;
-
-		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
-			exclude: ['posts'],
-			canonicalizeExpressions: false,
-		});
-
-		expect(introspect).toHaveBeenCalledWith({ exclude: ['posts'] });
-		expect(diff.changes).toEqual([]);
-	});
-
 	it('refuses a CHECK on an existing enum column without desired originalDbType when the diff adds the enum value', async () => {
 		const desired = makeModelWithEnums(
 			[

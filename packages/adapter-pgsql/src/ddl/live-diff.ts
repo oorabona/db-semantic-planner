@@ -1,18 +1,13 @@
-import { ModelIRImpl } from '@dbsp/core';
-import type { CheckConstraintIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
+import type { CheckConstraintIR, EnumIR, ModelIR } from '@dbsp/types';
 import {
 	type CanonicalizeCheckConstraintsOptions,
 	type CheckConstraintCanonicalizationWarning,
 	canonicalizeCheckConstraints,
 } from '../expression-canonicalizer.js';
-import {
-	type IntrospectionOptions,
-	isTableInIntrospectionScope,
+import type {
+	IntrospectionOptions,
+	SchemaScopeOptions,
 } from '../introspection.js';
-import {
-	getNamingPluginForDbCasing,
-	identityNaming,
-} from '../naming-plugin.js';
 import type { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	type CompareSchemataOptions,
@@ -25,7 +20,7 @@ import {
 
 export interface ComparePgsqlDatabaseSchemaOptions
 	extends CompareSchemataOptions,
-		IntrospectionOptions {
+		SchemaScopeOptions {
 	/**
 	 * Whether to canonicalise PostgreSQL CHECK constraint expressions before
 	 * comparing. Defaults to `true`. Set to `false` only for compatibility with
@@ -117,7 +112,6 @@ export async function comparePgsqlDatabaseSchema(
 	options?: ComparePgsqlDatabaseSchemaOptions,
 ): Promise<SchemaDiff> {
 	const dbModel = await adapter.introspect(toIntrospectionOptions(options));
-	const scopedDesired = scopeDesiredModelForIntrospection(desired, options);
 	const compareCheckConstraints = supportsDDLCheckConstraints(options);
 	const useCanonicalizer =
 		compareCheckConstraints && (options?.canonicalizeExpressions ?? true);
@@ -126,12 +120,12 @@ export async function comparePgsqlDatabaseSchema(
 		? await adapter.withScratchScope((scratch) =>
 				canonicalizeCheckConstraints(
 					scratch,
-					scopedDesired,
+					desired,
 					dbModel,
 					toCanonicalizerOptions(options, rawCheckExpressionSurfaces),
 				),
 			)
-		: scopedDesired;
+		: desired;
 	if (
 		options?.requireExpressionCanonicalization &&
 		(useCanonicalizer || !compareCheckConstraints)
@@ -169,66 +163,6 @@ export async function comparePgsqlDatabaseSchema(
 	}
 
 	return diff;
-}
-
-function scopeDesiredModelForIntrospection(
-	desired: ModelIR,
-	options: ComparePgsqlDatabaseSchemaOptions | undefined,
-): ModelIR {
-	if (!options?.include?.length && !options?.exclude?.length) {
-		return desired;
-	}
-
-	const naming =
-		options.dbCasing !== undefined
-			? getNamingPluginForDbCasing(options.dbCasing)
-			: identityNaming;
-	const tables = new Map<string, TableIR>();
-	const scopedTableNames = new Set<string>();
-
-	for (const [key, table] of desired.tables) {
-		if (!isTableInIntrospectionScope(naming.toDatabase(table.name), options)) {
-			continue;
-		}
-		tables.set(key, table);
-		scopedTableNames.add(key);
-		scopedTableNames.add(table.name);
-	}
-
-	const filteredTables = new Map<string, TableIR>();
-	for (const [key, table] of tables) {
-		filteredTables.set(key, {
-			...table,
-			foreignKeys: table.foreignKeys.filter(
-				(fk) =>
-					fk.references.schema !== undefined ||
-					scopedTableNames.has(fk.references.table),
-			),
-		});
-	}
-
-	const relations = new Map(
-		[...desired.relations].filter(([, relation]) => {
-			if (
-				!scopedTableNames.has(relation.source) ||
-				!scopedTableNames.has(relation.target)
-			) {
-				return false;
-			}
-			return (
-				relation.through === undefined || scopedTableNames.has(relation.through)
-			);
-		}),
-	);
-
-	return new ModelIRImpl(
-		filteredTables,
-		relations,
-		desired.enums === undefined ? undefined : new Map(desired.enums),
-		desired.extensions,
-		desired.sequences === undefined ? undefined : new Map(desired.sequences),
-		desired.externalTables,
-	);
 }
 
 function assertNoUncanonicalizedLiveExpressionSurfaces(
@@ -397,8 +331,6 @@ function toIntrospectionOptions(
 ): IntrospectionOptions {
 	return {
 		...(options?.schema !== undefined ? { schema: options.schema } : {}),
-		...(options?.include !== undefined ? { include: options.include } : {}),
-		...(options?.exclude !== undefined ? { exclude: options.exclude } : {}),
 	};
 }
 

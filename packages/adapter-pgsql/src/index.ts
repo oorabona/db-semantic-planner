@@ -116,6 +116,7 @@ export {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
 	introspect,
+	type SchemaScopeOptions,
 } from './introspection.js';
 // Mutations
 export {

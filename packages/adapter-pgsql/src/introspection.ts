@@ -39,14 +39,22 @@ import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 // Types
 // ============================================================================
 
-/** Options for database introspection */
-export interface IntrospectionOptions {
+/** The minimum every schema-level operation needs: which schema. */
+export interface SchemaScopeOptions {
+	/** Schema name to operate on (default: 'public') */
+	readonly schema?: string;
+}
+
+/**
+ * Introspection additionally chooses WHICH TABLES to read. It is a read-only
+ * path, so narrowing it is safe — that is why the table filters live here and
+ * nowhere else.
+ */
+export interface IntrospectionOptions extends SchemaScopeOptions {
 	/** Tables to exclude (glob patterns: * matches any chars) */
 	readonly exclude?: readonly string[];
 	/** Tables to include (default: all). Applied before exclude. */
 	readonly include?: readonly string[];
-	/** Schema name to introspect (default: 'public') */
-	readonly schema?: string;
 }
 
 /** Hierarchy pattern detected during introspection */
@@ -1566,7 +1574,7 @@ function filterTables(
 	);
 }
 
-export function isTableInIntrospectionScope(
+function isTableInIntrospectionScope(
 	tableName: string,
 	options?: IntrospectionOptions,
 ): boolean {
