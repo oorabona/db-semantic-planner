@@ -205,6 +205,11 @@ export default withMermaid(
 			resolve: {
 				alias: {
 					pg: path.resolve(__dirname, 'theme/pg-stub.ts'),
+					// tsup strips the `node:` prefix, so the built adapter imports bare
+					// `crypto`. Alias both — the prefixed form is what the source says,
+					// and the bare form is what actually reaches the bundler.
+					'node:crypto': path.resolve(__dirname, 'theme/node-crypto-stub.ts'),
+					crypto: path.resolve(__dirname, 'theme/node-crypto-stub.ts'),
 				},
 			},
 			optimizeDeps: {

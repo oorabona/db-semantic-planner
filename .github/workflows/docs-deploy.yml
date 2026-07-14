@@ -3,15 +3,20 @@ name: Deploy Docs
 on:
   push:
     branches: [main]
+  # Build on pull requests too. Without this the docs bundle is only ever built
+  # AFTER a merge, so a change that breaks it lands on main and stays broken —
+  # which is exactly what happened when the adapter began importing `node:crypto`
+  # for its savepoint names: red on main for thirteen hours, across two merges and
+  # a release, invisible to every PR check.
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  # Keyed by ref so a PR build never queues behind (or cancels) the pages deploy.
+  group: pages-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -36,18 +41,30 @@ jobs:
 
       - name: Build VitePress site
         env:
-          SITE_URL: ${{ vars.SITE_URL }}
-          SITE_BASE: ${{ vars.SITE_BASE }}
+          # A pull request publishes nothing, so a placeholder origin is enough to
+          # answer the only question it asks: does the site still build? On main the
+          # real values must be set — the config refuses to build without them rather
+          # than publish a site with a broken sitemap.
+          SITE_URL: ${{ github.event_name == 'pull_request' && 'http://localhost:4173' || vars.SITE_URL }}
+          SITE_BASE: ${{ github.event_name == 'pull_request' && '/' || vars.SITE_BASE }}
         run: pnpm -C packages/docs build
 
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
 
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: packages/docs/.vitepress/dist
 
   deploy:
     needs: build
+    if: github.event_name != 'pull_request'
+    # Granted here rather than at the top of the file: a pull-request build has no
+    # business holding write access to Pages.
+    permissions:
+      pages: write
+      id-token: write
     runs-on: ubuntu-latest
     environment:
       name: github-pages
