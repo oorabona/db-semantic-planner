@@ -37,6 +37,7 @@
 		"test:unit": "pnpm -r test",
 		"pretest:e2e": "pnpm run clean:artifacts",
 		"test:e2e": "vitest run --config tests/e2e/vitest.config.e2e.ts",
+		"check:docs": "node scripts/check-docs.mjs",
 		"lint": "pnpm biome check .",
 		"lint:fix": "pnpm biome check --write .",
 		"typecheck": "pnpm -r typecheck",
