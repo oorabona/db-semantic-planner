@@ -1,8 +1,8 @@
 {
-	"packages/types": "2.0.0",
-	"packages/nql": "1.9.4",
-	"packages/core": "2.0.0",
-	"packages/adapter-pgsql": "2.0.0",
-	"packages/cli": "2.0.0",
-	"packages/mcp-server": "2.0.0"
+	"packages/types": "3.0.0",
+	"packages/nql": "1.9.5",
+	"packages/core": "3.0.0",
+	"packages/adapter-pgsql": "3.0.0",
+	"packages/cli": "2.0.1",
+	"packages/mcp-server": "2.0.1"
 }
