@@ -2,18 +2,27 @@
  * Tests for migrate.ts — lock integrity, atomic transactions, process.exit safety,
  * cleanup masking, pg error sanitization, and DRY pool lifecycle.
  *
- * Observable Success gates (Commit 1):
+ * Observable success gates:
  *   S-1: Lock client is the SAME client used for DDL + record insert.
- *   S-2: Apply: throw between DDL and record → ROLLBACK; no partial apply.
- *   S-3: Rollback: throw between DOWN SQL and remove-record → ROLLBACK; no partial rollback.
+ *   S-2: Apply: throw between DDL and record -> ROLLBACK; no partial apply.
+ *   S-3: Rollback: throw between DOWN SQL and remove-record -> ROLLBACK; no partial rollback.
  *   S-4: process.exit is NOT called while lock client is held.
  *   M-1: cleanup finally does not mask the original error.
- *   M-2: withMigratePool is used by all 4 commands (pool lifecycle extracted).
+ *   M-2: withMigratePool is used by migrate commands.
  *   M-3: pg SQLSTATE errors are sanitized.
  */
 
-import { describe, expect, it, vi } from 'vitest';
-import { MigrationError, sanitizePgError } from './migrate.js';
+import { withMigrationLock } from '@dbsp/adapter-pgsql';
+import type { Pool, PoolClient } from 'pg';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { computeChecksum, type MigrationFile } from '../migration-file.js';
+import {
+	type MigrateDeps,
+	MigrationError,
+	runApply,
+	runRollback,
+	sanitizePgError,
+} from './migrate.js';
 
 // ============================================================================
 // Helpers
@@ -24,6 +33,41 @@ function makePgError(code: string, message: string): Error & { code: string } {
 	err.code = code;
 	return err;
 }
+
+function makeMigrationFile(name: string, content: string): MigrationFile {
+	return {
+		name,
+		path: `/tmp/${name}`,
+		content,
+		checksum: computeChecksum(content),
+	};
+}
+
+function sqlText(call: readonly unknown[]): string {
+	return String(call[0]);
+}
+
+function poolDeps(pool: Pool, files: readonly MigrationFile[]): MigrateDeps {
+	return {
+		withMigratePool: async (_dbUrl, fn) => fn(pool),
+		ensureMigrationsTable: async () => {},
+		withMigrationLock,
+		scanMigrationFiles: () => files,
+	};
+}
+
+async function readMigrateSource(): Promise<string> {
+	const fs = await import('node:fs/promises');
+	const path = await import('node:path');
+	const url = await import('node:url');
+	const dirname = path.dirname(url.fileURLToPath(import.meta.url));
+	return fs.readFile(path.resolve(dirname, 'migrate.ts'), 'utf8');
+}
+
+afterEach(() => {
+	vi.restoreAllMocks();
+	vi.doUnmock('../utils/db-utils.js');
+});
 
 // ============================================================================
 // MigrationError class
@@ -67,7 +111,6 @@ describe('sanitizePgError — M-3: pg error sanitization', () => {
 		const result = sanitizePgError(pgErr);
 		expect(result).toBeInstanceOf(MigrationError);
 		expect(result.message).toBe('Migration failed: database error 42P01');
-		// Must NOT leak the original message to caller
 		expect(result.message).not.toContain('secret_table');
 	});
 
@@ -80,7 +123,7 @@ describe('sanitizePgError — M-3: pg error sanitization', () => {
 
 	it('should not sanitize errors with non-SQLSTATE codes', () => {
 		const err = new Error('some app error') as Error & { code?: string };
-		err.code = 'ECONNREFUSED'; // 12 chars, not SQLSTATE
+		err.code = 'ECONNREFUSED';
 		const result = sanitizePgError(err);
 		expect(result).toBe(err);
 		expect(result.message).toBe('some app error');
@@ -103,96 +146,78 @@ describe('sanitizePgError — M-3: pg error sanitization', () => {
 			.mockImplementation(() => {});
 		const original = process.env.DEBUG;
 
-		// Without DEBUG — no leak
 		delete process.env.DEBUG;
 		const pgErr = makePgError('42P01', 'relation "secret" does not exist');
 		sanitizePgError(pgErr);
 		expect(consoleErrorSpy).not.toHaveBeenCalled();
 
-		// With DEBUG=dbsp — logs the raw message
 		process.env.DEBUG = 'dbsp';
 		sanitizePgError(pgErr);
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			expect.stringContaining('secret'),
 		);
 
-		// Restore
 		if (original === undefined) {
 			delete process.env.DEBUG;
 		} else {
 			process.env.DEBUG = original;
 		}
-		consoleErrorSpy.mockRestore();
 	});
 });
 
 // ============================================================================
-// withMigratePool (M-2: DRY pool lifecycle)
+// withMigratePool (M-1/M-2: real pool lifecycle)
 // ============================================================================
 
-describe('withMigratePool — M-2: DRY pool lifecycle', () => {
+describe('withMigratePool — real cleanup behavior', () => {
 	it('should call pool.end() after successful fn', async () => {
-		const endSpy = vi.fn().mockResolvedValue(undefined);
-		const fakePool = { end: endSpy, connect: vi.fn(), query: vi.fn() };
+		const fakePool = {
+			end: vi.fn().mockResolvedValue(undefined),
+		};
 
+		vi.resetModules();
 		vi.doMock('../utils/db-utils.js', () => ({
 			createDbConnection: vi.fn().mockResolvedValue({ pool: fakePool }),
-			redactDbUrl: (s: string) => s,
+			redactDbUrl: (value: string) => value,
 		}));
 
-		// withMigratePool is already imported at module level — test the contract
-		// via the fact that pool.end() always runs (covered by integration semantics).
-		// For unit purity we test the cleanup masking behavior directly:
-		expect(endSpy).not.toHaveBeenCalled(); // just guards import caching
+		const { withMigratePool } = await import('./migrate.js');
+
+		await expect(
+			withMigratePool('postgres://example/db', async (pool) => {
+				expect(pool).toBe(fakePool);
+				return 'ok';
+			}),
+		).resolves.toBe('ok');
+		expect(fakePool.end).toHaveBeenCalledOnce();
 	});
 
 	it('should not mask the original error when pool.end() also throws', async () => {
-		// Tests the cleanup-masking pattern from withMigratePool.
-		// The original error must propagate; cleanup error is captured as a note.
 		const originalError = new Error('real failure');
 		const cleanupError = new Error('cleanup failure');
+		const fakePool = {
+			end: vi.fn().mockRejectedValue(cleanupError),
+		};
+		const consoleErrorSpy = vi
+			.spyOn(console, 'error')
+			.mockImplementation(() => {});
 
-		// Simulate the withMigratePool finally pattern:
-		// 1. fn() throws originalError
-		// 2. pool.end() throws cleanupError
-		// 3. Original must re-throw; cleanup is a non-fatal note
-		async function simulateWithMigratePool(
-			fn: () => Promise<void>,
-		): Promise<void> {
-			let fnError: unknown;
-			try {
-				await fn();
-			} catch (e) {
-				fnError = e;
-			}
-			// pool.end() in finally — simulate by calling it after fn
-			let endError: unknown;
-			try {
-				// pool.end() fails — simulate the error
-				throw cleanupError;
-			} catch (e) {
-				endError = e;
-			}
-			if (endError !== undefined) {
-				// Non-fatal note
-				void endError;
-			}
-			if (fnError !== undefined) {
-				throw fnError;
-			}
-		}
+		vi.resetModules();
+		vi.doMock('../utils/db-utils.js', () => ({
+			createDbConnection: vi.fn().mockResolvedValue({ pool: fakePool }),
+			redactDbUrl: (value: string) => value,
+		}));
 
-		let thrownError: Error | undefined;
-		try {
-			await simulateWithMigratePool(async () => {
+		const { withMigratePool } = await import('./migrate.js');
+
+		await expect(
+			withMigratePool('postgres://example/db', async () => {
 				throw originalError;
-			});
-		} catch (e) {
-			thrownError = e as Error;
-		}
-
-		// Original error propagates; cleanup was noted but not re-thrown
-		expect(thrownError).toBe(originalError);
+			}),
+		).rejects.toBe(originalError);
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining('pool.end() failed: cleanup failure'),
+		);
 	});
 });
 
@@ -200,76 +225,76 @@ describe('withMigratePool — M-2: DRY pool lifecycle', () => {
 // S-1: Lock client isolation
 // ============================================================================
 
-describe('S-1 — Lock client: same client used for advisory lock AND DDL', () => {
-	it('should use withMigrationLock (dedicated client) not pool.query for advisory lock', async () => {
-		/**
-		 * Regression gate: Before fix, applyCommand called acquireMigrationLock(pool)
-		 * which uses pool.query() — the lock is acquired on an ephemeral connection
-		 * that gets returned to the pool immediately.
-		 *
-		 * After fix: applyCommand uses withMigrationLock(pool, async (client) => {...})
-		 * which holds a dedicated PoolClient for the entire callback.
-		 *
-		 * We verify this by inspecting the module's import list — if acquireMigrationLock
-		 * is no longer imported, the broken path is removed.
-		 */
-		const migrateTs = await import('./migrate.js');
-		// The module must NOT export or use acquireMigrationLock/releaseMigrationLock
-		// (they were unsafe pool.query-based functions).
-		// Structural: the module exports are known.
-		expect(typeof migrateTs.MigrationError).toBe('function');
-		expect(typeof migrateTs.withMigratePool).toBe('function');
-		expect(typeof migrateTs.sanitizePgError).toBe('function');
-		expect(typeof migrateTs.migrateCommand).toBe('object');
-	});
+describe('S-1 — Lock client: dedicated client used for advisory lock and DDL', () => {
+	it('should use withMigrationLock on a dedicated client, not pool.query, during apply', async () => {
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
 
-	it('should pass the same PoolClient to both DDL statements and recordMigration', async () => {
-		/**
-		 * Mock-based verification: when withMigrationLock invokes the callback,
-		 * the client passed to the callback should be the same object used for
-		 * BEGIN, DDL statements, INSERT into _dbsp_migrations, and COMMIT.
-		 *
-		 * We simulate this by tracking the client identity across calls.
-		 */
-		const clientQueries: string[] = [];
+		const file = makeMigrationFile(
+			'0001_create_users.sql',
+			`-- dbsp:destructive: false
+
+CREATE TABLE users (id serial);
+
+-- DOWN
+
+DROP TABLE users;
+`,
+		);
+
 		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				clientQueries.push(sql.trim().split(/\s+/)[0]?.toUpperCase() ?? sql);
-				if (sql.includes('MAX(')) {
-					return Promise.resolve({ rows: [{ max_version: 0 }] });
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('SELECT "name"')) {
+					return { rows: [] };
 				}
-				if (sql.includes('SELECT') && sql.includes('_dbsp_migrations')) {
-					return Promise.resolve({ rows: [] });
+				if (sql.includes('SELECT MAX')) {
+					return { rows: [{ max_version: 0 }] };
 				}
-				return Promise.resolve({ rows: [] });
+				return { rows: [] };
 			}),
 			release: vi.fn(),
 		};
+		const pool = {
+			connect: vi.fn().mockResolvedValue(client),
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('pg_advisory_lock')) {
+					throw new Error('advisory lock used pool.query');
+				}
+				return { rows: [] };
+			}),
+		} as unknown as Pool;
 
-		// Simulate withMigrationLock callback with the advisory lock pattern
-		const advisoryLockSql = `SELECT pg_advisory_lock(hashtext('dbsp_migrate'))`;
-		const advisoryUnlockSql = `SELECT pg_advisory_unlock(hashtext('dbsp_migrate'))`;
-
-		// Replicate the withMigrationLock contract
-		await client.query(advisoryLockSql);
-		await client.query('BEGIN');
-		await client.query('CREATE TABLE test (id serial)');
-		// recordMigration equivalent
-		await client.query(
-			'INSERT INTO "_dbsp_migrations" ("name", "checksum", "schema_version", "destructive") VALUES ($1, $2, $3, $4)',
+		await runApply(
+			{ db: 'postgres://example/db', dir: 'migrations' },
+			poolDeps(pool, [file]),
 		);
-		await client.query('COMMIT');
-		await client.query(advisoryUnlockSql);
-		client.release();
 
-		// ALL operations happened on the SAME client object
-		expect(client.query).toHaveBeenCalledTimes(6);
-		expect(clientQueries).toContain('SELECT'); // advisory lock
-		expect(clientQueries).toContain('BEGIN');
-		expect(clientQueries).toContain('CREATE');
-		expect(clientQueries).toContain('INSERT');
-		expect(clientQueries).toContain('COMMIT');
-		expect(client.release).toHaveBeenCalledTimes(1);
+		expect(pool.connect).toHaveBeenCalledOnce();
+		expect(pool.query).not.toHaveBeenCalledWith(
+			expect.stringContaining('pg_advisory_lock'),
+		);
+		expect(client.release).toHaveBeenCalledOnce();
+
+		const sqls = client.query.mock.calls.map(sqlText);
+		expect(sqls[0]).toContain('pg_advisory_lock');
+		expect(sqls.some((sql) => sql.includes('CREATE TABLE users'))).toBe(true);
+		expect(
+			sqls.some((sql) => sql.includes('INSERT INTO "_dbsp_migrations"')),
+		).toBe(true);
+		expect(sqls.at(-1)).toContain('pg_advisory_unlock');
+
+		const beginIndex = sqls.indexOf('BEGIN');
+		const createIndex = sqls.findIndex((sql) =>
+			sql.includes('CREATE TABLE users'),
+		);
+		const insertIndex = sqls.findIndex((sql) =>
+			sql.includes('INSERT INTO "_dbsp_migrations"'),
+		);
+		const commitIndex = sqls.indexOf('COMMIT');
+		expect(beginIndex).toBeGreaterThan(-1);
+		expect(createIndex).toBeGreaterThan(beginIndex);
+		expect(insertIndex).toBeGreaterThan(createIndex);
+		expect(commitIndex).toBeGreaterThan(insertIndex);
 	});
 });
 
@@ -279,132 +304,64 @@ describe('S-1 — Lock client: same client used for advisory lock AND DDL', () =
 
 describe('S-2 — Apply atomicity: DDL + record in one transaction', () => {
 	it('should ROLLBACK when DDL succeeds but recordMigration throws', async () => {
-		const rollbackCalled: boolean[] = [];
-		const commitCalled: boolean[] = [];
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
 
-		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'ROLLBACK') {
-					rollbackCalled.push(true);
-					return Promise.resolve({ rows: [] });
-				}
-				if (verb === 'COMMIT') {
-					commitCalled.push(true);
-					return Promise.resolve({ rows: [] });
-				}
-				if (verb === 'INSERT') {
-					// Simulate recordMigration failing
-					return Promise.reject(new Error('insert failed'));
-				}
-				return Promise.resolve({ rows: [] });
-			}),
-		};
+		const file = makeMigrationFile(
+			'0001_create_users.sql',
+			`-- dbsp:destructive: false
 
-		// Replicate the atomic apply pattern
-		let thrownError: Error | undefined;
-		try {
-			await client.query('BEGIN');
-			await client.query('CREATE TABLE t (id serial)');
-			await client.query(
-				'INSERT INTO "_dbsp_migrations" VALUES ($1, $2, $3, $4)',
-			);
-			await client.query('COMMIT');
-		} catch {
-			await client.query('ROLLBACK');
-		}
+CREATE TABLE users (id serial);
 
-		// ROLLBACK was called; COMMIT was NOT
-		expect(rollbackCalled).toHaveLength(1);
-		expect(commitCalled).toHaveLength(0);
-		expect(thrownError).toBeUndefined(); // pattern caught it
-	});
+-- DOWN
 
-	it('should ROLLBACK when DDL itself throws (syntax error)', async () => {
-		const rollbackCalled: boolean[] = [];
-		const commitCalled: boolean[] = [];
-
-		const pgSyntaxErr = makePgError('42601', 'syntax error at or near "CREAT"');
-
-		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'ROLLBACK') {
-					rollbackCalled.push(true);
-					return Promise.resolve({ rows: [] });
-				}
-				if (verb === 'COMMIT') {
-					commitCalled.push(true);
-					return Promise.resolve({ rows: [] });
-				}
-				if (sql.includes('CREAT TABLE')) {
-					return Promise.reject(pgSyntaxErr);
-				}
-				return Promise.resolve({ rows: [] });
-			}),
-		};
-
-		let thrownError: Error | undefined;
-		try {
-			await client.query('BEGIN');
-			await client.query('CREAT TABLE t (id serial)'); // intentional typo
-			await client.query(
-				'INSERT INTO "_dbsp_migrations" VALUES ($1, $2, $3, $4)',
-			);
-			await client.query('COMMIT');
-		} catch (e) {
-			thrownError = e as Error;
-			await client.query('ROLLBACK');
-		}
-
-		expect(rollbackCalled).toHaveLength(1);
-		expect(commitCalled).toHaveLength(0);
-		expect(thrownError).toBeDefined();
-		// After sanitization the user sees SQLSTATE, not schema detail
-		const sanitized = sanitizePgError(thrownError!);
-		expect(sanitized.message).toBe('Migration failed: database error 42601');
-		expect(sanitized.message).not.toContain('CREAT');
-	});
-
-	it('should note ROLLBACK failure without masking original error', async () => {
-		const originalError = new Error('DDL failed');
-		const rollbackError = new Error('connection lost during rollback');
-		const consoleErrorSpy = vi
-			.spyOn(console, 'error')
-			.mockImplementation(() => {});
-
-		let thrownError: Error | undefined;
-		try {
-			// Simulate the cleanup masking pattern from applyCommand
-			try {
-				throw originalError;
-			} catch (applyError) {
-				let rollbackCleanupErr: unknown;
-				try {
-					throw rollbackError; // ROLLBACK itself fails
-				} catch (e) {
-					rollbackCleanupErr = e;
-				}
-				const primary = sanitizePgError(applyError);
-				if (rollbackCleanupErr !== undefined) {
-					console.error(
-						`   Note: ROLLBACK also failed: ${sanitizePgError(rollbackCleanupErr).message}`,
-					);
-				}
-				throw primary;
-			}
-		} catch (e) {
-			thrownError = e as Error;
-		}
-
-		// Primary error is the original, not the rollback error
-		expect(thrownError).toBeDefined();
-		expect(thrownError!.message).toBe('DDL failed');
-		// Cleanup failure was noted
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining('ROLLBACK also failed'),
+DROP TABLE users;
+`,
 		);
-		consoleErrorSpy.mockRestore();
+		const successfulRecords: string[] = [];
+		const insertFailure = new Error('insert failed');
+
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('SELECT "name"')) {
+					return { rows: [] };
+				}
+				if (sql.includes('SELECT MAX')) {
+					return { rows: [{ max_version: 0 }] };
+				}
+				if (sql.includes('INSERT INTO "_dbsp_migrations"')) {
+					throw insertFailure;
+				}
+				return { rows: [] };
+			}),
+			release: vi.fn(),
+		};
+		const pool = {
+			connect: vi.fn().mockResolvedValue(client),
+			query: vi.fn(async () => ({ rows: [] })),
+		} as unknown as Pool;
+
+		await expect(
+			runApply(
+				{ db: 'postgres://example/db', dir: 'migrations' },
+				poolDeps(pool, [file]),
+			),
+		).rejects.toBe(insertFailure);
+
+		const sqls = client.query.mock.calls.map(sqlText);
+		const createIndex = sqls.findIndex((sql) =>
+			sql.includes('CREATE TABLE users'),
+		);
+		const insertIndex = sqls.findIndex((sql) =>
+			sql.includes('INSERT INTO "_dbsp_migrations"'),
+		);
+		const rollbackIndex = sqls.indexOf('ROLLBACK');
+		expect(sqls).toContain('BEGIN');
+		expect(createIndex).toBeGreaterThan(sqls.indexOf('BEGIN'));
+		expect(insertIndex).toBeGreaterThan(createIndex);
+		expect(rollbackIndex).toBeGreaterThan(insertIndex);
+		expect(sqls).not.toContain('COMMIT');
+		expect(successfulRecords).toEqual([]);
 	});
 });
 
@@ -414,65 +371,74 @@ describe('S-2 — Apply atomicity: DDL + record in one transaction', () => {
 
 describe('S-3 — Rollback atomicity: DOWN SQL + remove-record in one transaction', () => {
 	it('should ROLLBACK when DOWN SQL succeeds but removeMigrationRecord throws', async () => {
-		const rollbackCalled: boolean[] = [];
-		const commitCalled: boolean[] = [];
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+
+		const file = makeMigrationFile(
+			'0001_create_users.sql',
+			`-- dbsp:destructive: true
+
+CREATE TABLE users (id serial);
+
+-- DOWN
+
+DROP TABLE users;
+`,
+		);
+		const removedRecords: string[] = [];
+		const deleteFailure = new Error('delete failed');
 
 		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'ROLLBACK') {
-					rollbackCalled.push(true);
-					return Promise.resolve({ rows: [] });
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('SELECT "name"')) {
+					return {
+						rows: [
+							{
+								name: file.name,
+								checksum: file.checksum,
+								applied_at: new Date('2026-01-01T00:00:00Z'),
+								schema_version: 1,
+								destructive: true,
+							},
+						],
+					};
 				}
-				if (verb === 'COMMIT') {
-					commitCalled.push(true);
-					return Promise.resolve({ rows: [] });
+				if (sql.includes('DELETE FROM "_dbsp_migrations"')) {
+					throw deleteFailure;
 				}
-				if (verb === 'DELETE') {
-					// Simulate removeMigrationRecord failing
-					return Promise.reject(new Error('delete failed'));
-				}
-				return Promise.resolve({ rows: [] });
+				return { rows: [] };
 			}),
+			release: vi.fn(),
 		};
+		const pool = {
+			connect: vi.fn().mockResolvedValue(client),
+			query: vi.fn(async () => ({ rows: [] })),
+		} as unknown as Pool;
 
-		try {
-			await client.query('BEGIN');
-			await client.query('DROP TABLE IF EXISTS "t"');
-			await client.query('DELETE FROM "_dbsp_migrations" WHERE "name" = $1');
-			await client.query('COMMIT');
-		} catch {
-			await client.query('ROLLBACK');
-		}
+		await expect(
+			runRollback(
+				{
+					count: 1,
+					db: 'postgres://example/db',
+					dir: 'migrations',
+					force: true,
+				},
+				poolDeps(pool, [file]),
+			),
+		).rejects.toBe(deleteFailure);
 
-		expect(rollbackCalled).toHaveLength(1);
-		expect(commitCalled).toHaveLength(0);
-	});
-
-	it('should commit when DOWN SQL and removeMigrationRecord both succeed', async () => {
-		const rollbackCalled: boolean[] = [];
-		const commitCalled: boolean[] = [];
-
-		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'ROLLBACK') rollbackCalled.push(true);
-				if (verb === 'COMMIT') commitCalled.push(true);
-				return Promise.resolve({ rows: [] });
-			}),
-		};
-
-		try {
-			await client.query('BEGIN');
-			await client.query('DROP TABLE IF EXISTS "t"');
-			await client.query('DELETE FROM "_dbsp_migrations" WHERE "name" = $1');
-			await client.query('COMMIT');
-		} catch {
-			await client.query('ROLLBACK');
-		}
-
-		expect(commitCalled).toHaveLength(1);
-		expect(rollbackCalled).toHaveLength(0);
+		const sqls = client.query.mock.calls.map(sqlText);
+		const downIndex = sqls.findIndex((sql) => sql.includes('DROP TABLE users'));
+		const deleteIndex = sqls.findIndex((sql) =>
+			sql.includes('DELETE FROM "_dbsp_migrations"'),
+		);
+		const rollbackIndex = sqls.indexOf('ROLLBACK');
+		expect(sqls).toContain('BEGIN');
+		expect(downIndex).toBeGreaterThan(sqls.indexOf('BEGIN'));
+		expect(deleteIndex).toBeGreaterThan(downIndex);
+		expect(rollbackIndex).toBeGreaterThan(deleteIndex);
+		expect(sqls).not.toContain('COMMIT');
+		expect(removedRecords).toEqual([]);
 	});
 });
 
@@ -481,255 +447,99 @@ describe('S-3 — Rollback atomicity: DOWN SQL + remove-record in one transactio
 // ============================================================================
 
 describe('S-4 — No process.exit inside lock scope', () => {
-	it('should throw MigrationError (not call process.exit) for checksum mismatch inside lock', () => {
-		// The structural fix: process.exit inside withMigrationLock callback
-		// was replaced with throw new MigrationError(...)
-		// Verify the class and throw semantics work correctly.
-		const fn = () => {
-			throw new MigrationError('Checksum mismatch for 0001_init.sql');
-		};
+	it('should throw from runApply without calling process.exit while the lock is held', async () => {
+		vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
 
-		expect(fn).toThrow(MigrationError);
-		expect(fn).toThrow('Checksum mismatch');
-	});
+		const file = makeMigrationFile(
+			'0001_create_users.sql',
+			`-- dbsp:destructive: false
 
-	it('should throw MigrationError for missing migration file inside lock', () => {
-		const fn = () => {
-			throw new MigrationError('Migration file not found on disk: 0001.sql');
-		};
-		expect(fn).toThrow(MigrationError);
-	});
+CREATE TABLE users (id serial);
 
-	it('should throw MigrationError for empty migrations directory inside lock', () => {
-		const fn = () => {
-			throw new MigrationError('No migration files found');
-		};
-		expect(fn).toThrow(MigrationError);
-	});
+-- DOWN
 
-	it('runMigrateAction should catch MigrationError and exit 1 (outer boundary)', async () => {
-		// runMigrateAction is the ONLY place allowed to call process.exit
-		// All inner code throws; the outer boundary catches and exits.
-		const exitSpy = vi
-			.spyOn(process, 'exit')
-			.mockImplementation((_code?: number | string | null) => {
-				throw new Error('process.exit called');
-			});
-		const consoleErrorSpy = vi
-			.spyOn(console, 'error')
-			.mockImplementation(() => {});
+DROP TABLE users;
+`,
+		);
+		let lockHeld = false;
+		let exitObservedWhileLocked = false;
+		const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+			code?: string | number | null,
+		) => {
+			exitObservedWhileLocked = lockHeld;
+			throw new Error(`process.exit(${String(code)})`);
+		}) as never);
 
-		// Simulate runMigrateAction pattern
-		const runMigrateAction = async (fn: () => Promise<void>): Promise<void> => {
-			try {
-				await fn();
-			} catch (error) {
-				if (error instanceof Error) {
-					console.error(`❌ Error: ${error.message}`);
-				} else {
-					console.error('❌ Unknown error occurred');
+		const client = {
+			query: vi.fn(async (sql: string) => {
+				if (sql.includes('SELECT "name"')) {
+					return {
+						rows: [
+							{
+								name: file.name,
+								checksum: 'different-checksum',
+								applied_at: new Date('2026-01-01T00:00:00Z'),
+								schema_version: 1,
+								destructive: false,
+							},
+						],
+					};
 				}
-				process.exit(1);
-			}
-		};
-
-		// Wrap a function that throws inside a "lock scope" (the lock would be
-		// released by withMigrationLock's finally before we reach runMigrateAction's catch)
-		await expect(
-			runMigrateAction(async () => {
-				throw new MigrationError('test error from inside lock scope');
+				return { rows: [] };
 			}),
-		).rejects.toThrow('process.exit called');
+			release: vi.fn(),
+		} as unknown as PoolClient;
+		const pool = {} as Pool;
 
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining('test error from inside lock scope'),
-		);
-		// process.exit was called with 1 (AFTER lock release, in outer catch)
-		expect(exitSpy).toHaveBeenCalledWith(1);
+		await expect(
+			runApply(
+				{ db: 'postgres://example/db', dir: 'migrations' },
+				{
+					withMigratePool: async (_dbUrl, fn) => fn(pool),
+					ensureMigrationsTable: async () => {},
+					withMigrationLock: async (_pool, fn) => {
+						lockHeld = true;
+						try {
+							return await fn(client);
+						} finally {
+							lockHeld = false;
+						}
+					},
+					scanMigrationFiles: () => [file],
+				},
+			),
+		).rejects.toBeInstanceOf(MigrationError);
 
-		exitSpy.mockRestore();
-		consoleErrorSpy.mockRestore();
+		expect(exitSpy).not.toHaveBeenCalled();
+		expect(exitObservedWhileLocked).toBe(false);
+		expect(lockHeld).toBe(false);
 	});
 });
 
 // ============================================================================
-// M-1: Cleanup masking — finally does not mask original error (5 sites)
+// Integration-level: verify removed unsafe paths stay removed
 // ============================================================================
 
-describe('M-1 — Cleanup masking: original error propagates through cleanup failures', () => {
-	it('should propagate original error when pool.end() fails', async () => {
-		const originalError = new Error('migration logic failed');
-		const poolEndError = new Error('pool.end() failed');
-		const consoleErrorSpy = vi
-			.spyOn(console, 'error')
-			.mockImplementation(() => {});
-
-		// Reproduce the withMigratePool cleanup pattern using direct function simulation
-		// (avoids biome noUnsafeFinally by not throwing inside finally in test code)
-		async function simulateCleanup(
-			fn: () => Promise<void>,
-			poolEnd: () => Promise<void>,
-		): Promise<void> {
-			let fnError: unknown;
-			try {
-				await fn();
-			} catch (e) {
-				fnError = e;
-			}
-			let endError: unknown;
-			try {
-				await poolEnd();
-			} catch (e) {
-				endError = e;
-			}
-			if (endError !== undefined) {
-				// Non-fatal note — does not throw
-				console.error(
-					`Warning: pool.end() failed: ${endError instanceof Error ? endError.message : String(endError)}`,
-				);
-			}
-			if (fnError !== undefined) {
-				throw fnError;
-			}
-		}
-
-		let thrownError: Error | undefined;
-		try {
-			await simulateCleanup(
-				async () => {
-					throw originalError;
-				},
-				async () => {
-					throw poolEndError;
-				},
-			);
-		} catch (e) {
-			thrownError = e as Error;
-		}
-
-		expect(thrownError).toBe(originalError);
-		expect(consoleErrorSpy).toHaveBeenCalledWith(
-			expect.stringContaining('pool.end() failed'),
-		);
-		consoleErrorSpy.mockRestore();
-	});
-});
-
-// ============================================================================
-// Integration-level: verify no removed lock functions used in module
-// ============================================================================
-
-describe('Lock API — no acquireMigrationLock in migrate.ts', () => {
+describe('Lock API — migrate.ts source scan', () => {
 	it('should not import acquireMigrationLock or releaseMigrationLock', async () => {
-		// Read the source file to verify import list
-		const fs = await import('node:fs/promises');
-		const url = await import('node:url');
-		const path = await import('node:path');
-		const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-		const filePath = path.resolve(__dirname, 'migrate.ts');
-		const source = await fs.readFile(filePath, 'utf8');
+		const source = await readMigrateSource();
 
-		// These removed functions must NOT be imported
 		expect(source).not.toContain('acquireMigrationLock');
 		expect(source).not.toContain('releaseMigrationLock');
-		// The correct function IS used
 		expect(source).toContain('withMigrationLock');
 	});
 
 	it('should not contain executeDdl (removed split-transaction path)', async () => {
-		const fs = await import('node:fs/promises');
-		const url = await import('node:url');
-		const path = await import('node:path');
-		const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-		const filePath = path.resolve(__dirname, 'migrate.ts');
-		const source = await fs.readFile(filePath, 'utf8');
+		const source = await readMigrateSource();
 
-		// executeDdl was the old split-transaction path: pool → new client → BEGIN/COMMIT
-		// After fix it's replaced by inlined client.query('BEGIN'/..'COMMIT')
 		expect(source).not.toContain('executeDdl');
 	});
 
-	it('should contain withMigratePool used in all 4 commands', async () => {
-		const fs = await import('node:fs/promises');
-		const url = await import('node:url');
-		const path = await import('node:path');
-		const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-		const filePath = path.resolve(__dirname, 'migrate.ts');
-		const source = await fs.readFile(filePath, 'utf8');
+	it('should contain withMigratePool used by migrate command paths', async () => {
+		const source = await readMigrateSource();
 
-		// Count occurrences of withMigratePool — should be exactly 4 (dev, apply, rollback, status)
 		const matches = source.match(/withMigratePool\(/g) ?? [];
 		expect(matches.length).toBeGreaterThanOrEqual(4);
-	});
-});
-
-// ============================================================================
-// Regression gate: stash/restore demonstration for S-2
-// ============================================================================
-
-describe('Regression gate demo — S-2 (apply atomicity)', () => {
-	it('BEFORE fix: DDL committed, record missing (split-transaction)', async () => {
-		/**
-		 * Demonstrates what the OLD code did:
-		 * executeDdl() runs BEGIN/DDL/COMMIT on its OWN client (client A).
-		 * recordMigration() runs INSERT on a DIFFERENT client (client B) from the pool.
-		 * If process crashes between them, DDL is committed but no migration record.
-		 *
-		 * We simulate this to show the invariant that was BROKEN:
-		 */
-		const committed: string[] = [];
-
-		// Client A: executeDdl's private client
-		const clientA = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'COMMIT') committed.push('DDL on clientA');
-				return Promise.resolve({ rows: [] });
-			}),
-			release: vi.fn(),
-		};
-
-		// Simulate the OLD split-transaction:
-		// Step 1: executeDdl runs on clientA
-		await clientA.query('BEGIN');
-		await clientA.query('CREATE TABLE users (id serial)');
-		await clientA.query('COMMIT'); // DDL committed
-
-		// Simulate process crash — recordMigration never runs
-		// Result: schema changed, migration NOT recorded → corrupted state
-
-		expect(committed).toContain('DDL on clientA');
-		// Migration record would be absent (simulated by not calling INSERT)
-	});
-
-	it('AFTER fix: DDL + record in ONE transaction — partial commit impossible', async () => {
-		/**
-		 * After fix: everything runs on the same lock-held client inside ONE transaction.
-		 * If anything fails, ROLLBACK undoes both DDL and record together.
-		 */
-		const committed: string[] = [];
-		const rolledBack: string[] = [];
-
-		// Single dedicated client (from withMigrationLock)
-		const client = {
-			query: vi.fn().mockImplementation((sql: string) => {
-				const verb = sql.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
-				if (verb === 'COMMIT') committed.push('both DDL + record');
-				if (verb === 'ROLLBACK') rolledBack.push('both DDL + record');
-				return Promise.resolve({ rows: [] });
-			}),
-			release: vi.fn(),
-		};
-
-		// After fix: ONE transaction for DDL + record
-		await client.query('BEGIN');
-		await client.query('CREATE TABLE users (id serial)');
-		await client.query(
-			`INSERT INTO "_dbsp_migrations" ("name", "checksum", "schema_version", "destructive") VALUES ($1, $2, $3, $4)`,
-		);
-		await client.query('COMMIT'); // Both committed together
-
-		expect(committed).toContain('both DDL + record');
-		expect(rolledBack).toHaveLength(0);
 	});
 });

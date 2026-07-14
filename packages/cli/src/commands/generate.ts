@@ -19,6 +19,8 @@ import type { DbCasing } from '@dbsp/types';
 import { Command } from 'commander';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
+export type GenerateCasingOption = 'snake' | 'camel' | 'none';
+
 export const generateCommand = new Command('generate')
 	.description('Generate code from schema')
 	.argument('<target>', 'Target to generate: ddl')
@@ -45,7 +47,7 @@ export const generateCommand = new Command('generate')
 				drop?: boolean;
 				schemaName?: string;
 				dialect?: string;
-				casing?: 'snake' | 'camel' | 'none';
+				casing?: GenerateCasingOption;
 			},
 		) => {
 			try {
@@ -84,7 +86,7 @@ export const generateCommand = new Command('generate')
 
 				// Validate dialect option
 				const dialect = options.dialect ?? 'postgresql';
-				if (dialect !== 'postgresql') {
+				if (!isDialectSupported(dialect)) {
 					console.error(
 						`⚠️  Warning: Only 'postgresql' dialect is currently supported. Using postgresql.`,
 					);
@@ -95,7 +97,7 @@ export const generateCommand = new Command('generate')
 					case 'ddl': {
 						// Determine casing: explicit option > schema export > dialect default.
 						const dbCasing =
-							mapGenerateCasingOption(options.casing) ??
+							mapCasingToDbCasing(options.casing) ??
 							schema.dbCasing ??
 							('snake_case' as const);
 						const casingLabel = formatGenerateCasingLabel(dbCasing);
@@ -157,8 +159,12 @@ export const generateCommand = new Command('generate')
 		},
 	);
 
-function mapGenerateCasingOption(
-	casing: 'snake' | 'camel' | 'none' | undefined,
+export function isDialectSupported(dialect: string): dialect is 'postgresql' {
+	return dialect === 'postgresql';
+}
+
+export function mapCasingToDbCasing(
+	casing: GenerateCasingOption | undefined,
 ): DbCasing | undefined {
 	switch (casing) {
 		case 'snake':
