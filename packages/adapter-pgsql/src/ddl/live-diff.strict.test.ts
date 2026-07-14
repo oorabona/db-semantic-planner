@@ -1,18 +1,13 @@
 import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
-import type { Pool } from 'pg';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	ExpressionCanonicalizationUnavailableError,
 	type SchemaDiff,
 } from './schema-diff.js';
 
-const mockIntrospect = vi.fn();
 const mockCanonicalizeCheckConstraints = vi.fn();
-
-vi.mock('../introspection.js', () => ({
-	introspect: (...args: unknown[]) => mockIntrospect(...args),
-}));
 
 vi.mock('../expression-canonicalizer.js', async (importOriginal) => {
 	const actual =
@@ -101,9 +96,19 @@ function checkExpressionDiff(
 	};
 }
 
+function makeAdapter(dbModel: ModelIR): PgsqlAdapter {
+	const adapter = {
+		introspect: vi.fn(async () => dbModel),
+		withScratchScope: vi.fn(
+			async (fn: (scratch: PgsqlAdapter) => Promise<unknown>) =>
+				fn(adapter as unknown as PgsqlAdapter),
+		),
+	} as unknown as PgsqlAdapter;
+	return adapter;
+}
+
 describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => {
 	beforeEach(() => {
-		mockIntrospect.mockReset();
 		mockCanonicalizeCheckConstraints.mockReset();
 	});
 
@@ -115,19 +120,18 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			}),
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
-		mockIntrospect.mockResolvedValue(dbModel);
 		mockCanonicalizeCheckConstraints.mockRejectedValue(
 			new Error('users_age_check refused'),
 		);
-		const pool = {} as Pool;
+		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema(pool, desired, {
+			comparePgsqlDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow('users_age_check refused');
 		expect(mockCanonicalizeCheckConstraints).toHaveBeenCalledWith(
-			pool,
+			adapter,
 			desired,
 			dbModel,
 			expect.objectContaining({ requireCanonicalization: true }),
@@ -148,11 +152,11 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			}),
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
-		mockIntrospect.mockResolvedValue(dbModel);
 		mockCanonicalizeCheckConstraints.mockResolvedValue(desired);
+		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema({} as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapter, desired, {
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow(ExpressionCanonicalizationUnavailableError);
@@ -166,10 +170,10 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			}),
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
-		mockIntrospect.mockResolvedValue(dbModel);
+		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema({} as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapter, desired, {
 				canonicalizeExpressions: false,
 				requireExpressionCanonicalization: true,
 			}),
@@ -211,9 +215,8 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 			],
 			[{ name: 'status', values: ['active'] }],
 		);
-		mockIntrospect.mockResolvedValue(dbModel);
 		mockCanonicalizeCheckConstraints.mockImplementation(
-			async (_pool, desiredModel, _dbModel, options) => {
+			async (_adapter, desiredModel, _dbModel, options) => {
 				options?.onWarning?.({
 					table: 'jobs',
 					constraint: 'jobs_status_check',
@@ -226,10 +229,11 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				return desiredModel;
 			},
 		);
+		const adapter = makeAdapter(dbModel);
 
 		let caught: unknown;
 		try {
-			await comparePgsqlDatabaseSchema({} as Pool, desired, {
+			await comparePgsqlDatabaseSchema(adapter, desired, {
 				onWarning: vi.fn(),
 			});
 		} catch (error) {
@@ -262,9 +266,8 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				],
 			}),
 		]);
-		mockIntrospect.mockResolvedValue(dbModel);
 		mockCanonicalizeCheckConstraints.mockImplementation(
-			async (_pool, desiredModel, _dbModel, options) => {
+			async (_adapter, desiredModel, _dbModel, options) => {
 				options?.onWarning?.({
 					table: 'jobs',
 					constraint: 'jobs_status_check',
@@ -275,9 +278,10 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				return desiredModel;
 			},
 		);
+		const adapter = makeAdapter(dbModel);
 
 		await expect(
-			comparePgsqlDatabaseSchema({} as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapter, desired, {
 				previouslyAppliedDiff: checkExpressionDiff(
 					'jobs',
 					'jobs_status_check',

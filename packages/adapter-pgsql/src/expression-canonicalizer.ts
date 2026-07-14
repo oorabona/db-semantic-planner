@@ -19,13 +19,13 @@
 import { randomUUID } from 'node:crypto';
 import { ModelIRImpl } from '@dbsp/core';
 import type {
+	Adapter,
 	CheckConstraintIR,
 	DbCasing,
 	EnumIR,
 	ModelIR,
 	TableIR,
 } from '@dbsp/types';
-import type { Pool, PoolClient } from 'pg';
 import { getCheckConstraintDatabaseName } from './check-constraint-name.js';
 import {
 	isCheckConstraintNotValid,
@@ -72,10 +72,9 @@ interface CheckConstraintTarget {
 	readonly dbCheckNames: readonly string[];
 }
 
-type PgsqlCanonicalizationConnection = Pool | PoolClient;
+type PgsqlCanonicalizationScope = Pick<Adapter, 'executeRaw' | 'transaction'>;
 
 interface CheckCanonicalizationNameScope {
-	readonly savepointPrefix: string;
 	readonly tempPrefix: string;
 }
 
@@ -100,10 +99,12 @@ export class CheckConstraintCanonicalizationError extends Error {
  * CHECK constraints are canonicalised by creating a transaction-local temp table
  * with the desired table's column definitions (borrowing live database type
  * detail for existing columns when the desired model omits it), adding the
- * authored CHECK constraints to that temp table, reading PostgreSQL's
- * `pg_get_constraintdef()` rendering, then rolling the transaction back.
- * Missing desired enum types are also created inside the same rolled-back
- * transaction before scratch tables.
+ * authored CHECK constraints to that temp table, and reading PostgreSQL's
+ * `pg_get_constraintdef()` rendering. The caller must provide a rollback-only
+ * scratch scope; that rollback is cleanup for dbsp-created scratch objects, not
+ * a sandbox for arbitrary session effects.
+ * Missing desired enum types are also created inside that scratch scope before
+ * scratch tables.
  * Scratch columns include only names and types; defaults, identity, uniqueness,
  * nullability, and other table-shape clauses are deliberately omitted.
  *
@@ -121,7 +122,7 @@ export class CheckConstraintCanonicalizationError extends Error {
  * those surfaces may still compare by raw text in non-strict diffs.
  */
 export async function canonicalizeCheckConstraints(
-	connection: PgsqlCanonicalizationConnection,
+	adapter: PgsqlCanonicalizationScope,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options?: CanonicalizeCheckConstraintsOptions,
@@ -135,37 +136,18 @@ export async function canonicalizeCheckConstraints(
 		string,
 		readonly CheckConstraintIR[]
 	>();
-	const ownsClient = isPool(connection);
-	const client = ownsClient ? await connection.connect() : connection;
 	const names = createCheckCanonicalizationNameScope();
-	const rootSavepoint = `${names.savepointPrefix}_root`;
-	let ownsTransaction = false;
-	let rootSavepointOpen = false;
-	let lifecycleError: Error | undefined;
 	let workError: unknown;
 
 	try {
-		try {
-			await openScratchScope();
-		} catch (error) {
-			lifecycleError = toError(error);
-			throw lifecycleError;
-		}
-
 		// The scratch work is best-effort: a role that may not create temp tables,
 		// or an expression PostgreSQL refuses, degrades to raw comparison.
 		try {
-			await createMissingDesiredEnumTypes(
-				client,
-				desired,
-				dbModel,
-				options,
-				names,
-			);
+			await createMissingDesiredEnumTypes(adapter, desired, dbModel, options);
 			for (let i = 0; i < targets.length; i++) {
 				const target = targets[i]!;
 				const canonicalChecks = await canonicalizeTableChecksBestEffort(
-					client,
+					adapter,
 					target,
 					i,
 					options,
@@ -178,24 +160,8 @@ export async function canonicalizeCheckConstraints(
 		} catch (error) {
 			workError = error;
 		}
-
-		// Undoing the scratch DDL is NOT best-effort. A failure here leaves the
-		// connection in an unknown transaction state, so the canonicalised model
-		// cannot be trusted: it surfaces even in non-strict mode.
-		try {
-			await closeScratchScope();
-		} catch (error) {
-			lifecycleError = toError(error);
-			throw lifecycleError;
-		}
-	} finally {
-		if (ownsClient) {
-			if (lifecycleError !== undefined) {
-				client.release(lifecycleError);
-			} else {
-				client.release();
-			}
-		}
+	} catch (error) {
+		workError = error;
 	}
 
 	if (workError !== undefined) {
@@ -210,48 +176,6 @@ export async function canonicalizeCheckConstraints(
 	}
 
 	return cloneModelWithCanonicalChecks(desired, canonicalChecksByTable);
-
-	/**
-	 * A pool client is ours, so the transaction is ours. A caller-owned client may
-	 * or may not already be inside one, and PostgreSQL answers that question
-	 * itself: SAVEPOINT outside a transaction block fails with 25P01. That is the
-	 * signal to open a transaction here rather than nest inside the caller's.
-	 */
-	async function openScratchScope(): Promise<void> {
-		if (!ownsClient) {
-			try {
-				await client.query(`SAVEPOINT ${rootSavepoint}`);
-				rootSavepointOpen = true;
-				return;
-			} catch (error) {
-				if (!isNoActiveTransactionError(error)) throw error;
-			}
-		}
-		await client.query('BEGIN');
-		ownsTransaction = true;
-	}
-
-	async function closeScratchScope(): Promise<void> {
-		if (ownsTransaction) {
-			await client.query('ROLLBACK');
-			ownsTransaction = false;
-			return;
-		}
-		if (rootSavepointOpen) {
-			await client.query(`ROLLBACK TO SAVEPOINT ${rootSavepoint}`);
-			await client.query(`RELEASE SAVEPOINT ${rootSavepoint}`);
-			rootSavepointOpen = false;
-		}
-	}
-}
-
-/** PostgreSQL 25P01 — `SAVEPOINT` issued outside a transaction block. */
-function isNoActiveTransactionError(error: unknown): boolean {
-	return (
-		typeof error === 'object' &&
-		error !== null &&
-		(error as { code?: unknown }).code === '25P01'
-	);
 }
 
 function collectCheckConstraintTargets(
@@ -288,27 +212,17 @@ function collectCheckConstraintTargets(
 }
 
 async function canonicalizeTableChecksBestEffort(
-	client: PoolClient,
+	adapter: PgsqlCanonicalizationScope,
 	target: CheckConstraintTarget,
 	targetIndex: number,
 	options: CanonicalizeCheckConstraintsOptions | undefined,
 	names: CheckCanonicalizationNameScope,
 ): Promise<readonly CheckConstraintIR[] | undefined> {
-	const savepoint = `${names.savepointPrefix}_sp_${targetIndex}`;
-	await client.query(`SAVEPOINT ${savepoint}`);
 	try {
-		const canonical = await canonicalizeTableChecks(
-			client,
-			target,
-			targetIndex,
-			options,
-			names,
+		return await adapter.transaction((tx) =>
+			canonicalizeTableChecks(tx, target, targetIndex, options, names),
 		);
-		await client.query(`RELEASE SAVEPOINT ${savepoint}`);
-		return canonical;
 	} catch (error) {
-		await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-		await client.query(`RELEASE SAVEPOINT ${savepoint}`);
 		if (error instanceof CheckConstraintCanonicalizationError) {
 			throw error;
 		}
@@ -325,7 +239,7 @@ async function canonicalizeTableChecksBestEffort(
 }
 
 async function canonicalizeTableChecks(
-	client: PoolClient,
+	adapter: PgsqlCanonicalizationScope,
 	target: CheckConstraintTarget,
 	targetIndex: number,
 	options: CanonicalizeCheckConstraintsOptions | undefined,
@@ -342,7 +256,7 @@ async function canonicalizeTableChecks(
 		generateScratchColumnDef(column, dbColumnsByName, naming, targetSchema),
 	);
 
-	await client.query(
+	await adapter.executeRaw(
 		`CREATE TEMP TABLE ${tempTable} (${columnDefs.join(', ')}) ON COMMIT DROP`,
 	);
 
@@ -351,19 +265,16 @@ async function canonicalizeTableChecks(
 	for (let i = 0; i < target.checks.length; i++) {
 		const check = target.checks[i]!;
 		const tempConstraintName = `${names.tempPrefix}_${targetIndex}_${i}`;
-		const savepoint = `${names.savepointPrefix}_sp_${targetIndex}_${i}`;
-		await client.query(`SAVEPOINT ${savepoint}`);
 		try {
-			const expression = renderCheckConstraintClause(check);
-			validateCheckExpression(expression, 'canonicalized check constraint');
-			await client.query(
-				`ALTER TABLE ${tempTable} ADD CONSTRAINT ${quoteIdent(tempConstraintName, 'alias')} ${expression}`,
-			);
-			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+			await adapter.transaction(async (tx) => {
+				const expression = renderCheckConstraintClause(check);
+				validateCheckExpression(expression, 'canonicalized check constraint');
+				await tx.executeRaw(
+					`ALTER TABLE ${tempTable} ADD CONSTRAINT ${quoteIdent(tempConstraintName, 'alias')} ${expression}`,
+				);
+			});
 			tempConstraintNamesByIndex.set(i, tempConstraintName);
 		} catch (error) {
-			await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
 			if (options?.requireCanonicalization) {
 				throw new CheckConstraintCanonicalizationError(
 					target.dbTableName,
@@ -380,7 +291,7 @@ async function canonicalizeTableChecks(
 		return canonicalChecks;
 	}
 
-	const result = await client.query<{
+	const rows = await adapter.executeRaw<{
 		name: string;
 		expression: string;
 	}>(
@@ -394,7 +305,7 @@ async function canonicalizeTableChecks(
 	);
 
 	const canonicalByTempName = new Map(
-		result.rows.map((row) => [row.name, stripNotValidSuffix(row.expression)]),
+		rows.map((row) => [row.name, stripNotValidSuffix(row.expression)]),
 	);
 
 	for (const [i, tempConstraintName] of tempConstraintNamesByIndex) {
@@ -446,11 +357,10 @@ function generateScratchColumnDef(
 }
 
 async function createMissingDesiredEnumTypes(
-	client: PoolClient,
+	adapter: PgsqlCanonicalizationScope,
 	desired: ModelIR,
 	dbModel: ModelIR,
 	options: CanonicalizeCheckConstraintsOptions | undefined,
-	names: CheckCanonicalizationNameScope,
 ): Promise<void> {
 	const missingEnums = missingDesiredEnums(desired, dbModel);
 	if (missingEnums.size === 0) return;
@@ -467,15 +377,14 @@ async function createMissingDesiredEnumTypes(
 		includeDropStatements: false,
 	};
 	const statements = generateEnumTypesPhase(phaseContext);
-	for (let i = 0; i < statements.length; i++) {
-		const savepoint = `${names.savepointPrefix}_enum_${i}`;
-		await client.query(`SAVEPOINT ${savepoint}`);
+	for (const statement of statements) {
 		try {
-			await client.query(statements[i]!);
-			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+			await adapter.transaction(async (tx) => {
+				await tx.executeRaw(statement);
+			});
 		} catch {
-			await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
-			await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+			// Missing enum scratch DDL is opportunistic. If PostgreSQL refuses one
+			// statement, CHECK canonicalization can still fall back per constraint.
 		}
 	}
 }
@@ -483,7 +392,6 @@ async function createMissingDesiredEnumTypes(
 function createCheckCanonicalizationNameScope(): CheckCanonicalizationNameScope {
 	const callId = randomUUID().replace(/-/gu, '').slice(0, 12);
 	return {
-		savepointPrefix: `dbsp_check_canon_${callId}`,
 		tempPrefix: `_dbsp_check_canon_${callId}`,
 	};
 }
@@ -547,16 +455,6 @@ function reportConstraintCanonicalizationFailure(
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
-}
-
-function toError(error: unknown): Error {
-	return error instanceof Error ? error : new Error(String(error));
-}
-
-function isPool(
-	connection: PgsqlCanonicalizationConnection,
-): connection is Pool {
-	return typeof (connection as { connect?: unknown }).connect === 'function';
 }
 
 function cloneModelWithCanonicalChecks(

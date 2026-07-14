@@ -9,6 +9,7 @@
 
 import {
 	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	ensureMigrationsTable,
 	generateMigrationFile,
 	generateMigrationSQL,
@@ -167,7 +168,8 @@ const devCommand = new Command('dev')
 				const schemaModel = loaded.model;
 
 				await withMigratePool(options.db, async (pool) => {
-					const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
+					const adapter = createPgsqlAdapter(pool);
+					const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
 						...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
 						onWarning: (message) => console.warn(`⚠️  ${message}`),

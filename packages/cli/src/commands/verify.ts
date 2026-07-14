@@ -5,7 +5,10 @@
  * Detects drift in tables, columns, types, nullable, defaults, FKs, indexes.
  */
 
-import { comparePgsqlDatabaseSchema, introspect } from '@dbsp/adapter-pgsql';
+import {
+	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
+} from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { createDbConnection, redactDbUrl } from '../utils/db-utils.js';
 import { loadSchema } from '../utils/schema-loader.js';
@@ -49,9 +52,10 @@ export const verifyCommand = new Command('verify')
 				const { pool } = await createDbConnection(options.db);
 
 				try {
+					const adapter = createPgsqlAdapter(pool);
 					// Live diff: introspect database and canonicalise PostgreSQL CHECK
 					// expressions before comparing.
-					const diff = await comparePgsqlDatabaseSchema(pool, schemaModel, {
+					const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
 						...(loaded.dbCasing !== undefined
 							? { dbCasing: loaded.dbCasing }
@@ -62,7 +66,7 @@ export const verifyCommand = new Command('verify')
 					// Convert to verify result
 					// Keep the legacy reporting fields sourced from introspection so
 					// --json consumers continue to see database table names as before.
-					const dbModel = await introspect(pool, {
+					const dbModel = await adapter.introspect({
 						...(options.schemaName ? { schema: options.schemaName } : {}),
 					});
 					const schemaTables = Array.from(schemaModel.tables.keys());

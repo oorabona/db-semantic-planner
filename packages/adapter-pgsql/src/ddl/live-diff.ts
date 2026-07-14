@@ -1,11 +1,11 @@
 import type { CheckConstraintIR, EnumIR, ModelIR } from '@dbsp/types';
-import type { Pool, PoolClient } from 'pg';
 import {
 	type CanonicalizeCheckConstraintsOptions,
 	type CheckConstraintCanonicalizationWarning,
 	canonicalizeCheckConstraints,
 } from '../expression-canonicalizer.js';
-import { type IntrospectionOptions, introspect } from '../introspection.js';
+import type { IntrospectionOptions } from '../introspection.js';
+import type { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	type CompareSchemataOptions,
 	collectExpressionSurfaces,
@@ -24,11 +24,12 @@ export interface ComparePgsqlDatabaseSchemaOptions
 	 * legacy raw-string live diffs.
 	 *
 	 * Live canonicalisation creates temporary scratch tables and missing desired
-	 * enum types inside a transaction that is always rolled back. The database
-	 * role needs permission to create temporary tables, and enum-dependent checks
-	 * may need permission to create the pending enum type. If PostgreSQL refuses
-	 * that scratch DDL, non-strict mode warns and falls back to best-effort raw
-	 * string comparison for the affected CHECK constraints.
+	 * enum types inside an adapter scratch scope whose successful cleanup is
+	 * rollback. The database role needs permission to create temporary tables,
+	 * and enum-dependent checks may need permission to create the pending enum
+	 * type. If PostgreSQL refuses that scratch DDL, non-strict mode warns and
+	 * falls back to best-effort raw string comparison for the affected CHECK
+	 * constraints.
 	 */
 	readonly canonicalizeExpressions?: boolean;
 	/**
@@ -103,21 +104,23 @@ export class CheckConstraintNewEnumValueError extends Error {
  * diffs reject them.
  */
 export async function comparePgsqlDatabaseSchema(
-	pool: Pool | PoolClient,
+	adapter: PgsqlAdapter,
 	desired: ModelIR,
 	options?: ComparePgsqlDatabaseSchemaOptions,
 ): Promise<SchemaDiff> {
-	const dbModel = await introspect(pool, toIntrospectionOptions(options));
+	const dbModel = await adapter.introspect(toIntrospectionOptions(options));
 	const compareCheckConstraints = supportsDDLCheckConstraints(options);
 	const useCanonicalizer =
 		compareCheckConstraints && (options?.canonicalizeExpressions ?? true);
 	const rawCheckExpressionSurfaces = new Set<string>();
 	const desiredForCompare = useCanonicalizer
-		? await canonicalizeCheckConstraints(
-				pool,
-				desired,
-				dbModel,
-				toCanonicalizerOptions(options, rawCheckExpressionSurfaces),
+		? await adapter.withScratchScope((scratch) =>
+				canonicalizeCheckConstraints(
+					scratch,
+					desired,
+					dbModel,
+					toCanonicalizerOptions(options, rawCheckExpressionSurfaces),
+				),
 			)
 		: desired;
 	if (

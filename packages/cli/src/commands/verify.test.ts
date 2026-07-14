@@ -8,13 +8,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mockComparePgsqlDatabaseSchema = vi.hoisted(() => vi.fn());
 const mockIntrospect = vi.hoisted(() => vi.fn());
 const mockCreateDbConnection = vi.hoisted(() => vi.fn());
+const mockCreatePgsqlAdapter = vi.hoisted(() => vi.fn());
 const mockLoadSchema = vi.hoisted(() => vi.fn());
 
-vi.mock('@dbsp/adapter-pgsql', () => ({
-	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
-		mockComparePgsqlDatabaseSchema(...args),
-	introspect: (...args: unknown[]) => mockIntrospect(...args),
-}));
+vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	return {
+		...actual,
+		comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+			mockComparePgsqlDatabaseSchema(...args),
+		createPgsqlAdapter: (...args: unknown[]) => mockCreatePgsqlAdapter(...args),
+	};
+});
 
 vi.mock('../utils/db-utils.js', () => ({
 	createDbConnection: (...args: unknown[]) => mockCreateDbConnection(...args),
@@ -87,15 +92,20 @@ async function runVerify(args: string[] = []): Promise<void> {
 }
 
 describe('verify command live diff integration', () => {
+	let adapter: { introspect: (...args: unknown[]) => unknown };
+	let loadedSchema: ReturnType<typeof makeLoadedSchema>;
 	let pool: { end: ReturnType<typeof vi.fn> };
 	let logSpy: ReturnType<typeof vi.spyOn>;
 	let warnSpy: ReturnType<typeof vi.spyOn>;
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		adapter = { introspect: (...args: unknown[]) => mockIntrospect(...args) };
+		loadedSchema = makeLoadedSchema('snake_case');
 		pool = { end: vi.fn().mockResolvedValue(undefined) };
 		mockCreateDbConnection.mockResolvedValue({ pool });
-		mockLoadSchema.mockResolvedValue(makeLoadedSchema('snake_case'));
+		mockCreatePgsqlAdapter.mockReturnValue(adapter);
+		mockLoadSchema.mockResolvedValue(loadedSchema);
 		mockComparePgsqlDatabaseSchema.mockResolvedValue(makeDiff());
 		mockIntrospect.mockResolvedValue({
 			tables: new Map([
@@ -146,6 +156,16 @@ describe('verify command live diff integration', () => {
 
 		expect(readStdout(logSpy)).toContain('Schema matches database');
 		expect(process.exitCode).toBe(0);
+		expect(mockCreatePgsqlAdapter).toHaveBeenCalledWith(pool);
+		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledWith(
+			adapter,
+			loadedSchema.model,
+			expect.objectContaining({
+				dbCasing: 'snake_case',
+				schema: 'tenant_1',
+			}),
+		);
+		expect(mockIntrospect).toHaveBeenCalledWith({ schema: 'tenant_1' });
 		expect(pool.end).toHaveBeenCalledOnce();
 	});
 

@@ -74,7 +74,7 @@ describe('PgsqlAdapter', () => {
 			} as unknown as PoolClient;
 
 			expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
-				/createPgsqlAdapter\(\) expects a pg Pool, but received a PoolClient\. Pass the Pool itself/,
+				/createPgsqlAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
 			);
 		});
 	});

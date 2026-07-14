@@ -2,6 +2,7 @@ import { ModelIRImpl } from '@dbsp/core';
 import type { ColumnIR, EnumIR, ModelIR, TableIR } from '@dbsp/types';
 import type { Pool, PoolClient, QueryResult } from 'pg';
 import { describe, expect, it, vi } from 'vitest';
+import { PgsqlAdapter } from '../pgsql-adapter.js';
 import {
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,
@@ -290,6 +291,10 @@ class FakeLiveDiffPool {
 	constructor(readonly client: FakeQueryableClient) {}
 }
 
+function adapterForPool(pool: FakeLiveDiffPool): PgsqlAdapter {
+	return new PgsqlAdapter(pool as unknown as Pool);
+}
+
 describe('assertNoRepeatedExpressionSurfaceDrift', () => {
 	it('throws when the same CHECK expression drift repeats after apply and re-introspect', () => {
 		const previous = checkExpressionDiff(
@@ -362,7 +367,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 
 		await expect(
-			comparePgsqlDatabaseSchema(pool as unknown as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
 				schema: 'tenant_1',
 				onWarning: vi.fn(),
 			}),
@@ -412,7 +417,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const onWarning = vi.fn();
 
 		await expect(
-			comparePgsqlDatabaseSchema(pool as unknown as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
 				schema: 'tenant_1',
 				onWarning,
 			}),
@@ -444,7 +449,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const pool = new FakeLiveDiffPool(client);
 
 		await expect(
-			comparePgsqlDatabaseSchema(pool as unknown as Pool, desired, {
+			comparePgsqlDatabaseSchema(adapterForPool(pool), desired, {
 				dbCasing: 'snake_case',
 				previouslyAppliedDiff: checkExpressionDiff(
 					'users',
@@ -474,7 +479,7 @@ describe('comparePgsqlDatabaseSchema', () => {
 		const onWarning = vi.fn();
 
 		const diff = await comparePgsqlDatabaseSchema(
-			pool as unknown as Pool,
+			adapterForPool(pool),
 			desired,
 			{
 				dialectCapabilities: { supportsDDLCheckConstraints: false },

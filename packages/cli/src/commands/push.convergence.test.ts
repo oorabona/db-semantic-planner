@@ -6,17 +6,19 @@ const mockGenerateDDL = vi.hoisted(() => vi.fn());
 const mockGenerateMigrationSQL = vi.hoisted(() => vi.fn());
 const mockExecuteDdl = vi.hoisted(() => vi.fn());
 const mockCreateDbConnection = vi.hoisted(() => vi.fn());
+const mockCreatePgsqlAdapter = vi.hoisted(() => vi.fn());
 const mockLoadSchema = vi.hoisted(() => vi.fn());
 
 vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
 	return {
+		...actual,
 		comparePgsqlDatabaseSchema: (...args: unknown[]) =>
 			mockComparePgsqlDatabaseSchema(...args),
+		createPgsqlAdapter: (...args: unknown[]) => mockCreatePgsqlAdapter(...args),
 		generateDDL: (...args: unknown[]) => mockGenerateDDL(...args),
 		generateMigrationSQL: (...args: unknown[]) =>
 			mockGenerateMigrationSQL(...args),
-		getNamingPluginForDbCasing: actual.getNamingPluginForDbCasing,
 	};
 });
 
@@ -55,15 +57,18 @@ function makeDiff(changes: Partial<SchemaChange>[] = []): SchemaDiff {
 }
 
 describe('push — #315 casing and convergence wiring', () => {
+	let adapter: { readonly kind: 'mock-pgsql-adapter' };
 	let pool: { end: ReturnType<typeof vi.fn> };
 	let schemaModel: { tables: Map<string, unknown> };
 
 	beforeEach(() => {
 		vi.clearAllMocks();
 		mockGenerateDDL.mockReset();
+		adapter = { kind: 'mock-pgsql-adapter' };
 		schemaModel = { tables: new Map() };
 		pool = { end: vi.fn().mockResolvedValue(undefined) };
 		mockCreateDbConnection.mockResolvedValue({ pool });
+		mockCreatePgsqlAdapter.mockReturnValue(adapter);
 		mockLoadSchema.mockResolvedValue({
 			model: schemaModel,
 			definition: {},
@@ -111,15 +116,16 @@ describe('push — #315 casing and convergence wiring', () => {
 		);
 
 		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledTimes(2);
+		expect(mockCreatePgsqlAdapter).toHaveBeenCalledWith(pool);
 		expect(mockComparePgsqlDatabaseSchema).toHaveBeenNthCalledWith(
 			1,
-			pool,
+			adapter,
 			schemaModel,
 			expect.objectContaining({ dbCasing: 'snake_case' }),
 		);
 		expect(mockComparePgsqlDatabaseSchema).toHaveBeenNthCalledWith(
 			2,
-			pool,
+			adapter,
 			schemaModel,
 			expect.objectContaining({
 				dbCasing: 'snake_case',

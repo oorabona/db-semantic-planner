@@ -7,6 +7,7 @@ import {
 	CheckConstraintCanonicalizationError,
 	canonicalizeCheckConstraints,
 } from './expression-canonicalizer.js';
+import { PgsqlAdapter } from './pgsql-adapter.js';
 
 function makeCol(name: string, overrides: Partial<ColumnIR> = {}): ColumnIR {
 	return {
@@ -45,10 +46,7 @@ function normalizeSql(sql: string): string {
 
 function normalizeCanonicalizationSql(sql: string): string {
 	return normalizeSql(sql)
-		.replace(
-			/\bdbsp_check_canon_[a-z0-9]+_(root|sp_\d+(?:_\d+)?|enum_\d+)\b/giu,
-			'dbsp_check_canon_$1',
-		)
+		.replace(/\bdbsp_savepoint_[a-f0-9]+\b/giu, 'dbsp_savepoint')
 		.replace(
 			/_dbsp_check_canon_[a-z0-9]+_(\d+(?:_\d+)?)/giu,
 			'_dbsp_check_canon_$1',
@@ -165,6 +163,27 @@ class FakePgPool {
 	constructor(readonly client: FakePgClient) {}
 }
 
+function adapterForPool(pool: FakePgPool): PgsqlAdapter {
+	return new PgsqlAdapter(pool as unknown as Pool);
+}
+
+function adapterForBorrowedClient(client: FakePgClient): PgsqlAdapter {
+	return new PgsqlAdapter(client as unknown as PoolClient, {
+		borrowedClient: true,
+	});
+}
+
+async function canonicalizeWithScratch(
+	adapter: PgsqlAdapter,
+	desired: ModelIR,
+	dbModel: ModelIR,
+	options?: Parameters<typeof canonicalizeCheckConstraints>[3],
+): Promise<ModelIR> {
+	return adapter.withScratchScope((scratch) =>
+		canonicalizeCheckConstraints(scratch, desired, dbModel, options),
+	);
+}
+
 function createdTempTableNames(client: FakePgClient): string[] {
 	const names: string[] = [];
 	for (const query of client.queries) {
@@ -226,8 +245,8 @@ describe('canonicalizeCheckConstraints', () => {
 			makeTable({ name: 'logs' }),
 		]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 			{ schemaName: 'public' },
@@ -238,23 +257,23 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 		expect(normalizedQueries).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER, "status" VARCHAR(255)) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
-			'SAVEPOINT dbsp_check_canon_sp_0_1',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_1" CHECK (status = \'active\')',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_1',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
-			'SAVEPOINT dbsp_check_canon_sp_1',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_1" ("id" INTEGER, "price" INTEGER) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_1_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_1" ADD CONSTRAINT "_dbsp_check_canon_1_0" CHECK (price > 0)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_1_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_1',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 		expect(client.tempTables.size).toBe(0);
@@ -297,8 +316,8 @@ describe('canonicalizeCheckConstraints', () => {
 			}),
 		]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			client as unknown as PoolClient,
+		const canonical = await canonicalizeWithScratch(
+			adapterForBorrowedClient(client),
 			desired,
 			dbModel,
 		);
@@ -310,16 +329,16 @@ describe('canonicalizeCheckConstraints', () => {
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
-			'SAVEPOINT dbsp_check_canon_root',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (age > 0)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_root',
-			'RELEASE SAVEPOINT dbsp_check_canon_root',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 		]);
 	});
 
@@ -345,14 +364,14 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const warnings = vi.fn();
 
-		const first = await canonicalizeCheckConstraints(
-			client as unknown as PoolClient,
+		const first = await canonicalizeWithScratch(
+			adapterForBorrowedClient(client),
 			desired,
 			dbModel,
 			{ onWarning: warnings },
 		);
-		const second = await canonicalizeCheckConstraints(
-			client as unknown as PoolClient,
+		const second = await canonicalizeWithScratch(
+			adapterForBorrowedClient(client),
 			desired,
 			dbModel,
 			{ onWarning: warnings },
@@ -398,8 +417,8 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 		);
@@ -409,16 +428,16 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 		expect(normalizedQueries).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_enum_0',
+			'SAVEPOINT dbsp_savepoint',
 			"CREATE TYPE \"status\" AS ENUM ('active', 'inactive');",
-			'RELEASE SAVEPOINT dbsp_check_canon_enum_0',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'active\')',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 		expect(client.tempTables.size).toBe(0);
@@ -465,12 +484,10 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 		const dbModel = makeModel([makeTable({ name: 'jobs' })]);
 
-		await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
-			desired,
-			dbModel,
-			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
-		);
+		await canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
+			schemaName: 'tenantOne',
+			dbCasing: 'snake_case',
+		});
 
 		const normalizedQueries = client.queries.map((q) =>
 			normalizeCanonicalizationSql(q.sql),
@@ -530,8 +547,8 @@ describe('canonicalizeCheckConstraints', () => {
 			[{ name: 'status', values: ['active'] }],
 		);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning) },
@@ -554,13 +571,13 @@ describe('canonicalizeCheckConstraints', () => {
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 	});
@@ -621,8 +638,8 @@ describe('canonicalizeCheckConstraints', () => {
 			[{ name: 'status', values: ['active'] }],
 		);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning) },
@@ -697,7 +714,7 @@ describe('canonicalizeCheckConstraints', () => {
 		);
 
 		await expect(
-			canonicalizeCheckConstraints(pool as unknown as Pool, desired, dbModel, {
+			canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
 				requireCanonicalization: true,
 			}),
 		).rejects.toThrow(CheckConstraintCanonicalizationError);
@@ -705,14 +722,14 @@ describe('canonicalizeCheckConstraints', () => {
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "status" status) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (status = \'pending\')',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 	});
@@ -735,8 +752,8 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 		);
@@ -745,13 +762,13 @@ describe('canonicalizeCheckConstraints', () => {
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "amount" INTEGER) ON COMMIT DROP',
-			'SAVEPOINT dbsp_check_canon_sp_0_0',
+			'SAVEPOINT dbsp_savepoint',
 			'ALTER TABLE "_dbsp_check_canon_0" ADD CONSTRAINT "_dbsp_check_canon_0_0" CHECK (amount > 0)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'SELECT conname AS name, pg_get_constraintdef(oid, false) AS expression FROM pg_constraint WHERE conrelid = $1::regclass AND conname = ANY($2::text[]) ORDER BY array_position($2::text[], conname)',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 		expect(canonical.tables.get('payments')?.checkConstraints).toEqual([
@@ -802,12 +819,9 @@ describe('canonicalizeCheckConstraints', () => {
 			[{ name: 'status', schema: 'tenant_1', values: ['queued', 'done'] }],
 		);
 
-		await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
-			desired,
-			dbModel,
-			{ schemaName: 'tenant_1' },
-		);
+		await canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
+			schemaName: 'tenant_1',
+		});
 
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
@@ -861,12 +875,10 @@ describe('canonicalizeCheckConstraints', () => {
 			[{ name: 'status', schema: 'tenantOne', values: ['queued', 'done'] }],
 		);
 
-		await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
-			desired,
-			dbModel,
-			{ schemaName: 'tenantOne', dbCasing: 'snake_case' },
-		);
+		await canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
+			schemaName: 'tenantOne',
+			dbCasing: 'snake_case',
+		});
 
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
@@ -914,12 +926,9 @@ describe('canonicalizeCheckConstraints', () => {
 			}),
 		]);
 
-		await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
-			desired,
-			dbModel,
-			{ schemaName: 'tenant_1' },
-		);
+		await canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
+			schemaName: 'tenant_1',
+		});
 
 		expect(
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
@@ -979,8 +988,8 @@ describe('canonicalizeCheckConstraints', () => {
 				}),
 			]);
 
-			const canonical = await canonicalizeCheckConstraints(
-				pool as unknown as Pool,
+			const canonical = await canonicalizeWithScratch(
+				adapterForPool(pool),
 				desired,
 				dbModel,
 			);
@@ -1011,8 +1020,8 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 			{ onWarning: (warning) => warnings.push(warning.message) },
@@ -1033,10 +1042,10 @@ describe('canonicalizeCheckConstraints', () => {
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 	});
@@ -1059,8 +1068,8 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+		const canonical = await canonicalizeWithScratch(
+			adapterForPool(pool),
 			desired,
 			dbModel,
 			{
@@ -1097,7 +1106,7 @@ describe('canonicalizeCheckConstraints', () => {
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
 		await expect(
-			canonicalizeCheckConstraints(pool as unknown as Pool, desired, dbModel, {
+			canonicalizeWithScratch(adapterForPool(pool), desired, dbModel, {
 				requireCanonicalization: true,
 			}),
 		).rejects.toThrow(CheckConstraintCanonicalizationError);
@@ -1106,10 +1115,10 @@ describe('canonicalizeCheckConstraints', () => {
 			client.queries.map((q) => normalizeCanonicalizationSql(q.sql)),
 		).toEqual([
 			'BEGIN',
-			'SAVEPOINT dbsp_check_canon_sp_0',
+			'SAVEPOINT dbsp_savepoint',
 			'CREATE TEMP TABLE "_dbsp_check_canon_0" ("id" INTEGER, "age" INTEGER) ON COMMIT DROP',
-			'ROLLBACK TO SAVEPOINT dbsp_check_canon_sp_0',
-			'RELEASE SAVEPOINT dbsp_check_canon_sp_0',
+			'ROLLBACK TO SAVEPOINT dbsp_savepoint',
+			'RELEASE SAVEPOINT dbsp_savepoint',
 			'ROLLBACK',
 		]);
 	});
@@ -1137,7 +1146,7 @@ describe('canonicalizeCheckConstraints', () => {
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
 		await expect(
-			canonicalizeCheckConstraints(pool as unknown as Pool, desired, dbModel),
+			canonicalizeWithScratch(adapterForPool(pool), desired, dbModel),
 		).rejects.toThrow('rollback connection lost');
 
 		expect(client.release).toHaveBeenCalledTimes(1);
@@ -1162,8 +1171,8 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
-		const canonical = await canonicalizeCheckConstraints(
-			client as unknown as PoolClient,
+		const canonical = await canonicalizeWithScratch(
+			adapterForBorrowedClient(client),
 			desired,
 			dbModel,
 		);
@@ -1174,7 +1183,7 @@ describe('canonicalizeCheckConstraints', () => {
 		const issued = client.queries.map((q) => normalizeSql(q.sql));
 		expect(issued).toContain('BEGIN');
 		expect(issued).toContain('ROLLBACK');
-		// The caller's client is theirs — never released by the canonicaliser.
+		// The caller's client is theirs — never released by the adapter scratch scope.
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
@@ -1193,8 +1202,8 @@ describe('canonicalizeCheckConstraints', () => {
 		]);
 		const dbModel = makeModel([makeTable({ name: 'users' })]);
 
-		await canonicalizeCheckConstraints(
-			client as unknown as PoolClient,
+		await canonicalizeWithScratch(
+			adapterForBorrowedClient(client),
 			desired,
 			dbModel,
 		);
@@ -1216,7 +1225,7 @@ describe('canonicalizeCheckConstraints', () => {
 		const dbModel = makeModel([makeTable({ name: 'logs' })]);
 
 		const canonical = await canonicalizeCheckConstraints(
-			pool as unknown as Pool,
+			adapterForPool(pool),
 			desired,
 			dbModel,
 		);

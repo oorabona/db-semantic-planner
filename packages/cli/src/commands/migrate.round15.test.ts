@@ -5,27 +5,25 @@ const mockComparePgsqlDatabaseSchema = vi.hoisted(() => vi.fn());
 const mockGenerateMigrationSQL = vi.hoisted(() => vi.fn());
 const mockGenerateMigrationFile = vi.hoisted(() => vi.fn());
 const mockCreateDbConnection = vi.hoisted(() => vi.fn());
+const mockCreatePgsqlAdapter = vi.hoisted(() => vi.fn());
 const mockLoadSchema = vi.hoisted(() => vi.fn());
 const mockGenerateMigrationFilename = vi.hoisted(() => vi.fn());
 const mockScanMigrationFiles = vi.hoisted(() => vi.fn());
 const mockWriteMigrationFile = vi.hoisted(() => vi.fn());
 
-vi.mock('@dbsp/adapter-pgsql', () => ({
-	comparePgsqlDatabaseSchema: (...args: unknown[]) =>
-		mockComparePgsqlDatabaseSchema(...args),
-	ensureMigrationsTable: vi.fn(),
-	generateMigrationFile: (...args: unknown[]) =>
-		mockGenerateMigrationFile(...args),
-	generateMigrationSQL: (...args: unknown[]) =>
-		mockGenerateMigrationSQL(...args),
-	getAppliedMigrations: vi.fn(),
-	getNextSchemaVersion: vi.fn(),
-	isDestructiveDown: vi.fn(),
-	parseMigrationFile: vi.fn(),
-	recordMigration: vi.fn(),
-	removeMigrationRecord: vi.fn(),
-	withMigrationLock: vi.fn(),
-}));
+vi.mock('@dbsp/adapter-pgsql', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('@dbsp/adapter-pgsql')>();
+	return {
+		...actual,
+		comparePgsqlDatabaseSchema: (...args: unknown[]) =>
+			mockComparePgsqlDatabaseSchema(...args),
+		createPgsqlAdapter: (...args: unknown[]) => mockCreatePgsqlAdapter(...args),
+		generateMigrationFile: (...args: unknown[]) =>
+			mockGenerateMigrationFile(...args),
+		generateMigrationSQL: (...args: unknown[]) =>
+			mockGenerateMigrationSQL(...args),
+	};
+});
 
 vi.mock('../utils/db-utils.js', () => ({
 	createDbConnection: (...args: unknown[]) => mockCreateDbConnection(...args),
@@ -67,14 +65,17 @@ function makeDiff(changes: Partial<SchemaChange>[] = []): SchemaDiff {
 }
 
 describe('migrate dev — #315 casing wiring', () => {
+	let adapter: { readonly kind: 'mock-pgsql-adapter' };
 	let pool: { end: ReturnType<typeof vi.fn> };
 	let schemaModel: { tables: Map<string, unknown> };
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		adapter = { kind: 'mock-pgsql-adapter' };
 		schemaModel = { tables: new Map() };
 		pool = { end: vi.fn().mockResolvedValue(undefined) };
 		mockCreateDbConnection.mockResolvedValue({ pool });
+		mockCreatePgsqlAdapter.mockReturnValue(adapter);
 		mockLoadSchema.mockResolvedValue({
 			model: schemaModel,
 			definition: {},
@@ -114,8 +115,9 @@ describe('migrate dev — #315 casing wiring', () => {
 			{ from: 'user' },
 		);
 
+		expect(mockCreatePgsqlAdapter).toHaveBeenCalledWith(pool);
 		expect(mockComparePgsqlDatabaseSchema).toHaveBeenCalledWith(
-			pool,
+			adapter,
 			schemaModel,
 			expect.objectContaining({ dbCasing: 'snake_case' }),
 		);

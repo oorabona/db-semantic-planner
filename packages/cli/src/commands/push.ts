@@ -9,6 +9,7 @@
 import type { SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 import {
 	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	generateDDL,
 	generateMigrationSQL,
 	getNamingPluginForDbCasing,
@@ -114,13 +115,14 @@ export const pushCommand = new Command('push')
 						}
 					} else {
 						// Additive mode: live diff -> generate migration SQL (additive only)
+						const adapter = createPgsqlAdapter(pool);
 						const compareOptions = {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
 							...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
 							onWarning: (message: string) => console.warn(`⚠️  ${message}`),
 						};
 						const diff = await comparePgsqlDatabaseSchema(
-							pool,
+							adapter,
 							schemaModel,
 							compareOptions,
 						);
@@ -174,7 +176,7 @@ export const pushCommand = new Command('push')
 
 						if (!options.dryRun) {
 							const postApplyDiff = await comparePgsqlDatabaseSchema(
-								pool,
+								adapter,
 								schemaModel,
 								{
 									...compareOptions,
