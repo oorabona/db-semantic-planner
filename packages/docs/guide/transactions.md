@@ -54,7 +54,7 @@ await orm.transaction(async (tx) => {
 
 This is PostgreSQL's own semantics, not a dbsp choice: **a failed statement aborts the whole transaction**, and every statement after it is rejected until the transaction ends. dbsp does not savepoint each statement behind your back, so it cannot hide this from you — and it will not pretend otherwise. It refuses the next statement rather than let it run outside the transaction you believe you are still in.
 
-That paragraph is not a claim you have to take on trust. It runs, against a real PostgreSQL, every time these docs are tested:
+That paragraph is not a claim you have to take on trust. It is a test. CI runs it against a real PostgreSQL on every pull request that touches these docs, and it fails if the transaction ever accepts that second statement:
 
 ```typescript
 // doctest: real-db-only — this proves the paragraph above
@@ -217,9 +217,11 @@ The declaration is the point. dbsp does not inspect the object you handed it and
 
 ## What it cannot promise
 
-**Raw SQL that ends the transaction ends it.** `tx.raw('COMMIT')` commits — right then, before dbsp can learn what the statement was. dbsp reports it loudly and kills the scope so nothing after it escapes, but it cannot un-run it: **`transaction()` rejecting is not proof that nothing was committed.** The same is true of raw `ROLLBACK`, `SAVEPOINT`, `RELEASE`, and `PREPARE TRANSACTION`.
+**Raw SQL that ends the transaction ends it.** `tx.raw('COMMIT')` commits — right then, before dbsp can learn what the statement was. dbsp reports it loudly and kills the scope so nothing after it escapes, but it cannot un-run it: **`transaction()` rejecting is not proof that nothing was committed.** The same goes for raw `ROLLBACK` and `PREPARE TRANSACTION`, which also end the transaction.
 
-This is not an oversight — it is what an escape hatch is. [Raw SQL](./raw-sql) covers it in full, including the session state (advanced sequences, advisory locks, `SET`, `LISTEN`, prepared statements) that no rollback undoes.
+**Raw savepoint control is a different hazard.** `SAVEPOINT`, `RELEASE` and `ROLLBACK TO` do *not* end the transaction — they rearrange its savepoint stack, which is the stack dbsp is using to keep your nested transactions isolated. `RELEASE SAVEPOINT a` destroys every savepoint established after it, so a raw release can quietly delete the savepoint a nested `transaction()` is relying on. Nothing is committed and nothing is lost, but the containment you thought you had is gone.
+
+Neither is an oversight — it is what an escape hatch is. [Raw SQL](./raw-sql) covers both in full, along with the session state (advanced sequences, advisory locks, `SET`, `LISTEN`, prepared statements) that no rollback undoes.
 
 ## Use `tx`, not `orm`
 
