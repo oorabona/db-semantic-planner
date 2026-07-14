@@ -81,6 +81,7 @@ export function supportsStreaming(
 	adapter: BaseAdapter,
 ): adapter is StreamingAdapter {
 	return (
+		adapter.capabilities?.supportsStreaming === true &&
 		'stream' in adapter &&
 		typeof (adapter as StreamingAdapter).stream === 'function'
 	);
@@ -105,6 +106,7 @@ export function supportsTransactions<DB>(
 	adapter: BaseAdapter,
 ): adapter is TransactionalAdapter<DB> {
 	return (
+		adapter.capabilities?.supportsTransactions === true &&
 		'transaction' in adapter &&
 		'withSchema' in adapter &&
 		typeof (adapter as TransactionalAdapter<DB>).transaction === 'function'

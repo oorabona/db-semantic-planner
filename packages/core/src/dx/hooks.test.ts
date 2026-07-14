@@ -519,6 +519,18 @@ import type { OrmInstanceInternal } from './orm-instance-types.js';
 import { schema } from './schema.js';
 import { createMockAdapter } from './test-utils.js';
 
+function declareAdapterCapabilities(
+	adapter: Adapter,
+	capabilities: Partial<Adapter['capabilities']>,
+): void {
+	(
+		adapter as unknown as { capabilities: Adapter['capabilities'] }
+	).capabilities = {
+		...adapter.capabilities,
+		...capabilities,
+	};
+}
+
 function createSpyAdapterForHooks(executeResult: unknown[] = []) {
 	const base = createMockAdapter();
 	const compileSpy = vi.fn((_plan: unknown, _opts?: unknown) => ({
@@ -547,6 +559,10 @@ function createSpyAdapterForHooks(executeResult: unknown[] = []) {
 
 	const adapter = {
 		...base,
+		capabilities: {
+			...base.capabilities,
+			supportsStreaming: true,
+		},
 		compile: compileSpy,
 		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,
@@ -1332,6 +1348,7 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 			(adapter as unknown as Record<string, unknown>).withSchema = vi.fn(
 				() => adapter,
 			);
+			declareAdapterCapabilities(adapter, { supportsTransactions: true });
 			let receivedCtx: QueryHookContext | undefined;
 			const hooks = createHookManager().beforeQuery((ctx) => {
 				receivedCtx = ctx;
@@ -1362,6 +1379,7 @@ describe('Edge Cases (SC-16 to SC-22)', () => {
 			(adapter as unknown as Record<string, unknown>).withSchema = vi.fn(
 				() => adapter,
 			);
+			declareAdapterCapabilities(adapter, { supportsTransactions: true });
 			let receivedCtx: MutationHookContext | undefined;
 			const hooks = createHookManager().beforeMutation((ctx) => {
 				receivedCtx = ctx;

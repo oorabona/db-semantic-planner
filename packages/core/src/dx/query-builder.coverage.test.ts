@@ -76,6 +76,10 @@ function createSpyAdapter(executeResult: unknown[] = []) {
 
 	const adapter = {
 		...base,
+		capabilities: {
+			...base.capabilities,
+			supportsStreaming: true,
+		},
 		compile: compileSpy,
 		compileWithIncludes: compileWithIncludesSpy,
 		execute: executeSpy,

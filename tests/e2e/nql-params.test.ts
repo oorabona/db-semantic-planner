@@ -528,7 +528,10 @@ authors | where id in (new_author) | select id`;
 		try {
 			const searchPath = sql`SET search_path TO ${sql.ref(SCHEMA)}`.compile();
 			await client.query(searchPath.sql, searchPath.parameters as unknown[]);
-			const adapter = createPgsqlAdapter(client, { dbCasing: 'snake_case' });
+			const adapter = createPgsqlAdapter(client, {
+				borrowedClient: true,
+				dbCasing: 'snake_case',
+			});
 			const orm = createOrm({ schema: blogSchema, adapter });
 			const mutation = orm.nql<{
 				id: number;
