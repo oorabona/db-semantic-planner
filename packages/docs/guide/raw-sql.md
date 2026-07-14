@@ -8,7 +8,7 @@ You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express s
 
 | | |
 |---|---|
-| Raw SQL **outside** a dbsp transaction | It is your statement on a pooled connection. Data changes are just PostgreSQL, but session state you create — `SET`, `LISTEN`, prepared statements, temp tables, session advisory locks — can outlive the call and affect the next borrower. |
+| Raw SQL **outside** a dbsp transaction | It is your statement on a pooled connection. Data changes are just PostgreSQL, but committed session changes can affect the next borrower: a plain `SET`, a committed `LISTEN`, prepared statements, temp tables, and session-level advisory locks. Sequence advances are not reclaimed by rollback. |
 | Raw SQL **inside** `orm.transaction()` | Read the rest of this page. |
 | Raw SQL inside **your own** transaction, on a borrowed client | dbsp savepoints statements **it** issues so dbsp failures do not poison your transaction. Your raw transaction-control SQL is no safer here: `COMMIT` still commits, `ROLLBACK` still rolls back, and savepoint control still changes your savepoint stack. |
 
@@ -16,8 +16,8 @@ You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express s
 
 - The callback's work commits together, or not at all.
 - A statement issued inside the transaction **never executes after the boundary** — not even one you forgot to `await`.
-- A nested `transaction()` is a real savepoint, and if it fails it does not take the parent's work with it.
-- A nested transaction that fails **fails its parent**, even if you did not `await` it.
+- A nested `transaction()` is a real savepoint, and if you await it you can catch its failure without losing the parent's work.
+- A nested `transaction()` **must be awaited** before the parent callback returns.
 - The connection never returns to the pool with a transaction still open on it.
 - dbsp never reports success when nothing committed: PostgreSQL answers `COMMIT` on a broken transaction with the tag `ROLLBACK`, and dbsp checks.
 
@@ -38,9 +38,11 @@ PostgreSQL reports what a statement *was* only **after it has run**. So dbsp lea
 
 What it cannot do is un-run your statement. **`transaction()` rejecting does not mean nothing was committed.**
 
-The same is true of several commands in one call — `tx.raw('COMMIT; INSERT …')` — and of `PREPARE TRANSACTION`, and of raw savepoint control (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`), which can rearrange the savepoint stack under dbsp's feet before dbsp sees the tag.
+The same is true of several commands in one call — `tx.raw('COMMIT; INSERT …')` — and of `PREPARE TRANSACTION`, and of raw savepoint control (`SAVEPOINT`, `RELEASE`, `ROLLBACK TO`), which can rearrange the savepoint stack or discard work done since a savepoint before dbsp sees the tag.
 
-**And raw SQL makes session state that no rollback undoes.** A sequence that advanced stays advanced. An advisory lock stays held. A `PREPARE`, a `SET` (not `SET LOCAL`), a `LISTEN`, a temp table — all of them ride the connection back into the pool, and the next caller inherits them. dbsp cleans up only what dbsp created.
+**And raw SQL can leave effects outside the rollback boundary.** These survive a rollback: a sequence advanced by `nextval`, a session-level advisory lock such as `pg_advisory_lock`, a prepared statement created with `PREPARE`, and a temp table created outside the transaction being rolled back. A transaction-level advisory lock such as `pg_advisory_xact_lock` is released when the transaction ends.
+
+Do not put `SET` or `LISTEN` in that bucket. A plain `SET` inside a transaction is undone by `ROLLBACK`; both `SET` and `SET LOCAL` are canceled by `ROLLBACK TO SAVEPOINT` when the savepoint predates the command, and `SET LOCAL` never persists past transaction end. A committed plain `SET` still persists on the pooled connection, and `LISTEN` changes the session's registrations only when its transaction commits. dbsp cleans up only what dbsp created.
 
 This is not an oversight. It is what an escape hatch *is*, and the alternative — parsing your SQL to decide what it will do — is exactly the guessing this adapter was rewritten to remove. See [#327](https://github.com/oorabona/db-semantic-planner/issues/327).
 

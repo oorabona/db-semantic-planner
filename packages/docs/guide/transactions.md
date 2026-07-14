@@ -27,8 +27,8 @@ The callback receives `tx`, an ORM instance bound to the connection the transact
 
 - The callback's work commits together, or not at all.
 - **A statement issued inside the transaction never executes after the boundary** — not even one you forgot to `await`. It is drained before the commit, or refused.
-- A nested `transaction()` is a real savepoint. If it fails, it does not take the parent's work with it.
-- **A nested transaction that fails fails its parent** — even if you never awaited it.
+- A nested `transaction()` is a real savepoint. If you await it, you can catch its failure without losing the parent's work.
+- **A nested `transaction()` must be awaited** before the parent callback returns.
 - The connection never returns to the pool with a transaction still open on it.
 - dbsp never reports success when nothing committed. PostgreSQL answers `COMMIT` on a broken transaction with the command tag `ROLLBACK`, and dbsp checks.
 
@@ -174,7 +174,7 @@ await orm.transaction(async (tx) => {
 
 The savepoint's name is unguessable by design — see [Raw SQL](./raw-sql) for why that matters.
 
-**A nested transaction you do not await still counts.** If it fails, the parent fails with it. dbsp waits for every child it started before it commits, so a forgotten `await` cannot let a broken savepoint slip past the boundary unnoticed.
+**A nested `transaction()` must be awaited.** dbsp refuses an unobserved child before the parent commits, even if the child already succeeded. A forgotten `await` cannot leave dbsp guessing whether a savepoint scope was part of the work you meant to commit.
 
 ::: warning Nested transactions changed in 3.0.0
 Before 3.0.0 a nested `transaction()` did nothing at all — it simply ran your callback on the parent's connection, with no savepoint. So a failure inside it aborted the **whole** transaction, and the pattern above could not work: there was nothing to roll back *to*. It is a real savepoint now, which means a sub-block can fail and be survived. Code that relied on a nested transaction being flat will find it is no longer flat.
@@ -198,7 +198,11 @@ try {
     schema: db,
     adapter: createPgsqlAdapter(client, { borrowedClient: true }),
   });
-  await guest.transaction(async () => {}); // throws — the connection is not dbsp's
+  try {
+    await guest.transaction(async () => {});
+  } catch {
+    // Expected: the connection is not dbsp's.
+  }
 
   // Unless you say otherwise:
   const delegated = createOrm({
@@ -207,6 +211,9 @@ try {
       borrowedClient: true,
       managedTransactions: true, // "run transactions on my client"
     }),
+  });
+  await delegated.transaction(async (tx) => {
+    await tx.raw('SELECT 1');
   });
 } finally {
   client.release();
@@ -219,9 +226,9 @@ The declaration is the point. dbsp does not inspect the object you handed it and
 
 **Raw SQL that ends the transaction ends it.** `tx.raw('COMMIT')` commits — right then, before dbsp can learn what the statement was. dbsp reports it loudly and kills the scope so nothing after it escapes, but it cannot un-run it: **`transaction()` rejecting is not proof that nothing was committed.** The same goes for raw `ROLLBACK` and `PREPARE TRANSACTION`, which also end the transaction.
 
-**Raw savepoint control is a different hazard.** `SAVEPOINT`, `RELEASE` and `ROLLBACK TO` do *not* end the transaction — they rearrange its savepoint stack, which is the stack dbsp is using to keep your nested transactions isolated. `RELEASE SAVEPOINT a` destroys every savepoint established after it, so a raw release can quietly delete the savepoint a nested `transaction()` is relying on. Nothing is committed and nothing is lost, but the containment you thought you had is gone.
+**Raw savepoint control is a different hazard.** `SAVEPOINT`, `RELEASE` and `ROLLBACK TO` do *not* end the transaction — they rearrange its savepoint stack, which is the stack dbsp is using to keep your nested transactions isolated. `RELEASE SAVEPOINT a` destroys every savepoint established after it, so a raw release can quietly delete the savepoint a nested `transaction()` is relying on. `ROLLBACK TO SAVEPOINT a` keeps the transaction open, but discards every change made after that savepoint and destroys later savepoints. The containment you thought you had can be gone, and so can work you already issued.
 
-Neither is an oversight — it is what an escape hatch is. [Raw SQL](./raw-sql) covers both in full, along with the session state (advanced sequences, advisory locks, `SET`, `LISTEN`, prepared statements) that no rollback undoes.
+Neither is an oversight — it is what an escape hatch is. [Raw SQL](./raw-sql) covers both in full, along with effects outside the normal rollback boundary: advanced sequences, session-level advisory locks, prepared statements, and temp tables created outside the rolled-back transaction.
 
 ## Use `tx`, not `orm`
 
@@ -241,7 +248,7 @@ await orm.transaction(async (tx) => {
 
 ## Hooks
 
-Hooks fire inside transactions. `QueryHookContext` and `MutationHookContext` both carry `inTransaction: boolean`, so a hook can tell the difference — useful when an effect should only happen once the work is actually committed:
+Hooks fire inside transactions. `QueryHookContext` and `MutationHookContext` both carry `inTransaction?: boolean`; inside `transaction()` it is `true`, and outside a transaction the property is omitted. A hook can still tell the difference — useful when an effect should only happen once the work is actually committed:
 
 ```typescript
 // doctest: skip — requires a real PostgreSQL connection
