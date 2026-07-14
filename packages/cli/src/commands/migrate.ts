@@ -16,16 +16,18 @@ import {
 	getAppliedMigrations,
 	getNextSchemaVersion,
 	isDestructiveDown,
+	type MigrationRecord,
 	parseMigrationFile,
 	recordMigration,
 	removeMigrationRecord,
 	withMigrationLock,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import {
 	DEFAULT_MIGRATIONS_DIR,
 	generateMigrationFilename,
+	type MigrationFile,
 	scanMigrationFiles,
 	writeMigrationFile,
 } from '../migration-file.js';
@@ -133,6 +135,330 @@ export function hasExecutableSql(stmt: string): boolean {
 	});
 }
 
+export interface ApplyOptions {
+	db: string;
+	dir: string;
+	dryRun?: boolean;
+}
+
+export interface RollbackOptions {
+	count: number;
+	db: string;
+	dir: string;
+	force?: boolean;
+}
+
+export interface MigrateDeps {
+	withMigratePool?: <T>(
+		dbUrl: string,
+		fn: (pool: Pool) => Promise<T>,
+	) => Promise<T>;
+	ensureMigrationsTable?: (pool: Pool) => Promise<void>;
+	withMigrationLock?: <T>(
+		pool: Pool,
+		fn: (client: PoolClient) => Promise<T>,
+	) => Promise<T>;
+	getAppliedMigrations?: (pool: Pool) => Promise<readonly MigrationRecord[]>;
+	scanMigrationFiles?: (dir: string) => readonly MigrationFile[];
+	parseMigrationFile?: typeof parseMigrationFile;
+	getNextSchemaVersion?: (pool: Pool) => Promise<number>;
+	recordMigration?: (
+		pool: Pool,
+		name: string,
+		checksum: string,
+		schemaVersion: number,
+		destructive: boolean,
+	) => Promise<void>;
+	removeMigrationRecord?: (pool: Pool, name: string) => Promise<void>;
+	isDestructiveDown?: (downStatements: readonly string[]) => boolean;
+}
+
+const defaultMigrateDeps: Required<MigrateDeps> = {
+	withMigratePool,
+	ensureMigrationsTable,
+	withMigrationLock,
+	getAppliedMigrations,
+	scanMigrationFiles,
+	parseMigrationFile,
+	getNextSchemaVersion,
+	recordMigration,
+	removeMigrationRecord,
+	isDestructiveDown,
+};
+
+function resolveMigrateDeps(deps?: MigrateDeps): Required<MigrateDeps> {
+	return { ...defaultMigrateDeps, ...deps };
+}
+
+export async function runApply(
+	options: ApplyOptions,
+	deps?: MigrateDeps,
+): Promise<void> {
+	const d = resolveMigrateDeps(deps);
+
+	console.log('🔄 Applying migrations');
+	console.log(`   Database: ${redactDbUrl(options.db)}`);
+	console.log(`   Directory: ${options.dir}`);
+	console.log('');
+
+	await d.withMigratePool(options.db, async (pool) => {
+		// Ensure tracking table exists before acquiring lock
+		await d.ensureMigrationsTable(pool);
+
+		await d.withMigrationLock(pool, async (client) => {
+			// Get applied migrations on the lock-holding client
+			const applied = await d.getAppliedMigrations(client as unknown as Pool);
+			const appliedMap = new Map(applied.map((m) => [m.name, m.checksum]));
+
+			// Scan migration files
+			const files = d.scanMigrationFiles(options.dir);
+
+			if (files.length === 0) {
+				console.log(`No migration files found in ${options.dir}`);
+				return;
+			}
+
+			// Validate checksums for already-applied migrations
+			for (const file of files) {
+				const existingChecksum = appliedMap.get(file.name);
+				if (
+					existingChecksum !== undefined &&
+					existingChecksum !== file.checksum
+				) {
+					throw new MigrationError(
+						`Checksum mismatch for ${file.name}\n` +
+							`   Expected: ${existingChecksum}\n` +
+							`   Got:      ${file.checksum}\n` +
+							'\nMigration file has been tampered with after being applied.',
+					);
+				}
+			}
+
+			// Find pending migrations
+			const pending = files.filter((f) => !appliedMap.has(f.name));
+
+			if (pending.length === 0) {
+				console.log('✅ All migrations already applied.');
+				return;
+			}
+
+			if (options.dryRun) {
+				console.log(`${pending.length} pending migration(s):`);
+				for (const file of pending) {
+					console.log(`   - ${file.name}`);
+				}
+				return;
+			}
+
+			// Apply each pending migration atomically (DDL + record in one transaction)
+			let appliedCount = 0;
+			for (const file of pending) {
+				console.log(`  Applying: ${file.name}...`);
+
+				// Parse UP section from file
+				const parsed = d.parseMigrationFile(file.content);
+				const statements = parsed.upStatements.filter(hasExecutableSql);
+
+				// Determine version and destructive flag before the transaction
+				// (read from the lock-held client so we see a consistent view)
+				const version = await d.getNextSchemaVersion(client as unknown as Pool);
+				const destructive = parsed.destructive === true;
+
+				// Atomic: DDL + record in ONE transaction on the lock-holding client
+				try {
+					await client.query('BEGIN');
+
+					for (const stmt of statements) {
+						await client.query(stmt);
+					}
+
+					await d.recordMigration(
+						client as unknown as Pool,
+						file.name,
+						file.checksum,
+						version,
+						destructive,
+					);
+
+					await client.query('COMMIT');
+				} catch (applyError) {
+					let rollbackError: unknown;
+					try {
+						await client.query('ROLLBACK');
+					} catch (e) {
+						rollbackError = e;
+					}
+					const primary = sanitizePgError(applyError);
+					if (rollbackError !== undefined) {
+						console.error(
+							`   Note: rollback also failed: ${sanitizePgError(rollbackError).message}`,
+						);
+					}
+					throw primary;
+				}
+
+				appliedCount++;
+				console.log(`  ✅ Applied: ${file.name}`);
+			}
+
+			console.log(`\n✅ ${appliedCount} migration(s) applied successfully.`);
+		});
+	});
+}
+
+export async function runRollback(
+	options: RollbackOptions,
+	deps?: MigrateDeps,
+): Promise<void> {
+	const d = resolveMigrateDeps(deps);
+
+	console.log(`⏪ Rolling back ${options.count} migration(s)`);
+	console.log(`   Database: ${redactDbUrl(options.db)}`);
+	console.log(`   Directory: ${options.dir}`);
+	console.log('');
+
+	await d.withMigratePool(options.db, async (pool) => {
+		await d.ensureMigrationsTable(pool);
+
+		await d.withMigrationLock(pool, async (client) => {
+			// Get applied migrations on the lock-holding client
+			const applied = await d.getAppliedMigrations(client as unknown as Pool);
+			const sortedDesc = [...applied].sort((a, b) =>
+				b.name.localeCompare(a.name),
+			);
+
+			// SC-18: Validate count
+			if (options.count > sortedDesc.length) {
+				throw new MigrationError(
+					`Cannot roll back ${options.count} migration(s) — only ${sortedDesc.length} applied`,
+				);
+			}
+
+			const toRollback = sortedDesc.slice(0, options.count);
+
+			// Load migration files from disk
+			const files = d.scanMigrationFiles(options.dir);
+			const fileMap = new Map(files.map((f) => [f.name, f]));
+
+			let rolledBack = 0;
+			for (const record of toRollback) {
+				const file = fileMap.get(record.name);
+				if (!file) {
+					throw new MigrationError(
+						`Migration file not found on disk: ${record.name}`,
+					);
+				}
+
+				// SC-17: Verify checksum
+				if (file.checksum !== record.checksum) {
+					throw new MigrationError(
+						`Checksum mismatch for ${record.name}\n` +
+							`   Expected: ${record.checksum}\n` +
+							`   Got:      ${file.checksum}\n` +
+							'\nMigration file has been modified since it was applied.',
+					);
+				}
+
+				// Parse DOWN section
+				const parsed = d.parseMigrationFile(file.content);
+
+				// SC-10/ERR-01: No DOWN section
+				if (!parsed.hasDown) {
+					throw new MigrationError(
+						`Migration ${record.name} has no DOWN section\n` +
+							'   Cannot roll back a migration without a DOWN section.',
+					);
+				}
+
+				// SC-11/ERR-04: Empty DOWN section
+				const downStmts = parsed.downStatements.filter(hasExecutableSql);
+				if (downStmts.length === 0 && !options.force) {
+					throw new MigrationError(
+						`Migration ${record.name} has an empty DOWN section\n` +
+							'   Use --force to roll back anyway.',
+					);
+				}
+
+				// SC-19: Metadata-driven destructive rollback guard
+				const safeHeaderContradictedByDown =
+					parsed.destructive === false && d.isDestructiveDown(downStmts);
+				if (
+					(parsed.destructive !== false || safeHeaderContradictedByDown) &&
+					!options.force
+				) {
+					if (parsed.destructive === true) {
+						throw new MigrationError(
+							`Migration ${record.name} has destructive DOWN operations\n` +
+								'   Use --force to proceed with destructive rollback.',
+						);
+					}
+					if (safeHeaderContradictedByDown) {
+						throw new MigrationError(
+							`Migration ${record.name} is marked non-destructive but its DOWN section contains an obvious destructive statement\n` +
+								'   Re-generate the migration with accurate dbsp metadata or pass --force.',
+						);
+					}
+					throw new MigrationError(
+						`Migration ${record.name} is unmarked or legacy\n` +
+							'   Re-generate the migration with dbsp metadata or pass --force.',
+					);
+				}
+
+				// Atomic: DOWN SQL + remove record in ONE transaction on the lock-holding client
+				if (downStmts.length > 0 || options.force) {
+					console.log(`  Rolling back: ${record.name}...`);
+				}
+
+				try {
+					await client.query('BEGIN');
+
+					for (const stmt of downStmts) {
+						await client.query(stmt);
+					}
+
+					await d.removeMigrationRecord(client as unknown as Pool, record.name);
+
+					await client.query('COMMIT');
+				} catch (rollbackError) {
+					let rollbackCleanupError: unknown;
+					try {
+						await client.query('ROLLBACK');
+					} catch (e) {
+						rollbackCleanupError = e;
+					}
+					const primary = sanitizePgError(rollbackError);
+					if (rollbackCleanupError !== undefined) {
+						console.error(
+							`   Note: rollback also failed: ${sanitizePgError(rollbackCleanupError).message}`,
+						);
+					}
+					throw primary;
+				}
+
+				rolledBack++;
+				console.log(`  ✅ Rolled back: ${record.name}`);
+			}
+
+			console.log(`\n✅ ${rolledBack} migration(s) rolled back successfully.`);
+		});
+	});
+}
+
+function runRollbackCommand(
+	countArg: string,
+	options: { db: string; dir: string; force?: boolean },
+): Promise<void> {
+	const count = Number.parseInt(countArg, 10);
+	if (Number.isNaN(count) || count < 1) {
+		console.error('❌ Count must be a positive integer');
+		process.exit(1);
+	}
+
+	return runMigrateAction(async () => {
+		await runRollback({ count, ...options });
+	});
+}
+
 // ============================================================================
 // Subcommands
 // ============================================================================
@@ -231,120 +557,9 @@ const applyCommand = new Command('apply')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--dir <path>', 'Migrations directory', DEFAULT_MIGRATIONS_DIR)
 	.option('--dry-run', 'Show pending migrations without applying')
-	.action((options: { db: string; dir: string; dryRun?: boolean }) =>
+	.action((options: ApplyOptions) =>
 		runMigrateAction(async () => {
-			console.log('🔄 Applying migrations');
-			console.log(`   Database: ${redactDbUrl(options.db)}`);
-			console.log(`   Directory: ${options.dir}`);
-			console.log('');
-
-			await withMigratePool(options.db, async (pool) => {
-				// Ensure tracking table exists before acquiring lock
-				await ensureMigrationsTable(pool);
-
-				await withMigrationLock(pool, async (client) => {
-					// Get applied migrations on the lock-holding client
-					const applied = await getAppliedMigrations(client as unknown as Pool);
-					const appliedMap = new Map(applied.map((m) => [m.name, m.checksum]));
-
-					// Scan migration files
-					const files = scanMigrationFiles(options.dir);
-
-					if (files.length === 0) {
-						console.log(`No migration files found in ${options.dir}`);
-						return;
-					}
-
-					// Validate checksums for already-applied migrations
-					for (const file of files) {
-						const existingChecksum = appliedMap.get(file.name);
-						if (
-							existingChecksum !== undefined &&
-							existingChecksum !== file.checksum
-						) {
-							throw new MigrationError(
-								`Checksum mismatch for ${file.name}\n` +
-									`   Expected: ${existingChecksum}\n` +
-									`   Got:      ${file.checksum}\n` +
-									'\nMigration file has been tampered with after being applied.',
-							);
-						}
-					}
-
-					// Find pending migrations
-					const pending = files.filter((f) => !appliedMap.has(f.name));
-
-					if (pending.length === 0) {
-						console.log('✅ All migrations already applied.');
-						return;
-					}
-
-					if (options.dryRun) {
-						console.log(`${pending.length} pending migration(s):`);
-						for (const file of pending) {
-							console.log(`   - ${file.name}`);
-						}
-						return;
-					}
-
-					// Apply each pending migration atomically (DDL + record in one transaction)
-					let appliedCount = 0;
-					for (const file of pending) {
-						console.log(`  Applying: ${file.name}...`);
-
-						// Parse UP section from file
-						const parsed = parseMigrationFile(file.content);
-						const statements = parsed.upStatements.filter(hasExecutableSql);
-
-						// Determine version and destructive flag before the transaction
-						// (read from the lock-held client so we see a consistent view)
-						const version = await getNextSchemaVersion(
-							client as unknown as Pool,
-						);
-						const destructive = parsed.destructive === true;
-
-						// Atomic: DDL + record in ONE transaction on the lock-holding client
-						try {
-							await client.query('BEGIN');
-
-							for (const stmt of statements) {
-								await client.query(stmt);
-							}
-
-							await recordMigration(
-								client as unknown as Pool,
-								file.name,
-								file.checksum,
-								version,
-								destructive,
-							);
-
-							await client.query('COMMIT');
-						} catch (applyError) {
-							let rollbackError: unknown;
-							try {
-								await client.query('ROLLBACK');
-							} catch (e) {
-								rollbackError = e;
-							}
-							const primary = sanitizePgError(applyError);
-							if (rollbackError !== undefined) {
-								console.error(
-									`   Note: rollback also failed: ${sanitizePgError(rollbackError).message}`,
-								);
-							}
-							throw primary;
-						}
-
-						appliedCount++;
-						console.log(`  ✅ Applied: ${file.name}`);
-					}
-
-					console.log(
-						`\n✅ ${appliedCount} migration(s) applied successfully.`,
-					);
-				});
-			});
+			await runApply(options);
 		}),
 	);
 
@@ -354,159 +569,7 @@ const rollbackCommand = new Command('rollback')
 	.requiredOption('-d, --db <url>', 'Database connection URL (required)')
 	.option('--dir <path>', 'Migrations directory', DEFAULT_MIGRATIONS_DIR)
 	.option('--force', 'Force rollback of destructive or empty DOWN migrations')
-	.action(
-		(
-			countArg: string,
-			options: { db: string; dir: string; force?: boolean },
-		) => {
-			const count = Number.parseInt(countArg, 10);
-			if (Number.isNaN(count) || count < 1) {
-				console.error('❌ Count must be a positive integer');
-				process.exit(1);
-			}
-
-			return runMigrateAction(async () => {
-				console.log(`⏪ Rolling back ${count} migration(s)`);
-				console.log(`   Database: ${redactDbUrl(options.db)}`);
-				console.log(`   Directory: ${options.dir}`);
-				console.log('');
-
-				await withMigratePool(options.db, async (pool) => {
-					await ensureMigrationsTable(pool);
-
-					await withMigrationLock(pool, async (client) => {
-						// Get applied migrations on the lock-holding client
-						const applied = await getAppliedMigrations(
-							client as unknown as Pool,
-						);
-						const sortedDesc = [...applied].sort((a, b) =>
-							b.name.localeCompare(a.name),
-						);
-
-						// SC-18: Validate count
-						if (count > sortedDesc.length) {
-							throw new MigrationError(
-								`Cannot roll back ${count} migration(s) — only ${sortedDesc.length} applied`,
-							);
-						}
-
-						const toRollback = sortedDesc.slice(0, count);
-
-						// Load migration files from disk
-						const files = scanMigrationFiles(options.dir);
-						const fileMap = new Map(files.map((f) => [f.name, f]));
-
-						let rolledBack = 0;
-						for (const record of toRollback) {
-							const file = fileMap.get(record.name);
-							if (!file) {
-								throw new MigrationError(
-									`Migration file not found on disk: ${record.name}`,
-								);
-							}
-
-							// SC-17: Verify checksum
-							if (file.checksum !== record.checksum) {
-								throw new MigrationError(
-									`Checksum mismatch for ${record.name}\n` +
-										`   Expected: ${record.checksum}\n` +
-										`   Got:      ${file.checksum}\n` +
-										'\nMigration file has been modified since it was applied.',
-								);
-							}
-
-							// Parse DOWN section
-							const parsed = parseMigrationFile(file.content);
-
-							// SC-10/ERR-01: No DOWN section
-							if (!parsed.hasDown) {
-								throw new MigrationError(
-									`Migration ${record.name} has no DOWN section\n` +
-										'   Cannot roll back a migration without a DOWN section.',
-								);
-							}
-
-							// SC-11/ERR-04: Empty DOWN section
-							const downStmts = parsed.downStatements.filter(hasExecutableSql);
-							if (downStmts.length === 0 && !options.force) {
-								throw new MigrationError(
-									`Migration ${record.name} has an empty DOWN section\n` +
-										'   Use --force to roll back anyway.',
-								);
-							}
-
-							// SC-19: Metadata-driven destructive rollback guard
-							const safeHeaderContradictedByDown =
-								parsed.destructive === false && isDestructiveDown(downStmts);
-							if (
-								(parsed.destructive !== false ||
-									safeHeaderContradictedByDown) &&
-								!options.force
-							) {
-								if (parsed.destructive === true) {
-									throw new MigrationError(
-										`Migration ${record.name} has destructive DOWN operations\n` +
-											'   Use --force to proceed with destructive rollback.',
-									);
-								}
-								if (safeHeaderContradictedByDown) {
-									throw new MigrationError(
-										`Migration ${record.name} is marked non-destructive but its DOWN section contains an obvious destructive statement\n` +
-											'   Re-generate the migration with accurate dbsp metadata or pass --force.',
-									);
-								}
-								throw new MigrationError(
-									`Migration ${record.name} is unmarked or legacy\n` +
-										'   Re-generate the migration with dbsp metadata or pass --force.',
-								);
-							}
-
-							// Atomic: DOWN SQL + remove record in ONE transaction on the lock-holding client
-							if (downStmts.length > 0 || options.force) {
-								console.log(`  Rolling back: ${record.name}...`);
-							}
-
-							try {
-								await client.query('BEGIN');
-
-								for (const stmt of downStmts) {
-									await client.query(stmt);
-								}
-
-								await removeMigrationRecord(
-									client as unknown as Pool,
-									record.name,
-								);
-
-								await client.query('COMMIT');
-							} catch (rollbackError) {
-								let rollbackCleanupError: unknown;
-								try {
-									await client.query('ROLLBACK');
-								} catch (e) {
-									rollbackCleanupError = e;
-								}
-								const primary = sanitizePgError(rollbackError);
-								if (rollbackCleanupError !== undefined) {
-									console.error(
-										`   Note: rollback also failed: ${sanitizePgError(rollbackCleanupError).message}`,
-									);
-								}
-								throw primary;
-							}
-
-							rolledBack++;
-							console.log(`  ✅ Rolled back: ${record.name}`);
-						}
-
-						console.log(
-							`\n✅ ${rolledBack} migration(s) rolled back successfully.`,
-						);
-					});
-				});
-			});
-		},
-	);
+	.action(runRollbackCommand);
 
 const statusCommand = new Command('status')
 	.description('Show migration status')
