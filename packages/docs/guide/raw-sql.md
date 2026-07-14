@@ -28,10 +28,10 @@ You reach for `orm.raw()` / `adapter.executeRaw()` because dbsp cannot express s
 ```ts
 // doctest: skip — this demonstrates the hazard. Running it would commit.
 await orm.transaction(async (tx) => {
-  await tx.into(tx.tables.orders).values({ id: 1 }).execute();
+  await tx.into(tx.tables.users).values({ id: idA, name: 'Ada' }).execute();
   await tx.raw('COMMIT');                       // ← this commits. Right now.
-  await tx.into(tx.tables.orders).values({ id: 2 }).execute();
-});                                             // throws — but order 1 is committed
+  await tx.into(tx.tables.users).values({ id: idB, name: 'Grace' }).execute();
+});                                             // throws — but Ada is committed
 ```
 
 PostgreSQL reports what a statement *was* only **after it has run**. So dbsp learns about your `COMMIT` when it is already done. What it does then is everything it still can: it kills the scope, so nothing after it escapes into a transaction that no longer exists, and it throws loudly.
@@ -57,11 +57,20 @@ try {
 
   // dbsp works inside YOUR transaction, and savepoints statements it
   // issues so a failure of its own does not poison it.
-  const orm = createOrm({
+  const scopedOrm = createOrm({
     schema: db,
     adapter: createPgsqlAdapter(client, { borrowedClient: true }),
   });
-  await orm.into(orm.tables.orders).values({ id: 1 }).execute();
+  await scopedOrm
+    .into(scopedOrm.tables.users)
+    .values({
+      id: crypto.randomUUID(),
+      name: 'Ada',
+      email: 'ada@example.com',
+      createdAt: new Date(),
+      active: true,
+    })
+    .execute();
   await client.query('SAVEPOINT my_own');       // yours to manage
 
   await client.query('COMMIT');
