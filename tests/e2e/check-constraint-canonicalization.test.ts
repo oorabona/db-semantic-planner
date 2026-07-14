@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import {
 	CheckConstraintNewEnumValueError,
 	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	generateDDL,
 	generateMigrationSQL,
 } from '@dbsp/adapter-pgsql';
@@ -252,9 +253,11 @@ function databaseUrlForRole(role: string, password: string): string {
 
 describe('#315 CHECK constraint canonicalization live diff', () => {
 	let pool: Awaited<ReturnType<typeof getTestPool>>;
+	let adapter: ReturnType<typeof createPgsqlAdapter>;
 
 	beforeAll(async () => {
 		pool = await getTestPool();
+		adapter = createPgsqlAdapter(pool);
 	});
 
 	beforeEach(async () => {
@@ -290,11 +293,11 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 		await executeDdl(pool, generateDDL(desired.model, { schemaName: SCHEMA }));
 
-		const first = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const first = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
-		const second = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const second = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -331,7 +334,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			},
 		);
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -343,7 +346,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 
 		// The whole point: it converges on the very next run.
-		const after = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const after = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -372,7 +375,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 
 		// Nothing exists yet — table, column and constraint all land in one diff.
-		const diff = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -381,7 +384,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			generateMigrationSQL(diff, { schemaName: SCHEMA }) as string[],
 		);
 
-		const after = await comparePgsqlDatabaseSchema(pool, desired.model, {
+		const after = await comparePgsqlDatabaseSchema(adapter, desired.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -402,7 +405,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			],
 		});
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -416,7 +419,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 		await executeDdl(pool, statements);
 
-		const after = await comparePgsqlDatabaseSchema(pool, desired, {
+		const after = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -456,7 +459,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 		await executeDdl(pool, generateDDL(initial.model, { schemaName: SCHEMA }));
 
-		const diff = await comparePgsqlDatabaseSchema(pool, changed.model, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, changed.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -475,7 +478,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		]);
 		await executeDdl(pool, statements);
 
-		const rediff = await comparePgsqlDatabaseSchema(pool, changed.model, {
+		const rediff = await comparePgsqlDatabaseSchema(adapter, changed.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -515,7 +518,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		);
 		await executeDdl(pool, generateDDL(initial.model, { schemaName: SCHEMA }));
 
-		const diff = await comparePgsqlDatabaseSchema(pool, changed.model, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, changed.model, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -565,7 +568,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			],
 		});
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -607,10 +610,14 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			],
 		});
 
-		const roundTrip = await comparePgsqlDatabaseSchema(pool, desiredNotValid, {
-			schema: SCHEMA,
-			ignoreUnmanagedExtensions: true,
-		});
+		const roundTrip = await comparePgsqlDatabaseSchema(
+			adapter,
+			desiredNotValid,
+			{
+				schema: SCHEMA,
+				ignoreUnmanagedExtensions: true,
+			},
+		);
 		expect(roundTrip.changes).toEqual([]);
 
 		const desiredValid = makeModel({
@@ -627,7 +634,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				},
 			],
 		});
-		const diff = await comparePgsqlDatabaseSchema(pool, desiredValid, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desiredValid, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -661,7 +668,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			],
 		});
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -687,7 +694,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			],
 		});
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 			requireExpressionCanonicalization: true,
@@ -706,7 +713,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		).toBe(true);
 		await executeDdl(pool, statements);
 
-		const rediff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const rediff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 			requireExpressionCanonicalization: true,
@@ -761,7 +768,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				]),
 			);
 
-			const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+			const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 				schema: tenantSchema,
 				dbCasing: 'snake_case',
 				ignoreUnmanagedExtensions: true,
@@ -821,13 +828,13 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				throw new Error('expected generated schema to export dbCasing');
 			}
 			const warnings: string[] = [];
-			const first = await comparePgsqlDatabaseSchema(pool, loaded.model, {
+			const first = await comparePgsqlDatabaseSchema(adapter, loaded.model, {
 				schema: SCHEMA,
 				dbCasing,
 				ignoreUnmanagedExtensions: true,
 				onWarning: (message) => warnings.push(message),
 			});
-			const second = await comparePgsqlDatabaseSchema(pool, loaded.model, {
+			const second = await comparePgsqlDatabaseSchema(adapter, loaded.model, {
 				schema: SCHEMA,
 				dbCasing,
 				ignoreUnmanagedExtensions: true,
@@ -1211,7 +1218,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			new Map(),
 		);
 
-		const diff = await comparePgsqlDatabaseSchema(pool, desired, {
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
 			schema: SCHEMA,
 			ignoreUnmanagedExtensions: true,
 		});
@@ -1331,7 +1338,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				]),
 			);
 
-			const error = await comparePgsqlDatabaseSchema(pool, desired, {
+			const error = await comparePgsqlDatabaseSchema(adapter, desired, {
 				schema: SCHEMA,
 				ignoreUnmanagedExtensions: true,
 			}).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
@@ -1346,7 +1353,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			['tagged dollar-quoted', 'state = $lit$pending$lit$'],
 		])('refuses a %s reference to the added enum value', async (_kind, expr) => {
 			await expect(
-				comparePgsqlDatabaseSchema(pool, desiredWithPendingValue(expr), {
+				comparePgsqlDatabaseSchema(adapter, desiredWithPendingValue(expr), {
 					schema: SCHEMA,
 					ignoreUnmanagedExtensions: true,
 				}),
@@ -1355,7 +1362,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 		it('names the added enum values as candidates, without asserting a cause', async () => {
 			const error = await comparePgsqlDatabaseSchema(
-				pool,
+				adapter,
 				desiredWithPendingValue('state = $$pending$$'),
 				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
 			).catch((e: unknown) => e as CheckConstraintNewEnumValueError);
@@ -1372,7 +1379,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			// The same diff still adds 'pending' to the enum, but this constraint uses
 			// only values the database already knows, so it canonicalises and applies.
 			const diff = await comparePgsqlDatabaseSchema(
-				pool,
+				adapter,
 				desiredWithPendingValue("state <> 'done'"),
 				{ schema: SCHEMA, ignoreUnmanagedExtensions: true },
 			);
