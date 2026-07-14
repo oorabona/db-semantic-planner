@@ -6,6 +6,7 @@
  */
 
 import { readFileSync } from 'node:fs';
+import type { DbCasing } from '@dbsp/types';
 import { Command } from 'commander';
 import { config } from '../config.js';
 import { validateIdentifier } from '../utils/identifier-validation.js';
@@ -117,15 +118,8 @@ export const replCommand = new Command('repl')
 				validateIdentifier(options.use, 'schema');
 			}
 
-			// CLI-CASING: Map --casing flag to dbCasing (intuitive: describes DB columns)
-			const dbCasing =
-				options.casing === 'snake'
-					? ('snake_case' as const)
-					: options.casing === 'camel'
-						? ('camelCase' as const)
-						: options.casing === 'none'
-							? ('preserve' as const)
-							: undefined;
+			// CLI-CASING: explicit flag wins; otherwise use the schema declaration.
+			const dbCasing = mapReplCasingOption(options.casing) ?? schema.dbCasing;
 
 			// CLI-022: Batch mode - execute queries without interactive UI
 			if (options.eval || options.input) {
@@ -198,3 +192,18 @@ export const replCommand = new Command('repl')
 			process.exit(1);
 		}
 	});
+
+function mapReplCasingOption(
+	casing: ReplOptions['casing'],
+): DbCasing | undefined {
+	switch (casing) {
+		case 'snake':
+			return 'snake_case';
+		case 'camel':
+			return 'camelCase';
+		case 'none':
+			return 'preserve';
+		default:
+			return undefined;
+	}
+}

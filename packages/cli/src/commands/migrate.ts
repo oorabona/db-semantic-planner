@@ -8,13 +8,13 @@
  */
 
 import {
-	compareSchemata,
+	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	ensureMigrationsTable,
 	generateMigrationFile,
 	generateMigrationSQL,
 	getAppliedMigrations,
 	getNextSchemaVersion,
-	introspect,
 	isDestructiveDown,
 	parseMigrationFile,
 	recordMigration,
@@ -168,11 +168,12 @@ const devCommand = new Command('dev')
 				const schemaModel = loaded.model;
 
 				await withMigratePool(options.db, async (pool) => {
-					const dbModel = await introspect(pool, {
+					const adapter = createPgsqlAdapter(pool);
+					const diff = await comparePgsqlDatabaseSchema(adapter, schemaModel, {
 						...(options.schemaName ? { schema: options.schemaName } : {}),
+						...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
+						onWarning: (message) => console.warn(`⚠️  ${message}`),
 					});
-
-					const diff = compareSchemata(schemaModel, dbModel);
 
 					if (diff.changes.length === 0) {
 						console.log('✅ No changes detected — database matches schema.');

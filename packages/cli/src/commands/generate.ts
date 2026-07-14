@@ -15,6 +15,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import type { DbCasing } from '@dbsp/types';
 import { Command } from 'commander';
 import { loadSchema, loadSchemaFromCwd } from '../utils/schema-loader.js';
 
@@ -92,18 +93,18 @@ export const generateCommand = new Command('generate')
 				// Generate based on target
 				switch (target) {
 					case 'ddl': {
-						// Determine casing: explicit option > dialect default > 'snake'
-						const casing = options.casing ?? 'snake';
+						// Determine casing: explicit option > schema export > dialect default.
+						const dbCasing =
+							mapGenerateCasingOption(options.casing) ??
+							schema.dbCasing ??
+							('snake_case' as const);
+						const casingLabel = formatGenerateCasingLabel(dbCasing);
 
 						// Import adapter from adapter-pgsql (compile-only, no DB connection needed)
 						const { createPgsqlCompileOnlyAdapter } = await import(
 							'@dbsp/adapter-pgsql'
 						);
 
-						const dbCasing =
-							casing === 'snake'
-								? ('snake_case' as const)
-								: ('preserve' as const);
 						const adapter = createPgsqlCompileOnlyAdapter({
 							dbCasing,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
@@ -132,7 +133,7 @@ export const generateCommand = new Command('generate')
 								console.log(`✅ Generated DDL: ${outPath}`);
 								console.log(`   Tables: ${schema.tableNames.length}`);
 								console.log(`   Statements: ${ddlStatements.length}`);
-								console.log(`   Casing: ${casing}`);
+								console.log(`   Casing: ${casingLabel}`);
 								if (options.drop) {
 									console.log(`   Includes DROP statements`);
 								}
@@ -155,3 +156,31 @@ export const generateCommand = new Command('generate')
 			}
 		},
 	);
+
+function mapGenerateCasingOption(
+	casing: 'snake' | 'camel' | 'none' | undefined,
+): DbCasing | undefined {
+	switch (casing) {
+		case 'snake':
+			return 'snake_case';
+		case 'camel':
+			return 'camelCase';
+		case 'none':
+			return 'preserve';
+		default:
+			return undefined;
+	}
+}
+
+function formatGenerateCasingLabel(
+	dbCasing: DbCasing,
+): 'snake' | 'camel' | 'none' {
+	switch (dbCasing) {
+		case 'snake_case':
+			return 'snake';
+		case 'camelCase':
+			return 'camel';
+		case 'preserve':
+			return 'none';
+	}
+}

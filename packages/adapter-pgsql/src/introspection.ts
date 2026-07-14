@@ -32,20 +32,29 @@ import type {
 import { buildRelationKeyFields } from '@dbsp/types';
 import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
+import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-/** Options for database introspection */
-export interface IntrospectionOptions {
+/** The minimum every schema-level operation needs: which schema. */
+export interface SchemaScopeOptions {
+	/** Schema name to operate on (default: 'public') */
+	readonly schema?: string;
+}
+
+/**
+ * Introspection additionally chooses WHICH TABLES to read. It is a read-only
+ * path, so narrowing it is safe — that is why the table filters live here and
+ * nowhere else.
+ */
+export interface IntrospectionOptions extends SchemaScopeOptions {
 	/** Tables to exclude (glob patterns: * matches any chars) */
 	readonly exclude?: readonly string[];
 	/** Tables to include (default: all). Applied before exclude. */
 	readonly include?: readonly string[];
-	/** Schema name to introspect (default: 'public') */
-	readonly schema?: string;
 }
 
 /** Hierarchy pattern detected during introspection */
@@ -241,7 +250,12 @@ interface CatalogResults {
 		column_name: string | null;
 		comment: string;
 	}>;
-	checks: Array<{ name: string; expression: string; raw_table: string }>;
+	checks: Array<{
+		name: string;
+		expression: string;
+		not_valid: boolean;
+		raw_table: string;
+	}>;
 	partitions: RawPartition[];
 	extensions: Array<{ name: string }>;
 	sequences: Array<{
@@ -457,14 +471,17 @@ async function queryAllCatalogs(
 			pool.query<{
 				name: string;
 				expression: string;
+				not_valid: boolean;
 				raw_table: string;
 			}>(
 				`SELECT
 			   c.conname AS name,
 			   pg_get_constraintdef(c.oid, false) AS expression,
-			   c.conrelid::regclass::text AS raw_table
+			   NOT c.convalidated AS not_valid,
+			   r.relname AS raw_table
 			 FROM pg_constraint c
-			 JOIN pg_namespace n ON n.oid = c.connamespace
+			 JOIN pg_class r ON r.oid = c.conrelid
+			 JOIN pg_namespace n ON n.oid = r.relnamespace
 			 WHERE c.contype = 'c'
 			   AND n.nspname = $1`,
 				[schema],
@@ -615,7 +632,12 @@ async function queryAllCatalogs(
 			column_name: string | null;
 			comment: string;
 		}>,
-		QueryResult<{ name: string; expression: string; raw_table: string }>,
+		QueryResult<{
+			name: string;
+			expression: string;
+			not_valid: boolean;
+			raw_table: string;
+		}>,
 		QueryResult<RawPartition>,
 		QueryResult<{ name: string }>,
 		QueryResult<{
@@ -681,14 +703,23 @@ function buildPartitionMap(rows: RawPartition[]): Map<string, PartitionIR> {
 
 /** Build a Map<tableName, CheckConstraintIR[]> from raw check rows. */
 function buildCheckMap(
-	rows: Array<{ name: string; expression: string; raw_table: string }>,
+	rows: Array<{
+		name: string;
+		expression: string;
+		not_valid: boolean;
+		raw_table: string;
+	}>,
 ): Map<string, CheckConstraintIR[]> {
 	const result = new Map<string, CheckConstraintIR[]>();
 	for (const ck of rows) {
-		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
+		const tableName = ck.raw_table;
+		// `pg_get_constraintdef` appends `NOT VALID` to the expression itself, so the
+		// suffix has to come off the text and go onto the IR — otherwise it would be
+		// compared as if it were part of the predicate, and re-emitted into the DDL.
 		const checkIR: CheckConstraintIR = {
 			name: ck.name,
-			expression: ck.expression,
+			expression: stripNotValidSuffix(ck.expression),
+			...(ck.not_valid ? { notValid: true } : {}),
 		};
 		const existing = result.get(tableName);
 		if (existing) {
@@ -1539,21 +1570,30 @@ function filterTables(
 	tableNames: string[],
 	options?: IntrospectionOptions,
 ): string[] {
-	let result = tableNames;
+	return tableNames.filter((name) =>
+		isTableInIntrospectionScope(name, options),
+	);
+}
 
-	if (options?.include?.length) {
-		result = result.filter((name) =>
-			options.include!.some((pattern) => matchGlob(pattern, name)),
-		);
+function isTableInIntrospectionScope(
+	tableName: string,
+	options?: IntrospectionOptions,
+): boolean {
+	if (
+		options?.include?.length &&
+		!options.include.some((pattern) => matchGlob(pattern, tableName))
+	) {
+		return false;
 	}
 
-	if (options?.exclude?.length) {
-		result = result.filter(
-			(name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)),
-		);
+	if (
+		options?.exclude?.length &&
+		options.exclude.some((pattern) => matchGlob(pattern, tableName))
+	) {
+		return false;
 	}
 
-	return result;
+	return true;
 }
 
 /** Simple glob matching (supports * wildcard) */

@@ -18,14 +18,14 @@ import { quoteIdent as quoteId } from './utils.js';
  * @returns Array of DDL statements, or empty if sequences are unsupported / absent
  */
 export function generateSequencesPhase(ctx: PhaseContext): string[] {
-	const { schema, schemaName, naming, caps } = ctx;
+	const { schema, schemaName, caps } = ctx;
 	if (!schema.sequences || !sup(caps, caps?.supportsDDLSequences)) {
 		return [];
 	}
 	const statements: string[] = [];
 	for (const [, seq] of schema.sequences) {
 		const seqName = schemaName
-			? `${quoteId(naming.toDatabase(schemaName), 'schema')}.${quoteId(seq.name, 'table')}`
+			? `${quoteId(schemaName, 'schema')}.${quoteId(seq.name, 'table')}`
 			: quoteId(seq.name, 'table');
 		statements.push(buildSequenceClause('CREATE SEQUENCE', seqName, seq));
 	}

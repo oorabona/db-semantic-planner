@@ -11,6 +11,14 @@ export {
 	generateDDL,
 } from './ddl-generator.js';
 export {
+	type AddedEnumValue,
+	assertNoRepeatedExpressionSurfaceDrift,
+	CheckConstraintNewEnumValueError,
+	type ComparePgsqlDatabaseSchemaOptions,
+	comparePgsqlDatabaseSchema,
+	NonConvergentSchemaDiffError,
+} from './live-diff.js';
+export {
 	generateMigrationFile,
 	isDestructiveDown,
 	type ParsedMigrationFile,
@@ -36,6 +44,7 @@ export {
 	type CompareSchemataOptions,
 	compareSchemata,
 	type DiffSummary,
+	ExpressionCanonicalizationUnavailableError,
 	type SchemaChange,
 	type SchemaDiff,
 } from './schema-diff.js';

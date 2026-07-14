@@ -921,7 +921,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		});
 	});
 
-	it('database-cases target schema for source-table runtime binding casts', () => {
+	it('keeps target schema verbatim for source-table runtime binding casts', () => {
 		const bundle: CompiledNqlQuery = {
 			query: {
 				type: 'select',
@@ -961,7 +961,7 @@ describe('NQL bind CTE identifier injection defense', () => {
 		expect({ error, params, sql }).toEqual({
 			error: undefined,
 			params: ['active'],
-			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "tenant_one"."items" WHERE false UNION ALL VALUES ($1::"tenant_one".status)) SELECT ids.id FROM ids',
+			sql: 'WITH "ids" ("id") as (SELECT "id" FROM "tenantOne"."items" WHERE false UNION ALL VALUES ($1::"tenantOne".status)) SELECT ids.id FROM ids',
 		});
 	});
 

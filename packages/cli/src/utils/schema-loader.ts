@@ -14,10 +14,12 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { LoadedSchema } from '@dbsp/types';
+import type { LoadedSchema as BaseLoadedSchema, DbCasing } from '@dbsp/types';
 import { isValidSchema } from '@dbsp/types';
 
-export type { LoadedSchema } from '@dbsp/types';
+export interface LoadedSchema extends BaseLoadedSchema {
+	readonly dbCasing?: DbCasing;
+}
 
 /**
  * Default schema file names to search for.
@@ -122,7 +124,8 @@ export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 			);
 		}
 
-		return schema;
+		const dbCasing = readDbCasingExport(module.dbCasing, resolvedPath);
+		return dbCasing === undefined ? schema : { ...schema, dbCasing };
 	} catch (error) {
 		if (error instanceof SchemaLoadError) {
 			throw error;
@@ -146,6 +149,19 @@ export async function loadSchema(schemaPath: string): Promise<LoadedSchema> {
 
 		throw new SchemaLoadError(`Failed to load schema: ${message}`);
 	}
+}
+
+function readDbCasingExport(
+	value: unknown,
+	resolvedPath: string,
+): DbCasing | undefined {
+	if (value === undefined) return undefined;
+	if (value === 'snake_case' || value === 'camelCase' || value === 'preserve') {
+		return value;
+	}
+	throw new SchemaLoadError(
+		`Invalid dbCasing export in ${resolvedPath}. Expected 'snake_case', 'camelCase', or 'preserve'.`,
+	);
 }
 
 /**

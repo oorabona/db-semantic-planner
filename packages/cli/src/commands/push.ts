@@ -6,11 +6,13 @@
  * With --drop: recreates from scratch (preserves _dbsp_migrations).
  */
 
+import type { SchemaChange, SchemaDiff } from '@dbsp/adapter-pgsql';
 import {
-	compareSchemata,
+	comparePgsqlDatabaseSchema,
+	createPgsqlAdapter,
 	generateDDL,
 	generateMigrationSQL,
-	introspect,
+	getNamingPluginForDbCasing,
 } from '@dbsp/adapter-pgsql';
 import { Command } from 'commander';
 import { executeDdl } from '../ddl-executor.js';
@@ -69,21 +71,13 @@ export const pushCommand = new Command('push')
 						const statements = generateDDL(schemaModel, {
 							includeDropStatements: true,
 							...(options.schemaName ? { schemaName: options.schemaName } : {}),
+							...(loaded.dbCasing !== undefined
+								? { naming: getNamingPluginForDbCasing(loaded.dbCasing) }
+								: {}),
 						});
 
-						// SEC-7: Escape MIGRATIONS_TABLE before interpolating into RegExp
-						const escapedTable = MIGRATIONS_TABLE.replace(
-							/[.*+?^${}()|[\]\\]/g,
-							'\\$&',
-						);
-						// CC-11: Token-based check — match DROP TABLE ... "tableName" (no greedy .*
-						// across statement boundaries). The pattern anchors on the quoted table name
-						// appearing anywhere in the statement, which is safe for single-statement
-						// inputs (generateDDL returns one statement per array entry).
-						const migrationsPattern = new RegExp(
-							`DROP\\s+TABLE(?:\\s+IF\\s+EXISTS)?(?:\\s+"[^"]*"\\s*\\.)?\\s*"${escapedTable}"`,
-							'i',
-						);
+						const migrationsPattern =
+							buildMigrationsTableDropPattern(MIGRATIONS_TABLE);
 						const filtered = statements.filter(
 							(stmt) => !migrationsPattern.test(stmt),
 						);
@@ -96,17 +90,11 @@ export const pushCommand = new Command('push')
 								: {}),
 						});
 
-						// CC-1: --drop --json must emit JSON to stdout on success
 						if (options.json) {
 							const droppedTables = statements
 								.filter((s) => /DROP\s+TABLE/i.test(s))
 								.filter((s) => !migrationsPattern.test(s))
-								.map((s) => {
-									// M6: handle CASCADE between last quoted identifier and semicolon
-									// e.g. DROP TABLE IF EXISTS "public"."users" CASCADE;
-									const m = s.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/i);
-									return m ? m[1] : s;
-								})
+								.map(extractDroppedTableName)
 								.filter((t): t is string => t !== undefined);
 							console.log(
 								JSON.stringify(
@@ -126,12 +114,18 @@ export const pushCommand = new Command('push')
 							);
 						}
 					} else {
-						// Additive mode: introspect → diff → generate migration SQL (additive only)
-						const dbModel = await introspect(pool, {
+						// Additive mode: live diff -> generate migration SQL (additive only)
+						const adapter = createPgsqlAdapter(pool);
+						const compareOptions = {
 							...(options.schemaName ? { schema: options.schemaName } : {}),
-						});
-
-						const diff = compareSchemata(schemaModel, dbModel);
+							...(loaded.dbCasing ? { dbCasing: loaded.dbCasing } : {}),
+							onWarning: (message: string) => console.warn(`⚠️  ${message}`),
+						};
+						const diff = await comparePgsqlDatabaseSchema(
+							adapter,
+							schemaModel,
+							compareOptions,
+						);
 
 						// Generate SQL for additive changes only (no destructive)
 						const statements = generateMigrationSQL(diff, {
@@ -180,6 +174,18 @@ export const pushCommand = new Command('push')
 								: {}),
 						});
 
+						if (!options.dryRun) {
+							const postApplyDiff = await comparePgsqlDatabaseSchema(
+								adapter,
+								schemaModel,
+								{
+									...compareOptions,
+									previouslyAppliedDiff: diff,
+								},
+							);
+							assertNoUnexpectedResidualDrift(postApplyDiff, skippedChanges);
+						}
+
 						if (options.json) {
 							console.log(
 								JSON.stringify(
@@ -221,6 +227,40 @@ export const pushCommand = new Command('push')
 /**
  * Output SQL statements (dry-run or --json mode).
  */
+/**
+ * Match a `DROP TABLE` statement that targets the migrations table, so `--drop`
+ * can never destroy dbsp's own migration history.
+ *
+ * The table name is escaped before it reaches the pattern: an unescaped `.` or
+ * `$` in it would otherwise match characters it should not, and a table whose
+ * name merely resembles the migrations table would be spared — or worse, one
+ * that should be spared would be dropped.
+ *
+ * The pattern matches the quoted name anywhere in the statement rather than
+ * anchoring to the end. That is safe because `generateDDL` returns one statement
+ * per array entry, so a match can never jump across a statement boundary.
+ */
+export function buildMigrationsTableDropPattern(tableName: string): RegExp {
+	const escaped = tableName.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+	return new RegExp(
+		`DROP\\s+TABLE(?:\\s+IF\\s+EXISTS)?(?:\\s+"[^"]*"\\s*\\.)?\\s*"${escaped}"`,
+		'i',
+	);
+}
+
+/**
+ * Read the table name out of a `DROP TABLE` statement for the JSON report.
+ *
+ * The name is the last quoted identifier, which skips the schema in
+ * `"public"."users"`, and it may be followed by `CASCADE` before the semicolon.
+ * Returns the statement itself when nothing matches, so the report never silently
+ * loses a table.
+ */
+export function extractDroppedTableName(statement: string): string {
+	const match = statement.match(/"([^"]+)"\s*(?:CASCADE\s*)?;?\s*$/iu);
+	return match?.[1] ?? statement;
+}
+
 function outputResult(
 	statements: readonly string[],
 	options: { dryRun?: boolean; json?: boolean },
@@ -231,4 +271,38 @@ function outputResult(
 			console.log(`${stmt};\n`);
 		}
 	}
+}
+
+function assertNoUnexpectedResidualDrift(
+	postApplyDiff: SchemaDiff,
+	skippedChanges: readonly SchemaChange[],
+): void {
+	const skippedKeys = new Set(skippedChanges.map(changeIdentity));
+	const unexpected = postApplyDiff.changes.filter(
+		(change) =>
+			!(change.destructive && skippedKeys.has(changeIdentity(change))),
+	);
+	if (unexpected.length === 0) return;
+
+	throw new Error(
+		`Push did not converge after applying DDL; ${unexpected.length} outstanding change(s) remain:\n` +
+			unexpected.map(formatOutstandingChange).join('\n'),
+	);
+}
+
+function changeIdentity(change: SchemaChange): string {
+	return JSON.stringify([
+		change.kind,
+		change.table,
+		change.column ?? null,
+		change.details,
+		change.destructive,
+	]);
+}
+
+function formatOutstandingChange(change: SchemaChange): string {
+	const target = change.column
+		? `${change.table}.${change.column}`
+		: change.table || 'schema';
+	return `   - ${change.details} (${change.kind}: ${target})`;
 }

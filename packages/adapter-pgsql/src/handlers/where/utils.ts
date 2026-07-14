@@ -142,8 +142,7 @@ export function resolveColumnPgType(
 	// Manually defined schemas omit this field — we do not guess the PG type from
 	// the abstract ColumnType to avoid breaking queries on non-introspected schemas.
 	if (column.originalDbType) {
-		const targetSchema =
-			ctx.schema !== undefined ? ctx.naming.toDatabase(ctx.schema) : undefined;
+		const targetSchema = ctx.schema;
 		const typeName = renderColumnDbType(column, targetSchema).trim();
 		// Validate with the adapter's PG-aware validator (accepts faithful
 		// format_type shapes like `timestamp(3) with time zone`), then emit the

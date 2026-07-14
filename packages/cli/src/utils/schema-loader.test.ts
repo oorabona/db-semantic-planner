@@ -4,9 +4,26 @@
  * SEC-8: loadSchema must reject paths outside cwd to prevent path traversal.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { SchemaLoadError } from './schema-loader.js';
+
+const tempDirs: string[] = [];
+
+function writeTempSchema(source: string): string {
+	const dir = mkdtempSync(join(process.cwd(), '.tmp-schema-loader-'));
+	tempDirs.push(dir);
+	const schemaPath = join(dir, 'dbsp.schema.ts');
+	writeFileSync(schemaPath, source, 'utf8');
+	return schemaPath;
+}
+
+afterEach(() => {
+	for (const dir of tempDirs.splice(0)) {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
 describe('loadSchema — path traversal protection (SEC-8)', () => {
 	it('rejects a schema path outside cwd', async () => {
@@ -49,6 +66,45 @@ describe('loadSchema — path traversal protection (SEC-8)', () => {
 		await expect(loadSchema('nonexistent-schema-xyz.ts')).rejects.toThrow(
 			SchemaLoadError,
 		);
+	});
+
+	it('reads an optional dbCasing export', async () => {
+		const { loadSchema } = await import('./schema-loader.js');
+		const schemaPath = writeTempSchema(`
+			import { schema } from '@dbsp/core';
+
+			export const dbSchema = schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+					fullName: 'string',
+				},
+			});
+
+			export default dbSchema;
+			export const dbCasing = 'snake_case' as const;
+		`);
+
+		const loaded = await loadSchema(schemaPath);
+
+		expect(loaded.dbCasing).toBe('snake_case');
+	});
+
+	it('leaves schemas without dbCasing export unchanged', async () => {
+		const { loadSchema } = await import('./schema-loader.js');
+		const schemaPath = writeTempSchema(`
+			import { schema } from '@dbsp/core';
+
+			export default schema({
+				users: {
+					id: { type: 'integer', primaryKey: true },
+				},
+			});
+		`);
+
+		const loaded = await loadSchema(schemaPath);
+
+		expect(loaded.dbCasing).toBeUndefined();
+		expect(loaded.tableNames).toEqual(['users']);
 	});
 });
 

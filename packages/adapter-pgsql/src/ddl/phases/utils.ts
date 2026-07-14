@@ -208,9 +208,11 @@ export function quoteRoleName(name: string): string {
 /**
  * Qualify a table name with an optional schema prefix.
  * Both the schema and table names are validated + quoted via `quoteIdent`.
+ * The schema name is already a database identifier and must not be transformed
+ * by the naming plugin.
  *
  * @param tableName  Unqualified table name (pre-naming-plugin)
- * @param schemaName Optional schema name
+ * @param schemaName Optional database schema identifier
  * @param naming     NamingPlugin from PhaseContext
  * @returns `"schema"."table"` or `"table"` if no schema
  */
@@ -221,7 +223,7 @@ export function qualifyTableIdent(
 ): string {
 	const table = quoteIdent(naming.toDatabase(tableName), 'table');
 	if (schemaName) {
-		return `${quoteIdent(naming.toDatabase(schemaName), 'schema')}.${table}`;
+		return `${quoteIdent(schemaName, 'schema')}.${table}`;
 	}
 	return table;
 }

@@ -17,6 +17,7 @@ import type { NamingPlugin } from '../../naming-plugin.js';
 export type PhaseContext = {
 	readonly schema: ModelIR;
 	readonly tables: TableIR[];
+	/** Database schema identifier resolved from GenerateDDLOptions; never pass through naming plugins. */
 	readonly schemaName: string | undefined;
 	readonly naming: NamingPlugin;
 	readonly caps: DialectCapabilities | undefined;

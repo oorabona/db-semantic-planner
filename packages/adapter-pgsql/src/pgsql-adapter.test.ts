@@ -5,8 +5,8 @@
  */
 
 import type { PlanReport } from '@dbsp/core';
-import type { Pool } from 'pg';
-import { describe, expect, it, vi } from 'vitest';
+import type { Pool, PoolClient } from 'pg';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
 	createPgsqlAdapter,
 	createPgsqlCompileOnlyAdapter,
@@ -65,6 +65,38 @@ describe('PgsqlAdapter', () => {
 			});
 
 			expect(adapter).toBeInstanceOf(PgsqlAdapter);
+		});
+
+		it('rejects a checked-out PoolClient passed as the pool', () => {
+			const client = {
+				query: vi.fn(),
+				release: vi.fn(),
+			} as unknown as PoolClient;
+
+			expect(() => createPgsqlAdapter(client as unknown as Pool)).toThrow(
+				/createPgsqlAdapter\(\) received a pg PoolClient\. Pass borrowedClient: true/,
+			);
+		});
+	});
+
+	describe('createPgsqlAdapter', () => {
+		it('does not accept a PoolClient through createPgsqlAdapter', () => {
+			expectTypeOf<
+				Parameters<typeof createPgsqlAdapter>[0]
+			>().toEqualTypeOf<Pool>();
+			expectTypeOf<PoolClient>().not.toMatchTypeOf<
+				Parameters<typeof createPgsqlAdapter>[0]
+			>();
+		});
+	});
+
+	describe('getPoolInstance', () => {
+		it('declares that the current executor can be a pool or transaction client', () => {
+			const adapter = createPgsqlAdapter(createMockPool());
+
+			expectTypeOf(adapter.getPoolInstance()).toEqualTypeOf<
+				Pool | PoolClient
+			>();
 		});
 	});
 

@@ -187,12 +187,10 @@ function qualifyTable(
 	tableName: string,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
-	transformSchema = true,
 ): string {
 	const table = quoteIdentifier(naming.toDatabase(tableName));
 	if (schemaName) {
-		const schema = transformSchema ? naming.toDatabase(schemaName) : schemaName;
-		return `${quoteIdentifier(schema)}.${table}`;
+		return `${quoteIdentifier(schemaName)}.${table}`;
 	}
 	return table;
 }
@@ -220,12 +218,11 @@ export function generateCreateTable(
 	naming: NamingPlugin,
 ): string {
 	const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-	const targetSchema = schemaName ? naming.toDatabase(schemaName) : undefined;
 	const elements: string[] = [];
 
 	// Add columns
 	for (const col of table.columns) {
-		elements.push(generateColumnDef(col, naming, targetSchema));
+		elements.push(generateColumnDef(col, naming, schemaName));
 	}
 
 	// Add primary key constraint (omit if no PK defined)
@@ -269,7 +266,7 @@ export function generateCreateTable(
 /**
  * Generate a column definition string.
  */
-function generateColumnDef(
+export function generateColumnDef(
 	col: ColumnIR,
 	naming: NamingPlugin,
 	targetSchema?: string,
@@ -351,7 +348,7 @@ export function generateAlterTableAddFK(
 	// Referenced table and columns resolve to a declared schema, or the DDL schema when absent.
 	const refTable =
 		fk.references.schema !== undefined
-			? qualifyTable(fk.references.table, fk.references.schema, naming, false)
+			? qualifyTable(fk.references.table, fk.references.schema, naming)
 			: qualifyTable(fk.references.table, schemaName, naming);
 	const refCols = fk.references.columns
 		.map((col) => quoteIdentifier(naming.toDatabase(col)))

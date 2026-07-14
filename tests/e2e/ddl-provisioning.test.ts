@@ -9,14 +9,19 @@
  * Requires: DATABASE_URL env var + running PostgreSQL container.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
+	camelCaseNaming,
 	compareSchemata,
 	generateDDL,
 	generateMigrationSQL,
 	introspect,
 } from '@dbsp/adapter-pgsql';
-import { ref, schema } from '@dbsp/core';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ModelIRImpl, ref, schema } from '@dbsp/core';
+import type { SequenceIR, TableIR } from '@dbsp/types';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { pushCommand } from '../../packages/cli/src/commands/push.js';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
 import {
 	computeChecksum,
@@ -94,6 +99,21 @@ const schemaV2 = schema({
 	},
 });
 
+async function getTableOid(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	schemaName: string,
+	tableName: string,
+): Promise<string | undefined> {
+	const result = await pool.query<{ oid: string }>(
+		`SELECT c.oid::text AS oid
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind = 'r'`,
+		[schemaName, tableName],
+	);
+	return result.rows[0]?.oid;
+}
+
 // ============================================================================
 // Test Suite
 // ============================================================================
@@ -131,6 +151,221 @@ describe('DDL Provisioning E2E', () => {
 			const result = await executeDdl(pool, statements);
 			expect(result.statementsExecuted).toBeGreaterThan(0);
 			expect(result.dryRun).toBe(false);
+		});
+
+		it('applies generated DDL with a verbatim mixed-case schemaName under a naming plugin', async () => {
+			const tenantSchema = 'ddlTenantOne';
+			const ownersTable: TableIR = {
+				name: 'tenantOwners',
+				columns: [{ name: 'id', type: 'integer', nullable: false }],
+				primaryKey: 'id',
+				foreignKeys: [],
+				indexes: [],
+			};
+			const jobsTable: TableIR = {
+				name: 'jobQueue',
+				columns: [
+					{ name: 'id', type: 'integer', nullable: false },
+					{ name: 'ownerId', type: 'integer', nullable: false },
+					{
+						name: 'status',
+						type: 'string',
+						nullable: false,
+						comment: 'Current status',
+						originalDbType: 'status',
+						originalDbTypeSchema: tenantSchema,
+						originalDbTypeSchemaScope: 'target',
+					},
+					{ name: 'priority', type: 'integer', nullable: false },
+				],
+				primaryKey: 'id',
+				foreignKeys: [
+					{
+						columns: ['ownerId'],
+						references: { table: 'tenantOwners', columns: ['id'] },
+						onDelete: 'CASCADE',
+					},
+				],
+				indexes: [{ name: 'idx_job_queue_status', columns: ['status'] }],
+				checkConstraints: [
+					{
+						name: 'jobQueuePriorityCheck',
+						expression: 'CHECK ((priority >= 0))',
+					},
+				],
+				rlsEnabled: true,
+				comment: 'Job queue',
+			};
+			const schemaModel = new ModelIRImpl(
+				new Map([
+					[ownersTable.name, ownersTable],
+					[jobsTable.name, jobsTable],
+				]),
+				new Map(),
+				new Map([
+					[
+						'status',
+						{
+							name: 'status',
+							schema: tenantSchema,
+							values: ['queued', 'done'],
+						},
+					],
+				]),
+				undefined,
+				new Map([['job_id_seq', { name: 'job_id_seq' } satisfies SequenceIR]]),
+			);
+
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				const statements = generateDDL(schemaModel, {
+					schemaName: tenantSchema,
+					naming: camelCaseNaming,
+				});
+				expect(statements.join('\n')).not.toContain('"ddl_tenant_one"');
+
+				const result = await executeDdl(pool, statements);
+				expect(result.statementsExecuted).toBe(statements.length);
+
+				const tables = await pool.query<{ table_name: string }>(
+					`SELECT table_name FROM information_schema.tables WHERE table_schema = $1 ORDER BY table_name`,
+					[tenantSchema],
+				);
+				expect(tables.rows.map((row) => row.table_name)).toEqual([
+					'job_queue',
+					'tenant_owners',
+				]);
+
+				const enumType = await pool.query<{ typname: string }>(
+					`SELECT t.typname
+					 FROM pg_type t
+					 JOIN pg_namespace n ON n.oid = t.typnamespace
+					 WHERE n.nspname = $1 AND t.typname = $2`,
+					[tenantSchema, 'status'],
+				);
+				expect(enumType.rows).toHaveLength(1);
+			} finally {
+				await dropSchema(tenantSchema);
+			}
+		});
+
+		it('push --drop uses schema dbCasing to drop and recreate snake_case tables', async () => {
+			const tenantSchema = 'ddl_push_drop_casing';
+			const tempDir = mkdtempSync(
+				join(process.cwd(), 'tests/e2e/.tmp-push-drop-'),
+			);
+			const schemaPath = join(tempDir, 'dbsp.schema.ts');
+			writeFileSync(
+				schemaPath,
+				[
+					"import { schema as defineSchema } from '@dbsp/core';",
+					'',
+					"export const dbCasing = 'snake_case' as const;",
+					'',
+					'export const schema = defineSchema({',
+					'	userProfiles: {',
+					"		id: { type: 'integer', primaryKey: true },",
+					"		displayName: 'string',",
+					'	},',
+					'});',
+					'',
+				].join('\n'),
+			);
+
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				await pool.query(
+					`CREATE TABLE "${tenantSchema}"."user_profiles" ("id" integer PRIMARY KEY, "display_name" text)`,
+				);
+				await pool.query(
+					`INSERT INTO "${tenantSchema}"."user_profiles" ("id", "display_name") VALUES (1, 'stale')`,
+				);
+				const beforeOid = await getTableOid(
+					pool,
+					tenantSchema,
+					'user_profiles',
+				);
+
+				const dryRunLogs: string[] = [];
+				const logSpy = vi
+					.spyOn(console, 'log')
+					.mockImplementation((message?: unknown, ...rest: unknown[]) => {
+						dryRunLogs.push([message, ...rest].map(String).join(' '));
+					});
+				const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+					code?: string | number | null | undefined,
+				) => {
+					throw new Error(`process.exit:${code}`);
+				}) as typeof process.exit);
+				try {
+					await pushCommand.parseAsync(
+						[
+							'--schema',
+							schemaPath,
+							'--db',
+							process.env.DATABASE_URL!,
+							'--schema-name',
+							tenantSchema,
+							'--drop',
+							'--dry-run',
+						],
+						{ from: 'user' },
+					);
+				} finally {
+					logSpy.mockRestore();
+					exitSpy.mockRestore();
+				}
+
+				const dryRunSql = dryRunLogs.join('\n');
+				expect(dryRunSql).toContain(
+					`DROP TABLE IF EXISTS "${tenantSchema}"."user_profiles" CASCADE;`,
+				);
+				expect(dryRunSql).not.toContain('"userProfiles"');
+
+				const applyLogSpy = vi
+					.spyOn(console, 'log')
+					.mockImplementation(() => {});
+				const applyExitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+					code?: string | number | null | undefined,
+				) => {
+					throw new Error(`process.exit:${code}`);
+				}) as typeof process.exit);
+				try {
+					await pushCommand.parseAsync(
+						[
+							'--schema',
+							schemaPath,
+							'--db',
+							process.env.DATABASE_URL!,
+							'--schema-name',
+							tenantSchema,
+							'--drop',
+							'--json',
+						],
+						{ from: 'user' },
+					);
+				} finally {
+					applyLogSpy.mockRestore();
+					applyExitSpy.mockRestore();
+				}
+
+				const afterOid = await getTableOid(pool, tenantSchema, 'user_profiles');
+				expect(afterOid).toBeDefined();
+				expect(afterOid).not.toBe(beforeOid);
+
+				const wrongCase = await getTableOid(pool, tenantSchema, 'userProfiles');
+				expect(wrongCase).toBeUndefined();
+
+				const rows = await pool.query<{ count: string }>(
+					`SELECT count(*)::text AS count FROM "${tenantSchema}"."user_profiles"`,
+				);
+				expect(rows.rows[0]!.count).toBe('0');
+			} finally {
+				await dropSchema(tenantSchema);
+				rmSync(tempDir, { recursive: true, force: true });
+			}
 		});
 
 		it('should be idempotent — no changes when schema matches', async () => {

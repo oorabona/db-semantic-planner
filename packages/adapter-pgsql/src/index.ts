@@ -30,11 +30,17 @@ export {
 } from './compiler.js';
 // DDL Generation
 export {
+	type AddedEnumValue,
+	assertNoRepeatedExpressionSurfaceDrift,
 	type ChangeKind,
+	CheckConstraintNewEnumValueError,
+	type ComparePgsqlDatabaseSchemaOptions,
 	type CompareSchemataOptions,
 	canGenerateCreateIndex,
+	comparePgsqlDatabaseSchema,
 	compareSchemata,
 	type DiffSummary,
+	ExpressionCanonicalizationUnavailableError,
 	ensureMigrationsTable,
 	type GenerateDDLOptions,
 	generateCreateIndex,
@@ -50,6 +56,7 @@ export {
 	type MigrationSQLOptions,
 	mapColumnType,
 	mapOnDeleteAction,
+	NonConvergentSchemaDiffError,
 	type ParsedMigrationFile,
 	parseMigrationFile,
 	recordMigration,
@@ -71,6 +78,12 @@ export {
 	getTotalExecutionTime,
 	parseExplainJson,
 } from './explain/index.js';
+export {
+	type CanonicalizeCheckConstraintsOptions,
+	CheckConstraintCanonicalizationError,
+	type CheckConstraintCanonicalizationWarning,
+	canonicalizeCheckConstraints,
+} from './expression-canonicalizer.js';
 // Extensions (pgvector, ParadeDB, PG builtins)
 export {
 	bm25Search,
@@ -103,6 +116,7 @@ export {
 	type IntrospectedModelIR,
 	type IntrospectionOptions,
 	introspect,
+	type SchemaScopeOptions,
 } from './introspection.js';
 // Mutations
 export {

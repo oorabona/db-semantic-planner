@@ -10,6 +10,11 @@
  * @module ddl/phases/constraints
  */
 
+import {
+	assertNoCheckConstraintNameCollisions,
+	getCheckConstraintDatabaseName,
+} from '../../check-constraint-name.js';
+import { renderCheckConstraintClause } from '../../check-expression.js';
 import { validateCheckExpression } from '../../validate.js';
 import { generateAlterTableAddFK } from '../ddl-generator.js';
 import { type PhaseContext, sup } from './types.js';
@@ -40,10 +45,13 @@ export function generateConstraintsPhase(ctx: PhaseContext): string[] {
 	// Check constraints
 	if (sup(caps, caps?.supportsDDLCheckConstraints)) {
 		for (const table of tables) {
+			assertNoCheckConstraintNameCollisions(table, naming);
 			for (const check of table.checkConstraints ?? []) {
 				const qualifiedTable = qualifyTable(table.name, schemaName, naming);
-				const constraintName = quoteId(check.name);
-				const expression = check.expression;
+				const constraintName = quoteId(
+					getCheckConstraintDatabaseName(check, naming),
+				);
+				const expression = renderCheckConstraintClause(check);
 				validateCheckExpression(expression, 'check constraint expression');
 				statements.push(
 					`ALTER TABLE ${qualifiedTable} ADD CONSTRAINT ${constraintName} ${expression};`,

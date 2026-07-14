@@ -111,8 +111,8 @@ export function nullConstNode(): Node {
  * Create a ColumnRef node
  * @param column - Column name
  * @param table - Optional table name or alias
- * @param schema - Optional schema name
- * @param naming - Naming plugin for transformation
+ * @param schema - Optional database schema identifier
+ * @param naming - Naming plugin for table, alias, and column transformation
  */
 export function columnRef(
 	column: string,
@@ -123,9 +123,8 @@ export function columnRef(
 	const fields: Node[] = [];
 
 	if (schema) {
-		const dbSchema = naming.toDatabase(schema);
-		validateIdentifier(dbSchema, 'schema');
-		fields.push(stringNode(dbSchema));
+		validateIdentifier(schema, 'schema');
+		fields.push(stringNode(schema));
 	}
 	if (table) {
 		const dbTable = naming.toDatabase(table);
@@ -167,6 +166,7 @@ export function columnRefStar(
 
 /**
  * Create a RangeVar node (table reference in FROM clause)
+ * The schema argument is a database identifier and is not transformed.
  */
 export function rangeVar(
 	table: string,
@@ -183,9 +183,8 @@ export function rangeVar(
 	};
 
 	if (schema) {
-		const dbSchema = naming.toDatabase(schema);
-		validateIdentifier(dbSchema, 'schema');
-		rv.schemaname = dbSchema;
+		validateIdentifier(schema, 'schema');
+		rv.schemaname = schema;
 	}
 
 	if (alias) {
@@ -708,7 +707,8 @@ export function insertStmt(options: InsertOptions): Node {
 	};
 
 	if (options.schema) {
-		relation.schemaname = naming.toDatabase(options.schema);
+		validateIdentifier(options.schema, 'schema');
+		relation.schemaname = options.schema;
 	}
 
 	const stmt: InsertStmt = {
@@ -768,7 +768,8 @@ export function updateStmt(options: UpdateOptions): Node {
 	};
 
 	if (options.schema) {
-		relation.schemaname = naming.toDatabase(options.schema);
+		validateIdentifier(options.schema, 'schema');
+		relation.schemaname = options.schema;
 	}
 
 	const stmt: UpdateStmt = {
@@ -820,7 +821,8 @@ export function deleteStmt(options: DeleteOptions): Node {
 	};
 
 	if (options.schema) {
-		relation.schemaname = naming.toDatabase(options.schema);
+		validateIdentifier(options.schema, 'schema');
+		relation.schemaname = options.schema;
 	}
 
 	const stmt: DeleteStmt = {

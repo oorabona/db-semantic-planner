@@ -552,6 +552,45 @@ export interface IntrospectionResult extends ModelIR {
 }
 
 /**
+ * A database-neutral schema change reported by a live schema comparison.
+ */
+export interface SchemaChange {
+	readonly kind: string;
+	readonly table: string;
+	readonly column?: string;
+	readonly destructive: boolean;
+	readonly details: string;
+	readonly meta?: Readonly<Record<string, unknown>>;
+}
+
+/**
+ * Aggregate counts for a schema diff.
+ */
+export interface DiffSummary {
+	readonly tables: { readonly added: number; readonly dropped: number };
+	readonly columns: {
+		readonly added: number;
+		readonly dropped: number;
+		readonly altered: number;
+	};
+	readonly indexes: { readonly added: number; readonly dropped: number };
+	readonly constraints: {
+		readonly added: number;
+		readonly dropped: number;
+		readonly altered: number;
+	};
+}
+
+/**
+ * Database-neutral schema diff returned by live schema comparison.
+ */
+export interface SchemaDiff {
+	readonly changes: readonly SchemaChange[];
+	readonly hasDestructive: boolean;
+	readonly summary: DiffSummary;
+}
+
+/**
  * Introspecting adapter - can introspect database schema.
  */
 export interface IntrospectingAdapter extends BaseAdapter {

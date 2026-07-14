@@ -288,7 +288,7 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		]);
 	});
 
-	it('database-cases target schema for target-scoped custom type casts', () => {
+	it('keeps target schema verbatim for target-scoped custom type casts', () => {
 		const { sql, parameters } = compileSelect(
 			'events',
 			[
@@ -308,7 +308,7 @@ describe('PARAM-TYPE-CAST: comparison handler emits CAST when originalDbType set
 		);
 
 		expect({ sql, parameters }).toEqual({
-			sql: 'SELECT * FROM tenant_one.events WHERE events.state = CAST($1 AS "tenant_one".status)',
+			sql: 'SELECT * FROM "tenantOne".events WHERE events.state = CAST($1 AS "tenantOne".status)',
 			parameters: ['active'],
 		});
 	});

@@ -657,6 +657,77 @@ describe('introspect', () => {
 		expect(result.tables.has('posts')).toBe(false);
 	});
 
+	it('keeps CHECK constraints on quoted table names by reading relname from pg_class', async () => {
+		const query = vi.fn(
+			async (sql: string): Promise<QueryResult<Record<string, unknown>>> => {
+				const normalized = sql.replace(/\s+/g, ' ').trim();
+
+				if (normalized.includes('FROM information_schema.columns')) {
+					const rows = [
+						{
+							table_name: 'jobQueue',
+							column_name: 'id',
+							data_type: 'integer',
+							udt_name: 'int4',
+							is_nullable: 'NO',
+							column_default: null,
+						},
+						{
+							table_name: 'jobQueue',
+							column_name: 'n',
+							data_type: 'integer',
+							udt_name: 'int4',
+							is_nullable: 'NO',
+							column_default: null,
+						},
+					];
+					return { rows, rowCount: rows.length } as QueryResult<
+						Record<string, unknown>
+					>;
+				}
+
+				if (normalized.includes('FROM information_schema.table_constraints')) {
+					const rows = [{ table_name: 'jobQueue', column_name: 'id' }];
+					return { rows, rowCount: rows.length } as QueryResult<
+						Record<string, unknown>
+					>;
+				}
+
+				if (normalized.includes("c.contype = 'c'")) {
+					const readsBareRelname = normalized.includes(
+						'r.relname AS raw_table',
+					);
+					const rows = [
+						{
+							name: 'jobQueue_n_check',
+							expression: 'CHECK ((n > 0))',
+							not_valid: false,
+							raw_table: readsBareRelname ? 'jobQueue' : 'tenant."jobQueue"',
+						},
+					];
+					return { rows, rowCount: rows.length } as QueryResult<
+						Record<string, unknown>
+					>;
+				}
+
+				return { rows: [], rowCount: 0 } as QueryResult<
+					Record<string, unknown>
+				>;
+			},
+		);
+		const pool = { query } as unknown as Pool;
+
+		const result = await introspect(pool, { schema: 'tenant' });
+
+		// The mock answers as PostgreSQL does: `::regclass::text` renders a quoted,
+		// schema-qualified name, `relname` gives the bare one. Assert the OUTCOME —
+		// that the CHECK is reachable under the table's real name — not the SQL text
+		// that gets there. A query rewritten correctly but differently must still pass.
+		expect(result.tables.get('jobQueue')?.checkConstraints).toEqual([
+			{ name: 'jobQueue_n_check', expression: 'CHECK ((n > 0))' },
+		]);
+	});
+
 	it('should apply exclude filter', async () => {
 		const pool = createMockPool([
 			usersPostsColumns,
