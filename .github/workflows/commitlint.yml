@@ -17,39 +17,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      # Run the repo's OWN commitlint, not a version an action happens to bundle.
-      #
-      # wagoid/commitlint-github-action@v6 ships commitlint v19, while this repo
-      # pins v21 — and they disagree. v19 rejects `feat(scope)!: subject` with
-      # "subject may not be empty", which is a valid Conventional Commit and which
-      # the local commit-msg hook accepts. A hook that passes what CI rejects
-      # protects nobody: it just moves the failure to the slowest place to see it.
-      #
-      # So CI runs the same binary, from the same lockfile, against the same config
-      # as the hook on a contributor's machine.
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: wagoid/commitlint-github-action@v6
         with:
-          node-version: 22
-          cache: pnpm
-
-      # --ignore-scripts is not a nicety. This workflow is triggered by
-      # `pull_request`, so the tree it installs from belongs to whoever opened the
-      # PR — and lifecycle scripts in a package.json are arbitrary code. Without
-      # this flag, a fork could run anything it liked on the runner, from a job
-      # whose entire purpose is to read commit messages.
-      #
-      # Linting text does not need anyone's postinstall to have run.
-      - run: pnpm install --frozen-lockfile --ignore-scripts
-
-      - name: Lint commit messages
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ -n "$BASE_SHA" ]; then
-            pnpm exec commitlint --from "$BASE_SHA" --to "$HEAD_SHA" --verbose
-          else
-            pnpm exec commitlint --last --verbose
-          fi
+          configFile: commitlint.config.mjs
