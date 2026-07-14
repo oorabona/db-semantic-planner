@@ -452,15 +452,17 @@ orm.withSchema('tenant_42').transaction(async (tx) => {
 });
 ```
 
-**Nested transactions** reuse the outer transaction context — no savepoints, no additional BEGIN/COMMIT:
+**A nested transaction is a real savepoint.** It does not re-`BEGIN`, but it does take a `SAVEPOINT` with an unguessable name, so a failure inside it can be caught and survived without losing the parent's work. It **must be awaited** — dbsp refuses an unobserved child before the parent commits, even one that already succeeded. See [Transactions](/guide/transactions) for the full contract.
 
 ```typescript
 // doctest: skip — exec-only operation; uses logs table not in default preamble schema
 orm.transaction(async (outer) => {
   await outer.insert('users').values({ name: 'Alice' }).dump();
 
+  // Awaited, because dbsp refuses an unobserved child — even a successful one.
   await outer.transaction(async (inner) => {
-    // inner reuses the same connection and transaction
+    // Same connection, but a real SAVEPOINT: this can fail without taking the
+    // outer insert with it.
     await inner.insert('logs').values({ action: 'user_created' }).dump();
   });
 });
@@ -470,7 +472,7 @@ orm.transaction(async (outer) => {
 |----------|--------|
 | Success | `COMMIT` after callback returns |
 | Error thrown | `ROLLBACK`, error re-thrown |
-| Nested call | Reuses parent transaction (no savepoints) |
+| Nested call | Real `SAVEPOINT` — an inner failure can be survived. Must be awaited. |
 | Connection | Dedicated client, released on completion |
 
 ---
