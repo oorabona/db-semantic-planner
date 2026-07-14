@@ -353,6 +353,44 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 		expect(after.changes).toEqual([]);
 	});
 
+	it('keeps CHECK constraints on mixed-case table names and converges', async () => {
+		await pool.query(`
+			CREATE TABLE ${quoteIdent(SCHEMA)}."jobQueue" (
+				id integer PRIMARY KEY,
+				n integer NOT NULL,
+				CONSTRAINT "jobQueue_n_check" CHECK (n > 0)
+			)
+		`);
+		const desired = makeModel({
+			name: 'jobQueue',
+			columns: [makeCol('id'), makeCol('n')],
+			primaryKey: 'id',
+			foreignKeys: [],
+			indexes: [],
+			checkConstraints: [{ name: 'jobQueue_n_check', expression: 'n > 0' }],
+		});
+
+		const introspected = await adapter.introspect({ schema: SCHEMA });
+		expect(introspected.getTable('jobQueue')?.checkConstraints).toEqual([
+			{ name: 'jobQueue_n_check', expression: 'CHECK ((n > 0))' },
+		]);
+
+		const first = await comparePgsqlDatabaseSchema(adapter, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+		await executeDdl(
+			pool,
+			generateMigrationSQL(first, { schemaName: SCHEMA }) as string[],
+		);
+		const second = await comparePgsqlDatabaseSchema(adapter, desired, {
+			schema: SCHEMA,
+			ignoreUnmanagedExtensions: true,
+		});
+
+		expect(second.changes).toEqual([]);
+	});
+
 	it('canonicalizes a CHECK that refers to an enum the same diff creates', async () => {
 		const desired = schema(
 			{

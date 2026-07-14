@@ -478,9 +478,10 @@ async function queryAllCatalogs(
 			   c.conname AS name,
 			   pg_get_constraintdef(c.oid, false) AS expression,
 			   NOT c.convalidated AS not_valid,
-			   c.conrelid::regclass::text AS raw_table
+			   r.relname AS raw_table
 			 FROM pg_constraint c
-			 JOIN pg_namespace n ON n.oid = c.connamespace
+			 JOIN pg_class r ON r.oid = c.conrelid
+			 JOIN pg_namespace n ON n.oid = r.relnamespace
 			 WHERE c.contype = 'c'
 			   AND n.nspname = $1`,
 				[schema],
@@ -711,7 +712,7 @@ function buildCheckMap(
 ): Map<string, CheckConstraintIR[]> {
 	const result = new Map<string, CheckConstraintIR[]>();
 	for (const ck of rows) {
-		const tableName = ck.raw_table.replace(/^".*"\.|^.*\./u, '');
+		const tableName = ck.raw_table;
 		// `pg_get_constraintdef` appends `NOT VALID` to the expression itself, so the
 		// suffix has to come off the text and go onto the IR — otherwise it would be
 		// compared as if it were part of the predicate, and re-emitted into the DDL.
