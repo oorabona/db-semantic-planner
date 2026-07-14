@@ -7,6 +7,7 @@
  * @module pgsql-adapter
  */
 
+import { randomBytes } from 'node:crypto';
 import type {
 	AlterColumnOptions,
 	CreateIndexOptions,
@@ -159,8 +160,7 @@ const RESOLVE_TABLE_SCHEMA_SQL = (tableParam: string): string =>
 const NO_ACTIVE_SQL_TRANSACTION = '25P01';
 const IN_FAILED_SQL_TRANSACTION = '25P02';
 const INVALID_SAVEPOINT_SPECIFICATION = '3B001';
-
-let savepointCounter = 0;
+const SAVEPOINT_RANDOM_BYTES = 16;
 
 const RAW_SQL_TRANSACTION_CONTROL_MESSAGE =
 	'Transaction control through raw SQL inside a scope dbsp is managing is unsupported. ' +
@@ -225,6 +225,7 @@ type DbspScopeState = {
 	statementLock: DbspScopeStatementLock;
 	children: DbspScopeChildren;
 	closing: boolean;
+	streamFailureRecovery: (() => Promise<void>) | undefined;
 };
 
 type DbspScopeChildren = {
@@ -355,8 +356,7 @@ function isPgErrorWithCode(error: unknown, code: string): boolean {
 }
 
 function nextSavepointName(): string {
-	savepointCounter = (savepointCounter + 1) % Number.MAX_SAFE_INTEGER;
-	return `dbsp_savepoint_${savepointCounter}`;
+	return `dbsp_savepoint_${randomBytes(SAVEPOINT_RANDOM_BYTES).toString('hex')}`;
 }
 
 function createScopeToken(): DbspScopeToken {
@@ -375,6 +375,7 @@ function createScopeState(
 			transactions: new Set(),
 		},
 		closing: false,
+		streamFailureRecovery: undefined,
 	};
 }
 
@@ -499,6 +500,32 @@ function createCleanupOnlyError(
 		configurable: true,
 	});
 	return error;
+}
+
+function addCleanupErrorToOriginal(
+	originalError: unknown,
+	cleanupError: unknown,
+): unknown {
+	if (originalError instanceof Error) {
+		if (!Object.hasOwn(originalError, 'cause')) {
+			Object.defineProperty(originalError, 'cause', {
+				value: cleanupError,
+				configurable: true,
+			});
+		}
+		if (!Object.hasOwn(originalError, 'cleanupError')) {
+			Object.defineProperty(originalError, 'cleanupError', {
+				value: cleanupError,
+				configurable: true,
+			});
+		}
+		return originalError;
+	}
+	return createCleanupFailureError(
+		'PostgreSQL stream cleanup failed: CLOSE cursor failed after the stream failed',
+		originalError,
+		cleanupError,
+	);
 }
 
 function cleanupReleaseReason(error: unknown): Error | boolean | undefined {
@@ -2168,6 +2195,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			let scopeState: DbspScopeState | undefined;
 			let releaseError: Error | boolean | undefined;
 			let cleanupErrorToThrow: unknown;
+			let streamRolledBackBeforeClose = false;
 			try {
 				scopeToken = createScopeToken();
 				scopeState = createScopeState();
@@ -2183,11 +2211,20 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					'BEGIN',
 				);
 				begun = true;
+				scopeState.streamFailureRecovery = async () => {
+					await adapter.rollbackTransactionIfOpen(
+						client,
+						scopeToken,
+						scopeState,
+					);
+					streamRolledBackBeforeClose = true;
+				};
 				yield* adapter.streamWithClient<T>(
 					client,
 					query,
 					chunkSize,
 					scopeToken,
+					scopeState.streamFailureRecovery,
 				);
 				adapter.closeScopeAndAssertChildren(scopeState);
 				await adapter.drainScopeWork(scopeState);
@@ -2208,7 +2245,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					transactionError = scopeError;
 				}
 				streamFailed = true;
-				if (begun && !committed) {
+				if (begun && !committed && !streamRolledBackBeforeClose) {
 					try {
 						await adapter.rollbackTransactionIfOpen(
 							client,
@@ -2228,7 +2265,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			} finally {
 				// On early break, yield* returns without reaching COMMIT.
 				// ROLLBACK the open transaction to avoid leaking it to the pool.
-				if (begun && !committed && !streamFailed) {
+				if (
+					begun &&
+					!committed &&
+					!streamFailed &&
+					!streamRolledBackBeforeClose
+				) {
 					adapter.closeScope(scopeState);
 					try {
 						await adapter.rollbackTransactionIfOpen(
@@ -2263,6 +2305,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		query: CompiledQuery<T>,
 		chunkSize: number,
 		allowedScopeToken?: DbspScopeToken,
+		recoverBeforeCloseOnError?: () => Promise<void>,
 	): AsyncIterableIterator<T> {
 		// Generate unique cursor name
 		const cursorName = generateCursorName();
@@ -2307,6 +2350,22 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			streamError = error;
 			throw error;
 		} finally {
+			if (
+				streamError !== undefined &&
+				recoverBeforeCloseOnError !== undefined
+			) {
+				try {
+					await recoverBeforeCloseOnError();
+				} catch (cleanupErr) {
+					raise(
+						createCleanupFailureError(
+							'PostgreSQL stream cleanup failed: rollback before CLOSE cursor failed after the stream failed',
+							streamError,
+							cleanupErr,
+						),
+					);
+				}
+			}
 			// Always close the cursor
 			try {
 				await this.executeConnectionStatement(
@@ -2320,13 +2379,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 			} catch (cleanupErr) {
 				if (streamError !== undefined) {
-					raise(
-						createCleanupFailureError(
-							'PostgreSQL stream cleanup failed: CLOSE cursor failed after the stream failed',
-							streamError,
-							cleanupErr,
-						),
-					);
+					raise(addCleanupErrorToOriginal(streamError, cleanupErr));
 				}
 				raise(
 					createCleanupOnlyError(
@@ -2350,6 +2403,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				query,
 				chunkSize,
 				this.scopeToken,
+				this.scopeState?.streamFailureRecovery,
 			);
 			return;
 		}
@@ -2395,8 +2449,24 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 
 		let completed = false;
 		let streamError: unknown;
+		let savepointRolledBackBeforeClose = false;
+		const recoverStreamFailure = async () => {
+			const rolledBack = await this.rollbackSavepoint(
+				client,
+				savepointName,
+				scopeToken,
+				scopeState,
+			);
+			savepointRolledBackBeforeClose ||= rolledBack;
+		};
 		try {
-			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
+			yield* this.streamWithClient<T>(
+				client,
+				query,
+				chunkSize,
+				scopeToken,
+				recoverStreamFailure,
+			);
 			completed = true;
 		} catch (error) {
 			streamError = error;
@@ -2432,12 +2502,21 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					}
 				} else {
 					try {
-						await this.rollbackAndReleaseSavepoint(
-							client,
-							savepointName,
-							scopeToken,
-							scopeState,
-						);
+						if (savepointRolledBackBeforeClose) {
+							await this.releaseSavepoint(
+								client,
+								savepointName,
+								scopeToken,
+								scopeState,
+							);
+						} else {
+							await this.rollbackAndReleaseSavepoint(
+								client,
+								savepointName,
+								scopeToken,
+								scopeState,
+							);
+						}
 					} catch (cleanupErr) {
 						if (streamError !== undefined) {
 							raise(
@@ -2474,6 +2553,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let releaseScope: (() => void) | undefined;
 		let scopeToken: DbspScopeToken | undefined;
 		let scopeState: DbspScopeState | undefined;
+		let streamRolledBackBeforeClose = false;
 		try {
 			scopeToken = createScopeToken();
 			scopeState = createScopeState();
@@ -2485,7 +2565,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				'BEGIN',
 			);
 			begun = true;
-			yield* this.streamWithClient<T>(client, query, chunkSize, scopeToken);
+			scopeState.streamFailureRecovery = async () => {
+				await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
+				streamRolledBackBeforeClose = true;
+			};
+			yield* this.streamWithClient<T>(
+				client,
+				query,
+				chunkSize,
+				scopeToken,
+				scopeState.streamFailureRecovery,
+			);
 			this.closeScopeAndAssertChildren(scopeState);
 			await this.drainScopeWork(scopeState);
 			this.throwIfScopePoisoned(scopeState);
@@ -2505,7 +2595,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				transactionError = scopeError;
 			}
 			streamFailed = true;
-			if (begun && !committed) {
+			if (begun && !committed && !streamRolledBackBeforeClose) {
 				try {
 					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				} catch (rollbackErr) {
@@ -2518,7 +2608,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			}
 			throw transactionError;
 		} finally {
-			if (begun && !committed && !streamFailed) {
+			if (
+				begun &&
+				!committed &&
+				!streamFailed &&
+				!streamRolledBackBeforeClose
+			) {
 				this.closeScope(scopeState);
 				try {
 					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
@@ -2796,6 +2891,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			throw error;
 		}
 		let scopeFailure: DbspScopeFailure | undefined;
+		let savepointRolledBackBeforeClose = false;
 		try {
 			await this.executeConnectionStatement(
 				client,
@@ -2814,6 +2910,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			releaseScope({ error });
 			throw error;
 		}
+		scopeState.streamFailureRecovery = async () => {
+			const rolledBack = await this.rollbackSavepoint(
+				client,
+				savepointName,
+				scopeToken,
+				scopeState,
+			);
+			savepointRolledBackBeforeClose ||= rolledBack;
+		};
 
 		try {
 			let result: T;
@@ -2831,12 +2936,15 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				}
 				let cleanupErr: unknown;
 				try {
-					const rolledBack = await this.rollbackSavepoint(
-						client,
-						savepointName,
-						scopeToken,
-						scopeState,
-					);
+					let rolledBack = savepointRolledBackBeforeClose;
+					if (!rolledBack) {
+						rolledBack = await this.rollbackSavepoint(
+							client,
+							savepointName,
+							scopeToken,
+							scopeState,
+						);
+					}
 					await this.drainScopeChildren(scopeState);
 					if (rolledBack) {
 						await this.releaseSavepoint(
@@ -2913,6 +3021,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		let scopeToken: DbspScopeToken | undefined;
 		let scopeState: DbspScopeState | undefined;
 		let scopeFailure: DbspScopeFailure | undefined;
+		let transactionRolledBackBeforeClose = false;
 		try {
 			scopeToken = createScopeToken();
 			scopeState = createScopeState();
@@ -2929,6 +3038,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				'BEGIN',
 			);
 			begun = true;
+			scopeState.streamFailureRecovery = async () => {
+				await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
+				transactionRolledBackBeforeClose = true;
+			};
 			const txAdapter = this.createManagedClientAdapter(
 				client,
 				scopeToken,
@@ -2954,7 +3067,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			} catch (scopeError) {
 				transactionError = scopeError;
 			}
-			if (begun && !committed) {
+			if (begun && !committed && !transactionRolledBackBeforeClose) {
 				try {
 					await this.rollbackTransactionIfOpen(client, scopeToken, scopeState);
 				} catch (rollbackErr) {

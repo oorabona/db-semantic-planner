@@ -128,6 +128,7 @@ function makeDDLAdapter() {
 		withSchema: vi.fn().mockReturnThis(),
 		validateIdentifier: vi.fn(),
 		generateDDL: vi.fn(),
+		inTransaction: false,
 		dbCasing: 'snake_case' as const,
 	} as unknown as Adapter<unknown>;
 	return {
@@ -481,6 +482,26 @@ describe('orm.tables.X.indexes.create()', () => {
 			'CREATE INDEX CONCURRENTLY cannot run inside a transaction',
 		);
 	});
+
+	it('refuses CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateCreateIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+		const idxProxy = wrapTablesProxyWithDDL(
+			{ users: {} },
+			adapter,
+			undefined,
+		) as Record<string, Record<string, Record<string, unknown>>>;
+
+		await expect(
+			(idxProxy.users.indexes.create as (o: unknown) => Promise<void>)({
+				name: 'idx_x',
+				columns: ['id'],
+				concurrently: true,
+			}),
+		).rejects.toThrow('inTransaction: boolean');
+		expect(generateCreateIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
 });
 
 // -----------------------------------------------------------------------
@@ -566,6 +587,17 @@ describe('orm.tables.X.indexes.drop()', () => {
 		).rejects.toThrow(
 			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
 		);
+	});
+
+	it('refuses CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+
+		await expect(
+			getIndexes(adapter).drop('idx_users_email', { concurrently: true }),
+		).rejects.toThrow('inTransaction: boolean');
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
 	});
 });
 
@@ -738,6 +770,24 @@ describe('orm.ddl.dropIndex()', () => {
 		).rejects.toThrow(
 			'DROP INDEX CONCURRENTLY cannot run inside a transaction',
 		);
+		expect(generateDropIndex).not.toHaveBeenCalled();
+		expect(executeDDL).not.toHaveBeenCalled();
+	});
+
+	it('refuses DROP INDEX CONCURRENTLY when adapter omits inTransaction', async () => {
+		const { adapter, executeDDL, generateDropIndex } = makeDDLAdapter();
+		delete (adapter as { inTransaction?: boolean }).inTransaction;
+		const orm = createOrmInstance(
+			{ tables: {} } as never,
+			false,
+			{},
+			adapter,
+			undefined,
+		);
+
+		await expect(
+			orm.ddl.dropIndex('idx_foo', { concurrently: true }),
+		).rejects.toThrow('inTransaction: boolean');
 		expect(generateDropIndex).not.toHaveBeenCalled();
 		expect(executeDDL).not.toHaveBeenCalled();
 	});

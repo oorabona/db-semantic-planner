@@ -73,6 +73,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		} satisfies AdapterCapabilities,
 		dialectCapabilities: dialectCaps,
 		dbCasing,
+		inTransaction: false,
 		compile: notImplemented,
 		compileWithIncludes: notImplemented,
 		compileSubqueryInclude: notImplemented,

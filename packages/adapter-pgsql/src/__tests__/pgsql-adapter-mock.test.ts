@@ -2941,6 +2941,23 @@ describe('PgsqlAdapter.executeRaw — error path', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
+	it('uses CSPRNG-shaped savepoint names for protected borrowed-client statements', async () => {
+		const client = makeClient();
+		const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+		await adapter.executeRaw('SELECT first');
+		await adapter.executeRaw('SELECT second');
+
+		const savepointNames = queryCalls(client.query as ReturnType<typeof vi.fn>)
+			.filter((sql) => /^SAVEPOINT dbsp_savepoint_/.test(sql))
+			.map((sql) => sql.replace(/^SAVEPOINT /, ''));
+		expect(savepointNames).toHaveLength(2);
+		expect(new Set(savepointNames).size).toBe(2);
+		for (const name of savepointNames) {
+			expect(name).toMatch(/^dbsp_savepoint_[0-9a-f]{32}$/);
+		}
+	});
+
 	it('does not expose rows from a multi-command raw result in the surfaced error', async () => {
 		const literal = 'dbsp_secret_literal_multi_command_mock';
 		const multiResult = [
@@ -3678,13 +3695,18 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		expect(client.release).not.toHaveBeenCalled();
 	});
 
-	it('surfaces a FETCH PostgreSQL error and still closes the cursor on a poisoned scope', async () => {
+	it('surfaces a FETCH PostgreSQL error when CLOSE then fails with 25P02', async () => {
 		const fetchError = Object.assign(new Error('division by zero'), {
 			code: '22012',
 		});
+		const closeError = Object.assign(
+			new Error('current transaction is aborted'),
+			{ code: '25P02' },
+		);
 		const query = vi.fn(async (input: MockQueryInput) => {
 			const sql = queryText(input);
 			if (/^FETCH /.test(sql)) throw fetchError;
+			if (/^CLOSE /.test(sql)) throw closeError;
 			return { rows: [], rowCount: 0 } as QueryResult;
 		});
 		const client = { query, release: vi.fn() } as unknown as PoolClient;
@@ -3697,18 +3719,25 @@ describe('PgsqlAdapter.stream — borrowed client contract', () => {
 		const error = await captureRejection(() => iter.next());
 
 		expect(error).toBe(fetchError);
+		expect((error as { readonly cleanupError?: unknown }).cleanupError).toBe(
+			closeError,
+		);
 		expect(error).not.toBeInstanceOf(PgsqlTransactionAbortedError);
 		const calls = queryCalls(query);
 		const fetchIndex = calls.findIndex((sql) => /^FETCH /.test(sql));
 		const closeIndex = calls.findIndex((sql) => /^CLOSE /.test(sql));
+		const rollbackIndex = calls.findIndex((sql) =>
+			/^ROLLBACK TO SAVEPOINT /.test(sql),
+		);
 		expect(fetchIndex).toBeGreaterThan(-1);
-		expect(closeIndex).toBeGreaterThan(fetchIndex);
+		expect(rollbackIndex).toBeGreaterThan(fetchIndex);
+		expect(closeIndex).toBeGreaterThan(rollbackIndex);
 		expect(calls).toEqual([
 			expect.stringMatching(/^SAVEPOINT dbsp_savepoint_/),
 			expect.stringMatching(/^DECLARE /),
 			expect.stringMatching(/^FETCH FORWARD 100 FROM /),
-			expect.stringMatching(/^CLOSE /),
 			expect.stringMatching(/^ROLLBACK TO SAVEPOINT dbsp_savepoint_/),
+			expect.stringMatching(/^CLOSE /),
 			expect.stringMatching(/^RELEASE SAVEPOINT dbsp_savepoint_/),
 		]);
 		expect(client.release).not.toHaveBeenCalled();

@@ -37,7 +37,7 @@ describe('orm.transaction() promise contract', () => {
 
 	it('rejects rather than throwing when the adapter throws synchronously', async () => {
 		const adapter = createMockAdapter();
-		// The mock declares supportsTransactions: false, and core refuses before it
+		// The mock does not declare supportsTransactions: true, and core refuses before it
 		// ever reaches the adapter — which would make this test pass for the wrong
 		// reason. Say the adapter supports them, so the transaction path is real.
 		(
@@ -547,7 +547,9 @@ describe('orm-instance coverage', () => {
 				error = caught;
 			}
 			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toContain('supportsTransactions: false');
+			expect((error as Error).message).toContain(
+				'capabilities.supportsTransactions: true',
+			);
 			expect((error as Error).message).not.toContain('managedTransactions');
 			expect(transactionSpy).not.toHaveBeenCalled();
 		});

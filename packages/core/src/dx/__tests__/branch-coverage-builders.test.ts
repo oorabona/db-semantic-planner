@@ -845,7 +845,9 @@ describe('createOrmInstance — transaction and raw error branches', () => {
 			error = caught;
 		}
 		expect(error).toBeInstanceOf(Error);
-		expect((error as Error).message).toContain('supportsTransactions: false');
+		expect((error as Error).message).toContain(
+			'capabilities.supportsTransactions: true',
+		);
 		expect((error as Error).message).not.toContain('managedTransactions');
 	});
 

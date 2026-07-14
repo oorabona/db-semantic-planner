@@ -133,6 +133,84 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 		}
 	});
 
+	it('does not let guessed dbsp-pattern savepoints shadow protected statement rollback', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const guessedSavepoints = Array.from(
+			{ length: 1024 },
+			(_unused, index) => `SAVEPOINT dbsp_savepoint_${index + 1}`,
+		).join(';\n');
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			await expect(
+				adapter.executeRaw(`
+					INSERT INTO "${SCHEMA}".items (id, label)
+					VALUES (901, 'caller guessed dbsp savepoint');
+					${guessedSavepoints}
+				`),
+			).rejects.toThrow(/Transaction control|multi-command/);
+
+			const inside = await client.query<{ id: number }>(
+				`SELECT id FROM "${SCHEMA}".items WHERE id = $1`,
+				[901],
+			);
+			expect(inside.rows).toEqual([]);
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+
+		expect(await itemIds()).toEqual([]);
+	});
+
+	it('creates distinct random dbsp savepoint names on one borrowed connection', async () => {
+		const pool = await getTestPool();
+		const client = await pool.connect();
+		const originalQuery = client.query.bind(client) as (
+			...args: unknown[]
+		) => Promise<unknown>;
+		const savepointNames: string[] = [];
+		(client as { query: (...args: unknown[]) => Promise<unknown> }).query =
+			async (...args: unknown[]) => {
+				const sqlText = queryText(args[0]);
+				const match = /^SAVEPOINT (dbsp_savepoint_\S+)$/.exec(sqlText);
+				if (match) {
+					savepointNames.push(match[1]!);
+				}
+				return originalQuery(...args);
+			};
+		let rolledBack = false;
+		try {
+			await client.query('BEGIN');
+			const adapter = createPgsqlAdapter(client, { borrowedClient: true });
+
+			await adapter.executeRaw('SELECT 1');
+			await adapter.executeRaw('SELECT 2');
+
+			expect(savepointNames).toHaveLength(2);
+			expect(new Set(savepointNames).size).toBe(2);
+			for (const name of savepointNames) {
+				expect(name).toMatch(/^dbsp_savepoint_[0-9a-f]{32}$/);
+			}
+
+			await client.query('ROLLBACK');
+			rolledBack = true;
+		} finally {
+			if (!rolledBack) {
+				await client.query('ROLLBACK').catch(() => undefined);
+			}
+			client.release();
+		}
+	});
+
 	it('uses a savepoint inside the caller transaction and preserves caller work after callback failure', async () => {
 		const pool = await getTestPool();
 		const client = await pool.connect();
@@ -886,10 +964,8 @@ describe('PgsqlAdapter borrowed client ownership', () => {
 
 			expect(thrown).toBeInstanceOf(Error);
 			const message = (thrown as Error).message;
-			expect(message).toContain('supportsTransactions: false');
-			expect(message).toContain(
-				'adapter configuration that supports transactions',
-			);
+			expect(message).toContain('capabilities.supportsTransactions: true');
+			expect(message).toContain('implements transaction() and withSchema()');
 			expect(message).not.toContain('managedTransactions');
 			expect(message).not.toContain('PoolClient');
 			expect(callback).not.toHaveBeenCalled();

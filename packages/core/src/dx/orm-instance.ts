@@ -108,9 +108,38 @@ function createUnsupportedTransactionError(): ExecutionError {
 	return new ExecutionError({
 		operation: 'transaction()',
 		reason:
-			'The adapter declares supportsTransactions: false for this ORM instance.',
-		fix: 'Use an adapter configuration that supports transactions.',
+			'The adapter does not declare capabilities.supportsTransactions: true for this ORM instance.',
+		fix: 'Use an adapter that implements transaction() and withSchema(), and declare adapter.capabilities.supportsTransactions: true.',
 	});
+}
+
+function adapterTransactionState(
+	adapter: Adapter<unknown>,
+	operation: string,
+	statement: string,
+): boolean {
+	const inTransaction = (adapter as { readonly inTransaction?: unknown })
+		.inTransaction;
+	if (typeof inTransaction !== 'boolean') {
+		throw new InvalidOperationError(
+			operation,
+			`${statement} requires an adapter that exposes inTransaction: boolean; dbsp refuses to run it when transaction state is unknown.`,
+		);
+	}
+	return inTransaction;
+}
+
+function assertOutsideTransaction(
+	adapter: Adapter<unknown>,
+	operation: string,
+	statement: string,
+): void {
+	if (adapterTransactionState(adapter, operation, statement)) {
+		throw new InvalidOperationError(
+			operation,
+			`${statement} cannot run inside a transaction block`,
+		);
+	}
 }
 
 function generateAlterColumnSQL(
@@ -220,11 +249,8 @@ function buildIndexAPI(
 	return {
 		async create(opts: CreateIndexOptions): Promise<void> {
 			const a = requireAdapter();
-			if (opts.concurrently && a.inTransaction) {
-				throw new InvalidOperationError(
-					'createIndex',
-					'CREATE INDEX CONCURRENTLY cannot run inside a transaction block',
-				);
+			if (opts.concurrently) {
+				assertOutsideTransaction(a, 'createIndex', 'CREATE INDEX CONCURRENTLY');
 			}
 			const sql = a.generateCreateIndex
 				? a.generateCreateIndex(tableName, opts, schemaName)
@@ -234,11 +260,8 @@ function buildIndexAPI(
 
 		async drop(name: string, options?: DropIndexOptions): Promise<void> {
 			const a = requireAdapter();
-			if (options?.concurrently && a.inTransaction) {
-				throw new InvalidOperationError(
-					'dropIndex',
-					'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
-				);
+			if (options?.concurrently) {
+				assertOutsideTransaction(a, 'dropIndex', 'DROP INDEX CONCURRENTLY');
 			}
 			// Every other generator on this port takes the schema as an explicit
 			// parameter — generateCreateIndex, generateTruncate, generateVacuum,
@@ -326,12 +349,7 @@ function buildTableDDL(
 
 		async vacuum(options?: VacuumOptions): Promise<void> {
 			const a = requireAdapter();
-			if (a.inTransaction) {
-				throw new InvalidOperationError(
-					'vacuum',
-					'VACUUM cannot run inside a transaction block',
-				);
-			}
+			assertOutsideTransaction(a, 'vacuum', 'VACUUM');
 			const sql = a.generateVacuum
 				? a.generateVacuum(tableName, schemaName, options)
 				: generateVacuumSQL(tableName, schemaName, options);
@@ -969,10 +987,11 @@ export function createOrmInstance<DB = Record<string, unknown>>(
 				// shortcut. PostgreSQL cannot run DROP INDEX CONCURRENTLY inside a
 				// transaction block, and reaching the database to be told so aborts the
 				// transaction you were in.
-				if (options?.concurrently && adapter.inTransaction) {
-					throw new InvalidOperationError(
+				if (options?.concurrently) {
+					assertOutsideTransaction(
+						adapter,
 						'dropIndex',
-						'DROP INDEX CONCURRENTLY cannot run inside a transaction block',
+						'DROP INDEX CONCURRENTLY',
 					);
 				}
 				// FIND-003: Validate index name and optional schema before building SQL

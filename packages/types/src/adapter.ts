@@ -402,6 +402,12 @@ export interface BaseAdapter {
 	readonly capabilities: AdapterCapabilities;
 
 	/**
+	 * Whether this adapter instance is scoped inside a transaction.
+	 * Compile-only adapters and adapters without an active transaction report false.
+	 */
+	readonly inTransaction: boolean;
+
+	/**
 	 * Dialect capabilities for planner strategy selection.
 	 * Determines which SQL features the adapter's database supports
 	 * (LATERAL JOIN, json_agg, window functions, etc.).
@@ -819,14 +825,6 @@ export interface Adapter<DB = unknown>
 	 * @since DDL-TABLE-001
 	 */
 	executeDDL?(sql: string): Promise<void>;
-
-	/**
-	 * Whether this adapter instance is scoped inside a transaction.
-	 * Used by table DDL methods to guard against unsafe operations (e.g. VACUUM).
-	 *
-	 * @since DDL-TABLE-001
-	 */
-	readonly inTransaction?: boolean;
 }
 
 // ============================================================================
