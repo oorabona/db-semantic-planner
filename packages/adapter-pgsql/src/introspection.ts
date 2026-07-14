@@ -1561,21 +1561,30 @@ function filterTables(
 	tableNames: string[],
 	options?: IntrospectionOptions,
 ): string[] {
-	let result = tableNames;
+	return tableNames.filter((name) =>
+		isTableInIntrospectionScope(name, options),
+	);
+}
 
-	if (options?.include?.length) {
-		result = result.filter((name) =>
-			options.include!.some((pattern) => matchGlob(pattern, name)),
-		);
+export function isTableInIntrospectionScope(
+	tableName: string,
+	options?: IntrospectionOptions,
+): boolean {
+	if (
+		options?.include?.length &&
+		!options.include.some((pattern) => matchGlob(pattern, tableName))
+	) {
+		return false;
 	}
 
-	if (options?.exclude?.length) {
-		result = result.filter(
-			(name) => !options.exclude!.some((pattern) => matchGlob(pattern, name)),
-		);
+	if (
+		options?.exclude?.length &&
+		options.exclude.some((pattern) => matchGlob(pattern, tableName))
+	) {
+		return false;
 	}
 
-	return result;
+	return true;
 }
 
 /** Simple glob matching (supports * wildcard) */
