@@ -719,12 +719,10 @@ describe('introspect', () => {
 
 		const result = await introspect(pool, { schema: 'tenant' });
 
-		const checkQuery = query.mock.calls
-			.map((call) => String(call[0]).replace(/\s+/g, ' ').trim())
-			.find((sql) => sql.includes("c.contype = 'c'"));
-		expect(checkQuery).toContain('JOIN pg_class r ON r.oid = c.conrelid');
-		expect(checkQuery).toContain('r.relname AS raw_table');
-		expect(checkQuery).not.toContain('c.conrelid::regclass::text');
+		// The mock answers as PostgreSQL does: `::regclass::text` renders a quoted,
+		// schema-qualified name, `relname` gives the bare one. Assert the OUTCOME —
+		// that the CHECK is reachable under the table's real name — not the SQL text
+		// that gets there. A query rewritten correctly but differently must still pass.
 		expect(result.tables.get('jobQueue')?.checkConstraints).toEqual([
 			{ name: 'jobQueue_n_check', expression: 'CHECK ((n > 0))' },
 		]);
