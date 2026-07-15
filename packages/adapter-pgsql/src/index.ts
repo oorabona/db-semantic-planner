@@ -200,6 +200,30 @@ export {
 	generateCursorName,
 	type StreamConfig,
 } from './streaming/index.js';
+// ADR-0003 transition planner pack
+export {
+	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
+	type AlterColumnSetNotNullPayload,
+	COLUMN_EXISTS_OBSERVATION,
+	createAlterColumnSetNotNullOperationRuntime,
+	createPgObservationIssuer,
+	createPgTransitionPack,
+	createSetNotNullRule,
+	ENGINE_VERSION_OBSERVATION,
+	NO_NULLS_GUARD,
+	PG_INTROSPECTION_ARTIFACT,
+	PG_OPERATION_PACK_ARTIFACT,
+	PG_RULE_PACK_ARTIFACT,
+	type PgTransitionPackOptions,
+	readPgObservationContext,
+	renderAlterColumnSetNotNullSql,
+	renderNoNullsCheckSql,
+	renderSetNotNullLockSql,
+	SET_NOT_NULL_RULE_ID,
+	type SetNotNullMatch,
+	type SetNotNullRuleOptions,
+} from './transition/index.js';
 // Validation
 export {
 	InvalidIdentifierError,

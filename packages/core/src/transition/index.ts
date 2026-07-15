@@ -4,14 +4,16 @@ import type {
 	ApplyResult,
 	CompareOutcome,
 	ObservationContext,
-	ObservationIssuer,
 	PlanAssessment,
 	ProofClaim,
 	ProvenPlanShape,
 	SemanticArtifactRef,
+	TransitionConnectionPool,
 } from '@dbsp/types';
 
-export type ProvenPlan = ProvenPlanShape & { readonly __proven: unique symbol };
+export type InProcessProvenPlan = ProvenPlanShape & {
+	readonly __inProcessProvenPlan: unique symbol;
+};
 
 export type EstablishedProofClaim = ProofClaim & {
 	readonly assumes: readonly [];
@@ -21,7 +23,7 @@ export type EstablishedProofClaim = ProofClaim & {
 export type ProveOutcome =
 	| {
 			readonly kind: 'proven';
-			readonly plan: ProvenPlan;
+			readonly plan: InProcessProvenPlan;
 			readonly assessment: ApplicableAssessment;
 	  }
 	| {
@@ -38,7 +40,7 @@ export interface Prover {
 	readonly artifact: SemanticArtifactRef;
 	prove(
 		compare: CompareOutcome,
-		issuer: ObservationIssuer,
+		target: TransitionConnectionPool,
 		context: ObservationContext,
 	): Promise<ProveOutcome>;
 }
@@ -47,16 +49,18 @@ export interface Applier {
 	readonly artifact: SemanticArtifactRef;
 	apply(
 		proven: {
-			readonly plan: ProvenPlan;
+			readonly plan: InProcessProvenPlan;
 			readonly assessment: ApplicableAssessment;
 		},
 		policy: ApplyPolicy,
+		target: TransitionConnectionPool,
 	): Promise<ApplyResult>;
 }
 
 export type {
 	ApplicableAssessment,
 	ApplicableEvaluation,
+	ApplyPolicy,
 	Comparator,
 	CompareOutcome,
 	ObservationIssuer,
@@ -69,5 +73,38 @@ export type {
 	RecognitionResult,
 	RuleEvaluation,
 	RuleSupport,
+	SerializedProvenPlan,
+	TransitionCandidate,
 	TransitionRule,
 } from '@dbsp/types';
+export { createApplier } from './applier.js';
+export { createComparator } from './comparator.js';
+export {
+	advisoryObservationId,
+	assumptionId,
+	claimId,
+	evidenceId,
+	semanticArtifactId,
+} from './ids.js';
+export { createProver } from './prover.js';
+export {
+	type ComparatorNameNormalizer,
+	createPackRegistry,
+	type GuardExecutionResult,
+	isOperationRuntime,
+	type OperationFingerprints,
+	type OperationObservation,
+	type OperationResolution,
+	type OperationRuntime,
+	PackRegistry,
+	type RegisteredOperationSemantics,
+	type TransitionConnectionPool,
+	type TransitionExecutionClient,
+	type TransitionPack,
+	type TransitionQueryClient,
+} from './registry.js';
+export {
+	type TransitionRelationalValidationInput,
+	type TransitionRelationalValidationResult,
+	validateTransitionRelationalInvariants,
+} from './validation.js';

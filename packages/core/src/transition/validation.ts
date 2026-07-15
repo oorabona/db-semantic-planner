@@ -1,0 +1,551 @@
+import type {
+	Assumption,
+	GuardedPlanStep,
+	ObservationContext,
+	PhysicalOperation,
+	ProofClaim,
+	ProvenPlanShape,
+	ResourceAddress,
+	TransitionFragment,
+} from '@dbsp/types';
+import { stableJson } from './stable-json.js';
+
+export type TransitionRelationalValidationInput =
+	| {
+			readonly kind: 'fragment';
+			readonly fragment: TransitionFragment;
+			readonly claims: readonly ProofClaim[];
+			readonly assumptions: readonly Assumption[];
+	  }
+	| {
+			readonly kind: 'plan';
+			readonly plan: ProvenPlanShape;
+	  };
+
+export type TransitionRelationalValidationResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly detail: string };
+
+function sameTrustRoot(
+	left: Assumption['asserter'],
+	right: Assumption['asserter'],
+): boolean {
+	return stableJson(left) === stableJson(right);
+}
+
+function sameArtifact(
+	left: Assumption['asserter'],
+	right: Assumption['asserter'],
+): boolean {
+	return sameTrustRoot(left, right);
+}
+
+function sameResource(left: ResourceAddress, right: ResourceAddress): boolean {
+	return stableJson(left) === stableJson(right);
+}
+
+function resourceCovers(
+	covering: readonly ResourceAddress[],
+	target: readonly ResourceAddress[],
+): boolean {
+	return target.every((resource) =>
+		covering.some((candidate) => sameResource(candidate, resource)),
+	);
+}
+
+function refCounts(
+	operations: readonly PhysicalOperation[],
+): ReadonlyMap<string, number> {
+	const counts = new Map<string, number>();
+	for (const operation of operations) {
+		counts.set(operation.ref, (counts.get(operation.ref) ?? 0) + 1);
+	}
+	return counts;
+}
+
+function duplicateOperationRef(
+	counts: ReadonlyMap<string, number>,
+): string | undefined {
+	for (const [ref, count] of counts) {
+		if (count > 1) {
+			return ref;
+		}
+	}
+	return undefined;
+}
+
+function validatesExactlyOneRef(
+	ref: string | undefined,
+	counts: ReadonlyMap<string, number>,
+): boolean {
+	return typeof ref === 'string' && ref.length > 0 && counts.get(ref) === 1;
+}
+
+function validateAssumptionIds(
+	assumptions: readonly Assumption[],
+): TransitionRelationalValidationResult {
+	const seen = new Set<string>();
+	for (const assumption of assumptions) {
+		if (seen.has(assumption.id)) {
+			return {
+				ok: false,
+				detail: `duplicate assumption id ${assumption.id}`,
+			};
+		}
+		seen.add(assumption.id);
+	}
+	return { ok: true };
+}
+
+function validateClaimIdsAndEvidence(
+	plan: ProvenPlanShape,
+): TransitionRelationalValidationResult {
+	const claimIds = new Set<string>();
+	const observationIds = new Set(
+		plan.observations.map((observation) => observation.id as string),
+	);
+	for (const claim of plan.claims) {
+		if (claimIds.has(claim.id)) {
+			return {
+				ok: false,
+				detail: `duplicate claim id ${claim.id}`,
+			};
+		}
+		claimIds.add(claim.id);
+		const conclusionShape = validateClaimConclusionShape(claim);
+		if (!conclusionShape.ok) {
+			return conclusionShape;
+		}
+		for (const evidenceId of claim.supportedBy) {
+			if (!observationIds.has(evidenceId)) {
+				return {
+					ok: false,
+					detail: `claim ${claim.id} supportedBy references missing observation ${evidenceId}`,
+				};
+			}
+		}
+		for (const evidenceId of claim.derivedBy.inputs) {
+			if (!observationIds.has(evidenceId)) {
+				return {
+					ok: false,
+					detail: `claim ${claim.id} derivedBy.inputs references missing observation ${evidenceId}`,
+				};
+			}
+		}
+	}
+	return { ok: true };
+}
+
+function assumptionExists(
+	assumptions: readonly Assumption[],
+	assumptionId: string,
+): boolean {
+	return assumptions.some((assumption) => assumption.id === assumptionId);
+}
+
+function validateClaimConclusionShape(
+	claim: ProofClaim,
+): TransitionRelationalValidationResult {
+	if (
+		claim.derivedBy.conclusion === 'established' &&
+		claim.assumes.length > 0
+	) {
+		return {
+			ok: false,
+			detail: `established claim ${claim.id} must not assume ${claim.assumes.join(', ')}`,
+		};
+	}
+	if (
+		claim.derivedBy.conclusion === 'established-under-assumptions' &&
+		claim.assumes.length === 0
+	) {
+		return {
+			ok: false,
+			detail: `established-under-assumptions claim ${claim.id} must list at least one assumption`,
+		};
+	}
+	return { ok: true };
+}
+
+function validateEstablishedClaim(params: {
+	readonly claimId: string;
+	readonly claims: readonly ProofClaim[];
+	readonly assumptions: readonly Assumption[];
+	readonly requiredAssumptionIds?: readonly string[] | undefined;
+	readonly missingDetail: string;
+	readonly rejectedDetail: (
+		conclusion: ProofClaim['derivedBy']['conclusion'],
+	) => string;
+	readonly missingAssumptionDetail: (assumptionId: string) => string;
+	readonly missingClosureDetail: (assumptionId: string) => string;
+}): TransitionRelationalValidationResult {
+	const {
+		claimId,
+		claims,
+		assumptions,
+		requiredAssumptionIds,
+		missingDetail,
+		rejectedDetail,
+		missingAssumptionDetail,
+		missingClosureDetail,
+	} = params;
+	const claim = claims.find((candidate) => candidate.id === claimId);
+	if (!claim) {
+		return { ok: false, detail: missingDetail };
+	}
+	const conclusionShape = validateClaimConclusionShape(claim);
+	if (!conclusionShape.ok) {
+		return conclusionShape;
+	}
+	if (claim.derivedBy.conclusion === 'established') {
+		return { ok: true };
+	}
+	if (claim.derivedBy.conclusion !== 'established-under-assumptions') {
+		return {
+			ok: false,
+			detail: rejectedDetail(claim.derivedBy.conclusion),
+		};
+	}
+	for (const assumptionId of claim.assumes) {
+		if (!assumptionExists(assumptions, assumptionId)) {
+			return {
+				ok: false,
+				detail: missingAssumptionDetail(assumptionId),
+			};
+		}
+		if (
+			requiredAssumptionIds &&
+			!requiredAssumptionIds.includes(assumptionId)
+		) {
+			return {
+				ok: false,
+				detail: missingClosureDetail(assumptionId),
+			};
+		}
+	}
+	return { ok: true };
+}
+
+function expectedOperationPackTrustRoot(
+	operation: PhysicalOperation,
+): Assumption['asserter'] {
+	return { kind: 'pack', artifact: operation.operationKind.artifact };
+}
+
+function operationPackSemanticsAssumption(
+	assumptions: readonly Assumption[],
+	operation: PhysicalOperation,
+): Assumption | undefined {
+	const expectedAsserter = expectedOperationPackTrustRoot(operation);
+	return assumptions.find(
+		(assumption) =>
+			assumption.class === 'operation-pack-semantics' &&
+			sameArtifact(assumption.asserter, expectedAsserter),
+	);
+}
+
+function validateOperationPackSemanticsAssumption(params: {
+	readonly operation: PhysicalOperation;
+	readonly assumptions: readonly Assumption[];
+	readonly stepId?: string;
+	readonly requiredAssumptionIds?: readonly string[] | undefined;
+}): TransitionRelationalValidationResult {
+	const { operation, assumptions, stepId, requiredAssumptionIds } = params;
+	const assumption = operationPackSemanticsAssumption(assumptions, operation);
+	if (!assumption) {
+		return {
+			ok: false,
+			detail: `operation ${operation.ref} is missing an operation-pack-semantics assumption for ${operation.operationKind.artifact.id}@${operation.operationKind.artifact.version}`,
+		};
+	}
+	if (requiredAssumptionIds && !requiredAssumptionIds.includes(assumption.id)) {
+		return {
+			ok: false,
+			detail: `step ${stepId ?? operation.ref} is missing operation-pack-semantics assumption ${assumption.id} from the step assumption closure`,
+		};
+	}
+	return { ok: true };
+}
+
+function validateBinding(params: {
+	readonly guard: GuardedPlanStep['guards'][number];
+	readonly claims: readonly ProofClaim[];
+	readonly assumptions: readonly Assumption[];
+	readonly requiredAssumptionIds?: readonly string[];
+	readonly expectedAsserter: Assumption['asserter'];
+}): TransitionRelationalValidationResult {
+	const {
+		guard,
+		claims,
+		assumptions,
+		requiredAssumptionIds,
+		expectedAsserter,
+	} = params;
+	if (guard.protocol.kind === 'impossible' || !guard.protocol.binding) {
+		return {
+			ok: false,
+			detail: `guard ${guard.predicate.kind} has an impossible protocol`,
+		};
+	}
+	const binding = guard.protocol.binding;
+	if (binding.kind === 'stable-identity') {
+		return validateEstablishedClaim({
+			claimId: binding.identityClaim,
+			claims,
+			assumptions,
+			requiredAssumptionIds,
+			missingDetail: `stable-identity binding references missing or unestablished claim ${binding.identityClaim}`,
+			rejectedDetail: (conclusion) =>
+				`stable-identity binding references ${conclusion} claim ${binding.identityClaim}`,
+			missingAssumptionDetail: (assumptionId) =>
+				`stable-identity binding claim ${binding.identityClaim} assumes missing assumption ${assumptionId}`,
+			missingClosureDetail: (assumptionId) =>
+				`stable-identity binding claim ${binding.identityClaim} assumes ${assumptionId}, which is missing from the step assumption closure`,
+		});
+	}
+	if (binding.kind !== 'external-ddl-exclusion') {
+		return {
+			ok: false,
+			detail: `guard ${guard.predicate.kind} has unbindable target protocol`,
+		};
+	}
+
+	const assumption = assumptions.find(
+		(candidate) => candidate.id === binding.assumption,
+	);
+	if (!assumption) {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion binding references missing assumption ${binding.assumption}`,
+		};
+	}
+	if (assumption.class !== 'external-ddl-exclusion') {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion binding ${binding.assumption} references assumption class ${assumption.class}`,
+		};
+	}
+	if (!sameTrustRoot(assumption.asserter, expectedAsserter)) {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion assumption ${binding.assumption} has the wrong trust root`,
+		};
+	}
+	if (!resourceCovers(assumption.scope, binding.scope)) {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion assumption ${binding.assumption} does not cover its binding scope`,
+		};
+	}
+	if (!resourceCovers(assumption.scope, guard.predicate.scope)) {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion assumption ${binding.assumption} does not cover its guard scope`,
+		};
+	}
+	if (
+		requiredAssumptionIds &&
+		!requiredAssumptionIds.includes(binding.assumption)
+	) {
+		return {
+			ok: false,
+			detail: `external-ddl-exclusion assumption ${binding.assumption} is missing from the step assumption closure`,
+		};
+	}
+	return { ok: true };
+}
+
+function validateObservationContexts(
+	contexts: readonly ObservationContext[],
+): TransitionRelationalValidationResult {
+	if (contexts.length === 0) {
+		return {
+			ok: false,
+			detail: 'plan contains no durable evidence context',
+		};
+	}
+	const expected = stableJson(contexts[0]);
+	for (const context of contexts.slice(1)) {
+		if (stableJson(context) !== expected) {
+			return {
+				ok: false,
+				detail: 'plan evidence observations do not share one context',
+			};
+		}
+	}
+	return { ok: true };
+}
+
+function validateFragment(
+	fragment: TransitionFragment,
+	claims: readonly ProofClaim[],
+	assumptions: readonly Assumption[],
+): TransitionRelationalValidationResult {
+	const assumptionIds = validateAssumptionIds(assumptions);
+	if (!assumptionIds.ok) {
+		return assumptionIds;
+	}
+	const counts = refCounts(fragment.operations);
+	const duplicate = duplicateOperationRef(counts);
+	if (duplicate) {
+		return {
+			ok: false,
+			detail: `duplicate operation ref ${duplicate}`,
+		};
+	}
+	for (const obligation of fragment.obligations) {
+		if (!validatesExactlyOneRef(obligation.appliesTo, counts)) {
+			return {
+				ok: false,
+				detail: `proof obligation ${obligation.proposition.kind} has missing or dangling appliesTo`,
+			};
+		}
+	}
+	for (const operation of fragment.operations) {
+		const operationPackAssumption = validateOperationPackSemanticsAssumption({
+			operation,
+			assumptions,
+		});
+		if (!operationPackAssumption.ok) {
+			return operationPackAssumption;
+		}
+	}
+	for (const guard of fragment.guards) {
+		if (!validatesExactlyOneRef(guard.appliesTo, counts)) {
+			return {
+				ok: false,
+				detail: `guard ${guard.predicate.kind} has missing or dangling appliesTo`,
+			};
+		}
+		if (guard.protocol.kind === 'impossible') {
+			return {
+				ok: false,
+				detail: `guard ${guard.predicate.kind} has an impossible protocol`,
+			};
+		}
+		const binding = validateBinding({
+			guard,
+			claims,
+			assumptions,
+			expectedAsserter: { kind: 'pack', artifact: fragment.generatedBy.pack },
+		});
+		if (!binding.ok) {
+			return binding;
+		}
+	}
+	return { ok: true };
+}
+
+function validatePlan(
+	plan: ProvenPlanShape,
+): TransitionRelationalValidationResult {
+	const assumptionIds = validateAssumptionIds(plan.assumptions);
+	if (!assumptionIds.ok) {
+		return assumptionIds;
+	}
+	const claimEvidence = validateClaimIdsAndEvidence(plan);
+	if (!claimEvidence.ok) {
+		return claimEvidence;
+	}
+	const operations = plan.steps.map((step) => step.operation);
+	const counts = refCounts(operations);
+	const duplicate = duplicateOperationRef(counts);
+	if (duplicate) {
+		return {
+			ok: false,
+			detail: `duplicate operation ref ${duplicate}`,
+		};
+	}
+	const claimIds = new Set(plan.claims.map((claim) => claim.id));
+	const assumptionIdSet = new Set(
+		plan.assumptions.map((assumption) => assumption.id),
+	);
+	for (const step of plan.steps) {
+		const operationPackAssumption = validateOperationPackSemanticsAssumption({
+			operation: step.operation,
+			assumptions: plan.assumptions,
+			requiredAssumptionIds: step.restsOnAssumptions,
+			stepId: step.stepId,
+		});
+		if (!operationPackAssumption.ok) {
+			return operationPackAssumption;
+		}
+		for (const claimId of step.requiredClaims) {
+			if (!claimIds.has(claimId)) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires missing claim ${claimId}`,
+				};
+			}
+			const requiredClaim = validateEstablishedClaim({
+				claimId,
+				claims: plan.claims,
+				assumptions: plan.assumptions,
+				requiredAssumptionIds: step.restsOnAssumptions,
+				missingDetail: `step ${step.stepId} requires missing claim ${claimId}`,
+				rejectedDetail: (conclusion) =>
+					`step ${step.stepId} requires ${conclusion} claim ${claimId}`,
+				missingAssumptionDetail: (assumptionId) =>
+					`step ${step.stepId} required claim ${claimId} assumes missing assumption ${assumptionId}`,
+				missingClosureDetail: (assumptionId) =>
+					`step ${step.stepId} required claim ${claimId} assumes ${assumptionId}, which is missing from the step assumption closure`,
+			});
+			if (!requiredClaim.ok) {
+				return requiredClaim;
+			}
+		}
+		for (const assumptionId of step.restsOnAssumptions) {
+			if (!assumptionIdSet.has(assumptionId)) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} references missing assumption ${assumptionId}`,
+				};
+			}
+		}
+		for (const guard of step.guards) {
+			if (guard.appliesTo !== step.operation.ref) {
+				return {
+					ok: false,
+					detail: `guard ${guard.predicate.kind} applies to ${guard.appliesTo}, not step operation ${step.operation.ref}`,
+				};
+			}
+			if (!validatesExactlyOneRef(guard.appliesTo, counts)) {
+				return {
+					ok: false,
+					detail: `guard ${guard.predicate.kind} has missing or dangling appliesTo`,
+				};
+			}
+			const binding = validateBinding({
+				guard,
+				claims: plan.claims,
+				assumptions: plan.assumptions,
+				requiredAssumptionIds: step.restsOnAssumptions,
+				expectedAsserter: {
+					kind: 'pack',
+					artifact: step.selectionRationale.chosen.pack,
+				},
+			});
+			if (!binding.ok) {
+				return binding;
+			}
+		}
+	}
+	const contexts = plan.observations
+		.filter((observation) => observation.role === 'evidence')
+		.map((observation) => observation.context);
+	return validateObservationContexts(contexts);
+}
+
+/**
+ * Diagnostic consistency check for transition fragments and already-trusted,
+ * in-process plans. For plan inputs this is not an untrusted serialized-plan
+ * validator; apply() first requires the module-private minting capability, and
+ * any later plan failure is a prover bug.
+ */
+export function validateTransitionRelationalInvariants(
+	input: TransitionRelationalValidationInput,
+): TransitionRelationalValidationResult {
+	return input.kind === 'fragment'
+		? validateFragment(input.fragment, input.claims, input.assumptions)
+		: validatePlan(input.plan);
+}

@@ -1,11 +1,19 @@
 /**
- * > ProvenPlanShape is the serializable structural shape a Prover may brand in @dbsp/core after validating the following relational invariants at runtime (they are beyond structural typing).
+ * ProvenPlanShape is the serializable audit/dump shape of a plan the prover can
+ * derive. It is not an apply credential: runtime safety comes from @dbsp/core
+ * apply() accepting only an InProcessProvenPlan minted by this module instance's
+ * prove() through a module-private WeakSet identity capability plus deep-freeze.
  *
+ * A serialized, cloned, or hand-forged shape is not authorized for apply(). A
+ * separate future adoptSerializedPlan(serialized, observationContext) API
+ * (stage: identity & adoption) will re-derive an in-process plan from fresh
+ * observations; apply() must not be overloaded to accept serialized data.
+ *
+ * The derived plan shape is expected to satisfy these relational invariants,
+ * which are beyond structural typing:
  * - Every ApplyGuard.appliesTo and ProofObligation.appliesTo matches exactly one PhysicalOperation.ref in the same step/fragment (no dangling or duplicate ref).
  * - Every external-ddl-exclusion binding's AssumptionId is present in the step's restsOnAssumptions closure and in GuardedPlan.assumptions.
  * - Journal record stepIds are consistent with intent.stepId; ApplyResult.observations is a superset of every ObservedOutcomeRecord.observations.
- *
- * A persisted or reloaded plan is a GuardedPlan and must be re-proven before apply; proof is never trusted across serialization.
  */
 import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
@@ -48,6 +56,7 @@ export type StepOutcome =
 	| 'completed'
 	| 'guard-failed'
 	| 'guard-timeout'
+	| 'context-mismatch'
 	| 'partially-applied'
 	| 'unknown-step-result';
 
@@ -70,7 +79,11 @@ type CompletedStepJournal = StepJournalBase &
 	);
 
 type ObservedNonCompletionStepJournal = StepJournalBase & {
-	readonly outcome: 'guard-failed' | 'guard-timeout' | 'partially-applied';
+	readonly outcome:
+		| 'guard-failed'
+		| 'guard-timeout'
+		| 'context-mismatch'
+		| 'partially-applied';
 	readonly observedOutcome: ObservedOutcomeRecord;
 	readonly transactionalCompletion?: never;
 	readonly recovery?: readonly RecoveryArtefact[];
@@ -126,3 +139,10 @@ export interface ProvenPlanStep extends Omit<GuardedPlanStep, 'guards'> {
 export interface ProvenPlanShape extends Omit<GuardedPlan, 'steps'> {
 	readonly steps: readonly ProvenPlanStep[];
 }
+
+/**
+ * Plain serializable audit/dump format. A future
+ * adoptSerializedPlan(serialized, observationContext) API will re-derive an
+ * InProcessProvenPlan; apply() must not accept this shape directly.
+ */
+export type SerializedProvenPlan = ProvenPlanShape;

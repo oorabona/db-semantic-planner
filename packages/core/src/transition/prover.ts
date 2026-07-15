@@ -1,0 +1,926 @@
+import type {
+	AdvisoryObservation,
+	ApplicableAssessment,
+	Assumption,
+	ClaimId,
+	CompareOutcome,
+	EvidenceObservation,
+	ObservationContext,
+	ObservationIssuer,
+	ObservationRequest,
+	OutcomeReason,
+	PhysicalOperation,
+	PlanAssessment,
+	ProofClaim,
+	ProofObligation,
+	ProvenApplyGuard,
+	ProvenPlanShape,
+	ResourceAddress,
+	RuleRef,
+	SemanticArtifactRef,
+	TransitionCandidate,
+	TransitionConnectionPool,
+	TransitionFragment,
+	TransitionQueryClient,
+	TransitionRule,
+} from '@dbsp/types';
+import { claimId, semanticArtifactId } from './ids.js';
+import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
+import { mintInProcessPlan } from './minting.js';
+import type { PackRegistry, RegisteredOperationSemantics } from './registry.js';
+import { stableJson } from './stable-json.js';
+import { validateTransitionRelationalInvariants } from './validation.js';
+
+const PROVER_ARTIFACT: SemanticArtifactRef = {
+	id: semanticArtifactId('dbsp.core.transition.prover'),
+	version: '0.1.0',
+};
+
+function sameArtifact(
+	left: SemanticArtifactRef,
+	right: SemanticArtifactRef,
+): boolean {
+	return left.id === right.id && left.version === right.version;
+}
+
+function sameScope(
+	left: readonly ResourceAddress[],
+	right: readonly ResourceAddress[],
+): boolean {
+	return stableJson(left) === stableJson(right);
+}
+
+function blockedAssessment(reason: OutcomeReason): PlanAssessment {
+	return {
+		decision: 'blocked',
+		assurance: 'unproven',
+		lifecycle: 'planned',
+		continuation: 'replan-required',
+		reasons: [reason],
+	};
+}
+
+function applicableAssessment(
+	claim: ClaimId,
+	assumptions: readonly Assumption[],
+): ApplicableAssessment {
+	return {
+		decision: 'applicable',
+		assurance:
+			assumptions.length === 0 ? 'established' : 'accepted-under-assumptions',
+		lifecycle: 'planned',
+		continuation: 'none',
+		reasons: [
+			{
+				code: 'proven-applicable',
+				claim,
+				scope: [],
+			},
+		],
+	};
+}
+
+function uncomposable(
+	fragments: readonly TransitionFragment[],
+	detail: string,
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'uncomposable',
+		fragments: fragments.map((fragment) => fragment.generatedBy),
+		scope: [],
+		detail,
+	});
+}
+
+function uncomposableCandidates(
+	candidates: readonly TransitionCandidate[],
+	detail: string,
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'uncomposable',
+		fragments: candidateRefs(candidates),
+		scope: [],
+		detail,
+	});
+}
+
+function artifactMismatch(
+	artifact: SemanticArtifactRef,
+	fact: string,
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'context-mismatch',
+		artifact,
+		fact: { key: 'semantic-artifact', value: fact },
+		scope: [],
+	});
+}
+
+function unsupported(
+	compare: Extract<CompareOutcome, { kind: 'unsupported' }>,
+) {
+	return blockedAssessment({
+		code: 'unsupported-transition',
+		changes: compare.changes,
+		scope: compare.changes,
+	});
+}
+
+function ambiguous(compare: Extract<CompareOutcome, { kind: 'ambiguous' }>) {
+	return blockedAssessment({
+		code: 'ambiguous-rule',
+		candidates: compare.candidates,
+		scope: [],
+	});
+}
+
+function uniqueAssumptions(
+	assumptions: readonly Assumption[],
+): readonly Assumption[] {
+	const seen = new Map<string, Assumption>();
+	const unique: Assumption[] = [];
+	for (const assumption of assumptions) {
+		const prior = seen.get(assumption.id);
+		if (prior) {
+			if (stableJson(prior) !== stableJson(assumption)) {
+				throw new Error(`conflicting assumption id ${assumption.id}`);
+			}
+			continue;
+		}
+		seen.set(assumption.id, assumption);
+		unique.push(assumption);
+	}
+	return unique;
+}
+
+function operationPackSemanticsMissing(
+	effects: ReturnType<RegisteredOperationSemantics['effectsOf']>,
+	operation: PhysicalOperation,
+): boolean {
+	return !effects.restsOn.some(
+		(assumption) =>
+			assumption.class === 'operation-pack-semantics' &&
+			assumption.asserter.kind === 'pack' &&
+			sameArtifact(
+				assumption.asserter.artifact,
+				operation.operationKind.artifact,
+			),
+	);
+}
+
+function operationEffects(
+	semantics: RegisteredOperationSemantics,
+	operation: PhysicalOperation,
+	context: ObservationContext,
+) {
+	return semantics.effectsOf(operation, context);
+}
+
+function isJsonObject(
+	value: unknown,
+): value is Readonly<Record<string, unknown>> {
+	return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+class ObservationContextMismatchError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'ObservationContextMismatchError';
+	}
+}
+
+function transitionPool(
+	target: TransitionConnectionPool,
+): TransitionConnectionPool {
+	if (
+		isJsonObject(target) &&
+		typeof target.connect === 'function' &&
+		typeof (target as { release?: unknown }).release !== 'function'
+	) {
+		return target;
+	}
+	throw new Error(
+		'transition proof target must be a Pool-like object with connect(); checked-out clients are not accepted',
+	);
+}
+
+async function checkoutProofClient(
+	target: TransitionConnectionPool,
+): Promise<TransitionQueryClient> {
+	const client = await transitionPool(target).connect();
+	if (
+		!isJsonObject(client) ||
+		typeof client.query !== 'function' ||
+		typeof client.release !== 'function'
+	) {
+		throw new Error(
+			'transition proof pool returned a client without query() and release()',
+		);
+	}
+	return client;
+}
+
+function evidenceClaims(
+	evidence: EvidenceObservation,
+): readonly { readonly kind: string; readonly holds: boolean }[] {
+	const value = evidence.result.value;
+	if (!isJsonObject(value)) {
+		return [];
+	}
+	const claims = value.claims;
+	if (Array.isArray(claims)) {
+		return claims.flatMap((claim) => {
+			if (!isJsonObject(claim)) {
+				return [];
+			}
+			return typeof claim.kind === 'string' && typeof claim.holds === 'boolean'
+				? [{ kind: claim.kind, holds: claim.holds }]
+				: [];
+		});
+	}
+	if (typeof value.holds === 'boolean') {
+		return [{ kind: evidence.request.kind, holds: value.holds }];
+	}
+	return [];
+}
+
+function requestMatches(
+	obligation: ProofObligation,
+	request: ObservationRequest,
+): boolean {
+	const dischargeable = obligation.dischargeableBy ?? [];
+	return dischargeable.some(
+		(candidate) =>
+			candidate.kind === request.kind &&
+			sameScope(candidate.scope, request.scope) &&
+			stableJson(candidate.detail) === stableJson(request.detail),
+	);
+}
+
+type DurableConclusion = 'established' | 'undischarged' | 'refuted';
+
+function conclusionForObligation(
+	obligation: ProofObligation,
+	evidence: readonly EvidenceObservation[],
+): {
+	readonly conclusion: DurableConclusion;
+	readonly supportedBy: readonly EvidenceObservation[];
+} {
+	const matchingEvidence = evidence.filter((item) =>
+		requestMatches(obligation, item.request),
+	);
+	for (const item of matchingEvidence) {
+		const claim = evidenceClaims(item).find(
+			(candidate) => candidate.kind === obligation.proposition.kind,
+		);
+		if (claim) {
+			return {
+				conclusion: claim.holds ? 'established' : 'refuted',
+				supportedBy: [item],
+			};
+		}
+	}
+	return {
+		conclusion: 'undischarged',
+		supportedBy: matchingEvidence,
+	};
+}
+
+function proofClaimForObligation(
+	obligation: ProofObligation,
+	evidence: readonly EvidenceObservation[],
+	index: number,
+	semantics: SemanticArtifactRef,
+): ProofClaim {
+	const { conclusion, supportedBy } = conclusionForObligation(
+		obligation,
+		evidence,
+	);
+	const id = claimId(
+		`dbsp.transition.claim.${index}.${obligation.proposition.kind}`,
+	);
+	const supportedByIds = supportedBy.map((item) => item.id);
+	if (conclusion === 'established') {
+		return {
+			id,
+			proposition: obligation.proposition,
+			scope: obligation.scope,
+			supportedBy: supportedByIds,
+			assumes: [],
+			semantics: [semantics],
+			derivedBy: {
+				semantics,
+				inputs: supportedByIds,
+				proposition: obligation.proposition,
+				conclusion,
+			},
+		};
+	}
+	return {
+		id,
+		proposition: obligation.proposition,
+		scope: obligation.scope,
+		supportedBy: supportedByIds,
+		assumes: [],
+		semantics: [semantics],
+		derivedBy: {
+			semantics,
+			inputs: supportedByIds,
+			proposition: obligation.proposition,
+			conclusion,
+		},
+	};
+}
+
+function missingEvidenceAssessment(
+	obligation: ProofObligation,
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'insufficient-evidence',
+		obligation,
+		scope: obligation.scope,
+	});
+}
+
+function refutedAssessment(claim: ProofClaim): PlanAssessment {
+	return blockedAssessment({
+		code: 'proven-inapplicable',
+		claim: claim.id,
+		scope: claim.scope,
+		detail: claim.proposition.kind,
+	});
+}
+
+async function issueObservations(
+	issuer: ObservationIssuer | undefined,
+	requests: readonly ObservationRequest[],
+	target: unknown,
+	context: ObservationContext,
+): Promise<{
+	readonly evidence: readonly EvidenceObservation[];
+	readonly advisory: readonly AdvisoryObservation[];
+}> {
+	if (!issuer) {
+		return { evidence: [], advisory: [] };
+	}
+	const seen = new Set<string>();
+	const uniqueRequests = requests.filter((request) => {
+		const key = stableJson(request);
+		if (seen.has(key)) {
+			return false;
+		}
+		seen.add(key);
+		return true;
+	});
+	const issued: (EvidenceObservation | AdvisoryObservation)[] = [];
+	for (const request of uniqueRequests) {
+		issued.push(await issuer.execute(request, target, context));
+	}
+	for (const observation of issued) {
+		if (
+			observation.role === 'evidence' &&
+			stableJson(observation.context) !== stableJson(context)
+		) {
+			throw new ObservationContextMismatchError(
+				`evidence ${observation.id} was issued for a different observation context`,
+			);
+		}
+	}
+	return {
+		evidence: issued.filter(
+			(observation): observation is EvidenceObservation =>
+				observation.role === 'evidence',
+		),
+		advisory: issued.filter(
+			(observation): observation is AdvisoryObservation =>
+				observation.role === 'advisory',
+		),
+	};
+}
+
+function establishedNoDriftClaim(
+	compare: Extract<CompareOutcome, { kind: 'no-drift' }>,
+): EstablishedProofClaim {
+	return {
+		id: claimId('dbsp.transition.claim.no-drift'),
+		proposition: compare.claimedInvariant,
+		scope: compare.claimedInvariant.scope,
+		supportedBy: [],
+		assumes: [],
+		semantics: [PROVER_ARTIFACT],
+		derivedBy: {
+			semantics: PROVER_ARTIFACT,
+			inputs: [],
+			proposition: compare.claimedInvariant,
+			conclusion: 'established',
+		},
+	};
+}
+
+function candidateRefs(
+	candidates: readonly TransitionCandidate[],
+): readonly RuleRef[] {
+	return candidates.map((candidate) => candidate.rule);
+}
+
+function parseVersion(value: string): readonly number[] {
+	const trimmed = value.trim();
+	if (/^\d+$/.test(trimmed) && trimmed.length >= 5) {
+		const serverVersionNum = Number.parseInt(trimmed, 10);
+		if (Number.isFinite(serverVersionNum)) {
+			return [
+				Math.trunc(serverVersionNum / 10_000),
+				Math.trunc((serverVersionNum % 10_000) / 100),
+				serverVersionNum % 100,
+			];
+		}
+	}
+	return trimmed
+		.split(/[.-]/)
+		.map((part) => Number.parseInt(part, 10))
+		.filter((part) => Number.isFinite(part));
+}
+
+function compareVersions(left: string, right: string): number {
+	const leftParts = parseVersion(left);
+	const rightParts = parseVersion(right);
+	const length = Math.max(leftParts.length, rightParts.length);
+	for (let index = 0; index < length; index += 1) {
+		const leftPart = leftParts[index] ?? 0;
+		const rightPart = rightParts[index] ?? 0;
+		if (leftPart !== rightPart) {
+			return leftPart < rightPart ? -1 : 1;
+		}
+	}
+	return 0;
+}
+
+function versionInRange(
+	version: string,
+	range: TransitionRule['support']['versions'][number],
+): boolean {
+	if (range.min && compareVersions(version, range.min) < 0) {
+		return false;
+	}
+	if (range.max && compareVersions(version, range.max) > 0) {
+		return false;
+	}
+	return true;
+}
+
+function ruleSupportMismatch(
+	rule: TransitionRule,
+	context: ObservationContext,
+): string | undefined {
+	if (rule.support.engine !== context.engine) {
+		return `rule requires engine ${rule.support.engine}, got ${context.engine}`;
+	}
+	if (
+		rule.support.versions.length > 0 &&
+		!rule.support.versions.some((range) =>
+			versionInRange(context.engineVersion, range),
+		)
+	) {
+		return `rule does not support engine version ${context.engineVersion}`;
+	}
+	const missingCapabilities = rule.support.requiredCapabilities.filter(
+		(capability) => !context.capabilities.includes(capability),
+	);
+	if (missingCapabilities.length > 0) {
+		return `missing required capabilities: ${missingCapabilities.join(', ')}`;
+	}
+	return undefined;
+}
+
+function supportMismatchAssessment(
+	candidate: TransitionCandidate,
+	detail: string,
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'context-mismatch',
+		artifact: candidate.rule.pack,
+		fact: { key: 'rule-support', value: detail },
+		scope: [],
+	});
+}
+
+function evaluationBlockedAssessment(
+	evaluation: { readonly obligations: readonly ProofObligation[] },
+	detail: string,
+): PlanAssessment {
+	const obligation = evaluation.obligations[0];
+	if (obligation) {
+		return missingEvidenceAssessment(obligation);
+	}
+	return blockedAssessment({
+		code: 'insufficient-evidence',
+		obligation: {
+			proposition: { kind: 'unknown', scope: [] },
+			scope: [],
+		},
+		scope: [],
+		detail,
+	});
+}
+
+function sameObservationRequests(
+	left: readonly ObservationRequest[],
+	right: readonly ObservationRequest[],
+): boolean {
+	return (
+		left.length === right.length &&
+		left.every(
+			(request, index) => stableJson(request) === stableJson(right[index]),
+		)
+	);
+}
+
+export function createProver(registry: PackRegistry): Prover {
+	return {
+		artifact: PROVER_ARTIFACT,
+		async prove(
+			compare: CompareOutcome,
+			target: TransitionConnectionPool,
+			context: ObservationContext,
+		): Promise<ProveOutcome> {
+			switch (compare.kind) {
+				case 'no-drift': {
+					const claim = establishedNoDriftClaim(compare);
+					return {
+						kind: 'no-drift',
+						claim,
+						assessment: applicableAssessment(claim.id, []),
+					};
+				}
+				case 'unsupported':
+					return { kind: 'blocked', assessment: unsupported(compare) };
+				case 'ambiguous':
+					return { kind: 'blocked', assessment: ambiguous(compare) };
+				case 'transitions':
+					break;
+			}
+
+			if (compare.candidates.length !== 1) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'multi-candidate plan',
+					),
+				};
+			}
+
+			const candidate = compare.candidates[0];
+			if (!candidate) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'missing transition candidate',
+					),
+				};
+			}
+
+			const rule = registry.resolveRule(candidate.rule);
+			if (!rule) {
+				return {
+					kind: 'blocked',
+					assessment: blockedAssessment({
+						code: 'ambiguous-rule',
+						candidates: candidateRefs(compare.candidates),
+						scope: [],
+						detail: 'rule pack id did not resolve',
+					}),
+				};
+			}
+
+			let requiredObservations: readonly ObservationRequest[];
+			try {
+				requiredObservations = rule.requiredObservations(candidate.match);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						error instanceof Error
+							? error.message
+							: 'candidate required observation resolution failed',
+					),
+				};
+			}
+			if (
+				!Array.isArray(candidate.requiredObservations) ||
+				!sameObservationRequests(
+					requiredObservations,
+					candidate.requiredObservations,
+				)
+			) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'candidate required observations do not match resolved rule',
+					),
+				};
+			}
+
+			const issuer = registry.resolveIssuer(candidate.rule.pack);
+			let proofContext = context;
+			let issued: Awaited<ReturnType<typeof issueObservations>>;
+			if (issuer) {
+				let client: TransitionQueryClient | undefined;
+				let releaseError: unknown;
+				try {
+					client = await checkoutProofClient(target);
+					proofContext = issuer.readContext
+						? await issuer.readContext(client, context)
+						: context;
+
+					const supportMismatch = ruleSupportMismatch(rule, proofContext);
+					if (supportMismatch) {
+						return {
+							kind: 'blocked',
+							assessment: supportMismatchAssessment(candidate, supportMismatch),
+						};
+					}
+
+					issued = await issueObservations(
+						issuer,
+						requiredObservations,
+						client,
+						proofContext,
+					);
+				} catch (error) {
+					releaseError = error;
+					return {
+						kind: 'blocked',
+						assessment: artifactMismatch(
+							PROVER_ARTIFACT,
+							error instanceof Error
+								? error.message
+								: 'proof observation failed',
+						),
+					};
+				} finally {
+					if (client) {
+						client.release(releaseError);
+					}
+				}
+			} else {
+				const supportMismatch = ruleSupportMismatch(rule, proofContext);
+				if (supportMismatch) {
+					return {
+						kind: 'blocked',
+						assessment: supportMismatchAssessment(candidate, supportMismatch),
+					};
+				}
+				issued = { evidence: [], advisory: [] };
+			}
+			const evaluation = rule.evaluate(
+				candidate.match,
+				issued.evidence,
+				issued.advisory,
+			);
+
+			if (evaluation.outcome === 'blocked') {
+				return {
+					kind: 'blocked',
+					assessment: evaluationBlockedAssessment(
+						evaluation,
+						'rule evaluation blocked',
+					),
+				};
+			}
+
+			if (evaluation.outcome === 'inapplicable') {
+				const claims = evaluation.obligations.map((obligation, index) =>
+					proofClaimForObligation(
+						obligation,
+						issued.evidence,
+						index,
+						issuer?.artifact ?? PROVER_ARTIFACT,
+					),
+				);
+				const refuted = claims.find(
+					(claim) => claim.derivedBy.conclusion === 'refuted',
+				);
+				return {
+					kind: 'blocked',
+					assessment: refuted
+						? refutedAssessment(refuted)
+						: uncomposableCandidates(
+								compare.candidates,
+								'rule evaluated inapplicable',
+							),
+				};
+			}
+
+			let fragment: TransitionFragment;
+			try {
+				fragment = rule.generateCandidate(candidate.match, evaluation);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						error instanceof Error
+							? error.message
+							: 'candidate generation failed',
+					),
+				};
+			}
+			if (fragment?.operations.length !== 1) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], 'multi-operation plan'),
+				};
+			}
+			const operation = fragment.operations[0];
+			if (!operation) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], 'missing operation'),
+				};
+			}
+
+			if (
+				fragment.generatedBy.id !== candidate.rule.id ||
+				!sameArtifact(fragment.generatedBy.pack, candidate.rule.pack)
+			) {
+				return {
+					kind: 'blocked',
+					assessment: blockedAssessment({
+						code: 'ambiguous-rule',
+						candidates: [candidate.rule, fragment.generatedBy],
+						scope: [],
+						detail: 'generated fragment rule did not match candidate',
+					}),
+				};
+			}
+
+			const operationResolution = registry.resolveOperation(operation);
+			if (!operationResolution.ok) {
+				return {
+					kind: 'blocked',
+					assessment: artifactMismatch(
+						operation.operationKind.artifact,
+						operationResolution.detail,
+					),
+				};
+			}
+			const semantics = operationResolution.semantics;
+			if (!sameArtifact(semantics.artifact, operation.operationKind.artifact)) {
+				return {
+					kind: 'blocked',
+					assessment: artifactMismatch(
+						semantics.artifact,
+						'operation pack id mismatch',
+					),
+				};
+			}
+
+			const effects = operationEffects(semantics, operation, proofContext);
+			if (operationPackSemanticsMissing(effects, operation)) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable(
+						[fragment],
+						'missing operation-pack-semantics assumption',
+					),
+				};
+			}
+
+			let assumptions: readonly Assumption[];
+			try {
+				assumptions = uniqueAssumptions([
+					...evaluation.assumptions,
+					...fragment.assumptions,
+					...effects.restsOn,
+				]);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable(
+						[fragment],
+						error instanceof Error
+							? error.message
+							: 'conflicting assumption ids',
+					),
+				};
+			}
+
+			const claims = fragment.obligations.map((obligation, index) =>
+				proofClaimForObligation(
+					obligation,
+					issued.evidence,
+					index,
+					issuer?.artifact ?? PROVER_ARTIFACT,
+				),
+			);
+
+			const undischarged = claims.find(
+				(claim) => claim.derivedBy.conclusion === 'undischarged',
+			);
+			if (undischarged) {
+				const obligation = fragment.obligations.find(
+					(item) => item.proposition.kind === undischarged.proposition.kind,
+				);
+				return {
+					kind: 'blocked',
+					assessment: missingEvidenceAssessment(
+						obligation ?? {
+							proposition: undischarged.proposition,
+							scope: undischarged.scope,
+						},
+					),
+				};
+			}
+
+			const refuted = claims.find(
+				(claim) => claim.derivedBy.conclusion === 'refuted',
+			);
+			if (refuted) {
+				return { kind: 'blocked', assessment: refutedAssessment(refuted) };
+			}
+
+			const invariants = validateTransitionRelationalInvariants({
+				kind: 'fragment',
+				fragment,
+				claims,
+				assumptions,
+			});
+			if (!invariants.ok) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], invariants.detail),
+				};
+			}
+			const provenGuards = fragment.guards as readonly ProvenApplyGuard[];
+
+			let fingerprints: ReturnType<
+				RegisteredOperationSemantics['buildFingerprints']
+			>;
+			try {
+				fingerprints = semantics.buildFingerprints(
+					operation,
+					issued.evidence,
+					proofContext,
+				);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: artifactMismatch(
+						semantics.artifact,
+						error instanceof Error
+							? `fingerprint construction failed: ${error.message}`
+							: 'fingerprint construction failed',
+					),
+				};
+			}
+			const primaryClaim =
+				claims[0]?.id ?? claimId('dbsp.transition.claim.plan');
+			const guardedPlan: ProvenPlanShape = {
+				observations: issued.evidence,
+				claims,
+				assumptions,
+				preconditions: fragment.obligations.map((obligation) => ({
+					proposition: obligation.proposition,
+					scope: obligation.scope,
+				})),
+				steps: [
+					{
+						stepId: `step:${operation.ref}`,
+						operation,
+						expectedBefore: fingerprints.expectedBefore,
+						expectedAfter: fingerprints.expectedAfter,
+						requiredClaims: claims.map((claim) => claim.id),
+						establishesClaims: [],
+						invalidatesClaims: effects.effects.invalidates,
+						guards: provenGuards,
+						restsOnAssumptions: assumptions.map((assumption) => assumption.id),
+						selectionRationale: fragment.selectionRationale,
+					},
+				],
+				postconditions: [],
+			};
+
+			const planInvariants = validateTransitionRelationalInvariants({
+				kind: 'plan',
+				plan: guardedPlan,
+			});
+			if (!planInvariants.ok) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], planInvariants.detail),
+				};
+			}
+
+			const plan = mintInProcessPlan(guardedPlan);
+			return {
+				kind: 'proven',
+				plan,
+				assessment: applicableAssessment(primaryClaim, assumptions),
+			};
+		},
+	};
+}

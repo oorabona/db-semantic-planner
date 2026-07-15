@@ -38,8 +38,10 @@ import type {
 	ResourceAddress,
 	RuleEvaluation,
 	SemanticArtifactRef,
+	SerializedProvenPlan,
 	StepJournal,
 	TargetBinding,
+	TransitionCandidate,
 	TransitionFragment,
 	TransitionRule,
 	UnsafeNativeFragment,
@@ -72,6 +74,8 @@ declare const provenPlanShape: ProvenPlanShape;
 declare const proposition: Proposition;
 declare const resourceAddress: ResourceAddress;
 declare const semanticArtifactRef: SemanticArtifactRef;
+declare const serializedPlan: SerializedProvenPlan;
+declare const transitionCandidate: TransitionCandidate;
 declare const transitionFragment: TransitionFragment;
 declare const transitionRule: TransitionRule;
 
@@ -99,6 +103,7 @@ declare function acceptsPlanAssessment(assessment: PlanAssessment): void;
 declare function acceptsProofClaim(claim: ProofClaim): void;
 declare function acceptsProvenPlanShape(plan: ProvenPlanShape): void;
 declare function acceptsProvenPlanStep(step: ProvenPlanStep): void;
+declare function acceptsSerializedProvenPlan(plan: SerializedProvenPlan): void;
 declare function acceptsProposition(proposition: Proposition): void;
 declare function acceptsRecognitionResult<TMatch>(
 	result: RecognitionResult<TMatch>,
@@ -113,6 +118,9 @@ declare function acceptsSupportedBy(
 	supportedBy: ProofClaim['supportedBy'],
 ): void;
 declare function acceptsTargetBinding(binding: TargetBinding): void;
+declare function acceptsTransitionCandidate(
+	candidate: TransitionCandidate,
+): void;
 declare function acceptsTransitionFragment(fragment: TransitionFragment): void;
 declare function acceptsUnsafeNativeFragment(
 	fragment: UnsafeNativeFragment,
@@ -198,6 +206,7 @@ acceptsApplicableAssessment({
 });
 
 const _provenPlanShapeIsSerializableGuardedPlan: GuardedPlan = provenPlanShape;
+acceptsSerializedProvenPlan(serializedPlan);
 
 transitionRule.generateCandidate(undefined, {
 	// @ts-expect-error A blocked rule evaluation cannot generate operations.
@@ -599,6 +608,16 @@ acceptsStepJournal({
 });
 
 acceptsStepJournal({
+	outcome: 'context-mismatch',
+	intent: { stepId: 'step', operation: physicalOperation, recordedAt: 't0' },
+	observedOutcome: {
+		stepId: 'step',
+		observations: [evidenceId],
+		recordedAt: 't1',
+	},
+});
+
+acceptsStepJournal({
 	outcome: 'partially-applied',
 	intent: { stepId: 'step', operation: physicalOperation, recordedAt: 't0' },
 	observedOutcome: {
@@ -706,8 +725,26 @@ acceptsOutcomeReason({
 // @ts-expect-error Compare results are discriminated; empty arrays are not an outcome.
 acceptsCompareOutcome({ fragments: [], obligations: [], assumptions: [] });
 
-// @ts-expect-error Transition compare outcomes carry assumptions.
+// @ts-expect-error Transition compare outcomes carry candidates, not fragments.
 acceptsCompareOutcome({ kind: 'transitions', fragments: [], obligations: [] });
+
+// @ts-expect-error Transition candidates carry their required observations.
+acceptsTransitionCandidate({
+	rule: { id: 'rule', pack: semanticArtifactRef },
+	match: undefined,
+	obligations: [],
+	selectionRationale: {
+		chosen: { id: 'rule', pack: semanticArtifactRef },
+		overRules: [],
+		why: 'only rule',
+	},
+});
+
+acceptsCompareOutcome({
+	kind: 'transitions',
+	candidates: [transitionCandidate],
+	obligations: [proofObligation],
+});
 
 // @ts-expect-error Even no-drift compare outcomes carry a claimed invariant.
 acceptsCompareOutcome({ kind: 'no-drift' });

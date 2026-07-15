@@ -29,4 +29,21 @@ export function randomUUID(): string {
 	return globalThis.crypto.randomUUID();
 }
 
-export default { randomBytes, randomUUID };
+export function createHash(_algorithm: string): {
+	update(value: unknown): { digest(encoding: 'hex'): string };
+	digest(encoding: 'hex'): string;
+} {
+	const unavailable = () => {
+		throw new Error(
+			'node:crypto createHash is unavailable in the browser docs bundle',
+		);
+	};
+	return {
+		update() {
+			return { digest: unavailable };
+		},
+		digest: unavailable,
+	};
+}
+
+export default { randomBytes, randomUUID, createHash };

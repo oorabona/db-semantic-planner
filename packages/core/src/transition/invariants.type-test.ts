@@ -8,13 +8,16 @@ import type {
 	PlanAssessment,
 	ProofClaim,
 	SemanticArtifactRef,
+	TransitionConnectionPool,
+	TransitionQueryClient,
 } from '@dbsp/types';
 import type {
 	Applier,
 	EstablishedProofClaim,
-	ProvenPlan,
+	InProcessProvenPlan,
 	ProveOutcome,
 	Prover,
+	SerializedProvenPlan,
 } from './index.js';
 
 declare const applicableAssessment: ApplicableAssessment;
@@ -25,8 +28,11 @@ declare const compareOutcome: CompareOutcome;
 declare const guardedPlan: GuardedPlan;
 declare const observationContext: ObservationContext;
 declare const observationIssuer: ObservationIssuer;
-declare const provenPlan: ProvenPlan;
+declare const provenPlan: InProcessProvenPlan;
 declare const semanticArtifactRef: SemanticArtifactRef;
+declare const serializedPlan: SerializedProvenPlan;
+declare const executionTarget: TransitionConnectionPool;
+declare const borrowedClient: TransitionQueryClient;
 
 declare const blockedOutcome: Extract<
 	ProveOutcome,
@@ -38,7 +44,7 @@ declare const undischargedClaim: ProofClaim & {
 };
 
 // @ts-expect-error A plain guarded plan is not a core-minted proven plan.
-const _guardedPlanAsProvenPlan: ProvenPlan = guardedPlan;
+const _guardedPlanAsProvenPlan: InProcessProvenPlan = guardedPlan;
 
 applier.apply(
 	{
@@ -47,11 +53,23 @@ applier.apply(
 		assessment: applicableAssessment,
 	},
 	applyPolicy,
+	executionTarget,
+);
+
+applier.apply(
+	{
+		// @ts-expect-error Serialized audit plans are not apply credentials.
+		plan: serializedPlan,
+		assessment: applicableAssessment,
+	},
+	applyPolicy,
+	executionTarget,
 );
 
 applier.apply(
 	{ plan: provenPlan, assessment: applicableAssessment },
 	applyPolicy,
+	executionTarget,
 );
 
 applier.apply(
@@ -67,10 +85,11 @@ applier.apply(
 		},
 	},
 	applyPolicy,
+	executionTarget,
 );
 
 // @ts-expect-error A blocked prove outcome has no proven plan to apply.
-applier.apply(blockedOutcome, applyPolicy);
+applier.apply(blockedOutcome, applyPolicy, executionTarget);
 
 // @ts-expect-error A proven outcome must carry an applicable assessment.
 const _provenOutcomeWithBlockedAssessment: ProveOutcome = {
@@ -107,10 +126,20 @@ const _noDriftWithUndischargedClaim: ProveOutcome = {
 
 declare const prover: Prover;
 
-prover.prove(compareOutcome, observationIssuer, observationContext);
+prover.prove(compareOutcome, executionTarget, observationContext);
+
+// @ts-expect-error A checked-out client is not an execution target; runtime owns checkout/release.
+prover.prove(compareOutcome, borrowedClient, observationContext);
+
+applier.apply(
+	{ plan: provenPlan, assessment: applicableAssessment },
+	applyPolicy,
+	// @ts-expect-error A checked-out client is not an execution target; runtime owns checkout/release.
+	borrowedClient,
+);
 
 // @ts-expect-error Provers consume the whole compare outcome, not just fragments.
-prover.prove([], observationIssuer, observationContext);
+prover.prove([], executionTarget, observationContext);
 
 // @ts-expect-error Provers are judgement producers and own an artifact.
 const _proverWithoutArtifact: Prover = {

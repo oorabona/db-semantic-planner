@@ -1,6 +1,10 @@
 import type { ModelIR } from '../model-ir.js';
 import type { SemanticArtifactRef } from './artifact.js';
-import type { RuleRef, TransitionFragment } from './fragment.js';
+import type {
+	RuleRef,
+	RuleSelectionRationale,
+	TransitionFragment,
+} from './fragment.js';
 import type {
 	AdvisoryObservation,
 	EvidenceObservation,
@@ -11,6 +15,19 @@ import type {
 import type { OperationEffects, PhysicalOperation } from './operation.js';
 import type { Assumption, ProofObligation, Proposition } from './proof.js';
 import type { ResourceAddress } from './resource.js';
+
+export interface TransitionQueryResult {
+	readonly rows: readonly Record<string, unknown>[];
+}
+
+export interface TransitionQueryClient {
+	query(sql: string, params?: unknown): Promise<TransitionQueryResult>;
+	release(error?: unknown): void;
+}
+
+export interface TransitionConnectionPool {
+	connect(): Promise<TransitionQueryClient>;
+}
 
 export interface OperationEffectAssessment {
 	readonly effects: OperationEffects;
@@ -27,6 +44,10 @@ export interface OperationSemantics {
 
 export interface ObservationIssuer {
 	readonly artifact: SemanticArtifactRef;
+	readContext?(
+		target: unknown,
+		context: ObservationContext,
+	): Promise<ObservationContext>;
 	execute(
 		request: ObservationRequest,
 		target: unknown,
@@ -86,12 +107,19 @@ export interface TransitionRule<TMatch = unknown> {
 	): TransitionFragment;
 }
 
+export interface TransitionCandidate<TMatch = unknown> {
+	readonly rule: RuleRef;
+	readonly match: TMatch;
+	readonly requiredObservations: readonly ObservationRequest[];
+	readonly obligations: readonly ProofObligation[];
+	readonly selectionRationale: RuleSelectionRationale;
+}
+
 export type CompareOutcome =
 	| {
 			readonly kind: 'transitions';
-			readonly fragments: readonly TransitionFragment[];
+			readonly candidates: readonly TransitionCandidate[];
 			readonly obligations: readonly ProofObligation[];
-			readonly assumptions: readonly Assumption[];
 	  }
 	| { readonly kind: 'no-drift'; readonly claimedInvariant: Proposition }
 	| {
