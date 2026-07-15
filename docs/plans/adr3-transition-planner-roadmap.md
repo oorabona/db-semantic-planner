@@ -65,6 +65,27 @@ side-effect registry.
 6. `PlanAssessment` is **four axes** (decision/assurance/lifecycle/continuation), never one verdict enum, never
    a resurrected `destructive: boolean` / `canApply`.
 
+## How invariants are enforced — structural types vs the validated `Prover`
+
+Two enforcement tiers, because a structural type system cannot express everything the ADR forbids:
+
+- **Structural invariants** — discriminated unions, required fields, excluded members, brands, generics — are
+  **compile-time type errors**, proved by `invariants.type-test.ts`. Examples: a blocked plan cannot reach
+  `apply` (branded `ProvenPlan`); a `lock-and-check` guard cannot be `unbindable`; evidence is never
+  `historical-only`; an `established` claim carries no assumptions; a proven plan holds no `impossible` guard.
+- **Relational invariants** — cross-reference integrity, ID consistency, payload content — are **beyond
+  structural typing** (they would need unsound or unreadable encodings). They are enforced by the `Prover`/
+  executor as a **validated smart-constructor at runtime, with tests**, and the `ProvenPlan` brand certifies
+  the validation ran. These are, and stay, runtime-checked: `ApplyGuard.appliesTo`/`ProofObligation.appliesTo`
+  match exactly one `PhysicalOperation.ref`; an `external-ddl-exclusion` assumption is in the step's closure;
+  journal step-ids are consistent and `ApplyResult.observations` covers every observed outcome; and a
+  `PhysicalOperation.payload` carries no raw SQL (the owning pack's payload type validates its expression
+  values). A `ProvenPlan` therefore means "the Prover validated these relations"; the brand is the receipt.
+
+This matches the ADR's own stance: the type-level contracts are *"the shape of the decision, not its final
+signature — subject to validation by implementation"*. The vertical slices refine the shape in use; the
+relational validator is built with the `Prover` and executor, not pre-encoded into the contract types.
+
 ## Build order
 
 Delivered in this sequence. Each stage widens the previous — a later stage must not force a rewrite of an
