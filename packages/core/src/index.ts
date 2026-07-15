@@ -271,6 +271,33 @@ export {
 } from './planner.js';
 
 // ============================================================================
+// ADR-0003 Transition Planner Interfaces
+// ============================================================================
+
+export type {
+	ApplicableAssessment,
+	ApplicableEvaluation,
+	Applier,
+	Comparator,
+	CompareOutcome,
+	EstablishedProofClaim,
+	ObservationIssuer,
+	OperationEffectAssessment,
+	OperationSemantics,
+	ProvenApplyGuard,
+	ProvenGuardProtocol,
+	ProvenPlan,
+	ProvenPlanShape,
+	ProvenPlanStep,
+	ProveOutcome,
+	Prover,
+	RecognitionResult,
+	RuleEvaluation,
+	RuleSupport,
+	TransitionRule,
+} from './transition/index.js';
+
+// ============================================================================
 // Implementation (for advanced use cases)
 // ============================================================================
 
