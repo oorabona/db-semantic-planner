@@ -1,6 +1,6 @@
 import type { SemanticArtifactRef } from './artifact.js';
 import type { JsonValue } from './json.js';
-import type { AssumptionId } from './proof.js';
+import type { Assumption, AssumptionId } from './proof.js';
 
 export interface PortableExpression {
 	readonly kind: 'portable';
@@ -19,9 +19,18 @@ export interface UnsafeNativeFragment {
 	readonly category: 'scalar' | 'predicate' | 'qualified-name' | 'statement';
 	readonly text: string;
 	readonly assumption: AssumptionId;
+	readonly attestation?: Assumption;
+}
+
+export interface UnresolvableExpression {
+	readonly kind: 'unresolvable';
+	readonly category: 'scalar' | 'predicate' | 'qualified-name' | 'statement';
+	readonly reason: string;
+	readonly source?: string;
 }
 
 export type ExpressionValue =
 	| PortableExpression
 	| VendorValidatedExpression
-	| UnsafeNativeFragment;
+	| UnsafeNativeFragment
+	| UnresolvableExpression;

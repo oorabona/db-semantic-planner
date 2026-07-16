@@ -1,7 +1,7 @@
 import type { SemanticArtifactRef } from './artifact.js';
 import type { ExpressionValue } from './expression.js';
 import type { EvidenceObservation } from './observation.js';
-import type { ProofClaimDraft, ProofObligation } from './proof.js';
+import type { Assumption, ProofClaimDraft, ProofObligation } from './proof.js';
 
 export type EquivalenceResult =
 	| {
@@ -9,6 +9,7 @@ export type EquivalenceResult =
 			readonly claim: ProofClaimDraft<
 				'established' | 'established-under-assumptions'
 			>;
+			readonly assumptions?: readonly Assumption[];
 	  }
 	| { readonly kind: 'different'; readonly claim: ProofClaimDraft<'refuted'> }
 	| {

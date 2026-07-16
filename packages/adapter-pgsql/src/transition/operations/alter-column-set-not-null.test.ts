@@ -175,6 +175,10 @@ function catalogEvidence(
 function defaultDeparseEvidence(
 	expectedColumnShape: SetNotNullColumnShapeExpectation,
 	catalogDefault: string,
+	canonical: {
+		readonly leftCanonical: string;
+		readonly rightCanonical: string;
+	} = { leftCanonical: catalogDefault, rightCanonical: catalogDefault },
 ): EvidenceObservation {
 	if (!expectedColumnShape.default) {
 		throw new Error('expected default is required');
@@ -217,8 +221,8 @@ function defaultDeparseEvidence(
 				ok: true,
 				surface: 'column-default',
 				category: 'scalar',
-				leftCanonical: catalogDefault,
-				rightCanonical: catalogDefault,
+				leftCanonical: canonical.leftCanonical,
+				rightCanonical: canonical.rightCanonical,
 			},
 		},
 		context,
@@ -550,6 +554,119 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		).not.toThrow();
 	});
 
+	it('skips an unresolved default value comparison when default presence is unchanged and fingerprinted', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected = expectedShape({
+			type: 'string',
+			originalDbType: 'text',
+			default: 'active',
+		});
+
+		const fingerprints = runtime.buildFingerprints(
+			operationWithExpectedShape(expected),
+			[
+				catalogEvidence('users', 'age', {
+					atttypid: '25',
+					formatType: 'text',
+					typeName: 'text',
+					typeSchema: 'pg_catalog',
+					hasDefault: true,
+					defaultExpression: "'active'::text",
+				}),
+			],
+			context,
+		);
+
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual(
+			expect.objectContaining({ key: 'column.default' }),
+		);
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: 'pg_attrdef.expression',
+			value: "'active'::text",
+		});
+	});
+
+	it('blocks apply-time shape recheck when default presence drifted', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected = expectedShape({
+			type: 'string',
+			originalDbType: 'text',
+			default: 'active',
+		});
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expected),
+				[
+					catalogEvidence('users', 'age', {
+						atttypid: '25',
+						formatType: 'text',
+						typeName: 'text',
+						typeSchema: 'pg_catalog',
+						hasDefault: false,
+						defaultExpression: null,
+					}),
+				],
+				context,
+			),
+		).toThrow(/field default\.presence/);
+	});
+
+	it('blocks apply-time shape recheck when default comparison is definitely different', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected = expectedShape({
+			type: 'string',
+			originalDbType: 'text',
+			default: 'active',
+		});
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expected),
+				[
+					catalogEvidence('users', 'age', {
+						atttypid: '25',
+						formatType: 'text',
+						typeName: 'text',
+						typeSchema: 'pg_catalog',
+						hasDefault: true,
+						defaultExpression: "'pending'::text",
+					}),
+					defaultDeparseEvidence(expected, "'pending'::text", {
+						leftCanonical: "'active'::text",
+						rightCanonical: "'pending'::text",
+					}),
+				],
+				context,
+			),
+		).toThrow(/field default/);
+	});
+
+	it('blocks apply-time shape recheck when structural fields drift', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expectedShape({ unique: true })),
+				[catalogEvidence('users', 'age', { unique: false })],
+				context,
+			),
+		).toThrow(/field unique/);
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expectedShape({ identity: 'always' })),
+				[
+					catalogEvidence('users', 'age', {
+						attidentity: null,
+						identity: null,
+					}),
+				],
+				context,
+			),
+		).toThrow(/field identity/);
+	});
+
 	it('blocks apply-time shape recheck when the type genuinely drifted', () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
 
@@ -569,6 +686,70 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 				context,
 			),
 		).toThrow(/field type/);
+	});
+
+	it('blocks apply-time shape recheck when custom type identity is unresolved', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(
+					expectedShape({
+						type: 'string',
+						originalDbType: 'tenant.status',
+					}),
+				),
+				[
+					catalogEvidence('users', 'age', {
+						atttypid: '90001',
+						formatType: 'status',
+						typeName: 'status',
+						typeSchema: null,
+					}),
+				],
+				{ ...context, searchPath: [] },
+			),
+		).toThrow(/field type/);
+	});
+
+	it('blocks apply-time shape recheck when collation identity is unresolved even if default value is unresolved too', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected: SetNotNullColumnShapeExpectation = {
+			...expectedShape({
+				type: 'string',
+				originalDbType: 'text',
+				default: 'active',
+				collation: 'en_US',
+			}),
+			collation: {
+				kind: 'collation',
+				name: '"en_US"',
+				schema: 'tenant',
+				isDefault: false,
+			},
+		};
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expected),
+				[
+					catalogEvidence('users', 'age', {
+						atttypid: '25',
+						formatType: 'text',
+						typeName: 'text',
+						typeSchema: 'pg_catalog',
+						hasDefault: true,
+						defaultExpression: "'active'::text",
+						attcollation: '100',
+						collationName: 'en_US',
+						collationSchema: null,
+						collationProvider: 'c',
+						collationVersion: '153.120',
+					}),
+				],
+				context,
+			),
+		).toThrow(/field collation/);
 	});
 
 	it('hashes every recognizer-compared column fact instead of silently omitting it', () => {

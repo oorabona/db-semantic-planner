@@ -81,6 +81,20 @@ function operationAssumption(overrides: Partial<Assumption> = {}): Assumption {
 	};
 }
 
+function userAttestedNativeDefaultAssumption(
+	overrides: Partial<Assumption> = {},
+): Assumption {
+	return {
+		id: 'mock.user-attested-native-default' as Assumption['id'],
+		class: 'user-attested-native-default',
+		asserter: { kind: 'human', identity: 'schema-author' },
+		statement:
+			'Schema author attests this native SQL column default is unchanged.',
+		scope: [columnResource()],
+		...overrides,
+	};
+}
+
 function executionTarget(): TransitionConnectionPool {
 	return {
 		connect: async () => ({
@@ -783,6 +797,57 @@ describe('createApplier', () => {
 
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
+	});
+
+	it('requires policy acceptance for user-attested native default assumptions', async () => {
+		const operation = operationAssumption();
+		const nativeDefault = userAttestedNativeDefaultAssumption();
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => undefined),
+		});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const scopedPlan = planWithStep(
+			{ restsOnAssumptions: [operation.id, nativeDefault.id] },
+			{ assumptions: [operation, nativeDefault] },
+		);
+
+		const denied = await createApplier(registry).apply(
+			{ plan: scopedPlan, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(denied.assessment.reasons[0]).toMatchObject({
+			code: 'uncomposable',
+			assumption: nativeDefault.id,
+		});
+		expect(rt.checkout).not.toHaveBeenCalled();
+
+		const accepted = await createApplier(registry).apply(
+			{ plan: scopedPlan, assessment: assessment() },
+			{
+				accepts: [
+					{ class: 'operation-pack-semantics' },
+					{
+						class: 'user-attested-native-default',
+						fromTrustRoot: nativeDefault.asserter,
+						withinScope: [{ within: tableResource() }],
+					},
+				],
+			},
+			executionTarget(),
+		);
+
+		expect(accepted.assessment.lifecycle).toBe('completed');
 	});
 
 	it('returns an ApplyResult when checkout fails', async () => {

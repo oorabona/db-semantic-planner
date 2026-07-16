@@ -1,4 +1,5 @@
 import type {
+	Assumption,
 	CollationRef,
 	EquivalenceCapability,
 	EquivalenceContext,
@@ -179,8 +180,19 @@ function draft<TConclusion extends ProofClaimDraft['conclusion']>(
 
 function equivalent(
 	proposition: ProofClaimDraft<'established'>['proposition'],
+	assumptions: readonly Assumption[] = [],
 ): EquivalenceResult {
-	return { kind: 'equivalent', claim: draft('established', proposition) };
+	if (assumptions.length === 0) {
+		return { kind: 'equivalent', claim: draft('established', proposition) };
+	}
+	return {
+		kind: 'equivalent',
+		claim: {
+			...draft('established-under-assumptions', proposition),
+			assumes: assumptions.map((assumption) => assumption.id),
+		},
+		assumptions,
+	};
 }
 
 function different(
@@ -441,6 +453,17 @@ type GuardedExpressionComparison =
 				{ readonly kind: 'vendor-validated' }
 			>;
 	  }
+	| {
+			readonly kind: 'unsafe-native';
+			readonly left: Extract<
+				ExpressionValue,
+				{ readonly kind: 'unsafe-native' }
+			>;
+			readonly right: Extract<
+				ExpressionValue,
+				{ readonly kind: 'unsafe-native' }
+			>;
+	  }
 	| { readonly kind: 'unknown'; readonly reason: string };
 
 type DeparseEvidenceOutcome = {
@@ -474,12 +497,22 @@ function guardExpressionComparison(
 			reason: 'right expression category does not match requested category',
 		};
 	}
-
-	// Future assumption-carrying equivalence can extend this branch.
-	if (left.kind === 'unsafe-native' || right.kind === 'unsafe-native') {
+	if (left.kind === 'unresolvable' || right.kind === 'unresolvable') {
 		return {
 			kind: 'unknown',
-			reason: 'unsafe native expression comparison cannot carry its assumption',
+			reason:
+				'unresolvable expression has no comparable SQL text or portable AST',
+		};
+	}
+
+	if (left.kind === 'unsafe-native' || right.kind === 'unsafe-native') {
+		if (left.kind === 'unsafe-native' && right.kind === 'unsafe-native') {
+			return { kind: 'unsafe-native', left, right };
+		}
+		return {
+			kind: 'unknown',
+			reason:
+				'mixed unsafe native expression kinds are not comparable by static equality',
 		};
 	}
 	if (left.kind !== right.kind) {
@@ -516,6 +549,31 @@ function guardExpressionComparison(
 		kind: 'unknown',
 		reason: 'unsafe native expression comparison cannot carry its assumption',
 	};
+}
+
+function attestationForUnsafeNativeEquivalence(
+	left: Extract<ExpressionValue, { readonly kind: 'unsafe-native' }>,
+	right: Extract<ExpressionValue, { readonly kind: 'unsafe-native' }>,
+): Assumption | undefined {
+	if (left.assumption !== right.assumption) {
+		return undefined;
+	}
+	const attestations = [left.attestation, right.attestation].filter(
+		(attestation): attestation is Assumption => attestation !== undefined,
+	);
+	if (attestations.length === 0) {
+		return undefined;
+	}
+	const [first, ...rest] = attestations;
+	if (!first || first.id !== left.assumption) {
+		return undefined;
+	}
+	if (
+		rest.some((attestation) => stableJson(attestation) !== stableJson(first))
+	) {
+		return undefined;
+	}
+	return first;
 }
 
 function sameExpressionValue(left: unknown, right: ExpressionValue): boolean {
@@ -588,6 +646,11 @@ function compareExpression(
 ): EquivalenceResult {
 	const guarded = guardExpressionComparison(left, right, category);
 	if (guarded.kind === 'unknown') {
+		if (left.kind === 'unresolvable' || right.kind === 'unresolvable') {
+			return unknown(
+				unresolvedExpressionObligation(left, right, category, guarded.reason),
+			);
+		}
 		const observed = deparseEvidenceFor(left, right, category, evidence);
 		if (observed) {
 			const detail = {
@@ -628,6 +691,42 @@ function compareExpression(
 				category,
 				'portable expression ASTs are not exactly equal',
 			),
+		);
+	}
+	if (guarded.kind === 'unsafe-native') {
+		const method =
+			guarded.left.text === guarded.right.text
+				? 'exact'
+				: guarded.left.text.trim() === guarded.right.text.trim()
+					? 'trim-exact'
+					: undefined;
+		if (!method) {
+			return unknown(
+				unresolvedExpressionObligation(
+					left,
+					right,
+					category,
+					'static unsafe native expression comparison only accepts exact trimmed text matches',
+				),
+			);
+		}
+		const assumption = attestationForUnsafeNativeEquivalence(
+			guarded.left,
+			guarded.right,
+		);
+		if (!assumption) {
+			return unknown(
+				unresolvedExpressionObligation(
+					left,
+					right,
+					category,
+					'unsafe native expression comparison requires a matching author attestation',
+				),
+			);
+		}
+		return equivalent(
+			expressionProposition(left, right, category, { method }),
+			[assumption],
 		);
 	}
 	if (guarded.left.text === guarded.right.text) {

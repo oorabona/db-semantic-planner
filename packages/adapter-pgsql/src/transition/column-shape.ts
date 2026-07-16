@@ -1,4 +1,6 @@
 import type {
+	Assumption,
+	AuthorAttestedNativeDefault,
 	CollationRef,
 	ColumnIR,
 	EquivalenceCapability,
@@ -9,6 +11,7 @@ import type {
 	JsonValue,
 	ProofClaimDraft,
 	ProofObligation,
+	ResourceAddress,
 	TypeRef,
 } from '@dbsp/types';
 import { PG_DEPARSE_ARTIFACT } from './constants.js';
@@ -50,6 +53,7 @@ export type SetNotNullColumnShapeComparison =
 	| {
 			readonly kind: 'equivalent';
 			readonly claimDrafts: readonly ProofClaimDraft[];
+			readonly assumptions: readonly Assumption[];
 	  }
 	| {
 			readonly kind: 'different';
@@ -86,6 +90,13 @@ export interface CatalogColumnShapeInput {
 	readonly comment: string | null;
 }
 
+export interface ColumnDefaultAttestationTarget {
+	readonly database?: string;
+	readonly schema?: string;
+	readonly table: string;
+	readonly column: string;
+}
+
 type ParsedTypeSpelling = {
 	readonly name: string;
 	readonly schema?: string;
@@ -98,8 +109,123 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
 }
 
+function authorAttester(
+	value: unknown,
+): AuthorAttestedNativeDefault['attestedBy'] | undefined {
+	if (!isRecord(value) || typeof value.kind !== 'string') {
+		return undefined;
+	}
+	if (value.kind === 'human' && typeof value.identity === 'string') {
+		return { kind: 'human', identity: value.identity };
+	}
+	if (value.kind === 'policy' && typeof value.policyId === 'string') {
+		return { kind: 'policy', policyId: value.policyId };
+	}
+	return undefined;
+}
+
+function authorAttestedNativeDefault(
+	value: unknown,
+): AuthorAttestedNativeDefault | undefined {
+	if (!isRecord(value) || typeof value.sql !== 'string') {
+		return undefined;
+	}
+	const attestedBy = authorAttester(value.attestedBy);
+	if (!attestedBy) {
+		return undefined;
+	}
+	return {
+		sql: value.sql,
+		attestedBy,
+		...(typeof value.statement === 'string'
+			? { statement: value.statement }
+			: {}),
+	};
+}
+
 function json(value: unknown): JsonValue {
 	return JSON.parse(JSON.stringify(value)) as JsonValue;
+}
+
+function jsonSafeSnapshot(
+	value: unknown,
+	seen: WeakSet<object> = new WeakSet(),
+): JsonValue | undefined {
+	if (value === null) {
+		return null;
+	}
+	switch (typeof value) {
+		case 'string':
+		case 'boolean':
+			return value;
+		case 'number':
+			return Number.isFinite(value) ? value : undefined;
+		case 'bigint':
+		case 'function':
+		case 'symbol':
+		case 'undefined':
+			return undefined;
+		case 'object':
+			break;
+	}
+
+	if (seen.has(value)) {
+		return undefined;
+	}
+	const prototype = Object.getPrototypeOf(value);
+	const isPlainArray = Array.isArray(value);
+	if (
+		(isPlainArray && prototype !== Array.prototype && prototype !== null) ||
+		(!isPlainArray && prototype !== Object.prototype && prototype !== null)
+	) {
+		return undefined;
+	}
+	if (
+		Object.getOwnPropertySymbols(value).some((symbol) =>
+			Object.prototype.propertyIsEnumerable.call(value, symbol),
+		)
+	) {
+		return undefined;
+	}
+
+	seen.add(value);
+	try {
+		if (isPlainArray) {
+			const array = value as readonly unknown[];
+			if (Object.keys(array).length !== array.length) {
+				return undefined;
+			}
+			const snapshot: JsonValue[] = [];
+			for (let index = 0; index < array.length; index += 1) {
+				const descriptor = Object.getOwnPropertyDescriptor(array, index);
+				if (!descriptor || !('value' in descriptor)) {
+					return undefined;
+				}
+				const item = jsonSafeSnapshot(descriptor.value, seen);
+				if (item === undefined) {
+					return undefined;
+				}
+				snapshot.push(item);
+			}
+			return snapshot;
+		}
+
+		const snapshot: Record<string, JsonValue> = {};
+		for (const key of Object.keys(value)) {
+			const descriptor = Object.getOwnPropertyDescriptor(value, key);
+			if (!descriptor || !('value' in descriptor)) {
+				return undefined;
+			}
+			const item = jsonSafeSnapshot(descriptor.value, seen);
+			if (item === undefined) {
+				return undefined;
+			}
+			snapshot[key] = item;
+		}
+		return snapshot;
+	} finally {
+		seen.delete(value);
+	}
 }
 
 function quoteRawIdentifierIfNeeded(value: string): string {
@@ -286,41 +412,103 @@ function typeRefFromCatalog(catalog: CatalogColumnShapeInput): TypeRef {
 	};
 }
 
-function unsafeNativeDefault(rawSql: string): ExpressionValue {
+function columnDefaultScope(
+	target: ColumnDefaultAttestationTarget,
+): readonly ResourceAddress[] {
+	const base: ResourceAddress = {
+		engine: 'postgresql',
+		database: target.database ?? 'model',
+		kind: 'column',
+		name: target.column,
+		qualifiedBy: [target.table],
+	};
+	return [target.schema ? { ...base, schema: target.schema } : base];
+}
+
+function userAttestedNativeDefaultAssumption(
+	defaultValue: AuthorAttestedNativeDefault,
+	target: ColumnDefaultAttestationTarget,
+): Assumption {
+	const database = target.database ?? 'model';
+	const scope = columnDefaultScope({ ...target, database });
+	return {
+		id: assumptionId(
+			`dbsp.postgresql.default.user-attested-native-default:${JSON.stringify([
+				database,
+				target.schema ?? null,
+				target.table,
+				target.column,
+				defaultValue.sql,
+				defaultValue.attestedBy,
+			])}`,
+		),
+		class: 'user-attested-native-default',
+		asserter: defaultValue.attestedBy,
+		statement:
+			defaultValue.statement ??
+			'Schema author attests this native SQL fragment is the intended unchanged scalar column default.',
+		scope,
+	};
+}
+
+function unsafeNativeDefault(
+	rawSql: string,
+	attestation?: Assumption,
+): ExpressionValue {
 	return {
 		kind: 'unsafe-native',
 		category: 'scalar',
 		text: rawSql,
-		assumption: assumptionId(
-			`dbsp.postgresql.default.unsafe-native:${JSON.stringify(rawSql)}`,
-		),
+		assumption:
+			attestation?.id ??
+			assumptionId(
+				`dbsp.postgresql.default.unsafe-native:${JSON.stringify(rawSql)}`,
+			),
+		...(attestation ? { attestation } : {}),
 	};
 }
 
-function portableDefault(value: unknown): ExpressionValue {
+function portableDefault(value: unknown, source: string): ExpressionValue {
+	const ast = jsonSafeSnapshot(value);
+	if (ast === undefined) {
+		return {
+			kind: 'unresolvable',
+			category: 'scalar',
+			source,
+			reason: 'column default is not a finite, plain, cycle-free JSON value',
+		};
+	}
 	return {
 		kind: 'portable',
-		ast: json(value),
+		ast,
 	};
 }
 
 function defaultExpressionFromAuthoredValue(
 	value: unknown,
+	target?: ColumnDefaultAttestationTarget,
 ): ExpressionValue | null {
-	if (value === undefined) {
-		return null;
-	}
 	if (isRecord(value) && typeof value.sql === 'string') {
-		return unsafeNativeDefault(value.sql);
+		const attestedDefault = authorAttestedNativeDefault(value);
+		const attestation =
+			attestedDefault && target
+				? userAttestedNativeDefaultAssumption(attestedDefault, target)
+				: undefined;
+		return unsafeNativeDefault(value.sql, attestation);
 	}
-	return portableDefault(value);
+	return portableDefault(value, 'authored-column-default');
 }
 
 function defaultExpressionFromObservedColumnValue(
 	value: unknown,
+	target?: ColumnDefaultAttestationTarget,
 ): ExpressionValue | null {
-	if (value === undefined) {
-		return null;
+	const attestedDefault = authorAttestedNativeDefault(value);
+	if (attestedDefault && target) {
+		return unsafeNativeDefault(
+			attestedDefault.sql,
+			userAttestedNativeDefaultAssumption(attestedDefault, target),
+		);
 	}
 	if (isRecord(value) && typeof value.sql === 'string') {
 		return {
@@ -332,7 +520,7 @@ function defaultExpressionFromObservedColumnValue(
 	}
 	// Hand-built current models used by pure tests can still carry structured
 	// values; keep those portable so exact AST equality remains compile-only.
-	return portableDefault(value);
+	return portableDefault(value, 'observed-column-default');
 }
 
 function defaultExpressionFromCatalog(
@@ -405,6 +593,7 @@ export function columnWithoutNullable(
 export function expectedColumnShapeFor(
 	column: ColumnIR,
 	physicalName: string,
+	target?: ColumnDefaultAttestationTarget,
 ): SetNotNullColumnShapeExpectation {
 	return {
 		kind: 'postgresql.set-not-null.column-shape.v1',
@@ -412,7 +601,7 @@ export function expectedColumnShapeFor(
 		nullability: { from: true, to: column.nullable },
 		type: typeRefFromColumn(column),
 		default: Object.hasOwn(column, 'default')
-			? defaultExpressionFromAuthoredValue(column.default)
+			? defaultExpressionFromAuthoredValue(column.default, target)
 			: null,
 		collation: collationFromColumn(column),
 		identity: column.identity ?? null,
@@ -427,13 +616,14 @@ export function expectedColumnShapeFor(
 export function columnShapeFromColumn(
 	column: ColumnIR,
 	physicalName: string,
+	target?: ColumnDefaultAttestationTarget,
 ): SetNotNullObservedColumnShape {
 	return {
 		name: physicalName,
 		nullable: column.nullable,
 		type: typeRefFromColumn(column),
 		default: Object.hasOwn(column, 'default')
-			? defaultExpressionFromObservedColumnValue(column.default)
+			? defaultExpressionFromObservedColumnValue(column.default, target)
 			: null,
 		collation: collationFromColumn(column),
 		identity: column.identity ?? null,
@@ -486,6 +676,12 @@ function equivalentClaims(
 		: [];
 }
 
+function equivalentAssumptions(
+	result: EquivalenceResult,
+): readonly Assumption[] {
+	return result.kind === 'equivalent' ? (result.assumptions ?? []) : [];
+}
+
 function handleEquivalenceField(
 	field: string,
 	result: EquivalenceResult,
@@ -527,6 +723,7 @@ export function compareSetNotNullColumnShape(
 	evidence?: readonly EvidenceObservation[],
 ): SetNotNullColumnShapeComparison {
 	let claimDrafts: readonly ProofClaimDraft[] = [];
+	let assumptions: readonly Assumption[] = [];
 	if (expected.name !== observed.name) {
 		return structuralDifferent('name', 'column name changed', claimDrafts);
 	}
@@ -587,6 +784,7 @@ export function compareSetNotNullColumnShape(
 		return typeComparison;
 	}
 	claimDrafts = [...claimDrafts, ...equivalentClaims(typeResult)];
+	assumptions = [...assumptions, ...equivalentAssumptions(typeResult)];
 
 	if (expected.default == null && observed.default != null) {
 		return structuralDifferent(
@@ -619,6 +817,7 @@ export function compareSetNotNullColumnShape(
 			return defaultComparison;
 		}
 		claimDrafts = [...claimDrafts, ...equivalentClaims(defaultResult)];
+		assumptions = [...assumptions, ...equivalentAssumptions(defaultResult)];
 	}
 
 	const collationResult = equivalence.compareCollation(
@@ -636,8 +835,9 @@ export function compareSetNotNullColumnShape(
 		return collationComparison;
 	}
 	claimDrafts = [...claimDrafts, ...equivalentClaims(collationResult)];
+	assumptions = [...assumptions, ...equivalentAssumptions(collationResult)];
 
-	return { kind: 'equivalent', claimDrafts };
+	return { kind: 'equivalent', claimDrafts, assumptions };
 }
 
 export function isSetNotNullColumnShapeExpectation(

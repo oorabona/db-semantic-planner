@@ -131,6 +131,26 @@ function statusType(
 	};
 }
 
+function attestedNativeDefault(sql: string) {
+	return {
+		sql,
+		attestedBy: { kind: 'human' as const, identity: 'schema-author' },
+		statement: 'Schema author attests this raw SQL default is unchanged.',
+	};
+}
+
+function circularDefault(): Record<string, unknown> {
+	const value: Record<string, unknown> = {};
+	value.self = value;
+	return value;
+}
+
+function nullPrototypeDefault(): Record<string, unknown> {
+	return Object.assign(Object.create(null) as Record<string, unknown>, {
+		status: 'active',
+	});
+}
+
 function normalizedRequest(
 	request: ObservationRequest,
 	schema = 'public',
@@ -576,6 +596,16 @@ describe('postgresql.column.set-not-null rule', () => {
 	});
 
 	it('keeps unsafe native defaults unknown without requesting deparse', () => {
+		const recognition = createSetNotNullRule().recognize(
+			model(false, {
+				default: { sql: 'now()' },
+			}),
+			model(true, {
+				default: { sql: 'now()' },
+			}),
+		);
+		expect(recognition.recognized).toBe('unknown');
+
 		const compare = createComparator(
 			createPackRegistry([createPgTransitionPack()]),
 		).compare(
@@ -598,6 +628,229 @@ describe('postgresql.column.set-not-null rule', () => {
 		).not.toContainEqual(
 			expect.objectContaining({ kind: EXPRESSION_DEPARSE_OBSERVATION }),
 		);
+	});
+
+	it.each([
+		['string', 'active', 'active'],
+		['finite number', 42, 42],
+		['boolean', true, true],
+		['null', null, null],
+		[
+			'plain nested',
+			{ status: 'active', limits: [1, null, { ok: true }] },
+			{ status: 'active', limits: [1, null, { ok: true }] },
+		],
+		['null-prototype object', nullPrototypeDefault(), { status: 'active' }],
+	])('keeps JSON-safe authored %s defaults portable', (_label, value, expectedAst) => {
+		const shape = expectedColumnShapeFor(
+			column(false, { default: value }),
+			'age',
+		);
+
+		expect(shape.default).toEqual({
+			kind: 'portable',
+			ast: expectedAst,
+		});
+		expect(
+			compareSetNotNullColumnShape(
+				shape,
+				columnShapeFromColumn(column(true, { default: value }), 'age'),
+				createPgEquivalenceCapability(),
+				{ engine: 'postgresql' },
+			).kind,
+		).toBe('equivalent');
+	});
+
+	it.each([
+		['bigint', () => 10n],
+		['NaN', () => Number.NaN],
+		['Infinity', () => Number.POSITIVE_INFINITY],
+		['Date', () => new Date('2026-01-01T00:00:00.000Z')],
+		['Map', () => new Map([['value', 1]])],
+		['circular object', circularDefault],
+		['explicit undefined', () => undefined],
+	])('classifies non-JSON-safe authored %s defaults as unresolvable', (_label, makeDefault) => {
+		const shape = expectedColumnShapeFor(
+			column(false, { default: makeDefault() }),
+			'age',
+		);
+
+		expect(shape.default).toMatchObject({
+			kind: 'unresolvable',
+			category: 'scalar',
+			source: 'authored-column-default',
+		});
+	});
+
+	it.each([
+		['Date', () => new Date('2026-01-01T00:00:00.000Z')],
+		['Map', () => new Map([['value', 1]])],
+		['circular object', circularDefault],
+	])('treats non-JSON-safe authored %s default comparisons as unknown', (_label, makeDefault) => {
+		const desiredColumn = column(false, { default: makeDefault() });
+		const currentColumn = column(true, { default: makeDefault() });
+
+		expect(() =>
+			compareSetNotNullColumnShape(
+				expectedColumnShapeFor(desiredColumn, 'age'),
+				columnShapeFromColumn(currentColumn, 'age'),
+				createPgEquivalenceCapability(),
+				{ engine: 'postgresql' },
+			),
+		).not.toThrow();
+
+		const comparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(desiredColumn, 'age'),
+			columnShapeFromColumn(currentColumn, 'age'),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql' },
+		);
+		expect(comparison.kind).toBe('unknown');
+		if (comparison.kind === 'unknown') {
+			expect(comparison.field).toBe('default');
+		}
+	});
+
+	it.each([
+		['NaN', Number.NaN],
+		['Infinity', Number.POSITIVE_INFINITY],
+	])('treats authored %s default as unknown instead of lossy null', (_label, value) => {
+		const desiredColumn = column(false, { default: value });
+		const currentColumn = column(true, { default: null });
+		const comparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(desiredColumn, 'age'),
+			columnShapeFromColumn(currentColumn, 'age'),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql' },
+		);
+
+		expect(comparison.kind).toBe('unknown');
+		if (comparison.kind === 'unknown') {
+			expect(comparison.field).toBe('default');
+		}
+
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(model(false, { default: value }), model(true, { default: null }));
+
+		expect(compare.kind).toBe('unknown');
+	});
+
+	it('blocks SET NOT NULL proof for an authored bigint default instead of crashing', async () => {
+		const registry = registryWithColumnObservation({
+			hasDefault: true,
+			defaultExpression: '10',
+		});
+		const compare = createComparator(registry).compare(
+			model(false, { default: 10n }),
+			model(true, { default: 10n }),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.appliesTo).toBe('default');
+		expect(
+			compare.obligations.flatMap(
+				(obligation) => obligation.dischargeableBy ?? [],
+			),
+		).not.toContainEqual(
+			expect.objectContaining({ kind: EXPRESSION_DEPARSE_OBSERVATION }),
+		);
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
+		}
+	});
+
+	it('proves a raw SQL default equivalence under author attestation', async () => {
+		const defaultValue = attestedNativeDefault('now()');
+		const registry = registryWithColumnObservation({
+			hasDefault: true,
+			defaultExpression: 'now()',
+		});
+		const compare = createComparator(registry).compare(
+			model(false, {
+				default: defaultValue,
+			}),
+			model(true, {
+				default: defaultValue,
+			}),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(
+			compare.candidates[0]?.claimDrafts?.some(
+				(claim) =>
+					claim.conclusion === 'established-under-assumptions' &&
+					claim.assumes?.length === 1,
+			),
+		).toBe(true);
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.assessment.assurance).toBe('accepted-under-assumptions');
+		const assumption = outcome.plan.assumptions.find(
+			(item) => item.class === 'user-attested-native-default',
+		);
+		expect(assumption).toMatchObject({
+			class: 'user-attested-native-default',
+			asserter: { kind: 'human', identity: 'schema-author' },
+			scope: [
+				{
+					engine: 'postgresql',
+					database: 'model',
+					kind: 'column',
+					name: 'age',
+					qualifiedBy: ['users'],
+				},
+			],
+		});
+		if (!assumption) {
+			return;
+		}
+		expect(outcome.plan.steps[0]?.restsOnAssumptions).toContain(assumption.id);
+		const claim = outcome.plan.claims.find(
+			(item) =>
+				item.derivedBy.conclusion === 'established-under-assumptions' &&
+				item.assumes.includes(assumption.id),
+		);
+		expect(claim).toBeDefined();
+	});
+
+	it('does not recognize different attested raw SQL default text as equivalent', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				default: attestedNativeDefault('now()'),
+			}),
+			model(true, {
+				default: attestedNativeDefault('clock_timestamp()'),
+			}),
+		);
+
+		expect(compare.kind).not.toBe('transitions');
 	});
 
 	it('proves mixed defaults when mocked deparse canonical forms are equal', async () => {

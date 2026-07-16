@@ -53,6 +53,7 @@ export interface SetNotNullMatch {
 	readonly table: string;
 	readonly column: string;
 	readonly expectedColumnShape: SetNotNullColumnShapeExpectation;
+	readonly assumptions?: readonly Assumption[];
 }
 
 type ResolvedSetNotNullMatch = SetNotNullMatch & {
@@ -125,15 +126,28 @@ function refutedClaims(
 function isPureNullabilityTightening(
 	desired: ColumnIR,
 	current: ColumnIR,
+	physicalTable: string,
 	physicalName: string,
 	context: RecognitionContext | undefined,
 ): RecognitionResult<{
 	readonly expectedColumnShape: SetNotNullColumnShapeExpectation;
+	readonly assumptions?: readonly Assumption[];
 }> {
-	const expectedColumnShape = expectedColumnShapeFor(desired, physicalName);
+	const target = {
+		table: physicalTable,
+		column: physicalName,
+		...(context?.context.targetSchema
+			? { schema: context.context.targetSchema }
+			: {}),
+	};
+	const expectedColumnShape = expectedColumnShapeFor(
+		desired,
+		physicalName,
+		target,
+	);
 	const comparison = compareSetNotNullColumnShape(
 		expectedColumnShape,
-		columnShapeFromColumn(current, physicalName),
+		columnShapeFromColumn(current, physicalName, target),
 		context?.equivalence ?? createPgEquivalenceCapability(),
 		context?.context ?? { engine: 'postgresql' },
 		context?.evidence,
@@ -141,7 +155,12 @@ function isPureNullabilityTightening(
 	if (comparison.kind === 'equivalent') {
 		return {
 			recognized: true,
-			match: { expectedColumnShape },
+			match: {
+				expectedColumnShape,
+				...(comparison.assumptions.length > 0
+					? { assumptions: comparison.assumptions }
+					: {}),
+			},
 			claimDrafts: comparison.claimDrafts,
 		};
 	}
@@ -547,16 +566,18 @@ export function createSetNotNullRule(
 					if (!currentColumn) {
 						continue;
 					}
+					const physicalTable = naming.toDatabase(desiredTable.name);
 					const physicalColumn = naming.toDatabase(desiredColumn.name);
 					const nullabilityTightening = isPureNullabilityTightening(
 						desiredColumn,
 						currentColumn,
+						physicalTable,
 						physicalColumn,
 						context,
 					);
 					if (nullabilityTightening.recognized === 'unknown') {
 						const target = {
-							table: naming.toDatabase(desiredTable.name),
+							table: physicalTable,
 							column: physicalColumn,
 						};
 						return {
@@ -572,10 +593,15 @@ export function createSetNotNullRule(
 						const recognized = {
 							recognized: true as const,
 							match: {
-								table: naming.toDatabase(desiredTable.name),
+								table: physicalTable,
 								column: physicalColumn,
 								expectedColumnShape:
 									nullabilityTightening.match.expectedColumnShape,
+								...(nullabilityTightening.match.assumptions
+									? {
+											assumptions: nullabilityTightening.match.assumptions,
+										}
+									: {}),
 							},
 						};
 						return nullabilityTightening.claimDrafts
@@ -648,7 +674,11 @@ export function createSetNotNullRule(
 			if (!exists || !hasAlterAuthority || !versionSupported) {
 				return { outcome: 'inapplicable', obligations, assumptions: [] };
 			}
-			return { outcome: 'applicable', obligations, assumptions: [] };
+			return {
+				outcome: 'applicable',
+				obligations,
+				assumptions: match.assumptions ?? [],
+			};
 		},
 		generateCandidate(
 			match: SetNotNullMatch,

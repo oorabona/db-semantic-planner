@@ -1,4 +1,5 @@
 import {
+	createPgObservationIssuer,
 	createPgTransitionPack,
 	readPgObservationContext,
 } from '@dbsp/adapter-pgsql';
@@ -20,6 +21,19 @@ const policy: ApplyPolicy = {
 	accepts: [
 		{ class: 'operation-pack-semantics' },
 		{ class: 'external-ddl-exclusion' },
+	],
+};
+
+const schemaAuthor = { kind: 'human' as const, identity: 'schema-author' };
+
+const policyWithNativeDefaultAttestation: ApplyPolicy = {
+	accepts: [
+		...policy.accepts,
+		{
+			class: 'user-attested-native-default',
+			fromTrustRoot: schemaAuthor,
+			withinScope: [{ kind: 'column', name: 'age' }],
+		},
 	],
 };
 
@@ -51,6 +65,14 @@ function model(nullable: boolean, column = 'age', overrides = {}): ModelIR {
 	};
 }
 
+function attestedNativeDefault(sql: string) {
+	return {
+		sql,
+		attestedBy: schemaAuthor,
+		statement: 'Schema author attests this raw SQL default is unchanged.',
+	};
+}
+
 async function createUsersTable(
 	ages: readonly (number | null)[],
 ): Promise<void> {
@@ -59,6 +81,25 @@ async function createUsersTable(
 		`CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(
 			'users',
 		)} (id serial PRIMARY KEY, age integer NULL)`,
+	);
+	for (const age of ages) {
+		await pool.query(
+			`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (age) VALUES ($1)`,
+			[age],
+		);
+	}
+}
+
+async function createUsersTableWithRawDefault(
+	ages: readonly (number | null)[],
+): Promise<void> {
+	const pool = await getTestPool();
+	await pool.query(
+		`CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(
+			'users',
+		)} (id serial PRIMARY KEY, age integer DEFAULT (42 + 1) NULL)`,
 	);
 	for (const age of ages) {
 		await pool.query(
@@ -120,6 +161,11 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 		await pool.query(
 			`DROP TABLE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent(
 				'users',
+			)} CASCADE`,
+		);
+		await pool.query(
+			`DROP TYPE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent(
+				'status',
 			)} CASCADE`,
 		);
 	});
@@ -274,5 +320,122 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 
 		expect(result.assessment.decision).toBe('applicable');
 		expect(result.journals[0]?.outcome).toBe('completed');
+	});
+
+	it('blocks SET NOT NULL when live custom type identity remains unresolved at proof time', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent(
+				'status',
+			)} AS ENUM ('active', 'pending')`,
+		);
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (id serial PRIMARY KEY, status ${quoteIdent(
+				schemaName,
+			)}.${quoteIdent('status')} NULL)`,
+		);
+		await pool.query(
+			`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (status) VALUES ('active'), ('pending')`,
+		);
+		const desired = model(false, 'status', {
+			type: 'string',
+			originalDbType: 'status',
+		});
+		const current = model(true, 'status', {
+			type: 'string',
+			originalDbType: 'status',
+		});
+		const pack = createPgTransitionPack();
+		const issuer = createPgObservationIssuer();
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					...issuer,
+					readContext: async (target, context, requests) => ({
+						...(issuer.readContext
+							? await issuer.readContext(target, context, requests)
+							: context),
+						searchPath: ['public', schemaName],
+					}),
+				},
+			},
+		]);
+		const context = {
+			...(await readPgObservationContext(pool, schemaName)),
+			searchPath: ['public', schemaName],
+		};
+		const compare = createComparator(registry).compare(desired, current);
+		expect(compare.kind).toBe('transitions');
+
+		const outcome = await createProver(registry).prove(compare, pool, context);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(JSON.stringify(outcome.assessment.reasons)).toContain(
+				'the target column no longer matches the compared desired shape',
+			);
+			expect(JSON.stringify(outcome.assessment.reasons)).toContain(
+				'field type',
+			);
+		}
+	});
+
+	it('proves and applies SET NOT NULL with an author-attested raw SQL default', async () => {
+		await createUsersTableWithRawDefault([18, 21, 34]);
+		const defaultValue = attestedNativeDefault('(42 + 1)');
+		const desired = model(false, 'age', {
+			default: defaultValue,
+		});
+		const current = model(true, 'age', {
+			default: defaultValue,
+		});
+		const { pool, registry, outcome } = await proveSetNotNullForModels(
+			desired,
+			current,
+		);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.assessment.assurance).toBe('accepted-under-assumptions');
+		const assumption = outcome.plan.assumptions.find(
+			(item) => item.class === 'user-attested-native-default',
+		);
+		expect(assumption).toBeDefined();
+		if (!assumption) {
+			return;
+		}
+		expect(outcome.plan.steps[0]?.restsOnAssumptions).toContain(assumption.id);
+
+		const result = await createApplier(registry).apply(
+			{ plan: outcome.plan, assessment: outcome.assessment },
+			policyWithNativeDefaultAttestation,
+			pool,
+		);
+
+		expect(result.assessment.decision).toBe('applicable');
+		expect(result.journals[0]?.outcome).toBe('completed');
+		expect(await ageIsNullable()).toBe(false);
+	});
+
+	it('blocks SET NOT NULL with an unattested raw SQL default', async () => {
+		await createUsersTableWithRawDefault([18, 21, 34]);
+		const desired = model(false, 'age', {
+			default: { sql: '(42 + 1)' },
+		});
+		const current = model(true, 'age', {
+			default: { sql: '(42 + 1)' },
+		});
+		const { outcome } = await proveSetNotNullForModels(desired, current);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
+		}
 	});
 });

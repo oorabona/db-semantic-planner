@@ -4,6 +4,8 @@ import type {
 	ApplyGuard,
 	Assumption,
 	DurableIntentRecord,
+	EquivalenceContext,
+	EquivalenceResult,
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
@@ -20,9 +22,9 @@ import type {
 import { validateIdentifier } from '../../validate.js';
 import {
 	columnShapeFromCatalog,
-	compareSetNotNullColumnShape,
 	isSetNotNullColumnShapeExpectation,
 	type SetNotNullColumnShapeExpectation,
+	type SetNotNullObservedColumnShape,
 } from '../column-shape.js';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
@@ -98,6 +100,11 @@ const JOURNAL_TABLE = 'dbsp_transition_journal';
 const GUARD_STATEMENT_TIMEOUT_MS = 5000;
 const STALE_EXPECTED_COLUMN_SHAPE_REASON =
 	'the target column no longer matches the compared desired shape; the recognized pure-nullability tightening is stale - replan against fresh state';
+
+type ColumnShapeGuardFailure = {
+	readonly field: string;
+	readonly detail: string;
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -273,6 +280,157 @@ function originalDbTypeSchemaScope(
 	return typeSchema === explicitSchema(payload) ? 'target' : 'absolute';
 }
 
+function structuralFailure(
+	field: string,
+	detail: string,
+): ColumnShapeGuardFailure {
+	return { field, detail };
+}
+
+function equivalenceFailure(
+	field: string,
+	result: EquivalenceResult,
+): ColumnShapeGuardFailure | undefined {
+	if (result.kind === 'equivalent') {
+		return undefined;
+	}
+	if (result.kind === 'different') {
+		return {
+			field,
+			detail: `${field} is semantically different`,
+		};
+	}
+	const firstDetail = result.obligations[0]?.proposition.detail;
+	return {
+		field,
+		detail:
+			firstDetail == null
+				? `${field} equivalence is unresolved`
+				: `${field} equivalence is unresolved: ${stableJson(firstDetail)}`,
+	};
+}
+
+function assertDefaultUnknownSkipInvariant(
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	catalog: CatalogValue,
+): void {
+	if (
+		expected.default == null ||
+		observed.default == null ||
+		catalog.hasDefault !== true ||
+		catalog.defaultExpression == null
+	) {
+		throw new Error(
+			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field default: default value comparison was unresolved without the required default-presence and fingerprint facts`,
+		);
+	}
+}
+
+function setNotNullShapeGuardFailures(
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	catalog: CatalogValue,
+	context: EquivalenceContext,
+	evidence: readonly EvidenceObservation[],
+): readonly ColumnShapeGuardFailure[] {
+	const failures: ColumnShapeGuardFailure[] = [];
+	if (expected.name !== observed.name) {
+		failures.push(structuralFailure('name', 'column name changed'));
+	}
+	if (expected.nullability.to !== false) {
+		failures.push(
+			structuralFailure(
+				'nullability.to',
+				'desired column is not a SET NOT NULL target',
+			),
+		);
+	}
+	if (observed.nullable !== expected.nullability.from) {
+		failures.push(
+			structuralFailure(
+				'nullability.from',
+				'observed column is not currently nullable',
+			),
+		);
+	}
+	if (expected.identity !== observed.identity) {
+		failures.push(structuralFailure('identity', 'identity changed'));
+	}
+	if (expected.generated !== observed.generated) {
+		failures.push(
+			structuralFailure('generated', 'generated column state changed'),
+		);
+	}
+	if (expected.autoIncrement !== observed.autoIncrement) {
+		failures.push(
+			structuralFailure('autoIncrement', 'auto-increment state changed'),
+		);
+	}
+	if (expected.unique !== observed.unique) {
+		failures.push(structuralFailure('unique', 'unique state changed'));
+	}
+	if (expected.comment !== observed.comment) {
+		failures.push(structuralFailure('comment', 'column comment changed'));
+	}
+
+	const equivalence = createPgEquivalenceCapability();
+	const typeFailure = equivalenceFailure(
+		'type',
+		equivalence.compareType(expected.type, observed.type, context, evidence),
+	);
+	if (typeFailure) {
+		failures.push(typeFailure);
+	}
+
+	if (expected.default == null && observed.default != null) {
+		failures.push(
+			structuralFailure('default.presence', 'default expression added'),
+		);
+	} else if (expected.default != null && observed.default == null) {
+		failures.push(
+			structuralFailure('default.presence', 'default expression removed'),
+		);
+	} else if (expected.default != null && observed.default != null) {
+		const defaultResult = equivalence.compareExpression(
+			expected.default,
+			observed.default,
+			'scalar',
+			context,
+			evidence,
+		);
+		if (defaultResult.kind === 'unknown') {
+			// DEFAULT value is the only deliberately relaxed field in this stale-shape
+			// guard. Its value is fingerprinted (`column.default` and
+			// `pg_attrdef.expression`) and the SET NOT NULL recognizer only emits this
+			// operation after drafting the corresponding default-equivalence claim
+			// (possibly under author attestation). Widening this relaxation to any
+			// other field requires threading claim coverage into buildFingerprints.
+			assertDefaultUnknownSkipInvariant(expected, observed, catalog);
+		} else {
+			const defaultFailure = equivalenceFailure('default', defaultResult);
+			if (defaultFailure) {
+				failures.push(defaultFailure);
+			}
+		}
+	}
+
+	const collationFailure = equivalenceFailure(
+		'collation',
+		equivalence.compareCollation(
+			expected.collation,
+			observed.collation,
+			context,
+			evidence,
+		),
+	);
+	if (collationFailure) {
+		failures.push(collationFailure);
+	}
+
+	return failures;
+}
+
 function assertExpectedColumnShape(
 	payload: AlterColumnSetNotNullPayload,
 	catalog: CatalogValue,
@@ -284,10 +442,11 @@ function assertExpectedColumnShape(
 			`missing expected column shape; ${STALE_EXPECTED_COLUMN_SHAPE_REASON}`,
 		);
 	}
-	const comparison = compareSetNotNullColumnShape(
+	const observed = columnShapeFromCatalog(catalog, payload.column);
+	const failures = setNotNullShapeGuardFailures(
 		payload.expectedColumnShape,
-		columnShapeFromCatalog(catalog, payload.column),
-		createPgEquivalenceCapability(),
+		observed,
+		catalog,
 		{
 			engine: context.engine,
 			databaseId: context.databaseId,
@@ -296,19 +455,17 @@ function assertExpectedColumnShape(
 		},
 		evidence,
 	);
-	// Only a DEFINITE mismatch (`different`) blocks here. An `unknown` means the
-	// comparison needs async evidence (the vendor-deparser for a column default)
-	// that is present at prove time but NOT during the apply-time fingerprint
-	// rebuild (the apply re-observation carries only fresh catalog facts). Such a
-	// field's desired-equivalence was already PROVEN at prove, and any drift from
-	// the proven state is caught by the applier's fingerprint comparison — the
-	// field is an included fingerprint fact (e.g. the column default). Blocking on
-	// `unknown` here would make a column with a default unprovable at apply.
-	// INVARIANT: every field that can be `unknown` here MUST be an included
-	// fingerprint fact, so its drift is still detected.
-	if (comparison.kind === 'different') {
+	if (failures.length > 0) {
+		const first =
+			failures[0] ??
+			structuralFailure('unknown', 'unknown column shape guard failure');
+		const rest = failures.slice(1);
+		const additional =
+			rest.length === 0
+				? ''
+				: `; additional fields ${rest.map((item) => item.field).join(', ')}`;
 		throw new Error(
-			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field ${comparison.field}: ${comparison.detail}`,
+			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field ${first.field}: ${first.detail}${additional}`,
 		);
 	}
 }

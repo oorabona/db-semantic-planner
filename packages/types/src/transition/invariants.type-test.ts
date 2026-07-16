@@ -44,6 +44,7 @@ import type {
 	TransitionCandidate,
 	TransitionFragment,
 	TransitionRule,
+	UnresolvableExpression,
 	UnsafeNativeFragment,
 } from './index.js';
 
@@ -122,6 +123,9 @@ declare function acceptsTransitionCandidate(
 	candidate: TransitionCandidate,
 ): void;
 declare function acceptsTransitionFragment(fragment: TransitionFragment): void;
+declare function acceptsUnresolvableExpression(
+	expression: UnresolvableExpression,
+): void;
 declare function acceptsUnsafeNativeFragment(
 	fragment: UnsafeNativeFragment,
 ): void;
@@ -459,6 +463,18 @@ acceptsUnsafeNativeFragment({
 	category: 'statement',
 	text: 'create index concurrently idx on users (email)',
 	assumption: assumptionId,
+});
+
+acceptsUnresolvableExpression({
+	kind: 'unresolvable',
+	category: 'scalar',
+	reason: 'authored default cannot be faithfully represented as JSON',
+});
+
+// @ts-expect-error Unresolvable expressions still name their grammatical slot.
+acceptsUnresolvableExpression({
+	kind: 'unresolvable',
+	reason: 'authored default cannot be faithfully represented as JSON',
 });
 
 // @ts-expect-error Claim derivation is retained on proof claims.

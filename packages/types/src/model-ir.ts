@@ -7,6 +7,8 @@
  * remain in @dbsp/core.
  */
 
+import type { TrustRoot } from './transition/artifact.js';
+
 // ============================================================================
 // Column Types
 // ============================================================================
@@ -158,6 +160,14 @@ export type FilterStrategy = 'exists' | 'join' | 'auto';
 
 /** Default join type when joining */
 export type JoinDefault = 'left' | 'inner' | 'auto';
+
+export type AuthorAttester = Exclude<TrustRoot, { readonly kind: 'pack' }>;
+
+export interface AuthorAttestedNativeDefault {
+	readonly sql: string;
+	readonly attestedBy: AuthorAttester;
+	readonly statement?: string;
+}
 
 // ============================================================================
 // Core Interfaces

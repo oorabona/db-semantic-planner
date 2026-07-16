@@ -2,7 +2,12 @@ import type { OperationKindRef } from './artifact.js';
 import type { JsonValue } from './json.js';
 import type { ResourceAddress, ResourceSelector } from './resource.js';
 
-/** This envelope is opaque: expression safety is enforced by the owning operation pack's payload type (PortableExpression | VendorValidatedExpression | UnsafeNativeFragment) and its effectsOf/renderer, and a pack that emits a raw fragment must type it UnsafeNativeFragment carrying its assumption before erasing to JsonValue here. */
+/**
+ * This envelope is opaque: expression safety is enforced by the owning
+ * operation pack's payload type and its effectsOf/renderer, and a pack that
+ * emits a raw fragment must type it UnsafeNativeFragment carrying its
+ * assumption before erasing to JsonValue here.
+ */
 export interface PhysicalOperation<TPayload extends JsonValue = JsonValue> {
 	readonly ref: string;
 	readonly operationKind: OperationKindRef;

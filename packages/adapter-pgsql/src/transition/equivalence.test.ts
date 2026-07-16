@@ -1,8 +1,10 @@
 import type {
+	Assumption,
 	CollationRef,
 	EvidenceObservation,
 	ExpressionValue,
 	ObservationRequest,
+	ResourceAddress,
 	TypeRef,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
@@ -49,10 +51,53 @@ function sqlExpression(text: string): ExpressionValue {
 	};
 }
 
+function columnResource(): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: 'model',
+		kind: 'column',
+		name: 'created_at',
+		qualifiedBy: ['users'],
+	};
+}
+
+function nativeDefaultAssumption(id = 'unsafe.default.now'): Assumption {
+	return {
+		id: assumptionId(id),
+		class: 'user-attested-native-default',
+		asserter: { kind: 'human', identity: 'schema-author' },
+		statement:
+			'Schema author attests this raw SQL column default is unchanged.',
+		scope: [columnResource()],
+	};
+}
+
+function unsafeNativeDefault(
+	text: string,
+	attestation?: Assumption,
+): ExpressionValue {
+	return {
+		kind: 'unsafe-native',
+		category: 'scalar',
+		text,
+		assumption: attestation?.id ?? assumptionId('unsafe.default.now'),
+		...(attestation ? { attestation } : {}),
+	};
+}
+
 function portable(ast: unknown): ExpressionValue {
 	return {
 		kind: 'portable',
 		ast: JSON.parse(JSON.stringify(ast)),
+	};
+}
+
+function unresolvableDefault(): ExpressionValue {
+	return {
+		kind: 'unresolvable',
+		category: 'scalar',
+		source: 'authored-column-default',
+		reason: 'column default is not a finite, plain, cycle-free JSON value',
 	};
 }
 
@@ -107,24 +152,32 @@ function deparseEvidence(
 }
 
 describe('PostgreSQL transition equivalence', () => {
-	it('refuses identical unsafe-native expressions before exact equality', () => {
+	it('keeps identical unsafe-native expressions equivalent under author attestation', () => {
 		const equivalence = createPgEquivalenceCapability();
-		const left: ExpressionValue = {
-			kind: 'unsafe-native',
-			category: 'scalar',
-			text: 'now()',
-			assumption: assumptionId('unsafe.default.now'),
-		};
-		const right: ExpressionValue = {
-			kind: 'unsafe-native',
-			category: 'scalar',
-			text: 'now()',
-			assumption: assumptionId('unsafe.default.now'),
-		};
+		const assumption = nativeDefaultAssumption();
 
 		const result = equivalence.compareExpression(
-			left,
-			right,
+			unsafeNativeDefault(' now() ', assumption),
+			unsafeNativeDefault('now()', assumption),
+			'scalar',
+			context,
+		);
+
+		expect(result.kind).toBe('equivalent');
+		if (result.kind !== 'equivalent') {
+			return;
+		}
+		expect(result.claim.conclusion).toBe('established-under-assumptions');
+		expect(result.claim.assumes).toEqual([assumption.id]);
+		expect(result.assumptions).toEqual([assumption]);
+	});
+
+	it('refuses identical unsafe-native expressions without a real attestation', () => {
+		const equivalence = createPgEquivalenceCapability();
+
+		const result = equivalence.compareExpression(
+			unsafeNativeDefault('now()'),
+			unsafeNativeDefault('now()'),
 			'scalar',
 			context,
 		);
@@ -139,6 +192,20 @@ describe('PostgreSQL transition equivalence', () => {
 				},
 			],
 		});
+	});
+
+	it('does not prove different unsafe-native text under author attestation', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const assumption = nativeDefaultAssumption();
+
+		const result = equivalence.compareExpression(
+			unsafeNativeDefault('now()', assumption),
+			unsafeNativeDefault('clock_timestamp()', assumption),
+			'scalar',
+			context,
+		);
+
+		expect(result.kind).not.toBe('equivalent');
 	});
 
 	it('refuses vendor-validated expressions with different trust roots', () => {
@@ -256,6 +323,31 @@ describe('PostgreSQL transition equivalence', () => {
 		);
 
 		expect(result.kind).toBe('equivalent');
+	});
+
+	it('keeps unresolvable defaults unknown without accepting deparse evidence', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = unresolvableDefault();
+		const right = sqlExpression('10');
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			context,
+			[deparseEvidence(left, right, '10', '10')],
+		);
+
+		expect(result).toMatchObject({
+			kind: 'unknown',
+			obligations: [
+				{
+					proposition: {
+						kind: 'postgresql.equivalence.expression.unknown',
+					},
+				},
+			],
+		});
 	});
 
 	it('refutes mixed default equivalence from unequal vendor-deparser evidence', () => {
