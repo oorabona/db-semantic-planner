@@ -7,10 +7,12 @@ import type {
 	ObservationStability,
 	ResourceAddress,
 } from '@dbsp/types';
+import { formatSqlDefault, quoteIdent } from '../ddl/phases/utils.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
@@ -46,6 +48,11 @@ type AlterAuthorityFacts = {
 	readonly hasAlterAuthority: boolean;
 	readonly hasTableAlterAuthority: boolean;
 	readonly hasSchemaUsage: boolean;
+};
+
+type PortableExpressionDetail = {
+	readonly kind: 'portable';
+	readonly ast: JsonValue;
 };
 
 let observationSequence = 0;
@@ -204,6 +211,13 @@ function requestForTarget(
 		kind: request.kind,
 		scope: [scopeFor(target, context, kind)],
 		detail: {
+			...(isRecord(request.detail)
+				? Object.fromEntries(
+						Object.entries(request.detail).filter(
+							([key]) => !['schema', 'table', 'column'].includes(key),
+						),
+					)
+				: {}),
 			table: target.table,
 			column: target.column,
 			schema: target.schema ?? null,
@@ -273,6 +287,188 @@ function identityFromAttidentity(
 		return 'byDefault';
 	}
 	return null;
+}
+
+function portableExpressionFromRequest(
+	request: ObservationRequest,
+): PortableExpressionDetail | undefined {
+	if (!isRecord(request.detail)) {
+		return undefined;
+	}
+	const left = request.detail.left;
+	const right = request.detail.right;
+	if (isRecord(left) && left.kind === 'portable') {
+		return left as unknown as PortableExpressionDetail;
+	}
+	if (isRecord(right) && right.kind === 'portable') {
+		return right as unknown as PortableExpressionDetail;
+	}
+	return undefined;
+}
+
+function renderPortableDefaultSql(value: PortableExpressionDetail): string {
+	const ast = value.ast;
+	if (
+		ast === null ||
+		typeof ast === 'string' ||
+		typeof ast === 'number' ||
+		typeof ast === 'boolean'
+	) {
+		return formatSqlDefault(ast, 'transition column default deparse');
+	}
+	throw new Error(
+		'column-default deparse only supports pack-rendered scalar portable defaults; structured default ASTs remain unknown until a default renderer is added',
+	);
+}
+
+function canonicalDefaultQuery() {
+	return (
+		'SELECT pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS default_expression ' +
+		'FROM pg_catalog.pg_class c ' +
+		'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+		'JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid ' +
+		'JOIN pg_catalog.pg_attrdef ad ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum ' +
+		'WHERE n.nspname = $1 AND c.relname = $2 AND a.attname = $3 ' +
+		'AND NOT a.attisdropped'
+	);
+}
+
+async function readCatalogDefaultCanonical(
+	executor: Queryable,
+	target: ObservationTarget & { readonly schema: string },
+): Promise<string> {
+	const result = await executor.query(canonicalDefaultQuery(), [
+		target.schema,
+		target.table,
+		target.column,
+	]);
+	const expression = result.rows[0]?.default_expression;
+	if (typeof expression !== 'string') {
+		throw new Error('column-default deparse could not read catalog default');
+	}
+	return expression;
+}
+
+async function readTempDefaultCanonical(
+	executor: Queryable,
+	tempTable: string,
+	column: string,
+): Promise<string> {
+	const result = await executor.query(
+		'SELECT pg_catalog.pg_get_expr(ad.adbin, ad.adrelid) AS default_expression ' +
+			'FROM pg_catalog.pg_attrdef ad ' +
+			'JOIN pg_catalog.pg_attribute a ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum ' +
+			'WHERE ad.adrelid = $1::pg_catalog.regclass AND a.attname = $2 ' +
+			'AND NOT a.attisdropped',
+		[tempTable, column],
+	);
+	const expression = result.rows[0]?.default_expression;
+	if (typeof expression !== 'string') {
+		throw new Error('column-default deparse could not read temp default');
+	}
+	return expression;
+}
+
+async function observeExpressionDeparse(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	if (
+		!isRecord(request.detail) ||
+		request.detail.surface !== 'column-default' ||
+		request.detail.category !== 'scalar'
+	) {
+		throw new Error(
+			`${request.kind} requires surface=column-default and category=scalar`,
+		);
+	}
+	const target = resolvedTarget(detailTarget(request, context));
+	const normalizedRequest = requestForTarget(
+		request,
+		target,
+		context,
+		'column',
+	);
+	const portable = portableExpressionFromRequest(request);
+	if (!portable) {
+		throw new Error(
+			'column-default deparse requires one portable expression side',
+		);
+	}
+	const desiredSql = renderPortableDefaultSql(portable);
+	const catalogCanonical = await readCatalogDefaultCanonical(executor, target);
+	const tempTable = `_dbsp_default_deparse_${Date.now()}_${++observationSequence}`;
+	const savepoint = `dbsp_default_deparse_sp_${observationSequence}`;
+	let savepointActive = false;
+	let startedTransaction = false;
+	try {
+		// Isolate the round-trip so it NEVER disturbs an outer transaction. At apply
+		// this observation runs inside the applier's lock transaction, so a bare
+		// BEGIN/ROLLBACK here would roll back the applier's DDL and lock. A SAVEPOINT
+		// nests safely; it errors only when there is no transaction (pure prove-time
+		// autocommit), in which case we open our own BEGIN/ROLLBACK. Either way the
+		// temp table lives across CREATE / ALTER / read and is discarded afterwards.
+		try {
+			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+			savepointActive = true;
+		} catch {
+			await executor.query('BEGIN');
+			startedTransaction = true;
+		}
+		await executor.query(
+			`CREATE TEMP TABLE ${quoteIdent(tempTable, 'table')} ` +
+				`(LIKE ${quoteIdent(target.schema, 'schema')}.${quoteIdent(
+					target.table,
+					'table',
+				)} INCLUDING DEFAULTS)`,
+		);
+		await executor.query(
+			`ALTER TABLE ${quoteIdent(tempTable, 'table')} ` +
+				`ALTER COLUMN ${quoteIdent(target.column, 'column')} ` +
+				`SET DEFAULT ${desiredSql}`,
+		);
+		const desiredCanonical = await readTempDefaultCanonical(
+			executor,
+			tempTable,
+			target.column,
+		);
+		return evidenceObservation({
+			request: normalizedRequest,
+			context,
+			scope: [scopeFor(target, context, 'column')],
+			stability: 'externally-mutable',
+			source: 'vendor-deparser',
+			value: {
+				ok: true,
+				surface: 'column-default',
+				category: 'scalar',
+				leftCanonical:
+					(portable as unknown) ===
+					(isRecord(request.detail.left) ? request.detail.left : undefined)
+						? desiredCanonical
+						: catalogCanonical,
+				rightCanonical:
+					(portable as unknown) ===
+					(isRecord(request.detail.right) ? request.detail.right : undefined)
+						? desiredCanonical
+						: catalogCanonical,
+				desiredCanonical,
+				catalogCanonical,
+			},
+		});
+	} finally {
+		if (savepointActive) {
+			await executor
+				.query(`ROLLBACK TO SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
+				.catch(() => undefined);
+			await executor
+				.query(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
+				.catch(() => undefined);
+		} else if (startedTransaction) {
+			await executor.query('ROLLBACK').catch(() => undefined);
+		}
+	}
 }
 
 async function observeColumn(
@@ -466,6 +662,24 @@ export function createPgObservationIssuer(): ObservationIssuer {
 					return observeAlterAuthority(executor, request, context);
 				case ENGINE_VERSION_OBSERVATION:
 					return observeEngineVersion(executor, request, context);
+				case EXPRESSION_DEPARSE_OBSERVATION: {
+					// The deparse round-trip creates a session-scoped TEMP TABLE and then
+					// ALTERs/reads it across several statements. On a pool each query
+					// would run on a different connection, so the temp table would vanish
+					// between statements. Run the whole round-trip on ONE checked-out
+					// client (mirroring readPgObservationContext); a pre-checked-out
+					// client is already session-scoped and used directly.
+					const deparsePool = poolLike(target);
+					if (deparsePool) {
+						const client = await deparsePool.connect();
+						try {
+							return await observeExpressionDeparse(client, request, context);
+						} finally {
+							client.release();
+						}
+					}
+					return observeExpressionDeparse(executor, request, context);
+				}
 				default:
 					throw new Error(`unsupported PostgreSQL observation ${request.kind}`);
 			}

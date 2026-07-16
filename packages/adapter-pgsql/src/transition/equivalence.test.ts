@@ -1,8 +1,18 @@
-import type { CollationRef, ExpressionValue, TypeRef } from '@dbsp/types';
+import type {
+	CollationRef,
+	EvidenceObservation,
+	ExpressionValue,
+	ObservationRequest,
+	TypeRef,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
-import { PG_EQUIVALENCE_ARTIFACT } from './constants.js';
+import {
+	EXPRESSION_DEPARSE_OBSERVATION,
+	PG_EQUIVALENCE_ARTIFACT,
+	PG_INTROSPECTION_ARTIFACT,
+} from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
-import { assumptionId, semanticArtifactId } from './ids.js';
+import { assumptionId, evidenceId, semanticArtifactId } from './ids.js';
 
 const context = { engine: 'postgresql' };
 
@@ -36,6 +46,63 @@ function sqlExpression(text: string): ExpressionValue {
 		category: 'scalar',
 		validatedBy: PG_EQUIVALENCE_ARTIFACT,
 		text,
+	};
+}
+
+function portable(ast: unknown): ExpressionValue {
+	return {
+		kind: 'portable',
+		ast: JSON.parse(JSON.stringify(ast)),
+	};
+}
+
+function deparseEvidence(
+	left: ExpressionValue,
+	right: ExpressionValue,
+	leftCanonical: string,
+	rightCanonical: string,
+): EvidenceObservation {
+	const request: ObservationRequest = {
+		kind: EXPRESSION_DEPARSE_OBSERVATION,
+		scope: [],
+		detail: {
+			surface: 'column-default',
+			category: 'scalar',
+			table: 'users',
+			column: 'status',
+			schema: 'public',
+			left,
+			right,
+		},
+	};
+	return {
+		role: 'evidence',
+		id: evidenceId(`deparse.${leftCanonical}.${rightCanonical}`),
+		issuer: PG_INTROSPECTION_ARTIFACT,
+		request,
+		result: {
+			value: {
+				ok: true,
+				surface: 'column-default',
+				category: 'scalar',
+				leftCanonical,
+				rightCanonical,
+			},
+		},
+		context: {
+			engine: 'postgresql',
+			engineVersion: '180000',
+			databaseId: 'test',
+			capabilities: [],
+			privileges: [],
+			sessionConfiguration: {},
+			extensions: {},
+		},
+		stability: 'externally-mutable',
+		takenAt: new Date().toISOString(),
+		scope: [],
+		source: 'vendor-deparser',
+		validity: { invalidatedBy: ['external-ddl'] },
 	};
 }
 
@@ -122,16 +189,23 @@ describe('PostgreSQL transition equivalence', () => {
 		expect(result.kind).toBe('equivalent');
 	});
 
+	it('keeps same-trust vendor scalar defaults equivalent with trim-only drift', () => {
+		const equivalence = createPgEquivalenceCapability();
+
+		const result = equivalence.compareExpression(
+			sqlExpression(' 42 '),
+			sqlExpression('42'),
+			'scalar',
+			context,
+		);
+
+		expect(result.kind).toBe('equivalent');
+	});
+
 	it('keeps equal portable ASTs equivalent under the requested category', () => {
 		const equivalence = createPgEquivalenceCapability();
-		const left: ExpressionValue = {
-			kind: 'portable',
-			ast: { kind: 'literal', value: 42 },
-		};
-		const right: ExpressionValue = {
-			kind: 'portable',
-			ast: { value: 42, kind: 'literal' },
-		};
+		const left = portable({ kind: 'literal', value: 42 });
+		const right = portable({ value: 42, kind: 'literal' });
 
 		const result = equivalence.compareExpression(
 			left,
@@ -141,6 +215,63 @@ describe('PostgreSQL transition equivalence', () => {
 		);
 
 		expect(result.kind).toBe('equivalent');
+	});
+
+	it('returns a deparse obligation for mixed portable and vendor defaults', () => {
+		const equivalence = createPgEquivalenceCapability();
+
+		const result = equivalence.compareExpression(
+			portable('active'),
+			sqlExpression("'active'::text"),
+			'scalar',
+			context,
+		);
+
+		expect(result).toMatchObject({
+			kind: 'unknown',
+			obligations: [
+				{
+					proposition: {
+						kind: 'postgresql.equivalence.expression.deparse-required',
+						detail: {
+							observationKind: EXPRESSION_DEPARSE_OBSERVATION,
+						},
+					},
+				},
+			],
+		});
+	});
+
+	it('resolves mixed default equivalence from vendor-deparser evidence', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'active'::text");
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			context,
+			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+		);
+
+		expect(result.kind).toBe('equivalent');
+	});
+
+	it('refutes mixed default equivalence from unequal vendor-deparser evidence', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'pending'::text");
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			context,
+			[deparseEvidence(left, right, "'active'::text", "'pending'::text")],
+		);
+
+		expect(result.kind).toBe('different');
 	});
 
 	it('does not case-fold SQL expression literal content', () => {

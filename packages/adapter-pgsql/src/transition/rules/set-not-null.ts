@@ -31,6 +31,7 @@ import {
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
@@ -193,20 +194,89 @@ function columnExistsRequest(match: SetNotNullTarget): ObservationRequest {
 function withRecognitionEvidenceRequest(
 	obligations: readonly ProofObligation[],
 	request: ObservationRequest,
+	target: SetNotNullTarget,
 ): readonly ProofObligation[] {
 	const requestKey = stableJson(request);
 	return obligations.map((obligation) => {
+		const additionalRequests = [
+			request,
+			...deparseRequestsFor(target, obligation),
+		];
 		const dischargeableBy = obligation.dischargeableBy ?? [];
+		let updated = dischargeableBy;
+		for (const candidate of additionalRequests) {
+			const candidateKey = stableJson(candidate);
+			if (updated.some((item) => stableJson(item) === candidateKey)) {
+				continue;
+			}
+			updated = [...updated, candidate];
+		}
 		if (
+			updated.length === dischargeableBy.length &&
 			dischargeableBy.some((candidate) => stableJson(candidate) === requestKey)
 		) {
 			return obligation;
 		}
 		return {
 			...obligation,
-			dischargeableBy: [...dischargeableBy, request],
+			dischargeableBy: updated,
 		};
 	});
+}
+
+function expressionDetail(
+	obligation: ProofObligation,
+): Record<string, unknown> | undefined {
+	const detail = obligation.proposition.detail;
+	if (!isRecord(detail)) {
+		return undefined;
+	}
+	if (detail.field === 'default' && isRecord(detail.detail)) {
+		return detail.detail;
+	}
+	return detail;
+}
+
+function deparseRequestsFor(
+	target: SetNotNullTarget,
+	obligation: ProofObligation,
+): readonly ObservationRequest[] {
+	const detail = expressionDetail(obligation);
+	if (
+		obligation.appliesTo !== 'default' ||
+		!detail ||
+		detail.observationKind !== EXPRESSION_DEPARSE_OBSERVATION ||
+		detail.category !== 'scalar' ||
+		!isRecord(detail.left) ||
+		!isRecord(detail.right)
+	) {
+		return [];
+	}
+	const leftKind = detail.left.kind;
+	const rightKind = detail.right.kind;
+	if (
+		!(
+			(leftKind === 'portable' && rightKind === 'vendor-validated') ||
+			(leftKind === 'vendor-validated' && rightKind === 'portable')
+		)
+	) {
+		return [];
+	}
+	return [
+		{
+			kind: EXPRESSION_DEPARSE_OBSERVATION,
+			scope: [resourceForMatch(target, 'column')],
+			detail: {
+				surface: 'column-default',
+				category: 'scalar',
+				table: target.table,
+				column: target.column,
+				schema: target.schema ?? null,
+				left: detail.left as JsonValue,
+				right: detail.right as JsonValue,
+			},
+		},
+	];
 }
 
 function requiredObservationsFor(
@@ -494,6 +564,7 @@ export function createSetNotNullRule(
 							obligations: withRecognitionEvidenceRequest(
 								nullabilityTightening.obligations,
 								columnExistsRequest(target),
+								target,
 							),
 						};
 					}

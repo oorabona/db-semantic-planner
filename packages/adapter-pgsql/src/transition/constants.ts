@@ -16,6 +16,11 @@ export const PG_EQUIVALENCE_ARTIFACT: SemanticArtifactRef = {
 	version: '0.1.0',
 };
 
+export const PG_DEPARSE_ARTIFACT: SemanticArtifactRef = {
+	id: semanticArtifactId('dbsp.postgresql.deparser.pg18'),
+	version: '0.1.0',
+};
+
 export const PG_INTROSPECTION_ARTIFACT: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.postgresql.introspection.pg18'),
 	version: '0.1.0',
@@ -40,5 +45,6 @@ export const SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION =
 	'postgresql.column.set-not-null.relation-kind-supported';
 export const ALTER_AUTHORITY_OBSERVATION = 'postgresql.table.alter-authority';
 export const ENGINE_VERSION_OBSERVATION = 'postgresql.engine.version-supported';
+export const EXPRESSION_DEPARSE_OBSERVATION = 'postgresql.expression.deparse';
 
 export const NO_NULLS_GUARD = 'NO_NULLS';

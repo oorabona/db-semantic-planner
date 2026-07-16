@@ -3,6 +3,7 @@ import type {
 	EquivalenceCapability,
 	EquivalenceContext,
 	EquivalenceResult,
+	EvidenceObservation,
 	ExpressionEquivalenceCategory,
 	ExpressionValue,
 	JsonValue,
@@ -10,7 +11,11 @@ import type {
 	ProofObligation,
 	TypeRef,
 } from '@dbsp/types';
-import { PG_EQUIVALENCE_ARTIFACT } from './constants.js';
+import {
+	EXPRESSION_DEPARSE_OBSERVATION,
+	PG_DEPARSE_ARTIFACT,
+	PG_EQUIVALENCE_ARTIFACT,
+} from './constants.js';
 import { stableJson } from './stable-json.js';
 
 const TYPE_ALIASES = new Map<string, string>([
@@ -209,14 +214,37 @@ function unresolvedExpressionObligation(
 	right: ExpressionValue,
 	category: ExpressionEquivalenceCategory,
 	reason: string,
+	extra: Record<string, unknown> = {},
 ): ProofObligation {
 	const proposition = {
 		kind: 'postgresql.equivalence.expression.unknown',
 		scope: [],
-		detail: json({ left, right, category, reason }),
+		detail: json({ left, right, category, reason, ...extra }),
 	};
 	return {
 		proposition,
+		scope: [],
+	};
+}
+
+function deparseExpressionObligation(
+	left: ExpressionValue,
+	right: ExpressionValue,
+	category: ExpressionEquivalenceCategory,
+	reason: string,
+): ProofObligation {
+	return {
+		proposition: {
+			kind: 'postgresql.equivalence.expression.deparse-required',
+			scope: [],
+			detail: json({
+				left,
+				right,
+				category,
+				reason,
+				observationKind: EXPRESSION_DEPARSE_OBSERVATION,
+			}),
+		},
 		scope: [],
 	};
 }
@@ -415,6 +443,12 @@ type GuardedExpressionComparison =
 	  }
 	| { readonly kind: 'unknown'; readonly reason: string };
 
+type DeparseEvidenceOutcome = {
+	readonly surface: string;
+	readonly leftCanonical: string;
+	readonly rightCanonical: string;
+};
+
 function expressionCategory(
 	value: ExpressionValue,
 ): ExpressionEquivalenceCategory | undefined {
@@ -451,7 +485,7 @@ function guardExpressionComparison(
 	if (left.kind !== right.kind) {
 		return {
 			kind: 'unknown',
-			reason: 'mixed expression kinds are not comparable by static equality',
+			reason: 'mixed expression kinds require a vendor deparse observation',
 		};
 	}
 	if (left.kind === 'portable') {
@@ -484,13 +518,97 @@ function guardExpressionComparison(
 	};
 }
 
+function sameExpressionValue(left: unknown, right: ExpressionValue): boolean {
+	return stableJson(left) === stableJson(right);
+}
+
+function deparseEvidenceFor(
+	left: ExpressionValue,
+	right: ExpressionValue,
+	category: ExpressionEquivalenceCategory,
+	evidence: readonly EvidenceObservation[] | undefined,
+): DeparseEvidenceOutcome | undefined {
+	for (const observation of evidence ?? []) {
+		if (
+			observation.source !== 'vendor-deparser' ||
+			observation.request.kind !== EXPRESSION_DEPARSE_OBSERVATION
+		) {
+			continue;
+		}
+		const detail = observation.request.detail;
+		if (
+			!detail ||
+			typeof detail !== 'object' ||
+			Array.isArray(detail) ||
+			(detail as { readonly category?: unknown }).category !== category ||
+			!sameExpressionValue(
+				(detail as { readonly left?: unknown }).left,
+				left,
+			) ||
+			!sameExpressionValue(
+				(detail as { readonly right?: unknown }).right,
+				right,
+			)
+		) {
+			continue;
+		}
+		const value = observation.result.value;
+		if (!value || typeof value !== 'object' || Array.isArray(value)) {
+			continue;
+		}
+		const result = value as {
+			readonly ok?: unknown;
+			readonly surface?: unknown;
+			readonly leftCanonical?: unknown;
+			readonly rightCanonical?: unknown;
+		};
+		if (
+			result.ok !== true ||
+			typeof result.surface !== 'string' ||
+			typeof result.leftCanonical !== 'string' ||
+			typeof result.rightCanonical !== 'string'
+		) {
+			continue;
+		}
+		return {
+			surface: result.surface,
+			leftCanonical: result.leftCanonical,
+			rightCanonical: result.rightCanonical,
+		};
+	}
+	return undefined;
+}
+
 function compareExpression(
 	left: ExpressionValue,
 	right: ExpressionValue,
 	category: ExpressionEquivalenceCategory,
+	_context: EquivalenceContext,
+	evidence?: readonly EvidenceObservation[],
 ): EquivalenceResult {
 	const guarded = guardExpressionComparison(left, right, category);
 	if (guarded.kind === 'unknown') {
+		const observed = deparseEvidenceFor(left, right, category, evidence);
+		if (observed) {
+			const detail = {
+				method: 'vendor-deparser',
+				surface: observed.surface,
+				leftCanonical: observed.leftCanonical,
+				rightCanonical: observed.rightCanonical,
+				validatedBy: PG_DEPARSE_ARTIFACT,
+			};
+			return observed.leftCanonical === observed.rightCanonical
+				? equivalent(expressionProposition(left, right, category, detail))
+				: different(expressionProposition(left, right, category, detail));
+		}
+		if (
+			(left.kind === 'portable' && right.kind === 'vendor-validated') ||
+			(left.kind === 'vendor-validated' && right.kind === 'portable')
+		) {
+			return unknown(
+				deparseExpressionObligation(left, right, category, guarded.reason),
+			);
+		}
 		return unknown(
 			unresolvedExpressionObligation(left, right, category, guarded.reason),
 		);

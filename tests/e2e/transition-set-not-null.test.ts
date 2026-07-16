@@ -27,17 +27,19 @@ function quoteIdent(value: string): string {
 	return `"${value.replaceAll('"', '""')}"`;
 }
 
-function table(nullable: boolean): TableIR {
+function table(nullable: boolean, column = 'age', overrides = {}): TableIR {
 	return {
 		name: 'users',
-		columns: [{ name: 'age', type: 'integer', nullable }],
+		columns: [{ name: column, type: 'integer', nullable, ...overrides }],
 		foreignKeys: [],
 		indexes: [],
 	};
 }
 
-function model(nullable: boolean): ModelIR {
-	const tables = new Map<string, TableIR>([['users', table(nullable)]]);
+function model(nullable: boolean, column = 'age', overrides = {}): ModelIR {
+	const tables = new Map<string, TableIR>([
+		['users', table(nullable, column, overrides)],
+	]);
 	return {
 		tables,
 		relations: new Map(),
@@ -85,6 +87,21 @@ async function proveSetNotNull() {
 	const prover = createProver(registry);
 	const context = await readPgObservationContext(pool, schemaName);
 	const compare = comparator.compare(model(false), model(true));
+	return {
+		pool,
+		registry,
+		context,
+		outcome: await prover.prove(compare, pool, context),
+	};
+}
+
+async function proveSetNotNullForModels(desired: ModelIR, current: ModelIR) {
+	const pool = await getTestPool();
+	const registry = createPackRegistry([createPgTransitionPack()]);
+	const comparator = createComparator(registry);
+	const prover = createProver(registry);
+	const context = await readPgObservationContext(pool, schemaName);
+	const compare = comparator.compare(desired, current);
 	return {
 		pool,
 		registry,
@@ -174,5 +191,88 @@ describe('ADR-0003 transition planner: SET NOT NULL', () => {
 		expect(result.assessment.reasons[0]?.code).toBe('guard-failed');
 		expect(result.journals[0]?.outcome).toBe('guard-failed');
 		expect(await ageIsNullable()).toBe(true);
+	});
+
+	it('proves and applies SET NOT NULL with an unchanged literal default', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (id serial PRIMARY KEY, status text DEFAULT 'active' NULL)`,
+		);
+		await pool.query(
+			`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (status) VALUES ('active'), ('pending')`,
+		);
+		const desired = model(false, 'status', {
+			type: 'string',
+			originalDbType: 'text',
+			default: 'active',
+		});
+		const current = model(true, 'status', {
+			type: 'string',
+			originalDbType: 'text',
+			default: { sql: "'active'::text" },
+		});
+		const { registry, outcome } = await proveSetNotNullForModels(
+			desired,
+			current,
+		);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+
+		const result = await createApplier(registry).apply(
+			{ plan: outcome.plan, assessment: outcome.assessment },
+			policy,
+			pool,
+		);
+
+		expect(result.assessment.decision).toBe('applicable');
+		expect(result.journals[0]?.outcome).toBe('completed');
+	});
+
+	it('proves and applies SET NOT NULL for a UNIQUE nullable column', async () => {
+		const pool = await getTestPool();
+		await pool.query(
+			`CREATE TABLE ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (id serial PRIMARY KEY, email text UNIQUE NULL)`,
+		);
+		await pool.query(
+			`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
+				'users',
+			)} (email) VALUES ('a@example.test'), ('b@example.test')`,
+		);
+		const desired = model(false, 'email', {
+			type: 'string',
+			originalDbType: 'text',
+			unique: true,
+		});
+		const current = model(true, 'email', {
+			type: 'string',
+			originalDbType: 'text',
+			unique: true,
+			uniqueConstraintName: 'users_email_key',
+		});
+		const { registry, outcome } = await proveSetNotNullForModels(
+			desired,
+			current,
+		);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+
+		const result = await createApplier(registry).apply(
+			{ plan: outcome.plan, assessment: outcome.assessment },
+			policy,
+			pool,
+		);
+
+		expect(result.assessment.decision).toBe('applicable');
+		expect(result.journals[0]?.outcome).toBe('completed');
 	});
 });

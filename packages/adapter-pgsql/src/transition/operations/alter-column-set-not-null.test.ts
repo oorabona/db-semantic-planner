@@ -3,6 +3,7 @@ import type {
 	ColumnIR,
 	DurableIntentRecord,
 	EvidenceObservation,
+	ExpressionValue,
 	ObservationContext,
 	ObservationRequest,
 	PhysicalOperation,
@@ -15,7 +16,9 @@ import {
 import {
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
 	NO_NULLS_GUARD,
+	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
@@ -166,6 +169,64 @@ function catalogEvidence(
 		scope: request.scope,
 		source: 'system-catalog',
 		validity: { invalidatedBy: [] },
+	};
+}
+
+function defaultDeparseEvidence(
+	expectedColumnShape: SetNotNullColumnShapeExpectation,
+	catalogDefault: string,
+): EvidenceObservation {
+	if (!expectedColumnShape.default) {
+		throw new Error('expected default is required');
+	}
+	const right: ExpressionValue = {
+		kind: 'vendor-validated',
+		category: 'scalar',
+		validatedBy: PG_DEPARSE_ARTIFACT,
+		text: catalogDefault,
+	};
+	const request: ObservationRequest = {
+		kind: EXPRESSION_DEPARSE_OBSERVATION,
+		scope: [
+			{
+				engine: 'postgresql',
+				database: context.databaseId,
+				schema: 'tenant',
+				kind: 'column',
+				name: 'age',
+				qualifiedBy: ['users'],
+			},
+		],
+		detail: {
+			surface: 'column-default',
+			category: 'scalar',
+			schema: 'tenant',
+			table: 'users',
+			column: 'age',
+			left: expectedColumnShape.default,
+			right,
+		},
+	};
+	return {
+		role: 'evidence',
+		id: evidenceId(`deparse.users.age.${catalogDefault}`),
+		issuer: PG_INTROSPECTION_ARTIFACT,
+		request,
+		result: {
+			value: {
+				ok: true,
+				surface: 'column-default',
+				category: 'scalar',
+				leftCanonical: catalogDefault,
+				rightCanonical: catalogDefault,
+			},
+		},
+		context,
+		stability: 'externally-mutable',
+		takenAt: new Date().toISOString(),
+		scope: request.scope,
+		source: 'vendor-deparser',
+		validity: { invalidatedBy: ['external-ddl'] },
 	};
 }
 
@@ -413,6 +474,16 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 				reason:
 					'sibling columns, multi-column indexes, multi-column constraints, RLS and triggers are outside the per-column recognizer comparison - bounded by the external-ddl-exclusion assumption',
 			},
+			{
+				key: 'column.uniqueConstraintName',
+				reason:
+					'unique constraint names are metadata; the structural unique boolean is compared and fingerprinted, while generated-name drift is bounded by the external-ddl-exclusion assumption',
+			},
+			{
+				key: 'pg_constraint.unique.name',
+				reason:
+					'catalog unique constraint names are metadata excluded from shape equality and bounded by the external-ddl-exclusion assumption',
+			},
 		]);
 	});
 
@@ -462,15 +533,17 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 
 	it('passes apply-time shape recheck with matching bare SQL default text', () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected = expectedShape({ default: 'now()' });
 
 		expect(() =>
 			runtime.buildFingerprints(
-				operationWithExpectedShape(expectedShape({ default: 'now()' })),
+				operationWithExpectedShape(expected),
 				[
 					catalogEvidence('users', 'age', {
 						hasDefault: true,
 						defaultExpression: 'now()',
 					}),
+					defaultDeparseEvidence(expected, 'now()'),
 				],
 				context,
 			),
@@ -510,20 +583,19 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			],
 			context,
 		);
+		const expected = expectedShape({
+			type: 'string',
+			originalDbType: 'character varying(42)',
+			default: 'unknown',
+			collation: 'en_US',
+			identity: 'byDefault',
+			comment: 'Age in years',
+			unique: true,
+			uniqueConstraintName: 'users_age_key',
+			autoIncrement: true,
+		});
 		const changed = runtime.buildFingerprints(
-			operationWithExpectedShape(
-				expectedShape({
-					type: 'string',
-					originalDbType: 'character varying(42)',
-					default: { sql: "'unknown'::text" },
-					collation: 'en_US',
-					identity: 'byDefault',
-					comment: 'Age in years',
-					unique: true,
-					uniqueConstraintName: 'users_age_key',
-					autoIncrement: true,
-				}),
-			),
+			operationWithExpectedShape(expected),
 			[
 				catalogEvidence('users', 'age', {
 					oid: 'same-oid',
@@ -546,6 +618,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					uniqueConstraintName: 'users_age_key',
 					autoIncrement: true,
 				}),
+				defaultDeparseEvidence(expected, "'unknown'::text"),
 			],
 			context,
 		);
@@ -567,7 +640,6 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			'column.originalDbTypeSchema',
 			'column.originalDbTypeSchemaScope',
 			'column.unique',
-			'column.uniqueConstraintName',
 			'column.autoIncrement',
 			'column.collation',
 			'column.identity',
@@ -578,5 +650,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		for (const key of recognizerComparedFacts) {
 			expect(included.has(key) || excluded.has(key)).toBe(true);
 		}
+		expect(included.has('column.uniqueConstraintName')).toBe(false);
+		expect(excluded.has('column.uniqueConstraintName')).toBe(true);
 	});
 });

@@ -17,6 +17,7 @@ import {
 	ALTER_AUTHORITY_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_EQUIVALENCE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
@@ -235,6 +236,66 @@ function catalogEvidence(
 	};
 }
 
+function deparseEvidence(
+	request: ObservationRequest,
+	leftCanonical: string | null,
+	rightCanonical: string | null,
+	ctx: ObservationContext = context,
+): EvidenceObservation {
+	const detail = request.detail as {
+		readonly table: string;
+		readonly column: string;
+		readonly schema?: string | null;
+	};
+	const schema =
+		(ctx as { readonly targetSchema?: string }).targetSchema ??
+		detail.schema ??
+		'public';
+	const normalized: ObservationRequest = {
+		...request,
+		scope: request.scope.map((resource) => ({
+			...resource,
+			database: ctx.databaseId,
+			schema,
+		})),
+		detail: {
+			...(request.detail as Record<string, unknown>),
+			table: detail.table,
+			column: detail.column,
+			schema,
+		},
+	};
+	return {
+		role: 'evidence',
+		id: evidenceId(`test.${request.kind}.${leftCanonical}.${rightCanonical}`),
+		issuer: PG_INTROSPECTION_ARTIFACT,
+		request: normalized,
+		result: {
+			value:
+				leftCanonical == null || rightCanonical == null
+					? {
+							ok: false,
+							surface: 'column-default',
+							category: 'scalar',
+							reason: 'mocked deparse failure',
+						}
+					: {
+							ok: true,
+							surface: 'column-default',
+							category: 'scalar',
+							leftCanonical,
+							rightCanonical,
+						},
+		},
+		context: ctx,
+		stability: 'externally-mutable',
+		takenAt: new Date().toISOString(),
+		scope: normalized.scope,
+		source: 'vendor-deparser',
+		validity: { invalidatedBy: ['external-ddl'] },
+	};
+}
+
 function proofTarget() {
 	return {
 		connect: vi.fn(async () => ({
@@ -421,25 +482,51 @@ describe('postgresql.column.set-not-null rule', () => {
 		).toBe('unsupported');
 	});
 
-	it('does not recognize a combined nullability and unique constraint name change as complete', () => {
+	it('recognizes unique constraint names as metadata outside shape equality', async () => {
 		const desired = model(false, {
 			unique: true,
-			uniqueConstraintName: 'users_age_new_key',
 		});
 		const current = model(true, {
 			unique: true,
-			uniqueConstraintName: 'users_age_old_key',
+			uniqueConstraintName: 'users_age_key',
 		});
 
 		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
-			false,
+			true,
 		);
-		expect(
-			createComparator(createPackRegistry([createPgTransitionPack()])).compare(
-				desired,
-				current,
-			).kind,
-		).toBe('unsupported');
+		const registry = registryWithColumnObservation({
+			unique: true,
+			uniqueConstraintName: 'users_age_key',
+		});
+		const compare = createComparator(registry).compare(desired, current);
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		const included = new Set(
+			outcome.plan.steps[0]?.expectedBefore.includedFacts.map(
+				(item) => item.key,
+			),
+		);
+		const excluded = new Set(
+			outcome.plan.steps[0]?.expectedBefore.excludedOrUnknownFacts.map(
+				(item) => item.key,
+			),
+		);
+		expect(included.has('column.unique')).toBe(true);
+		expect(included.has('column.uniqueConstraintName')).toBe(false);
+		expect(excluded.has('column.uniqueConstraintName')).toBe(true);
 	});
 
 	it('recognizes pure nullability with matching bare SQL default text', () => {
@@ -455,6 +542,267 @@ describe('postgresql.column.set-not-null rule', () => {
 			return;
 		}
 		expect(compare.candidates).toHaveLength(1);
+	});
+
+	it('requests a deparse observation for mixed portable and catalog defaults', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				type: 'string',
+				originalDbType: 'text',
+				default: 'active',
+			}),
+			model(true, {
+				type: 'string',
+				originalDbType: 'text',
+				default: { sql: "'active'::text" },
+			}),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.appliesTo).toBe('default');
+		expect(
+			compare.obligations[0]?.dischargeableBy?.some(
+				(request) =>
+					request.kind === EXPRESSION_DEPARSE_OBSERVATION &&
+					(request.detail as { readonly surface?: unknown }).surface ===
+						'column-default',
+			),
+		).toBe(true);
+	});
+
+	it('keeps unsafe native defaults unknown without requesting deparse', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				default: { sql: 'now()' },
+			}),
+			model(true, {
+				default: { sql: 'now()' },
+			}),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(
+			compare.obligations.flatMap(
+				(obligation) => obligation.dischargeableBy ?? [],
+			),
+		).not.toContainEqual(
+			expect.objectContaining({ kind: EXPRESSION_DEPARSE_OBSERVATION }),
+		);
+	});
+
+	it('proves mixed defaults when mocked deparse canonical forms are equal', async () => {
+		const pack = createPgTransitionPack();
+		const proofContext = { ...context, targetSchema: 'public' };
+		const execute = vi.fn(
+			async (
+				request: ObservationRequest,
+				_target: unknown,
+				ctx: ObservationContext,
+			) => {
+				if (request.kind === EXPRESSION_DEPARSE_OBSERVATION) {
+					return deparseEvidence(
+						request,
+						"'active'::text",
+						"'active'::text",
+						ctx,
+					);
+				}
+				if (request.kind === COLUMN_EXISTS_OBSERVATION) {
+					return catalogEvidence(
+						request,
+						{
+							atttypid: '25',
+							formatType: 'text',
+							typeName: 'text',
+							typeSchema: 'pg_catalog',
+							hasDefault: true,
+							defaultExpression: "'active'::text",
+						},
+						ctx,
+					);
+				}
+				return normalizedEvidence(request, true, 'public', ctx);
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext: async () => proofContext,
+					execute,
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, {
+				type: 'string',
+				originalDbType: 'text',
+				default: 'active',
+			}),
+			model(true, {
+				type: 'string',
+				originalDbType: 'text',
+				default: { sql: "'active'::text" },
+			}),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		expect(execute.mock.calls.map(([request]) => request.kind)).toContain(
+			EXPRESSION_DEPARSE_OBSERVATION,
+		);
+	});
+
+	it('marks mixed defaults inapplicable when mocked deparse canonical forms differ', async () => {
+		const pack = createPgTransitionPack();
+		const proofContext = { ...context, targetSchema: 'public' };
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext: async () => proofContext,
+					execute: async (
+						request: ObservationRequest,
+						_target: unknown,
+						ctx: ObservationContext,
+					) => {
+						if (request.kind === EXPRESSION_DEPARSE_OBSERVATION) {
+							return deparseEvidence(
+								request,
+								"'active'::text",
+								"'pending'::text",
+								ctx,
+							);
+						}
+						if (request.kind === COLUMN_EXISTS_OBSERVATION) {
+							return catalogEvidence(
+								request,
+								{
+									atttypid: '25',
+									formatType: 'text',
+									typeName: 'text',
+									typeSchema: 'pg_catalog',
+									hasDefault: true,
+									defaultExpression: "'pending'::text",
+								},
+								ctx,
+							);
+						}
+						return normalizedEvidence(request, true, 'public', ctx);
+					},
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, {
+				type: 'string',
+				originalDbType: 'text',
+				default: 'active',
+			}),
+			model(true, {
+				type: 'string',
+				originalDbType: 'text',
+				default: { sql: "'pending'::text" },
+			}),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('inapplicable');
+	});
+
+	it('blocks mixed defaults when mocked deparse is unavailable', async () => {
+		const pack = createPgTransitionPack();
+		const proofContext = { ...context, targetSchema: 'public' };
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext: async () => proofContext,
+					execute: async (
+						request: ObservationRequest,
+						_target: unknown,
+						ctx: ObservationContext,
+					) => {
+						if (request.kind === EXPRESSION_DEPARSE_OBSERVATION) {
+							return deparseEvidence(request, null, null, ctx);
+						}
+						if (request.kind === COLUMN_EXISTS_OBSERVATION) {
+							return catalogEvidence(
+								request,
+								{
+									atttypid: '25',
+									formatType: 'text',
+									typeName: 'text',
+									typeSchema: 'pg_catalog',
+									hasDefault: true,
+									defaultExpression: "'active'::text",
+								},
+								ctx,
+							);
+						}
+						return normalizedEvidence(request, true, 'public', ctx);
+					},
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, {
+				type: 'string',
+				originalDbType: 'text',
+				default: 'active',
+			}),
+			model(true, {
+				type: 'string',
+				originalDbType: 'text',
+				default: { sql: "'active'::text" },
+			}),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
+		}
 	});
 
 	it.each([

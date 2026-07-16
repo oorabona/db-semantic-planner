@@ -296,13 +296,19 @@ function assertExpectedColumnShape(
 		},
 		evidence,
 	);
-	if (comparison.kind !== 'equivalent') {
+	// Only a DEFINITE mismatch (`different`) blocks here. An `unknown` means the
+	// comparison needs async evidence (the vendor-deparser for a column default)
+	// that is present at prove time but NOT during the apply-time fingerprint
+	// rebuild (the apply re-observation carries only fresh catalog facts). Such a
+	// field's desired-equivalence was already PROVEN at prove, and any drift from
+	// the proven state is caught by the applier's fingerprint comparison — the
+	// field is an included fingerprint fact (e.g. the column default). Blocking on
+	// `unknown` here would make a column with a default unprovable at apply.
+	// INVARIANT: every field that can be `unknown` here MUST be an included
+	// fingerprint fact, so its drift is still detected.
+	if (comparison.kind === 'different') {
 		throw new Error(
-			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field ${comparison.field}: ${
-				comparison.kind === 'unknown'
-					? 'equivalence is unknown'
-					: comparison.detail
-			}`,
+			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field ${comparison.field}: ${comparison.detail}`,
 		);
 	}
 }
@@ -547,8 +553,6 @@ function fingerprintFor(
 		),
 		fact('pg_constraint.unique.exists', catalog.unique),
 		fact('column.unique', catalog.unique),
-		fact('pg_constraint.unique.name', catalog.uniqueConstraintName),
-		fact('column.uniqueConstraintName', catalog.uniqueConstraintName),
 		fact('pg_description.column', catalog.comment),
 		fact('column.comment', catalog.comment),
 		fact('pg_depend.owned-sequence.exists', catalog.autoIncrement),
@@ -569,6 +573,16 @@ function fingerprintFor(
 			key: 'relation.sibling-columns-indexes-constraints',
 			reason:
 				'sibling columns, multi-column indexes, multi-column constraints, RLS and triggers are outside the per-column recognizer comparison - bounded by the external-ddl-exclusion assumption',
+		},
+		{
+			key: 'column.uniqueConstraintName',
+			reason:
+				'unique constraint names are metadata; the structural unique boolean is compared and fingerprinted, while generated-name drift is bounded by the external-ddl-exclusion assumption',
+		},
+		{
+			key: 'pg_constraint.unique.name',
+			reason:
+				'catalog unique constraint names are metadata excluded from shape equality and bounded by the external-ddl-exclusion assumption',
 		},
 	];
 	return {

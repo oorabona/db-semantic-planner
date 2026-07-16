@@ -11,7 +11,8 @@ import type {
 	ProofObligation,
 	TypeRef,
 } from '@dbsp/types';
-import { PG_EQUIVALENCE_ARTIFACT } from './constants.js';
+import { PG_DEPARSE_ARTIFACT } from './constants.js';
+import { assumptionId } from './ids.js';
 
 export interface SetNotNullColumnShapeExpectation {
 	readonly kind: 'postgresql.set-not-null.column-shape.v1';
@@ -93,11 +94,6 @@ type ParsedTypeSpelling = {
 };
 
 const SAFE_LOWERCASE_IDENTIFIER_RE = /^[a-z_][a-z0-9_$]*$/;
-const SQL_FUNCTION_DEFAULT_RE =
-	/^[A-Za-z_][A-Za-z0-9_$]*(?:\.[A-Za-z_][A-Za-z0-9_$]*)*\(\)$/;
-const SQL_CURRENT_DEFAULT_RE =
-	/^(?:CURRENT_TIMESTAMP|CURRENT_DATE|CURRENT_TIME|LOCALTIME|LOCALTIMESTAMP)(?:\(\d+\))?$/i;
-
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -290,7 +286,39 @@ function typeRefFromCatalog(catalog: CatalogColumnShapeInput): TypeRef {
 	};
 }
 
-function defaultExpressionFromValue(value: unknown): ExpressionValue | null {
+function unsafeNativeDefault(rawSql: string): ExpressionValue {
+	return {
+		kind: 'unsafe-native',
+		category: 'scalar',
+		text: rawSql,
+		assumption: assumptionId(
+			`dbsp.postgresql.default.unsafe-native:${JSON.stringify(rawSql)}`,
+		),
+	};
+}
+
+function portableDefault(value: unknown): ExpressionValue {
+	return {
+		kind: 'portable',
+		ast: json(value),
+	};
+}
+
+function defaultExpressionFromAuthoredValue(
+	value: unknown,
+): ExpressionValue | null {
+	if (value === undefined) {
+		return null;
+	}
+	if (isRecord(value) && typeof value.sql === 'string') {
+		return unsafeNativeDefault(value.sql);
+	}
+	return portableDefault(value);
+}
+
+function defaultExpressionFromObservedColumnValue(
+	value: unknown,
+): ExpressionValue | null {
 	if (value === undefined) {
 		return null;
 	}
@@ -298,28 +326,13 @@ function defaultExpressionFromValue(value: unknown): ExpressionValue | null {
 		return {
 			kind: 'vendor-validated',
 			category: 'scalar',
-			validatedBy: PG_EQUIVALENCE_ARTIFACT,
+			validatedBy: PG_DEPARSE_ARTIFACT,
 			text: value.sql,
 		};
 	}
-	if (typeof value === 'string') {
-		const trimmed = value.trim();
-		if (
-			SQL_FUNCTION_DEFAULT_RE.test(trimmed) ||
-			SQL_CURRENT_DEFAULT_RE.test(trimmed)
-		) {
-			return {
-				kind: 'vendor-validated',
-				category: 'scalar',
-				validatedBy: PG_EQUIVALENCE_ARTIFACT,
-				text: trimmed,
-			};
-		}
-	}
-	return {
-		kind: 'portable',
-		ast: json(value),
-	};
+	// Hand-built current models used by pure tests can still carry structured
+	// values; keep those portable so exact AST equality remains compile-only.
+	return portableDefault(value);
 }
 
 function defaultExpressionFromCatalog(
@@ -331,7 +344,7 @@ function defaultExpressionFromCatalog(
 	return {
 		kind: 'vendor-validated',
 		category: 'scalar',
-		validatedBy: PG_EQUIVALENCE_ARTIFACT,
+		validatedBy: PG_DEPARSE_ARTIFACT,
 		text: catalog.defaultExpression,
 	};
 }
@@ -399,7 +412,7 @@ export function expectedColumnShapeFor(
 		nullability: { from: true, to: column.nullable },
 		type: typeRefFromColumn(column),
 		default: Object.hasOwn(column, 'default')
-			? defaultExpressionFromValue(column.default)
+			? defaultExpressionFromAuthoredValue(column.default)
 			: null,
 		collation: collationFromColumn(column),
 		identity: column.identity ?? null,
@@ -420,7 +433,7 @@ export function columnShapeFromColumn(
 		nullable: column.nullable,
 		type: typeRefFromColumn(column),
 		default: Object.hasOwn(column, 'default')
-			? defaultExpressionFromValue(column.default)
+			? defaultExpressionFromObservedColumnValue(column.default)
 			: null,
 		collation: collationFromColumn(column),
 		identity: column.identity ?? null,
@@ -550,13 +563,6 @@ export function compareSetNotNullColumnShape(
 	}
 	if (expected.unique !== observed.unique) {
 		return structuralDifferent('unique', 'unique state changed', claimDrafts);
-	}
-	if (expected.uniqueConstraintName !== observed.uniqueConstraintName) {
-		return structuralDifferent(
-			'uniqueConstraintName',
-			'unique constraint name changed',
-			claimDrafts,
-		);
 	}
 	if (expected.comment !== observed.comment) {
 		return structuralDifferent(
