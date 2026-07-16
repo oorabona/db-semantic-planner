@@ -31,19 +31,35 @@ export const ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND: OperationKindRef = {
 	name: 'AlterColumnSetNotNull',
 };
 
+export const ALTER_TYPE_ADD_VALUE_OPERATION_KIND: OperationKindRef = {
+	artifact: PG_OPERATION_PACK_ARTIFACT,
+	name: 'AlterTypeAddValue',
+};
+
 export const SET_NOT_NULL_RULE_ID = 'postgresql.column.set-not-null';
+export const ENUM_ADD_VALUE_RULE_ID = 'postgresql.enum.add-value';
 export const ALTER_COLUMN_SET_NOT_NULL_CAPABILITY = 'alter-column-set-not-null';
 export const ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM = 180000;
+export const ALTER_TYPE_ADD_VALUE_CAPABILITY = 'alter-type-add-value';
+export const ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM = 120000;
 export const PG_SCHEMA_USAGE_PRIVILEGE = 'postgresql.schema.usage';
 export const PG_TABLE_ALTER_AUTHORITY_PRIVILEGE =
 	'postgresql.table.alter-authority';
+export const PG_TYPE_ALTER_AUTHORITY_PRIVILEGE =
+	'postgresql.type.alter-authority';
 export const PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE =
 	'postgresql.column.set-not-null.authority';
 
+export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
+
 export const COLUMN_EXISTS_OBSERVATION = 'postgresql.column.exists';
+export const ENUM_TYPE_EXISTS_OBSERVATION = 'postgresql.enum-type.exists';
+export const ENUM_LABEL_VISIBLE_OBSERVATION = 'postgresql.enum-label.visible';
 export const SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION =
 	'postgresql.column.set-not-null.relation-kind-supported';
 export const ALTER_AUTHORITY_OBSERVATION = 'postgresql.table.alter-authority';
+export const ALTER_TYPE_AUTHORITY_OBSERVATION =
+	'postgresql.type.alter-authority';
 export const ENGINE_VERSION_OBSERVATION = 'postgresql.engine.version-supported';
 export const EXPRESSION_DEPARSE_OBSERVATION = 'postgresql.expression.deparse';
 

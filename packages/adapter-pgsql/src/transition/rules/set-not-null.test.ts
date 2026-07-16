@@ -15,6 +15,7 @@ import {
 } from '../column-shape.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
@@ -36,7 +37,7 @@ const context: ObservationContext = {
 	engine: 'postgresql',
 	engineVersion: '18',
 	databaseId: 'test',
-	capabilities: ['alter-column-set-not-null'],
+	capabilities: ['alter-column-set-not-null', ALTER_TYPE_ADD_VALUE_CAPABILITY],
 	privileges: [],
 	sessionConfiguration: {},
 	extensions: {},

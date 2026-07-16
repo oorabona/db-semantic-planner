@@ -4,10 +4,14 @@ import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+	ALTER_TYPE_ADD_VALUE_CAPABILITY,
+	ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
 } from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
+import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type-add-value.js';
+import { createEnumAddValueRule } from './rules/enum-add-value.js';
 import { createSetNotNullRule } from './rules/set-not-null.js';
 
 export interface PgTransitionPackOptions {
@@ -21,8 +25,14 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		getNamingPluginForDbCasing(options.dbCasing ?? 'preserve');
 	const equivalence = createPgEquivalenceCapability();
 	return {
-		rules: [createSetNotNullRule({ naming })],
-		operationSemantics: [createAlterColumnSetNotNullOperationRuntime()],
+		rules: [
+			createSetNotNullRule({ naming }),
+			createEnumAddValueRule({ naming }),
+		],
+		operationSemantics: [
+			createAlterColumnSetNotNullOperationRuntime(),
+			createAlterTypeAddValueOperationRuntime(),
+		],
 		issuer: createPgObservationIssuer(),
 		equivalence,
 		capabilityDescriptors: [
@@ -31,6 +41,13 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 				predicate: {
 					kind: 'minServerVersionNum',
 					minServerVersionNum: ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+				},
+			},
+			{
+				id: ALTER_TYPE_ADD_VALUE_CAPABILITY,
+				predicate: {
+					kind: 'minServerVersionNum',
+					minServerVersionNum: ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
 				},
 			},
 		],

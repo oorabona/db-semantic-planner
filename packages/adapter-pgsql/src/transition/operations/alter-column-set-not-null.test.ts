@@ -7,6 +7,8 @@ import type {
 	ObservationContext,
 	ObservationRequest,
 	PhysicalOperation,
+	StepJournal,
+	TransactionalCompletionRecord,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -262,33 +264,43 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		);
 	});
 
-	it('writes the journal table in the operation schema', async () => {
+	it('keeps journal writes ephemeral and does not write planner metadata to the target', async () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
 		const queries: string[] = [];
-		const record: DurableIntentRecord = {
+		const intent: DurableIntentRecord = {
 			stepId: 'step:op',
 			operation,
 			recordedAt: new Date().toISOString(),
 		};
-
-		await runtime.writeIntentJournal(
-			{
-				opaqueClient: {
-					query: async (sql: string) => {
-						queries.push(sql);
-						return { rows: [] };
-					},
+		const completion: TransactionalCompletionRecord = {
+			stepId: 'step:op',
+			committedWithDdl: true,
+			recordedAt: new Date().toISOString(),
+		};
+		const journal: StepJournal = {
+			intent,
+			outcome: 'completed',
+			transactionalCompletion: completion,
+			observedOutcome: {
+				stepId: 'step:op',
+				observations: [],
+				recordedAt: new Date().toISOString(),
+			},
+		};
+		const client = {
+			opaqueClient: {
+				query: async (sql: string) => {
+					queries.push(sql);
+					return { rows: [] };
 				},
 			},
-			record,
-		);
+		};
 
-		expect(queries[0]).toContain(
-			'CREATE TABLE IF NOT EXISTS "tenant"."dbsp_transition_journal"',
-		);
-		expect(queries[1]).toContain(
-			'INSERT INTO "tenant"."dbsp_transition_journal"',
-		);
+		await runtime.writeIntentJournal(client, intent);
+		await runtime.writeCompletionJournal(client, operation, completion);
+		await runtime.writeObservedJournal(client, journal);
+
+		expect(queries).toEqual([]);
 	});
 
 	it('rejects a checked-out client as an execution target', async () => {
@@ -385,20 +397,9 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 				context,
 			),
 		).toThrow(/exceeds maximum length of 63/);
-		await expect(
-			runtime.writeIntentJournal(
-				{
-					opaqueClient: {
-						query: async () => ({ rows: [] }),
-					},
-				},
-				{
-					stepId: 'step:op',
-					operation: invalidOperation,
-					recordedAt: new Date().toISOString(),
-				},
-			),
-		).rejects.toThrow(/exceeds maximum length of 63/);
+		expect(() => runtime.effectsOf(invalidOperation, context)).toThrow(
+			/exceeds maximum length of 63/,
+		);
 	});
 
 	it('keeps operation-pack semantics assumptions collision-free for identifier tuples', () => {

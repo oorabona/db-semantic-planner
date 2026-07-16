@@ -1,12 +1,19 @@
-import type { ObservationContext, ObservationRequest } from '@dbsp/types';
+import type {
+	JsonValue,
+	ObservationContext,
+	ObservationRequest,
+} from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_TYPE_AUTHORITY_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
+	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from './constants.js';
 import {
@@ -39,6 +46,42 @@ function engineRequest(minServerVersionNum: number): ObservationRequest {
 		],
 		detail: { minServerVersionNum },
 	};
+}
+
+async function enumLabelVisibleHolds(
+	labels: readonly string[],
+	position?: JsonValue,
+): Promise<boolean> {
+	const issuer = createPgObservationIssuer();
+	const detail =
+		position === undefined
+			? { schema: 'tenant', type: 'status', label: 'pending' }
+			: { schema: 'tenant', type: 'status', label: 'pending', position };
+	const observation = await issuer.execute(
+		{
+			kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+			scope: [],
+			detail,
+		},
+		{
+			query: async () => ({
+				rows: [
+					{
+						oid: '90001',
+						schema_name: 'tenant',
+						type_name: 'status',
+						labels,
+					},
+				],
+			}),
+		},
+		context,
+	);
+	return (
+		observation.result.value as {
+			claims: readonly [{ readonly holds: boolean }];
+		}
+	).claims[0].holds;
 }
 
 describe('PostgreSQL transition observation issuer', () => {
@@ -187,6 +230,223 @@ describe('PostgreSQL transition observation issuer', () => {
 		});
 	});
 
+	it('reads ALTER TYPE authority evidence for enum targets', async () => {
+		const issuer = createPgObservationIssuer();
+		const observation = await issuer.execute(
+			{
+				kind: ALTER_TYPE_AUTHORITY_OBSERVATION,
+				scope: [],
+				detail: { schema: 'tenant', type: 'status' },
+			},
+			{
+				query: async () => ({
+					rows: [
+						{
+							has_type_alter_authority: true,
+							has_schema_usage: true,
+						},
+					],
+				}),
+			},
+			context,
+		);
+
+		expect(observation.result.value).toMatchObject({
+			hasAlterAuthority: true,
+			hasTypeAlterAuthority: true,
+			hasSchemaUsage: true,
+			privileges: [
+				pgPrivilegeFact(PG_SCHEMA_USAGE_PRIVILEGE, ['tenant'], true),
+				pgPrivilegeFact(
+					PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
+					['tenant', 'status'],
+					true,
+				),
+			],
+			claims: [{ kind: ALTER_TYPE_AUTHORITY_OBSERVATION, holds: true }],
+		});
+	});
+
+	it('emits ALTER TYPE authority under the type authority observation kind', async () => {
+		const issuer = createPgObservationIssuer();
+		const observation = await issuer.execute(
+			{
+				kind: ALTER_TYPE_AUTHORITY_OBSERVATION,
+				scope: [],
+				detail: { schema: 'tenant', type: 'status' },
+			},
+			{
+				query: async () => ({
+					rows: [
+						{
+							has_type_alter_authority: true,
+							has_schema_usage: true,
+						},
+					],
+				}),
+			},
+			context,
+		);
+
+		expect(observation.request.kind).toBe(ALTER_TYPE_AUTHORITY_OBSERVATION);
+		expect(observation.result.value).toMatchObject({
+			claims: [{ kind: ALTER_TYPE_AUTHORITY_OBSERVATION, holds: true }],
+		});
+	});
+
+	it('checks enum label position when position detail is requested', async () => {
+		const issuer = createPgObservationIssuer();
+		const request: ObservationRequest = {
+			kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+			scope: [],
+			detail: {
+				schema: 'tenant',
+				type: 'status',
+				label: 'pending',
+				position: {
+					mode: 'after',
+					after: 'inactive',
+					index: 1,
+					atEnd: false,
+				},
+			},
+		};
+		const target = {
+			query: async () => ({
+				rows: [
+					{
+						oid: '90001',
+						schema_name: 'tenant',
+						type_name: 'status',
+						labels: ['inactive', 'active', 'pending'],
+					},
+				],
+			}),
+		};
+
+		const observation = await issuer.execute(request, target, context);
+		const matchingObservation = await issuer.execute(
+			{
+				...request,
+				detail: {
+					schema: 'tenant',
+					type: 'status',
+					label: 'pending',
+					position: {
+						mode: 'append',
+						after: 'active',
+						index: 2,
+						atEnd: true,
+					},
+				},
+			},
+			target,
+			context,
+		);
+
+		expect(observation.result.value).toMatchObject({
+			claims: [{ kind: ENUM_LABEL_VISIBLE_OBSERVATION, holds: false }],
+		});
+		expect(matchingObservation.result.value).toMatchObject({
+			claims: [{ kind: ENUM_LABEL_VISIBLE_OBSERVATION, holds: true }],
+		});
+	});
+
+	it('fails closed for unsupported enum label position modes', async () => {
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'between',
+				after: 'inactive',
+			}),
+		).resolves.toBe(false);
+	});
+
+	it('fails closed for after-position requests without a valid after label', async () => {
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'after',
+			}),
+		).resolves.toBe(false);
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'after',
+				after: 1,
+			}),
+		).resolves.toBe(false);
+	});
+
+	it('fails closed for unsupported before-position shapes', async () => {
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'before',
+				before: 'active',
+			}),
+		).resolves.toBe(false);
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'after',
+				after: 'inactive',
+				before: 'active',
+			}),
+		).resolves.toBe(false);
+	});
+
+	it('binds after-position evidence to the observed enum label order', async () => {
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'pending', 'active'], {
+				mode: 'after',
+				after: 'inactive',
+			}),
+		).resolves.toBe(true);
+		await expect(
+			enumLabelVisibleHolds(['inactive', 'active', 'pending'], {
+				mode: 'after',
+				after: 'inactive',
+			}),
+		).resolves.toBe(false);
+	});
+
+	it('rejects unsupported enum observation detail fields before querying', async () => {
+		const issuer = createPgObservationIssuer();
+		const query = vi.fn(async () => ({ rows: [] }));
+
+		await expect(
+			issuer.execute(
+				{
+					kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+					scope: [],
+					detail: {
+						schema: 'tenant',
+						type: 'status',
+						label: 'pending',
+						visibility: 'transaction-local',
+					},
+				},
+				{ query },
+				context,
+			),
+		).rejects.toThrow(/unsupported field visibility/);
+		expect(query).not.toHaveBeenCalled();
+	});
+
+	it('rejects enum-label-visible requests without a label', async () => {
+		const issuer = createPgObservationIssuer();
+		const query = vi.fn(async () => ({ rows: [] }));
+
+		await expect(
+			issuer.execute(
+				{
+					kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+					scope: [],
+					detail: { schema: 'tenant', type: 'status' },
+				},
+				{ query },
+				context,
+			),
+		).rejects.toThrow(/requires enum label detail/);
+		expect(query).not.toHaveBeenCalled();
+	});
+
 	it('reads resolved schemas without splitting SHOW search_path', async () => {
 		const contextFromDb = await readPgObservationContext(
 			{
@@ -205,6 +465,9 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					if (sql === 'SHOW search_path') {
 						return { rows: [{ search_path: '"$user", public' }] };
+					}
+					if (sql === 'SHOW standard_conforming_strings') {
+						return { rows: [{ standard_conforming_strings: 'on' }] };
 					}
 					if (sql.includes('pg_extension')) {
 						return { rows: [] };
@@ -234,6 +497,9 @@ describe('PostgreSQL transition observation issuer', () => {
 		expect(contextFromDb.sessionConfiguration.actual_search_path).toBe(
 			JSON.stringify(['role,with,commas', 'public']),
 		);
+		expect(contextFromDb.sessionConfiguration.standard_conforming_strings).toBe(
+			'on',
+		);
 	});
 
 	it('reads target-scoped privilege facts into context when a target is known', async () => {
@@ -254,6 +520,9 @@ describe('PostgreSQL transition observation issuer', () => {
 					}
 					if (sql === 'SHOW search_path') {
 						return { rows: [{ search_path: 'tenant, public' }] };
+					}
+					if (sql === 'SHOW standard_conforming_strings') {
+						return { rows: [{ standard_conforming_strings: 'on' }] };
 					}
 					if (sql.includes('pg_extension')) {
 						return {
@@ -326,6 +595,9 @@ describe('PostgreSQL transition observation issuer', () => {
 				if (sql === 'SHOW search_path') {
 					return { rows: [{ search_path: 'tenant, public' }] };
 				}
+				if (sql === 'SHOW standard_conforming_strings') {
+					return { rows: [{ standard_conforming_strings: 'on' }] };
+				}
 				if (sql.includes('pg_extension')) {
 					return { rows: [] };
 				}
@@ -353,6 +625,7 @@ describe('PostgreSQL transition observation issuer', () => {
 			'SELECT current_user AS current_user',
 			'SELECT pg_catalog.to_json(pg_catalog.current_schemas(false)) AS search_path',
 			'SHOW search_path',
+			'SHOW standard_conforming_strings',
 			'SELECT extname AS name, extversion AS version FROM pg_catalog.pg_extension ORDER BY extname',
 			"SELECT pg_catalog.to_jsonb(d)->>'datlocprovider' AS collation_provider, pg_catalog.to_jsonb(d)->>'datcollversion' AS collation_version FROM pg_catalog.pg_database d WHERE d.datname = pg_catalog.current_database()",
 		]);

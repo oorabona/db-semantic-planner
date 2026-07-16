@@ -87,6 +87,7 @@ export type {
 } from '@dbsp/types';
 export { createApplier } from './applier.js';
 export { createComparator } from './comparator.js';
+export { type EnumAddDelta, enumAddDelta } from './enum-delta.js';
 export {
 	advisoryObservationId,
 	assumptionId,

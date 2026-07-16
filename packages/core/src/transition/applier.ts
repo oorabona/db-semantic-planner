@@ -871,7 +871,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						try {
 							await segmentRuntime.rollback(client);
 						} catch {
-							// The outcome below is based on durable journals when present.
+							// The outcome below reports uncertainty; resume must re-introspect.
 						}
 					}
 					if (segmentRuntime.isLockTimeout(error)) {

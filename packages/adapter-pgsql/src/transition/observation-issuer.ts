@@ -10,13 +10,17 @@ import type {
 import { formatSqlDefault, quoteIdent } from '../ddl/phases/utils.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_TYPE_AUTHORITY_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
+	ENUM_TYPE_EXISTS_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
+	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from './constants.js';
 import { evidenceId } from './ids.js';
@@ -44,9 +48,16 @@ type ObservationTarget = {
 	readonly schema?: string;
 };
 
+type EnumObservationTarget = {
+	readonly type: string;
+	readonly label?: string;
+	readonly schema?: string;
+};
+
 type AlterAuthorityFacts = {
 	readonly hasAlterAuthority: boolean;
 	readonly hasTableAlterAuthority: boolean;
+	readonly hasTypeAlterAuthority?: boolean;
 	readonly hasSchemaUsage: boolean;
 };
 
@@ -134,26 +145,62 @@ function resolvedTarget(
 	return { table: target.table, column: target.column, schema: target.schema };
 }
 
+function enumDetailTarget(
+	request: ObservationRequest,
+	context: ObservationContext,
+): EnumObservationTarget & { readonly schema: string } {
+	if (!isRecord(request.detail)) {
+		throw new Error(`${request.kind} requires enum type detail`);
+	}
+	const { type, label, schema } = request.detail;
+	if (typeof type !== 'string') {
+		throw new Error(`${request.kind} requires enum type detail`);
+	}
+	if (
+		request.kind === ENUM_LABEL_VISIBLE_OBSERVATION &&
+		typeof label !== 'string'
+	) {
+		throw new Error(`${request.kind} requires enum label detail`);
+	}
+	if (label != null && typeof label !== 'string') {
+		throw new Error(`${request.kind} label detail must be a string`);
+	}
+	if (schema != null && typeof schema !== 'string') {
+		throw new Error(`${request.kind} schema detail must be a string`);
+	}
+	const resolvedSchema = schema ?? explicitSchemaFromContext(context);
+	if (!resolvedSchema) {
+		throw new Error(
+			`${request.kind} requires explicit schema detail; unqualified transition observations cannot be resolved from search_path`,
+		);
+	}
+	return label == null
+		? { type, schema: resolvedSchema }
+		: { type, label, schema: resolvedSchema };
+}
+
 function targetFromRequests(
 	requests: readonly ObservationRequest[] | undefined,
 	context: ObservationContext,
-): ObservationTarget | undefined {
+): ObservationTarget | EnumObservationTarget | undefined {
 	for (const request of requests ?? []) {
 		if (!isRecord(request.detail)) {
 			continue;
 		}
 		if (
-			typeof request.detail.table !== 'string' ||
-			typeof request.detail.column !== 'string'
+			typeof request.detail.table === 'string' &&
+			typeof request.detail.column === 'string'
 		) {
-			continue;
+			return detailTarget(request, context);
 		}
-		return detailTarget(request, context);
+		if (typeof request.detail.type === 'string') {
+			return enumDetailTarget(request, context);
+		}
 	}
 	return undefined;
 }
 
-async function readAlterAuthorityFacts(
+async function readTableAlterAuthorityFacts(
 	executor: Queryable,
 	target: ObservationTarget & { readonly schema: string },
 ): Promise<AlterAuthorityFacts> {
@@ -178,6 +225,47 @@ async function readAlterAuthorityFacts(
 	};
 }
 
+async function readTypeAlterAuthorityFacts(
+	executor: Queryable,
+	target: EnumObservationTarget & { readonly schema: string },
+): Promise<AlterAuthorityFacts> {
+	const result = await executor.query(
+		// USAGE reflects privileges available to the effective role without SET ROLE;
+		// MEMBER alone is too broad for ALTER ownership checks under NOINHERIT.
+		"SELECT pg_catalog.pg_has_role(t.typowner, 'USAGE') AS has_type_alter_authority, " +
+			"pg_catalog.has_schema_privilege(n.oid, 'USAGE') AS has_schema_usage " +
+			'FROM pg_catalog.pg_type t ' +
+			'JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace ' +
+			'WHERE n.nspname = $1 AND t.typname = $2 ' +
+			"AND t.typtype = 'e'",
+		[target.schema, target.type],
+	);
+	const row = result.rows[0];
+	const hasTypeAlterAuthority = row?.has_type_alter_authority === true;
+	const hasSchemaUsage = row?.has_schema_usage === true;
+	return {
+		hasAlterAuthority: hasTypeAlterAuthority && hasSchemaUsage,
+		hasTableAlterAuthority: false,
+		hasTypeAlterAuthority,
+		hasSchemaUsage,
+	};
+}
+
+function isEnumTarget(
+	target: ObservationTarget | EnumObservationTarget,
+): target is EnumObservationTarget {
+	return 'type' in target;
+}
+
+function resolvedEnumTarget(
+	target: EnumObservationTarget,
+): EnumObservationTarget & { readonly schema: string } {
+	if (!target.schema) {
+		throw new Error('PostgreSQL transition observation target lost schema');
+	}
+	return { type: target.type, schema: target.schema };
+}
+
 function privilegeFactsForTarget(
 	target: ObservationTarget & { readonly schema: string },
 	facts: AlterAuthorityFacts,
@@ -197,6 +285,24 @@ function privilegeFactsForTarget(
 			PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 			[target.schema, target.table, target.column],
 			facts.hasAlterAuthority,
+		),
+	];
+}
+
+function privilegeFactsForEnumTarget(
+	target: EnumObservationTarget & { readonly schema: string },
+	facts: AlterAuthorityFacts,
+): readonly string[] {
+	return [
+		pgPrivilegeFact(
+			PG_SCHEMA_USAGE_PRIVILEGE,
+			[target.schema],
+			facts.hasSchemaUsage,
+		),
+		pgPrivilegeFact(
+			PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
+			[target.schema, target.type],
+			facts.hasTypeAlterAuthority === true,
 		),
 	];
 }
@@ -241,6 +347,44 @@ function scopeFor(
 	return target.schema ? { ...qualified, schema: target.schema } : qualified;
 }
 
+function enumScopeFor(
+	target: EnumObservationTarget & { readonly schema: string },
+	context: ObservationContext,
+): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: context.databaseId,
+		schema: target.schema,
+		kind: 'type',
+		name: target.type,
+		qualifiedBy: ['enum'],
+	};
+}
+
+function requestForEnumTarget(
+	request: ObservationRequest,
+	target: EnumObservationTarget,
+	context: ObservationContext,
+): ObservationRequest {
+	const resolved = resolvedEnumTarget(target);
+	return {
+		kind: request.kind,
+		scope: [enumScopeFor(resolved, context)],
+		detail: {
+			...(isRecord(request.detail)
+				? Object.fromEntries(
+						Object.entries(request.detail).filter(
+							([key]) => !['schema', 'type', 'label'].includes(key),
+						),
+					)
+				: {}),
+			type: target.type,
+			...(target.label !== undefined ? { label: target.label } : {}),
+			schema: resolved.schema,
+		},
+	};
+}
+
 function evidenceObservation(params: {
 	readonly request: ObservationRequest;
 	readonly context: ObservationContext;
@@ -269,12 +413,124 @@ function evidenceObservation(params: {
 	};
 }
 
+function stringArray(value: unknown): readonly string[] {
+	if (Array.isArray(value)) {
+		return value.filter((item): item is string => typeof item === 'string');
+	}
+	if (typeof value === 'string') {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			return Array.isArray(parsed)
+				? parsed.filter((item): item is string => typeof item === 'string')
+				: [];
+		} catch {
+			return [];
+		}
+	}
+	return [];
+}
+
 function stringOrNull(value: unknown): string | null {
 	return typeof value === 'string' ? value : null;
 }
 
 function numberOrNull(value: unknown): number | null {
 	return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function unsupportedEnumDetailKeys(
+	request: ObservationRequest,
+	allowedKeys: readonly string[],
+): readonly string[] {
+	if (!isRecord(request.detail)) {
+		return [];
+	}
+	const allowed = new Set(allowedKeys);
+	return Object.keys(request.detail).filter((key) => !allowed.has(key));
+}
+
+function assertRecognizedEnumObservationDetail(
+	request: ObservationRequest,
+): void {
+	const allowedKeys =
+		request.kind === ENUM_LABEL_VISIBLE_OBSERVATION
+			? ['schema', 'type', 'label', 'position']
+			: ['schema', 'type'];
+	const unsupported = unsupportedEnumDetailKeys(request, allowedKeys);
+	if (unsupported.length > 0) {
+		throw new Error(
+			`${request.kind} detail contains unsupported field ${unsupported[0]}`,
+		);
+	}
+}
+
+function validPositionIndex(value: unknown): value is number {
+	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+function hasOnlySupportedEnumPositionKeys(
+	position: Record<string, unknown>,
+): boolean {
+	const supportedKeys = new Set(['mode', 'after', 'index', 'atEnd']);
+	return Object.keys(position).every((key) => supportedKeys.has(key));
+}
+
+function enumLabelPositionHolds(
+	detail: ObservationRequest['detail'],
+	labels: readonly string[],
+	label: string | undefined,
+): boolean {
+	if (label === undefined) {
+		return false;
+	}
+	const index = labels.indexOf(label);
+	if (index < 0) {
+		return false;
+	}
+	if (!isRecord(detail)) {
+		return false;
+	}
+	if (!('position' in detail)) {
+		return true;
+	}
+	if (!isRecord(detail.position)) {
+		return false;
+	}
+	if (!hasOnlySupportedEnumPositionKeys(detail.position)) {
+		return false;
+	}
+	const { after, index: expectedIndex, atEnd, mode } = detail.position;
+	if (mode !== 'append' && mode !== 'after') {
+		return false;
+	}
+	if (mode === 'after' && typeof after !== 'string') {
+		return false;
+	}
+	if (after !== undefined && after !== null && typeof after !== 'string') {
+		return false;
+	}
+	if (expectedIndex !== undefined && !validPositionIndex(expectedIndex)) {
+		return false;
+	}
+	if (atEnd !== undefined && typeof atEnd !== 'boolean') {
+		return false;
+	}
+	if (mode === 'append' && index !== labels.length - 1) {
+		return false;
+	}
+	if (expectedIndex !== undefined && index !== expectedIndex) {
+		return false;
+	}
+	if (atEnd !== undefined && (index === labels.length - 1) !== atEnd) {
+		return false;
+	}
+	if (typeof after === 'string' && labels[index - 1] !== after) {
+		return false;
+	}
+	if (after === null && index !== 0) {
+		return false;
+	}
+	return true;
 }
 
 function identityFromAttidentity(
@@ -575,15 +831,132 @@ async function observeColumn(
 	});
 }
 
+async function observeEnumLabels(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	assertRecognizedEnumObservationDetail(request);
+	const target = enumDetailTarget(request, context);
+	const scope = enumScopeFor(target, context);
+	const extraDetail = isRecord(request.detail)
+		? Object.fromEntries(
+				Object.entries(request.detail).filter(
+					([key]) => !['schema', 'type', 'label'].includes(key),
+				),
+			)
+		: {};
+	const detail =
+		request.kind === ENUM_LABEL_VISIBLE_OBSERVATION
+			? {
+					...extraDetail,
+					type: target.type,
+					label: target.label ?? null,
+					schema: target.schema,
+				}
+			: {
+					...extraDetail,
+					type: target.type,
+					schema: target.schema,
+				};
+	const normalizedRequest: ObservationRequest = {
+		kind: request.kind,
+		scope: [scope],
+		detail,
+	};
+	const result = await executor.query(
+		'SELECT t.oid::text AS oid, n.nspname AS schema_name, t.typname AS type_name, ' +
+			"COALESCE(pg_catalog.json_agg(e.enumlabel ORDER BY e.enumsortorder) FILTER (WHERE e.enumlabel IS NOT NULL), '[]'::json) AS labels " +
+			'FROM pg_catalog.pg_type t ' +
+			'JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace ' +
+			'LEFT JOIN pg_catalog.pg_enum e ON e.enumtypid = t.oid ' +
+			"WHERE n.nspname = $1 AND t.typname = $2 AND t.typtype = 'e' " +
+			'GROUP BY t.oid, n.nspname, t.typname',
+		[target.schema, target.type],
+	);
+	const row = result.rows[0];
+	const observedSchema = row ? stringOrNull(row.schema_name) : null;
+	const observedType = row ? stringOrNull(row.type_name) : null;
+	const exists =
+		row != null &&
+		observedSchema === target.schema &&
+		observedType === target.type;
+	const labels = exists ? stringArray(row.labels) : [];
+	const labelVisible =
+		!exists || target.label == null
+			? false
+			: enumLabelPositionHolds(request.detail, labels, target.label);
+	const value = {
+		exists,
+		oid: exists ? stringOrNull(row.oid) : null,
+		schema: exists ? observedSchema : null,
+		type: exists ? observedType : null,
+		labels,
+		claims:
+			request.kind === ENUM_LABEL_VISIBLE_OBSERVATION
+				? [{ kind: ENUM_LABEL_VISIBLE_OBSERVATION, holds: labelVisible }]
+				: [{ kind: ENUM_TYPE_EXISTS_OBSERVATION, holds: exists }],
+	};
+	return evidenceObservation({
+		request: normalizedRequest,
+		context,
+		scope: [scope],
+		stability: 'externally-mutable',
+		source: 'system-catalog',
+		value,
+	});
+}
+
 async function observeAlterAuthority(
 	executor: Queryable,
 	request: ObservationRequest,
 	context: ObservationContext,
 ): Promise<EvidenceObservation> {
+	const enumTarget =
+		isRecord(request.detail) && typeof request.detail.type === 'string'
+			? enumDetailTarget(request, context)
+			: undefined;
+	if (enumTarget) {
+		if (request.kind !== ALTER_TYPE_AUTHORITY_OBSERVATION) {
+			throw new Error(
+				'ALTER TYPE authority observations must use postgresql.type.alter-authority',
+			);
+		}
+		const normalizedRequest = requestForEnumTarget(
+			request,
+			enumTarget,
+			context,
+		);
+		const resolved = resolvedEnumTarget(enumTarget);
+		const facts = await readTypeAlterAuthorityFacts(executor, resolved);
+		const value = {
+			...facts,
+			privileges: privilegeFactsForEnumTarget(resolved, facts),
+			claims: [
+				{
+					kind: ALTER_TYPE_AUTHORITY_OBSERVATION,
+					holds: facts.hasAlterAuthority,
+				},
+			],
+		};
+		return evidenceObservation({
+			request: normalizedRequest,
+			context,
+			scope: [enumScopeFor(resolved, context)],
+			stability: 'session-bound',
+			source: 'privilege-probe',
+			value,
+		});
+	}
+	if (request.kind !== ALTER_AUTHORITY_OBSERVATION) {
+		throw new Error(
+			'ALTER TABLE authority observations must use postgresql.table.alter-authority',
+		);
+	}
 	const target = detailTarget(request, context);
 	const normalizedRequest = requestForTarget(request, target, context, 'table');
 	const resolved = resolvedTarget(target);
-	const facts = await readAlterAuthorityFacts(executor, resolved);
+	const facts = await readTableAlterAuthorityFacts(executor, resolved);
 	const value = {
 		...facts,
 		privileges: privilegeFactsForTarget(resolved, facts),
@@ -658,7 +1031,11 @@ export function createPgObservationIssuer(): ObservationIssuer {
 			switch (request.kind) {
 				case COLUMN_EXISTS_OBSERVATION:
 					return observeColumn(executor, request, context);
+				case ENUM_TYPE_EXISTS_OBSERVATION:
+				case ENUM_LABEL_VISIBLE_OBSERVATION:
+					return observeEnumLabels(executor, request, context);
 				case ALTER_AUTHORITY_OBSERVATION:
+				case ALTER_TYPE_AUTHORITY_OBSERVATION:
 					return observeAlterAuthority(executor, request, context);
 				case ENGINE_VERSION_OBSERVATION:
 					return observeEngineVersion(executor, request, context);
@@ -690,7 +1067,7 @@ export function createPgObservationIssuer(): ObservationIssuer {
 export async function readPgObservationContext(
 	target: unknown,
 	schema?: string,
-	observationTarget?: ObservationTarget,
+	observationTarget?: ObservationTarget | EnumObservationTarget,
 ): Promise<ObservationContext> {
 	const pool = poolLike(target);
 	if (pool) {
@@ -715,7 +1092,7 @@ export async function readPgObservationContext(
 async function readPgObservationContextFromClient(
 	executor: Queryable,
 	schema?: string,
-	observationTarget?: ObservationTarget,
+	observationTarget?: ObservationTarget | EnumObservationTarget,
 ): Promise<ObservationContext> {
 	const version = await executor.query('SHOW server_version_num');
 	const database = await executor.query(
@@ -726,6 +1103,9 @@ async function readPgObservationContextFromClient(
 		'SELECT pg_catalog.to_json(pg_catalog.current_schemas(false)) AS search_path',
 	);
 	const searchPathSetting = await executor.query('SHOW search_path');
+	const standardConformingStrings = await executor.query(
+		'SHOW standard_conforming_strings',
+	);
 	const extensions = await executor.query(
 		'SELECT extname AS name, extversion AS version FROM pg_catalog.pg_extension ORDER BY extname',
 	);
@@ -755,10 +1135,21 @@ async function readPgObservationContextFromClient(
 			: undefined;
 	const targetSchema = resolvedObservationTarget?.schema ?? schema;
 	const privilegeFacts = resolvedObservationTarget
-		? privilegeFactsForTarget(
-				resolvedObservationTarget,
-				await readAlterAuthorityFacts(executor, resolvedObservationTarget),
-			)
+		? isEnumTarget(resolvedObservationTarget)
+			? privilegeFactsForEnumTarget(
+					resolvedEnumTarget(resolvedObservationTarget),
+					await readTypeAlterAuthorityFacts(
+						executor,
+						resolvedEnumTarget(resolvedObservationTarget),
+					),
+				)
+			: privilegeFactsForTarget(
+					resolvedTarget(resolvedObservationTarget),
+					await readTableAlterAuthorityFacts(
+						executor,
+						resolvedTarget(resolvedObservationTarget),
+					),
+				)
 		: [];
 	const collationRow = databaseCollation.rows[0];
 	const collationProvider = stringOrNull(collationRow?.collation_provider);
@@ -775,6 +1166,10 @@ async function readPgObservationContextFromClient(
 			configuredSearchPath.length > 0 ? configuredSearchPath : ['public'],
 		sessionConfiguration: {
 			search_path: String(searchPathSetting.rows[0]?.search_path ?? ''),
+			standard_conforming_strings: String(
+				standardConformingStrings.rows[0]?.standard_conforming_strings ??
+					'unknown',
+			),
 			actual_search_path: JSON.stringify(actualSearchPath),
 			...(schema != null ? { [EXPLICIT_SCHEMA_CONTEXT_KEY]: schema } : {}),
 		},

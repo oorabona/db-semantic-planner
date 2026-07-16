@@ -1,5 +1,6 @@
 import type { OperationKindRef } from './artifact.js';
 import type { JsonValue } from './json.js';
+import type { Proposition } from './proof.js';
 import type { ResourceAddress, ResourceSelector } from './resource.js';
 
 /**
@@ -45,6 +46,14 @@ export interface OperationExecutionSemantics {
 	readonly commitBoundary: 'none' | 'before' | 'after' | 'before-and-after';
 }
 
+export interface OperationRecoverySemantics {
+	readonly afterCommit: 'irreversible-additive' | (string & {});
+	readonly rerunnable: boolean;
+	readonly idempotenceKey: string;
+	readonly completionObservation: Proposition;
+	readonly statement: string;
+}
+
 export interface OperationEffects {
 	readonly reads: readonly ResourceSelector[];
 	readonly writes: readonly ResourceSelector[];
@@ -53,4 +62,5 @@ export interface OperationEffects {
 	readonly contextMutations: readonly ContextMutation[];
 	readonly externalEffects: ExternalEffectCoverage;
 	readonly execution: OperationExecutionSemantics;
+	readonly recovery?: OperationRecoverySemantics;
 }

@@ -3,6 +3,7 @@ import type {
 	CapabilityDescriptor,
 	ColumnIR,
 	CompareOutcome,
+	EnumIR,
 	EvidenceObservation,
 	ModelIR,
 	ObservationContext,
@@ -14,6 +15,7 @@ import type {
 	ProofObligation,
 	ResourceAddress,
 	SemanticArtifactRef,
+	SequenceIR,
 	TableIR,
 	TransitionCandidate,
 	TransitionConnectionPool,
@@ -110,10 +112,29 @@ function table(nullable: boolean, columns = [column(nullable)]): TableIR {
 }
 
 function modelFromTable(users: TableIR): ModelIR {
-	const tables = new Map<string, TableIR>([['users', users]]);
+	return modelFromTables([users]);
+}
+
+function modelFromTables(
+	modelTables: readonly TableIR[],
+	externalTables: Iterable<string> = [],
+	extras: {
+		readonly extensions?: readonly string[];
+		readonly sequences?: ReadonlyMap<string, SequenceIR>;
+	} = {},
+): ModelIR {
+	const tables = new Map<string, TableIR>();
+	for (const table of modelTables) {
+		tables.set(table.name, table);
+	}
 	return {
 		tables,
+		externalTables: new Set(externalTables),
 		relations: new Map(),
+		...(extras.extensions !== undefined
+			? { extensions: extras.extensions }
+			: {}),
+		...(extras.sequences !== undefined ? { sequences: extras.sequences } : {}),
 		getTable: (name) => tables.get(name),
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
@@ -124,6 +145,59 @@ function modelFromTable(users: TableIR): ModelIR {
 
 function model(nullable: boolean): ModelIR {
 	return modelFromTable(table(nullable));
+}
+
+function sequence(
+	name: string,
+	overrides: Partial<SequenceIR> = {},
+): SequenceIR {
+	return { name, ...overrides };
+}
+
+function sequenceMap(
+	sequences: readonly SequenceIR[],
+): ReadonlyMap<string, SequenceIR> {
+	return new Map(sequences.map((entry) => [entry.name, entry]));
+}
+
+function enumDef(values: readonly string[], name = 'status'): EnumIR {
+	return { name, values };
+}
+
+function modelFromEnums(enums: readonly EnumIR[]): ModelIR {
+	const enumMap = new Map<string, EnumIR>(
+		enums.map((entry) => [entry.name, entry]),
+	);
+	return {
+		tables: new Map(),
+		relations: new Map(),
+		enums: enumMap,
+		getTable: () => undefined,
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function modelWithTableAndEnums(
+	users: TableIR,
+	enums: readonly EnumIR[],
+): ModelIR {
+	const tables = new Map<string, TableIR>([['users', users]]);
+	const enumMap = new Map<string, EnumIR>(
+		enums.map((entry) => [entry.name, entry]),
+	);
+	return {
+		tables,
+		relations: new Map(),
+		enums: enumMap,
+		getTable: (name) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
 }
 
 function columnResource(name = 'age'): ResourceAddress {
@@ -142,6 +216,16 @@ function tableResource(): ResourceAddress {
 		database: 'test',
 		kind: 'table',
 		name: 'users',
+	};
+}
+
+function enumResource(name = 'status'): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: 'test',
+		kind: 'type',
+		name,
+		qualifiedBy: ['enum'],
 	};
 }
 
@@ -332,6 +416,87 @@ function rule(options: RuleOptions = {}): TransitionRule<{
 	};
 }
 
+function enumRule(): TransitionRule<{
+	readonly type: string;
+	readonly label: string;
+	readonly after?: string;
+}> {
+	return {
+		id: 'mock.enum-add',
+		artifact: ruleArtifact,
+		support: {
+			engine: 'postgresql',
+			versions: [{ min: '18' }],
+			requiredCapabilities: ['mock'],
+		},
+		recognize(desired, current) {
+			const desiredEnum = desired.enums?.get('status');
+			const currentEnum = current.enums?.get('status');
+			if (!desiredEnum || !currentEnum) {
+				return { recognized: false };
+			}
+			const currentValues = new Set(currentEnum.values);
+			const added = desiredEnum.values.filter(
+				(value) => !currentValues.has(value),
+			);
+			if (added.length !== 1) {
+				return { recognized: false };
+			}
+			const label = added[0];
+			if (!label) {
+				return { recognized: false };
+			}
+			const withoutLabel = desiredEnum.values.filter(
+				(value) => value !== label,
+			);
+			if (JSON.stringify(withoutLabel) !== JSON.stringify(currentEnum.values)) {
+				return { recognized: false };
+			}
+			const index = desiredEnum.values.indexOf(label);
+			if (index <= 0) {
+				return { recognized: false };
+			}
+			const after =
+				index === desiredEnum.values.length - 1
+					? undefined
+					: desiredEnum.values[index - 1];
+			return after === undefined
+				? {
+						recognized: true,
+						match: { type: 'status', label },
+					}
+				: {
+						recognized: true,
+						match: { type: 'status', label, after },
+					};
+		},
+		requiredObservations: () => [],
+		evaluate: () => ({
+			outcome: 'applicable',
+			obligations: [],
+			assumptions: [],
+		}),
+		generateCandidate: () => ({
+			generatedBy: { id: 'mock.enum-add', pack: ruleArtifact },
+			operations: [
+				{
+					ref: 'op:enum-add',
+					operationKind: { artifact: operationArtifact, name: 'EnumAdd' },
+					payload: { type: 'status', label: 'pending' },
+				},
+			],
+			obligations: [],
+			assumptions: [],
+			guards: [],
+			selectionRationale: {
+				chosen: { id: 'mock.enum-add', pack: ruleArtifact },
+				overRules: [],
+				why: 'mock enum add',
+			},
+		}),
+	};
+}
+
 function semantics(
 	restsOn: readonly Assumption[] = [operationAssumption()],
 	operationKind: PhysicalOperation['operationKind'] = operation().operationKind,
@@ -425,6 +590,9 @@ function registry(
 		readonly semantics?: RegisteredOperationSemantics;
 		readonly issuer?: ObservationIssuer;
 		readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
+		readonly comparatorNameNormalizer?: {
+			normalizeCurrentIdentifier(identifier: string): string;
+		};
 	} = {},
 ) {
 	return createPackRegistry([
@@ -433,6 +601,7 @@ function registry(
 			operationSemantics: [options.semantics ?? semantics()],
 			issuer: options.issuer ?? issuer(),
 			capabilityDescriptors: options.capabilityDescriptors,
+			comparatorNameNormalizer: options.comparatorNameNormalizer,
 		},
 	]);
 }
@@ -708,6 +877,198 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('no-drift');
 	});
 
+	it('ignores current-only tables marked external', () => {
+		const externalAuditLog: TableIR = {
+			name: 'external_audit_log',
+			columns: [column(false, 'id')],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const compare = createComparator(registry()).compare(
+			model(false),
+			modelFromTables(
+				[table(false), externalAuditLog],
+				[externalAuditLog.name],
+			),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('compares desired-managed tables even when current marks them external', () => {
+		const compare = createComparator(registry()).compare(
+			model(false),
+			modelFromTables([table(true)], ['users']),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind === 'transitions') {
+			expect(compare.candidates[0]?.rule.id).toBe('mock.set-not-null');
+		}
+	});
+
+	it('ignores current extensions when desired declares no managed extensions', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([]),
+			modelFromTables([], [], {
+				extensions: ['pg_ivm', 'citus', 'timescaledb', 'postgis', 'vector'],
+			}),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('surfaces current extensions when desired explicitly manages an empty extension set', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], { extensions: [] }),
+			modelFromTables([], [], { extensions: ['vector'] }),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('ignores current extensions outside the desired managed extension set', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], { extensions: ['vector'] }),
+			modelFromTables([], [], { extensions: ['citus', 'vector'] }),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('surfaces a missing desired extension as unsupported drift', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], { extensions: ['vector'] }),
+			modelFromTables([], [], { extensions: [] }),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('ignores current sequences when desired declares no managed sequences', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([]),
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('audit_id'), sequence('event_id')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('surfaces current sequences when desired explicitly manages an empty sequence set', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], { sequences: sequenceMap([]) }),
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('audit_id')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('ignores current sequences outside the desired managed sequence set', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('audit_id')]),
+			}),
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('event_id'), sequence('audit_id')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('surfaces a missing desired sequence as unsupported drift', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('audit_id')]),
+			}),
+			modelFromTables([], [], { sequences: sequenceMap([]) }),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('surfaces enum name-normalization collisions as unsupported drift', () => {
+		const compare = createComparator(
+			registry({
+				rules: [enumRule()],
+				comparatorNameNormalizer: {
+					normalizeCurrentIdentifier: (identifier) => identifier.toLowerCase(),
+				},
+			}),
+		).compare(
+			modelFromEnums([enumDef(['active'], 'status')]),
+			modelFromEnums([
+				enumDef(['active'], 'Status'),
+				enumDef(['inactive'], 'status'),
+			]),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'type',
+					name: 'status',
+					qualifiedBy: ['enum'],
+				}),
+			);
+		}
+	});
+
+	it('surfaces sequence name-normalization collisions as unsupported drift', () => {
+		const compare = createComparator(
+			registry({
+				comparatorNameNormalizer: {
+					normalizeCurrentIdentifier: (identifier) => identifier.toLowerCase(),
+				},
+			}),
+		).compare(
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('audit_id')]),
+			}),
+			modelFromTables([], [], {
+				sequences: sequenceMap([sequence('Audit_ID'), sequence('audit_id')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'sequence',
+					name: 'audit_id',
+				}),
+			);
+		}
+	});
+
+	it('keeps non-external current-only tables unsupported', () => {
+		const unmanagedTable: TableIR = {
+			name: 'audit_log',
+			columns: [column(false, 'id')],
+			foreignKeys: [],
+			indexes: [],
+		};
+		const compare = createComparator(registry()).compare(
+			model(false),
+			modelFromTables([table(false), unmanagedTable]),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'table',
+					name: unmanagedTable.name,
+				}),
+			);
+		}
+	});
+
 	it('recognizes a nullable true to false column transition as a candidate', () => {
 		const compare = createComparator(registry()).compare(
 			model(false),
@@ -755,6 +1116,114 @@ describe('createComparator', () => {
 			{ table: 'users', column: 'age' },
 			{ table: 'users', column: 'height' },
 		]);
+	});
+
+	it('recognizes one added enum label as a transition candidate', () => {
+		const customRegistry = registry({ rules: [enumRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromEnums([enumDef(['active', 'pending'])]),
+			modelFromEnums([enumDef(['active'])]),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.candidates[0]?.rule.id).toBe('mock.enum-add');
+		expect(compare.candidates[0]?.match).toEqual({
+			type: 'status',
+			label: 'pending',
+		});
+	});
+
+	it('treats an unchanged enum with unspecified desired schema as no-drift', () => {
+		const customRegistry = registry({ rules: [enumRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromEnums([enumDef(['active', 'pending'])]),
+			modelFromEnums([{ ...enumDef(['active', 'pending']), schema: 'tenant' }]),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+		if (compare.kind === 'transitions') {
+			expect(compare.candidates).toHaveLength(0);
+		}
+	});
+
+	it('surfaces explicit enum schema drift as unsupported', () => {
+		const customRegistry = registry({ rules: [enumRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromEnums([
+				{ ...enumDef(['active', 'pending']), schema: 'desired' },
+			]),
+			modelFromEnums([
+				{ ...enumDef(['active', 'pending']), schema: 'current' },
+			]),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'type',
+					name: 'status',
+					qualifiedBy: ['enum'],
+					schema: 'desired',
+				}),
+			);
+		}
+	});
+
+	it('blocks removed, renamed, and reordered enum labels as unsupported', () => {
+		const customRegistry = registry({ rules: [enumRule()] });
+		const removed = createComparator(customRegistry).compare(
+			modelFromEnums([enumDef(['active'])]),
+			modelFromEnums([enumDef(['active', 'pending'])]),
+		);
+		const renamed = createComparator(customRegistry).compare(
+			modelFromEnums([enumDef(['active', 'queued'])]),
+			modelFromEnums([enumDef(['active', 'pending'])]),
+		);
+		const reordered = createComparator(customRegistry).compare(
+			modelFromEnums([enumDef(['pending', 'active'])]),
+			modelFromEnums([enumDef(['active', 'pending'])]),
+		);
+
+		for (const compare of [removed, renamed, reordered]) {
+			expect(compare.kind).toBe('unsupported');
+			if (compare.kind === 'unsupported') {
+				expect(compare.changes[0]).toMatchObject({
+					kind: 'type',
+					name: 'status',
+					qualifiedBy: ['enum'],
+				});
+			}
+		}
+	});
+
+	it('keeps enum-add plus a column change as multiple candidates for the prove guard', async () => {
+		const customRegistry = registry({ rules: [rule(), enumRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelWithTableAndEnums(table(false), [enumDef(['active', 'pending'])]),
+			modelWithTableAndEnums(table(true), [enumDef(['active'])]),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates.map((candidate) => candidate.rule.id)).toEqual([
+			'mock.set-not-null',
+			'mock.enum-add',
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expectMultiOperationCompositionGuard(outcome);
 	});
 
 	it('blocks mixed recognized and retryable unknown changes before observation', async () => {

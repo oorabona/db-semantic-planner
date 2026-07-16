@@ -116,6 +116,44 @@ describe('introspect', () => {
 		expect(users!.columns[0]!.type).toBe('integer');
 	});
 
+	it('treats dbsp_transition_journal as an ordinary table', async () => {
+		const journalTableName = 'dbsp_transition_journal';
+		const columns = [
+			{
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			...[
+				['id', 'bigint', 'int8'],
+				['step_id', 'text', 'text'],
+				['event', 'text', 'text'],
+				['operation_ref', 'text', 'text'],
+				['operation_kind', 'text', 'text'],
+				['recorded_at', 'timestamp with time zone', 'timestamptz'],
+				['record', 'jsonb', 'jsonb'],
+			].map(([column_name, data_type, udt_name]) => ({
+				table_name: journalTableName,
+				column_name,
+				data_type,
+				udt_name,
+				is_nullable: 'NO',
+				column_default: null,
+			})),
+		];
+		const pks = [{ table_name: 'users', column_name: 'id' }];
+		const pool = createMockPool([columns, pks, []]);
+
+		const result = await introspect(pool);
+
+		expect(result.tables.has('users')).toBe(true);
+		expect(result.tables.has(journalTableName)).toBe(true);
+		expect(result.externalTables.has(journalTableName)).toBe(false);
+	});
+
 	it('should map column types correctly', async () => {
 		const columns = [
 			{
@@ -738,6 +776,22 @@ describe('introspect', () => {
 
 		expect(result.tables.size).toBe(1);
 		expect(result.tables.has('users')).toBe(true);
+	});
+
+	it('should apply include before exclude filters', async () => {
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+		]);
+		const result = await introspect(pool, {
+			include: ['*s'],
+			exclude: ['posts'],
+		});
+
+		expect(result.tables.size).toBe(1);
+		expect(result.tables.has('users')).toBe(true);
+		expect(result.tables.has('posts')).toBe(false);
 	});
 
 	it('should apply glob pattern in exclude', async () => {

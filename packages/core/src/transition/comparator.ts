@@ -20,6 +20,7 @@ import type {
 	TransitionRule,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
+import { enumAddDelta } from './enum-delta.js';
 import { semanticArtifactId } from './ids.js';
 import type { PackRegistry } from './registry.js';
 import { stableJson } from './stable-json.js';
@@ -51,7 +52,9 @@ type NormalizationConflict =
 			readonly kind: 'column';
 			readonly table: string;
 			readonly column: string;
-	  };
+	  }
+	| { readonly kind: 'enum'; readonly enum: string }
+	| { readonly kind: 'sequence'; readonly sequence: string };
 
 function normalizeColumnList(
 	columns: readonly string[],
@@ -196,16 +199,28 @@ function normalizeTable(
 function normalizeNamedMap<T extends { readonly name: string }>(
 	items: ReadonlyMap<string, T> | undefined,
 	normalize: NormalizeIdentifier,
-): ReadonlyMap<string, T> | undefined {
+	kind: 'enum' | 'sequence',
+): {
+	readonly items: ReadonlyMap<string, T> | undefined;
+	readonly conflicts: readonly NormalizationConflict[];
+} {
 	if (!items) {
-		return undefined;
+		return { items: undefined, conflicts: [] };
 	}
-	return new Map(
-		[...items.values()].map((item) => {
-			const normalized = { ...item, name: normalize(item.name) };
-			return [normalized.name, normalized];
-		}),
-	);
+	const normalizedItems = new Map<string, T>();
+	const conflicts: NormalizationConflict[] = [];
+	for (const item of items.values()) {
+		const normalized = { ...item, name: normalize(item.name) };
+		if (normalizedItems.has(normalized.name)) {
+			conflicts.push(
+				kind === 'enum'
+					? { kind: 'enum', enum: normalized.name }
+					: { kind: 'sequence', sequence: normalized.name },
+			);
+		}
+		normalizedItems.set(normalized.name, normalized);
+	}
+	return { items: normalizedItems, conflicts };
 }
 
 function normalizeCurrentModelForComparison(
@@ -233,16 +248,21 @@ function normalizeCurrentModelForComparison(
 	const externalTables = model.externalTables
 		? new Set([...model.externalTables].map((table) => normalize(table)))
 		: undefined;
-	const enums = normalizeNamedMap<EnumIR>(model.enums, normalize);
-	const sequences = normalizeNamedMap<SequenceIR>(model.sequences, normalize);
+	const enums = normalizeNamedMap<EnumIR>(model.enums, normalize, 'enum');
+	const sequences = normalizeNamedMap<SequenceIR>(
+		model.sequences,
+		normalize,
+		'sequence',
+	);
+	conflicts.push(...enums.conflicts, ...sequences.conflicts);
 	return {
 		model: {
 			...model,
 			tables,
 			...(externalTables ? { externalTables } : {}),
 			relations,
-			...(enums ? { enums } : {}),
-			...(sequences ? { sequences } : {}),
+			...(enums.items ? { enums: enums.items } : {}),
+			...(sequences.items ? { sequences: sequences.items } : {}),
 			getTable: (name: string) => tables.get(name),
 			getRelation: (qualifiedName: string) => relations.get(qualifiedName),
 			getRelationsFrom: (sourceTable: string) =>
@@ -277,10 +297,6 @@ function mapToEntries<T>(map: ReadonlyMap<string, T> | undefined): unknown {
 	);
 }
 
-function setToValues(set: ReadonlySet<string> | undefined): unknown {
-	return set ? [...set.values()].sort() : undefined;
-}
-
 function tableForComparison(table: TableIR): unknown {
 	return {
 		name: table.name,
@@ -297,16 +313,98 @@ function tableForComparison(table: TableIR): unknown {
 	};
 }
 
-function modelForComparison(model: ModelIR): unknown {
+function externalTableNames(
+	desired: ModelIR,
+	current: ModelIR,
+): ReadonlySet<string> {
+	const desiredManagedTables = new Set(desired.tables.keys());
+	return new Set(
+		[
+			...(desired.externalTables ?? []),
+			...(current.externalTables ?? []),
+		].filter((table) => !desiredManagedTables.has(table)),
+	);
+}
+
+function relationTouchesExternalTable(
+	relation: RelationIR,
+	externalTables: ReadonlySet<string>,
+): boolean {
+	return (
+		externalTables.has(relation.source) ||
+		externalTables.has(relation.target) ||
+		(typeof relation.through === 'string' &&
+			externalTables.has(relation.through))
+	);
+}
+
+function managedRelationsForComparison(
+	relations: ReadonlyMap<string, RelationIR>,
+	externalTables: ReadonlySet<string>,
+): ReadonlyMap<string, RelationIR> {
+	return new Map(
+		[...relations.entries()].filter(
+			([, relation]) => !relationTouchesExternalTable(relation, externalTables),
+		),
+	);
+}
+
+function extensionNamesForComparison(
+	extensions: readonly string[] | undefined,
+	managedExtensions: readonly string[] | undefined,
+): readonly string[] {
+	if (managedExtensions === undefined) {
+		return [];
+	}
+	const sortedExtensions = [...new Set(extensions ?? [])].sort((left, right) =>
+		left.localeCompare(right),
+	);
+	if (managedExtensions.length === 0) {
+		return sortedExtensions;
+	}
+	const managed = new Set(managedExtensions);
+	return sortedExtensions.filter((extension) => managed.has(extension));
+}
+
+function sequencesForComparison(
+	sequences: ReadonlyMap<string, SequenceIR> | undefined,
+	managedSequences: ReadonlyMap<string, SequenceIR> | undefined,
+): unknown {
+	if (managedSequences === undefined) {
+		return [];
+	}
+	const entries = [
+		...(sequences ?? new Map<string, SequenceIR>()).entries(),
+	].sort(([left], [right]) => left.localeCompare(right));
+	if (managedSequences.size === 0) {
+		return entries;
+	}
+	const managedNames = new Set(managedSequences.keys());
+	return entries.filter(([name]) => managedNames.has(name));
+}
+
+function modelForComparison(
+	model: ModelIR,
+	externalTables: ReadonlySet<string>,
+	managedSurface: ModelIR,
+): unknown {
 	return {
 		tables: [...model.tables.entries()]
+			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([name, table]) => [name, tableForComparison(table)]),
-		externalTables: setToValues(model.externalTables),
-		relations: mapToEntries(model.relations),
+		relations: mapToEntries(
+			managedRelationsForComparison(model.relations, externalTables),
+		),
 		enums: mapToEntries(model.enums),
-		extensions: model.extensions,
-		sequences: mapToEntries(model.sequences),
+		extensions: extensionNamesForComparison(
+			model.extensions,
+			managedSurface.extensions,
+		),
+		sequences: sequencesForComparison(
+			model.sequences,
+			managedSurface.sequences,
+		),
 	};
 }
 
@@ -314,9 +412,13 @@ function revertRecognizedColumnChanges(
 	desired: ModelIR,
 	current: ModelIR,
 	recognizedColumnKeys: ReadonlySet<string>,
+	externalTables: ReadonlySet<string>,
+	recognizedEnumKeys: ReadonlySet<string> = new Set(),
 ): unknown {
+	const desiredEnums = desired.enums;
 	return {
 		tables: [...desired.tables.entries()]
+			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([name, table]) => {
 				const currentTable = current.getTable(name);
@@ -336,11 +438,35 @@ function revertRecognizedColumnChanges(
 					}),
 				];
 			}),
-		externalTables: setToValues(desired.externalTables),
-		relations: mapToEntries(desired.relations),
-		enums: mapToEntries(desired.enums),
-		extensions: desired.extensions,
-		sequences: mapToEntries(desired.sequences),
+		relations: mapToEntries(
+			managedRelationsForComparison(desired.relations, externalTables),
+		),
+		enums: desiredEnums
+			? [...desiredEnums.entries()]
+					.sort(([left], [right]) => left.localeCompare(right))
+					.map(([name, enumDef]) => {
+						const currentEnum = current.enums?.get(name);
+						const hasRecognizedEnumLabel = [...recognizedEnumKeys].some(
+							(key) => {
+								const parsed = JSON.parse(key) as unknown;
+								return (
+									Array.isArray(parsed) &&
+									parsed.length === 2 &&
+									parsed[0] === name
+								);
+							},
+						);
+						return [
+							name,
+							hasRecognizedEnumLabel && currentEnum ? currentEnum : enumDef,
+						];
+					})
+			: undefined,
+		extensions: extensionNamesForComparison(
+			desired.extensions,
+			desired.extensions,
+		),
+		sequences: sequencesForComparison(desired.sequences, desired.sequences),
 	};
 }
 
@@ -358,13 +484,46 @@ function resourceForColumn(
 	return column ? { ...resource, qualifiedBy: [table] } : resource;
 }
 
+function resourceForEnum(
+	engine: string,
+	enumDef: EnumIR | undefined,
+	name: string,
+): ResourceAddress {
+	const resource: ResourceAddress = {
+		engine,
+		database: 'model',
+		kind: 'type',
+		name,
+		qualifiedBy: ['enum'],
+	};
+	return enumDef?.schema ? { ...resource, schema: enumDef.schema } : resource;
+}
+
 function resourceForNormalizationConflict(
 	engine: string,
 	conflict: NormalizationConflict,
 ): ResourceAddress {
-	return conflict.kind === 'column'
-		? resourceForColumn(engine, conflict.table, conflict.column)
-		: resourceForColumn(engine, conflict.table);
+	switch (conflict.kind) {
+		case 'column':
+			return resourceForColumn(engine, conflict.table, conflict.column);
+		case 'table':
+			return resourceForColumn(engine, conflict.table);
+		case 'enum':
+			return {
+				engine,
+				database: 'model',
+				kind: 'type',
+				name: conflict.enum,
+				qualifiedBy: ['enum'],
+			};
+		case 'sequence':
+			return {
+				engine,
+				database: 'model',
+				kind: 'sequence',
+				name: conflict.sequence,
+			};
+	}
 }
 
 function noDriftProposition(): Proposition {
@@ -395,6 +554,20 @@ function makeFocusedModel(table: TableIR, column: ColumnIR): ModelIR {
 		tables,
 		relations: new Map(),
 		getTable: (name: string) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function makeFocusedEnumModel(enumDef: EnumIR): ModelIR {
+	const enums = new Map<string, EnumIR>([[enumDef.name, enumDef]]);
+	return {
+		tables: new Map(),
+		relations: new Map(),
+		enums,
+		getTable: () => undefined,
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
@@ -492,8 +665,20 @@ export function createComparator(registry: PackRegistry): Comparator {
 				};
 			}
 			const currentForComparison = normalizedCurrent.model;
-			const desiredComparison = modelForComparison(desired);
-			const currentComparison = modelForComparison(currentForComparison);
+			const ignoredExternalTables = externalTableNames(
+				desired,
+				currentForComparison,
+			);
+			const desiredComparison = modelForComparison(
+				desired,
+				ignoredExternalTables,
+				desired,
+			);
+			const currentComparison = modelForComparison(
+				currentForComparison,
+				ignoredExternalTables,
+				desired,
+			);
 			if (stableJson(desiredComparison) === stableJson(currentComparison)) {
 				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
 			}
@@ -503,6 +688,8 @@ export function createComparator(registry: PackRegistry): Comparator {
 			const unsupported: ResourceAddress[] = [];
 			const recognizedColumnKeys = new Set<string>();
 			const pendingColumnKeys = new Set<string>();
+			const recognizedEnumKeys = new Set<string>();
+			const pendingEnumKeys = new Set<string>();
 
 			const tableNames = new Set<string>([
 				...desired.tables.keys(),
@@ -510,6 +697,9 @@ export function createComparator(registry: PackRegistry): Comparator {
 			]);
 
 			for (const tableName of tableNames) {
+				if (ignoredExternalTables.has(tableName)) {
+					continue;
+				}
 				const desiredTable = desired.getTable(tableName);
 				const currentTable = currentForComparison.getTable(tableName);
 				if (!desiredTable || !currentTable) {
@@ -620,12 +810,120 @@ export function createComparator(registry: PackRegistry): Comparator {
 				}
 			}
 
+			const enumNames = new Set<string>([
+				...(desired.enums?.keys() ?? []),
+				...(currentForComparison.enums?.keys() ?? []),
+			]);
+
+			for (const enumName of enumNames) {
+				const desiredEnum = desired.enums?.get(enumName);
+				const currentEnum = currentForComparison.enums?.get(enumName);
+				if (!desiredEnum || !currentEnum) {
+					unsupported.push(
+						resourceForEnum(engine, desiredEnum ?? currentEnum, enumName),
+					);
+					continue;
+				}
+				const delta = enumAddDelta(desiredEnum, currentEnum);
+				if (delta.kind === 'none') {
+					pendingEnumKeys.add(JSON.stringify([enumName, null]));
+					continue;
+				}
+				if (delta.kind === 'unsupported') {
+					unsupported.push(resourceForEnum(engine, desiredEnum, enumName));
+					continue;
+				}
+
+				const focusedDesired = makeFocusedEnumModel(desiredEnum);
+				const focusedCurrent = makeFocusedEnumModel(currentEnum);
+				const recognitionEntries = registry.allRules().map((rule) => {
+					const equivalence = registry.resolveEquivalence(rule.artifact);
+					return {
+						rule,
+						result: rule.recognize(
+							focusedDesired,
+							focusedCurrent,
+							equivalence
+								? { equivalence, context: { engine } }
+								: { context: { engine } },
+						),
+					};
+				});
+				const recognized = recognitionEntries.filter(
+					(
+						entry,
+					): entry is {
+						readonly rule: TransitionRule;
+						readonly result: Extract<
+							RecognitionResult<unknown>,
+							{ readonly recognized: true }
+						>;
+					} => entry.result.recognized === true,
+				);
+				const unknown = recognitionEntries.filter(
+					(
+						entry,
+					): entry is {
+						readonly rule: TransitionRule;
+						readonly result: Extract<
+							RecognitionResult<unknown>,
+							{ readonly recognized: 'unknown' }
+						>;
+					} => entry.result.recognized === 'unknown',
+				);
+
+				if (recognized.length === 0) {
+					if (unknown.length > 0) {
+						for (const entry of unknown) {
+							unknownRecognitions.push({
+								rule: ruleRef(entry.rule),
+								desired: focusedDesired,
+								current: focusedCurrent,
+								obligations: entry.result.obligations,
+							});
+						}
+						pendingEnumKeys.add(JSON.stringify([enumName, delta.label]));
+						continue;
+					}
+					unsupported.push(resourceForEnum(engine, desiredEnum, enumName));
+					continue;
+				}
+
+				const chosen =
+					recognized.length === 1
+						? recognized[0]?.rule
+						: chooseByPrecedence(recognized.map((entry) => entry.rule));
+				if (!chosen) {
+					return {
+						kind: 'ambiguous',
+						candidates: recognized.map((entry) => ruleRef(entry.rule)),
+					};
+				}
+
+				const chosenEntry = recognized.find((entry) => entry.rule === chosen);
+				if (!chosenEntry?.result.recognized) {
+					unsupported.push(resourceForEnum(engine, desiredEnum, enumName));
+					continue;
+				}
+				candidates.push(
+					candidateFromRule(
+						chosen,
+						chosenEntry.result,
+						recognized.map((entry) => entry.rule),
+					),
+				);
+				recognizedEnumKeys.add(JSON.stringify([enumName, delta.label]));
+				pendingEnumKeys.add(JSON.stringify([enumName, delta.label]));
+			}
+
 			const hiddenDiffsRemain =
 				stableJson(
 					revertRecognizedColumnChanges(
 						desired,
 						currentForComparison,
 						new Set([...recognizedColumnKeys, ...pendingColumnKeys]),
+						ignoredExternalTables,
+						new Set([...recognizedEnumKeys, ...pendingEnumKeys]),
 					),
 				) !== stableJson(currentComparison);
 			if (hiddenDiffsRemain) {
@@ -663,6 +961,10 @@ export function createComparator(registry: PackRegistry): Comparator {
 						...entry.obligations,
 					]),
 				};
+			}
+
+			if (candidates.length === 0) {
+				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
 			}
 
 			return {

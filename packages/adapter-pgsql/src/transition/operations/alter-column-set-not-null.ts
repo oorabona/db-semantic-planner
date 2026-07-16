@@ -9,7 +9,6 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
-	JsonValue,
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
@@ -96,7 +95,6 @@ type CatalogValue = {
 	readonly autoIncrement: boolean | null;
 };
 
-const JOURNAL_TABLE = 'dbsp_transition_journal';
 const GUARD_STATEMENT_TIMEOUT_MS = 5000;
 const STALE_EXPECTED_COLUMN_SHAPE_REASON =
 	'the target column no longer matches the compared desired shape; the recognized pure-nullability tightening is stale - replan against fresh state';
@@ -815,54 +813,6 @@ function clientQuery(client: TransitionExecutionClient): Queryable {
 	return queryable(client.opaqueClient);
 }
 
-function qualifiedJournalTable(schema: string): string {
-	return `${quoteIdent(schema, 'schema')}.${quoteIdent(JOURNAL_TABLE, 'table')}`;
-}
-
-async function ensureJournal(
-	executor: Queryable,
-	schema: string,
-): Promise<void> {
-	await executor.query(
-		`CREATE TABLE IF NOT EXISTS ${qualifiedJournalTable(schema)} (` +
-			'id bigserial PRIMARY KEY, ' +
-			'step_id text NOT NULL, ' +
-			'event text NOT NULL, ' +
-			'operation_ref text NOT NULL, ' +
-			'operation_kind text NOT NULL, ' +
-			'recorded_at timestamptz NOT NULL DEFAULT now(), ' +
-			'record jsonb NOT NULL' +
-			')',
-	);
-}
-
-async function insertJournalRecord(
-	executor: Queryable,
-	event: string,
-	operation: PhysicalOperation,
-	stepId: string,
-	record: JsonValue,
-): Promise<void> {
-	const schema = explicitSchema(payloadOf(operation));
-	await ensureJournal(executor, schema);
-	await executor.query(
-		`INSERT INTO ${qualifiedJournalTable(schema)} ` +
-			'(step_id, event, operation_ref, operation_kind, record) ' +
-			'VALUES ($1, $2, $3, $4, $5::jsonb)',
-		[
-			stepId,
-			event,
-			operation.ref,
-			operation.operationKind.name,
-			JSON.stringify(record),
-		],
-	);
-}
-
-function jsonRecord(value: unknown): JsonValue {
-	return JSON.parse(JSON.stringify(value)) as JsonValue;
-}
-
 function boundedLockTimeout(maxWaitMs: number): number {
 	if (!Number.isFinite(maxWaitMs)) {
 		return 5000;
@@ -994,16 +944,13 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			}
 		},
 		async writeIntentJournal(
-			client: TransitionExecutionClient,
-			record: DurableIntentRecord,
+			_client: TransitionExecutionClient,
+			_record: DurableIntentRecord,
 		) {
-			await insertJournalRecord(
-				clientQuery(client),
-				'intent',
-				record.operation,
-				record.stepId,
-				jsonRecord(record),
-			);
+			// Operator-approved option B: journal state is intentionally ephemeral
+			// for this single-op, re-introspectable transition. Durable journaling
+			// and a recovery reader belong to executor-recovery; crash recovery is
+			// by re-introspection, not journal replay.
 		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
@@ -1115,17 +1062,14 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			);
 		},
 		async writeCompletionJournal(
-			client: TransitionExecutionClient,
-			operation: PhysicalOperation,
-			record: TransactionalCompletionRecord,
+			_client: TransitionExecutionClient,
+			_operation: PhysicalOperation,
+			_record: TransactionalCompletionRecord,
 		) {
-			await insertJournalRecord(
-				clientQuery(client),
-				'completion',
-				operation,
-				record.stepId,
-				jsonRecord(record),
-			);
+			// Operator-approved option B: journal state is intentionally ephemeral
+			// for this single-op, re-introspectable transition. Durable journaling
+			// and a recovery reader belong to executor-recovery; crash recovery is
+			// by re-introspection, not journal replay.
 		},
 		async commit(client: TransitionExecutionClient) {
 			await clientQuery(client).query('COMMIT');
@@ -1134,16 +1078,13 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			await clientQuery(client).query('ROLLBACK');
 		},
 		async writeObservedJournal(
-			client: TransitionExecutionClient,
-			journal: StepJournal,
+			_client: TransitionExecutionClient,
+			_journal: StepJournal,
 		) {
-			await insertJournalRecord(
-				clientQuery(client),
-				'observed',
-				journal.intent.operation,
-				journal.intent.stepId,
-				jsonRecord(journal),
-			);
+			// Operator-approved option B: journal state is intentionally ephemeral
+			// for this single-op, re-introspectable transition. Durable journaling
+			// and a recovery reader belong to executor-recovery; crash recovery is
+			// by re-introspection, not journal replay.
 		},
 		isLockTimeout(error: unknown) {
 			return (

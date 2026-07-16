@@ -712,6 +712,7 @@ describe('createApplier', () => {
 		);
 
 		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.journals[0]?.outcome).toBe('completed');
 		expect(observed[0]?.outcome).toBe('completed');
 		expect(rt.checkout).toHaveBeenCalledOnce();
 	});
