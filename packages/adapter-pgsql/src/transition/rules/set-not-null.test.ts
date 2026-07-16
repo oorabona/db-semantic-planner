@@ -1243,9 +1243,8 @@ describe('postgresql.column.set-not-null rule', () => {
 		if (compare.kind !== 'uncomposable') {
 			return;
 		}
-		expect(compare.detail).toMatch(
-			/multi-change composition is not yet supported/i,
-		);
+		expect(compare.detail).toMatch(/mixed recognized and unknown/i);
+		expect(compare.detail).toMatch(/whole diff/i);
 		expect(compare.candidates).toHaveLength(1);
 		expect(compare.candidates[0]?.match).toMatchObject({
 			table: 'users',
@@ -1269,13 +1268,32 @@ describe('postgresql.column.set-not-null rule', () => {
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
 			expect(outcome.assessment.reasons[0]?.detail).toMatch(
-				/multi-change composition is not yet supported/i,
+				/mixed recognized and unknown/i,
 			);
 		}
 	});
 
-	it('refuses two unknown column changes as uncomposable', () => {
-		const registry = createPackRegistry([createPgTransitionPack()]);
+	it('blocks two unknown column changes before observation', async () => {
+		const pack = createPgTransitionPack();
+		const readContext = vi.fn(async () => ({
+			...context,
+			targetSchema: 'tenant_live',
+		}));
+		const execute = vi.fn(async (request: ObservationRequest, _target, ctx) =>
+			request.kind === COLUMN_EXISTS_OBSERVATION
+				? catalogEvidence(request, {}, ctx)
+				: normalizedEvidence(request, true, 'tenant_live', ctx),
+		);
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext,
+					execute,
+				},
+			},
+		]);
 		const compare = createComparator(registry).compare(
 			modelWithColumns([
 				column(false, statusType('tenant_model'), 'state'),
@@ -1287,15 +1305,30 @@ describe('postgresql.column.set-not-null rule', () => {
 			]),
 		);
 
-		expect(compare.kind).toBe('uncomposable');
-		if (compare.kind !== 'uncomposable') {
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
 			return;
 		}
-		expect(compare.candidates).toHaveLength(0);
 		expect(compare.recognitions).toHaveLength(2);
-		expect(compare.detail).toMatch(
-			/multi-change composition is not yet supported/i,
+		const target = proofTarget();
+		const outcome = await createProver(registry).prove(
+			compare,
+			target,
+			context,
 		);
+
+		expect(outcome.kind).toBe('blocked');
+		expect(outcome).not.toHaveProperty('plan');
+		expect(readContext).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+		expect(target.connect).not.toHaveBeenCalled();
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('ambiguous-rule');
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/multiple transition recognitions/i,
+			);
+			expect(outcome.assessment.reasons[0]?.candidates).toHaveLength(2);
+		}
 	});
 
 	it('reports a refuted recognition claim when retry resolves unknown to different', async () => {

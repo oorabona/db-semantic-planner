@@ -10,6 +10,7 @@ import type {
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
+	OperationEffectAssessment,
 	OutcomeReason,
 	PhysicalOperation,
 	PlanAssessment,
@@ -30,6 +31,7 @@ import type {
 	TransitionRule,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
+import { type CompositionOperation, composeOperations } from './composer.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
 import { mintInProcessPlan } from './minting.js';
@@ -151,6 +153,16 @@ function unsupported(
 		code: 'unsupported-transition',
 		changes: compare.changes,
 		scope: compare.changes,
+	});
+}
+
+function unsupportedMultiOperationComposition(): PlanAssessment {
+	return blockedAssessment({
+		code: 'unsupported-transition',
+		changes: [],
+		scope: [],
+		detail:
+			'multi-operation composition is not yet enabled; pending the enum→CHECK slice',
 	});
 }
 
@@ -482,7 +494,7 @@ async function issueObservations(
 		return { evidence: [], advisory: [] };
 	}
 	const uniqueRequests = requests.filter((request) => {
-		const key = stableJson(request);
+		const key = stableJson({ issuer: issuer.artifact, request });
 		if (issuedRequestKeys.has(key)) {
 			return false;
 		}
@@ -607,6 +619,25 @@ function appendIssued(
 		evidence: [...left.evidence, ...right.evidence],
 		advisory: [...left.advisory, ...right.advisory],
 	};
+}
+
+function appendUniqueEvidence(
+	target: EvidenceObservation[],
+	seen: Map<string, EvidenceObservation>,
+	evidence: readonly EvidenceObservation[],
+): string | undefined {
+	for (const observation of evidence) {
+		const prior = seen.get(observation.id);
+		if (prior) {
+			if (stableJson(prior) !== stableJson(observation)) {
+				return `duplicate observation id ${observation.id} has conflicting results`;
+			}
+			continue;
+		}
+		seen.set(observation.id, observation);
+		target.push(observation);
+	}
+	return undefined;
 }
 
 function firstRefutedRecognitionClaim(
@@ -794,18 +825,7 @@ async function proveTransitions(
 	context: ObservationContext,
 	initialState?: ObservationIssueState,
 ): Promise<ProveOutcome> {
-	if (compare.candidates.length !== 1) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposableCandidates(
-				compare.candidates,
-				'multi-candidate plan',
-			),
-		};
-	}
-
-	const candidate = compare.candidates[0];
-	if (!candidate) {
+	if (compare.candidates.length === 0) {
 		return {
 			kind: 'blocked',
 			assessment: uncomposableCandidates(
@@ -814,401 +834,622 @@ async function proveTransitions(
 			),
 		};
 	}
-
-	const rule = registry.resolveRule(candidate.rule);
-	if (!rule) {
+	if (compare.candidates.length > 1) {
 		return {
 			kind: 'blocked',
-			assessment: blockedAssessment({
-				code: 'ambiguous-rule',
-				candidates: candidateRefs(compare.candidates),
-				scope: [],
-				detail: 'rule pack id did not resolve',
-			}),
+			assessment: unsupportedMultiOperationComposition(),
+		};
+	}
+	if (initialState && compare.candidates.length !== 1) {
+		return {
+			kind: 'blocked',
+			assessment: uncomposableCandidates(
+				compare.candidates,
+				'initial observation replay only supports one transition candidate',
+			),
 		};
 	}
 
-	let requiredObservations: readonly ObservationRequest[];
+	const fragments: TransitionFragment[] = [];
+	const planEvidence: EvidenceObservation[] = [];
+	const planEvidenceById = new Map<string, EvidenceObservation>();
+	const planClaims: ProofClaim[] = [];
+	const planAssumptions: Assumption[] = [];
+	const operationInputs: CompositionOperation[] = [];
+	const compositionDeclarations: NonNullable<
+		TransitionFragment['composition']
+	>[] = [];
+	const stepInputs = new Map<
+		string,
+		{
+			readonly fragment: TransitionFragment;
+			readonly operation: PhysicalOperation;
+			readonly effects: OperationEffectAssessment;
+			readonly fingerprints: ReturnType<
+				RegisteredOperationSemantics['buildFingerprints']
+			>;
+			readonly requiredClaims: readonly ClaimId[];
+			readonly guards: readonly ProvenApplyGuard[];
+			readonly restsOnAssumptions: readonly Assumption['id'][];
+		}
+	>();
+	let sharedProofContext: ObservationContext | undefined;
+	let claimIndex = 0;
+
+	const multiCandidateSnapshot = !initialState && compare.candidates.length > 1;
+	let sharedClient: TransitionQueryClient | undefined;
+	let sharedReleaseError: unknown;
+	const sharedIssuedRequestKeys = new Set<string>();
+	let sharedIssued: {
+		readonly evidence: readonly EvidenceObservation[];
+		readonly advisory: readonly AdvisoryObservation[];
+	} = { evidence: [], advisory: [] };
+
 	try {
-		requiredObservations = rule.requiredObservations(candidate.match);
-	} catch (error) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposableCandidates(
-				compare.candidates,
-				error instanceof Error
-					? error.message
-					: 'candidate required observation resolution failed',
-			),
-		};
-	}
-	if (
-		!Array.isArray(candidate.requiredObservations) ||
-		!sameObservationRequests(
-			requiredObservations,
-			candidate.requiredObservations,
-		)
-	) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposableCandidates(
-				compare.candidates,
-				'candidate required observations do not match resolved rule',
-			),
-		};
-	}
+		if (multiCandidateSnapshot) {
+			sharedClient = await checkoutProofClient(target);
+		}
 
-	const issuer = registry.resolveIssuer(candidate.rule.pack);
-	let proofContext = context;
-	let issued: Awaited<ReturnType<typeof issueObservations>>;
-	if (issuer) {
-		if (initialState) {
-			if (initialState.issuer !== issuer) {
+		for (const candidate of compare.candidates) {
+			const rule = registry.resolveRule(candidate.rule);
+			if (!rule) {
 				return {
 					kind: 'blocked',
-					assessment: artifactMismatch(
-						PROVER_ARTIFACT,
-						'recognition observations were issued by a different issuer',
+					assessment: blockedAssessment({
+						code: 'ambiguous-rule',
+						candidates: candidateRefs(compare.candidates),
+						scope: [],
+						detail: 'rule pack id did not resolve',
+					}),
+				};
+			}
+
+			let requiredObservations: readonly ObservationRequest[];
+			try {
+				requiredObservations = rule.requiredObservations(candidate.match);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						error instanceof Error
+							? error.message
+							: 'candidate required observation resolution failed',
 					),
 				};
 			}
-			proofContext = initialState.proofContext;
-			const supportMismatch = ruleSupportMismatch(rule, proofContext);
-			if (supportMismatch) {
-				const assessment = supportMismatchAssessment(
-					candidate,
-					supportMismatch,
-				);
+			if (
+				!Array.isArray(candidate.requiredObservations) ||
+				!sameObservationRequests(
+					requiredObservations,
+					candidate.requiredObservations,
+				)
+			) {
 				return {
-					kind: 'inapplicable',
-					assessment,
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'candidate required observations do not match resolved rule',
+					),
 				};
 			}
-			const additional = await issueObservations(
-				issuer,
-				requiredObservations,
-				initialState.client,
-				proofContext,
-				initialState.issuedRequestKeys,
-			);
-			issued = appendIssued(initialState, additional);
-		} else {
-			let client: TransitionQueryClient | undefined;
-			let releaseError: unknown;
-			try {
-				client = await checkoutProofClient(target);
-				proofContext = issuer.readContext
-					? await issuer.readContext(client, context, requiredObservations)
-					: context;
-				proofContext = registry.contextWithDerivedCapabilities(proofContext);
 
+			const issuer = registry.resolveIssuer(candidate.rule.pack);
+			let proofContext = context;
+			let issued: Awaited<ReturnType<typeof issueObservations>>;
+			if (issuer) {
+				if (initialState) {
+					if (initialState.issuer !== issuer) {
+						return {
+							kind: 'blocked',
+							assessment: artifactMismatch(
+								PROVER_ARTIFACT,
+								'recognition observations were issued by a different issuer',
+							),
+						};
+					}
+					proofContext = initialState.proofContext;
+					const supportMismatch = ruleSupportMismatch(rule, proofContext);
+					if (supportMismatch) {
+						return {
+							kind: 'inapplicable',
+							assessment: supportMismatchAssessment(candidate, supportMismatch),
+						};
+					}
+					const additional = await issueObservations(
+						issuer,
+						requiredObservations,
+						initialState.client,
+						proofContext,
+						initialState.issuedRequestKeys,
+					);
+					issued = appendIssued(initialState, additional);
+				} else if (sharedClient) {
+					proofContext = issuer.readContext
+						? await issuer.readContext(
+								sharedClient,
+								context,
+								requiredObservations,
+							)
+						: context;
+					proofContext = registry.contextWithDerivedCapabilities(proofContext);
+
+					const supportMismatch = ruleSupportMismatch(rule, proofContext);
+					if (supportMismatch) {
+						return {
+							kind: 'inapplicable',
+							assessment: supportMismatchAssessment(candidate, supportMismatch),
+						};
+					}
+
+					const additional = await issueObservations(
+						issuer,
+						requiredObservations,
+						sharedClient,
+						proofContext,
+						sharedIssuedRequestKeys,
+					);
+					issued = appendIssued(sharedIssued, additional);
+					sharedIssued = appendIssued(sharedIssued, additional);
+				} else {
+					let client: TransitionQueryClient | undefined;
+					let releaseError: unknown;
+					try {
+						client = await checkoutProofClient(target);
+						proofContext = issuer.readContext
+							? await issuer.readContext(client, context, requiredObservations)
+							: context;
+						proofContext =
+							registry.contextWithDerivedCapabilities(proofContext);
+
+						const supportMismatch = ruleSupportMismatch(rule, proofContext);
+						if (supportMismatch) {
+							return {
+								kind: 'inapplicable',
+								assessment: supportMismatchAssessment(
+									candidate,
+									supportMismatch,
+								),
+							};
+						}
+
+						issued = await issueObservations(
+							issuer,
+							requiredObservations,
+							client,
+							proofContext,
+						);
+					} catch (error) {
+						releaseError = error;
+						return {
+							kind: 'blocked',
+							assessment: artifactMismatch(
+								PROVER_ARTIFACT,
+								error instanceof Error
+									? error.message
+									: 'proof observation failed',
+							),
+						};
+					} finally {
+						if (client) {
+							client.release(releaseError);
+						}
+					}
+				}
+			} else {
+				proofContext =
+					initialState?.proofContext ??
+					sharedProofContext ??
+					registry.contextWithDerivedCapabilities(proofContext);
 				const supportMismatch = ruleSupportMismatch(rule, proofContext);
 				if (supportMismatch) {
-					const assessment = supportMismatchAssessment(
-						candidate,
-						supportMismatch,
-					);
 					return {
 						kind: 'inapplicable',
-						assessment,
+						assessment: supportMismatchAssessment(candidate, supportMismatch),
 					};
 				}
-
-				issued = await issueObservations(
-					issuer,
-					requiredObservations,
-					client,
-					proofContext,
-				);
-			} catch (error) {
-				releaseError = error;
+				issued = initialState
+					? { evidence: initialState.evidence, advisory: initialState.advisory }
+					: { evidence: [], advisory: [] };
+			}
+			if (!sharedProofContext) {
+				sharedProofContext = proofContext;
+			} else if (stableJson(sharedProofContext) !== stableJson(proofContext)) {
 				return {
 					kind: 'blocked',
 					assessment: artifactMismatch(
 						PROVER_ARTIFACT,
-						error instanceof Error ? error.message : 'proof observation failed',
+						'candidate proof contexts did not match',
 					),
 				};
-			} finally {
-				if (client) {
-					client.release(releaseError);
-				}
 			}
-		}
-	} else {
-		proofContext =
-			initialState?.proofContext ??
-			registry.contextWithDerivedCapabilities(proofContext);
-		const supportMismatch = ruleSupportMismatch(rule, proofContext);
-		if (supportMismatch) {
-			const assessment = supportMismatchAssessment(candidate, supportMismatch);
-			return {
-				kind: 'inapplicable',
-				assessment,
-			};
-		}
-		issued = initialState
-			? { evidence: initialState.evidence, advisory: initialState.advisory }
-			: { evidence: [], advisory: [] };
-	}
-	const evaluation = rule.evaluate(
-		candidate.match,
-		issued.evidence,
-		issued.advisory,
-	);
 
-	if (evaluation.outcome === 'blocked') {
-		return {
-			kind: 'blocked',
-			assessment: evaluationBlockedAssessment(
-				evaluation,
-				'rule evaluation blocked',
-			),
-		};
-	}
-
-	if (evaluation.outcome === 'inapplicable') {
-		const claims = evaluation.obligations.map((obligation, index) =>
-			proofClaimForObligation(
-				obligation,
+			const evaluation = rule.evaluate(
+				candidate.match,
 				issued.evidence,
-				index,
-				issuer?.artifact ?? PROVER_ARTIFACT,
-			),
-		);
-		const refuted = claims.find(
-			(claim) => claim.derivedBy.conclusion === 'refuted',
-		);
-		if (refuted) {
-			return {
-				kind: 'inapplicable',
-				assessment: refutedAssessment(refuted),
-				claim: refuted,
-			};
+				issued.advisory,
+			);
+			if (evaluation.outcome === 'blocked') {
+				return {
+					kind: 'blocked',
+					assessment: evaluationBlockedAssessment(
+						evaluation,
+						'rule evaluation blocked',
+					),
+				};
+			}
+			if (evaluation.outcome === 'inapplicable') {
+				const claims = evaluation.obligations.map((obligation, index) =>
+					proofClaimForObligation(
+						obligation,
+						issued.evidence,
+						index,
+						issuer?.artifact ?? PROVER_ARTIFACT,
+					),
+				);
+				const refuted = claims.find(
+					(claim) => claim.derivedBy.conclusion === 'refuted',
+				);
+				if (refuted) {
+					return {
+						kind: 'inapplicable',
+						assessment: refutedAssessment(refuted),
+						claim: refuted,
+					};
+				}
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'rule evaluated inapplicable',
+					),
+				};
+			}
+
+			let fragment: TransitionFragment;
+			try {
+				fragment = rule.generateCandidate(candidate.match, evaluation);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						error instanceof Error
+							? error.message
+							: 'candidate generation failed',
+					),
+				};
+			}
+			if (fragment.operations.length === 0) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], 'missing operation'),
+				};
+			}
+			if (
+				fragment.generatedBy.id !== candidate.rule.id ||
+				!sameArtifact(fragment.generatedBy.pack, candidate.rule.pack)
+			) {
+				return {
+					kind: 'blocked',
+					assessment: blockedAssessment({
+						code: 'ambiguous-rule',
+						candidates: [candidate.rule, fragment.generatedBy],
+						scope: [],
+						detail: 'generated fragment rule did not match candidate',
+					}),
+				};
+			}
+
+			const operationEffectsByRef = new Map<
+				string,
+				OperationEffectAssessment
+			>();
+			const operationSemanticsByRef = new Map<
+				string,
+				RegisteredOperationSemantics
+			>();
+			for (const operation of fragment.operations) {
+				const operationResolution = registry.resolveOperation(operation);
+				if (!operationResolution.ok) {
+					return {
+						kind: 'blocked',
+						assessment: artifactMismatch(
+							operation.operationKind.artifact,
+							operationResolution.detail,
+						),
+					};
+				}
+				const semantics = operationResolution.semantics;
+				if (
+					!sameArtifact(semantics.artifact, operation.operationKind.artifact)
+				) {
+					return {
+						kind: 'blocked',
+						assessment: artifactMismatch(
+							semantics.artifact,
+							'operation pack id mismatch',
+						),
+					};
+				}
+				const effects = operationEffects(semantics, operation, proofContext);
+				if (operationPackSemanticsMissing(effects, operation)) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposable(
+							[fragment],
+							'missing operation-pack-semantics assumption',
+						),
+					};
+				}
+				operationEffectsByRef.set(operation.ref, effects);
+				operationSemanticsByRef.set(operation.ref, semantics);
+			}
+
+			let assumptions: readonly Assumption[];
+			try {
+				assumptions = uniqueAssumptions([
+					...evaluation.assumptions,
+					...fragment.assumptions,
+					...fragment.operations.flatMap((operation) => [
+						...(operationEffectsByRef.get(operation.ref)?.restsOn ?? []),
+					]),
+				]);
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable(
+						[fragment],
+						error instanceof Error
+							? error.message
+							: 'conflicting assumption ids',
+					),
+				};
+			}
+
+			let draftClaims: readonly ProofClaim[];
+			try {
+				draftClaims = [
+					...(candidate.claimDrafts ?? []),
+					...(fragment.claimDrafts ?? []),
+				].map((draft) => proofClaimForDraft(draft, claimIndex++));
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable(
+						[fragment],
+						error instanceof Error
+							? error.message
+							: 'claim draft materialization failed',
+					),
+				};
+			}
+			const obligationClaims = fragment.obligations.map((obligation) => ({
+				obligation,
+				claim: proofClaimForObligation(
+					obligation,
+					issued.evidence,
+					claimIndex++,
+					issuer?.artifact ?? PROVER_ARTIFACT,
+				),
+			}));
+			const claims = [
+				...draftClaims,
+				...obligationClaims.map((entry) => entry.claim),
+			];
+
+			const undischarged = claims.find(
+				(claim) => claim.derivedBy.conclusion === 'undischarged',
+			);
+			if (undischarged) {
+				const obligation = fragment.obligations.find(
+					(item) => item.proposition.kind === undischarged.proposition.kind,
+				);
+				return {
+					kind: 'blocked',
+					assessment: missingEvidenceAssessment(
+						obligation ?? {
+							proposition: undischarged.proposition,
+							scope: undischarged.scope,
+						},
+					),
+				};
+			}
+
+			const refuted = claims.find(
+				(claim) => claim.derivedBy.conclusion === 'refuted',
+			);
+			if (refuted) {
+				return {
+					kind: 'inapplicable',
+					assessment: refutedAssessment(refuted),
+					claim: refuted,
+				};
+			}
+
+			const invariants = validateTransitionRelationalInvariants({
+				kind: 'fragment',
+				fragment,
+				claims,
+				assumptions,
+			});
+			if (!invariants.ok) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable([fragment], invariants.detail),
+				};
+			}
+
+			for (const operation of fragment.operations) {
+				const semantics = operationSemanticsByRef.get(operation.ref);
+				const effects = operationEffectsByRef.get(operation.ref);
+				if (!semantics || !effects) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposable([fragment], 'missing operation effects'),
+					};
+				}
+				let fingerprints: ReturnType<
+					RegisteredOperationSemantics['buildFingerprints']
+				>;
+				try {
+					fingerprints = semantics.buildFingerprints(
+						operation,
+						issued.evidence,
+						proofContext,
+					);
+				} catch (error) {
+					return {
+						kind: 'blocked',
+						assessment: artifactMismatch(
+							semantics.artifact,
+							error instanceof Error
+								? `fingerprint construction failed: ${error.message}`
+								: 'fingerprint construction failed',
+						),
+					};
+				}
+				const operationObligationClaims = obligationClaims.filter(
+					(entry) => entry.obligation.appliesTo === operation.ref,
+				);
+				const requiredClaims = [
+					...draftClaims.map((claim) => claim.id),
+					...operationObligationClaims.map((entry) => entry.claim.id),
+				];
+				stepInputs.set(operation.ref, {
+					fragment,
+					operation,
+					effects,
+					fingerprints,
+					requiredClaims,
+					guards: fragment.guards.filter(
+						(guard) => guard.appliesTo === operation.ref,
+					) as readonly ProvenApplyGuard[],
+					restsOnAssumptions: assumptions.map((assumption) => assumption.id),
+				});
+				operationInputs.push({
+					operation,
+					effects,
+				});
+			}
+
+			fragments.push(fragment);
+			compositionDeclarations.push(
+				...(fragment.composition ? [fragment.composition] : []),
+			);
+			const evidenceConflict = appendUniqueEvidence(
+				planEvidence,
+				planEvidenceById,
+				issued.evidence,
+			);
+			if (evidenceConflict) {
+				return {
+					kind: 'blocked',
+					assessment: artifactMismatch(PROVER_ARTIFACT, evidenceConflict),
+				};
+			}
+			planClaims.push(...claims);
+			planAssumptions.push(...assumptions);
 		}
-		return {
-			kind: 'blocked',
-			assessment: uncomposableCandidates(
-				compare.candidates,
-				'rule evaluated inapplicable',
-			),
-		};
-	}
-
-	let fragment: TransitionFragment;
-	try {
-		fragment = rule.generateCandidate(candidate.match, evaluation);
 	} catch (error) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposableCandidates(
-				compare.candidates,
-				error instanceof Error ? error.message : 'candidate generation failed',
-			),
-		};
-	}
-	if (fragment?.operations.length !== 1) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposable([fragment], 'multi-operation plan'),
-		};
-	}
-	const operation = fragment.operations[0];
-	if (!operation) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposable([fragment], 'missing operation'),
-		};
-	}
-
-	if (
-		fragment.generatedBy.id !== candidate.rule.id ||
-		!sameArtifact(fragment.generatedBy.pack, candidate.rule.pack)
-	) {
-		return {
-			kind: 'blocked',
-			assessment: blockedAssessment({
-				code: 'ambiguous-rule',
-				candidates: [candidate.rule, fragment.generatedBy],
-				scope: [],
-				detail: 'generated fragment rule did not match candidate',
-			}),
-		};
-	}
-
-	const operationResolution = registry.resolveOperation(operation);
-	if (!operationResolution.ok) {
+		sharedReleaseError = error;
 		return {
 			kind: 'blocked',
 			assessment: artifactMismatch(
-				operation.operationKind.artifact,
-				operationResolution.detail,
+				PROVER_ARTIFACT,
+				error instanceof Error ? error.message : 'proof observation failed',
 			),
 		};
-	}
-	const semantics = operationResolution.semantics;
-	if (!sameArtifact(semantics.artifact, operation.operationKind.artifact)) {
-		return {
-			kind: 'blocked',
-			assessment: artifactMismatch(
-				semantics.artifact,
-				'operation pack id mismatch',
-			),
-		};
-	}
-
-	const effects = operationEffects(semantics, operation, proofContext);
-	if (operationPackSemanticsMissing(effects, operation)) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposable(
-				[fragment],
-				'missing operation-pack-semantics assumption',
-			),
-		};
+	} finally {
+		if (sharedClient) {
+			sharedClient.release(sharedReleaseError);
+		}
 	}
 
 	let assumptions: readonly Assumption[];
 	try {
-		assumptions = uniqueAssumptions([
-			...evaluation.assumptions,
-			...fragment.assumptions,
-			...effects.restsOn,
-		]);
+		assumptions = uniqueAssumptions(planAssumptions);
 	} catch (error) {
 		return {
 			kind: 'blocked',
 			assessment: uncomposable(
-				[fragment],
+				fragments,
 				error instanceof Error ? error.message : 'conflicting assumption ids',
 			),
 		};
 	}
-
-	let draftClaims: readonly ProofClaim[];
-	try {
-		draftClaims = [
-			...(candidate.claimDrafts ?? []),
-			...(fragment.claimDrafts ?? []),
-		].map((draft, index) => proofClaimForDraft(draft, index));
-	} catch (error) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposable(
-				[fragment],
-				error instanceof Error
-					? error.message
-					: 'claim draft materialization failed',
-			),
-		};
-	}
-	const obligationClaims = fragment.obligations.map((obligation, index) =>
-		proofClaimForObligation(
-			obligation,
-			issued.evidence,
-			index + draftClaims.length,
-			issuer?.artifact ?? PROVER_ARTIFACT,
-		),
+	const composition = composeOperations(
+		operationInputs,
+		compositionDeclarations,
 	);
-	const claims = [...draftClaims, ...obligationClaims];
-
-	const undischarged = claims.find(
-		(claim) => claim.derivedBy.conclusion === 'undischarged',
-	);
-	if (undischarged) {
-		const obligation = fragment.obligations.find(
-			(item) => item.proposition.kind === undischarged.proposition.kind,
-		);
+	if (!composition.ok) {
 		return {
 			kind: 'blocked',
-			assessment: missingEvidenceAssessment(
-				obligation ?? {
-					proposition: undischarged.proposition,
-					scope: undischarged.scope,
-				},
-			),
+			assessment: uncomposable(fragments, composition.detail),
 		};
 	}
-
-	const refuted = claims.find(
-		(claim) => claim.derivedBy.conclusion === 'refuted',
-	);
-	if (refuted) {
-		return {
-			kind: 'inapplicable',
-			assessment: refutedAssessment(refuted),
-			claim: refuted,
-		};
+	const segmentByStepId = new Map<string, string>();
+	for (const segment of composition.segments) {
+		for (const stepId of segment.stepIds) {
+			segmentByStepId.set(stepId, segment.segmentId);
+		}
 	}
-
-	const invariants = validateTransitionRelationalInvariants({
-		kind: 'fragment',
-		fragment,
-		claims,
-		assumptions,
-	});
-	if (!invariants.ok) {
-		return {
-			kind: 'blocked',
-			assessment: uncomposable([fragment], invariants.detail),
-		};
-	}
-	const provenGuards = fragment.guards as readonly ProvenApplyGuard[];
-
-	let fingerprints: ReturnType<
-		RegisteredOperationSemantics['buildFingerprints']
-	>;
-	try {
-		fingerprints = semantics.buildFingerprints(
-			operation,
-			issued.evidence,
-			proofContext,
-		);
-	} catch (error) {
-		return {
-			kind: 'blocked',
-			assessment: artifactMismatch(
-				semantics.artifact,
-				error instanceof Error
-					? `fingerprint construction failed: ${error.message}`
-					: 'fingerprint construction failed',
-			),
-		};
-	}
-	const primaryClaim = claims[0]?.id ?? claimId('dbsp.transition.claim.plan');
+	const primaryClaim =
+		planClaims[0]?.id ?? claimId('dbsp.transition.claim.plan');
 	const guardedPlan: ProvenPlanShape = {
-		observations: issued.evidence,
-		claims,
+		observations: planEvidence,
+		claims: planClaims,
 		assumptions,
-		preconditions: fragment.obligations.map((obligation) => ({
-			proposition: obligation.proposition,
-			scope: obligation.scope,
-		})),
-		steps: [
-			{
-				stepId: `step:${operation.ref}`,
-				operation,
-				expectedBefore: fingerprints.expectedBefore,
-				expectedAfter: fingerprints.expectedAfter,
-				requiredClaims: claims.map((claim) => claim.id),
+		preconditions: fragments.flatMap((fragment) =>
+			fragment.obligations.map((obligation) => ({
+				proposition: obligation.proposition,
+				scope: obligation.scope,
+			})),
+		),
+		segments: composition.segments,
+		steps: composition.operations.map((entry) => {
+			const input = stepInputs.get(entry.operation.ref);
+			if (!input) {
+				throw new Error(
+					`internal error: missing composed operation ${entry.operation.ref}`,
+				);
+			}
+			const currentStepId = `step:${entry.operation.ref}`;
+			const segmentId = segmentByStepId.get(currentStepId);
+			if (!segmentId) {
+				throw new Error(
+					`internal error: composed step ${currentStepId} has no segment`,
+				);
+			}
+			return {
+				stepId: currentStepId,
+				segmentId,
+				operation: input.operation,
+				expectedBefore: input.fingerprints.expectedBefore,
+				expectedAfter: input.fingerprints.expectedAfter,
+				requiredClaims: input.requiredClaims,
 				establishesClaims: [],
-				invalidatesClaims: effects.effects.invalidates,
-				guards: provenGuards,
-				restsOnAssumptions: assumptions.map((assumption) => assumption.id),
-				selectionRationale: fragment.selectionRationale,
-			},
-		],
+				invalidatesClaims: input.effects.effects.invalidates,
+				guards: input.guards,
+				restsOnAssumptions: input.restsOnAssumptions,
+				selectionRationale: input.fragment.selectionRationale,
+			};
+		}),
 		postconditions: [],
 	};
+	const operationEffectsByPlanRef = new Map(
+		[...stepInputs.entries()].map(([ref, input]) => [ref, input.effects]),
+	);
 
 	const planInvariants = validateTransitionRelationalInvariants({
 		kind: 'plan',
 		plan: guardedPlan,
+		operationEffectsByRef: operationEffectsByPlanRef,
 	});
 	if (!planInvariants.ok) {
 		return {
 			kind: 'blocked',
-			assessment: uncomposable([fragment], planInvariants.detail),
+			assessment: uncomposable(fragments, planInvariants.detail),
 		};
 	}
 

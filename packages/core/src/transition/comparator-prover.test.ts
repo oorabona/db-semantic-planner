@@ -2,6 +2,7 @@ import type {
 	Assumption,
 	CapabilityDescriptor,
 	ColumnIR,
+	CompareOutcome,
 	EvidenceObservation,
 	ModelIR,
 	ObservationContext,
@@ -45,6 +46,14 @@ const operationArtifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.operations'),
 	version: '0.1.0',
 };
+const compositionOperationArtifact: SemanticArtifactRef = {
+	id: semanticArtifactId('dbsp.mock.composition.operations'),
+	version: '0.1.0',
+};
+const compositionRuleArtifact: SemanticArtifactRef = {
+	id: semanticArtifactId('dbsp.mock.composition.rules'),
+	version: '0.1.0',
+};
 const issuerArtifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.issuer'),
 	version: '0.1.0',
@@ -60,6 +69,13 @@ const context: ObservationContext = {
 	extensions: {},
 };
 
+const multiOperationCompositionDisabledDetail =
+	'multi-operation composition is not yet enabled; pending the enum→CHECK slice';
+
+type ProverOutcome = Awaited<
+	ReturnType<ReturnType<typeof createProver>['prove']>
+>;
+
 function proofTarget(): TransitionConnectionPool {
 	return {
 		connect: async () => ({
@@ -67,6 +83,17 @@ function proofTarget(): TransitionConnectionPool {
 			release: vi.fn(),
 		}),
 	};
+}
+
+function expectMultiOperationCompositionGuard(outcome: ProverOutcome) {
+	expect(outcome.kind).toBe('blocked');
+	expect(outcome).not.toHaveProperty('plan');
+	if (outcome.kind === 'blocked') {
+		expect(outcome.assessment.reasons[0]).toMatchObject({
+			code: 'unsupported-transition',
+			detail: multiOperationCompositionDisabledDetail,
+		});
+	}
 }
 
 function column(nullable: boolean, name = 'age'): ColumnIR {
@@ -118,6 +145,15 @@ function tableResource(): ResourceAddress {
 	};
 }
 
+function compositionMarkerResource(): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: 'test',
+		kind: 'table',
+		name: 'composition_marker',
+	};
+}
+
 function externalAssumption(overrides: Partial<Assumption> = {}): Assumption {
 	return {
 		id: assumptionId('mock.external-ddl-exclusion'),
@@ -136,6 +172,16 @@ function operationAssumption(): Assumption {
 		asserter: { kind: 'pack', artifact: operationArtifact },
 		statement: 'mock operation semantics are correct',
 		scope: [columnResource()],
+	};
+}
+
+function compositionOperationAssumption(): Assumption {
+	return {
+		id: assumptionId('mock.composition.operation-pack-semantics'),
+		class: 'operation-pack-semantics',
+		asserter: { kind: 'pack', artifact: compositionOperationArtifact },
+		statement: 'mock composition operation semantics are correct',
+		scope: [compositionMarkerResource()],
 	};
 }
 
@@ -391,6 +437,254 @@ function registry(
 	]);
 }
 
+type CompositionMode = 'dependent' | 'cycle' | 'disconnected';
+
+function compositionOperation(ref: 'op:a' | 'op:b'): PhysicalOperation {
+	return {
+		ref,
+		operationKind: {
+			artifact: compositionOperationArtifact,
+			name: ref === 'op:a' ? 'CommitMarker' : 'UseMarker',
+		},
+		payload: { ref },
+	};
+}
+
+function compositionRequest(opRef: 'op:a' | 'op:b'): ObservationRequest {
+	return {
+		kind: `mock.composition.${opRef}.ready`,
+		scope: [compositionMarkerResource()],
+		detail: { opRef },
+	};
+}
+
+function compositionObligation(opRef: 'op:a' | 'op:b'): ProofObligation {
+	const request = compositionRequest(opRef);
+	return {
+		proposition: {
+			kind: request.kind,
+			scope: request.scope,
+			detail: request.detail,
+		},
+		scope: request.scope,
+		appliesTo: opRef,
+		dischargeableBy: [request],
+	};
+}
+
+function compositionFact() {
+	return {
+		kind: 'mock.composition.marker-ready',
+		resource: compositionMarkerResource(),
+		detail: { marker: 'composition_marker' },
+	};
+}
+
+function compositionDeclarations(
+	opRef: 'op:a' | 'op:b',
+	mode: CompositionMode,
+): TransitionFragment['composition'] {
+	if (mode === 'dependent') {
+		return opRef === 'op:a'
+			? {
+					produces: [
+						{
+							opRef,
+							fact: compositionFact(),
+							available: 'after-commit',
+						},
+					],
+				}
+			: {
+					requires: [
+						{
+							opRef,
+							fact: compositionFact(),
+							needs: 'producer-after-commit',
+						},
+					],
+				};
+	}
+	if (mode === 'cycle') {
+		return {
+			order: [
+				opRef === 'op:a'
+					? {
+							before: 'op:a',
+							after: 'op:b',
+							reason: 'test cycle first edge',
+						}
+					: {
+							before: 'op:b',
+							after: 'op:a',
+							reason: 'test cycle second edge',
+						},
+			],
+		};
+	}
+	return undefined;
+}
+
+function compositionRule(
+	opRef: 'op:a' | 'op:b',
+	mode: CompositionMode = 'dependent',
+): TransitionRule<{
+	readonly opRef: 'op:a' | 'op:b';
+}> {
+	const id = opRef === 'op:a' ? 'mock.compose.a' : 'mock.compose.b';
+	return {
+		id,
+		artifact: compositionRuleArtifact,
+		support: {
+			engine: 'postgresql',
+			versions: [{ min: '18' }],
+			requiredCapabilities: ['mock'],
+		},
+		recognize: () => ({ recognized: false }),
+		requiredObservations: () => [compositionRequest(opRef)],
+		evaluate: () => ({
+			outcome: 'applicable',
+			obligations: [compositionObligation(opRef)],
+			assumptions: [],
+		}),
+		generateCandidate: (_match, evaluation) => ({
+			generatedBy: { id, pack: compositionRuleArtifact },
+			operations: [compositionOperation(opRef)],
+			composition: compositionDeclarations(opRef, mode),
+			obligations: evaluation.obligations,
+			assumptions: [],
+			guards: [],
+			selectionRationale: {
+				chosen: { id, pack: compositionRuleArtifact },
+				overRules: [],
+				why: 'test-only composition fixture',
+			},
+		}),
+	};
+}
+
+function compositionCandidate(
+	rule: TransitionRule<{ readonly opRef: 'op:a' | 'op:b' }>,
+	opRef: 'op:a' | 'op:b',
+): TransitionCandidate<{ readonly opRef: 'op:a' | 'op:b' }> {
+	const requiredObservations = rule.requiredObservations({ opRef });
+	return {
+		rule: { id: rule.id, pack: rule.artifact },
+		match: { opRef },
+		requiredObservations,
+		obligations: [compositionObligation(opRef)],
+		selectionRationale: {
+			chosen: { id: rule.id, pack: rule.artifact },
+			overRules: [],
+			why: 'manual test compare',
+		},
+	};
+}
+
+function compositionCompare(
+	ruleA = compositionRule('op:a'),
+	ruleB = compositionRule('op:b'),
+): Extract<CompareOutcome, { readonly kind: 'transitions' }> {
+	const candidates = [
+		compositionCandidate(ruleA, 'op:a'),
+		compositionCandidate(ruleB, 'op:b'),
+	];
+	return {
+		kind: 'transitions',
+		candidates,
+		obligations: candidates.flatMap((candidate) => [...candidate.obligations]),
+	};
+}
+
+function compositionSemantics(
+	mode: CompositionMode = 'dependent',
+): RegisteredOperationSemantics {
+	const marker = { kind: 'table', name: 'composition_marker' };
+	const consumer = { kind: 'table', name: 'composition_consumer' };
+	const unrelated = { kind: 'table', name: 'composition_unrelated' };
+	return {
+		artifact: compositionOperationArtifact,
+		supportsOperation: (operation) =>
+			operation.operationKind.artifact.id === compositionOperationArtifact.id &&
+			operation.operationKind.artifact.version ===
+				compositionOperationArtifact.version,
+		effectsOf: (operation): OperationEffectAssessment => {
+			const isA = operation.ref === 'op:a';
+			const cycleReads = isA ? [consumer] : [marker];
+			const dependentReads = isA
+				? []
+				: [mode === 'disconnected' ? unrelated : marker];
+			return {
+				effects: {
+					reads: mode === 'cycle' ? cycleReads : dependentReads,
+					writes: isA ? [marker] : [consumer],
+					locks: [],
+					invalidates: [],
+					contextMutations: [],
+					externalEffects: { accountedFor: [], couldNotAccountFor: [] },
+					execution: isA
+						? { transaction: 'requires-new', commitBoundary: 'after' }
+						: { transaction: 'joins-current', commitBoundary: 'none' },
+				},
+				restsOn: [compositionOperationAssumption()],
+			};
+		},
+		buildFingerprints: (operation) => ({
+			expectedBefore: {
+				algorithm: 'mock',
+				semanticModel: compositionOperationArtifact,
+				includedFacts: [{ key: 'op', value: `${operation.ref}:before` }],
+				excludedOrUnknownFacts: [],
+				digest: `${operation.ref}:before`,
+			},
+			expectedAfter: {
+				algorithm: 'mock',
+				semanticModel: compositionOperationArtifact,
+				includedFacts: [{ key: 'op', value: `${operation.ref}:after` }],
+				excludedOrUnknownFacts: [],
+				digest: `${operation.ref}:after`,
+			},
+		}),
+	};
+}
+
+function compositionIssuer(): ObservationIssuer {
+	return {
+		artifact: compositionRuleArtifact,
+		execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
+			role: 'evidence',
+			id: evidenceId(`mock.evidence.${request.kind}`),
+			issuer: compositionRuleArtifact,
+			request,
+			result: {
+				value: { claims: [{ kind: request.kind, holds: true }] },
+			},
+			context: ctx,
+			stability: 'externally-mutable',
+			takenAt: new Date().toISOString(),
+			scope: request.scope,
+			source: 'system-catalog',
+			validity: { invalidatedBy: [] },
+		}),
+	};
+}
+
+function compositionRegistry(mode: CompositionMode = 'dependent') {
+	const ruleA = compositionRule('op:a', mode);
+	const ruleB = compositionRule('op:b', mode);
+	return {
+		ruleA,
+		ruleB,
+		registry: createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [compositionSemantics(mode)],
+				issuer: compositionIssuer(),
+			},
+		]),
+	};
+}
+
 function validCompare(): Extract<
 	ReturnType<ReturnType<typeof createComparator>['compare']>,
 	{ readonly kind: 'transitions' }
@@ -443,7 +737,7 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('unsupported');
 	});
 
-	it('returns uncomposable when two recognized column changes are present', async () => {
+	it('returns transitions when two recognized column changes are present', () => {
 		const desired = modelFromTable(
 			table(false, [column(false, 'age'), column(false, 'height')]),
 		);
@@ -453,30 +747,132 @@ describe('createComparator', () => {
 		const customRegistry = registry();
 		const compare = createComparator(customRegistry).compare(desired, current);
 
-		expect(compare.kind).toBe('uncomposable');
-		if (compare.kind !== 'uncomposable') {
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
 			return;
 		}
-		expect(compare.detail).toMatch(
-			/multi-change composition is not yet supported/i,
-		);
 		expect(compare.candidates.map((candidate) => candidate.match)).toEqual([
 			{ table: 'users', column: 'age' },
 			{ table: 'users', column: 'height' },
 		]);
+	});
 
+	it('blocks mixed recognized and retryable unknown changes before observation', async () => {
+		const ageRule: TransitionRule<{
+			readonly table: string;
+			readonly column: string;
+		}> = {
+			...rule(),
+			recognize(desired, current) {
+				const desiredColumn = desired.getTable('users')?.columns[0];
+				const currentColumn = current.getTable('users')?.columns[0];
+				return desiredColumn?.name === 'age' &&
+					desiredColumn.nullable === false &&
+					currentColumn?.nullable === true
+					? {
+							recognized: true,
+							match: { table: 'users', column: desiredColumn.name },
+						}
+					: { recognized: false };
+			},
+		};
+		const heightRecognitionRequest: ObservationRequest = {
+			kind: 'mock.height.recognition',
+			scope: [columnResource('height')],
+			detail: { table: 'users', column: 'height' },
+		};
+		const heightRule: TransitionRule<{
+			readonly table: string;
+			readonly column: string;
+		}> = {
+			...rule(),
+			id: 'mock.height-retry',
+			recognize(desired, current, recognitionContext) {
+				const desiredColumn = desired.getTable('users')?.columns[0];
+				const currentColumn = current.getTable('users')?.columns[0];
+				if (
+					desiredColumn?.name !== 'height' ||
+					desiredColumn.nullable !== false ||
+					currentColumn?.nullable !== true
+				) {
+					return { recognized: false };
+				}
+				if ((recognitionContext?.evidence ?? []).length > 0) {
+					return {
+						recognized: true,
+						match: { table: 'users', column: desiredColumn.name },
+					};
+				}
+				return {
+					recognized: 'unknown',
+					obligations: [
+						{
+							proposition: {
+								kind: heightRecognitionRequest.kind,
+								scope: heightRecognitionRequest.scope,
+								detail: heightRecognitionRequest.detail,
+							},
+							scope: heightRecognitionRequest.scope,
+							dischargeableBy: [heightRecognitionRequest],
+						},
+					],
+				};
+			},
+			requiredObservations: () => [heightRecognitionRequest],
+			generateCandidate: (_match, evaluation) => {
+				const fragment = baseFragment(evaluation);
+				return {
+					...fragment,
+					generatedBy: { id: 'mock.height-retry', pack: ruleArtifact },
+					selectionRationale: {
+						chosen: { id: 'mock.height-retry', pack: ruleArtifact },
+						overRules: [],
+						why: 'mock retryable recognition',
+					},
+				};
+			},
+		};
+		const readContext = vi.fn(async () => context);
+		const execute = vi.fn(issuer().execute);
+		const customRegistry = registry({
+			rules: [ageRule, heightRule],
+			issuer: {
+				artifact: issuerArtifact,
+				readContext,
+				execute,
+			},
+		});
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(
+				table(false, [column(false, 'age'), column(false, 'height')]),
+			),
+			modelFromTable(
+				table(true, [column(true, 'age'), column(true, 'height')]),
+			),
+		);
+
+		expect(compare.kind).toBe('uncomposable');
+		if (compare.kind !== 'uncomposable') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.recognitions).toHaveLength(1);
+		expect(compare.detail).toMatch(/whole diff/i);
+		const connect = vi.fn(proofTarget().connect);
+		const target: TransitionConnectionPool = { connect };
 		const outcome = await createProver(customRegistry).prove(
 			compare,
-			proofTarget(),
+			target,
 			context,
 		);
 
 		expect(outcome.kind).toBe('blocked');
+		expect(outcome).not.toHaveProperty('plan');
+		expect(readContext).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+		expect(connect).not.toHaveBeenCalled();
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
-			expect(outcome.assessment.reasons[0]?.detail).toMatch(
-				/multi-change composition is not yet supported/i,
-			);
 		}
 	});
 });
@@ -616,6 +1012,112 @@ describe('createProver', () => {
 					};
 			}).toThrow(TypeError);
 		}
+	});
+
+	it('fails closed before composing dependency-ordered candidates', async () => {
+		const { registry: customRegistry, ruleA, ruleB } = compositionRegistry();
+		const release = vi.fn();
+		const connect = vi.fn(async () => ({
+			query: async () => ({ rows: [] }),
+			release,
+		}));
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			{ connect },
+			context,
+		);
+
+		expectMultiOperationCompositionGuard(outcome);
+		expect(connect).not.toHaveBeenCalled();
+		expect(release).not.toHaveBeenCalled();
+	});
+
+	it('fails closed before cyclic multi-operation composition validation', async () => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = compositionRegistry('cycle');
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		// Composer-level cycle coverage remains in composer.test.ts; prove()
+		// fails closed before using it while multi-operation composition is disabled.
+		expectMultiOperationCompositionGuard(outcome);
+	});
+
+	it('fails closed before disconnected multi-operation composition validation', async () => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = compositionRegistry('disconnected');
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		// Composer-level disconnected coverage remains in composer.test.ts; prove()
+		// fails closed before using it while multi-operation composition is disabled.
+		expectMultiOperationCompositionGuard(outcome);
+	});
+
+	it('fails closed before collecting multi-candidate duplicate observation evidence', async () => {
+		const ruleA = compositionRule('op:a');
+		const ruleB = compositionRule('op:b');
+		const execute = vi.fn(
+			async (
+				request: ObservationRequest,
+				_target,
+				ctx,
+			): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId('mock.evidence.duplicate-composition'),
+				issuer: compositionRuleArtifact,
+				request,
+				result: {
+					value: {
+						claims: [
+							{
+								kind: request.kind,
+								holds: true,
+							},
+						],
+					},
+				},
+				context: ctx,
+				stability: 'externally-mutable',
+				takenAt: '2026-01-01T00:00:00.000Z',
+				scope: request.scope,
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		);
+		const customRegistry = createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [compositionSemantics()],
+				issuer: {
+					artifact: compositionRuleArtifact,
+					execute,
+				},
+			},
+		]);
+		const connect = vi.fn(proofTarget().connect);
+
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			{ connect },
+			context,
+		);
+
+		expectMultiOperationCompositionGuard(outcome);
+		expect(connect).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
 	});
 
 	it('refuses a forged compare result that drops required observations', async () => {
@@ -1141,7 +1643,7 @@ describe('createProver', () => {
 		}
 	});
 
-	it('refuses multi-candidate composition in this slice', async () => {
+	it('fails closed before duplicate operation refs in a multi-candidate composition', async () => {
 		const compare = validCompare();
 		const candidate = compare.candidates[0] as TransitionCandidate;
 		const bad: typeof compare = {
@@ -1153,10 +1655,7 @@ describe('createProver', () => {
 			proofTarget(),
 			context,
 		);
-		expect(outcome.kind).toBe('blocked');
-		if (outcome.kind === 'blocked') {
-			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
-		}
+		expectMultiOperationCompositionGuard(outcome);
 	});
 
 	it('refuses an undischarged durable obligation', async () => {

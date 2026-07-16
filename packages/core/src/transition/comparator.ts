@@ -641,7 +641,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 				return { kind: 'unsupported', changes: unsupported };
 			}
 
-			if (pendingColumnKeys.size > 1) {
+			if (unknownRecognitions.length > 0 && candidates.length > 0) {
 				return {
 					kind: 'uncomposable',
 					candidates,
@@ -651,7 +651,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 						...unknownRecognitions.flatMap((entry) => [...entry.obligations]),
 					],
 					detail:
-						'multi-change composition is not yet supported; the transition planner only proves one change per diff',
+						'mixed recognized and unknown transition changes cannot be retried without proving the whole diff',
 				};
 			}
 

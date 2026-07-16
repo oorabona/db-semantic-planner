@@ -19,7 +19,11 @@ import type { FingerprintManifest } from './fingerprint.js';
 import type { RuleSelectionRationale } from './fragment.js';
 import type { ApplyGuard, GuardProtocol, RecoveryArtefact } from './guard.js';
 import type { EvidenceId, IssuedObservation } from './observation.js';
-import type { ClaimSelector, PhysicalOperation } from './operation.js';
+import type {
+	ClaimSelector,
+	OperationExecutionSemantics,
+	PhysicalOperation,
+} from './operation.js';
 import type {
 	Assumption,
 	AssumptionId,
@@ -103,6 +107,7 @@ export type StepJournal =
 
 export interface GuardedPlanStep {
 	readonly stepId: string;
+	readonly segmentId: string;
 	readonly operation: PhysicalOperation;
 	readonly expectedBefore: FingerprintManifest;
 	readonly expectedAfter: FingerprintManifest;
@@ -114,11 +119,20 @@ export interface GuardedPlanStep {
 	readonly selectionRationale: RuleSelectionRationale;
 }
 
+export interface GuardedPlanSegment {
+	readonly segmentId: string;
+	readonly stepIds: readonly string[];
+	readonly transaction: OperationExecutionSemantics['transaction'];
+	readonly commitBoundaryBefore: boolean;
+	readonly commitBoundaryAfter: boolean;
+}
+
 export interface GuardedPlan {
 	readonly observations: readonly IssuedObservation[];
 	readonly claims: readonly ProofClaim[];
 	readonly assumptions: readonly Assumption[];
 	readonly preconditions: readonly ExecutableAssertion[];
+	readonly segments: readonly GuardedPlanSegment[];
 	readonly steps: readonly GuardedPlanStep[];
 	readonly postconditions: readonly ExecutableAssertion[];
 }

@@ -2,6 +2,7 @@ import type {
 	Assumption,
 	GuardedPlanStep,
 	ObservationContext,
+	OperationEffectAssessment,
 	PhysicalOperation,
 	ProofClaim,
 	ProvenPlanShape,
@@ -20,6 +21,10 @@ export type TransitionRelationalValidationInput =
 	| {
 			readonly kind: 'plan';
 			readonly plan: ProvenPlanShape;
+			readonly operationEffectsByRef?: ReadonlyMap<
+				string,
+				OperationEffectAssessment
+			>;
 	  };
 
 export type TransitionRelationalValidationResult =
@@ -101,9 +106,19 @@ function validateClaimIdsAndEvidence(
 	plan: ProvenPlanShape,
 ): TransitionRelationalValidationResult {
 	const claimIds = new Set<string>();
-	const observationIds = new Set(
-		plan.observations.map((observation) => observation.id as string),
-	);
+	const observationIds = new Set<string>();
+	for (const observation of plan.observations) {
+		if (observation.role !== 'evidence') {
+			continue;
+		}
+		if (observationIds.has(observation.id)) {
+			return {
+				ok: false,
+				detail: `duplicate observation id ${observation.id}`,
+			};
+		}
+		observationIds.add(observation.id);
+	}
 	for (const claim of plan.claims) {
 		if (claimIds.has(claim.id)) {
 			return {
@@ -376,6 +391,140 @@ function validateObservationContexts(
 	return { ok: true };
 }
 
+function executionCommitBoundaryBefore(
+	execution: OperationEffectAssessment['effects']['execution'],
+): boolean {
+	return (
+		execution.commitBoundary === 'before' ||
+		execution.commitBoundary === 'before-and-after'
+	);
+}
+
+function executionCommitBoundaryAfter(
+	execution: OperationEffectAssessment['effects']['execution'],
+): boolean {
+	return (
+		execution.commitBoundary === 'after' ||
+		execution.commitBoundary === 'before-and-after'
+	);
+}
+
+function validateSegmentExecutionSemantics(
+	plan: ProvenPlanShape,
+	operationEffectsByRef: ReadonlyMap<string, OperationEffectAssessment>,
+): TransitionRelationalValidationResult {
+	const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
+	const executableStepIds = plan.segments.flatMap((segment) => [
+		...segment.stepIds,
+	]);
+	const globalStepIndex = new Map(
+		executableStepIds.map((stepId, index) => [stepId, index]),
+	);
+	for (const segment of plan.segments) {
+		for (const [segmentIndex, stepId] of segment.stepIds.entries()) {
+			const step = stepById.get(stepId);
+			if (!step) {
+				continue;
+			}
+			const effects = operationEffectsByRef.get(step.operation.ref);
+			if (!effects) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} is missing operation effects for segment validation`,
+				};
+			}
+			const execution = effects.effects.execution;
+			if (
+				segment.transaction === 'joins-current' &&
+				execution.transaction !== 'joins-current'
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+				};
+			}
+			if (
+				segment.transaction === 'forbids-transaction' &&
+				execution.transaction !== 'forbids-transaction'
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+				};
+			}
+			if (
+				segment.transaction !== 'forbids-transaction' &&
+				execution.transaction === 'forbids-transaction'
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} forbids the transaction used by segment ${segment.segmentId}`,
+				};
+			}
+			if (
+				execution.transaction === 'requires-new' &&
+				segment.transaction !== 'requires-new'
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a new transaction outside segment ${segment.segmentId}`,
+				};
+			}
+			if (execution.transaction === 'requires-new' && segmentIndex > 0) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a new segment before execution`,
+				};
+			}
+			if (
+				execution.transaction === 'forbids-transaction' &&
+				segment.stepIds.length !== 1
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} forbids coalescing with other segment steps`,
+				};
+			}
+
+			const currentGlobalIndex = globalStepIndex.get(stepId) ?? 0;
+			const hasPriorExecutableStep = currentGlobalIndex > 0;
+			if (
+				executionCommitBoundaryBefore(execution) &&
+				hasPriorExecutableStep &&
+				!segment.commitBoundaryBefore
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a commit boundary before segment ${segment.segmentId}`,
+				};
+			}
+			if (executionCommitBoundaryBefore(execution) && segmentIndex > 0) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a commit boundary before operation but is coalesced in segment ${segment.segmentId}`,
+				};
+			}
+			const hasLaterSegmentStep = segmentIndex < segment.stepIds.length - 1;
+			if (
+				executionCommitBoundaryAfter(execution) &&
+				!segment.commitBoundaryAfter
+			) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a commit boundary after segment ${segment.segmentId}`,
+				};
+			}
+			if (executionCommitBoundaryAfter(execution) && hasLaterSegmentStep) {
+				return {
+					ok: false,
+					detail: `step ${step.stepId} requires a commit boundary after operation but is coalesced in segment ${segment.segmentId}`,
+				};
+			}
+		}
+	}
+	return { ok: true };
+}
+
 function validateFragment(
 	fragment: TransitionFragment,
 	claims: readonly ProofClaim[],
@@ -438,6 +587,7 @@ function validateFragment(
 
 function validatePlan(
 	plan: ProvenPlanShape,
+	operationEffectsByRef?: ReadonlyMap<string, OperationEffectAssessment>,
 ): TransitionRelationalValidationResult {
 	const assumptionIds = validateAssumptionIds(plan.assumptions);
 	if (!assumptionIds.ok) {
@@ -460,7 +610,60 @@ function validatePlan(
 	const assumptionIdSet = new Set(
 		plan.assumptions.map((assumption) => assumption.id),
 	);
+	const stepIds = new Set(plan.steps.map((step) => step.stepId));
+	const segmentIds = new Set<string>();
+	const segmentStepIds = new Set<string>();
+	const segmentByStepId = new Map<string, string>();
+	for (const segment of plan.segments) {
+		if (segmentIds.has(segment.segmentId)) {
+			return {
+				ok: false,
+				detail: `duplicate segment id ${segment.segmentId}`,
+			};
+		}
+		segmentIds.add(segment.segmentId);
+		if (segment.stepIds.length === 0) {
+			return {
+				ok: false,
+				detail: `segment ${segment.segmentId} contains no steps`,
+			};
+		}
+		for (const stepId of segment.stepIds) {
+			if (!stepIds.has(stepId)) {
+				return {
+					ok: false,
+					detail: `segment ${segment.segmentId} references missing step ${stepId}`,
+				};
+			}
+			if (segmentStepIds.has(stepId)) {
+				return {
+					ok: false,
+					detail: `step ${stepId} is assigned to multiple segments`,
+				};
+			}
+			segmentStepIds.add(stepId);
+			segmentByStepId.set(stepId, segment.segmentId);
+		}
+	}
 	for (const step of plan.steps) {
+		if (!segmentIds.has(step.segmentId)) {
+			return {
+				ok: false,
+				detail: `step ${step.stepId} references missing segment ${step.segmentId}`,
+			};
+		}
+		if (!segmentStepIds.has(step.stepId)) {
+			return {
+				ok: false,
+				detail: `step ${step.stepId} is missing from its segment`,
+			};
+		}
+		if (segmentByStepId.get(step.stepId) !== step.segmentId) {
+			return {
+				ok: false,
+				detail: `step ${step.stepId} segment ${step.segmentId} does not match its segment membership`,
+			};
+		}
 		const operationPackAssumption = validateOperationPackSemanticsAssumption({
 			operation: step.operation,
 			assumptions: plan.assumptions,
@@ -533,7 +736,20 @@ function validatePlan(
 	const contexts = plan.observations
 		.filter((observation) => observation.role === 'evidence')
 		.map((observation) => observation.context);
-	return validateObservationContexts(contexts);
+	const observationContexts = validateObservationContexts(contexts);
+	if (!observationContexts.ok) {
+		return observationContexts;
+	}
+	if (operationEffectsByRef) {
+		const segmentExecution = validateSegmentExecutionSemantics(
+			plan,
+			operationEffectsByRef,
+		);
+		if (!segmentExecution.ok) {
+			return segmentExecution;
+		}
+	}
+	return { ok: true };
 }
 
 /**
@@ -547,5 +763,5 @@ export function validateTransitionRelationalInvariants(
 ): TransitionRelationalValidationResult {
 	return input.kind === 'fragment'
 		? validateFragment(input.fragment, input.claims, input.assumptions)
-		: validatePlan(input.plan);
+		: validatePlan(input.plan, input.operationEffectsByRef);
 }

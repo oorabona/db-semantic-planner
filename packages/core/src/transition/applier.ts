@@ -10,6 +10,7 @@ import type {
 	FingerprintManifest,
 	IssuedObservation,
 	ObservationContext,
+	OperationEffectAssessment,
 	OutcomeReason,
 	PlanAssessment,
 	ProvenPlanStep,
@@ -224,10 +225,13 @@ function intentRecord(step: ProvenPlanStep): DurableIntentRecord {
 	};
 }
 
-function completionRecord(step: ProvenPlanStep): TransactionalCompletionRecord {
+function completionRecord(
+	step: ProvenPlanStep,
+	committedWithDdl = true,
+): TransactionalCompletionRecord {
 	return {
 		stepId: step.stepId,
-		committedWithDdl: true,
+		committedWithDdl,
 		recordedAt: recordedAt(),
 	};
 }
@@ -297,13 +301,16 @@ function unacceptedAssumptionResult(
 	};
 }
 
-function noSingleStepResult(plan: InProcessProvenPlan): ApplyResult {
+function uncomposablePlanResult(
+	plan: InProcessProvenPlan,
+	detail: string,
+): ApplyResult {
 	return {
 		assessment: assessment({
 			code: 'uncomposable',
 			fragments: plan.steps.map((step) => step.selectionRationale.chosen),
 			scope: [],
-			detail: 'applier only supports the ADR-0003 single-step slice',
+			detail,
 		}),
 		journals: [],
 		observations: [],
@@ -351,6 +358,31 @@ function unknownJournal(intent: DurableIntentRecord): StepJournal {
 	};
 }
 
+function partiallyAppliedReason(
+	step: ProvenPlanStep,
+	detail: string,
+): OutcomeReason {
+	return {
+		code: 'partially-applied',
+		stepId: step.stepId,
+		operationKind: step.operation.operationKind,
+		operationRef: step.operation.ref,
+		scope: [],
+		detail,
+	};
+}
+
+function stoppedAssessment(
+	reason: OutcomeReason,
+	hasCommittedSteps: boolean,
+): PlanAssessment {
+	return assessment(
+		reason,
+		hasCommittedSteps ? 'partially-applied' : 'planned',
+		hasCommittedSteps ? 'resume-possible' : 'replan-required',
+	);
+}
+
 function durableEvidence(
 	observations: readonly IssuedObservation[],
 ): readonly EvidenceObservation[] {
@@ -378,12 +410,11 @@ export function createApplier(registry: PackRegistry): Applier {
 			if (!isMintedInProcessPlan(plan)) {
 				return invalidPlanResult(UNMINTED_PLAN_DETAIL);
 			}
-			if (plan.steps.length !== 1) {
-				return noSingleStepResult(plan);
-			}
-			const step = plan.steps[0];
-			if (!step) {
-				return noSingleStepResult(plan);
+			if (plan.steps.length === 0 || plan.segments.length === 0) {
+				return uncomposablePlanResult(
+					plan,
+					'plan contains no executable steps',
+				);
 			}
 			const diagnostic = validateTransitionRelationalInvariants({
 				kind: 'plan',
@@ -402,291 +433,548 @@ export function createApplier(registry: PackRegistry): Applier {
 				}
 			}
 
-			const operationResolution = registry.resolveOperation(step.operation);
-			if (!operationResolution.ok) {
-				return unresolvedOperationResult(step, operationResolution.detail);
-			}
-			const semantics = operationResolution.semantics;
-			if (!isOperationRuntime(semantics)) {
-				return unresolvedRuntimeResult(step);
-			}
-			if (
-				semantics.artifact.id !== step.operation.operationKind.artifact.id ||
-				semantics.artifact.version !==
-					step.operation.operationKind.artifact.version
-			) {
-				return unresolvedRuntimeResult(step);
-			}
-
 			const proofContext = contextFromPlanObservations(plan.observations);
 			if (!proofContext) {
 				throw new Error(
 					'internal error: minted proven plan evidence observations do not share one context',
 				);
 			}
-			const operationIssuer = registry.resolveIssuer(
-				step.operation.operationKind.artifact,
-			);
-			if (!operationIssuer) {
-				return unresolvedOperationResult(
-					step,
-					'operation observation issuer missing',
+			const operationEffectsByRef = new Map<
+				string,
+				OperationEffectAssessment
+			>();
+			for (const step of plan.steps) {
+				const operationResolution = registry.resolveOperation(step.operation);
+				if (!operationResolution.ok) {
+					return unresolvedOperationResult(step, operationResolution.detail);
+				}
+				operationEffectsByRef.set(
+					step.operation.ref,
+					operationResolution.semantics.effectsOf(step.operation, proofContext),
 				);
 			}
-			const intent = intentRecord(step);
+			const semanticDiagnostic = validateTransitionRelationalInvariants({
+				kind: 'plan',
+				plan,
+				operationEffectsByRef,
+			});
+			if (!semanticDiagnostic.ok) {
+				throw new Error(
+					`internal error: minted proven plan violated relational invariants: ${semanticDiagnostic.detail}`,
+				);
+			}
 
 			const observations: IssuedObservation[] = [];
-			let client: Awaited<ReturnType<OperationRuntime['checkout']>> | undefined;
-			let committed = false;
-			let transactionStarted = false;
-			let releaseError: unknown;
+			const journals: StepJournal[] = [];
 			let runtimeContext = proofContext;
-			try {
-				const executionClient = await semantics.checkout(target);
-				client = executionClient;
-				await semantics.writeIntentJournal(executionClient, intent);
-				await semantics.begin(executionClient);
-				transactionStarted = true;
-				await semantics.setLockTimeout(
-					executionClient,
-					lockTimeoutMs(semantics, step, proofContext),
-				);
-				await semantics.acquireLocks(
-					executionClient,
-					step.operation,
-					semantics.effectsOf(step.operation, proofContext),
-					proofContext,
-				);
-				runtimeContext = await semantics.observeContext(
-					executionClient,
-					step.operation,
-					proofContext,
-				);
-				runtimeContext =
-					registry.contextWithDerivedCapabilities(runtimeContext);
 
-				const before = await semantics.observeOperation(
-					executionClient,
-					step.operation,
-					runtimeContext,
-					'before',
-					operationIssuer,
+			const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
+			for (const segment of plan.segments) {
+				const segmentSteps = segment.stepIds.map((stepId) =>
+					stepById.get(stepId),
 				);
-				observations.push(...before.observations);
-				let currentFingerprints: ReturnType<
-					OperationRuntime['buildFingerprints']
-				>;
-				try {
-					currentFingerprints = semantics.buildFingerprints(
-						step.operation,
-						durableEvidence(before.observations),
-						runtimeContext,
+				if (segmentSteps.some((step) => !step)) {
+					return uncomposablePlanResult(
+						plan,
+						`segment ${segment.segmentId} references a missing step`,
 					);
-				} catch {
-					await semantics.rollback(executionClient);
-					const journal = unknownJournal(intent);
-					await semantics.writeObservedJournal(executionClient, journal);
-					return {
-						assessment: assessment(
-							contextMismatchReason(
-								step,
-								'expectedBefore fingerprint could not be rebuilt',
-							),
-						),
-						journals: [journal],
-						observations,
-					};
 				}
-				if (
-					!fingerprintMatches(
-						step.expectedBefore,
-						currentFingerprints.expectedBefore,
-					)
-				) {
-					await semantics.rollback(executionClient);
-					const journal = contextMismatchJournal(intent, observations);
-					await semantics.writeObservedJournal(executionClient, journal);
-					return {
-						assessment: assessment(
-							contextMismatchReason(step, 'expectedBefore mismatch'),
-						),
-						journals: [journal],
-						observations,
-					};
+				const resolvedSteps = [];
+				for (const step of segmentSteps as ProvenPlanStep[]) {
+					const operationResolution = registry.resolveOperation(step.operation);
+					if (!operationResolution.ok) {
+						return unresolvedOperationResult(step, operationResolution.detail);
+					}
+					const semantics = operationResolution.semantics;
+					if (!isOperationRuntime(semantics)) {
+						return unresolvedRuntimeResult(step);
+					}
+					if (
+						semantics.artifact.id !==
+							step.operation.operationKind.artifact.id ||
+						semantics.artifact.version !==
+							step.operation.operationKind.artifact.version
+					) {
+						return unresolvedRuntimeResult(step);
+					}
+					const operationIssuer = registry.resolveIssuer(
+						step.operation.operationKind.artifact,
+					);
+					if (!operationIssuer) {
+						return unresolvedOperationResult(
+							step,
+							'operation observation issuer missing',
+						);
+					}
+					const execution = semantics.effectsOf(step.operation, proofContext)
+						.effects.execution;
+					if (
+						segment.transaction === 'joins-current' &&
+						execution.transaction !== 'joins-current'
+					) {
+						return uncomposablePlanResult(
+							plan,
+							`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+						);
+					}
+					if (
+						segment.transaction === 'forbids-transaction' &&
+						execution.transaction !== 'forbids-transaction'
+					) {
+						return uncomposablePlanResult(
+							plan,
+							`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+						);
+					}
+					if (
+						segment.transaction !== 'forbids-transaction' &&
+						execution.transaction === 'forbids-transaction'
+					) {
+						return uncomposablePlanResult(
+							plan,
+							`step ${step.stepId} forbids the transaction used by segment ${segment.segmentId}`,
+						);
+					}
+					resolvedSteps.push({
+						step,
+						semantics,
+						operationIssuer,
+						intent: intentRecord(step),
+					});
+				}
+				const first = resolvedSteps[0];
+				if (!first) {
+					return uncomposablePlanResult(
+						plan,
+						`segment ${segment.segmentId} contains no steps`,
+					);
+				}
+				const segmentRuntime = first.semantics;
+				if (resolvedSteps.some((entry) => entry.semantics !== segmentRuntime)) {
+					return uncomposablePlanResult(
+						plan,
+						`segment ${segment.segmentId} spans multiple operation runtimes`,
+					);
 				}
 
-				const runGuardPhase = async (
-					phase: ProvenPlanStep['guards'][number]['phase'],
-				): Promise<ApplyResult | undefined> => {
-					for (const guard of step.guards.filter(
-						(candidate) => candidate.phase === phase,
-					)) {
-						const guardResult = await semantics.checkGuard(
+				let client:
+					| Awaited<ReturnType<OperationRuntime['checkout']>>
+					| undefined;
+				let committed = false;
+				let transactionStarted = false;
+				let releaseError: unknown;
+				let active = first;
+				let activeContext = runtimeContext;
+				let activeNonRollbackableOperationExecuted = false;
+				const transactional = segment.transaction !== 'forbids-transaction';
+				const completedInSegment: {
+					readonly step: ProvenPlanStep;
+					readonly semantics: OperationRuntime;
+					readonly intent: DurableIntentRecord;
+					readonly completion: TransactionalCompletionRecord;
+					readonly context: ObservationContext;
+					readonly operationIssuer: NonNullable<
+						ReturnType<PackRegistry['resolveIssuer']>
+					>;
+				}[] = [];
+				try {
+					client = await segmentRuntime.checkout(target);
+					const executionClient = client;
+					for (const entry of resolvedSteps) {
+						await segmentRuntime.writeIntentJournal(
 							executionClient,
-							step.operation,
-							guard,
+							entry.intent,
+						);
+					}
+					if (transactional) {
+						await segmentRuntime.begin(executionClient);
+						transactionStarted = true;
+					}
+
+					for (const entry of resolvedSteps) {
+						active = entry;
+						activeContext = runtimeContext;
+						activeNonRollbackableOperationExecuted = false;
+						await entry.semantics.setLockTimeout(
+							executionClient,
+							lockTimeoutMs(entry.semantics, entry.step, runtimeContext),
+						);
+						await entry.semantics.acquireLocks(
+							executionClient,
+							entry.step.operation,
+							entry.semantics.effectsOf(entry.step.operation, runtimeContext),
 							runtimeContext,
 						);
-						observations.push(...guardResult.observations);
-						if (!guardResult.passed) {
-							await semantics.rollback(executionClient);
-							const journal = journalWithObserved(
-								intent,
-								'guard-failed',
-								guardResult.observations,
-								guardResult.recovery,
+						runtimeContext = await entry.semantics.observeContext(
+							executionClient,
+							entry.step.operation,
+							runtimeContext,
+						);
+						runtimeContext =
+							registry.contextWithDerivedCapabilities(runtimeContext);
+						const stepContext = runtimeContext;
+						activeContext = stepContext;
+
+						const before = await entry.semantics.observeOperation(
+							executionClient,
+							entry.step.operation,
+							stepContext,
+							'before',
+							entry.operationIssuer,
+						);
+						observations.push(...before.observations);
+						let currentFingerprints: ReturnType<
+							OperationRuntime['buildFingerprints']
+						>;
+						try {
+							currentFingerprints = entry.semantics.buildFingerprints(
+								entry.step.operation,
+								durableEvidence(before.observations),
+								stepContext,
 							);
-							await semantics.writeObservedJournal(executionClient, journal);
+						} catch {
+							if (transactionStarted && !committed) {
+								await entry.semantics.rollback(executionClient);
+							}
+							const journal = unknownJournal(entry.intent);
+							await entry.semantics.writeObservedJournal(
+								executionClient,
+								journal,
+							);
 							return {
-								assessment: assessment({
-									code: 'guard-failed',
-									stepId: step.stepId,
-									operationKind: step.operation.operationKind,
-									operationRef: step.operation.ref,
-									recovery: guardResult.recovery,
-									scope: guard.predicate.scope,
-								}),
-								journals: [journal],
+								assessment: stoppedAssessment(
+									contextMismatchReason(
+										entry.step,
+										'expectedBefore fingerprint could not be rebuilt',
+									),
+									journals.length > 0,
+								),
+								journals: [...journals, journal],
 								observations,
 							};
 						}
+						if (
+							!fingerprintMatches(
+								entry.step.expectedBefore,
+								currentFingerprints.expectedBefore,
+							)
+						) {
+							if (transactionStarted && !committed) {
+								await entry.semantics.rollback(executionClient);
+							}
+							const journal = contextMismatchJournal(
+								entry.intent,
+								observations,
+							);
+							await entry.semantics.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							return {
+								assessment: stoppedAssessment(
+									contextMismatchReason(entry.step, 'expectedBefore mismatch'),
+									journals.length > 0,
+								),
+								journals: [...journals, journal],
+								observations,
+							};
+						}
+
+						const runGuardPhase = async (
+							phase: ProvenPlanStep['guards'][number]['phase'],
+							nonRollbackableOperationExecuted = false,
+						): Promise<ApplyResult | undefined> => {
+							for (const guard of entry.step.guards.filter(
+								(candidate) => candidate.phase === phase,
+							)) {
+								const guardResult = await entry.semantics.checkGuard(
+									executionClient,
+									entry.step.operation,
+									guard,
+									stepContext,
+								);
+								observations.push(...guardResult.observations);
+								if (!guardResult.passed) {
+									if (transactionStarted && !committed) {
+										await entry.semantics.rollback(executionClient);
+									}
+									const hasAppliedWork =
+										journals.length > 0 || nonRollbackableOperationExecuted;
+									const journal = journalWithObserved(
+										entry.intent,
+										nonRollbackableOperationExecuted
+											? 'partially-applied'
+											: 'guard-failed',
+										guardResult.observations,
+										guardResult.recovery,
+									);
+									await entry.semantics.writeObservedJournal(
+										executionClient,
+										journal,
+									);
+									const guardFailureReason: OutcomeReason = {
+										code: 'guard-failed',
+										stepId: entry.step.stepId,
+										operationKind: entry.step.operation.operationKind,
+										operationRef: entry.step.operation.ref,
+										recovery: guardResult.recovery,
+										scope: guard.predicate.scope,
+									};
+									return {
+										assessment: hasAppliedWork
+											? assessment(
+													guardFailureReason,
+													'partially-applied',
+													'resume-possible',
+												)
+											: stoppedAssessment(guardFailureReason, false),
+										journals: [...journals, journal],
+										observations,
+									};
+								}
+							}
+							return undefined;
+						};
+
+						const beforeGuardFailure = await runGuardPhase('before-operation');
+						if (beforeGuardFailure) {
+							return beforeGuardFailure;
+						}
+
+						await entry.semantics.executeOperation(
+							executionClient,
+							entry.step.operation,
+							stepContext,
+							entry.step.guards.filter(
+								(guard) => guard.phase === 'during-operation',
+							),
+						);
+						if (!transactional) {
+							activeNonRollbackableOperationExecuted = true;
+						}
+						const afterGuardFailure = await runGuardPhase(
+							'after-operation',
+							!transactional,
+						);
+						if (afterGuardFailure) {
+							return afterGuardFailure;
+						}
+						const completion = completionRecord(entry.step, transactional);
+						await entry.semantics.writeCompletionJournal(
+							executionClient,
+							entry.step.operation,
+							completion,
+						);
+						completedInSegment.push({
+							step: entry.step,
+							semantics: entry.semantics,
+							intent: entry.intent,
+							completion,
+							context: stepContext,
+							operationIssuer: entry.operationIssuer,
+						});
 					}
-					return undefined;
-				};
 
-				const beforeGuardFailure = await runGuardPhase('before-operation');
-				if (beforeGuardFailure) {
-					return beforeGuardFailure;
-				}
+					if (transactional) {
+						await segmentRuntime.commit(executionClient);
+						committed = true;
+					}
 
-				await semantics.executeOperation(
-					executionClient,
-					step.operation,
-					runtimeContext,
-					step.guards.filter((guard) => guard.phase === 'during-operation'),
-				);
-				const afterGuardFailure = await runGuardPhase('after-operation');
-				if (afterGuardFailure) {
-					return afterGuardFailure;
-				}
-				const completion = completionRecord(step);
-				await semantics.writeCompletionJournal(
-					executionClient,
-					step.operation,
-					completion,
-				);
-				await semantics.commit(executionClient);
-				committed = true;
+					let afterFailure:
+						| { readonly step: ProvenPlanStep; readonly detail: string }
+						| undefined;
+					for (const entry of completedInSegment) {
+						active = entry;
+						activeContext = entry.context;
+						let after: Awaited<
+							ReturnType<OperationRuntime['observeOperation']>
+						>;
+						try {
+							after = await segmentRuntime.observeOperation(
+								executionClient,
+								entry.step.operation,
+								entry.context,
+								'after',
+								entry.operationIssuer,
+							);
+						} catch (error) {
+							const journal = journalWithObserved(
+								entry.intent,
+								'partially-applied',
+								[],
+							);
+							await segmentRuntime.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							journals.push(journal);
+							afterFailure ??= {
+								step: entry.step,
+								detail:
+									error instanceof Error
+										? error.message
+										: 'after observation failed',
+							};
+							continue;
+						}
+						observations.push(...after.observations);
+						const observedOutcome = {
+							stepId: entry.step.stepId,
+							observations: evidenceIds(after.observations),
+							recordedAt: recordedAt(),
+						};
 
-				const after = await semantics.observeOperation(
-					executionClient,
-					step.operation,
-					runtimeContext,
-					'after',
-					operationIssuer,
-				);
-				observations.push(...after.observations);
-				const observedOutcome = {
-					stepId: step.stepId,
-					observations: evidenceIds(after.observations),
-					recordedAt: recordedAt(),
-				};
-
-				if (!fingerprintMatches(step.expectedAfter, after.fingerprint)) {
-					const journal: StepJournal = {
-						intent,
-						outcome: 'partially-applied',
-						observedOutcome,
-						recovery: [],
-					};
-					await semantics.writeObservedJournal(executionClient, journal);
-					return {
-						assessment: assessment(
-							{
-								code: 'partially-applied',
-								stepId: step.stepId,
-								operationKind: step.operation.operationKind,
-								operationRef: step.operation.ref,
-								scope: [],
+						if (
+							!fingerprintMatches(entry.step.expectedAfter, after.fingerprint)
+						) {
+							const journal: StepJournal = {
+								intent: entry.intent,
+								outcome: 'partially-applied',
+								observedOutcome,
+								recovery: [],
+							};
+							await segmentRuntime.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							journals.push(journal);
+							afterFailure ??= {
+								step: entry.step,
 								detail: 'expectedAfter mismatch',
-							},
-							'partially-applied',
-							'human-intervention-required',
-						),
-						journals: [journal],
-						observations,
-					};
-				}
+							};
+							continue;
+						}
 
-				const journal: StepJournal = {
-					intent,
-					outcome: 'completed',
-					transactionalCompletion: completion,
-					observedOutcome,
-				};
-				await semantics.writeObservedJournal(executionClient, journal);
-				return {
-					assessment: completedAssessment(reportedAssessment),
-					journals: [journal],
-					observations,
-				};
-			} catch (error) {
-				releaseError = error;
-				if (client && transactionStarted && !committed) {
-					await semantics.rollback(client).catch(() => undefined);
-				}
-				if (semantics.isLockTimeout(error)) {
-					const journal = journalWithObserved(intent, 'guard-timeout', []);
+						const journal: StepJournal = {
+							intent: entry.intent,
+							outcome: 'completed',
+							transactionalCompletion: entry.completion,
+							observedOutcome,
+						};
+						await segmentRuntime.writeObservedJournal(executionClient, journal);
+						journals.push(journal);
+					}
+					if (afterFailure) {
+						return {
+							assessment: assessment(
+								partiallyAppliedReason(afterFailure.step, afterFailure.detail),
+								'partially-applied',
+								'human-intervention-required',
+							),
+							journals,
+							observations,
+						};
+					}
+				} catch (error) {
+					releaseError = error;
+					if (client && transactionStarted && !committed) {
+						try {
+							await segmentRuntime.rollback(client);
+						} catch {
+							// The outcome below is based on durable journals when present.
+						}
+					}
+					if (segmentRuntime.isLockTimeout(error)) {
+						const hasAppliedWork =
+							journals.length > 0 || activeNonRollbackableOperationExecuted;
+						const journal = journalWithObserved(
+							active.intent,
+							activeNonRollbackableOperationExecuted
+								? 'partially-applied'
+								: 'guard-timeout',
+							[],
+						);
+						if (client) {
+							await segmentRuntime
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return {
+							assessment: stoppedAssessment(
+								{
+									code: 'guard-timeout',
+									stepId: active.step.stepId,
+									operationKind: active.step.operation.operationKind,
+									operationRef: active.step.operation.ref,
+									maxWaitMs: lockTimeoutMs(
+										active.semantics,
+										active.step,
+										activeContext,
+									),
+									scope: [],
+								},
+								hasAppliedWork,
+							),
+							journals: [...journals, journal],
+							observations,
+						};
+					}
+					if (journals.length > 0 || activeNonRollbackableOperationExecuted) {
+						const journal = journalWithObserved(
+							active.intent,
+							'partially-applied',
+							[],
+						);
+						if (client) {
+							await segmentRuntime
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return {
+							assessment: assessment(
+								partiallyAppliedReason(
+									active.step,
+									error instanceof Error
+										? error.message
+										: 'segment failed after an earlier commit',
+								),
+								'partially-applied',
+								'resume-possible',
+							),
+							journals: [...journals, journal],
+							observations,
+						};
+					}
+					const journal = unknownJournal(active.intent);
 					if (client) {
-						await semantics
+						await segmentRuntime
 							.writeObservedJournal(client, journal)
 							.catch(() => undefined);
 					}
 					return {
-						assessment: assessment({
-							code: 'guard-timeout',
-							stepId: step.stepId,
-							operationKind: step.operation.operationKind,
-							operationRef: step.operation.ref,
-							maxWaitMs: lockTimeoutMs(semantics, step, runtimeContext),
-							scope: [],
-						}),
-						journals: [journal],
+						assessment: assessment(
+							{
+								code: 'unknown-step-result',
+								stepId: active.step.stepId,
+								operationKind: active.step.operation.operationKind,
+								operationRef: active.step.operation.ref,
+								scope: [],
+								detail:
+									error instanceof Error
+										? error.message
+										: 'unknown apply error',
+							},
+							'outcome-unknown',
+							'human-intervention-required',
+						),
+						journals: [...journals, journal],
 						observations,
 					};
-				}
-				const journal = unknownJournal(intent);
-				if (client) {
-					await semantics
-						.writeObservedJournal(client, journal)
-						.catch(() => undefined);
-				}
-				return {
-					assessment: assessment(
-						{
-							code: 'unknown-step-result',
-							stepId: step.stepId,
-							operationKind: step.operation.operationKind,
-							operationRef: step.operation.ref,
-							scope: [],
-							detail:
-								error instanceof Error ? error.message : 'unknown apply error',
-						},
-						'outcome-unknown',
-						'human-intervention-required',
-					),
-					journals: [journal],
-					observations,
-				};
-			} finally {
-				if (client) {
-					try {
-						await semantics.release(client, releaseError);
-					} catch {
-						// A cleanup failure must not mask the known apply outcome.
+				} finally {
+					if (client) {
+						try {
+							await segmentRuntime.release(client, releaseError);
+						} catch {
+							// A cleanup failure must not mask the known apply outcome.
+						}
 					}
 				}
 			}
+			return {
+				assessment: completedAssessment(reportedAssessment),
+				journals,
+				observations,
+			};
 		},
 	};
 }

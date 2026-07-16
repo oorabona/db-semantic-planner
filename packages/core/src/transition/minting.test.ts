@@ -43,9 +43,19 @@ function planShape(): ProvenPlanShape {
 		claims: [],
 		assumptions: [],
 		preconditions: [],
+		segments: [
+			{
+				segmentId: 'segment:0',
+				stepIds: ['step:op'],
+				transaction: 'joins-current',
+				commitBoundaryBefore: false,
+				commitBoundaryAfter: false,
+			},
+		],
 		steps: [
 			{
 				stepId: 'step:op',
+				segmentId: 'segment:0',
 				operation,
 				expectedBefore: fingerprint('before'),
 				expectedAfter: fingerprint('after'),
