@@ -47,6 +47,7 @@ export interface ObservationIssuer {
 	readContext?(
 		target: unknown,
 		context: ObservationContext,
+		requests?: readonly ObservationRequest[],
 	): Promise<ObservationContext>;
 	execute(
 		request: ObservationRequest,
@@ -88,6 +89,16 @@ export interface RuleSupport {
 		readonly max?: string;
 	}[];
 	readonly requiredCapabilities: readonly string[];
+}
+
+export type CapabilityAvailabilityPredicate = {
+	readonly kind: 'minServerVersionNum';
+	readonly minServerVersionNum: number;
+};
+
+export interface CapabilityDescriptor {
+	readonly id: string;
+	readonly predicate: CapabilityAvailabilityPredicate;
 }
 
 export interface TransitionRule<TMatch = unknown> {

@@ -22,8 +22,17 @@ export const ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND: OperationKindRef = {
 };
 
 export const SET_NOT_NULL_RULE_ID = 'postgresql.column.set-not-null';
+export const ALTER_COLUMN_SET_NOT_NULL_CAPABILITY = 'alter-column-set-not-null';
+export const ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM = 180000;
+export const PG_SCHEMA_USAGE_PRIVILEGE = 'postgresql.schema.usage';
+export const PG_TABLE_ALTER_AUTHORITY_PRIVILEGE =
+	'postgresql.table.alter-authority';
+export const PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE =
+	'postgresql.column.set-not-null.authority';
 
 export const COLUMN_EXISTS_OBSERVATION = 'postgresql.column.exists';
+export const SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION =
+	'postgresql.column.set-not-null.relation-kind-supported';
 export const ALTER_AUTHORITY_OBSERVATION = 'postgresql.table.alter-authority';
 export const ENGINE_VERSION_OBSERVATION = 'postgresql.engine.version-supported';
 

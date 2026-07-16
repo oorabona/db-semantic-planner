@@ -3,6 +3,7 @@ import type {
 	ApplyPolicy,
 	CompareOutcome,
 	GuardedPlan,
+	InapplicableAssessment,
 	ObservationContext,
 	ObservationIssuer,
 	PlanAssessment,
@@ -37,6 +38,11 @@ declare const borrowedClient: TransitionQueryClient;
 declare const blockedOutcome: Extract<
 	ProveOutcome,
 	{ readonly kind: 'blocked' }
+>;
+declare const inapplicableAssessment: InapplicableAssessment;
+declare const inapplicableOutcome: Extract<
+	ProveOutcome,
+	{ readonly kind: 'inapplicable' }
 >;
 declare const establishedClaim: EstablishedProofClaim;
 declare const undischargedClaim: ProofClaim & {
@@ -90,6 +96,14 @@ applier.apply(
 
 // @ts-expect-error A blocked prove outcome has no proven plan to apply.
 applier.apply(blockedOutcome, applyPolicy, executionTarget);
+
+// @ts-expect-error An inapplicable prove outcome has no proven plan to apply.
+applier.apply(inapplicableOutcome, applyPolicy, executionTarget);
+
+const _inapplicableOutcome: ProveOutcome = {
+	kind: 'inapplicable',
+	assessment: inapplicableAssessment,
+};
 
 // @ts-expect-error A proven outcome must carry an applicable assessment.
 const _provenOutcomeWithBlockedAssessment: ProveOutcome = {

@@ -114,3 +114,7 @@ export type ApplicableAssessment = PlanAssessment & {
 	readonly decision: 'applicable';
 	readonly assurance: 'established' | 'accepted-under-assumptions';
 };
+
+export type InapplicableAssessment = PlanAssessment & {
+	readonly decision: 'inapplicable';
+};

@@ -428,6 +428,53 @@ describe('createApplier', () => {
 		expect(rt.checkout).toHaveBeenCalledOnce();
 	});
 
+	it('derives the completed assessment from the minted plan instead of the caller assessment', async () => {
+		const observed: StepJournal[] = [];
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation: vi.fn(async () => undefined),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const forgedAssessment: ApplicableAssessment = {
+			...assessment(),
+			assurance: 'established',
+			reasons: [
+				{
+					code: 'proven-applicable',
+					claim: claimId('forged.established'),
+					scope: [],
+				},
+			],
+		};
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: forgedAssessment },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.assessment.assurance).toBe('accepted-under-assumptions');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'proven-applicable',
+			claim: claimId('dbsp.transition.claim.plan'),
+		});
+		expect(observed[0]?.outcome).toBe('completed');
+	});
+
 	it('persists an unknown-step-result journal on the generic error path', async () => {
 		const observed: StepJournal[] = [];
 		const registry = createPackRegistry([
@@ -889,6 +936,53 @@ describe('createApplier', () => {
 		expect(observed[0]?.outcome).toBe('context-mismatch');
 		expect(executeOperation).not.toHaveBeenCalled();
 		expect(rt.rollback).toHaveBeenCalledOnce();
+	});
+
+	it('treats a volatile before-operation guard failure as guard-failed, not inapplicable', async () => {
+		const observed: StepJournal[] = [];
+		const executeOperation = vi.fn(async () => undefined);
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation,
+				checkGuard: vi.fn(async () => ({
+					passed: false,
+					observations: [],
+					recovery: [],
+				})),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const guarded = planWithStep(
+			{
+				guards: [guard('before-operation')],
+				requiredClaims: [claimId('mock.identity')],
+			},
+			{ claims: [identityClaim()] },
+		);
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]?.code).toBe('guard-failed');
+		expect(result.journals[0]?.outcome).toBe('guard-failed');
+		expect(observed[0]?.outcome).toBe('guard-failed');
+		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
 	it('runs after-operation guards after the operation executes', async () => {

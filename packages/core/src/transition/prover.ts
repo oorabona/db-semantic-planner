@@ -4,7 +4,9 @@ import type {
 	Assumption,
 	ClaimId,
 	CompareOutcome,
+	ContextFact,
 	EvidenceObservation,
+	InapplicableAssessment,
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
@@ -56,6 +58,16 @@ function blockedAssessment(reason: OutcomeReason): PlanAssessment {
 		assurance: 'unproven',
 		lifecycle: 'planned',
 		continuation: 'replan-required',
+		reasons: [reason],
+	};
+}
+
+function inapplicableAssessment(reason: OutcomeReason): InapplicableAssessment {
+	return {
+		decision: 'inapplicable',
+		assurance: 'established',
+		lifecycle: 'planned',
+		continuation: 'none',
 		reasons: [reason],
 	};
 }
@@ -342,12 +354,17 @@ function missingEvidenceAssessment(
 	});
 }
 
-function refutedAssessment(claim: ProofClaim): PlanAssessment {
-	return blockedAssessment({
+function refutedClaimDetail(claim: ProofClaim): string {
+	const detail = claim.proposition.detail;
+	return typeof detail === 'string' ? detail : claim.proposition.kind;
+}
+
+function refutedAssessment(claim: ProofClaim): InapplicableAssessment {
+	return inapplicableAssessment({
 		code: 'proven-inapplicable',
 		claim: claim.id,
 		scope: claim.scope,
-		detail: claim.proposition.kind,
+		detail: refutedClaimDetail(claim),
 	});
 }
 
@@ -468,12 +485,20 @@ function versionInRange(
 	return true;
 }
 
+type RuleSupportMismatch = {
+	readonly detail: string;
+	readonly fact: ContextFact;
+};
+
 function ruleSupportMismatch(
 	rule: TransitionRule,
 	context: ObservationContext,
-): string | undefined {
+): RuleSupportMismatch | undefined {
 	if (rule.support.engine !== context.engine) {
-		return `rule requires engine ${rule.support.engine}, got ${context.engine}`;
+		return {
+			detail: `rule requires engine ${rule.support.engine}, got ${context.engine}`,
+			fact: { key: 'context.engine', value: context.engine },
+		};
 	}
 	if (
 		rule.support.versions.length > 0 &&
@@ -481,26 +506,37 @@ function ruleSupportMismatch(
 			versionInRange(context.engineVersion, range),
 		)
 	) {
-		return `rule does not support engine version ${context.engineVersion}`;
+		return {
+			detail: `rule does not support engine version ${context.engineVersion}`,
+			fact: { key: 'context.engineVersion', value: context.engineVersion },
+		};
 	}
 	const missingCapabilities = rule.support.requiredCapabilities.filter(
 		(capability) => !context.capabilities.includes(capability),
 	);
 	if (missingCapabilities.length > 0) {
-		return `missing required capabilities: ${missingCapabilities.join(', ')}`;
+		const first = missingCapabilities[0] ?? 'unknown';
+		return {
+			detail: `missing required capabilities: ${missingCapabilities.join(', ')}`,
+			fact: {
+				key: `context.capability.${first}.available`,
+				value: 'false',
+			},
+		};
 	}
 	return undefined;
 }
 
 function supportMismatchAssessment(
 	candidate: TransitionCandidate,
-	detail: string,
-): PlanAssessment {
-	return blockedAssessment({
+	mismatch: RuleSupportMismatch,
+): InapplicableAssessment {
+	return inapplicableAssessment({
 		code: 'context-mismatch',
 		artifact: candidate.rule.pack,
-		fact: { key: 'rule-support', value: detail },
+		fact: mismatch.fact,
 		scope: [],
+		detail: mismatch.detail,
 	});
 }
 
@@ -633,14 +669,19 @@ export function createProver(registry: PackRegistry): Prover {
 				try {
 					client = await checkoutProofClient(target);
 					proofContext = issuer.readContext
-						? await issuer.readContext(client, context)
+						? await issuer.readContext(client, context, requiredObservations)
 						: context;
+					proofContext = registry.contextWithDerivedCapabilities(proofContext);
 
 					const supportMismatch = ruleSupportMismatch(rule, proofContext);
 					if (supportMismatch) {
+						const assessment = supportMismatchAssessment(
+							candidate,
+							supportMismatch,
+						);
 						return {
-							kind: 'blocked',
-							assessment: supportMismatchAssessment(candidate, supportMismatch),
+							kind: 'inapplicable',
+							assessment,
 						};
 					}
 
@@ -667,11 +708,16 @@ export function createProver(registry: PackRegistry): Prover {
 					}
 				}
 			} else {
+				proofContext = registry.contextWithDerivedCapabilities(proofContext);
 				const supportMismatch = ruleSupportMismatch(rule, proofContext);
 				if (supportMismatch) {
+					const assessment = supportMismatchAssessment(
+						candidate,
+						supportMismatch,
+					);
 					return {
-						kind: 'blocked',
-						assessment: supportMismatchAssessment(candidate, supportMismatch),
+						kind: 'inapplicable',
+						assessment,
 					};
 				}
 				issued = { evidence: [], advisory: [] };
@@ -704,14 +750,19 @@ export function createProver(registry: PackRegistry): Prover {
 				const refuted = claims.find(
 					(claim) => claim.derivedBy.conclusion === 'refuted',
 				);
+				if (refuted) {
+					return {
+						kind: 'inapplicable',
+						assessment: refutedAssessment(refuted),
+						claim: refuted,
+					};
+				}
 				return {
 					kind: 'blocked',
-					assessment: refuted
-						? refutedAssessment(refuted)
-						: uncomposableCandidates(
-								compare.candidates,
-								'rule evaluated inapplicable',
-							),
+					assessment: uncomposableCandidates(
+						compare.candidates,
+						'rule evaluated inapplicable',
+					),
 				};
 			}
 
@@ -840,7 +891,11 @@ export function createProver(registry: PackRegistry): Prover {
 				(claim) => claim.derivedBy.conclusion === 'refuted',
 			);
 			if (refuted) {
-				return { kind: 'blocked', assessment: refutedAssessment(refuted) };
+				return {
+					kind: 'inapplicable',
+					assessment: refutedAssessment(refuted),
+					claim: refuted,
+				};
 			}
 
 			const invariants = validateTransitionRelationalInvariants({

@@ -1,5 +1,6 @@
 import type {
 	ApplyGuard,
+	CapabilityDescriptor,
 	DurableIntentRecord,
 	EvidenceObservation,
 	FingerprintManifest,
@@ -123,6 +124,7 @@ export interface TransitionPack {
 	readonly rules: readonly TransitionRule[];
 	readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	readonly issuer: ObservationIssuer;
+	readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
 	readonly comparatorNameNormalizer?: ComparatorNameNormalizer;
 }
 
@@ -155,6 +157,45 @@ function sameArtifact(
 	return left.id === right.id && left.version === right.version;
 }
 
+function serverVersionNum(engineVersion: string): number | undefined {
+	const trimmed = engineVersion.trim();
+	if (trimmed.length === 0 || trimmed === 'unknown') {
+		return undefined;
+	}
+	if (/^\d+$/.test(trimmed)) {
+		const parsed = Number.parseInt(trimmed, 10);
+		if (!Number.isFinite(parsed)) {
+			return undefined;
+		}
+		return trimmed.length >= 5 ? parsed : parsed * 10_000;
+	}
+	const match = /^(\d+)(?:\.(\d+))?/.exec(trimmed);
+	if (!match) {
+		return undefined;
+	}
+	const major = Number.parseInt(match[1] ?? '', 10);
+	const minor = Number.parseInt(match[2] ?? '0', 10);
+	if (!Number.isFinite(major) || !Number.isFinite(minor)) {
+		return undefined;
+	}
+	return major * 10_000 + minor * 100;
+}
+
+function capabilityAvailable(
+	descriptor: CapabilityDescriptor,
+	context: ObservationContext,
+): boolean {
+	switch (descriptor.predicate.kind) {
+		case 'minServerVersionNum': {
+			const actual = serverVersionNum(context.engineVersion);
+			return (
+				actual !== undefined &&
+				actual >= descriptor.predicate.minServerVersionNum
+			);
+		}
+	}
+}
+
 export function isOperationRuntime(
 	semantics: RegisteredOperationSemantics,
 ): semantics is OperationRuntime {
@@ -182,6 +223,7 @@ export class PackRegistry {
 	private readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	private readonly issuers: readonly ObservationIssuer[];
 	private readonly issuerByArtifact: ReadonlyMap<string, ObservationIssuer>;
+	private readonly capabilityDescriptors: readonly CapabilityDescriptor[];
 	private readonly nameNormalizer: ComparatorNameNormalizer | undefined;
 
 	constructor(packs: readonly TransitionPack[]) {
@@ -190,6 +232,9 @@ export class PackRegistry {
 			...pack.operationSemantics,
 		]);
 		this.issuers = packs.map((pack) => pack.issuer);
+		this.capabilityDescriptors = packs.flatMap((pack) => [
+			...(pack.capabilityDescriptors ?? []),
+		]);
 		const normalizers = packs.flatMap((pack) =>
 			pack.comparatorNameNormalizer ? [pack.comparatorNameNormalizer] : [],
 		);
@@ -263,6 +308,23 @@ export class PackRegistry {
 			return this.defaultIssuer();
 		}
 		return this.issuerByArtifact.get(artifactKey(ref));
+	}
+
+	contextWithDerivedCapabilities(
+		context: ObservationContext,
+	): ObservationContext {
+		if (this.capabilityDescriptors.length === 0) {
+			return context;
+		}
+		const capabilities = this.capabilityDescriptors.flatMap((descriptor) =>
+			capabilityAvailable(descriptor, context) ? [descriptor.id] : [],
+		);
+		return {
+			...context,
+			capabilities: [
+				...new Set([...context.capabilities, ...capabilities]),
+			].sort(),
+		};
 	}
 
 	resolveOperation(operation: PhysicalOperation): OperationResolution {

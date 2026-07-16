@@ -3,6 +3,7 @@ import type {
 	AdvisoryObservation,
 	ApplyGuard,
 	Assumption,
+	ColumnIR,
 	DurableIntentRecord,
 	EvidenceObservation,
 	FingerprintManifest,
@@ -19,19 +20,25 @@ import type {
 } from '@dbsp/types';
 import { validateIdentifier } from '../../validate.js';
 import {
+	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_OPERATION_PACK_ARTIFACT,
+	PG_SCHEMA_USAGE_PRIVILEGE,
+	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
 import { advisoryObservationId, assumptionId } from '../ids.js';
 import { readPgObservationContext } from '../observation-issuer.js';
+import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
 
 export type AlterColumnSetNotNullPayload = {
 	readonly table: string;
 	readonly column: string;
 	readonly schema?: string;
+	readonly expectedColumnShape?: string;
 };
 
 type QueryResultLike = {
@@ -59,10 +66,31 @@ type CatalogValue = {
 	readonly nullable: boolean | null;
 	readonly oid: string | null;
 	readonly attnum: number | null;
+	readonly atttypid: string | null;
+	readonly atttypmod: number | null;
+	readonly formatType: string | null;
+	readonly typeName: string | null;
+	readonly typeSchema: string | null;
+	readonly hasDefault: boolean | null;
+	readonly defaultExpression: string | null;
+	readonly attcollation: string | null;
+	readonly collationName: string | null;
+	readonly collationSchema: string | null;
+	readonly collationProvider: string | null;
+	readonly collationVersion: string | null;
+	readonly attidentity: string | null;
+	readonly identity: 'always' | 'byDefault' | null;
+	readonly attgenerated: string | null;
+	readonly comment: string | null;
+	readonly unique: boolean | null;
+	readonly uniqueConstraintName: string | null;
+	readonly autoIncrement: boolean | null;
 };
 
 const JOURNAL_TABLE = 'dbsp_transition_journal';
 const GUARD_STATEMENT_TIMEOUT_MS = 5000;
+const STALE_EXPECTED_COLUMN_SHAPE_REASON =
+	'the target column no longer matches the compared desired shape; the recognized pure-nullability tightening is stale - replan against fresh state';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
@@ -89,7 +117,7 @@ function payloadOf(operation: PhysicalOperation): AlterColumnSetNotNullPayload {
 	if (!isRecord(operation.payload)) {
 		throw new Error('AlterColumnSetNotNull payload must be an object');
 	}
-	const { table, column, schema } = operation.payload;
+	const { table, column, schema, expectedColumnShape } = operation.payload;
 	if (typeof table !== 'string' || typeof column !== 'string') {
 		throw new Error('AlterColumnSetNotNull payload requires table and column');
 	}
@@ -98,13 +126,18 @@ function payloadOf(operation: PhysicalOperation): AlterColumnSetNotNullPayload {
 			'AlterColumnSetNotNull schema must be a string when present',
 		);
 	}
+	if (expectedColumnShape != null && typeof expectedColumnShape !== 'string') {
+		throw new Error(
+			'AlterColumnSetNotNull expectedColumnShape must be a stable-json string when present',
+		);
+	}
 	const payload = schema ? { table, column, schema } : { table, column };
 	validateIdentifier(payload.table, 'table');
 	validateIdentifier(payload.column, 'column');
 	if (payload.schema) {
 		validateIdentifier(payload.schema, 'schema');
 	}
-	return payload;
+	return expectedColumnShape ? { ...payload, expectedColumnShape } : payload;
 }
 
 function schemaFor(
@@ -213,16 +246,194 @@ function digest(value: unknown): string {
 	return createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
-function contextDigest(context: ObservationContext): string {
-	return digest({
-		engine: context.engine,
-		engineVersion: context.engineVersion,
-		databaseId: context.databaseId,
-		effectiveRole: context.effectiveRole,
-		searchPath: context.searchPath,
-		sessionConfiguration: context.sessionConfiguration,
-		extensions: context.extensions,
-	});
+function fact(key: string, value: unknown) {
+	return {
+		key,
+		value: typeof value === 'string' ? value : stableJson(value),
+	};
+}
+
+function originalDbTypeSchemaScope(
+	payload: AlterColumnSetNotNullPayload,
+	typeSchema: string | null,
+): 'target' | 'absolute' | null {
+	if (!typeSchema || typeSchema === 'pg_catalog') {
+		return null;
+	}
+	return typeSchema === explicitSchema(payload) ? 'target' : 'absolute';
+}
+
+function columnTypeFromCatalog(catalog: CatalogValue): ColumnIR['type'] {
+	switch (catalog.typeName) {
+		case 'uuid':
+			return 'uuid';
+		case 'jsonb':
+			return 'jsonb';
+		case 'json':
+			return 'json';
+		case 'int4range':
+			return 'int4range';
+		case 'int8range':
+			return 'int8range';
+		case 'numrange':
+			return 'numrange';
+		case 'daterange':
+			return 'daterange';
+		case 'tsrange':
+			return 'tsrange';
+		case 'tstzrange':
+			return 'tstzrange';
+		case 'int2':
+		case 'int4':
+			return 'integer';
+		case 'int8':
+			return 'bigint';
+		case 'numeric':
+		case 'decimal':
+		case 'float4':
+		case 'float8':
+			return 'decimal';
+		case 'bool':
+			return 'boolean';
+		case 'varchar':
+		case 'bpchar':
+			return 'string';
+		case 'text':
+			return 'text';
+		case 'date':
+			return 'date';
+		case 'time':
+		case 'timetz':
+			return 'time';
+		case 'timestamp':
+			return 'timestamp';
+		case 'timestamptz':
+			return 'datetime';
+	}
+
+	const formatType = catalog.formatType?.toLowerCase() ?? '';
+	if (formatType.startsWith('character varying')) {
+		return 'string';
+	}
+	if (formatType === 'bigint') {
+		return 'bigint';
+	}
+	if (formatType === 'integer' || formatType === 'smallint') {
+		return 'integer';
+	}
+	if (formatType === 'boolean') {
+		return 'boolean';
+	}
+	if (formatType === 'text') {
+		return 'text';
+	}
+	if (formatType === 'uuid') {
+		return 'uuid';
+	}
+	return 'string';
+}
+
+function catalogColumnShape(
+	payload: AlterColumnSetNotNullPayload,
+	catalog: CatalogValue,
+	includeOriginalDbType: boolean,
+): Omit<ColumnIR, 'nullable'> {
+	const shape: Record<string, unknown> = {
+		name: payload.column,
+		type: columnTypeFromCatalog(catalog),
+	};
+	if (catalog.hasDefault) {
+		shape.default = { sql: catalog.defaultExpression };
+	}
+	if (includeOriginalDbType && catalog.formatType) {
+		shape.originalDbType = catalog.formatType;
+		const schemaScope = originalDbTypeSchemaScope(payload, catalog.typeSchema);
+		if (catalog.typeSchema && schemaScope) {
+			shape.originalDbTypeSchema = catalog.typeSchema;
+			shape.originalDbTypeSchemaScope = schemaScope;
+		}
+	}
+	if (catalog.unique) {
+		shape.unique = true;
+		if (catalog.uniqueConstraintName) {
+			shape.uniqueConstraintName = catalog.uniqueConstraintName;
+		}
+	}
+	if (catalog.autoIncrement) {
+		shape.autoIncrement = true;
+	}
+	if (catalog.collationName && catalog.collationName !== 'default') {
+		shape.collation = catalog.collationName;
+	}
+	if (catalog.comment) {
+		shape.comment = catalog.comment;
+	}
+	if (catalog.identity) {
+		shape.identity = catalog.identity;
+	}
+	return shape as Omit<ColumnIR, 'nullable'>;
+}
+
+function assertExpectedColumnShape(
+	payload: AlterColumnSetNotNullPayload,
+	catalog: CatalogValue,
+): void {
+	if (!payload.expectedColumnShape) {
+		throw new Error(
+			`missing expected column shape; ${STALE_EXPECTED_COLUMN_SHAPE_REASON}`,
+		);
+	}
+	const observed = stableJson(catalogColumnShape(payload, catalog, true));
+	const observedWithoutDbTypeMetadata = stableJson(
+		catalogColumnShape(payload, catalog, false),
+	);
+	if (
+		payload.expectedColumnShape !== observed &&
+		payload.expectedColumnShape !== observedWithoutDbTypeMetadata
+	) {
+		throw new Error(STALE_EXPECTED_COLUMN_SHAPE_REASON);
+	}
+}
+
+function collationFacts(catalog: CatalogValue) {
+	if (!catalog.attcollation || catalog.attcollation === '0') {
+		return [];
+	}
+	return [
+		fact('column.collation.oid', catalog.attcollation),
+		fact('column.collation.name', catalog.collationName),
+		fact('column.collation.schema', catalog.collationSchema),
+		fact('pg_collation.provider', catalog.collationProvider),
+		fact('pg_collation.version', catalog.collationVersion),
+	];
+}
+
+function targetPrivilegeFacts(
+	payload: AlterColumnSetNotNullPayload,
+	context: ObservationContext,
+) {
+	const schema = schemaFor(payload, context);
+	return [
+		fact(
+			`context.privilege.${PG_SCHEMA_USAGE_PRIVILEGE}`,
+			pgPrivilegeValue(context, PG_SCHEMA_USAGE_PRIVILEGE, [schema]),
+		),
+		fact(
+			`context.privilege.${PG_TABLE_ALTER_AUTHORITY_PRIVILEGE}`,
+			pgPrivilegeValue(context, PG_TABLE_ALTER_AUTHORITY_PRIVILEGE, [
+				schema,
+				payload.table,
+			]),
+		),
+		fact(
+			`context.privilege.${PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE}`,
+			pgPrivilegeValue(context, PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE, [
+				schema,
+				payload.table,
+				payload.column,
+			]),
+		),
+	];
 }
 
 function sameResourceTarget(
@@ -284,13 +495,78 @@ function catalogValueFromEvidence(
 		const nullable = value.nullable;
 		const oid = value.oid;
 		const attnum = value.attnum;
+		const atttypid = value.atttypid;
+		const atttypmod = value.atttypmod;
+		const formatType = value.formatType;
+		const typeName = value.typeName;
+		const typeSchema = value.typeSchema;
+		const hasDefault = value.hasDefault;
+		const defaultExpression = value.defaultExpression;
+		const attcollation = value.attcollation;
+		const collationName = value.collationName;
+		const collationSchema = value.collationSchema;
+		const collationProvider = value.collationProvider;
+		const collationVersion = value.collationVersion;
+		const attidentity = value.attidentity;
+		const identity = value.identity;
+		const attgenerated = value.attgenerated;
+		const comment = value.comment;
+		const unique = value.unique;
+		const uniqueConstraintName = value.uniqueConstraintName;
+		const autoIncrement = value.autoIncrement;
 		if (
 			typeof exists === 'boolean' &&
 			(nullable === null || typeof nullable === 'boolean') &&
 			(oid === null || typeof oid === 'string') &&
-			(attnum === null || typeof attnum === 'number')
+			(attnum === null || typeof attnum === 'number') &&
+			(atttypid === null || typeof atttypid === 'string') &&
+			(atttypmod === null || typeof atttypmod === 'number') &&
+			(formatType === null || typeof formatType === 'string') &&
+			(typeName === null || typeof typeName === 'string') &&
+			(typeSchema === null || typeof typeSchema === 'string') &&
+			(hasDefault === null || typeof hasDefault === 'boolean') &&
+			(defaultExpression === null || typeof defaultExpression === 'string') &&
+			(attcollation === null || typeof attcollation === 'string') &&
+			(collationName === null || typeof collationName === 'string') &&
+			(collationSchema === null || typeof collationSchema === 'string') &&
+			(collationProvider === null || typeof collationProvider === 'string') &&
+			(collationVersion === null || typeof collationVersion === 'string') &&
+			(attidentity === null || typeof attidentity === 'string') &&
+			(identity === null ||
+				identity === 'always' ||
+				identity === 'byDefault') &&
+			(attgenerated === null || typeof attgenerated === 'string') &&
+			(comment === null || typeof comment === 'string') &&
+			(unique === null || typeof unique === 'boolean') &&
+			(uniqueConstraintName === null ||
+				typeof uniqueConstraintName === 'string') &&
+			(autoIncrement === null || typeof autoIncrement === 'boolean')
 		) {
-			return { exists, nullable, oid, attnum };
+			return {
+				exists,
+				nullable,
+				oid,
+				attnum,
+				atttypid,
+				atttypmod,
+				formatType,
+				typeName,
+				typeSchema,
+				hasDefault,
+				defaultExpression,
+				attcollation,
+				collationName,
+				collationSchema,
+				collationProvider,
+				collationVersion,
+				attidentity,
+				identity,
+				attgenerated,
+				comment,
+				unique,
+				uniqueConstraintName,
+				autoIncrement,
+			};
 		}
 	}
 	return undefined;
@@ -306,52 +582,77 @@ function fingerprintFor(
 		throw new Error('column catalog identity is missing');
 	}
 	const includedFacts = [
-		{ key: 'schema', value: schemaFor(payload, context) },
-		{ key: 'table', value: payload.table },
-		{ key: 'column', value: payload.column },
-		{ key: 'pg_class.oid', value: catalog.oid },
-		{ key: 'pg_attribute.attnum', value: String(catalog.attnum) },
-		{ key: 'nullable', value: String(nullable) },
-		{ key: 'context.digest', value: contextDigest(context) },
+		fact('target.schema', schemaFor(payload, context)),
+		fact('target.table', payload.table),
+		fact('target.column', payload.column),
+		fact('column.name', payload.column),
+		fact('pg_class.oid', catalog.oid),
+		fact('pg_attribute.attnum', catalog.attnum),
+		fact('column.nullable', nullable),
+		fact('pg_attribute.atttypid', catalog.atttypid),
+		fact('pg_attribute.atttypmod', catalog.atttypmod),
+		fact('pg_catalog.format_type', catalog.formatType),
+		fact('pg_type.typname', catalog.typeName),
+		fact('pg_type.typnamespace', catalog.typeSchema),
+		fact('column.type', {
+			atttypid: catalog.atttypid,
+			atttypmod: catalog.atttypmod,
+			formatType: catalog.formatType,
+		}),
+		fact('column.originalDbType', catalog.formatType),
+		fact(
+			'column.originalDbTypeSchema',
+			catalog.typeSchema === 'pg_catalog' ? null : catalog.typeSchema,
+		),
+		fact(
+			'column.originalDbTypeSchemaScope',
+			originalDbTypeSchemaScope(payload, catalog.typeSchema),
+		),
+		fact('column.default', {
+			hasDefault: catalog.hasDefault,
+			expression: catalog.defaultExpression,
+		}),
+		fact('pg_attrdef.exists', catalog.hasDefault),
+		fact('pg_attrdef.expression', catalog.defaultExpression),
+		fact('pg_attribute.attidentity', catalog.attidentity),
+		fact('column.identity', catalog.identity),
+		fact('pg_attribute.attgenerated', catalog.attgenerated),
+		fact('column.generated', catalog.attgenerated),
+		fact('pg_attribute.attcollation', catalog.attcollation),
+		fact(
+			'column.collation',
+			catalog.attcollation && catalog.attcollation !== '0'
+				? {
+						oid: catalog.attcollation,
+						name: catalog.collationName,
+						schema: catalog.collationSchema,
+					}
+				: null,
+		),
+		fact('pg_description.column', catalog.comment),
+		fact('column.comment', catalog.comment),
+		fact('pg_constraint.unique.exists', catalog.unique),
+		fact('column.unique', catalog.unique),
+		fact('pg_constraint.unique.name', catalog.uniqueConstraintName),
+		fact('column.uniqueConstraintName', catalog.uniqueConstraintName),
+		fact('pg_depend.owned-sequence.exists', catalog.autoIncrement),
+		fact('column.autoIncrement', catalog.autoIncrement),
+		...collationFacts(catalog),
+		fact('context.engine', context.engine),
+		fact('context.engineVersion', context.engineVersion),
+		fact('context.databaseId', context.databaseId),
+		fact('context.effectiveRole', context.effectiveRole ?? null),
+		fact(
+			`context.capability.${ALTER_COLUMN_SET_NOT_NULL_CAPABILITY}.available`,
+			context.capabilities.includes(ALTER_COLUMN_SET_NOT_NULL_CAPABILITY),
+		),
+		...targetPrivilegeFacts(payload, context),
 	];
-	// The fingerprint intentionally scopes to column identity (oid+attnum) and
-	// nullability — the only facts a SET NOT NULL transition reads or depends on.
-	// Every other column/table fact is DELIBERATELY not fingerprinted; its stability
-	// is bounded by the external-ddl-exclusion assumption on the proven step, not by
-	// this manifest. Declaring them here keeps the manifest honest: a change to one of
-	// these while oid+attnum+nullable stay identical is out of this fingerprint's
-	// coverage, not silently "matched". Widening the fingerprint to the full column
-	// fact set is tracked for the fingerprint-manifest stage.
 	const excludedOrUnknownFacts = [
 		{
-			key: 'pg_attribute.atttypid',
+			key: 'relation.sibling-columns-indexes-constraints',
 			reason:
-				'column data type/modifiers not fingerprinted; SET NOT NULL is type-agnostic — bounded by the external-ddl-exclusion assumption',
-		},
-		{
-			key: 'pg_attrdef',
-			reason:
-				'column default not fingerprinted — bounded by the external-ddl-exclusion assumption',
-		},
-		{
-			key: 'pg_attribute.attcollation',
-			reason:
-				'column collation not fingerprinted — bounded by the external-ddl-exclusion assumption',
-		},
-		{
-			key: 'pg_attribute.attidentity/attgenerated',
-			reason:
-				'identity/generated status not fingerprinted — bounded by the external-ddl-exclusion assumption',
-		},
-		{
-			key: 'pg_description',
-			reason:
-				'column/table comment not fingerprinted — bounded by the external-ddl-exclusion assumption',
-		},
-		{
-			key: 'relation.siblings',
-			reason:
-				'sibling columns, indexes, constraints, RLS and triggers not fingerprinted; SET NOT NULL does not depend on them — bounded by the external-ddl-exclusion assumption',
+				'sibling columns, multi-column indexes, multi-column constraints, RLS and triggers are outside the per-column recognizer comparison - bounded by the external-ddl-exclusion assumption',
 		},
 	];
 	return {
@@ -376,6 +677,7 @@ function beforeAfterFingerprints(
 	if (catalog.nullable !== true) {
 		throw new Error('expectedBefore requires a currently nullable column');
 	}
+	assertExpectedColumnShape(payload, catalog);
 	return {
 		expectedBefore: fingerprintFor(payload, context, catalog, true),
 		expectedAfter: fingerprintFor(payload, context, catalog, false),
@@ -639,9 +941,11 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			operation: PhysicalOperation,
 			_proofContext: ObservationContext,
 		) {
+			const payload = payloadOf(operation);
 			return readPgObservationContext(
 				client.opaqueClient,
-				explicitSchema(payloadOf(operation)),
+				explicitSchema(payload),
+				payload,
 			);
 		},
 		async observeOperation(

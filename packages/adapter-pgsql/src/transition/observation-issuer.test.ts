@@ -2,12 +2,18 @@ import type { ObservationContext, ObservationRequest } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
+	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
+	PG_SCHEMA_USAGE_PRIVILEGE,
+	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
+	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from './constants.js';
 import {
 	createPgObservationIssuer,
 	readPgObservationContext,
 } from './observation-issuer.js';
+import { pgPrivilegeFact } from './privileges.js';
 
 const context: ObservationContext = {
 	engine: 'postgresql',
@@ -36,6 +42,54 @@ function engineRequest(minServerVersionNum: number): ObservationRequest {
 }
 
 describe('PostgreSQL transition observation issuer', () => {
+	it('surfaces relation kind in column evidence for partitioned tables', async () => {
+		const issuer = createPgObservationIssuer();
+		const queries: string[] = [];
+		const observation = await issuer.execute(
+			{
+				kind: COLUMN_EXISTS_OBSERVATION,
+				scope: [],
+				detail: { schema: 'tenant', table: 'users', column: 'age' },
+			},
+			{
+				query: async (sql: string) => {
+					queries.push(sql);
+					return {
+						rows: [
+							{
+								oid: '12345',
+								relkind: 'p',
+								attnum: 2,
+								nullable: true,
+								atttypid: '23',
+								atttypmod: -1,
+								format_type: 'integer',
+								type_name: 'int4',
+								type_schema: 'pg_catalog',
+								has_default: false,
+								auto_increment: false,
+							},
+						],
+					};
+				},
+			},
+			context,
+		);
+
+		expect(queries[0]).toContain('c.relkind AS relkind');
+		expect(observation.result.value).toMatchObject({
+			exists: true,
+			relkind: 'p',
+			claims: [
+				{ kind: COLUMN_EXISTS_OBSERVATION, holds: true },
+				{
+					kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+					holds: false,
+				},
+			],
+		});
+	});
+
 	it('binds engine-version evidence to the request minimum', async () => {
 		const issuer = createPgObservationIssuer();
 		const observation = await issuer.execute(
@@ -152,6 +206,19 @@ describe('PostgreSQL transition observation issuer', () => {
 					if (sql === 'SHOW search_path') {
 						return { rows: [{ search_path: '"$user", public' }] };
 					}
+					if (sql.includes('pg_extension')) {
+						return { rows: [] };
+					}
+					if (sql.includes('pg_database')) {
+						return {
+							rows: [
+								{
+									collation_provider: 'c',
+									collation_version: '153.120',
+								},
+							],
+						};
+					}
 					throw new Error(`unexpected query: ${sql}`);
 				},
 			},
@@ -159,9 +226,75 @@ describe('PostgreSQL transition observation issuer', () => {
 		);
 
 		expect(contextFromDb.searchPath).toEqual(['tenant']);
+		expect(contextFromDb.capabilities).toEqual([]);
+		expect(contextFromDb.extensions).toEqual({});
+		expect(contextFromDb.collationProvider).toBe('c');
+		expect(contextFromDb.collationVersion).toBe('153.120');
 		expect(contextFromDb.sessionConfiguration.actual_search_path).toBe(
 			JSON.stringify(['role,with,commas', 'public']),
 		);
+	});
+
+	it('reads target-scoped privilege facts into context when a target is known', async () => {
+		const contextFromDb = await readPgObservationContext(
+			{
+				query: async (sql: string) => {
+					if (sql === 'SHOW server_version_num') {
+						return { rows: [{ server_version_num: '180000' }] };
+					}
+					if (sql === 'SELECT current_database() AS database_id') {
+						return { rows: [{ database_id: 'db' }] };
+					}
+					if (sql === 'SELECT current_user AS current_user') {
+						return { rows: [{ current_user: 'tenant_owner' }] };
+					}
+					if (sql.includes('current_schemas(false)')) {
+						return { rows: [{ search_path: ['tenant', 'public'] }] };
+					}
+					if (sql === 'SHOW search_path') {
+						return { rows: [{ search_path: 'tenant, public' }] };
+					}
+					if (sql.includes('pg_extension')) {
+						return {
+							rows: [{ name: 'vector', version: '0.8.0' }],
+						};
+					}
+					if (sql.includes('pg_database')) {
+						return {
+							rows: [{ collation_provider: null, collation_version: null }],
+						};
+					}
+					if (sql.includes('pg_has_role')) {
+						return {
+							rows: [
+								{
+									has_table_alter_authority: true,
+									has_schema_usage: true,
+								},
+							],
+						};
+					}
+					throw new Error(`unexpected query: ${sql}`);
+				},
+			},
+			'tenant',
+			{ schema: 'tenant', table: 'users', column: 'age' },
+		);
+
+		expect(contextFromDb.extensions).toEqual({ vector: '0.8.0' });
+		expect(contextFromDb.privileges).toEqual([
+			pgPrivilegeFact(PG_SCHEMA_USAGE_PRIVILEGE, ['tenant'], true),
+			pgPrivilegeFact(
+				PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
+				['tenant', 'users'],
+				true,
+			),
+			pgPrivilegeFact(
+				PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+				['tenant', 'users', 'age'],
+				true,
+			),
+		]);
 	});
 
 	it('reads observation context sequentially on one checked-out pool client', async () => {
@@ -191,6 +324,14 @@ describe('PostgreSQL transition observation issuer', () => {
 				if (sql === 'SHOW search_path') {
 					return { rows: [{ search_path: 'tenant, public' }] };
 				}
+				if (sql.includes('pg_extension')) {
+					return { rows: [] };
+				}
+				if (sql.includes('pg_database')) {
+					return {
+						rows: [{ collation_provider: null, collation_version: null }],
+					};
+				}
 				throw new Error(`unexpected query: ${sql}`);
 			},
 			release,
@@ -210,6 +351,8 @@ describe('PostgreSQL transition observation issuer', () => {
 			'SELECT current_user AS current_user',
 			'SELECT pg_catalog.to_json(pg_catalog.current_schemas(false)) AS search_path',
 			'SHOW search_path',
+			'SELECT extname AS name, extversion AS version FROM pg_catalog.pg_extension ORDER BY extname',
+			"SELECT pg_catalog.to_jsonb(d)->>'datlocprovider' AS collation_provider, pg_catalog.to_jsonb(d)->>'datcollversion' AS collation_version FROM pg_catalog.pg_database d WHERE d.datname = pg_catalog.current_database()",
 		]);
 		expect(contextFromDb.effectiveRole).toBe('tenant_owner');
 	});

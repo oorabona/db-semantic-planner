@@ -1,4 +1,4 @@
-import { createComparator, createPackRegistry } from '@dbsp/core';
+import { createComparator, createPackRegistry, createProver } from '@dbsp/core';
 import type {
 	ColumnIR,
 	EvidenceObservation,
@@ -7,7 +7,7 @@ import type {
 	ObservationRequest,
 	TableIR,
 } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CamelCaseNamingPlugin } from '../../naming-plugin.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
@@ -15,10 +15,15 @@ import {
 	ENGINE_VERSION_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_INTROSPECTION_ARTIFACT,
+	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from '../constants.js';
 import { evidenceId } from '../ids.js';
 import { createPgTransitionPack } from '../pack.js';
-import { createSetNotNullRule } from './set-not-null.js';
+import {
+	createSetNotNullRule,
+	expectedColumnShapeFor,
+	type SetNotNullMatch,
+} from './set-not-null.js';
 
 const context: ObservationContext = {
 	engine: 'postgresql',
@@ -69,6 +74,22 @@ function model(
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
 		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function setNotNullMatch(
+	overrides: Partial<SetNotNullMatch> = {},
+): SetNotNullMatch {
+	const columnName = overrides.column ?? 'age';
+	return {
+		schema: 'public',
+		table: 'users',
+		column: columnName,
+		expectedColumnShape: expectedColumnShapeFor(
+			column(false, {}, columnName),
+			columnName,
+		),
+		...overrides,
 	};
 }
 
@@ -131,13 +152,84 @@ function evidence(
 	};
 }
 
+function catalogEvidence(
+	request: ObservationRequest,
+	overrides: Record<string, unknown> = {},
+): EvidenceObservation {
+	const normalized = normalizedRequest(request);
+	return {
+		...evidence(normalized, true),
+		result: {
+			value: {
+				exists: true,
+				nullable: true,
+				oid: 'oid:users.age',
+				relkind: 'r',
+				attnum: 2,
+				atttypid: '23',
+				atttypmod: -1,
+				formatType: 'integer',
+				typeName: 'int4',
+				typeSchema: 'pg_catalog',
+				hasDefault: false,
+				defaultExpression: null,
+				attcollation: '0',
+				collationName: null,
+				collationSchema: null,
+				collationProvider: null,
+				collationVersion: null,
+				attidentity: null,
+				identity: null,
+				attgenerated: null,
+				comment: null,
+				unique: false,
+				uniqueConstraintName: null,
+				autoIncrement: false,
+				...overrides,
+				claims: [{ kind: COLUMN_EXISTS_OBSERVATION, holds: true }],
+			},
+		},
+	};
+}
+
+function proofTarget() {
+	return {
+		connect: vi.fn(async () => ({
+			query: async () => ({ rows: [] }),
+			release: vi.fn(),
+		})),
+	};
+}
+
+function registryWithColumnObservation(
+	overrides: Record<string, unknown> = {},
+) {
+	const pack = createPgTransitionPack();
+	return createPackRegistry([
+		{
+			...pack,
+			issuer: {
+				artifact: PG_INTROSPECTION_ARTIFACT,
+				execute: async (request: ObservationRequest) =>
+					request.kind === COLUMN_EXISTS_OBSERVATION
+						? catalogEvidence(request, overrides)
+						: normalizedEvidence(request),
+			},
+		},
+	]);
+}
+
 describe('postgresql.column.set-not-null rule', () => {
 	it('recognizes nullable true to false', () => {
 		const rule = createSetNotNullRule();
 		const result = rule.recognize(model(false), model(true));
 		expect(result.recognized).toBe(true);
 		if (result.recognized) {
-			expect(result.match).toEqual({ table: 'users', column: 'age' });
+			expect(result.match).toEqual({
+				table: 'users',
+				column: 'age',
+				expectedColumnShape: expectedColumnShapeFor(column(false), 'age'),
+			});
 		}
 	});
 
@@ -157,6 +249,10 @@ describe('postgresql.column.set-not-null rule', () => {
 		expect(result.match).toEqual({
 			table: 'user_profiles',
 			column: 'created_at',
+			expectedColumnShape: expectedColumnShapeFor(
+				column(false, {}, 'createdAt'),
+				'created_at',
+			),
 		});
 		const requests = rule.requiredObservations(result.match);
 		expect(requests[0]?.detail).toEqual({
@@ -178,6 +274,10 @@ describe('postgresql.column.set-not-null rule', () => {
 			schema: 'public',
 			table: 'user_profiles',
 			column: 'created_at',
+			expectedColumnShape: expectedColumnShapeFor(
+				column(false, {}, 'createdAt'),
+				'created_at',
+			),
 		});
 	});
 
@@ -198,6 +298,10 @@ describe('postgresql.column.set-not-null rule', () => {
 		expect(compare.candidates[0]?.match).toEqual({
 			table: 'user_profiles',
 			column: 'created_at',
+			expectedColumnShape: expectedColumnShapeFor(
+				column(false, {}, 'createdAt'),
+				'created_at',
+			),
 		});
 		expect(compare.candidates[0]?.requiredObservations[0]?.detail).toEqual({
 			table: 'user_profiles',
@@ -242,7 +346,7 @@ describe('postgresql.column.set-not-null rule', () => {
 
 	it('evaluates applicable when durable evidence holds', () => {
 		const rule = createSetNotNullRule();
-		const match = { schema: 'public', table: 'users', column: 'age' };
+		const match = setNotNullMatch();
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,
@@ -254,7 +358,7 @@ describe('postgresql.column.set-not-null rule', () => {
 
 	it('evaluates inapplicable when authority is refuted', () => {
 		const rule = createSetNotNullRule();
-		const match = { schema: 'public', table: 'users', column: 'age' };
+		const match = setNotNullMatch();
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,
@@ -268,15 +372,152 @@ describe('postgresql.column.set-not-null rule', () => {
 
 	it('evaluates blocked when evidence is missing', () => {
 		const rule = createSetNotNullRule();
-		const match = { schema: 'public', table: 'users', column: 'age' };
+		const match = setNotNullMatch();
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(match, [evidence(requests[0]!, true)], []);
 		expect(evaluation.outcome).toBe('blocked');
 	});
 
+	it('refuses partitioned tables before minting a parent-only operation plan', async () => {
+		const pack = createPgTransitionPack();
+		const runtime = pack.operationSemantics[0];
+		if (!runtime) {
+			throw new Error('expected set-not-null operation runtime');
+		}
+		const effectsOf = vi.fn(runtime.effectsOf);
+		const registry = createPackRegistry([
+			{
+				...pack,
+				operationSemantics: [{ ...runtime, effectsOf }],
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					execute: async (request: ObservationRequest) => {
+						const normalized = normalizedRequest(request);
+						if (request.kind !== COLUMN_EXISTS_OBSERVATION) {
+							return normalizedEvidence(request);
+						}
+						return {
+							...evidence(normalized, true),
+							result: {
+								value: {
+									exists: true,
+									relkind: 'p',
+									claims: [
+										{ kind: COLUMN_EXISTS_OBSERVATION, holds: true },
+										{
+											kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+											holds: false,
+										},
+									],
+								},
+							},
+						};
+					},
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false),
+			model(true),
+		);
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('inapplicable');
+		if (outcome.kind === 'inapplicable') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'proven-inapplicable',
+			});
+			expect(outcome.claim?.proposition.detail).toBe(
+				'partitioned tables are not yet supported by the SET NOT NULL transition',
+			);
+		}
+		expect(effectsOf).not.toHaveBeenCalled();
+	});
+
+	it('blocks proof when the observed column shape drifted after recognition', async () => {
+		const registry = registryWithColumnObservation({
+			atttypid: '20',
+			formatType: 'bigint',
+			typeName: 'int8',
+		});
+		const compare = createComparator(registry).compare(
+			model(false),
+			model(true),
+		);
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		expect(outcome).not.toHaveProperty('plan');
+		expect(outcome.assessment.decision).toBe('blocked');
+		expect(JSON.stringify(outcome.assessment.reasons)).toContain(
+			'the target column no longer matches the compared desired shape',
+		);
+		expect(JSON.stringify(outcome.assessment.reasons)).toContain(
+			'replan against fresh state',
+		);
+	});
+
+	it('proves the honest path and anchors expectedAfter to the verified shape', async () => {
+		const registry = registryWithColumnObservation();
+		const compare = createComparator(registry).compare(
+			model(false),
+			model(true),
+		);
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		const step = outcome.plan.steps[0];
+		const beforeFact = step?.expectedBefore.includedFacts.find(
+			(item) => item.key === 'column.nullable',
+		);
+		const afterFact = step?.expectedAfter.includedFacts.find(
+			(item) => item.key === 'column.nullable',
+		);
+		expect(beforeFact?.value).toBe('boolean:true');
+		expect(afterFact?.value).toBe('boolean:false');
+		expect(step?.expectedAfter.includedFacts).toContainEqual({
+			key: 'pg_catalog.format_type',
+			value: 'integer',
+		});
+		expect(step?.expectedAfter.includedFacts).toContainEqual({
+			key: 'column.name',
+			value: 'age',
+		});
+	});
+
 	it('generates an operation and an undischarged NO_NULLS apply guard', () => {
 		const rule = createSetNotNullRule();
-		const match = { schema: 'public', table: 'users', column: 'age' };
+		const match = setNotNullMatch();
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,

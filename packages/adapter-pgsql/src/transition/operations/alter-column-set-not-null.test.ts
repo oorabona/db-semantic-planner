@@ -1,5 +1,6 @@
 import type {
 	ApplyGuard,
+	ColumnIR,
 	DurableIntentRecord,
 	EvidenceObservation,
 	ObservationContext,
@@ -13,8 +14,13 @@ import {
 	NO_NULLS_GUARD,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_OPERATION_PACK_ARTIFACT,
+	PG_SCHEMA_USAGE_PRIVILEGE,
+	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
 import { assumptionId, evidenceId } from '../ids.js';
+import { pgPrivilegeFact } from '../privileges.js';
+import { expectedColumnShapeFor } from '../rules/set-not-null.js';
 import {
 	createAlterColumnSetNotNullOperationRuntime,
 	renderAlterColumnSetNotNullSql,
@@ -25,17 +31,54 @@ const context: ObservationContext = {
 	engineVersion: '180000',
 	databaseId: 'test',
 	capabilities: ['alter-column-set-not-null'],
-	privileges: [],
+	privileges: [
+		pgPrivilegeFact(PG_SCHEMA_USAGE_PRIVILEGE, ['tenant'], true),
+		pgPrivilegeFact(
+			PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
+			['tenant', 'users'],
+			true,
+		),
+		pgPrivilegeFact(
+			PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+			['tenant', 'users', 'age'],
+			true,
+		),
+	],
+	effectiveRole: 'tenant_owner',
 	searchPath: ['tenant'],
 	sessionConfiguration: {},
 	extensions: {},
 };
 
-const operation: PhysicalOperation = {
-	ref: 'postgresql:set-not-null:["tenant","users","age"]',
-	operationKind: ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
-	payload: { schema: 'tenant', table: 'users', column: 'age' },
-};
+function expectedShape(overrides: Partial<ColumnIR> = {}): string {
+	return expectedColumnShapeFor(
+		{
+			name: 'age',
+			type: 'integer',
+			nullable: false,
+			originalDbType: 'integer',
+			...overrides,
+		},
+		'age',
+	);
+}
+
+function operationWithExpectedShape(
+	expectedColumnShape = expectedShape(),
+): PhysicalOperation {
+	return {
+		ref: 'postgresql:set-not-null:["tenant","users","age"]',
+		operationKind: ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
+		payload: {
+			schema: 'tenant',
+			table: 'users',
+			column: 'age',
+			expectedColumnShape,
+		},
+	};
+}
+
+const operation: PhysicalOperation = operationWithExpectedShape();
 
 function guard(): ApplyGuard {
 	return {
@@ -58,7 +101,11 @@ function guard(): ApplyGuard {
 	};
 }
 
-function catalogEvidence(table: string, column: string): EvidenceObservation {
+function catalogEvidence(
+	table: string,
+	column: string,
+	overrides: Record<string, unknown> = {},
+): EvidenceObservation {
 	const request: ObservationRequest = {
 		kind: COLUMN_EXISTS_OBSERVATION,
 		scope: [
@@ -84,6 +131,26 @@ function catalogEvidence(table: string, column: string): EvidenceObservation {
 				nullable: true,
 				oid: `oid:${table}.${column}`,
 				attnum: column === 'age' ? 2 : 3,
+				atttypid: '23',
+				atttypmod: -1,
+				formatType: 'integer',
+				typeName: 'int4',
+				typeSchema: 'pg_catalog',
+				hasDefault: false,
+				defaultExpression: null,
+				attcollation: '0',
+				collationName: null,
+				collationSchema: null,
+				collationProvider: null,
+				collationVersion: null,
+				attidentity: null,
+				identity: null,
+				attgenerated: null,
+				comment: null,
+				unique: false,
+				uniqueConstraintName: null,
+				autoIncrement: false,
+				...overrides,
 				claims: [{ kind: COLUMN_EXISTS_OBSERVATION, holds: true }],
 			},
 		},
@@ -309,23 +376,113 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		});
 		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
 			key: 'pg_attribute.attnum',
-			value: '2',
+			value: 'number:2',
 		});
-
-		// The manifest must NOT claim complete coverage: facts the fingerprint does
-		// not read (type, default, collation, identity, comment, siblings) are
-		// declared as excluded/unknown, bounded by the external-ddl-exclusion
-		// assumption — never silently omitted (fail-open honesty).
-		expect(
-			fingerprints.expectedBefore.excludedOrUnknownFacts.length,
-		).toBeGreaterThan(0);
-		const excludedKeys = fingerprints.expectedBefore.excludedOrUnknownFacts.map(
-			(fact) => fact.key,
+		expect(fingerprints.expectedBefore.includedFacts).not.toContainEqual(
+			expect.objectContaining({ key: 'context.digest' }),
 		);
-		expect(excludedKeys).toContain('pg_attribute.atttypid');
-		expect(excludedKeys).toContain('relation.siblings');
-		for (const fact of fingerprints.expectedBefore.excludedOrUnknownFacts) {
-			expect(fact.reason).toMatch(/external-ddl-exclusion/);
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: 'context.engine',
+			value: 'postgresql',
+		});
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: 'context.engineVersion',
+			value: '180000',
+		});
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: 'context.capability.alter-column-set-not-null.available',
+			value: 'boolean:true',
+		});
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: `context.privilege.${PG_SCHEMA_USAGE_PRIVILEGE}`,
+			value: 'true',
+		});
+		expect(fingerprints.expectedBefore.excludedOrUnknownFacts).toEqual([
+			{
+				key: 'relation.sibling-columns-indexes-constraints',
+				reason:
+					'sibling columns, multi-column indexes, multi-column constraints, RLS and triggers are outside the per-column recognizer comparison - bounded by the external-ddl-exclusion assumption',
+			},
+		]);
+	});
+
+	it('hashes every recognizer-compared column fact instead of silently omitting it', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const base = runtime.buildFingerprints(
+			operation,
+			[
+				catalogEvidence('users', 'age', {
+					oid: 'same-oid',
+					attnum: 2,
+				}),
+			],
+			context,
+		);
+		const changed = runtime.buildFingerprints(
+			operationWithExpectedShape(
+				expectedShape({
+					type: 'string',
+					originalDbType: 'character varying(42)',
+					default: { sql: "'unknown'::text" },
+					collation: 'en_US',
+					identity: 'byDefault',
+					comment: 'Age in years',
+					unique: true,
+					uniqueConstraintName: 'users_age_key',
+					autoIncrement: true,
+				}),
+			),
+			[
+				catalogEvidence('users', 'age', {
+					oid: 'same-oid',
+					attnum: 2,
+					atttypid: '25',
+					atttypmod: 42,
+					formatType: 'character varying(42)',
+					typeName: 'varchar',
+					hasDefault: true,
+					defaultExpression: "'unknown'::text",
+					attcollation: '100',
+					collationName: 'en_US',
+					collationSchema: 'pg_catalog',
+					collationProvider: 'c',
+					collationVersion: '153.120',
+					attidentity: 'd',
+					identity: 'byDefault',
+					attgenerated: 's',
+					comment: 'Age in years',
+					unique: true,
+					uniqueConstraintName: 'users_age_key',
+					autoIncrement: true,
+				}),
+			],
+			context,
+		);
+
+		expect(changed.expectedBefore.digest).not.toBe(base.expectedBefore.digest);
+
+		const included = new Set(
+			changed.expectedBefore.includedFacts.map((item) => item.key),
+		);
+		const excluded = new Set(
+			changed.expectedBefore.excludedOrUnknownFacts.map((item) => item.key),
+		);
+		const recognizerComparedFacts = [
+			'column.name',
+			'column.type',
+			'column.default',
+			'column.originalDbType',
+			'column.originalDbTypeSchema',
+			'column.originalDbTypeSchemaScope',
+			'column.unique',
+			'column.uniqueConstraintName',
+			'column.autoIncrement',
+			'column.collation',
+			'column.comment',
+			'column.identity',
+		];
+		for (const key of recognizerComparedFacts) {
+			expect(included.has(key) || excluded.has(key)).toBe(true);
 		}
 	});
 });

@@ -17,12 +17,15 @@ import type { NamingPlugin } from '../../naming-plugin.js';
 import { identityNaming } from '../../naming-plugin.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
+	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
+	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	SET_NOT_NULL_RULE_ID,
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
@@ -33,12 +36,16 @@ export interface SetNotNullMatch {
 	readonly database?: string;
 	readonly table: string;
 	readonly column: string;
+	readonly expectedColumnShape: string;
 }
 
 type ResolvedSetNotNullMatch = SetNotNullMatch & {
 	readonly schema: string;
 	readonly database: string;
 };
+
+const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
+	'partitioned tables are not yet supported by the SET NOT NULL transition';
 
 export interface SetNotNullRuleOptions {
 	readonly naming?: NamingPlugin;
@@ -85,10 +92,19 @@ function sameLogicalDetail(
 	);
 }
 
-function columnWithoutNullable(column: ColumnIR): Omit<ColumnIR, 'nullable'> {
+export function columnWithoutNullable(
+	column: ColumnIR,
+): Omit<ColumnIR, 'nullable'> {
 	const rest: Record<string, unknown> = { ...column };
 	delete rest.nullable;
 	return rest as Omit<ColumnIR, 'nullable'>;
+}
+
+export function expectedColumnShapeFor(
+	column: ColumnIR,
+	physicalName: string,
+): string {
+	return stableJson(columnWithoutNullable({ ...column, name: physicalName }));
 }
 
 function isPureNullabilityTightening(
@@ -151,7 +167,9 @@ function requiredObservationsFor(
 					name: 'postgresql',
 				},
 			],
-			detail: { minServerVersionNum: 180000 },
+			detail: {
+				minServerVersionNum: ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+			},
 		},
 	];
 }
@@ -225,6 +243,51 @@ function claimHolds(
 	return undefined;
 }
 
+function relationKind(
+	evidence: readonly EvidenceObservation[],
+	request: ObservationRequest,
+): string | undefined {
+	for (const observation of evidence) {
+		if (!sameRequest(observation.request, request)) {
+			continue;
+		}
+		const value = observation.result.value;
+		if (isRecord(value) && typeof value.relkind === 'string') {
+			return value.relkind;
+		}
+	}
+	return undefined;
+}
+
+function partitionedTableUnsupportedObligation(
+	match: SetNotNullMatch,
+	columnRequest: ObservationRequest,
+): ProofObligation {
+	const database =
+		columnRequest.scope.find((resource) => resource.database)?.database ??
+		match.database ??
+		'model';
+	const schema =
+		columnRequest.scope.find((resource) => resource.schema)?.schema ??
+		match.schema;
+	const scopedMatch: SetNotNullMatch = schema
+		? { ...match, schema, database }
+		: { ...match, database };
+	const scope = [
+		resourceForMatch(scopedMatch, 'table', database),
+		resourceForMatch(scopedMatch, 'column', database),
+	];
+	return {
+		proposition: {
+			kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+			scope,
+			detail: PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
+		},
+		scope,
+		dischargeableBy: [columnRequest],
+	};
+}
+
 function evaluationObligations(
 	match: SetNotNullMatch,
 	evidence: readonly EvidenceObservation[],
@@ -248,8 +311,17 @@ function operationRef(match: SetNotNullMatch): string {
 
 function operationFor(match: SetNotNullMatch): PhysicalOperation {
 	const payload = match.schema
-		? { schema: match.schema, table: match.table, column: match.column }
-		: { table: match.table, column: match.column };
+		? {
+				schema: match.schema,
+				table: match.table,
+				column: match.column,
+				expectedColumnShape: match.expectedColumnShape,
+			}
+		: {
+				table: match.table,
+				column: match.column,
+				expectedColumnShape: match.expectedColumnShape,
+			};
 	return {
 		ref: operationRef(match),
 		operationKind: ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
@@ -323,7 +395,7 @@ export function createSetNotNullRule(
 		support: {
 			engine: 'postgresql',
 			versions: [{ min: '18' }],
-			requiredCapabilities: ['alter-column-set-not-null'],
+			requiredCapabilities: [ALTER_COLUMN_SET_NOT_NULL_CAPABILITY],
 		},
 		recognize(
 			desired: ModelIR,
@@ -342,11 +414,16 @@ export function createSetNotNullRule(
 						currentColumn &&
 						isPureNullabilityTightening(desiredColumn, currentColumn)
 					) {
+						const physicalColumn = naming.toDatabase(desiredColumn.name);
 						return {
 							recognized: true,
 							match: {
 								table: naming.toDatabase(desiredTable.name),
-								column: naming.toDatabase(desiredColumn.name),
+								column: physicalColumn,
+								expectedColumnShape: expectedColumnShapeFor(
+									desiredColumn,
+									physicalColumn,
+								),
 							},
 						};
 					}
@@ -371,6 +448,19 @@ export function createSetNotNullRule(
 			const exists = existsRequest
 				? claimHolds(evidence, existsRequest)
 				: undefined;
+			if (
+				existsRequest &&
+				exists === true &&
+				relationKind(evidence, existsRequest) === 'p'
+			) {
+				return {
+					outcome: 'inapplicable',
+					obligations: [
+						partitionedTableUnsupportedObligation(match, existsRequest),
+					],
+					assumptions: [],
+				};
+			}
 			const hasAlterAuthority = authorityRequest
 				? claimHolds(evidence, authorityRequest)
 				: undefined;

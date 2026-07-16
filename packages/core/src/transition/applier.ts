@@ -3,6 +3,7 @@ import type {
 	ApplyPolicy,
 	ApplyResult,
 	Assumption,
+	ClaimId,
 	DurableIntentRecord,
 	EvidenceId,
 	EvidenceObservation,
@@ -19,7 +20,7 @@ import type {
 	TransitionConnectionPool,
 	TrustRoot,
 } from '@dbsp/types';
-import { semanticArtifactId } from './ids.js';
+import { claimId, semanticArtifactId } from './ids.js';
 import type { Applier, InProcessProvenPlan } from './index.js';
 import { isMintedInProcessPlan } from './minting.js';
 import {
@@ -129,6 +130,39 @@ function completedAssessment(
 		...proven,
 		lifecycle: 'completed',
 		continuation: 'none',
+	};
+}
+
+function primaryClaimFromPlan(plan: InProcessProvenPlan): ClaimId {
+	return (
+		plan.claims[0]?.id ??
+		plan.steps.flatMap((step) => [...step.requiredClaims])[0] ??
+		claimId('dbsp.transition.claim.plan')
+	);
+}
+
+function derivedApplicableAssessment(
+	plan: InProcessProvenPlan,
+): ApplicableAssessment {
+	const established =
+		plan.assumptions.length === 0 &&
+		plan.claims.every(
+			(item) =>
+				item.derivedBy.conclusion === 'established' &&
+				item.assumes.length === 0,
+		);
+	return {
+		decision: 'applicable',
+		assurance: established ? 'established' : 'accepted-under-assumptions',
+		lifecycle: 'planned',
+		continuation: 'none',
+		reasons: [
+			{
+				code: 'proven-applicable',
+				claim: primaryClaimFromPlan(plan),
+				scope: [],
+			},
+		],
 	};
 }
 
@@ -344,7 +378,6 @@ export function createApplier(registry: PackRegistry): Applier {
 			if (!isMintedInProcessPlan(plan)) {
 				return invalidPlanResult(UNMINTED_PLAN_DETAIL);
 			}
-			const assessmentInput = proven.assessment;
 			if (plan.steps.length !== 1) {
 				return noSingleStepResult(plan);
 			}
@@ -361,6 +394,7 @@ export function createApplier(registry: PackRegistry): Applier {
 					`internal error: minted proven plan violated relational invariants: ${diagnostic.detail}`,
 				);
 			}
+			const reportedAssessment = derivedApplicableAssessment(plan);
 
 			for (const assumption of plan.assumptions) {
 				if (!assumptionAccepted(assumption, policy)) {
@@ -428,6 +462,8 @@ export function createApplier(registry: PackRegistry): Applier {
 					step.operation,
 					proofContext,
 				);
+				runtimeContext =
+					registry.contextWithDerivedCapabilities(runtimeContext);
 
 				const before = await semantics.observeOperation(
 					executionClient,
@@ -590,7 +626,7 @@ export function createApplier(registry: PackRegistry): Applier {
 				};
 				await semantics.writeObservedJournal(executionClient, journal);
 				return {
-					assessment: completedAssessment(assessmentInput),
+					assessment: completedAssessment(reportedAssessment),
 					journals: [journal],
 					observations,
 				};

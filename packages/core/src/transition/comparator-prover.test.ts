@@ -1,5 +1,6 @@
 import type {
 	Assumption,
+	CapabilityDescriptor,
 	ColumnIR,
 	EvidenceObservation,
 	ModelIR,
@@ -374,6 +375,7 @@ function registry(
 		readonly rules?: readonly TransitionRule[];
 		readonly semantics?: RegisteredOperationSemantics;
 		readonly issuer?: ObservationIssuer;
+		readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
 	} = {},
 ) {
 	return createPackRegistry([
@@ -381,6 +383,7 @@ function registry(
 			rules: options.rules ?? [rule()],
 			operationSemantics: [options.semantics ?? semantics()],
 			issuer: options.issuer ?? issuer(),
+			capabilityDescriptors: options.capabilityDescriptors,
 		},
 	]);
 }
@@ -644,21 +647,31 @@ describe('createProver', () => {
 				issuer: issuer(false),
 			}),
 		).prove(validCompare(), proofTarget(), context);
-		expect(outcome.kind).toBe('blocked');
+		expect(outcome.kind).toBe('inapplicable');
 		expect(generateCandidate).not.toHaveBeenCalled();
 	});
 
-	it.each([
-		['refuted', issuer(false), 'proven-inapplicable'],
-		['undischarged', emptyIssuer(), 'insufficient-evidence'],
-	] as const)('refuses a %s required claim before minting a plan', async (_conclusion, observationIssuer, reasonCode) => {
+	it('returns inapplicable for a refuted required claim before minting a plan', async () => {
 		const outcome = await createProver(
-			registry({ issuer: observationIssuer }),
+			registry({ issuer: issuer(false) }),
+		).prove(validCompare(), proofTarget(), context);
+
+		expect(outcome.kind).toBe('inapplicable');
+		if (outcome.kind === 'inapplicable') {
+			expect(outcome.assessment.decision).toBe('inapplicable');
+			expect(outcome.assessment.reasons[0]?.code).toBe('proven-inapplicable');
+			expect(outcome.claim?.derivedBy.conclusion).toBe('refuted');
+		}
+	});
+
+	it('stays blocked for an undischarged required claim before minting a plan', async () => {
+		const outcome = await createProver(
+			registry({ issuer: emptyIssuer() }),
 		).prove(validCompare(), proofTarget(), context);
 
 		expect(outcome.kind).toBe('blocked');
 		if (outcome.kind === 'blocked') {
-			expect(outcome.assessment.reasons[0]?.code).toBe(reasonCode);
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
 		}
 	});
 
@@ -718,8 +731,96 @@ describe('createProver', () => {
 				issuer: { artifact: issuerArtifact, execute },
 			}),
 		).prove(validCompare(), proofTarget(), context);
-		expect(outcome.kind).toBe('blocked');
+		expect(outcome.kind).toBe('inapplicable');
 		expect(execute).not.toHaveBeenCalled();
+	});
+
+	it('derives required capabilities from pack descriptors before issuing observations', async () => {
+		const capabilityDescriptors: readonly CapabilityDescriptor[] = [
+			{
+				id: 'mock',
+				predicate: { kind: 'minServerVersionNum', minServerVersionNum: 180000 },
+			},
+		];
+		const execute = vi.fn(issuer().execute);
+		const readContext = vi
+			.fn()
+			.mockResolvedValueOnce({
+				...context,
+				engineVersion: '170000',
+				capabilities: [],
+			})
+			.mockResolvedValueOnce({
+				...context,
+				engineVersion: '180000',
+				capabilities: [],
+			});
+		const customRegistry = registry({
+			rules: [
+				rule({
+					support: {
+						engine: 'postgresql',
+						versions: [{ min: '17' }],
+						requiredCapabilities: ['mock'],
+					},
+				}),
+			],
+			issuer: { artifact: issuerArtifact, readContext, execute },
+			capabilityDescriptors,
+		});
+		const compare = createComparator(customRegistry).compare(
+			model(false),
+			model(true),
+		);
+		if (compare.kind !== 'transitions') {
+			throw new Error(`expected transitions, got ${compare.kind}`);
+		}
+
+		const oldServer = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+		const supportedServer = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(oldServer.kind).toBe('inapplicable');
+		if (oldServer.kind === 'inapplicable') {
+			expect(oldServer.assessment.reasons[0]).toMatchObject({
+				code: 'context-mismatch',
+				fact: {
+					key: 'context.capability.mock.available',
+					value: 'false',
+				},
+			});
+		}
+		expect(supportedServer.kind).toBe('proven');
+		expect(execute).toHaveBeenCalled();
+	});
+
+	it('merges descriptor-derived capabilities with incoming context capabilities', () => {
+		const customRegistry = registry({
+			capabilityDescriptors: [
+				{
+					id: 'mock',
+					predicate: {
+						kind: 'minServerVersionNum',
+						minServerVersionNum: 180000,
+					},
+				},
+			],
+		});
+
+		const derived = customRegistry.contextWithDerivedCapabilities({
+			...context,
+			engineVersion: '180000',
+			capabilities: ['external-pack-capability'],
+		});
+
+		expect(derived.capabilities).toEqual(['external-pack-capability', 'mock']);
 	});
 
 	it('refuses scope/detail mismatched evidence for an obligation', async () => {

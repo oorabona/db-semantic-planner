@@ -1,6 +1,10 @@
 import type { DbCasing } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
+import {
+	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
+	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+} from './constants.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createSetNotNullRule } from './rules/set-not-null.js';
@@ -18,6 +22,15 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		rules: [createSetNotNullRule({ naming })],
 		operationSemantics: [createAlterColumnSetNotNullOperationRuntime()],
 		issuer: createPgObservationIssuer(),
+		capabilityDescriptors: [
+			{
+				id: ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
+				predicate: {
+					kind: 'minServerVersionNum',
+					minServerVersionNum: ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+				},
+			},
+		],
 		comparatorNameNormalizer: {
 			normalizeCurrentIdentifier: (identifier: string) =>
 				naming.toModel(identifier),

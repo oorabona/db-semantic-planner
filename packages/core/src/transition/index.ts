@@ -3,6 +3,7 @@ import type {
 	ApplyPolicy,
 	ApplyResult,
 	CompareOutcome,
+	InapplicableAssessment,
 	ObservationContext,
 	PlanAssessment,
 	ProofClaim,
@@ -34,6 +35,11 @@ export type ProveOutcome =
 	| {
 			readonly kind: 'blocked';
 			readonly assessment: PlanAssessment;
+	  }
+	| {
+			readonly kind: 'inapplicable';
+			readonly assessment: InapplicableAssessment;
+			readonly claim?: ProofClaim;
 	  };
 
 export interface Prover {
@@ -61,8 +67,10 @@ export type {
 	ApplicableAssessment,
 	ApplicableEvaluation,
 	ApplyPolicy,
+	CapabilityDescriptor,
 	Comparator,
 	CompareOutcome,
+	InapplicableAssessment,
 	ObservationIssuer,
 	OperationEffectAssessment,
 	OperationSemantics,
