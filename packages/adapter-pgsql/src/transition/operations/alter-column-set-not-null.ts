@@ -3,7 +3,6 @@ import type {
 	AdvisoryObservation,
 	ApplyGuard,
 	Assumption,
-	ColumnIR,
 	DurableIntentRecord,
 	EvidenceObservation,
 	FingerprintManifest,
@@ -20,6 +19,12 @@ import type {
 } from '@dbsp/types';
 import { validateIdentifier } from '../../validate.js';
 import {
+	columnShapeFromCatalog,
+	compareSetNotNullColumnShape,
+	isSetNotNullColumnShapeExpectation,
+	type SetNotNullColumnShapeExpectation,
+} from '../column-shape.js';
+import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
@@ -29,6 +34,7 @@ import {
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
+import { createPgEquivalenceCapability } from '../equivalence.js';
 import { advisoryObservationId, assumptionId } from '../ids.js';
 import { readPgObservationContext } from '../observation-issuer.js';
 import { pgPrivilegeValue } from '../privileges.js';
@@ -38,7 +44,7 @@ export type AlterColumnSetNotNullPayload = {
 	readonly table: string;
 	readonly column: string;
 	readonly schema?: string;
-	readonly expectedColumnShape?: string;
+	readonly expectedColumnShape?: SetNotNullColumnShapeExpectation;
 };
 
 type QueryResultLike = {
@@ -63,6 +69,7 @@ type TransitionExecutionClient = {
 
 type CatalogValue = {
 	readonly exists: boolean;
+	readonly relkind: string | null;
 	readonly nullable: boolean | null;
 	readonly oid: string | null;
 	readonly attnum: number | null;
@@ -126,9 +133,12 @@ function payloadOf(operation: PhysicalOperation): AlterColumnSetNotNullPayload {
 			'AlterColumnSetNotNull schema must be a string when present',
 		);
 	}
-	if (expectedColumnShape != null && typeof expectedColumnShape !== 'string') {
+	if (
+		expectedColumnShape != null &&
+		!isSetNotNullColumnShapeExpectation(expectedColumnShape)
+	) {
 		throw new Error(
-			'AlterColumnSetNotNull expectedColumnShape must be a stable-json string when present',
+			'AlterColumnSetNotNull expectedColumnShape must be a structured column shape expectation when present',
 		);
 	}
 	const payload = schema ? { table, column, schema } : { table, column };
@@ -263,135 +273,37 @@ function originalDbTypeSchemaScope(
 	return typeSchema === explicitSchema(payload) ? 'target' : 'absolute';
 }
 
-function columnTypeFromCatalog(catalog: CatalogValue): ColumnIR['type'] {
-	switch (catalog.typeName) {
-		case 'uuid':
-			return 'uuid';
-		case 'jsonb':
-			return 'jsonb';
-		case 'json':
-			return 'json';
-		case 'int4range':
-			return 'int4range';
-		case 'int8range':
-			return 'int8range';
-		case 'numrange':
-			return 'numrange';
-		case 'daterange':
-			return 'daterange';
-		case 'tsrange':
-			return 'tsrange';
-		case 'tstzrange':
-			return 'tstzrange';
-		case 'int2':
-		case 'int4':
-			return 'integer';
-		case 'int8':
-			return 'bigint';
-		case 'numeric':
-		case 'decimal':
-		case 'float4':
-		case 'float8':
-			return 'decimal';
-		case 'bool':
-			return 'boolean';
-		case 'varchar':
-		case 'bpchar':
-			return 'string';
-		case 'text':
-			return 'text';
-		case 'date':
-			return 'date';
-		case 'time':
-		case 'timetz':
-			return 'time';
-		case 'timestamp':
-			return 'timestamp';
-		case 'timestamptz':
-			return 'datetime';
-	}
-
-	const formatType = catalog.formatType?.toLowerCase() ?? '';
-	if (formatType.startsWith('character varying')) {
-		return 'string';
-	}
-	if (formatType === 'bigint') {
-		return 'bigint';
-	}
-	if (formatType === 'integer' || formatType === 'smallint') {
-		return 'integer';
-	}
-	if (formatType === 'boolean') {
-		return 'boolean';
-	}
-	if (formatType === 'text') {
-		return 'text';
-	}
-	if (formatType === 'uuid') {
-		return 'uuid';
-	}
-	return 'string';
-}
-
-function catalogColumnShape(
-	payload: AlterColumnSetNotNullPayload,
-	catalog: CatalogValue,
-	includeOriginalDbType: boolean,
-): Omit<ColumnIR, 'nullable'> {
-	const shape: Record<string, unknown> = {
-		name: payload.column,
-		type: columnTypeFromCatalog(catalog),
-	};
-	if (catalog.hasDefault) {
-		shape.default = { sql: catalog.defaultExpression };
-	}
-	if (includeOriginalDbType && catalog.formatType) {
-		shape.originalDbType = catalog.formatType;
-		const schemaScope = originalDbTypeSchemaScope(payload, catalog.typeSchema);
-		if (catalog.typeSchema && schemaScope) {
-			shape.originalDbTypeSchema = catalog.typeSchema;
-			shape.originalDbTypeSchemaScope = schemaScope;
-		}
-	}
-	if (catalog.unique) {
-		shape.unique = true;
-		if (catalog.uniqueConstraintName) {
-			shape.uniqueConstraintName = catalog.uniqueConstraintName;
-		}
-	}
-	if (catalog.autoIncrement) {
-		shape.autoIncrement = true;
-	}
-	if (catalog.collationName && catalog.collationName !== 'default') {
-		shape.collation = catalog.collationName;
-	}
-	if (catalog.comment) {
-		shape.comment = catalog.comment;
-	}
-	if (catalog.identity) {
-		shape.identity = catalog.identity;
-	}
-	return shape as Omit<ColumnIR, 'nullable'>;
-}
-
 function assertExpectedColumnShape(
 	payload: AlterColumnSetNotNullPayload,
 	catalog: CatalogValue,
+	context: ObservationContext,
+	evidence: readonly EvidenceObservation[],
 ): void {
 	if (!payload.expectedColumnShape) {
 		throw new Error(
 			`missing expected column shape; ${STALE_EXPECTED_COLUMN_SHAPE_REASON}`,
 		);
 	}
-	const observed = stableJson(catalogColumnShape(payload, catalog, true));
-	const observedWithoutDbTypeMetadata = stableJson(
-		catalogColumnShape(payload, catalog, false),
+	const comparison = compareSetNotNullColumnShape(
+		payload.expectedColumnShape,
+		columnShapeFromCatalog(catalog, payload.column),
+		createPgEquivalenceCapability(),
+		{
+			engine: context.engine,
+			databaseId: context.databaseId,
+			targetSchema: schemaFor(payload, context),
+			...(context.searchPath ? { searchPath: context.searchPath } : {}),
+		},
+		evidence,
 	);
-	if (
-		payload.expectedColumnShape !== observed &&
-		payload.expectedColumnShape !== observedWithoutDbTypeMetadata
-	) {
-		throw new Error(STALE_EXPECTED_COLUMN_SHAPE_REASON);
+	if (comparison.kind !== 'equivalent') {
+		throw new Error(
+			`${STALE_EXPECTED_COLUMN_SHAPE_REASON}; field ${comparison.field}: ${
+				comparison.kind === 'unknown'
+					? 'equivalence is unknown'
+					: comparison.detail
+			}`,
+		);
 	}
 }
 
@@ -492,6 +404,7 @@ function catalogValueFromEvidence(
 			continue;
 		}
 		const exists = value.exists;
+		const relkind = value.relkind;
 		const nullable = value.nullable;
 		const oid = value.oid;
 		const attnum = value.attnum;
@@ -516,6 +429,7 @@ function catalogValueFromEvidence(
 		const autoIncrement = value.autoIncrement;
 		if (
 			typeof exists === 'boolean' &&
+			(relkind === null || typeof relkind === 'string') &&
 			(nullable === null || typeof nullable === 'boolean') &&
 			(oid === null || typeof oid === 'string') &&
 			(attnum === null || typeof attnum === 'number') &&
@@ -544,6 +458,7 @@ function catalogValueFromEvidence(
 		) {
 			return {
 				exists,
+				relkind,
 				nullable,
 				oid,
 				attnum,
@@ -587,6 +502,7 @@ function fingerprintFor(
 		fact('target.column', payload.column),
 		fact('column.name', payload.column),
 		fact('pg_class.oid', catalog.oid),
+		fact('pg_class.relkind', catalog.relkind),
 		fact('pg_attribute.attnum', catalog.attnum),
 		fact('column.nullable', nullable),
 		fact('pg_attribute.atttypid', catalog.atttypid),
@@ -629,12 +545,12 @@ function fingerprintFor(
 					}
 				: null,
 		),
-		fact('pg_description.column', catalog.comment),
-		fact('column.comment', catalog.comment),
 		fact('pg_constraint.unique.exists', catalog.unique),
 		fact('column.unique', catalog.unique),
 		fact('pg_constraint.unique.name', catalog.uniqueConstraintName),
 		fact('column.uniqueConstraintName', catalog.uniqueConstraintName),
+		fact('pg_description.column', catalog.comment),
+		fact('column.comment', catalog.comment),
 		fact('pg_depend.owned-sequence.exists', catalog.autoIncrement),
 		fact('column.autoIncrement', catalog.autoIncrement),
 		...collationFacts(catalog),
@@ -677,7 +593,7 @@ function beforeAfterFingerprints(
 	if (catalog.nullable !== true) {
 		throw new Error('expectedBefore requires a currently nullable column');
 	}
-	assertExpectedColumnShape(payload, catalog);
+	assertExpectedColumnShape(payload, catalog, context, evidence);
 	return {
 		expectedBefore: fingerprintFor(payload, context, catalog, true),
 		expectedAfter: fingerprintFor(payload, context, catalog, false),

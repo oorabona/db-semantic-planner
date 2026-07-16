@@ -9,6 +9,10 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
+	expectedColumnShapeFor,
+	type SetNotNullColumnShapeExpectation,
+} from '../column-shape.js';
+import {
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
 	NO_NULLS_GUARD,
@@ -20,7 +24,6 @@ import {
 } from '../constants.js';
 import { assumptionId, evidenceId } from '../ids.js';
 import { pgPrivilegeFact } from '../privileges.js';
-import { expectedColumnShapeFor } from '../rules/set-not-null.js';
 import {
 	createAlterColumnSetNotNullOperationRuntime,
 	renderAlterColumnSetNotNullSql,
@@ -50,7 +53,9 @@ const context: ObservationContext = {
 	extensions: {},
 };
 
-function expectedShape(overrides: Partial<ColumnIR> = {}): string {
+function expectedShape(
+	overrides: Partial<ColumnIR> = {},
+): SetNotNullColumnShapeExpectation {
 	return expectedColumnShapeFor(
 		{
 			name: 'age',
@@ -74,7 +79,7 @@ function operationWithExpectedShape(
 			table: 'users',
 			column: 'age',
 			expectedColumnShape,
-		},
+		} as never,
 	};
 }
 
@@ -128,6 +133,7 @@ function catalogEvidence(
 		result: {
 			value: {
 				exists: true,
+				relkind: 'r',
 				nullable: true,
 				oid: `oid:${table}.${column}`,
 				attnum: column === 'age' ? 2 : 3,
@@ -375,6 +381,10 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			value: 'oid:users.age',
 		});
 		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
+			key: 'pg_class.relkind',
+			value: 'r',
+		});
+		expect(fingerprints.expectedBefore.includedFacts).toContainEqual({
 			key: 'pg_attribute.attnum',
 			value: 'number:2',
 		});
@@ -404,6 +414,88 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					'sibling columns, multi-column indexes, multi-column constraints, RLS and triggers are outside the per-column recognizer comparison - bounded by the external-ddl-exclusion assumption',
 			},
 		]);
+	});
+
+	it('changes the fingerprint when relation kind drifts', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const expected = runtime.buildFingerprints(
+			operation,
+			[catalogEvidence('users', 'age', { relkind: 'r' })],
+			context,
+		);
+		const drifted = runtime.buildFingerprints(
+			operation,
+			[catalogEvidence('users', 'age', { relkind: 'p' })],
+			context,
+		);
+
+		expect(expected.expectedBefore.includedFacts).toContainEqual({
+			key: 'pg_class.relkind',
+			value: 'r',
+		});
+		expect(drifted.expectedBefore.includedFacts).toContainEqual({
+			key: 'pg_class.relkind',
+			value: 'p',
+		});
+		expect(drifted.expectedBefore.digest).not.toBe(
+			expected.expectedBefore.digest,
+		);
+	});
+
+	it('passes apply-time shape recheck when only type aliases differ', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expectedShape({ originalDbType: 'int4' })),
+				[
+					catalogEvidence('users', 'age', {
+						formatType: 'integer',
+						typeName: 'int4',
+						typeSchema: 'pg_catalog',
+					}),
+				],
+				context,
+			),
+		).not.toThrow();
+	});
+
+	it('passes apply-time shape recheck with matching bare SQL default text', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(expectedShape({ default: 'now()' })),
+				[
+					catalogEvidence('users', 'age', {
+						hasDefault: true,
+						defaultExpression: 'now()',
+					}),
+				],
+				context,
+			),
+		).not.toThrow();
+	});
+
+	it('blocks apply-time shape recheck when the type genuinely drifted', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+
+		expect(() =>
+			runtime.buildFingerprints(
+				operationWithExpectedShape(
+					expectedShape({ originalDbType: 'integer' }),
+				),
+				[
+					catalogEvidence('users', 'age', {
+						atttypid: '20',
+						formatType: 'bigint',
+						typeName: 'int8',
+						typeSchema: 'pg_catalog',
+					}),
+				],
+				context,
+			),
+		).toThrow(/field type/);
 	});
 
 	it('hashes every recognizer-compared column fact instead of silently omitting it', () => {
@@ -449,7 +541,6 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					collationVersion: '153.120',
 					attidentity: 'd',
 					identity: 'byDefault',
-					attgenerated: 's',
 					comment: 'Age in years',
 					unique: true,
 					uniqueConstraintName: 'users_age_key',
@@ -469,6 +560,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		);
 		const recognizerComparedFacts = [
 			'column.name',
+			'pg_class.relkind',
 			'column.type',
 			'column.default',
 			'column.originalDbType',
@@ -478,8 +570,10 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			'column.uniqueConstraintName',
 			'column.autoIncrement',
 			'column.collation',
-			'column.comment',
 			'column.identity',
+			'column.generated',
+			'column.comment',
+			'pg_description.column',
 		];
 		for (const key of recognizerComparedFacts) {
 			expect(included.has(key) || excluded.has(key)).toBe(true);

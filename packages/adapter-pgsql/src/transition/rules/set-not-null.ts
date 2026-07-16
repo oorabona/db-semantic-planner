@@ -3,10 +3,12 @@ import type {
 	Assumption,
 	ColumnIR,
 	EvidenceObservation,
+	JsonValue,
 	ModelIR,
 	ObservationRequest,
 	PhysicalOperation,
 	ProofObligation,
+	RecognitionContext,
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
@@ -15,6 +17,12 @@ import type {
 } from '@dbsp/types';
 import type { NamingPlugin } from '../../naming-plugin.js';
 import { identityNaming } from '../../naming-plugin.js';
+import {
+	columnShapeFromColumn,
+	compareSetNotNullColumnShape,
+	expectedColumnShapeFor,
+	type SetNotNullColumnShapeExpectation,
+} from '../column-shape.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
@@ -28,15 +36,21 @@ import {
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	SET_NOT_NULL_RULE_ID,
 } from '../constants.js';
+import { createPgEquivalenceCapability } from '../equivalence.js';
 import { assumptionId } from '../ids.js';
 import { stableJson } from '../stable-json.js';
+
+export {
+	columnWithoutNullable,
+	expectedColumnShapeFor,
+} from '../column-shape.js';
 
 export interface SetNotNullMatch {
 	readonly schema?: string;
 	readonly database?: string;
 	readonly table: string;
 	readonly column: string;
-	readonly expectedColumnShape: string;
+	readonly expectedColumnShape: SetNotNullColumnShapeExpectation;
 }
 
 type ResolvedSetNotNullMatch = SetNotNullMatch & {
@@ -92,31 +106,33 @@ function sameLogicalDetail(
 	);
 }
 
-export function columnWithoutNullable(
-	column: ColumnIR,
-): Omit<ColumnIR, 'nullable'> {
-	const rest: Record<string, unknown> = { ...column };
-	delete rest.nullable;
-	return rest as Omit<ColumnIR, 'nullable'>;
-}
-
-export function expectedColumnShapeFor(
-	column: ColumnIR,
-	physicalName: string,
-): string {
-	return stableJson(columnWithoutNullable({ ...column, name: physicalName }));
-}
-
 function isPureNullabilityTightening(
 	desired: ColumnIR,
 	current: ColumnIR,
-): boolean {
-	return (
-		current.nullable === true &&
-		desired.nullable === false &&
-		stableJson(columnWithoutNullable(desired)) ===
-			stableJson(columnWithoutNullable(current))
+	physicalName: string,
+	context: RecognitionContext | undefined,
+): RecognitionResult<{
+	readonly expectedColumnShape: SetNotNullColumnShapeExpectation;
+}> {
+	const expectedColumnShape = expectedColumnShapeFor(desired, physicalName);
+	const comparison = compareSetNotNullColumnShape(
+		expectedColumnShape,
+		columnShapeFromColumn(current, physicalName),
+		context?.equivalence ?? createPgEquivalenceCapability(),
+		context?.context ?? { engine: 'postgresql' },
+		context?.evidence,
 	);
+	if (comparison.kind === 'equivalent') {
+		return {
+			recognized: true,
+			match: { expectedColumnShape },
+			claimDrafts: comparison.claimDrafts,
+		};
+	}
+	if (comparison.kind === 'unknown') {
+		return { recognized: 'unknown', obligations: comparison.obligations };
+	}
+	return { recognized: false };
 }
 
 function resourceForMatch(
@@ -325,7 +341,7 @@ function operationFor(match: SetNotNullMatch): PhysicalOperation {
 	return {
 		ref: operationRef(match),
 		operationKind: ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
-		payload,
+		payload: payload as unknown as JsonValue,
 	};
 }
 
@@ -400,6 +416,7 @@ export function createSetNotNullRule(
 		recognize(
 			desired: ModelIR,
 			current: ModelIR,
+			context?: RecognitionContext,
 		): RecognitionResult<SetNotNullMatch> {
 			for (const desiredTable of desired.tables.values()) {
 				const currentTable = current.getTable(desiredTable.name);
@@ -410,22 +427,35 @@ export function createSetNotNullRule(
 					const currentColumn = currentTable.columns.find(
 						(column) => column.name === desiredColumn.name,
 					);
-					if (
-						currentColumn &&
-						isPureNullabilityTightening(desiredColumn, currentColumn)
-					) {
-						const physicalColumn = naming.toDatabase(desiredColumn.name);
-						return {
+					if (!currentColumn) {
+						continue;
+					}
+					const physicalColumn = naming.toDatabase(desiredColumn.name);
+					const nullabilityTightening = isPureNullabilityTightening(
+						desiredColumn,
+						currentColumn,
+						physicalColumn,
+						context,
+					);
+					if (nullabilityTightening.recognized === 'unknown') {
+						return nullabilityTightening;
+					}
+					if (nullabilityTightening.recognized) {
+						const recognized = {
 							recognized: true,
 							match: {
 								table: naming.toDatabase(desiredTable.name),
 								column: physicalColumn,
-								expectedColumnShape: expectedColumnShapeFor(
-									desiredColumn,
-									physicalColumn,
-								),
+								expectedColumnShape:
+									nullabilityTightening.match.expectedColumnShape,
 							},
 						};
+						return nullabilityTightening.claimDrafts
+							? {
+									...recognized,
+									claimDrafts: nullabilityTightening.claimDrafts,
+								}
+							: recognized;
 					}
 				}
 			}

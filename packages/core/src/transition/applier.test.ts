@@ -100,6 +100,16 @@ function fingerprint(digest: string): FingerprintManifest {
 	};
 }
 
+function fingerprintWithRelkind(
+	digest: string,
+	relkind: string,
+): FingerprintManifest {
+	return {
+		...fingerprint(digest),
+		includedFacts: [{ key: 'pg_class.relkind', value: relkind }],
+	};
+}
+
 function evidence(): EvidenceObservation {
 	const request = {
 		kind: 'mock.before',
@@ -936,6 +946,48 @@ describe('createApplier', () => {
 		expect(observed[0]?.outcome).toBe('context-mismatch');
 		expect(executeOperation).not.toHaveBeenCalled();
 		expect(rt.rollback).toHaveBeenCalledOnce();
+	});
+
+	it('blocks before DDL when a relkind fingerprint fact drifts at apply time', async () => {
+		const observed: StepJournal[] = [];
+		const executeOperation = vi.fn(async () => undefined);
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation,
+				buildFingerprints: () => ({
+					expectedBefore: fingerprintWithRelkind('relkind:p', 'p'),
+					expectedAfter: fingerprint('after'),
+				}),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const relkindAnchoredPlan = planWithStep({
+			expectedBefore: fingerprintWithRelkind('relkind:r', 'r'),
+		});
+
+		const result = await createApplier(registry).apply(
+			{ plan: relkindAnchoredPlan, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(result.journals[0]?.outcome).toBe('context-mismatch');
+		expect(observed[0]?.outcome).toBe('context-mismatch');
+		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
 	it('treats a volatile before-operation guard failure as guard-failed, not inapplicable', async () => {

@@ -10,13 +10,19 @@ import type {
 import { describe, expect, it, vi } from 'vitest';
 import { CamelCaseNamingPlugin } from '../../naming-plugin.js';
 import {
+	columnShapeFromColumn,
+	compareSetNotNullColumnShape,
+} from '../column-shape.js';
+import {
 	ALTER_AUTHORITY_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
 	NO_NULLS_GUARD,
+	PG_EQUIVALENCE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from '../constants.js';
+import { createPgEquivalenceCapability } from '../equivalence.js';
 import { evidenceId } from '../ids.js';
 import { createPgTransitionPack } from '../pack.js';
 import {
@@ -224,7 +230,7 @@ describe('postgresql.column.set-not-null rule', () => {
 		const rule = createSetNotNullRule();
 		const result = rule.recognize(model(false), model(true));
 		expect(result.recognized).toBe(true);
-		if (result.recognized) {
+		if (result.recognized === true) {
 			expect(result.match).toEqual({
 				table: 'users',
 				column: 'age',
@@ -243,7 +249,7 @@ describe('postgresql.column.set-not-null rule', () => {
 		);
 
 		expect(result.recognized).toBe(true);
-		if (!result.recognized) {
+		if (result.recognized !== true) {
 			return;
 		}
 		expect(result.match).toEqual({
@@ -322,15 +328,70 @@ describe('postgresql.column.set-not-null rule', () => {
 				model(false, { default: 0 }),
 				model(true, { default: null }),
 			).recognized,
-		).toBe(false);
+		).toBe('unknown');
 	});
 
-	it('does not recognize nullability plus a changed Date-valued column field', () => {
+	it('returns unknown for nullability plus a changed Date-valued default', () => {
 		const desired = model(false, {
 			default: new Date('2026-01-02T00:00:00.000Z'),
 		});
 		const current = model(true, {
 			default: new Date('2026-01-01T00:00:00.000Z'),
+		});
+
+		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
+			'unknown',
+		);
+		expect(
+			createComparator(createPackRegistry([createPgTransitionPack()])).compare(
+				desired,
+				current,
+			).kind,
+		).toBe('unknown');
+	});
+
+	it('does not accept string-literal default case drift as pure nullability', () => {
+		const desiredColumn = column(false, { default: 'A' });
+		const currentColumn = column(true, { default: 'a' });
+		const shapeComparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(desiredColumn, 'age'),
+			columnShapeFromColumn(currentColumn, 'age'),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql' },
+		);
+
+		expect(shapeComparison.kind).not.toBe('equivalent');
+
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(model(false, { default: 'A' }), model(true, { default: 'a' }));
+
+		expect(compare.kind).toBe('unknown');
+	});
+
+	it('does not recognize a combined nullability and comment change as complete', () => {
+		const desired = model(false, { comment: 'new comment' });
+		const current = model(true, { comment: 'old comment' });
+
+		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
+			false,
+		);
+		expect(
+			createComparator(createPackRegistry([createPgTransitionPack()])).compare(
+				desired,
+				current,
+			).kind,
+		).toBe('unsupported');
+	});
+
+	it('does not recognize a combined nullability and unique constraint name change as complete', () => {
+		const desired = model(false, {
+			unique: true,
+			uniqueConstraintName: 'users_age_new_key',
+		});
+		const current = model(true, {
+			unique: true,
+			uniqueConstraintName: 'users_age_old_key',
 		});
 
 		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
@@ -342,6 +403,161 @@ describe('postgresql.column.set-not-null rule', () => {
 				current,
 			).kind,
 		).toBe('unsupported');
+	});
+
+	it('recognizes pure nullability with matching bare SQL default text', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, { default: 'now()' }),
+			model(true, { default: 'now()' }),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+	});
+
+	it.each([
+		['int4', 'integer', 'integer'],
+		['varchar(42)', 'character varying(42)', 'string'],
+		['pg_catalog.int4', 'integer', 'integer'],
+	])('recognizes pure nullability when %s and %s are equivalent type spellings', (desiredType, currentType, columnType) => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				type: columnType as ColumnIR['type'],
+				originalDbType: desiredType,
+			}),
+			model(true, {
+				type: columnType as ColumnIR['type'],
+				originalDbType: currentType,
+			}),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.candidates[0]?.claimDrafts?.[0]?.semantics).toEqual(
+			PG_EQUIVALENCE_ARTIFACT,
+		);
+	});
+
+	it('recognizes target-scoped custom type identity relative to the current target schema', () => {
+		const desiredColumn = column(false, {
+			type: 'string',
+			originalDbType: 'status',
+			originalDbTypeSchema: 'tenant_model',
+			originalDbTypeSchemaScope: 'target',
+		});
+		const currentColumn = column(true, {
+			type: 'string',
+			originalDbType: 'status',
+			originalDbTypeSchema: 'tenant_live',
+			originalDbTypeSchemaScope: 'target',
+		});
+		const comparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(desiredColumn, 'age'),
+			columnShapeFromColumn(currentColumn, 'age'),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql', targetSchema: 'tenant_live' },
+		);
+
+		expect(comparison.kind).toBe('equivalent');
+	});
+
+	it('does not retarget absolute custom type schema differences', () => {
+		const desiredColumn = column(false, {
+			type: 'string',
+			originalDbType: 'status',
+			originalDbTypeSchema: 'tenant_a',
+			originalDbTypeSchemaScope: 'absolute',
+		});
+		const currentColumn = column(true, {
+			type: 'string',
+			originalDbType: 'status',
+			originalDbTypeSchema: 'tenant_b',
+			originalDbTypeSchemaScope: 'absolute',
+		});
+		const comparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(desiredColumn, 'age'),
+			columnShapeFromColumn(currentColumn, 'age'),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql', targetSchema: 'tenant_b' },
+		);
+
+		expect(comparison.kind).toBe('different');
+		if (comparison.kind === 'different') {
+			expect(comparison.field).toBe('type');
+		}
+	});
+
+	it('treats a genuinely different type as unsupported, not a pure-nullability tightening', async () => {
+		const registry = createPackRegistry([createPgTransitionPack()]);
+		const compare = createComparator(registry).compare(
+			model(false, { originalDbType: 'integer' }),
+			model(true, { originalDbType: 'bigint' }),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+		expect(outcome.kind).toBe('blocked');
+		expect(outcome).not.toHaveProperty('plan');
+	});
+
+	it('does not accept quoted mixed-case custom type drift as pure nullability', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				type: 'string',
+				originalDbType: '"MyType"',
+				originalDbTypeSchema: 'tenant',
+				originalDbTypeSchemaScope: 'absolute',
+			}),
+			model(true, {
+				type: 'string',
+				originalDbType: '"mytype"',
+				originalDbTypeSchema: 'tenant',
+				originalDbTypeSchemaScope: 'absolute',
+			}),
+		);
+
+		expect(compare.kind).not.toBe('transitions');
+	});
+
+	it('blocks unresolved custom type spelling as unknown instead of guessing', async () => {
+		const registry = registryWithColumnObservation();
+		const compare = createComparator(registry).compare(
+			model(false, { originalDbType: 'myschema.t' }),
+			model(true, { originalDbType: 't' }),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.appliesTo).toBe('type');
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		expect(outcome.assessment.reasons[0]).toMatchObject({
+			code: 'insufficient-evidence',
+		});
 	});
 
 	it('evaluates applicable when durable evidence holds', () => {
@@ -513,6 +729,15 @@ describe('postgresql.column.set-not-null rule', () => {
 			key: 'column.name',
 			value: 'age',
 		});
+		expect(
+			outcome.plan.claims.some((claim) =>
+				claim.semantics.some(
+					(artifact) =>
+						artifact.id === PG_EQUIVALENCE_ARTIFACT.id &&
+						artifact.version === PG_EQUIVALENCE_ARTIFACT.version,
+				),
+			),
+		).toBe(true);
 	});
 
 	it('generates an operation and an undischarged NO_NULLS apply guard', () => {

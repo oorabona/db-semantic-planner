@@ -14,9 +14,12 @@ import type {
 	PhysicalOperation,
 	PlanAssessment,
 	ProofClaim,
+	ProofClaimDraft,
 	ProofObligation,
+	Proposition,
 	ProvenApplyGuard,
 	ProvenPlanShape,
+	RecognitionResult,
 	ResourceAddress,
 	RuleRef,
 	SemanticArtifactRef,
@@ -25,6 +28,7 @@ import type {
 	TransitionFragment,
 	TransitionQueryClient,
 	TransitionRule,
+	UnknownTransitionRecognition,
 } from '@dbsp/types';
 import { claimId, semanticArtifactId } from './ids.js';
 import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
@@ -89,6 +93,18 @@ function applicableAssessment(
 				scope: [],
 			},
 		],
+	};
+}
+
+function equivalenceContextFromObservation(context: ObservationContext) {
+	const searchPath = context.searchPath;
+	const targetSchema =
+		searchPath && searchPath.length === 1 ? searchPath[0] : undefined;
+	return {
+		engine: context.engine,
+		...(context.databaseId ? { databaseId: context.databaseId } : {}),
+		...(targetSchema ? { targetSchema } : {}),
+		...(searchPath ? { searchPath } : {}),
 	};
 }
 
@@ -344,6 +360,76 @@ function proofClaimForObligation(
 	};
 }
 
+function proofClaimForDraft(draft: ProofClaimDraft, index: number): ProofClaim {
+	const supportedBy = [...(draft.supportedBy ?? [])];
+	const assumptions = [...(draft.assumes ?? [])];
+	const conclusion =
+		draft.conclusion === 'established' && assumptions.length > 0
+			? 'established-under-assumptions'
+			: draft.conclusion;
+	const id = claimId(
+		`dbsp.transition.claim.draft.${index}.${draft.proposition.kind}.${stableJson(
+			{
+				conclusion,
+				proposition: draft.proposition,
+				semantics: draft.semantics,
+			},
+		)}`,
+	);
+	if (conclusion === 'established') {
+		return {
+			id,
+			proposition: draft.proposition,
+			scope: draft.scope,
+			supportedBy,
+			assumes: [],
+			semantics: [draft.semantics],
+			derivedBy: {
+				semantics: draft.semantics,
+				inputs: supportedBy,
+				proposition: draft.proposition,
+				conclusion,
+			},
+		};
+	}
+	if (conclusion === 'established-under-assumptions') {
+		if (assumptions.length === 0) {
+			throw new Error('established-under-assumptions claim lacks assumptions');
+		}
+		return {
+			id,
+			proposition: draft.proposition,
+			scope: draft.scope,
+			supportedBy,
+			assumes: assumptions as [
+				ProofClaim['assumes'][number],
+				...ProofClaim['assumes'][number][],
+			],
+			semantics: [draft.semantics],
+			derivedBy: {
+				semantics: draft.semantics,
+				inputs: supportedBy,
+				proposition: draft.proposition,
+				conclusion,
+			},
+		};
+	}
+	return {
+		id,
+		proposition: draft.proposition,
+		scope: draft.scope,
+		supportedBy,
+		assumes: assumptions,
+		semantics: [draft.semantics],
+		derivedBy: {
+			semantics: draft.semantics,
+			inputs: supportedBy,
+			proposition: draft.proposition,
+			conclusion,
+		},
+	};
+}
+
 function missingEvidenceAssessment(
 	obligation: ProofObligation,
 ): PlanAssessment {
@@ -438,6 +524,50 @@ function candidateRefs(
 	candidates: readonly TransitionCandidate[],
 ): readonly RuleRef[] {
 	return candidates.map((candidate) => candidate.rule);
+}
+
+function requestToObligation(
+	request: ObservationRequest,
+	appliesTo?: string,
+): ProofObligation {
+	const propositionBase = {
+		kind: request.kind,
+		scope: request.scope,
+	};
+	const proposition: Proposition =
+		request.detail === undefined
+			? propositionBase
+			: { ...propositionBase, detail: request.detail };
+	const obligation: ProofObligation = {
+		proposition,
+		scope: request.scope,
+		dischargeableBy: [request],
+	};
+	return appliesTo ? { ...obligation, appliesTo } : obligation;
+}
+
+function candidateFromRecognition(
+	rule: TransitionRule,
+	result: Extract<RecognitionResult<unknown>, { readonly recognized: true }>,
+): TransitionCandidate {
+	const requiredObservations = rule.requiredObservations(result.match);
+	const ref = { id: rule.id, pack: rule.artifact };
+	const candidate = {
+		rule: ref,
+		match: result.match,
+		requiredObservations,
+		obligations: requiredObservations.map((request) =>
+			requestToObligation(request),
+		),
+		selectionRationale: {
+			chosen: ref,
+			overRules: [ref],
+			why: 'recognized transition rule after discharging recognition obligations',
+		},
+	};
+	return result.claimDrafts
+		? { ...candidate, claimDrafts: result.claimDrafts }
+		: candidate;
 }
 
 function parseVersion(value: string): readonly number[] {
@@ -571,6 +701,170 @@ function sameObservationRequests(
 	);
 }
 
+function fallbackUnknownObligation(
+	recognition: UnknownTransitionRecognition,
+): ProofObligation {
+	return (
+		recognition.obligations[0] ?? {
+			proposition: {
+				kind: 'dbsp.transition.recognition.unknown',
+				scope: [],
+				detail: recognition.rule.id,
+			},
+			scope: [],
+		}
+	);
+}
+
+async function retryUnknownRecognition(
+	registry: PackRegistry,
+	compare: Extract<CompareOutcome, { readonly kind: 'unknown' }>,
+	target: TransitionConnectionPool,
+	context: ObservationContext,
+): Promise<ProveOutcome> {
+	if (compare.recognitions.length !== 1) {
+		return {
+			kind: 'blocked',
+			assessment: blockedAssessment({
+				code: 'ambiguous-rule',
+				candidates: compare.recognitions.map((recognition) => recognition.rule),
+				scope: [],
+				detail:
+					'multiple transition recognitions require unresolved equivalence evidence',
+			}),
+		};
+	}
+	const recognition = compare.recognitions[0];
+	if (!recognition) {
+		return {
+			kind: 'blocked',
+			assessment: evaluationBlockedAssessment(
+				{ obligations: compare.obligations },
+				'missing unknown transition recognition',
+			),
+		};
+	}
+	const rule = registry.resolveRule(recognition.rule);
+	if (!rule) {
+		return {
+			kind: 'blocked',
+			assessment: blockedAssessment({
+				code: 'ambiguous-rule',
+				candidates: [recognition.rule],
+				scope: [],
+				detail: 'rule pack id did not resolve',
+			}),
+		};
+	}
+
+	const recognitionRequests = recognition.obligations.flatMap((obligation) => [
+		...(obligation.dischargeableBy ?? []),
+	]);
+	const issuer = registry.resolveIssuer(recognition.rule.pack);
+	let proofContext = context;
+	let issued: Awaited<ReturnType<typeof issueObservations>>;
+	if (issuer) {
+		let client: TransitionQueryClient | undefined;
+		let releaseError: unknown;
+		try {
+			client = await checkoutProofClient(target);
+			proofContext = issuer.readContext
+				? await issuer.readContext(client, context, recognitionRequests)
+				: context;
+			proofContext = registry.contextWithDerivedCapabilities(proofContext);
+			const supportMismatch = ruleSupportMismatch(rule, proofContext);
+			if (supportMismatch) {
+				return {
+					kind: 'inapplicable',
+					assessment: inapplicableAssessment({
+						code: 'context-mismatch',
+						artifact: rule.artifact,
+						fact: supportMismatch.fact,
+						scope: [],
+						detail: supportMismatch.detail,
+					}),
+				};
+			}
+			issued = await issueObservations(
+				issuer,
+				recognitionRequests,
+				client,
+				proofContext,
+			);
+		} catch (error) {
+			releaseError = error;
+			return {
+				kind: 'blocked',
+				assessment: artifactMismatch(
+					PROVER_ARTIFACT,
+					error instanceof Error
+						? error.message
+						: 'recognition observation failed',
+				),
+			};
+		} finally {
+			if (client) {
+				client.release(releaseError);
+			}
+		}
+	} else {
+		proofContext = registry.contextWithDerivedCapabilities(proofContext);
+		const supportMismatch = ruleSupportMismatch(rule, proofContext);
+		if (supportMismatch) {
+			return {
+				kind: 'blocked',
+				assessment: artifactMismatch(
+					rule.artifact,
+					`rule support mismatch while retrying recognition: ${supportMismatch.detail}`,
+				),
+			};
+		}
+		issued = { evidence: [], advisory: [] };
+	}
+
+	const equivalence = registry.resolveEquivalence(rule.artifact);
+	const retried = rule.recognize(
+		recognition.desired,
+		recognition.current,
+		equivalence
+			? {
+					equivalence,
+					context: equivalenceContextFromObservation(proofContext),
+					evidence: issued.evidence,
+				}
+			: {
+					context: equivalenceContextFromObservation(proofContext),
+					evidence: issued.evidence,
+				},
+	);
+	if (retried.recognized === 'unknown') {
+		return {
+			kind: 'blocked',
+			assessment: missingEvidenceAssessment(
+				retried.obligations[0] ?? fallbackUnknownObligation(recognition),
+			),
+		};
+	}
+	if (!retried.recognized) {
+		return {
+			kind: 'blocked',
+			assessment: missingEvidenceAssessment(
+				fallbackUnknownObligation(recognition),
+			),
+		};
+	}
+	const candidate = candidateFromRecognition(rule, retried);
+	return createProver(registry).prove(
+		{
+			kind: 'transitions',
+			candidates: [candidate],
+			obligations: candidate.obligations,
+		},
+		target,
+		context,
+	);
+}
+
 export function createProver(registry: PackRegistry): Prover {
 	return {
 		artifact: PROVER_ARTIFACT,
@@ -590,6 +884,8 @@ export function createProver(registry: PackRegistry): Prover {
 				}
 				case 'unsupported':
 					return { kind: 'blocked', assessment: unsupported(compare) };
+				case 'unknown':
+					return retryUnknownRecognition(registry, compare, target, context);
 				case 'ambiguous':
 					return { kind: 'blocked', assessment: ambiguous(compare) };
 				case 'transitions':
@@ -860,14 +1156,32 @@ export function createProver(registry: PackRegistry): Prover {
 				};
 			}
 
-			const claims = fragment.obligations.map((obligation, index) =>
+			let draftClaims: readonly ProofClaim[];
+			try {
+				draftClaims = [
+					...(candidate.claimDrafts ?? []),
+					...(fragment.claimDrafts ?? []),
+				].map((draft, index) => proofClaimForDraft(draft, index));
+			} catch (error) {
+				return {
+					kind: 'blocked',
+					assessment: uncomposable(
+						[fragment],
+						error instanceof Error
+							? error.message
+							: 'claim draft materialization failed',
+					),
+				};
+			}
+			const obligationClaims = fragment.obligations.map((obligation, index) =>
 				proofClaimForObligation(
 					obligation,
 					issued.evidence,
-					index,
+					index + draftClaims.length,
 					issuer?.artifact ?? PROVER_ARTIFACT,
 				),
 			);
+			const claims = [...draftClaims, ...obligationClaims];
 
 			const undischarged = claims.find(
 				(claim) => claim.derivedBy.conclusion === 'undischarged',

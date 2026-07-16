@@ -1,6 +1,10 @@
 import type { ModelIR } from '../model-ir.js';
 import type { SemanticArtifactRef } from './artifact.js';
 import type {
+	EquivalenceCapability,
+	EquivalenceContext,
+} from './equivalence.js';
+import type {
 	RuleRef,
 	RuleSelectionRationale,
 	TransitionFragment,
@@ -13,7 +17,12 @@ import type {
 	ObservationRequest,
 } from './observation.js';
 import type { OperationEffects, PhysicalOperation } from './operation.js';
-import type { Assumption, ProofObligation, Proposition } from './proof.js';
+import type {
+	Assumption,
+	ProofClaimDraft,
+	ProofObligation,
+	Proposition,
+} from './proof.js';
 import type { ResourceAddress } from './resource.js';
 
 export interface TransitionQueryResult {
@@ -56,9 +65,23 @@ export interface ObservationIssuer {
 	): Promise<IssuedObservation>;
 }
 
+export interface RecognitionContext {
+	readonly equivalence?: EquivalenceCapability;
+	readonly context: EquivalenceContext;
+	readonly evidence?: readonly EvidenceObservation[];
+}
+
 export type RecognitionResult<TMatch> =
 	| { readonly recognized: false }
-	| { readonly recognized: true; readonly match: TMatch };
+	| {
+			readonly recognized: true;
+			readonly match: TMatch;
+			readonly claimDrafts?: readonly ProofClaimDraft[];
+	  }
+	| {
+			readonly recognized: 'unknown';
+			readonly obligations: readonly ProofObligation[];
+	  };
 
 export type RuleEvaluation =
 	| {
@@ -105,7 +128,11 @@ export interface TransitionRule<TMatch = unknown> {
 	readonly id: string;
 	readonly artifact: SemanticArtifactRef;
 	readonly support: RuleSupport;
-	recognize(desired: ModelIR, current: ModelIR): RecognitionResult<TMatch>;
+	recognize(
+		desired: ModelIR,
+		current: ModelIR,
+		context?: RecognitionContext,
+	): RecognitionResult<TMatch>;
 	requiredObservations(match: TMatch): readonly ObservationRequest[];
 	evaluate(
 		match: TMatch,
@@ -123,7 +150,15 @@ export interface TransitionCandidate<TMatch = unknown> {
 	readonly match: TMatch;
 	readonly requiredObservations: readonly ObservationRequest[];
 	readonly obligations: readonly ProofObligation[];
+	readonly claimDrafts?: readonly ProofClaimDraft[];
 	readonly selectionRationale: RuleSelectionRationale;
+}
+
+export interface UnknownTransitionRecognition {
+	readonly rule: RuleRef;
+	readonly desired: ModelIR;
+	readonly current: ModelIR;
+	readonly obligations: readonly ProofObligation[];
 }
 
 export type CompareOutcome =
@@ -136,6 +171,11 @@ export type CompareOutcome =
 	| {
 			readonly kind: 'unsupported';
 			readonly changes: readonly ResourceAddress[];
+	  }
+	| {
+			readonly kind: 'unknown';
+			readonly recognitions: readonly UnknownTransitionRecognition[];
+			readonly obligations: readonly ProofObligation[];
 	  }
 	| { readonly kind: 'ambiguous'; readonly candidates: readonly RuleRef[] };
 

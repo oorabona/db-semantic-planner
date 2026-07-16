@@ -9,6 +9,7 @@ import type {
 	ObservationRequest,
 	ProofObligation,
 	Proposition,
+	RecognitionResult,
 	RelationIR,
 	ResourceAddress,
 	RuleRef,
@@ -17,6 +18,7 @@ import type {
 	TableIR,
 	TransitionCandidate,
 	TransitionRule,
+	UnknownTransitionRecognition,
 } from '@dbsp/types';
 import { semanticArtifactId } from './ids.js';
 import type { PackRegistry } from './registry.js';
@@ -446,12 +448,13 @@ function chooseByPrecedence(
 
 function candidateFromRule(
 	rule: TransitionRule,
-	match: unknown,
+	result: Extract<RecognitionResult<unknown>, { readonly recognized: true }>,
 	recognizedRules: readonly TransitionRule[],
 ): TransitionCandidate {
+	const { match } = result;
 	const required = rule.requiredObservations(match);
 	const ref = ruleRef(rule);
-	return {
+	const candidate = {
 		rule: ref,
 		match,
 		requiredObservations: required,
@@ -462,6 +465,9 @@ function candidateFromRule(
 			why: 'recognized transition rule',
 		},
 	};
+	return result.claimDrafts
+		? { ...candidate, claimDrafts: result.claimDrafts }
+		: candidate;
 }
 
 export function createComparator(registry: PackRegistry): Comparator {
@@ -493,8 +499,10 @@ export function createComparator(registry: PackRegistry): Comparator {
 			}
 
 			const candidates: TransitionCandidate[] = [];
+			const unknownRecognitions: UnknownTransitionRecognition[] = [];
 			const unsupported: ResourceAddress[] = [];
 			const recognizedColumnKeys = new Set<string>();
+			const pendingColumnKeys = new Set<string>();
 
 			const tableNames = new Set<string>([
 				...desired.tables.keys(),
@@ -531,15 +539,55 @@ export function createComparator(registry: PackRegistry): Comparator {
 
 					const focusedDesired = makeFocusedModel(desiredTable, desiredColumn);
 					const focusedCurrent = makeFocusedModel(currentTable, currentColumn);
-					const recognized = registry
-						.allRules()
-						.map((rule) => ({
+					const recognitionEntries = registry.allRules().map((rule) => {
+						const equivalence = registry.resolveEquivalence(rule.artifact);
+						return {
 							rule,
-							result: rule.recognize(focusedDesired, focusedCurrent),
-						}))
-						.filter((entry) => entry.result.recognized);
+							result: rule.recognize(
+								focusedDesired,
+								focusedCurrent,
+								equivalence
+									? { equivalence, context: { engine } }
+									: { context: { engine } },
+							),
+						};
+					});
+					const recognized = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: true }
+							>;
+						} => entry.result.recognized === true,
+					);
+					const unknown = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: 'unknown' }
+							>;
+						} => entry.result.recognized === 'unknown',
+					);
 
 					if (recognized.length === 0) {
+						if (unknown.length > 0) {
+							for (const entry of unknown) {
+								unknownRecognitions.push({
+									rule: ruleRef(entry.rule),
+									desired: focusedDesired,
+									current: focusedCurrent,
+									obligations: entry.result.obligations,
+								});
+							}
+							pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
+							continue;
+						}
 						unsupported.push(resourceForColumn(engine, tableName, columnName));
 						continue;
 					}
@@ -563,11 +611,12 @@ export function createComparator(registry: PackRegistry): Comparator {
 					candidates.push(
 						candidateFromRule(
 							chosen,
-							chosenEntry.result.match,
+							chosenEntry.result,
 							recognized.map((entry) => entry.rule),
 						),
 					);
 					recognizedColumnKeys.add(JSON.stringify([tableName, columnName]));
+					pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
 				}
 			}
 
@@ -576,7 +625,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 					revertRecognizedColumnChanges(
 						desired,
 						currentForComparison,
-						recognizedColumnKeys,
+						new Set([...recognizedColumnKeys, ...pendingColumnKeys]),
 					),
 				) !== stableJson(currentComparison);
 			if (hiddenDiffsRemain) {
@@ -590,6 +639,16 @@ export function createComparator(registry: PackRegistry): Comparator {
 
 			if (unsupported.length > 0) {
 				return { kind: 'unsupported', changes: unsupported };
+			}
+
+			if (unknownRecognitions.length > 0) {
+				return {
+					kind: 'unknown',
+					recognitions: unknownRecognitions,
+					obligations: unknownRecognitions.flatMap((entry) => [
+						...entry.obligations,
+					]),
+				};
 			}
 
 			return {

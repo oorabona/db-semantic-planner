@@ -49,6 +49,17 @@ export interface ClaimDerivation<
 	readonly conclusion: TConclusion;
 }
 
+export interface ProofClaimDraft<
+	TConclusion extends ClaimConclusion = ClaimConclusion,
+> {
+	readonly proposition: Proposition;
+	readonly scope: readonly ResourceAddress[];
+	readonly supportedBy?: readonly EvidenceId[];
+	readonly assumes?: readonly AssumptionId[];
+	readonly semantics: SemanticArtifactRef;
+	readonly conclusion: TConclusion;
+}
+
 interface ProofClaimBase<TConclusion extends ClaimConclusion> {
 	readonly id: ClaimId;
 	readonly proposition: Proposition;

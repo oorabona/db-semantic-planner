@@ -2,6 +2,7 @@ import type {
 	ApplyGuard,
 	CapabilityDescriptor,
 	DurableIntentRecord,
+	EquivalenceCapability,
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
@@ -124,6 +125,7 @@ export interface TransitionPack {
 	readonly rules: readonly TransitionRule[];
 	readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	readonly issuer: ObservationIssuer;
+	readonly equivalence?: EquivalenceCapability;
 	readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
 	readonly comparatorNameNormalizer?: ComparatorNameNormalizer;
 }
@@ -223,6 +225,10 @@ export class PackRegistry {
 	private readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	private readonly issuers: readonly ObservationIssuer[];
 	private readonly issuerByArtifact: ReadonlyMap<string, ObservationIssuer>;
+	private readonly equivalenceByArtifact: ReadonlyMap<
+		string,
+		EquivalenceCapability
+	>;
 	private readonly capabilityDescriptors: readonly CapabilityDescriptor[];
 	private readonly nameNormalizer: ComparatorNameNormalizer | undefined;
 
@@ -260,6 +266,7 @@ export class PackRegistry {
 			issuerArtifactKeys.add(key);
 		}
 		const issuerByArtifact = new Map<string, ObservationIssuer>();
+		const equivalenceByArtifact = new Map<string, EquivalenceCapability>();
 		const bindIssuer = (key: string, issuer: ObservationIssuer) => {
 			const prior = issuerByArtifact.get(key);
 			if (prior && prior !== issuer) {
@@ -267,22 +274,53 @@ export class PackRegistry {
 			}
 			issuerByArtifact.set(key, issuer);
 		};
+		const bindEquivalence = (
+			key: string,
+			equivalence: EquivalenceCapability,
+		) => {
+			const prior = equivalenceByArtifact.get(key);
+			if (prior && prior !== equivalence) {
+				throw new Error(
+					`ambiguous transition equivalence registration for ${key}`,
+				);
+			}
+			equivalenceByArtifact.set(key, equivalence);
+		};
 		for (const pack of packs) {
 			bindIssuer(artifactKey(pack.issuer.artifact), pack.issuer);
+			if (pack.equivalence) {
+				bindEquivalence(
+					artifactKey(pack.equivalence.artifact),
+					pack.equivalence,
+				);
+			}
 			for (const rule of pack.rules) {
 				bindIssuer(artifactKey(rule.artifact), pack.issuer);
+				if (pack.equivalence) {
+					bindEquivalence(artifactKey(rule.artifact), pack.equivalence);
+				}
 			}
 			for (const semantics of pack.operationSemantics) {
 				bindIssuer(artifactKey(semantics.artifact), pack.issuer);
+				if (pack.equivalence) {
+					bindEquivalence(artifactKey(semantics.artifact), pack.equivalence);
+				}
 				if (semantics.operationKind) {
 					bindIssuer(
 						artifactKey(semantics.operationKind.artifact),
 						pack.issuer,
 					);
+					if (pack.equivalence) {
+						bindEquivalence(
+							artifactKey(semantics.operationKind.artifact),
+							pack.equivalence,
+						);
+					}
 				}
 			}
 		}
 		this.issuerByArtifact = issuerByArtifact;
+		this.equivalenceByArtifact = equivalenceByArtifact;
 	}
 
 	allRules(): readonly TransitionRule[] {
@@ -308,6 +346,15 @@ export class PackRegistry {
 			return this.defaultIssuer();
 		}
 		return this.issuerByArtifact.get(artifactKey(ref));
+	}
+
+	resolveEquivalence(
+		ref?: SemanticArtifactRef,
+	): EquivalenceCapability | undefined {
+		if (!ref) {
+			return undefined;
+		}
+		return this.equivalenceByArtifact.get(artifactKey(ref));
 	}
 
 	contextWithDerivedCapabilities(

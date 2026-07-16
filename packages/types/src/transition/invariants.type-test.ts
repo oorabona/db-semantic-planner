@@ -242,7 +242,7 @@ type TypedMatch = { readonly operationRef: string };
 declare const typedRule: TransitionRule<TypedMatch>;
 
 const typedRecognition = typedRule.recognize(desiredModel, currentModel);
-if (typedRecognition.recognized) {
+if (typedRecognition.recognized === true) {
 	typedRule.requiredObservations(typedRecognition.match);
 	typedRule.evaluate(typedRecognition.match, [evidenceObservation], []);
 	typedRule.generateCandidate(typedRecognition.match, {
@@ -434,6 +434,11 @@ const _recognitionWithNativeDetail: RecognitionResult<unknown> = {
 
 // @ts-expect-error Recognized rule results must carry the typed match.
 acceptsRecognitionResult<TypedMatch>({ recognized: true });
+
+acceptsRecognitionResult<TypedMatch>({
+	recognized: 'unknown',
+	obligations: [proofObligation],
+});
 
 // @ts-expect-error Unsafe native fragments must carry the assumption that permits them.
 acceptsUnsafeNativeFragment({

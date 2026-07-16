@@ -1,7 +1,7 @@
 import type { SemanticArtifactRef } from './artifact.js';
 import type { ApplyGuard } from './guard.js';
 import type { PhysicalOperation } from './operation.js';
-import type { Assumption, ProofObligation } from './proof.js';
+import type { Assumption, ProofClaimDraft, ProofObligation } from './proof.js';
 
 export interface RuleRef {
 	readonly id: string;
@@ -18,6 +18,7 @@ export interface TransitionFragment {
 	readonly generatedBy: RuleRef;
 	readonly operations: readonly PhysicalOperation[];
 	readonly obligations: readonly ProofObligation[];
+	readonly claimDrafts?: readonly ProofClaimDraft[];
 	readonly assumptions: readonly Assumption[];
 	readonly guards: readonly ApplyGuard[];
 	readonly selectionRationale: RuleSelectionRationale;

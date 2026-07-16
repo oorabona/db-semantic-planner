@@ -11,6 +11,11 @@ export const PG_RULE_PACK_ARTIFACT: SemanticArtifactRef = {
 	version: '0.1.0',
 };
 
+export const PG_EQUIVALENCE_ARTIFACT: SemanticArtifactRef = {
+	id: semanticArtifactId('dbsp.postgresql.equivalence.pg18'),
+	version: '0.1.0',
+};
+
 export const PG_INTROSPECTION_ARTIFACT: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.postgresql.introspection.pg18'),
 	version: '0.1.0',
