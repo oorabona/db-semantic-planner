@@ -221,6 +221,23 @@ describe('PostgreSQL transition equivalence', () => {
 		).not.toBe('equivalent');
 	});
 
+	it('keeps target-scoped custom types unresolved without explicit target schema', () => {
+		const equivalence = createPgEquivalenceCapability();
+
+		const result = equivalence.compareType(
+			typeRef('status', 'tenant_a', 'target'),
+			typeRef('status', 'tenant_b', 'target'),
+			{ engine: 'postgresql', searchPath: ['tenant_a', 'public'] },
+		);
+
+		expect(result.kind).toBe('unknown');
+		if (result.kind === 'unknown') {
+			expect(result.obligations[0]?.proposition.kind).toBe(
+				'postgresql.equivalence.type.identity-unresolved',
+			);
+		}
+	});
+
 	it('compares quoted collation identifiers case-sensitively', () => {
 		const equivalence = createPgEquivalenceCapability();
 

@@ -83,6 +83,25 @@ function model(
 	};
 }
 
+function modelWithColumns(columns: readonly ColumnIR[]): ModelIR {
+	const users: TableIR = {
+		name: 'users',
+		columns: [...columns],
+		foreignKeys: [],
+		indexes: [],
+	};
+	const tables = new Map<string, TableIR>([['users', users]]);
+	return {
+		tables,
+		relations: new Map(),
+		getTable: (name) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
 function setNotNullMatch(
 	overrides: Partial<SetNotNullMatch> = {},
 ): SetNotNullMatch {
@@ -99,16 +118,29 @@ function setNotNullMatch(
 	};
 }
 
+function statusType(
+	schema: string,
+	schemaScope: NonNullable<ColumnIR['originalDbTypeSchemaScope']> = 'target',
+): Partial<ColumnIR> {
+	return {
+		type: 'string',
+		originalDbType: 'status',
+		originalDbTypeSchema: schema,
+		originalDbTypeSchemaScope: schemaScope,
+	};
+}
+
 function normalizedRequest(
 	request: ObservationRequest,
 	schema = 'public',
+	ctx: ObservationContext = context,
 ): ObservationRequest {
 	if (request.kind === ENGINE_VERSION_OBSERVATION) {
 		return {
 			...request,
 			scope: request.scope.map((resource) => ({
 				...resource,
-				database: context.databaseId,
+				database: ctx.databaseId,
 			})),
 		};
 	}
@@ -120,7 +152,7 @@ function normalizedRequest(
 		...request,
 		scope: request.scope.map((resource) => ({
 			...resource,
-			database: context.databaseId,
+			database: ctx.databaseId,
 			schema,
 		})),
 		detail: {
@@ -135,13 +167,15 @@ function normalizedEvidence(
 	request: ObservationRequest,
 	holds = true,
 	schema = 'public',
+	ctx: ObservationContext = context,
 ): EvidenceObservation {
-	return evidence(normalizedRequest(request, schema), holds);
+	return evidence(normalizedRequest(request, schema, ctx), holds, ctx);
 }
 
 function evidence(
 	request: ObservationRequest,
 	holds: boolean,
+	ctx: ObservationContext = context,
 ): EvidenceObservation {
 	return {
 		role: 'evidence',
@@ -149,7 +183,7 @@ function evidence(
 		issuer: PG_INTROSPECTION_ARTIFACT,
 		request,
 		result: { value: { claims: [{ kind: request.kind, holds }] } },
-		context,
+		context: ctx,
 		stability: 'externally-mutable',
 		takenAt: new Date().toISOString(),
 		scope: request.scope,
@@ -161,10 +195,13 @@ function evidence(
 function catalogEvidence(
 	request: ObservationRequest,
 	overrides: Record<string, unknown> = {},
+	ctx: ObservationContext = context,
 ): EvidenceObservation {
-	const normalized = normalizedRequest(request);
+	const schema =
+		(ctx as { readonly targetSchema?: string }).targetSchema ?? 'public';
+	const normalized = normalizedRequest(request, schema, ctx);
 	return {
-		...evidence(normalized, true),
+		...evidence(normalized, true, ctx),
 		result: {
 			value: {
 				exists: true,
@@ -469,6 +506,288 @@ describe('postgresql.column.set-not-null rule', () => {
 		);
 
 		expect(comparison.kind).toBe('equivalent');
+	});
+
+	it('returns unknown at pure compare for target-scoped custom type identity without target schema', () => {
+		const registry = createPackRegistry([createPgTransitionPack()]);
+		const compare = createComparator(registry).compare(
+			model(false, statusType('tenant_model')),
+			model(true, statusType('tenant_live')),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.appliesTo).toBe('type');
+		expect(compare.obligations[0]?.dischargeableBy?.[0]?.kind).toBe(
+			COLUMN_EXISTS_OBSERVATION,
+		);
+	});
+
+	it('proves a target-scoped custom type after one recognition retry and carries recognition evidence', async () => {
+		const pack = createPgTransitionPack();
+		const proofContext: ObservationContext = {
+			...context,
+			targetSchema: 'tenant_live',
+			searchPath: ['tenant_live', 'public'],
+		};
+		const recognitionEvidenceId = evidenceId('test.recognition.column.exists');
+		const execute = vi.fn(
+			async (
+				request: ObservationRequest,
+				_target: unknown,
+				ctx: ObservationContext,
+			) => {
+				if (request.kind === COLUMN_EXISTS_OBSERVATION) {
+					return {
+						...catalogEvidence(
+							request,
+							{
+								atttypid: '90001',
+								formatType: 'tenant_live.status',
+								typeName: 'status',
+								typeSchema: 'tenant_live',
+							},
+							ctx,
+						),
+						id: recognitionEvidenceId,
+					};
+				}
+				return normalizedEvidence(request, true, 'tenant_live', ctx);
+			},
+		);
+		const readContext = vi.fn(async () => proofContext);
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext,
+					execute,
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, statusType('tenant_model')),
+			model(true, statusType('tenant_live')),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		expect(readContext).toHaveBeenCalledOnce();
+		expect(execute.mock.calls.map(([request]) => request.kind)).toEqual([
+			COLUMN_EXISTS_OBSERVATION,
+			ALTER_AUTHORITY_OBSERVATION,
+			ENGINE_VERSION_OBSERVATION,
+		]);
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.plan.observations.map((item) => item.id)).toContain(
+			recognitionEvidenceId,
+		);
+		const equivalenceClaim = outcome.plan.claims.find((claim) =>
+			claim.semantics.some(
+				(artifact) =>
+					artifact.id === PG_EQUIVALENCE_ARTIFACT.id &&
+					artifact.version === PG_EQUIVALENCE_ARTIFACT.version,
+			),
+		);
+		expect(equivalenceClaim?.supportedBy).toContain(recognitionEvidenceId);
+	});
+
+	it('refuses mixed recognized and unknown column changes without proving a partial plan', async () => {
+		const pack = createPgTransitionPack();
+		const readContext = vi.fn(async () => ({
+			...context,
+			targetSchema: 'tenant_live',
+		}));
+		const execute = vi.fn(async (request: ObservationRequest, _target, ctx) =>
+			request.kind === COLUMN_EXISTS_OBSERVATION
+				? catalogEvidence(request, {}, ctx)
+				: normalizedEvidence(request, true, 'tenant_live', ctx),
+		);
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext,
+					execute,
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			modelWithColumns([
+				column(false, {}, 'age'),
+				column(false, statusType('tenant_model'), 'state'),
+			]),
+			modelWithColumns([
+				column(true, {}, 'age'),
+				column(true, statusType('tenant_live'), 'state'),
+			]),
+		);
+
+		expect(compare.kind).toBe('uncomposable');
+		if (compare.kind !== 'uncomposable') {
+			return;
+		}
+		expect(compare.detail).toMatch(
+			/multi-change composition is not yet supported/i,
+		);
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.candidates[0]?.match).toMatchObject({
+			table: 'users',
+			column: 'age',
+		});
+		expect(compare.recognitions).toHaveLength(1);
+		expect(
+			compare.recognitions[0]?.desired.getTable('users')?.columns[0]?.name,
+		).toBe('state');
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		expect(outcome).not.toHaveProperty('plan');
+		expect(readContext).not.toHaveBeenCalled();
+		expect(execute).not.toHaveBeenCalled();
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/multi-change composition is not yet supported/i,
+			);
+		}
+	});
+
+	it('refuses two unknown column changes as uncomposable', () => {
+		const registry = createPackRegistry([createPgTransitionPack()]);
+		const compare = createComparator(registry).compare(
+			modelWithColumns([
+				column(false, statusType('tenant_model'), 'state'),
+				column(false, statusType('tenant_model'), 'mood'),
+			]),
+			modelWithColumns([
+				column(true, statusType('tenant_live'), 'state'),
+				column(true, statusType('tenant_live'), 'mood'),
+			]),
+		);
+
+		expect(compare.kind).toBe('uncomposable');
+		if (compare.kind !== 'uncomposable') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(0);
+		expect(compare.recognitions).toHaveLength(2);
+		expect(compare.detail).toMatch(
+			/multi-change composition is not yet supported/i,
+		);
+	});
+
+	it('reports a refuted recognition claim when retry resolves unknown to different', async () => {
+		const pack = createPgTransitionPack();
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext: async () => ({
+						...context,
+						targetSchema: 'tenant_live',
+					}),
+					execute: async (request: ObservationRequest, _target, ctx) =>
+						request.kind === COLUMN_EXISTS_OBSERVATION
+							? catalogEvidence(request, {}, ctx)
+							: normalizedEvidence(request, true, 'tenant_live', ctx),
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, statusType('tenant_model')),
+			model(true, statusType('tenant_other', 'absolute')),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('inapplicable');
+		if (outcome.kind !== 'inapplicable') {
+			return;
+		}
+		expect(outcome.assessment.reasons[0]?.code).toBe('proven-inapplicable');
+		expect(outcome.claim?.derivedBy.conclusion).toBe('refuted');
+		expect(outcome.claim?.proposition.kind).toBe('postgresql.equivalence.type');
+	});
+
+	it('blocks after one retry when target-scoped custom type identity remains unknown', async () => {
+		const pack = createPgTransitionPack();
+		const execute = vi.fn(
+			async (
+				request: ObservationRequest,
+				_target: unknown,
+				ctx: ObservationContext,
+			) =>
+				request.kind === COLUMN_EXISTS_OBSERVATION
+					? catalogEvidence(request, {}, ctx)
+					: normalizedEvidence(request, true, 'tenant_live', ctx),
+		);
+		const readContext = vi.fn(async () => ({
+			...context,
+			searchPath: ['tenant_live', 'public'],
+		}));
+		const target = proofTarget();
+		const registry = createPackRegistry([
+			{
+				...pack,
+				issuer: {
+					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext,
+					execute,
+				},
+			},
+		]);
+		const compare = createComparator(registry).compare(
+			model(false, statusType('tenant_model')),
+			model(true, statusType('tenant_live')),
+		);
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(registry).prove(
+			compare,
+			target,
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
+		}
+		expect(readContext).toHaveBeenCalledOnce();
+		expect(execute).toHaveBeenCalledOnce();
+		expect(target.connect).toHaveBeenCalledOnce();
 	});
 
 	it('does not retarget absolute custom type schema differences', () => {

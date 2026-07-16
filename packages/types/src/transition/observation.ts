@@ -21,6 +21,7 @@ export interface ObservationContext {
 	readonly capabilities: readonly string[];
 	readonly privileges: readonly string[];
 	readonly effectiveRole?: string;
+	readonly targetSchema?: string;
 	readonly searchPath?: readonly string[];
 	readonly sessionConfiguration: Readonly<Record<string, string>>;
 	readonly extensions: Readonly<Record<string, string>>;

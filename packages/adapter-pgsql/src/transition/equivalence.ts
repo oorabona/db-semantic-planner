@@ -258,11 +258,10 @@ function resolvedCustomSchema(
 	context: EquivalenceContext,
 	normalizedSchema: NormalizedIdentifier | undefined,
 ): NormalizedIdentifier | undefined {
-	if (ref.schemaScope === 'target' && context.targetSchema) {
-		return normalizeSchema(context.targetSchema);
-	}
-	if (ref.schemaScope === 'target' && context.searchPath?.length === 1) {
-		return normalizeSchema(context.searchPath[0]);
+	if (ref.schemaScope === 'target') {
+		return context.targetSchema
+			? normalizeSchema(context.targetSchema)
+			: undefined;
 	}
 	if (normalizedSchema) {
 		return normalizedSchema;
@@ -356,6 +355,18 @@ function compareType(
 				left,
 				right,
 				'type identifier quoting or spelling is not resolved by static context',
+			),
+		);
+	}
+	if (
+		(left.schemaScope === 'target' && !normalizedLeft.schema) ||
+		(right.schemaScope === 'target' && !normalizedRight.schema)
+	) {
+		return unknown(
+			unresolvedTypeIdentityObligation(
+				left,
+				right,
+				'target-scoped type identity requires an explicit target schema',
 			),
 		);
 	}

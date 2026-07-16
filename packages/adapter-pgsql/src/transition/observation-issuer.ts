@@ -86,6 +86,11 @@ function nextEvidenceId(kind: string): ReturnType<typeof evidenceId> {
 function explicitSchemaFromContext(
 	context: ObservationContext,
 ): string | undefined {
+	const targetSchema = (context as { readonly targetSchema?: string })
+		.targetSchema;
+	if (targetSchema && targetSchema.length > 0) {
+		return targetSchema;
+	}
 	const value = context.sessionConfiguration[EXPLICIT_SCHEMA_CONTEXT_KEY];
 	return value && value.length > 0 ? value : undefined;
 }
@@ -534,6 +539,7 @@ async function readPgObservationContextFromClient(
 		: observationTarget && schema
 			? { ...observationTarget, schema }
 			: undefined;
+	const targetSchema = resolvedObservationTarget?.schema ?? schema;
 	const privilegeFacts = resolvedObservationTarget
 		? privilegeFactsForTarget(
 				resolvedObservationTarget,
@@ -550,6 +556,7 @@ async function readPgObservationContextFromClient(
 		capabilities: [],
 		privileges: privilegeFacts,
 		effectiveRole: String(role.rows[0]?.current_user ?? 'unknown'),
+		...(targetSchema ? { targetSchema } : {}),
 		searchPath:
 			configuredSearchPath.length > 0 ? configuredSearchPath : ['public'],
 		sessionConfiguration: {

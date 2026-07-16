@@ -226,6 +226,7 @@ describe('PostgreSQL transition observation issuer', () => {
 		);
 
 		expect(contextFromDb.searchPath).toEqual(['tenant']);
+		expect(contextFromDb.targetSchema).toBe('tenant');
 		expect(contextFromDb.capabilities).toEqual([]);
 		expect(contextFromDb.extensions).toEqual({});
 		expect(contextFromDb.collationProvider).toBe('c');
@@ -282,6 +283,7 @@ describe('PostgreSQL transition observation issuer', () => {
 		);
 
 		expect(contextFromDb.extensions).toEqual({ vector: '0.8.0' });
+		expect(contextFromDb.targetSchema).toBe('tenant');
 		expect(contextFromDb.privileges).toEqual([
 			pgPrivilegeFact(PG_SCHEMA_USAGE_PRIVILEGE, ['tenant'], true),
 			pgPrivilegeFact(
@@ -355,5 +357,6 @@ describe('PostgreSQL transition observation issuer', () => {
 			"SELECT pg_catalog.to_jsonb(d)->>'datlocprovider' AS collation_provider, pg_catalog.to_jsonb(d)->>'datcollversion' AS collation_version FROM pg_catalog.pg_database d WHERE d.datname = pg_catalog.current_database()",
 		]);
 		expect(contextFromDb.effectiveRole).toBe('tenant_owner');
+		expect(contextFromDb.targetSchema).toBe('tenant');
 	});
 });

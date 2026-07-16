@@ -7,6 +7,7 @@ import type {
 	ModelIR,
 	ObservationRequest,
 	PhysicalOperation,
+	ProofClaimDraft,
 	ProofObligation,
 	RecognitionContext,
 	RecognitionResult,
@@ -58,6 +59,11 @@ type ResolvedSetNotNullMatch = SetNotNullMatch & {
 	readonly database: string;
 };
 
+type SetNotNullTarget = Pick<
+	SetNotNullMatch,
+	'schema' | 'database' | 'table' | 'column'
+>;
+
 const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
 	'partitioned tables are not yet supported by the SET NOT NULL transition';
 
@@ -106,6 +112,15 @@ function sameLogicalDetail(
 	);
 }
 
+function refutedClaims(
+	claimDrafts: readonly ProofClaimDraft[],
+): readonly ProofClaimDraft<'refuted'>[] {
+	return claimDrafts.filter(
+		(claim): claim is ProofClaimDraft<'refuted'> =>
+			claim.conclusion === 'refuted',
+	);
+}
+
 function isPureNullabilityTightening(
 	desired: ColumnIR,
 	current: ColumnIR,
@@ -132,11 +147,19 @@ function isPureNullabilityTightening(
 	if (comparison.kind === 'unknown') {
 		return { recognized: 'unknown', obligations: comparison.obligations };
 	}
-	return { recognized: false };
+	const claims = refutedClaims(comparison.claimDrafts);
+	return claims.length > 0
+		? ({
+				recognized: false,
+				claimDrafts: claims,
+			} as RecognitionResult<{
+				readonly expectedColumnShape: SetNotNullColumnShapeExpectation;
+			}>)
+		: { recognized: false };
 }
 
 function resourceForMatch(
-	match: SetNotNullMatch,
+	match: SetNotNullTarget,
 	kind: 'table' | 'column',
 	database = match.database ?? 'model',
 ): ResourceAddress {
@@ -151,7 +174,7 @@ function resourceForMatch(
 	return match.schema ? { ...qualified, schema: match.schema } : qualified;
 }
 
-function requestDetail(match: SetNotNullMatch) {
+function requestDetail(match: SetNotNullTarget) {
 	return {
 		table: match.table,
 		column: match.column,
@@ -159,15 +182,38 @@ function requestDetail(match: SetNotNullMatch) {
 	};
 }
 
+function columnExistsRequest(match: SetNotNullTarget): ObservationRequest {
+	return {
+		kind: COLUMN_EXISTS_OBSERVATION,
+		scope: [resourceForMatch(match, 'column')],
+		detail: requestDetail(match),
+	};
+}
+
+function withRecognitionEvidenceRequest(
+	obligations: readonly ProofObligation[],
+	request: ObservationRequest,
+): readonly ProofObligation[] {
+	const requestKey = stableJson(request);
+	return obligations.map((obligation) => {
+		const dischargeableBy = obligation.dischargeableBy ?? [];
+		if (
+			dischargeableBy.some((candidate) => stableJson(candidate) === requestKey)
+		) {
+			return obligation;
+		}
+		return {
+			...obligation,
+			dischargeableBy: [...dischargeableBy, request],
+		};
+	});
+}
+
 function requiredObservationsFor(
 	match: SetNotNullMatch,
 ): readonly ObservationRequest[] {
 	return [
-		{
-			kind: COLUMN_EXISTS_OBSERVATION,
-			scope: [resourceForMatch(match, 'column')],
-			detail: requestDetail(match),
-		},
+		columnExistsRequest(match),
 		{
 			kind: ALTER_AUTHORITY_OBSERVATION,
 			scope: [resourceForMatch(match, 'table')],
@@ -418,6 +464,7 @@ export function createSetNotNullRule(
 			current: ModelIR,
 			context?: RecognitionContext,
 		): RecognitionResult<SetNotNullMatch> {
+			let refutedClaimDrafts: readonly ProofClaimDraft<'refuted'>[] = [];
 			for (const desiredTable of desired.tables.values()) {
 				const currentTable = current.getTable(desiredTable.name);
 				if (!currentTable) {
@@ -438,11 +485,21 @@ export function createSetNotNullRule(
 						context,
 					);
 					if (nullabilityTightening.recognized === 'unknown') {
-						return nullabilityTightening;
+						const target = {
+							table: naming.toDatabase(desiredTable.name),
+							column: physicalColumn,
+						};
+						return {
+							recognized: 'unknown',
+							obligations: withRecognitionEvidenceRequest(
+								nullabilityTightening.obligations,
+								columnExistsRequest(target),
+							),
+						};
 					}
 					if (nullabilityTightening.recognized) {
 						const recognized = {
-							recognized: true,
+							recognized: true as const,
 							match: {
 								table: naming.toDatabase(desiredTable.name),
 								column: physicalColumn,
@@ -457,9 +514,22 @@ export function createSetNotNullRule(
 								}
 							: recognized;
 					}
+					const claimDrafts = (
+						nullabilityTightening as {
+							readonly claimDrafts?: readonly ProofClaimDraft<'refuted'>[];
+						}
+					).claimDrafts;
+					if (claimDrafts?.length) {
+						refutedClaimDrafts = [...refutedClaimDrafts, ...claimDrafts];
+					}
 				}
 			}
-			return { recognized: false };
+			return refutedClaimDrafts.length > 0
+				? ({
+						recognized: false,
+						claimDrafts: refutedClaimDrafts,
+					} as RecognitionResult<SetNotNullMatch>)
+				: { recognized: false };
 		},
 		requiredObservations: requiredObservationsFor,
 		evaluate(

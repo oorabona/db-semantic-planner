@@ -751,6 +751,22 @@ acceptsCompareOutcome({
 	obligations: [proofObligation],
 });
 
+acceptsCompareOutcome({
+	kind: 'uncomposable',
+	candidates: [transitionCandidate],
+	recognitions: [],
+	obligations: [proofObligation],
+	detail: 'multi-change composition is not yet supported',
+});
+
+// @ts-expect-error Uncomposable compare outcomes name the composition reason as detail.
+acceptsCompareOutcome({
+	kind: 'uncomposable',
+	candidates: [transitionCandidate],
+	recognitions: [],
+	obligations: [proofObligation],
+});
+
 // @ts-expect-error Even no-drift compare outcomes carry a claimed invariant.
 acceptsCompareOutcome({ kind: 'no-drift' });
 

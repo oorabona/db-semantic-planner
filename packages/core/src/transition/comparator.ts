@@ -641,6 +641,20 @@ export function createComparator(registry: PackRegistry): Comparator {
 				return { kind: 'unsupported', changes: unsupported };
 			}
 
+			if (pendingColumnKeys.size > 1) {
+				return {
+					kind: 'uncomposable',
+					candidates,
+					recognitions: unknownRecognitions,
+					obligations: [
+						...candidates.flatMap((candidate) => [...candidate.obligations]),
+						...unknownRecognitions.flatMap((entry) => [...entry.obligations]),
+					],
+					detail:
+						'multi-change composition is not yet supported; the transition planner only proves one change per diff',
+				};
+			}
+
 			if (unknownRecognitions.length > 0) {
 				return {
 					kind: 'unknown',

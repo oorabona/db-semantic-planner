@@ -264,7 +264,10 @@ function rule(options: RuleOptions = {}): TransitionRule<{
 			const currentColumn = current.getTable('users')?.columns[0];
 			return desiredColumn?.nullable === false &&
 				currentColumn?.nullable === true
-				? { recognized: true, match: { table: 'users', column: 'age' } }
+				? {
+						recognized: true,
+						match: { table: 'users', column: desiredColumn.name },
+					}
 				: { recognized: false };
 		},
 		requiredObservations:
@@ -438,6 +441,43 @@ describe('createComparator', () => {
 		const current = model(true);
 		const compare = createComparator(registry()).compare(desired, current);
 		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('returns uncomposable when two recognized column changes are present', async () => {
+		const desired = modelFromTable(
+			table(false, [column(false, 'age'), column(false, 'height')]),
+		);
+		const current = modelFromTable(
+			table(true, [column(true, 'age'), column(true, 'height')]),
+		);
+		const customRegistry = registry();
+		const compare = createComparator(customRegistry).compare(desired, current);
+
+		expect(compare.kind).toBe('uncomposable');
+		if (compare.kind !== 'uncomposable') {
+			return;
+		}
+		expect(compare.detail).toMatch(
+			/multi-change composition is not yet supported/i,
+		);
+		expect(compare.candidates.map((candidate) => candidate.match)).toEqual([
+			{ table: 'users', column: 'age' },
+			{ table: 'users', column: 'height' },
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('uncomposable');
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/multi-change composition is not yet supported/i,
+			);
+		}
 	});
 });
 

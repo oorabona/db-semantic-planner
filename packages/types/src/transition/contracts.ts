@@ -72,7 +72,10 @@ export interface RecognitionContext {
 }
 
 export type RecognitionResult<TMatch> =
-	| { readonly recognized: false }
+	| {
+			readonly recognized: false;
+			readonly claimDrafts?: readonly ProofClaimDraft<'refuted'>[];
+	  }
 	| {
 			readonly recognized: true;
 			readonly match: TMatch;
@@ -176,6 +179,13 @@ export type CompareOutcome =
 			readonly kind: 'unknown';
 			readonly recognitions: readonly UnknownTransitionRecognition[];
 			readonly obligations: readonly ProofObligation[];
+	  }
+	| {
+			readonly kind: 'uncomposable';
+			readonly candidates: readonly TransitionCandidate[];
+			readonly recognitions: readonly UnknownTransitionRecognition[];
+			readonly obligations: readonly ProofObligation[];
+			readonly detail: string;
 	  }
 	| { readonly kind: 'ambiguous'; readonly candidates: readonly RuleRef[] };
 
