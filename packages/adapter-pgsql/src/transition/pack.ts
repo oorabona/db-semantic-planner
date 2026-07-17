@@ -8,6 +8,7 @@ import {
 	ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM,
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
 } from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
 import { createPgObservationIssuer } from './observation-issuer.js';
@@ -15,7 +16,10 @@ import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';
 import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type-add-value.js';
 import { createAddCheckRule } from './rules/add-check.js';
-import { createEnumAddValueRule } from './rules/enum-add-value.js';
+import {
+	createEnumAddValueRule,
+	satisfiesPgEnumLabelVisibleCompositionFact,
+} from './rules/enum-add-value.js';
 import { createSetNotNullRule } from './rules/set-not-null.js';
 
 export interface PgTransitionPackOptions {
@@ -68,5 +72,7 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 			normalizeCurrentIdentifier: (identifier: string) =>
 				naming.toModel(identifier),
 		},
+		compositionFactKinds: [ENUM_LABEL_VISIBLE_OBSERVATION],
+		satisfiesCompositionFact: satisfiesPgEnumLabelVisibleCompositionFact,
 	};
 }

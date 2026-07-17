@@ -274,7 +274,20 @@ function registry(rules: readonly TransitionRule[]) {
 		}),
 	};
 	return createPackRegistry([
-		{ rules, operationSemantics: [semantics], issuer },
+		{
+			rules,
+			operationSemantics: [semantics],
+			issuer,
+			compositionFactKinds: [enumLabelFact.kind],
+			satisfiesCompositionFact: (fact, current) => {
+				if (fact.kind !== enumLabelFact.kind) {
+					return false;
+				}
+				return (
+					current.enums?.get('status')?.values.includes('pending') ?? false
+				);
+			},
+		},
 	]);
 }
 

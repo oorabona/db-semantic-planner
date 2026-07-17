@@ -7,6 +7,7 @@ import type {
 import type {
 	RuleRef,
 	RuleSelectionRationale,
+	TransitionCompositionFact,
 	TransitionFragment,
 	TransitionFragmentComposition,
 } from './fragment.js';
@@ -135,6 +136,15 @@ export type CapabilityAvailabilityPredicate = {
 export interface CapabilityDescriptor {
 	readonly id: string;
 	readonly predicate: CapabilityAvailabilityPredicate;
+}
+
+export interface CompositionFactSatisfactionOwner {
+	readonly compositionFactKinds: readonly string[];
+	satisfiesCompositionFact(
+		fact: TransitionCompositionFact,
+		current: ModelIR,
+		context: ObservationContext,
+	): boolean;
 }
 
 export interface TransitionRule<TMatch = unknown> {

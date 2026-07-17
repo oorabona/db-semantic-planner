@@ -5,6 +5,7 @@ import type {
 	EvidenceObservation,
 	JsonValue,
 	ModelIR,
+	ObservationContext,
 	ObservationRequest,
 	PhysicalOperation,
 	ProofObligation,
@@ -12,6 +13,7 @@ import type {
 	RecognitionResult,
 	ResourceAddress,
 	RuleEvaluation,
+	TransitionCompositionFact,
 	TransitionFragment,
 	TransitionFragmentComposition,
 	TransitionRule,
@@ -368,6 +370,56 @@ function compositionForMatch(
 			},
 		],
 	};
+}
+
+function stringDetail(
+	detail: JsonValue | undefined,
+	key: string,
+): string | undefined {
+	if (!isRecord(detail)) {
+		return undefined;
+	}
+	const value = detail[key];
+	return typeof value === 'string' ? value : undefined;
+}
+
+function schemaDetail(fact: TransitionCompositionFact): string | undefined {
+	const schema = stringDetail(fact.detail, 'schema');
+	return schema ?? fact.resource.schema;
+}
+
+export function satisfiesPgEnumLabelVisibleCompositionFact(
+	fact: TransitionCompositionFact,
+	current: ModelIR,
+	_context: ObservationContext,
+): boolean {
+	if (fact.kind !== ENUM_LABEL_VISIBLE_OBSERVATION) {
+		return false;
+	}
+	if (
+		fact.resource.kind !== 'type' ||
+		!(fact.resource.qualifiedBy?.includes('enum') ?? false)
+	) {
+		return false;
+	}
+	const label = stringDetail(fact.detail, 'label');
+	const type = stringDetail(fact.detail, 'type') ?? fact.resource.name;
+	if (!label || !type) {
+		return false;
+	}
+	const schema = schemaDetail(fact);
+	for (const [key, enumDef] of current.enums ?? new Map()) {
+		if (key !== type && enumDef.name !== type) {
+			continue;
+		}
+		if (schema && enumDef.schema !== schema) {
+			continue;
+		}
+		if (enumDef.values.includes(label)) {
+			return true;
+		}
+	}
+	return false;
 }
 
 export function createEnumAddValueRule(

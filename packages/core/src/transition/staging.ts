@@ -1,6 +1,5 @@
 import type {
 	CompareOutcome,
-	JsonValue,
 	ModelIR,
 	ObservationContext,
 	PlanAssessment,
@@ -22,7 +21,6 @@ type CompositionProducer = NonNullable<
 type CompositionRequirement = NonNullable<
 	TransitionFragmentComposition['requires']
 >[number];
-type CompositionFact = CompositionProducer['fact'];
 
 export interface StagedCompositionCandidate {
 	readonly candidate: TransitionCandidate;
@@ -117,58 +115,6 @@ function compositionOpRefs(
 	].filter((value, index, values) => values.indexOf(value) === index);
 }
 
-function isRecord(value: JsonValue | undefined): value is {
-	readonly [key: string]: JsonValue;
-} {
-	return value !== undefined && typeof value === 'object' && value !== null;
-}
-
-function stringDetail(
-	detail: JsonValue | undefined,
-	key: string,
-): string | undefined {
-	if (!isRecord(detail)) {
-		return undefined;
-	}
-	const value = detail[key];
-	return typeof value === 'string' ? value : undefined;
-}
-
-function schemaDetail(fact: CompositionFact): string | undefined {
-	const schema = stringDetail(fact.detail, 'schema');
-	return schema ?? fact.resource.schema;
-}
-
-function factSatisfiedByCurrentModel(
-	fact: CompositionFact,
-	current: ModelIR,
-): boolean {
-	if (
-		fact.resource.kind !== 'type' ||
-		!(fact.resource.qualifiedBy?.includes('enum') ?? false)
-	) {
-		return false;
-	}
-	const label = stringDetail(fact.detail, 'label');
-	const type = stringDetail(fact.detail, 'type') ?? fact.resource.name;
-	if (!label || !type) {
-		return false;
-	}
-	const schema = schemaDetail(fact);
-	for (const [key, enumDef] of current.enums ?? new Map()) {
-		if (key !== type && enumDef.name !== type) {
-			continue;
-		}
-		if (schema && enumDef.schema !== schema) {
-			continue;
-		}
-		if (enumDef.values.includes(label)) {
-			return true;
-		}
-	}
-	return false;
-}
-
 function requirementNeedsCommit(
 	requirement: CompositionRequirement,
 	producer: CompositionProducer,
@@ -260,7 +206,13 @@ export function preflightStagedComposition(
 					[requirement.fact.resource],
 				);
 			}
-			if (factSatisfiedByCurrentModel(requirement.fact, input.current)) {
+			if (
+				registry.satisfiesCompositionFact(
+					requirement.fact,
+					input.current,
+					input.context,
+				)
+			) {
 				continue;
 			}
 			const producers =

@@ -6,6 +6,7 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
+	ModelIR,
 	ObservationContext,
 	ObservationIssuer,
 	OperationEffectAssessment,
@@ -17,6 +18,7 @@ import type {
 	SemanticArtifactRef,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionCompositionFact,
 	TransitionConnectionPool,
 	TransitionQueryClient,
 	TransitionRule,
@@ -48,6 +50,15 @@ export interface ComparatorNameNormalizer {
 	 * used by authored desired models before comparator matching runs.
 	 */
 	normalizeCurrentIdentifier(identifier: string): string;
+}
+
+interface CompositionFactSatisfactionOwner {
+	readonly compositionFactKinds: readonly string[];
+	satisfiesCompositionFact(
+		fact: TransitionCompositionFact,
+		current: ModelIR,
+		context: ObservationContext,
+	): boolean;
 }
 
 export interface GuardExecutionResult {
@@ -128,6 +139,8 @@ export interface TransitionPack {
 	readonly equivalence?: EquivalenceCapability;
 	readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
 	readonly comparatorNameNormalizer?: ComparatorNameNormalizer;
+	readonly compositionFactKinds?: CompositionFactSatisfactionOwner['compositionFactKinds'];
+	readonly satisfiesCompositionFact?: CompositionFactSatisfactionOwner['satisfiesCompositionFact'];
 }
 
 export type OperationResolution =
@@ -229,6 +242,10 @@ export class PackRegistry {
 		string,
 		EquivalenceCapability
 	>;
+	private readonly compositionFactOwnerByKind: ReadonlyMap<
+		string,
+		CompositionFactSatisfactionOwner
+	>;
 	private readonly capabilityDescriptors: readonly CapabilityDescriptor[];
 	private readonly nameNormalizer: ComparatorNameNormalizer | undefined;
 
@@ -286,6 +303,22 @@ export class PackRegistry {
 			}
 			equivalenceByArtifact.set(key, equivalence);
 		};
+		const compositionFactOwnerByKind = new Map<
+			string,
+			CompositionFactSatisfactionOwner
+		>();
+		const bindCompositionFactOwner = (
+			kind: string,
+			owner: CompositionFactSatisfactionOwner,
+		) => {
+			const prior = compositionFactOwnerByKind.get(kind);
+			if (prior && prior !== owner) {
+				throw new Error(
+					`ambiguous composition fact satisfaction owner for ${kind}`,
+				);
+			}
+			compositionFactOwnerByKind.set(kind, owner);
+		};
 		for (const pack of packs) {
 			bindIssuer(artifactKey(pack.issuer.artifact), pack.issuer);
 			if (pack.equivalence) {
@@ -318,9 +351,19 @@ export class PackRegistry {
 					}
 				}
 			}
+			if (pack.satisfiesCompositionFact) {
+				const owner: CompositionFactSatisfactionOwner = {
+					compositionFactKinds: pack.compositionFactKinds ?? [],
+					satisfiesCompositionFact: pack.satisfiesCompositionFact,
+				};
+				for (const kind of owner.compositionFactKinds) {
+					bindCompositionFactOwner(kind, owner);
+				}
+			}
 		}
 		this.issuerByArtifact = issuerByArtifact;
 		this.equivalenceByArtifact = equivalenceByArtifact;
+		this.compositionFactOwnerByKind = compositionFactOwnerByKind;
 	}
 
 	allRules(): readonly TransitionRule[] {
@@ -372,6 +415,24 @@ export class PackRegistry {
 				...new Set([...context.capabilities, ...capabilities]),
 			].sort(),
 		};
+	}
+
+	satisfiesCompositionFact(
+		fact: Parameters<
+			CompositionFactSatisfactionOwner['satisfiesCompositionFact']
+		>[0],
+		current: ModelIR,
+		context: ObservationContext,
+	): boolean {
+		const owner = this.compositionFactOwnerByKind.get(fact.kind);
+		if (!owner) {
+			return false;
+		}
+		try {
+			return owner.satisfiesCompositionFact(fact, current, context) === true;
+		} catch {
+			return false;
+		}
 	}
 
 	resolveOperation(operation: PhysicalOperation): OperationResolution {
