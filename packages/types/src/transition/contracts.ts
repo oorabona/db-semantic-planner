@@ -77,6 +77,15 @@ export type RecognitionResult<TMatch> =
 			readonly claimDrafts?: readonly ProofClaimDraft<'refuted'>[];
 	  }
 	| {
+			readonly recognized: 'no-drift';
+			readonly claimDraft: ProofClaimDraft<'established'>;
+	  }
+	| {
+			readonly recognized: 'unsupported';
+			readonly changes: readonly ResourceAddress[];
+			readonly detail?: string;
+	  }
+	| {
 			readonly recognized: true;
 			readonly match: TMatch;
 			readonly claimDrafts?: readonly ProofClaimDraft[];

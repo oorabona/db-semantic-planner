@@ -335,10 +335,14 @@ function registryWithColumnObservation(
 			...pack,
 			issuer: {
 				artifact: PG_INTROSPECTION_ARTIFACT,
-				execute: async (request: ObservationRequest) =>
+				execute: async (
+					request: ObservationRequest,
+					_target: unknown,
+					ctx: ObservationContext,
+				) =>
 					request.kind === COLUMN_EXISTS_OBSERVATION
-						? catalogEvidence(request, overrides)
-						: normalizedEvidence(request),
+						? catalogEvidence(request, overrides, ctx)
+						: normalizedEvidence(request, true, 'public', ctx),
 			},
 		},
 	]);
@@ -1561,13 +1565,17 @@ describe('postgresql.column.set-not-null rule', () => {
 				operationSemantics: [{ ...runtime, effectsOf }],
 				issuer: {
 					artifact: PG_INTROSPECTION_ARTIFACT,
-					execute: async (request: ObservationRequest) => {
-						const normalized = normalizedRequest(request);
+					execute: async (
+						request: ObservationRequest,
+						_target: unknown,
+						ctx: ObservationContext,
+					) => {
+						const normalized = normalizedRequest(request, 'public', ctx);
 						if (request.kind !== COLUMN_EXISTS_OBSERVATION) {
-							return normalizedEvidence(request);
+							return normalizedEvidence(request, true, 'public', ctx);
 						}
 						return {
-							...evidence(normalized, true),
+							...evidence(normalized, true, ctx),
 							result: {
 								value: {
 									exists: true,

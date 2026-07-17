@@ -546,6 +546,22 @@ function establishedNoDriftClaim(
 	};
 }
 
+function establishedNoDriftClaimFromDraft(
+	draft: ProofClaimDraft<'established'>,
+	index: number,
+): EstablishedProofClaim {
+	const claim = proofClaimForDraft(draft, index);
+	if (
+		claim.derivedBy.conclusion !== 'established' ||
+		claim.assumes.length !== 0
+	) {
+		throw new Error(
+			'no-drift recognition did not produce an established claim',
+		);
+	}
+	return claim as EstablishedProofClaim;
+}
+
 function candidateRefs(
 	candidates: readonly TransitionCandidate[],
 ): readonly RuleRef[] {
@@ -657,6 +673,20 @@ function recognitionResultWithEvidenceSupport<
 	T extends RecognitionResult<unknown>,
 >(result: T, evidence: readonly EvidenceObservation[]): T {
 	const evidenceIds = evidence.map((item) => item.id);
+	if (result.recognized === 'no-drift' && evidenceIds.length > 0) {
+		return {
+			...result,
+			claimDraft: {
+				...result.claimDraft,
+				supportedBy: [
+					...new Set([
+						...(result.claimDraft.supportedBy ?? []),
+						...evidenceIds,
+					]),
+				],
+			},
+		} as T;
+	}
 	const claimDrafts = (
 		result as { readonly claimDrafts?: readonly ProofClaimDraft[] }
 	).claimDrafts;
@@ -1562,6 +1592,25 @@ async function retryUnknownRecognition(
 					),
 				};
 			}
+			if (retried.recognized === 'no-drift') {
+				const claim = establishedNoDriftClaimFromDraft(retried.claimDraft, 0);
+				return {
+					kind: 'no-drift',
+					claim,
+					assessment: applicableAssessment(claim.id, []),
+				};
+			}
+			if (retried.recognized === 'unsupported') {
+				return {
+					kind: 'blocked',
+					assessment: blockedAssessment({
+						code: 'unsupported-transition',
+						changes: retried.changes,
+						scope: retried.changes,
+						...(retried.detail ? { detail: retried.detail } : {}),
+					}),
+				};
+			}
 			if (!retried.recognized) {
 				const refuted = firstRefutedRecognitionClaim(retried);
 				if (refuted) {
@@ -1645,6 +1694,25 @@ async function retryUnknownRecognition(
 			assessment: missingEvidenceAssessment(
 				retried.obligations[0] ?? fallbackUnknownObligation(recognition),
 			),
+		};
+	}
+	if (retried.recognized === 'no-drift') {
+		const claim = establishedNoDriftClaimFromDraft(retried.claimDraft, 0);
+		return {
+			kind: 'no-drift',
+			claim,
+			assessment: applicableAssessment(claim.id, []),
+		};
+	}
+	if (retried.recognized === 'unsupported') {
+		return {
+			kind: 'blocked',
+			assessment: blockedAssessment({
+				code: 'unsupported-transition',
+				changes: retried.changes,
+				scope: retried.changes,
+				...(retried.detail ? { detail: retried.detail } : {}),
+			}),
 		};
 	}
 	if (!retried.recognized) {

@@ -7,14 +7,18 @@ import { describe, expect, it, vi } from 'vitest';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
+	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
+	PG_DEPARSE_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from './constants.js';
 import {
 	createPgObservationIssuer,
@@ -228,6 +232,264 @@ describe('PostgreSQL transition observation issuer', () => {
 			hasSchemaUsage: false,
 			claims: [{ kind: ALTER_AUTHORITY_OBSERVATION, holds: false }],
 		});
+	});
+
+	it('observes table CHECK constraints with table identity and absence claim', async () => {
+		const issuer = createPgObservationIssuer();
+		const observation = await issuer.execute(
+			{
+				kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+				scope: [],
+				detail: {
+					schema: 'tenant',
+					table: 'users',
+					constraint: 'users_age_check',
+				},
+			},
+			{
+				query: async () => ({
+					rows: [
+						{
+							oid: '12345',
+							relkind: 'r',
+							schema_name: 'tenant',
+							table_name: 'users',
+							checks: [
+								{
+									name: 'users_state_check',
+									oid: '90001',
+									expression: "CHECK (((state)::text = 'active'::text))",
+									predicateExpression: "((state)::text = 'active'::text)",
+									notValid: false,
+								},
+							],
+						},
+					],
+				}),
+			},
+			context,
+		);
+
+		expect(observation.request).toMatchObject({
+			kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+			detail: {
+				schema: 'tenant',
+				table: 'users',
+				constraint: 'users_age_check',
+			},
+		});
+		expect(observation.result.value).toMatchObject({
+			exists: true,
+			oid: '12345',
+			relkind: 'r',
+			checks: [
+				{
+					name: 'users_state_check',
+					oid: '90001',
+					predicate: "((state)::text = 'active'::text)",
+					notValid: false,
+				},
+			],
+			claims: [
+				{ kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION, holds: true },
+				{ kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION, holds: true },
+			],
+		});
+		const value = observation.result.value as {
+			readonly checks?: readonly Record<string, unknown>[];
+		};
+		expect(value.checks?.[0]).not.toHaveProperty('predicateExpression');
+	});
+
+	it('deparses table CHECK expressions under a savepoint and returns CHECK plus predicate artifacts', async () => {
+		const issuer = createPgObservationIssuer();
+		const queries: string[] = [];
+		const proofContext = {
+			...context,
+			sessionConfiguration: { standard_conforming_strings: 'on' },
+		};
+		const observation = await issuer.execute(
+			{
+				kind: EXPRESSION_DEPARSE_OBSERVATION,
+				scope: [],
+				detail: {
+					surface: 'table-check',
+					category: 'predicate',
+					schema: 'tenant',
+					table: 'users',
+					constraint: 'users_age_check',
+					expression: 'age > 0',
+				},
+			},
+			{
+				query: async (sql: string) => {
+					queries.push(sql);
+					if (sql.includes('JOIN pg_catalog.pg_class')) {
+						return { rows: [] };
+					}
+					if (sql.includes('WHERE con.conrelid = $1::pg_catalog.regclass')) {
+						return {
+							rows: [
+								{
+									expression: 'CHECK ((age > 0))',
+									predicate_expression: '(age > 0)',
+									not_valid: false,
+								},
+							],
+						};
+					}
+					return { rows: [] };
+				},
+			},
+			proofContext,
+		);
+
+		expect(queries.some((sql) => sql.startsWith('SAVEPOINT'))).toBe(true);
+		expect(
+			queries.find((sql) =>
+				sql.startsWith('CREATE TEMP TABLE "_dbsp_check_deparse_'),
+			),
+		).toContain(
+			'(LIKE "tenant"."users" INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)',
+		);
+		expect(
+			queries.find((sql) =>
+				sql.startsWith('ALTER TABLE "_dbsp_check_deparse_'),
+			),
+		).toMatch(/ADD CONSTRAINT "users_age_check" CHECK \(age > 0\)$/u);
+		expect(observation.role).toBe('evidence');
+		expect(observation.source).toBe('vendor-deparser');
+		expect(observation.context).toEqual(proofContext);
+		expect(observation.scope).toEqual([
+			{
+				engine: 'postgresql',
+				database: 'test',
+				kind: 'table',
+				name: 'users',
+				schema: 'tenant',
+			},
+		]);
+		expect(observation.request).toEqual({
+			kind: EXPRESSION_DEPARSE_OBSERVATION,
+			scope: observation.scope,
+			detail: {
+				surface: 'table-check',
+				category: 'predicate',
+				table: 'users',
+				constraint: 'users_age_check',
+				schema: 'tenant',
+				expression: 'age > 0',
+			},
+		});
+		expect(observation.result.value).toMatchObject({
+			ok: true,
+			surface: 'table-check',
+			category: 'predicate',
+			desiredCanonical: 'CHECK ((age > 0))',
+			desiredPredicateCanonical: '(age > 0)',
+			expression: {
+				kind: 'vendor-validated',
+				category: 'predicate',
+				validatedBy: PG_DEPARSE_ARTIFACT,
+				text: 'CHECK ((age > 0))',
+			},
+			predicate: {
+				kind: 'vendor-validated',
+				category: 'predicate',
+				validatedBy: PG_DEPARSE_ARTIFACT,
+				text: '(age > 0)',
+			},
+			claims: [{ kind: EXPRESSION_DEPARSE_OBSERVATION, holds: true }],
+		});
+	});
+
+	it('opens a transaction before table CHECK temp-table deparse when no outer transaction exists', async () => {
+		const issuer = createPgObservationIssuer();
+		const queries: string[] = [];
+		let savepointAttempts = 0;
+		await issuer.execute(
+			{
+				kind: EXPRESSION_DEPARSE_OBSERVATION,
+				scope: [],
+				detail: {
+					surface: 'table-check',
+					category: 'predicate',
+					schema: 'tenant',
+					table: 'users',
+					constraint: 'users_age_check',
+					expression: 'age > 0',
+				},
+			},
+			{
+				query: async (sql: string) => {
+					queries.push(sql);
+					if (sql.startsWith('SAVEPOINT')) {
+						savepointAttempts += 1;
+						if (savepointAttempts === 1) {
+							throw new Error(
+								'SAVEPOINT can only be used in transaction blocks',
+							);
+						}
+					}
+					if (sql.includes('JOIN pg_catalog.pg_class')) {
+						return { rows: [] };
+					}
+					if (sql.includes('WHERE con.conrelid = $1::pg_catalog.regclass')) {
+						return {
+							rows: [
+								{
+									expression: 'CHECK ((age > 0))',
+									predicate_expression: '(age > 0)',
+									not_valid: false,
+								},
+							],
+						};
+					}
+					return { rows: [] };
+				},
+			},
+			{
+				...context,
+				sessionConfiguration: { standard_conforming_strings: 'on' },
+			},
+		);
+
+		const firstSavepoint = queries.findIndex((sql) =>
+			sql.startsWith('SAVEPOINT'),
+		);
+		expect(firstSavepoint).toBeGreaterThan(0);
+		expect(queries[firstSavepoint + 1]).toBe('BEGIN');
+		expect(queries[firstSavepoint + 2]).toMatch(/^SAVEPOINT /u);
+		expect(queries[firstSavepoint + 3]).toMatch(/^CREATE TEMP TABLE /u);
+		expect(queries).toContain('ROLLBACK');
+	});
+
+	it('fails closed for malformed table CHECK deparse requests before querying', async () => {
+		const issuer = createPgObservationIssuer();
+		const query = vi.fn(async () => ({ rows: [] }));
+
+		await expect(
+			issuer.execute(
+				{
+					kind: EXPRESSION_DEPARSE_OBSERVATION,
+					scope: [],
+					detail: {
+						surface: 'table-check',
+						category: 'scalar',
+						schema: 'tenant',
+						table: 'users',
+						constraint: 'users_age_check',
+						expression: 'age > 0',
+					},
+				},
+				{ query },
+				{
+					...context,
+					sessionConfiguration: { standard_conforming_strings: 'on' },
+				},
+			),
+		).rejects.toThrow(/surface=table-check and category=predicate/);
+		expect(query).not.toHaveBeenCalled();
 	});
 
 	it('reads ALTER TYPE authority evidence for enum targets', async () => {

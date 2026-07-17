@@ -1,6 +1,7 @@
 import type {
 	Assumption,
 	CapabilityDescriptor,
+	CheckConstraintIR,
 	ColumnIR,
 	CompareOutcome,
 	EnumIR,
@@ -13,6 +14,7 @@ import type {
 	PhysicalOperation,
 	ProofClaim,
 	ProofObligation,
+	RelationIR,
 	ResourceAddress,
 	SemanticArtifactRef,
 	SequenceIR,
@@ -111,6 +113,24 @@ function table(nullable: boolean, columns = [column(nullable)]): TableIR {
 	};
 }
 
+function check(
+	name: string,
+	expression: string,
+	overrides: Partial<CheckConstraintIR> = {},
+): CheckConstraintIR {
+	return { name, expression, ...overrides };
+}
+
+function tableWithChecks(
+	checkConstraints: readonly CheckConstraintIR[],
+	nullable = false,
+): TableIR {
+	return {
+		...table(nullable),
+		checkConstraints,
+	};
+}
+
 function modelFromTable(users: TableIR): ModelIR {
 	return modelFromTables([users]);
 }
@@ -143,6 +163,24 @@ function modelFromTables(
 	};
 }
 
+function exactReintrospectedCheckModel(expression: string): ModelIR {
+	const users: TableIR = {
+		name: 'users',
+		columns: [
+			{
+				name: 'age',
+				type: 'integer',
+				nullable: true,
+				originalDbType: 'int4',
+			},
+		],
+		foreignKeys: [],
+		indexes: [],
+		checkConstraints: [{ name: 'users_age_check', expression }],
+	};
+	return modelFromTables([users]);
+}
+
 function model(nullable: boolean): ModelIR {
 	return modelFromTable(table(nullable));
 }
@@ -158,6 +196,69 @@ function sequenceMap(
 	sequences: readonly SequenceIR[],
 ): ReadonlyMap<string, SequenceIR> {
 	return new Map(sequences.map((entry) => [entry.name, entry]));
+}
+
+function relation(name = 'posts'): RelationIR {
+	return {
+		name,
+		type: 'hasMany',
+		source: 'users',
+		target: name,
+		cardinality: 'many',
+		optionality: 'optional',
+		includeStrategy: 'auto',
+		filterStrategy: 'auto',
+		joinDefault: 'auto',
+	};
+}
+
+function relationMap(
+	relations: readonly RelationIR[],
+): ReadonlyMap<string, RelationIR> {
+	return new Map(
+		relations.map((entry) => [`${entry.source}.${entry.name}`, entry]),
+	);
+}
+
+function modelFromTablesWithOptionalCollections(
+	modelTables: readonly TableIR[],
+	options: {
+		readonly relations?: ReadonlyMap<string, RelationIR>;
+		readonly omitRelations?: boolean;
+		readonly enums?: ReadonlyMap<string, EnumIR>;
+		readonly extensions?: readonly string[];
+		readonly sequences?: ReadonlyMap<string, SequenceIR>;
+	} = {},
+): ModelIR {
+	const tables = new Map<string, TableIR>();
+	for (const table of modelTables) {
+		tables.set(table.name, table);
+	}
+	const relations = options.relations;
+	return {
+		tables,
+		...(options.omitRelations
+			? {}
+			: { relations: relations ?? new Map<string, RelationIR>() }),
+		...(options.enums !== undefined ? { enums: options.enums } : {}),
+		...(options.extensions !== undefined
+			? { extensions: options.extensions }
+			: {}),
+		...(options.sequences !== undefined
+			? { sequences: options.sequences }
+			: {}),
+		getTable: (name: string) => tables.get(name),
+		getRelation: (qualifiedName: string) => relations?.get(qualifiedName),
+		getRelationsFrom: (sourceTable: string) =>
+			[...(relations?.values() ?? [])].filter(
+				(entry) => entry.source === sourceTable,
+			),
+		getRelationsTo: (targetTable: string) =>
+			[...(relations?.values() ?? [])].filter(
+				(entry) => entry.target === targetTable,
+			),
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	} as ModelIR;
 }
 
 function enumDef(values: readonly string[], name = 'status'): EnumIR {
@@ -226,6 +327,16 @@ function enumResource(name = 'status'): ResourceAddress {
 		kind: 'type',
 		name,
 		qualifiedBy: ['enum'],
+	};
+}
+
+function checkResource(name = 'users_age_check'): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: 'model',
+		kind: 'check-constraint',
+		name,
+		qualifiedBy: ['users'],
 	};
 }
 
@@ -318,6 +429,18 @@ function obligation(appliesTo = operation().ref): ProofObligation {
 		},
 		scope: request.scope,
 		appliesTo,
+		dischargeableBy: [request],
+	};
+}
+
+function obligationForRequest(request: ObservationRequest): ProofObligation {
+	return {
+		proposition: {
+			kind: request.kind,
+			scope: request.scope,
+			detail: request.detail,
+		},
+		scope: request.scope,
 		dischargeableBy: [request],
 	};
 }
@@ -494,6 +617,157 @@ function enumRule(): TransitionRule<{
 				why: 'mock enum add',
 			},
 		}),
+	};
+}
+
+function checkRule(): TransitionRule<{
+	readonly table: string;
+	readonly constraint: string;
+}> {
+	return {
+		id: 'mock.add-check',
+		artifact: ruleArtifact,
+		support: {
+			engine: 'postgresql',
+			versions: [{ min: '18' }],
+			requiredCapabilities: ['mock'],
+		},
+		recognize(desired, current) {
+			const desiredTable = desired.getTable('users');
+			const currentTable = current.getTable('users');
+			const desiredChecks = desiredTable?.checkConstraints ?? [];
+			const currentNames = new Set(
+				(currentTable?.checkConstraints ?? []).map((entry) => entry.name),
+			);
+			const added = desiredChecks.filter(
+				(entry) => !currentNames.has(entry.name),
+			);
+			return added.length === 1 && added[0]
+				? {
+						recognized: true,
+						match: { table: 'users', constraint: added[0].name },
+					}
+				: { recognized: false };
+		},
+		requiredObservations: () => [],
+		evaluate: () => ({
+			outcome: 'applicable',
+			obligations: [],
+			assumptions: [],
+		}),
+		generateCandidate: () => ({
+			generatedBy: { id: 'mock.add-check', pack: ruleArtifact },
+			operations: [
+				{
+					ref: 'op:add-check',
+					operationKind: { artifact: operationArtifact, name: 'AddCheck' },
+					payload: { table: 'users', constraint: 'users_age_check' },
+				},
+			],
+			obligations: [],
+			assumptions: [],
+			guards: [],
+			selectionRationale: {
+				chosen: { id: 'mock.add-check', pack: ruleArtifact },
+				overRules: [],
+				why: 'mock add check',
+			},
+		}),
+	};
+}
+
+function checkDeparseRequest(
+	constraint = 'users_age_check',
+): ObservationRequest {
+	return {
+		kind: 'mock.check.deparse',
+		scope: [checkResource(constraint)],
+		detail: { table: 'users', constraint },
+	};
+}
+
+function claimHolds(
+	evidence: readonly EvidenceObservation[],
+	request: ObservationRequest,
+): boolean | undefined {
+	const observation = evidence.find(
+		(item) =>
+			item.request.kind === request.kind &&
+			JSON.stringify(item.request.scope) === JSON.stringify(request.scope) &&
+			JSON.stringify(item.request.detail) === JSON.stringify(request.detail),
+	);
+	const value = observation?.result.value;
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return undefined;
+	}
+	const claims = (value as { readonly claims?: unknown }).claims;
+	if (!Array.isArray(claims)) {
+		return undefined;
+	}
+	for (const claim of claims) {
+		if (!claim || typeof claim !== 'object' || Array.isArray(claim)) {
+			continue;
+		}
+		const entry = claim as {
+			readonly kind?: unknown;
+			readonly holds?: unknown;
+		};
+		if (entry.kind === request.kind && typeof entry.holds === 'boolean') {
+			return entry.holds;
+		}
+	}
+	return undefined;
+}
+
+function checkEquivalenceRule(): TransitionRule<{
+	readonly constraint: string;
+}> {
+	return {
+		...checkRule(),
+		id: 'mock.check-equivalence',
+		recognize(desired, current, recognitionContext) {
+			const desiredCheck = desired
+				.getTable('users')
+				?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+			const currentCheck = current
+				.getTable('users')
+				?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+			if (
+				!desiredCheck ||
+				!currentCheck ||
+				desiredCheck.expression === currentCheck.expression
+			) {
+				return { recognized: false };
+			}
+			const request = checkDeparseRequest(desiredCheck.name);
+			const holds = claimHolds(recognitionContext?.evidence ?? [], request);
+			if (holds === true) {
+				return {
+					recognized: 'no-drift',
+					claimDraft: {
+						proposition: {
+							kind: 'dbsp.model.no-drift',
+							scope: [checkResource(desiredCheck.name)],
+							detail: request.detail,
+						},
+						scope: [checkResource(desiredCheck.name)],
+						semantics: ruleArtifact,
+						conclusion: 'established',
+					},
+				};
+			}
+			if (holds === false) {
+				return {
+					recognized: 'unsupported',
+					changes: [checkResource(desiredCheck.name)],
+					detail: 'mocked CHECK deparse evidence was different',
+				};
+			}
+			return {
+				recognized: 'unknown',
+				obligations: [obligationForRequest(request)],
+			};
+		},
 	};
 }
 
@@ -991,6 +1265,104 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('unsupported');
 	});
 
+	it('ignores undefined model-level collections while routing CHECK equivalence', () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+		});
+		const compare = createComparator(customRegistry).compare(
+			modelFromTablesWithOptionalCollections(
+				[tableWithChecks([check('users_age_check', 'age > 0')])],
+				{ omitRelations: true },
+			),
+			modelFromTablesWithOptionalCollections(
+				[tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')])],
+				{
+					relations: relationMap([relation('posts')]),
+					enums: new Map(),
+					extensions: ['vector'],
+					sequences: sequenceMap([]),
+				},
+			),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.recognitions[0]?.rule.id).toBe('mock.check-equivalence');
+	});
+
+	it('surfaces current enums and relations when desired explicitly manages empty collections', () => {
+		const compare = createComparator(registry({ rules: [enumRule()] })).compare(
+			modelFromTablesWithOptionalCollections([], {
+				enums: new Map(),
+				relations: new Map(),
+			}),
+			modelFromTablesWithOptionalCollections([], {
+				enums: new Map([['status', enumDef(['active'])]]),
+				relations: relationMap([relation('posts')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'type',
+					name: 'status',
+					qualifiedBy: ['enum'],
+				}),
+			);
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					database: 'model',
+					kind: 'schema',
+					name: 'model',
+				}),
+			);
+		}
+	});
+
+	it('ignores current enum and relation siblings outside non-empty desired managed sets', () => {
+		const usersPosts = relation('posts');
+		const compare = createComparator(registry({ rules: [enumRule()] })).compare(
+			modelFromTablesWithOptionalCollections([], {
+				enums: new Map([['status', enumDef(['active'])]]),
+				relations: relationMap([usersPosts]),
+			}),
+			modelFromTablesWithOptionalCollections([], {
+				enums: new Map([
+					['status', enumDef(['active'])],
+					['priority', enumDef(['low'], 'priority')],
+				]),
+				relations: relationMap([usersPosts, relation('comments')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('ignores unmanaged enum and sequence normalization collisions', () => {
+		const compare = createComparator(
+			registry({
+				comparatorNameNormalizer: {
+					normalizeCurrentIdentifier: (identifier) => identifier.toLowerCase(),
+				},
+			}),
+		).compare(
+			modelFromTablesWithOptionalCollections([]),
+			modelFromTablesWithOptionalCollections([], {
+				enums: new Map([
+					['Status', enumDef(['active'], 'Status')],
+					['status', enumDef(['inactive'], 'status')],
+				]),
+				sequences: sequenceMap([sequence('Audit_ID'), sequence('audit_id')]),
+			}),
+		);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
 	it('surfaces enum name-normalization collisions as unsupported drift', () => {
 		const compare = createComparator(
 			registry({
@@ -1096,6 +1468,354 @@ describe('createComparator', () => {
 		const current = model(true);
 		const compare = createComparator(registry()).compare(desired, current);
 		expect(compare.kind).toBe('unsupported');
+	});
+
+	it('recognizes exactly one added CHECK as one transition candidate', () => {
+		const customRegistry = registry({ rules: [checkRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(
+				tableWithChecks([
+					check('users_age_check', 'CHECK ((age > 0))'),
+					check('users_height_check', 'CHECK ((height > 0))'),
+				]),
+			),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.candidates[0]?.rule.id).toBe('mock.add-check');
+		expect(compare.candidates[0]?.match).toEqual({
+			table: 'users',
+			constraint: 'users_height_check',
+		});
+	});
+
+	it('blocks unsupported CHECK shapes before recognition', () => {
+		const customRegistry = registry({ rules: [checkRule()] });
+		const cases = [
+			[
+				modelFromTable(tableWithChecks([])),
+				modelFromTable(
+					tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+				),
+			],
+			[
+				modelFromTable(
+					tableWithChecks([
+						check('users_height_check', 'CHECK ((height > 0))'),
+					]),
+				),
+				modelFromTable(
+					tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+				),
+			],
+			[
+				modelFromTable(
+					tableWithChecks([
+						check('users_age_check', 'CHECK ((age > 0))'),
+						check('users_height_check', 'CHECK ((height > 0))'),
+					]),
+				),
+				modelFromTable(tableWithChecks([])),
+			],
+			[
+				modelFromTable(
+					tableWithChecks([
+						check('users_age_check', 'CHECK ((age > 0)) NOT VALID'),
+					]),
+				),
+				modelFromTable(tableWithChecks([])),
+			],
+			[
+				modelFromTable(
+					tableWithChecks([
+						check('users_age_check', 'CHECK ((age > 0))', {
+							notValid: true,
+						}),
+					]),
+				),
+				modelFromTable(tableWithChecks([])),
+			],
+			[
+				modelFromTable(
+					tableWithChecks([
+						check('users_age_check', 'CHECK ((age > 0)) NO INHERIT'),
+					]),
+				),
+				modelFromTable(tableWithChecks([])),
+			],
+		] as const;
+
+		for (const [desired, current] of cases) {
+			const compare = createComparator(customRegistry).compare(
+				desired,
+				current,
+			);
+			expect(compare.kind).toBe('unsupported');
+		}
+	});
+
+	it('keeps same-name CHECK expression mismatch on an evidence path, not add-check', async () => {
+		const request: ObservationRequest = {
+			kind: 'mock.check.deparse',
+			scope: [
+				{
+					engine: 'postgresql',
+					database: 'model',
+					kind: 'check-constraint',
+					name: 'users_age_check',
+					qualifiedBy: ['users'],
+				},
+			],
+			detail: { table: 'users', constraint: 'users_age_check' },
+		};
+		const equivalenceRule: TransitionRule<{ readonly constraint: string }> = {
+			...checkRule(),
+			id: 'mock.check-equivalence',
+			recognize(desired, current) {
+				const desiredCheck = desired
+					.getTable('users')
+					?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+				const currentCheck = current
+					.getTable('users')
+					?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+				if (
+					desiredCheck &&
+					currentCheck &&
+					desiredCheck.expression !== currentCheck.expression
+				) {
+					return {
+						recognized: 'unknown',
+						obligations: [obligationForRequest(request)],
+					};
+				}
+				return { recognized: false };
+			},
+		};
+		const customRegistry = registry({ rules: [checkRule(), equivalenceRule] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+			),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age >= 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.recognitions[0]?.rule.id).toBe('mock.check-equivalence');
+
+		const outcome = await createProver(
+			registry({
+				rules: [checkRule(), equivalenceRule],
+				issuer: emptyIssuer(),
+			}),
+		).prove(compare, proofTarget(), context);
+		expect(outcome.kind).toBe('blocked');
+	});
+
+	it('proves a non-canonical same-name CHECK as no-drift when deparse evidence matches', async () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+			issuer: issuer(true),
+		});
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(tableWithChecks([check('users_age_check', 'age > 0')])),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.proposition.kind).toBe('mock.check.deparse');
+		expect(compare.recognitions[0]?.rule.id).toBe('mock.check-equivalence');
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('no-drift');
+	});
+
+	it('routes the exact re-introspected CHECK expression shape through deparse equivalence', async () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+			issuer: issuer(true),
+		});
+		const compare = createComparator(customRegistry).compare(
+			exactReintrospectedCheckModel('age > 0'),
+			exactReintrospectedCheckModel('CHECK ((age > 0))'),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+		expect(compare.obligations[0]?.proposition.kind).toBe('mock.check.deparse');
+		expect(compare.recognitions[0]?.rule.id).toBe('mock.check-equivalence');
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('no-drift');
+	});
+
+	it('blocks the exact re-introspected CHECK expression shape when deparse evidence differs', async () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+			issuer: issuer(false),
+		});
+		const compare = createComparator(customRegistry).compare(
+			exactReintrospectedCheckModel('age > 0'),
+			exactReintrospectedCheckModel('CHECK ((age > 0))'),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+				changes: [checkResource()],
+			});
+		}
+	});
+
+	it('blocks a same-name CHECK when deparse evidence differs', async () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+			issuer: issuer(false),
+		});
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(tableWithChecks([check('users_age_check', 'age > 0')])),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age >= 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+				changes: [checkResource()],
+			});
+		}
+	});
+
+	it('does not add a schema-level hidden diff for a pending CHECK deparse mismatch', () => {
+		const customRegistry = registry({ rules: [rule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(tableWithChecks([check('users_age_check', 'age > 0')])),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind !== 'unsupported') {
+			return;
+		}
+		expect(compare.changes).toContainEqual(checkResource());
+		expect(compare.changes).not.toContainEqual(
+			expect.objectContaining({
+				database: 'model',
+				kind: 'schema',
+				name: 'model',
+			}),
+		);
+	});
+
+	it('keeps schema-level hidden diffs when a pending CHECK deparse has a non-check sibling diff', () => {
+		const customRegistry = registry({
+			rules: [checkRule(), checkEquivalenceRule()],
+			issuer: issuer(true),
+		});
+		const desired = exactReintrospectedCheckModel('age > 0');
+		const users = desired.getTable('users');
+		if (!users) {
+			throw new Error('missing users table');
+		}
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable({ ...users, comment: 'changed too' }),
+			exactReintrospectedCheckModel('CHECK ((age > 0))'),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind !== 'unsupported') {
+			return;
+		}
+		expect(compare.changes).toContainEqual(
+			expect.objectContaining({
+				database: 'model',
+				kind: 'schema',
+				name: 'model',
+			}),
+		);
+	});
+
+	it('keeps CHECK add plus a column change as multiple candidates for the prove guard', async () => {
+		const customRegistry = registry({ rules: [rule(), checkRule()] });
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable({
+				...table(false),
+				checkConstraints: [check('users_age_check', 'CHECK ((age > 0))')],
+			}),
+			model(true),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates.map((candidate) => candidate.rule.id)).toEqual([
+			'mock.set-not-null',
+			'mock.add-check',
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expectMultiOperationCompositionGuard(outcome);
 	});
 
 	it('returns transitions when two recognized column changes are present', () => {

@@ -589,7 +589,7 @@ export function createSetNotNullRule(
 							),
 						};
 					}
-					if (nullabilityTightening.recognized) {
+					if (nullabilityTightening.recognized === true) {
 						const recognized = {
 							recognized: true as const,
 							match: {

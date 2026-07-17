@@ -1,4 +1,5 @@
 import type {
+	CheckConstraintIR,
 	ColumnIR,
 	Comparator,
 	CompareOutcome,
@@ -20,6 +21,7 @@ import type {
 	TransitionRule,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
+import { checkDelta } from './check-delta.js';
 import { enumAddDelta } from './enum-delta.js';
 import { semanticArtifactId } from './ids.js';
 import type { PackRegistry } from './registry.js';
@@ -53,8 +55,38 @@ type NormalizationConflict =
 			readonly table: string;
 			readonly column: string;
 	  }
+	| {
+			readonly kind: 'check';
+			readonly table: string;
+			readonly check: string;
+	  }
 	| { readonly kind: 'enum'; readonly enum: string }
 	| { readonly kind: 'sequence'; readonly sequence: string };
+
+type ManagedCollectionPolicy =
+	| { readonly managed: false }
+	| {
+			readonly managed: true;
+			/**
+			 * Undefined keys means an explicit empty desired collection: manage the
+			 * whole current collection and assert it is empty.
+			 */
+			readonly keys?: ReadonlySet<string>;
+	  };
+
+type ManagedModelCollections = {
+	readonly extensions: ManagedCollectionPolicy;
+	readonly sequences: ManagedCollectionPolicy;
+	readonly enums: ManagedCollectionPolicy;
+	readonly relations: ManagedCollectionPolicy;
+};
+
+type ModelLevelCollectionsComparison = {
+	readonly relations: unknown;
+	readonly enums: unknown;
+	readonly extensions: readonly string[];
+	readonly sequences: unknown;
+};
 
 function normalizeColumnList(
 	columns: readonly string[],
@@ -124,22 +156,31 @@ function normalizeRelation(
 	relation: RelationIR,
 	normalize: NormalizeIdentifier,
 ): RelationIR {
+	const { foreignKey, otherKey, sourceKey, targetKey, through, ...rest } =
+		relation;
 	return {
-		...relation,
+		...rest,
 		name: normalize(relation.name),
 		source: normalize(relation.source),
 		target: normalize(relation.target),
-		through:
-			typeof relation.through === 'string'
-				? normalize(relation.through)
-				: relation.through,
-		foreignKey: normalizeColumnRef(relation.foreignKey, normalize),
-		otherKey:
-			typeof relation.otherKey === 'string'
-				? normalize(relation.otherKey)
-				: relation.otherKey,
-		sourceKey: normalizeColumnRef(relation.sourceKey, normalize),
-		targetKey: normalizeColumnRef(relation.targetKey, normalize),
+		...(through !== undefined
+			? { through: typeof through === 'string' ? normalize(through) : through }
+			: {}),
+		...(foreignKey !== undefined
+			? { foreignKey: normalizeColumnRef(foreignKey, normalize) }
+			: {}),
+		...(otherKey !== undefined
+			? {
+					otherKey:
+						typeof otherKey === 'string' ? normalize(otherKey) : otherKey,
+				}
+			: {}),
+		...(sourceKey !== undefined
+			? { sourceKey: normalizeColumnRef(sourceKey, normalize) }
+			: {}),
+		...(targetKey !== undefined
+			? { targetKey: normalizeColumnRef(targetKey, normalize) }
+			: {}),
 	};
 }
 
@@ -161,11 +202,21 @@ function normalizeTable(
 		seenColumns.add(name);
 		return { ...column, name };
 	});
+	const seenChecks = new Set<string>();
+	const checkConstraints = table.checkConstraints?.map((check) => {
+		const name = normalize(check.name);
+		if (seenChecks.has(name)) {
+			conflicts.push({ kind: 'check', table: tableName, check: name });
+		}
+		seenChecks.add(name);
+		return { ...check, name };
+	});
 	return {
 		table: {
 			...table,
 			name: tableName,
 			columns,
+			...(checkConstraints !== undefined ? { checkConstraints } : {}),
 			...(table.primaryKey !== undefined
 				? { primaryKey: normalizeDefinedColumnRef(table.primaryKey, normalize) }
 				: {}),
@@ -288,15 +339,6 @@ function normalizeCurrentModelForComparison(
 	};
 }
 
-function mapToEntries<T>(map: ReadonlyMap<string, T> | undefined): unknown {
-	if (!map) {
-		return undefined;
-	}
-	return [...map.entries()].sort(([left], [right]) =>
-		left.localeCompare(right),
-	);
-}
-
 function tableForComparison(table: TableIR): unknown {
 	return {
 		name: table.name,
@@ -339,71 +381,153 @@ function relationTouchesExternalTable(
 }
 
 function managedRelationsForComparison(
-	relations: ReadonlyMap<string, RelationIR>,
+	relations: ReadonlyMap<string, RelationIR> | undefined,
 	externalTables: ReadonlySet<string>,
 ): ReadonlyMap<string, RelationIR> {
 	return new Map(
-		[...relations.entries()].filter(
+		[...(relations ?? new Map<string, RelationIR>()).entries()].filter(
 			([, relation]) => !relationTouchesExternalTable(relation, externalTables),
 		),
 	);
 }
 
-function extensionNamesForComparison(
-	extensions: readonly string[] | undefined,
-	managedExtensions: readonly string[] | undefined,
-): readonly string[] {
-	if (managedExtensions === undefined) {
-		return [];
-	}
-	const sortedExtensions = [...new Set(extensions ?? [])].sort((left, right) =>
-		left.localeCompare(right),
-	);
-	if (managedExtensions.length === 0) {
-		return sortedExtensions;
-	}
-	const managed = new Set(managedExtensions);
-	return sortedExtensions.filter((extension) => managed.has(extension));
+function modelRelations(
+	model: ModelIR,
+): ReadonlyMap<string, RelationIR> | undefined {
+	return (model as { readonly relations?: ReadonlyMap<string, RelationIR> })
+		.relations;
 }
 
-function sequencesForComparison(
-	sequences: ReadonlyMap<string, SequenceIR> | undefined,
-	managedSequences: ReadonlyMap<string, SequenceIR> | undefined,
-): unknown {
-	if (managedSequences === undefined) {
+function managedMapPolicy<T>(
+	items: ReadonlyMap<string, T> | undefined,
+): ManagedCollectionPolicy {
+	if (items === undefined) {
+		return { managed: false };
+	}
+	if (items.size === 0) {
+		return { managed: true };
+	}
+	return { managed: true, keys: new Set(items.keys()) };
+}
+
+function managedListPolicy(
+	items: readonly string[] | undefined,
+): ManagedCollectionPolicy {
+	if (items === undefined) {
+		return { managed: false };
+	}
+	if (items.length === 0) {
+		return { managed: true };
+	}
+	return { managed: true, keys: new Set(items) };
+}
+
+function managedRelationPolicy(
+	relations: ReadonlyMap<string, RelationIR> | undefined,
+	externalTables: ReadonlySet<string>,
+): ManagedCollectionPolicy {
+	if (relations === undefined) {
+		return { managed: false };
+	}
+	if (relations.size === 0) {
+		return { managed: true };
+	}
+	return {
+		managed: true,
+		keys: new Set(
+			managedRelationsForComparison(relations, externalTables).keys(),
+		),
+	};
+}
+
+function managedModelCollections(
+	desired: ModelIR,
+	externalTables: ReadonlySet<string>,
+): ManagedModelCollections {
+	return {
+		extensions: managedListPolicy(desired.extensions),
+		sequences: managedMapPolicy(desired.sequences),
+		enums: managedMapPolicy(desired.enums),
+		relations: managedRelationPolicy(modelRelations(desired), externalTables),
+	};
+}
+
+function isManagedCollectionKey(
+	policy: ManagedCollectionPolicy,
+	key: string,
+): boolean {
+	return policy.managed && (policy.keys === undefined || policy.keys.has(key));
+}
+
+function projectManagedMapEntries<T>(
+	items: ReadonlyMap<string, T> | undefined,
+	policy: ManagedCollectionPolicy,
+	valueForEntry: (name: string, value: T) => T = (_name, value) => value,
+): readonly (readonly [string, T])[] {
+	if (!policy.managed) {
 		return [];
 	}
-	const entries = [
-		...(sequences ?? new Map<string, SequenceIR>()).entries(),
-	].sort(([left], [right]) => left.localeCompare(right));
-	if (managedSequences.size === 0) {
-		return entries;
+	return [...(items ?? new Map<string, T>()).entries()]
+		.filter(([name]) => isManagedCollectionKey(policy, name))
+		.sort(([left], [right]) => left.localeCompare(right))
+		.map(([name, value]) => [name, valueForEntry(name, value)] as const);
+}
+
+function extensionNamesForComparison(
+	extensions: readonly string[] | undefined,
+	policy: ManagedCollectionPolicy,
+): readonly string[] {
+	if (!policy.managed) {
+		return [];
 	}
-	const managedNames = new Set(managedSequences.keys());
-	return entries.filter(([name]) => managedNames.has(name));
+	return [...new Set(extensions ?? [])]
+		.filter((extension) => isManagedCollectionKey(policy, extension))
+		.sort((left, right) => left.localeCompare(right));
+}
+
+function modelLevelCollectionsForComparison(
+	model: ModelIR,
+	externalTables: ReadonlySet<string>,
+	managedCollections: ManagedModelCollections,
+	options: {
+		readonly enumValueForComparison?: (name: string, enumDef: EnumIR) => EnumIR;
+	} = {},
+): ModelLevelCollectionsComparison {
+	return {
+		relations: projectManagedMapEntries(
+			managedRelationsForComparison(modelRelations(model), externalTables),
+			managedCollections.relations,
+		),
+		enums: projectManagedMapEntries(
+			model.enums,
+			managedCollections.enums,
+			options.enumValueForComparison,
+		),
+		extensions: extensionNamesForComparison(
+			model.extensions,
+			managedCollections.extensions,
+		),
+		sequences: projectManagedMapEntries(
+			model.sequences,
+			managedCollections.sequences,
+		),
+	};
 }
 
 function modelForComparison(
 	model: ModelIR,
 	externalTables: ReadonlySet<string>,
-	managedSurface: ModelIR,
+	managedCollections: ManagedModelCollections,
 ): unknown {
 	return {
 		tables: [...model.tables.entries()]
 			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([name, table]) => [name, tableForComparison(table)]),
-		relations: mapToEntries(
-			managedRelationsForComparison(model.relations, externalTables),
-		),
-		enums: mapToEntries(model.enums),
-		extensions: extensionNamesForComparison(
-			model.extensions,
-			managedSurface.extensions,
-		),
-		sequences: sequencesForComparison(
-			model.sequences,
-			managedSurface.sequences,
+		...modelLevelCollectionsForComparison(
+			model,
+			externalTables,
+			managedCollections,
 		),
 	};
 }
@@ -413,61 +537,150 @@ function revertRecognizedColumnChanges(
 	current: ModelIR,
 	recognizedColumnKeys: ReadonlySet<string>,
 	externalTables: ReadonlySet<string>,
+	managedCollections: ManagedModelCollections,
 	recognizedEnumKeys: ReadonlySet<string> = new Set(),
+	recognizedCheckKeys: ReadonlySet<string> = new Set(),
+	recognizedCheckReplacements: ReadonlyMap<
+		string,
+		CheckConstraintIR
+	> = new Map(),
 ): unknown {
-	const desiredEnums = desired.enums;
 	return {
 		tables: [...desired.tables.entries()]
 			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([name, table]) => {
 				const currentTable = current.getTable(name);
-				return [
+				const revertedChecks = revertRecognizedCheckChanges(
 					name,
-					tableForComparison({
-						...table,
-						columns: table.columns.map((column) => {
-							const key = JSON.stringify([name, column.name]);
-							const currentColumn = currentTable?.columns.find(
-								(candidate) => candidate.name === column.name,
-							);
-							return recognizedColumnKeys.has(key) && currentColumn
-								? currentColumn
-								: column;
-						}),
-					}),
-				];
-			}),
-		relations: mapToEntries(
-			managedRelationsForComparison(desired.relations, externalTables),
-		),
-		enums: desiredEnums
-			? [...desiredEnums.entries()]
-					.sort(([left], [right]) => left.localeCompare(right))
-					.map(([name, enumDef]) => {
-						const currentEnum = current.enums?.get(name);
-						const hasRecognizedEnumLabel = [...recognizedEnumKeys].some(
-							(key) => {
-								const parsed = JSON.parse(key) as unknown;
-								return (
-									Array.isArray(parsed) &&
-									parsed.length === 2 &&
-									parsed[0] === name
-								);
-							},
+					table.checkConstraints,
+					currentTable?.checkConstraints,
+					recognizedCheckKeys,
+					recognizedCheckReplacements,
+				);
+				const tableWithRevertedColumns = {
+					...table,
+					columns: table.columns.map((column) => {
+						const key = JSON.stringify([name, column.name]);
+						const currentColumn = currentTable?.columns.find(
+							(candidate) => candidate.name === column.name,
 						);
-						return [
-							name,
-							hasRecognizedEnumLabel && currentEnum ? currentEnum : enumDef,
-						];
-					})
-			: undefined,
-		extensions: extensionNamesForComparison(
-			desired.extensions,
-			desired.extensions,
+						return recognizedColumnKeys.has(key) && currentColumn
+							? currentColumn
+							: column;
+					}),
+				};
+				const tableWithRevertedChecks =
+					revertedChecks === undefined
+						? (({ checkConstraints: _checkConstraints, ...rest }: TableIR) =>
+								rest)(tableWithRevertedColumns)
+						: {
+								...tableWithRevertedColumns,
+								checkConstraints: revertedChecks,
+							};
+				return [name, tableForComparison(tableWithRevertedChecks)];
+			}),
+		...modelLevelCollectionsForComparison(
+			desired,
+			externalTables,
+			managedCollections,
+			{
+				enumValueForComparison: (name, enumDef) => {
+					const currentEnum = current.enums?.get(name);
+					return recognizedEnumKeysForName(recognizedEnumKeys, name) &&
+						currentEnum
+						? currentEnum
+						: enumDef;
+				},
+			},
 		),
-		sequences: sequencesForComparison(desired.sequences, desired.sequences),
 	};
+}
+
+function recognizedEnumKeysForName(
+	recognizedEnumKeys: ReadonlySet<string>,
+	name: string,
+): boolean {
+	for (const key of recognizedEnumKeys) {
+		const parsed = JSON.parse(key) as unknown;
+		if (Array.isArray(parsed) && parsed.length === 2 && parsed[0] === name) {
+			return true;
+		}
+	}
+	return false;
+}
+
+function normalizationConflictIsManaged(
+	conflict: NormalizationConflict,
+	managedCollections: ManagedModelCollections,
+): boolean {
+	switch (conflict.kind) {
+		case 'enum':
+			return isManagedCollectionKey(managedCollections.enums, conflict.enum);
+		case 'sequence':
+			return isManagedCollectionKey(
+				managedCollections.sequences,
+				conflict.sequence,
+			);
+		default:
+			return true;
+	}
+}
+
+function managedMapRecognitionKeys<T>(
+	desired: ReadonlyMap<string, T> | undefined,
+	current: ReadonlyMap<string, T> | undefined,
+	policy: ManagedCollectionPolicy,
+): ReadonlySet<string> {
+	if (!policy.managed) {
+		return new Set();
+	}
+	if (policy.keys !== undefined) {
+		return new Set(policy.keys);
+	}
+	return new Set([
+		...(desired ?? new Map<string, T>()).keys(),
+		...(current ?? new Map<string, T>()).keys(),
+	]);
+}
+
+function revertRecognizedCheckChanges(
+	tableName: string,
+	desiredChecks: readonly CheckConstraintIR[] | undefined,
+	currentChecks: readonly CheckConstraintIR[] | undefined,
+	recognizedCheckKeys: ReadonlySet<string>,
+	recognizedCheckReplacements: ReadonlyMap<string, CheckConstraintIR>,
+): readonly CheckConstraintIR[] | undefined {
+	if (recognizedCheckKeys.size === 0 || desiredChecks === undefined) {
+		return desiredChecks;
+	}
+	const reverted: CheckConstraintIR[] = [];
+	for (const check of desiredChecks) {
+		const key = JSON.stringify([tableName, check.name]);
+		if (!recognizedCheckKeys.has(key)) {
+			reverted.push(check);
+			continue;
+		}
+		const replacement = recognizedCheckReplacements.get(key);
+		if (replacement) {
+			reverted.push(replacement);
+			continue;
+		}
+		const currentCheck = currentChecks?.find(
+			(candidate) => candidate.name === check.name,
+		);
+		if (currentCheck) {
+			reverted.push(currentCheck);
+		}
+	}
+	if (reverted.length === 0 && currentChecks === undefined) {
+		return undefined;
+	}
+	return reverted;
+}
+
+function checkChangeKey(tableName: string, checkName: string): string {
+	return JSON.stringify([tableName, checkName]);
 }
 
 function resourceForColumn(
@@ -482,6 +695,23 @@ function resourceForColumn(
 		name: column ?? table,
 	};
 	return column ? { ...resource, qualifiedBy: [table] } : resource;
+}
+
+function resourceForCheck(
+	engine: string,
+	table: string,
+	check?: string,
+): ResourceAddress {
+	if (!check) {
+		return resourceForColumn(engine, table);
+	}
+	return {
+		engine,
+		database: 'model',
+		kind: 'check-constraint',
+		name: check,
+		qualifiedBy: [table],
+	};
 }
 
 function resourceForEnum(
@@ -506,6 +736,8 @@ function resourceForNormalizationConflict(
 	switch (conflict.kind) {
 		case 'column':
 			return resourceForColumn(engine, conflict.table, conflict.column);
+		case 'check':
+			return resourceForCheck(engine, conflict.table, conflict.check);
 		case 'table':
 			return resourceForColumn(engine, conflict.table);
 		case 'enum':
@@ -541,11 +773,12 @@ function noDriftProposition(): Proposition {
 }
 
 function makeFocusedModel(table: TableIR, column: ColumnIR): ModelIR {
+	const { checkConstraints: _checkConstraints, ...tableWithoutChecks } = table;
 	const tables = new Map<string, TableIR>([
 		[
 			table.name,
 			{
-				...table,
+				...tableWithoutChecks,
 				columns: [column],
 			},
 		],
@@ -568,6 +801,28 @@ function makeFocusedEnumModel(enumDef: EnumIR): ModelIR {
 		relations: new Map(),
 		enums,
 		getTable: () => undefined,
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function makeFocusedCheckModel(table: TableIR): ModelIR {
+	const { columns: _columns, ...tableWithoutColumns } = table;
+	const tables = new Map<string, TableIR>([
+		[
+			table.name,
+			{
+				...tableWithoutColumns,
+				columns: [],
+			},
+		],
+	]);
+	return {
+		tables,
+		relations: new Map(),
+		getTable: (name: string) => tables.get(name),
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
@@ -656,28 +911,36 @@ export function createComparator(registry: PackRegistry): Comparator {
 				current,
 				normalizeCurrentIdentifier,
 			);
-			if (normalizedCurrent.conflicts.length > 0) {
-				return {
-					kind: 'unsupported',
-					changes: normalizedCurrent.conflicts.map((conflict) =>
-						resourceForNormalizationConflict(engine, conflict),
-					),
-				};
-			}
 			const currentForComparison = normalizedCurrent.model;
 			const ignoredExternalTables = externalTableNames(
 				desired,
 				currentForComparison,
 			);
+			const managedCollections = managedModelCollections(
+				desired,
+				ignoredExternalTables,
+			);
+			const blockingNormalizationConflicts = normalizedCurrent.conflicts.filter(
+				(conflict) =>
+					normalizationConflictIsManaged(conflict, managedCollections),
+			);
+			if (blockingNormalizationConflicts.length > 0) {
+				return {
+					kind: 'unsupported',
+					changes: blockingNormalizationConflicts.map((conflict) =>
+						resourceForNormalizationConflict(engine, conflict),
+					),
+				};
+			}
 			const desiredComparison = modelForComparison(
 				desired,
 				ignoredExternalTables,
-				desired,
+				managedCollections,
 			);
 			const currentComparison = modelForComparison(
 				currentForComparison,
 				ignoredExternalTables,
-				desired,
+				managedCollections,
 			);
 			if (stableJson(desiredComparison) === stableJson(currentComparison)) {
 				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
@@ -690,6 +953,9 @@ export function createComparator(registry: PackRegistry): Comparator {
 			const pendingColumnKeys = new Set<string>();
 			const recognizedEnumKeys = new Set<string>();
 			const pendingEnumKeys = new Set<string>();
+			const recognizedCheckKeys = new Set<string>();
+			const pendingCheckKeys = new Set<string>();
+			const pendingCheckReplacements = new Map<string, CheckConstraintIR>();
 
 			const tableNames = new Set<string>([
 				...desired.tables.keys(),
@@ -808,12 +1074,125 @@ export function createComparator(registry: PackRegistry): Comparator {
 					recognizedColumnKeys.add(JSON.stringify([tableName, columnName]));
 					pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
 				}
+
+				const tableCheckDelta = checkDelta(
+					desiredTable.checkConstraints,
+					currentTable.checkConstraints,
+				);
+				if (tableCheckDelta.kind === 'unsupported') {
+					unsupported.push(resourceForCheck(engine, tableName));
+					continue;
+				}
+				if (tableCheckDelta.kind !== 'none') {
+					const checkName =
+						tableCheckDelta.kind === 'add-check'
+							? tableCheckDelta.check.name
+							: tableCheckDelta.desired.name;
+					const checkKey = checkChangeKey(tableName, checkName);
+					if (tableCheckDelta.kind === 'expression-mismatch') {
+						pendingCheckKeys.add(checkKey);
+						const currentCheck = currentTable.checkConstraints?.find(
+							(candidate) => candidate.name === tableCheckDelta.current.name,
+						);
+						if (currentCheck) {
+							pendingCheckReplacements.set(checkKey, currentCheck);
+						}
+					}
+					const focusedDesired = makeFocusedCheckModel(desiredTable);
+					const focusedCurrent = makeFocusedCheckModel(currentTable);
+					const recognitionEntries = registry.allRules().map((rule) => {
+						const equivalence = registry.resolveEquivalence(rule.artifact);
+						return {
+							rule,
+							result: rule.recognize(
+								focusedDesired,
+								focusedCurrent,
+								equivalence
+									? { equivalence, context: { engine } }
+									: { context: { engine } },
+							),
+						};
+					});
+					const recognized = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: true }
+							>;
+						} => entry.result.recognized === true,
+					);
+					const unknown = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: 'unknown' }
+							>;
+						} => entry.result.recognized === 'unknown',
+					);
+					const recognizedUnsupported = recognitionEntries.find(
+						(entry) => entry.result.recognized === 'unsupported',
+					);
+
+					if (recognized.length === 0) {
+						if (unknown.length > 0) {
+							for (const entry of unknown) {
+								unknownRecognitions.push({
+									rule: ruleRef(entry.rule),
+									desired: focusedDesired,
+									current: focusedCurrent,
+									obligations: entry.result.obligations,
+								});
+							}
+							pendingCheckKeys.add(checkKey);
+							continue;
+						}
+						if (recognizedUnsupported?.result.recognized === 'unsupported') {
+							unsupported.push(...recognizedUnsupported.result.changes);
+							continue;
+						}
+						unsupported.push(resourceForCheck(engine, tableName, checkName));
+						continue;
+					}
+
+					const chosen =
+						recognized.length === 1
+							? recognized[0]?.rule
+							: chooseByPrecedence(recognized.map((entry) => entry.rule));
+					if (!chosen) {
+						return {
+							kind: 'ambiguous',
+							candidates: recognized.map((entry) => ruleRef(entry.rule)),
+						};
+					}
+
+					const chosenEntry = recognized.find((entry) => entry.rule === chosen);
+					if (!chosenEntry?.result.recognized) {
+						unsupported.push(resourceForCheck(engine, tableName, checkName));
+						continue;
+					}
+					candidates.push(
+						candidateFromRule(
+							chosen,
+							chosenEntry.result,
+							recognized.map((entry) => entry.rule),
+						),
+					);
+					recognizedCheckKeys.add(checkKey);
+					pendingCheckKeys.add(checkKey);
+				}
 			}
 
-			const enumNames = new Set<string>([
-				...(desired.enums?.keys() ?? []),
-				...(currentForComparison.enums?.keys() ?? []),
-			]);
+			const enumNames = managedMapRecognitionKeys(
+				desired.enums,
+				currentForComparison.enums,
+				managedCollections.enums,
+			);
 
 			for (const enumName of enumNames) {
 				const desiredEnum = desired.enums?.get(enumName);
@@ -923,7 +1302,10 @@ export function createComparator(registry: PackRegistry): Comparator {
 						currentForComparison,
 						new Set([...recognizedColumnKeys, ...pendingColumnKeys]),
 						ignoredExternalTables,
+						managedCollections,
 						new Set([...recognizedEnumKeys, ...pendingEnumKeys]),
+						new Set([...recognizedCheckKeys, ...pendingCheckKeys]),
+						pendingCheckReplacements,
 					),
 				) !== stableJson(currentComparison);
 			if (hiddenDiffsRemain) {

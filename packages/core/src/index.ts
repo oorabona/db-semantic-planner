@@ -280,6 +280,7 @@ export type {
 	Applier,
 	ApplyPolicy,
 	CapabilityDescriptor,
+	CheckDelta,
 	Comparator,
 	CompareOutcome,
 	EnumAddDelta,
@@ -316,6 +317,7 @@ export type {
 export {
 	advisoryObservationId,
 	assumptionId,
+	checkDelta,
 	claimId,
 	createApplier,
 	createComparator,

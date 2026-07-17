@@ -86,6 +86,7 @@ export type {
 	TransitionRule,
 } from '@dbsp/types';
 export { createApplier } from './applier.js';
+export { type CheckDelta, checkDelta } from './check-delta.js';
 export { createComparator } from './comparator.js';
 export { type EnumAddDelta, enumAddDelta } from './enum-delta.js';
 export {

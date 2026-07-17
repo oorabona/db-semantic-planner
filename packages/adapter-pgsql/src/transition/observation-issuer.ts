@@ -6,22 +6,31 @@ import type {
 	ObservationRequest,
 	ObservationStability,
 	ResourceAddress,
+	VendorValidatedExpression,
 } from '@dbsp/types';
+import {
+	renderCheckConstraintClause,
+	splitCheckConstraintState,
+} from '../check-expression.js';
 import { formatSqlDefault, quoteIdent } from '../ddl/phases/utils.js';
+import { validateCheckExpression } from '../validate.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
+	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
+	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from './constants.js';
 import { evidenceId } from './ids.js';
 import { pgPrivilegeFact } from './privileges.js';
@@ -44,7 +53,8 @@ type PoolLike = {
 
 type ObservationTarget = {
 	readonly table: string;
-	readonly column: string;
+	readonly column?: string;
+	readonly constraint?: string;
 	readonly schema?: string;
 };
 
@@ -116,7 +126,7 @@ function explicitSchemaFromContext(
 function detailTarget(
 	request: ObservationRequest,
 	context: ObservationContext,
-): ObservationTarget {
+): ObservationTarget & { readonly column: string } {
 	if (!isRecord(request.detail)) {
 		throw new Error(`${request.kind} requires table and column detail`);
 	}
@@ -136,13 +146,60 @@ function detailTarget(
 	return { table, column, schema: resolvedSchema };
 }
 
+function tableDetailTarget(
+	request: ObservationRequest,
+	context: ObservationContext,
+): ObservationTarget & { readonly schema: string } {
+	if (!isRecord(request.detail)) {
+		throw new Error(`${request.kind} requires table detail`);
+	}
+	const { table, schema, constraint } = request.detail;
+	if (typeof table !== 'string') {
+		throw new Error(`${request.kind} requires table detail`);
+	}
+	if (schema != null && typeof schema !== 'string') {
+		throw new Error(`${request.kind} schema detail must be a string`);
+	}
+	if (constraint != null && typeof constraint !== 'string') {
+		throw new Error(`${request.kind} constraint detail must be a string`);
+	}
+	const resolvedSchema = schema ?? explicitSchemaFromContext(context);
+	if (!resolvedSchema) {
+		throw new Error(
+			`${request.kind} requires explicit schema detail; unqualified transition observations cannot be resolved from search_path`,
+		);
+	}
+	return constraint == null
+		? { table, schema: resolvedSchema }
+		: { table, constraint, schema: resolvedSchema };
+}
+
 function resolvedTarget(
+	target: ObservationTarget,
+): ObservationTarget & { readonly schema: string; readonly column: string } {
+	if (!target.schema) {
+		throw new Error('PostgreSQL transition observation target lost schema');
+	}
+	if (!target.column) {
+		throw new Error('PostgreSQL column observation target lost column');
+	}
+	return { table: target.table, column: target.column, schema: target.schema };
+}
+
+function resolvedTableTarget(
 	target: ObservationTarget,
 ): ObservationTarget & { readonly schema: string } {
 	if (!target.schema) {
 		throw new Error('PostgreSQL transition observation target lost schema');
 	}
-	return { table: target.table, column: target.column, schema: target.schema };
+	return {
+		table: target.table,
+		...(target.column !== undefined ? { column: target.column } : {}),
+		...(target.constraint !== undefined
+			? { constraint: target.constraint }
+			: {}),
+		schema: target.schema,
+	};
 }
 
 function enumDetailTarget(
@@ -192,6 +249,9 @@ function targetFromRequests(
 			typeof request.detail.column === 'string'
 		) {
 			return detailTarget(request, context);
+		}
+		if (typeof request.detail.table === 'string') {
+			return tableDetailTarget(request, context);
 		}
 		if (typeof request.detail.type === 'string') {
 			return enumDetailTarget(request, context);
@@ -270,7 +330,7 @@ function privilegeFactsForTarget(
 	target: ObservationTarget & { readonly schema: string },
 	facts: AlterAuthorityFacts,
 ): readonly string[] {
-	return [
+	const tableFacts = [
 		pgPrivilegeFact(
 			PG_SCHEMA_USAGE_PRIVILEGE,
 			[target.schema],
@@ -281,12 +341,17 @@ function privilegeFactsForTarget(
 			[target.schema, target.table],
 			facts.hasTableAlterAuthority,
 		),
-		pgPrivilegeFact(
-			PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
-			[target.schema, target.table, target.column],
-			facts.hasAlterAuthority,
-		),
 	];
+	return target.column
+		? [
+				...tableFacts,
+				pgPrivilegeFact(
+					PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
+					[target.schema, target.table, target.column],
+					facts.hasAlterAuthority,
+				),
+			]
+		: tableFacts;
 }
 
 function privilegeFactsForEnumTarget(
@@ -325,7 +390,10 @@ function requestForTarget(
 					)
 				: {}),
 			table: target.table,
-			column: target.column,
+			...(target.column !== undefined ? { column: target.column } : {}),
+			...(target.constraint !== undefined
+				? { constraint: target.constraint }
+				: {}),
 			schema: target.schema ?? null,
 		},
 	};
@@ -336,11 +404,14 @@ function scopeFor(
 	context: ObservationContext,
 	kind: 'table' | 'column',
 ): ResourceAddress {
+	if (kind === 'column' && !target.column) {
+		throw new Error('column observation scope requires a column target');
+	}
 	const base: ResourceAddress = {
 		engine: 'postgresql',
 		database: context.databaseId,
 		kind,
-		name: kind === 'table' ? target.table : target.column,
+		name: kind === 'table' ? target.table : (target.column ?? target.table),
 	};
 	const qualified =
 		kind === 'column' ? { ...base, qualifiedBy: [target.table] } : base;
@@ -625,11 +696,237 @@ async function readTempDefaultCanonical(
 	return expression;
 }
 
+function assertStandardConformingStrings(context: ObservationContext): void {
+	if (context.sessionConfiguration.standard_conforming_strings !== 'on') {
+		throw new Error(
+			'table-check deparse requires standard_conforming_strings=on before rendering authored CHECK text',
+		);
+	}
+}
+
+function tableCheckDetail(
+	request: ObservationRequest,
+	context: ObservationContext,
+): {
+	readonly target: ObservationTarget & {
+		readonly schema: string;
+		readonly constraint: string;
+	};
+	readonly expression: string;
+} {
+	const target = tableDetailTarget(request, context);
+	if (!target.constraint) {
+		throw new Error('table-check deparse requires a constraint detail');
+	}
+	if (
+		!isRecord(request.detail) ||
+		typeof request.detail.expression !== 'string'
+	) {
+		throw new Error(
+			'table-check deparse requires an authored expression detail',
+		);
+	}
+	return {
+		target: {
+			table: target.table,
+			schema: target.schema,
+			constraint: target.constraint,
+		},
+		expression: request.detail.expression,
+	};
+}
+
+function validatedCheckClause(expression: string): string {
+	const state = splitCheckConstraintState({ expression });
+	if (state.notValid) {
+		throw new Error('table-check deparse does not support NOT VALID');
+	}
+	if (/\bNO\s+INHERIT\b/iu.test(state.expression)) {
+		throw new Error('table-check deparse does not support NO INHERIT');
+	}
+	const clause = renderCheckConstraintClause({ expression: state.expression });
+	validateCheckExpression(clause, 'table-check deparse expression');
+	return clause;
+}
+
+type CanonicalCheckRead = {
+	readonly expression: string;
+	readonly predicate: string;
+	readonly notValid: boolean;
+};
+
+async function readCatalogCheckCanonical(
+	executor: Queryable,
+	target: ObservationTarget & {
+		readonly schema: string;
+		readonly constraint: string;
+	},
+): Promise<CanonicalCheckRead | undefined> {
+	const result = await executor.query(
+		'SELECT pg_catalog.pg_get_constraintdef(con.oid, false) AS expression, ' +
+			'pg_catalog.pg_get_expr(con.conbin, con.conrelid) AS predicate_expression, ' +
+			'NOT con.convalidated AS not_valid ' +
+			'FROM pg_catalog.pg_constraint con ' +
+			'JOIN pg_catalog.pg_class c ON c.oid = con.conrelid ' +
+			'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+			'WHERE n.nspname = $1 AND c.relname = $2 AND con.conname = $3 ' +
+			"AND con.contype = 'c'",
+		[target.schema, target.table, target.constraint],
+	);
+	const row = result.rows[0];
+	if (!row) {
+		return undefined;
+	}
+	const expression = row.expression;
+	const predicate = row.predicate_expression;
+	if (typeof expression !== 'string' || typeof predicate !== 'string') {
+		throw new Error('table-check deparse could not read catalog CHECK text');
+	}
+	return {
+		expression,
+		predicate,
+		notValid: row?.not_valid === true,
+	};
+}
+
+async function readTempCheckCanonical(
+	executor: Queryable,
+	tempTable: string,
+	constraint: string,
+): Promise<CanonicalCheckRead> {
+	const result = await executor.query(
+		'SELECT pg_catalog.pg_get_constraintdef(con.oid, false) AS expression, ' +
+			'pg_catalog.pg_get_expr(con.conbin, con.conrelid) AS predicate_expression, ' +
+			'NOT con.convalidated AS not_valid ' +
+			'FROM pg_catalog.pg_constraint con ' +
+			'WHERE con.conrelid = $1::pg_catalog.regclass AND con.conname = $2 ' +
+			"AND con.contype = 'c'",
+		[tempTable, constraint],
+	);
+	const row = result.rows[0];
+	const expression = row?.expression;
+	const predicate = row?.predicate_expression;
+	if (typeof expression !== 'string' || typeof predicate !== 'string') {
+		throw new Error('table-check deparse could not read temp CHECK text');
+	}
+	return {
+		expression,
+		predicate,
+		notValid: row?.not_valid === true,
+	};
+}
+
+function vendorValidatedPredicate(text: string): VendorValidatedExpression {
+	return {
+		kind: 'vendor-validated',
+		category: 'predicate',
+		validatedBy: PG_DEPARSE_ARTIFACT,
+		text,
+	};
+}
+
+async function observeTableCheckDeparse(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	if (
+		!isRecord(request.detail) ||
+		request.detail.surface !== 'table-check' ||
+		request.detail.category !== 'predicate'
+	) {
+		throw new Error(
+			`${request.kind} requires surface=table-check and category=predicate`,
+		);
+	}
+	assertStandardConformingStrings(context);
+	const { target, expression } = tableCheckDetail(request, context);
+	const normalizedRequest = requestForTarget(request, target, context, 'table');
+	const desiredClause = validatedCheckClause(expression);
+	const catalogCanonical = await readCatalogCheckCanonical(executor, target);
+	const tempTable = `_dbsp_check_deparse_${Date.now()}_${++observationSequence}`;
+	const savepoint = `dbsp_check_deparse_sp_${observationSequence}`;
+	let savepointActive = false;
+	let startedTransaction = false;
+	try {
+		try {
+			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+			savepointActive = true;
+		} catch {
+			await executor.query('BEGIN');
+			startedTransaction = true;
+			await executor.query(`SAVEPOINT ${quoteIdent(savepoint, 'table')}`);
+			savepointActive = true;
+		}
+		await executor.query(
+			`CREATE TEMP TABLE ${quoteIdent(tempTable, 'table')} ` +
+				`(LIKE ${quoteIdent(target.schema, 'schema')}.${quoteIdent(
+					target.table,
+					'table',
+				)} INCLUDING DEFAULTS INCLUDING GENERATED INCLUDING IDENTITY)`,
+		);
+		await executor.query(
+			`ALTER TABLE ${quoteIdent(tempTable, 'table')} ` +
+				`ADD CONSTRAINT ${quoteIdent(target.constraint, 'alias')} ${desiredClause}`,
+		);
+		const desiredCanonical = await readTempCheckCanonical(
+			executor,
+			tempTable,
+			target.constraint,
+		);
+		const equivalentToCatalog =
+			catalogCanonical === undefined
+				? undefined
+				: catalogCanonical.expression === desiredCanonical.expression &&
+					catalogCanonical.predicate === desiredCanonical.predicate &&
+					catalogCanonical.notValid === desiredCanonical.notValid;
+		return evidenceObservation({
+			request: normalizedRequest,
+			context,
+			scope: [scopeFor(target, context, 'table')],
+			stability: 'externally-mutable',
+			source: 'vendor-deparser',
+			value: {
+				ok: true,
+				surface: 'table-check',
+				category: 'predicate',
+				desiredCanonical: desiredCanonical.expression,
+				desiredPredicateCanonical: desiredCanonical.predicate,
+				...(catalogCanonical
+					? {
+							catalogCanonical: catalogCanonical.expression,
+							catalogPredicateCanonical: catalogCanonical.predicate,
+							equivalentToCatalog,
+						}
+					: {}),
+				expression: vendorValidatedPredicate(desiredCanonical.expression),
+				predicate: vendorValidatedPredicate(desiredCanonical.predicate),
+				claims: [{ kind: EXPRESSION_DEPARSE_OBSERVATION, holds: true }],
+			} as unknown as JsonValue,
+		});
+	} finally {
+		if (savepointActive) {
+			await executor
+				.query(`ROLLBACK TO SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
+				.catch(() => undefined);
+			await executor
+				.query(`RELEASE SAVEPOINT ${quoteIdent(savepoint, 'table')}`)
+				.catch(() => undefined);
+		}
+		if (startedTransaction) {
+			await executor.query('ROLLBACK').catch(() => undefined);
+		}
+	}
+}
+
 async function observeExpressionDeparse(
 	executor: Queryable,
 	request: ObservationRequest,
 	context: ObservationContext,
 ): Promise<EvidenceObservation> {
+	if (isRecord(request.detail) && request.detail.surface === 'table-check') {
+		return observeTableCheckDeparse(executor, request, context);
+	}
 	if (
 		!isRecord(request.detail) ||
 		request.detail.surface !== 'column-default' ||
@@ -831,6 +1128,113 @@ async function observeColumn(
 	});
 }
 
+type ObservedCheckSetEntry = {
+	readonly name: string;
+	readonly oid: string | null;
+	readonly expression: string;
+	readonly predicate: string;
+	readonly notValid: boolean;
+};
+
+function observedCheckSet(value: unknown): readonly ObservedCheckSetEntry[] {
+	const parsed =
+		typeof value === 'string'
+			? (() => {
+					try {
+						return JSON.parse(value) as unknown;
+					} catch {
+						return [];
+					}
+				})()
+			: value;
+	if (!Array.isArray(parsed)) {
+		return [];
+	}
+	return parsed.flatMap((item): readonly ObservedCheckSetEntry[] => {
+		if (!isRecord(item)) {
+			return [];
+		}
+		const predicate =
+			typeof item.predicate === 'string'
+				? item.predicate
+				: typeof item.predicateExpression === 'string'
+					? item.predicateExpression
+					: undefined;
+		if (
+			typeof item.name !== 'string' ||
+			!(item.oid === null || typeof item.oid === 'string') ||
+			typeof item.expression !== 'string' ||
+			typeof predicate !== 'string' ||
+			typeof item.notValid !== 'boolean'
+		) {
+			return [];
+		}
+		return [
+			{
+				name: item.name,
+				oid: item.oid,
+				expression: item.expression,
+				predicate,
+				notValid: item.notValid,
+			},
+		];
+	});
+}
+
+async function observeTableChecks(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	const target = tableDetailTarget(request, context);
+	if (!target.constraint) {
+		throw new Error(
+			`${request.kind} requires a constraint detail for absence binding`,
+		);
+	}
+	const normalizedRequest = requestForTarget(request, target, context, 'table');
+	const result = await executor.query(
+		'SELECT c.oid::text AS oid, c.relkind AS relkind, n.nspname AS schema_name, c.relname AS table_name, ' +
+			"COALESCE(pg_catalog.json_agg(pg_catalog.json_build_object('name', con.conname, 'oid', con.oid::text, 'expression', pg_catalog.pg_get_constraintdef(con.oid, false), 'predicate', pg_catalog.pg_get_expr(con.conbin, con.conrelid), 'notValid', NOT con.convalidated) ORDER BY con.conname) FILTER (WHERE con.oid IS NOT NULL), '[]'::json) AS checks " +
+			'FROM pg_catalog.pg_class c ' +
+			'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+			'LEFT JOIN pg_catalog.pg_constraint con ON con.conrelid = c.oid ' +
+			"AND con.contype = 'c' AND con.conparentid = 0 " +
+			'WHERE n.nspname = $1 AND c.relname = $2 ' +
+			"AND c.relkind IN ('r', 'p') " +
+			'GROUP BY c.oid, c.relkind, n.nspname, c.relname',
+		[target.schema, target.table],
+	);
+	const row = result.rows[0];
+	const exists = row != null;
+	const checks = [...observedCheckSet(row?.checks)].sort((left, right) =>
+		left.name.localeCompare(right.name),
+	);
+	const absent = exists
+		? !checks.some((check) => check.name === target.constraint)
+		: false;
+	const value = {
+		exists,
+		oid: exists ? stringOrNull(row.oid) : null,
+		relkind: exists ? stringOrNull(row.relkind) : null,
+		schema: exists ? stringOrNull(row.schema_name) : null,
+		table: exists ? stringOrNull(row.table_name) : null,
+		checks,
+		claims: [
+			{ kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION, holds: exists },
+			{ kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION, holds: absent },
+		],
+	};
+	return evidenceObservation({
+		request: normalizedRequest,
+		context,
+		scope: [scopeFor(target, context, 'table')],
+		stability: 'externally-mutable',
+		source: 'system-catalog',
+		value,
+	});
+}
+
 async function observeEnumLabels(
 	executor: Queryable,
 	request: ObservationRequest,
@@ -953,9 +1357,12 @@ async function observeAlterAuthority(
 			'ALTER TABLE authority observations must use postgresql.table.alter-authority',
 		);
 	}
-	const target = detailTarget(request, context);
+	const target =
+		isRecord(request.detail) && typeof request.detail.column === 'string'
+			? detailTarget(request, context)
+			: tableDetailTarget(request, context);
 	const normalizedRequest = requestForTarget(request, target, context, 'table');
-	const resolved = resolvedTarget(target);
+	const resolved = resolvedTableTarget(target);
 	const facts = await readTableAlterAuthorityFacts(executor, resolved);
 	const value = {
 		...facts,
@@ -1031,6 +1438,8 @@ export function createPgObservationIssuer(): ObservationIssuer {
 			switch (request.kind) {
 				case COLUMN_EXISTS_OBSERVATION:
 					return observeColumn(executor, request, context);
+				case TABLE_CHECK_CONSTRAINTS_OBSERVATION:
+					return observeTableChecks(executor, request, context);
 				case ENUM_TYPE_EXISTS_OBSERVATION:
 				case ENUM_LABEL_VISIBLE_OBSERVATION:
 					return observeEnumLabels(executor, request, context);
@@ -1144,10 +1553,10 @@ async function readPgObservationContextFromClient(
 					),
 				)
 			: privilegeFactsForTarget(
-					resolvedTarget(resolvedObservationTarget),
+					resolvedTableTarget(resolvedObservationTarget),
 					await readTableAlterAuthorityFacts(
 						executor,
-						resolvedTarget(resolvedObservationTarget),
+						resolvedTableTarget(resolvedObservationTarget),
 					),
 				)
 		: [];

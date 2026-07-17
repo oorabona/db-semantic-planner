@@ -1,8 +1,12 @@
 export {
+	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
+	ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
+	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
+	CHECK_ROWS_SATISFY_GUARD,
 	COLUMN_EXISTS_OBSERVATION,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	ENGINE_VERSION_OBSERVATION,
@@ -10,11 +14,13 @@ export {
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
 	NO_NULLS_GUARD,
+	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	SET_NOT_NULL_RULE_ID,
+	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from './constants.js';
 export {
 	createPgObservationIssuer,
@@ -28,6 +34,14 @@ export {
 	renderSetNotNullLockSql,
 } from './operations/alter-column-set-not-null.js';
 export {
+	type AlterTableAddCheckPayload,
+	type CheckSet,
+	createAlterTableAddCheckOperationRuntime,
+	renderAddCheckLockSql,
+	renderAlterTableAddCheckSql,
+	renderCheckRowsSatisfySql,
+} from './operations/alter-table-add-check.js';
+export {
 	type AlterTypeAddValuePayload,
 	createAlterTypeAddValueOperationRuntime,
 	renderAlterTypeAddValueSql,
@@ -36,6 +50,11 @@ export {
 	createPgTransitionPack,
 	type PgTransitionPackOptions,
 } from './pack.js';
+export {
+	type AddCheckMatch,
+	type AddCheckRuleOptions,
+	createAddCheckRule,
+} from './rules/add-check.js';
 export {
 	createEnumAddValueRule,
 	type EnumAddValueMatch,
