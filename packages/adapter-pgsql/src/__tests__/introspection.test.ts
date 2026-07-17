@@ -828,15 +828,20 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// 14 queries total: columns, PKs, FKs, indexes, unique columns, enums,
+		// 15 queries total: columns, PKs, FKs, indexes, unique columns, enums,
 		// comments, checks, partitions, extensions, sequences, rls state, policies,
-		// formatted column types
+		// formatted column types, logical-identity carrier probe
 		// Note: extensions query has no schema param (queries all extensions globally)
-		expect(mockQuery).toHaveBeenCalledTimes(14);
+		expect(mockQuery).toHaveBeenCalledTimes(15);
 		// All parameterized queries (those with a second arg) should pass 'tenant_1'
 		for (const call of mockQuery.mock.calls) {
 			if (call[1] !== undefined) {
-				expect(call[1]).toEqual(['tenant_1']);
+				const sql = String(call[0]);
+				if (sql.includes('to_regclass')) {
+					expect(call[1]).toEqual(['"tenant_1"."dbsp_logical_identity"']);
+				} else {
+					expect(call[1]).toEqual(['tenant_1']);
+				}
 			}
 		}
 		const uniqueConstraintQuery = mockQuery.mock.calls.find((call) =>

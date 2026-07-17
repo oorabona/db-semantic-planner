@@ -6,6 +6,7 @@
 import type {
 	AmbiguityCheckResult,
 	EnumIR,
+	LogicalIdentity,
 	ModelIR,
 	RelationIR,
 	SequenceIR,
@@ -14,6 +15,13 @@ import type {
 
 function hasExternalSchema(schemaName: string | null | undefined): boolean {
 	return schemaName != null && schemaName.trim().length > 0;
+}
+
+function logicalIdentityId(
+	identity: LogicalIdentity | undefined,
+): string | undefined {
+	const id = identity?.id;
+	return id === undefined ? undefined : id.trim();
 }
 
 /**
@@ -178,9 +186,39 @@ export class ModelIRImpl implements ModelIR {
 
 	private validate(): void {
 		const errors: string[] = [];
+		const logicalIdentityOwners = new Map<string, string>();
+
+		const recordLogicalIdentity = (
+			identity: LogicalIdentity | undefined,
+			owner: string,
+		): void => {
+			const id = logicalIdentityId(identity);
+			if (id === undefined) {
+				return;
+			}
+			if (id.length === 0) {
+				errors.push(`${owner} has an empty logical identity id`);
+				return;
+			}
+			const priorOwner = logicalIdentityOwners.get(id);
+			if (priorOwner) {
+				errors.push(
+					`Logical identity "${id}" is attached to multiple objects: ${priorOwner}, ${owner}`,
+				);
+				return;
+			}
+			logicalIdentityOwners.set(id, owner);
+		};
 
 		// Validate PK columns exist when PK is defined
 		for (const table of this.tables.values()) {
+			recordLogicalIdentity(table.logicalIdentity, `table "${table.name}"`);
+			for (const column of table.columns) {
+				recordLogicalIdentity(
+					column.logicalIdentity,
+					`column "${table.name}.${column.name}"`,
+				);
+			}
 			if (this.externalTables.has(table.name)) {
 				errors.push(
 					`Table "${table.name}" cannot be both managed and external`,

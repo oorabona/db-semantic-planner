@@ -1206,6 +1206,72 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('no-drift');
 	});
 
+	it('keeps a table rename without identity unsupported with no transition candidates', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTable({ ...table(false), name: 'accounts' }),
+			modelFromTable(table(false)),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		expect(compare).not.toHaveProperty('candidates');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({ kind: 'table', name: 'accounts' }),
+			);
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({ kind: 'table', name: 'users' }),
+			);
+		}
+	});
+
+	it('keeps a column rename without identity unsupported with no transition candidates', () => {
+		const compare = createComparator(registry()).compare(
+			modelFromTable(table(false, [column(false, 'years')])),
+			modelFromTable(table(false, [column(false, 'age')])),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		expect(compare).not.toHaveProperty('candidates');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({ kind: 'column', name: 'years' }),
+			);
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({ kind: 'column', name: 'age' }),
+			);
+		}
+	});
+
+	it('recognizes same logical id with a different physical table name as unsupported until rename rules exist', () => {
+		const logicalIdentity = { id: 'logical.table.users' };
+		const compare = createComparator(registry()).compare(
+			modelFromTable({
+				...table(false),
+				name: 'accounts',
+				logicalIdentity,
+			}),
+			modelFromTable({ ...table(false), logicalIdentity }),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		expect(compare).not.toHaveProperty('candidates');
+	});
+
+	it('recognizes same logical id with a different physical column name as unsupported until rename rules exist', () => {
+		const logicalIdentity = { id: 'logical.column.users.age' };
+		const compare = createComparator(registry()).compare(
+			modelFromTable(
+				table(false, [{ ...column(false, 'years'), logicalIdentity }]),
+			),
+			modelFromTable(
+				table(false, [{ ...column(false, 'age'), logicalIdentity }]),
+			),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		expect(compare).not.toHaveProperty('candidates');
+	});
+
 	it('uses declared precedence only within a same-group recognition set', async () => {
 		const slow = namedSetNotNullRule('mock.set-not-null.slow');
 		const fast = namedSetNotNullRule('mock.set-not-null.fast');

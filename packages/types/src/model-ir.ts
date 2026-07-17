@@ -173,12 +173,25 @@ export interface AuthorAttestedNativeDefault {
 // Core Interfaces
 // ============================================================================
 
+export interface LogicalIdentityCarrier {
+	readonly kind: 'postgresql-side-table' | (string & {});
+	readonly authenticated: false;
+}
+
+export interface LogicalIdentity {
+	readonly id: string;
+	readonly carrier?: LogicalIdentityCarrier;
+}
+
 /**
  * Column definition
  */
 export interface ColumnIR {
 	/** Column name in database */
 	readonly name: string;
+
+	/** Stable logical identity, when attached by an engine-neutral carrier. */
+	readonly logicalIdentity?: LogicalIdentity;
 
 	/** Data type for TypeScript inference */
 	readonly type: ColumnType;
@@ -426,6 +439,9 @@ export interface IndexIR {
 export interface TableIR {
 	/** Table name in database */
 	readonly name: string;
+
+	/** Stable logical identity, when attached by an engine-neutral carrier. */
+	readonly logicalIdentity?: LogicalIdentity;
 
 	/** Column definitions */
 	readonly columns: readonly ColumnIR[];

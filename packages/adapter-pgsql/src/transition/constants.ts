@@ -47,11 +47,18 @@ export const CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND: OperationKindRef =
 		name: 'CreateUniqueIndexConcurrently',
 	};
 
+export const ATTACH_LOGICAL_IDENTITY_OPERATION_KIND: OperationKindRef = {
+	artifact: PG_OPERATION_PACK_ARTIFACT,
+	name: 'AttachLogicalIdentity',
+};
+
 export const SET_NOT_NULL_RULE_ID = 'postgresql.column.set-not-null';
 export const ADD_CHECK_RULE_ID = 'postgresql.table.add-check';
 export const ENUM_ADD_VALUE_RULE_ID = 'postgresql.enum.add-value';
 export const CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID =
 	'postgresql.index.create-unique-concurrently';
+export const LOGICAL_IDENTITY_ADOPTION_RULE_ID =
+	'postgresql.logical-identity.adopt';
 export const ALTER_COLUMN_SET_NOT_NULL_CAPABILITY = 'alter-column-set-not-null';
 export const ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM = 180000;
 export const ALTER_TABLE_ADD_CHECK_CAPABILITY = 'alter-table-add-check';
@@ -70,6 +77,7 @@ export const PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE =
 	'postgresql.column.set-not-null.authority';
 
 export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
+export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
 
 export const COLUMN_EXISTS_OBSERVATION = 'postgresql.column.exists';
 export const TABLE_CHECK_CONSTRAINTS_OBSERVATION =
@@ -87,6 +95,8 @@ export const ALTER_TYPE_AUTHORITY_OBSERVATION =
 	'postgresql.type.alter-authority';
 export const ENGINE_VERSION_OBSERVATION = 'postgresql.engine.version-supported';
 export const EXPRESSION_DEPARSE_OBSERVATION = 'postgresql.expression.deparse';
+export const LOGICAL_IDENTITY_CARRIER_OBSERVATION =
+	'postgresql.logical-identity.carrier-state';
 
 export const NO_NULLS_GUARD = 'NO_NULLS';
 export const CHECK_ROWS_SATISFY_GUARD = 'CHECK_ROWS_SATISFY';

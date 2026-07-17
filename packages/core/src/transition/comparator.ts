@@ -6,6 +6,7 @@ import type {
 	EnumIR,
 	ForeignKeyIR,
 	IndexIR,
+	LogicalIdentity,
 	ModelIR,
 	ObservationRequest,
 	ProofObligation,
@@ -44,7 +45,10 @@ function columnChanged(
 	if (!desired || !current) {
 		return true;
 	}
-	return stableJson(desired) !== stableJson(current);
+	return (
+		stableJson(columnForComparison(desired)) !==
+		stableJson(columnForComparison(current))
+	);
 }
 
 type NormalizeIdentifier = (identifier: string) => string;
@@ -259,6 +263,31 @@ function checksForComparison(
 	return checks?.map(checkForComparison);
 }
 
+function logicalIdentityForComparison(
+	identity: LogicalIdentity | undefined,
+): { readonly id: string } | undefined {
+	return identity ? { id: identity.id } : undefined;
+}
+
+function columnForComparison(column: ColumnIR): unknown {
+	const { logicalIdentity: _logicalIdentity, ...rest } = column;
+	const logicalIdentity = logicalIdentityForComparison(column.logicalIdentity);
+	return logicalIdentity ? { ...rest, logicalIdentity } : rest;
+}
+
+function logicalIdentityChanged(
+	desired: { readonly logicalIdentity?: LogicalIdentity } | undefined,
+	current: { readonly logicalIdentity?: LogicalIdentity } | undefined,
+): boolean {
+	if (!desired || !current) {
+		return false;
+	}
+	return (
+		stableJson(logicalIdentityForComparison(desired.logicalIdentity)) !==
+		stableJson(logicalIdentityForComparison(current.logicalIdentity))
+	);
+}
+
 function normalizeNamedMap<T extends { readonly name: string }>(
 	items: ReadonlyMap<string, T> | undefined,
 	normalize: NormalizeIdentifier,
@@ -352,9 +381,11 @@ function normalizeCurrentModelForComparison(
 }
 
 function tableForComparison(table: TableIR): unknown {
+	const logicalIdentity = logicalIdentityForComparison(table.logicalIdentity);
 	return {
 		name: table.name,
-		columns: table.columns,
+		...(logicalIdentity ? { logicalIdentity } : {}),
+		columns: table.columns.map(columnForComparison),
 		primaryKey: table.primaryKey,
 		foreignKeys: table.foreignKeys,
 		indexes: table.indexes.map((index) => normalizedIndex(table.name, index)),
@@ -550,6 +581,7 @@ function revertRecognizedColumnChanges(
 	recognizedColumnKeys: ReadonlySet<string>,
 	externalTables: ReadonlySet<string>,
 	managedCollections: ManagedModelCollections,
+	recognizedTableKeys: ReadonlySet<string> = new Set(),
 	recognizedEnumKeys: ReadonlySet<string> = new Set(),
 	recognizedCheckKeys: ReadonlySet<string> = new Set(),
 	recognizedCheckReplacements: ReadonlyMap<
@@ -564,22 +596,26 @@ function revertRecognizedColumnChanges(
 			.sort(([left], [right]) => left.localeCompare(right))
 			.map(([name, table]) => {
 				const currentTable = current.getTable(name);
+				const tableWithRevertedIdentity =
+					recognizedTableKeys.has(name) && currentTable
+						? tableWithLogicalIdentity(table, currentTable.logicalIdentity)
+						: table;
 				const revertedChecks = revertRecognizedCheckChanges(
 					name,
-					table.checkConstraints,
+					tableWithRevertedIdentity.checkConstraints,
 					currentTable?.checkConstraints,
 					recognizedCheckKeys,
 					recognizedCheckReplacements,
 				);
 				const revertedIndexes = revertRecognizedIndexChanges(
 					name,
-					table.indexes,
+					tableWithRevertedIdentity.indexes,
 					currentTable?.indexes,
 					recognizedIndexKeys,
 				);
 				const tableWithRevertedColumns = {
-					...table,
-					columns: table.columns.map((column) => {
+					...tableWithRevertedIdentity,
+					columns: tableWithRevertedIdentity.columns.map((column) => {
 						const key = JSON.stringify([name, column.name]);
 						const currentColumn = currentTable?.columns.find(
 							(candidate) => candidate.name === column.name,
@@ -620,6 +656,14 @@ function revertRecognizedColumnChanges(
 			},
 		),
 	};
+}
+
+function tableWithLogicalIdentity(
+	table: TableIR,
+	identity: LogicalIdentity | undefined,
+): TableIR {
+	const { logicalIdentity: _logicalIdentity, ...rest } = table;
+	return identity ? { ...rest, logicalIdentity: identity } : rest;
 }
 
 function recognizedEnumKeysForName(
@@ -873,6 +917,30 @@ function makeFocusedModel(table: TableIR, column: ColumnIR): ModelIR {
 	};
 }
 
+function makeFocusedTableModel(table: TableIR): ModelIR {
+	const { checkConstraints: _checkConstraints, ...tableWithoutChecks } = table;
+	const tables = new Map<string, TableIR>([
+		[
+			table.name,
+			{
+				...tableWithoutChecks,
+				columns: [],
+				indexes: [],
+				foreignKeys: [],
+			},
+		],
+	]);
+	return {
+		tables,
+		relations: new Map(),
+		getTable: (name: string) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
 function makeFocusedEnumModel(enumDef: EnumIR): ModelIR {
 	const enums = new Map<string, EnumIR>([[enumDef.name, enumDef]]);
 	return {
@@ -1096,6 +1164,8 @@ export function createComparator(registry: PackRegistry): Comparator {
 			const unsupported: ResourceAddress[] = [];
 			const recognizedColumnKeys = new Set<string>();
 			const pendingColumnKeys = new Set<string>();
+			const recognizedTableKeys = new Set<string>();
+			const pendingTableKeys = new Set<string>();
 			const recognizedEnumKeys = new Set<string>();
 			const pendingEnumKeys = new Set<string>();
 			const recognizedCheckKeys = new Set<string>();
@@ -1118,6 +1188,74 @@ export function createComparator(registry: PackRegistry): Comparator {
 				if (!desiredTable || !currentTable) {
 					unsupported.push(resourceForColumn(engine, tableName));
 					continue;
+				}
+
+				if (logicalIdentityChanged(desiredTable, currentTable)) {
+					const focusedDesired = makeFocusedTableModel(desiredTable);
+					const focusedCurrent = makeFocusedTableModel(currentTable);
+					const recognitionEntries = registry.allRules().map((rule) => {
+						const equivalence = registry.resolveEquivalence(rule.artifact);
+						return {
+							rule,
+							result: rule.recognize(
+								focusedDesired,
+								focusedCurrent,
+								equivalence
+									? { equivalence, context: { engine } }
+									: { context: { engine } },
+							),
+						};
+					});
+					const recognized = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: true }
+							>;
+						} => entry.result.recognized === true,
+					);
+					const unknown = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: 'unknown' }
+							>;
+						} => entry.result.recognized === 'unknown',
+					);
+
+					if (recognized.length === 0) {
+						if (unknown.length > 0) {
+							for (const entry of unknown) {
+								unknownRecognitions.push({
+									rule: ruleRef(entry.rule),
+									desired: focusedDesired,
+									current: focusedCurrent,
+									obligations: entry.result.obligations,
+								});
+							}
+							pendingTableKeys.add(tableName);
+							continue;
+						}
+						unsupported.push(resourceForColumn(engine, tableName));
+						continue;
+					}
+
+					const arbitration = arbitrateRecognizedRules(registry, recognized);
+					if (arbitration.kind === 'ambiguous') {
+						return {
+							kind: 'ambiguous',
+							candidates: arbitration.candidates,
+						};
+					}
+					candidates.push(arbitration.candidate);
+					recognizedTableKeys.add(tableName);
+					pendingTableKeys.add(tableName);
 				}
 
 				const columnNames = new Set<string>([
@@ -1492,6 +1630,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 						new Set([...recognizedColumnKeys, ...pendingColumnKeys]),
 						ignoredExternalTables,
 						managedCollections,
+						new Set([...recognizedTableKeys, ...pendingTableKeys]),
 						new Set([...recognizedEnumKeys, ...pendingEnumKeys]),
 						new Set([...recognizedCheckKeys, ...pendingCheckKeys]),
 						pendingCheckReplacements,

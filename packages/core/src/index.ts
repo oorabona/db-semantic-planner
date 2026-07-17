@@ -21,6 +21,8 @@ export type {
 	// Index definition
 	IndexIR,
 	JoinDefault,
+	LogicalIdentity,
+	LogicalIdentityCarrier,
 	ModelIR,
 	OnDeleteAction,
 	Optionality,

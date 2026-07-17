@@ -278,6 +278,92 @@ describe('ModelIRImpl validation — foreign keys', () => {
 	});
 });
 
+describe('ModelIRImpl validation — logical identity', () => {
+	it('preserves optional table and column logical identities', () => {
+		const users = makeTable('users', {
+			logicalIdentity: {
+				id: 'logical.table.users',
+				carrier: {
+					kind: 'postgresql-side-table',
+					authenticated: false,
+				},
+			},
+			columns: [
+				{
+					name: 'id',
+					type: 'integer',
+					nullable: false,
+					logicalIdentity: { id: 'logical.column.users.id' },
+				},
+			],
+		});
+
+		const model = buildModel([users], []);
+
+		expect(model.getTable('users')?.logicalIdentity?.id).toBe(
+			'logical.table.users',
+		);
+		expect(model.getTable('users')?.columns[0]?.logicalIdentity?.id).toBe(
+			'logical.column.users.id',
+		);
+	});
+
+	it('rejects duplicate logical ids across table and column objects', () => {
+		expect(() =>
+			buildModel(
+				[
+					makeTable('users', {
+						logicalIdentity: { id: 'logical.duplicate' },
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: { id: 'logical.duplicate' },
+							},
+						],
+					}),
+				],
+				[],
+			),
+		).toThrow(
+			/Logical identity "logical\.duplicate" is attached to multiple objects/,
+		);
+	});
+
+	it('rejects duplicate logical ids across columns in different tables', () => {
+		expect(() =>
+			buildModel(
+				[
+					makeTable('users', {
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: { id: 'logical.column.shared' },
+							},
+						],
+					}),
+					makeTable('posts', {
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: { id: 'logical.column.shared' },
+							},
+						],
+					}),
+				],
+				[],
+			),
+		).toThrow(
+			/Logical identity "logical\.column\.shared" is attached to multiple objects/,
+		);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Validation: Relation source / target / through non-existent
 // ---------------------------------------------------------------------------

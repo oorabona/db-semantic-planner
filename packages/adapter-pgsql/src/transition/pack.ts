@@ -17,8 +17,13 @@ import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';
 import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type-add-value.js';
+import { createAttachLogicalIdentityOperationRuntime } from './operations/attach-logical-identity.js';
 import { createCreateUniqueIndexConcurrentlyOperationRuntime } from './operations/create-unique-index-concurrently.js';
 import { createAddCheckRule } from './rules/add-check.js';
+import {
+	createLogicalIdentityAdoptionRule,
+	type IdentityAdoptionAsserter,
+} from './rules/adopt-logical-identity.js';
 import { createCreateUniqueIndexConcurrentlyRule } from './rules/create-unique-index-concurrently.js';
 import {
 	createEnumAddValueRule,
@@ -29,6 +34,8 @@ import { createSetNotNullRule } from './rules/set-not-null.js';
 export interface PgTransitionPackOptions {
 	readonly dbCasing?: DbCasing;
 	readonly naming?: NamingPlugin;
+	readonly identityAdoptionAsserter?: IdentityAdoptionAsserter;
+	readonly identityAdoptionSelectionBasis?: string;
 }
 
 export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
@@ -38,12 +45,22 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 	const equivalence = createPgEquivalenceCapability();
 	return {
 		rules: [
+			createLogicalIdentityAdoptionRule({
+				naming,
+				...(options.identityAdoptionAsserter
+					? { asserter: options.identityAdoptionAsserter }
+					: {}),
+				...(options.identityAdoptionSelectionBasis
+					? { selectionBasis: options.identityAdoptionSelectionBasis }
+					: {}),
+			}),
 			createSetNotNullRule({ naming }),
 			createAddCheckRule({ naming }),
 			createEnumAddValueRule({ naming }),
 			createCreateUniqueIndexConcurrentlyRule({ naming }),
 		],
 		operationSemantics: [
+			createAttachLogicalIdentityOperationRuntime(),
 			createAlterColumnSetNotNullOperationRuntime(),
 			createAlterTableAddCheckOperationRuntime(),
 			createAlterTypeAddValueOperationRuntime(),

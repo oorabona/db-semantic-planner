@@ -20,6 +20,8 @@ export type {
 	IncludeStrategy,
 	IndexIR,
 	JoinDefault,
+	LogicalIdentity,
+	LogicalIdentityCarrier,
 	ModelIR,
 	OnDeleteAction,
 	Optionality,

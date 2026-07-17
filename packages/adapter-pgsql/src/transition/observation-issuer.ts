@@ -19,11 +19,13 @@ import {
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
+	DBSP_LOGICAL_IDENTITY_TABLE,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
 	INDEX_ABSENT_OBSERVATION,
+	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
@@ -65,6 +67,24 @@ type EnumObservationTarget = {
 	readonly type: string;
 	readonly label?: string;
 	readonly schema?: string;
+};
+
+type LogicalIdentityObservationTarget = {
+	readonly schema: string;
+	readonly table: string;
+	readonly column?: string;
+	readonly logicalId: string;
+	readonly carrierKind: 'postgresql-side-table';
+	readonly authenticated: false;
+	readonly expected: 'adoptable' | 'attached';
+};
+
+type LogicalIdentityBinding = {
+	readonly logicalId: string;
+	readonly schema: string;
+	readonly table: string;
+	readonly column: string | null;
+	readonly carrierKind: string;
 };
 
 type AlterAuthorityFacts = {
@@ -244,6 +264,65 @@ function enumDetailTarget(
 	return label == null
 		? { type, schema: resolvedSchema }
 		: { type, label, schema: resolvedSchema };
+}
+
+function logicalIdentityDetailTarget(
+	request: ObservationRequest,
+	context: ObservationContext,
+): LogicalIdentityObservationTarget {
+	if (!isRecord(request.detail)) {
+		throw new Error(`${request.kind} requires logical identity detail`);
+	}
+	const {
+		table,
+		column,
+		schema,
+		logicalId,
+		carrierKind,
+		authenticated,
+		expected,
+	} = request.detail;
+	if (typeof table !== 'string' || typeof logicalId !== 'string') {
+		throw new Error(`${request.kind} requires table and logicalId detail`);
+	}
+	if (column != null && typeof column !== 'string') {
+		throw new Error(`${request.kind} column detail must be a string or null`);
+	}
+	if (schema != null && typeof schema !== 'string') {
+		throw new Error(`${request.kind} schema detail must be a string`);
+	}
+	if (carrierKind !== 'postgresql-side-table' || authenticated !== false) {
+		throw new Error(
+			`${request.kind} only supports authenticated:false postgresql-side-table carrier detail`,
+		);
+	}
+	if (expected !== 'adoptable' && expected !== 'attached') {
+		throw new Error(`${request.kind} requires expected=adoptable|attached`);
+	}
+	const resolvedSchema = schema ?? explicitSchemaFromContext(context);
+	if (!resolvedSchema) {
+		throw new Error(
+			`${request.kind} requires explicit schema detail; unqualified transition observations cannot be resolved from search_path`,
+		);
+	}
+	return column == null
+		? {
+				table,
+				schema: resolvedSchema,
+				logicalId,
+				carrierKind,
+				authenticated,
+				expected,
+			}
+		: {
+				table,
+				column,
+				schema: resolvedSchema,
+				logicalId,
+				carrierKind,
+				authenticated,
+				expected,
+			};
 }
 
 function targetFromRequests(
@@ -427,6 +506,20 @@ function scopeFor(
 	const qualified =
 		kind === 'column' ? { ...base, qualifiedBy: [target.table] } : base;
 	return target.schema ? { ...qualified, schema: target.schema } : qualified;
+}
+
+function logicalIdentityScopeFor(
+	target: LogicalIdentityObservationTarget,
+	context: ObservationContext,
+): ResourceAddress {
+	const base: ResourceAddress = {
+		engine: 'postgresql',
+		database: context.databaseId,
+		schema: target.schema,
+		kind: target.column ? 'column' : 'table',
+		name: target.column ?? target.table,
+	};
+	return target.column ? { ...base, qualifiedBy: [target.table] } : base;
 }
 
 function enumScopeFor(
@@ -1101,6 +1194,181 @@ async function observeExpressionDeparse(
 	}
 }
 
+function logicalIdentityBindingFromRow(
+	row: Record<string, unknown>,
+): LogicalIdentityBinding | undefined {
+	const logicalId = stringOrNull(row.logical_id);
+	const schema = stringOrNull(row.schema_name);
+	const table = stringOrNull(row.table_name);
+	const column =
+		row.column_name === null ? null : stringOrNull(row.column_name);
+	const carrierKind = stringOrNull(row.carrier_kind);
+	if (!logicalId || !schema || !table || carrierKind === null) {
+		return undefined;
+	}
+	return {
+		logicalId,
+		schema,
+		table,
+		column,
+		carrierKind,
+	};
+}
+
+function bindingMatchesTarget(
+	binding: LogicalIdentityBinding,
+	target: LogicalIdentityObservationTarget,
+): boolean {
+	return (
+		binding.schema === target.schema &&
+		binding.table === target.table &&
+		binding.column === (target.column ?? null)
+	);
+}
+
+function bindingIsExpected(
+	binding: LogicalIdentityBinding,
+	target: LogicalIdentityObservationTarget,
+): boolean {
+	return (
+		binding.logicalId === target.logicalId &&
+		binding.carrierKind === target.carrierKind &&
+		bindingMatchesTarget(binding, target)
+	);
+}
+
+async function logicalIdentityObjectExists(
+	executor: Queryable,
+	target: LogicalIdentityObservationTarget,
+): Promise<boolean> {
+	if (target.column) {
+		const result = await executor.query(
+			'SELECT 1 FROM pg_catalog.pg_class c ' +
+				'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+				'JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid ' +
+				'WHERE n.nspname = $1 AND c.relname = $2 AND a.attname = $3 ' +
+				"AND c.relkind IN ('r', 'p') AND a.attnum > 0 AND NOT a.attisdropped " +
+				'LIMIT 1',
+			[target.schema, target.table, target.column],
+		);
+		return result.rows.length > 0;
+	}
+	const result = await executor.query(
+		'SELECT 1 FROM pg_catalog.pg_class c ' +
+			'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
+			'WHERE n.nspname = $1 AND c.relname = $2 ' +
+			"AND c.relkind IN ('r', 'p') LIMIT 1",
+		[target.schema, target.table],
+	);
+	return result.rows.length > 0;
+}
+
+async function logicalIdentitySideTableExists(
+	executor: Queryable,
+	schema: string,
+): Promise<boolean> {
+	const qualified = `${quoteIdent(schema, 'schema')}.${quoteIdent(
+		DBSP_LOGICAL_IDENTITY_TABLE,
+		'table',
+	)}`;
+	const result = await executor.query(
+		'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
+		[qualified],
+	);
+	return result.rows[0]?.exists === true;
+}
+
+async function logicalIdentityBindings(
+	executor: Queryable,
+	target: LogicalIdentityObservationTarget,
+): Promise<readonly LogicalIdentityBinding[]> {
+	const sideTableExists = await logicalIdentitySideTableExists(
+		executor,
+		target.schema,
+	);
+	if (!sideTableExists) {
+		return [];
+	}
+	const result = await executor.query(
+		`SELECT logical_id, schema_name, table_name, column_name, carrier_kind ` +
+			`FROM ${quoteIdent(target.schema, 'schema')}.${quoteIdent(
+				DBSP_LOGICAL_IDENTITY_TABLE,
+				'table',
+			)} ` +
+			'WHERE logical_id = $1 OR (' +
+			'schema_name = $2 AND table_name = $3 AND ' +
+			'((column_name IS NULL AND $4::text IS NULL) OR column_name = $4::text)' +
+			') ' +
+			'ORDER BY logical_id, schema_name, table_name, column_name NULLS FIRST',
+		[target.logicalId, target.schema, target.table, target.column ?? null],
+	);
+	return result.rows.flatMap((row) => {
+		const binding = logicalIdentityBindingFromRow(row);
+		return binding ? [binding] : [];
+	});
+}
+
+async function observeLogicalIdentityCarrier(
+	executor: Queryable,
+	request: ObservationRequest,
+	context: ObservationContext,
+): Promise<EvidenceObservation> {
+	const target = logicalIdentityDetailTarget(request, context);
+	const scope = logicalIdentityScopeFor(target, context);
+	const normalizedRequest: ObservationRequest = {
+		kind: request.kind,
+		scope: [scope],
+		detail: {
+			schema: target.schema,
+			table: target.table,
+			column: target.column ?? null,
+			logicalId: target.logicalId,
+			carrierKind: target.carrierKind,
+			authenticated: target.authenticated,
+			expected: target.expected,
+		},
+	};
+	const [objectExists, sideTableExists, bindings] = await Promise.all([
+		logicalIdentityObjectExists(executor, target),
+		logicalIdentitySideTableExists(executor, target.schema),
+		logicalIdentityBindings(executor, target),
+	]);
+	const objectBindings = bindings.filter((binding) =>
+		bindingMatchesTarget(binding, target),
+	);
+	const logicalIdBindings = bindings.filter(
+		(binding) => binding.logicalId === target.logicalId,
+	);
+	const adoptable =
+		objectExists &&
+		objectBindings.length === 0 &&
+		logicalIdBindings.length === 0;
+	const attached =
+		objectExists &&
+		objectBindings.length === 1 &&
+		logicalIdBindings.length === 1 &&
+		objectBindings.every((binding) => bindingIsExpected(binding, target)) &&
+		logicalIdBindings.every((binding) => bindingIsExpected(binding, target));
+	const holds = target.expected === 'attached' ? attached : adoptable;
+	return evidenceObservation({
+		request: normalizedRequest,
+		context,
+		scope: [scope],
+		stability: 'externally-mutable',
+		source: 'system-catalog',
+		value: {
+			objectExists,
+			sideTableExists,
+			logicalId: target.logicalId,
+			carrierKind: target.carrierKind,
+			authenticated: target.authenticated,
+			objectBindings,
+			logicalIdBindings,
+			claims: [{ kind: LOGICAL_IDENTITY_CARRIER_OBSERVATION, holds }],
+		} as unknown as JsonValue,
+	});
+}
+
 async function observeColumn(
 	executor: Queryable,
 	request: ObservationRequest,
@@ -1722,6 +1990,8 @@ export function createPgObservationIssuer(): ObservationIssuer {
 					return observeTableChecks(executor, request, context);
 				case TABLE_INDEXES_OBSERVATION:
 					return observeTableIndexes(executor, request, context);
+				case LOGICAL_IDENTITY_CARRIER_OBSERVATION:
+					return observeLogicalIdentityCarrier(executor, request, context);
 				case ENUM_TYPE_EXISTS_OBSERVATION:
 				case ENUM_LABEL_VISIBLE_OBSERVATION:
 					return observeEnumLabels(executor, request, context);

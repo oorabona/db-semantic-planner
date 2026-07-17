@@ -5,17 +5,21 @@ export {
 	ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
+	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	CHECK_ROWS_SATISFY_GUARD,
 	COLUMN_EXISTS_OBSERVATION,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
 	CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
+	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_ADD_VALUE_RULE_ID,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
 	INDEX_ABSENT_OBSERVATION,
+	LOGICAL_IDENTITY_ADOPTION_RULE_ID,
+	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
 	NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD,
 	NO_NULLS_GUARD,
 	PG_DEPARSE_ARTIFACT,
@@ -52,6 +56,14 @@ export {
 	renderAlterTypeAddValueSql,
 } from './operations/alter-type-add-value.js';
 export {
+	type AttachLogicalIdentityPayload,
+	createAttachLogicalIdentityOperationRuntime,
+	renderAttachLogicalIdentityLockSql,
+	renderCreateLogicalIdentityIndexesSql,
+	renderCreateLogicalIdentitySideTableSql,
+	renderInsertLogicalIdentitySql,
+} from './operations/attach-logical-identity.js';
+export {
 	type CreateUniqueIndexConcurrentlyPayload,
 	createCreateUniqueIndexConcurrentlyOperationRuntime,
 	type IndexSet,
@@ -67,6 +79,12 @@ export {
 	type AddCheckRuleOptions,
 	createAddCheckRule,
 } from './rules/add-check.js';
+export {
+	createLogicalIdentityAdoptionRule,
+	type IdentityAdoptionAsserter,
+	type LogicalIdentityAdoptionMatch,
+	type LogicalIdentityAdoptionRuleOptions,
+} from './rules/adopt-logical-identity.js';
 export {
 	type CreateUniqueIndexConcurrentlyMatch,
 	type CreateUniqueIndexConcurrentlyRuleOptions,

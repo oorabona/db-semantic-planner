@@ -59,7 +59,8 @@ function createMockPool(
 			.mockResolvedValueOnce(sequences) // sequences (pg_sequences)
 			.mockResolvedValueOnce(rlsState) // RLS enabled state per table
 			.mockResolvedValueOnce(policies) // RLS policies
-			.mockResolvedValueOnce(formattedColumnTypes), // formatted column types
+			.mockResolvedValueOnce(formattedColumnTypes) // formatted column types
+			.mockResolvedValueOnce({ rows: [{ exists: false }] }), // logical identity side table
 	} as any;
 }
 
@@ -1956,8 +1957,8 @@ describe('introspection — hierarchy detection', () => {
 			before.getTime(),
 		);
 		expect(model.introspectedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-		// Default schema = 'public' (passed to queries); 14 catalog queries.
-		expect(pool.query).toHaveBeenCalledTimes(14);
+		// Default schema = 'public' (passed to queries); 14 catalog queries plus the logical-identity carrier probe.
+		expect(pool.query).toHaveBeenCalledTimes(15);
 		expect(pool.query.mock.calls[0][1]).toEqual(['public']);
 	});
 
