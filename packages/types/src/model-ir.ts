@@ -392,6 +392,12 @@ export interface IndexIR {
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
 
+	/** PostgreSQL catalog validity (indisvalid); false marks an unusable leftover index */
+	readonly valid?: boolean;
+
+	/** PostgreSQL catalog readiness (indisready); false marks an incomplete index build */
+	readonly ready?: boolean;
+
 	/** PG15+ — for UNIQUE indexes only; schema authoring rejects true on non-unique indexes */
 	readonly nullsNotDistinct?: boolean;
 

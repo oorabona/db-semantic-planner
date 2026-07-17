@@ -1,4 +1,5 @@
 import type { OperationKindRef } from './artifact.js';
+import type { ApplyGuard, RecoveryArtefact } from './guard.js';
 import type { JsonValue } from './json.js';
 import type { Proposition } from './proof.js';
 import type { ResourceAddress, ResourceSelector } from './resource.js';
@@ -37,6 +38,19 @@ export interface ExternalEffectCoverage {
 	readonly accountedFor: readonly ResourceSelector[];
 	readonly couldNotAccountFor: readonly ResourceSelector[];
 }
+
+export type OperationExecutionOutcome =
+	| { readonly kind: 'completed' }
+	| {
+			readonly kind: 'guard-failed';
+			readonly guard: ApplyGuard;
+			readonly recovery: readonly RecoveryArtefact[];
+	  }
+	| {
+			readonly kind: 'partially-applied';
+			readonly recovery: readonly RecoveryArtefact[];
+			readonly detail?: string;
+	  };
 
 export interface OperationExecutionSemantics {
 	readonly transaction:

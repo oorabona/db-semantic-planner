@@ -8,11 +8,15 @@ export {
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	CHECK_ROWS_SATISFY_GUARD,
 	COLUMN_EXISTS_OBSERVATION,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_ADD_VALUE_RULE_ID,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
+	INDEX_ABSENT_OBSERVATION,
+	NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD,
 	NO_NULLS_GUARD,
 	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
@@ -21,6 +25,7 @@ export {
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	SET_NOT_NULL_RULE_ID,
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 export {
 	createPgObservationIssuer,
@@ -47,6 +52,13 @@ export {
 	renderAlterTypeAddValueSql,
 } from './operations/alter-type-add-value.js';
 export {
+	type CreateUniqueIndexConcurrentlyPayload,
+	createCreateUniqueIndexConcurrentlyOperationRuntime,
+	type IndexSet,
+	renderCreateUniqueIndexConcurrentlySql,
+	renderDropIndexConcurrentlySql,
+} from './operations/create-unique-index-concurrently.js';
+export {
 	createPgTransitionPack,
 	type PgTransitionPackOptions,
 } from './pack.js';
@@ -55,6 +67,11 @@ export {
 	type AddCheckRuleOptions,
 	createAddCheckRule,
 } from './rules/add-check.js';
+export {
+	type CreateUniqueIndexConcurrentlyMatch,
+	type CreateUniqueIndexConcurrentlyRuleOptions,
+	createCreateUniqueIndexConcurrentlyRule,
+} from './rules/create-unique-index-concurrently.js';
 export {
 	createEnumAddValueRule,
 	type EnumAddValueMatch,

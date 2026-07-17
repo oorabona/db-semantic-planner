@@ -828,6 +828,7 @@ export function createAlterTypeAddValueOperationRuntime() {
 			await clientQuery(client).query(
 				renderAlterTypeAddValueSql(payloadOf(operation), context),
 			);
+			return { kind: 'completed' };
 		},
 		async writeCompletionJournal(
 			_client: TransitionExecutionClient,

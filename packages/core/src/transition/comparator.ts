@@ -24,6 +24,11 @@ import type {
 import { checkDelta } from './check-delta.js';
 import { enumAddDelta } from './enum-delta.js';
 import { semanticArtifactId } from './ids.js';
+import {
+	defaultIndexName,
+	indexDelta,
+	normalizedIndex,
+} from './index-delta.js';
 import type { PackRegistry } from './registry.js';
 import { stableJson } from './stable-json.js';
 
@@ -356,7 +361,7 @@ function tableForComparison(table: TableIR): unknown {
 		columns: table.columns,
 		primaryKey: table.primaryKey,
 		foreignKeys: table.foreignKeys,
-		indexes: table.indexes,
+		indexes: table.indexes.map((index) => normalizedIndex(table.name, index)),
 		checkConstraints: checksForComparison(table.checkConstraints),
 		pseudoColumns: table.pseudoColumns,
 		comment: table.comment,
@@ -555,6 +560,7 @@ function revertRecognizedColumnChanges(
 		string,
 		CheckConstraintIR
 	> = new Map(),
+	recognizedIndexKeys: ReadonlySet<string> = new Set(),
 ): unknown {
 	return {
 		tables: [...desired.tables.entries()]
@@ -568,6 +574,12 @@ function revertRecognizedColumnChanges(
 					currentTable?.checkConstraints,
 					recognizedCheckKeys,
 					recognizedCheckReplacements,
+				);
+				const revertedIndexes = revertRecognizedIndexChanges(
+					name,
+					table.indexes,
+					currentTable?.indexes,
+					recognizedIndexKeys,
 				);
 				const tableWithRevertedColumns = {
 					...table,
@@ -589,7 +601,13 @@ function revertRecognizedColumnChanges(
 								...tableWithRevertedColumns,
 								checkConstraints: revertedChecks,
 							};
-				return [name, tableForComparison(tableWithRevertedChecks)];
+				return [
+					name,
+					tableForComparison({
+						...tableWithRevertedChecks,
+						indexes: revertedIndexes,
+					}),
+				];
 			}),
 		...modelLevelCollectionsForComparison(
 			desired,
@@ -694,6 +712,43 @@ function checkChangeKey(tableName: string, checkName: string): string {
 	return JSON.stringify([tableName, checkName]);
 }
 
+function indexChangeKey(
+	tableName: string,
+	index: Pick<IndexIR, 'name' | 'columns'>,
+): string {
+	return JSON.stringify([tableName, defaultIndexName(tableName, index)]);
+}
+
+function revertRecognizedIndexChanges(
+	tableName: string,
+	desiredIndexes: readonly IndexIR[],
+	currentIndexes: readonly IndexIR[] | undefined,
+	recognizedIndexKeys: ReadonlySet<string>,
+): readonly IndexIR[] {
+	if (recognizedIndexKeys.size === 0) {
+		return desiredIndexes;
+	}
+	const currentByName = new Map(
+		(currentIndexes ?? []).map((index) => [
+			defaultIndexName(tableName, index),
+			index,
+		]),
+	);
+	const reverted: IndexIR[] = [];
+	for (const index of desiredIndexes) {
+		const key = indexChangeKey(tableName, index);
+		if (!recognizedIndexKeys.has(key)) {
+			reverted.push(index);
+			continue;
+		}
+		const current = currentByName.get(defaultIndexName(tableName, index));
+		if (current) {
+			reverted.push(current);
+		}
+	}
+	return reverted;
+}
+
 function resourceForColumn(
 	engine: string,
 	table: string,
@@ -721,6 +776,23 @@ function resourceForCheck(
 		database: 'model',
 		kind: 'check-constraint',
 		name: check,
+		qualifiedBy: [table],
+	};
+}
+
+function resourceForIndex(
+	engine: string,
+	table: string,
+	index?: string,
+): ResourceAddress {
+	if (!index) {
+		return resourceForColumn(engine, table);
+	}
+	return {
+		engine,
+		database: 'model',
+		kind: 'index',
+		name: index,
 		qualifiedBy: [table],
 	};
 }
@@ -830,6 +902,20 @@ function makeFocusedCheckModel(table: TableIR): ModelIR {
 			},
 		],
 	]);
+	return {
+		tables,
+		relations: new Map(),
+		getTable: (name: string) => tables.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function makeFocusedIndexModel(table: TableIR): ModelIR {
+	const { checkConstraints: _checkConstraints, ...tableWithoutChecks } = table;
+	const tables = new Map<string, TableIR>([[table.name, tableWithoutChecks]]);
 	return {
 		tables,
 		relations: new Map(),
@@ -967,6 +1053,8 @@ export function createComparator(registry: PackRegistry): Comparator {
 			const recognizedCheckKeys = new Set<string>();
 			const pendingCheckKeys = new Set<string>();
 			const pendingCheckReplacements = new Map<string, CheckConstraintIR>();
+			const recognizedIndexKeys = new Set<string>();
+			const pendingIndexKeys = new Set<string>();
 
 			const tableNames = new Set<string>([
 				...desired.tables.keys(),
@@ -1197,6 +1285,110 @@ export function createComparator(registry: PackRegistry): Comparator {
 					recognizedCheckKeys.add(checkKey);
 					pendingCheckKeys.add(checkKey);
 				}
+
+				const tableIndexDelta = indexDelta(
+					tableName,
+					desiredTable.indexes,
+					currentTable.indexes,
+				);
+				if (tableIndexDelta.kind === 'unsupported') {
+					unsupported.push(resourceForIndex(engine, tableName));
+					continue;
+				}
+				if (tableIndexDelta.kind === 'add-unique-index') {
+					const indexKey = indexChangeKey(tableName, tableIndexDelta.index);
+					const focusedDesired = makeFocusedIndexModel(desiredTable);
+					const focusedCurrent = makeFocusedIndexModel(currentTable);
+					const recognitionEntries = registry.allRules().map((rule) => {
+						const equivalence = registry.resolveEquivalence(rule.artifact);
+						return {
+							rule,
+							result: rule.recognize(
+								focusedDesired,
+								focusedCurrent,
+								equivalence
+									? { equivalence, context: { engine } }
+									: { context: { engine } },
+							),
+						};
+					});
+					const recognized = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: true }
+							>;
+						} => entry.result.recognized === true,
+					);
+					const unknown = recognitionEntries.filter(
+						(
+							entry,
+						): entry is {
+							readonly rule: TransitionRule;
+							readonly result: Extract<
+								RecognitionResult<unknown>,
+								{ readonly recognized: 'unknown' }
+							>;
+						} => entry.result.recognized === 'unknown',
+					);
+					const recognizedUnsupported = recognitionEntries.find(
+						(entry) => entry.result.recognized === 'unsupported',
+					);
+
+					if (recognized.length === 0) {
+						if (unknown.length > 0) {
+							for (const entry of unknown) {
+								unknownRecognitions.push({
+									rule: ruleRef(entry.rule),
+									desired: focusedDesired,
+									current: focusedCurrent,
+									obligations: entry.result.obligations,
+								});
+							}
+							pendingIndexKeys.add(indexKey);
+							continue;
+						}
+						if (recognizedUnsupported?.result.recognized === 'unsupported') {
+							unsupported.push(...recognizedUnsupported.result.changes);
+							continue;
+						}
+						unsupported.push(
+							resourceForIndex(engine, tableName, tableIndexDelta.index.name),
+						);
+						continue;
+					}
+
+					const chosen =
+						recognized.length === 1
+							? recognized[0]?.rule
+							: chooseByPrecedence(recognized.map((entry) => entry.rule));
+					if (!chosen) {
+						return {
+							kind: 'ambiguous',
+							candidates: recognized.map((entry) => ruleRef(entry.rule)),
+						};
+					}
+
+					const chosenEntry = recognized.find((entry) => entry.rule === chosen);
+					if (!chosenEntry?.result.recognized) {
+						unsupported.push(
+							resourceForIndex(engine, tableName, tableIndexDelta.index.name),
+						);
+						continue;
+					}
+					candidates.push(
+						candidateFromRule(
+							chosen,
+							chosenEntry.result,
+							recognized.map((entry) => entry.rule),
+						),
+					);
+					recognizedIndexKeys.add(indexKey);
+					pendingIndexKeys.add(indexKey);
+				}
 			}
 
 			const enumNames = managedMapRecognitionKeys(
@@ -1317,6 +1509,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 						new Set([...recognizedEnumKeys, ...pendingEnumKeys]),
 						new Set([...recognizedCheckKeys, ...pendingCheckKeys]),
 						pendingCheckReplacements,
+						new Set([...recognizedIndexKeys, ...pendingIndexKeys]),
 					),
 				) !== stableJson(currentComparison);
 			if (hiddenDiffsRemain) {

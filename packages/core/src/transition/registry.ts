@@ -10,6 +10,7 @@ import type {
 	ObservationContext,
 	ObservationIssuer,
 	OperationEffectAssessment,
+	OperationExecutionOutcome,
 	OperationKindRef,
 	OperationSemantics,
 	PhysicalOperation,
@@ -117,7 +118,7 @@ export interface OperationRuntime extends RegisteredOperationSemantics {
 		operation: PhysicalOperation,
 		context: ObservationContext,
 		duringGuards?: readonly ApplyGuard[],
-	): Promise<void>;
+	): Promise<OperationExecutionOutcome>;
 	writeCompletionJournal(
 		client: TransitionExecutionClient,
 		operation: PhysicalOperation,

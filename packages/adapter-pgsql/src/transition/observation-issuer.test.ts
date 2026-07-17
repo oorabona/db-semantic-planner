@@ -12,6 +12,7 @@ import {
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
+	INDEX_ABSENT_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
@@ -19,6 +20,7 @@ import {
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 import {
 	createPgObservationIssuer,
@@ -299,6 +301,90 @@ describe('PostgreSQL transition observation issuer', () => {
 			readonly checks?: readonly Record<string, unknown>[];
 		};
 		expect(value.checks?.[0]).not.toHaveProperty('predicateExpression');
+	});
+
+	it('observes table indexes from raw pg_index flag names and text-array literals', async () => {
+		const issuer = createPgObservationIssuer();
+		const queries: string[] = [];
+		const observation = await issuer.execute(
+			{
+				kind: TABLE_INDEXES_OBSERVATION,
+				scope: [],
+				detail: {
+					schema: 'tenant',
+					table: 'users',
+					index: 'idx_users_email',
+				},
+			},
+			{
+				query: async (sql: string) => {
+					queries.push(sql);
+					if (sql.includes('FROM pg_catalog.pg_class c')) {
+						return {
+							rows: [
+								{
+									oid: '12345',
+									relkind: 'r',
+									schema_name: 'tenant',
+									table_name: 'users',
+								},
+							],
+						};
+					}
+					if (sql.includes('FROM pg_catalog.pg_index ix')) {
+						return {
+							rows: [
+								{
+									oid: '20002',
+									index_name: 'idx_users_email',
+									columns: '{email}',
+									include_columns: '{}',
+									expressions_text: null,
+									opclass_names: '{}',
+									opclass_cols: '{}',
+									indisunique: true,
+									indisvalid: true,
+									indisready: true,
+									nulls_not_distinct: false,
+									method: 'btree',
+									predicate: null,
+									reloptions: null,
+								},
+							],
+						};
+					}
+					if (sql.includes('FROM pg_catalog.pg_class i')) {
+						return { rows: [{}] };
+					}
+					throw new Error(`unexpected query: ${sql}`);
+				},
+			},
+			context,
+		);
+
+		const value = observation.result.value as {
+			readonly indexes: readonly Record<string, unknown>[];
+			readonly claims: readonly Record<string, unknown>[];
+		};
+		expect(queries[1]).toContain('jsonb_agg');
+		expect(queries[1]).toContain('ix.indisunique AS indisunique');
+		expect(value.indexes).toEqual([
+			expect.objectContaining({
+				name: 'idx_users_email',
+				oid: '20002',
+				columns: ['email'],
+				include: [],
+				unique: true,
+				valid: true,
+				ready: true,
+				method: 'btree',
+				predicate: null,
+			}),
+		]);
+		expect(value.claims).toEqual([
+			{ kind: TABLE_INDEXES_OBSERVATION, holds: true },
+			{ kind: INDEX_ABSENT_OBSERVATION, holds: false },
+		]);
 	});
 
 	it('deparses table CHECK expressions under a savepoint and returns CHECK plus predicate artifacts', async () => {

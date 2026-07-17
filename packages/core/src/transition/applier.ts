@@ -1,5 +1,6 @@
 import type {
 	ApplicableAssessment,
+	ApplyGuard,
 	ApplyPolicy,
 	ApplyResult,
 	Assumption,
@@ -361,6 +362,7 @@ function unknownJournal(intent: DurableIntentRecord): StepJournal {
 function partiallyAppliedReason(
 	step: ProvenPlanStep,
 	detail: string,
+	recovery: readonly RecoveryArtefact[] = [],
 ): OutcomeReason {
 	return {
 		code: 'partially-applied',
@@ -369,6 +371,22 @@ function partiallyAppliedReason(
 		operationRef: step.operation.ref,
 		scope: [],
 		detail,
+		...(recovery.length > 0 ? { recovery } : {}),
+	};
+}
+
+function guardFailedReason(
+	step: ProvenPlanStep,
+	guard: ApplyGuard,
+	recovery: readonly RecoveryArtefact[],
+): OutcomeReason {
+	return {
+		code: 'guard-failed',
+		stepId: step.stepId,
+		operationKind: step.operation.operationKind,
+		operationRef: step.operation.ref,
+		recovery,
+		scope: guard.predicate.scope,
 	};
 }
 
@@ -712,14 +730,11 @@ export function createApplier(registry: PackRegistry): Applier {
 										executionClient,
 										journal,
 									);
-									const guardFailureReason: OutcomeReason = {
-										code: 'guard-failed',
-										stepId: entry.step.stepId,
-										operationKind: entry.step.operation.operationKind,
-										operationRef: entry.step.operation.ref,
-										recovery: guardResult.recovery,
-										scope: guard.predicate.scope,
-									};
+									const guardFailureReason = guardFailedReason(
+										entry.step,
+										guard,
+										guardResult.recovery,
+									);
 									return {
 										assessment: hasAppliedWork
 											? assessment(
@@ -741,7 +756,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							return beforeGuardFailure;
 						}
 
-						await entry.semantics.executeOperation(
+						const executionOutcome = await entry.semantics.executeOperation(
 							executionClient,
 							entry.step.operation,
 							stepContext,
@@ -749,6 +764,60 @@ export function createApplier(registry: PackRegistry): Applier {
 								(guard) => guard.phase === 'during-operation',
 							),
 						);
+						if (executionOutcome.kind === 'guard-failed') {
+							if (transactionStarted && !committed) {
+								await entry.semantics.rollback(executionClient);
+							}
+							const journal = journalWithObserved(
+								entry.intent,
+								'guard-failed',
+								[],
+								executionOutcome.recovery,
+							);
+							await entry.semantics.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							const reason = guardFailedReason(
+								entry.step,
+								executionOutcome.guard,
+								executionOutcome.recovery,
+							);
+							return {
+								assessment: stoppedAssessment(reason, journals.length > 0),
+								journals: [...journals, journal],
+								observations,
+							};
+						}
+						if (executionOutcome.kind === 'partially-applied') {
+							if (transactionStarted && !committed) {
+								await entry.semantics.rollback(executionClient);
+							}
+							const journal = journalWithObserved(
+								entry.intent,
+								'partially-applied',
+								[],
+								executionOutcome.recovery,
+							);
+							await entry.semantics.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							return {
+								assessment: assessment(
+									partiallyAppliedReason(
+										entry.step,
+										executionOutcome.detail ??
+											'operation partially applied and requires recovery',
+										executionOutcome.recovery,
+									),
+									'partially-applied',
+									'resume-possible',
+								),
+								journals: [...journals, journal],
+								observations,
+							};
+						}
 						if (!transactional) {
 							activeNonRollbackableOperationExecuted = true;
 						}

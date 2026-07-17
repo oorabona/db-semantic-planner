@@ -80,6 +80,7 @@ export type OutcomeReason =
 			readonly stepId: string;
 			readonly operationKind: OperationKindRef;
 			readonly operationRef: string;
+			readonly recovery?: readonly RecoveryArtefact[];
 	  })
 	| (OutcomeReasonBase & {
 			readonly code: 'unknown-step-result';

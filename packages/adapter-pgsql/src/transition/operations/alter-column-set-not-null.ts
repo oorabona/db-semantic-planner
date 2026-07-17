@@ -1060,6 +1060,7 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			await clientQuery(client).query(
 				renderAlterColumnSetNotNullSql(payloadOf(operation), context),
 			);
+			return { kind: 'completed' };
 		},
 		async writeCompletionJournal(
 			_client: TransitionExecutionClient,

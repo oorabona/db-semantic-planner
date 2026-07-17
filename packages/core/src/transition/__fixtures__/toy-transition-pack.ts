@@ -1031,6 +1031,7 @@ function createRuntime(db: ToyDb): OperationRuntime {
 				column,
 				columnFromPayload(payloadColumn(operation.payload, 'expectedAfter')),
 			);
+			return { kind: 'completed' };
 		},
 		writeCompletionJournal: async () => undefined,
 		commit: async () => undefined,

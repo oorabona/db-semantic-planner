@@ -128,6 +128,8 @@ interface RawIndex {
 	opclass_names: string[] | null;
 	opclass_cols: string[] | null;
 	is_unique: boolean;
+	is_valid?: boolean;
+	is_ready?: boolean;
 	nulls_not_distinct?: boolean | null;
 	method: string;
 	predicate: string | null;
@@ -386,6 +388,8 @@ async function queryAllCatalogs(
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
+			   ix.indisvalid AS is_valid,
+			   ix.indisready AS is_ready,
 			   bool_or(COALESCE((to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean, false)) AS nulls_not_distinct,
 			   am.amname AS method,
 			   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
@@ -414,7 +418,8 @@ async function queryAllCatalogs(
 			     WHERE c.conindid = i.oid
 			       AND c.contype = 'u'
 			   )
-			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname,
+			 GROUP BY i.relname, t.relname, ix.indisunique, ix.indisvalid,
+			          ix.indisready, am.amname,
 			          ix.indpred, ix.indrelid, ix.indexprs, i.reloptions
 			 ORDER BY t.relname, i.relname`,
 				[schema],
@@ -758,6 +763,8 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 			name: idx.index_name,
 			columns,
 			...(idx.is_unique ? { unique: true } : {}),
+			...(idx.is_valid === false ? { valid: false } : {}),
+			...(idx.is_ready === false ? { ready: false } : {}),
 			...(idx.is_unique && idx.nulls_not_distinct
 				? { nullsNotDistinct: true }
 				: {}),

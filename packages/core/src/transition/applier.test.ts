@@ -622,6 +622,7 @@ function multiSegmentRuntime(
 			if (options.failB && candidate.ref === 'op:b') {
 				throw new Error('forced op:b failure');
 			}
+			return { kind: 'completed' };
 		}),
 		writeCompletionJournal: vi.fn(async (client, _operation, recordValue) => {
 			record(`completion:${recordValue.stepId}:${clientId(client)}`);
@@ -691,7 +692,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => undefined),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 			},
 		);
 		const registry = createPackRegistry([
@@ -724,7 +725,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => undefined),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 			},
 		);
 		const registry = createPackRegistry([
@@ -1408,7 +1409,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => undefined),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 			},
 		);
 		const registry = createPackRegistry([
@@ -1447,7 +1448,7 @@ describe('createApplier', () => {
 		const operation = operationAssumption();
 		const nativeDefault = userAttestedNativeDefaultAssumption();
 		const rt = runtime(() => undefined, {
-			executeOperation: vi.fn(async () => undefined),
+			executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 		});
 		const registry = createPackRegistry([
 			{
@@ -1531,7 +1532,7 @@ describe('createApplier', () => {
 					observed.push(journal);
 				},
 				{
-					executeOperation: vi.fn(async () => undefined),
+					executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 				},
 			),
 			release: vi.fn(() => {
@@ -1569,7 +1570,7 @@ describe('createApplier', () => {
 				observed.push(journal);
 			},
 			{
-				executeOperation: vi.fn(async () => undefined),
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
 				observeOperation: vi.fn(
 					async (_client, _operation, ctx, phase, observationIssuer) => ({
 						observations: [
@@ -1620,7 +1621,7 @@ describe('createApplier', () => {
 
 	it('journals a known context-mismatch when expectedBefore changes before DDL', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => undefined);
+		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -1659,7 +1660,7 @@ describe('createApplier', () => {
 
 	it('blocks before DDL when a relkind fingerprint fact drifts at apply time', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => undefined);
+		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -1701,7 +1702,7 @@ describe('createApplier', () => {
 
 	it('treats a volatile before-operation guard failure as guard-failed, not inapplicable', async () => {
 		const observed: StepJournal[] = [];
-		const executeOperation = vi.fn(async () => undefined);
+		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
 		const rt = runtime(
 			(journal) => {
 				observed.push(journal);
@@ -1746,12 +1747,123 @@ describe('createApplier', () => {
 		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
+	it('journals a runtime engine guard failure as guard-failed', async () => {
+		const observed: StepJournal[] = [];
+		const duringGuard = guard('during-operation');
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation: vi.fn(async () => ({
+					kind: 'guard-failed',
+					guard: duringGuard,
+					recovery: [],
+				})),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const guarded = planWithStep(
+			{
+				guards: [duringGuard],
+				requiredClaims: [claimId('mock.identity')],
+			},
+			{ claims: [identityClaim()] },
+		);
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'guard-failed',
+			operationRef: operation.ref,
+		});
+		expect(result.journals[0]?.outcome).toBe('guard-failed');
+		expect(observed[0]?.outcome).toBe('guard-failed');
+	});
+
+	it('surfaces runtime partial recovery artefacts as resume-possible', async () => {
+		const observed: StepJournal[] = [];
+		const recovery = [
+			{
+				kind: 'invalid-index',
+				resource: {
+					engine: 'postgresql',
+					database: 'test',
+					schema: 'public',
+					kind: 'index',
+					name: 'idx_users_email',
+					qualifiedBy: ['users'],
+				},
+			},
+		];
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation: vi.fn(async () => ({
+					kind: 'partially-applied',
+					recovery,
+					detail: 'invalid index cleanup did not remove the target index',
+				})),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.assessment.continuation).toBe('resume-possible');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'partially-applied',
+			recovery,
+		});
+		expect(result.journals[0]).toMatchObject({
+			outcome: 'partially-applied',
+			recovery,
+		});
+		expect(observed[0]).toMatchObject({
+			outcome: 'partially-applied',
+			recovery,
+		});
+	});
+
 	it('runs after-operation guards after the operation executes', async () => {
 		const log: string[] = [];
 		const rt = runtime(() => undefined, {
 			log,
 			executeOperation: vi.fn(async () => {
 				log.push('execute');
+				return { kind: 'completed' };
 			}),
 			checkGuard: vi.fn(async (_client, _operation, checkedGuard) => {
 				log.push(`guard:${checkedGuard.phase}`);

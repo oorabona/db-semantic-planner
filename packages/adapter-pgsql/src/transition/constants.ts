@@ -41,15 +41,26 @@ export const ALTER_TYPE_ADD_VALUE_OPERATION_KIND: OperationKindRef = {
 	name: 'AlterTypeAddValue',
 };
 
+export const CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND: OperationKindRef =
+	{
+		artifact: PG_OPERATION_PACK_ARTIFACT,
+		name: 'CreateUniqueIndexConcurrently',
+	};
+
 export const SET_NOT_NULL_RULE_ID = 'postgresql.column.set-not-null';
 export const ADD_CHECK_RULE_ID = 'postgresql.table.add-check';
 export const ENUM_ADD_VALUE_RULE_ID = 'postgresql.enum.add-value';
+export const CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID =
+	'postgresql.index.create-unique-concurrently';
 export const ALTER_COLUMN_SET_NOT_NULL_CAPABILITY = 'alter-column-set-not-null';
 export const ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM = 180000;
 export const ALTER_TABLE_ADD_CHECK_CAPABILITY = 'alter-table-add-check';
 export const ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM = 180000;
 export const ALTER_TYPE_ADD_VALUE_CAPABILITY = 'alter-type-add-value';
 export const ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM = 120000;
+export const CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY =
+	'create-unique-index-concurrently';
+export const CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM = 120000;
 export const PG_SCHEMA_USAGE_PRIVILEGE = 'postgresql.schema.usage';
 export const PG_TABLE_ALTER_AUTHORITY_PRIVILEGE =
 	'postgresql.table.alter-authority';
@@ -65,6 +76,8 @@ export const TABLE_CHECK_CONSTRAINTS_OBSERVATION =
 	'postgresql.table.check-constraints';
 export const CHECK_CONSTRAINT_ABSENT_OBSERVATION =
 	'postgresql.table.check-constraint.absent';
+export const TABLE_INDEXES_OBSERVATION = 'postgresql.table.indexes';
+export const INDEX_ABSENT_OBSERVATION = 'postgresql.index.absent';
 export const ENUM_TYPE_EXISTS_OBSERVATION = 'postgresql.enum-type.exists';
 export const ENUM_LABEL_VISIBLE_OBSERVATION = 'postgresql.enum-label.visible';
 export const SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION =
@@ -77,3 +90,5 @@ export const EXPRESSION_DEPARSE_OBSERVATION = 'postgresql.expression.deparse';
 
 export const NO_NULLS_GUARD = 'NO_NULLS';
 export const CHECK_ROWS_SATISFY_GUARD = 'CHECK_ROWS_SATISFY';
+export const NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD =
+	'NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD';

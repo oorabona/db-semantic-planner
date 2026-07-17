@@ -96,6 +96,13 @@ export {
 	evidenceId,
 	semanticArtifactId,
 } from './ids.js';
+export {
+	defaultIndexName,
+	type IndexDelta,
+	type IndexSetEntry,
+	indexDelta,
+	normalizedIndex,
+} from './index-delta.js';
 export { createProver } from './prover.js';
 export {
 	type ComparatorNameNormalizer,

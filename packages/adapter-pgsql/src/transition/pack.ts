@@ -8,6 +8,8 @@ import {
 	ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM,
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 } from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
@@ -15,7 +17,9 @@ import { createPgObservationIssuer } from './observation-issuer.js';
 import { createAlterColumnSetNotNullOperationRuntime } from './operations/alter-column-set-not-null.js';
 import { createAlterTableAddCheckOperationRuntime } from './operations/alter-table-add-check.js';
 import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type-add-value.js';
+import { createCreateUniqueIndexConcurrentlyOperationRuntime } from './operations/create-unique-index-concurrently.js';
 import { createAddCheckRule } from './rules/add-check.js';
+import { createCreateUniqueIndexConcurrentlyRule } from './rules/create-unique-index-concurrently.js';
 import {
 	createEnumAddValueRule,
 	satisfiesPgEnumLabelVisibleCompositionFact,
@@ -37,11 +41,13 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 			createSetNotNullRule({ naming }),
 			createAddCheckRule({ naming }),
 			createEnumAddValueRule({ naming }),
+			createCreateUniqueIndexConcurrentlyRule({ naming }),
 		],
 		operationSemantics: [
 			createAlterColumnSetNotNullOperationRuntime(),
 			createAlterTableAddCheckOperationRuntime(),
 			createAlterTypeAddValueOperationRuntime(),
+			createCreateUniqueIndexConcurrentlyOperationRuntime(),
 		],
 		issuer: createPgObservationIssuer(),
 		equivalence,
@@ -65,6 +71,14 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 				predicate: {
 					kind: 'minServerVersionNum',
 					minServerVersionNum: ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
+				},
+			},
+			{
+				id: CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
+				predicate: {
+					kind: 'minServerVersionNum',
+					minServerVersionNum:
+						CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
 				},
 			},
 		],

@@ -1028,6 +1028,7 @@ export function createAlterTableAddCheckOperationRuntime() {
 			await clientQuery(client).query(
 				renderAlterTableAddCheckSql(payloadOf(operation), context),
 			);
+			return { kind: 'completed' };
 		},
 		async writeCompletionJournal(
 			_client: TransitionExecutionClient,
