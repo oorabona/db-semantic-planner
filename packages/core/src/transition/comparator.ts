@@ -247,6 +247,17 @@ function normalizeTable(
 	};
 }
 
+function checkForComparison(check: CheckConstraintIR): CheckConstraintIR {
+	const { requiresEnumLabels: _requiresEnumLabels, ...physicalCheck } = check;
+	return physicalCheck;
+}
+
+function checksForComparison(
+	checks: readonly CheckConstraintIR[] | undefined,
+): readonly CheckConstraintIR[] | undefined {
+	return checks?.map(checkForComparison);
+}
+
 function normalizeNamedMap<T extends { readonly name: string }>(
 	items: ReadonlyMap<string, T> | undefined,
 	normalize: NormalizeIdentifier,
@@ -346,7 +357,7 @@ function tableForComparison(table: TableIR): unknown {
 		primaryKey: table.primaryKey,
 		foreignKeys: table.foreignKeys,
 		indexes: table.indexes,
-		checkConstraints: table.checkConstraints,
+		checkConstraints: checksForComparison(table.checkConstraints),
 		pseudoColumns: table.pseudoColumns,
 		comment: table.comment,
 		partition: table.partition,

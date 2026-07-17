@@ -11,9 +11,11 @@ import type {
 	ProofObligation,
 	RecognitionContext,
 	RecognitionResult,
+	RequiredEnumLabelIR,
 	ResourceAddress,
 	RuleEvaluation,
 	TransitionFragment,
+	TransitionFragmentComposition,
 	TransitionRule,
 	VendorValidatedExpression,
 } from '@dbsp/types';
@@ -29,6 +31,7 @@ import {
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	CHECK_ROWS_SATISFY_GUARD,
 	ENGINE_VERSION_OBSERVATION,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
@@ -44,6 +47,7 @@ export interface AddCheckMatch {
 	readonly table: string;
 	readonly constraint: string;
 	readonly expression: string;
+	readonly requiresEnumLabels?: readonly RequiredEnumLabelIR[];
 	readonly assumptions?: readonly Assumption[];
 }
 
@@ -511,6 +515,50 @@ function operationRef(match: AddCheckMatch): string {
 	])}`;
 }
 
+function enumLabelCompositionFact(
+	match: AddCheckMatch,
+	required: RequiredEnumLabelIR,
+	naming: NamingPlugin,
+	database = match.database ?? 'model',
+) {
+	const schema = required.schema ?? match.schema;
+	const type = naming.toDatabase(required.type);
+	const resource: ResourceAddress = {
+		engine: 'postgresql',
+		database,
+		kind: 'type',
+		name: type,
+		qualifiedBy: ['enum'],
+		...(schema ? { schema } : {}),
+	};
+	return {
+		kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+		resource,
+		detail: {
+			schema: schema ?? null,
+			type,
+			label: required.label,
+		} as JsonValue,
+	};
+}
+
+function compositionForRequiredEnumLabels(
+	match: AddCheckMatch,
+	naming: NamingPlugin,
+): TransitionFragmentComposition | undefined {
+	if (!match.requiresEnumLabels || match.requiresEnumLabels.length === 0) {
+		return undefined;
+	}
+	const opRef = operationRef(match);
+	return {
+		requires: match.requiresEnumLabels.map((required) => ({
+			opRef,
+			fact: enumLabelCompositionFact(match, required, naming),
+			needs: 'producer-after-commit',
+		})),
+	};
+}
+
 function operationFor(
 	match: ResolvedAddCheckMatch,
 	evaluation: AddCheckApplicableEvaluation,
@@ -684,6 +732,9 @@ export function createAddCheckRule(
 				};
 				if (delta.kind === 'add-check') {
 					const constraint = naming.toDatabase(delta.check.name);
+					const desiredCheck = desiredTable.checkConstraints?.find(
+						(candidate) => candidate.name === delta.check.name,
+					);
 					validateIdentifier(table, 'table');
 					validateIdentifier(constraint, 'alias');
 					return {
@@ -692,15 +743,28 @@ export function createAddCheckRule(
 							...baseMatch,
 							constraint,
 							expression: delta.check.expression,
+							...(desiredCheck?.requiresEnumLabels
+								? {
+										requiresEnumLabels: desiredCheck.requiresEnumLabels,
+									}
+								: {}),
 						},
 					};
 				}
 
 				const constraint = naming.toDatabase(delta.desired.name);
+				const desiredCheck = desiredTable.checkConstraints?.find(
+					(candidate) => candidate.name === delta.desired.name,
+				);
 				const match: AddCheckMatch = {
 					...baseMatch,
 					constraint,
 					expression: delta.desired.expression,
+					...(desiredCheck?.requiresEnumLabels
+						? {
+								requiresEnumLabels: desiredCheck.requiresEnumLabels,
+							}
+						: {}),
 				};
 				const request = deparseRequest(match);
 				const observed = deparseEvidenceFor(context?.evidence ?? [], request);
@@ -721,6 +785,11 @@ export function createAddCheckRule(
 			return { recognized: false };
 		},
 		requiredObservations: requiredObservationsFor,
+		declareComposition(
+			match: AddCheckMatch,
+		): TransitionFragmentComposition | undefined {
+			return compositionForRequiredEnumLabels(match, naming);
+		},
 		evaluate(
 			match: AddCheckMatch,
 			evidence: readonly EvidenceObservation[],
@@ -830,9 +899,14 @@ export function createAddCheckRule(
 				'check-constraint',
 				resolvedMatch.database,
 			);
+			const composition = compositionForRequiredEnumLabels(
+				resolvedMatch,
+				naming,
+			);
 			return {
 				generatedBy: { id: ADD_CHECK_RULE_ID, pack: PG_RULE_PACK_ARTIFACT },
 				operations: [operation],
+				...(composition ? { composition } : {}),
 				obligations: evaluation.obligations.map((obligation) => ({
 					...obligation,
 					appliesTo: operation.ref,

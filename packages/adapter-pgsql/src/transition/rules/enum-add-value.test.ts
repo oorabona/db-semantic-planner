@@ -437,6 +437,7 @@ describe('postgresql.enum.add-value rule', () => {
 	it('generates a requires-new operation with an after-commit composition fact', () => {
 		const rule = createEnumAddValueRule();
 		const currentMatch = match();
+		const declared = rule.declareComposition?.(currentMatch, context);
 		const requests = rule.requiredObservations(currentMatch);
 		const evaluation = rule.evaluate(
 			currentMatch,
@@ -469,6 +470,9 @@ describe('postgresql.enum.add-value rule', () => {
 				detail: { schema: 'tenant', type: 'status', label: 'pending' },
 			},
 		});
+		expect(fragment.composition?.produces?.[0]).toEqual(
+			declared?.produces?.[0],
+		);
 		expect(fragment.assumptions).toContainEqual(
 			expect.objectContaining({
 				class: 'external-ddl-exclusion',

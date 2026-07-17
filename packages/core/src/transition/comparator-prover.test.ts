@@ -25,6 +25,7 @@ import type {
 	TransitionRule,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
+import { checkDelta } from './check-delta.js';
 import { createComparator } from './comparator.js';
 import {
 	assumptionId,
@@ -1147,6 +1148,24 @@ describe('createComparator', () => {
 		const compare = createComparator(registry()).compare(
 			model(false),
 			model(false),
+		);
+		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('ignores CHECK requiresEnumLabels metadata in physical comparison and check delta fingerprints', () => {
+		const desiredCheck = check('users_status_check', "status <> 'archived'", {
+			requiresEnumLabels: [
+				{ schema: 'tenant', type: 'status', label: 'archived' },
+			],
+		});
+		const currentCheck = check('users_status_check', "status <> 'archived'");
+
+		expect(checkDelta([desiredCheck], [currentCheck])).toEqual({
+			kind: 'none',
+		});
+		const compare = createComparator(registry()).compare(
+			modelFromTable(tableWithChecks([desiredCheck])),
+			modelFromTable(tableWithChecks([currentCheck])),
 		);
 		expect(compare.kind).toBe('no-drift');
 	});

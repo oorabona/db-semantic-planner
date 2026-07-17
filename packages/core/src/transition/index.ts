@@ -114,6 +114,19 @@ export {
 	type TransitionQueryClient,
 } from './registry.js';
 export {
+	createStagedTransitionOrchestrator,
+	type StagedTransitionInput,
+	type StagedTransitionOrchestrator,
+} from './staged-orchestrator.js';
+export {
+	chooseReadyCandidate,
+	preflightStagedComposition,
+	projectCompareToSingleCandidate,
+	type StagedCompositionCandidate,
+	type StagedCompositionPreflight,
+	type StagedCompositionPreflightInput,
+} from './staging.js';
+export {
 	type TransitionRelationalValidationInput,
 	type TransitionRelationalValidationResult,
 	validateTransitionRelationalInvariants,

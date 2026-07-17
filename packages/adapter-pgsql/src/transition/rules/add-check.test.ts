@@ -17,6 +17,7 @@ import {
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	CHECK_ROWS_SATISFY_GUARD,
 	ENGINE_VERSION_OBSERVATION,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
@@ -363,6 +364,121 @@ describe('postgresql.table.add-check rule', () => {
 		expect(effects.effects.locks[0]).toMatchObject({
 			mode: 'ACCESS EXCLUSIVE',
 		});
+	});
+
+	it('declares enum-label visibility dependencies from authored CHECK metadata', () => {
+		const rule = createAddCheckRule();
+		const required = {
+			schema: 'public',
+			type: 'status',
+			label: 'pending',
+		} as const;
+		const recognition = rule.recognize(
+			model(
+				table([
+					check('users_status_check', "status <> 'pending'", {
+						requiresEnumLabels: [required],
+					}),
+				]),
+			),
+			model(table()),
+			{ context: { engine: 'postgresql', targetSchema: 'public' } },
+		);
+		expect(recognition.recognized).toBe(true);
+		if (recognition.recognized !== true) {
+			return;
+		}
+		expect(recognition.match.requiresEnumLabels).toEqual([required]);
+
+		const declared = rule.declareComposition?.(recognition.match, context);
+		expect(declared?.requires?.[0]).toMatchObject({
+			needs: 'producer-after-commit',
+			fact: {
+				kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+				resource: {
+					kind: 'type',
+					name: 'status',
+					schema: 'public',
+					qualifiedBy: ['enum'],
+				},
+				detail: {
+					schema: 'public',
+					type: 'status',
+					label: 'pending',
+				},
+			},
+		});
+
+		const requests = rule.requiredObservations(recognition.match);
+		const evaluation = rule.evaluate(
+			recognition.match,
+			[
+				tableChecksEvidence(requests[0]!, {
+					constraintName: 'users_status_check',
+				}),
+				authorityEvidence(requests[1]!),
+				versionEvidence(requests[2]!),
+				deparseEvidence(requests[3]!),
+			],
+			[],
+		);
+		expect(evaluation.outcome).toBe('applicable');
+		if (evaluation.outcome !== 'applicable') {
+			return;
+		}
+		const fragment = rule.generateCandidate(recognition.match, evaluation);
+		expect(fragment.composition?.requires?.[0]).toMatchObject({
+			opRef: declared?.requires?.[0]?.opRef,
+			needs: 'producer-after-commit',
+			fact: {
+				kind: ENUM_LABEL_VISIBLE_OBSERVATION,
+				resource: {
+					kind: 'type',
+					name: 'status',
+					schema: 'public',
+					qualifiedBy: ['enum'],
+				},
+				detail: {
+					schema: 'public',
+					type: 'status',
+					label: 'pending',
+				},
+			},
+		});
+	});
+
+	it('does not declare enum-label dependencies without authored metadata', () => {
+		const rule = createAddCheckRule();
+		const recognition = rule.recognize(
+			model(table([check('users_age_check', 'age > 0')])),
+			model(table()),
+		);
+		expect(recognition.recognized).toBe(true);
+		if (recognition.recognized !== true) {
+			return;
+		}
+
+		expect(recognition.match.requiresEnumLabels).toBeUndefined();
+		expect(
+			rule.declareComposition?.(recognition.match, context),
+		).toBeUndefined();
+		const requests = rule.requiredObservations(recognition.match);
+		const evaluation = rule.evaluate(
+			recognition.match,
+			[
+				tableChecksEvidence(requests[0]!),
+				authorityEvidence(requests[1]!),
+				versionEvidence(requests[2]!),
+				deparseEvidence(requests[3]!),
+			],
+			[],
+		);
+		expect(evaluation.outcome).toBe('applicable');
+		if (evaluation.outcome !== 'applicable') {
+			return;
+		}
+		const fragment = rule.generateCandidate(recognition.match, evaluation);
+		expect(fragment.composition).toBeUndefined();
 	});
 
 	it('rejects mismatched deparse evidence scope and missing deparse results', () => {

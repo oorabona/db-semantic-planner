@@ -314,7 +314,7 @@ function unorderedEdgeKey(left: string, right: string): string {
 	return stableJson([left, right].sort());
 }
 
-function factKey(fact: CompositionFact): string {
+export function transitionCompositionFactKey(fact: CompositionFact): string {
 	return stableJson({
 		kind: fact.kind,
 		resource: fact.resource,
@@ -340,6 +340,7 @@ function addConstraint(
 function declaredEdges(
 	declarations: readonly TransitionFragmentComposition[],
 	knownRefs: ReadonlySet<string>,
+	options: { readonly allowExternalRequirements: boolean },
 ): DeclaredEdgesResult {
 	const edges: DeclaredEdge[] = [];
 	const producersByFact = new Map<
@@ -358,7 +359,7 @@ function declaredEdges(
 					detail: `composition producer ${producer.opRef} references an unknown operation`,
 				};
 			}
-			const key = factKey(producer.fact);
+			const key = transitionCompositionFactKey(producer.fact);
 			const bucket = producersByFact.get(key) ?? [];
 			bucket.push({
 				opRef: producer.opRef,
@@ -376,8 +377,13 @@ function declaredEdges(
 					detail: `composition requirement ${requirement.opRef} references an unknown operation`,
 				};
 			}
-			const matches = producersByFact.get(factKey(requirement.fact)) ?? [];
+			const matches =
+				producersByFact.get(transitionCompositionFactKey(requirement.fact)) ??
+				[];
 			if (matches.length === 0) {
+				if (options.allowExternalRequirements) {
+					continue;
+				}
 				return {
 					ok: false,
 					detail: `unsatisfied composition requirement ${requirement.opRef} requires ${requirement.fact.kind}`,
@@ -453,7 +459,9 @@ function buildConstraints(
 	}
 
 	const knownRefs = new Set(operations.map((entry) => entry.operation.ref));
-	const edges = declaredEdges(declarations, knownRefs);
+	const edges = declaredEdges(declarations, knownRefs, {
+		allowExternalRequirements: operations.length === 1,
+	});
 	if (!edges.ok) {
 		return edges;
 	}

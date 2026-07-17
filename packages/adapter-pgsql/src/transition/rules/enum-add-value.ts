@@ -13,6 +13,7 @@ import type {
 	ResourceAddress,
 	RuleEvaluation,
 	TransitionFragment,
+	TransitionFragmentComposition,
 	TransitionRule,
 } from '@dbsp/types';
 import type { NamingPlugin } from '../../naming-plugin.js';
@@ -341,15 +342,31 @@ function matchForOperation(
 	return { ...match, schema, database };
 }
 
-function compositionFact(match: ResolvedEnumAddValueMatch) {
+function compositionFact(
+	match: Pick<EnumAddValueMatch, 'schema' | 'database' | 'type' | 'label'>,
+) {
 	return {
 		kind: ENUM_LABEL_VISIBLE_OBSERVATION,
-		resource: resourceForMatch(match, match.database),
+		resource: resourceForMatch(match, match.database ?? 'model'),
 		detail: {
-			schema: match.schema,
+			schema: match.schema ?? null,
 			type: match.type,
 			label: match.label,
 		} as JsonValue,
+	};
+}
+
+function compositionForMatch(
+	match: EnumAddValueMatch,
+): TransitionFragmentComposition {
+	return {
+		produces: [
+			{
+				opRef: operationRef(match),
+				fact: compositionFact(match),
+				available: 'after-commit',
+			},
+		],
 	};
 }
 
@@ -403,6 +420,11 @@ export function createEnumAddValueRule(
 			return { recognized: false };
 		},
 		requiredObservations: requiredObservationsFor,
+		declareComposition(
+			match: EnumAddValueMatch,
+		): TransitionFragmentComposition {
+			return compositionForMatch(match);
+		},
 		evaluate(
 			match: EnumAddValueMatch,
 			evidence: readonly EvidenceObservation[],
@@ -454,15 +476,7 @@ export function createEnumAddValueRule(
 					pack: PG_RULE_PACK_ARTIFACT,
 				},
 				operations: [operation],
-				composition: {
-					produces: [
-						{
-							opRef: operation.ref,
-							fact: compositionFact(resolvedMatch),
-							available: 'after-commit',
-						},
-					],
-				},
+				composition: compositionForMatch(resolvedMatch),
 				obligations: evaluation.obligations.map((obligation) => ({
 					...obligation,
 					appliesTo: operation.ref,

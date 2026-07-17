@@ -8,6 +8,7 @@ import type {
 	RuleRef,
 	RuleSelectionRationale,
 	TransitionFragment,
+	TransitionFragmentComposition,
 } from './fragment.js';
 import type {
 	AdvisoryObservation,
@@ -151,6 +152,10 @@ export interface TransitionRule<TMatch = unknown> {
 		evidence: readonly EvidenceObservation[],
 		advisory: readonly AdvisoryObservation[],
 	): RuleEvaluation;
+	declareComposition?(
+		match: TMatch,
+		context: ObservationContext,
+	): TransitionFragmentComposition | undefined;
 	generateCandidate(
 		match: TMatch,
 		evaluation: ApplicableEvaluation,

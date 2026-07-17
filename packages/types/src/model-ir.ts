@@ -313,6 +313,13 @@ export interface EnumIR {
 	/** Schema name (if not in default schema) */
 	readonly schema?: string;
 }
+
+export interface RequiredEnumLabelIR {
+	readonly schema?: string;
+	readonly type: string;
+	readonly label: string;
+}
+
 export interface CheckConstraintIR {
 	/** Constraint name in database */
 	readonly name: string;
@@ -322,6 +329,9 @@ export interface CheckConstraintIR {
 
 	/** If true, add the constraint WITHOUT scanning existing rows (NOT VALID). Use validate_constraint to validate later. */
 	readonly notValid?: boolean;
+
+	/** Authored transition metadata: enum labels this CHECK references and requires visible before proof/apply. */
+	readonly requiresEnumLabels?: readonly RequiredEnumLabelIR[];
 }
 
 /**

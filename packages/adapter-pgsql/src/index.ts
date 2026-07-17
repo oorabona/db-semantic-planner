@@ -202,6 +202,7 @@ export {
 } from './streaming/index.js';
 // ADR-0003 transition planner pack
 export {
+	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,

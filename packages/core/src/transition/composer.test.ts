@@ -155,7 +155,7 @@ describe('composeOperations', () => {
 
 	it('refuses a declared requirement with no matching producer', () => {
 		const result = composeOperations(
-			[compositionEntry('op:a')],
+			[compositionEntry('op:a'), compositionEntry('op:b')],
 			[
 				{
 					requires: [
