@@ -27,6 +27,12 @@ import type {
 } from './proof.js';
 import type { ResourceAddress } from './resource.js';
 
+export type RulePrecedenceFact = {
+	readonly higher: RuleRef;
+	readonly lower: RuleRef;
+	readonly reason: string;
+};
+
 export interface TransitionQueryResult {
 	readonly rows: readonly Record<string, unknown>[];
 }

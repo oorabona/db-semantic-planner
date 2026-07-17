@@ -401,6 +401,7 @@ describe('staged composition preflight', () => {
 
 		expect(preflight.kind).toBe('unsupported-transition');
 		if (preflight.kind === 'unsupported-transition') {
+			expect(preflight.assessment.reasons[0]?.code).toBe('ambiguous-rule');
 			expect(preflight.assessment.reasons[0]?.detail).toMatch(
 				/ambiguous composition requirement/,
 			);

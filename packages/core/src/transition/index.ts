@@ -115,6 +115,7 @@ export {
 	type OperationRuntime,
 	PackRegistry,
 	type RegisteredOperationSemantics,
+	type RulePrecedenceFact,
 	type TransitionConnectionPool,
 	type TransitionExecutionClient,
 	type TransitionPack,

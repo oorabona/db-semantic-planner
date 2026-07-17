@@ -102,6 +102,29 @@ function unsupported(
 	};
 }
 
+function ambiguousRule(
+	detail: string,
+	candidates: readonly TransitionCandidate[],
+): StagedCompositionPreflight {
+	return {
+		kind: 'unsupported-transition',
+		assessment: {
+			decision: 'blocked',
+			assurance: 'unproven',
+			lifecycle: 'planned',
+			continuation: 'replan-required',
+			reasons: [
+				{
+					code: 'ambiguous-rule',
+					candidates: candidates.map((candidate) => candidate.rule),
+					scope: candidateResources(candidates),
+					detail,
+				},
+			],
+		},
+	};
+}
+
 function compositionOpRefs(
 	composition: TransitionFragmentComposition | undefined,
 ): readonly string[] {
@@ -226,10 +249,9 @@ export function preflightStagedComposition(
 				);
 			}
 			if (producers.length > 1) {
-				return unsupported(
+				return ambiguousRule(
 					`ambiguous composition requirement ${requirement.opRef} requires ${requirement.fact.kind}`,
 					input.compare.candidates,
-					[requirement.fact.resource],
 				);
 			}
 			const producer = producers[0];

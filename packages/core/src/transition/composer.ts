@@ -1,4 +1,6 @@
 import type {
+	ClaimId,
+	ClaimSelector,
 	GuardedPlanSegment,
 	OperationEffectAssessment,
 	PhysicalOperation,
@@ -11,6 +13,13 @@ import { stableJson } from './stable-json.js';
 export interface CompositionOperation {
 	readonly operation: PhysicalOperation;
 	readonly effects: OperationEffectAssessment;
+	readonly requiredClaims?: readonly CompositionRequiredClaim[];
+}
+
+export interface CompositionRequiredClaim {
+	readonly id: ClaimId;
+	readonly proposition: string;
+	readonly scope: readonly ResourceAddress[];
 }
 
 export interface OrderedCompositionOperation extends CompositionOperation {
@@ -188,6 +197,60 @@ function effectsInteract(
 		writesIntersectReadsOrLocks(left, right) ||
 		writesIntersectReadsOrLocks(right, left)
 	);
+}
+
+function selectorMatchesClaim(
+	selector: ClaimSelector,
+	claim: CompositionRequiredClaim,
+): boolean {
+	if (selector.proposition && selector.proposition !== claim.proposition) {
+		return false;
+	}
+	if (claim.scope.length === 0) {
+		return (
+			selector.scope.kind === undefined &&
+			selector.scope.schema === undefined &&
+			selector.scope.name === undefined &&
+			selector.scope.within === undefined
+		);
+	}
+	return claim.scope.some((resource) =>
+		selectorIntersectsResource(selector.scope, resource),
+	);
+}
+
+function invalidatedRequiredClaimDetail(
+	operations: readonly OrderedCompositionOperation[],
+): string | undefined {
+	const claimById = new Map<ClaimId, CompositionRequiredClaim>();
+	for (const entry of operations) {
+		for (const claim of entry.requiredClaims ?? []) {
+			const prior = claimById.get(claim.id);
+			if (prior && stableJson(prior) !== stableJson(claim)) {
+				return `conflicting required claim metadata for ${claim.id}`;
+			}
+			claimById.set(claim.id, claim);
+		}
+	}
+
+	const invalidatedBy = new Map<ClaimId, string>();
+	for (const entry of operations) {
+		for (const claim of entry.requiredClaims ?? []) {
+			const invalidatingRef = invalidatedBy.get(claim.id);
+			if (invalidatingRef) {
+				return `operation ${entry.operation.ref} requires claim ${claim.id} invalidated by earlier operation ${invalidatingRef}`;
+			}
+		}
+		for (const selector of entry.effects.effects.invalidates) {
+			for (const claim of claimById.values()) {
+				if (selectorMatchesClaim(selector, claim)) {
+					invalidatedBy.set(claim.id, entry.operation.ref);
+				}
+			}
+		}
+	}
+
+	return undefined;
 }
 
 function hasContextMutation(entry: CompositionOperation): boolean {
@@ -607,6 +670,14 @@ export function composeOperations(
 		ready = ready.sort(
 			(left, right) => (refOrder.get(left) ?? 0) - (refOrder.get(right) ?? 0),
 		);
+	}
+
+	const invalidatedClaimDetail = invalidatedRequiredClaimDetail(ordered);
+	if (invalidatedClaimDetail) {
+		return {
+			ok: false,
+			detail: invalidatedClaimDetail,
+		};
 	}
 
 	return {

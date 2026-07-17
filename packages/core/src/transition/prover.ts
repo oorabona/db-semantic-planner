@@ -156,16 +156,6 @@ function unsupported(
 	});
 }
 
-function unsupportedMultiOperationComposition(): PlanAssessment {
-	return blockedAssessment({
-		code: 'unsupported-transition',
-		changes: [],
-		scope: [],
-		detail:
-			'multi-operation composition is not yet enabled; pending the enum→CHECK slice',
-	});
-}
-
 function ambiguous(compare: Extract<CompareOutcome, { kind: 'ambiguous' }>) {
 	return blockedAssessment({
 		code: 'ambiguous-rule',
@@ -864,12 +854,6 @@ async function proveTransitions(
 			),
 		};
 	}
-	if (compare.candidates.length > 1) {
-		return {
-			kind: 'blocked',
-			assessment: unsupportedMultiOperationComposition(),
-		};
-	}
 	if (initialState && compare.candidates.length !== 1) {
 		return {
 			kind: 'blocked',
@@ -1170,6 +1154,10 @@ async function proveTransitions(
 					}),
 				};
 			}
+			fragment = {
+				...fragment,
+				selectionRationale: candidate.selectionRationale,
+			};
 
 			const operationEffectsByRef = new Map<
 				string,
@@ -1342,6 +1330,10 @@ async function proveTransitions(
 				const operationObligationClaims = obligationClaims.filter(
 					(entry) => entry.obligation.appliesTo === operation.ref,
 				);
+				const requiredClaimEntries = [
+					...draftClaims,
+					...operationObligationClaims.map((entry) => entry.claim),
+				];
 				const requiredClaims = [
 					...draftClaims.map((claim) => claim.id),
 					...operationObligationClaims.map((entry) => entry.claim.id),
@@ -1360,6 +1352,11 @@ async function proveTransitions(
 				operationInputs.push({
 					operation,
 					effects,
+					requiredClaims: requiredClaimEntries.map((claim) => ({
+						id: claim.id,
+						proposition: claim.proposition.kind,
+						scope: claim.scope,
+					})),
 				});
 			}
 

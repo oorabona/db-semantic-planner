@@ -62,6 +62,12 @@ interface CompositionFactSatisfactionOwner {
 	): boolean;
 }
 
+export type RulePrecedenceFact = {
+	readonly higher: RuleRef;
+	readonly lower: RuleRef;
+	readonly reason: string;
+};
+
 export interface GuardExecutionResult {
 	readonly passed: boolean;
 	readonly observations: readonly IssuedObservation[];
@@ -142,6 +148,7 @@ export interface TransitionPack {
 	readonly comparatorNameNormalizer?: ComparatorNameNormalizer;
 	readonly compositionFactKinds?: CompositionFactSatisfactionOwner['compositionFactKinds'];
 	readonly satisfiesCompositionFact?: CompositionFactSatisfactionOwner['satisfiesCompositionFact'];
+	readonly rulePrecedence?: readonly RulePrecedenceFact[];
 }
 
 export type OperationResolution =
@@ -164,6 +171,10 @@ function operationKey(kind: OperationKindRef): string {
 
 function ruleKey(rule: TransitionRule): string {
 	return `${artifactKey(rule.artifact)}#${rule.id}`;
+}
+
+function ruleRefKey(ref: RuleRef): string {
+	return `${artifactKey(ref.pack)}#${ref.id}`;
 }
 
 function sameArtifact(
@@ -234,10 +245,86 @@ export function isOperationRuntime(
 	);
 }
 
+export type RulePrecedenceResolution =
+	| {
+			readonly ok: true;
+			readonly rule: TransitionRule;
+			readonly facts: readonly RulePrecedenceFact[];
+			readonly reason: string;
+	  }
+	| {
+			readonly ok: false;
+			readonly detail: string;
+	  };
+
+function validateRulePrecedenceFacts(
+	facts: readonly RulePrecedenceFact[],
+	rules: readonly TransitionRule[],
+): readonly RulePrecedenceFact[] {
+	const rulesByKey = new Map(rules.map((rule) => [ruleKey(rule), rule]));
+	const seenPairs = new Set<string>();
+	const edges = new Map<string, Set<string>>();
+	const visitState = new Map<string, 'visiting' | 'visited'>();
+
+	for (const fact of facts) {
+		const higherKey = ruleRefKey(fact.higher);
+		const lowerKey = ruleRefKey(fact.lower);
+		if (!rulesByKey.has(higherKey)) {
+			throw new Error(
+				`rule precedence higher ref did not resolve: ${higherKey}`,
+			);
+		}
+		if (!rulesByKey.has(lowerKey)) {
+			throw new Error(`rule precedence lower ref did not resolve: ${lowerKey}`);
+		}
+		if (higherKey === lowerKey) {
+			throw new Error(`rule precedence self-reference for ${higherKey}`);
+		}
+		const pairKey = `${higherKey}>${lowerKey}`;
+		const reversePairKey = `${lowerKey}>${higherKey}`;
+		if (seenPairs.has(pairKey)) {
+			throw new Error(`duplicate rule precedence fact for ${pairKey}`);
+		}
+		if (seenPairs.has(reversePairKey)) {
+			throw new Error(
+				`conflicting rule precedence facts for ${pairKey} and ${reversePairKey}`,
+			);
+		}
+		seenPairs.add(pairKey);
+		const outgoing = edges.get(higherKey) ?? new Set<string>();
+		outgoing.add(lowerKey);
+		edges.set(higherKey, outgoing);
+	}
+
+	const visit = (key: string, trail: readonly string[]): void => {
+		const state = visitState.get(key);
+		if (state === 'visited') {
+			return;
+		}
+		if (state === 'visiting') {
+			throw new Error(
+				`cyclic rule precedence facts: ${[...trail, key].join(' -> ')}`,
+			);
+		}
+		visitState.set(key, 'visiting');
+		for (const lower of edges.get(key) ?? []) {
+			visit(lower, [...trail, key]);
+		}
+		visitState.set(key, 'visited');
+	};
+
+	for (const key of edges.keys()) {
+		visit(key, []);
+	}
+
+	return facts;
+}
+
 export class PackRegistry {
 	private readonly rules: readonly TransitionRule[];
 	private readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	private readonly issuers: readonly ObservationIssuer[];
+	private readonly rulePrecedence: readonly RulePrecedenceFact[];
 	private readonly issuerByArtifact: ReadonlyMap<string, ObservationIssuer>;
 	private readonly equivalenceByArtifact: ReadonlyMap<
 		string,
@@ -275,6 +362,10 @@ export class PackRegistry {
 			}
 			ruleKeys.add(key);
 		}
+		this.rulePrecedence = validateRulePrecedenceFacts(
+			packs.flatMap((pack) => [...(pack.rulePrecedence ?? [])]),
+			this.rules,
+		);
 		const issuerArtifactKeys = new Set<string>();
 		for (const issuer of this.issuers) {
 			const key = artifactKey(issuer.artifact);
@@ -383,6 +474,104 @@ export class PackRegistry {
 		return this.rules.find(
 			(rule) => rule.id === ref.id && sameArtifact(rule.artifact, ref.pack),
 		);
+	}
+
+	resolveRulePrecedence(
+		rules: readonly TransitionRule[],
+	): RulePrecedenceResolution {
+		if (rules.length === 0) {
+			return { ok: false, detail: 'missing matching transition rules' };
+		}
+		if (rules.length === 1) {
+			const rule = rules[0];
+			if (!rule) {
+				return { ok: false, detail: 'missing matching transition rule' };
+			}
+			return {
+				ok: true,
+				rule,
+				facts: [],
+				reason: 'single recognized transition rule',
+			};
+		}
+
+		const matchingKeys = new Set(rules.map((rule) => ruleKey(rule)));
+		const facts = this.rulePrecedence.filter(
+			(fact) =>
+				matchingKeys.has(ruleRefKey(fact.higher)) &&
+				matchingKeys.has(ruleRefKey(fact.lower)),
+		);
+		const reachable = new Map<string, Set<string>>();
+		for (const rule of rules) {
+			reachable.set(ruleKey(rule), new Set<string>());
+		}
+		for (const fact of facts) {
+			reachable.get(ruleRefKey(fact.higher))?.add(ruleRefKey(fact.lower));
+		}
+
+		let changed = true;
+		while (changed) {
+			changed = false;
+			for (const lowerSet of reachable.values()) {
+				for (const lower of [...lowerSet]) {
+					for (const transitiveLower of reachable.get(lower) ?? []) {
+						if (!lowerSet.has(transitiveLower)) {
+							lowerSet.add(transitiveLower);
+							changed = true;
+						}
+					}
+				}
+			}
+		}
+
+		for (let leftIndex = 0; leftIndex < rules.length; leftIndex += 1) {
+			const left = rules[leftIndex];
+			if (!left) {
+				continue;
+			}
+			const leftKey = ruleKey(left);
+			for (
+				let rightIndex = leftIndex + 1;
+				rightIndex < rules.length;
+				rightIndex += 1
+			) {
+				const right = rules[rightIndex];
+				if (!right) {
+					continue;
+				}
+				const rightKey = ruleKey(right);
+				if (
+					!reachable.get(leftKey)?.has(rightKey) &&
+					!reachable.get(rightKey)?.has(leftKey)
+				) {
+					return {
+						ok: false,
+						detail: `rule precedence is not total between ${leftKey} and ${rightKey}`,
+					};
+				}
+			}
+		}
+
+		const maximal = rules.filter((rule) => {
+			const key = ruleKey(rule);
+			return rules.every((candidate) => {
+				const candidateKey = ruleKey(candidate);
+				return candidateKey === key || !reachable.get(candidateKey)?.has(key);
+			});
+		});
+		if (maximal.length !== 1 || !maximal[0]) {
+			return {
+				ok: false,
+				detail: 'rule precedence did not yield a unique maximal rule',
+			};
+		}
+
+		return {
+			ok: true,
+			rule: maximal[0],
+			facts,
+			reason: facts.map((fact) => fact.reason).join('; '),
+		};
 	}
 
 	resolveIssuer(ref?: SemanticArtifactRef): ObservationIssuer | undefined {

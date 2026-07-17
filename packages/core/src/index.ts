@@ -306,6 +306,7 @@ export type {
 	RecognitionResult,
 	RegisteredOperationSemantics,
 	RuleEvaluation,
+	RulePrecedenceFact,
 	RuleSupport,
 	SerializedProvenPlan,
 	StagedCompositionCandidate,

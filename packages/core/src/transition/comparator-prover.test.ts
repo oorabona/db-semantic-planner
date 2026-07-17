@@ -16,6 +16,7 @@ import type {
 	ProofObligation,
 	RelationIR,
 	ResourceAddress,
+	RulePrecedenceFact,
 	SemanticArtifactRef,
 	SequenceIR,
 	TableIR,
@@ -74,9 +75,6 @@ const context: ObservationContext = {
 	extensions: {},
 };
 
-const multiOperationCompositionDisabledDetail =
-	'multi-operation composition is not yet enabled; pending the enum→CHECK slice';
-
 type ProverOutcome = Awaited<
 	ReturnType<ReturnType<typeof createProver>['prove']>
 >;
@@ -90,14 +88,11 @@ function proofTarget(): TransitionConnectionPool {
 	};
 }
 
-function expectMultiOperationCompositionGuard(outcome: ProverOutcome) {
+function expectBlockedReason(outcome: ProverOutcome, code: string) {
 	expect(outcome.kind).toBe('blocked');
 	expect(outcome).not.toHaveProperty('plan');
 	if (outcome.kind === 'blocked') {
-		expect(outcome.assessment.reasons[0]).toMatchObject({
-			code: 'unsupported-transition',
-			detail: multiOperationCompositionDisabledDetail,
-		});
+		expect(outcome.assessment.reasons[0]?.code).toBe(code);
 	}
 }
 
@@ -540,6 +535,27 @@ function rule(options: RuleOptions = {}): TransitionRule<{
 	};
 }
 
+function namedSetNotNullRule(id: string): TransitionRule<{
+	readonly table: string;
+	readonly column: string;
+}> {
+	const base = rule({
+		generateCandidate: (_match, evaluation) => {
+			const fragment = baseFragment(evaluation);
+			return {
+				...fragment,
+				generatedBy: { id, pack: ruleArtifact },
+				selectionRationale: {
+					chosen: { id, pack: ruleArtifact },
+					overRules: [],
+					why: `mock ${id}`,
+				},
+			};
+		},
+	});
+	return { ...base, id };
+}
+
 function enumRule(): TransitionRule<{
 	readonly type: string;
 	readonly label: string;
@@ -868,6 +884,7 @@ function registry(
 		readonly comparatorNameNormalizer?: {
 			normalizeCurrentIdentifier(identifier: string): string;
 		};
+		readonly rulePrecedence?: readonly RulePrecedenceFact[];
 	} = {},
 ) {
 	return createPackRegistry([
@@ -877,11 +894,12 @@ function registry(
 			issuer: options.issuer ?? issuer(),
 			capabilityDescriptors: options.capabilityDescriptors,
 			comparatorNameNormalizer: options.comparatorNameNormalizer,
+			rulePrecedence: options.rulePrecedence,
 		},
 	]);
 }
 
-type CompositionMode = 'dependent' | 'cycle' | 'disconnected';
+type CompositionMode = 'dependent' | 'cycle' | 'disconnected' | 'invalidates';
 
 function compositionOperation(ref: 'op:a' | 'op:b'): PhysicalOperation {
 	return {
@@ -928,7 +946,7 @@ function compositionDeclarations(
 	opRef: 'op:a' | 'op:b',
 	mode: CompositionMode,
 ): TransitionFragment['composition'] {
-	if (mode === 'dependent') {
+	if (mode === 'dependent' || mode === 'invalidates') {
 		return opRef === 'op:a'
 			? {
 					produces: [
@@ -972,6 +990,7 @@ function compositionDeclarations(
 function compositionRule(
 	opRef: 'op:a' | 'op:b',
 	mode: CompositionMode = 'dependent',
+	recognizedColumn?: 'age' | 'height',
 ): TransitionRule<{
 	readonly opRef: 'op:a' | 'op:b';
 }> {
@@ -984,7 +1003,18 @@ function compositionRule(
 			versions: [{ min: '18' }],
 			requiredCapabilities: ['mock'],
 		},
-		recognize: () => ({ recognized: false }),
+		recognize: (desired, current) => {
+			if (!recognizedColumn) {
+				return { recognized: false };
+			}
+			const desiredColumn = desired.getTable('users')?.columns[0];
+			const currentColumn = current.getTable('users')?.columns[0];
+			return desiredColumn?.name === recognizedColumn &&
+				desiredColumn.nullable === false &&
+				currentColumn?.nullable === true
+				? { recognized: true, match: { opRef } }
+				: { recognized: false };
+		},
 		requiredObservations: () => [compositionRequest(opRef)],
 		evaluate: () => ({
 			outcome: 'applicable',
@@ -1063,7 +1093,15 @@ function compositionSemantics(
 					reads: mode === 'cycle' ? cycleReads : dependentReads,
 					writes: isA ? [marker] : [consumer],
 					locks: [],
-					invalidates: [],
+					invalidates:
+						isA && mode === 'invalidates'
+							? [
+									{
+										proposition: compositionRequest('op:b').kind,
+										scope: marker,
+									},
+								]
+							: [],
 					contextMutations: [],
 					externalEffects: { accountedFor: [], couldNotAccountFor: [] },
 					execution: isA
@@ -1129,6 +1167,22 @@ function compositionRegistry(mode: CompositionMode = 'dependent') {
 	};
 }
 
+function recognizedCompositionRegistry(mode: CompositionMode = 'dependent') {
+	const ruleA = compositionRule('op:a', mode, 'age');
+	const ruleB = compositionRule('op:b', mode, 'height');
+	return {
+		ruleA,
+		ruleB,
+		registry: createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [compositionSemantics(mode)],
+				issuer: compositionIssuer(),
+			},
+		]),
+	};
+}
+
 function validCompare(): Extract<
 	ReturnType<ReturnType<typeof createComparator>['compare']>,
 	{ readonly kind: 'transitions' }
@@ -1150,6 +1204,130 @@ describe('createComparator', () => {
 			model(false),
 		);
 		expect(compare.kind).toBe('no-drift');
+	});
+
+	it('uses declared precedence only within a same-group recognition set', async () => {
+		const slow = namedSetNotNullRule('mock.set-not-null.slow');
+		const fast = namedSetNotNullRule('mock.set-not-null.fast');
+		const customRegistry = registry({
+			rules: [slow, fast],
+			rulePrecedence: [
+				{
+					higher: { id: fast.id, pack: fast.artifact },
+					lower: { id: slow.id, pack: slow.artifact },
+					reason: 'fast rule has the narrower guard protocol',
+				},
+			],
+		});
+
+		const compare = createComparator(customRegistry).compare(
+			model(false),
+			model(true),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates).toHaveLength(1);
+		expect(compare.candidates[0]?.rule.id).toBe(fast.id);
+		expect(compare.candidates[0]?.selectionRationale.overRules).toEqual([
+			{ id: slow.id, pack: slow.artifact },
+		]);
+		expect(compare.candidates[0]?.selectionRationale.why).toContain(
+			'fast rule has the narrower guard protocol',
+		);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.plan.steps).toHaveLength(1);
+		expect(outcome.plan.steps[0]?.selectionRationale.chosen.id).toBe(fast.id);
+		expect(outcome.plan.steps[0]?.selectionRationale.overRules).toEqual([
+			{ id: slow.id, pack: slow.artifact },
+		]);
+		expect(outcome.plan.steps[0]?.selectionRationale.why).toContain(
+			'fast rule has the narrower guard protocol',
+		);
+	});
+
+	it('fails closed for same-group recognitions without declared precedence', async () => {
+		const slow = namedSetNotNullRule('mock.set-not-null.slow');
+		const fast = namedSetNotNullRule('mock.set-not-null.fast');
+		const customRegistry = registry({ rules: [slow, fast] });
+
+		const compare = createComparator(customRegistry).compare(
+			model(false),
+			model(true),
+		);
+
+		expect(compare.kind).toBe('ambiguous');
+		if (compare.kind !== 'ambiguous') {
+			return;
+		}
+		expect(compare.candidates).toEqual([
+			{ id: slow.id, pack: slow.artifact },
+			{ id: fast.id, pack: fast.artifact },
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+		expectBlockedReason(outcome, 'ambiguous-rule');
+	});
+
+	it('keeps different-group recognitions for composition instead of using precedence across them', async () => {
+		const { registry: customRegistry } = recognizedCompositionRegistry();
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(
+				table(false, [column(false, 'age'), column(false, 'height')]),
+			),
+			modelFromTable(
+				table(true, [column(true, 'age'), column(true, 'height')]),
+			),
+		);
+
+		expect(compare.kind).toBe('transitions');
+		if (compare.kind !== 'transitions') {
+			return;
+		}
+		expect(compare.candidates.map((candidate) => candidate.rule.id)).toEqual([
+			'mock.compose.a',
+			'mock.compose.b',
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+			'op:a',
+			'op:b',
+		]);
+		expect(outcome.plan.segments).toMatchObject([
+			{
+				stepIds: ['step:op:a'],
+				commitBoundaryAfter: true,
+			},
+			{
+				stepIds: ['step:op:b'],
+				commitBoundaryBefore: true,
+			},
+		]);
 	});
 
 	it('ignores CHECK requiresEnumLabels metadata in physical comparison and check delta fingerprints', () => {
@@ -1809,8 +1987,20 @@ describe('createComparator', () => {
 		);
 	});
 
-	it('keeps CHECK add plus a column change as multiple candidates for the prove guard', async () => {
-		const customRegistry = registry({ rules: [rule(), checkRule()] });
+	it('fails closed for CHECK add plus a column change without composition declarations', async () => {
+		const customRegistry = createPackRegistry([
+			{
+				rules: [rule(), checkRule()],
+				operationSemantics: [
+					semantics(),
+					semantics([operationAssumption()], {
+						artifact: operationArtifact,
+						name: 'AddCheck',
+					}),
+				],
+				issuer: issuer(),
+			},
+		]);
 		const compare = createComparator(customRegistry).compare(
 			modelFromTable({
 				...table(false),
@@ -1834,7 +2024,12 @@ describe('createComparator', () => {
 			context,
 		);
 
-		expectMultiOperationCompositionGuard(outcome);
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/ambiguous|unordered/i,
+			);
+		}
 	});
 
 	it('returns transitions when two recognized column changes are present', () => {
@@ -1940,8 +2135,20 @@ describe('createComparator', () => {
 		}
 	});
 
-	it('keeps enum-add plus a column change as multiple candidates for the prove guard', async () => {
-		const customRegistry = registry({ rules: [rule(), enumRule()] });
+	it('fails closed for enum-add plus a column change without composition declarations', async () => {
+		const customRegistry = createPackRegistry([
+			{
+				rules: [rule(), enumRule()],
+				operationSemantics: [
+					semantics(),
+					semantics([operationAssumption()], {
+						artifact: operationArtifact,
+						name: 'EnumAdd',
+					}),
+				],
+				issuer: issuer(),
+			},
+		]);
 		const compare = createComparator(customRegistry).compare(
 			modelWithTableAndEnums(table(false), [enumDef(['active', 'pending'])]),
 			modelWithTableAndEnums(table(true), [enumDef(['active'])]),
@@ -1962,7 +2169,12 @@ describe('createComparator', () => {
 			context,
 		);
 
-		expectMultiOperationCompositionGuard(outcome);
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/ambiguous|unordered/i,
+			);
+		}
 	});
 
 	it('blocks mixed recognized and retryable unknown changes before observation', async () => {
@@ -2175,6 +2387,80 @@ describe('createProver', () => {
 		).toThrow(/duplicate transition rule registration/);
 	});
 
+	it('validates declared rule precedence facts at registration', () => {
+		const fast = namedSetNotNullRule('mock.set-not-null.fast');
+		const slow = namedSetNotNullRule('mock.set-not-null.slow');
+		const fallback = namedSetNotNullRule('mock.set-not-null.fallback');
+		const basePack = {
+			rules: [fast, slow, fallback],
+			operationSemantics: [],
+			issuer: issuer(),
+		};
+		const fastRef = { id: fast.id, pack: fast.artifact };
+		const slowRef = { id: slow.id, pack: slow.artifact };
+		const fallbackRef = { id: fallback.id, pack: fallback.artifact };
+
+		expect(() =>
+			createPackRegistry([
+				{
+					...basePack,
+					rulePrecedence: [
+						{
+							higher: fastRef,
+							lower: { id: 'mock.missing', pack: ruleArtifact },
+							reason: 'missing lower rule',
+						},
+					],
+				},
+			]),
+		).toThrow(/did not resolve/);
+
+		expect(() =>
+			createPackRegistry([
+				{
+					...basePack,
+					rulePrecedence: [
+						{ higher: fastRef, lower: slowRef, reason: 'first' },
+						{ higher: fastRef, lower: slowRef, reason: 'duplicate' },
+					],
+				},
+			]),
+		).toThrow(/duplicate rule precedence/);
+
+		expect(() =>
+			createPackRegistry([
+				{
+					...basePack,
+					rulePrecedence: [
+						{ higher: fastRef, lower: slowRef, reason: 'fast wins' },
+						{ higher: slowRef, lower: fastRef, reason: 'slow wins' },
+					],
+				},
+			]),
+		).toThrow(/conflicting rule precedence/);
+
+		expect(() =>
+			createPackRegistry([
+				{
+					...basePack,
+					rulePrecedence: [
+						{ higher: fastRef, lower: slowRef, reason: 'fast wins' },
+						{
+							higher: slowRef,
+							lower: fallbackRef,
+							reason: 'slow beats fallback',
+						},
+						{
+							higher: fallbackRef,
+							lower: fastRef,
+							reason: 'fallback beats fast',
+						},
+					],
+				},
+			]),
+		).toThrow(/cyclic rule precedence/);
+	});
+
 	it('rejects duplicate issuer registrations', () => {
 		expect(() =>
 			createPackRegistry([
@@ -2222,7 +2508,7 @@ describe('createProver', () => {
 		}
 	});
 
-	it('fails closed before composing dependency-ordered candidates', async () => {
+	it('proves dependency-ordered candidates into one composed plan', async () => {
 		const { registry: customRegistry, ruleA, ruleB } = compositionRegistry();
 		const release = vi.fn();
 		const connect = vi.fn(async () => ({
@@ -2235,12 +2521,30 @@ describe('createProver', () => {
 			context,
 		);
 
-		expectMultiOperationCompositionGuard(outcome);
-		expect(connect).not.toHaveBeenCalled();
-		expect(release).not.toHaveBeenCalled();
+		expect(outcome.kind).toBe('proven');
+		expect(connect).toHaveBeenCalledOnce();
+		expect(release).toHaveBeenCalledOnce();
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+			'op:a',
+			'op:b',
+		]);
+		expect(outcome.plan.steps[1]?.requiredClaims).toHaveLength(1);
+		expect(outcome.plan.segments).toMatchObject([
+			{
+				stepIds: ['step:op:a'],
+				commitBoundaryAfter: true,
+			},
+			{
+				stepIds: ['step:op:b'],
+				commitBoundaryBefore: true,
+			},
+		]);
 	});
 
-	it('fails closed before cyclic multi-operation composition validation', async () => {
+	it('fails closed on cyclic multi-operation composition validation', async () => {
 		const {
 			registry: customRegistry,
 			ruleA,
@@ -2252,12 +2556,13 @@ describe('createProver', () => {
 			context,
 		);
 
-		// Composer-level cycle coverage remains in composer.test.ts; prove()
-		// fails closed before using it while multi-operation composition is disabled.
-		expectMultiOperationCompositionGuard(outcome);
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(/cycle/i);
+		}
 	});
 
-	it('fails closed before disconnected multi-operation composition validation', async () => {
+	it('fails closed on disconnected multi-operation composition validation', async () => {
 		const {
 			registry: customRegistry,
 			ruleA,
@@ -2269,12 +2574,15 @@ describe('createProver', () => {
 			context,
 		);
 
-		// Composer-level disconnected coverage remains in composer.test.ts; prove()
-		// fails closed before using it while multi-operation composition is disabled.
-		expectMultiOperationCompositionGuard(outcome);
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/ambiguous|unordered/i,
+			);
+		}
 	});
 
-	it('fails closed before collecting multi-candidate duplicate observation evidence', async () => {
+	it('fails closed when multi-candidate observation evidence conflicts', async () => {
 		const ruleA = compositionRule('op:a');
 		const ruleB = compositionRule('op:b');
 		const execute = vi.fn(
@@ -2323,9 +2631,34 @@ describe('createProver', () => {
 			context,
 		);
 
-		expectMultiOperationCompositionGuard(outcome);
-		expect(connect).not.toHaveBeenCalled();
-		expect(execute).not.toHaveBeenCalled();
+		expectBlockedReason(outcome, 'context-mismatch');
+		expect(connect).toHaveBeenCalledOnce();
+		expect(execute).toHaveBeenCalledTimes(2);
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				fact: {
+					value: expect.stringMatching(/duplicate observation id/i),
+				},
+			});
+		}
+	});
+
+	it('fails closed when an earlier composed step invalidates a later required claim', async () => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = compositionRegistry('invalidates');
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(/invalidated/i);
+		}
 	});
 
 	it('refuses a forged compare result that drops required observations', async () => {
@@ -2863,7 +3196,12 @@ describe('createProver', () => {
 			proofTarget(),
 			context,
 		);
-		expectMultiOperationCompositionGuard(outcome);
+		expectBlockedReason(outcome, 'uncomposable');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
+				/duplicate operation ref/i,
+			);
+		}
 	});
 
 	it('refuses an undischarged durable obligation', async () => {

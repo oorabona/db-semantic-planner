@@ -37,10 +37,6 @@ const COMPARATOR_ARTIFACT: SemanticArtifactRef = {
 	version: '0.1.0',
 };
 
-type RuleWithPrecedence = TransitionRule & {
-	readonly precedence?: number;
-};
-
 function columnChanged(
 	desired: ColumnIR | undefined,
 	current: ColumnIR | undefined,
@@ -954,27 +950,19 @@ function ruleRef(rule: TransitionRule): RuleRef {
 	};
 }
 
-function chooseByPrecedence(
-	rules: readonly TransitionRule[],
-): TransitionRule | undefined {
-	const withPrecedence = rules.filter(
-		(rule): rule is RuleWithPrecedence =>
-			typeof (rule as RuleWithPrecedence).precedence === 'number',
-	);
-	if (withPrecedence.length !== rules.length) {
-		return undefined;
-	}
-	const highest = Math.max(
-		...withPrecedence.map((rule) => rule.precedence ?? 0),
-	);
-	const winners = withPrecedence.filter((rule) => rule.precedence === highest);
-	return winners.length === 1 ? winners[0] : undefined;
-}
+type RecognizedRuleEntry = {
+	readonly rule: TransitionRule;
+	readonly result: Extract<
+		RecognitionResult<unknown>,
+		{ readonly recognized: true }
+	>;
+};
 
 function candidateFromRule(
 	rule: TransitionRule,
 	result: Extract<RecognitionResult<unknown>, { readonly recognized: true }>,
 	recognizedRules: readonly TransitionRule[],
+	why: string,
 ): TransitionCandidate {
 	const { match } = result;
 	const required = rule.requiredObservations(match);
@@ -986,13 +974,73 @@ function candidateFromRule(
 		obligations: required.map((request) => requestToObligation(request)),
 		selectionRationale: {
 			chosen: ref,
-			overRules: recognizedRules.map((candidate) => ruleRef(candidate)),
-			why: 'recognized transition rule',
+			overRules: recognizedRules
+				.filter((candidate) => candidate !== rule)
+				.map((candidate) => ruleRef(candidate)),
+			why,
 		},
 	};
 	return result.claimDrafts
 		? { ...candidate, claimDrafts: result.claimDrafts }
 		: candidate;
+}
+
+type ArbitrationResult =
+	| {
+			readonly kind: 'candidate';
+			readonly candidate: TransitionCandidate;
+	  }
+	| {
+			readonly kind: 'ambiguous';
+			readonly candidates: readonly RuleRef[];
+	  };
+
+function arbitrateRecognizedRules(
+	registry: PackRegistry,
+	recognized: readonly RecognizedRuleEntry[],
+): ArbitrationResult {
+	const recognizedRules = recognized.map((entry) => entry.rule);
+	if (recognized.length === 1) {
+		const entry = recognized[0];
+		if (!entry) {
+			return { kind: 'ambiguous', candidates: [] };
+		}
+		return {
+			kind: 'candidate',
+			candidate: candidateFromRule(
+				entry.rule,
+				entry.result,
+				recognizedRules,
+				'recognized transition rule',
+			),
+		};
+	}
+
+	const resolution = registry.resolveRulePrecedence(recognizedRules);
+	if (!resolution.ok) {
+		return {
+			kind: 'ambiguous',
+			candidates: recognizedRules.map((entry) => ruleRef(entry)),
+		};
+	}
+	const chosenEntry = recognized.find(
+		(entry) => entry.rule === resolution.rule,
+	);
+	if (!chosenEntry) {
+		return {
+			kind: 'ambiguous',
+			candidates: recognizedRules.map((entry) => ruleRef(entry)),
+		};
+	}
+	return {
+		kind: 'candidate',
+		candidate: candidateFromRule(
+			chosenEntry.rule,
+			chosenEntry.result,
+			recognizedRules,
+			`recognized transition rule selected by declared precedence: ${resolution.reason}`,
+		),
+	};
 }
 
 export function createComparator(registry: PackRegistry): Comparator {
@@ -1147,29 +1195,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 						continue;
 					}
 
-					const chosen =
-						recognized.length === 1
-							? recognized[0]?.rule
-							: chooseByPrecedence(recognized.map((entry) => entry.rule));
-					if (!chosen) {
+					const arbitration = arbitrateRecognizedRules(registry, recognized);
+					if (arbitration.kind === 'ambiguous') {
 						return {
 							kind: 'ambiguous',
-							candidates: recognized.map((entry) => ruleRef(entry.rule)),
+							candidates: arbitration.candidates,
 						};
 					}
-
-					const chosenEntry = recognized.find((entry) => entry.rule === chosen);
-					if (!chosenEntry?.result.recognized) {
-						unsupported.push(resourceForColumn(engine, tableName, columnName));
-						continue;
-					}
-					candidates.push(
-						candidateFromRule(
-							chosen,
-							chosenEntry.result,
-							recognized.map((entry) => entry.rule),
-						),
-					);
+					candidates.push(arbitration.candidate);
 					recognizedColumnKeys.add(JSON.stringify([tableName, columnName]));
 					pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
 				}
@@ -1259,29 +1292,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 						continue;
 					}
 
-					const chosen =
-						recognized.length === 1
-							? recognized[0]?.rule
-							: chooseByPrecedence(recognized.map((entry) => entry.rule));
-					if (!chosen) {
+					const arbitration = arbitrateRecognizedRules(registry, recognized);
+					if (arbitration.kind === 'ambiguous') {
 						return {
 							kind: 'ambiguous',
-							candidates: recognized.map((entry) => ruleRef(entry.rule)),
+							candidates: arbitration.candidates,
 						};
 					}
-
-					const chosenEntry = recognized.find((entry) => entry.rule === chosen);
-					if (!chosenEntry?.result.recognized) {
-						unsupported.push(resourceForCheck(engine, tableName, checkName));
-						continue;
-					}
-					candidates.push(
-						candidateFromRule(
-							chosen,
-							chosenEntry.result,
-							recognized.map((entry) => entry.rule),
-						),
-					);
+					candidates.push(arbitration.candidate);
 					recognizedCheckKeys.add(checkKey);
 					pendingCheckKeys.add(checkKey);
 				}
@@ -1361,31 +1379,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 						continue;
 					}
 
-					const chosen =
-						recognized.length === 1
-							? recognized[0]?.rule
-							: chooseByPrecedence(recognized.map((entry) => entry.rule));
-					if (!chosen) {
+					const arbitration = arbitrateRecognizedRules(registry, recognized);
+					if (arbitration.kind === 'ambiguous') {
 						return {
 							kind: 'ambiguous',
-							candidates: recognized.map((entry) => ruleRef(entry.rule)),
+							candidates: arbitration.candidates,
 						};
 					}
-
-					const chosenEntry = recognized.find((entry) => entry.rule === chosen);
-					if (!chosenEntry?.result.recognized) {
-						unsupported.push(
-							resourceForIndex(engine, tableName, tableIndexDelta.index.name),
-						);
-						continue;
-					}
-					candidates.push(
-						candidateFromRule(
-							chosen,
-							chosenEntry.result,
-							recognized.map((entry) => entry.rule),
-						),
-					);
+					candidates.push(arbitration.candidate);
 					recognizedIndexKeys.add(indexKey);
 					pendingIndexKeys.add(indexKey);
 				}
@@ -1471,29 +1472,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 					continue;
 				}
 
-				const chosen =
-					recognized.length === 1
-						? recognized[0]?.rule
-						: chooseByPrecedence(recognized.map((entry) => entry.rule));
-				if (!chosen) {
+				const arbitration = arbitrateRecognizedRules(registry, recognized);
+				if (arbitration.kind === 'ambiguous') {
 					return {
 						kind: 'ambiguous',
-						candidates: recognized.map((entry) => ruleRef(entry.rule)),
+						candidates: arbitration.candidates,
 					};
 				}
-
-				const chosenEntry = recognized.find((entry) => entry.rule === chosen);
-				if (!chosenEntry?.result.recognized) {
-					unsupported.push(resourceForEnum(engine, desiredEnum, enumName));
-					continue;
-				}
-				candidates.push(
-					candidateFromRule(
-						chosen,
-						chosenEntry.result,
-						recognized.map((entry) => entry.rule),
-					),
-				);
+				candidates.push(arbitration.candidate);
 				recognizedEnumKeys.add(JSON.stringify([enumName, delta.label]));
 				pendingEnumKeys.add(JSON.stringify([enumName, delta.label]));
 			}

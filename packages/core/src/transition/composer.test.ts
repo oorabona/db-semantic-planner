@@ -8,7 +8,7 @@ import type {
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { type CompositionOperation, composeOperations } from './composer.js';
-import { semanticArtifactId } from './ids.js';
+import { claimId, semanticArtifactId } from './ids.js';
 
 const operationArtifact: SemanticArtifactRef = {
 	id: semanticArtifactId('dbsp.mock.composer.operations'),
@@ -248,6 +248,49 @@ describe('composeOperations', () => {
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.detail).toMatch(/contextMutations/i);
+		}
+	});
+
+	it('refuses an order where an earlier operation invalidates a later required claim', () => {
+		const requiredClaim = {
+			id: claimId('mock.claim.ready'),
+			proposition: 'mock.claim.ready',
+			scope: [tableResource()],
+		};
+		const result = composeOperations(
+			[
+				compositionEntry(
+					'op:a',
+					effects({
+						invalidates: [
+							{
+								proposition: requiredClaim.proposition,
+								scope: tableSelector(),
+							},
+						],
+					}),
+				),
+				{
+					...compositionEntry('op:b'),
+					requiredClaims: [requiredClaim],
+				},
+			],
+			[
+				{
+					order: [
+						{
+							before: 'op:a',
+							after: 'op:b',
+							reason: 'test invalidation order',
+						},
+					],
+				},
+			],
+		);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.detail).toMatch(/invalidated by earlier operation op:a/i);
 		}
 	});
 });
