@@ -30,6 +30,14 @@ export interface ObservationContext {
 	readonly transaction?: string;
 }
 
+export type ObservationPrivilegeMergeResult =
+	| {
+			readonly merged: readonly string[];
+	  }
+	| {
+			readonly conflict: string;
+	  };
+
 export type ObservationStability =
 	| 'connection-constant'
 	| 'session-bound'

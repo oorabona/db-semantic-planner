@@ -24,6 +24,10 @@ import type {
 	TransitionQueryClient,
 	TransitionRule,
 } from '@dbsp/types';
+import {
+	mergeCompatibleObservationContexts,
+	type ObservationContextMergeResult,
+} from './context-compat.js';
 
 export interface OperationFingerprints {
 	readonly expectedBefore: FingerprintManifest;
@@ -76,6 +80,30 @@ export interface GuardExecutionResult {
 
 export interface TransitionExecutionClient {
 	readonly opaqueClient: unknown;
+}
+
+export interface ExecutionCoordinator {
+	readonly transactionDomain: string;
+	checkout(
+		target: TransitionConnectionPool,
+	): Promise<TransitionExecutionClient>;
+	release(
+		client: TransitionExecutionClient,
+		error?: unknown,
+	): Promise<void> | void;
+	begin(client: TransitionExecutionClient): Promise<void>;
+	setLockTimeout(
+		client: TransitionExecutionClient,
+		maxWaitMs: number,
+	): Promise<void>;
+	commit(client: TransitionExecutionClient): Promise<void>;
+	rollback(client: TransitionExecutionClient): Promise<void>;
+	isLockTimeout(error: unknown): boolean;
+}
+
+export interface TransactionCoordinatorBinding {
+	readonly coordinator: ExecutionCoordinator;
+	readonly transactionDomain: string;
 }
 
 export interface OperationRuntime extends RegisteredOperationSemantics {
@@ -143,6 +171,8 @@ export interface TransitionPack {
 	readonly rules: readonly TransitionRule[];
 	readonly operationSemantics: readonly RegisteredOperationSemantics[];
 	readonly issuer: ObservationIssuer;
+	readonly executionCoordinator?: ExecutionCoordinator;
+	readonly transactionDomain?: string;
 	readonly equivalence?: EquivalenceCapability;
 	readonly capabilityDescriptors?: readonly CapabilityDescriptor[];
 	readonly comparatorNameNormalizer?: ComparatorNameNormalizer;
@@ -336,6 +366,13 @@ export class PackRegistry {
 	>;
 	private readonly capabilityDescriptors: readonly CapabilityDescriptor[];
 	private readonly nameNormalizer: ComparatorNameNormalizer | undefined;
+	private readonly privilegeMergers: readonly NonNullable<
+		ObservationIssuer['mergeObservationPrivileges']
+	>[];
+	private readonly transactionCoordinatorBySemantics: WeakMap<
+		RegisteredOperationSemantics,
+		TransactionCoordinatorBinding
+	>;
 
 	constructor(packs: readonly TransitionPack[]) {
 		this.rules = packs.flatMap((pack) => [...pack.rules]);
@@ -343,6 +380,15 @@ export class PackRegistry {
 			...pack.operationSemantics,
 		]);
 		this.issuers = packs.map((pack) => pack.issuer);
+		this.privilegeMergers = [
+			...new Set(
+				this.issuers.flatMap((issuer) =>
+					issuer.mergeObservationPrivileges
+						? [issuer.mergeObservationPrivileges.bind(issuer)]
+						: [],
+				),
+			),
+		];
 		this.capabilityDescriptors = packs.flatMap((pack) => [
 			...(pack.capabilityDescriptors ?? []),
 		]);
@@ -399,6 +445,10 @@ export class PackRegistry {
 			string,
 			CompositionFactSatisfactionOwner
 		>();
+		const transactionCoordinatorBySemantics = new WeakMap<
+			RegisteredOperationSemantics,
+			TransactionCoordinatorBinding
+		>();
 		const bindCompositionFactOwner = (
 			kind: string,
 			owner: CompositionFactSatisfactionOwner,
@@ -412,6 +462,26 @@ export class PackRegistry {
 			compositionFactOwnerByKind.set(kind, owner);
 		};
 		for (const pack of packs) {
+			const transactionDomain =
+				pack.transactionDomain ?? pack.executionCoordinator?.transactionDomain;
+			if (pack.executionCoordinator && !transactionDomain) {
+				throw new Error(
+					'transition pack executionCoordinator must declare a transactionDomain',
+				);
+			}
+			if (!pack.executionCoordinator && transactionDomain) {
+				throw new Error(
+					'transition pack transactionDomain requires an executionCoordinator',
+				);
+			}
+			if (
+				pack.executionCoordinator &&
+				transactionDomain !== pack.executionCoordinator.transactionDomain
+			) {
+				throw new Error(
+					'transition pack transactionDomain must match its executionCoordinator transactionDomain',
+				);
+			}
 			bindIssuer(artifactKey(pack.issuer.artifact), pack.issuer);
 			if (pack.equivalence) {
 				bindEquivalence(
@@ -442,6 +512,12 @@ export class PackRegistry {
 						);
 					}
 				}
+				if (pack.executionCoordinator && transactionDomain) {
+					transactionCoordinatorBySemantics.set(semantics, {
+						coordinator: pack.executionCoordinator,
+						transactionDomain,
+					});
+				}
 			}
 			if (pack.satisfiesCompositionFact) {
 				const owner: CompositionFactSatisfactionOwner = {
@@ -456,6 +532,7 @@ export class PackRegistry {
 		this.issuerByArtifact = issuerByArtifact;
 		this.equivalenceByArtifact = equivalenceByArtifact;
 		this.compositionFactOwnerByKind = compositionFactOwnerByKind;
+		this.transactionCoordinatorBySemantics = transactionCoordinatorBySemantics;
 	}
 
 	allRules(): readonly TransitionRule[] {
@@ -607,6 +684,28 @@ export class PackRegistry {
 		};
 	}
 
+	mergeObservationContexts(
+		left: ObservationContext,
+		right: ObservationContext,
+	): ObservationContextMergeResult {
+		const merger =
+			this.privilegeMergers.length === 1 ? this.privilegeMergers[0] : undefined;
+		const result = mergeCompatibleObservationContexts(left, right, merger);
+		if (
+			result.ok ||
+			this.privilegeMergers.length <= 1 ||
+			result.detail !==
+				'candidate proof contexts differ in privileges and no issuer privilege merger is registered'
+		) {
+			return result;
+		}
+		return {
+			ok: false,
+			detail:
+				'candidate proof contexts differ in privileges and privilege merging is ambiguous',
+		};
+	}
+
 	satisfiesCompositionFact(
 		fact: Parameters<
 			CompositionFactSatisfactionOwner['satisfiesCompositionFact']
@@ -656,6 +755,12 @@ export class PackRegistry {
 			ok: false,
 			detail: `operation runtime missing for ${key}`,
 		};
+	}
+
+	transactionCoordinatorFor(
+		semantics: RegisteredOperationSemantics,
+	): TransactionCoordinatorBinding | undefined {
+		return this.transactionCoordinatorBySemantics.get(semantics);
 	}
 }
 

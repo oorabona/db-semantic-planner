@@ -21,6 +21,7 @@ import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import type { InProcessProvenPlan } from './index.js';
 import { mintInProcessPlan } from './minting.js';
 import type {
+	ExecutionCoordinator,
 	OperationObservation,
 	OperationRuntime,
 	TransitionExecutionClient,
@@ -436,7 +437,7 @@ function runtime(
 				externalEffects: { accountedFor: [], couldNotAccountFor: [] },
 				execution: { transaction: 'joins-current', commitBoundary: 'none' },
 			},
-			restsOn: [],
+			restsOn: [operationAssumption()],
 		}),
 		buildFingerprints:
 			options.buildFingerprints ??
@@ -572,7 +573,7 @@ function multiSegmentRuntime(
 					externalEffects: { accountedFor: [], couldNotAccountFor: [] },
 					execution,
 				},
-				restsOn: [],
+				restsOn: [operationAssumption()],
 			};
 		},
 		buildFingerprints: (candidate) => ({
@@ -640,6 +641,60 @@ function multiSegmentRuntime(
 			writeObservedJournal(journal);
 		}),
 		isLockTimeout: () => false,
+	};
+}
+
+function sharedCoordinator(log: string[]): ExecutionCoordinator {
+	let nextClientId = 0;
+	const clientId = (client: TransitionExecutionClient): number =>
+		(client.opaqueClient as { readonly id: number }).id;
+	const record = (event: string) => {
+		log.push(event);
+	};
+	return {
+		transactionDomain: 'mock.shared-transaction-domain',
+		checkout: vi.fn(async () => {
+			nextClientId += 1;
+			record(`coordinator:checkout:${nextClientId}`);
+			return { opaqueClient: { id: nextClientId } };
+		}),
+		release: vi.fn(async (client) => {
+			record(`coordinator:release:${clientId(client)}`);
+		}),
+		begin: vi.fn(async (client) => {
+			record(`coordinator:begin:${clientId(client)}`);
+		}),
+		setLockTimeout: vi.fn(async (client) => {
+			record(`coordinator:lock-timeout:${clientId(client)}`);
+		}),
+		commit: vi.fn(async (client) => {
+			record(`coordinator:commit:${clientId(client)}`);
+		}),
+		rollback: vi.fn(async (client) => {
+			record(`coordinator:rollback:${clientId(client)}`);
+		}),
+		isLockTimeout: () => false,
+	};
+}
+
+function runtimeForOperation(
+	targetOperation: PhysicalOperation,
+	writeObservedJournal: (journal: StepJournal) => void,
+	log: string[],
+): OperationRuntime {
+	const base = multiSegmentRuntime(writeObservedJournal, {
+		log,
+		transactionMode: 'single-segment',
+	});
+	return {
+		...base,
+		operationKind: targetOperation.operationKind,
+		supportsOperation: (candidate) =>
+			candidate.operationKind.artifact.id ===
+				targetOperation.operationKind.artifact.id &&
+			candidate.operationKind.artifact.version ===
+				targetOperation.operationKind.artifact.version &&
+			candidate.operationKind.name === targetOperation.operationKind.name,
 	};
 }
 
@@ -810,6 +865,111 @@ describe('createApplier', () => {
 		expect(log).toContain('commit:2');
 	});
 
+	it('executes compatible coordinator-owned runtimes in one transaction', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const coordinator = sharedCoordinator(log);
+		const rtA = runtimeForOperation(
+			operationA,
+			(journal) => {
+				observed.push(journal);
+			},
+			log,
+		);
+		const rtB = runtimeForOperation(
+			operationB,
+			(journal) => {
+				observed.push(journal);
+			},
+			log,
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rtA, rtB],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+				executionCoordinator: coordinator,
+				transactionDomain: coordinator.transactionDomain,
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(
+			log.filter((entry) => entry.startsWith('coordinator:checkout')),
+		).toEqual(['coordinator:checkout:1']);
+		expect(log).toContain('coordinator:begin:1');
+		expect(log).toContain('execute:op:a:1');
+		expect(log).toContain('execute:op:b:1');
+		expect(log).toContain('coordinator:commit:1');
+		expect(log).not.toContain('checkout:1');
+		expect(rtA.checkout).not.toHaveBeenCalled();
+		expect(rtB.checkout).not.toHaveBeenCalled();
+		expect(observed.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'completed',
+		]);
+	});
+
+	it('rejects cross-runtime transactional segments without a shared coordinator before checkout', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const rtA = runtimeForOperation(
+			operationA,
+			(journal) => {
+				observed.push(journal);
+			},
+			log,
+		);
+		const rtB = runtimeForOperation(
+			operationB,
+			(journal) => {
+				observed.push(journal);
+			},
+			log,
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rtA, rtB],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'uncomposable',
+		});
+		expect(result.assessment.reasons[0]?.detail).toMatch(
+			/shared transaction coordinator/,
+		);
+		expect(rtA.checkout).not.toHaveBeenCalled();
+		expect(rtB.checkout).not.toHaveBeenCalled();
+		expect(log).not.toContain('checkout:1');
+		expect(observed).toEqual([]);
+	});
+
 	it('keeps an earlier committed segment when a later segment fails', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
@@ -839,14 +999,16 @@ describe('createApplier', () => {
 		expect(result.assessment.decision).toBe('blocked');
 		expect(result.assessment.lifecycle).toBe('partially-applied');
 		expect(result.assessment.continuation).toBe('resume-possible');
-		expect(result.assessment.reasons[0]?.code).toBe('partially-applied');
+		expect(result.assessment.reasons[0]?.code).toBe(
+			'operation-failed-not-applied',
+		);
 		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
 			'step:op:a',
 			'step:op:b',
 		]);
 		expect(result.journals.map((journal) => journal.outcome)).toEqual([
 			'completed',
-			'partially-applied',
+			'operation-failed-not-applied',
 		]);
 		expect(log).toContain('commit:1');
 		expect(log).toContain('rollback:2');
@@ -854,11 +1016,11 @@ describe('createApplier', () => {
 		expect(log).not.toContain('commit:2');
 		expect(observed.map((journal) => journal.outcome)).toEqual([
 			'completed',
-			'partially-applied',
+			'operation-failed-not-applied',
 		]);
 	});
 
-	it('attributes committed multi-step after-observation failures to the observed step and journals the segment', async () => {
+	it('rolls back the whole transactional segment on a pre-commit postcondition mismatch', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
 		const afterContexts: string[] = [];
@@ -887,9 +1049,6 @@ describe('createApplier', () => {
 						if (phase === 'after') {
 							afterContexts.push(`${candidate.ref}:${ctx.databaseId}`);
 						}
-						if (candidate.ref === 'op:a' && phase === 'after') {
-							throw new Error('forced op:a after failure');
-						}
 						return {
 							observations: [
 								{
@@ -898,7 +1057,11 @@ describe('createApplier', () => {
 									context: ctx,
 								},
 							],
-							fingerprint: fingerprint(`${candidate.ref}:${phase}`),
+							fingerprint: fingerprint(
+								candidate.ref === 'op:b' && phase === 'after'
+									? 'op:b:wrong-after'
+									: `${candidate.ref}:${phase}`,
+							),
 						};
 					},
 				),
@@ -922,24 +1085,139 @@ describe('createApplier', () => {
 		);
 
 		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
 		expect(result.assessment.reasons[0]).toMatchObject({
-			code: 'partially-applied',
-			stepId: 'step:op:a',
-			operationRef: 'op:a',
+			code: 'operation-failed-not-applied',
+			stepId: 'step:op:b',
+			operationRef: 'op:b',
 		});
 		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
-			'step:op:a',
 			'step:op:b',
 		]);
 		expect(result.journals.map((journal) => journal.outcome)).toEqual([
-			'partially-applied',
-			'completed',
+			'operation-failed-not-applied',
 		]);
 		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
-			'step:op:a',
 			'step:op:b',
 		]);
 		expect(afterContexts).toEqual(['op:a:op:a', 'op:b:op:b']);
+		expect(log).toContain('completion:step:op:a:1');
+		expect(log).toContain('rollback:1');
+		expect(log).not.toContain('commit:1');
+	});
+
+	it('rolls back step A when step B fails in the same transactional segment', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const rt = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log, failB: true, transactionMode: 'single-segment' },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'operation-failed-not-applied',
+			stepId: 'step:op:b',
+			operationRef: 'op:b',
+		});
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(log).toContain('completion:step:op:a:1');
+		expect(log).toContain('rollback:1');
+		expect(log).not.toContain('commit:1');
+	});
+
+	it('rolls back step A when step B guard fails in the same transactional segment', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log, transactionMode: 'single-segment' },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			checkGuard: vi.fn(async (_client, candidate, checkedGuard) => ({
+				passed: !(
+					candidate.ref === 'op:b' && checkedGuard.phase === 'before-operation'
+				),
+				observations: [],
+				recovery: [],
+			})),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const base = multiStepSingleSegmentPlan() as ProvenPlanShape;
+		const guarded = mintInProcessPlan({
+			...base,
+			claims: [identityClaim()],
+			steps: base.steps.map((step) =>
+				step.operation.ref === 'op:b'
+					? {
+							...step,
+							requiredClaims: [claimId('mock.identity')],
+							guards: [guardFor('op:b', 'before-operation')],
+						}
+					: step,
+			),
+		});
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'guard-failed',
+			stepId: 'step:op:b',
+			operationRef: 'op:b',
+		});
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(result.journals[0]?.outcome).toBe('guard-failed');
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(log).toContain('completion:step:op:a:1');
+		expect(log).toContain('rollback:1');
+		expect(log).not.toContain('commit:1');
 	});
 
 	it('reports a forbids-transaction failure after an earlier committed segment as resumable partial work', async () => {
@@ -1061,16 +1339,15 @@ describe('createApplier', () => {
 		expect(log).not.toContain('rollback:2');
 	});
 
-	it('persists an unknown-step-result journal on the generic error path', async () => {
+	it('persists a not-applied journal when a transactional operation error rolls back', async () => {
 		const observed: StepJournal[] = [];
+		const rt = runtime((journal) => {
+			observed.push(journal);
+		});
 		const registry = createPackRegistry([
 			{
 				rules: [],
-				operationSemantics: [
-					runtime((journal) => {
-						observed.push(journal);
-					}),
-				],
+				operationSemantics: [rt],
 				issuer: {
 					artifact: operationArtifact,
 					execute: async () => evidence(),
@@ -1083,6 +1360,43 @@ describe('createApplier', () => {
 			executionTarget(),
 		);
 
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.reasons[0]?.code).toBe(
+			'operation-failed-not-applied',
+		);
+		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(observed[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(rt.rollback).toHaveBeenCalledOnce();
+	});
+
+	it('reports unknown-step-result when rollback outcome is uncertain', async () => {
+		const observed: StepJournal[] = [];
+		const rt: OperationRuntime = {
+			...runtime((journal) => {
+				observed.push(journal);
+			}),
+			rollback: vi.fn(async () => {
+				throw new Error('rollback failed');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
 		expect(result.assessment.reasons[0]?.code).toBe('unknown-step-result');
 		expect(result.journals[0]?.outcome).toBe('unknown-step-result');
 		expect(observed[0]?.outcome).toBe('unknown-step-result');
@@ -1495,6 +1809,64 @@ describe('createApplier', () => {
 		expect(accepted.assessment.lifecycle).toBe('completed');
 	});
 
+	it('reports unaccepted assumptions at the step closure that depends on them', async () => {
+		const operation = operationAssumption();
+		const blastRadius = operationAssumption({
+			id: 'mock.user-blast-radius' as Assumption['id'],
+			class: 'user-blast-radius',
+			asserter: { kind: 'human', identity: 'schema-owner' },
+			statement: 'schema owner accepts the blast radius for this step',
+			scope: [tableResource()],
+		});
+		const rt = runtime(() => undefined, {
+			executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+		});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const scopedPlan = planWithStep(
+			{ restsOnAssumptions: [operation.id, blastRadius.id] },
+			{ assumptions: [operation, blastRadius] },
+		);
+
+		const denied = await createApplier(registry).apply(
+			{ plan: scopedPlan, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(denied.assessment.reasons[0]).toMatchObject({
+			code: 'uncomposable',
+			assumption: blastRadius.id,
+			fragments: [scopedPlan.steps[0]?.selectionRationale.chosen],
+		});
+		expect(rt.checkout).not.toHaveBeenCalled();
+
+		const accepted = await createApplier(registry).apply(
+			{ plan: scopedPlan, assessment: assessment() },
+			{
+				accepts: [
+					{ class: 'operation-pack-semantics' },
+					{
+						class: 'user-blast-radius',
+						fromTrustRoot: blastRadius.asserter,
+						withinScope: [{ within: tableResource() }],
+					},
+				],
+			},
+			executionTarget(),
+		);
+
+		expect(accepted.assessment.lifecycle).toBe('completed');
+	});
+
 	it('returns an ApplyResult when checkout fails', async () => {
 		const rt: OperationRuntime = {
 			...runtime(() => undefined),
@@ -1747,6 +2119,78 @@ describe('createApplier', () => {
 		expect(executeOperation).not.toHaveBeenCalled();
 	});
 
+	it('keeps a transactional before-operation guard failure classified after rollback clears the intent journal', async () => {
+		const observed: StepJournal[] = [];
+		const durableIntentRows = new Set<string>();
+		const log: string[] = [];
+		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const baseRuntime = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				log,
+				executeOperation,
+				checkGuard: vi.fn(async () => ({
+					passed: false,
+					observations: [],
+					recovery: [],
+				})),
+			},
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			writeIntentJournal: vi.fn(async (_client, recordValue) => {
+				log.push(`intent:${recordValue.stepId}`);
+				durableIntentRows.add(recordValue.stepId);
+			}),
+			rollback: vi.fn(async () => {
+				log.push('rollback-clears-intent');
+				durableIntentRows.clear();
+			}),
+			writeObservedJournal: vi.fn(async (_client, journal) => {
+				log.push(`observed:${journal.outcome}`);
+				expect(durableIntentRows.has(journal.intent.stepId)).toBe(false);
+				expect(journal.intent.run?.runId).toBe(journal.intent.runId);
+				observed.push(journal);
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const guarded = planWithStep(
+			{
+				guards: [guard('before-operation')],
+				requiredClaims: [claimId('mock.identity')],
+			},
+			{ claims: [identityClaim()] },
+		);
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]?.code).toBe('guard-failed');
+		expect(result.journals[0]?.outcome).toBe('guard-failed');
+		expect(observed[0]?.outcome).toBe('guard-failed');
+		expect(log).toContain('rollback-clears-intent');
+		expect(log.indexOf('rollback-clears-intent')).toBeLessThan(
+			log.indexOf('observed:guard-failed'),
+		);
+		expect(durableIntentRows.size).toBe(0);
+		expect(executeOperation).not.toHaveBeenCalled();
+	});
+
 	it('journals a runtime engine guard failure as guard-failed', async () => {
 		const observed: StepJournal[] = [];
 		const duringGuard = guard('during-operation');
@@ -1796,7 +2240,7 @@ describe('createApplier', () => {
 		expect(observed[0]?.outcome).toBe('guard-failed');
 	});
 
-	it('surfaces runtime partial recovery artefacts as resume-possible', async () => {
+	it('surfaces nontransactional runtime partial recovery artefacts as resume-possible', async () => {
 		const observed: StepJournal[] = [];
 		const recovery = [
 			{
@@ -1811,7 +2255,7 @@ describe('createApplier', () => {
 				},
 			},
 		];
-		const rt = runtime(
+		const baseRuntime = runtime(
 			(journal) => {
 				observed.push(journal);
 			},
@@ -1823,6 +2267,24 @@ describe('createApplier', () => {
 				})),
 			},
 		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: (): OperationEffectAssessment => ({
+				effects: {
+					reads: [],
+					writes: [],
+					locks: [],
+					invalidates: [],
+					contextMutations: [],
+					externalEffects: { accountedFor: [], couldNotAccountFor: [] },
+					execution: {
+						transaction: 'forbids-transaction',
+						commitBoundary: 'after',
+					},
+				},
+				restsOn: [operationAssumption()],
+			}),
+		};
 		const registry = createPackRegistry([
 			{
 				rules: [],
@@ -1833,9 +2295,20 @@ describe('createApplier', () => {
 				},
 			},
 		]);
+		const basePlan = planShape();
+		const nonTransactionalPlan = mintInProcessPlan({
+			...basePlan,
+			segments: [
+				{
+					...basePlan.segments[0]!,
+					transaction: 'forbids-transaction',
+					commitBoundaryAfter: true,
+				},
+			],
+		});
 
 		const result = await createApplier(registry).apply(
-			{ plan: plan(), assessment: assessment() },
+			{ plan: nonTransactionalPlan, assessment: assessment() },
 			acceptsOperationPolicy(),
 			executionTarget(),
 		);

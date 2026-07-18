@@ -199,6 +199,68 @@ function effectsInteract(
 	);
 }
 
+function resourceOrderKey(resource: ResourceAddress): string {
+	return stableJson([
+		resource.engine,
+		resource.database,
+		resource.schema ?? '',
+		resource.name,
+		resource.kind,
+		stableJson(resource.qualifiedBy ?? []),
+	]);
+}
+
+function selectorOrderKey(selector: ResourceSelector): string {
+	return stableJson([
+		selector.within?.engine ?? '',
+		selector.within?.database ?? '',
+		selector.schema ?? selector.within?.schema ?? '',
+		selector.name ?? selector.within?.name ?? '',
+		selector.kind ?? '',
+		selector.within ? resourceOrderKey(selector.within) : '',
+		stableJson(selector),
+	]);
+}
+
+function sortedKeys(values: readonly string[]): readonly string[] {
+	return [...values].sort();
+}
+
+function stableCompositionOrderKey(
+	entry: CompositionOperation,
+): readonly string[] {
+	const effects = entry.effects.effects;
+	return [
+		stableJson(sortedKeys(effects.writes.map(selectorOrderKey))),
+		stableJson(
+			sortedKeys(effects.locks.map((lock) => resourceOrderKey(lock.resource))),
+		),
+		stableJson(sortedKeys(effects.reads.map(selectorOrderKey))),
+		stableJson(entry.operation.operationKind),
+		entry.operation.ref,
+	];
+}
+
+function compareStableCompositionOrder(
+	left: CompositionOperation,
+	right: CompositionOperation,
+): number {
+	const leftKey = stableCompositionOrderKey(left);
+	const rightKey = stableCompositionOrderKey(right);
+	const length = Math.max(leftKey.length, rightKey.length);
+	for (let index = 0; index < length; index += 1) {
+		const leftPart = leftKey[index] ?? '';
+		const rightPart = rightKey[index] ?? '';
+		if (leftPart < rightPart) {
+			return -1;
+		}
+		if (leftPart > rightPart) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 function selectorMatchesClaim(
 	selector: ClaimSelector,
 	claim: CompositionRequiredClaim,
@@ -216,6 +278,27 @@ function selectorMatchesClaim(
 	}
 	return claim.scope.some((resource) =>
 		selectorIntersectsResource(selector.scope, resource),
+	);
+}
+
+function invalidatesRequiredClaim(
+	invalidator: CompositionOperation,
+	target: CompositionOperation,
+): boolean {
+	return invalidator.effects.effects.invalidates.some((selector) =>
+		(target.requiredClaims ?? []).some((claim) =>
+			selectorMatchesClaim(selector, claim),
+		),
+	);
+}
+
+function requiredClaimsInvalidate(
+	left: CompositionOperation,
+	right: CompositionOperation,
+): boolean {
+	return (
+		invalidatesRequiredClaim(left, right) ||
+		invalidatesRequiredClaim(right, left)
 	);
 }
 
@@ -273,6 +356,12 @@ function commitBoundaryAfter(
 	return commitBoundary === 'after' || commitBoundary === 'before-and-after';
 }
 
+function postconditionVisibleOnlyAfterCommit(
+	execution: CompositionOperation['effects']['effects']['execution'],
+): boolean {
+	return execution.postconditionVisibility === 'after-commit';
+}
+
 function segmentTransaction(
 	current: GuardedPlanSegment['transaction'] | undefined,
 	next: GuardedPlanSegment['transaction'],
@@ -323,6 +412,7 @@ function composeSegments(
 			entry.requiresCommitBefore ||
 			execution.transaction === 'requires-new' ||
 			execution.transaction === 'forbids-transaction' ||
+			postconditionVisibleOnlyAfterCommit(execution) ||
 			commitBoundaryBefore(execution.commitBoundary) ||
 			current?.transaction === 'forbids-transaction';
 		if (current && startsNewSegment) {
@@ -346,6 +436,7 @@ function composeSegments(
 		current.stepIds.push(stepId(entry.operation));
 		if (
 			execution.transaction === 'forbids-transaction' ||
+			postconditionVisibleOnlyAfterCommit(execution) ||
 			commitBoundaryAfter(execution.commitBoundary)
 		) {
 			flush(true);
@@ -468,9 +559,7 @@ function declaredEdges(
 			edges.push({
 				before: producer.opRef,
 				after: requirement.opRef,
-				requiresCommitBetween:
-					requirement.needs === 'producer-after-commit' ||
-					producer.available === 'after-commit',
+				requiresCommitBetween: requirement.needs === 'producer-after-commit',
 				reason: `composition requirement ${requirement.fact.kind}`,
 			});
 		}
@@ -549,8 +638,9 @@ function buildConstraints(
 			const leftRef = left.operation.ref;
 			const rightRef = right.operation.ref;
 			if (
-				effectsInteract(left.effects, right.effects) &&
-				!declaredPairs.has(unorderedEdgeKey(leftRef, rightRef))
+				!declaredPairs.has(unorderedEdgeKey(leftRef, rightRef)) &&
+				(effectsInteract(left.effects, right.effects) ||
+					requiredClaimsInvalidate(left, right))
 			) {
 				return {
 					ok: false,
@@ -569,10 +659,6 @@ function buildConstraints(
 	};
 }
 
-function ambiguousOrderDetail(refs: readonly string[]): string {
-	return `composition order is ambiguous — siblings ${refs.join(', ')} are unordered`;
-}
-
 export function composeOperations(
 	operations: readonly CompositionOperation[],
 	declarations: readonly TransitionFragmentComposition[] = [],
@@ -581,8 +667,7 @@ export function composeOperations(
 		return { ok: false, detail: 'missing operations' };
 	}
 	const byRef = new Map<string, CompositionOperation>();
-	const refOrder = new Map<string, number>();
-	for (const [index, entry] of operations.entries()) {
+	for (const entry of operations) {
 		if (byRef.has(entry.operation.ref)) {
 			return {
 				ok: false,
@@ -590,7 +675,6 @@ export function composeOperations(
 			};
 		}
 		byRef.set(entry.operation.ref, entry);
-		refOrder.set(entry.operation.ref, index);
 		if (
 			operations.length > 1 &&
 			entry.effects.effects.externalEffects.couldNotAccountFor.length > 0
@@ -608,6 +692,14 @@ export function composeOperations(
 	}
 	const { dependents, dependencyRefs, commitEdges } = constraints;
 	const indegree = new Map<string, number>();
+	const compareRefs = (left: string, right: string): number => {
+		const leftEntry = byRef.get(left);
+		const rightEntry = byRef.get(right);
+		if (!leftEntry || !rightEntry) {
+			return left < right ? -1 : left > right ? 1 : 0;
+		}
+		return compareStableCompositionOrder(leftEntry, rightEntry);
+	};
 	for (const entry of operations) {
 		indegree.set(
 			entry.operation.ref,
@@ -619,18 +711,13 @@ export function composeOperations(
 	const emitted = new Set<string>();
 	let ready = operations
 		.filter((entry) => indegree.get(entry.operation.ref) === 0)
-		.map((entry) => entry.operation.ref);
+		.map((entry) => entry.operation.ref)
+		.sort(compareRefs);
 	while (ordered.length < operations.length) {
 		if (ready.length === 0) {
 			return {
 				ok: false,
 				detail: 'composition dependency cycle detected',
-			};
-		}
-		if (ready.length > 1) {
-			return {
-				ok: false,
-				detail: ambiguousOrderDetail(ready),
 			};
 		}
 
@@ -641,7 +728,7 @@ export function composeOperations(
 				detail: 'composition dependency cycle detected',
 			};
 		}
-		ready = [];
+		ready = ready.slice(1);
 		const entry = byRef.get(ref);
 		if (!entry) {
 			return {
@@ -649,9 +736,7 @@ export function composeOperations(
 				detail: `composition references unknown operation ${ref}`,
 			};
 		}
-		const dependencies = [...(dependencyRefs.get(ref) ?? [])].sort(
-			(left, right) => (refOrder.get(left) ?? 0) - (refOrder.get(right) ?? 0),
-		);
+		const dependencies = [...(dependencyRefs.get(ref) ?? [])].sort(compareRefs);
 		ordered.push({
 			...entry,
 			dependsOn: dependencies,
@@ -667,9 +752,7 @@ export function composeOperations(
 				ready.push(dependent);
 			}
 		}
-		ready = ready.sort(
-			(left, right) => (refOrder.get(left) ?? 0) - (refOrder.get(right) ?? 0),
-		);
+		ready = ready.sort(compareRefs);
 	}
 
 	const invalidatedClaimDetail = invalidatedRequiredClaimDetail(ordered);

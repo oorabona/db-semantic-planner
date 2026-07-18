@@ -233,7 +233,7 @@ function createFakePool(rows: BindingRow[]) {
 					],
 				};
 			}
-			if (sql.startsWith('INSERT INTO')) {
+			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_logical_identity"')) {
 				const [logicalId, schemaName, tableName, columnName, carrierKind] =
 					params ?? [];
 				rows.push({

@@ -197,6 +197,51 @@ function uniqueAssumptions(
 	return unique;
 }
 
+function uniqueAssumptionIds(
+	assumptionIds: readonly Assumption['id'][],
+): readonly Assumption['id'][] {
+	const seen = new Set<string>();
+	const unique: Assumption['id'][] = [];
+	for (const assumptionId of assumptionIds) {
+		if (seen.has(assumptionId)) {
+			continue;
+		}
+		seen.add(assumptionId);
+		unique.push(assumptionId);
+	}
+	return unique;
+}
+
+function stepAssumptionClosure(params: {
+	readonly effects: OperationEffectAssessment;
+	readonly requiredClaims: readonly ProofClaim[];
+	readonly allClaims: readonly ProofClaim[];
+	readonly guards: readonly ProvenApplyGuard[];
+}): readonly Assumption['id'][] {
+	const claimById = new Map(params.allClaims.map((claim) => [claim.id, claim]));
+	const assumptionIds: Assumption['id'][] = [
+		...params.effects.restsOn.map((assumption) => assumption.id),
+		...params.requiredClaims.flatMap((claim) => [...claim.assumes]),
+	];
+	for (const guard of params.guards) {
+		const binding = guard.protocol.binding;
+		if (!binding) {
+			continue;
+		}
+		if (binding.kind === 'external-ddl-exclusion') {
+			assumptionIds.push(binding.assumption);
+			continue;
+		}
+		if (binding.kind === 'stable-identity') {
+			const identityClaim = claimById.get(binding.identityClaim);
+			if (identityClaim) {
+				assumptionIds.push(...identityClaim.assumes);
+			}
+		}
+	}
+	return uniqueAssumptionIds(assumptionIds);
+}
+
 function operationPackSemanticsMissing(
 	effects: ReturnType<RegisteredOperationSemantics['effectsOf']>,
 	operation: PhysicalOperation,
@@ -646,6 +691,25 @@ function appendUniqueEvidence(
 	return undefined;
 }
 
+function appendUniqueClaims(
+	target: ProofClaim[],
+	seen: Map<string, ProofClaim>,
+	claims: readonly ProofClaim[],
+): string | undefined {
+	for (const claim of claims) {
+		const prior = seen.get(claim.id);
+		if (prior) {
+			if (stableJson(prior) !== stableJson(claim)) {
+				return `duplicate claim id ${claim.id} has conflicting claims`;
+			}
+			continue;
+		}
+		seen.set(claim.id, claim);
+		target.push(claim);
+	}
+	return undefined;
+}
+
 function firstRefutedRecognitionClaim(
 	result: Extract<RecognitionResult<unknown>, { readonly recognized: false }>,
 ): ProofClaim | undefined {
@@ -823,6 +887,234 @@ function sameObservationRequests(
 	);
 }
 
+function minServerVersionNum(request: ObservationRequest): number | undefined {
+	if (!isJsonObject(request.detail)) {
+		return undefined;
+	}
+	const value = request.detail.minServerVersionNum;
+	return typeof value === 'number' && Number.isFinite(value)
+		? value
+		: undefined;
+}
+
+function normalizeMinServerVersionRequest(
+	request: ObservationRequest,
+	context: ObservationContext,
+): ObservationRequest {
+	const minimum = minServerVersionNum(request);
+	if (minimum === undefined) {
+		return request;
+	}
+	return {
+		...request,
+		scope: request.scope.map((resource) => ({
+			...resource,
+			database: context.databaseId,
+		})),
+		detail: {
+			...(isJsonObject(request.detail) ? request.detail : {}),
+			minServerVersionNum: minimum,
+		},
+	};
+}
+
+function minServerVersionRequestKey(
+	request: ObservationRequest,
+	context: ObservationContext,
+): string | undefined {
+	const normalized = normalizeMinServerVersionRequest(request, context);
+	if (!isJsonObject(normalized.detail)) {
+		return undefined;
+	}
+	const minimum = minServerVersionNum(normalized);
+	if (minimum === undefined) {
+		return undefined;
+	}
+	const { minServerVersionNum: _minimum, ...detail } = normalized.detail;
+	return stableJson({
+		kind: normalized.kind,
+		scope: normalized.scope,
+		detail,
+	});
+}
+
+function strongestMinServerVersionRequests(
+	requests: readonly ObservationRequest[],
+	context: ObservationContext,
+): ReadonlyMap<string, ObservationRequest> {
+	const strongest = new Map<string, ObservationRequest>();
+	for (const request of requests) {
+		const key = minServerVersionRequestKey(request, context);
+		if (!key) {
+			continue;
+		}
+		const normalized = normalizeMinServerVersionRequest(request, context);
+		const prior = strongest.get(key);
+		if (
+			!prior ||
+			(minServerVersionNum(normalized) ?? 0) > (minServerVersionNum(prior) ?? 0)
+		) {
+			strongest.set(key, normalized);
+		}
+	}
+	return strongest;
+}
+
+function canonicalMinServerVersionRequest(
+	request: ObservationRequest,
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): ObservationRequest {
+	const key = minServerVersionRequestKey(request, context);
+	return (key ? strongest.get(key) : undefined) ?? request;
+}
+
+function uniqueRequests(
+	requests: readonly ObservationRequest[],
+): readonly ObservationRequest[] {
+	const seen = new Set<string>();
+	const unique: ObservationRequest[] = [];
+	for (const request of requests) {
+		const key = stableJson(request);
+		if (seen.has(key)) {
+			continue;
+		}
+		seen.add(key);
+		unique.push(request);
+	}
+	return unique;
+}
+
+function evaluationRequestsForCandidate(
+	requests: readonly ObservationRequest[],
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): readonly ObservationRequest[] {
+	return uniqueRequests([
+		...requests.map((request) =>
+			normalizeMinServerVersionRequest(request, context),
+		),
+		...canonicalProofRequestsForCandidate(requests, strongest, context),
+	]);
+}
+
+function canonicalProofRequestsForCandidate(
+	requests: readonly ObservationRequest[],
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): readonly ObservationRequest[] {
+	return uniqueRequests(
+		requests.map((request) =>
+			canonicalMinServerVersionRequest(request, strongest, context),
+		),
+	);
+}
+
+function isCanonicalMinServerVersionEvidence(
+	evidence: EvidenceObservation,
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): boolean {
+	const key = minServerVersionRequestKey(evidence.request, context);
+	if (!key) {
+		return true;
+	}
+	const canonical = strongest.get(key);
+	return (
+		canonical !== undefined &&
+		stableJson(normalizeMinServerVersionRequest(evidence.request, context)) ===
+			stableJson(canonical)
+	);
+}
+
+function canonicalEvidence(
+	evidence: readonly EvidenceObservation[],
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): readonly EvidenceObservation[] {
+	return evidence.filter((item) =>
+		isCanonicalMinServerVersionEvidence(item, strongest, context),
+	);
+}
+
+function propositionRequest(proposition: Proposition): ObservationRequest {
+	return proposition.detail === undefined
+		? {
+				kind: proposition.kind,
+				scope: proposition.scope,
+			}
+		: {
+				kind: proposition.kind,
+				scope: proposition.scope,
+				detail: proposition.detail,
+			};
+}
+
+function canonicalizeObligation(
+	obligation: ProofObligation,
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): ProofObligation {
+	const canonicalPropositionRequest = canonicalMinServerVersionRequest(
+		propositionRequest(obligation.proposition),
+		strongest,
+		context,
+	);
+	const proposition =
+		minServerVersionNum(canonicalPropositionRequest) === undefined
+			? obligation.proposition
+			: canonicalPropositionRequest.detail === undefined
+				? {
+						kind: canonicalPropositionRequest.kind,
+						scope: canonicalPropositionRequest.scope,
+					}
+				: {
+						kind: canonicalPropositionRequest.kind,
+						scope: canonicalPropositionRequest.scope,
+						detail: canonicalPropositionRequest.detail,
+					};
+	const dischargeableBy = obligation.dischargeableBy?.map((request) =>
+		canonicalMinServerVersionRequest(request, strongest, context),
+	);
+	return {
+		...obligation,
+		proposition,
+		scope:
+			minServerVersionNum(canonicalPropositionRequest) === undefined
+				? obligation.scope
+				: canonicalPropositionRequest.scope,
+		...(dischargeableBy ? { dischargeableBy } : {}),
+	};
+}
+
+function canonicalizeFragmentObligations(
+	fragment: TransitionFragment,
+	strongest: ReadonlyMap<string, ObservationRequest>,
+	context: ObservationContext,
+): TransitionFragment {
+	return {
+		...fragment,
+		obligations: fragment.obligations.map((obligation) =>
+			canonicalizeObligation(obligation, strongest, context),
+		),
+	};
+}
+
+function canonicalObligationClaimKey(
+	obligation: ProofObligation,
+): string | undefined {
+	if (
+		minServerVersionNum(propositionRequest(obligation.proposition)) ===
+		undefined
+	) {
+		return undefined;
+	}
+	return stableJson({
+		proposition: obligation.proposition,
+		scope: obligation.scope,
+	});
+}
+
 function fallbackUnknownObligation(
 	recognition: UnknownTransitionRecognition,
 ): ProofObligation {
@@ -868,6 +1160,7 @@ async function proveTransitions(
 	const planEvidence: EvidenceObservation[] = [];
 	const planEvidenceById = new Map<string, EvidenceObservation>();
 	const planClaims: ProofClaim[] = [];
+	const planClaimsById = new Map<string, ProofClaim>();
 	const planAssumptions: Assumption[] = [];
 	const operationInputs: CompositionOperation[] = [];
 	const compositionDeclarations: NonNullable<
@@ -890,6 +1183,15 @@ async function proveTransitions(
 	let sharedProofContext: ObservationContext | undefined;
 	let claimIndex = 0;
 
+	type PreparedCandidate = {
+		readonly candidate: TransitionCandidate;
+		readonly rule: TransitionRule;
+		readonly issuer: ObservationIssuer | undefined;
+		readonly requiredObservations: readonly ObservationRequest[];
+	};
+	const preparedCandidates = new Map<TransitionCandidate, PreparedCandidate>();
+	let minServerVersionRequests = new Map<string, ObservationRequest>();
+	const obligationClaimByCanonicalKey = new Map<string, ProofClaim>();
 	const multiCandidateSnapshot = !initialState && compare.candidates.length > 1;
 	let sharedClient: TransitionQueryClient | undefined;
 	let sharedReleaseError: unknown;
@@ -902,10 +1204,95 @@ async function proveTransitions(
 	try {
 		if (multiCandidateSnapshot) {
 			sharedClient = await checkoutProofClient(target);
+			const allRequiredObservations: ObservationRequest[] = [];
+			for (const candidate of compare.candidates) {
+				const rule = registry.resolveRule(candidate.rule);
+				if (!rule) {
+					return {
+						kind: 'blocked',
+						assessment: blockedAssessment({
+							code: 'ambiguous-rule',
+							candidates: candidateRefs(compare.candidates),
+							scope: [],
+							detail: 'rule pack id did not resolve',
+						}),
+					};
+				}
+				let requiredObservations: readonly ObservationRequest[];
+				try {
+					requiredObservations = rule.requiredObservations(candidate.match);
+				} catch (error) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposableCandidates(
+							compare.candidates,
+							error instanceof Error
+								? error.message
+								: 'candidate required observation resolution failed',
+						),
+					};
+				}
+				if (
+					!Array.isArray(candidate.requiredObservations) ||
+					!sameObservationRequests(
+						requiredObservations,
+						candidate.requiredObservations,
+					)
+				) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposableCandidates(
+							compare.candidates,
+							'candidate required observations do not match resolved rule',
+						),
+					};
+				}
+				const issuer = registry.resolveIssuer(candidate.rule.pack);
+				const candidateContext = registry.contextWithDerivedCapabilities(
+					issuer?.readContext
+						? await issuer.readContext(
+								sharedClient,
+								context,
+								requiredObservations,
+							)
+						: context,
+				);
+				if (!sharedProofContext) {
+					sharedProofContext = candidateContext;
+				} else {
+					const merged = registry.mergeObservationContexts(
+						sharedProofContext,
+						candidateContext,
+					);
+					if (!merged.ok) {
+						return {
+							kind: 'blocked',
+							assessment: artifactMismatch(PROVER_ARTIFACT, merged.detail),
+						};
+					}
+					sharedProofContext = merged.context;
+				}
+				preparedCandidates.set(candidate, {
+					candidate,
+					rule,
+					issuer,
+					requiredObservations,
+				});
+				allRequiredObservations.push(...requiredObservations);
+			}
+			if (sharedProofContext) {
+				minServerVersionRequests = new Map(
+					strongestMinServerVersionRequests(
+						allRequiredObservations,
+						sharedProofContext,
+					),
+				);
+			}
 		}
 
 		for (const candidate of compare.candidates) {
-			const rule = registry.resolveRule(candidate.rule);
+			const prepared = preparedCandidates.get(candidate);
+			const rule = prepared?.rule ?? registry.resolveRule(candidate.rule);
 			if (!rule) {
 				return {
 					kind: 'blocked',
@@ -919,36 +1306,41 @@ async function proveTransitions(
 			}
 
 			let requiredObservations: readonly ObservationRequest[];
-			try {
-				requiredObservations = rule.requiredObservations(candidate.match);
-			} catch (error) {
-				return {
-					kind: 'blocked',
-					assessment: uncomposableCandidates(
-						compare.candidates,
-						error instanceof Error
-							? error.message
-							: 'candidate required observation resolution failed',
-					),
-				};
-			}
-			if (
-				!Array.isArray(candidate.requiredObservations) ||
-				!sameObservationRequests(
-					requiredObservations,
-					candidate.requiredObservations,
-				)
-			) {
-				return {
-					kind: 'blocked',
-					assessment: uncomposableCandidates(
-						compare.candidates,
-						'candidate required observations do not match resolved rule',
-					),
-				};
+			if (prepared) {
+				requiredObservations = prepared.requiredObservations;
+			} else {
+				try {
+					requiredObservations = rule.requiredObservations(candidate.match);
+				} catch (error) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposableCandidates(
+							compare.candidates,
+							error instanceof Error
+								? error.message
+								: 'candidate required observation resolution failed',
+						),
+					};
+				}
+				if (
+					!Array.isArray(candidate.requiredObservations) ||
+					!sameObservationRequests(
+						requiredObservations,
+						candidate.requiredObservations,
+					)
+				) {
+					return {
+						kind: 'blocked',
+						assessment: uncomposableCandidates(
+							compare.candidates,
+							'candidate required observations do not match resolved rule',
+						),
+					};
+				}
 			}
 
-			const issuer = registry.resolveIssuer(candidate.rule.pack);
+			const issuer =
+				prepared?.issuer ?? registry.resolveIssuer(candidate.rule.pack);
 			let proofContext = context;
 			let issued: Awaited<ReturnType<typeof issueObservations>>;
 			if (issuer) {
@@ -979,14 +1371,7 @@ async function proveTransitions(
 					);
 					issued = appendIssued(initialState, additional);
 				} else if (sharedClient) {
-					proofContext = issuer.readContext
-						? await issuer.readContext(
-								sharedClient,
-								context,
-								requiredObservations,
-							)
-						: context;
-					proofContext = registry.contextWithDerivedCapabilities(proofContext);
+					proofContext = sharedProofContext ?? context;
 
 					const supportMismatch = ruleSupportMismatch(rule, proofContext);
 					if (supportMismatch) {
@@ -998,7 +1383,11 @@ async function proveTransitions(
 
 					const additional = await issueObservations(
 						issuer,
-						requiredObservations,
+						evaluationRequestsForCandidate(
+							requiredObservations,
+							minServerVersionRequests,
+							proofContext,
+						),
 						sharedClient,
 						proofContext,
 						sharedIssuedRequestKeys,
@@ -1068,16 +1457,27 @@ async function proveTransitions(
 			}
 			if (!sharedProofContext) {
 				sharedProofContext = proofContext;
-			} else if (stableJson(sharedProofContext) !== stableJson(proofContext)) {
-				return {
-					kind: 'blocked',
-					assessment: artifactMismatch(
-						PROVER_ARTIFACT,
-						'candidate proof contexts did not match',
-					),
-				};
+			} else {
+				const merged = registry.mergeObservationContexts(
+					sharedProofContext,
+					proofContext,
+				);
+				if (!merged.ok) {
+					return {
+						kind: 'blocked',
+						assessment: artifactMismatch(PROVER_ARTIFACT, merged.detail),
+					};
+				}
+				sharedProofContext = merged.context;
 			}
 
+			const proofEvidence = multiCandidateSnapshot
+				? canonicalEvidence(
+						issued.evidence,
+						minServerVersionRequests,
+						proofContext,
+					)
+				: issued.evidence;
 			const evaluation = rule.evaluate(
 				candidate.match,
 				issued.evidence,
@@ -1158,6 +1558,13 @@ async function proveTransitions(
 				...fragment,
 				selectionRationale: candidate.selectionRationale,
 			};
+			if (multiCandidateSnapshot) {
+				fragment = canonicalizeFragmentObligations(
+					fragment,
+					minServerVersionRequests,
+					proofContext,
+				);
+			}
 
 			const operationEffectsByRef = new Map<
 				string,
@@ -1244,12 +1651,25 @@ async function proveTransitions(
 			}
 			const obligationClaims = fragment.obligations.map((obligation) => ({
 				obligation,
-				claim: proofClaimForObligation(
-					obligation,
-					issued.evidence,
-					claimIndex++,
-					issuer?.artifact ?? PROVER_ARTIFACT,
-				),
+				claim: (() => {
+					const key = canonicalObligationClaimKey(obligation);
+					const prior = key
+						? obligationClaimByCanonicalKey.get(key)
+						: undefined;
+					if (prior) {
+						return prior;
+					}
+					const claim = proofClaimForObligation(
+						obligation,
+						proofEvidence,
+						claimIndex++,
+						issuer?.artifact ?? PROVER_ARTIFACT,
+					);
+					if (key) {
+						obligationClaimByCanonicalKey.set(key, claim);
+					}
+					return claim;
+				})(),
 			}));
 			const claims = [
 				...draftClaims,
@@ -1313,7 +1733,7 @@ async function proveTransitions(
 				try {
 					fingerprints = semantics.buildFingerprints(
 						operation,
-						issued.evidence,
+						proofEvidence,
 						proofContext,
 					);
 				} catch (error) {
@@ -1338,16 +1758,22 @@ async function proveTransitions(
 					...draftClaims.map((claim) => claim.id),
 					...operationObligationClaims.map((entry) => entry.claim.id),
 				];
+				const stepGuards = fragment.guards.filter(
+					(guard) => guard.appliesTo === operation.ref,
+				) as readonly ProvenApplyGuard[];
 				stepInputs.set(operation.ref, {
 					fragment,
 					operation,
 					effects,
 					fingerprints,
 					requiredClaims,
-					guards: fragment.guards.filter(
-						(guard) => guard.appliesTo === operation.ref,
-					) as readonly ProvenApplyGuard[],
-					restsOnAssumptions: assumptions.map((assumption) => assumption.id),
+					guards: stepGuards,
+					restsOnAssumptions: stepAssumptionClosure({
+						effects,
+						requiredClaims: requiredClaimEntries,
+						allClaims: claims,
+						guards: stepGuards,
+					}),
 				});
 				operationInputs.push({
 					operation,
@@ -1367,7 +1793,7 @@ async function proveTransitions(
 			const evidenceConflict = appendUniqueEvidence(
 				planEvidence,
 				planEvidenceById,
-				issued.evidence,
+				proofEvidence,
 			);
 			if (evidenceConflict) {
 				return {
@@ -1375,7 +1801,17 @@ async function proveTransitions(
 					assessment: artifactMismatch(PROVER_ARTIFACT, evidenceConflict),
 				};
 			}
-			planClaims.push(...claims);
+			const claimConflict = appendUniqueClaims(
+				planClaims,
+				planClaimsById,
+				claims,
+			);
+			if (claimConflict) {
+				return {
+					kind: 'blocked',
+					assessment: artifactMismatch(PROVER_ARTIFACT, claimConflict),
+				};
+			}
 			planAssumptions.push(...assumptions);
 		}
 	} catch (error) {

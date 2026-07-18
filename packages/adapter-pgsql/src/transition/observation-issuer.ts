@@ -20,6 +20,7 @@ import {
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
 	DBSP_LOGICAL_IDENTITY_TABLE,
+	DBSP_META_SCHEMA,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
@@ -37,7 +38,7 @@ import {
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 import { evidenceId } from './ids.js';
-import { pgPrivilegeFact } from './privileges.js';
+import { mergePgObservationPrivileges, pgPrivilegeFact } from './privileges.js';
 
 type QueryResultLike = {
 	readonly rows: readonly Record<string, unknown>[];
@@ -1265,9 +1266,9 @@ async function logicalIdentityObjectExists(
 
 async function logicalIdentitySideTableExists(
 	executor: Queryable,
-	schema: string,
+	_schema: string,
 ): Promise<boolean> {
-	const qualified = `${quoteIdent(schema, 'schema')}.${quoteIdent(
+	const qualified = `${quoteIdent(DBSP_META_SCHEMA, 'schema')}.${quoteIdent(
 		DBSP_LOGICAL_IDENTITY_TABLE,
 		'table',
 	)}`;
@@ -1291,7 +1292,7 @@ async function logicalIdentityBindings(
 	}
 	const result = await executor.query(
 		`SELECT logical_id, schema_name, table_name, column_name, carrier_kind ` +
-			`FROM ${quoteIdent(target.schema, 'schema')}.${quoteIdent(
+			`FROM ${quoteIdent(DBSP_META_SCHEMA, 'schema')}.${quoteIdent(
 				DBSP_LOGICAL_IDENTITY_TABLE,
 				'table',
 			)} ` +
@@ -1974,6 +1975,7 @@ async function observeEngineVersion(
 export function createPgObservationIssuer(): ObservationIssuer {
 	return {
 		artifact: PG_INTROSPECTION_ARTIFACT,
+		mergeObservationPrivileges: mergePgObservationPrivileges,
 		async readContext(target, context, requests) {
 			return readPgObservationContext(
 				target,

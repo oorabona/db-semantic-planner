@@ -434,7 +434,7 @@ describe('postgresql.enum.add-value rule', () => {
 		expect(unchanged).toEqual({ recognized: false });
 	});
 
-	it('generates a requires-new operation with an after-commit composition fact', () => {
+	it('generates a transactional operation with an after-commit composition fact', () => {
 		const rule = createEnumAddValueRule();
 		const currentMatch = match();
 		const declared = rule.declareComposition?.(currentMatch, context);
@@ -559,8 +559,8 @@ describe('postgresql.enum.add-value rule', () => {
 			return;
 		}
 		expect(outcome.plan.segments[0]).toMatchObject({
-			transaction: 'requires-new',
-			commitBoundaryAfter: true,
+			transaction: 'joins-current',
+			commitBoundaryAfter: false,
 		});
 
 		const result = await createApplier(registry).apply(

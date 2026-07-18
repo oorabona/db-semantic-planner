@@ -1,3 +1,8 @@
+import type {
+	ExecutionCoordinator,
+	TransitionConnectionPool,
+	TransitionExecutionClient,
+} from '@dbsp/core';
 import type { DbCasing } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
@@ -19,6 +24,7 @@ import { createAlterTableAddCheckOperationRuntime } from './operations/alter-tab
 import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type-add-value.js';
 import { createAttachLogicalIdentityOperationRuntime } from './operations/attach-logical-identity.js';
 import { createCreateUniqueIndexConcurrentlyOperationRuntime } from './operations/create-unique-index-concurrently.js';
+import { createManualSqlOperationRuntime } from './operations/manual-sql.js';
 import { createAddCheckRule } from './rules/add-check.js';
 import {
 	createLogicalIdentityAdoptionRule,
@@ -38,11 +44,105 @@ export interface PgTransitionPackOptions {
 	readonly identityAdoptionSelectionBasis?: string;
 }
 
+type QueryResultLike = {
+	readonly rows: readonly Record<string, unknown>[];
+};
+
+type Queryable = {
+	query(sql: string, params?: readonly unknown[]): Promise<QueryResultLike>;
+};
+
+type ReleasableQueryable = Queryable & {
+	release(error?: unknown): void;
+};
+
+type PoolLike = {
+	connect(): Promise<ReleasableQueryable>;
+};
+
+const PG_TRANSACTION_DOMAIN = 'postgresql.transition.connection';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function poolLike(value: unknown): PoolLike | undefined {
+	if (isRecord(value) && typeof value.connect === 'function') {
+		return value as PoolLike;
+	}
+	return undefined;
+}
+
+function releasable(value: unknown): value is ReleasableQueryable {
+	return (
+		isRecord(value) &&
+		typeof value.query === 'function' &&
+		typeof value.release === 'function'
+	);
+}
+
+function clientQuery(client: TransitionExecutionClient): Queryable {
+	if (
+		isRecord(client.opaqueClient) &&
+		typeof client.opaqueClient.query === 'function'
+	) {
+		return client.opaqueClient as Queryable;
+	}
+	throw new Error('PostgreSQL transition execution client is not queryable');
+}
+
+function boundedLockTimeout(maxWaitMs: number): number {
+	if (!Number.isFinite(maxWaitMs)) {
+		return 5000;
+	}
+	return Math.max(0, Math.min(86_400_000, Math.trunc(maxWaitMs)));
+}
+
+function createPgExecutionCoordinator(): ExecutionCoordinator {
+	return {
+		transactionDomain: PG_TRANSACTION_DOMAIN,
+		async checkout(
+			target: TransitionConnectionPool,
+		): Promise<TransitionExecutionClient> {
+			const pool = poolLike(target);
+			if (!pool) {
+				throw new Error(
+					'PostgreSQL transition target must be a Pool-like object with connect(); checked-out clients are not accepted',
+				);
+			}
+			return { opaqueClient: await pool.connect() };
+		},
+		release(client: TransitionExecutionClient, error?: unknown) {
+			if (releasable(client.opaqueClient)) {
+				client.opaqueClient.release(error);
+			}
+		},
+		async begin(client: TransitionExecutionClient) {
+			await clientQuery(client).query('BEGIN');
+		},
+		async setLockTimeout(client: TransitionExecutionClient, maxWaitMs: number) {
+			await clientQuery(client).query(
+				`SET LOCAL lock_timeout = '${boundedLockTimeout(maxWaitMs)}ms'`,
+			);
+		},
+		async commit(client: TransitionExecutionClient) {
+			await clientQuery(client).query('COMMIT');
+		},
+		async rollback(client: TransitionExecutionClient) {
+			await clientQuery(client).query('ROLLBACK');
+		},
+		isLockTimeout(error: unknown) {
+			return isRecord(error) && error.code === '55P03';
+		},
+	};
+}
+
 export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 	const naming =
 		options.naming ??
 		getNamingPluginForDbCasing(options.dbCasing ?? 'preserve');
 	const equivalence = createPgEquivalenceCapability();
+	const executionCoordinator = createPgExecutionCoordinator();
 	return {
 		rules: [
 			createLogicalIdentityAdoptionRule({
@@ -65,8 +165,11 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 			createAlterTableAddCheckOperationRuntime(),
 			createAlterTypeAddValueOperationRuntime(),
 			createCreateUniqueIndexConcurrentlyOperationRuntime(),
+			createManualSqlOperationRuntime(),
 		],
 		issuer: createPgObservationIssuer(),
+		executionCoordinator,
+		transactionDomain: executionCoordinator.transactionDomain,
 		equivalence,
 		capabilityDescriptors: [
 			{

@@ -140,12 +140,9 @@ function compositionOpRefs(
 
 function requirementNeedsCommit(
 	requirement: CompositionRequirement,
-	producer: CompositionProducer,
+	_producer: CompositionProducer,
 ): boolean {
-	return (
-		requirement.needs === 'producer-after-commit' ||
-		producer.available === 'after-commit'
-	);
+	return requirement.needs === 'producer-after-commit';
 }
 
 export function preflightStagedComposition(

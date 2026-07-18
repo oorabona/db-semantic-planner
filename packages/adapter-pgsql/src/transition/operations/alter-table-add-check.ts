@@ -30,6 +30,11 @@ import {
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from '../constants.js';
 import { advisoryObservationId, assumptionId } from '../ids.js';
+import {
+	appendCompletionJournal,
+	appendIntentJournal,
+	appendObservedJournal,
+} from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
 import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
@@ -908,11 +913,10 @@ export function createAlterTableAddCheckOperationRuntime() {
 			}
 		},
 		async writeIntentJournal(
-			_client: TransitionExecutionClient,
-			_record: DurableIntentRecord,
+			client: TransitionExecutionClient,
+			record: DurableIntentRecord,
 		) {
-			// Ephemeral by design: recovery is by re-introspection of the table CHECK
-			// set, not durable replay.
+			await appendIntentJournal(clientQuery(client), record);
 		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
@@ -1031,12 +1035,11 @@ export function createAlterTableAddCheckOperationRuntime() {
 			return { kind: 'completed' };
 		},
 		async writeCompletionJournal(
-			_client: TransitionExecutionClient,
-			_operation: PhysicalOperation,
-			_record: TransactionalCompletionRecord,
+			client: TransitionExecutionClient,
+			operation: PhysicalOperation,
+			record: TransactionalCompletionRecord,
 		) {
-			// Ephemeral by design: recovery is by re-introspection of the table CHECK
-			// set, not durable replay.
+			await appendCompletionJournal(clientQuery(client), operation, record);
 		},
 		async commit(client: TransitionExecutionClient) {
 			await clientQuery(client).query('COMMIT');
@@ -1045,11 +1048,10 @@ export function createAlterTableAddCheckOperationRuntime() {
 			await clientQuery(client).query('ROLLBACK');
 		},
 		async writeObservedJournal(
-			_client: TransitionExecutionClient,
-			_journal: StepJournal,
+			client: TransitionExecutionClient,
+			journal: StepJournal,
 		) {
-			// Ephemeral by design: recovery is by re-introspection of the table CHECK
-			// set, not durable replay.
+			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
 			return (

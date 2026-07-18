@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from 'node:crypto';
 import type {
 	ApplicableAssessment,
 	ApplyGuard,
@@ -20,16 +21,19 @@ import type {
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionConnectionPool,
+	TransitionRunMetadata,
 	TrustRoot,
 } from '@dbsp/types';
 import { claimId, semanticArtifactId } from './ids.js';
 import type { Applier, InProcessProvenPlan } from './index.js';
 import { isMintedInProcessPlan } from './minting.js';
 import {
+	type ExecutionCoordinator,
 	isOperationRuntime,
 	type OperationRuntime,
 	type PackRegistry,
 } from './registry.js';
+import { resumeTransitionRun } from './resume.js';
 import { stableJson } from './stable-json.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
@@ -180,6 +184,10 @@ function recordedAt(): string {
 	return new Date().toISOString();
 }
 
+function digest(value: unknown): string {
+	return createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
 function lockTimeoutMs(
 	runtime: OperationRuntime,
 	step: ProvenPlanStep,
@@ -218,8 +226,27 @@ function fingerprintMatches(
 	return expected.digest === actual.digest;
 }
 
-function intentRecord(step: ProvenPlanStep): DurableIntentRecord {
+function transitionRunMetadata(
+	plan: InProcessProvenPlan,
+	context: ObservationContext,
+): TransitionRunMetadata {
 	return {
+		runId: `dbsp-${randomUUID()}`,
+		planDigest: digest(plan),
+		targetContextDigest: digest(context),
+		databaseId: context.databaseId,
+		coreVersion: APPLIER_ARTIFACT.version,
+		startedAt: recordedAt(),
+	};
+}
+
+function intentRecord(
+	step: ProvenPlanStep,
+	run: TransitionRunMetadata,
+): DurableIntentRecord {
+	return {
+		runId: run.runId,
+		run,
 		stepId: step.stepId,
 		operation: step.operation,
 		recordedAt: recordedAt(),
@@ -228,9 +255,11 @@ function intentRecord(step: ProvenPlanStep): DurableIntentRecord {
 
 function completionRecord(
 	step: ProvenPlanStep,
+	run: TransitionRunMetadata,
 	committedWithDdl = true,
 ): TransactionalCompletionRecord {
 	return {
+		runId: run.runId,
 		stepId: step.stepId,
 		committedWithDdl,
 		recordedAt: recordedAt(),
@@ -251,7 +280,11 @@ function contextMismatchReason(
 
 function journalWithObserved(
 	intent: DurableIntentRecord,
-	outcome: 'guard-failed' | 'guard-timeout' | 'partially-applied',
+	outcome:
+		| 'guard-failed'
+		| 'guard-timeout'
+		| 'operation-failed-not-applied'
+		| 'partially-applied',
 	observations: readonly IssuedObservation[],
 	recovery: readonly RecoveryArtefact[] = [],
 ): StepJournal {
@@ -296,6 +329,24 @@ function unacceptedAssumptionResult(
 			assumption: assumption.id,
 			scope: assumption.scope,
 			detail: 'apply policy did not accept required assumption',
+		}),
+		journals: [],
+		observations: [],
+	};
+}
+
+function unacceptedStepAssumptionResult(
+	_plan: InProcessProvenPlan,
+	step: ProvenPlanStep,
+	assumption: Assumption,
+): ApplyResult {
+	return {
+		assessment: assessment({
+			code: 'uncomposable',
+			fragments: [step.selectionRationale.chosen],
+			assumption: assumption.id,
+			scope: assumption.scope,
+			detail: `apply policy did not accept assumption ${assumption.id} required by step ${step.stepId}`,
 		}),
 		journals: [],
 		observations: [],
@@ -390,6 +441,20 @@ function guardFailedReason(
 	};
 }
 
+function operationFailedNotAppliedReason(
+	step: ProvenPlanStep,
+	detail: string,
+): OutcomeReason {
+	return {
+		code: 'operation-failed-not-applied',
+		stepId: step.stepId,
+		operationKind: step.operation.operationKind,
+		operationRef: step.operation.ref,
+		scope: [],
+		detail,
+	};
+}
+
 function stoppedAssessment(
 	reason: OutcomeReason,
 	hasCommittedSteps: boolean,
@@ -445,18 +510,34 @@ export function createApplier(registry: PackRegistry): Applier {
 			}
 			const reportedAssessment = derivedApplicableAssessment(plan);
 
-			for (const assumption of plan.assumptions) {
-				if (!assumptionAccepted(assumption, policy)) {
-					return unacceptedAssumptionResult(plan, assumption);
-				}
-			}
-
 			const proofContext = contextFromPlanObservations(plan.observations);
 			if (!proofContext) {
 				throw new Error(
 					'internal error: minted proven plan evidence observations do not share one context',
 				);
 			}
+			const assumptionById = new Map(
+				plan.assumptions.map((assumption) => [assumption.id, assumption]),
+			);
+			const stepAssumptionIds = new Set<string>();
+			for (const step of plan.steps) {
+				for (const assumptionId of step.restsOnAssumptions) {
+					stepAssumptionIds.add(assumptionId);
+					const assumption = assumptionById.get(assumptionId);
+					if (assumption && !assumptionAccepted(assumption, policy)) {
+						return unacceptedStepAssumptionResult(plan, step, assumption);
+					}
+				}
+			}
+			for (const assumption of plan.assumptions) {
+				if (
+					!stepAssumptionIds.has(assumption.id) &&
+					!assumptionAccepted(assumption, policy)
+				) {
+					return unacceptedAssumptionResult(plan, assumption);
+				}
+			}
+			const run = transitionRunMetadata(plan, proofContext);
 			const operationEffectsByRef = new Map<
 				string,
 				OperationEffectAssessment
@@ -524,8 +605,11 @@ export function createApplier(registry: PackRegistry): Applier {
 							'operation observation issuer missing',
 						);
 					}
-					const execution = semantics.effectsOf(step.operation, proofContext)
-						.effects.execution;
+					const execution = operationEffectsByRef.get(step.operation.ref)
+						?.effects.execution;
+					if (!execution) {
+						return unresolvedOperationResult(step, 'operation effects missing');
+					}
 					if (
 						segment.transaction === 'joins-current' &&
 						execution.transaction !== 'joins-current'
@@ -557,7 +641,8 @@ export function createApplier(registry: PackRegistry): Applier {
 						step,
 						semantics,
 						operationIssuer,
-						intent: intentRecord(step),
+						intent: intentRecord(step, run),
+						coordinatorBinding: registry.transactionCoordinatorFor(semantics),
 					});
 				}
 				const first = resolvedSteps[0];
@@ -567,11 +652,53 @@ export function createApplier(registry: PackRegistry): Applier {
 						`segment ${segment.segmentId} contains no steps`,
 					);
 				}
-				const segmentRuntime = first.semantics;
-				if (resolvedSteps.some((entry) => entry.semantics !== segmentRuntime)) {
+				const transactional = segment.transaction !== 'forbids-transaction';
+				const runtimeSet = new Set(
+					resolvedSteps.map((entry) => entry.semantics),
+				);
+				let segmentCoordinator: ExecutionCoordinator | OperationRuntime =
+					first.semantics;
+				if (transactional && runtimeSet.size > 1) {
+					const firstBinding = first.coordinatorBinding;
+					if (!firstBinding) {
+						return uncomposablePlanResult(
+							plan,
+							`segment ${segment.segmentId} spans multiple operation runtimes without an explicit shared transaction coordinator`,
+						);
+					}
+					if (
+						resolvedSteps.some((entry) => {
+							const binding = entry.coordinatorBinding;
+							return (
+								!binding ||
+								binding.coordinator !== firstBinding.coordinator ||
+								binding.transactionDomain !== firstBinding.transactionDomain
+							);
+						})
+					) {
+						return uncomposablePlanResult(
+							plan,
+							`segment ${segment.segmentId} spans operation runtimes with different transaction coordinators`,
+						);
+					}
+					segmentCoordinator = firstBinding.coordinator;
+				} else if (
+					transactional &&
+					first.coordinatorBinding &&
+					resolvedSteps.every((entry) => {
+						const binding = entry.coordinatorBinding;
+						return (
+							binding?.coordinator === first.coordinatorBinding?.coordinator &&
+							binding?.transactionDomain ===
+								first.coordinatorBinding?.transactionDomain
+						);
+					})
+				) {
+					segmentCoordinator = first.coordinatorBinding.coordinator;
+				} else if (!transactional && runtimeSet.size > 1) {
 					return uncomposablePlanResult(
 						plan,
-						`segment ${segment.segmentId} spans multiple operation runtimes`,
+						`segment ${segment.segmentId} spans multiple operation runtimes without a transaction`,
 					);
 				}
 
@@ -584,28 +711,16 @@ export function createApplier(registry: PackRegistry): Applier {
 				let active = first;
 				let activeContext = runtimeContext;
 				let activeNonRollbackableOperationExecuted = false;
-				const transactional = segment.transaction !== 'forbids-transaction';
 				const completedInSegment: {
 					readonly step: ProvenPlanStep;
 					readonly semantics: OperationRuntime;
-					readonly intent: DurableIntentRecord;
-					readonly completion: TransactionalCompletionRecord;
-					readonly context: ObservationContext;
-					readonly operationIssuer: NonNullable<
-						ReturnType<PackRegistry['resolveIssuer']>
-					>;
+					readonly journal: StepJournal;
 				}[] = [];
 				try {
-					client = await segmentRuntime.checkout(target);
+					client = await segmentCoordinator.checkout(target);
 					const executionClient = client;
-					for (const entry of resolvedSteps) {
-						await segmentRuntime.writeIntentJournal(
-							executionClient,
-							entry.intent,
-						);
-					}
 					if (transactional) {
-						await segmentRuntime.begin(executionClient);
+						await segmentCoordinator.begin(executionClient);
 						transactionStarted = true;
 					}
 
@@ -613,7 +728,11 @@ export function createApplier(registry: PackRegistry): Applier {
 						active = entry;
 						activeContext = runtimeContext;
 						activeNonRollbackableOperationExecuted = false;
-						await entry.semantics.setLockTimeout(
+						await entry.semantics.writeIntentJournal(
+							executionClient,
+							entry.intent,
+						);
+						await segmentCoordinator.setLockTimeout(
 							executionClient,
 							lockTimeoutMs(entry.semantics, entry.step, runtimeContext),
 						);
@@ -652,7 +771,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							);
 						} catch {
 							if (transactionStarted && !committed) {
-								await entry.semantics.rollback(executionClient);
+								await segmentCoordinator.rollback(executionClient);
 							}
 							const journal = unknownJournal(entry.intent);
 							await entry.semantics.writeObservedJournal(
@@ -678,7 +797,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							)
 						) {
 							if (transactionStarted && !committed) {
-								await entry.semantics.rollback(executionClient);
+								await segmentCoordinator.rollback(executionClient);
 							}
 							const journal = contextMismatchJournal(
 								entry.intent,
@@ -714,7 +833,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								observations.push(...guardResult.observations);
 								if (!guardResult.passed) {
 									if (transactionStarted && !committed) {
-										await entry.semantics.rollback(executionClient);
+										await segmentCoordinator.rollback(executionClient);
 									}
 									const hasAppliedWork =
 										journals.length > 0 || nonRollbackableOperationExecuted;
@@ -766,7 +885,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						);
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
-								await entry.semantics.rollback(executionClient);
+								await segmentCoordinator.rollback(executionClient);
 							}
 							const journal = journalWithObserved(
 								entry.intent,
@@ -791,7 +910,30 @@ export function createApplier(registry: PackRegistry): Applier {
 						}
 						if (executionOutcome.kind === 'partially-applied') {
 							if (transactionStarted && !committed) {
-								await entry.semantics.rollback(executionClient);
+								await segmentCoordinator.rollback(executionClient);
+							}
+							if (transactional) {
+								const detail =
+									executionOutcome.detail ??
+									'operation reported a partial outcome before commit; transaction rolled back';
+								const journal = journalWithObserved(
+									entry.intent,
+									'operation-failed-not-applied',
+									[],
+									executionOutcome.recovery,
+								);
+								await entry.semantics.writeObservedJournal(
+									executionClient,
+									journal,
+								);
+								return {
+									assessment: stoppedAssessment(
+										operationFailedNotAppliedReason(entry.step, detail),
+										journals.length > 0,
+									),
+									journals: [...journals, journal],
+									observations,
+								};
 							}
 							const journal = journalWithObserved(
 								entry.intent,
@@ -828,63 +970,53 @@ export function createApplier(registry: PackRegistry): Applier {
 						if (afterGuardFailure) {
 							return afterGuardFailure;
 						}
-						const completion = completionRecord(entry.step, transactional);
-						await entry.semantics.writeCompletionJournal(
-							executionClient,
-							entry.step.operation,
-							completion,
-						);
-						completedInSegment.push({
-							step: entry.step,
-							semantics: entry.semantics,
-							intent: entry.intent,
-							completion,
-							context: stepContext,
-							operationIssuer: entry.operationIssuer,
-						});
-					}
-
-					if (transactional) {
-						await segmentRuntime.commit(executionClient);
-						committed = true;
-					}
-
-					let afterFailure:
-						| { readonly step: ProvenPlanStep; readonly detail: string }
-						| undefined;
-					for (const entry of completedInSegment) {
-						active = entry;
-						activeContext = entry.context;
 						let after: Awaited<
 							ReturnType<OperationRuntime['observeOperation']>
 						>;
 						try {
-							after = await segmentRuntime.observeOperation(
+							after = await entry.semantics.observeOperation(
 								executionClient,
 								entry.step.operation,
-								entry.context,
+								stepContext,
 								'after',
 								entry.operationIssuer,
 							);
 						} catch (error) {
+							if (transactionStarted && !committed) {
+								await segmentCoordinator.rollback(executionClient);
+							}
 							const journal = journalWithObserved(
 								entry.intent,
-								'partially-applied',
+								transactional
+									? 'operation-failed-not-applied'
+									: 'partially-applied',
 								[],
 							);
-							await segmentRuntime.writeObservedJournal(
+							await entry.semantics.writeObservedJournal(
 								executionClient,
 								journal,
 							);
-							journals.push(journal);
-							afterFailure ??= {
-								step: entry.step,
-								detail:
-									error instanceof Error
-										? error.message
-										: 'after observation failed',
+							const detail =
+								error instanceof Error
+									? error.message
+									: 'after observation failed';
+							return {
+								assessment: transactional
+									? stoppedAssessment(
+											operationFailedNotAppliedReason(
+												entry.step,
+												`expectedAfter observation failed before commit: ${detail}`,
+											),
+											journals.length > 0,
+										)
+									: assessment(
+											partiallyAppliedReason(entry.step, detail),
+											'partially-applied',
+											'human-intervention-required',
+										),
+								journals: [...journals, journal],
+								observations,
 							};
-							continue;
 						}
 						observations.push(...after.observations);
 						const observedOutcome = {
@@ -892,58 +1024,125 @@ export function createApplier(registry: PackRegistry): Applier {
 							observations: evidenceIds(after.observations),
 							recordedAt: recordedAt(),
 						};
-
 						if (
 							!fingerprintMatches(entry.step.expectedAfter, after.fingerprint)
 						) {
+							if (transactionStarted && !committed) {
+								await segmentCoordinator.rollback(executionClient);
+							}
 							const journal: StepJournal = {
 								intent: entry.intent,
-								outcome: 'partially-applied',
+								outcome: transactional
+									? 'operation-failed-not-applied'
+									: 'partially-applied',
 								observedOutcome,
 								recovery: [],
 							};
-							await segmentRuntime.writeObservedJournal(
+							await entry.semantics.writeObservedJournal(
+								executionClient,
+								journal,
+							);
+							return {
+								assessment: transactional
+									? stoppedAssessment(
+											operationFailedNotAppliedReason(
+												entry.step,
+												'expectedAfter mismatch before commit',
+											),
+											journals.length > 0,
+										)
+									: assessment(
+											partiallyAppliedReason(
+												entry.step,
+												'expectedAfter mismatch',
+											),
+											'partially-applied',
+											'human-intervention-required',
+										),
+								journals: [...journals, journal],
+								observations,
+							};
+						}
+						const completion = completionRecord(entry.step, run, transactional);
+						await entry.semantics.writeCompletionJournal(
+							executionClient,
+							entry.step.operation,
+							completion,
+						);
+						const journal: StepJournal = {
+							intent: entry.intent,
+							outcome: 'completed',
+							transactionalCompletion: completion,
+							observedOutcome,
+						};
+						if (transactional) {
+							completedInSegment.push({
+								step: entry.step,
+								semantics: entry.semantics,
+								journal,
+							});
+						} else {
+							await entry.semantics.writeObservedJournal(
 								executionClient,
 								journal,
 							);
 							journals.push(journal);
-							afterFailure ??= {
-								step: entry.step,
-								detail: 'expectedAfter mismatch',
-							};
-							continue;
 						}
-
-						const journal: StepJournal = {
-							intent: entry.intent,
-							outcome: 'completed',
-							transactionalCompletion: entry.completion,
-							observedOutcome,
-						};
-						await segmentRuntime.writeObservedJournal(executionClient, journal);
-						journals.push(journal);
 					}
-					if (afterFailure) {
-						return {
-							assessment: assessment(
-								partiallyAppliedReason(afterFailure.step, afterFailure.detail),
-								'partially-applied',
-								'human-intervention-required',
-							),
-							journals,
-							observations,
-						};
+
+					if (transactional) {
+						await segmentCoordinator.commit(executionClient);
+						committed = true;
+					}
+
+					for (const entry of completedInSegment) {
+						await entry.semantics.writeObservedJournal(
+							executionClient,
+							entry.journal,
+						);
+						journals.push(entry.journal);
 					}
 				} catch (error) {
 					releaseError = error;
+					let rollbackAttempted = false;
+					let rollbackSucceeded = false;
 					if (client && transactionStarted && !committed) {
+						rollbackAttempted = true;
 						try {
-							await segmentRuntime.rollback(client);
+							await segmentCoordinator.rollback(client);
+							rollbackSucceeded = true;
 						} catch {
 							// The outcome below reports uncertainty; resume must re-introspect.
 						}
 					}
-					if (segmentRuntime.isLockTimeout(error)) {
+					if (rollbackAttempted && !rollbackSucceeded) {
+						const journal = unknownJournal(active.intent);
+						if (client) {
+							await active.semantics
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return {
+							assessment: assessment(
+								{
+									code: 'unknown-step-result',
+									stepId: active.step.stepId,
+									operationKind: active.step.operation.operationKind,
+									operationRef: active.step.operation.ref,
+									scope: [],
+									detail:
+										error instanceof Error
+											? `rollback outcome uncertain after failure: ${error.message}`
+											: 'rollback outcome uncertain after apply failure',
+								},
+								'outcome-unknown',
+								'human-intervention-required',
+							),
+							journals: [...journals, journal],
+							observations,
+						};
+					}
+					if (segmentCoordinator.isLockTimeout(error)) {
 						const hasAppliedWork =
 							journals.length > 0 || activeNonRollbackableOperationExecuted;
 						const journal = journalWithObserved(
@@ -954,7 +1153,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							[],
 						);
 						if (client) {
-							await segmentRuntime
+							await active.semantics
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
@@ -978,14 +1177,47 @@ export function createApplier(registry: PackRegistry): Applier {
 							observations,
 						};
 					}
-					if (journals.length > 0 || activeNonRollbackableOperationExecuted) {
+					if (
+						transactional &&
+						rollbackAttempted &&
+						rollbackSucceeded &&
+						!activeNonRollbackableOperationExecuted
+					) {
+						const detail =
+							error instanceof Error
+								? error.message
+								: 'operation failed before commit';
+						const journal = journalWithObserved(
+							active.intent,
+							'operation-failed-not-applied',
+							[],
+						);
+						if (client) {
+							await active.semantics
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return {
+							assessment: stoppedAssessment(
+								operationFailedNotAppliedReason(active.step, detail),
+								journals.length > 0,
+							),
+							journals: [...journals, journal],
+							observations,
+						};
+					}
+					if (
+						committed ||
+						journals.length > 0 ||
+						activeNonRollbackableOperationExecuted
+					) {
 						const journal = journalWithObserved(
 							active.intent,
 							'partially-applied',
 							[],
 						);
 						if (client) {
-							await segmentRuntime
+							await active.semantics
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
@@ -1006,7 +1238,7 @@ export function createApplier(registry: PackRegistry): Applier {
 					}
 					const journal = unknownJournal(active.intent);
 					if (client) {
-						await segmentRuntime
+						await active.semantics
 							.writeObservedJournal(client, journal)
 							.catch(() => undefined);
 					}
@@ -1032,7 +1264,7 @@ export function createApplier(registry: PackRegistry): Applier {
 				} finally {
 					if (client) {
 						try {
-							await segmentRuntime.release(client, releaseError);
+							await segmentCoordinator.release(client, releaseError);
 						} catch {
 							// A cleanup failure must not mask the known apply outcome.
 						}
@@ -1044,6 +1276,15 @@ export function createApplier(registry: PackRegistry): Applier {
 				journals,
 				observations,
 			};
+		},
+		async resume(runId, loadCurrent, readContext, policy, target) {
+			return resumeTransitionRun(registry, {
+				runId,
+				loadCurrent,
+				readContext,
+				policy,
+				target,
+			});
 		},
 	};
 }

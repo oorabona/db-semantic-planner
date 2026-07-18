@@ -38,6 +38,7 @@ import { isMintedInProcessPlan } from './minting.js';
 import { createProver } from './prover.js';
 import type { RegisteredOperationSemantics } from './registry.js';
 import { createPackRegistry } from './registry.js';
+import { preflightStagedComposition } from './staging.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
 const ruleArtifact: SemanticArtifactRef = {
@@ -373,6 +374,14 @@ function compositionOperationAssumption(): Assumption {
 		asserter: { kind: 'pack', artifact: compositionOperationArtifact },
 		statement: 'mock composition operation semantics are correct',
 		scope: [compositionMarkerResource()],
+	};
+}
+
+function compositionOperationAssumptionFor(ref: 'op:a' | 'op:b'): Assumption {
+	return {
+		...compositionOperationAssumption(),
+		id: assumptionId(`mock.composition.operation-pack-semantics.${ref}`),
+		statement: `mock composition operation semantics are correct for ${ref}`,
 	};
 }
 
@@ -899,7 +908,12 @@ function registry(
 	]);
 }
 
-type CompositionMode = 'dependent' | 'cycle' | 'disconnected' | 'invalidates';
+type CompositionMode =
+	| 'dependent'
+	| 'cycle'
+	| 'disconnected'
+	| 'conflict'
+	| 'invalidates';
 
 function compositionOperation(ref: 'op:a' | 'op:b'): PhysicalOperation {
 	return {
@@ -1104,9 +1118,7 @@ function compositionSemantics(
 							: [],
 					contextMutations: [],
 					externalEffects: { accountedFor: [], couldNotAccountFor: [] },
-					execution: isA
-						? { transaction: 'requires-new', commitBoundary: 'after' }
-						: { transaction: 'joins-current', commitBoundary: 'none' },
+					execution: { transaction: 'joins-current', commitBoundary: 'none' },
 				},
 				restsOn: [compositionOperationAssumption()],
 			};
@@ -1162,6 +1174,192 @@ function compositionRegistry(mode: CompositionMode = 'dependent') {
 				rules: [ruleA, ruleB],
 				operationSemantics: [compositionSemantics(mode)],
 				issuer: compositionIssuer(),
+			},
+		]),
+	};
+}
+
+function minServerVersionRequest(
+	_opRef: 'op:a' | 'op:b',
+	minServerVersionNum: number,
+): ObservationRequest {
+	return {
+		kind: 'mock.engine.version-supported',
+		scope: [
+			{
+				engine: 'postgresql',
+				database: 'model',
+				kind: 'engine',
+				name: 'postgresql',
+			},
+		],
+		detail: { minServerVersionNum },
+	};
+}
+
+function versionedCompositionRule(
+	opRef: 'op:a' | 'op:b',
+	minServerVersionNum: number,
+): TransitionRule<{ readonly opRef: 'op:a' | 'op:b' }> {
+	const base = compositionRule(opRef, 'disconnected');
+	return {
+		...base,
+		requiredObservations: () => [
+			compositionRequest(opRef),
+			minServerVersionRequest(opRef, minServerVersionNum),
+		],
+		evaluate: (_match, evidenceItems) => {
+			const requests = [
+				compositionRequest(opRef),
+				minServerVersionRequest(opRef, minServerVersionNum),
+			].map((request) => {
+				const observed = evidenceItems.find(
+					(item) =>
+						item.request.kind === request.kind &&
+						(item.request.kind !== 'mock.engine.version-supported' ||
+							(item.request.detail as { minServerVersionNum?: unknown })
+								.minServerVersionNum === minServerVersionNum),
+				);
+				return observed?.request ?? request;
+			});
+			return {
+				outcome: 'applicable',
+				obligations: requests.map((request) => ({
+					...obligationForRequest(request),
+					appliesTo: opRef,
+				})),
+				assumptions: [],
+			};
+		},
+	};
+}
+
+function mockPrivilegeFact(
+	kind: string,
+	scope: readonly string[],
+	holds: boolean,
+): string {
+	return `${kind}:${JSON.stringify(scope)}=${String(holds)}`;
+}
+
+function mergeMockPrivileges(
+	left: readonly string[],
+	right: readonly string[],
+) {
+	const byFact = new Map<string, string>();
+	for (const fact of [...new Set([...left, ...right])].sort()) {
+		const separator = fact.lastIndexOf('=');
+		if (separator <= 0) {
+			return { conflict: `unparseable mock privilege fact ${fact}` };
+		}
+		const key = fact.slice(0, separator);
+		const value = fact.slice(separator + 1);
+		const prior = byFact.get(key);
+		if (prior && prior !== value) {
+			return { conflict: `conflicting mock privilege fact ${key}` };
+		}
+		byFact.set(key, value);
+	}
+	return {
+		merged: [...byFact.entries()]
+			.map(([key, value]) => `${key}=${value}`)
+			.sort(),
+	};
+}
+
+function versionedCompositionRegistry(
+	options: {
+		readonly contextFor?: (
+			opRef: 'op:a' | 'op:b',
+			ctx: ObservationContext,
+		) => ObservationContext;
+		readonly mergePrivileges?: ObservationIssuer['mergeObservationPrivileges'];
+		readonly effectsContexts?: ObservationContext[];
+		readonly fingerprintContexts?: ObservationContext[];
+	} = {},
+) {
+	const ruleA = versionedCompositionRule('op:a', 12);
+	const ruleB = versionedCompositionRule('op:b', 18);
+	const baseSemantics = compositionSemantics('disconnected');
+	const operationSemantics: RegisteredOperationSemantics = {
+		...baseSemantics,
+		effectsOf: (operation, ctx) => {
+			options.effectsContexts?.push(ctx);
+			return baseSemantics.effectsOf(operation, ctx);
+		},
+		buildFingerprints: (operation, evidenceItems, ctx) => {
+			options.fingerprintContexts?.push(ctx);
+			return baseSemantics.buildFingerprints(operation, evidenceItems, ctx);
+		},
+	};
+	const issuer: ObservationIssuer = {
+		artifact: compositionRuleArtifact,
+		mergeObservationPrivileges: options.mergePrivileges ?? mergeMockPrivileges,
+		readContext: async (_target, ctx, requests) => {
+			const opRef =
+				requests.find((request) => request.kind.startsWith('mock.composition.'))
+					?.detail &&
+				(
+					requests.find((request) =>
+						request.kind.startsWith('mock.composition.'),
+					)?.detail as { readonly opRef?: 'op:a' | 'op:b' }
+				).opRef;
+			if (opRef !== 'op:a' && opRef !== 'op:b') {
+				return ctx;
+			}
+			return (
+				options.contextFor?.(opRef, ctx) ?? {
+					...ctx,
+					capabilities: [...ctx.capabilities, `capability:${opRef}`],
+					privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
+				}
+			);
+		},
+		execute: async (request, _target, ctx): Promise<EvidenceObservation> => {
+			const normalizedRequest =
+				request.kind === 'mock.engine.version-supported'
+					? {
+							...request,
+							scope: request.scope.map((resource) => ({
+								...resource,
+								database: ctx.databaseId,
+							})),
+						}
+					: request;
+			return {
+				role: 'evidence',
+				id: evidenceId(
+					`mock.evidence.${normalizedRequest.kind}.${JSON.stringify(
+						normalizedRequest.detail ?? {},
+					)}`,
+				),
+				issuer: compositionRuleArtifact,
+				request: normalizedRequest,
+				result: {
+					value: {
+						claims: [{ kind: normalizedRequest.kind, holds: true }],
+					},
+				},
+				context: ctx,
+				stability: 'externally-mutable',
+				takenAt: new Date().toISOString(),
+				scope: normalizedRequest.scope,
+				source:
+					normalizedRequest.kind === 'mock.engine.version-supported'
+						? 'configuration-probe'
+						: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			};
+		},
+	};
+	return {
+		ruleA,
+		ruleB,
+		registry: createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [operationSemantics],
+				issuer,
 			},
 		]),
 	};
@@ -2053,7 +2251,7 @@ describe('createComparator', () => {
 		);
 	});
 
-	it('fails closed for CHECK add plus a column change without composition declarations', async () => {
+	it('proves CHECK add plus a column change when effects are disjoint', async () => {
 		const customRegistry = createPackRegistry([
 			{
 				rules: [rule(), checkRule()],
@@ -2090,12 +2288,14 @@ describe('createComparator', () => {
 			context,
 		);
 
-		expectBlockedReason(outcome, 'uncomposable');
-		if (outcome.kind === 'blocked') {
-			expect(outcome.assessment.reasons[0]?.detail).toMatch(
-				/ambiguous|unordered/i,
-			);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
 		}
+		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+			'op:add-check',
+			'op:set-not-null',
+		]);
 	});
 
 	it('returns transitions when two recognized column changes are present', () => {
@@ -2201,7 +2401,7 @@ describe('createComparator', () => {
 		}
 	});
 
-	it('fails closed for enum-add plus a column change without composition declarations', async () => {
+	it('proves enum-add plus a column change when effects are disjoint', async () => {
 		const customRegistry = createPackRegistry([
 			{
 				rules: [rule(), enumRule()],
@@ -2235,12 +2435,14 @@ describe('createComparator', () => {
 			context,
 		);
 
-		expectBlockedReason(outcome, 'uncomposable');
-		if (outcome.kind === 'blocked') {
-			expect(outcome.assessment.reasons[0]?.detail).toMatch(
-				/ambiguous|unordered/i,
-			);
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
 		}
+		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+			'op:enum-add',
+			'op:set-not-null',
+		]);
 	});
 
 	it('blocks mixed recognized and retryable unknown changes before observation', async () => {
@@ -2574,6 +2776,26 @@ describe('createProver', () => {
 		}
 	});
 
+	it('keeps single-candidate proving independent of privilege merge hooks', async () => {
+		const customIssuer: ObservationIssuer = {
+			...issuer(),
+			readContext: async (_target, ctx) => ({
+				...ctx,
+				privileges: ['opaque-single-candidate-privilege'],
+			}),
+		};
+		const outcome = await createProver(
+			registry({ issuer: customIssuer }),
+		).prove(validCompare(), proofTarget(), context);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind === 'proven') {
+			expect(outcome.plan.observations[0]?.context.privileges).toEqual([
+				'opaque-single-candidate-privilege',
+			]);
+		}
+	});
+
 	it('proves dependency-ordered candidates into one composed plan', async () => {
 		const { registry: customRegistry, ruleA, ruleB } = compositionRegistry();
 		const release = vi.fn();
@@ -2610,6 +2832,83 @@ describe('createProver', () => {
 		]);
 	});
 
+	it('keeps operation-pack-semantics assumptions exact per step for two operations from one pack', async () => {
+		const ruleA = compositionRule('op:a');
+		const ruleB = compositionRule('op:b');
+		const baseSemantics = compositionSemantics();
+		const exactSemantics: RegisteredOperationSemantics = {
+			...baseSemantics,
+			effectsOf: (operation): OperationEffectAssessment => {
+				const effects = baseSemantics.effectsOf(operation);
+				const ref = operation.ref === 'op:a' ? 'op:a' : 'op:b';
+				return {
+					...effects,
+					restsOn: [compositionOperationAssumptionFor(ref)],
+				};
+			},
+		};
+		const customRegistry = createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [exactSemantics],
+				issuer: compositionIssuer(),
+			},
+		]);
+
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		const stepA = outcome.plan.steps.find(
+			(step) => step.operation.ref === 'op:a',
+		);
+		const stepB = outcome.plan.steps.find(
+			(step) => step.operation.ref === 'op:b',
+		);
+		const assumptionA = compositionOperationAssumptionFor('op:a');
+		const assumptionB = compositionOperationAssumptionFor('op:b');
+		expect(stepA?.restsOnAssumptions).toContain(assumptionA.id);
+		expect(stepA?.restsOnAssumptions).not.toContain(assumptionB.id);
+		expect(stepB?.restsOnAssumptions).toContain(assumptionB.id);
+		expect(stepB?.restsOnAssumptions).not.toContain(assumptionA.id);
+		expect(
+			validateTransitionRelationalInvariants({
+				kind: 'plan',
+				plan: outcome.plan,
+			}).ok,
+		).toBe(true);
+
+		const effectsByRef = new Map(
+			outcome.plan.steps.map((step) => [
+				step.operation.ref,
+				exactSemantics.effectsOf(step.operation, context),
+			]),
+		);
+		const tampered = {
+			...outcome.plan,
+			steps: outcome.plan.steps.map((step) =>
+				step.operation.ref === 'op:b'
+					? { ...step, restsOnAssumptions: [assumptionA.id] }
+					: step,
+			),
+		};
+		const exactValidation = validateTransitionRelationalInvariants({
+			kind: 'plan',
+			plan: tampered,
+			operationEffectsByRef: effectsByRef,
+		});
+		expect(exactValidation.ok).toBe(false);
+		if (!exactValidation.ok) {
+			expect(exactValidation.detail).toContain(assumptionB.id);
+		}
+	});
+
 	it('fails closed on cyclic multi-operation composition validation', async () => {
 		const {
 			registry: customRegistry,
@@ -2628,7 +2927,7 @@ describe('createProver', () => {
 		}
 	});
 
-	it('fails closed on disconnected multi-operation composition validation', async () => {
+	it('proves disconnected multi-operation composition when effects are disjoint', async () => {
 		const {
 			registry: customRegistry,
 			ruleA,
@@ -2640,10 +2939,194 @@ describe('createProver', () => {
 			context,
 		);
 
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+			'op:b',
+			'op:a',
+		]);
+	});
+
+	it('proves compatible multi-candidate contexts under one merged context', async () => {
+		const effectsContexts: ObservationContext[] = [];
+		const fingerprintContexts: ObservationContext[] = [];
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = versionedCompositionRegistry({
+			effectsContexts,
+			fingerprintContexts,
+		});
+
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind !== 'proven') {
+			return;
+		}
+		const expectedPrivileges = [
+			mockPrivilegeFact('mock.alter', ['op:a'], true),
+			mockPrivilegeFact('mock.alter', ['op:b'], true),
+		];
+		const expectedCapabilities = ['capability:op:a', 'capability:op:b', 'mock'];
+		for (const observation of outcome.plan.observations) {
+			expect(observation.context.privileges).toEqual(expectedPrivileges);
+			expect(observation.context.capabilities).toEqual(expectedCapabilities);
+		}
+		for (const observedContext of [
+			...effectsContexts,
+			...fingerprintContexts,
+		]) {
+			expect(observedContext.privileges).toEqual(expectedPrivileges);
+			expect(observedContext.capabilities).toEqual(expectedCapabilities);
+		}
+		const versionEvidence = outcome.plan.observations.filter(
+			(observation) =>
+				observation.request.kind === 'mock.engine.version-supported',
+		);
+		expect(versionEvidence).toHaveLength(1);
+		expect(versionEvidence[0]?.request.detail).toEqual({
+			minServerVersionNum: 18,
+		});
+		const versionClaims = outcome.plan.claims.filter(
+			(claim) => claim.proposition.kind === 'mock.engine.version-supported',
+		);
+		expect(versionClaims).toHaveLength(1);
+		expect(versionClaims[0]?.proposition.detail).toEqual({
+			minServerVersionNum: 18,
+		});
+		const claimIds = outcome.plan.claims.map((claim) => claim.id);
+		expect(new Set(claimIds).size).toBe(claimIds.length);
+		for (const step of outcome.plan.steps) {
+			expect(step.requiredClaims).toContain(versionClaims[0]?.id);
+		}
+	});
+
+	it.each([
+		[
+			'databaseId',
+			(ctx: ObservationContext) => ({ ...ctx, databaseId: 'other' }),
+		],
+		['engine', (ctx: ObservationContext) => ({ ...ctx, engine: 'sqlite' })],
+		[
+			'engineVersion',
+			(ctx: ObservationContext) => ({ ...ctx, engineVersion: '19' }),
+		],
+	] as const)('fails closed when multi-candidate context nucleus differs at %s', async (_field, mutate) => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = versionedCompositionRegistry({
+			contextFor: (opRef, ctx) =>
+				opRef === 'op:b'
+					? {
+							...mutate(ctx),
+							privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
+						}
+					: {
+							...ctx,
+							privileges: [mockPrivilegeFact('mock.alter', [opRef], true)],
+						},
+		});
+
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		expectBlockedReason(outcome, 'context-mismatch');
+	});
+
+	it('fails closed when the issuer reports a privilege merge contradiction', async () => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = versionedCompositionRegistry({
+			contextFor: (opRef, ctx) => ({
+				...ctx,
+				privileges: [
+					mockPrivilegeFact('mock.alter', ['same-resource'], opRef === 'op:a'),
+				],
+			}),
+		});
+
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
+		expectBlockedReason(outcome, 'context-mismatch');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				fact: {
+					value: expect.stringMatching(/conflicting mock privilege fact/),
+				},
+			});
+		}
+	});
+
+	it('keeps declared producer/consumer dependencies in the staged path', () => {
+		const ruleA = {
+			...compositionRule('op:a', 'dependent'),
+			declareComposition: () => compositionDeclarations('op:a', 'dependent'),
+		};
+		const ruleB = {
+			...compositionRule('op:b', 'dependent'),
+			declareComposition: () => compositionDeclarations('op:b', 'dependent'),
+		};
+		const customRegistry = createPackRegistry([
+			{
+				rules: [ruleA, ruleB],
+				operationSemantics: [compositionSemantics('dependent')],
+				issuer: compositionIssuer(),
+			},
+		]);
+		const compare = compositionCompare(ruleA, ruleB);
+		const preflight = preflightStagedComposition(customRegistry, {
+			compare,
+			current: model(true),
+			context,
+		});
+
+		expect(preflight.kind).toBe('provable-in-stages');
+		if (preflight.kind !== 'provable-in-stages') {
+			return;
+		}
+		expect(preflight.ready.map((entry) => entry.candidate.rule.id)).toEqual([
+			'mock.compose.a',
+		]);
+		expect(preflight.pending.map((entry) => entry.candidate.rule.id)).toEqual([
+			'mock.compose.b',
+		]);
+	});
+
+	it('fails closed on effect-conflicting multi-operation composition without a declared dependency', async () => {
+		const {
+			registry: customRegistry,
+			ruleA,
+			ruleB,
+		} = compositionRegistry('conflict');
+		const outcome = await createProver(customRegistry).prove(
+			compositionCompare(ruleA, ruleB),
+			proofTarget(),
+			context,
+		);
+
 		expectBlockedReason(outcome, 'uncomposable');
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.detail).toMatch(
-				/ambiguous|unordered/i,
+				/unproven interaction/i,
 			);
 		}
 	});

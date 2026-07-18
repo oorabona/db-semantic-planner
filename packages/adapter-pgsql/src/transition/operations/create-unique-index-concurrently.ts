@@ -29,6 +29,11 @@ import {
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
 import {
+	appendCompletionJournal,
+	appendIntentJournal,
+	appendObservedJournal,
+} from '../journal.js';
+import {
 	normalizePgIndexCatalogRow,
 	readPgObservationContext,
 } from '../observation-issuer.js';
@@ -927,10 +932,10 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			}
 		},
 		async writeIntentJournal(
-			_client: TransitionExecutionClient,
-			_record: DurableIntentRecord,
+			client: TransitionExecutionClient,
+			record: DurableIntentRecord,
 		) {
-			// Ephemeral by design: invalid-index cleanup is in-run compensation.
+			await appendIntentJournal(clientQuery(client), record);
 		},
 		async begin(_client: TransitionExecutionClient) {
 			throw new Error(
@@ -1061,11 +1066,11 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			}
 		},
 		async writeCompletionJournal(
-			_client: TransitionExecutionClient,
-			_operation: PhysicalOperation,
-			_record: TransactionalCompletionRecord,
+			client: TransitionExecutionClient,
+			operation: PhysicalOperation,
+			record: TransactionalCompletionRecord,
 		) {
-			// Ephemeral by design: completion is re-introspectable from pg_index.
+			await appendCompletionJournal(clientQuery(client), operation, record);
 		},
 		async commit(_client: TransitionExecutionClient) {
 			throw new Error(
@@ -1078,10 +1083,10 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			);
 		},
 		async writeObservedJournal(
-			_client: TransitionExecutionClient,
-			_journal: StepJournal,
+			client: TransitionExecutionClient,
+			journal: StepJournal,
 		) {
-			// Ephemeral by design: recovery is by re-introspection.
+			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
 			return isRecord(error) && error.code === '55P03';

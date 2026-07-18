@@ -116,7 +116,7 @@ describe('introspect', () => {
 		expect(users!.columns[0]!.type).toBe('integer');
 	});
 
-	it('treats dbsp_transition_journal as an ordinary table', async () => {
+	it('treats target-schema dbsp_transition_journal as an ordinary table', async () => {
 		const journalTableName = 'dbsp_transition_journal';
 		const columns = [
 			{
@@ -152,6 +152,33 @@ describe('introspect', () => {
 		expect(result.tables.has('users')).toBe(true);
 		expect(result.tables.has(journalTableName)).toBe(true);
 		expect(result.externalTables.has(journalTableName)).toBe(false);
+	});
+
+	it('excludes dbsp_meta metadata tables from managed introspection', async () => {
+		const columns = [
+			{
+				table_name: 'dbsp_transition_journal',
+				column_name: 'run_id',
+				data_type: 'text',
+				udt_name: 'text',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'dbsp_logical_identity',
+				column_name: 'logical_id',
+				data_type: 'text',
+				udt_name: 'text',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pool = createMockPool([columns, [], []]);
+
+		const result = await introspect(pool, { schema: 'dbsp_meta' });
+
+		expect(result.tables.size).toBe(0);
+		expect(result.externalTables.size).toBe(0);
 	});
 
 	it('should map column types correctly', async () => {
@@ -838,7 +865,7 @@ describe('introspect', () => {
 			if (call[1] !== undefined) {
 				const sql = String(call[0]);
 				if (sql.includes('to_regclass')) {
-					expect(call[1]).toEqual(['"tenant_1"."dbsp_logical_identity"']);
+					expect(call[1]).toEqual(['"dbsp_meta"."dbsp_logical_identity"']);
 				} else {
 					expect(call[1]).toEqual(['tenant_1']);
 				}

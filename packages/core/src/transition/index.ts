@@ -10,6 +10,7 @@ import type {
 	ProvenPlanShape,
 	SemanticArtifactRef,
 	TransitionConnectionPool,
+	TransitionRunJournal,
 } from '@dbsp/types';
 
 export type InProcessProvenPlan = ProvenPlanShape & {
@@ -61,29 +62,55 @@ export interface Applier {
 		policy: ApplyPolicy,
 		target: TransitionConnectionPool,
 	): Promise<ApplyResult>;
+	resume(
+		runId: string,
+		loadCurrent: TransitionResumeJournalLoader,
+		readContext: TransitionResumeContextReader,
+		policy: ApplyPolicy,
+		target: TransitionConnectionPool,
+	): Promise<ApplyResult>;
 }
+
+export type TransitionResumeJournalLoader = (
+	runId: string,
+) => Promise<TransitionRunJournal & { readonly plan: ProvenPlanShape }>;
+
+export type TransitionResumeContextReader = (
+	target: TransitionConnectionPool,
+	run: TransitionRunJournal['run'],
+) => Promise<ObservationContext>;
 
 export type {
 	ApplicableAssessment,
 	ApplicableEvaluation,
 	ApplyPolicy,
+	Assumption,
 	CapabilityDescriptor,
 	Comparator,
 	CompareOutcome,
+	DurableIntentRecord,
+	FingerprintManifest,
 	InapplicableAssessment,
+	ObservationContext,
 	ObservationIssuer,
+	ObservationRequest,
 	OperationEffectAssessment,
 	OperationSemantics,
+	PhysicalOperation,
 	ProvenApplyGuard,
 	ProvenGuardProtocol,
 	ProvenPlanShape,
 	ProvenPlanStep,
 	RecognitionResult,
+	ResourceAddress,
 	RuleEvaluation,
 	RuleSupport,
 	SerializedProvenPlan,
+	StepJournal,
+	TransactionalCompletionRecord,
 	TransitionCandidate,
 	TransitionRule,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 export { createApplier } from './applier.js';
 export { type CheckDelta, checkDelta } from './check-delta.js';
@@ -107,6 +134,7 @@ export { createProver } from './prover.js';
 export {
 	type ComparatorNameNormalizer,
 	createPackRegistry,
+	type ExecutionCoordinator,
 	type GuardExecutionResult,
 	isOperationRuntime,
 	type OperationFingerprints,
@@ -116,11 +144,16 @@ export {
 	PackRegistry,
 	type RegisteredOperationSemantics,
 	type RulePrecedenceFact,
+	type TransactionCoordinatorBinding,
 	type TransitionConnectionPool,
 	type TransitionExecutionClient,
 	type TransitionPack,
 	type TransitionQueryClient,
 } from './registry.js';
+export {
+	type ResumeTransitionInput,
+	resumeTransitionRun,
+} from './resume.js';
 export {
 	createStagedTransitionOrchestrator,
 	type StagedTransitionInput,

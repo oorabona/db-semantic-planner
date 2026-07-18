@@ -19,10 +19,17 @@ import { validateIdentifier } from '../../validate.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
 	DBSP_LOGICAL_IDENTITY_TABLE,
+	DBSP_META_SCHEMA,
 	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
 	PG_OPERATION_PACK_ARTIFACT,
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
+import {
+	appendCompletionJournal,
+	appendIntentJournal,
+	appendObservedJournal,
+	renderCreateDbspMetaSchemaSql,
+} from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
 import { stableJson } from '../stable-json.js';
 
@@ -127,8 +134,8 @@ function payloadOf(operation: PhysicalOperation): AttachLogicalIdentityPayload {
 		: { schema, table, logicalId, carrierKind, authenticated };
 }
 
-function qualifiedSideTable(schema: string): string {
-	return `${quoteIdent(schema, 'schema')}.${quoteIdent(
+function qualifiedSideTable(): string {
+	return `${quoteIdent(DBSP_META_SCHEMA, 'schema')}.${quoteIdent(
 		DBSP_LOGICAL_IDENTITY_TABLE,
 		'table',
 	)}`;
@@ -163,13 +170,13 @@ function targetResource(
 }
 
 function sideTableResource(
-	payload: Pick<AttachLogicalIdentityPayload, 'schema'>,
+	_payload: Pick<AttachLogicalIdentityPayload, 'schema'>,
 	context?: ObservationContext,
 ): ResourceAddress {
 	return {
 		engine: 'postgresql',
 		database: context?.databaseId ?? 'unknown',
-		schema: payload.schema,
+		schema: DBSP_META_SCHEMA,
 		kind: 'table',
 		name: DBSP_LOGICAL_IDENTITY_TABLE,
 	};
@@ -210,10 +217,10 @@ export function renderAttachLogicalIdentityLockSql(
 }
 
 export function renderCreateLogicalIdentitySideTableSql(
-	schema: string,
+	_schema: string,
 ): string {
 	return (
-		`CREATE TABLE IF NOT EXISTS ${qualifiedSideTable(schema)} (` +
+		`CREATE TABLE IF NOT EXISTS ${qualifiedSideTable()} (` +
 		'logical_id text PRIMARY KEY, ' +
 		'schema_name text NOT NULL, ' +
 		'table_name text NOT NULL, ' +
@@ -227,9 +234,9 @@ export function renderCreateLogicalIdentitySideTableSql(
 }
 
 export function renderCreateLogicalIdentityIndexesSql(
-	schema: string,
+	_schema: string,
 ): readonly string[] {
-	const sideTable = qualifiedSideTable(schema);
+	const sideTable = qualifiedSideTable();
 	return [
 		`CREATE UNIQUE INDEX IF NOT EXISTS ${quoteIdent(
 			`${DBSP_LOGICAL_IDENTITY_TABLE}_table_uq`,
@@ -242,9 +249,9 @@ export function renderCreateLogicalIdentityIndexesSql(
 	];
 }
 
-export function renderInsertLogicalIdentitySql(schema: string): string {
+export function renderInsertLogicalIdentitySql(_schema: string): string {
 	return (
-		`INSERT INTO ${qualifiedSideTable(schema)} ` +
+		`INSERT INTO ${qualifiedSideTable()} ` +
 		'(logical_id, schema_name, table_name, column_name, carrier_kind) ' +
 		'VALUES ($1, $2, $3, $4, $5)'
 	);
@@ -582,7 +589,7 @@ export function createAttachLogicalIdentityOperationRuntime() {
 					};
 			const sideTableSelector = {
 				kind: 'table',
-				schema: payload.schema,
+				schema: DBSP_META_SCHEMA,
 				name: DBSP_LOGICAL_IDENTITY_TABLE,
 			};
 			return {
@@ -632,10 +639,10 @@ export function createAttachLogicalIdentityOperationRuntime() {
 			}
 		},
 		async writeIntentJournal(
-			_client: TransitionExecutionClient,
-			_record: DurableIntentRecord,
+			client: TransitionExecutionClient,
+			record: DurableIntentRecord,
 		) {
-			// Operator-approved option B: identity adoption is re-introspectable.
+			await appendIntentJournal(clientQuery(client), record);
 		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
@@ -699,6 +706,7 @@ export function createAttachLogicalIdentityOperationRuntime() {
 		) {
 			const payload = payloadOf(operation);
 			const executor = clientQuery(client);
+			await executor.query(renderCreateDbspMetaSchemaSql());
 			await executor.query(
 				renderCreateLogicalIdentitySideTableSql(payload.schema),
 			);
@@ -717,11 +725,11 @@ export function createAttachLogicalIdentityOperationRuntime() {
 			return { kind: 'completed' as const };
 		},
 		async writeCompletionJournal(
-			_client: TransitionExecutionClient,
-			_operation: PhysicalOperation,
-			_record: TransactionalCompletionRecord,
+			client: TransitionExecutionClient,
+			operation: PhysicalOperation,
+			record: TransactionalCompletionRecord,
 		) {
-			// Operator-approved option B: identity adoption is re-introspectable.
+			await appendCompletionJournal(clientQuery(client), operation, record);
 		},
 		async commit(client: TransitionExecutionClient) {
 			await clientQuery(client).query('COMMIT');
@@ -730,10 +738,10 @@ export function createAttachLogicalIdentityOperationRuntime() {
 			await clientQuery(client).query('ROLLBACK');
 		},
 		async writeObservedJournal(
-			_client: TransitionExecutionClient,
-			_journal: StepJournal,
+			client: TransitionExecutionClient,
+			journal: StepJournal,
 		) {
-			// Operator-approved option B: identity adoption is re-introspectable.
+			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
 			return isRecord(error) && error.code === '55P03';

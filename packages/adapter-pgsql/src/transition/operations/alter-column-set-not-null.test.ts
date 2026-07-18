@@ -9,6 +9,7 @@ import type {
 	PhysicalOperation,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -57,6 +58,17 @@ const context: ObservationContext = {
 	sessionConfiguration: {},
 	extensions: {},
 };
+
+function journalRun(): TransitionRunMetadata {
+	return {
+		runId: 'run:set-not-null',
+		planDigest: 'sha256:set-not-null-plan',
+		targetContextDigest: 'sha256:set-not-null-context',
+		databaseId: 'test',
+		coreVersion: 'dbsp.core.transition.applier@0.1.0',
+		startedAt: new Date(0).toISOString(),
+	};
+}
 
 function expectedShape(
 	overrides: Partial<ColumnIR> = {},
@@ -264,15 +276,19 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		);
 	});
 
-	it('keeps journal writes ephemeral and does not write planner metadata to the target', async () => {
+	it('writes durable journal metadata outside the tenant target', async () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
 		const queries: string[] = [];
+		const run = journalRun();
 		const intent: DurableIntentRecord = {
+			runId: run.runId,
+			run,
 			stepId: 'step:op',
 			operation,
 			recordedAt: new Date().toISOString(),
 		};
 		const completion: TransactionalCompletionRecord = {
+			runId: run.runId,
 			stepId: 'step:op',
 			committedWithDdl: true,
 			recordedAt: new Date().toISOString(),
@@ -300,7 +316,18 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		await runtime.writeCompletionJournal(client, operation, completion);
 		await runtime.writeObservedJournal(client, journal);
 
-		expect(queries).toEqual([]);
+		expect(queries).toContain('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"');
+		expect(
+			queries.some((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"'),
+			),
+		).toBe(true);
+		expect(
+			queries.filter((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"'),
+			),
+		).toHaveLength(3);
+		expect(queries.some((sql) => sql.includes('"tenant"'))).toBe(false);
 	});
 
 	it('rejects a checked-out client as an execution target', async () => {

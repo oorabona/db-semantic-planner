@@ -52,6 +52,11 @@ export const ATTACH_LOGICAL_IDENTITY_OPERATION_KIND: OperationKindRef = {
 	name: 'AttachLogicalIdentity',
 };
 
+export const MANUAL_SQL_OPERATION_KIND: OperationKindRef = {
+	artifact: PG_OPERATION_PACK_ARTIFACT,
+	name: 'ManualSql',
+};
+
 export const SET_NOT_NULL_RULE_ID = 'postgresql.column.set-not-null';
 export const ADD_CHECK_RULE_ID = 'postgresql.table.add-check';
 export const ENUM_ADD_VALUE_RULE_ID = 'postgresql.enum.add-value';
@@ -76,6 +81,8 @@ export const PG_TYPE_ALTER_AUTHORITY_PRIVILEGE =
 export const PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE =
 	'postgresql.column.set-not-null.authority';
 
+export const DBSP_META_SCHEMA = 'dbsp_meta';
+export const DBSP_TRANSITION_RUN_TABLE = 'dbsp_transition_run';
 export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
 export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
 

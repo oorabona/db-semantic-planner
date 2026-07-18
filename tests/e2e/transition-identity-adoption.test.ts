@@ -2,6 +2,7 @@ import {
 	createPgsqlAdapter,
 	createPgTransitionPack,
 	DBSP_LOGICAL_IDENTITY_TABLE,
+	DBSP_META_SCHEMA,
 	readPgObservationContext,
 } from '@dbsp/adapter-pgsql';
 import {
@@ -80,28 +81,37 @@ async function sideTableRows(): Promise<readonly Record<string, unknown>[]> {
 	const pool = await getTestPool();
 	const exists = await pool.query(
 		'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
-		[`${quoteIdent(schemaName)}.${quoteIdent(DBSP_LOGICAL_IDENTITY_TABLE)}`],
+		[
+			`${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+				DBSP_LOGICAL_IDENTITY_TABLE,
+			)}`,
+		],
 	);
 	if (exists.rows[0]?.exists !== true) {
 		return [];
 	}
 	const result = await pool.query(
 		`SELECT logical_id, schema_name, table_name, column_name, carrier_kind ` +
-			`FROM ${quoteIdent(schemaName)}.${quoteIdent(
+			`FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
 				DBSP_LOGICAL_IDENTITY_TABLE,
 			)} ` +
+			`WHERE schema_name = $1 ` +
 			`ORDER BY logical_id`,
+		[schemaName],
 	);
 	return result.rows;
 }
 
-async function tableExists(name: string): Promise<boolean> {
+async function tableExists(
+	name: string,
+	schema = schemaName,
+): Promise<boolean> {
 	const pool = await getTestPool();
 	const result = await pool.query(
 		'SELECT 1 FROM pg_catalog.pg_class c ' +
 			'JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ' +
 			'WHERE n.nspname = $1 AND c.relname = $2 LIMIT 1',
-		[schemaName, name],
+		[schema, name],
 	);
 	return result.rows.length > 0;
 }
@@ -123,6 +133,14 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 
 	afterEach(async () => {
 		const pool = await getTestPool();
+		if (await tableExists(DBSP_LOGICAL_IDENTITY_TABLE, DBSP_META_SCHEMA)) {
+			await pool.query(
+				`DELETE FROM ${quoteIdent(DBSP_META_SCHEMA)}.${quoteIdent(
+					DBSP_LOGICAL_IDENTITY_TABLE,
+				)} WHERE schema_name = $1`,
+				[schemaName],
+			);
+		}
 		await pool.query(
 			`DROP TABLE IF EXISTS ${quoteIdent(schemaName)}.${quoteIdent(
 				DBSP_LOGICAL_IDENTITY_TABLE,
@@ -180,6 +198,10 @@ describe('ADR-0003 transition planner: logical identity adoption', () => {
 		);
 
 		expect(applied.assessment.decision).toBe('applicable');
+		expect(await tableExists(DBSP_LOGICAL_IDENTITY_TABLE)).toBe(false);
+		expect(
+			await tableExists(DBSP_LOGICAL_IDENTITY_TABLE, DBSP_META_SCHEMA),
+		).toBe(true);
 		expect(await sideTableRows()).toContainEqual(
 			expect.objectContaining({
 				logical_id: 'logical.column.users.age',

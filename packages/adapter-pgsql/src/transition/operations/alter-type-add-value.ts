@@ -26,6 +26,11 @@ import {
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
 import { assumptionId, evidenceId } from '../ids.js';
+import {
+	appendCompletionJournal,
+	appendIntentJournal,
+	appendObservedJournal,
+} from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
 import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
@@ -706,8 +711,8 @@ export function createAlterTypeAddValueOperationRuntime() {
 						couldNotAccountFor: [],
 					},
 					execution: {
-						transaction: 'requires-new',
-						commitBoundary: 'after',
+						transaction: 'joins-current',
+						commitBoundary: 'none',
 					},
 				},
 				restsOn: [operationPackSemanticsAssumption(payload, context)],
@@ -729,13 +734,10 @@ export function createAlterTypeAddValueOperationRuntime() {
 			}
 		},
 		async writeIntentJournal(
-			_client: TransitionExecutionClient,
-			_record: DurableIntentRecord,
+			client: TransitionExecutionClient,
+			record: DurableIntentRecord,
 		) {
-			// Operator-approved option B: journal state is intentionally ephemeral
-			// for this single-op, re-introspectable transition. Durable journaling
-			// and a recovery reader belong to executor-recovery; crash recovery is
-			// by re-introspection, not journal replay.
+			await appendIntentJournal(clientQuery(client), record);
 		},
 		async begin(client: TransitionExecutionClient) {
 			await clientQuery(client).query('BEGIN');
@@ -831,14 +833,11 @@ export function createAlterTypeAddValueOperationRuntime() {
 			return { kind: 'completed' };
 		},
 		async writeCompletionJournal(
-			_client: TransitionExecutionClient,
-			_operation: PhysicalOperation,
-			_record: TransactionalCompletionRecord,
+			client: TransitionExecutionClient,
+			operation: PhysicalOperation,
+			record: TransactionalCompletionRecord,
 		) {
-			// Operator-approved option B: journal state is intentionally ephemeral
-			// for this single-op, re-introspectable transition. Durable journaling
-			// and a recovery reader belong to executor-recovery; crash recovery is
-			// by re-introspection, not journal replay.
+			await appendCompletionJournal(clientQuery(client), operation, record);
 		},
 		async commit(client: TransitionExecutionClient) {
 			await clientQuery(client).query('COMMIT');
@@ -847,13 +846,10 @@ export function createAlterTypeAddValueOperationRuntime() {
 			await clientQuery(client).query('ROLLBACK');
 		},
 		async writeObservedJournal(
-			_client: TransitionExecutionClient,
-			_journal: StepJournal,
+			client: TransitionExecutionClient,
+			journal: StepJournal,
 		) {
-			// Operator-approved option B: journal state is intentionally ephemeral
-			// for this single-op, re-introspectable transition. Durable journaling
-			// and a recovery reader belong to executor-recovery; crash recovery is
-			// by re-introspection, not journal replay.
+			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
 			return isRecord(error) && error.code === '55P03';

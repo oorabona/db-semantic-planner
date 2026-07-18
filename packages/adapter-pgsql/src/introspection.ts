@@ -35,7 +35,10 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
-import { DBSP_LOGICAL_IDENTITY_TABLE } from './transition/constants.js';
+import {
+	DBSP_LOGICAL_IDENTITY_TABLE,
+	DBSP_META_SCHEMA,
+} from './transition/constants.js';
 
 // ============================================================================
 // Types
@@ -1020,7 +1023,7 @@ async function queryLogicalIdentityCatalog(
 	pool: CatalogQueryExecutor,
 	schema: string,
 ): Promise<readonly RawLogicalIdentity[]> {
-	const qualifiedSideTable = `${quoteIdentifier(schema)}.${quoteIdentifier(
+	const qualifiedSideTable = `${quoteIdentifier(DBSP_META_SCHEMA)}.${quoteIdentifier(
 		DBSP_LOGICAL_IDENTITY_TABLE,
 	)}`;
 	const exists = await pool.query<{ exists: boolean }>(
@@ -1367,10 +1370,10 @@ export async function introspectWithExecutor(
 	const { tableLogicalIdentities, columnLogicalIdentities } =
 		buildLogicalIdentityMaps(logicalIdentities);
 
-	// Apply include/exclude filters
-	let tableNames = Array.from(tableColumns.keys()).filter(
-		(tableName) => tableName !== DBSP_LOGICAL_IDENTITY_TABLE,
-	);
+	// dbsp-owned metadata lives in a shared schema and is never surfaced as
+	// managed user tables for a target introspection.
+	let tableNames =
+		schema === DBSP_META_SCHEMA ? [] : Array.from(tableColumns.keys());
 	tableNames = filterTables(tableNames, options);
 
 	// Build TableIR map

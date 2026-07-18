@@ -7,6 +7,7 @@ import type {
 	PhysicalOperation,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -71,6 +72,17 @@ const operation: PhysicalOperation = {
 	operationKind: ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
 	payload: payload as never,
 };
+
+function journalRun(): TransitionRunMetadata {
+	return {
+		runId: 'run:add-check',
+		planDigest: 'sha256:add-check-plan',
+		targetContextDigest: 'sha256:add-check-context',
+		databaseId: 'test',
+		coreVersion: 'dbsp.core.transition.applier@0.1.0',
+		startedAt: new Date(0).toISOString(),
+	};
+}
 
 function tableChecksEvidence(
 	checks: readonly CheckSet[],
@@ -345,15 +357,19 @@ describe('AlterTableAddCheck operation runtime', () => {
 		expect(queries.some((sql) => sql.startsWith('ALTER TABLE'))).toBe(false);
 	});
 
-	it('keeps journal writes ephemeral', async () => {
+	it('writes durable journal metadata outside the tenant target', async () => {
 		const runtime = createAlterTableAddCheckOperationRuntime();
 		const queries: string[] = [];
+		const run = journalRun();
 		const intent: DurableIntentRecord = {
+			runId: run.runId,
+			run,
 			stepId: 'step:add-check',
 			operation,
 			recordedAt: new Date().toISOString(),
 		};
 		const completion: TransactionalCompletionRecord = {
+			runId: run.runId,
 			stepId: 'step:add-check',
 			committedWithDdl: true,
 			recordedAt: new Date().toISOString(),
@@ -376,6 +392,17 @@ describe('AlterTableAddCheck operation runtime', () => {
 		await runtime.writeCompletionJournal(client, operation, completion);
 		await runtime.writeObservedJournal(client, journal);
 
-		expect(queries).toEqual([]);
+		expect(queries).toContain('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"');
+		expect(
+			queries.some((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"'),
+			),
+		).toBe(true);
+		expect(
+			queries.filter((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"'),
+			),
+		).toHaveLength(3);
+		expect(queries.some((sql) => sql.includes('"tenant"'))).toBe(false);
 	});
 });

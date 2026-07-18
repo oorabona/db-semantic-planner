@@ -259,24 +259,80 @@ function operationPackSemanticsAssumption(
 	);
 }
 
+function operationPackSemanticsAssumptionsFromEffects(params: {
+	readonly operation: PhysicalOperation;
+	readonly effects: OperationEffectAssessment;
+}): readonly Assumption[] {
+	const expectedAsserter = expectedOperationPackTrustRoot(params.operation);
+	return params.effects.restsOn.filter(
+		(assumption) =>
+			assumption.class === 'operation-pack-semantics' &&
+			sameArtifact(assumption.asserter, expectedAsserter),
+	);
+}
+
 function validateOperationPackSemanticsAssumption(params: {
 	readonly operation: PhysicalOperation;
 	readonly assumptions: readonly Assumption[];
 	readonly stepId?: string;
 	readonly requiredAssumptionIds?: readonly string[] | undefined;
+	readonly operationEffects?: OperationEffectAssessment | undefined;
 }): TransitionRelationalValidationResult {
-	const { operation, assumptions, stepId, requiredAssumptionIds } = params;
+	const {
+		operation,
+		assumptions,
+		stepId,
+		requiredAssumptionIds,
+		operationEffects,
+	} = params;
+	if (operationEffects) {
+		const requiredOperationPackAssumptions =
+			operationPackSemanticsAssumptionsFromEffects({
+				operation,
+				effects: operationEffects,
+			});
+		if (requiredOperationPackAssumptions.length === 0) {
+			return {
+				ok: false,
+				detail: `operation ${operation.ref} is missing an operation-pack-semantics assumption for ${operation.operationKind.artifact.id}@${operation.operationKind.artifact.version}`,
+			};
+		}
+		for (const required of requiredOperationPackAssumptions) {
+			const actual = assumptions.find(
+				(assumption) => assumption.id === required.id,
+			);
+			if (!actual) {
+				return {
+					ok: false,
+					detail: `operation ${operation.ref} is missing operation-pack-semantics assumption ${required.id} in plan assumptions`,
+				};
+			}
+			if (stableJson(actual) !== stableJson(required)) {
+				return {
+					ok: false,
+					detail: `operation ${operation.ref} operation-pack-semantics assumption ${required.id} does not match its operation effects`,
+				};
+			}
+			if (
+				requiredAssumptionIds &&
+				!requiredAssumptionIds.includes(required.id)
+			) {
+				return {
+					ok: false,
+					detail: `step ${stepId ?? operation.ref} is missing operation-pack-semantics assumption ${required.id} from the step assumption closure`,
+				};
+			}
+		}
+		return { ok: true };
+	}
+	if (requiredAssumptionIds) {
+		return { ok: true };
+	}
 	const assumption = operationPackSemanticsAssumption(assumptions, operation);
 	if (!assumption) {
 		return {
 			ok: false,
 			detail: `operation ${operation.ref} is missing an operation-pack-semantics assumption for ${operation.operationKind.artifact.id}@${operation.operationKind.artifact.version}`,
-		};
-	}
-	if (requiredAssumptionIds && !requiredAssumptionIds.includes(assumption.id)) {
-		return {
-			ok: false,
-			detail: `step ${stepId ?? operation.ref} is missing operation-pack-semantics assumption ${assumption.id} from the step assumption closure`,
 		};
 	}
 	return { ok: true };
@@ -409,6 +465,12 @@ function executionCommitBoundaryAfter(
 	);
 }
 
+function executionPostconditionVisibleOnlyAfterCommit(
+	execution: OperationEffectAssessment['effects']['execution'],
+): boolean {
+	return execution.postconditionVisibility === 'after-commit';
+}
+
 function validateSegmentExecutionSemantics(
 	plan: ProvenPlanShape,
 	operationEffectsByRef: ReadonlyMap<string, OperationEffectAssessment>,
@@ -519,6 +581,26 @@ function validateSegmentExecutionSemantics(
 					ok: false,
 					detail: `step ${step.stepId} requires a commit boundary after operation but is coalesced in segment ${segment.segmentId}`,
 				};
+			}
+			if (executionPostconditionVisibleOnlyAfterCommit(execution)) {
+				if (segment.stepIds.length !== 1) {
+					return {
+						ok: false,
+						detail: `step ${step.stepId} postcondition is only visible after commit and cannot be coalesced in segment ${segment.segmentId}`,
+					};
+				}
+				if (hasPriorExecutableStep && !segment.commitBoundaryBefore) {
+					return {
+						ok: false,
+						detail: `step ${step.stepId} postcondition is only visible after commit and requires a commit boundary before segment ${segment.segmentId}`,
+					};
+				}
+				if (!segment.commitBoundaryAfter) {
+					return {
+						ok: false,
+						detail: `step ${step.stepId} postcondition is only visible after commit and requires a commit boundary after segment ${segment.segmentId}`,
+					};
+				}
 			}
 		}
 	}
@@ -669,6 +751,7 @@ function validatePlan(
 			assumptions: plan.assumptions,
 			requiredAssumptionIds: step.restsOnAssumptions,
 			stepId: step.stepId,
+			operationEffects: operationEffectsByRef?.get(step.operation.ref),
 		});
 		if (!operationPackAssumption.ok) {
 			return operationPackAssumption;

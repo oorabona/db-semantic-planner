@@ -39,12 +39,15 @@ export interface ExecutableAssertion {
 }
 
 export interface DurableIntentRecord {
+	readonly runId?: string;
+	readonly run?: TransitionRunMetadata;
 	readonly stepId: string;
 	readonly operation: PhysicalOperation;
 	readonly recordedAt: string;
 }
 
 export interface TransactionalCompletionRecord {
+	readonly runId?: string;
 	readonly stepId: string;
 	readonly committedWithDdl: boolean;
 	readonly recordedAt: string;
@@ -56,11 +59,44 @@ export interface ObservedOutcomeRecord {
 	readonly recordedAt: string;
 }
 
+export interface TransitionRunMetadata {
+	readonly runId: string;
+	readonly planDigest: string;
+	readonly targetContextDigest: string;
+	readonly databaseId: string;
+	readonly coreVersion: string;
+	readonly startedAt: string;
+}
+
+export type TransitionJournalEventName = 'intent' | 'completion' | 'observed';
+
+export type TransitionJournalEventRecord =
+	| DurableIntentRecord
+	| TransactionalCompletionRecord
+	| StepJournal;
+
+export interface TransitionJournalEvent {
+	readonly runId: string;
+	readonly seq: number;
+	readonly event: TransitionJournalEventName;
+	readonly stepId: string;
+	readonly operationRef: string;
+	readonly operationKind: PhysicalOperation['operationKind'];
+	readonly recordedAt: string;
+	readonly record: TransitionJournalEventRecord;
+}
+
+export interface TransitionRunJournal {
+	readonly run: TransitionRunMetadata;
+	readonly events: readonly TransitionJournalEvent[];
+}
+
 export type StepOutcome =
 	| 'completed'
 	| 'guard-failed'
 	| 'guard-timeout'
 	| 'context-mismatch'
+	| 'operation-failed-not-applied'
 	| 'partially-applied'
 	| 'unknown-step-result';
 
@@ -87,6 +123,7 @@ type ObservedNonCompletionStepJournal = StepJournalBase & {
 		| 'guard-failed'
 		| 'guard-timeout'
 		| 'context-mismatch'
+		| 'operation-failed-not-applied'
 		| 'partially-applied';
 	readonly observedOutcome: ObservedOutcomeRecord;
 	readonly transactionalCompletion?: never;

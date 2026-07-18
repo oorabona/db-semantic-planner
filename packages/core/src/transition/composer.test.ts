@@ -35,8 +35,8 @@ function tableResource(): ResourceAddress {
 	};
 }
 
-function tableSelector(): ResourceSelector {
-	return { kind: 'table', name: 'users' };
+function tableSelector(name = 'users'): ResourceSelector {
+	return { kind: 'table', name };
 }
 
 function effects(
@@ -78,6 +78,36 @@ function markerFact(): NonNullable<
 }
 
 describe('composeOperations', () => {
+	it('keeps an after-commit producer in the same transaction when no consumer requires it', () => {
+		const result = composeOperations(
+			[compositionEntry('op:enum'), compositionEntry('op:check')],
+			[
+				{
+					produces: [
+						{
+							opRef: 'op:enum',
+							fact: markerFact(),
+							available: 'after-commit',
+						},
+					],
+				},
+			],
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) {
+			return;
+		}
+		expect(result.segments).toMatchObject([
+			{
+				stepIds: ['step:op:check', 'step:op:enum'],
+				transaction: 'joins-current',
+				commitBoundaryBefore: false,
+				commitBoundaryAfter: false,
+			},
+		]);
+	});
+
 	it('orders a declared producer before a consumer and inserts the commit boundary it requires', () => {
 		const declarations: TransitionFragmentComposition[] = [
 			{
@@ -187,17 +217,29 @@ describe('composeOperations', () => {
 		}
 	});
 
-	it('refuses operations with no declared relationship as ambiguous', () => {
+	it('composes disjoint unordered operations in stable order', () => {
 		const result = composeOperations([
-			compositionEntry('op:a'),
-			compositionEntry('op:b'),
+			compositionEntry(
+				'op:first-input',
+				effects({ writes: [tableSelector('zeta')] }),
+			),
+			compositionEntry(
+				'op:second-input',
+				effects({ writes: [tableSelector('alpha')] }),
+			),
 		]);
 
-		expect(result.ok).toBe(false);
 		if (!result.ok) {
-			expect(result.detail).toMatch(/ambiguous/i);
-			expect(result.detail).toMatch(/unordered/i);
+			throw new Error(result.detail);
 		}
+		expect(result.operations.map((entry) => entry.operation.ref)).toEqual([
+			'op:second-input',
+			'op:first-input',
+		]);
+		expect(result.segments[0]?.stepIds).toEqual([
+			'step:op:second-input',
+			'step:op:first-input',
+		]);
 	});
 
 	it('refuses a declared cycle', () => {
@@ -291,6 +333,37 @@ describe('composeOperations', () => {
 		expect(result.ok).toBe(false);
 		if (!result.ok) {
 			expect(result.detail).toMatch(/invalidated by earlier operation op:a/i);
+		}
+	});
+
+	it('refuses unordered required-claim invalidation without a declared order', () => {
+		const requiredClaim = {
+			id: claimId('mock.claim.ready'),
+			proposition: 'mock.claim.ready',
+			scope: [tableResource()],
+		};
+		const result = composeOperations([
+			{
+				...compositionEntry('op:requires-claim'),
+				requiredClaims: [requiredClaim],
+			},
+			compositionEntry(
+				'op:invalidates-claim',
+				effects({
+					invalidates: [
+						{
+							proposition: requiredClaim.proposition,
+							scope: tableSelector(),
+						},
+					],
+				}),
+			),
+		]);
+
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.detail).toMatch(/unproven interaction/i);
+			expect(result.detail).toMatch(/declare an order/i);
 		}
 	});
 });

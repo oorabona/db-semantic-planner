@@ -16,6 +16,7 @@ import type {
 	EvidenceObservation,
 	IssuedObservation,
 	ObservationContext,
+	ObservationPrivilegeMergeResult,
 	ObservationRequest,
 } from './observation.js';
 import type { OperationEffects, PhysicalOperation } from './operation.js';
@@ -61,6 +62,10 @@ export interface OperationSemantics {
 
 export interface ObservationIssuer {
 	readonly artifact: SemanticArtifactRef;
+	mergeObservationPrivileges?(
+		left: readonly string[],
+		right: readonly string[],
+	): ObservationPrivilegeMergeResult;
 	readContext?(
 		target: unknown,
 		context: ObservationContext,

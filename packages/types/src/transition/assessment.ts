@@ -16,6 +16,7 @@ export type OutcomeReasonCode =
 	| 'ambiguous-intent'
 	| 'guard-failed'
 	| 'guard-timeout'
+	| 'operation-failed-not-applied'
 	| 'partially-applied'
 	| 'unknown-step-result'
 	| 'resume-required';
@@ -74,6 +75,12 @@ export type OutcomeReason =
 			readonly operationKind: OperationKindRef;
 			readonly operationRef: string;
 			readonly maxWaitMs?: number;
+	  })
+	| (OutcomeReasonBase & {
+			readonly code: 'operation-failed-not-applied';
+			readonly stepId: string;
+			readonly operationKind: OperationKindRef;
+			readonly operationRef: string;
 	  })
 	| (OutcomeReasonBase & {
 			readonly code: 'partially-applied';

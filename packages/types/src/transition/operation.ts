@@ -58,6 +58,11 @@ export interface OperationExecutionSemantics {
 		| 'requires-new'
 		| 'forbids-transaction';
 	readonly commitBoundary: 'none' | 'before' | 'after' | 'before-and-after';
+	/**
+	 * Defaults to pre-commit: PostgreSQL catalog observations normally reflect
+	 * transactional DDL before commit, making postcondition failures rollbackable.
+	 */
+	readonly postconditionVisibility?: 'pre-commit' | 'after-commit';
 }
 
 export interface OperationRecoverySemantics {

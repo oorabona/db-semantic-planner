@@ -7,6 +7,7 @@ import type {
 	PhysicalOperation,
 	StepJournal,
 	TransactionalCompletionRecord,
+	TransitionRunMetadata,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import {
@@ -49,6 +50,17 @@ const operation: PhysicalOperation = {
 	operationKind: ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
 	payload: operationPayload as never,
 };
+
+function journalRun(): TransitionRunMetadata {
+	return {
+		runId: 'run:enum-add-value',
+		planDigest: 'sha256:enum-add-value-plan',
+		targetContextDigest: 'sha256:enum-add-value-context',
+		databaseId: 'test',
+		coreVersion: 'dbsp.core.transition.applier@0.1.0',
+		startedAt: new Date(0).toISOString(),
+	};
+}
 
 type EnumEvidenceOptions = {
 	readonly requestSchema?: string;
@@ -294,13 +306,13 @@ describe('AlterTypeAddValue operation runtime', () => {
 		).toThrow(/63 bytes.*66 bytes/);
 	});
 
-	it('declares requires-new execution without a recovery rerun contract', () => {
+	it('declares transactional execution without an intrinsic commit boundary', () => {
 		const runtime = createAlterTypeAddValueOperationRuntime();
 		const effects = runtime.effectsOf(operation, context);
 
 		expect(effects.effects.execution).toEqual({
-			transaction: 'requires-new',
-			commitBoundary: 'after',
+			transaction: 'joins-current',
+			commitBoundary: 'none',
 		});
 		expect(effects.effects.writes).toContainEqual({
 			kind: 'type',
@@ -446,15 +458,19 @@ describe('AlterTypeAddValue operation runtime', () => {
 		]);
 	});
 
-	it('keeps journal writes ephemeral and does not write planner metadata to the target', async () => {
+	it('writes durable journal metadata outside the tenant target', async () => {
 		const runtime = createAlterTypeAddValueOperationRuntime();
 		const queries: string[] = [];
+		const run = journalRun();
 		const intent: DurableIntentRecord = {
+			runId: run.runId,
+			run,
 			stepId: 'step:enum',
 			operation,
 			recordedAt: new Date().toISOString(),
 		};
 		const completion: TransactionalCompletionRecord = {
+			runId: run.runId,
 			stepId: 'step:enum',
 			committedWithDdl: false,
 			recordedAt: new Date().toISOString(),
@@ -482,7 +498,18 @@ describe('AlterTypeAddValue operation runtime', () => {
 		await runtime.writeCompletionJournal(client, operation, completion);
 		await runtime.writeObservedJournal(client, journal);
 
-		expect(queries).toEqual([]);
+		expect(queries).toContain('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"');
+		expect(
+			queries.some((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"'),
+			),
+		).toBe(true);
+		expect(
+			queries.filter((sql) =>
+				sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"'),
+			),
+		).toHaveLength(3);
+		expect(queries.some((sql) => sql.includes('"tenant"'))).toBe(false);
 	});
 
 	it('acquires the enum type lock before observation', async () => {
