@@ -1,12 +1,15 @@
 import { createHash } from 'node:crypto';
 import {
+	ADD_CHECK_RULE_ID,
 	createManualSqlOperationRuntime,
 	createPgObservationIssuer,
+	createPgsqlAdapter,
 	createPgTransitionPack,
 	DBSP_META_SCHEMA,
 	DBSP_TRANSITION_JOURNAL_TABLE,
 	DBSP_TRANSITION_RUN_TABLE,
 	ENGINE_VERSION_OBSERVATION,
+	ENUM_ADD_VALUE_RULE_ID,
 	MANUAL_SQL_OPERATION_KIND,
 	normalizeManualSqlPayload,
 	PG_RULE_PACK_ARTIFACT,
@@ -24,9 +27,8 @@ import {
 	createComparator,
 	createPackRegistry,
 	createProver,
-	type DurableIntentRecord,
+	createStagedTransitionOrchestrator,
 	type EnumIR,
-	type FingerprintManifest,
 	isOperationRuntime,
 	type ModelIR,
 	type ObservationContext,
@@ -34,11 +36,8 @@ import {
 	type PhysicalOperation,
 	type ProvenPlanStep,
 	type RecognitionResult,
-	type RequiredEnumLabelIR,
 	type ResourceAddress,
-	type StepJournal,
 	type TableIR,
-	type TransactionalCompletionRecord,
 	type TransitionRule,
 	type TransitionRunMetadata,
 } from '@dbsp/core';
@@ -165,6 +164,7 @@ function tableResource(): ResourceAddress {
 
 function usersTable(options: {
 	readonly ageNullable: boolean;
+	readonly checkExpression?: string;
 	readonly uniqueEmail?: boolean;
 }): TableIR {
 	return {
@@ -179,69 +179,85 @@ function usersTable(options: {
 		indexes: options.uniqueEmail
 			? [{ name: 'idx_users_email', columns: ['email'], unique: true }]
 			: [],
+		...(options.checkExpression
+			? {
+					checkConstraints: [
+						{
+							name: 'users_age_check',
+							expression: options.checkExpression,
+						},
+					],
+				}
+			: {}),
 	};
 }
 
-function tasksTable(options: {
-	readonly checkExpression?: string;
-	readonly requiresEnumLabels?: readonly RequiredEnumLabelIR[];
-}): TableIR {
-	const check: CheckConstraintIR | undefined =
-		options.checkExpression === undefined
-			? undefined
-			: {
-					name: 'tasks_status_check',
-					expression: options.checkExpression,
-					...(options.requiresEnumLabels
-						? { requiresEnumLabels: options.requiresEnumLabels }
-						: {}),
-				};
-	return {
-		name: 'tasks',
-		columns: [
-			{ name: 'id', type: 'integer', nullable: false },
-			{
-				name: 'status',
-				type: 'string',
-				nullable: false,
-				originalDbType: 'status',
-				originalDbTypeSchema: schemaName,
-				originalDbTypeSchemaScope: 'target',
-			},
-		],
-		primaryKey: 'id',
-		foreignKeys: [],
-		indexes: [],
-		...(check ? { checkConstraints: [check] } : {}),
-	};
-}
-
-function statusEnums(values: readonly string[]): ReadonlyMap<string, EnumIR> {
-	return new Map<string, EnumIR>([
-		['status', { name: 'status', schema: schemaName, values }],
-	]);
-}
-
-function tasksModel(options: {
-	readonly enumValues: readonly string[];
-	readonly checkExpression?: string;
-	readonly requiresEnumLabels?: readonly RequiredEnumLabelIR[];
-}): ModelIR {
-	return model(tasksTable(options), statusEnums(options.enumValues));
-}
-
-function model(table: TableIR, enums?: ReadonlyMap<string, EnumIR>): ModelIR {
+function model(table: TableIR): ModelIR {
 	const tables = new Map<string, TableIR>([[table.name, table]]);
 	return {
 		tables,
 		relations: new Map(),
-		...(enums ? { enums } : {}),
 		getTable: (name) => tables.get(name),
 		getRelation: () => undefined,
 		getRelationsFrom: () => [],
 		getRelationsTo: () => [],
 		isAmbiguous: () => ({ ambiguous: false, options: [] }),
 	};
+}
+
+function modelFromTables(
+	tables: readonly TableIR[],
+	enums?: ReadonlyMap<string, EnumIR>,
+): ModelIR {
+	const tableMap = new Map(tables.map((table) => [table.name, table]));
+	return {
+		tables: tableMap,
+		relations: new Map(),
+		...(enums ? { enums } : {}),
+		getTable: (name) => tableMap.get(name),
+		getRelation: () => undefined,
+		getRelationsFrom: () => [],
+		getRelationsTo: () => [],
+		isAmbiguous: () => ({ ambiguous: false, options: [] }),
+	};
+}
+
+function desiredTasksFromCurrent(
+	current: ModelIR,
+	options: {
+		readonly checkExpression: string;
+		readonly enumValues: readonly string[];
+	},
+): ModelIR {
+	const currentTasks = current.getTable('tasks');
+	if (!currentTasks) {
+		throw new Error('expected introspected tasks table');
+	}
+	const check: CheckConstraintIR = {
+		name: 'tasks_status_check',
+		expression: options.checkExpression,
+		requiresEnumLabels: [
+			{ schema: schemaName, type: 'status', label: 'pending' },
+		],
+	};
+	return modelFromTables(
+		[
+			{
+				...currentTasks,
+				checkConstraints: [check],
+			},
+		],
+		new Map<string, EnumIR>([
+			[
+				'status',
+				{
+					name: 'status',
+					schema: schemaName,
+					values: options.enumValues,
+				},
+			],
+		]),
+	);
 }
 
 function runMetadata(
@@ -259,13 +275,6 @@ function runMetadata(
 	};
 }
 
-function fingerprintMatches(
-	expected: FingerprintManifest,
-	actual: FingerprintManifest,
-): boolean {
-	return expected.digest === actual.digest;
-}
-
 async function createUsers(): Promise<void> {
 	const pool = await getTestPool();
 	await pool.query(
@@ -281,7 +290,7 @@ async function createUsers(): Promise<void> {
 	);
 }
 
-async function createTasks(): Promise<void> {
+async function createBaseTasks(statuses: readonly string[]): Promise<void> {
 	const pool = await getTestPool();
 	await pool.query(
 		`CREATE TYPE ${quoteIdent(schemaName)}.${quoteIdent(
@@ -294,13 +303,16 @@ async function createTasks(): Promise<void> {
 			status ${quoteIdent(schemaName)}.${quoteIdent('status')} NOT NULL
 		)`,
 	);
-	await pool.query(
-		`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
-			'tasks',
-		)} (id, status) VALUES (1, 'active'::${quoteIdent(
-			schemaName,
-		)}.${quoteIdent('status')})`,
-	);
+	for (const [index, status] of statuses.entries()) {
+		await pool.query(
+			`INSERT INTO ${quoteIdent(schemaName)}.${quoteIdent(
+				'tasks',
+			)} (id, status) VALUES ($1, $2::${quoteIdent(schemaName)}.${quoteIdent(
+				'status',
+			)})`,
+			[index + 1, status],
+		);
+	}
 }
 
 async function enumLabels(): Promise<readonly string[]> {
@@ -317,7 +329,7 @@ async function enumLabels(): Promise<readonly string[]> {
 	return result.rows.map((row) => String(row.label));
 }
 
-async function taskCheckExists(): Promise<boolean> {
+async function checkExists(): Promise<boolean> {
 	const pool = await getTestPool();
 	const result = await pool.query(
 		'SELECT 1 FROM pg_catalog.pg_constraint con ' +
@@ -373,150 +385,6 @@ async function prove(desired: ModelIR, current: ModelIR) {
 	const compare = comparator.compare(desired, current);
 	const outcome = await createProver(registry).prove(compare, pool, context);
 	return { pool, registry, comparator, context, compare, outcome };
-}
-
-async function executeStep(params: {
-	readonly registry: ReturnType<typeof createPackRegistry>;
-	readonly step: ProvenPlanStep;
-	readonly context: ObservationContext;
-	readonly pool: Pool;
-}): Promise<void> {
-	const resolution = params.registry.resolveOperation(params.step.operation);
-	if (!resolution.ok || !isOperationRuntime(resolution.semantics)) {
-		throw new Error('operation runtime missing for recovery e2e');
-	}
-	const issuer = params.registry.resolveIssuer(
-		params.step.operation.operationKind.artifact,
-	);
-	if (!issuer) {
-		throw new Error('operation issuer missing for recovery e2e');
-	}
-	const runtime = resolution.semantics;
-	const client = await runtime.checkout(params.pool);
-	try {
-		await runtime.begin(client);
-		await runtime.setLockTimeout(client, 2_000);
-		await runtime.acquireLocks(
-			client,
-			params.step.operation,
-			runtime.effectsOf(params.step.operation, params.context),
-			params.context,
-		);
-		const runtimeContext = params.registry.contextWithDerivedCapabilities(
-			await runtime.observeContext(
-				client,
-				params.step.operation,
-				params.context,
-			),
-		);
-		const before = await runtime.observeOperation(
-			client,
-			params.step.operation,
-			runtimeContext,
-			'before',
-			issuer,
-		);
-		expect(
-			fingerprintMatches(params.step.expectedBefore, before.fingerprint),
-		).toBe(true);
-		for (const guard of params.step.guards) {
-			const result = await runtime.checkGuard(
-				client,
-				params.step.operation,
-				guard,
-				runtimeContext,
-			);
-			expect(result.passed).toBe(true);
-		}
-		const executionOutcome = await runtime.executeOperation(
-			client,
-			params.step.operation,
-			runtimeContext,
-			params.step.guards.filter((guard) => guard.phase === 'during-operation'),
-		);
-		expect(executionOutcome.kind).toBe('completed');
-		await runtime.commit(client);
-	} catch (error) {
-		await runtime.rollback(client).catch(() => undefined);
-		throw error;
-	} finally {
-		await runtime.release(client);
-	}
-}
-
-async function writeCompletedStepJournal(params: {
-	readonly registry: ReturnType<typeof createPackRegistry>;
-	readonly step: ProvenPlanStep;
-	readonly context: ObservationContext;
-	readonly pool: Pool;
-	readonly run: TransitionRunMetadata;
-}): Promise<StepJournal> {
-	const resolution = params.registry.resolveOperation(params.step.operation);
-	if (!resolution.ok || !isOperationRuntime(resolution.semantics)) {
-		throw new Error('operation runtime missing for recovery e2e');
-	}
-	const issuer = params.registry.resolveIssuer(
-		params.step.operation.operationKind.artifact,
-	);
-	if (!issuer) {
-		throw new Error('operation issuer missing for recovery e2e');
-	}
-	const runtime = resolution.semantics;
-	const client = await runtime.checkout(params.pool);
-	const intent: DurableIntentRecord = {
-		runId: params.run.runId,
-		run: params.run,
-		stepId: params.step.stepId,
-		operation: params.step.operation,
-		recordedAt: new Date().toISOString(),
-	};
-	try {
-		const runtimeContext = params.registry.contextWithDerivedCapabilities(
-			await runtime.observeContext(
-				client,
-				params.step.operation,
-				params.context,
-			),
-		);
-		const after = await runtime.observeOperation(
-			client,
-			params.step.operation,
-			runtimeContext,
-			'after',
-			issuer,
-		);
-		expect(
-			fingerprintMatches(params.step.expectedAfter, after.fingerprint),
-		).toBe(true);
-		const completion: TransactionalCompletionRecord = {
-			runId: params.run.runId,
-			stepId: params.step.stepId,
-			committedWithDdl: true,
-			recordedAt: new Date().toISOString(),
-		};
-		const journal: StepJournal = {
-			intent,
-			outcome: 'completed',
-			transactionalCompletion: completion,
-			observedOutcome: {
-				stepId: params.step.stepId,
-				observations: after.observations
-					.filter((observation) => observation.role === 'evidence')
-					.map((observation) => observation.id),
-				recordedAt: new Date().toISOString(),
-			},
-		};
-		await runtime.writeIntentJournal(client, intent);
-		await runtime.writeCompletionJournal(
-			client,
-			params.step.operation,
-			completion,
-		);
-		await runtime.writeObservedJournal(client, journal);
-		return journal;
-	} finally {
-		await runtime.release(client);
-	}
 }
 
 async function writeIntentOnly(params: {
@@ -736,106 +604,127 @@ describe('ADR-0003 transition executor recovery', () => {
 		await dropSchema(schemaName);
 	});
 
-	it('resumes from a durable completed prefix and reports known remaining work', async () => {
-		await createTasks();
-		const current = tasksModel({ enumValues: ['active'] });
-		const desired = tasksModel({
+	it('resumes from a staged durable completed prefix and applies the known remaining CHECK', async () => {
+		await createBaseTasks(['active']);
+		const pool = await getTestPool();
+		const adapter = createPgsqlAdapter(pool, { schemaName });
+		const registry = createPackRegistry([createPgTransitionPack()]);
+		const comparator = createComparator(registry);
+		const loadCurrent = () => adapter.introspect({ schema: schemaName });
+		const readContext = () => readPgObservationContext(pool, schemaName);
+		const current = await loadCurrent();
+		const desired = desiredTasksFromCurrent(current, {
 			enumValues: ['active', 'pending'],
-			checkExpression: "status::text <> 'pending'",
-			requiresEnumLabels: [
-				{ schema: schemaName, type: 'status', label: 'pending' },
-			],
+			checkExpression: "status <> 'pending'",
 		});
-		const { pool, registry, context, outcome } = await prove(desired, current);
-		expect(outcome.kind).toBe('proven');
-		if (outcome.kind !== 'proven') {
+
+		const initialCompare = comparator.compare(desired, current);
+		expect(initialCompare.kind).toBe('transitions');
+		if (initialCompare.kind !== 'transitions') {
 			return;
 		}
-		const plan = outcome.plan;
-		expect(plan.steps).toHaveLength(2);
 		expect(
-			new Set(plan.steps.map((step) => step.operation.operationKind.name)),
-		).toEqual(new Set(['AlterTypeAddValue', 'AlterTableAddCheck']));
-		const enumStep = plan.steps.find(
-			(step) => step.operation.operationKind.name === 'AlterTypeAddValue',
-		);
-		const checkStep = plan.steps.find(
-			(step) => step.operation.operationKind.name === 'AlterTableAddCheck',
-		);
-		expect(enumStep).toBeDefined();
-		expect(checkStep).toBeDefined();
-		if (!enumStep || !checkStep) {
+			new Set(initialCompare.candidates.map((entry) => entry.rule.id)),
+		).toEqual(new Set([ADD_CHECK_RULE_ID, ENUM_ADD_VALUE_RULE_ID]));
+
+		const firstPass = await createStagedTransitionOrchestrator(
+			registry,
+		).applyStagedTransition({
+			desired,
+			loadCurrent,
+			readContext,
+			target: pool,
+			policy: basePolicy,
+			maxIterations: 1,
+		});
+
+		expect(firstPass.assessment).toMatchObject({
+			decision: 'blocked',
+			lifecycle: 'partially-applied',
+			continuation: 'resume-possible',
+		});
+		expect(firstPass.journals).toHaveLength(1);
+		const prefixJournal = firstPass.journals[0]!;
+		expect(prefixJournal).toMatchObject({
+			outcome: 'completed',
+			intent: {
+				operation: {
+					operationKind: { name: 'AlterTypeAddValue' },
+				},
+			},
+		});
+		const prefixRunId =
+			prefixJournal.intent.run?.runId ?? prefixJournal.intent.runId;
+		expect(prefixRunId).toBeDefined();
+		if (!prefixRunId) {
 			return;
 		}
-		expect(plan.segments).toMatchObject([
-			{
-				stepIds: [enumStep.stepId],
-				commitBoundaryAfter: true,
-			},
-			{
-				stepIds: [checkStep.stepId],
-				commitBoundaryBefore: true,
-			},
-		]);
-
-		await executeStep({
-			registry,
-			step: enumStep,
-			context,
-			pool,
-		});
-		expect(await enumLabels()).toEqual(['active', 'pending']);
-		expect(await taskCheckExists()).toBe(false);
-
-		const completedStep = enumStep;
-		const remainingStep = checkStep;
-		const completedIsPrefix =
-			plan.steps.indexOf(completedStep) < plan.steps.indexOf(remainingStep);
-		expect(completedIsPrefix).toBe(true);
-		const run = runMetadata(plan, context, 'completed-prefix');
-		const completedJournal = await writeCompletedStepJournal({
-			registry,
-			step: completedStep,
-			context,
-			pool,
-			run,
-		});
-		expect(completedJournal.outcome).toBe('completed');
-		const seeded = await readTransitionJournal(pool, run.runId);
-		expect(seeded.events.map((event) => event.event)).toEqual([
+		const durablePrefix = await readTransitionJournal(pool, prefixRunId);
+		expect(durablePrefix.events.map((event) => event.event)).toEqual([
 			'intent',
 			'completion',
 			'observed',
 		]);
-		expect(seeded.events.map((event) => event.stepId)).toEqual([
-			completedStep.stepId,
-			completedStep.stepId,
-			completedStep.stepId,
+		expect(
+			durablePrefix.events.every(
+				(event) => event.stepId === prefixJournal.intent.stepId,
+			),
+		).toBe(true);
+		expect(await enumLabels()).toEqual(['active', 'pending']);
+		expect(await checkExists()).toBe(false);
+
+		const afterPrefixCurrent = await loadCurrent();
+		const remainingCompare = comparator.compare(desired, afterPrefixCurrent);
+		expect(remainingCompare.kind).toBe('transitions');
+		if (remainingCompare.kind !== 'transitions') {
+			return;
+		}
+		expect(remainingCompare.candidates.map((entry) => entry.rule.id)).toEqual([
+			ADD_CHECK_RULE_ID,
 		]);
-
-		const resumed = await createApplier(registry).resume(
-			run.runId,
-			async (runId) => ({
-				...(await readTransitionJournal(pool, runId)),
-				plan,
-			}),
-			() => readPgObservationContext(pool, schemaName),
-			basePolicy,
+		const remainingProof = await createProver(registry).prove(
+			remainingCompare,
 			pool,
+			await readContext(),
 		);
+		expect(remainingProof.kind).toBe('proven');
+		if (remainingProof.kind !== 'proven') {
+			return;
+		}
+		expect(remainingProof.plan.steps).toHaveLength(1);
+		expect(remainingProof.plan.steps[0]?.operation.operationKind.name).toBe(
+			'AlterTableAddCheck',
+		);
+		expect(
+			new Set(
+				remainingProof.plan.observations
+					.filter((observation) => observation.role === 'evidence')
+					.map((observation) => digest(observation.context)),
+			).size,
+		).toBe(1);
 
-		expect(resumed.assessment.decision).toBe('blocked');
-		expect(resumed.assessment.continuation).toBe('resume-possible');
-		expect(resumed.assessment.reasons[0]).toMatchObject({
-			code: 'resume-required',
-			stepId: remainingStep.stepId,
+		const resumed = await createStagedTransitionOrchestrator(
+			registry,
+		).applyStagedTransition({
+			desired,
+			loadCurrent,
+			readContext,
+			target: pool,
+			policy: basePolicy,
 		});
-		expect(resumed.assessment.lifecycle).toBe('partially-applied');
-		expect(resumed.journals).toHaveLength(1);
-		expect(resumed.journals[0]).toMatchObject({
-			outcome: 'completed',
-			intent: { stepId: completedStep.stepId },
+
+		expect(resumed.assessment).toMatchObject({
+			decision: 'applicable',
+			lifecycle: 'completed',
+			continuation: 'none',
 		});
+		expect(resumed.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+		]);
+		expect(resumed.journals[0]?.intent.operation.operationKind.name).toBe(
+			'AlterTableAddCheck',
+		);
+		expect(await checkExists()).toBe(true);
 	});
 
 	it('reports unknown for an unconfirmable non-atomic intent', async () => {

@@ -34,6 +34,10 @@ import {
 	appendObservedJournal,
 	renderCreateDbspMetaSchemaSql,
 } from '../journal.js';
+import {
+	assertLogicalIdentityCarrierTableManagedIfPresent,
+	unmanagedLogicalIdentityCarrierTableError,
+} from '../logical-identity-carrier-shape.js';
 import { readPgObservationContext } from '../observation-issuer.js';
 import { stableJson } from '../stable-json.js';
 
@@ -810,9 +814,15 @@ export function createAttachLogicalIdentityOperationRuntime() {
 			const payload = payloadOf(operation);
 			const executor = clientQuery(client);
 			await executor.query(renderCreateDbspMetaSchemaSql());
+			await assertLogicalIdentityCarrierTableManagedIfPresent(executor);
 			await executor.query(
 				renderCreateLogicalIdentitySideTableSql(payload.schema),
 			);
+			const carrierStatus =
+				await assertLogicalIdentityCarrierTableManagedIfPresent(executor);
+			if (carrierStatus !== 'managed') {
+				throw unmanagedLogicalIdentityCarrierTableError();
+			}
 			for (const statement of renderCreateLogicalIdentityIndexesSql(
 				payload.schema,
 			)) {

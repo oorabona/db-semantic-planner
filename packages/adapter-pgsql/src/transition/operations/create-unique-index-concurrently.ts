@@ -1148,7 +1148,12 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 				if (!isUniqueBuildFailure(error)) {
 					throw error;
 				}
-				return { kind: 'guard-failed', guard, recovery: [] };
+				return {
+					kind: 'guard-failed',
+					guard,
+					recovery: [],
+					nonRollbackableFootprint: 'none',
+				};
 			} finally {
 				await executor
 					.query('SET lock_timeout = DEFAULT')

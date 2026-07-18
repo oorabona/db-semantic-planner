@@ -419,11 +419,16 @@ async function appendJournalEvent(params: {
 		| StepJournal;
 }): Promise<void> {
 	await params.executor.query(
-		`INSERT INTO ${transitionJournalTable()} ` +
+		`WITH run_lock AS MATERIALIZED (` +
+			`SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext($1)::bigint)` +
+			`), next_seq AS (` +
+			`SELECT COALESCE(max(j.seq), 0) + 1 AS seq ` +
+			`FROM run_lock ` +
+			`LEFT JOIN ${transitionJournalTable()} j ON j.run_id = $1` +
+			`) INSERT INTO ${transitionJournalTable()} ` +
 			'(run_id, seq, event, step_id, operation_ref, operation_kind, record) ' +
-			'VALUES ($1, ' +
-			`COALESCE((SELECT max(seq) + 1 FROM ${transitionJournalTable()} WHERE run_id = $1), 1), ` +
-			'$2, $3, $4, $5::jsonb, $6::jsonb)',
+			'SELECT $1, next_seq.seq, $2, $3, $4, $5::jsonb, $6::jsonb ' +
+			'FROM next_seq',
 		[
 			params.runId,
 			params.event,

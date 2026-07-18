@@ -8,6 +8,7 @@ import type {
 	ObservationContext,
 	OperationEffectAssessment,
 	PhysicalOperation,
+	Proposition,
 	ResourceAddress,
 	ResourceSelector,
 	StepJournal,
@@ -227,15 +228,88 @@ function assertResource(value: unknown, field: string): ResourceAddress {
 	};
 }
 
-function assertAssertion(value: unknown, field: string): ExecutableAssertion {
+function assertNonEmptyString(value: unknown, field: string): string {
+	if (typeof value !== 'string' || value.trim().length === 0) {
+		throw new Error(`${field} must be a non-empty string`);
+	}
+	return value;
+}
+
+function assertUserBlastRadiusAttestation(
+	value: unknown,
+	statementAssumption: string,
+): Assumption {
+	if (!isRecord(value)) {
+		throw new Error(
+			'ManualSql statement attestation must be a human user-blast-radius assumption',
+		);
+	}
+	const id = assertNonEmptyString(value.id, 'ManualSql attestation id');
+	if (statementAssumption !== id) {
+		throw new Error(
+			'ManualSql statement assumption must match its attestation id',
+		);
+	}
+	const statement = assertNonEmptyString(
+		value.statement,
+		'ManualSql attestation statement',
+	);
 	if (
-		!isRecord(value) ||
-		!isRecord(value.proposition) ||
+		value.class !== 'user-blast-radius' ||
+		!isRecord(value.asserter) ||
+		value.asserter.kind !== 'human' ||
+		typeof value.asserter.identity !== 'string' ||
 		!Array.isArray(value.scope)
 	) {
+		throw new Error(
+			'ManualSql statement attestation must be a human user-blast-radius assumption',
+		);
+	}
+	return {
+		id: id as Assumption['id'],
+		class: 'user-blast-radius',
+		asserter: { kind: 'human', identity: value.asserter.identity },
+		statement,
+		scope: value.scope.map((resource, index) =>
+			assertResource(resource, `ManualSql attestation scope[${index}]`),
+		),
+	};
+}
+
+function assertProposition(value: unknown, field: string): Proposition {
+	if (!isRecord(value)) {
+		throw new Error(`${field} must be a proposition`);
+	}
+	const kind = assertNonEmptyString(value.kind, `${field}.kind`);
+	if (kind === 'unknown') {
+		throw new Error(`${field}.kind must be a known proposition kind`);
+	}
+	if (!Array.isArray(value.scope)) {
+		throw new Error(`${field}.scope must be an array of resource addresses`);
+	}
+	const scope = value.scope.map((resource, index) =>
+		assertResource(resource, `${field}.scope[${index}]`),
+	);
+	if (value.detail === undefined) {
+		return { kind, scope };
+	}
+	return {
+		kind,
+		scope,
+		detail: value.detail as Exclude<Proposition['detail'], undefined>,
+	};
+}
+
+function assertAssertion(value: unknown, field: string): ExecutableAssertion {
+	if (!isRecord(value) || !Array.isArray(value.scope)) {
 		throw new Error(`${field} must be an executable assertion`);
 	}
-	return value as unknown as ExecutableAssertion;
+	return {
+		proposition: assertProposition(value.proposition, `${field}.proposition`),
+		scope: value.scope.map((resource, index) =>
+			assertResource(resource, `${field}.scope[${index}]`),
+		),
+	};
 }
 
 type SqlScanState =
@@ -530,28 +604,25 @@ function assertUnsafeStatement(value: unknown): UnsafeNativeFragment {
 		value.category !== 'statement' ||
 		typeof value.text !== 'string' ||
 		value.text.trim().length === 0 ||
-		typeof value.assumption !== 'string' ||
-		!isRecord(value.attestation)
+		typeof value.assumption !== 'string'
 	) {
 		throw new Error(
 			'ManualSql requires one unsafe-native statement fragment with a user-blast-radius attestation',
 		);
 	}
-	const attestation = value.attestation;
-	if (
-		attestation.class !== 'user-blast-radius' ||
-		!isRecord(attestation.asserter) ||
-		attestation.asserter.kind !== 'human' ||
-		typeof attestation.asserter.identity !== 'string' ||
-		!Array.isArray(attestation.scope)
-	) {
-		throw new Error(
-			'ManualSql statement attestation must be a human user-blast-radius assumption',
-		);
-	}
+	const attestation = assertUserBlastRadiusAttestation(
+		value.attestation,
+		value.assumption,
+	);
 	assertSingleSqlStatement(value.text);
 	assertNotTransactionControlStatement(value.text);
-	return value as unknown as UnsafeNativeFragment;
+	return {
+		kind: 'unsafe-native',
+		category: 'statement',
+		text: value.text,
+		assumption: value.assumption as UnsafeNativeFragment['assumption'],
+		attestation,
+	};
 }
 
 function payloadOf(operation: PhysicalOperation): ManualSqlPayload {
@@ -615,23 +686,24 @@ export function normalizeManualSqlPayload(
 	context: ObservationContext,
 ): ManualSqlPayload {
 	const statement = assertUnsafeStatement(payload.statement);
+	const blastRadius = payload.blastRadius.map((resource, index) =>
+		assertResource(resource, `blastRadius[${index}]`),
+	);
+	const preconditions = payload.preconditions.map((assertion, index) =>
+		assertAssertion(assertion, `preconditions[${index}]`),
+	);
+	const postconditions = payload.postconditions.map((assertion, index) =>
+		assertAssertion(assertion, `postconditions[${index}]`),
+	);
+	const validated = { statement, blastRadius, preconditions, postconditions };
 	return {
 		statement: {
 			...statement,
-			attestation: userBlastRadiusAssumption(
-				{ ...payload, statement },
-				context,
-			),
+			attestation: userBlastRadiusAssumption(validated, context),
 		},
-		blastRadius: payload.blastRadius.map((resource, index) =>
-			assertResource(resource, `blastRadius[${index}]`),
-		),
-		preconditions: payload.preconditions.map((assertion, index) =>
-			assertAssertion(assertion, `preconditions[${index}]`),
-		),
-		postconditions: payload.postconditions.map((assertion, index) =>
-			assertAssertion(assertion, `postconditions[${index}]`),
-		),
+		blastRadius,
+		preconditions,
+		postconditions,
 	};
 }
 

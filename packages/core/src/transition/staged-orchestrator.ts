@@ -60,12 +60,15 @@ function candidateResources(
 
 function equivalenceContextFromObservation(
 	context: ObservationContext,
-): EquivalenceContext {
+): EquivalenceContext & {
+	readonly proofObservationContext: ObservationContext;
+} {
 	return {
 		engine: context.engine,
 		...(context.databaseId ? { databaseId: context.databaseId } : {}),
 		...(context.targetSchema ? { targetSchema: context.targetSchema } : {}),
 		...(context.searchPath ? { searchPath: context.searchPath } : {}),
+		proofObservationContext: context,
 	};
 }
 

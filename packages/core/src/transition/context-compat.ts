@@ -20,6 +20,12 @@ export type ObservationPrivilegeMerger = (
 ) => ObservationPrivilegeMergeResult;
 
 const ADDITIVE_CONTEXT_FIELDS = new Set(['capabilities', 'privileges']);
+const IDENTITY_CONTEXT_FIELDS = [
+	'databaseId',
+	'engine',
+	'engineVersion',
+	'targetSchema',
+] as const;
 
 function sortedUnique(values: readonly string[]): readonly string[] {
 	return [...new Set(values)].sort();
@@ -43,6 +49,21 @@ export function firstObservationContextNucleusMismatch(
 	right: ObservationContext,
 ): string | undefined {
 	for (const key of nucleusKeys(left, right)) {
+		if (
+			stableJson(contextValue(left, key)) !==
+			stableJson(contextValue(right, key))
+		) {
+			return key;
+		}
+	}
+	return undefined;
+}
+
+export function firstObservationContextIdentityMismatch(
+	left: ObservationContext,
+	right: ObservationContext,
+): string | undefined {
+	for (const key of IDENTITY_CONTEXT_FIELDS) {
 		if (
 			stableJson(contextValue(left, key)) !==
 			stableJson(contextValue(right, key))

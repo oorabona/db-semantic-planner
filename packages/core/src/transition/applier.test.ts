@@ -429,6 +429,43 @@ function planWithStep(
 	});
 }
 
+function nonTransactionalPlanWithStep(
+	stepOverrides: Partial<ProvenPlanShape['steps'][number]> = {},
+	planOverrides: Partial<ProvenPlanShape> = {},
+): InProcessProvenPlan {
+	const base = planShape(planOverrides);
+	return mintInProcessPlan({
+		...base,
+		segments: [
+			{
+				...base.segments[0]!,
+				transaction: 'forbids-transaction',
+				commitBoundaryAfter: true,
+			},
+			...base.segments.slice(1),
+		],
+		steps: [{ ...base.steps[0]!, ...stepOverrides }],
+	});
+}
+
+function nonTransactionalEffects(): OperationEffectAssessment {
+	return {
+		effects: {
+			reads: [],
+			writes: [],
+			locks: [],
+			invalidates: [],
+			contextMutations: [],
+			externalEffects: { accountedFor: [], couldNotAccountFor: [] },
+			execution: {
+				transaction: 'forbids-transaction',
+				commitBoundary: 'after',
+			},
+		},
+		restsOn: [operationAssumption()],
+	};
+}
+
 function runtime(
 	writeObservedJournal: (journal: StepJournal) => void,
 	options: {
@@ -534,6 +571,16 @@ function runtime(
 			writeObservedJournal(journal);
 		}),
 		isLockTimeout: () => false,
+	};
+}
+
+function nonTransactionalRuntime(
+	writeObservedJournal: (journal: StepJournal) => void,
+	options: Parameters<typeof runtime>[1] = {},
+): OperationRuntime {
+	return {
+		...runtime(writeObservedJournal, options),
+		effectsOf: nonTransactionalEffects,
 	};
 }
 
@@ -1509,6 +1556,50 @@ describe('createApplier', () => {
 		expect(rt.rollback).toHaveBeenCalledOnce();
 	});
 
+	it('reports a pre-execute setup failure as not applied when no prior segment committed', async () => {
+		const observed: StepJournal[] = [];
+		const executeOperation = vi.fn(async () => ({ kind: 'completed' }));
+		const rt = nonTransactionalRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation,
+				observeContext: vi.fn(async () => {
+					throw new Error('context observation failed before DDL');
+				}),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.continuation).toBe('replan-required');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'operation-failed-not-applied',
+			stepId: 'step:op',
+		});
+		expect(result.assessment.reasons[0]?.code).not.toBe('unknown-step-result');
+		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(observed[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(executeOperation).not.toHaveBeenCalled();
+	});
+
 	it('reports unknown-step-result when rollback outcome is uncertain', async () => {
 		const observed: StepJournal[] = [];
 		const rt: OperationRuntime = {
@@ -2464,8 +2555,12 @@ describe('createApplier', () => {
 			executionTarget(),
 		);
 
-		expect(result.assessment.reasons[0]?.code).toBe('unknown-step-result');
+		expect(result.assessment.reasons[0]?.code).toBe(
+			'operation-failed-not-applied',
+		);
+		expect(result.assessment.lifecycle).toBe('planned');
 		expect(result.journals[0]?.intent.stepId).toBe('step:op');
+		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
 		expect(rt.release).not.toHaveBeenCalled();
 	});
 
@@ -2811,6 +2906,107 @@ describe('createApplier', () => {
 		});
 		expect(result.journals[0]?.outcome).toBe('guard-failed');
 		expect(observed[0]?.outcome).toBe('guard-failed');
+	});
+
+	it('reports a nontransactional runtime guard failure after execute as partial work', async () => {
+		const observed: StepJournal[] = [];
+		const duringGuard = guard('during-operation');
+		const executeOperation = vi.fn(async () => ({
+			kind: 'guard-failed' as const,
+			guard: duringGuard,
+			recovery: [],
+		}));
+		const rt = nonTransactionalRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ executeOperation },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const guarded = nonTransactionalPlanWithStep(
+			{
+				guards: [duringGuard],
+				requiredClaims: [claimId('mock.identity')],
+			},
+			{ claims: [identityClaim()] },
+		);
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.assessment.continuation).toBe('resume-possible');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'guard-failed',
+			operationRef: operation.ref,
+		});
+		expect(result.journals[0]?.outcome).toBe('partially-applied');
+		expect(observed[0]?.outcome).toBe('partially-applied');
+		expect(executeOperation).toHaveBeenCalledOnce();
+	});
+
+	it('reports a nontransactional runtime guard failure with no footprint as guard-failed', async () => {
+		const observed: StepJournal[] = [];
+		const duringGuard = guard('during-operation');
+		const executeOperation = vi.fn(async () => ({
+			kind: 'guard-failed' as const,
+			guard: duringGuard,
+			recovery: [],
+			nonRollbackableFootprint: 'none' as const,
+		}));
+		const rt = nonTransactionalRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ executeOperation },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+		const guarded = nonTransactionalPlanWithStep(
+			{
+				guards: [duringGuard],
+				requiredClaims: [claimId('mock.identity')],
+			},
+			{ claims: [identityClaim()] },
+		);
+
+		const result = await createApplier(registry).apply(
+			{ plan: guarded, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.continuation).toBe('replan-required');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'guard-failed',
+			operationRef: operation.ref,
+		});
+		expect(result.journals[0]?.outcome).toBe('guard-failed');
+		expect(observed[0]?.outcome).toBe('guard-failed');
+		expect(executeOperation).toHaveBeenCalledOnce();
 	});
 
 	it('surfaces nontransactional runtime partial recovery artefacts as resume-possible', async () => {

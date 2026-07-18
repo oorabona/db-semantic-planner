@@ -1,8 +1,10 @@
 import type {
 	Assumption,
 	CollationRef,
+	EquivalenceContext,
 	EvidenceObservation,
 	ExpressionValue,
+	ObservationContext,
 	ObservationRequest,
 	ResourceAddress,
 	TypeRef,
@@ -17,6 +19,32 @@ import { createPgEquivalenceCapability } from './equivalence.js';
 import { assumptionId, evidenceId, semanticArtifactId } from './ids.js';
 
 const context = { engine: 'postgresql' };
+const proofObservationContext: ObservationContext = {
+	engine: 'postgresql',
+	engineVersion: '180000',
+	databaseId: 'test',
+	capabilities: [],
+	privileges: [],
+	effectiveRole: 'app_owner',
+	targetSchema: 'public',
+	searchPath: ['public'],
+	sessionConfiguration: { standard_conforming_strings: 'on' },
+	extensions: { pgcrypto: '1.3' },
+	collationProvider: 'icu',
+	collationVersion: '153.120',
+	transaction: 'tx:deparse',
+};
+type ProofBoundEquivalenceContext = EquivalenceContext & {
+	readonly proofObservationContext?: ObservationContext;
+	readonly deparseRequest?: ObservationRequest;
+};
+const proofEquivalenceContext: ProofBoundEquivalenceContext = {
+	engine: proofObservationContext.engine,
+	databaseId: proofObservationContext.databaseId,
+	targetSchema: proofObservationContext.targetSchema,
+	searchPath: proofObservationContext.searchPath,
+	proofObservationContext,
+};
 
 function typeRef(
 	name: string,
@@ -141,13 +169,7 @@ function deparseEvidence(
 			},
 		},
 		context: options.context ?? {
-			engine: 'postgresql',
-			engineVersion: '180000',
-			databaseId: 'test',
-			capabilities: [],
-			privileges: [],
-			sessionConfiguration: {},
-			extensions: {},
+			...proofObservationContext,
 		},
 		stability: 'externally-mutable',
 		takenAt: new Date().toISOString(),
@@ -354,11 +376,92 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			context,
+			proofEquivalenceContext,
 			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
 		);
 
 		expect(result.kind).toBe('equivalent');
+	});
+
+	it('keeps deparse evidence unknown without a full proof observation context', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'active'::text");
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			{
+				engine: proofEquivalenceContext.engine,
+				databaseId: proofEquivalenceContext.databaseId,
+				targetSchema: proofEquivalenceContext.targetSchema,
+				searchPath: proofEquivalenceContext.searchPath,
+			},
+			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+		);
+
+		expect(result.kind).toBe('unknown');
+	});
+
+	it.each([
+		[
+			'effectiveRole',
+			(ctx: ObservationContext) => ({ ...ctx, effectiveRole: 'readonly_app' }),
+		],
+		[
+			'sessionConfiguration',
+			(ctx: ObservationContext) => ({
+				...ctx,
+				sessionConfiguration: {
+					...ctx.sessionConfiguration,
+					TimeZone: 'UTC',
+				},
+			}),
+		],
+		[
+			'extensions',
+			(ctx: ObservationContext) => ({
+				...ctx,
+				extensions: { ...ctx.extensions, citext: '1.6' },
+			}),
+		],
+		[
+			'collationVersion',
+			(ctx: ObservationContext) => ({
+				...ctx,
+				collationVersion: '153.121',
+			}),
+		],
+		[
+			'collationProvider',
+			(ctx: ObservationContext) => ({
+				...ctx,
+				collationProvider: 'libc',
+			}),
+		],
+		[
+			'transaction',
+			(ctx: ObservationContext) => ({ ...ctx, transaction: 'tx:other' }),
+		],
+	] as const)('does not consume deparse evidence from a different %s', (_field, mutate) => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'active'::text");
+		const mismatchedProofContext = mutate(proofObservationContext);
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			{
+				...proofEquivalenceContext,
+				proofObservationContext: mismatchedProofContext,
+			},
+			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+		);
+
+		expect(result.kind).toBe('unknown');
 	});
 
 	it('does not use sibling column deparse evidence for a bound comparison target', () => {
@@ -373,9 +476,7 @@ describe('PostgreSQL transition equivalence', () => {
 			'status',
 		);
 		const boundContext = {
-			engine: 'postgresql',
-			databaseId: 'test',
-			targetSchema: 'public',
+			...proofEquivalenceContext,
 			deparseRequest: request,
 		};
 
@@ -388,15 +489,7 @@ describe('PostgreSQL transition equivalence', () => {
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request: siblingRequest,
 					context: {
-						engine: 'postgresql',
-						engineVersion: '180000',
-						databaseId: 'test',
-						targetSchema: 'public',
-						searchPath: ['public'],
-						capabilities: [],
-						privileges: [],
-						sessionConfiguration: {},
-						extensions: {},
+						...proofObservationContext,
 					},
 				}),
 			],
@@ -411,9 +504,7 @@ describe('PostgreSQL transition equivalence', () => {
 		const right = sqlExpression("'active'::text");
 		const request = columnDeparseRequest(left, right);
 		const boundContext = {
-			engine: 'postgresql',
-			databaseId: 'test',
-			targetSchema: 'public',
+			...proofEquivalenceContext,
 			deparseRequest: request,
 		};
 
@@ -426,29 +517,13 @@ describe('PostgreSQL transition equivalence', () => {
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request,
 					context: {
-						engine: 'postgresql',
-						engineVersion: '180000',
-						databaseId: 'test',
-						targetSchema: 'public',
-						searchPath: ['public'],
-						capabilities: [],
-						privileges: [],
-						sessionConfiguration: {},
-						extensions: {},
+						...proofObservationContext,
 					},
 				}),
 				deparseEvidence(left, right, "'active'::text", "'pending'::text", {
 					request,
 					context: {
-						engine: 'postgresql',
-						engineVersion: '180000',
-						databaseId: 'test',
-						targetSchema: 'public',
-						searchPath: ['public'],
-						capabilities: [],
-						privileges: [],
-						sessionConfiguration: {},
-						extensions: {},
+						...proofObservationContext,
 					},
 				}),
 			],
@@ -497,7 +572,7 @@ describe('PostgreSQL transition equivalence', () => {
 			left,
 			right,
 			'scalar',
-			context,
+			proofEquivalenceContext,
 			[deparseEvidence(left, right, "'active'::text", "'pending'::text")],
 		);
 

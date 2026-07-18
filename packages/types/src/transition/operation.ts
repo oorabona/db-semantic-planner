@@ -45,6 +45,7 @@ export type OperationExecutionOutcome =
 			readonly kind: 'guard-failed';
 			readonly guard: ApplyGuard;
 			readonly recovery: readonly RecoveryArtefact[];
+			readonly nonRollbackableFootprint?: 'none' | 'unknown-or-present';
 	  }
 	| {
 			readonly kind: 'partially-applied';

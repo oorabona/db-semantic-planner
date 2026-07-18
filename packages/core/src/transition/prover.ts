@@ -113,6 +113,7 @@ function equivalenceContextFromObservation(context: ObservationContext) {
 		...(context.databaseId ? { databaseId: context.databaseId } : {}),
 		...(targetSchema ? { targetSchema } : {}),
 		...(searchPath ? { searchPath } : {}),
+		proofObservationContext: context,
 	};
 }
 
@@ -1148,6 +1149,22 @@ function fallbackUnknownObligation(
 }
 
 type CompositionDeclaration = NonNullable<TransitionFragment['composition']>;
+type CompositionProducer = NonNullable<
+	CompositionDeclaration['produces']
+>[number];
+type CompositionRequirement = NonNullable<
+	CompositionDeclaration['requires']
+>[number];
+
+function compositionRequirementNeedsCommittedProducer(
+	requirement: CompositionRequirement,
+	producer: CompositionProducer,
+): boolean {
+	return (
+		requirement.needs === 'producer-after-commit' ||
+		producer.available === 'after-commit'
+	);
+}
 
 function compositionRequirementSatisfaction(
 	registry: PackRegistry,
@@ -1157,21 +1174,49 @@ function compositionRequirementSatisfaction(
 ):
 	| { readonly ok: true }
 	| { readonly ok: false; readonly assessment: PlanAssessment } {
-	const producedFacts = new Set<string>();
+	const producersByFact = new Map<string, CompositionProducer[]>();
 	for (const declaration of declarations) {
 		for (const producer of declaration.produces ?? []) {
-			producedFacts.add(transitionCompositionFactKey(producer.fact));
+			const key = transitionCompositionFactKey(producer.fact);
+			producersByFact.set(key, [...(producersByFact.get(key) ?? []), producer]);
 		}
 	}
 	for (const declaration of declarations) {
 		for (const requirement of declaration.requires ?? []) {
-			if (producedFacts.has(transitionCompositionFactKey(requirement.fact))) {
-				continue;
-			}
 			if (
 				current &&
 				registry.satisfiesCompositionFact(requirement.fact, current, context)
 			) {
+				continue;
+			}
+			const producers =
+				producersByFact.get(transitionCompositionFactKey(requirement.fact)) ??
+				[];
+			if (producers.length === 1) {
+				const producer = producers[0];
+				if (!producer) {
+					return {
+						ok: false,
+						assessment: unsupportedCompositionRequirement(
+							`unsatisfied composition requirement ${requirement.opRef} requires ${requirement.fact.kind}`,
+							[requirement.fact.resource],
+						),
+					};
+				}
+				if (
+					compositionRequirementNeedsCommittedProducer(requirement, producer)
+				) {
+					return {
+						ok: false,
+						assessment: unsupportedCompositionRequirement(
+							`composition requirement ${requirement.opRef} requires ${requirement.fact.kind} from same-plan producer ${producer.opRef}, but ${requirement.needs} / ${producer.available} facts must be proven against committed state`,
+							[requirement.fact.resource],
+						),
+					};
+				}
+				continue;
+			}
+			if (producers.length > 1) {
 				continue;
 			}
 			return {

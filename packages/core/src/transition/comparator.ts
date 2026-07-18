@@ -298,10 +298,34 @@ function checksForComparison(
 	return checks?.map(checkForComparison);
 }
 
-function logicalIdentityForComparison(
-	identity: LogicalIdentity | undefined,
-): { readonly id: string } | undefined {
-	return identity ? { id: identity.id } : undefined;
+function logicalIdentityForComparison(identity: LogicalIdentity | undefined):
+	| {
+			readonly id: string;
+			readonly carrier:
+				| {
+						readonly kind: string;
+						readonly authenticated: false;
+				  }
+				| undefined;
+	  }
+	| undefined {
+	if (identity === undefined) {
+		return undefined;
+	}
+	// A malformed identity that reached comparison without a carrier (e.g. a
+	// spoofed/legacy db-side shape that bypassed validation) must NOT crash the
+	// comparator. Reflect the missing carrier as `undefined` so it compares as a
+	// real difference against a well-formed carrier (fail closed → surfaces as
+	// drift), never silently equal.
+	return {
+		id: identity.id,
+		carrier: identity.carrier
+			? {
+					kind: identity.carrier.kind,
+					authenticated: identity.carrier.authenticated,
+				}
+			: undefined,
+	};
 }
 
 function columnForComparison(column: ColumnIR): unknown {

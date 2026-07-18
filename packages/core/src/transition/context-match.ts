@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import type { ObservationContext, TransitionRunMetadata } from '@dbsp/types';
-import { firstObservationContextNucleusMismatch } from './context-compat.js';
+import {
+	firstObservationContextIdentityMismatch,
+	firstObservationContextNucleusMismatch,
+} from './context-compat.js';
 import { stableJson } from './stable-json.js';
 
 export type ObservationContextMatchResult =
@@ -31,6 +34,25 @@ export function matchLiveObservationContext(params: {
 		return {
 			ok: false,
 			detail: `${label} nucleus differs from proof context at ${mismatchedField}`,
+		};
+	}
+	return { ok: true };
+}
+
+export function matchObservationContextIdentity(params: {
+	readonly expected: ObservationContext;
+	readonly actual: ObservationContext;
+	readonly label?: string;
+}): ObservationContextMatchResult {
+	const label = params.label ?? 'observation context';
+	const mismatchedField = firstObservationContextIdentityMismatch(
+		params.expected,
+		params.actual,
+	);
+	if (mismatchedField) {
+		return {
+			ok: false,
+			detail: `${label} identity differs from proof context at ${mismatchedField}`,
 		};
 	}
 	return { ok: true };

@@ -1,6 +1,6 @@
 import type { SemanticArtifactRef } from './artifact.js';
 import type { ExpressionValue } from './expression.js';
-import type { EvidenceObservation } from './observation.js';
+import type { EvidenceObservation, ObservationContext } from './observation.js';
 import type { Assumption, ProofClaimDraft, ProofObligation } from './proof.js';
 
 export type EquivalenceResult =
@@ -50,6 +50,7 @@ export interface EquivalenceContext {
 	readonly databaseId?: string;
 	readonly targetSchema?: string;
 	readonly searchPath?: readonly string[];
+	readonly proofObservationContext?: ObservationContext;
 }
 
 export type ExpressionEquivalenceCategory =

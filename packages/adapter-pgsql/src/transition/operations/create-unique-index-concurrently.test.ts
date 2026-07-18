@@ -368,6 +368,7 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 			kind: 'guard-failed',
 			guard: guard(),
 			recovery: [],
+			nonRollbackableFootprint: 'none',
 		});
 		expect(queries).toContain(
 			'DROP INDEX CONCURRENTLY IF EXISTS "tenant"."idx_users_email"',

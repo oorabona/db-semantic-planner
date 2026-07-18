@@ -177,7 +177,7 @@ function resourceMatchesRequestedScope(
 		left.kind === right.kind &&
 		left.name === right.name &&
 		sameJson(left.qualifiedBy, right.qualifiedBy) &&
-		(left.schema == null || left.schema === right.schema)
+		left.schema === right.schema
 	);
 }
 
@@ -193,8 +193,7 @@ function schemaMatchesRequested(
 		(requested == null && observed == null) ||
 		(requested == null &&
 			typeof observed === 'string' &&
-			(context?.targetSchema === undefined ||
-				context.targetSchema === observed))
+			context?.targetSchema === observed)
 	);
 }
 
@@ -228,11 +227,7 @@ function detailMatchesRequested(
 		}
 	}
 	for (const key of Object.keys(right)) {
-		if (
-			!(key in left) &&
-			(key !== 'schema' ||
-				!schemaMatchesRequested(undefined, right[key], context))
-		) {
+		if (!(key in left)) {
 			return false;
 		}
 	}
@@ -434,6 +429,15 @@ function concreteIdentityMismatch(
 			}
 		}
 	}
+	const requestedSchemas = requested.get('schema');
+	const observedSchemas = observed.get('schema');
+	if (
+		(!requestedSchemas || requestedSchemas.size === 0) &&
+		observedSchemas &&
+		observedSchemas.size > 0
+	) {
+		return 'schema';
+	}
 	return undefined;
 }
 
@@ -522,7 +526,7 @@ function resourceCovers(
 	return (
 		carrier.engine === target.engine &&
 		carrier.database === target.database &&
-		(target.schema == null || carrier.schema === target.schema) &&
+		carrier.schema === target.schema &&
 		(target.qualifiedBy?.includes(carrier.name) ?? false)
 	);
 }
@@ -711,6 +715,9 @@ function evidenceContextMatches(
 	evidence: EvidenceObservation,
 	expectedContext?: ObservationContext,
 ): boolean {
+	if (!transactionSnapshotContextMatches(evidence, expectedContext)) {
+		return false;
+	}
 	return (
 		!expectedContext ||
 		matchLiveObservationContext({
@@ -718,6 +725,28 @@ function evidenceContextMatches(
 			actual: evidence.context,
 			label: 'evidence observation context',
 		}).ok
+	);
+}
+
+function hasTransactionBinding(context: ObservationContext): boolean {
+	return (
+		typeof context.transaction === 'string' &&
+		context.transaction.trim().length > 0
+	);
+}
+
+function transactionSnapshotContextMatches(
+	evidence: EvidenceObservation,
+	expectedContext?: ObservationContext,
+): boolean {
+	if (evidence.stability !== 'transaction-snapshot') {
+		return true;
+	}
+	return (
+		expectedContext !== undefined &&
+		hasTransactionBinding(evidence.context) &&
+		hasTransactionBinding(expectedContext) &&
+		evidence.context.transaction === expectedContext.transaction
 	);
 }
 

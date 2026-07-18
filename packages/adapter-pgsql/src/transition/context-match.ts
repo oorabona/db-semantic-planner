@@ -1,6 +1,10 @@
 import type { EvidenceObservation, ObservationContext } from '@dbsp/types';
 import { stableJson } from './stable-json.js';
 
+export type ObservationContextMatchResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly detail: string };
+
 const ADDITIVE_CONTEXT_FIELDS = new Set(['capabilities', 'privileges']);
 
 function nucleusKeys(
@@ -35,11 +39,34 @@ export function observationContextMatches(
 	observation: EvidenceObservation,
 	context: ObservationContext,
 ): boolean {
-	if (observation.context.databaseId !== context.databaseId) {
-		return false;
+	return matchLiveObservationContext({
+		expected: context,
+		actual: observation.context,
+		label: 'observation context',
+	}).ok;
+}
+
+export function matchLiveObservationContext(params: {
+	readonly expected: ObservationContext;
+	readonly actual: ObservationContext;
+	readonly label?: string;
+}): ObservationContextMatchResult {
+	const label = params.label ?? 'live observation context';
+	if (params.actual.databaseId !== params.expected.databaseId) {
+		return {
+			ok: false,
+			detail: `${label} databaseId ${params.actual.databaseId} does not match proof databaseId ${params.expected.databaseId}`,
+		};
 	}
-	return (
-		firstObservationContextNucleusMismatch(context, observation.context) ===
-		undefined
+	const mismatchedField = firstObservationContextNucleusMismatch(
+		params.expected,
+		params.actual,
 	);
+	if (mismatchedField) {
+		return {
+			ok: false,
+			detail: `${label} nucleus differs from proof context at ${mismatchedField}`,
+		};
+	}
+	return { ok: true };
 }

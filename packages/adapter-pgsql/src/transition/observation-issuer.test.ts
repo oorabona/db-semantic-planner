@@ -13,6 +13,7 @@ import {
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
 	INDEX_ABSENT_OBSERVATION,
+	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
 	PG_DEPARSE_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
@@ -91,6 +92,65 @@ async function enumLabelVisibleHolds(
 }
 
 describe('PostgreSQL transition observation issuer', () => {
+	it('fails closed before trusting logical identity rows from an unmanaged side table', async () => {
+		const issuer = createPgObservationIssuer();
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_catalog.jsonb_object_agg')) {
+				return {
+					rows: [
+						{
+							table_exists: true,
+							columns: {
+								logical_id: { type: 'text', notNull: true },
+								schema_name: { type: 'text', notNull: true },
+								table_name: { type: 'text', notNull: true },
+								column_name: { type: 'text', notNull: false },
+								carrier_kind: { type: 'text', notNull: true },
+								attached_at: {
+									type: 'timestamp with time zone',
+									notNull: true,
+								},
+							},
+							primary_key: ['logical_id'],
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_catalog.to_regclass')) {
+				return { rows: [{ exists: true }] };
+			}
+			if (sql.includes('JOIN pg_catalog.pg_attribute a')) {
+				return { rows: [{}] };
+			}
+			throw new Error(`unexpected query: ${sql}`);
+		});
+
+		await expect(
+			issuer.execute(
+				{
+					kind: LOGICAL_IDENTITY_CARRIER_OBSERVATION,
+					scope: [],
+					detail: {
+						schema: 'tenant',
+						table: 'users',
+						column: 'age',
+						logicalId: 'logical.users.age',
+						carrierKind: 'postgresql-side-table',
+						authenticated: false,
+						expected: 'attached',
+					},
+				},
+				{ query },
+				context,
+			),
+		).rejects.toThrow(/not the dbsp-managed carrier shape/);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('SELECT logical_id, schema_name'),
+			),
+		).toBe(false);
+	});
+
 	it('surfaces relation kind in column evidence for partitioned tables', async () => {
 		const issuer = createPgObservationIssuer();
 		const queries: string[] = [];

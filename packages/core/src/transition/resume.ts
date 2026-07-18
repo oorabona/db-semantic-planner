@@ -23,6 +23,7 @@ import type {
 } from '@dbsp/types';
 import {
 	matchLiveObservationContext,
+	matchObservationContextIdentity,
 	matchRunObservationContext,
 } from './context-match.js';
 import { semanticArtifactId } from './ids.js';
@@ -137,6 +138,14 @@ function assumptionAccepted(
 
 function digest(value: unknown): string {
 	return createHash('sha256').update(stableJson(value)).digest('hex');
+}
+
+function planEvidenceContext(
+	plan: ProvenPlanShape,
+): ObservationContext | undefined {
+	return plan.observations.find(
+		(observation) => observation.role === 'evidence',
+	)?.context;
 }
 
 function assessment(
@@ -764,6 +773,10 @@ export async function resumeTransitionRun(
 			`loaded plan failed invariant validation: ${diagnostic.detail}`,
 		);
 	}
+	const evidenceContext = planEvidenceContext(loaded.plan);
+	if (!evidenceContext) {
+		return contextMismatch('loaded plan contains no durable evidence context');
+	}
 	const baseContext = await input.readContext(input.target, loaded.run);
 	const runContextMatch = matchRunObservationContext({
 		run: loaded.run,
@@ -771,6 +784,16 @@ export async function resumeTransitionRun(
 	});
 	if (!runContextMatch.ok) {
 		return contextMismatch(runContextMatch.detail);
+	}
+	const evidenceIdentityMatch = matchObservationContextIdentity({
+		expected: baseContext,
+		actual: evidenceContext,
+		label: 'loaded plan evidence context',
+	});
+	if (!evidenceIdentityMatch.ok) {
+		return contextMismatch(
+			`loaded plan evidence context does not match run proof context: ${evidenceIdentityMatch.detail}`,
+		);
 	}
 	const operationEffectsByRef = new Map<string, OperationEffectAssessment>();
 	for (const step of loaded.plan.steps) {

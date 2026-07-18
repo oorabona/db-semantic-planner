@@ -377,11 +377,17 @@ function setNotNullEquivalenceContext(
 	observed: SetNotNullObservedColumnShape,
 	context: ObservationContext,
 ): EquivalenceContext & { readonly deparseRequest?: ObservationRequest } {
+	const targetSchema = schemaFor(payload, context);
+	const proofObservationContext =
+		context.targetSchema === targetSchema
+			? context
+			: { ...context, targetSchema };
 	const base = {
 		engine: context.engine,
 		databaseId: context.databaseId,
-		targetSchema: schemaFor(payload, context),
+		targetSchema,
 		...(context.searchPath ? { searchPath: context.searchPath } : {}),
+		proofObservationContext,
 	};
 	const request = columnDefaultDeparseRequest(
 		payload,

@@ -42,6 +42,10 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 	readonly runs = new Map<string, Record<string, unknown>>();
 	readonly events: Record<string, unknown>[] = [];
 	readonly sql: string[] = [];
+	readonly queryLog: {
+		readonly sql: string;
+		readonly params: readonly unknown[];
+	}[] = [];
 	readonly shapeOverrides = new Map<string, Record<string, unknown>>();
 	runUpsertAttempts = 0;
 
@@ -101,6 +105,7 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 
 	async query(sql: string, params: readonly unknown[] = []) {
 		this.sql.push(sql);
+		this.queryLog.push({ sql, params });
 		if (sql.startsWith('CREATE ')) {
 			return { rows: [] };
 		}
@@ -215,6 +220,68 @@ describe('transition journal primitive', () => {
 				sql.includes('CREATE SCHEMA IF NOT EXISTS "dbsp_meta"'),
 			),
 		).toBe(true);
+	});
+
+	it('allocates journal seq under a parameterized per-run advisory lock', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		const intent: DurableIntentRecord = {
+			runId: metadata.runId,
+			run: metadata,
+			stepId: 'step:mock',
+			operation,
+			recordedAt: '2026-07-17T00:00:00.100Z',
+		};
+
+		await appendIntentJournal(executor, intent);
+
+		const appendQuery = executor.queryLog.find(({ sql }) =>
+			sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"'),
+		);
+		expect(appendQuery?.params[0]).toBe(metadata.runId);
+		expect(appendQuery?.sql).toContain('WITH run_lock AS MATERIALIZED');
+		expect(appendQuery?.sql).toContain(
+			'pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext($1)::bigint)',
+		);
+		expect(appendQuery?.sql).toContain(
+			'SELECT COALESCE(max(j.seq), 0) + 1 AS seq',
+		);
+		expect(appendQuery?.sql).toContain('LEFT JOIN');
+		expect(appendQuery?.sql).not.toContain(metadata.runId);
+	});
+
+	it('allows concurrent same-run public appends to complete with distinct seqs', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		const intent: DurableIntentRecord = {
+			runId: metadata.runId,
+			run: metadata,
+			stepId: 'step:mock',
+			operation,
+			recordedAt: '2026-07-17T00:00:00.100Z',
+		};
+		const firstCompletion: TransactionalCompletionRecord = {
+			runId: metadata.runId,
+			stepId: 'step:mock:a',
+			committedWithDdl: true,
+			recordedAt: '2026-07-17T00:00:00.200Z',
+		};
+		const secondCompletion: TransactionalCompletionRecord = {
+			runId: metadata.runId,
+			stepId: 'step:mock:b',
+			committedWithDdl: true,
+			recordedAt: '2026-07-17T00:00:00.300Z',
+		};
+
+		await appendIntentJournal(executor, intent);
+		await Promise.all([
+			appendCompletionJournal(executor, operation, firstCompletion),
+			appendCompletionJournal(executor, operation, secondCompletion),
+		]);
+
+		expect(executor.events).toHaveLength(3);
+		expect(executor.events.map((entry) => entry.seq)).toEqual([1, 2, 3]);
+		expect(new Set(executor.events.map((entry) => entry.seq)).size).toBe(3);
 	});
 
 	it('re-ensures the run row before appending observed output after a rolled-back intent transaction', async () => {

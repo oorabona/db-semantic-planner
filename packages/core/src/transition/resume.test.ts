@@ -492,6 +492,34 @@ describe('resumeTransitionRun', () => {
 		expect(result.assessment.reasons[0]?.detail).toContain('databaseId');
 	});
 
+	it('fails closed when loaded plan evidence context does not match the run proof context', async () => {
+		const base = planShape();
+		const tampered: ProvenPlanShape = {
+			...base,
+			observations: base.observations.map((observation) =>
+				observation.role === 'evidence'
+					? {
+							...observation,
+							context: {
+								...context,
+								databaseId: 'other-db',
+								targetSchema: 'other',
+							},
+						}
+					: observation,
+			),
+		};
+
+		const result = await resumeWith(tampered, [], runtime({}));
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'loaded plan evidence context',
+		);
+	});
+
 	it('blocks reconciliation when a step runtime observes a foreign context', async () => {
 		const plan = planShape();
 		const runMetadata = run(plan);

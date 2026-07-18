@@ -4,7 +4,7 @@ import type {
 	ObservationRequest,
 	PhysicalOperation,
 } from '@dbsp/types';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { stampedClaimForRequest } from '../claim-stamping.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
@@ -104,6 +104,49 @@ function carrierEvidence(
 }
 
 describe('AttachLogicalIdentity operation runtime', () => {
+	it('fails closed before writing into an existing unmanaged side table', async () => {
+		const runtime = createAttachLogicalIdentityOperationRuntime();
+		const query = vi.fn(async (sql: string) => {
+			if (sql.includes('pg_catalog.jsonb_object_agg')) {
+				return {
+					rows: [
+						{
+							table_exists: true,
+							columns: {
+								logical_id: { type: 'text', notNull: true },
+								schema_name: { type: 'text', notNull: true },
+								table_name: { type: 'text', notNull: true },
+								column_name: { type: 'text', notNull: false },
+								carrier_kind: { type: 'text', notNull: true },
+								attached_at: {
+									type: 'timestamp with time zone',
+									notNull: true,
+								},
+							},
+							primary_key: ['logical_id'],
+						},
+					],
+				};
+			}
+			if (sql.includes('pg_catalog.to_regclass')) {
+				return { rows: [{ exists: true }] };
+			}
+			return { rows: [] };
+		});
+
+		await expect(
+			runtime.executeOperation({ opaqueClient: { query } }, operation),
+		).rejects.toThrow(/not the dbsp-managed carrier shape/);
+		expect(
+			query.mock.calls.some(([sql]) =>
+				String(sql).includes('CREATE TABLE IF NOT EXISTS'),
+			),
+		).toBe(false);
+		expect(
+			query.mock.calls.some(([sql]) => String(sql).includes('INSERT INTO')),
+		).toBe(false);
+	});
+
 	it('declares the meta schema, side table and carrier indexes it creates', () => {
 		const runtime = createAttachLogicalIdentityOperationRuntime();
 		const effects = runtime.effectsOf(operation, context);

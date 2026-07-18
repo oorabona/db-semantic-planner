@@ -21,6 +21,7 @@ import { assumptionId } from '../ids.js';
 import { createPgObservationIssuer } from '../observation-issuer.js';
 import {
 	createManualSqlOperationRuntime,
+	type ManualSqlPayload,
 	normalizeManualSqlPayload,
 } from './manual-sql.js';
 
@@ -134,6 +135,43 @@ function expectStatementRejected(text: string, pattern: RegExp): void {
 			},
 			context,
 		),
+	).toThrow(pattern);
+}
+
+function validManualPayload(): ManualSqlPayload {
+	return {
+		statement: {
+			kind: 'unsafe-native',
+			category: 'statement',
+			text: 'ALTER TABLE "tenant"."users" ADD COLUMN "manual_flag" boolean',
+			assumption: userBlastAssumption().id,
+			attestation: userBlastAssumption([tableResource]),
+		},
+		blastRadius: [tableResource],
+		preconditions: [
+			{
+				proposition: {
+					kind: 'manual.users.manual_flag.absent',
+					scope: [tableResource],
+				},
+				scope: [tableResource],
+			},
+		],
+		postconditions: [
+			{
+				proposition: {
+					kind: 'manual.users.manual_flag.present',
+					scope: [tableResource],
+				},
+				scope: [tableResource],
+			},
+		],
+	};
+}
+
+function expectPayloadRejected(payload: unknown, pattern: RegExp): void {
+	expect(() =>
+		normalizeManualSqlPayload(payload as ManualSqlPayload, context),
 	).toThrow(pattern);
 }
 
@@ -372,6 +410,139 @@ describe('ManualSql operation runtime', () => {
 		'/* leading comment */ COMMIT',
 	])('rejects transaction-control escape-hatch SQL: %s', (sql) => {
 		expectStatementRejected(sql, /transaction-control/);
+	});
+
+	it('rejects malformed unsafe statement attestations before normalization', () => {
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				statement: {
+					...validManualPayload().statement,
+					attestation: {
+						...userBlastAssumption([tableResource]),
+						id: undefined,
+					},
+				},
+			},
+			/attestation id/,
+		);
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				statement: {
+					...validManualPayload().statement,
+					attestation: {
+						...userBlastAssumption([tableResource]),
+						statement: '',
+					},
+				},
+			},
+			/attestation statement/,
+		);
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				statement: {
+					...validManualPayload().statement,
+					assumption: assumptionId('manual.user-blast.other'),
+				},
+			},
+			/assumption must match its attestation id/,
+		);
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				statement: {
+					...validManualPayload().statement,
+					attestation: {
+						...userBlastAssumption([tableResource]),
+						scope: [
+							{
+								engine: 'postgresql',
+								database: 'manual-db',
+								schema: 'tenant',
+								kind: 'table',
+							},
+						],
+					},
+				},
+			},
+			/attestation scope\[0\] must be a resource address/,
+		);
+	});
+
+	it('rejects malformed manual assertions before normalization', () => {
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				preconditions: [
+					{
+						proposition: { kind: 'unknown', scope: [tableResource] },
+						scope: [tableResource],
+					},
+				],
+			},
+			/known proposition kind/,
+		);
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				preconditions: [
+					{
+						proposition: {
+							kind: 'manual.users.manual_flag.absent',
+							scope: [
+								{
+									engine: 'postgresql',
+									database: 'manual-db',
+									kind: 'table',
+								},
+							],
+						},
+						scope: [tableResource],
+					},
+				],
+			},
+			/preconditions\[0\]\.proposition\.scope\[0\] must be a resource address/,
+		);
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				postconditions: [
+					{
+						proposition: {
+							kind: 'manual.users.manual_flag.present',
+							scope: [tableResource],
+						},
+						scope: [
+							{
+								engine: 'postgresql',
+								database: 'manual-db',
+								kind: 'table',
+							},
+						],
+					},
+				],
+			},
+			/postconditions\[0\]\.scope\[0\] must be a resource address/,
+		);
+	});
+
+	it('canonicalizes well-formed manual assertions and attestation scopes', () => {
+		const normalized = normalizeManualSqlPayload(validManualPayload(), context);
+
+		expect(normalized.statement.attestation).toMatchObject({
+			id: userBlastAssumption().id,
+			statement:
+				'schema-owner declares this manual statement only touches users',
+			scope: [tableResource],
+		});
+		expect(normalized.preconditions[0]).toEqual(
+			validManualPayload().preconditions[0],
+		);
+		expect(normalized.postconditions[0]).toEqual(
+			validManualPayload().postconditions[0],
+		);
 	});
 
 	it('retains and widens the human blast-radius assumption', async () => {

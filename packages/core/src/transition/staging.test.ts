@@ -15,6 +15,7 @@ import type {
 	TransitionRule,
 } from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
+import { withTransitionCompareCurrentModel } from './comparator.js';
 import { assumptionId, evidenceId, semanticArtifactId } from './ids.js';
 import { createProver } from './prover.js';
 import type { RegisteredOperationSemantics } from './registry.js';
@@ -347,6 +348,53 @@ describe('staged composition preflight', () => {
 			context,
 		);
 		expect(outcome.kind).toBe('proven');
+	});
+
+	it('blocks direct proof when a CHECK depends on a same-plan after-commit enum label', async () => {
+		const enumRule = producerRule();
+		const checkRule = consumerRule();
+		const reg = registry([enumRule, checkRule]);
+		const diff = withTransitionCompareCurrentModel(
+			compare([
+				candidate(enumRule, 'op:enum'),
+				candidate(checkRule, 'op:check'),
+			]),
+			model(['active']),
+		);
+
+		const outcome = await createProver(reg).prove(diff, proofTarget(), context);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+			});
+			expect(outcome.assessment.reasons[0]?.detail).toContain(
+				'postgresql.enum-label.visible',
+			);
+			expect(outcome.assessment.reasons[0]?.detail).toContain(
+				'producer-after-commit',
+			);
+			expect(outcome.assessment.reasons[0]?.detail).toContain('after-commit');
+		}
+	});
+
+	it('proves a CHECK consumer directly when its enum label is already committed', async () => {
+		const checkRule = consumerRule();
+		const reg = registry([checkRule]);
+		const diff = withTransitionCompareCurrentModel(
+			compare([candidate(checkRule, 'op:check')]),
+			model(['active', 'pending']),
+		);
+
+		const outcome = await createProver(reg).prove(diff, proofTarget(), context);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind === 'proven') {
+			expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
+				'op:check',
+			]);
+		}
 	});
 
 	it('stages after-commit facts even when the consumer asks for before-operation availability', () => {

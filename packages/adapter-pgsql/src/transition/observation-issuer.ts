@@ -20,8 +20,6 @@ import {
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	COLUMN_EXISTS_OBSERVATION,
-	DBSP_LOGICAL_IDENTITY_TABLE,
-	DBSP_META_SCHEMA,
 	ENGINE_VERSION_OBSERVATION,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 	ENUM_TYPE_EXISTS_OBSERVATION,
@@ -40,6 +38,11 @@ import {
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 import { evidenceId } from './ids.js';
+import {
+	logicalIdentityCarrierTableStatus,
+	qualifiedLogicalIdentitySideTable,
+	unmanagedLogicalIdentityCarrierTableError,
+} from './logical-identity-carrier-shape.js';
 import { mergePgObservationPrivileges, pgPrivilegeFact } from './privileges.js';
 
 type QueryResultLike = {
@@ -1324,38 +1327,24 @@ async function logicalIdentityObjectExists(
 	return result.rows.length > 0;
 }
 
-async function logicalIdentitySideTableExists(
-	executor: Queryable,
-	_schema: string,
-): Promise<boolean> {
-	const qualified = `${quoteIdent(DBSP_META_SCHEMA, 'schema')}.${quoteIdent(
-		DBSP_LOGICAL_IDENTITY_TABLE,
-		'table',
-	)}`;
-	const result = await executor.query(
-		'SELECT pg_catalog.to_regclass($1) IS NOT NULL AS exists',
-		[qualified],
-	);
-	return result.rows[0]?.exists === true;
-}
-
-async function logicalIdentityBindings(
+async function logicalIdentityCarrierSnapshot(
 	executor: Queryable,
 	target: LogicalIdentityObservationTarget,
-): Promise<readonly LogicalIdentityBinding[]> {
-	const sideTableExists = await logicalIdentitySideTableExists(
-		executor,
-		target.schema,
-	);
-	if (!sideTableExists) {
-		return [];
+): Promise<{
+	readonly sideTableExists: boolean;
+	readonly bindings: readonly LogicalIdentityBinding[];
+}> {
+	const status = await logicalIdentityCarrierTableStatus(executor);
+	if (status === 'absent') {
+		return { sideTableExists: false, bindings: [] };
 	}
+	if (status === 'unmanaged') {
+		throw unmanagedLogicalIdentityCarrierTableError();
+	}
+	const sideTable = qualifiedLogicalIdentitySideTable();
 	const result = await executor.query(
 		`SELECT logical_id, schema_name, table_name, column_name, carrier_kind ` +
-			`FROM ${quoteIdent(DBSP_META_SCHEMA, 'schema')}.${quoteIdent(
-				DBSP_LOGICAL_IDENTITY_TABLE,
-				'table',
-			)} ` +
+			`FROM ${sideTable} ` +
 			'WHERE logical_id = $1 OR (' +
 			'schema_name = $2 AND table_name = $3 AND ' +
 			'((column_name IS NULL AND $4::text IS NULL) OR column_name = $4::text)' +
@@ -1363,10 +1352,11 @@ async function logicalIdentityBindings(
 			'ORDER BY logical_id, schema_name, table_name, column_name NULLS FIRST',
 		[target.logicalId, target.schema, target.table, target.column ?? null],
 	);
-	return result.rows.flatMap((row) => {
+	const bindings = result.rows.flatMap((row) => {
 		const binding = logicalIdentityBindingFromRow(row);
 		return binding ? [binding] : [];
 	});
+	return { sideTableExists: true, bindings };
 }
 
 async function observeLogicalIdentityCarrier(
@@ -1389,11 +1379,11 @@ async function observeLogicalIdentityCarrier(
 			expected: target.expected,
 		},
 	};
-	const [objectExists, sideTableExists, bindings] = await Promise.all([
+	const [objectExists, carrierSnapshot] = await Promise.all([
 		logicalIdentityObjectExists(executor, target),
-		logicalIdentitySideTableExists(executor, target.schema),
-		logicalIdentityBindings(executor, target),
+		logicalIdentityCarrierSnapshot(executor, target),
 	]);
+	const { sideTableExists, bindings } = carrierSnapshot;
 	const objectBindings = bindings.filter((binding) =>
 		bindingMatchesTarget(binding, target),
 	);

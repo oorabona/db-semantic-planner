@@ -8,6 +8,7 @@ import type {
 	ExpressionEquivalenceCategory,
 	ExpressionValue,
 	JsonValue,
+	ObservationContext,
 	ObservationRequest,
 	ProofClaimDraft,
 	ProofObligation,
@@ -18,7 +19,7 @@ import {
 	PG_DEPARSE_ARTIFACT,
 	PG_EQUIVALENCE_ARTIFACT,
 } from './constants.js';
-import { observationContextMatches } from './context-match.js';
+import { matchLiveObservationContext } from './context-match.js';
 import { stableJson } from './stable-json.js';
 
 const TYPE_ALIASES = new Map<string, string>([
@@ -481,6 +482,7 @@ type DeparseEvidenceLookup =
 
 type DeparseBoundEquivalenceContext = EquivalenceContext & {
 	readonly deparseRequest?: ObservationRequest;
+	readonly proofObservationContext?: ObservationContext;
 };
 
 function expressionCategory(
@@ -595,18 +597,16 @@ function equivalenceObservationContextMatches(
 	observation: EvidenceObservation,
 	context: EquivalenceContext,
 ): boolean {
-	const expected = {
-		...observation.context,
-		engine: context.engine,
-		...(context.databaseId ? { databaseId: context.databaseId } : {}),
-		...(context.targetSchema !== undefined
-			? { targetSchema: context.targetSchema }
-			: {}),
-		...(context.searchPath !== undefined
-			? { searchPath: context.searchPath }
-			: {}),
-	};
-	return observationContextMatches(observation, expected);
+	const expected = (context as DeparseBoundEquivalenceContext)
+		.proofObservationContext;
+	if (!expected) {
+		return false;
+	}
+	return matchLiveObservationContext({
+		expected,
+		actual: observation.context,
+		label: 'deparse evidence observation context',
+	}).ok;
 }
 
 function boundDeparseRequest(

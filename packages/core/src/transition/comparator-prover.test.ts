@@ -5,7 +5,10 @@ import type {
 	ColumnIR,
 	CompareOutcome,
 	EnumIR,
+	EquivalenceCapability,
+	EquivalenceContext,
 	EvidenceObservation,
+	ExpressionValue,
 	JsonValue,
 	ModelIR,
 	ObservationContext,
@@ -75,6 +78,10 @@ const context: ObservationContext = {
 	privileges: [],
 	sessionConfiguration: {},
 	extensions: {},
+};
+
+type ProofBoundEquivalenceContext = EquivalenceContext & {
+	readonly proofObservationContext?: ObservationContext;
 };
 
 const logicalIdentityCarrier = {
@@ -984,13 +991,16 @@ function compositionDeclarations(
 	mode: CompositionMode,
 ): TransitionFragment['composition'] {
 	if (mode === 'dependent' || mode === 'invalidates') {
+		const requiresCommittedProducer = mode === 'dependent';
 		return opRef === 'op:a'
 			? {
 					produces: [
 						{
 							opRef,
 							fact: compositionFact(),
-							available: 'after-commit',
+							available: requiresCommittedProducer
+								? 'after-commit'
+								: 'after-operation',
 						},
 					],
 				}
@@ -999,7 +1009,9 @@ function compositionDeclarations(
 						{
 							opRef,
 							fact: compositionFact(),
-							needs: 'producer-after-commit',
+							needs: requiresCommittedProducer
+								? 'producer-after-commit'
+								: 'producer-before-operation',
 						},
 					],
 				};
@@ -1603,7 +1615,8 @@ describe('createComparator', () => {
 	});
 
 	it('keeps different-group recognitions for composition instead of using precedence across them', async () => {
-		const { registry: customRegistry } = recognizedCompositionRegistry();
+		const { registry: customRegistry } =
+			recognizedCompositionRegistry('disconnected');
 		const compare = createComparator(customRegistry).compare(
 			modelFromTable(
 				table(false, [column(false, 'age'), column(false, 'height')]),
@@ -1633,18 +1646,8 @@ describe('createComparator', () => {
 			return;
 		}
 		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
-			'op:a',
 			'op:b',
-		]);
-		expect(outcome.plan.segments).toMatchObject([
-			{
-				stepIds: ['step:op:a'],
-				commitBoundaryAfter: true,
-			},
-			{
-				stepIds: ['step:op:b'],
-				commitBoundaryBefore: true,
-			},
+			'op:a',
 		]);
 	});
 
@@ -2203,6 +2206,174 @@ describe('createComparator', () => {
 		);
 
 		expect(outcome.kind).toBe('no-drift');
+	});
+
+	it('passes the full proof observation context to equivalence during recognition retry', async () => {
+		const request = checkDeparseRequest('users_age_check');
+		const proofContext: ObservationContext = {
+			...context,
+			effectiveRole: 'tenant_owner',
+			targetSchema: 'tenant',
+			searchPath: ['tenant', 'public'],
+			sessionConfiguration: {
+				standard_conforming_strings: 'on',
+				TimeZone: 'UTC',
+			},
+			extensions: { citext: '1.6' },
+			collationProvider: 'icu',
+			collationVersion: '153.120',
+			transaction: 'tx:proof',
+		};
+		const seenContexts: ProofBoundEquivalenceContext[] = [];
+		const desiredExpression: ExpressionValue = {
+			kind: 'portable',
+			ast: { check: 'age > 0' },
+		};
+		const currentExpression: ExpressionValue = {
+			kind: 'vendor-validated',
+			category: 'predicate',
+			validatedBy: ruleArtifact,
+			text: 'CHECK ((age > 0))',
+		};
+		const equivalence: EquivalenceCapability = {
+			artifact: ruleArtifact,
+			compareType: () => ({ kind: 'unknown', obligations: [] }),
+			compareCollation: () => ({ kind: 'unknown', obligations: [] }),
+			compareExpression: (
+				_left,
+				_right,
+				_category,
+				equivalenceContext,
+				evidence,
+			) => {
+				const proofBoundContext =
+					equivalenceContext as ProofBoundEquivalenceContext;
+				seenContexts.push(proofBoundContext);
+				if (
+					(evidence?.length ?? 0) > 0 &&
+					proofBoundContext.proofObservationContext
+				) {
+					return {
+						kind: 'equivalent',
+						claim: {
+							proposition: {
+								kind: 'mock.expression.equivalent',
+								scope: request.scope,
+								detail: request.detail,
+							},
+							scope: request.scope,
+							semantics: ruleArtifact,
+							conclusion: 'established',
+						},
+					};
+				}
+				return {
+					kind: 'unknown',
+					obligations: [obligationForRequest(request)],
+				};
+			},
+		};
+		const equivalenceRule: TransitionRule<{ readonly constraint: string }> = {
+			...checkRule(),
+			id: 'mock.check-equivalence-context',
+			recognize(desired, current, recognitionContext) {
+				const desiredCheck = desired
+					.getTable('users')
+					?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+				const currentCheck = current
+					.getTable('users')
+					?.checkConstraints?.find((entry) => entry.name === 'users_age_check');
+				if (
+					!desiredCheck ||
+					!currentCheck ||
+					desiredCheck.expression === currentCheck.expression ||
+					!recognitionContext?.equivalence
+				) {
+					return { recognized: false };
+				}
+				const result = recognitionContext.equivalence.compareExpression(
+					desiredExpression,
+					currentExpression,
+					'predicate',
+					recognitionContext.context,
+					recognitionContext.evidence,
+				);
+				if (result.kind === 'equivalent') {
+					return {
+						recognized: 'no-drift',
+						claimDraft: {
+							proposition: {
+								kind: 'dbsp.model.no-drift',
+								scope: [checkResource(desiredCheck.name)],
+								detail: request.detail,
+							},
+							scope: [checkResource(desiredCheck.name)],
+							semantics: ruleArtifact,
+							conclusion: 'established',
+						},
+					};
+				}
+				if (result.kind === 'unknown') {
+					return { recognized: 'unknown', obligations: result.obligations };
+				}
+				return {
+					recognized: 'unsupported',
+					changes: [checkResource(desiredCheck.name)],
+					detail: 'mocked equivalence differed',
+				};
+			},
+		};
+		const baseIssuer = issuer(true);
+		const customRegistry = createPackRegistry([
+			{
+				rules: [equivalenceRule],
+				operationSemantics: [],
+				issuer: {
+					...baseIssuer,
+					readContext: async () => proofContext,
+				},
+				equivalence,
+			},
+		]);
+		const compare = createComparator(customRegistry).compare(
+			modelFromTable(tableWithChecks([check('users_age_check', 'age > 0')])),
+			modelFromTable(
+				tableWithChecks([check('users_age_check', 'CHECK ((age > 0))')]),
+			),
+		);
+
+		expect(compare.kind).toBe('unknown');
+		if (compare.kind !== 'unknown') {
+			return;
+		}
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			context,
+		);
+
+		expect(outcome.kind).toBe('no-drift');
+		const retryContext = seenContexts.find(
+			(item) => item.proofObservationContext !== undefined,
+		);
+		expect(retryContext?.proofObservationContext).toEqual(proofContext);
+		expect(retryContext?.proofObservationContext).toMatchObject({
+			engine: 'postgresql',
+			engineVersion: '18',
+			databaseId: 'test',
+			effectiveRole: 'tenant_owner',
+			targetSchema: 'tenant',
+			searchPath: ['tenant', 'public'],
+			sessionConfiguration: {
+				standard_conforming_strings: 'on',
+				TimeZone: 'UTC',
+			},
+			extensions: { citext: '1.6' },
+			collationProvider: 'icu',
+			collationVersion: '153.120',
+			transaction: 'tx:proof',
+		});
 	});
 
 	it('routes the exact re-introspected CHECK expression shape through deparse equivalence', async () => {
@@ -2895,7 +3066,7 @@ describe('createProver', () => {
 		}
 	});
 
-	it('proves dependency-ordered candidates into one composed plan', async () => {
+	it('fails closed on direct proof of same-plan after-commit dependencies', async () => {
 		const { registry: customRegistry, ruleA, ruleB } = compositionRegistry();
 		const release = vi.fn();
 		const connect = vi.fn(async () => ({
@@ -2908,33 +3079,27 @@ describe('createProver', () => {
 			context,
 		);
 
-		expect(outcome.kind).toBe('proven');
+		expect(outcome.kind).toBe('blocked');
 		expect(connect).toHaveBeenCalledOnce();
 		expect(release).toHaveBeenCalledOnce();
-		if (outcome.kind !== 'proven') {
-			return;
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+			});
+			expect(outcome.assessment.reasons[0]?.detail).toContain(
+				'mock.composition.marker-ready',
+			);
+			expect(outcome.assessment.reasons[0]?.detail).toContain(
+				'producer-after-commit',
+			);
+			expect(outcome.assessment.reasons[0]?.detail).toContain('after-commit');
 		}
-		expect(outcome.plan.steps.map((step) => step.operation.ref)).toEqual([
-			'op:a',
-			'op:b',
-		]);
-		expect(outcome.plan.steps[1]?.requiredClaims).toHaveLength(1);
-		expect(outcome.plan.segments).toMatchObject([
-			{
-				stepIds: ['step:op:a'],
-				commitBoundaryAfter: true,
-			},
-			{
-				stepIds: ['step:op:b'],
-				commitBoundaryBefore: true,
-			},
-		]);
 	});
 
 	it('keeps operation-pack-semantics assumptions exact per step for two operations from one pack', async () => {
-		const ruleA = compositionRule('op:a');
-		const ruleB = compositionRule('op:b');
-		const baseSemantics = compositionSemantics();
+		const ruleA = compositionRule('op:a', 'disconnected');
+		const ruleB = compositionRule('op:b', 'disconnected');
+		const baseSemantics = compositionSemantics('disconnected');
 		const exactSemantics: RegisteredOperationSemantics = {
 			...baseSemantics,
 			effectsOf: (operation): OperationEffectAssessment => {

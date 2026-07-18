@@ -7,6 +7,7 @@ import type {
 	AmbiguityCheckResult,
 	EnumIR,
 	LogicalIdentity,
+	LogicalIdentityCarrier,
 	ModelIR,
 	RelationIR,
 	SequenceIR,
@@ -21,7 +22,22 @@ function logicalIdentityId(
 	identity: LogicalIdentity | undefined,
 ): string | undefined {
 	const id = identity?.id;
-	return id === undefined ? undefined : id.trim();
+	return typeof id === 'string' ? id.trim() : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function logicalIdentityCarrierIsWellFormed(
+	carrier: LogicalIdentityCarrier | undefined,
+): boolean {
+	return (
+		isRecord(carrier) &&
+		typeof carrier.kind === 'string' &&
+		carrier.kind.trim().length > 0 &&
+		carrier.authenticated === false
+	);
 }
 
 /**
@@ -192,12 +208,24 @@ export class ModelIRImpl implements ModelIR {
 			identity: LogicalIdentity | undefined,
 			owner: string,
 		): void => {
+			if (identity === undefined) {
+				return;
+			}
+			if (!isRecord(identity)) {
+				errors.push(`${owner} has a malformed logical identity`);
+				return;
+			}
 			const id = logicalIdentityId(identity);
 			if (id === undefined) {
+				errors.push(`${owner} has a malformed logical identity id`);
 				return;
 			}
 			if (id.length === 0) {
 				errors.push(`${owner} has an empty logical identity id`);
+				return;
+			}
+			if (!logicalIdentityCarrierIsWellFormed(identity.carrier)) {
+				errors.push(`${owner} has a malformed logical identity carrier`);
 				return;
 			}
 			const priorOwner = logicalIdentityOwners.get(id);

@@ -855,6 +855,7 @@ export function createApplier(registry: PackRegistry): Applier {
 				let releaseError: unknown;
 				let active = first;
 				let activeContext = runtimeContext;
+				let activeOperationAttempted = false;
 				let activeNonRollbackableOperationExecuted = false;
 				const completedInSegment: {
 					readonly step: ProvenPlanStep;
@@ -878,6 +879,7 @@ export function createApplier(registry: PackRegistry): Applier {
 					for (const entry of resolvedSteps) {
 						active = entry;
 						activeContext = runtimeContext;
+						activeOperationAttempted = false;
 						activeNonRollbackableOperationExecuted = false;
 						await entry.semantics.writeIntentJournal(
 							executionClient,
@@ -1054,6 +1056,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							return resultWithJournalWriteWarnings(beforeGuardFailure);
 						}
 
+						activeOperationAttempted = true;
 						if (!transactional) {
 							activeNonRollbackableOperationExecuted = true;
 						}
@@ -1069,9 +1072,18 @@ export function createApplier(registry: PackRegistry): Applier {
 							if (transactionStarted && !committed) {
 								await segmentCoordinator.rollback(executionClient);
 							}
+							const nonRollbackableFootprint =
+								executionOutcome.nonRollbackableFootprint ??
+								'unknown-or-present';
+							const currentStepHasDurableFootprint =
+								activeNonRollbackableOperationExecuted &&
+								nonRollbackableFootprint === 'unknown-or-present';
+							const hasCommittedSteps = journals.length > 0;
 							const journal = journalWithObserved(
 								entry.intent,
-								'guard-failed',
+								hasCommittedSteps || currentStepHasDurableFootprint
+									? 'partially-applied'
+									: 'guard-failed',
 								[],
 								executionOutcome.recovery,
 							);
@@ -1080,8 +1092,12 @@ export function createApplier(registry: PackRegistry): Applier {
 								executionOutcome.guard,
 								executionOutcome.recovery,
 							);
+							const hasAppliedWork =
+								hasCommittedSteps || currentStepHasDurableFootprint;
 							const result = {
-								assessment: stoppedAssessment(reason, journals.length > 0),
+								assessment: hasAppliedWork
+									? assessment(reason, 'partially-applied', 'resume-possible')
+									: stoppedAssessment(reason, false),
 								journals: [...journals, journal],
 								observations,
 							};
@@ -1090,7 +1106,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								client: executionClient,
 								journal,
 								result,
-								outcomeDurable: !transactional,
+								outcomeDurable: currentStepHasDurableFootprint,
 								onDurableWriteWarning: recordJournalWriteWarning,
 							});
 							return resultWithJournalWriteWarnings(
@@ -1478,7 +1494,11 @@ export function createApplier(registry: PackRegistry): Applier {
 							// The outcome below reports uncertainty; resume must re-introspect.
 						}
 					}
-					if (rollbackAttempted && !rollbackSucceeded) {
+					if (
+						rollbackAttempted &&
+						!rollbackSucceeded &&
+						activeOperationAttempted
+					) {
 						const journal = unknownJournal(active.intent);
 						if (client) {
 							await active.semantics
@@ -1535,6 +1555,30 @@ export function createApplier(registry: PackRegistry): Applier {
 									scope: [],
 								},
 								hasAppliedWork,
+							),
+							journals: [...journals, journal],
+							observations,
+						});
+					}
+					if (!activeOperationAttempted) {
+						const detail =
+							error instanceof Error
+								? error.message
+								: 'operation setup failed before executeOperation';
+						const journal = journalWithObserved(
+							active.intent,
+							'operation-failed-not-applied',
+							[],
+						);
+						if (client) {
+							await active.semantics
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return resultWithJournalWriteWarnings({
+							assessment: stoppedAssessment(
+								operationFailedNotAppliedReason(active.step, detail),
+								journals.length > 0,
 							),
 							journals: [...journals, journal],
 							observations,
@@ -1599,21 +1643,25 @@ export function createApplier(registry: PackRegistry): Applier {
 						const detail =
 							error instanceof Error
 								? error.message
-								: 'segment setup failed after an earlier commit';
-						const journal = journalWithObserved(
-							active.intent,
-							'operation-failed-not-applied',
-							[],
-						);
+								: 'segment failed after an earlier commit without a confirmed rollback';
+						const journal = unknownJournal(active.intent);
 						if (client) {
 							await active.semantics
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
 						return resultWithJournalWriteWarnings({
-							assessment: stoppedAssessment(
-								operationFailedNotAppliedReason(active.step, detail),
-								true,
+							assessment: assessment(
+								{
+									code: 'unknown-step-result',
+									stepId: active.step.stepId,
+									operationKind: active.step.operation.operationKind,
+									operationRef: active.step.operation.ref,
+									scope: [],
+									detail,
+								},
+								'outcome-unknown',
+								'human-intervention-required',
 							),
 							journals: [...journals, journal],
 							observations,

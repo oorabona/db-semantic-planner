@@ -228,6 +228,20 @@ function bindingValue(row: BindingRow) {
 function createFakePool(rows: BindingRow[]) {
 	const sideTableWrites = { count: 0 };
 	const runs = new Map<string, Record<string, unknown>>();
+	let logicalIdentitySideTableCreated = rows.length > 0;
+	const logicalIdentityShape = {
+		table_exists: true,
+		columns: {
+			logical_id: { type: 'text', notNull: true },
+			schema_name: { type: 'text', notNull: true },
+			table_name: { type: 'text', notNull: true },
+			column_name: { type: 'text', notNull: false },
+			carrier_kind: { type: 'text', notNull: true },
+			dbsp_managed_by: { type: 'text', notNull: true },
+			attached_at: { type: 'timestamp with time zone', notNull: true },
+		},
+		primary_key: ['logical_id'],
+	};
 	const tableShape = (table: string): Record<string, unknown> => {
 		if (table === 'dbsp_transition_run') {
 			return {
@@ -276,6 +290,24 @@ function createFakePool(rows: BindingRow[]) {
 			}
 			if (sql.includes('dbsp_transition_journal_shape')) {
 				return { rows: [tableShape(String(params?.[1]))] };
+			}
+			if (
+				sql.includes('pg_catalog.jsonb_object_agg') &&
+				params?.[2] === 'dbsp_logical_identity'
+			) {
+				return { rows: [logicalIdentityShape] };
+			}
+			if (
+				sql.includes('pg_catalog.to_regclass') &&
+				String(params?.[0]).includes('"dbsp_meta"."dbsp_logical_identity"')
+			) {
+				return { rows: [{ exists: logicalIdentitySideTableCreated }] };
+			}
+			if (
+				sql.includes('invalid_marker_rows') &&
+				sql.includes('"dbsp_meta"."dbsp_logical_identity"')
+			) {
+				return { rows: [{ invalid_marker_rows: '0' }] };
 			}
 			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
 				const [
@@ -337,6 +369,14 @@ function createFakePool(rows: BindingRow[]) {
 						},
 					],
 				};
+			}
+			if (
+				sql.includes(
+					'CREATE TABLE IF NOT EXISTS "dbsp_meta"."dbsp_logical_identity"',
+				)
+			) {
+				logicalIdentitySideTableCreated = true;
+				return { rows: [] };
 			}
 			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_logical_identity"')) {
 				const [logicalId, schemaName, tableName, columnName, carrierKind] =
