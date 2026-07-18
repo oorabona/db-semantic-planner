@@ -27,6 +27,7 @@ import {
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 	TABLE_INDEXES_OBSERVATION,
 } from '../constants.js';
+import { observationContextMatches } from '../context-match.js';
 import { assumptionId } from '../ids.js';
 import {
 	appendCompletionJournal,
@@ -52,6 +53,8 @@ export type IndexSet = {
 	readonly expressions: readonly string[];
 	readonly include: readonly string[];
 	readonly opclass: Readonly<Record<string, string>>;
+	readonly collation: Readonly<Record<string, string>>;
+	readonly options: Readonly<Record<string, string>>;
 	readonly with: Readonly<Record<string, string>>;
 	readonly nullsNotDistinct: boolean;
 };
@@ -334,13 +337,19 @@ function requestTargetsPayload(
 	);
 }
 
-function observationContextMatches(
-	observation: EvidenceObservation,
+function sameIndexResource(
+	resource: ResourceAddress,
+	payload: CreateUniqueIndexConcurrentlyPayload,
 	context: ObservationContext,
 ): boolean {
 	return (
-		observation.context.engine === context.engine &&
-		observation.context.databaseId === context.databaseId
+		resource.engine === 'postgresql' &&
+		resource.database === context.databaseId &&
+		resource.schema === payload.schema &&
+		resource.kind === 'index' &&
+		resource.name === payload.index &&
+		resource.qualifiedBy?.length === 1 &&
+		resource.qualifiedBy[0] === payload.table
 	);
 }
 
@@ -394,6 +403,8 @@ function hasUnsupportedShape(index: IndexSet): boolean {
 		index.expressions.length > 0 ||
 		index.include.length > 0 ||
 		Object.keys(index.opclass).length > 0 ||
+		Object.keys(index.collation).length > 0 ||
+		Object.keys(index.options).length > 0 ||
 		Object.keys(index.with).length > 0 ||
 		index.nullsNotDistinct === true ||
 		index.columns.length === 0
@@ -447,6 +458,8 @@ function normalizedIndexForDigest(
 		expressions: index.expressions,
 		include: index.include,
 		opclass: index.opclass,
+		collation: index.collation,
+		options: index.options,
 		with: index.with,
 		nullsNotDistinct: index.nullsNotDistinct,
 	};
@@ -467,6 +480,8 @@ function syntheticTargetIndex(
 		expressions: [],
 		include: [],
 		opclass: {},
+		collation: {},
+		options: {},
 		with: {},
 		nullsNotDistinct: false,
 	};
@@ -695,6 +710,7 @@ function boundedLockTimeout(maxWaitMs: number): number {
 function guardTargetsPayload(
 	guard: ApplyGuard,
 	payload: CreateUniqueIndexConcurrentlyPayload,
+	context: ObservationContext,
 ): boolean {
 	if (guard.predicate.kind !== NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD) {
 		return false;
@@ -706,16 +722,22 @@ function guardTargetsPayload(
 		guard.predicate.detail.schema === payload.schema &&
 		guard.predicate.detail.table === payload.table &&
 		guard.predicate.detail.index === payload.index &&
-		stableJson(guard.predicate.detail.columns) === stableJson(payload.columns)
+		stableJson(guard.predicate.detail.columns) ===
+			stableJson(payload.columns) &&
+		sameIndexResource(guard.predicate.target, payload, context) &&
+		guard.predicate.scope.some((resource) =>
+			sameIndexResource(resource, payload, context),
+		)
 	);
 }
 
 function engineGuardFor(
 	payload: CreateUniqueIndexConcurrentlyPayload,
 	duringGuards: readonly ApplyGuard[],
+	context: ObservationContext,
 ): ApplyGuard {
 	const guard = duringGuards.find((candidate) =>
-		guardTargetsPayload(candidate, payload),
+		guardTargetsPayload(candidate, payload, context),
 	);
 	if (guard?.protocol.kind !== 'engine-validated') {
 		throw new Error(
@@ -788,6 +810,46 @@ async function readTargetIndexCatalogValue(
 		     WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 		       AND NOT oc.opcdefault
 		   ), '[]'::jsonb) AS opclass_names
+		   ,
+		   COALESCE((
+		     SELECT jsonb_agg(a.attname ORDER BY k.n)
+		     FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+		     JOIN pg_catalog.pg_attribute a
+		       ON a.attrelid = t.oid AND a.attnum = k.attnum
+		     JOIN pg_catalog.pg_collation coll
+		       ON coll.oid = (ix.indcollation::oid[])[k.n - 1]
+		     WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+		       AND coll.oid <> 0::oid
+		       AND coll.oid <> a.attcollation
+		   ), '[]'::jsonb) AS collation_cols,
+		   COALESCE((
+		     SELECT jsonb_agg((collns.nspname || '.' || coll.collname) ORDER BY k.n)
+		     FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+		     JOIN pg_catalog.pg_attribute a
+		       ON a.attrelid = t.oid AND a.attnum = k.attnum
+		     JOIN pg_catalog.pg_collation coll
+		       ON coll.oid = (ix.indcollation::oid[])[k.n - 1]
+		     JOIN pg_catalog.pg_namespace collns ON collns.oid = coll.collnamespace
+		     WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+		       AND coll.oid <> 0::oid
+		       AND coll.oid <> a.attcollation
+		   ), '[]'::jsonb) AS collation_names,
+		   COALESCE((
+		     SELECT jsonb_agg(a.attname ORDER BY k.n)
+		     FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+		     JOIN pg_catalog.pg_attribute a
+		       ON a.attrelid = t.oid AND a.attnum = k.attnum
+		     WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+		       AND ((ix.indoption::int2[])[k.n - 1])::int <> 0
+		   ), '[]'::jsonb) AS option_cols,
+		   COALESCE((
+		     SELECT jsonb_agg(((ix.indoption::int2[])[k.n - 1])::int ORDER BY k.n)
+		     FROM unnest(ix.indkey) WITH ORDINALITY AS k(attnum, n)
+		     JOIN pg_catalog.pg_attribute a
+		       ON a.attrelid = t.oid AND a.attnum = k.attnum
+		     WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+		       AND ((ix.indoption::int2[])[k.n - 1])::int <> 0
+		   ), '[]'::jsonb) AS option_values
 		 FROM pg_catalog.pg_class t
 		 JOIN pg_catalog.pg_namespace n ON n.oid = t.relnamespace
 		 LEFT JOIN pg_catalog.pg_class i
@@ -834,6 +896,55 @@ function partialDetail(error: unknown): string {
 	return error instanceof Error
 		? error.message
 		: 'invalid index cleanup could not be verified';
+}
+
+type InvalidIndexCleanupOutcome =
+	| { readonly kind: 'none' }
+	| { readonly kind: 'cleaned' }
+	| { readonly kind: 'inspection-failed'; readonly error: unknown }
+	| { readonly kind: 'cleanup-failed'; readonly error: unknown }
+	| { readonly kind: 'cleanup-unverified' };
+
+async function cleanupInvalidTargetIndex(
+	executor: Queryable,
+	payload: CreateUniqueIndexConcurrentlyPayload,
+): Promise<InvalidIndexCleanupOutcome> {
+	let catalog: TargetIndexCatalogValue;
+	try {
+		catalog = await readTargetIndexCatalogValue(executor, payload);
+	} catch (error) {
+		return { kind: 'inspection-failed', error };
+	}
+	if (!catalog.index || (catalog.index.valid && catalog.index.ready)) {
+		return { kind: 'none' };
+	}
+	try {
+		await executor.query(renderDropIndexConcurrentlySql(payload));
+		if (await targetIndexAbsent(executor, payload)) {
+			return { kind: 'cleaned' };
+		}
+		return { kind: 'cleanup-unverified' };
+	} catch (error) {
+		return { kind: 'cleanup-failed', error };
+	}
+}
+
+function cleanupPartialOutcome(
+	payload: CreateUniqueIndexConcurrentlyPayload,
+	context: ObservationContext,
+	cleanup: Exclude<
+		InvalidIndexCleanupOutcome,
+		{ readonly kind: 'none' | 'cleaned' }
+	>,
+) {
+	return {
+		kind: 'partially-applied' as const,
+		recovery: [invalidIndexArtefact(payload, context)],
+		detail:
+			cleanup.kind === 'cleanup-unverified'
+				? 'invalid index cleanup did not remove the target index'
+				: partialDetail(cleanup.error),
+	};
 }
 
 export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
@@ -1017,7 +1128,7 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			duringGuards: readonly ApplyGuard[] = [],
 		) {
 			const payload = payloadOf(operation);
-			const guard = engineGuardFor(payload, duringGuards);
+			const guard = engineGuardFor(payload, duringGuards, context);
 			const executor = clientQuery(client);
 			await executor.query(
 				`SET lock_timeout = '${boundedLockTimeout(DEFAULT_LOCK_TIMEOUT_MS)}ms'`,
@@ -1026,37 +1137,16 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 				await executor.query(renderCreateUniqueIndexConcurrentlySql(payload));
 				return { kind: 'completed' };
 			} catch (error) {
+				const cleanup = await cleanupInvalidTargetIndex(executor, payload);
+				if (
+					cleanup.kind === 'inspection-failed' ||
+					cleanup.kind === 'cleanup-failed' ||
+					cleanup.kind === 'cleanup-unverified'
+				) {
+					return cleanupPartialOutcome(payload, context, cleanup);
+				}
 				if (!isUniqueBuildFailure(error)) {
 					throw error;
-				}
-				let catalog: TargetIndexCatalogValue;
-				try {
-					catalog = await readTargetIndexCatalogValue(executor, payload);
-				} catch (inspectionError) {
-					return {
-						kind: 'partially-applied',
-						recovery: [invalidIndexArtefact(payload, context)],
-						detail: partialDetail(inspectionError),
-					};
-				}
-				if (catalog.index && (!catalog.index.valid || !catalog.index.ready)) {
-					try {
-						await executor.query(renderDropIndexConcurrentlySql(payload));
-						if (await targetIndexAbsent(executor, payload)) {
-							return { kind: 'guard-failed', guard, recovery: [] };
-						}
-						return {
-							kind: 'partially-applied',
-							recovery: [invalidIndexArtefact(payload, context)],
-							detail: 'invalid index cleanup did not remove the target index',
-						};
-					} catch (cleanupError) {
-						return {
-							kind: 'partially-applied',
-							recovery: [invalidIndexArtefact(payload, context)],
-							detail: partialDetail(cleanupError),
-						};
-					}
 				}
 				return { kind: 'guard-failed', guard, recovery: [] };
 			} finally {

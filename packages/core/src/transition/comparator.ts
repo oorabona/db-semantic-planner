@@ -4,6 +4,7 @@ import type {
 	Comparator,
 	CompareOutcome,
 	EnumIR,
+	EquivalenceContext,
 	ForeignKeyIR,
 	IndexIR,
 	LogicalIdentity,
@@ -38,6 +39,35 @@ const COMPARATOR_ARTIFACT: SemanticArtifactRef = {
 	version: '0.1.0',
 };
 
+const TRANSITION_COMPARE_CURRENT_MODEL = Symbol.for(
+	'dbsp.core.transition.compare.current-model',
+);
+
+type CompareOutcomeWithCurrentModel = CompareOutcome & {
+	readonly [TRANSITION_COMPARE_CURRENT_MODEL]?: ModelIR;
+};
+
+export function transitionCompareCurrentModel(
+	compare: CompareOutcome,
+): ModelIR | undefined {
+	return (compare as CompareOutcomeWithCurrentModel)[
+		TRANSITION_COMPARE_CURRENT_MODEL
+	];
+}
+
+export function withTransitionCompareCurrentModel<T extends CompareOutcome>(
+	compare: T,
+	current: ModelIR,
+): T {
+	Object.defineProperty(compare, TRANSITION_COMPARE_CURRENT_MODEL, {
+		value: current,
+		enumerable: false,
+		configurable: false,
+		writable: false,
+	});
+	return compare;
+}
+
 function columnChanged(
 	desired: ColumnIR | undefined,
 	current: ColumnIR | undefined,
@@ -64,6 +94,11 @@ type NormalizationConflict =
 			readonly kind: 'check';
 			readonly table: string;
 			readonly check: string;
+	  }
+	| {
+			readonly kind: 'relation';
+			readonly source: string;
+			readonly relation: string;
 	  }
 	| { readonly kind: 'enum'; readonly enum: string }
 	| { readonly kind: 'sequence'; readonly sequence: string };
@@ -335,7 +370,15 @@ function normalizeCurrentModelForComparison(
 	const relations = new Map<string, RelationIR>();
 	for (const relation of model.relations.values()) {
 		const normalized = normalizeRelation(relation, normalize);
-		relations.set(`${normalized.source}.${normalized.name}`, normalized);
+		const key = `${normalized.source}.${normalized.name}`;
+		if (relations.has(key)) {
+			conflicts.push({
+				kind: 'relation',
+				source: normalized.source,
+				relation: normalized.name,
+			});
+		}
+		relations.set(key, normalized);
 	}
 	const externalTables = model.externalTables
 		? new Set([...model.externalTables].map((table) => normalize(table)))
@@ -380,7 +423,10 @@ function normalizeCurrentModelForComparison(
 	};
 }
 
-function tableForComparison(table: TableIR): unknown {
+function tableForComparison(
+	table: TableIR,
+	perspective: 'desired' | 'current' = 'desired',
+): unknown {
 	const logicalIdentity = logicalIdentityForComparison(table.logicalIdentity);
 	return {
 		name: table.name,
@@ -388,7 +434,9 @@ function tableForComparison(table: TableIR): unknown {
 		columns: table.columns.map(columnForComparison),
 		primaryKey: table.primaryKey,
 		foreignKeys: table.foreignKeys,
-		indexes: table.indexes.map((index) => normalizedIndex(table.name, index)),
+		indexes: table.indexes.map((index) =>
+			normalizedIndex(table.name, index, perspective),
+		),
 		checkConstraints: checksForComparison(table.checkConstraints),
 		pseudoColumns: table.pseudoColumns,
 		comment: table.comment,
@@ -561,12 +609,13 @@ function modelForComparison(
 	model: ModelIR,
 	externalTables: ReadonlySet<string>,
 	managedCollections: ManagedModelCollections,
+	perspective: 'desired' | 'current' = 'desired',
 ): unknown {
 	return {
 		tables: [...model.tables.entries()]
 			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([name, table]) => [name, tableForComparison(table)]),
+			.map(([name, table]) => [name, tableForComparison(table, perspective)]),
 		...modelLevelCollectionsForComparison(
 			model,
 			externalTables,
@@ -684,6 +733,11 @@ function normalizationConflictIsManaged(
 	managedCollections: ManagedModelCollections,
 ): boolean {
 	switch (conflict.kind) {
+		case 'relation':
+			return isManagedCollectionKey(
+				managedCollections.relations,
+				`${conflict.source}.${conflict.relation}`,
+			);
 		case 'enum':
 			return isManagedCollectionKey(managedCollections.enums, conflict.enum);
 		case 'sequence':
@@ -863,6 +917,14 @@ function resourceForNormalizationConflict(
 			return resourceForCheck(engine, conflict.table, conflict.check);
 		case 'table':
 			return resourceForColumn(engine, conflict.table);
+		case 'relation':
+			return {
+				engine,
+				database: 'model',
+				kind: 'relation',
+				name: conflict.relation,
+				qualifiedBy: [conflict.source],
+			};
 		case 'enum':
 			return {
 				engine,
@@ -1114,9 +1176,25 @@ function arbitrateRecognizedRules(
 export function createComparator(registry: PackRegistry): Comparator {
 	return {
 		artifact: COMPARATOR_ARTIFACT,
-		compare(desired: ModelIR, current: ModelIR): CompareOutcome {
+		compare(
+			desired: ModelIR,
+			current: ModelIR,
+			context?: EquivalenceContext,
+		): CompareOutcome {
 			const engine =
-				registry.allRules()[0]?.support.engine ?? 'unknown-transition-engine';
+				context?.engine ??
+				registry.allRules()[0]?.support.engine ??
+				'unknown-transition-engine';
+			const recognitionContextFor = (rule: TransitionRule) => {
+				const equivalence = registry.resolveEquivalence(rule.artifact);
+				const recognitionContext: EquivalenceContext = {
+					...(context ?? {}),
+					engine,
+				};
+				return equivalence
+					? { equivalence, context: recognitionContext }
+					: { context: recognitionContext };
+			};
 			const normalizeCurrentIdentifier =
 				registry.comparatorNameNormalizer()?.normalizeCurrentIdentifier ??
 				((identifier: string) => identifier);
@@ -1149,11 +1227,13 @@ export function createComparator(registry: PackRegistry): Comparator {
 				desired,
 				ignoredExternalTables,
 				managedCollections,
+				'desired',
 			);
 			const currentComparison = modelForComparison(
 				currentForComparison,
 				ignoredExternalTables,
 				managedCollections,
+				'current',
 			);
 			if (stableJson(desiredComparison) === stableJson(currentComparison)) {
 				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
@@ -1193,19 +1273,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 				if (logicalIdentityChanged(desiredTable, currentTable)) {
 					const focusedDesired = makeFocusedTableModel(desiredTable);
 					const focusedCurrent = makeFocusedTableModel(currentTable);
-					const recognitionEntries = registry.allRules().map((rule) => {
-						const equivalence = registry.resolveEquivalence(rule.artifact);
-						return {
-							rule,
-							result: rule.recognize(
-								focusedDesired,
-								focusedCurrent,
-								equivalence
-									? { equivalence, context: { engine } }
-									: { context: { engine } },
-							),
-						};
-					});
+					const recognitionEntries = registry.allRules().map((rule) => ({
+						rule,
+						result: rule.recognize(
+							focusedDesired,
+							focusedCurrent,
+							recognitionContextFor(rule),
+						),
+					}));
 					const recognized = recognitionEntries.filter(
 						(
 							entry,
@@ -1280,19 +1355,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 
 					const focusedDesired = makeFocusedModel(desiredTable, desiredColumn);
 					const focusedCurrent = makeFocusedModel(currentTable, currentColumn);
-					const recognitionEntries = registry.allRules().map((rule) => {
-						const equivalence = registry.resolveEquivalence(rule.artifact);
-						return {
-							rule,
-							result: rule.recognize(
-								focusedDesired,
-								focusedCurrent,
-								equivalence
-									? { equivalence, context: { engine } }
-									: { context: { engine } },
-							),
-						};
-					});
+					const recognitionEntries = registry.allRules().map((rule) => ({
+						rule,
+						result: rule.recognize(
+							focusedDesired,
+							focusedCurrent,
+							recognitionContextFor(rule),
+						),
+					}));
 					const recognized = recognitionEntries.filter(
 						(
 							entry,
@@ -1370,19 +1440,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 					}
 					const focusedDesired = makeFocusedCheckModel(desiredTable);
 					const focusedCurrent = makeFocusedCheckModel(currentTable);
-					const recognitionEntries = registry.allRules().map((rule) => {
-						const equivalence = registry.resolveEquivalence(rule.artifact);
-						return {
-							rule,
-							result: rule.recognize(
-								focusedDesired,
-								focusedCurrent,
-								equivalence
-									? { equivalence, context: { engine } }
-									: { context: { engine } },
-							),
-						};
-					});
+					const recognitionEntries = registry.allRules().map((rule) => ({
+						rule,
+						result: rule.recognize(
+							focusedDesired,
+							focusedCurrent,
+							recognitionContextFor(rule),
+						),
+					}));
 					const recognized = recognitionEntries.filter(
 						(
 							entry,
@@ -1455,19 +1520,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 					const indexKey = indexChangeKey(tableName, tableIndexDelta.index);
 					const focusedDesired = makeFocusedIndexModel(desiredTable);
 					const focusedCurrent = makeFocusedIndexModel(currentTable);
-					const recognitionEntries = registry.allRules().map((rule) => {
-						const equivalence = registry.resolveEquivalence(rule.artifact);
-						return {
-							rule,
-							result: rule.recognize(
-								focusedDesired,
-								focusedCurrent,
-								equivalence
-									? { equivalence, context: { engine } }
-									: { context: { engine } },
-							),
-						};
-					});
+					const recognitionEntries = registry.allRules().map((rule) => ({
+						rule,
+						result: rule.recognize(
+							focusedDesired,
+							focusedCurrent,
+							recognitionContextFor(rule),
+						),
+					}));
 					const recognized = recognitionEntries.filter(
 						(
 							entry,
@@ -1545,7 +1605,13 @@ export function createComparator(registry: PackRegistry): Comparator {
 					);
 					continue;
 				}
-				const delta = enumAddDelta(desiredEnum, currentEnum);
+				const delta = enumAddDelta(
+					desiredEnum,
+					currentEnum,
+					context?.targetSchema === undefined
+						? {}
+						: { targetSchema: context.targetSchema },
+				);
 				if (delta.kind === 'none') {
 					pendingEnumKeys.add(JSON.stringify([enumName, null]));
 					continue;
@@ -1557,19 +1623,14 @@ export function createComparator(registry: PackRegistry): Comparator {
 
 				const focusedDesired = makeFocusedEnumModel(desiredEnum);
 				const focusedCurrent = makeFocusedEnumModel(currentEnum);
-				const recognitionEntries = registry.allRules().map((rule) => {
-					const equivalence = registry.resolveEquivalence(rule.artifact);
-					return {
-						rule,
-						result: rule.recognize(
-							focusedDesired,
-							focusedCurrent,
-							equivalence
-								? { equivalence, context: { engine } }
-								: { context: { engine } },
-						),
-					};
-				});
+				const recognitionEntries = registry.allRules().map((rule) => ({
+					rule,
+					result: rule.recognize(
+						focusedDesired,
+						focusedCurrent,
+						recognitionContextFor(rule),
+					),
+				}));
 				const recognized = recognitionEntries.filter(
 					(
 						entry,
@@ -1675,16 +1736,22 @@ export function createComparator(registry: PackRegistry): Comparator {
 			}
 
 			if (candidates.length === 0) {
-				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
+				return withTransitionCompareCurrentModel(
+					{ kind: 'no-drift', claimedInvariant: noDriftProposition() },
+					current,
+				);
 			}
 
-			return {
-				kind: 'transitions',
-				candidates,
-				obligations: candidates.flatMap((candidate) => [
-					...candidate.obligations,
-				]),
-			};
+			return withTransitionCompareCurrentModel(
+				{
+					kind: 'transitions',
+					candidates,
+					obligations: candidates.flatMap((candidate) => [
+						...candidate.obligations,
+					]),
+				},
+				current,
+			);
 		},
 	};
 }

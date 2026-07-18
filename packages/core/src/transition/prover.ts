@@ -7,6 +7,8 @@ import type {
 	ContextFact,
 	EvidenceObservation,
 	InapplicableAssessment,
+	IssuedObservation,
+	ModelIR,
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
@@ -31,7 +33,17 @@ import type {
 	TransitionRule,
 	UnknownTransitionRecognition,
 } from '@dbsp/types';
-import { type CompositionOperation, composeOperations } from './composer.js';
+import { transitionCompareCurrentModel } from './comparator.js';
+import {
+	type CompositionOperation,
+	composeOperations,
+	transitionCompositionFactKey,
+} from './composer.js';
+import {
+	concludeEvidenceForObligation,
+	observationRequestForProposition,
+	sameObservationRequest,
+} from './evidence-match.js';
 import { claimId, semanticArtifactId } from './ids.js';
 import type { EstablishedProofClaim, ProveOutcome, Prover } from './index.js';
 import { mintInProcessPlan } from './minting.js';
@@ -49,13 +61,6 @@ function sameArtifact(
 	right: SemanticArtifactRef,
 ): boolean {
 	return left.id === right.id && left.version === right.version;
-}
-
-function sameScope(
-	left: readonly ResourceAddress[],
-	right: readonly ResourceAddress[],
-): boolean {
-	return stableJson(left) === stableJson(right);
 }
 
 function blockedAssessment(reason: OutcomeReason): PlanAssessment {
@@ -130,6 +135,18 @@ function uncomposableCandidates(
 		code: 'uncomposable',
 		fragments: candidateRefs(candidates),
 		scope: [],
+		detail,
+	});
+}
+
+function unsupportedCompositionRequirement(
+	detail: string,
+	changes: readonly ResourceAddress[],
+): PlanAssessment {
+	return blockedAssessment({
+		code: 'unsupported-transition',
+		changes,
+		scope: changes,
 		detail,
 	});
 }
@@ -278,6 +295,70 @@ class ObservationContextMismatchError extends Error {
 	}
 }
 
+type IssuedObservationValidationResult =
+	| { readonly ok: true }
+	| { readonly ok: false; readonly detail: string };
+
+function issuedObservationContextMismatch(
+	observed: ObservationContext,
+	expected: ObservationContext,
+): string | undefined {
+	if (observed.engine !== expected.engine) {
+		return 'engine';
+	}
+	if (observed.databaseId !== expected.databaseId) {
+		return 'database';
+	}
+	return undefined;
+}
+
+function validateIssuedObservation(
+	observation: IssuedObservation,
+	context: ObservationContext,
+): IssuedObservationValidationResult {
+	const contextMismatch = issuedObservationContextMismatch(
+		observation.context,
+		context,
+	);
+	if (contextMismatch) {
+		return {
+			ok: false,
+			detail: `observation ${observation.id} was issued for a different concrete ${contextMismatch}`,
+		};
+	}
+	const role = (observation as { readonly role?: unknown }).role;
+	if (role === 'evidence') {
+		const evidence = observation as EvidenceObservation;
+		if (
+			typeof evidence.source !== 'string' ||
+			!isJsonObject(evidence.validity) ||
+			!Array.isArray(evidence.validity.invalidatedBy)
+		) {
+			return {
+				ok: false,
+				detail: `evidence observation ${evidence.id} has an invalid evidence source/validity shape`,
+			};
+		}
+		return { ok: true };
+	}
+	if (role === 'advisory') {
+		const advisory = observation as AdvisoryObservation;
+		if ('source' in advisory) {
+			return {
+				ok: false,
+				detail: `advisory observation ${advisory.id} must not carry an evidence source`,
+			};
+		}
+		return { ok: true };
+	}
+	return {
+		ok: false,
+		detail: `observation ${
+			(observation as { readonly id?: string }).id ?? 'unknown'
+		} has an invalid role`,
+	};
+}
+
 function transitionPool(
 	target: TransitionConnectionPool,
 ): TransitionConnectionPool {
@@ -309,69 +390,30 @@ async function checkoutProofClient(
 	return client;
 }
 
-function evidenceClaims(
-	evidence: EvidenceObservation,
-): readonly { readonly kind: string; readonly holds: boolean }[] {
-	const value = evidence.result.value;
-	if (!isJsonObject(value)) {
-		return [];
-	}
-	const claims = value.claims;
-	if (Array.isArray(claims)) {
-		return claims.flatMap((claim) => {
-			if (!isJsonObject(claim)) {
-				return [];
-			}
-			return typeof claim.kind === 'string' && typeof claim.holds === 'boolean'
-				? [{ kind: claim.kind, holds: claim.holds }]
-				: [];
-		});
-	}
-	if (typeof value.holds === 'boolean') {
-		return [{ kind: evidence.request.kind, holds: value.holds }];
-	}
-	return [];
-}
-
-function requestMatches(
-	obligation: ProofObligation,
-	request: ObservationRequest,
-): boolean {
-	const dischargeable = obligation.dischargeableBy ?? [];
-	return dischargeable.some(
-		(candidate) =>
-			candidate.kind === request.kind &&
-			sameScope(candidate.scope, request.scope) &&
-			stableJson(candidate.detail) === stableJson(request.detail),
-	);
-}
-
 type DurableConclusion = 'established' | 'undischarged' | 'refuted';
 
 function conclusionForObligation(
 	obligation: ProofObligation,
 	evidence: readonly EvidenceObservation[],
+	expectedContext?: ObservationContext,
 ): {
 	readonly conclusion: DurableConclusion;
 	readonly supportedBy: readonly EvidenceObservation[];
 } {
-	const matchingEvidence = evidence.filter((item) =>
-		requestMatches(obligation, item.request),
-	);
-	for (const item of matchingEvidence) {
-		const claim = evidenceClaims(item).find(
-			(candidate) => candidate.kind === obligation.proposition.kind,
-		);
-		if (claim) {
-			return {
-				conclusion: claim.holds ? 'established' : 'refuted',
-				supportedBy: [item],
-			};
-		}
+	const result = concludeEvidenceForObligation({
+		obligation,
+		evidence,
+		...(expectedContext ? { expectedContext } : {}),
+	});
+	if (result.conclusion === 'conflicted') {
+		return {
+			conclusion: 'undischarged',
+			supportedBy: result.supportedBy,
+		};
 	}
 	return {
-		conclusion: 'undischarged',
-		supportedBy: matchingEvidence,
+		conclusion: result.conclusion,
+		supportedBy: result.supportedBy,
 	};
 }
 
@@ -380,10 +422,12 @@ function proofClaimForObligation(
 	evidence: readonly EvidenceObservation[],
 	index: number,
 	semantics: SemanticArtifactRef,
+	expectedContext?: ObservationContext,
 ): ProofClaim {
 	const { conclusion, supportedBy } = conclusionForObligation(
 		obligation,
 		evidence,
+		expectedContext,
 	);
 	const id = claimId(
 		`dbsp.transition.claim.${index}.${obligation.proposition.kind}`,
@@ -538,17 +582,12 @@ async function issueObservations(
 	});
 	const issued: (EvidenceObservation | AdvisoryObservation)[] = [];
 	for (const request of uniqueRequests) {
-		issued.push(await issuer.execute(request, target, context));
-	}
-	for (const observation of issued) {
-		if (
-			observation.role === 'evidence' &&
-			stableJson(observation.context) !== stableJson(context)
-		) {
-			throw new ObservationContextMismatchError(
-				`evidence ${observation.id} was issued for a different observation context`,
-			);
+		const observation = await issuer.execute(request, target, context);
+		const validation = validateIssuedObservation(observation, context);
+		if (!validation.ok) {
+			throw new ObservationContextMismatchError(validation.detail);
 		}
+		issued.push(observation);
 	}
 	return {
 		evidence: issued.filter(
@@ -881,9 +920,10 @@ function sameObservationRequests(
 ): boolean {
 	return (
 		left.length === right.length &&
-		left.every(
-			(request, index) => stableJson(request) === stableJson(right[index]),
-		)
+		left.every((request, index) => {
+			const other = right[index];
+			return other !== undefined && sameObservationRequest(request, other);
+		})
 	);
 }
 
@@ -1037,26 +1077,13 @@ function canonicalEvidence(
 	);
 }
 
-function propositionRequest(proposition: Proposition): ObservationRequest {
-	return proposition.detail === undefined
-		? {
-				kind: proposition.kind,
-				scope: proposition.scope,
-			}
-		: {
-				kind: proposition.kind,
-				scope: proposition.scope,
-				detail: proposition.detail,
-			};
-}
-
 function canonicalizeObligation(
 	obligation: ProofObligation,
 	strongest: ReadonlyMap<string, ObservationRequest>,
 	context: ObservationContext,
 ): ProofObligation {
 	const canonicalPropositionRequest = canonicalMinServerVersionRequest(
-		propositionRequest(obligation.proposition),
+		observationRequestForProposition(obligation.proposition),
 		strongest,
 		context,
 	);
@@ -1104,8 +1131,9 @@ function canonicalObligationClaimKey(
 	obligation: ProofObligation,
 ): string | undefined {
 	if (
-		minServerVersionNum(propositionRequest(obligation.proposition)) ===
-		undefined
+		minServerVersionNum(
+			observationRequestForProposition(obligation.proposition),
+		) === undefined
 	) {
 		return undefined;
 	}
@@ -1128,6 +1156,45 @@ function fallbackUnknownObligation(
 			scope: [],
 		}
 	);
+}
+
+type CompositionDeclaration = NonNullable<TransitionFragment['composition']>;
+
+function compositionRequirementSatisfaction(
+	registry: PackRegistry,
+	declarations: readonly CompositionDeclaration[],
+	current: ModelIR | undefined,
+	context: ObservationContext,
+):
+	| { readonly ok: true }
+	| { readonly ok: false; readonly assessment: PlanAssessment } {
+	const producedFacts = new Set<string>();
+	for (const declaration of declarations) {
+		for (const producer of declaration.produces ?? []) {
+			producedFacts.add(transitionCompositionFactKey(producer.fact));
+		}
+	}
+	for (const declaration of declarations) {
+		for (const requirement of declaration.requires ?? []) {
+			if (producedFacts.has(transitionCompositionFactKey(requirement.fact))) {
+				continue;
+			}
+			if (
+				current &&
+				registry.satisfiesCompositionFact(requirement.fact, current, context)
+			) {
+				continue;
+			}
+			return {
+				ok: false,
+				assessment: unsupportedCompositionRequirement(
+					`unsatisfied composition requirement ${requirement.opRef} requires ${requirement.fact.kind}`,
+					[requirement.fact.resource],
+				),
+			};
+		}
+	}
+	return { ok: true };
 }
 
 async function proveTransitions(
@@ -1156,6 +1223,7 @@ async function proveTransitions(
 		};
 	}
 
+	const committedCurrent = transitionCompareCurrentModel(compare);
 	const fragments: TransitionFragment[] = [];
 	const planEvidence: EvidenceObservation[] = [];
 	const planEvidenceById = new Map<string, EvidenceObservation>();
@@ -1499,6 +1567,7 @@ async function proveTransitions(
 						issued.evidence,
 						index,
 						issuer?.artifact ?? PROVER_ARTIFACT,
+						proofContext,
 					),
 				);
 				const refuted = claims.find(
@@ -1664,6 +1733,7 @@ async function proveTransitions(
 						proofEvidence,
 						claimIndex++,
 						issuer?.artifact ?? PROVER_ARTIFACT,
+						proofContext,
 					);
 					if (key) {
 						obligationClaimByCanonicalKey.set(key, claim);
@@ -1845,6 +1915,18 @@ async function proveTransitions(
 		operationInputs,
 		compositionDeclarations,
 	);
+	const requirementSatisfaction = compositionRequirementSatisfaction(
+		registry,
+		compositionDeclarations,
+		committedCurrent,
+		sharedProofContext ?? context,
+	);
+	if (!requirementSatisfaction.ok) {
+		return {
+			kind: 'blocked',
+			assessment: requirementSatisfaction.assessment,
+		};
+	}
 	if (!composition.ok) {
 		return {
 			kind: 'blocked',

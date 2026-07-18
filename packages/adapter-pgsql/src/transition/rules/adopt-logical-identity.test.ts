@@ -37,6 +37,8 @@ const context: ObservationContext = {
 	sessionConfiguration: {
 		search_path: 'public',
 		standard_conforming_strings: 'on',
+		actual_search_path: '["public"]',
+		'dbsp.transition.explicit_schema': 'public',
 	},
 	extensions: {},
 };
@@ -75,6 +77,34 @@ function model(table: TableIR): ModelIR {
 function desiredColumnIdentity(): ModelIR {
 	return model(
 		usersTable({
+			columns: [
+				{
+					name: 'age',
+					type: 'integer',
+					nullable: true,
+					logicalIdentity: {
+						id: 'logical.column.users.age',
+						carrier: {
+							kind: 'postgresql-side-table',
+							authenticated: false,
+						},
+					},
+				},
+			],
+		}),
+	);
+}
+
+function desiredTableAndColumnIdentity(): ModelIR {
+	return model(
+		usersTable({
+			logicalIdentity: {
+				id: 'logical.table.users',
+				carrier: {
+					kind: 'postgresql-side-table',
+					authenticated: false,
+				},
+			},
 			columns: [
 				{
 					name: 'age',
@@ -197,8 +227,83 @@ function bindingValue(row: BindingRow) {
 
 function createFakePool(rows: BindingRow[]) {
 	const sideTableWrites = { count: 0 };
+	const runs = new Map<string, Record<string, unknown>>();
+	const tableShape = (table: string): Record<string, unknown> => {
+		if (table === 'dbsp_transition_run') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan_digest: { type: 'text', notNull: true },
+					target_context_digest: { type: 'text', notNull: true },
+					database_id: { type: 'text', notNull: true },
+					core_version: { type: 'text', notNull: true },
+					started_at: { type: 'timestamp with time zone', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [],
+				checks: [],
+			};
+		}
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				seq: { type: 'bigint', notNull: true },
+				event: { type: 'text', notNull: true },
+				step_id: { type: 'text', notNull: true },
+				operation_ref: { type: 'text', notNull: true },
+				operation_kind: { type: 'jsonb', notNull: true },
+				recorded_at: { type: 'timestamp with time zone', notNull: true },
+				record: { type: 'jsonb', notNull: true },
+			},
+			primary_key: ['run_id', 'seq'],
+			foreign_keys: [
+				{
+					columns: ['run_id'],
+					foreignSchema: 'dbsp_meta',
+					foreignTable: 'dbsp_transition_run',
+					foreignColumns: ['run_id'],
+				},
+			],
+			checks: ['CHECK (event IN (intent, completion, observed))'],
+		};
+	};
 	const client = {
 		query: vi.fn(async (sql: string, params?: readonly unknown[]) => {
+			if (sql.startsWith('CREATE SCHEMA')) {
+				return { rows: [] };
+			}
+			if (sql.includes('dbsp_transition_journal_shape')) {
+				return { rows: [tableShape(String(params?.[1]))] };
+			}
+			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
+				const [
+					run_id,
+					plan_digest,
+					target_context_digest,
+					database_id,
+					core_version,
+					started_at,
+				] = params ?? [];
+				if (!runs.has(String(run_id))) {
+					runs.set(String(run_id), {
+						run_id,
+						plan_digest,
+						target_context_digest,
+						database_id,
+						core_version,
+						started_at,
+					});
+				}
+				return { rows: [] };
+			}
+			if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
+				return { rows: [runs.get(String(params?.[0]))].filter(Boolean) };
+			}
+			if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
+				return { rows: [] };
+			}
 			if (sql === 'SHOW server_version_num') {
 				return { rows: [{ server_version_num: '180000' }] };
 			}
@@ -297,6 +402,40 @@ describe('logical identity adoption rule', () => {
 		expect(compare.candidates[0]?.rule.id).toBe(
 			LOGICAL_IDENTITY_ADOPTION_RULE_ID,
 		);
+	});
+
+	it('does not adopt a malformed logical identity with no explicit carrier', () => {
+		const registry = registryWithRows([]);
+		const bareIdentity = {
+			id: 'logical.column.users.age',
+		} as unknown as NonNullable<TableIR['columns'][number]['logicalIdentity']>;
+		const compare = createComparator(registry).compare(
+			model(
+				usersTable({
+					columns: [
+						{
+							name: 'age',
+							type: 'integer',
+							nullable: true,
+							logicalIdentity: bareIdentity,
+						},
+					],
+				}),
+			),
+			currentPhysicalOnly(),
+		);
+
+		expect(compare.kind).not.toBe('transitions');
+	});
+
+	it('does not emit a column-only adoption when the table also has an unadopted identity', () => {
+		const registry = registryWithRows([]);
+		const compare = createComparator(registry).compare(
+			desiredTableAndColumnIdentity(),
+			currentPhysicalOnly(),
+		);
+
+		expect(compare.kind).not.toBe('transitions');
 	});
 
 	it('emits the baseline assumption, blocks without acceptance, and applies when accepted', async () => {

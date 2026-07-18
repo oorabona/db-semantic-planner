@@ -22,6 +22,7 @@ import {
 	NO_NULLS_GUARD,
 	PG_EQUIVALENCE_ARTIFACT,
 	PG_INTROSPECTION_ARTIFACT,
+	SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 } from '../constants.js';
 import { createPgEquivalenceCapability } from '../equivalence.js';
@@ -357,7 +358,10 @@ describe('postgresql.column.set-not-null rule', () => {
 			expect(result.match).toEqual({
 				table: 'users',
 				column: 'age',
-				expectedColumnShape: expectedColumnShapeFor(column(false), 'age'),
+				expectedColumnShape: expectedColumnShapeFor(column(false), 'age', {
+					table: 'users',
+					column: 'age',
+				}),
 			});
 		}
 	});
@@ -381,6 +385,7 @@ describe('postgresql.column.set-not-null rule', () => {
 			expectedColumnShape: expectedColumnShapeFor(
 				column(false, {}, 'createdAt'),
 				'created_at',
+				{ table: 'user_profiles', column: 'created_at' },
 			),
 		});
 		const requests = rule.requiredObservations(result.match);
@@ -406,6 +411,7 @@ describe('postgresql.column.set-not-null rule', () => {
 			expectedColumnShape: expectedColumnShapeFor(
 				column(false, {}, 'createdAt'),
 				'created_at',
+				{ table: 'user_profiles', column: 'created_at' },
 			),
 		});
 	});
@@ -430,6 +436,7 @@ describe('postgresql.column.set-not-null rule', () => {
 			expectedColumnShape: expectedColumnShapeFor(
 				column(false, {}, 'createdAt'),
 				'created_at',
+				{ table: 'user_profiles', column: 'created_at' },
 			),
 		});
 		expect(compare.candidates[0]?.requiredObservations[0]?.detail).toEqual({
@@ -507,6 +514,56 @@ describe('postgresql.column.set-not-null rule', () => {
 		).toBe('unsupported');
 	});
 
+	it('does not recognize a combined nullability and logical identity change as complete', () => {
+		const carrier = {
+			kind: 'postgresql-side-table',
+			authenticated: false,
+		} as const;
+		const desired = model(false, {
+			logicalIdentity: {
+				id: 'logical.users.age.next',
+				carrier,
+			},
+		});
+		const current = model(true, {
+			logicalIdentity: {
+				id: 'logical.users.age.current',
+				carrier,
+			},
+		});
+
+		const shapeComparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(
+				column(false, {
+					logicalIdentity: {
+						id: 'logical.users.age.next',
+						carrier,
+					},
+				}),
+				'age',
+			),
+			columnShapeFromColumn(
+				column(true, {
+					logicalIdentity: {
+						id: 'logical.users.age.current',
+						carrier,
+					},
+				}),
+				'age',
+			),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql' },
+		);
+
+		expect(shapeComparison).toMatchObject({
+			kind: 'different',
+			field: 'logicalIdentity',
+		});
+		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
+			false,
+		);
+	});
+
 	it('recognizes unique constraint names as metadata outside shape equality', async () => {
 		const desired = model(false, {
 			unique: true,
@@ -516,6 +573,20 @@ describe('postgresql.column.set-not-null rule', () => {
 			uniqueConstraintName: 'users_age_key',
 		});
 
+		const shapeComparison = compareSetNotNullColumnShape(
+			expectedColumnShapeFor(column(false, { unique: true }), 'age'),
+			columnShapeFromColumn(
+				column(true, {
+					unique: true,
+					uniqueConstraintName: 'users_age_key',
+				}),
+				'age',
+			),
+			createPgEquivalenceCapability(),
+			{ engine: 'postgresql' },
+		);
+
+		expect(shapeComparison.kind).toBe('equivalent');
 		expect(createSetNotNullRule().recognize(desired, current).recognized).toBe(
 			true,
 		);
@@ -1581,10 +1652,26 @@ describe('postgresql.column.set-not-null rule', () => {
 									exists: true,
 									relkind: 'p',
 									claims: [
-										{ kind: COLUMN_EXISTS_OBSERVATION, holds: true },
+										{
+											kind: COLUMN_EXISTS_OBSERVATION,
+											holds: true,
+											scope: normalized.scope,
+											detail: normalized.detail,
+										},
 										{
 											kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 											holds: false,
+											scope: [
+												{
+													engine: 'postgresql',
+													database: ctx.databaseId,
+													schema: 'public',
+													kind: 'table',
+													name: 'users',
+												},
+												...normalized.scope,
+											],
+											detail: SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
 										},
 									],
 								},

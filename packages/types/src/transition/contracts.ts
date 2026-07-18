@@ -226,5 +226,9 @@ export type CompareOutcome =
 
 export interface Comparator {
 	readonly artifact: SemanticArtifactRef;
-	compare(desired: ModelIR, current: ModelIR): CompareOutcome;
+	compare(
+		desired: ModelIR,
+		current: ModelIR,
+		context?: EquivalenceContext,
+	): CompareOutcome;
 }

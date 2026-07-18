@@ -154,6 +154,48 @@ describe('composeOperations', () => {
 		]);
 	});
 
+	it('requires a commit when an after-commit producer satisfies a before-operation consumer', () => {
+		const declarations: TransitionFragmentComposition[] = [
+			{
+				produces: [
+					{
+						opRef: 'op:a',
+						fact: markerFact(),
+						available: 'after-commit',
+					},
+				],
+				requires: [
+					{
+						opRef: 'op:b',
+						fact: markerFact(),
+						needs: 'producer-before-operation',
+					},
+				],
+			},
+		];
+
+		const result = composeOperations(
+			[compositionEntry('op:a'), compositionEntry('op:b')],
+			declarations,
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) {
+			return;
+		}
+		expect(result.operations[1]?.requiresCommitBefore).toBe(true);
+		expect(result.segments).toMatchObject([
+			{
+				stepIds: ['step:op:a'],
+				commitBoundaryAfter: true,
+			},
+			{
+				stepIds: ['step:op:b'],
+				commitBoundaryBefore: true,
+			},
+		]);
+	});
+
 	it('orders operations from an explicit order declaration', () => {
 		const result = composeOperations(
 			[
@@ -180,6 +222,83 @@ describe('composeOperations', () => {
 		expect(result.operations.map((entry) => entry.operation.ref)).toEqual([
 			'op:a',
 			'op:b',
+		]);
+	});
+
+	it('stages declared-order operations when their effects interact', () => {
+		const result = composeOperations(
+			[
+				compositionEntry('op:a', effects({ writes: [tableSelector()] })),
+				compositionEntry('op:b', effects({ writes: [tableSelector()] })),
+			],
+			[
+				{
+					order: [
+						{
+							before: 'op:a',
+							after: 'op:b',
+							reason: 'same table writes must be sequenced',
+						},
+					],
+				},
+			],
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) {
+			return;
+		}
+		expect(result.operations.map((entry) => entry.operation.ref)).toEqual([
+			'op:a',
+			'op:b',
+		]);
+		expect(result.operations[1]?.requiresCommitBefore).toBe(true);
+		expect(result.segments).toMatchObject([
+			{
+				stepIds: ['step:op:a'],
+				commitBoundaryAfter: true,
+			},
+			{
+				stepIds: ['step:op:b'],
+				commitBoundaryBefore: true,
+			},
+		]);
+	});
+
+	it('keeps disjoint declared-order operations atomic', () => {
+		const result = composeOperations(
+			[
+				compositionEntry('op:a', effects({ writes: [tableSelector('users')] })),
+				compositionEntry('op:b', effects({ writes: [tableSelector('posts')] })),
+			],
+			[
+				{
+					order: [
+						{
+							before: 'op:a',
+							after: 'op:b',
+							reason: 'deterministic fixture order',
+						},
+					],
+				},
+			],
+		);
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) {
+			return;
+		}
+		expect(result.operations.map((entry) => entry.operation.ref)).toEqual([
+			'op:a',
+			'op:b',
+		]);
+		expect(result.operations[1]?.requiresCommitBefore).toBe(false);
+		expect(result.segments).toMatchObject([
+			{
+				stepIds: ['step:op:a', 'step:op:b'],
+				commitBoundaryBefore: false,
+				commitBoundaryAfter: false,
+			},
 		]);
 	});
 

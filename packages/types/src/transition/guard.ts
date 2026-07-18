@@ -57,10 +57,14 @@ export type GuardProtocol =
 			readonly binding?: TargetBinding;
 	  };
 
-export interface GuardPredicate {
+export interface GuardPredicate<
+	TTarget extends ResourceAddress = ResourceAddress,
+	TDetail extends JsonValue = JsonValue,
+> {
 	readonly kind: string;
+	readonly target: TTarget;
 	readonly scope: readonly ResourceAddress[];
-	readonly detail?: JsonValue;
+	readonly detail?: TDetail;
 }
 
 export interface ApplyGuard {

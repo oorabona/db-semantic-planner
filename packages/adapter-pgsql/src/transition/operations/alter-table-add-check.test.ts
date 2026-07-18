@@ -84,6 +84,59 @@ function journalRun(): TransitionRunMetadata {
 	};
 }
 
+function journalRunRow(run: TransitionRunMetadata) {
+	return {
+		run_id: run.runId,
+		plan_digest: run.planDigest,
+		target_context_digest: run.targetContextDigest,
+		database_id: run.databaseId,
+		core_version: run.coreVersion,
+		started_at: run.startedAt,
+	};
+}
+
+function journalTableShape(table: string) {
+	if (table === 'dbsp_transition_run') {
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				plan_digest: { type: 'text', notNull: true },
+				target_context_digest: { type: 'text', notNull: true },
+				database_id: { type: 'text', notNull: true },
+				core_version: { type: 'text', notNull: true },
+				started_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['run_id'],
+			foreign_keys: [],
+			checks: [],
+		};
+	}
+	return {
+		relkind: 'r',
+		columns: {
+			run_id: { type: 'text', notNull: true },
+			seq: { type: 'bigint', notNull: true },
+			event: { type: 'text', notNull: true },
+			step_id: { type: 'text', notNull: true },
+			operation_ref: { type: 'text', notNull: true },
+			operation_kind: { type: 'jsonb', notNull: true },
+			recorded_at: { type: 'timestamp with time zone', notNull: true },
+			record: { type: 'jsonb', notNull: true },
+		},
+		primary_key: ['run_id', 'seq'],
+		foreign_keys: [
+			{
+				columns: ['run_id'],
+				foreignSchema: 'dbsp_meta',
+				foreignTable: 'dbsp_transition_run',
+				foreignColumns: ['run_id'],
+			},
+		],
+		checks: ['CHECK (event IN (intent, completion, observed))'],
+	};
+}
+
 function tableChecksEvidence(
 	checks: readonly CheckSet[],
 	options: {
@@ -148,6 +201,14 @@ function guard(): ApplyGuard {
 		appliesTo: operation.ref,
 		predicate: {
 			kind: CHECK_ROWS_SATISFY_GUARD,
+			target: {
+				engine: 'postgresql',
+				database: 'test',
+				schema: 'tenant',
+				kind: 'check-constraint',
+				name: 'users_age_check',
+				qualifiedBy: ['users'],
+			},
 			scope: [
 				{
 					engine: 'postgresql',
@@ -381,8 +442,14 @@ describe('AlterTableAddCheck operation runtime', () => {
 		};
 		const client = {
 			opaqueClient: {
-				query: async (sql: string) => {
+				query: async (sql: string, params?: readonly unknown[]) => {
 					queries.push(sql);
+					if (sql.includes('dbsp_transition_journal_shape')) {
+						return { rows: [journalTableShape(String(params?.[1]))] };
+					}
+					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
+						return { rows: [journalRunRow(run)] };
+					}
 					return { rows: [] };
 				},
 			},

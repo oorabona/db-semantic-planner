@@ -94,11 +94,14 @@ function resourceForMatch(
 }
 
 function carrierSupported(identity: LogicalIdentity): boolean {
-	const carrier = identity.carrier;
+	const carrier = (
+		identity as { readonly carrier?: LogicalIdentity['carrier'] }
+	).carrier;
+	if (!carrier) {
+		return false;
+	}
 	return (
-		carrier === undefined ||
-		(carrier.kind === 'postgresql-side-table' &&
-			carrier.authenticated === false)
+		carrier.kind === 'postgresql-side-table' && carrier.authenticated === false
 	);
 }
 
@@ -129,6 +132,16 @@ function sameExceptColumnLogicalIdentity(
 	return (
 		stableJson(withoutColumnLogicalIdentity(desired)) ===
 		stableJson(withoutColumnLogicalIdentity(current))
+	);
+}
+
+function hasUnadoptedTableLogicalIdentityChange(
+	desiredTable: TableIR,
+	currentTable: TableIR,
+): boolean {
+	return (
+		stableJson(desiredTable.logicalIdentity ?? null) !==
+		stableJson(currentTable.logicalIdentity ?? null)
 	);
 }
 
@@ -405,7 +418,7 @@ function recognitionForTable(
 
 function recognitionForColumn(
 	desiredTable: TableIR,
-	_currentTable: TableIR,
+	currentTable: TableIR,
 	desiredColumn: ColumnIR,
 	currentColumn: ColumnIR,
 	naming: NamingPlugin,
@@ -415,7 +428,8 @@ function recognitionForColumn(
 	if (
 		!identity ||
 		currentColumn.logicalIdentity ||
-		!carrierSupported(identity)
+		!carrierSupported(identity) ||
+		hasUnadoptedTableLogicalIdentityChange(desiredTable, currentTable)
 	) {
 		return undefined;
 	}

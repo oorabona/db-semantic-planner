@@ -279,21 +279,26 @@ describe('ModelIRImpl validation — foreign keys', () => {
 });
 
 describe('ModelIRImpl validation — logical identity', () => {
+	const logicalIdentityCarrier = {
+		kind: 'postgresql-side-table',
+		authenticated: false,
+	} as const;
+
 	it('preserves optional table and column logical identities', () => {
 		const users = makeTable('users', {
 			logicalIdentity: {
 				id: 'logical.table.users',
-				carrier: {
-					kind: 'postgresql-side-table',
-					authenticated: false,
-				},
+				carrier: logicalIdentityCarrier,
 			},
 			columns: [
 				{
 					name: 'id',
 					type: 'integer',
 					nullable: false,
-					logicalIdentity: { id: 'logical.column.users.id' },
+					logicalIdentity: {
+						id: 'logical.column.users.id',
+						carrier: logicalIdentityCarrier,
+					},
 				},
 			],
 		});
@@ -313,13 +318,19 @@ describe('ModelIRImpl validation — logical identity', () => {
 			buildModel(
 				[
 					makeTable('users', {
-						logicalIdentity: { id: 'logical.duplicate' },
+						logicalIdentity: {
+							id: 'logical.duplicate',
+							carrier: logicalIdentityCarrier,
+						},
 						columns: [
 							{
 								name: 'id',
 								type: 'integer',
 								nullable: false,
-								logicalIdentity: { id: 'logical.duplicate' },
+								logicalIdentity: {
+									id: 'logical.duplicate',
+									carrier: logicalIdentityCarrier,
+								},
 							},
 						],
 					}),
@@ -341,7 +352,10 @@ describe('ModelIRImpl validation — logical identity', () => {
 								name: 'id',
 								type: 'integer',
 								nullable: false,
-								logicalIdentity: { id: 'logical.column.shared' },
+								logicalIdentity: {
+									id: 'logical.column.shared',
+									carrier: logicalIdentityCarrier,
+								},
 							},
 						],
 					}),
@@ -351,7 +365,10 @@ describe('ModelIRImpl validation — logical identity', () => {
 								name: 'id',
 								type: 'integer',
 								nullable: false,
-								logicalIdentity: { id: 'logical.column.shared' },
+								logicalIdentity: {
+									id: 'logical.column.shared',
+									carrier: logicalIdentityCarrier,
+								},
 							},
 						],
 					}),

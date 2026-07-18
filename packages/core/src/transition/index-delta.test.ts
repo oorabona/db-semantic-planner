@@ -35,6 +35,15 @@ describe('indexDelta', () => {
 		});
 	});
 
+	it('requires explicit current catalog validity for no-drift equivalence', () => {
+		expect(indexDelta('users', [idx()], [idx()])).toEqual({
+			kind: 'unsupported',
+		});
+		expect(
+			indexDelta('users', [idx()], [idx({ valid: true, ready: true })]),
+		).toEqual({ kind: 'none' });
+	});
+
 	it.each([
 		['non-unique', idx({ unique: false })],
 		['expression', idx({ expressions: ['lower(email)'] })],

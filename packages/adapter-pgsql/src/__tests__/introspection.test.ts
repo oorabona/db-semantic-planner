@@ -181,6 +181,110 @@ describe('introspect', () => {
 		expect(result.externalTables.size).toBe(0);
 	});
 
+	it('recovers logical identities only from a managed carrier shape', async () => {
+		const carrierShape = {
+			table_exists: true,
+			columns: {
+				logical_id: { type: 'text', notNull: true },
+				schema_name: { type: 'text', notNull: true },
+				table_name: { type: 'text', notNull: true },
+				column_name: { type: 'text', notNull: false },
+				carrier_kind: { type: 'text', notNull: true },
+				dbsp_managed_by: { type: 'text', notNull: true },
+				attached_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['logical_id'],
+		};
+		const pool = createMockPool([
+			[usersPostsColumns[0]!],
+			[{ table_name: 'users', column_name: 'id' }],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[{ exists: true }],
+			[carrierShape],
+			[{ invalid_marker_rows: '0' }],
+			[
+				{
+					logical_id: 'logical.column.users.id',
+					schema_name: 'public',
+					table_name: 'users',
+					column_name: 'id',
+					carrier_kind: 'postgresql-side-table',
+				},
+			],
+		]);
+
+		const result = await introspect(pool);
+
+		expect(result.getTable('users')?.columns[0]?.logicalIdentity).toMatchObject(
+			{
+				id: 'logical.column.users.id',
+				carrier: {
+					kind: 'postgresql-side-table',
+					authenticated: false,
+				},
+			},
+		);
+	});
+
+	it('does not recover logical identities from an unvalidated carrier table', async () => {
+		const staleCarrierShape = {
+			table_exists: true,
+			columns: {
+				logical_id: { type: 'text', notNull: true },
+				schema_name: { type: 'text', notNull: true },
+				table_name: { type: 'text', notNull: true },
+				column_name: { type: 'text', notNull: false },
+				carrier_kind: { type: 'text', notNull: true },
+				attached_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['logical_id'],
+		};
+		const pool = createMockPool([
+			[usersPostsColumns[0]!],
+			[{ table_name: 'users', column_name: 'id' }],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[{ exists: true }],
+			[staleCarrierShape],
+			[
+				{
+					logical_id: 'logical.column.users.id',
+					schema_name: 'public',
+					table_name: 'users',
+					column_name: 'id',
+					carrier_kind: 'postgresql-side-table',
+				},
+			],
+		]);
+
+		const result = await introspect(pool);
+
+		expect(
+			result.getTable('users')?.columns[0]?.logicalIdentity,
+		).toBeUndefined();
+	});
+
 	it('should map column types correctly', async () => {
 		const columns = [
 			{

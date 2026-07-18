@@ -292,15 +292,85 @@ describe('PostgreSQL transition observation issuer', () => {
 					notValid: false,
 				},
 			],
-			claims: [
-				{ kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION, holds: true },
-				{ kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION, holds: true },
-			],
+			claims: expect.arrayContaining([
+				expect.objectContaining({
+					kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+					holds: true,
+				}),
+				expect.objectContaining({
+					kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION,
+					holds: true,
+				}),
+			]),
 		});
 		const value = observation.result.value as {
 			readonly checks?: readonly Record<string, unknown>[];
 		};
 		expect(value.checks?.[0]).not.toHaveProperty('predicateExpression');
+	});
+
+	it('fails closed when table CHECK catalog JSON is malformed', async () => {
+		const issuer = createPgObservationIssuer();
+
+		await expect(
+			issuer.execute(
+				{
+					kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+					scope: [],
+					detail: {
+						schema: 'tenant',
+						table: 'users',
+						constraint: 'users_age_check',
+					},
+				},
+				{
+					query: async () => ({
+						rows: [
+							{
+								oid: '12345',
+								relkind: 'r',
+								schema_name: 'tenant',
+								table_name: 'users',
+								checks: '[{',
+							},
+						],
+					}),
+				},
+				context,
+			),
+		).rejects.toThrow(/CHECK catalog JSON could not be parsed/);
+	});
+
+	it('fails closed when table CHECK catalog entries are malformed', async () => {
+		const issuer = createPgObservationIssuer();
+
+		await expect(
+			issuer.execute(
+				{
+					kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+					scope: [],
+					detail: {
+						schema: 'tenant',
+						table: 'users',
+						constraint: 'users_age_check',
+					},
+				},
+				{
+					query: async () => ({
+						rows: [
+							{
+								oid: '12345',
+								relkind: 'r',
+								schema_name: 'tenant',
+								table_name: 'users',
+								checks: [{ name: 'users_age_check' }],
+							},
+						],
+					}),
+				},
+				context,
+			),
+		).rejects.toThrow(/CHECK catalog entry 0 has invalid shape/);
 	});
 
 	it('observes table indexes from raw pg_index flag names and text-array literals', async () => {
@@ -342,6 +412,10 @@ describe('PostgreSQL transition observation issuer', () => {
 									expressions_text: null,
 									opclass_names: '{}',
 									opclass_cols: '{}',
+									collation_names: '{pg_catalog.C}',
+									collation_cols: '{email}',
+									option_values: '{3}',
+									option_cols: '{email}',
 									indisunique: true,
 									indisvalid: true,
 									indisready: true,
@@ -379,12 +453,22 @@ describe('PostgreSQL transition observation issuer', () => {
 				ready: true,
 				method: 'btree',
 				predicate: null,
+				collation: { email: 'pg_catalog.C' },
+				options: { email: '3' },
 			}),
 		]);
-		expect(value.claims).toEqual([
-			{ kind: TABLE_INDEXES_OBSERVATION, holds: true },
-			{ kind: INDEX_ABSENT_OBSERVATION, holds: false },
-		]);
+		expect(value.claims).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({
+					kind: TABLE_INDEXES_OBSERVATION,
+					holds: true,
+				}),
+				expect.objectContaining({
+					kind: INDEX_ABSENT_OBSERVATION,
+					holds: false,
+				}),
+			]),
+		);
 	});
 
 	it('deparses table CHECK expressions under a savepoint and returns CHECK plus predicate artifacts', async () => {

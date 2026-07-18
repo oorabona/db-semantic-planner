@@ -9,6 +9,7 @@ import type {
 	EvidenceObservation,
 	FingerprintManifest,
 	IssuedObservation,
+	JsonValue,
 	ObservationContext,
 	ObservationIssuer,
 	ObservationRequest,
@@ -29,12 +30,14 @@ import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
 	COLUMN_EXISTS_OBSERVATION,
+	EXPRESSION_DEPARSE_OBSERVATION,
 	NO_NULLS_GUARD,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
+import { observationContextMatches } from '../context-match.js';
 import { createPgEquivalenceCapability } from '../equivalence.js';
 import { advisoryObservationId, assumptionId } from '../ids.js';
 import {
@@ -330,11 +333,72 @@ function assertDefaultUnknownSkipInvariant(
 	}
 }
 
+function columnDefaultDeparseResource(
+	payload: AlterColumnSetNotNullPayload,
+	context: ObservationContext,
+): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: context.databaseId,
+		schema: schemaFor(payload, context),
+		kind: 'column',
+		name: payload.column,
+		qualifiedBy: [payload.table],
+	};
+}
+
+function columnDefaultDeparseRequest(
+	payload: AlterColumnSetNotNullPayload,
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	context: ObservationContext,
+): ObservationRequest | undefined {
+	if (expected.default == null || observed.default == null) {
+		return undefined;
+	}
+	return {
+		kind: EXPRESSION_DEPARSE_OBSERVATION,
+		scope: [columnDefaultDeparseResource(payload, context)],
+		detail: {
+			surface: 'column-default',
+			category: 'scalar',
+			table: payload.table,
+			column: payload.column,
+			schema: schemaFor(payload, context),
+			left: expected.default as unknown as JsonValue,
+			right: observed.default as unknown as JsonValue,
+		},
+	};
+}
+
+function setNotNullEquivalenceContext(
+	payload: AlterColumnSetNotNullPayload,
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	context: ObservationContext,
+): EquivalenceContext & { readonly deparseRequest?: ObservationRequest } {
+	const base = {
+		engine: context.engine,
+		databaseId: context.databaseId,
+		targetSchema: schemaFor(payload, context),
+		...(context.searchPath ? { searchPath: context.searchPath } : {}),
+	};
+	const request = columnDefaultDeparseRequest(
+		payload,
+		expected,
+		observed,
+		context,
+	);
+	return request ? { ...base, deparseRequest: request } : base;
+}
+
 function setNotNullShapeGuardFailures(
 	expected: SetNotNullColumnShapeExpectation,
 	observed: SetNotNullObservedColumnShape,
 	catalog: CatalogValue,
-	context: EquivalenceContext,
+	context: EquivalenceContext & {
+		readonly deparseRequest?: ObservationRequest;
+	},
 	evidence: readonly EvidenceObservation[],
 ): readonly ColumnShapeGuardFailure[] {
 	const failures: ColumnShapeGuardFailure[] = [];
@@ -450,12 +514,12 @@ function assertExpectedColumnShape(
 		payload.expectedColumnShape,
 		observed,
 		catalog,
-		{
-			engine: context.engine,
-			databaseId: context.databaseId,
-			targetSchema: schemaFor(payload, context),
-			...(context.searchPath ? { searchPath: context.searchPath } : {}),
-		},
+		setNotNullEquivalenceContext(
+			payload,
+			payload.expectedColumnShape,
+			observed,
+			context,
+		),
 		evidence,
 	);
 	if (failures.length > 0) {
@@ -562,7 +626,10 @@ function catalogValueFromEvidence(
 	context: ObservationContext,
 ): CatalogValue | undefined {
 	for (const observation of evidence) {
-		if (!observationTargetsPayload(observation, payload, context)) {
+		if (
+			!observationTargetsPayload(observation, payload, context) ||
+			!observationContextMatches(observation, context)
+		) {
 			continue;
 		}
 		const value = observation.result.value;
@@ -863,6 +930,28 @@ function advisoryGuardObservation(
 	};
 }
 
+function guardTargetsPayload(
+	guard: ApplyGuard,
+	payload: AlterColumnSetNotNullPayload,
+	context: ObservationContext,
+): boolean {
+	if (guard.predicate.kind !== NO_NULLS_GUARD) {
+		return false;
+	}
+	if (!isRecord(guard.predicate.detail)) {
+		return false;
+	}
+	return (
+		guard.predicate.detail.schema === schemaFor(payload, context) &&
+		guard.predicate.detail.table === payload.table &&
+		guard.predicate.detail.column === payload.column &&
+		sameResourceTarget(guard.predicate.target, payload, context) &&
+		guard.predicate.scope.some((resource) =>
+			sameResourceTarget(resource, payload, context),
+		)
+	);
+}
+
 export function createAlterColumnSetNotNullOperationRuntime() {
 	return {
 		artifact: PG_OPERATION_PACK_ARTIFACT,
@@ -1020,6 +1109,12 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			if (guard.predicate.kind !== NO_NULLS_GUARD) {
 				throw new Error(`unsupported PostgreSQL guard ${guard.predicate.kind}`);
 			}
+			const payload = payloadOf(operation);
+			if (!guardTargetsPayload(guard, payload, context)) {
+				throw new Error(
+					'AlterColumnSetNotNull NO_NULLS guard does not target the operation payload',
+				);
+			}
 			const executor = clientQuery(client);
 			await executor.query(
 				`SET LOCAL statement_timeout = '${boundedStatementTimeout(
@@ -1028,9 +1123,7 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			);
 			let result: QueryResultLike;
 			try {
-				result = await executor.query(
-					renderNoNullsCheckSql(payloadOf(operation), context),
-				);
+				result = await executor.query(renderNoNullsCheckSql(payload, context));
 			} catch (error) {
 				await executor
 					.query('SET LOCAL statement_timeout = DEFAULT')

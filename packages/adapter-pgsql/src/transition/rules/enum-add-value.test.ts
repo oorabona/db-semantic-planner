@@ -112,6 +112,7 @@ function evidence(
 
 class FakeEnumPool {
 	readonly queries: string[] = [];
+	readonly runs = new Map<string, Record<string, unknown>>();
 	labels: string[];
 	readonly schema: string;
 
@@ -128,8 +129,83 @@ class FakeEnumPool {
 		};
 	}
 
+	tableShape(table: string): Record<string, unknown> {
+		if (table === 'dbsp_transition_run') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan_digest: { type: 'text', notNull: true },
+					target_context_digest: { type: 'text', notNull: true },
+					database_id: { type: 'text', notNull: true },
+					core_version: { type: 'text', notNull: true },
+					started_at: { type: 'timestamp with time zone', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [],
+				checks: [],
+			};
+		}
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				seq: { type: 'bigint', notNull: true },
+				event: { type: 'text', notNull: true },
+				step_id: { type: 'text', notNull: true },
+				operation_ref: { type: 'text', notNull: true },
+				operation_kind: { type: 'jsonb', notNull: true },
+				recorded_at: { type: 'timestamp with time zone', notNull: true },
+				record: { type: 'jsonb', notNull: true },
+			},
+			primary_key: ['run_id', 'seq'],
+			foreign_keys: [
+				{
+					columns: ['run_id'],
+					foreignSchema: 'dbsp_meta',
+					foreignTable: 'dbsp_transition_run',
+					foreignColumns: ['run_id'],
+				},
+			],
+			checks: ['CHECK (event IN (intent, completion, observed))'],
+		};
+	}
+
 	async query(sql: string, params?: readonly unknown[]) {
 		this.queries.push(sql);
+		if (sql.startsWith('CREATE ')) {
+			return { rows: [] };
+		}
+		if (sql.includes('dbsp_transition_journal_shape')) {
+			return { rows: [this.tableShape(String(params?.[1]))] };
+		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
+			const [
+				run_id,
+				plan_digest,
+				target_context_digest,
+				database_id,
+				core_version,
+				started_at,
+			] = params ?? [];
+			if (!this.runs.has(String(run_id))) {
+				this.runs.set(String(run_id), {
+					run_id,
+					plan_digest,
+					target_context_digest,
+					database_id,
+					core_version,
+					started_at,
+				});
+			}
+			return { rows: [] };
+		}
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
+			return { rows: [this.runs.get(String(params?.[0]))].filter(Boolean) };
+		}
+		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
+			return { rows: [] };
+		}
 		if (sql === 'SHOW server_version_num') {
 			return { rows: [{ server_version_num: '180000' }] };
 		}
@@ -239,44 +315,35 @@ describe('postgresql.enum.add-value rule', () => {
 		}
 	});
 
-	it('pins an unqualified desired enum to the matched current schema', () => {
+	it('matches an unqualified desired enum only in the target schema', () => {
 		const rule = createEnumAddValueRule();
 		const recognized = rule.recognize(
 			model([status(['inactive', 'active', 'pending'])]),
-			model([status(['inactive', 'active'], { schema: 'tenant_a' })]),
-			{ context: { engine: 'postgresql', targetSchema: 'tenant_b' } },
+			model([status(['inactive', 'active'], { schema: 'tenant' })]),
+			{ context: { engine: 'postgresql', targetSchema: 'tenant' } },
 		);
 
 		expect(recognized.recognized).toBe(true);
 		if (recognized.recognized !== true) {
 			return;
 		}
-		expect(recognized.match.schema).toBe('tenant_a');
+		expect(recognized.match.schema).toBe('tenant');
 
 		const requests = rule.requiredObservations(recognized.match);
 		expect(requests).toEqual(
 			expect.arrayContaining([
 				expect.objectContaining({
-					detail: { schema: 'tenant_a', type: 'status' },
+					detail: { schema: 'tenant', type: 'status' },
 				}),
 			]),
 		);
 
-		const mismatchedEvidence = requests.map((request) =>
-			request.kind === ENGINE_VERSION_OBSERVATION
-				? evidence(request)
-				: evidence({
-						...request,
-						scope: request.scope.map((resource) => ({
-							...resource,
-							schema: 'tenant_b',
-						})),
-						detail: { schema: 'tenant_b', type: 'status' },
-					}),
+		const differentSchema = rule.recognize(
+			model([status(['inactive', 'active', 'pending'])]),
+			model([status(['inactive', 'active'], { schema: 'tenant_a' })]),
+			{ context: { engine: 'postgresql', targetSchema: 'tenant_b' } },
 		);
-		const evaluation = rule.evaluate(recognized.match, mismatchedEvidence, []);
-
-		expect(evaluation.outcome).toBe('blocked');
+		expect(differentSchema).toEqual({ recognized: false });
 	});
 
 	it('proves an unqualified enum add when the proof context supplies the schema', async () => {
@@ -325,6 +392,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const compare = createComparator(registry).compare(
 			model([status(['inactive', 'pending', 'active'])]),
 			model([status(['inactive', 'active'], { schema: 'tenant_a' })]),
+			{ engine: 'postgresql', targetSchema: 'tenant_a' },
 		);
 
 		expect(compare.kind).toBe('transitions');
@@ -339,8 +407,8 @@ describe('postgresql.enum.add-value rule', () => {
 
 		const outcome = await createProver(registry).prove(compare, pool, {
 			...context,
-			targetSchema: 'tenant_b',
-			searchPath: ['tenant_b'],
+			targetSchema: 'tenant_a',
+			searchPath: ['tenant_a'],
 		});
 		expect(outcome.kind).toBe('proven');
 		if (outcome.kind !== 'proven') {
@@ -373,8 +441,17 @@ describe('postgresql.enum.add-value rule', () => {
 				),
 		).toBe(true);
 
+		const applyOutcome = await createProver(registry).prove(compare, pool, {
+			...context,
+			targetSchema: 'tenant_a',
+			searchPath: ['tenant_a'],
+		});
+		expect(applyOutcome.kind).toBe('proven');
+		if (applyOutcome.kind !== 'proven') {
+			return;
+		}
 		const result = await createApplier(registry).apply(
-			{ plan: outcome.plan, assessment: outcome.assessment },
+			{ plan: applyOutcome.plan, assessment: applyOutcome.assessment },
 			policy,
 			pool,
 		);
@@ -391,6 +468,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const compare = createComparator(registry).compare(
 			model([status(['inactive', 'pending', 'active'])]),
 			model([status(['inactive', 'active'], { schema: 'tenant_a' })]),
+			{ engine: 'postgresql', targetSchema: 'tenant_a' },
 		);
 
 		expect(compare.kind).toBe('transitions');
@@ -545,6 +623,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const compare = createComparator(registry).compare(
 			model([status(['inactive', 'pending', 'active'])]),
 			model([status(['inactive', 'active'], { schema: 'tenant' })]),
+			{ engine: 'postgresql', targetSchema: 'tenant' },
 		);
 
 		expect(compare.kind).toBe('transitions');

@@ -18,7 +18,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { claimId, evidenceId, semanticArtifactId } from './ids.js';
 import type { OperationObservation, OperationRuntime } from './registry.js';
 import { createPackRegistry } from './registry.js';
-import { resumeTransitionRun } from './resume.js';
+import { type ResumeTransitionInput, resumeTransitionRun } from './resume.js';
 import { stableJson } from './stable-json.js';
 
 const artifact: SemanticArtifactRef = {
@@ -269,7 +269,7 @@ function runtime(options: {
 					commitBoundary: 'none',
 				},
 			},
-			restsOn: [],
+			restsOn: [assumption()],
 		}),
 		buildFingerprints: () => ({
 			expectedBefore: fingerprint('before'),
@@ -309,6 +309,9 @@ async function resumeWith(
 	plan: ProvenPlanShape,
 	events: readonly TransitionJournalEvent[],
 	rt: OperationRuntime,
+	options: {
+		readonly readContext?: ResumeTransitionInput['readContext'];
+	} = {},
 ) {
 	const registry = createPackRegistry([
 		{
@@ -321,7 +324,7 @@ async function resumeWith(
 	return resumeTransitionRun(registry, {
 		runId: runMetadata.runId,
 		loadCurrent: async () => ({ run: runMetadata, plan, events }),
-		readContext: async () => context,
+		readContext: options.readContext ?? (async () => context),
 		policy,
 		target: { connect: vi.fn() },
 	});
@@ -391,7 +394,16 @@ describe('resumeTransitionRun', () => {
 	});
 
 	it('fails closed on non-atomic intent without confirmable completion', async () => {
-		const plan = planShape();
+		const base = planShape();
+		const plan: ProvenPlanShape = {
+			...base,
+			segments: [
+				{
+					...base.segments[0]!,
+					transaction: 'forbids-transaction',
+				},
+			],
+		};
 		const runMetadata = run(plan);
 		const step = plan.steps[0]!;
 
@@ -462,5 +474,94 @@ describe('resumeTransitionRun', () => {
 			code: 'resume-required',
 			stepId: 'step:op:b',
 		});
+	});
+
+	it('fails closed when readContext does not match run metadata', async () => {
+		const plan = planShape();
+		const result = await resumeWith(plan, [], runtime({}), {
+			readContext: async () => ({
+				...context,
+				databaseId: 'other-db',
+			}),
+		});
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain('databaseId');
+	});
+
+	it('rejects a plan whose step order differs from segment execution order', async () => {
+		const base = planShape(true);
+		const tampered: ProvenPlanShape = {
+			...base,
+			segments: [
+				{
+					...base.segments[0]!,
+					stepIds: ['step:op:b', 'step:op'],
+				},
+			],
+		};
+
+		const result = await resumeWith(tampered, [], runtime({}));
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain('step order');
+	});
+
+	it('rejects journal events with mismatched embedded record identity', async () => {
+		const plan = planShape(true);
+		const runMetadata = run(plan);
+		const first = plan.steps[0]!;
+		const second = plan.steps[1]!;
+
+		const result = await resumeWith(
+			plan,
+			[event(1, 'intent', second, runMetadata, intent(first, runMetadata))],
+			runtime({}),
+		);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain('embeds record');
+	});
+
+	it('requires each step exact operation-pack-semantics assumption during resume validation', async () => {
+		const assumptionA = assumption();
+		const assumptionB: Assumption = {
+			...assumptionA,
+			id: 'mock.operation-pack-semantics.b' as Assumption['id'],
+			statement: 'mock operation semantics are correct for op:b',
+		};
+		const base = planShape(true);
+		const tampered: ProvenPlanShape = {
+			...base,
+			assumptions: [assumptionA, assumptionB],
+			steps: base.steps.map((step) => ({
+				...step,
+				restsOnAssumptions: [assumptionA.id],
+			})),
+		};
+		const baseRuntime = runtime({});
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: (candidate): OperationEffectAssessment => {
+				const effects = baseRuntime.effectsOf(candidate, context);
+				return {
+					...effects,
+					restsOn: [candidate.ref === 'op:b' ? assumptionB : assumptionA],
+				};
+			},
+		};
+
+		const result = await resumeWith(tampered, [], rt);
+
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'context-mismatch',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(assumptionB.id);
 	});
 });

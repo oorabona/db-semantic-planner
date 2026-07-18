@@ -14,6 +14,7 @@ import {
 } from '../check-expression.js';
 import { formatSqlDefault, quoteIdent } from '../ddl/phases/utils.js';
 import { validateCheckExpression } from '../validate.js';
+import { stampedClaim, stampedClaimForRequest } from './claim-stamping.js';
 import {
 	ALTER_AUTHORITY_OBSERVATION,
 	ALTER_TYPE_AUTHORITY_OBSERVATION,
@@ -33,6 +34,7 @@ import {
 	PG_SET_NOT_NULL_AUTHORITY_PRIVILEGE,
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
+	SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 	TABLE_INDEXES_OBSERVATION,
@@ -509,6 +511,34 @@ function scopeFor(
 	return target.schema ? { ...qualified, schema: target.schema } : qualified;
 }
 
+function checkConstraintScopeFor(
+	target: ObservationTarget & { readonly constraint: string },
+	context: ObservationContext,
+): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: context.databaseId,
+		...(target.schema ? { schema: target.schema } : {}),
+		kind: 'check-constraint',
+		name: target.constraint,
+		qualifiedBy: [target.table],
+	};
+}
+
+function indexScopeFor(
+	target: ObservationTarget & { readonly index: string },
+	context: ObservationContext,
+): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: context.databaseId,
+		...(target.schema ? { schema: target.schema } : {}),
+		kind: 'index',
+		name: target.index,
+		qualifiedBy: [target.table],
+	};
+}
+
 function logicalIdentityScopeFor(
 	target: LogicalIdentityObservationTarget,
 	context: ObservationContext,
@@ -664,6 +694,35 @@ export function normalizePgStringArray(value: unknown): readonly string[] {
 			// Fall through to PostgreSQL text-array parsing.
 		}
 		return pgTextArray(value) ?? [];
+	}
+	return [];
+}
+
+function normalizePgNumberArray(value: unknown): readonly number[] {
+	if (Array.isArray(value)) {
+		return value.flatMap((item) => {
+			if (typeof item === 'number' && Number.isFinite(item)) {
+				return [item];
+			}
+			if (typeof item === 'string') {
+				const parsed = Number(item);
+				return Number.isFinite(parsed) ? [parsed] : [];
+			}
+			return [];
+		});
+	}
+	if (typeof value === 'string') {
+		try {
+			const parsed = JSON.parse(value) as unknown;
+			if (Array.isArray(parsed)) {
+				return normalizePgNumberArray(parsed);
+			}
+		} catch {
+			return (pgTextArray(value) ?? []).flatMap((item) => {
+				const parsed = Number(item);
+				return Number.isFinite(parsed) ? [parsed] : [];
+			});
+		}
 	}
 	return [];
 }
@@ -1072,7 +1131,7 @@ async function observeTableCheckDeparse(
 					: {}),
 				expression: vendorValidatedPredicate(desiredCanonical.expression),
 				predicate: vendorValidatedPredicate(desiredCanonical.predicate),
-				claims: [{ kind: EXPRESSION_DEPARSE_OBSERVATION, holds: true }],
+				claims: [stampedClaimForRequest(normalizedRequest, true)],
 			} as unknown as JsonValue,
 		});
 	} finally {
@@ -1179,6 +1238,7 @@ async function observeExpressionDeparse(
 						: catalogCanonical,
 				desiredCanonical,
 				catalogCanonical,
+				claims: [stampedClaimForRequest(normalizedRequest, true)],
 			},
 		});
 	} finally {
@@ -1365,7 +1425,7 @@ async function observeLogicalIdentityCarrier(
 			authenticated: target.authenticated,
 			objectBindings,
 			logicalIdBindings,
-			claims: [{ kind: LOGICAL_IDENTITY_CARRIER_OBSERVATION, holds }],
+			claims: [stampedClaimForRequest(normalizedRequest, holds)],
 		} as unknown as JsonValue,
 	});
 }
@@ -1429,6 +1489,10 @@ async function observeColumn(
 	);
 	const row = result.rows[0];
 	const exists = row != null;
+	const relationKindScope = [
+		scopeFor(target, context, 'table'),
+		scopeFor(target, context, 'column'),
+	];
 	const value = {
 		exists,
 		nullable: exists ? row.nullable === true : null,
@@ -1457,11 +1521,13 @@ async function observeColumn(
 			: null,
 		autoIncrement: exists ? row.auto_increment === true : null,
 		claims: [
-			{ kind: COLUMN_EXISTS_OBSERVATION, holds: exists },
-			{
+			stampedClaimForRequest(normalizedRequest, exists),
+			stampedClaim({
 				kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 				holds: exists && row?.relkind === 'r',
-			},
+				scope: relationKindScope,
+				detail: SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
+			}),
 		],
 	};
 	return evidenceObservation({
@@ -1488,17 +1554,21 @@ function observedCheckSet(value: unknown): readonly ObservedCheckSetEntry[] {
 			? (() => {
 					try {
 						return JSON.parse(value) as unknown;
-					} catch {
-						return [];
+					} catch (error) {
+						throw new Error(
+							`table CHECK catalog JSON could not be parsed: ${
+								error instanceof Error ? error.message : 'unknown parse error'
+							}`,
+						);
 					}
 				})()
 			: value;
 	if (!Array.isArray(parsed)) {
-		return [];
+		throw new Error('table CHECK catalog JSON must be an array');
 	}
-	return parsed.flatMap((item): readonly ObservedCheckSetEntry[] => {
+	return parsed.map((item, index): ObservedCheckSetEntry => {
 		if (!isRecord(item)) {
-			return [];
+			throw new Error(`table CHECK catalog entry ${index} must be an object`);
 		}
 		const predicate =
 			typeof item.predicate === 'string'
@@ -1513,17 +1583,15 @@ function observedCheckSet(value: unknown): readonly ObservedCheckSetEntry[] {
 			typeof predicate !== 'string' ||
 			typeof item.notValid !== 'boolean'
 		) {
-			return [];
+			throw new Error(`table CHECK catalog entry ${index} has invalid shape`);
 		}
-		return [
-			{
-				name: item.name,
-				oid: item.oid,
-				expression: item.expression,
-				predicate,
-				notValid: item.notValid,
-			},
-		];
+		return {
+			name: item.name,
+			oid: item.oid,
+			expression: item.expression,
+			predicate,
+			notValid: item.notValid,
+		};
 	});
 }
 
@@ -1559,6 +1627,16 @@ async function observeTableChecks(
 	const absent = exists
 		? !checks.some((check) => check.name === target.constraint)
 		: false;
+	const tableScope = [scopeFor(target, context, 'table')];
+	const checkScope = [
+		checkConstraintScopeFor(
+			{
+				...target,
+				constraint: target.constraint,
+			},
+			context,
+		),
+	];
 	const value = {
 		exists,
 		oid: exists ? stringOrNull(row.oid) : null,
@@ -1567,14 +1645,28 @@ async function observeTableChecks(
 		table: exists ? stringOrNull(row.table_name) : null,
 		checks,
 		claims: [
-			{ kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION, holds: exists },
-			{ kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION, holds: absent },
+			stampedClaimForRequest(normalizedRequest, exists),
+			stampedClaim({
+				kind: TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+				holds: exists && row?.relkind === 'r',
+				scope: tableScope,
+				detail:
+					'partitioned tables are not yet supported by the ADD CHECK transition',
+			}),
+			stampedClaim({
+				kind: CHECK_CONSTRAINT_ABSENT_OBSERVATION,
+				holds: absent,
+				scope: checkScope,
+				...(normalizedRequest.detail === undefined
+					? {}
+					: { detail: normalizedRequest.detail }),
+			}),
 		],
 	};
 	return evidenceObservation({
 		request: normalizedRequest,
 		context,
-		scope: [scopeFor(target, context, 'table')],
+		scope: tableScope,
 		stability: 'externally-mutable',
 		source: 'system-catalog',
 		value,
@@ -1616,6 +1708,8 @@ export type PgIndexCatalogRowValue = {
 	readonly expressions: readonly string[];
 	readonly include: readonly string[];
 	readonly opclass: Readonly<Record<string, string>>;
+	readonly collation: Readonly<Record<string, string>>;
+	readonly options: Readonly<Record<string, string>>;
 	readonly with: Readonly<Record<string, string>>;
 	readonly nullsNotDistinct: boolean;
 };
@@ -1629,6 +1723,10 @@ export function normalizePgIndexCatalogRow(
 	}
 	const opclassCols = nullableStringArray(row.opclass_cols);
 	const opclassNames = nullableStringArray(row.opclass_names);
+	const collationCols = nullableStringArray(row.collation_cols);
+	const collationNames = nullableStringArray(row.collation_names);
+	const optionCols = nullableStringArray(row.option_cols);
+	const optionValues = normalizePgNumberArray(row.option_values).map(String);
 	const expressions = nullableStringArray(row.expressions);
 	const expressionsText = stringOrNull(row.expressions_text);
 	const withValue = row.with ?? row.reloptions;
@@ -1654,6 +1752,28 @@ export function normalizePgIndexCatalogRow(
 				: opclassNames.length > 0
 					? { __unknown__: opclassNames.join(',') }
 					: stringRecord(row.opclass),
+		collation:
+			collationCols.length > 0
+				? Object.fromEntries(
+						collationCols.map((column, index) => [
+							column,
+							collationNames[index] ?? '',
+						]),
+					)
+				: collationNames.length > 0
+					? { __unknown__: collationNames.join(',') }
+					: stringRecord(row.collation),
+		options:
+			optionCols.length > 0
+				? Object.fromEntries(
+						optionCols.map((column, index) => [
+							column,
+							optionValues[index] ?? '',
+						]),
+					)
+				: optionValues.length > 0
+					? { __unknown__: optionValues.join(',') }
+					: stringRecord(row.options),
 		unique: booleanAlias(row, ['unique', 'is_unique', 'indisunique']),
 		valid: booleanAlias(row, ['valid', 'is_valid', 'indisvalid']),
 		ready: booleanAlias(row, ['ready', 'is_ready', 'indisready']),
@@ -1710,6 +1830,20 @@ async function observeTableIndexes(
 			   COALESCE(jsonb_agg(a.attname ORDER BY k.n)
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault), '[]'::jsonb) AS opclass_cols,
+			   COALESCE(jsonb_agg((collns.nspname || '.' || coll.collname) ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND coll.oid IS NOT NULL AND coll.oid <> 0::oid
+			             AND coll.oid <> a.attcollation), '[]'::jsonb) AS collation_names,
+			   COALESCE(jsonb_agg(a.attname ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND coll.oid IS NOT NULL AND coll.oid <> 0::oid
+			             AND coll.oid <> a.attcollation), '[]'::jsonb) AS collation_cols,
+			   COALESCE(jsonb_agg(((ix.indoption::int2[])[k.n - 1])::int ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND ((ix.indoption::int2[])[k.n - 1])::int <> 0), '[]'::jsonb) AS option_values,
+			   COALESCE(jsonb_agg(a.attname ORDER BY k.n)
+			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
+			             AND ((ix.indoption::int2[])[k.n - 1])::int <> 0), '[]'::jsonb) AS option_cols,
 			   ix.indisunique AS indisunique,
 			   ix.indisvalid AS indisvalid,
 			   ix.indisready AS indisready,
@@ -1730,6 +1864,11 @@ async function observeTableIndexes(
 			 LEFT JOIN pg_catalog.pg_opclass oc
 			   ON oc.oid = (ix.indclass::oid[])[k.n - 1]
 			   AND k.n <= ix.indnkeyatts AND k.attnum != 0
+			 LEFT JOIN pg_catalog.pg_collation coll
+			   ON coll.oid = (ix.indcollation::oid[])[k.n - 1]
+			   AND k.n <= ix.indnkeyatts AND k.attnum != 0
+			 LEFT JOIN pg_catalog.pg_namespace collns
+			   ON collns.oid = coll.collnamespace
 			 WHERE n.nspname = $1 AND t.relname = $2
 			   AND NOT ix.indisprimary
 			   AND NOT EXISTS (
@@ -1761,6 +1900,16 @@ async function observeTableIndexes(
 		? !targetIndexNameExists &&
 			!indexes.some((index) => index.name === target.index)
 		: false;
+	const tableScope = [scopeFor(target, context, 'table')];
+	const indexScope = [
+		indexScopeFor(
+			{
+				...target,
+				index: target.index,
+			},
+			context,
+		),
+	];
 	const value = {
 		exists,
 		oid: exists ? stringOrNull(tableRow.oid) : null,
@@ -1770,14 +1919,28 @@ async function observeTableIndexes(
 		targetIndexNameExists,
 		indexes,
 		claims: [
-			{ kind: TABLE_INDEXES_OBSERVATION, holds: exists },
-			{ kind: INDEX_ABSENT_OBSERVATION, holds: targetAbsent },
+			stampedClaimForRequest(normalizedRequest, exists),
+			stampedClaim({
+				kind: TABLE_INDEXES_OBSERVATION,
+				holds: exists && tableRow?.relkind === 'r',
+				scope: tableScope,
+				detail:
+					'partitioned tables are not yet supported by the CREATE UNIQUE INDEX CONCURRENTLY transition',
+			}),
+			stampedClaim({
+				kind: INDEX_ABSENT_OBSERVATION,
+				holds: targetAbsent,
+				scope: indexScope,
+				...(normalizedRequest.detail === undefined
+					? {}
+					: { detail: normalizedRequest.detail }),
+			}),
 		],
 	};
 	return evidenceObservation({
 		request: normalizedRequest,
 		context,
-		scope: [scopeFor(target, context, 'table')],
+		scope: tableScope,
 		stability: 'externally-mutable',
 		source: 'system-catalog',
 		value: value as unknown as JsonValue,
@@ -1845,10 +2008,12 @@ async function observeEnumLabels(
 		schema: exists ? observedSchema : null,
 		type: exists ? observedType : null,
 		labels,
-		claims:
-			request.kind === ENUM_LABEL_VISIBLE_OBSERVATION
-				? [{ kind: ENUM_LABEL_VISIBLE_OBSERVATION, holds: labelVisible }]
-				: [{ kind: ENUM_TYPE_EXISTS_OBSERVATION, holds: exists }],
+		claims: [
+			stampedClaimForRequest(
+				normalizedRequest,
+				request.kind === ENUM_LABEL_VISIBLE_OBSERVATION ? labelVisible : exists,
+			),
+		],
 	};
 	return evidenceObservation({
 		request: normalizedRequest,
@@ -1886,10 +2051,7 @@ async function observeAlterAuthority(
 			...facts,
 			privileges: privilegeFactsForEnumTarget(resolved, facts),
 			claims: [
-				{
-					kind: ALTER_TYPE_AUTHORITY_OBSERVATION,
-					holds: facts.hasAlterAuthority,
-				},
+				stampedClaimForRequest(normalizedRequest, facts.hasAlterAuthority),
 			],
 		};
 		return evidenceObservation({
@@ -1917,7 +2079,7 @@ async function observeAlterAuthority(
 		...facts,
 		privileges: privilegeFactsForTarget(resolved, facts),
 		claims: [
-			{ kind: ALTER_AUTHORITY_OBSERVATION, holds: facts.hasAlterAuthority },
+			stampedClaimForRequest(normalizedRequest, facts.hasAlterAuthority),
 		],
 	};
 	return evidenceObservation({
@@ -1960,7 +2122,7 @@ async function observeEngineVersion(
 		serverVersionNum: Number.isFinite(versionNum) ? versionNum : null,
 		minServerVersionNum,
 		supported,
-		claims: [{ kind: ENGINE_VERSION_OBSERVATION, holds: supported }],
+		claims: [stampedClaimForRequest(normalizedRequest, supported)],
 	};
 	return evidenceObservation({
 		request: normalizedRequest,

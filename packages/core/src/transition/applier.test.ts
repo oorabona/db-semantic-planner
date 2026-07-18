@@ -385,7 +385,11 @@ function guardFor(
 ): ApplyGuard {
 	return {
 		appliesTo: operationRef,
-		predicate: { kind: `mock.guard.${phase}`, scope: [columnResource()] },
+		predicate: {
+			kind: `mock.guard.${phase}`,
+			target: columnResource(),
+			scope: [columnResource()],
+		},
 		protocol: {
 			kind: 'lock-and-check',
 			onFailureLeaves: [],
@@ -416,6 +420,7 @@ function runtime(
 		readonly log?: string[];
 		readonly checkGuard?: OperationRuntime['checkGuard'];
 		readonly executeOperation?: OperationRuntime['executeOperation'];
+		readonly observeContext?: OperationRuntime['observeContext'];
 		readonly observeOperation?: OperationRuntime['observeOperation'];
 		readonly buildFingerprints?: OperationRuntime['buildFingerprints'];
 	} = {},
@@ -462,10 +467,12 @@ function runtime(
 		acquireLocks: vi.fn(async () => {
 			record('lock');
 		}),
-		observeContext: vi.fn(async () => {
-			record('context');
-			return context;
-		}),
+		observeContext:
+			options.observeContext ??
+			vi.fn(async () => {
+				record('context');
+				return context;
+			}),
 		observeOperation:
 			options.observeOperation ??
 			vi.fn(
@@ -773,6 +780,46 @@ describe('createApplier', () => {
 		expect(rt.checkout).toHaveBeenCalledOnce();
 	});
 
+	it('blocks apply when the live context database differs from the proof context', async () => {
+		const observed: StepJournal[] = [];
+		const executeOperation = vi.fn(
+			async () => ({ kind: 'completed' }) as const,
+		);
+		const rt = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation,
+				observeContext: vi.fn(async () => ({
+					...context,
+					databaseId: 'other-db',
+				})),
+			},
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.reasons[0]?.code).toBe('context-mismatch');
+		expect(result.journals[0]?.outcome).toBe('context-mismatch');
+		expect(executeOperation).not.toHaveBeenCalled();
+		expect(observed[0]?.outcome).toBe('context-mismatch');
+	});
+
 	it('derives the completed assessment from the minted plan instead of the caller assessment', async () => {
 		const observed: StepJournal[] = [];
 		const rt = runtime(
@@ -1026,8 +1073,7 @@ describe('createApplier', () => {
 		const afterContexts: string[] = [];
 		const contextFor = (ref: string): ObservationContext => ({
 			...context,
-			databaseId: ref,
-			sessionConfiguration: { step: ref },
+			capabilities: [ref],
 		});
 		const rt = multiSegmentRuntime(
 			(journal) => {
@@ -1047,7 +1093,9 @@ describe('createApplier', () => {
 						phase,
 					): Promise<OperationObservation> => {
 						if (phase === 'after') {
-							afterContexts.push(`${candidate.ref}:${ctx.databaseId}`);
+							afterContexts.push(
+								`${candidate.ref}:${ctx.capabilities.join(',')}`,
+							);
 						}
 						return {
 							observations: [
@@ -1400,6 +1448,200 @@ describe('createApplier', () => {
 		expect(result.assessment.reasons[0]?.code).toBe('unknown-step-result');
 		expect(result.journals[0]?.outcome).toBe('unknown-step-result');
 		expect(observed[0]?.outcome).toBe('unknown-step-result');
+	});
+
+	it('reports unknown-step-result when commit outcome is uncertain', async () => {
+		const observed: StepJournal[] = [];
+		const rt: OperationRuntime = {
+			...runtime(
+				(journal) => {
+					observed.push(journal);
+				},
+				{
+					executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+				},
+			),
+			commit: vi.fn(async () => {
+				throw new Error('connection lost during commit');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('outcome-unknown');
+		expect(result.assessment.continuation).toBe('human-intervention-required');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'unknown-step-result',
+			stepId: 'step:op',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'commit outcome uncertain',
+		);
+		expect(result.journals[0]?.outcome).toBe('unknown-step-result');
+		expect(observed[0]?.outcome).toBe('unknown-step-result');
+	});
+
+	it('keeps a committed segment completed when the post-commit observed journal write fails', async () => {
+		const rt: OperationRuntime = {
+			...runtime(() => undefined, {
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+			}),
+			writeObservedJournal: vi.fn(async () => {
+				throw new Error('journal unavailable');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: plan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'proven-applicable',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'observed journal write failed',
+		);
+		expect(result.journals[0]?.outcome).toBe('completed');
+	});
+
+	it('observes after-commit postconditions only after committing their own segment', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				log,
+				executeOperation: vi.fn(async () => ({ kind: 'completed' })),
+			},
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: (candidate): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate);
+				return {
+					...base,
+					effects: {
+						...base.effects,
+						execution: {
+							transaction: 'joins-current',
+							commitBoundary: 'after',
+							postconditionVisibility: 'after-commit',
+						},
+					},
+				};
+			},
+		};
+		const basePlan = planShape();
+		const afterCommitPlan = mintInProcessPlan({
+			...basePlan,
+			segments: [
+				{
+					...basePlan.segments[0]!,
+					commitBoundaryAfter: true,
+				},
+			],
+		});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: afterCommitPlan, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.journals[0]?.outcome).toBe('completed');
+		expect(log.indexOf('commit')).toBeLessThan(log.indexOf('observe:after'));
+		expect(observed[0]?.outcome).toBe('completed');
+	});
+
+	it('rejects after-commit postcondition operations coalesced in an atomic multi-step segment', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log, transactionMode: 'single-segment' },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: (candidate): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate);
+				return {
+					...base,
+					effects: {
+						...base.effects,
+						execution: {
+							transaction: 'joins-current',
+							commitBoundary: 'after',
+							postconditionVisibility: 'after-commit',
+						},
+					},
+				};
+			},
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		await expect(
+			createApplier(registry).apply(
+				{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+				acceptsOperationPolicy(),
+				executionTarget(),
+			),
+		).rejects.toThrow(
+			/internal error: minted proven plan violated relational invariants/,
+		);
+
+		expect(rt.checkout).not.toHaveBeenCalled();
+		expect(observed).toEqual([]);
 	});
 
 	it('diagnoses a minted plan with broken guard references before checkout', async () => {

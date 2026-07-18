@@ -42,12 +42,70 @@ class FakeJournalExecutor implements TransitionJournalQueryable {
 	readonly runs = new Map<string, Record<string, unknown>>();
 	readonly events: Record<string, unknown>[] = [];
 	readonly sql: string[] = [];
+	readonly shapeOverrides = new Map<string, Record<string, unknown>>();
 	runUpsertAttempts = 0;
+
+	tableShape(table: string): Record<string, unknown> {
+		const override = this.shapeOverrides.get(table);
+		if (override) {
+			return override;
+		}
+		if (table === 'dbsp_transition_run') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan_digest: { type: 'text', notNull: true },
+					target_context_digest: { type: 'text', notNull: true },
+					database_id: { type: 'text', notNull: true },
+					core_version: { type: 'text', notNull: true },
+					started_at: {
+						type: 'timestamp with time zone',
+						notNull: true,
+					},
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [],
+				checks: [],
+			};
+		}
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				seq: { type: 'bigint', notNull: true },
+				event: { type: 'text', notNull: true },
+				step_id: { type: 'text', notNull: true },
+				operation_ref: { type: 'text', notNull: true },
+				operation_kind: { type: 'jsonb', notNull: true },
+				recorded_at: {
+					type: 'timestamp with time zone',
+					notNull: true,
+				},
+				record: { type: 'jsonb', notNull: true },
+			},
+			primary_key: ['run_id', 'seq'],
+			foreign_keys: [
+				{
+					columns: ['run_id'],
+					foreignSchema: 'dbsp_meta',
+					foreignTable: 'dbsp_transition_run',
+					foreignColumns: ['run_id'],
+				},
+			],
+			checks: [
+				"CHECK ((event = ANY (ARRAY['intent'::text, 'completion'::text, 'observed'::text])))",
+			],
+		};
+	}
 
 	async query(sql: string, params: readonly unknown[] = []) {
 		this.sql.push(sql);
 		if (sql.startsWith('CREATE ')) {
 			return { rows: [] };
+		}
+		if (sql.includes('dbsp_transition_journal_shape')) {
+			return { rows: [this.tableShape(String(params[1]))] };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
 			this.runUpsertAttempts += 1;
@@ -257,5 +315,51 @@ describe('transition journal primitive', () => {
 		await expect(appendObservedJournal(executor, journal)).rejects.toThrow(
 			/durable transition observed journal intent run id mismatch/,
 		);
+	});
+
+	it('fails closed when a preexisting journal table is missing constraints', async () => {
+		const executor = new FakeJournalExecutor();
+		executor.shapeOverrides.set('dbsp_transition_journal', {
+			...executor.tableShape('dbsp_transition_journal'),
+			foreign_keys: [],
+		});
+		const metadata = run();
+		const intent: DurableIntentRecord = {
+			runId: metadata.runId,
+			run: metadata,
+			stepId: 'step:mock',
+			operation,
+			recordedAt: '2026-07-17T00:00:00.100Z',
+		};
+
+		await expect(appendIntentJournal(executor, intent)).rejects.toThrow(
+			/foreign key drifted/,
+		);
+		expect(executor.events).toHaveLength(0);
+	});
+
+	it('blocks when an existing run id has different metadata', async () => {
+		const executor = new FakeJournalExecutor();
+		const metadata = run();
+		const intent: DurableIntentRecord = {
+			runId: metadata.runId,
+			run: metadata,
+			stepId: 'step:mock',
+			operation,
+			recordedAt: '2026-07-17T00:00:00.100Z',
+		};
+		executor.runs.set(metadata.runId, {
+			run_id: metadata.runId,
+			plan_digest: 'different-plan',
+			target_context_digest: metadata.targetContextDigest,
+			database_id: metadata.databaseId,
+			core_version: metadata.coreVersion,
+			started_at: metadata.startedAt,
+		});
+
+		await expect(appendIntentJournal(executor, intent)).rejects.toThrow(
+			/different metadata/,
+		);
+		expect(executor.events).toHaveLength(0);
 	});
 });

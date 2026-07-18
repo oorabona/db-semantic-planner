@@ -727,6 +727,17 @@ function validatePlan(
 			segmentByStepId.set(stepId, segment.segmentId);
 		}
 	}
+	const flattenedSegmentStepIds = plan.segments.flatMap((segment) => [
+		...segment.stepIds,
+	]);
+	const planStepIds = plan.steps.map((step) => step.stepId);
+	if (stableJson(planStepIds) !== stableJson(flattenedSegmentStepIds)) {
+		return {
+			ok: false,
+			detail:
+				'plan step order does not match flattened segment execution order',
+		};
+	}
 	for (const step of plan.steps) {
 		if (!segmentIds.has(step.segmentId)) {
 			return {

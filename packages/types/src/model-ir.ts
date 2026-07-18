@@ -180,7 +180,7 @@ export interface LogicalIdentityCarrier {
 
 export interface LogicalIdentity {
 	readonly id: string;
-	readonly carrier?: LogicalIdentityCarrier;
+	readonly carrier: LogicalIdentityCarrier;
 }
 
 /**

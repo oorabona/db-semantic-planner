@@ -238,6 +238,291 @@ function assertAssertion(value: unknown, field: string): ExecutableAssertion {
 	return value as unknown as ExecutableAssertion;
 }
 
+type SqlScanState =
+	| { readonly kind: 'code' }
+	| { readonly kind: 'single-quote'; readonly backslashEscapes: boolean }
+	| { readonly kind: 'quoted-identifier' }
+	| { readonly kind: 'line-comment' }
+	| { readonly kind: 'block-comment'; readonly depth: number }
+	| { readonly kind: 'dollar-quote'; readonly delimiter: string };
+
+const IDENTIFIER_START_RE = /[A-Za-z_]/u;
+const IDENTIFIER_CONTINUE_RE = /[A-Za-z0-9_$]/u;
+const DOLLAR_QUOTE_RE = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u;
+
+function isSqlWhitespace(ch: string): boolean {
+	return /\s/u.test(ch);
+}
+
+function dollarQuoteDelimiterAt(
+	text: string,
+	index: number,
+): string | undefined {
+	const match = DOLLAR_QUOTE_RE.exec(text.slice(index));
+	return match?.[0];
+}
+
+function singleQuoteUsesBackslashEscapes(
+	text: string,
+	quoteIndex: number,
+): boolean {
+	let index = quoteIndex - 1;
+	while (index >= 0 && isSqlWhitespace(text[index] ?? '')) {
+		index -= 1;
+	}
+	return (
+		index >= 0 &&
+		(text[index] === 'E' || text[index] === 'e') &&
+		(index === 0 || !IDENTIFIER_CONTINUE_RE.test(text[index - 1] ?? ''))
+	);
+}
+
+function assertSingleSqlStatement(text: string): void {
+	let state: SqlScanState = { kind: 'code' };
+	let hasStatementContent = false;
+	let statements = 0;
+	let sawEmptyStatement = false;
+
+	for (let index = 0; index < text.length; index += 1) {
+		const ch = text[index] ?? '';
+		const next = text[index + 1] ?? '';
+
+		switch (state.kind) {
+			case 'line-comment':
+				if (ch === '\n' || ch === '\r') {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'block-comment':
+				if (ch === '/' && next === '*') {
+					state = { kind: 'block-comment', depth: state.depth + 1 };
+					index += 1;
+					continue;
+				}
+				if (ch === '*' && next === '/') {
+					const depth: number = state.depth - 1;
+					state =
+						depth === 0 ? { kind: 'code' } : { kind: 'block-comment', depth };
+					index += 1;
+				}
+				continue;
+			case 'single-quote':
+				if (state.backslashEscapes && ch === '\\') {
+					index += 1;
+					continue;
+				}
+				if (ch === "'" && next === "'") {
+					index += 1;
+					continue;
+				}
+				if (ch === "'") {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'quoted-identifier':
+				if (ch === '"' && next === '"') {
+					index += 1;
+					continue;
+				}
+				if (ch === '"') {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'dollar-quote':
+				if (text.startsWith(state.delimiter, index)) {
+					index += state.delimiter.length - 1;
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'code':
+				break;
+		}
+
+		if (ch === '-' && next === '-') {
+			state = { kind: 'line-comment' };
+			index += 1;
+			continue;
+		}
+		if (ch === '/' && next === '*') {
+			state = { kind: 'block-comment', depth: 1 };
+			index += 1;
+			continue;
+		}
+		if (ch === "'") {
+			hasStatementContent = true;
+			state = {
+				kind: 'single-quote',
+				backslashEscapes: singleQuoteUsesBackslashEscapes(text, index),
+			};
+			continue;
+		}
+		if (ch === '"') {
+			hasStatementContent = true;
+			state = { kind: 'quoted-identifier' };
+			continue;
+		}
+		if (ch === '$') {
+			const delimiter = dollarQuoteDelimiterAt(text, index);
+			if (delimiter) {
+				hasStatementContent = true;
+				state = { kind: 'dollar-quote', delimiter };
+				index += delimiter.length - 1;
+				continue;
+			}
+		}
+		if (ch === ';') {
+			if (!hasStatementContent) {
+				sawEmptyStatement = true;
+				continue;
+			}
+			statements += 1;
+			hasStatementContent = false;
+			continue;
+		}
+		if (!isSqlWhitespace(ch)) {
+			hasStatementContent = true;
+		}
+	}
+
+	if (state.kind !== 'code' && state.kind !== 'line-comment') {
+		throw new Error(
+			'ManualSql statement must be a single complete PostgreSQL statement',
+		);
+	}
+	if (hasStatementContent) {
+		statements += 1;
+	}
+	if (sawEmptyStatement || statements !== 1) {
+		throw new Error('ManualSql requires exactly one PostgreSQL statement');
+	}
+}
+
+function sqlCodeTokens(text: string, maxTokens: number): readonly string[] {
+	let state: SqlScanState = { kind: 'code' };
+	const tokens: string[] = [];
+	for (
+		let index = 0;
+		index < text.length && tokens.length < maxTokens;
+		index += 1
+	) {
+		const ch = text[index] ?? '';
+		const next = text[index + 1] ?? '';
+
+		switch (state.kind) {
+			case 'line-comment':
+				if (ch === '\n' || ch === '\r') {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'block-comment':
+				if (ch === '/' && next === '*') {
+					state = { kind: 'block-comment', depth: state.depth + 1 };
+					index += 1;
+					continue;
+				}
+				if (ch === '*' && next === '/') {
+					const depth: number = state.depth - 1;
+					state =
+						depth === 0 ? { kind: 'code' } : { kind: 'block-comment', depth };
+					index += 1;
+				}
+				continue;
+			case 'single-quote':
+				if (state.backslashEscapes && ch === '\\') {
+					index += 1;
+					continue;
+				}
+				if (ch === "'" && next === "'") {
+					index += 1;
+					continue;
+				}
+				if (ch === "'") {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'quoted-identifier':
+				if (ch === '"' && next === '"') {
+					index += 1;
+					continue;
+				}
+				if (ch === '"') {
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'dollar-quote':
+				if (text.startsWith(state.delimiter, index)) {
+					index += state.delimiter.length - 1;
+					state = { kind: 'code' };
+				}
+				continue;
+			case 'code':
+				break;
+		}
+
+		if (ch === '-' && next === '-') {
+			state = { kind: 'line-comment' };
+			index += 1;
+			continue;
+		}
+		if (ch === '/' && next === '*') {
+			state = { kind: 'block-comment', depth: 1 };
+			index += 1;
+			continue;
+		}
+		if (ch === "'") {
+			state = {
+				kind: 'single-quote',
+				backslashEscapes: singleQuoteUsesBackslashEscapes(text, index),
+			};
+			continue;
+		}
+		if (ch === '"') {
+			state = { kind: 'quoted-identifier' };
+			continue;
+		}
+		if (ch === '$') {
+			const delimiter = dollarQuoteDelimiterAt(text, index);
+			if (delimiter) {
+				state = { kind: 'dollar-quote', delimiter };
+				index += delimiter.length - 1;
+				continue;
+			}
+		}
+		if (!IDENTIFIER_START_RE.test(ch)) {
+			continue;
+		}
+		let end = index + 1;
+		while (end < text.length && IDENTIFIER_CONTINUE_RE.test(text[end] ?? '')) {
+			end += 1;
+		}
+		tokens.push(text.slice(index, end).toUpperCase());
+		index = end - 1;
+	}
+	return tokens;
+}
+
+function assertNotTransactionControlStatement(text: string): void {
+	const tokens = sqlCodeTokens(text, 3);
+	const first = tokens[0];
+	const second = tokens[1];
+	if (
+		first === 'BEGIN' ||
+		first === 'COMMIT' ||
+		first === 'END' ||
+		first === 'ROLLBACK' ||
+		first === 'ABORT' ||
+		first === 'SAVEPOINT' ||
+		(first === 'RELEASE' && second === 'SAVEPOINT') ||
+		(first === 'SET' && second === 'TRANSACTION') ||
+		(first === 'START' && second === 'TRANSACTION') ||
+		(first === 'PREPARE' && second === 'TRANSACTION')
+	) {
+		throw new Error(
+			'ManualSql must not execute transaction-control statements',
+		);
+	}
+}
+
 function assertUnsafeStatement(value: unknown): UnsafeNativeFragment {
 	if (
 		!isRecord(value) ||
@@ -264,6 +549,8 @@ function assertUnsafeStatement(value: unknown): UnsafeNativeFragment {
 			'ManualSql statement attestation must be a human user-blast-radius assumption',
 		);
 	}
+	assertSingleSqlStatement(value.text);
+	assertNotTransactionControlStatement(value.text);
 	return value as unknown as UnsafeNativeFragment;
 }
 

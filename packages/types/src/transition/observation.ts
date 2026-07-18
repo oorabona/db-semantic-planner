@@ -14,6 +14,13 @@ export interface ObservationRequest {
 	readonly detail?: JsonValue;
 }
 
+export interface ObservationBooleanClaim {
+	readonly kind: string;
+	readonly holds: boolean;
+	readonly scope?: readonly ResourceAddress[];
+	readonly detail?: JsonValue;
+}
+
 export interface ObservationContext {
 	readonly engine: string;
 	readonly engineVersion: string;

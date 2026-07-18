@@ -1,4 +1,4 @@
-import { enumAddDelta } from '@dbsp/core';
+import { enumAddDelta, resolveEnumSchemaForComparison } from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
 	Assumption,
@@ -444,7 +444,16 @@ export function createEnumAddValueRule(
 				if (!currentEnum) {
 					continue;
 				}
-				const delta = enumAddDelta(desiredEnum, currentEnum);
+				const targetSchema = context?.context.targetSchema;
+				const resolvedDesiredEnum = resolveEnumSchemaForComparison(
+					desiredEnum,
+					targetSchema,
+				);
+				const resolvedCurrentEnum = resolveEnumSchemaForComparison(
+					currentEnum,
+					targetSchema,
+				);
+				const delta = enumAddDelta(resolvedDesiredEnum, resolvedCurrentEnum);
 				if (delta.kind !== 'add-label') {
 					continue;
 				}
@@ -453,10 +462,7 @@ export function createEnumAddValueRule(
 					validatePgEnumLabel(delta.after, 'enum AFTER position');
 				}
 				const type = naming.toDatabase(desiredEnum.name);
-				const schema =
-					desiredEnum.schema ??
-					currentEnum.schema ??
-					context?.context.targetSchema;
+				const schema = resolvedDesiredEnum.schema ?? resolvedCurrentEnum.schema;
 				return {
 					recognized: true,
 					match: {
@@ -539,6 +545,7 @@ export function createEnumAddValueRule(
 						appliesTo: operation.ref,
 						predicate: {
 							kind: ENUM_TYPE_EXISTS_OBSERVATION,
+							target: resourceForMatch(resolvedMatch, resolvedMatch.database),
 							scope: [resourceForMatch(resolvedMatch, resolvedMatch.database)],
 							detail: {
 								schema: resolvedMatch.schema,

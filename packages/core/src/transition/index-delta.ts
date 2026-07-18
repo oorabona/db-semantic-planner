@@ -49,17 +49,34 @@ function normalizedMethod(index: IndexIR): string | undefined {
 	return index.method && index.method !== 'btree' ? index.method : undefined;
 }
 
+type IndexPerspective = 'desired' | 'current';
+
+function normalizedCatalogFlag(
+	value: boolean | undefined,
+	perspective: IndexPerspective,
+): boolean | undefined {
+	if (perspective === 'desired') {
+		return value === false ? false : undefined;
+	}
+	return value === true ? undefined : false;
+}
+
 export function normalizedIndex(
 	tableName: string,
 	index: IndexIR,
+	perspective: IndexPerspective = 'desired',
 ): IndexSetEntry {
 	const method = normalizedMethod(index);
 	return {
 		name: defaultIndexName(tableName, index),
 		columns: [...index.columns],
 		...(index.unique ? { unique: true } : {}),
-		...(index.valid === false ? { valid: false } : {}),
-		...(index.ready === false ? { ready: false } : {}),
+		...(normalizedCatalogFlag(index.valid, perspective) === false
+			? { valid: false }
+			: {}),
+		...(normalizedCatalogFlag(index.ready, perspective) === false
+			? { ready: false }
+			: {}),
 		...(method ? { method } : {}),
 		...(index.where ? { where: index.where } : {}),
 		...(nonEmptyArray(index.expressions)
@@ -79,9 +96,10 @@ function byName(left: IndexSetEntry, right: IndexSetEntry): number {
 function sortedIndexes(
 	tableName: string,
 	indexes: readonly IndexIR[],
+	perspective: IndexPerspective,
 ): readonly IndexSetEntry[] {
 	return [...indexes]
-		.map((index) => normalizedIndex(tableName, index))
+		.map((index) => normalizedIndex(tableName, index, perspective))
 		.sort(byName);
 }
 
@@ -148,8 +166,8 @@ export function indexDelta(
 	desiredIndexes: readonly IndexIR[],
 	currentIndexes: readonly IndexIR[],
 ): IndexDelta {
-	const desired = sortedIndexes(tableName, desiredIndexes);
-	const current = sortedIndexes(tableName, currentIndexes);
+	const desired = sortedIndexes(tableName, desiredIndexes, 'desired');
+	const current = sortedIndexes(tableName, currentIndexes, 'current');
 	if (stableJson(desired) === stableJson(current)) {
 		return { kind: 'none' };
 	}

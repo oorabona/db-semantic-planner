@@ -7,6 +7,10 @@ import type {
 	TransitionCandidate,
 	TransitionFragmentComposition,
 } from '@dbsp/types';
+import {
+	transitionCompareCurrentModel,
+	withTransitionCompareCurrentModel,
+} from './comparator.js';
 import { transitionCompositionFactKey } from './composer.js';
 import type { PackRegistry } from './registry.js';
 import { stableJson } from './stable-json.js';
@@ -140,9 +144,12 @@ function compositionOpRefs(
 
 function requirementNeedsCommit(
 	requirement: CompositionRequirement,
-	_producer: CompositionProducer,
+	producer: CompositionProducer,
 ): boolean {
-	return requirement.needs === 'producer-after-commit';
+	return (
+		requirement.needs === 'producer-after-commit' ||
+		producer.available === 'after-commit'
+	);
 }
 
 export function preflightStagedComposition(
@@ -345,9 +352,13 @@ export function projectCompareToSingleCandidate(
 	if (compare.candidates[entry.index] !== entry.candidate) {
 		throw new Error('ready candidate does not belong to the supplied compare');
 	}
-	return {
+	const projected: TransitionCompare = {
 		kind: 'transitions',
 		candidates: [entry.candidate],
 		obligations: entry.candidate.obligations,
 	};
+	const current = transitionCompareCurrentModel(compare);
+	return current
+		? withTransitionCompareCurrentModel(projected, current)
+		: projected;
 }

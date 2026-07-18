@@ -559,7 +559,9 @@ function declaredEdges(
 			edges.push({
 				before: producer.opRef,
 				after: requirement.opRef,
-				requiresCommitBetween: requirement.needs === 'producer-after-commit',
+				requiresCommitBetween:
+					requirement.needs === 'producer-after-commit' ||
+					producer.available === 'after-commit',
 				reason: `composition requirement ${requirement.fact.kind}`,
 			});
 		}
@@ -611,6 +613,9 @@ function buildConstraints(
 	}
 
 	const knownRefs = new Set(operations.map((entry) => entry.operation.ref));
+	const operationByRef = new Map(
+		operations.map((entry) => [entry.operation.ref, entry]),
+	);
 	const edges = declaredEdges(declarations, knownRefs, {
 		allowExternalRequirements: operations.length === 1,
 	});
@@ -618,7 +623,16 @@ function buildConstraints(
 		return edges;
 	}
 	for (const edge of edges.edges) {
-		addConstraint(dependents, dependencyRefs, commitEdges, declaredPairs, edge);
+		const before = operationByRef.get(edge.before);
+		const after = operationByRef.get(edge.after);
+		const effectsRequireCommit =
+			before !== undefined && after !== undefined
+				? effectsInteract(before.effects, after.effects)
+				: false;
+		addConstraint(dependents, dependencyRefs, commitEdges, declaredPairs, {
+			...edge,
+			requiresCommitBetween: edge.requiresCommitBetween || effectsRequireCommit,
+		});
 	}
 
 	for (let leftIndex = 0; leftIndex < operations.length; leftIndex += 1) {

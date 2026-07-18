@@ -16,6 +16,7 @@ import type {
 	TransactionalCompletionRecord,
 } from '@dbsp/types';
 import { assertString, validateIdentifier } from '../../validate.js';
+import { stampedClaimForRequest } from '../claim-stamping.js';
 import {
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
@@ -25,6 +26,7 @@ import {
 	PG_SCHEMA_USAGE_PRIVILEGE,
 	PG_TYPE_ALTER_AUTHORITY_PRIVILEGE,
 } from '../constants.js';
+import { observationContextMatches } from '../context-match.js';
 import { assumptionId, evidenceId } from '../ids.js';
 import {
 	appendCompletionJournal,
@@ -342,16 +344,6 @@ function sameTypeResource(
 	);
 }
 
-function observationContextMatches(
-	observation: EvidenceObservation,
-	context: ObservationContext,
-): boolean {
-	return (
-		observation.context.engine === context.engine &&
-		observation.context.databaseId === context.databaseId
-	);
-}
-
 function catalogValueTargetsPayload(
 	value: Record<string, unknown>,
 	payload: AlterTypeAddValuePayload,
@@ -573,6 +565,7 @@ async function readEnumCatalogValue(
 function guardTargetsPayload(
 	guard: ApplyGuard,
 	payload: AlterTypeAddValuePayload,
+	context: ObservationContext,
 ): boolean {
 	if (guard.predicate.kind !== ENUM_TYPE_EXISTS_OBSERVATION) {
 		return false;
@@ -582,7 +575,11 @@ function guardTargetsPayload(
 	}
 	return (
 		guard.predicate.detail.schema === payload.schema &&
-		guard.predicate.detail.type === payload.type
+		guard.predicate.detail.type === payload.type &&
+		sameTypeResource(guard.predicate.target, payload, context) &&
+		guard.predicate.scope.some((resource) =>
+			sameTypeResource(resource, payload, context),
+		)
 	);
 }
 
@@ -609,7 +606,7 @@ function enumTypeExistsGuardEvidence(
 		result: {
 			value: {
 				...catalog,
-				claims: [{ kind: ENUM_TYPE_EXISTS_OBSERVATION, holds: catalog.exists }],
+				claims: [stampedClaimForRequest(request, catalog.exists)],
 			},
 		},
 		context,
@@ -804,7 +801,7 @@ export function createAlterTypeAddValueOperationRuntime() {
 			if (guard.predicate.kind !== ENUM_TYPE_EXISTS_OBSERVATION) {
 				throw new Error(`unsupported PostgreSQL guard ${guard.predicate.kind}`);
 			}
-			if (!guardTargetsPayload(guard, payload)) {
+			if (!guardTargetsPayload(guard, payload, context)) {
 				throw new Error(
 					'AlterTypeAddValue enum-type-exists guard does not target the operation payload',
 				);

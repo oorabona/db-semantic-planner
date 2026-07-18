@@ -8,6 +8,7 @@ import type {
 	ExpressionEquivalenceCategory,
 	ExpressionValue,
 	JsonValue,
+	ObservationRequest,
 	ProofClaimDraft,
 	ProofObligation,
 	TypeRef,
@@ -17,6 +18,7 @@ import {
 	PG_DEPARSE_ARTIFACT,
 	PG_EQUIVALENCE_ARTIFACT,
 } from './constants.js';
+import { observationContextMatches } from './context-match.js';
 import { stableJson } from './stable-json.js';
 
 const TYPE_ALIASES = new Map<string, string>([
@@ -472,6 +474,15 @@ type DeparseEvidenceOutcome = {
 	readonly rightCanonical: string;
 };
 
+type DeparseEvidenceLookup =
+	| { readonly kind: 'found'; readonly evidence: DeparseEvidenceOutcome }
+	| { readonly kind: 'conflict'; readonly reason: string }
+	| { readonly kind: 'missing' };
+
+type DeparseBoundEquivalenceContext = EquivalenceContext & {
+	readonly deparseRequest?: ObservationRequest;
+};
+
 function expressionCategory(
 	value: ExpressionValue,
 ): ExpressionEquivalenceCategory | undefined {
@@ -580,16 +591,119 @@ function sameExpressionValue(left: unknown, right: ExpressionValue): boolean {
 	return stableJson(left) === stableJson(right);
 }
 
+function equivalenceObservationContextMatches(
+	observation: EvidenceObservation,
+	context: EquivalenceContext,
+): boolean {
+	const expected = {
+		...observation.context,
+		engine: context.engine,
+		...(context.databaseId ? { databaseId: context.databaseId } : {}),
+		...(context.targetSchema !== undefined
+			? { targetSchema: context.targetSchema }
+			: {}),
+		...(context.searchPath !== undefined
+			? { searchPath: context.searchPath }
+			: {}),
+	};
+	return observationContextMatches(observation, expected);
+}
+
+function boundDeparseRequest(
+	context: EquivalenceContext,
+): ObservationRequest | undefined {
+	const request = (context as DeparseBoundEquivalenceContext).deparseRequest;
+	if (
+		!request ||
+		request.kind !== EXPRESSION_DEPARSE_OBSERVATION ||
+		!Array.isArray(request.scope)
+	) {
+		return undefined;
+	}
+	return request;
+}
+
+function sameBoundDeparseRequest(
+	expected: ObservationRequest,
+	issued: ObservationRequest,
+): boolean {
+	return (
+		expected.kind === issued.kind &&
+		stableJson(expected.scope) === stableJson(issued.scope) &&
+		stableJson(expected.detail) === stableJson(issued.detail)
+	);
+}
+
+function sameDeparseTargetDetail(
+	left: Record<string, unknown>,
+	right: Record<string, unknown>,
+): boolean {
+	const leftTarget = { ...left };
+	const rightTarget = { ...right };
+	delete leftTarget.left;
+	delete leftTarget.right;
+	delete rightTarget.left;
+	delete rightTarget.right;
+	return stableJson(leftTarget) === stableJson(rightTarget);
+}
+
+function deparseClaimHolds(
+	observation: EvidenceObservation,
+	matchingDetail: Record<string, unknown>,
+): readonly boolean[] {
+	const value = observation.result.value;
+	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+		return [];
+	}
+	const claims = (value as { readonly claims?: unknown }).claims;
+	if (!Array.isArray(claims)) {
+		return [];
+	}
+	const holds: boolean[] = [];
+	for (const claim of claims) {
+		if (!claim || typeof claim !== 'object' || Array.isArray(claim)) {
+			continue;
+		}
+		const typed = claim as {
+			readonly kind?: unknown;
+			readonly holds?: unknown;
+			readonly detail?: unknown;
+		};
+		if (
+			typed.kind !== EXPRESSION_DEPARSE_OBSERVATION ||
+			typeof typed.holds !== 'boolean' ||
+			!typed.detail ||
+			typeof typed.detail !== 'object' ||
+			Array.isArray(typed.detail) ||
+			!sameDeparseTargetDetail(
+				matchingDetail,
+				typed.detail as Record<string, unknown>,
+			)
+		) {
+			continue;
+		}
+		holds.push(typed.holds);
+	}
+	return holds;
+}
+
 function deparseEvidenceFor(
 	left: ExpressionValue,
 	right: ExpressionValue,
 	category: ExpressionEquivalenceCategory,
+	context: EquivalenceContext,
 	evidence: readonly EvidenceObservation[] | undefined,
-): DeparseEvidenceOutcome | undefined {
+): DeparseEvidenceLookup {
+	const matching: DeparseEvidenceOutcome[] = [];
+	const matchingClaims: boolean[] = [];
+	let matchingDetail: Record<string, unknown> | undefined;
+	let matchingScope: string | undefined;
+	const expectedRequest = boundDeparseRequest(context);
 	for (const observation of evidence ?? []) {
 		if (
 			observation.source !== 'vendor-deparser' ||
-			observation.request.kind !== EXPRESSION_DEPARSE_OBSERVATION
+			observation.request.kind !== EXPRESSION_DEPARSE_OBSERVATION ||
+			!equivalenceObservationContextMatches(observation, context)
 		) {
 			continue;
 		}
@@ -610,6 +724,24 @@ function deparseEvidenceFor(
 		) {
 			continue;
 		}
+		if (
+			expectedRequest &&
+			!sameBoundDeparseRequest(expectedRequest, observation.request)
+		) {
+			continue;
+		}
+		const detailRecord = detail as Record<string, unknown>;
+		if (
+			matchingDetail &&
+			(matchingScope !== stableJson(observation.request.scope) ||
+				!sameDeparseTargetDetail(matchingDetail, detailRecord))
+		) {
+			return {
+				kind: 'conflict',
+				reason:
+					'multiple deparse evidence scopes/details match the same expression pair',
+			};
+		}
 		const value = observation.result.value;
 		if (!value || typeof value !== 'object' || Array.isArray(value)) {
 			continue;
@@ -628,20 +760,55 @@ function deparseEvidenceFor(
 		) {
 			continue;
 		}
-		return {
+		matchingClaims.push(...deparseClaimHolds(observation, detailRecord));
+		matchingDetail = detailRecord;
+		matchingScope = stableJson(observation.request.scope);
+		matching.push({
 			surface: result.surface,
 			leftCanonical: result.leftCanonical,
 			rightCanonical: result.rightCanonical,
+		});
+	}
+	if (matching.length === 0) {
+		return { kind: 'missing' };
+	}
+	if (matchingClaims.includes(true) && matchingClaims.includes(false)) {
+		return {
+			kind: 'conflict',
+			reason: 'deparse evidence contains conflicting boolean claims',
 		};
 	}
-	return undefined;
+	const [first, ...rest] = matching;
+	if (!first) {
+		return { kind: 'missing' };
+	}
+	const firstEquivalent = first.leftCanonical === first.rightCanonical;
+	if (
+		rest.some((candidate) => {
+			const candidateEquivalent =
+				candidate.leftCanonical === candidate.rightCanonical;
+			return candidateEquivalent !== firstEquivalent;
+		})
+	) {
+		return {
+			kind: 'conflict',
+			reason: 'deparse evidence contains both equivalent and different results',
+		};
+	}
+	if (rest.some((candidate) => stableJson(candidate) !== stableJson(first))) {
+		return {
+			kind: 'conflict',
+			reason: 'deparse evidence contains inconsistent canonical forms',
+		};
+	}
+	return { kind: 'found', evidence: first };
 }
 
 function compareExpression(
 	left: ExpressionValue,
 	right: ExpressionValue,
 	category: ExpressionEquivalenceCategory,
-	_context: EquivalenceContext,
+	context: EquivalenceContext,
 	evidence?: readonly EvidenceObservation[],
 ): EquivalenceResult {
 	const guarded = guardExpressionComparison(left, right, category);
@@ -651,16 +818,28 @@ function compareExpression(
 				unresolvedExpressionObligation(left, right, category, guarded.reason),
 			);
 		}
-		const observed = deparseEvidenceFor(left, right, category, evidence);
-		if (observed) {
+		const observed = deparseEvidenceFor(
+			left,
+			right,
+			category,
+			context,
+			evidence,
+		);
+		if (observed.kind === 'conflict') {
+			return unknown(
+				unresolvedExpressionObligation(left, right, category, observed.reason),
+			);
+		}
+		if (observed.kind === 'found') {
+			const deparse = observed.evidence;
 			const detail = {
 				method: 'vendor-deparser',
-				surface: observed.surface,
-				leftCanonical: observed.leftCanonical,
-				rightCanonical: observed.rightCanonical,
+				surface: deparse.surface,
+				leftCanonical: deparse.leftCanonical,
+				rightCanonical: deparse.rightCanonical,
 				validatedBy: PG_DEPARSE_ARTIFACT,
 			};
-			return observed.leftCanonical === observed.rightCanonical
+			return deparse.leftCanonical === deparse.rightCanonical
 				? equivalent(expressionProposition(left, right, category, detail))
 				: different(expressionProposition(left, right, category, detail));
 		}

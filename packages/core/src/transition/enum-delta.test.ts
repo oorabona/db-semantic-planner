@@ -10,13 +10,33 @@ function enumDef(
 }
 
 describe('enumAddDelta', () => {
-	it('treats an authored unspecified schema as matching the current schema', () => {
+	it('does not treat an omitted desired schema as a wildcard for a schemaed current enum', () => {
 		expect(
 			enumAddDelta(
 				enumDef(['active', 'pending']),
 				enumDef(['active'], { schema: 'tenant' }),
 			),
+		).toEqual({ kind: 'unsupported' });
+	});
+
+	it('matches an omitted desired schema against the resolved target schema', () => {
+		expect(
+			enumAddDelta(
+				enumDef(['active', 'pending']),
+				enumDef(['active'], { schema: 'tenant' }),
+				{ targetSchema: 'tenant' },
+			),
 		).toEqual({ kind: 'add-label', label: 'pending' });
+	});
+
+	it('does not match an omitted desired schema against a different concrete schema', () => {
+		expect(
+			enumAddDelta(
+				enumDef(['active', 'pending']),
+				enumDef(['active'], { schema: 'other' }),
+				{ targetSchema: 'tenant' },
+			),
+		).toEqual({ kind: 'unsupported' });
 	});
 
 	it('surfaces explicit schema drift before the no-drift fast path', () => {

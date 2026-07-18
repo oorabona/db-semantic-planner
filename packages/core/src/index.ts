@@ -357,6 +357,7 @@ export {
 	PackRegistry,
 	preflightStagedComposition,
 	projectCompareToSingleCandidate,
+	resolveEnumSchemaForComparison,
 	semanticArtifactId,
 	validateTransitionRelationalInvariants,
 } from './transition/index.js';

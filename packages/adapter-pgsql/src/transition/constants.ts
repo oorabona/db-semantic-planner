@@ -85,6 +85,8 @@ export const DBSP_META_SCHEMA = 'dbsp_meta';
 export const DBSP_TRANSITION_RUN_TABLE = 'dbsp_transition_run';
 export const DBSP_TRANSITION_JOURNAL_TABLE = 'dbsp_transition_journal';
 export const DBSP_LOGICAL_IDENTITY_TABLE = 'dbsp_logical_identity';
+export const DBSP_LOGICAL_IDENTITY_MARKER_COLUMN = 'dbsp_managed_by';
+export const DBSP_LOGICAL_IDENTITY_MARKER_VALUE = `${PG_OPERATION_PACK_ARTIFACT.id}@${PG_OPERATION_PACK_ARTIFACT.version}`;
 
 export const COLUMN_EXISTS_OBSERVATION = 'postgresql.column.exists';
 export const TABLE_CHECK_CONSTRAINTS_OBSERVATION =
@@ -97,6 +99,8 @@ export const ENUM_TYPE_EXISTS_OBSERVATION = 'postgresql.enum-type.exists';
 export const ENUM_LABEL_VISIBLE_OBSERVATION = 'postgresql.enum-label.visible';
 export const SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION =
 	'postgresql.column.set-not-null.relation-kind-supported';
+export const SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
+	'partitioned tables are not yet supported by the SET NOT NULL transition';
 export const ALTER_AUTHORITY_OBSERVATION = 'postgresql.table.alter-authority';
 export const ALTER_TYPE_AUTHORITY_OBSERVATION =
 	'postgresql.type.alter-authority';

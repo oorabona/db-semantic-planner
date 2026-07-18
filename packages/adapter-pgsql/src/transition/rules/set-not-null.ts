@@ -35,6 +35,7 @@ import {
 	NO_NULLS_GUARD,
 	PG_OPERATION_PACK_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
+	SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
 	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 	SET_NOT_NULL_RULE_ID,
 } from '../constants.js';
@@ -65,9 +66,6 @@ type SetNotNullTarget = Pick<
 	SetNotNullMatch,
 	'schema' | 'database' | 'table' | 'column'
 >;
-
-const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
-	'partitioned tables are not yet supported by the SET NOT NULL transition';
 
 export interface SetNotNullRuleOptions {
 	readonly naming?: NamingPlugin;
@@ -432,7 +430,7 @@ function partitionedTableUnsupportedObligation(
 		proposition: {
 			kind: SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
 			scope,
-			detail: PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
+			detail: SET_NOT_NULL_PARTITIONED_TABLE_UNSUPPORTED_DETAIL,
 		},
 		scope,
 		dischargeableBy: [columnRequest],
@@ -701,6 +699,7 @@ export function createSetNotNullRule(
 						appliesTo: operation.ref,
 						predicate: {
 							kind: NO_NULLS_GUARD,
+							target: resourceForMatch(resolvedMatch, 'column', database),
 							scope: [resourceForMatch(resolvedMatch, 'column', database)],
 							detail: requestDetail(resolvedMatch),
 						},

@@ -5,6 +5,7 @@ import type {
 	Assumption,
 	CompareOutcome,
 	ObservationContext,
+	ObservationRequest,
 	PhysicalOperation,
 	RecognitionResult,
 	ResourceAddress,
@@ -116,6 +117,26 @@ function operation(
 	};
 }
 
+function expectStatementRejected(text: string, pattern: RegExp): void {
+	expect(() =>
+		normalizeManualSqlPayload(
+			{
+				statement: {
+					kind: 'unsafe-native',
+					category: 'statement',
+					text,
+					assumption: userBlastAssumption().id,
+					attestation: userBlastAssumption([tableResource]),
+				},
+				blastRadius: [tableResource],
+				preconditions: [],
+				postconditions: [],
+			},
+			context,
+		),
+	).toThrow(pattern);
+}
+
 function manualRule(manualOperation: PhysicalOperation): TransitionRule {
 	const ruleRef = {
 		id: 'postgresql.manual-sql.test',
@@ -157,6 +178,49 @@ function manualRule(manualOperation: PhysicalOperation): TransitionRule {
 
 class ManualSqlPool {
 	readonly queries: string[] = [];
+	readonly runs = new Map<string, Record<string, unknown>>();
+
+	tableShape(table: string): Record<string, unknown> {
+		if (table === 'dbsp_transition_run') {
+			return {
+				relkind: 'r',
+				columns: {
+					run_id: { type: 'text', notNull: true },
+					plan_digest: { type: 'text', notNull: true },
+					target_context_digest: { type: 'text', notNull: true },
+					database_id: { type: 'text', notNull: true },
+					core_version: { type: 'text', notNull: true },
+					started_at: { type: 'timestamp with time zone', notNull: true },
+				},
+				primary_key: ['run_id'],
+				foreign_keys: [],
+				checks: [],
+			};
+		}
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				seq: { type: 'bigint', notNull: true },
+				event: { type: 'text', notNull: true },
+				step_id: { type: 'text', notNull: true },
+				operation_ref: { type: 'text', notNull: true },
+				operation_kind: { type: 'jsonb', notNull: true },
+				recorded_at: { type: 'timestamp with time zone', notNull: true },
+				record: { type: 'jsonb', notNull: true },
+			},
+			primary_key: ['run_id', 'seq'],
+			foreign_keys: [
+				{
+					columns: ['run_id'],
+					foreignSchema: 'dbsp_meta',
+					foreignTable: 'dbsp_transition_run',
+					foreignColumns: ['run_id'],
+				},
+			],
+			checks: ['CHECK (event IN (intent, completion, observed))'],
+		};
+	}
 
 	async connect() {
 		return {
@@ -171,8 +235,32 @@ class ManualSqlPool {
 		if (sql.startsWith('CREATE ')) {
 			return { rows: [] };
 		}
+		if (sql.includes('dbsp_transition_journal_shape')) {
+			return { rows: [this.tableShape(String(_params?.[1]))] };
+		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_run"')) {
+			const [
+				run_id,
+				plan_digest,
+				target_context_digest,
+				database_id,
+				core_version,
+				started_at,
+			] = _params ?? [];
+			if (!this.runs.has(String(run_id))) {
+				this.runs.set(String(run_id), {
+					run_id,
+					plan_digest,
+					target_context_digest,
+					database_id,
+					core_version,
+					started_at,
+				});
+			}
 			return { rows: [] };
+		}
+		if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
+			return { rows: [this.runs.get(String(_params?.[0]))].filter(Boolean) };
 		}
 		if (sql.includes('INSERT INTO "dbsp_meta"."dbsp_transition_journal"')) {
 			return { rows: [] };
@@ -242,6 +330,50 @@ async function prove(manualOperation: PhysicalOperation) {
 }
 
 describe('ManualSql operation runtime', () => {
+	it('rejects multi-statement escape-hatch SQL while allowing embedded semicolons in literals and comments', () => {
+		expectStatementRejected(
+			'ALTER TABLE "tenant"."users" ADD COLUMN "x" text; DROP TABLE "tenant"."users"',
+			/exactly one PostgreSQL statement/,
+		);
+		expectStatementRejected(';;', /exactly one PostgreSQL statement/);
+		expectStatementRejected(
+			'SELECT $tag$; not a terminator',
+			/single complete PostgreSQL statement/,
+		);
+
+		expect(() =>
+			normalizeManualSqlPayload(
+				{
+					statement: {
+						kind: 'unsafe-native',
+						category: 'statement',
+						text:
+							"SELECT ';' AS semicolon /* ; */ " +
+							'FROM pg_catalog.pg_class WHERE relname = $tag$;ok$tag$;',
+						assumption: userBlastAssumption().id,
+						attestation: userBlastAssumption([tableResource]),
+					},
+					blastRadius: [tableResource],
+					preconditions: [],
+					postconditions: [],
+				},
+				context,
+			),
+		).not.toThrow();
+	});
+
+	it.each([
+		'BEGIN',
+		'COMMIT',
+		'ROLLBACK',
+		'SAVEPOINT dbsp_manual',
+		'SET TRANSACTION READ WRITE',
+		'START TRANSACTION',
+		'/* leading comment */ COMMIT',
+	])('rejects transaction-control escape-hatch SQL: %s', (sql) => {
+		expectStatementRejected(sql, /transaction-control/);
+	});
+
 	it('retains and widens the human blast-radius assumption', async () => {
 		const manualOperation = operation();
 		const { outcome } = await prove(manualOperation);

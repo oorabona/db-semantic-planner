@@ -8,6 +8,7 @@ import type {
 	FingerprintManifest,
 	IssuedObservation,
 	ObservationContext,
+	OperationEffectAssessment,
 	OutcomeReason,
 	PlanAssessment,
 	ProvenPlanShape,
@@ -20,6 +21,7 @@ import type {
 	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
+import { matchRunObservationContext } from './context-match.js';
 import { semanticArtifactId } from './ids.js';
 import {
 	isOperationRuntime,
@@ -56,6 +58,13 @@ type StepEvents = {
 	};
 	readonly observed?: TransitionJournalEvent & { readonly record: StepJournal };
 };
+
+type GroupEventsResult =
+	| {
+			readonly ok: true;
+			readonly grouped: ReadonlyMap<string, StepEvents>;
+	  }
+	| { readonly ok: false; readonly detail: string };
 
 function sameTrustRoot(left: TrustRoot, right: TrustRoot): boolean {
 	return stableJson(left) === stableJson(right);
@@ -165,6 +174,7 @@ function contextMismatch(detail: string): ApplyResult {
 				artifact: RESUMER_ARTIFACT,
 				fact: { key: 'resume', value: detail },
 				scope: [],
+				detail,
 			},
 			'planned',
 			'replan-required',
@@ -258,11 +268,143 @@ function eventRecordIsObserved(
 	return event.event === 'observed';
 }
 
+function sameOperationShape(
+	step: ProvenPlanStep,
+	event: TransitionJournalEvent,
+): boolean {
+	return (
+		event.operationRef === step.operation.ref &&
+		stableJson(event.operationKind) === stableJson(step.operation.operationKind)
+	);
+}
+
+function validateIntentRecordIdentity(params: {
+	readonly event: TransitionJournalEvent;
+	readonly step: ProvenPlanStep;
+	readonly record: DurableIntentRecord;
+}): string | undefined {
+	if (params.record.stepId !== params.event.stepId) {
+		return `intent event for ${params.event.stepId} embeds record for ${params.record.stepId}`;
+	}
+	if (params.record.runId && params.record.runId !== params.event.runId) {
+		return `intent record runId ${params.record.runId} does not match event runId ${params.event.runId}`;
+	}
+	if (params.record.run && params.record.run.runId !== params.event.runId) {
+		return `intent record run metadata ${params.record.run.runId} does not match event runId ${params.event.runId}`;
+	}
+	if (params.record.operation.ref !== params.event.operationRef) {
+		return `intent event operationRef ${params.event.operationRef} embeds operation ${params.record.operation.ref}`;
+	}
+	if (
+		stableJson(params.record.operation.operationKind) !==
+		stableJson(params.event.operationKind)
+	) {
+		return `intent event ${params.event.stepId} embeds a different operation kind`;
+	}
+	if (
+		stableJson(params.record.operation) !== stableJson(params.step.operation)
+	) {
+		return `intent event ${params.event.stepId} embeds an operation that does not match the plan step`;
+	}
+	return undefined;
+}
+
+function validateCompletionRecordIdentity(params: {
+	readonly event: TransitionJournalEvent;
+	readonly record: TransactionalCompletionRecord;
+}): string | undefined {
+	if (params.record.stepId !== params.event.stepId) {
+		return `completion event for ${params.event.stepId} embeds record for ${params.record.stepId}`;
+	}
+	if (params.record.runId && params.record.runId !== params.event.runId) {
+		return `completion record runId ${params.record.runId} does not match event runId ${params.event.runId}`;
+	}
+	return undefined;
+}
+
+function validateObservedRecordIdentity(params: {
+	readonly event: TransitionJournalEvent;
+	readonly step: ProvenPlanStep;
+	readonly record: StepJournal;
+}): string | undefined {
+	const intentMismatch = validateIntentRecordIdentity({
+		event: params.event,
+		step: params.step,
+		record: params.record.intent,
+	});
+	if (intentMismatch) {
+		return intentMismatch;
+	}
+	const completion = params.record.transactionalCompletion;
+	if (completion) {
+		const completionMismatch = validateCompletionRecordIdentity({
+			event: params.event,
+			record: completion,
+		});
+		if (completionMismatch) {
+			return completionMismatch;
+		}
+	}
+	const observedOutcome = params.record.observedOutcome;
+	if (observedOutcome && observedOutcome.stepId !== params.event.stepId) {
+		return `observed event for ${params.event.stepId} embeds observed outcome for ${observedOutcome.stepId}`;
+	}
+	return undefined;
+}
+
+function validateJournalEventIdentity(params: {
+	readonly event: TransitionJournalEvent;
+	readonly runId: string;
+	readonly stepById: ReadonlyMap<string, ProvenPlanStep>;
+}): string | undefined {
+	if (params.event.runId !== params.runId) {
+		return `journal event runId ${params.event.runId} does not match run ${params.runId}`;
+	}
+	const step = params.stepById.get(params.event.stepId);
+	if (!step) {
+		return `journal event references missing step ${params.event.stepId}`;
+	}
+	if (!sameOperationShape(step, params.event)) {
+		return `journal event ${params.event.stepId} operation identity does not match the plan step`;
+	}
+	if (eventRecordIsIntent(params.event)) {
+		return validateIntentRecordIdentity({
+			event: params.event,
+			step,
+			record: params.event.record,
+		});
+	}
+	if (eventRecordIsCompletion(params.event)) {
+		return validateCompletionRecordIdentity({
+			event: params.event,
+			record: params.event.record,
+		});
+	}
+	if (eventRecordIsObserved(params.event)) {
+		return validateObservedRecordIdentity({
+			event: params.event,
+			step,
+			record: params.event.record,
+		});
+	}
+	return `journal event ${params.event.stepId} has unknown event type ${params.event.event}`;
+}
+
 function groupEvents(
 	events: readonly TransitionJournalEvent[],
-): ReadonlyMap<string, StepEvents> {
+	runId: string,
+	stepById: ReadonlyMap<string, ProvenPlanStep>,
+): GroupEventsResult {
 	const grouped = new Map<string, StepEvents>();
 	for (const event of [...events].sort((left, right) => left.seq - right.seq)) {
+		const identityMismatch = validateJournalEventIdentity({
+			event,
+			runId,
+			stepById,
+		});
+		if (identityMismatch) {
+			return { ok: false, detail: identityMismatch };
+		}
 		const current = grouped.get(event.stepId) ?? {};
 		if (eventRecordIsIntent(event)) {
 			grouped.set(event.stepId, { ...current, intent: event });
@@ -276,7 +418,7 @@ function groupEvents(
 			grouped.set(event.stepId, { ...current, observed: event });
 		}
 	}
-	return grouped;
+	return { ok: true, grouped };
 }
 
 function latestIntent(
@@ -611,6 +753,35 @@ export async function resumeTransitionRun(
 			`loaded plan failed invariant validation: ${diagnostic.detail}`,
 		);
 	}
+	const baseContext = await input.readContext(input.target, loaded.run);
+	const runContextMatch = matchRunObservationContext({
+		run: loaded.run,
+		actual: baseContext,
+	});
+	if (!runContextMatch.ok) {
+		return contextMismatch(runContextMatch.detail);
+	}
+	const operationEffectsByRef = new Map<string, OperationEffectAssessment>();
+	for (const step of loaded.plan.steps) {
+		const effectsResolution = registry.resolveOperation(step.operation);
+		if (!effectsResolution.ok) {
+			return contextMismatch(effectsResolution.detail);
+		}
+		operationEffectsByRef.set(
+			step.operation.ref,
+			effectsResolution.semantics.effectsOf(step.operation, baseContext),
+		);
+	}
+	const semanticDiagnostic = validateTransitionRelationalInvariants({
+		kind: 'plan',
+		plan: loaded.plan,
+		operationEffectsByRef,
+	});
+	if (!semanticDiagnostic.ok) {
+		return contextMismatch(
+			`loaded plan failed semantic invariant validation: ${semanticDiagnostic.detail}`,
+		);
+	}
 
 	const referencedAssumptions = new Set<string>();
 	for (const step of loaded.plan.steps) {
@@ -635,12 +806,21 @@ export async function resumeTransitionRun(
 		}
 	}
 
-	const baseContext = await input.readContext(input.target, loaded.run);
-	const grouped = groupEvents(loaded.events);
+	const stepById = new Map(
+		loaded.plan.steps.map((step) => [step.stepId, step]),
+	);
+	const groupedResult = groupEvents(loaded.events, loaded.run.runId, stepById);
+	if (!groupedResult.ok) {
+		return contextMismatch(groupedResult.detail);
+	}
+	const grouped = groupedResult.grouped;
+	const orderedSteps = loaded.plan.segments.flatMap((segment) =>
+		segment.stepIds.map((stepId) => stepById.get(stepId)).filter(Boolean),
+	) as ProvenPlanStep[];
 	const completed: StepJournal[] = [];
 	const observations: IssuedObservation[] = [];
 
-	for (const step of loaded.plan.steps) {
+	for (const step of orderedSteps) {
 		const events = grouped.get(step.stepId);
 		if (!events?.intent && !events?.observed) {
 			return resumeRequiredResult({
@@ -662,19 +842,15 @@ export async function resumeTransitionRun(
 		}
 
 		const completion = events?.completion?.record;
-		const effectsResolution = registry.resolveOperation(step.operation);
-		if (!effectsResolution.ok) {
+		const effects = operationEffectsByRef.get(step.operation.ref);
+		if (!effects) {
 			return unknownResult({
 				step,
 				completed,
 				observations,
-				detail: effectsResolution.detail,
+				detail: 'operation effects missing',
 			});
 		}
-		const effects = effectsResolution.semantics.effectsOf(
-			step.operation,
-			baseContext,
-		);
 		const transactional =
 			effects.effects.execution.transaction !== 'forbids-transaction';
 

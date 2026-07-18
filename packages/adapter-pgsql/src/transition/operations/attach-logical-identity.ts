@@ -18,11 +18,15 @@ import type {
 import { validateIdentifier } from '../../validate.js';
 import {
 	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+	DBSP_LOGICAL_IDENTITY_MARKER_COLUMN,
+	DBSP_LOGICAL_IDENTITY_MARKER_VALUE,
 	DBSP_LOGICAL_IDENTITY_TABLE,
 	DBSP_META_SCHEMA,
 	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
+	PG_INTROSPECTION_ARTIFACT,
 	PG_OPERATION_PACK_ARTIFACT,
 } from '../constants.js';
+import { observationContextMatches } from '../context-match.js';
 import { assumptionId } from '../ids.js';
 import {
 	appendCompletionJournal,
@@ -141,6 +145,10 @@ function qualifiedSideTable(): string {
 	)}`;
 }
 
+function quoteLiteral(value: string): string {
+	return `'${value.replaceAll("'", "''")}'`;
+}
+
 function tableResource(
 	payload: Pick<AttachLogicalIdentityPayload, 'schema' | 'table'>,
 	context?: ObservationContext,
@@ -179,6 +187,26 @@ function sideTableResource(
 		schema: DBSP_META_SCHEMA,
 		kind: 'table',
 		name: DBSP_LOGICAL_IDENTITY_TABLE,
+	};
+}
+
+function metaSchemaSelector() {
+	return {
+		kind: 'schema',
+		schema: DBSP_META_SCHEMA,
+		name: DBSP_META_SCHEMA,
+	};
+}
+
+function sideTableIndexSelector(
+	name: string,
+	payload: AttachLogicalIdentityPayload,
+	context: ObservationContext,
+) {
+	return {
+		kind: 'index',
+		name,
+		within: sideTableResource(payload, context),
 	};
 }
 
@@ -226,9 +254,19 @@ export function renderCreateLogicalIdentitySideTableSql(
 		'table_name text NOT NULL, ' +
 		'column_name text, ' +
 		'carrier_kind text NOT NULL, ' +
+		`${quoteIdent(
+			DBSP_LOGICAL_IDENTITY_MARKER_COLUMN,
+			'column',
+		)} text NOT NULL DEFAULT ${quoteLiteral(
+			DBSP_LOGICAL_IDENTITY_MARKER_VALUE,
+		)}, ` +
 		'attached_at timestamptz NOT NULL DEFAULT clock_timestamp(), ' +
 		"CHECK (logical_id <> ''), " +
-		"CHECK (carrier_kind = 'postgresql-side-table')" +
+		"CHECK (carrier_kind = 'postgresql-side-table'), " +
+		`CHECK (${quoteIdent(
+			DBSP_LOGICAL_IDENTITY_MARKER_COLUMN,
+			'column',
+		)} = ${quoteLiteral(DBSP_LOGICAL_IDENTITY_MARKER_VALUE)})` +
 		')'
 	);
 }
@@ -416,12 +454,45 @@ function bindingsFromValue(
 	return bindings;
 }
 
+function sameArtifact(
+	left: { readonly id: string; readonly version: string },
+	right: { readonly id: string; readonly version: string },
+): boolean {
+	return left.id === right.id && left.version === right.version;
+}
+
+function sameTargetResource(
+	resource: ResourceAddress,
+	payload: AttachLogicalIdentityPayload,
+	context: ObservationContext,
+): boolean {
+	const target = targetResource(payload, context);
+	return (
+		resource.engine === target.engine &&
+		resource.database === target.database &&
+		resource.schema === target.schema &&
+		resource.kind === target.kind &&
+		resource.name === target.name &&
+		stableJson(resource.qualifiedBy) === stableJson(target.qualifiedBy)
+	);
+}
+
 function observationTargetsPayload(
 	observation: EvidenceObservation,
 	payload: AttachLogicalIdentityPayload,
 	expected: 'adoptable' | 'attached',
+	context: ObservationContext,
 ): boolean {
 	if (observation.request.kind !== LOGICAL_IDENTITY_CARRIER_OBSERVATION) {
+		return false;
+	}
+	if (
+		!sameArtifact(observation.issuer, PG_INTROSPECTION_ARTIFACT) ||
+		!observationContextMatches(observation, context) ||
+		!observation.request.scope.some((resource) =>
+			sameTargetResource(resource, payload, context),
+		)
+	) {
 		return false;
 	}
 	const detail = observation.request.detail;
@@ -441,9 +512,10 @@ function carrierStateFromEvidence(
 	evidence: readonly EvidenceObservation[],
 	payload: AttachLogicalIdentityPayload,
 	expected: 'adoptable' | 'attached',
+	context: ObservationContext,
 ): CarrierState | undefined {
 	for (const observation of evidence) {
-		if (!observationTargetsPayload(observation, payload, expected)) {
+		if (!observationTargetsPayload(observation, payload, expected, context)) {
 			continue;
 		}
 		const state = carrierStateFromValue(observation.result.value);
@@ -460,7 +532,12 @@ function beforeAfterFingerprints(
 	context: ObservationContext,
 ) {
 	const payload = payloadOf(operation);
-	const beforeState = carrierStateFromEvidence(evidence, payload, 'adoptable');
+	const beforeState = carrierStateFromEvidence(
+		evidence,
+		payload,
+		'adoptable',
+		context,
+	);
 	if (!beforeState) {
 		throw new Error('missing logical identity carrier evidence');
 	}
@@ -492,6 +569,11 @@ function observedFingerprint(
 		);
 	}
 	const payload = payloadOf(operation);
+	if (!observationTargetsPayload(observation, payload, expected, context)) {
+		throw new Error(
+			'logical identity carrier observation does not target the operation payload and proof context',
+		);
+	}
 	const state = carrierStateFromValue(observation.result.value);
 	if (!state) {
 		throw new Error(
@@ -587,15 +669,31 @@ export function createAttachLogicalIdentityOperationRuntime() {
 						schema: payload.schema,
 						name: payload.table,
 					};
+			const schemaSelector = metaSchemaSelector();
 			const sideTableSelector = {
 				kind: 'table',
 				schema: DBSP_META_SCHEMA,
 				name: DBSP_LOGICAL_IDENTITY_TABLE,
 			};
+			const tableIndexSelector = sideTableIndexSelector(
+				`${DBSP_LOGICAL_IDENTITY_TABLE}_table_uq`,
+				payload,
+				context,
+			);
+			const columnIndexSelector = sideTableIndexSelector(
+				`${DBSP_LOGICAL_IDENTITY_TABLE}_column_uq`,
+				payload,
+				context,
+			);
 			return {
 				effects: {
 					reads: [targetSelector, sideTableSelector],
-					writes: [sideTableSelector],
+					writes: [
+						schemaSelector,
+						sideTableSelector,
+						tableIndexSelector,
+						columnIndexSelector,
+					],
 					locks: [
 						{
 							resource: tableResource(payload, context),
@@ -612,7 +710,12 @@ export function createAttachLogicalIdentityOperationRuntime() {
 					],
 					contextMutations: [],
 					externalEffects: {
-						accountedFor: [sideTableSelector],
+						accountedFor: [
+							schemaSelector,
+							sideTableSelector,
+							tableIndexSelector,
+							columnIndexSelector,
+						],
 						couldNotAccountFor: [],
 					},
 					execution: {

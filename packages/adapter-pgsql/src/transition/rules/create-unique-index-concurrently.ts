@@ -344,6 +344,20 @@ function indexSetEntry(value: unknown): IndexSet | undefined {
 					),
 				)
 			: {},
+		collation: isRecord(value.collation)
+			? Object.fromEntries(
+					Object.entries(value.collation).filter(
+						(entry): entry is [string, string] => typeof entry[1] === 'string',
+					),
+				)
+			: {},
+		options: isRecord(value.options)
+			? Object.fromEntries(
+					Object.entries(value.options).filter(
+						(entry): entry is [string, string] => typeof entry[1] === 'string',
+					),
+				)
+			: {},
 		with: isRecord(value.with)
 			? Object.fromEntries(
 					Object.entries(value.with).filter(
@@ -388,6 +402,8 @@ function indexHasUnsupportedShape(index: IndexSet): boolean {
 		index.expressions.length > 0 ||
 		index.include.length > 0 ||
 		Object.keys(index.opclass).length > 0 ||
+		Object.keys(index.collation).length > 0 ||
+		Object.keys(index.options).length > 0 ||
 		Object.keys(index.with).length > 0 ||
 		index.nullsNotDistinct === true ||
 		index.columns.length === 0
@@ -752,6 +768,7 @@ export function createCreateUniqueIndexConcurrentlyRule(
 						appliesTo: operation.ref,
 						predicate: {
 							kind: NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD,
+							target: index,
 							scope: [index],
 							detail: {
 								schema: resolvedMatch.schema,

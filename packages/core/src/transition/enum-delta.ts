@@ -10,47 +10,79 @@ export type EnumAddDelta =
 	  }
 	| { readonly kind: 'unsupported' };
 
+export interface EnumAddDeltaOptions {
+	readonly targetSchema?: string;
+}
+
+export function resolveEnumSchemaForComparison(
+	enumDef: EnumIR,
+	targetSchema?: string,
+): EnumIR {
+	if (enumDef.schema !== undefined || targetSchema === undefined) {
+		return enumDef;
+	}
+	return { ...enumDef, schema: targetSchema };
+}
+
 // Shared by the core comparator and adapter enum-add rules; keep this as the
 // single enum-add classifier.
-export function enumAddDelta(desired: EnumIR, current: EnumIR): EnumAddDelta {
-	if (desired.schema !== undefined && desired.schema !== current.schema) {
+export function enumAddDelta(
+	desired: EnumIR,
+	current: EnumIR,
+	options: EnumAddDeltaOptions = {},
+): EnumAddDelta {
+	const resolvedDesired = resolveEnumSchemaForComparison(
+		desired,
+		options.targetSchema,
+	);
+	const resolvedCurrent = resolveEnumSchemaForComparison(
+		current,
+		options.targetSchema,
+	);
+	if (resolvedDesired.schema !== resolvedCurrent.schema) {
 		return { kind: 'unsupported' };
 	}
-	if (stableJson(desired.values) === stableJson(current.values)) {
+	if (
+		stableJson(resolvedDesired.values) === stableJson(resolvedCurrent.values)
+	) {
 		return { kind: 'none' };
 	}
-	if (new Set(desired.values).size !== desired.values.length) {
+	if (new Set(resolvedDesired.values).size !== resolvedDesired.values.length) {
 		return { kind: 'unsupported' };
 	}
-	if (new Set(current.values).size !== current.values.length) {
+	if (new Set(resolvedCurrent.values).size !== resolvedCurrent.values.length) {
 		return { kind: 'unsupported' };
 	}
-	const desiredValueSet = new Set(desired.values);
-	if (current.values.some((value) => !desiredValueSet.has(value))) {
+	const desiredValueSet = new Set(resolvedDesired.values);
+	if (resolvedCurrent.values.some((value) => !desiredValueSet.has(value))) {
 		return { kind: 'unsupported' };
 	}
-	const currentValueSet = new Set(current.values);
-	const added = desired.values.filter((value) => !currentValueSet.has(value));
+	const currentValueSet = new Set(resolvedCurrent.values);
+	const added = resolvedDesired.values.filter(
+		(value) => !currentValueSet.has(value),
+	);
 	if (added.length !== 1) {
 		return { kind: 'unsupported' };
 	}
-	const withoutAdded = desired.values.filter((value) => value !== added[0]);
-	if (stableJson(withoutAdded) !== stableJson(current.values)) {
+	const withoutAdded = resolvedDesired.values.filter(
+		(value) => value !== added[0],
+	);
+	if (stableJson(withoutAdded) !== stableJson(resolvedCurrent.values)) {
 		return { kind: 'unsupported' };
 	}
 	const label = added[0];
 	if (label === undefined) {
 		return { kind: 'unsupported' };
 	}
-	const index = desired.values.indexOf(label);
+	const index = resolvedDesired.values.indexOf(label);
 	if (index <= 0) {
 		return { kind: 'unsupported' };
 	}
-	const appended = index === desired.values.length - 1;
+	const appended = index === resolvedDesired.values.length - 1;
 	if (appended) {
 		return { kind: 'add-label', label };
 	}
-	const after = desired.values[index - 1];
+	const after = resolvedDesired.values[index - 1];
 	return typeof after === 'string'
 		? {
 				kind: 'add-label',

@@ -1,4 +1,4 @@
-import type { ModelIR } from '../model-ir.js';
+import type { LogicalIdentity, ModelIR } from '../model-ir.js';
 import type {
 	AdvisoryObservation,
 	AdvisoryObservationId,
@@ -93,6 +93,7 @@ declare function acceptsEvidenceStability(
 	stability: EvidenceObservation['stability'],
 ): void;
 declare function acceptsGuardPredicate(predicate: GuardPredicate): void;
+declare function acceptsLogicalIdentity(identity: LogicalIdentity): void;
 declare function acceptsGuardProtocol(protocol: GuardProtocol): void;
 declare function acceptsLockRequirement(requirement: LockRequirement): void;
 declare function acceptsObservationContext(context: ObservationContext): void;
@@ -329,7 +330,7 @@ acceptsPhysicalOperation({
 
 // @ts-expect-error Apply guards must name the operation ref they protect.
 acceptsApplyGuard({
-	predicate: { kind: 'predicate', scope: [] },
+	predicate: { kind: 'predicate', target: resourceAddress, scope: [] },
 	protocol: {
 		kind: 'lock-and-check',
 		onFailureLeaves: [],
@@ -407,6 +408,9 @@ acceptsResourceAddress({
 	identity: 'raw-identity',
 });
 
+// @ts-expect-error Logical identities must declare an explicit carrier.
+acceptsLogicalIdentity({ id: 'logical.table.users' });
+
 // @ts-expect-error Stable identity bindings must reference a proof claim.
 acceptsTargetBinding({ kind: 'stable-identity', bound: [] });
 
@@ -426,8 +430,16 @@ acceptsObservationResult({ value: () => true });
 // @ts-expect-error Proposition detail is JSON-safe.
 acceptsProposition({ kind: 'claim', scope: [], detail: () => true });
 
-// @ts-expect-error Guard predicate detail is JSON-safe.
-acceptsGuardPredicate({ kind: 'guard', scope: [], detail: () => true });
+acceptsGuardPredicate({
+	kind: 'guard',
+	target: resourceAddress,
+	scope: [],
+	// @ts-expect-error Guard predicate detail is JSON-safe.
+	detail: () => true,
+});
+
+// @ts-expect-error Guard predicates must name the target they protect.
+acceptsGuardPredicate({ kind: 'guard', scope: [] });
 
 const _recognitionWithNativeDetail: RecognitionResult<unknown> = {
 	recognized: true,

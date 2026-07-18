@@ -70,6 +70,59 @@ function journalRun(): TransitionRunMetadata {
 	};
 }
 
+function journalRunRow(run: TransitionRunMetadata) {
+	return {
+		run_id: run.runId,
+		plan_digest: run.planDigest,
+		target_context_digest: run.targetContextDigest,
+		database_id: run.databaseId,
+		core_version: run.coreVersion,
+		started_at: run.startedAt,
+	};
+}
+
+function journalTableShape(table: string) {
+	if (table === 'dbsp_transition_run') {
+		return {
+			relkind: 'r',
+			columns: {
+				run_id: { type: 'text', notNull: true },
+				plan_digest: { type: 'text', notNull: true },
+				target_context_digest: { type: 'text', notNull: true },
+				database_id: { type: 'text', notNull: true },
+				core_version: { type: 'text', notNull: true },
+				started_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['run_id'],
+			foreign_keys: [],
+			checks: [],
+		};
+	}
+	return {
+		relkind: 'r',
+		columns: {
+			run_id: { type: 'text', notNull: true },
+			seq: { type: 'bigint', notNull: true },
+			event: { type: 'text', notNull: true },
+			step_id: { type: 'text', notNull: true },
+			operation_ref: { type: 'text', notNull: true },
+			operation_kind: { type: 'jsonb', notNull: true },
+			recorded_at: { type: 'timestamp with time zone', notNull: true },
+			record: { type: 'jsonb', notNull: true },
+		},
+		primary_key: ['run_id', 'seq'],
+		foreign_keys: [
+			{
+				columns: ['run_id'],
+				foreignSchema: 'dbsp_meta',
+				foreignTable: 'dbsp_transition_run',
+				foreignColumns: ['run_id'],
+			},
+		],
+		checks: ['CHECK (event IN (intent, completion, observed))'],
+	};
+}
+
 function expectedShape(
 	overrides: Partial<ColumnIR> = {},
 ): SetNotNullColumnShapeExpectation {
@@ -107,7 +160,24 @@ function guard(): ApplyGuard {
 		appliesTo: operation.ref,
 		predicate: {
 			kind: NO_NULLS_GUARD,
-			scope: [],
+			target: {
+				engine: 'postgresql',
+				database: 'test',
+				schema: 'tenant',
+				kind: 'column',
+				name: 'age',
+				qualifiedBy: ['users'],
+			},
+			scope: [
+				{
+					engine: 'postgresql',
+					database: 'test',
+					schema: 'tenant',
+					kind: 'column',
+					name: 'age',
+					qualifiedBy: ['users'],
+				},
+			],
 			detail: { schema: 'tenant', table: 'users', column: 'age' },
 		},
 		protocol: {
@@ -239,7 +309,7 @@ function defaultDeparseEvidence(
 				rightCanonical: canonical.rightCanonical,
 			},
 		},
-		context,
+		context: { ...context, targetSchema: 'tenant' },
 		stability: 'externally-mutable',
 		takenAt: new Date().toISOString(),
 		scope: request.scope,
@@ -305,8 +375,14 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		};
 		const client = {
 			opaqueClient: {
-				query: async (sql: string) => {
+				query: async (sql: string, params?: readonly unknown[]) => {
 					queries.push(sql);
+					if (sql.includes('dbsp_transition_journal_shape')) {
+						return { rows: [journalTableShape(String(params?.[1]))] };
+					}
+					if (sql.includes('FROM "dbsp_meta"."dbsp_transition_run"')) {
+						return { rows: [journalRunRow(run)] };
+					}
 					return { rows: [] };
 				},
 			},
@@ -364,6 +440,53 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 			'SELECT 1 FROM "tenant"."users" WHERE "age" IS NULL LIMIT 1',
 		);
 		expect(queries[2]).toBe('SET LOCAL statement_timeout = DEFAULT');
+	});
+
+	it('rejects a NO_NULLS guard scoped to a sibling column before scanning', async () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const queries: string[] = [];
+		const mismatchedGuard: ApplyGuard = {
+			...guard(),
+			predicate: {
+				kind: NO_NULLS_GUARD,
+				target: {
+					engine: 'postgresql',
+					database: 'test',
+					schema: 'tenant',
+					kind: 'column',
+					name: 'height',
+					qualifiedBy: ['users'],
+				},
+				scope: [
+					{
+						engine: 'postgresql',
+						database: 'test',
+						schema: 'tenant',
+						kind: 'column',
+						name: 'height',
+						qualifiedBy: ['users'],
+					},
+				],
+				detail: { schema: 'tenant', table: 'users', column: 'height' },
+			},
+		};
+
+		await expect(
+			runtime.checkGuard(
+				{
+					opaqueClient: {
+						query: async (sql: string) => {
+							queries.push(sql);
+							return { rows: [] };
+						},
+					},
+				},
+				operation,
+				mismatchedGuard,
+				context,
+			),
+		).rejects.toThrow(/does not target the operation payload/);
+		expect(queries).toEqual([]);
 	});
 
 	it('resets the guard statement timeout before executing DDL on the same client', async () => {
@@ -517,6 +640,18 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					'catalog unique constraint names are metadata excluded from shape equality and bounded by the external-ddl-exclusion assumption',
 			},
 		]);
+	});
+
+	it('rejects catalog evidence from a foreign live observation context', () => {
+		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const foreignDatabaseEvidence: EvidenceObservation = {
+			...catalogEvidence('users', 'age'),
+			context: { ...context, databaseId: 'foreign-db' },
+		};
+
+		expect(() =>
+			runtime.buildFingerprints(operation, [foreignDatabaseEvidence], context),
+		).toThrow(/missing column catalog evidence/);
 	});
 
 	it('changes the fingerprint when relation kind drifts', () => {
@@ -718,6 +853,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 
 	it('blocks apply-time shape recheck when custom type identity is unresolved', () => {
 		const runtime = createAlterColumnSetNotNullOperationRuntime();
+		const noSearchPathContext = { ...context, searchPath: [] };
 
 		expect(() =>
 			runtime.buildFingerprints(
@@ -728,14 +864,17 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 					}),
 				),
 				[
-					catalogEvidence('users', 'age', {
-						atttypid: '90001',
-						formatType: 'status',
-						typeName: 'status',
-						typeSchema: null,
-					}),
+					{
+						...catalogEvidence('users', 'age', {
+							atttypid: '90001',
+							formatType: 'status',
+							typeName: 'status',
+							typeSchema: null,
+						}),
+						context: noSearchPathContext,
+					},
 				],
-				{ ...context, searchPath: [] },
+				noSearchPathContext,
 			),
 		).toThrow(/field type/);
 	});
@@ -861,5 +1000,7 @@ describe('AlterColumnSetNotNull operation runtime', () => {
 		}
 		expect(included.has('column.uniqueConstraintName')).toBe(false);
 		expect(excluded.has('column.uniqueConstraintName')).toBe(true);
+		expect(included.has('pg_constraint.unique.name')).toBe(false);
+		expect(excluded.has('pg_constraint.unique.name')).toBe(true);
 	});
 });

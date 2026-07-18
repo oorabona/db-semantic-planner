@@ -29,6 +29,7 @@ import {
 	PG_TABLE_ALTER_AUTHORITY_PRIVILEGE,
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from '../constants.js';
+import { observationContextMatches } from '../context-match.js';
 import { advisoryObservationId, assumptionId } from '../ids.js';
 import {
 	appendCompletionJournal,
@@ -440,13 +441,19 @@ function sameTableResource(
 	);
 }
 
-function observationContextMatches(
-	observation: EvidenceObservation,
+function sameCheckResource(
+	resource: ResourceAddress,
+	payload: AlterTableAddCheckPayload,
 	context: ObservationContext,
 ): boolean {
 	return (
-		observation.context.engine === context.engine &&
-		observation.context.databaseId === context.databaseId
+		resource.engine === 'postgresql' &&
+		resource.database === context.databaseId &&
+		resource.schema === payload.schema &&
+		resource.kind === 'check-constraint' &&
+		resource.name === payload.constraint &&
+		resource.qualifiedBy?.length === 1 &&
+		resource.qualifiedBy[0] === payload.table
 	);
 }
 
@@ -772,6 +779,7 @@ function boundedStatementTimeout(maxWaitMs: number): number {
 function guardTargetsPayload(
 	guard: ApplyGuard,
 	payload: AlterTableAddCheckPayload,
+	context: ObservationContext,
 ): boolean {
 	if (guard.predicate.kind !== CHECK_ROWS_SATISFY_GUARD) {
 		return false;
@@ -782,7 +790,11 @@ function guardTargetsPayload(
 	return (
 		guard.predicate.detail.schema === payload.schema &&
 		guard.predicate.detail.table === payload.table &&
-		guard.predicate.detail.constraint === payload.constraint
+		guard.predicate.detail.constraint === payload.constraint &&
+		sameCheckResource(guard.predicate.target, payload, context) &&
+		guard.predicate.scope.some((resource) =>
+			sameCheckResource(resource, payload, context),
+		)
 	);
 }
 
@@ -985,7 +997,7 @@ export function createAlterTableAddCheckOperationRuntime() {
 			context: ObservationContext,
 		) {
 			const payload = payloadOf(operation);
-			if (!guardTargetsPayload(guard, payload)) {
+			if (!guardTargetsPayload(guard, payload, context)) {
 				throw new Error(
 					'AlterTableAddCheck CHECK_ROWS_SATISFY guard does not target the operation payload',
 				);

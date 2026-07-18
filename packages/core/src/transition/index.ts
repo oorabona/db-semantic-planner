@@ -115,7 +115,31 @@ export type {
 export { createApplier } from './applier.js';
 export { type CheckDelta, checkDelta } from './check-delta.js';
 export { createComparator } from './comparator.js';
-export { type EnumAddDelta, enumAddDelta } from './enum-delta.js';
+export {
+	matchLiveObservationContext,
+	matchRunObservationContext,
+	type ObservationContextMatchResult,
+	observationContextDigest,
+} from './context-match.js';
+export {
+	type EnumAddDelta,
+	type EnumAddDeltaOptions,
+	enumAddDelta,
+	resolveEnumSchemaForComparison,
+} from './enum-delta.js';
+export {
+	claimEntailsProposition,
+	concludeEvidenceForObligation,
+	type EvidenceConclusion,
+	type EvidenceEntailmentResult,
+	evidenceBooleanClaims,
+	normalizeObservationRequestForContext,
+	normalizePropositionForContext,
+	observationRequestForProposition,
+	observationRequestMatchesInContext,
+	sameObservationRequest,
+	sameObservationRequestInContext,
+} from './evidence-match.js';
 export {
 	advisoryObservationId,
 	assumptionId,

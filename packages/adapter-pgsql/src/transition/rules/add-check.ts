@@ -917,6 +917,7 @@ export function createAddCheckRule(
 						appliesTo: operation.ref,
 						predicate: {
 							kind: CHECK_ROWS_SATISFY_GUARD,
+							target: check,
 							scope: [check],
 							detail: {
 								schema: resolvedMatch.schema,

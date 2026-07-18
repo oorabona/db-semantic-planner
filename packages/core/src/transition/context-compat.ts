@@ -38,7 +38,7 @@ function contextValue(context: ObservationContext, key: string): unknown {
 	return (context as unknown as Readonly<Record<string, unknown>>)[key];
 }
 
-function firstNucleusMismatch(
+export function firstObservationContextNucleusMismatch(
 	left: ObservationContext,
 	right: ObservationContext,
 ): string | undefined {
@@ -92,7 +92,7 @@ export function mergeCompatibleObservationContexts(
 	right: ObservationContext,
 	merger?: ObservationPrivilegeMerger,
 ): ObservationContextMergeResult {
-	const mismatchedField = firstNucleusMismatch(left, right);
+	const mismatchedField = firstObservationContextNucleusMismatch(left, right);
 	if (mismatchedField) {
 		return {
 			ok: false,

@@ -82,12 +82,261 @@ export function renderCreateTransitionJournalTableSql(): string {
 	);
 }
 
+type JournalTableShapeRow = {
+	readonly relkind: string | null;
+	readonly columns: unknown;
+	readonly primary_key: unknown;
+	readonly foreign_keys: unknown;
+	readonly checks: unknown;
+};
+
+function jsonRecord(value: unknown): Record<string, unknown> {
+	if (isRecord(value)) {
+		return value;
+	}
+	if (typeof value !== 'string') {
+		return {};
+	}
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return isRecord(parsed) ? parsed : {};
+	} catch {
+		return {};
+	}
+}
+
+function jsonArray(value: unknown): readonly unknown[] {
+	if (Array.isArray(value)) {
+		return value;
+	}
+	if (typeof value !== 'string') {
+		return [];
+	}
+	try {
+		const parsed = JSON.parse(value) as unknown;
+		return Array.isArray(parsed) ? parsed : [];
+	} catch {
+		return [];
+	}
+}
+
+function jsonStringArray(value: unknown): readonly string[] {
+	return jsonArray(value).filter(
+		(item): item is string => typeof item === 'string',
+	);
+}
+
+function columnShape(
+	columns: Record<string, unknown>,
+	name: string,
+): Record<string, unknown> | undefined {
+	const value = columns[name];
+	return isRecord(value) ? value : undefined;
+}
+
+function columnMatches(
+	columns: Record<string, unknown>,
+	name: string,
+	type: string,
+): boolean {
+	const shape = columnShape(columns, name);
+	return shape?.type === type && shape.notNull === true;
+}
+
+function sameStringSet(
+	left: readonly string[],
+	right: readonly string[],
+): boolean {
+	return (
+		left.length === right.length &&
+		[...left].sort().every((value, index) => value === [...right].sort()[index])
+	);
+}
+
+function columnsMatch(
+	columns: Record<string, unknown>,
+	expected: Readonly<Record<string, string>>,
+): boolean {
+	const names = Object.keys(expected);
+	if (!sameStringSet(Object.keys(columns), names)) {
+		return false;
+	}
+	return names.every((name) => columnMatches(columns, name, expected[name]!));
+}
+
+function foreignKeyMatches(
+	value: unknown,
+	expected: {
+		readonly columns: readonly string[];
+		readonly foreignSchema: string;
+		readonly foreignTable: string;
+		readonly foreignColumns: readonly string[];
+	},
+): boolean {
+	if (!isRecord(value)) {
+		return false;
+	}
+	return (
+		value.foreignSchema === expected.foreignSchema &&
+		value.foreignTable === expected.foreignTable &&
+		JSON.stringify(jsonStringArray(value.columns)) ===
+			JSON.stringify(expected.columns) &&
+		JSON.stringify(jsonStringArray(value.foreignColumns)) ===
+			JSON.stringify(expected.foreignColumns)
+	);
+}
+
+function eventCheckMatches(value: string): boolean {
+	const normalized = value.replace(/\s+/gu, '').toLowerCase();
+	return new Set([
+		"check(eventin('intent','completion','observed'))",
+		"check((eventin('intent','completion','observed')))",
+		'check(eventin(intent,completion,observed))',
+		'check((eventin(intent,completion,observed)))',
+		"check((event=any(array['intent'::text,'completion'::text,'observed'::text])))",
+	]).has(normalized);
+}
+
+function assertRunTableShape(row: JournalTableShapeRow | undefined): void {
+	if (row?.relkind !== 'r') {
+		throw new Error('dbsp transition run journal table has invalid shape');
+	}
+	const columns = jsonRecord(row.columns);
+	if (
+		!columnsMatch(columns, {
+			run_id: 'text',
+			plan_digest: 'text',
+			target_context_digest: 'text',
+			database_id: 'text',
+			core_version: 'text',
+			started_at: 'timestamp with time zone',
+		})
+	) {
+		throw new Error('dbsp transition run journal table columns drifted');
+	}
+	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id"]') {
+		throw new Error('dbsp transition run journal table primary key drifted');
+	}
+	if (
+		jsonArray(row.foreign_keys).length !== 0 ||
+		jsonArray(row.checks).length !== 0
+	) {
+		throw new Error('dbsp transition run journal table constraints drifted');
+	}
+}
+
+function assertJournalTableShape(row: JournalTableShapeRow | undefined): void {
+	if (row?.relkind !== 'r') {
+		throw new Error('dbsp transition event journal table has invalid shape');
+	}
+	const columns = jsonRecord(row.columns);
+	if (
+		!columnsMatch(columns, {
+			run_id: 'text',
+			seq: 'bigint',
+			event: 'text',
+			step_id: 'text',
+			operation_ref: 'text',
+			operation_kind: 'jsonb',
+			recorded_at: 'timestamp with time zone',
+			record: 'jsonb',
+		})
+	) {
+		throw new Error('dbsp transition event journal table columns drifted');
+	}
+	if (JSON.stringify(jsonStringArray(row.primary_key)) !== '["run_id","seq"]') {
+		throw new Error('dbsp transition event journal table primary key drifted');
+	}
+	const foreignKeys = jsonArray(row.foreign_keys);
+	if (
+		foreignKeys.length !== 1 ||
+		!foreignKeyMatches(foreignKeys[0], {
+			columns: ['run_id'],
+			foreignSchema: DBSP_META_SCHEMA,
+			foreignTable: DBSP_TRANSITION_RUN_TABLE,
+			foreignColumns: ['run_id'],
+		})
+	) {
+		throw new Error('dbsp transition event journal table foreign key drifted');
+	}
+	const checks = jsonStringArray(row.checks);
+	if (checks.length !== 1 || !eventCheckMatches(checks[0]!)) {
+		throw new Error('dbsp transition event journal table CHECK drifted');
+	}
+}
+
+async function readJournalTableShape(
+	executor: TransitionJournalQueryable,
+	table: string,
+): Promise<JournalTableShapeRow | undefined> {
+	const result = await executor.query(
+		`/* dbsp_transition_journal_shape */ SELECT c.relkind AS relkind, ` +
+			`COALESCE((` +
+			`SELECT pg_catalog.jsonb_object_agg(a.attname, pg_catalog.jsonb_build_object(` +
+			`'type', pg_catalog.format_type(a.atttypid, a.atttypmod), ` +
+			`'notNull', a.attnotnull)) ` +
+			`FROM pg_catalog.pg_attribute a ` +
+			`WHERE a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped` +
+			`), '{}'::jsonb) AS columns, ` +
+			`COALESCE((` +
+			`SELECT pg_catalog.jsonb_agg(a.attname ORDER BY key.ordinality) ` +
+			`FROM pg_catalog.pg_constraint con ` +
+			`JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ON true ` +
+			`JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = key.attnum ` +
+			`WHERE con.conrelid = c.oid AND con.contype = 'p'` +
+			`), '[]'::jsonb) AS primary_key, ` +
+			`COALESCE((` +
+			`SELECT pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object(` +
+			`'columns', fk_cols.columns, ` +
+			`'foreignSchema', fn.nspname, ` +
+			`'foreignTable', fc.relname, ` +
+			`'foreignColumns', ref_cols.columns) ORDER BY con.conname) ` +
+			`FROM pg_catalog.pg_constraint con ` +
+			`JOIN pg_catalog.pg_class fc ON fc.oid = con.confrelid ` +
+			`JOIN pg_catalog.pg_namespace fn ON fn.oid = fc.relnamespace ` +
+			`JOIN LATERAL (` +
+			`SELECT pg_catalog.jsonb_agg(a.attname ORDER BY key.ordinality) AS columns ` +
+			`FROM unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality) ` +
+			`JOIN pg_catalog.pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = key.attnum` +
+			`) fk_cols ON true ` +
+			`JOIN LATERAL (` +
+			`SELECT pg_catalog.jsonb_agg(a.attname ORDER BY key.ordinality) AS columns ` +
+			`FROM unnest(con.confkey) WITH ORDINALITY AS key(attnum, ordinality) ` +
+			`JOIN pg_catalog.pg_attribute a ON a.attrelid = con.confrelid AND a.attnum = key.attnum` +
+			`) ref_cols ON true ` +
+			`WHERE con.conrelid = c.oid AND con.contype = 'f'` +
+			`), '[]'::jsonb) AS foreign_keys, ` +
+			`COALESCE((` +
+			`SELECT pg_catalog.jsonb_agg(pg_catalog.pg_get_constraintdef(con.oid, false) ORDER BY con.conname) ` +
+			`FROM pg_catalog.pg_constraint con ` +
+			`WHERE con.conrelid = c.oid AND con.contype = 'c'` +
+			`), '[]'::jsonb) AS checks ` +
+			`FROM pg_catalog.pg_class c ` +
+			`JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace ` +
+			`WHERE n.nspname = $1 AND c.relname = $2`,
+		[DBSP_META_SCHEMA, table],
+	);
+	return result.rows[0] as JournalTableShapeRow | undefined;
+}
+
+async function verifyTransitionJournalShape(
+	executor: TransitionJournalQueryable,
+): Promise<void> {
+	assertRunTableShape(
+		await readJournalTableShape(executor, DBSP_TRANSITION_RUN_TABLE),
+	);
+	assertJournalTableShape(
+		await readJournalTableShape(executor, DBSP_TRANSITION_JOURNAL_TABLE),
+	);
+}
+
 export async function ensureTransitionJournal(
 	executor: TransitionJournalQueryable,
 ): Promise<void> {
 	await executor.query(renderCreateDbspMetaSchemaSql());
 	await executor.query(renderCreateTransitionRunTableSql());
 	await executor.query(renderCreateTransitionJournalTableSql());
+	await verifyTransitionJournalShape(executor);
 }
 
 function requireRun(record: DurableIntentRecord): TransitionRunMetadata {
@@ -136,6 +385,26 @@ async function ensureRun(
 			run.startedAt,
 		],
 	);
+	const existing = await executor.query(
+		`SELECT run_id, plan_digest, target_context_digest, database_id, core_version, started_at ` +
+			`FROM ${transitionRunTable()} WHERE run_id = $1`,
+		[run.runId],
+	);
+	const row = existing.rows[0];
+	if (!row) {
+		throw new Error('dbsp transition run metadata was not persisted');
+	}
+	const current = runMetadataFromRow(row);
+	if (
+		current.planDigest !== run.planDigest ||
+		current.targetContextDigest !== run.targetContextDigest ||
+		current.databaseId !== run.databaseId ||
+		current.coreVersion !== run.coreVersion
+	) {
+		throw new Error(
+			`dbsp transition run ${run.runId} already exists with different metadata`,
+		);
+	}
 }
 
 async function appendJournalEvent(params: {

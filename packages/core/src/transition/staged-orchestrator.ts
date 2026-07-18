@@ -2,6 +2,7 @@ import type {
 	ApplyPolicy,
 	ApplyResult,
 	CompareOutcome,
+	EquivalenceContext,
 	IssuedObservation,
 	ModelIR,
 	ObservationContext,
@@ -55,6 +56,17 @@ function candidateResources(
 			candidate.obligations.flatMap((obligation) => [...obligation.scope]),
 		),
 	);
+}
+
+function equivalenceContextFromObservation(
+	context: ObservationContext,
+): EquivalenceContext {
+	return {
+		engine: context.engine,
+		...(context.databaseId ? { databaseId: context.databaseId } : {}),
+		...(context.targetSchema ? { targetSchema: context.targetSchema } : {}),
+		...(context.searchPath ? { searchPath: context.searchPath } : {}),
+	};
 }
 
 function blockedAssessment(reason: OutcomeReason): PlanAssessment {
@@ -233,8 +245,13 @@ export function createStagedTransitionOrchestrator(
 			const maxIterations = input.maxIterations ?? 32;
 
 			for (let iteration = 0; iteration < maxIterations; iteration += 1) {
+				const context = await input.readContext();
 				const current = await input.loadCurrent();
-				const compare = comparator.compare(input.desired, current);
+				const compare = comparator.compare(
+					input.desired,
+					current,
+					equivalenceContextFromObservation(context),
+				);
 				if (
 					compare.kind === 'no-drift' ||
 					(compare.kind === 'transitions' && compare.candidates.length === 0)
@@ -247,7 +264,6 @@ export function createStagedTransitionOrchestrator(
 				}
 				if (compare.kind !== 'transitions') {
 					if (compare.kind === 'unknown' && hasAppliedWork(journals)) {
-						const context = await input.readContext();
 						const proof = await prover.prove(compare, input.target, context);
 						switch (proof.kind) {
 							case 'no-drift':
@@ -278,7 +294,6 @@ export function createStagedTransitionOrchestrator(
 					);
 				}
 
-				const context = await input.readContext();
 				const preflight = preflightStagedComposition(registry, {
 					compare,
 					current,

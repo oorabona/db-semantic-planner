@@ -106,8 +106,13 @@ function deparseEvidence(
 	right: ExpressionValue,
 	leftCanonical: string,
 	rightCanonical: string,
+	options: {
+		readonly request?: ObservationRequest;
+		readonly context?: EvidenceObservation['context'];
+		readonly claims?: readonly Record<string, unknown>[];
+	} = {},
 ): EvidenceObservation {
-	const request: ObservationRequest = {
+	const request: ObservationRequest = options.request ?? {
 		kind: EXPRESSION_DEPARSE_OBSERVATION,
 		scope: [],
 		detail: {
@@ -132,9 +137,10 @@ function deparseEvidence(
 				category: 'scalar',
 				leftCanonical,
 				rightCanonical,
+				...(options.claims ? { claims: options.claims } : {}),
 			},
 		},
-		context: {
+		context: options.context ?? {
 			engine: 'postgresql',
 			engineVersion: '180000',
 			databaseId: 'test',
@@ -148,6 +154,36 @@ function deparseEvidence(
 		scope: [],
 		source: 'vendor-deparser',
 		validity: { invalidatedBy: ['external-ddl'] },
+	};
+}
+
+function columnDeparseRequest(
+	left: ExpressionValue,
+	right: ExpressionValue,
+	table = 'users',
+	column = 'status',
+): ObservationRequest {
+	return {
+		kind: EXPRESSION_DEPARSE_OBSERVATION,
+		scope: [
+			{
+				engine: 'postgresql',
+				database: 'test',
+				schema: 'public',
+				kind: 'column',
+				name: column,
+				qualifiedBy: [table],
+			},
+		],
+		detail: {
+			surface: 'column-default',
+			category: 'scalar',
+			table,
+			column,
+			schema: 'public',
+			left,
+			right,
+		},
 	};
 }
 
@@ -323,6 +359,108 @@ describe('PostgreSQL transition equivalence', () => {
 		);
 
 		expect(result.kind).toBe('equivalent');
+	});
+
+	it('does not use sibling column deparse evidence for a bound comparison target', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'active'::text");
+		const request = columnDeparseRequest(left, right, 'users', 'status');
+		const siblingRequest = columnDeparseRequest(
+			left,
+			right,
+			'accounts',
+			'status',
+		);
+		const boundContext = {
+			engine: 'postgresql',
+			databaseId: 'test',
+			targetSchema: 'public',
+			deparseRequest: request,
+		};
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			boundContext,
+			[
+				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+					request: siblingRequest,
+					context: {
+						engine: 'postgresql',
+						engineVersion: '180000',
+						databaseId: 'test',
+						targetSchema: 'public',
+						searchPath: ['public'],
+						capabilities: [],
+						privileges: [],
+						sessionConfiguration: {},
+						extensions: {},
+					},
+				}),
+			],
+		);
+
+		expect(result.kind).toBe('unknown');
+	});
+
+	it('fails closed when scoped deparse evidence conflicts', () => {
+		const equivalence = createPgEquivalenceCapability();
+		const left = portable('active');
+		const right = sqlExpression("'active'::text");
+		const request = columnDeparseRequest(left, right);
+		const boundContext = {
+			engine: 'postgresql',
+			databaseId: 'test',
+			targetSchema: 'public',
+			deparseRequest: request,
+		};
+
+		const result = equivalence.compareExpression(
+			left,
+			right,
+			'scalar',
+			boundContext,
+			[
+				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+					request,
+					context: {
+						engine: 'postgresql',
+						engineVersion: '180000',
+						databaseId: 'test',
+						targetSchema: 'public',
+						searchPath: ['public'],
+						capabilities: [],
+						privileges: [],
+						sessionConfiguration: {},
+						extensions: {},
+					},
+				}),
+				deparseEvidence(left, right, "'active'::text", "'pending'::text", {
+					request,
+					context: {
+						engine: 'postgresql',
+						engineVersion: '180000',
+						databaseId: 'test',
+						targetSchema: 'public',
+						searchPath: ['public'],
+						capabilities: [],
+						privileges: [],
+						sessionConfiguration: {},
+						extensions: {},
+					},
+				}),
+			],
+		);
+
+		expect(result.kind).toBe('unknown');
+		if (result.kind === 'unknown') {
+			expect(result.obligations[0]?.proposition.detail).toMatchObject({
+				reason:
+					'deparse evidence contains both equivalent and different results',
+			});
+		}
 	});
 
 	it('keeps unresolvable defaults unknown without accepting deparse evidence', () => {

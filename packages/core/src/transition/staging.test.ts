@@ -174,12 +174,20 @@ function producerRule(id = 'mock.enum.add', opRef = 'op:enum') {
 }
 
 function consumerRule() {
+	return consumerRuleWithNeed('producer-after-commit');
+}
+
+function consumerRuleWithNeed(
+	needs: NonNullable<
+		TransitionFragmentComposition['requires']
+	>[number]['needs'],
+) {
 	return rule('mock.check.add', 'op:check', {
 		requires: [
 			{
 				opRef: 'op:check',
 				fact: enumLabelFact,
-				needs: 'producer-after-commit',
+				needs,
 			},
 		],
 	});
@@ -341,6 +349,33 @@ describe('staged composition preflight', () => {
 		expect(outcome.kind).toBe('proven');
 	});
 
+	it('stages after-commit facts even when the consumer asks for before-operation availability', () => {
+		const enumRule = producerRule();
+		const checkRule = consumerRuleWithNeed('producer-before-operation');
+		const reg = registry([enumRule, checkRule]);
+		const diff = compare([
+			candidate(enumRule, 'op:enum'),
+			candidate(checkRule, 'op:check'),
+		]);
+
+		const preflight = preflightStagedComposition(reg, {
+			compare: diff,
+			current: model(['active']),
+			context,
+		});
+
+		expect(preflight.kind).toBe('provable-in-stages');
+		if (preflight.kind !== 'provable-in-stages') {
+			return;
+		}
+		expect(preflight.ready.map((entry) => entry.candidate.rule.id)).toEqual([
+			'mock.enum.add',
+		]);
+		expect(preflight.pending.map((entry) => entry.candidate.rule.id)).toEqual([
+			'mock.check.add',
+		]);
+	});
+
 	it('treats a declared requirement as ready once the committed model satisfies it', () => {
 		const checkRule = consumerRule();
 		const reg = registry([checkRule]);
@@ -377,6 +412,24 @@ describe('staged composition preflight', () => {
 				code: 'unsupported-transition',
 			});
 			expect(preflight.assessment.reasons[0]?.detail).toMatch(
+				/unsatisfied composition requirement/,
+			);
+		}
+	});
+
+	it('blocks direct proof when a required composition fact is neither committed nor produced', async () => {
+		const checkRule = consumerRule();
+		const reg = registry([checkRule]);
+		const diff = compare([candidate(checkRule, 'op:check')]);
+
+		const outcome = await createProver(reg).prove(diff, proofTarget(), context);
+
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]).toMatchObject({
+				code: 'unsupported-transition',
+			});
+			expect(outcome.assessment.reasons[0]?.detail).toMatch(
 				/unsatisfied composition requirement/,
 			);
 		}

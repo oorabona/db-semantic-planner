@@ -6,6 +6,7 @@ import type {
 	CompareOutcome,
 	EnumIR,
 	EvidenceObservation,
+	JsonValue,
 	ModelIR,
 	ObservationContext,
 	ObservationIssuer,
@@ -75,6 +76,11 @@ const context: ObservationContext = {
 	sessionConfiguration: {},
 	extensions: {},
 };
+
+const logicalIdentityCarrier = {
+	kind: 'postgresql-side-table',
+	authenticated: false,
+} as const;
 
 type ProverOutcome = Awaited<
 	ReturnType<ReturnType<typeof createProver>['prove']>
@@ -450,6 +456,22 @@ function obligationForRequest(request: ObservationRequest): ProofObligation {
 	};
 }
 
+function unresolvedSchemaColumnRequest(): ObservationRequest {
+	return {
+		kind: 'mock.column.exists',
+		scope: [
+			{
+				engine: 'postgresql',
+				database: 'model',
+				kind: 'column',
+				name: 'age',
+				qualifiedBy: ['users'],
+			},
+		],
+		detail: { table: 'users', column: 'age', schema: null },
+	};
+}
+
 function baseFragment(evaluation: {
 	readonly obligations: readonly ProofObligation[];
 	readonly assumptions: readonly Assumption[];
@@ -467,6 +489,7 @@ function baseFragment(evaluation: {
 				appliesTo: operation().ref,
 				predicate: {
 					kind: 'NO_NULLS',
+					target: columnResource(),
 					scope: [columnResource()],
 				},
 				protocol: {
@@ -1404,6 +1427,31 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('no-drift');
 	});
 
+	it('does not treat a current index with omitted catalog validity as no-drift', () => {
+		const index = {
+			name: 'idx_users_age',
+			columns: ['age'],
+			unique: true,
+		} as const;
+		const desiredTable = { ...table(false), indexes: [index] };
+
+		expect(
+			createComparator(registry()).compare(
+				modelFromTable(desiredTable),
+				modelFromTable(desiredTable),
+			).kind,
+		).not.toBe('no-drift');
+		expect(
+			createComparator(registry()).compare(
+				modelFromTable(desiredTable),
+				modelFromTable({
+					...desiredTable,
+					indexes: [{ ...index, valid: true, ready: true }],
+				}),
+			).kind,
+		).toBe('no-drift');
+	});
+
 	it('keeps a table rename without identity unsupported with no transition candidates', () => {
 		const compare = createComparator(registry()).compare(
 			modelFromTable({ ...table(false), name: 'accounts' }),
@@ -1441,7 +1489,10 @@ describe('createComparator', () => {
 	});
 
 	it('recognizes same logical id with a different physical table name as unsupported until rename rules exist', () => {
-		const logicalIdentity = { id: 'logical.table.users' };
+		const logicalIdentity = {
+			id: 'logical.table.users',
+			carrier: logicalIdentityCarrier,
+		};
 		const compare = createComparator(registry()).compare(
 			modelFromTable({
 				...table(false),
@@ -1456,7 +1507,10 @@ describe('createComparator', () => {
 	});
 
 	it('recognizes same logical id with a different physical column name as unsupported until rename rules exist', () => {
-		const logicalIdentity = { id: 'logical.column.users.age' };
+		const logicalIdentity = {
+			id: 'logical.column.users.age',
+			carrier: logicalIdentityCarrier,
+		};
 		const compare = createComparator(registry()).compare(
 			modelFromTable(
 				table(false, [{ ...column(false, 'years'), logicalIdentity }]),
@@ -1874,6 +1928,45 @@ describe('createComparator', () => {
 				expect.objectContaining({
 					kind: 'sequence',
 					name: 'audit_id',
+				}),
+			);
+		}
+	});
+
+	it('surfaces managed relation name-normalization collisions as unsupported drift', () => {
+		const usersPosts = relation('posts');
+		const compare = createComparator(
+			registry({
+				comparatorNameNormalizer: {
+					normalizeCurrentIdentifier: (identifier) => identifier.toLowerCase(),
+				},
+			}),
+		).compare(
+			modelFromTablesWithOptionalCollections([table(false)], {
+				relations: relationMap([usersPosts]),
+			}),
+			modelFromTablesWithOptionalCollections([table(true)], {
+				relations: new Map([
+					[
+						'Users.Posts',
+						{
+							...relation('Posts'),
+							source: 'Users',
+							target: 'Posts',
+						},
+					],
+					['users.posts', usersPosts],
+				]),
+			}),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'relation',
+					name: 'posts',
+					qualifiedBy: ['users'],
 				}),
 			);
 		}
@@ -2337,16 +2430,22 @@ describe('createComparator', () => {
 		});
 	});
 
-	it('treats an unchanged enum with unspecified desired schema as no-drift', () => {
+	it('does not match an unchanged schemaed current enum from an omitted desired schema', () => {
 		const customRegistry = registry({ rules: [enumRule()] });
 		const compare = createComparator(customRegistry).compare(
 			modelFromEnums([enumDef(['active', 'pending'])]),
 			modelFromEnums([{ ...enumDef(['active', 'pending']), schema: 'tenant' }]),
 		);
 
-		expect(compare.kind).toBe('no-drift');
-		if (compare.kind === 'transitions') {
-			expect(compare.candidates).toHaveLength(0);
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'type',
+					name: 'status',
+					qualifiedBy: ['enum'],
+				}),
+			);
 		}
 	});
 
@@ -3455,17 +3554,266 @@ describe('createProver', () => {
 		expect(derived.capabilities).toEqual(['external-pack-capability', 'mock']);
 	});
 
-	it('refuses scope/detail mismatched evidence for an obligation', async () => {
-		const badIssuer = issuer(true, (request) => ({
-			...request,
-			scope: [columnResource('height')],
-			detail: { table: 'users', column: 'height' },
-		}));
+	it('accepts returned observations normalized to the live schema and database', async () => {
+		const request = unresolvedSchemaColumnRequest();
+		const proofContext = { ...context, targetSchema: 'tenant' };
+		const customRegistry = registry({
+			rules: [
+				rule({
+					requiredObservations: () => [request],
+					evaluate: () => ({
+						outcome: 'applicable',
+						obligations: [obligationForRequest(request)],
+						assumptions: [],
+					}),
+				}),
+			],
+			issuer: issuer(true, () => ({
+				kind: request.kind,
+				scope: [
+					{
+						engine: 'postgresql',
+						database: proofContext.databaseId,
+						schema: proofContext.targetSchema,
+						kind: 'column',
+						name: 'age',
+						qualifiedBy: ['users'],
+					},
+				],
+				detail: {
+					table: 'users',
+					column: 'age',
+					schema: proofContext.targetSchema,
+				},
+			})),
+		});
+		const compare = createComparator(customRegistry).compare(
+			model(false),
+			model(true),
+		);
+		if (compare.kind !== 'transitions') {
+			throw new Error(`expected transitions, got ${compare.kind}`);
+		}
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			proofContext,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind === 'proven') {
+			expect(outcome.plan.observations[0]?.request).toMatchObject({
+				scope: [
+					expect.objectContaining({
+						database: proofContext.databaseId,
+						schema: proofContext.targetSchema,
+					}),
+				],
+				detail: expect.objectContaining({
+					schema: proofContext.targetSchema,
+				}),
+			});
+		}
+	});
+
+	it('accepts returned observations with envelope-only normalization for the same concrete target', async () => {
+		const request = unresolvedSchemaColumnRequest();
+		const proofContext = {
+			...context,
+			engineVersion: '18.0',
+			targetSchema: 'tenant',
+		};
+		const proposition =
+			request.detail === undefined
+				? { kind: request.kind, scope: request.scope }
+				: {
+						kind: request.kind,
+						scope: request.scope,
+						detail: request.detail,
+					};
+		const normalizedRequest: ObservationRequest = {
+			kind: request.kind,
+			scope: [
+				{
+					engine: 'postgresql',
+					database: proofContext.databaseId,
+					schema: proofContext.targetSchema,
+					kind: 'column',
+					name: 'age',
+					qualifiedBy: ['users'],
+				},
+			],
+			detail: {
+				table: 'users',
+				column: 'age',
+				schema: proofContext.targetSchema,
+				issuerRequestId: 'issuer-normalized-request',
+				capabilityEnvelope: {
+					engineVersion: proofContext.engineVersion,
+					capabilities: proofContext.capabilities,
+				},
+			},
+		};
+		const normalizingIssuer: ObservationIssuer = {
+			artifact: issuerArtifact,
+			execute: async (
+				_request,
+				_target,
+				ctx,
+			): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId('mock.evidence.normalized-envelope'),
+				issuer: issuerArtifact,
+				request: normalizedRequest,
+				result: {
+					value: {
+						claims: [
+							{
+								kind: request.kind,
+								holds: true,
+								proposition: proposition as unknown as JsonValue,
+							},
+						],
+					} as JsonValue,
+				},
+				context: {
+					...ctx,
+					engineVersion: `${ctx.engineVersion}.issuer-normalized`,
+					capabilities: [...ctx.capabilities, 'issuer-stamped-capability'],
+				},
+				stability: 'externally-mutable',
+				takenAt: '2026-07-18T00:00:00.000Z',
+				scope: normalizedRequest.scope,
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		};
+		const customRegistry = registry({
+			rules: [
+				rule({
+					requiredObservations: () => [request],
+					evaluate: () => ({
+						outcome: 'applicable',
+						obligations: [obligationForRequest(request)],
+						assumptions: [],
+					}),
+				}),
+			],
+			issuer: normalizingIssuer,
+		});
+		const compare = createComparator(customRegistry).compare(
+			model(false),
+			model(true),
+		);
+		if (compare.kind !== 'transitions') {
+			throw new Error(`expected transitions, got ${compare.kind}`);
+		}
+
+		const outcome = await createProver(customRegistry).prove(
+			compare,
+			proofTarget(),
+			proofContext,
+		);
+
+		expect(outcome.kind).toBe('proven');
+		if (outcome.kind === 'proven') {
+			expect(outcome.plan.observations[0]?.request).toEqual(normalizedRequest);
+		}
+	});
+
+	it.each([
+		[
+			'database',
+			[{ ...columnResource(), database: 'other-db' }],
+			{ table: 'users', column: 'age' },
+		],
+		[
+			'table',
+			[{ ...columnResource(), qualifiedBy: ['accounts'] }],
+			{ table: 'accounts', column: 'age' },
+		],
+		[
+			'column',
+			[columnResource('height')],
+			{ table: 'users', column: 'height' },
+		],
+	] as const)('refuses evidence whose claim proposition targets a different %s', async (_field, claimScope, claimDetail) => {
+		const badIssuer: ObservationIssuer = {
+			artifact: issuerArtifact,
+			execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId(`mock.evidence.bad-claim.${request.kind}`),
+				issuer: issuerArtifact,
+				request,
+				result: {
+					value: {
+						claims: [
+							{
+								kind: request.kind,
+								holds: true,
+								scope: claimScope,
+								detail: claimDetail as JsonValue,
+							},
+						],
+					},
+				},
+				context: ctx,
+				stability: 'externally-mutable',
+				takenAt: new Date().toISOString(),
+				scope: request.scope,
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		};
 		const outcome = await createProver(registry({ issuer: badIssuer })).prove(
 			validCompare(),
 			proofTarget(),
 			context,
 		);
+		expect(outcome.kind).toBe('blocked');
+		if (outcome.kind === 'blocked') {
+			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
+		}
+	});
+
+	it('blocks conflicting evidence for the same request and context', async () => {
+		const conflictingIssuer: ObservationIssuer = {
+			artifact: issuerArtifact,
+			execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId(`mock.evidence.conflict.${request.kind}`),
+				issuer: issuerArtifact,
+				request,
+				result: {
+					value: {
+						claims: [
+							{
+								kind: request.kind,
+								holds: true,
+								scope: request.scope,
+								detail: request.detail,
+							},
+							{
+								kind: request.kind,
+								holds: false,
+								scope: request.scope,
+								detail: request.detail,
+							},
+						],
+					},
+				},
+				context: ctx,
+				stability: 'externally-mutable',
+				takenAt: new Date().toISOString(),
+				scope: request.scope,
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		};
+		const outcome = await createProver(
+			registry({ issuer: conflictingIssuer }),
+		).prove(validCompare(), proofTarget(), context);
 		expect(outcome.kind).toBe('blocked');
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');

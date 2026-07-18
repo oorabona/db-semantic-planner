@@ -9,13 +9,19 @@ import type {
 	EvidenceObservation,
 	ExpressionValue,
 	JsonValue,
+	LogicalIdentity,
+	ObservationRequest,
 	ProofClaimDraft,
 	ProofObligation,
 	ResourceAddress,
 	TypeRef,
 } from '@dbsp/types';
-import { PG_DEPARSE_ARTIFACT } from './constants.js';
+import {
+	EXPRESSION_DEPARSE_OBSERVATION,
+	PG_DEPARSE_ARTIFACT,
+} from './constants.js';
 import { assumptionId } from './ids.js';
+import { stableJson } from './stable-json.js';
 
 export interface SetNotNullColumnShapeExpectation {
 	readonly kind: 'postgresql.set-not-null.column-shape.v1';
@@ -32,7 +38,9 @@ export interface SetNotNullColumnShapeExpectation {
 	readonly autoIncrement: boolean;
 	readonly unique: boolean;
 	readonly uniqueConstraintName: string | null;
+	readonly logicalIdentity?: LogicalIdentity | null;
 	readonly comment: string | null;
+	readonly target?: ColumnDefaultAttestationTarget;
 }
 
 export interface SetNotNullObservedColumnShape {
@@ -46,7 +54,9 @@ export interface SetNotNullObservedColumnShape {
 	readonly autoIncrement: boolean;
 	readonly unique: boolean;
 	readonly uniqueConstraintName: string | null;
+	readonly logicalIdentity?: LogicalIdentity | null;
 	readonly comment: string | null;
+	readonly target?: ColumnDefaultAttestationTarget;
 }
 
 export type SetNotNullColumnShapeComparison =
@@ -96,6 +106,10 @@ export interface ColumnDefaultAttestationTarget {
 	readonly table: string;
 	readonly column: string;
 }
+
+type DeparseBoundEquivalenceContext = EquivalenceContext & {
+	readonly deparseRequest?: ObservationRequest;
+};
 
 type ParsedTypeSpelling = {
 	readonly name: string;
@@ -609,7 +623,9 @@ export function expectedColumnShapeFor(
 		autoIncrement: column.autoIncrement ?? false,
 		unique: column.unique ?? false,
 		uniqueConstraintName: column.uniqueConstraintName ?? null,
+		logicalIdentity: column.logicalIdentity ?? null,
 		comment: column.comment ?? null,
+		...(target ? { target } : {}),
 	};
 }
 
@@ -631,7 +647,9 @@ export function columnShapeFromColumn(
 		autoIncrement: column.autoIncrement ?? false,
 		unique: column.unique ?? false,
 		uniqueConstraintName: column.uniqueConstraintName ?? null,
+		logicalIdentity: column.logicalIdentity ?? null,
 		comment: column.comment ?? null,
+		...(target ? { target } : {}),
 	};
 }
 
@@ -650,8 +668,58 @@ export function columnShapeFromCatalog(
 		autoIncrement: catalog.autoIncrement ?? false,
 		unique: catalog.unique ?? false,
 		uniqueConstraintName: catalog.uniqueConstraintName ?? null,
+		logicalIdentity: null,
 		comment: catalog.comment ?? null,
 	};
+}
+
+function deparseResourceForTarget(
+	target: ColumnDefaultAttestationTarget,
+	context: EquivalenceContext,
+): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: context.databaseId ?? target.database ?? 'model',
+		...((target.schema ?? context.targetSchema)
+			? { schema: target.schema ?? context.targetSchema }
+			: {}),
+		kind: 'column',
+		name: target.column,
+		qualifiedBy: [target.table],
+	};
+}
+
+function deparseRequestForDefault(
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	context: EquivalenceContext,
+): ObservationRequest | undefined {
+	const target = expected.target ?? observed.target;
+	if (!target || expected.default == null || observed.default == null) {
+		return undefined;
+	}
+	return {
+		kind: EXPRESSION_DEPARSE_OBSERVATION,
+		scope: [deparseResourceForTarget(target, context)],
+		detail: {
+			surface: 'column-default',
+			category: 'scalar',
+			table: target.table,
+			column: target.column,
+			schema: target.schema ?? context.targetSchema ?? null,
+			left: expected.default as unknown as JsonValue,
+			right: observed.default as unknown as JsonValue,
+		},
+	};
+}
+
+function contextWithDefaultDeparseRequest(
+	expected: SetNotNullColumnShapeExpectation,
+	observed: SetNotNullObservedColumnShape,
+	context: EquivalenceContext,
+): DeparseBoundEquivalenceContext {
+	const request = deparseRequestForDefault(expected, observed, context);
+	return request ? { ...context, deparseRequest: request } : context;
 }
 
 function addFieldToObligations(
@@ -715,6 +783,29 @@ function structuralDifferent(
 	return { kind: 'different', field, detail, claimDrafts };
 }
 
+function isLogicalIdentityValue(value: unknown): boolean {
+	return (
+		value === undefined ||
+		value === null ||
+		(isRecord(value) &&
+			typeof value.id === 'string' &&
+			isRecord(value.carrier) &&
+			value.carrier.kind === 'postgresql-side-table' &&
+			value.carrier.authenticated === false)
+	);
+}
+
+function isColumnShapeTarget(value: unknown): boolean {
+	return (
+		value === undefined ||
+		(isRecord(value) &&
+			(value.database === undefined || typeof value.database === 'string') &&
+			(value.schema === undefined || typeof value.schema === 'string') &&
+			typeof value.table === 'string' &&
+			typeof value.column === 'string')
+	);
+}
+
 export function compareSetNotNullColumnShape(
 	expected: SetNotNullColumnShapeExpectation,
 	observed: SetNotNullObservedColumnShape,
@@ -761,6 +852,16 @@ export function compareSetNotNullColumnShape(
 	if (expected.unique !== observed.unique) {
 		return structuralDifferent('unique', 'unique state changed', claimDrafts);
 	}
+	if (
+		stableJson(expected.logicalIdentity ?? null) !==
+		stableJson(observed.logicalIdentity ?? null)
+	) {
+		return structuralDifferent(
+			'logicalIdentity',
+			'logical identity changed',
+			claimDrafts,
+		);
+	}
 	if (expected.comment !== observed.comment) {
 		return structuralDifferent(
 			'comment',
@@ -805,7 +906,7 @@ export function compareSetNotNullColumnShape(
 			expected.default,
 			observed.default,
 			'scalar',
-			context,
+			contextWithDefaultDeparseRequest(expected, observed, context),
 			evidence,
 		);
 		const defaultComparison = handleEquivalenceField(
@@ -867,9 +968,13 @@ export function isSetNotNullColumnShapeExpectation(
 		typeof value.unique !== 'boolean' ||
 		(value.uniqueConstraintName !== null &&
 			typeof value.uniqueConstraintName !== 'string') ||
+		!isLogicalIdentityValue(value.logicalIdentity) ||
 		(value.comment !== null && typeof value.comment !== 'string')
 	) {
 		return false;
 	}
-	return value.default === null || isRecord(value.default);
+	return (
+		(value.default === null || isRecord(value.default)) &&
+		isColumnShapeTarget(value.target)
+	);
 }
