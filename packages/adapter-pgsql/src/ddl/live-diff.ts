@@ -3,6 +3,8 @@ import {
 	type CanonicalizeCheckConstraintsOptions,
 	type CheckConstraintCanonicalizationWarning,
 	canonicalizeCheckConstraints,
+	fallbackToRawCheckConstraintComparison,
+	isCheckCanonicalizationTempTableUnavailableError,
 } from '../expression-canonicalizer.js';
 import type {
 	IntrospectionOptions,
@@ -117,13 +119,12 @@ export async function comparePgsqlDatabaseSchema(
 		compareCheckConstraints && (options?.canonicalizeExpressions ?? true);
 	const rawCheckExpressionSurfaces = new Set<string>();
 	const desiredForCompare = useCanonicalizer
-		? await adapter.withScratchScope((scratch) =>
-				canonicalizeCheckConstraints(
-					scratch,
-					desired,
-					dbModel,
-					toCanonicalizerOptions(options, rawCheckExpressionSurfaces),
-				),
+		? await canonicalizeLiveCheckConstraints(
+				adapter,
+				desired,
+				dbModel,
+				options,
+				rawCheckExpressionSurfaces,
 			)
 		: desired;
 	if (
@@ -163,6 +164,42 @@ export async function comparePgsqlDatabaseSchema(
 	}
 
 	return diff;
+}
+
+async function canonicalizeLiveCheckConstraints(
+	adapter: PgsqlAdapter,
+	desired: ModelIR,
+	dbModel: ModelIR,
+	options: ComparePgsqlDatabaseSchemaOptions | undefined,
+	rawCheckExpressionSurfaces: Set<string>,
+): Promise<ModelIR> {
+	const canonicalizerOptions = toCanonicalizerOptions(
+		options,
+		rawCheckExpressionSurfaces,
+	);
+	try {
+		return await adapter.withScratchScope((scratch) =>
+			canonicalizeCheckConstraints(
+				scratch,
+				desired,
+				dbModel,
+				canonicalizerOptions,
+			),
+		);
+	} catch (error) {
+		if (
+			options?.requireExpressionCanonicalization === true ||
+			!isCheckCanonicalizationTempTableUnavailableError(error)
+		) {
+			throw error;
+		}
+		return fallbackToRawCheckConstraintComparison(
+			desired,
+			dbModel,
+			error,
+			canonicalizerOptions,
+		);
+	}
 }
 
 function assertNoUncanonicalizedLiveExpressionSurfaces(

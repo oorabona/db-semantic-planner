@@ -96,15 +96,68 @@ function checkExpressionDiff(
 	};
 }
 
-function makeAdapter(dbModel: ModelIR): PgsqlAdapter {
+function makeAdapter(
+	dbModel: ModelIR,
+	withScratchScope?: (
+		fn: (scratch: PgsqlAdapter) => Promise<unknown>,
+	) => Promise<unknown>,
+): PgsqlAdapter {
 	const adapter = {
 		introspect: vi.fn(async () => dbModel),
 		withScratchScope: vi.fn(
-			async (fn: (scratch: PgsqlAdapter) => Promise<unknown>) =>
-				fn(adapter as unknown as PgsqlAdapter),
+			withScratchScope ??
+				(async (fn) => fn(adapter as unknown as PgsqlAdapter)),
 		),
 	} as unknown as PgsqlAdapter;
 	return adapter;
+}
+
+function makeCheckFallbackModels(): {
+	readonly desired: ModelIR;
+	readonly dbModel: ModelIR;
+} {
+	const desired = makeModel([
+		makeTable({
+			name: 'users',
+			checkConstraints: [{ name: 'users_age_check', expression: 'age > 0' }],
+		}),
+	]);
+	const dbModel = makeModel([
+		makeTable({
+			name: 'users',
+			checkConstraints: [
+				{ name: 'users_age_check', expression: 'CHECK ((age > 0))' },
+			],
+		}),
+	]);
+	return { desired, dbModel };
+}
+
+function pgError(code: string, message: string): Error {
+	return Object.assign(new Error(message), { code });
+}
+
+function tempTablePermissionDeniedError(): Error {
+	return pgError(
+		'42501',
+		'permission denied to create temporary tables in database "dbsp_test"',
+	);
+}
+
+async function expectNonStrictScratchFailureToThrow(
+	error: Error,
+): Promise<void> {
+	const { desired, dbModel } = makeCheckFallbackModels();
+	const adapter = makeAdapter(dbModel, async () => {
+		throw error;
+	});
+	const onWarning = vi.fn();
+
+	await expect(
+		comparePgsqlDatabaseSchema(adapter, desired, { onWarning }),
+	).rejects.toBe(error);
+	expect(mockCanonicalizeCheckConstraints).not.toHaveBeenCalled();
+	expect(onWarning).not.toHaveBeenCalled();
 }
 
 describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => {
@@ -160,6 +213,103 @@ describe('comparePgsqlDatabaseSchema strict expression canonicalization', () => 
 				requireExpressionCanonicalization: true,
 			}),
 		).rejects.toThrow(ExpressionCanonicalizationUnavailableError);
+	});
+
+	it('falls back with a warning when the scratch scope reports temp-table permission denial before returning', async () => {
+		const { desired, dbModel } = makeCheckFallbackModels();
+		const tempError = tempTablePermissionDeniedError();
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempError;
+		});
+		const onWarning = vi.fn();
+
+		const diff = await comparePgsqlDatabaseSchema(adapter, desired, {
+			onWarning,
+		});
+
+		expect(mockCanonicalizeCheckConstraints).not.toHaveBeenCalled();
+		expect(onWarning).toHaveBeenCalledWith(
+			expect.stringContaining(
+				'Could not canonicalize CHECK constraint "users"."users_age_check"',
+			),
+		);
+		expect(diff.changes.map((change) => change.kind)).toEqual([
+			'drop_check_constraint',
+			'add_check_constraint',
+		]);
+	});
+
+	it('propagates a cleanup failure aggregate even when it also contains temp-table denial in non-strict mode', async () => {
+		const tempError = tempTablePermissionDeniedError();
+		const cleanupError = pgError(
+			'25P02',
+			'current transaction is aborted, commands ignored until end of transaction block',
+		);
+		const wrapperError = new AggregateError(
+			[tempError, cleanupError],
+			'PostgreSQL transaction cleanup failed: savepoint cleanup failed after the transaction body failed',
+		);
+		Object.defineProperties(wrapperError, {
+			cause: { value: tempError, configurable: true },
+			cleanupError: { value: cleanupError, configurable: true },
+		});
+
+		await expectNonStrictScratchFailureToThrow(wrapperError);
+	});
+
+	it('propagates pure in_failed_sql_transaction instead of falling back in non-strict mode', async () => {
+		await expectNonStrictScratchFailureToThrow(
+			pgError(
+				'25P02',
+				'current transaction is aborted, commands ignored until end of transaction block',
+			),
+		);
+	});
+
+	it.each([
+		{
+			code: '25P01',
+			message: 'no active SQL transaction',
+		},
+		{
+			code: '3B001',
+			message: 'savepoint "dbsp_savepoint" does not exist',
+		},
+	])('propagates pure SQLSTATE $code instead of falling back in non-strict mode', async ({
+		code,
+		message,
+	}) => {
+		await expectNonStrictScratchFailureToThrow(pgError(code, message));
+	});
+
+	it('propagates read_only_sql_transaction instead of falling back in non-strict mode', async () => {
+		await expectNonStrictScratchFailureToThrow(
+			pgError(
+				'25006',
+				'cannot execute CREATE TABLE in a read-only transaction',
+			),
+		);
+	});
+
+	it('propagates scratch temp-table permission denial in strict mode', async () => {
+		const desired = makeModel([
+			makeTable({
+				name: 'users',
+				checkConstraints: [{ name: 'users_age_check', expression: 'age > 0' }],
+			}),
+		]);
+		const dbModel = makeModel([makeTable({ name: 'users' })]);
+		const tempError = tempTablePermissionDeniedError();
+		const adapter = makeAdapter(dbModel, async () => {
+			throw tempError;
+		});
+
+		await expect(
+			comparePgsqlDatabaseSchema(adapter, desired, {
+				requireExpressionCanonicalization: true,
+			}),
+		).rejects.toBe(tempError);
+		expect(mockCanonicalizeCheckConstraints).not.toHaveBeenCalled();
 	});
 
 	it('threads strict mode to compareSchemata when live canonicalization is disabled', async () => {

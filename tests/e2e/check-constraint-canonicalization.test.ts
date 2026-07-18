@@ -5,6 +5,7 @@
  * by the agent verification command for this change.
  */
 
+import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -16,6 +17,7 @@ import {
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl, schema } from '@dbsp/core';
 import type { ColumnIR, TableIR } from '@dbsp/types';
+import pg from 'pg';
 import {
 	afterAll,
 	beforeAll,
@@ -36,6 +38,7 @@ import {
 } from './testkit/index.js';
 
 const SCHEMA = 'check_canonicalization_test';
+const NO_TEMP_DATABASE_URL_ENV = 'DBSP_CHECK_CANON_NO_TEMP_DATABASE_URL';
 
 function makeCol(name: string, type: ColumnIR['type'] = 'integer'): ColumnIR {
 	return {
@@ -145,23 +148,6 @@ function quoteLiteral(value: string): string {
 	return `'${value.replace(/'/gu, "''")}'`;
 }
 
-async function publicHasTempPrivilege(
-	pool: Awaited<ReturnType<typeof getTestPool>>,
-): Promise<boolean> {
-	const result = await pool.query<{ acl: string[] | null }>(
-		`SELECT datacl::text[] AS acl
-		 FROM pg_database
-		 WHERE datname = current_database()`,
-	);
-	const acl = result.rows[0]?.acl;
-	if (acl === null || acl === undefined) return true;
-	return acl.some((item) => {
-		const grantee = item.slice(0, item.indexOf('='));
-		const privileges = item.slice(item.indexOf('=') + 1, item.indexOf('/'));
-		return grantee === '' && privileges.includes('T');
-	});
-}
-
 async function roleExists(
 	pool: Awaited<ReturnType<typeof getTestPool>>,
 	role: string,
@@ -173,32 +159,77 @@ async function roleExists(
 	return result.rows[0]?.exists === true;
 }
 
+interface NoTempRoleState {
+	readonly databasePool: pg.Pool;
+	readonly restrictedDatabaseUrl: string;
+	readonly schemaName: string;
+	readonly database?: string;
+	readonly expectedDatabase?: string;
+	readonly expectedUser?: string;
+	readonly roleToDrop?: string;
+	readonly roleToGrantTableRead?: string;
+}
+
+interface TestContextLike {
+	readonly skip: (note?: string) => void;
+}
+
+function uniquePgName(prefix: string): string {
+	return `${prefix}_${randomUUID().replace(/-/gu, '').slice(0, 12)}`;
+}
+
+async function canCreateDatabase(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+): Promise<boolean> {
+	const database = uniquePgName('check_canon_createdb_probe');
+	try {
+		await pool.query(`CREATE DATABASE ${quoteIdent(database)}`);
+		return true;
+	} catch {
+		return false;
+	} finally {
+		await dropDatabaseIfExists(pool, database).catch(() => undefined);
+	}
+}
+
 async function setupNoTempRole(
+	ctx: TestContextLike,
 	pool: Awaited<ReturnType<typeof getTestPool>>,
 	role: string,
 	password: string,
 	schemaName: string,
-): Promise<{ readonly database: string; readonly publicHadTemp: boolean }> {
-	const databaseResult = await pool.query<{ name: string }>(
-		'SELECT current_database() AS name',
-	);
-	const database = databaseResult.rows[0]!.name;
-	const publicHadTemp = await publicHasTempPrivilege(pool);
+): Promise<NoTempRoleState | undefined> {
+	const preconfiguredUrl = process.env[NO_TEMP_DATABASE_URL_ENV];
+	if (preconfiguredUrl) {
+		return setupPreconfiguredNoTempRole(preconfiguredUrl, schemaName);
+	}
+	if (!(await canCreateDatabase(pool))) {
+		ctx.skip(
+			`restricted no-temp role requires CREATEDB or a preconfigured no-temp database via ${NO_TEMP_DATABASE_URL_ENV}`,
+		);
+		return undefined;
+	}
+	return setupDedicatedNoTempRole(pool, role, password, schemaName);
+}
+
+async function setupDedicatedNoTempRole(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	role: string,
+	password: string,
+	schemaName: string,
+): Promise<NoTempRoleState> {
+	const database = uniquePgName('check_canon_verify_db');
+	let databasePool: pg.Pool | undefined;
 	if (await roleExists(pool, role)) {
-		await cleanupNoTempRole(pool, role, schemaName, database, publicHadTemp);
+		throw new Error(`test role "${role}" already exists`);
 	}
 	try {
 		await pool.query(
 			`CREATE ROLE ${quoteIdent(role)} LOGIN PASSWORD ${quoteLiteral(password)}`,
 		);
+		await pool.query(`CREATE DATABASE ${quoteIdent(database)}`);
 		await pool.query(
 			`GRANT CONNECT ON DATABASE ${quoteIdent(database)} TO ${quoteIdent(role)}`,
-		);
-		await pool.query(
-			`GRANT USAGE ON SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
-		);
-		await pool.query(
-			`GRANT SELECT ON ALL TABLES IN SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
 		);
 		await pool.query(
 			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM PUBLIC`,
@@ -206,48 +237,145 @@ async function setupNoTempRole(
 		await pool.query(
 			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM ${quoteIdent(role)}`,
 		);
-		return { database, publicHadTemp };
+
+		databasePool = new pg.Pool({
+			connectionString: databaseUrlForDatabase(database),
+			max: 1,
+		});
+		await databasePool.query(`CREATE SCHEMA ${quoteIdent(schemaName)}`);
+		await databasePool.query(
+			`GRANT USAGE ON SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
+		);
+		return {
+			database,
+			databasePool,
+			restrictedDatabaseUrl: databaseUrlForRole(role, password, database),
+			schemaName,
+			expectedDatabase: database,
+			expectedUser: role,
+			roleToDrop: role,
+			roleToGrantTableRead: role,
+		};
 	} catch (error) {
-		if (await roleExists(pool, role)) {
-			await cleanupNoTempRole(pool, role, schemaName, database, publicHadTemp);
+		await databasePool?.end().catch(() => undefined);
+		await dropDatabaseIfExists(pool, database).catch(() => undefined);
+		await pool
+			.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`)
+			.catch(() => undefined);
+		throw error;
+	}
+}
+
+async function setupPreconfiguredNoTempRole(
+	restrictedDatabaseUrl: string,
+	schemaName: string,
+): Promise<NoTempRoleState> {
+	const databasePool = new pg.Pool({
+		connectionString: restrictedDatabaseUrl,
+		max: 1,
+	});
+	try {
+		const identity = await connectionIdentity(databasePool);
+		if (identity.can_temp) {
+			throw new Error(
+				`${NO_TEMP_DATABASE_URL_ENV} must point to a role/database without TEMP privilege`,
+			);
 		}
+		await databasePool.query(
+			`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`,
+		);
+		await databasePool.query(`CREATE SCHEMA ${quoteIdent(schemaName)}`);
+		return {
+			databasePool,
+			restrictedDatabaseUrl,
+			schemaName,
+			expectedDatabase: identity.database,
+			expectedUser: identity.current_user,
+		};
+	} catch (error) {
+		await databasePool.end().catch(() => undefined);
 		throw error;
 	}
 }
 
 async function cleanupNoTempRole(
 	pool: Awaited<ReturnType<typeof getTestPool>>,
-	role: string,
-	schemaName: string,
-	database: string,
-	publicHadTemp: boolean,
+	state: NoTempRoleState,
 ): Promise<void> {
-	if (publicHadTemp) {
-		await pool.query(
-			`GRANT TEMPORARY ON DATABASE ${quoteIdent(database)} TO PUBLIC`,
-		);
-	} else {
-		await pool.query(
-			`REVOKE TEMPORARY ON DATABASE ${quoteIdent(database)} FROM PUBLIC`,
-		);
+	if (state.database === undefined) {
+		await state.databasePool
+			.query(`DROP SCHEMA IF EXISTS ${quoteIdent(state.schemaName)} CASCADE`)
+			.catch(() => undefined);
 	}
-	await pool.query(
-		`REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA ${quoteIdent(schemaName)} FROM ${quoteIdent(role)}`,
-	);
-	await pool.query(
-		`REVOKE ALL PRIVILEGES ON SCHEMA ${quoteIdent(schemaName)} FROM ${quoteIdent(role)}`,
-	);
-	await pool.query(
-		`REVOKE ALL PRIVILEGES ON DATABASE ${quoteIdent(database)} FROM ${quoteIdent(role)}`,
-	);
-	await pool.query(`DROP OWNED BY ${quoteIdent(role)}`);
-	await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(role)}`);
+	await state.databasePool.end();
+	if (state.database !== undefined) {
+		await dropDatabaseIfExists(pool, state.database);
+	}
+	if (state.roleToDrop !== undefined) {
+		await pool.query(`DROP ROLE IF EXISTS ${quoteIdent(state.roleToDrop)}`);
+	}
 }
 
-function databaseUrlForRole(role: string, password: string): string {
+async function grantNoTempRoleTableRead(
+	databasePool: pg.Pool,
+	role: string,
+	schemaName: string,
+): Promise<void> {
+	await databasePool.query(
+		`GRANT SELECT ON ALL TABLES IN SCHEMA ${quoteIdent(schemaName)} TO ${quoteIdent(role)}`,
+	);
+}
+
+async function dropDatabaseIfExists(
+	pool: Awaited<ReturnType<typeof getTestPool>>,
+	database: string,
+): Promise<void> {
+	await pool.query(
+		`SELECT pg_terminate_backend(pid)
+		   FROM pg_stat_activity
+		  WHERE datname = $1
+		    AND pid <> pg_backend_pid()`,
+		[database],
+	);
+	await pool.query(`DROP DATABASE IF EXISTS ${quoteIdent(database)}`);
+}
+
+async function connectionIdentity(pool: pg.Pool): Promise<{
+	readonly current_user: string;
+	readonly database: string;
+	readonly can_temp: boolean;
+}> {
+	const identity = await pool.query<{
+		current_user: string;
+		database: string;
+		can_temp: boolean;
+	}>(
+		`SELECT current_user,
+		        current_database() AS database,
+		        has_database_privilege(current_user, current_database(), 'TEMP') AS can_temp`,
+	);
+	const row = identity.rows[0];
+	if (row === undefined) {
+		throw new Error('PostgreSQL did not return connection identity');
+	}
+	return row;
+}
+
+function databaseUrlForDatabase(database: string): string {
+	const url = new URL(process.env.DATABASE_URL!);
+	url.pathname = `/${database}`;
+	return url.toString();
+}
+
+function databaseUrlForRole(
+	role: string,
+	password: string,
+	database: string,
+): string {
 	const url = new URL(process.env.DATABASE_URL!);
 	url.username = role;
 	url.password = password;
+	url.pathname = `/${database}`;
 	return url.toString();
 }
 
@@ -1039,7 +1167,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 			}
 		});
 
-		it('falls back to raw CHECK comparison with a warning when the role cannot create temp tables', async () => {
+		it('falls back to raw CHECK comparison with a warning when the role cannot create temp tables', async (ctx: TestContextLike) => {
 			const desired = schema(
 				{
 					jobs: {
@@ -1059,10 +1187,6 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 						],
 					},
 				},
-			);
-			await executeDdl(
-				pool,
-				generateDDL(desired.model, { schemaName: SCHEMA }),
 			);
 			const { schemaPath, tmpDir } = writeTempSchemaFile(`
 				import { schema } from '@dbsp/core';
@@ -1090,19 +1214,55 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 
 				export default dbSchema;
 			`);
-			const role = 'check_canon_verify_no_temp';
+			const role = uniquePgName('check_canon_verify_no_temp');
 			const password = 'check-canon-verify-no-temp';
-			let roleState: Awaited<ReturnType<typeof setupNoTempRole>> | undefined;
+			const restrictedSchema = uniquePgName('check_canon_verify_schema');
+			let roleState: NoTempRoleState | undefined;
 
 			try {
-				roleState = await setupNoTempRole(pool, role, password, SCHEMA);
+				roleState = await setupNoTempRole(
+					ctx,
+					pool,
+					role,
+					password,
+					restrictedSchema,
+				);
+				if (roleState === undefined) return;
+				await executeDdl(
+					roleState.databasePool,
+					generateDDL(desired.model, { schemaName: roleState.schemaName }),
+				);
+				if (roleState.roleToGrantTableRead !== undefined) {
+					await grantNoTempRoleTableRead(
+						roleState.databasePool,
+						roleState.roleToGrantTableRead,
+						roleState.schemaName,
+					);
+				}
+				const restrictedDatabaseUrl = roleState.restrictedDatabaseUrl;
+				const restrictedPool = new pg.Pool({
+					connectionString: restrictedDatabaseUrl,
+					max: 1,
+				});
+				try {
+					const identity = await connectionIdentity(restrictedPool);
+					expect(identity.can_temp).toBe(false);
+					if (roleState.expectedUser !== undefined) {
+						expect(identity.current_user).toBe(roleState.expectedUser);
+					}
+					if (roleState.expectedDatabase !== undefined) {
+						expect(identity.database).toBe(roleState.expectedDatabase);
+					}
+				} finally {
+					await restrictedPool.end();
+				}
 				const result = await runVerifyCommand([
 					'--schema',
 					schemaPath,
 					'--db',
-					databaseUrlForRole(role, password),
+					restrictedDatabaseUrl,
 					'--schema-name',
-					SCHEMA,
+					roleState.schemaName,
 					'--json',
 				]);
 				const json = parseVerifyJson(result);
@@ -1131,13 +1291,7 @@ describe('#315 CHECK constraint canonicalization live diff', () => {
 				]);
 			} finally {
 				if (roleState !== undefined) {
-					await cleanupNoTempRole(
-						pool,
-						role,
-						SCHEMA,
-						roleState.database,
-						roleState.publicHadTemp,
-					);
+					await cleanupNoTempRole(pool, roleState);
 				}
 				rmSync(tmpDir, { recursive: true, force: true });
 			}
