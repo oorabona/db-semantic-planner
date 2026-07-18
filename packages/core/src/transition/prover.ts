@@ -39,6 +39,7 @@ import {
 	composeOperations,
 	transitionCompositionFactKey,
 } from './composer.js';
+import { matchLiveObservationContext } from './context-match.js';
 import {
 	concludeEvidenceForObligation,
 	observationRequestForProposition,
@@ -299,31 +300,19 @@ type IssuedObservationValidationResult =
 	| { readonly ok: true }
 	| { readonly ok: false; readonly detail: string };
 
-function issuedObservationContextMismatch(
-	observed: ObservationContext,
-	expected: ObservationContext,
-): string | undefined {
-	if (observed.engine !== expected.engine) {
-		return 'engine';
-	}
-	if (observed.databaseId !== expected.databaseId) {
-		return 'database';
-	}
-	return undefined;
-}
-
 function validateIssuedObservation(
 	observation: IssuedObservation,
 	context: ObservationContext,
 ): IssuedObservationValidationResult {
-	const contextMismatch = issuedObservationContextMismatch(
-		observation.context,
-		context,
-	);
-	if (contextMismatch) {
+	const contextMatch = matchLiveObservationContext({
+		expected: context,
+		actual: observation.context,
+		label: `observation ${observation.id} context`,
+	});
+	if (!contextMatch.ok) {
 		return {
 			ok: false,
-			detail: `observation ${observation.id} was issued for a different concrete ${contextMismatch}`,
+			detail: contextMatch.detail,
 		};
 	}
 	const role = (observation as { readonly role?: unknown }).role;

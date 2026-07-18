@@ -503,25 +503,44 @@ function withJournalWriteWarning<T extends PlanAssessment>(
 	};
 }
 
+async function writeObservedJournalOutcome(params: {
+	readonly semantics: OperationRuntime;
+	readonly client: Awaited<ReturnType<OperationRuntime['checkout']>>;
+	readonly journal: StepJournal;
+}): Promise<
+	{ readonly ok: true } | { readonly ok: false; readonly error: unknown }
+> {
+	try {
+		await params.semantics.writeObservedJournal(params.client, params.journal);
+		return { ok: true };
+	} catch (error) {
+		return { ok: false, error };
+	}
+}
+
 async function writeObservedJournalOrResult(params: {
 	readonly semantics: OperationRuntime;
 	readonly client: Awaited<ReturnType<OperationRuntime['checkout']>>;
 	readonly journal: StepJournal;
 	readonly result: ApplyResult;
 	readonly outcomeDurable: boolean;
+	readonly onDurableWriteWarning?: (error: unknown) => void;
 }): Promise<ApplyResult | undefined> {
-	try {
-		await params.semantics.writeObservedJournal(params.client, params.journal);
+	const write = await writeObservedJournalOutcome(params);
+	if (write.ok) {
 		return undefined;
-	} catch (error) {
-		if (!params.outcomeDurable) {
-			throw error;
-		}
-		return {
-			...params.result,
-			assessment: withJournalWriteWarning(params.result.assessment, error),
-		};
 	}
+	if (!params.outcomeDurable) {
+		throw write.error;
+	}
+	if (params.onDurableWriteWarning) {
+		params.onDurableWriteWarning(write.error);
+		return params.result;
+	}
+	return {
+		...params.result,
+		assessment: withJournalWriteWarning(params.result.assessment, write.error),
+	};
 }
 
 function durableEvidence(
@@ -623,6 +642,52 @@ export function createApplier(registry: PackRegistry): Applier {
 
 			const observations: IssuedObservation[] = [];
 			const journals: StepJournal[] = [];
+			const journalWriteWarnings: unknown[] = [];
+			const recordJournalWriteWarning = (error: unknown): void => {
+				journalWriteWarnings.push(error);
+			};
+			const assessmentWithJournalWriteWarnings = <T extends PlanAssessment>(
+				assessmentValue: T,
+			): T => {
+				let warned = assessmentValue;
+				for (const error of journalWriteWarnings) {
+					warned = withJournalWriteWarning(warned, error);
+				}
+				return warned;
+			};
+			const resultWithJournalWriteWarnings = (
+				result: ApplyResult,
+			): ApplyResult =>
+				journalWriteWarnings.length === 0
+					? result
+					: {
+							...result,
+							assessment: assessmentWithJournalWriteWarnings(result.assessment),
+						};
+			const resultWithCommittedJournals = (
+				result: ApplyResult,
+			): ApplyResult => {
+				if (journals.length === 0) {
+					return resultWithJournalWriteWarnings(result);
+				}
+				const assessmentValue =
+					result.assessment.lifecycle === 'partially-applied' ||
+					result.assessment.lifecycle === 'outcome-unknown'
+						? result.assessment
+						: {
+								...result.assessment,
+								lifecycle: 'partially-applied' as const,
+								continuation:
+									result.assessment.continuation === 'none'
+										? ('resume-possible' as const)
+										: result.assessment.continuation,
+							};
+				return resultWithJournalWriteWarnings({
+					...result,
+					assessment: assessmentValue,
+					journals: [...journals, ...result.journals],
+				});
+			};
 			let runtimeContext = proofContext;
 
 			const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
@@ -631,20 +696,24 @@ export function createApplier(registry: PackRegistry): Applier {
 					stepById.get(stepId),
 				);
 				if (segmentSteps.some((step) => !step)) {
-					return uncomposablePlanResult(
-						plan,
-						`segment ${segment.segmentId} references a missing step`,
+					return resultWithCommittedJournals(
+						uncomposablePlanResult(
+							plan,
+							`segment ${segment.segmentId} references a missing step`,
+						),
 					);
 				}
 				const resolvedSteps = [];
 				for (const step of segmentSteps as ProvenPlanStep[]) {
 					const operationResolution = registry.resolveOperation(step.operation);
 					if (!operationResolution.ok) {
-						return unresolvedOperationResult(step, operationResolution.detail);
+						return resultWithCommittedJournals(
+							unresolvedOperationResult(step, operationResolution.detail),
+						);
 					}
 					const semantics = operationResolution.semantics;
 					if (!isOperationRuntime(semantics)) {
-						return unresolvedRuntimeResult(step);
+						return resultWithCommittedJournals(unresolvedRuntimeResult(step));
 					}
 					if (
 						semantics.artifact.id !==
@@ -652,47 +721,57 @@ export function createApplier(registry: PackRegistry): Applier {
 						semantics.artifact.version !==
 							step.operation.operationKind.artifact.version
 					) {
-						return unresolvedRuntimeResult(step);
+						return resultWithCommittedJournals(unresolvedRuntimeResult(step));
 					}
 					const operationIssuer = registry.resolveIssuer(
 						step.operation.operationKind.artifact,
 					);
 					if (!operationIssuer) {
-						return unresolvedOperationResult(
-							step,
-							'operation observation issuer missing',
+						return resultWithCommittedJournals(
+							unresolvedOperationResult(
+								step,
+								'operation observation issuer missing',
+							),
 						);
 					}
 					const execution = operationEffectsByRef.get(step.operation.ref)
 						?.effects.execution;
 					if (!execution) {
-						return unresolvedOperationResult(step, 'operation effects missing');
+						return resultWithCommittedJournals(
+							unresolvedOperationResult(step, 'operation effects missing'),
+						);
 					}
 					if (
 						segment.transaction === 'joins-current' &&
 						execution.transaction !== 'joins-current'
 					) {
-						return uncomposablePlanResult(
-							plan,
-							`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+						return resultWithCommittedJournals(
+							uncomposablePlanResult(
+								plan,
+								`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+							),
 						);
 					}
 					if (
 						segment.transaction === 'forbids-transaction' &&
 						execution.transaction !== 'forbids-transaction'
 					) {
-						return uncomposablePlanResult(
-							plan,
-							`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+						return resultWithCommittedJournals(
+							uncomposablePlanResult(
+								plan,
+								`step ${step.stepId} execution semantics do not match segment ${segment.segmentId}`,
+							),
 						);
 					}
 					if (
 						segment.transaction !== 'forbids-transaction' &&
 						execution.transaction === 'forbids-transaction'
 					) {
-						return uncomposablePlanResult(
-							plan,
-							`step ${step.stepId} forbids the transaction used by segment ${segment.segmentId}`,
+						return resultWithCommittedJournals(
+							uncomposablePlanResult(
+								plan,
+								`step ${step.stepId} forbids the transaction used by segment ${segment.segmentId}`,
+							),
 						);
 					}
 					resolvedSteps.push({
@@ -705,9 +784,11 @@ export function createApplier(registry: PackRegistry): Applier {
 				}
 				const first = resolvedSteps[0];
 				if (!first) {
-					return uncomposablePlanResult(
-						plan,
-						`segment ${segment.segmentId} contains no steps`,
+					return resultWithCommittedJournals(
+						uncomposablePlanResult(
+							plan,
+							`segment ${segment.segmentId} contains no steps`,
+						),
 					);
 				}
 				const transactional = segment.transaction !== 'forbids-transaction';
@@ -719,9 +800,11 @@ export function createApplier(registry: PackRegistry): Applier {
 				if (transactional && runtimeSet.size > 1) {
 					const firstBinding = first.coordinatorBinding;
 					if (!firstBinding) {
-						return uncomposablePlanResult(
-							plan,
-							`segment ${segment.segmentId} spans multiple operation runtimes without an explicit shared transaction coordinator`,
+						return resultWithCommittedJournals(
+							uncomposablePlanResult(
+								plan,
+								`segment ${segment.segmentId} spans multiple operation runtimes without an explicit shared transaction coordinator`,
+							),
 						);
 					}
 					if (
@@ -734,9 +817,11 @@ export function createApplier(registry: PackRegistry): Applier {
 							);
 						})
 					) {
-						return uncomposablePlanResult(
-							plan,
-							`segment ${segment.segmentId} spans operation runtimes with different transaction coordinators`,
+						return resultWithCommittedJournals(
+							uncomposablePlanResult(
+								plan,
+								`segment ${segment.segmentId} spans operation runtimes with different transaction coordinators`,
+							),
 						);
 					}
 					segmentCoordinator = firstBinding.coordinator;
@@ -754,9 +839,11 @@ export function createApplier(registry: PackRegistry): Applier {
 				) {
 					segmentCoordinator = first.coordinatorBinding.coordinator;
 				} else if (!transactional && runtimeSet.size > 1) {
-					return uncomposablePlanResult(
-						plan,
-						`segment ${segment.segmentId} spans multiple operation runtimes without a transaction`,
+					return resultWithCommittedJournals(
+						uncomposablePlanResult(
+							plan,
+							`segment ${segment.segmentId} spans multiple operation runtimes without a transaction`,
+						),
 					);
 				}
 
@@ -828,14 +915,14 @@ export function createApplier(registry: PackRegistry): Applier {
 								executionClient,
 								journal,
 							);
-							return {
+							return resultWithJournalWriteWarnings({
 								assessment: stoppedAssessment(
 									contextMismatchReason(entry.step, liveContextMatch.detail),
 									journals.length > 0,
 								),
 								journals: [...journals, journal],
 								observations,
-							};
+							});
 						}
 
 						const before = await entry.semantics.observeOperation(
@@ -864,7 +951,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								executionClient,
 								journal,
 							);
-							return {
+							return resultWithJournalWriteWarnings({
 								assessment: stoppedAssessment(
 									contextMismatchReason(
 										entry.step,
@@ -874,7 +961,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								),
 								journals: [...journals, journal],
 								observations,
-							};
+							});
 						}
 						if (
 							!fingerprintMatches(
@@ -893,14 +980,14 @@ export function createApplier(registry: PackRegistry): Applier {
 								executionClient,
 								journal,
 							);
-							return {
+							return resultWithJournalWriteWarnings({
 								assessment: stoppedAssessment(
 									contextMismatchReason(entry.step, 'expectedBefore mismatch'),
 									journals.length > 0,
 								),
 								journals: [...journals, journal],
 								observations,
-							};
+							});
 						}
 
 						const runGuardPhase = async (
@@ -954,6 +1041,7 @@ export function createApplier(registry: PackRegistry): Applier {
 											journal,
 											result,
 											outcomeDurable: nonRollbackableOperationExecuted,
+											onDurableWriteWarning: recordJournalWriteWarning,
 										});
 									return journalWriteFailure ?? result;
 								}
@@ -963,9 +1051,12 @@ export function createApplier(registry: PackRegistry): Applier {
 
 						const beforeGuardFailure = await runGuardPhase('before-operation');
 						if (beforeGuardFailure) {
-							return beforeGuardFailure;
+							return resultWithJournalWriteWarnings(beforeGuardFailure);
 						}
 
+						if (!transactional) {
+							activeNonRollbackableOperationExecuted = true;
+						}
 						const executionOutcome = await entry.semantics.executeOperation(
 							executionClient,
 							entry.step.operation,
@@ -1000,8 +1091,11 @@ export function createApplier(registry: PackRegistry): Applier {
 								journal,
 								result,
 								outcomeDurable: !transactional,
+								onDurableWriteWarning: recordJournalWriteWarning,
 							});
-							return journalWriteFailure ?? result;
+							return resultWithJournalWriteWarnings(
+								journalWriteFailure ?? result,
+							);
 						}
 						if (executionOutcome.kind === 'partially-applied') {
 							if (transactionStarted && !committed) {
@@ -1021,14 +1115,14 @@ export function createApplier(registry: PackRegistry): Applier {
 									executionClient,
 									journal,
 								);
-								return {
+								return resultWithJournalWriteWarnings({
 									assessment: stoppedAssessment(
 										operationFailedNotAppliedReason(entry.step, detail),
 										journals.length > 0,
 									),
 									journals: [...journals, journal],
 									observations,
-								};
+								});
 							}
 							const journal = journalWithObserved(
 								entry.intent,
@@ -1056,27 +1150,29 @@ export function createApplier(registry: PackRegistry): Applier {
 								journal,
 								result,
 								outcomeDurable: true,
+								onDurableWriteWarning: recordJournalWriteWarning,
 							});
-							return journalWriteFailure ?? result;
-						}
-						if (!transactional) {
-							activeNonRollbackableOperationExecuted = true;
+							return resultWithJournalWriteWarnings(
+								journalWriteFailure ?? result,
+							);
 						}
 						const afterGuardFailure = await runGuardPhase(
 							'after-operation',
 							!transactional,
 						);
 						if (afterGuardFailure) {
-							return afterGuardFailure;
+							return resultWithJournalWriteWarnings(afterGuardFailure);
 						}
 						const postconditionAfterCommit =
 							operationEffectsByRef.get(entry.step.operation.ref)?.effects
 								.execution.postconditionVisibility === 'after-commit';
 						if (postconditionAfterCommit) {
 							if (!transactional || resolvedSteps.length !== 1) {
-								return uncomposablePlanResult(
-									plan,
-									`step ${entry.step.stepId} postcondition is only visible after commit and must execute in its own transactional segment`,
+								return resultWithCommittedJournals(
+									uncomposablePlanResult(
+										plan,
+										`step ${entry.step.stepId} postcondition is only visible after commit and must execute in its own transactional segment`,
+									),
 								);
 							}
 							const completion = completionRecord(
@@ -1148,8 +1244,11 @@ export function createApplier(registry: PackRegistry): Applier {
 								journal,
 								result,
 								outcomeDurable: !transactional,
+								onDurableWriteWarning: recordJournalWriteWarning,
 							});
-							return journalWriteFailure ?? result;
+							return resultWithJournalWriteWarnings(
+								journalWriteFailure ?? result,
+							);
 						}
 						observations.push(...after.observations);
 						const observedOutcome = {
@@ -1197,8 +1296,11 @@ export function createApplier(registry: PackRegistry): Applier {
 								journal,
 								result,
 								outcomeDurable: !transactional,
+								onDurableWriteWarning: recordJournalWriteWarning,
 							});
-							return journalWriteFailure ?? result;
+							return resultWithJournalWriteWarnings(
+								journalWriteFailure ?? result,
+							);
 						}
 						const completion = completionRecord(entry.step, run, transactional);
 						await entry.semantics.writeCompletionJournal(
@@ -1223,20 +1325,13 @@ export function createApplier(registry: PackRegistry): Applier {
 								journal,
 							});
 						} else {
-							const result = {
-								assessment: completedAssessment(reportedAssessment),
-								journals: [...journals, journal],
-								observations,
-							};
-							const journalWriteFailure = await writeObservedJournalOrResult({
+							const journalWrite = await writeObservedJournalOutcome({
 								semantics: entry.semantics,
 								client: executionClient,
 								journal,
-								result,
-								outcomeDurable: true,
 							});
-							if (journalWriteFailure) {
-								return journalWriteFailure;
+							if (!journalWrite.ok) {
+								recordJournalWriteWarning(journalWrite.error);
 							}
 							journals.push(journal);
 						}
@@ -1270,7 +1365,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								await entry.semantics
 									.writeObservedJournal(executionClient, unknown)
 									.catch(() => undefined);
-								return {
+								return resultWithJournalWriteWarnings({
 									assessment: assessment(
 										{
 											code: 'unknown-step-result',
@@ -1285,7 +1380,7 @@ export function createApplier(registry: PackRegistry): Applier {
 									),
 									journals: [...journals, unknown],
 									observations,
-								};
+								});
 							}
 							observations.push(...after.observations);
 							const observedOutcome = {
@@ -1320,8 +1415,11 @@ export function createApplier(registry: PackRegistry): Applier {
 									journal: journalWithMismatch,
 									result,
 									outcomeDurable: true,
+									onDurableWriteWarning: recordJournalWriteWarning,
 								});
-								return journalWriteFailure ?? result;
+								return resultWithJournalWriteWarnings(
+									journalWriteFailure ?? result,
+								);
 							}
 							journal = {
 								intent: entry.intent,
@@ -1330,20 +1428,13 @@ export function createApplier(registry: PackRegistry): Applier {
 								observedOutcome,
 							};
 						}
-						const result = {
-							assessment: completedAssessment(reportedAssessment),
-							journals: [...journals, journal],
-							observations,
-						};
-						const journalWriteFailure = await writeObservedJournalOrResult({
+						const journalWrite = await writeObservedJournalOutcome({
 							semantics: entry.semantics,
 							client: executionClient,
 							journal,
-							result,
-							outcomeDurable: true,
 						});
-						if (journalWriteFailure) {
-							return journalWriteFailure;
+						if (!journalWrite.ok) {
+							recordJournalWriteWarning(journalWrite.error);
 						}
 						journals.push(journal);
 					}
@@ -1359,7 +1450,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
-						return {
+						return resultWithJournalWriteWarnings({
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
@@ -1374,7 +1465,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
-						};
+						});
 					}
 					let rollbackAttempted = false;
 					let rollbackSucceeded = false;
@@ -1394,7 +1485,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
-						return {
+						return resultWithJournalWriteWarnings({
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
@@ -1412,7 +1503,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
-						};
+						});
 					}
 					if (segmentCoordinator.isLockTimeout(error)) {
 						const hasAppliedWork =
@@ -1429,7 +1520,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
-						return {
+						return resultWithJournalWriteWarnings({
 							assessment: stoppedAssessment(
 								{
 									code: 'guard-timeout',
@@ -1447,7 +1538,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
-						};
+						});
 					}
 					if (
 						transactional &&
@@ -1469,20 +1560,16 @@ export function createApplier(registry: PackRegistry): Applier {
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
-						return {
+						return resultWithJournalWriteWarnings({
 							assessment: stoppedAssessment(
 								operationFailedNotAppliedReason(active.step, detail),
 								journals.length > 0,
 							),
 							journals: [...journals, journal],
 							observations,
-						};
+						});
 					}
-					if (
-						committed ||
-						journals.length > 0 ||
-						activeNonRollbackableOperationExecuted
-					) {
+					if (committed || activeNonRollbackableOperationExecuted) {
 						const journal = journalWithObserved(
 							active.intent,
 							'partially-applied',
@@ -1493,7 +1580,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								.writeObservedJournal(client, journal)
 								.catch(() => undefined);
 						}
-						return {
+						return resultWithJournalWriteWarnings({
 							assessment: assessment(
 								partiallyAppliedReason(
 									active.step,
@@ -1506,7 +1593,31 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
-						};
+						});
+					}
+					if (journals.length > 0) {
+						const detail =
+							error instanceof Error
+								? error.message
+								: 'segment setup failed after an earlier commit';
+						const journal = journalWithObserved(
+							active.intent,
+							'operation-failed-not-applied',
+							[],
+						);
+						if (client) {
+							await active.semantics
+								.writeObservedJournal(client, journal)
+								.catch(() => undefined);
+						}
+						return resultWithJournalWriteWarnings({
+							assessment: stoppedAssessment(
+								operationFailedNotAppliedReason(active.step, detail),
+								true,
+							),
+							journals: [...journals, journal],
+							observations,
+						});
 					}
 					const journal = unknownJournal(active.intent);
 					if (client) {
@@ -1514,7 +1625,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							.writeObservedJournal(client, journal)
 							.catch(() => undefined);
 					}
-					return {
+					return resultWithJournalWriteWarnings({
 						assessment: assessment(
 							{
 								code: 'unknown-step-result',
@@ -1532,7 +1643,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						),
 						journals: [...journals, journal],
 						observations,
-					};
+					});
 				} finally {
 					if (client) {
 						try {
@@ -1544,7 +1655,9 @@ export function createApplier(registry: PackRegistry): Applier {
 				}
 			}
 			return {
-				assessment: completedAssessment(reportedAssessment),
+				assessment: assessmentWithJournalWriteWarnings(
+					completedAssessment(reportedAssessment),
+				),
 				journals,
 				observations,
 			};

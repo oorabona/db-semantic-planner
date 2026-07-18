@@ -353,6 +353,21 @@ function forbidsTransactionPlan(): InProcessProvenPlan {
 	});
 }
 
+function firstSegmentForbidsTransactionPlan(): InProcessProvenPlan {
+	const base = multiSegmentPlanShape();
+	return mintInProcessPlan({
+		...base,
+		segments: [
+			{
+				...base.segments[0]!,
+				transaction: 'forbids-transaction',
+				commitBoundaryAfter: true,
+			},
+			base.segments[1]!,
+		],
+	});
+}
+
 function assessment(): ApplicableAssessment {
 	return {
 		decision: 'applicable',
@@ -527,7 +542,11 @@ function multiSegmentRuntime(
 	options: {
 		readonly log: string[];
 		readonly failB?: boolean;
-		readonly transactionMode?: 'multi-segment' | 'single-segment' | 'forbid-b';
+		readonly transactionMode?:
+			| 'multi-segment'
+			| 'single-segment'
+			| 'forbid-a'
+			| 'forbid-b';
 		readonly observeContext?: OperationRuntime['observeContext'];
 		readonly observeOperation?: OperationRuntime['observeOperation'];
 	},
@@ -550,20 +569,25 @@ function multiSegmentRuntime(
 							transaction: 'joins-current' as const,
 							commitBoundary: 'none' as const,
 						}
-					: options.transactionMode === 'forbid-b' && candidate.ref === 'op:b'
+					: options.transactionMode === 'forbid-a' && candidate.ref === 'op:a'
 						? {
 								transaction: 'forbids-transaction' as const,
 								commitBoundary: 'after' as const,
 							}
-						: candidate.ref === 'op:a'
+						: options.transactionMode === 'forbid-b' && candidate.ref === 'op:b'
 							? {
-									transaction: 'requires-new' as const,
+									transaction: 'forbids-transaction' as const,
 									commitBoundary: 'after' as const,
 								}
-							: {
-									transaction: 'joins-current' as const,
-									commitBoundary: 'none' as const,
-								};
+							: candidate.ref === 'op:a'
+								? {
+										transaction: 'requires-new' as const,
+										commitBoundary: 'after' as const,
+									}
+								: {
+										transaction: 'joins-current' as const,
+										commitBoundary: 'none' as const,
+									};
 			return {
 				effects: {
 					reads:
@@ -1067,6 +1091,74 @@ describe('createApplier', () => {
 		]);
 	});
 
+	it('reports a later segment setup failure as not applied after an earlier segment committed', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{ log },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			begin: vi.fn(async (client) => {
+				const id = (client.opaqueClient as { readonly id: number }).id;
+				log.push(`begin:${id}`);
+				if (id === 2) {
+					throw new Error('begin failed before op:b');
+				}
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.assessment.continuation).toBe('resume-possible');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'operation-failed-not-applied',
+			stepId: 'step:op:b',
+			operationRef: 'op:b',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'begin failed before op:b',
+		);
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'operation-failed-not-applied',
+		]);
+		expect(result.journals[1]?.outcome).not.toBe('partially-applied');
+		expect(observed.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'operation-failed-not-applied',
+		]);
+		expect(log).toContain('commit:1');
+		expect(log).toContain('begin:2');
+		expect(log.some((entry) => entry.startsWith('intent:step:op:b'))).toBe(
+			false,
+		);
+		expect(log).not.toContain('execute:op:b:2');
+	});
+
 	it('rolls back the whole transactional segment on a pre-commit postcondition mismatch', async () => {
 		const observed: StepJournal[] = [];
 		const log: string[] = [];
@@ -1529,6 +1621,245 @@ describe('createApplier', () => {
 			'observed journal write failed',
 		);
 		expect(result.journals[0]?.outcome).toBe('completed');
+	});
+
+	it('keeps all journals for a committed multi-step segment when a post-commit observed journal write fails', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const rt = multiSegmentRuntime(
+			(journal) => {
+				if (journal.intent.stepId === 'step:op:a') {
+					throw new Error('journal unavailable');
+				}
+				observed.push(journal);
+			},
+			{ log, transactionMode: 'single-segment' },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiStepSingleSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'observed journal write failed',
+		);
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'completed',
+		]);
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+	});
+
+	it('continues to later segments when a post-commit observed journal write fails', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const rt = multiSegmentRuntime(
+			(journal) => {
+				if (journal.intent.stepId === 'step:op:a') {
+					throw new Error('journal unavailable');
+				}
+				observed.push(journal);
+			},
+			{ log },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: multiSegmentPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.assessment.continuation).toBe('none');
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'observed journal write failed',
+		);
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'completed',
+		]);
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(log).toContain('execute:op:b:2');
+		expect(log).toContain('commit:2');
+	});
+
+	it('orders observed journal write warnings chronologically across prior and terminal outcomes', async () => {
+		const log: string[] = [];
+		const baseRuntime = multiSegmentRuntime(
+			(journal) => {
+				throw new Error(`journal unavailable for ${journal.intent.stepId}`);
+			},
+			{ log },
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: (candidate): OperationEffectAssessment => {
+				const base = baseRuntime.effectsOf(candidate);
+				if (candidate.ref !== 'op:b') {
+					return base;
+				}
+				return {
+					...base,
+					effects: {
+						...base.effects,
+						execution: {
+							...base.effects.execution,
+							commitBoundary: 'after',
+							postconditionVisibility: 'after-commit',
+						},
+					},
+				};
+			},
+			observeOperation: vi.fn(
+				async (
+					_client,
+					candidate,
+					_context,
+					phase,
+				): Promise<OperationObservation> => ({
+					observations: [evidence()],
+					fingerprint: fingerprint(
+						candidate.ref === 'op:b' && phase === 'after'
+							? 'op:b:wrong-after'
+							: `${candidate.ref}:${phase}`,
+					),
+				}),
+			),
+		};
+		const base = multiSegmentPlanShape();
+		const afterCommitSecondSegment = mintInProcessPlan({
+			...base,
+			segments: [
+				base.segments[0]!,
+				{
+					...base.segments[1]!,
+					commitBoundaryAfter: true,
+				},
+			],
+		});
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: afterCommitSecondSegment, assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		const detail = result.assessment.reasons[0]?.detail ?? '';
+		const priorWarning =
+			'observed journal write failed after outcome was decided: journal unavailable for step:op:a';
+		const terminalWarning =
+			'observed journal write failed after outcome was decided: journal unavailable for step:op:b';
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'partially-applied',
+		]);
+		expect(detail).toContain(priorWarning);
+		expect(detail).toContain(terminalWarning);
+		expect(detail.indexOf(priorWarning)).toBeLessThan(
+			detail.indexOf(terminalWarning),
+		);
+		expect(log).toContain('commit:1');
+		expect(log).toContain('commit:2');
+	});
+
+	it('continues to later segments when a nontransactional completed journal write fails', async () => {
+		const observed: StepJournal[] = [];
+		const log: string[] = [];
+		const rt = multiSegmentRuntime(
+			(journal) => {
+				if (journal.intent.stepId === 'step:op:a') {
+					throw new Error('journal unavailable');
+				}
+				observed.push(journal);
+			},
+			{ log, transactionMode: 'forbid-a' },
+		);
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: firstSegmentForbidsTransactionPlan(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('completed');
+		expect(result.assessment.continuation).toBe('none');
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'observed journal write failed',
+		);
+		expect(result.journals.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:a',
+			'step:op:b',
+		]);
+		expect(result.journals.map((journal) => journal.outcome)).toEqual([
+			'completed',
+			'completed',
+		]);
+		expect(observed.map((journal) => journal.intent.stepId)).toEqual([
+			'step:op:b',
+		]);
+		expect(log).toContain('execute:op:a:1');
+		expect(log).toContain('execute:op:b:2');
+		expect(log).toContain('commit:2');
 	});
 
 	it('observes after-commit postconditions only after committing their own segment', async () => {

@@ -236,6 +236,7 @@ function runtime(options: {
 	readonly before?: string | Error;
 	readonly transaction?: 'joins-current' | 'forbids-transaction';
 	readonly observed?: StepJournal[];
+	readonly observeContext?: OperationRuntime['observeContext'];
 }): OperationRuntime {
 	const client = { opaqueClient: {} };
 	const observe = (
@@ -281,7 +282,7 @@ function runtime(options: {
 		begin: vi.fn(),
 		setLockTimeout: vi.fn(),
 		acquireLocks: vi.fn(),
-		observeContext: vi.fn(async () => context),
+		observeContext: options.observeContext ?? vi.fn(async () => context),
 		observeOperation: vi.fn((_client, _operation, _context, phase) =>
 			observe(phase),
 		),
@@ -489,6 +490,37 @@ describe('resumeTransitionRun', () => {
 			code: 'context-mismatch',
 		});
 		expect(result.assessment.reasons[0]?.detail).toContain('databaseId');
+	});
+
+	it('blocks reconciliation when a step runtime observes a foreign context', async () => {
+		const plan = planShape();
+		const runMetadata = run(plan);
+		const step = plan.steps[0]!;
+		const journal = completedJournal(step, runMetadata);
+
+		const result = await resumeWith(
+			plan,
+			[
+				event(1, 'intent', step, runMetadata, journal.intent),
+				event(2, 'observed', step, runMetadata, journal),
+			],
+			runtime({
+				after: 'after',
+				observeContext: vi.fn(async () => ({
+					...context,
+					databaseId: 'other-db',
+					targetSchema: 'other',
+				})),
+			}),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'unknown-step-result',
+			stepId: 'step:op',
+		});
+		expect(result.assessment.reasons[0]?.detail).toContain('databaseId');
+		expect(result.journals).toEqual([]);
 	});
 
 	it('rejects a plan whose step order differs from segment execution order', async () => {

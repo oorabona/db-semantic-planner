@@ -21,7 +21,10 @@ import type {
 	TransitionRunJournal,
 	TrustRoot,
 } from '@dbsp/types';
-import { matchRunObservationContext } from './context-match.js';
+import {
+	matchLiveObservationContext,
+	matchRunObservationContext,
+} from './context-match.js';
 import { semanticArtifactId } from './ids.js';
 import {
 	isOperationRuntime,
@@ -645,6 +648,14 @@ async function observeStep(
 			baseContext,
 		);
 		context = registry.contextWithDerivedCapabilities(context);
+		const liveContextMatch = matchLiveObservationContext({
+			expected: baseContext,
+			actual: context,
+		});
+		if (!liveContextMatch.ok) {
+			await runtimeSafeRelease(runtime, client);
+			return { ok: false, detail: liveContextMatch.detail };
+		}
 		const observed = await runtime.observeOperation(
 			client,
 			step.operation,

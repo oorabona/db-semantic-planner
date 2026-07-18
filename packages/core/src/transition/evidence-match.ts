@@ -7,6 +7,7 @@ import type {
 	Proposition,
 	ResourceAddress,
 } from '@dbsp/types';
+import { matchLiveObservationContext } from './context-match.js';
 import { stableJson } from './stable-json.js';
 
 type BooleanEvidenceClaim = {
@@ -412,11 +413,20 @@ function concreteIdentityForRequest(
 function concreteIdentityMismatch(
 	requested: ConcreteIdentity,
 	observed: ConcreteIdentity,
+	options: { readonly ignoreResourceKind?: boolean } = {},
 ): string | undefined {
 	for (const [field, requestedValues] of requested) {
+		if (options.ignoreResourceKind && field === 'resourceKind') {
+			continue;
+		}
 		const observedValues = observed.get(field);
 		if (!observedValues || observedValues.size === 0) {
-			continue;
+			return field;
+		}
+		for (const requestedValue of requestedValues) {
+			if (!observedValues.has(requestedValue)) {
+				return field;
+			}
 		}
 		for (const observedValue of observedValues) {
 			if (!requestedValues.has(observedValue)) {
@@ -427,31 +437,75 @@ function concreteIdentityMismatch(
 	return undefined;
 }
 
+function concreteIdentityIsEmpty(identity: ConcreteIdentity): boolean {
+	for (const values of identity.values()) {
+		if (values.size > 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+const SPECIFIC_TARGET_FIELDS = new Set([
+	'column',
+	'constraint',
+	'index',
+	'label',
+	'logicalId',
+	'object',
+	'type',
+]);
+
+function hasSpecificTargetField(identity: ConcreteIdentity): boolean {
+	for (const field of SPECIFIC_TARGET_FIELDS) {
+		if ((identity.get(field)?.size ?? 0) > 0) {
+			return true;
+		}
+	}
+	return false;
+}
+
 export function observationRequestTargetsSameConcreteIdentity(
 	requested: ObservationRequest,
 	observed: ObservationRequest,
 	context: ObservationContext,
 ): boolean {
+	const requestedIdentity = concreteIdentityForRequest(requested, context);
+	if (concreteIdentityIsEmpty(requestedIdentity)) {
+		return observationRequestMatchesInContext(requested, observed, context);
+	}
 	return (
 		requested.kind === observed.kind &&
 		concreteIdentityMismatch(
-			concreteIdentityForRequest(requested, context),
+			requestedIdentity,
 			concreteIdentityForRequest(observed, context),
 		) === undefined
 	);
 }
 
-function observationContextConcreteIdentityMismatch(
-	observed: ObservationContext,
-	expected: ObservationContext,
-): string | undefined {
-	if (observed.engine !== expected.engine) {
-		return 'engine';
+function observationRequestBindsPropositionTarget(
+	observed: ObservationRequest,
+	proposition: Proposition,
+	context: ObservationContext,
+): boolean {
+	const requestedIdentity = concreteIdentityForRequest(
+		observationRequestForProposition(proposition),
+		context,
+	);
+	if (concreteIdentityIsEmpty(requestedIdentity)) {
+		return observationRequestMatchesInContext(
+			observationRequestForProposition(proposition),
+			observed,
+			context,
+		);
 	}
-	if (observed.databaseId !== expected.databaseId) {
-		return 'database';
-	}
-	return undefined;
+	return (
+		concreteIdentityMismatch(
+			requestedIdentity,
+			concreteIdentityForRequest(observed, context),
+			{ ignoreResourceKind: hasSpecificTargetField(requestedIdentity) },
+		) === undefined
+	);
 }
 
 function sameResource(left: ResourceAddress, right: ResourceAddress): boolean {
@@ -543,6 +597,15 @@ export function claimEntailsProposition(params: {
 		? normalizePropositionForContext(params.proposition, params.expectedContext)
 		: params.proposition;
 	if (params.claim.kind !== proposition.kind) {
+		return false;
+	}
+	if (
+		!observationRequestBindsPropositionTarget(
+			params.evidence.request,
+			proposition,
+			params.expectedContext ?? params.evidence.context,
+		)
+	) {
 		return false;
 	}
 	const claimProposition = propositionFromClaim(params.claim);
@@ -650,10 +713,11 @@ function evidenceContextMatches(
 ): boolean {
 	return (
 		!expectedContext ||
-		observationContextConcreteIdentityMismatch(
-			evidence.context,
-			expectedContext,
-		) === undefined
+		matchLiveObservationContext({
+			expected: expectedContext,
+			actual: evidence.context,
+			label: 'evidence observation context',
+		}).ok
 	);
 }
 

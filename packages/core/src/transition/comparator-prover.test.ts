@@ -3679,7 +3679,6 @@ describe('createProver', () => {
 				},
 				context: {
 					...ctx,
-					engineVersion: `${ctx.engineVersion}.issuer-normalized`,
 					capabilities: [...ctx.capabilities, 'issuer-stamped-capability'],
 				},
 				stability: 'externally-mutable',
@@ -3720,6 +3719,60 @@ describe('createProver', () => {
 		if (outcome.kind === 'proven') {
 			expect(outcome.plan.observations[0]?.request).toEqual(normalizedRequest);
 		}
+	});
+
+	it.each([
+		[
+			'engineVersion',
+			(ctx: ObservationContext) => ({ ...ctx, engineVersion: '17' }),
+		],
+		[
+			'targetSchema',
+			(ctx: ObservationContext) => ({ ...ctx, targetSchema: 'other' }),
+		],
+		[
+			'effectiveRole',
+			(ctx: ObservationContext) => ({ ...ctx, effectiveRole: 'other_role' }),
+		],
+	] as const)('refuses evidence issued under a different %s', async (_field, mutate) => {
+		const proofContext = {
+			...context,
+			targetSchema: 'tenant',
+			effectiveRole: 'tenant_owner',
+		};
+		const badContextIssuer: ObservationIssuer = {
+			artifact: issuerArtifact,
+			execute: async (request, _target, ctx): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId(`mock.evidence.bad-context.${request.kind}`),
+				issuer: issuerArtifact,
+				request,
+				result: {
+					value: {
+						claims: [
+							{
+								kind: request.kind,
+								holds: true,
+								scope: request.scope,
+								detail: request.detail,
+							},
+						],
+					},
+				},
+				context: mutate(ctx),
+				stability: 'externally-mutable',
+				takenAt: new Date().toISOString(),
+				scope: request.scope,
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		};
+
+		const outcome = await createProver(
+			registry({ issuer: badContextIssuer }),
+		).prove(validCompare(), proofTarget(), proofContext);
+
+		expectBlockedReason(outcome, 'context-mismatch');
 	});
 
 	it.each([
@@ -3775,6 +3828,57 @@ describe('createProver', () => {
 		if (outcome.kind === 'blocked') {
 			expect(outcome.assessment.reasons[0]?.code).toBe('insufficient-evidence');
 		}
+	});
+
+	it('refuses a stamped proposition when the observation request has empty target identity', async () => {
+		const targetRequest = obligation().dischargeableBy?.[0];
+		if (!targetRequest) {
+			throw new Error('expected dischargeable request');
+		}
+		const proposition =
+			targetRequest.detail === undefined
+				? { kind: targetRequest.kind, scope: targetRequest.scope }
+				: {
+						kind: targetRequest.kind,
+						scope: targetRequest.scope,
+						detail: targetRequest.detail,
+					};
+		const emptyRequestIssuer: ObservationIssuer = {
+			artifact: issuerArtifact,
+			execute: async (
+				_request,
+				_target,
+				ctx,
+			): Promise<EvidenceObservation> => ({
+				role: 'evidence',
+				id: evidenceId('mock.evidence.empty-request-stamped-claim'),
+				issuer: issuerArtifact,
+				request: { kind: targetRequest.kind, scope: [], detail: {} },
+				result: {
+					value: {
+						claims: [
+							{
+								kind: targetRequest.kind,
+								holds: true,
+								proposition: proposition as unknown as JsonValue,
+							},
+						],
+					} as JsonValue,
+				},
+				context: ctx,
+				stability: 'externally-mutable',
+				takenAt: new Date().toISOString(),
+				scope: [],
+				source: 'system-catalog',
+				validity: { invalidatedBy: [] },
+			}),
+		};
+
+		const outcome = await createProver(
+			registry({ issuer: emptyRequestIssuer }),
+		).prove(validCompare(), proofTarget(), context);
+
+		expectBlockedReason(outcome, 'insufficient-evidence');
 	});
 
 	it('blocks conflicting evidence for the same request and context', async () => {
