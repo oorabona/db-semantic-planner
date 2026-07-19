@@ -55,7 +55,7 @@ export interface FeatureUsage {
 // ---------------------------------------------------------------------------
 
 /**
- * Default feature checkers -- mirrors the 16 supportsDDL* flags that
+ * Default feature checkers -- mirrors the 17 supportsDDL* flags that
  * negotiateFeatures() previously checked inline.
  *
  * Each checker preserves exactly the same detection logic (same guards,
@@ -313,6 +313,23 @@ export const DEFAULT_FEATURE_CHECKERS: readonly FeatureChecker[] =
 				for (const [tableName, table] of model.tables) {
 					for (const idx of table.indexes) {
 						if (idx.expressions?.length) {
+							const idxName = idx.name ?? `idx on ${tableName}`;
+							usages.push({ table: tableName, detail: idxName });
+						}
+					}
+				}
+				return usages;
+			},
+		},
+		{
+			capability: 'supportsDDLIndexNullsNotDistinct',
+			feature: 'indexNullsNotDistinct',
+			detectUsage(model) {
+				if (!model.tables) return [];
+				const usages: FeatureUsage[] = [];
+				for (const [tableName, table] of model.tables) {
+					for (const idx of table.indexes) {
+						if (idx.nullsNotDistinct === true) {
 							const idxName = idx.name ?? `idx on ${tableName}`;
 							usages.push({ table: tableName, detail: idxName });
 						}

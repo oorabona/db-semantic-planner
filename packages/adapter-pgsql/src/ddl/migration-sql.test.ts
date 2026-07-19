@@ -657,27 +657,26 @@ describe('generateMigrationSQL', () => {
 					},
 				]),
 			);
-			const nonUniqueSql = generateMigrationSQL(
-				makeDiff([
-					{
-						kind: 'create_index',
-						table: 'users',
-						destructive: false,
-						details: '',
-						meta: { index: nonUniqueWithNulls },
-					},
-				]),
-			);
-
 			expect(withNullsSql[0]).toBe(
 				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
 			);
 			expect(withoutNullsSql[0]).toBe(
 				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			);
-			expect(nonUniqueSql[0]).toBe(
-				'CREATE INDEX IF NOT EXISTS "idx_users_email_plain" ON "users" ("email");',
-			);
+			// #245: nullsNotDistinct on a NON-unique index is a fail-loud input error (was a silent drop).
+			expect(() =>
+				generateMigrationSQL(
+					makeDiff([
+						{
+							kind: 'create_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: nonUniqueWithNulls },
+						},
+					]),
+				),
+			).toThrow(/NULLS NOT DISTINCT is only valid for UNIQUE/);
 		});
 
 		it('should generate DROP INDEX', () => {
@@ -1930,27 +1929,26 @@ describe('generateDownSQL', () => {
 					},
 				]),
 			);
-			const nonUniqueSql = generateDownSQL(
-				makeDiff([
-					{
-						kind: 'drop_index',
-						table: 'users',
-						destructive: false,
-						details: '',
-						meta: { index: nonUniqueWithNulls },
-					},
-				]),
-			);
-
 			expect(withNullsSql).toEqual([
 				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique" ON "users" ("email") NULLS NOT DISTINCT WHERE deleted_at IS NULL;',
 			]);
 			expect(withoutNullsSql).toEqual([
 				'CREATE UNIQUE INDEX IF NOT EXISTS "idx_users_email_unique_plain" ON "users" ("email") WHERE deleted_at IS NULL;',
 			]);
-			expect(nonUniqueSql).toEqual([
-				'CREATE INDEX IF NOT EXISTS "idx_users_email_plain" ON "users" ("email");',
-			]);
+			// #245: recreating a non-unique index that declares nullsNotDistinct is a fail-loud input error.
+			expect(() =>
+				generateDownSQL(
+					makeDiff([
+						{
+							kind: 'drop_index',
+							table: 'users',
+							destructive: false,
+							details: '',
+							meta: { index: nonUniqueWithNulls },
+						},
+					]),
+				),
+			).toThrow(/NULLS NOT DISTINCT is only valid for UNIQUE/);
 		});
 
 		it('SC-07: alter_foreign_key with oldFk → DROP + re-add old', () => {

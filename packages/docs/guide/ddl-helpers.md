@@ -78,6 +78,7 @@ orm.tables.users.indexes.exists(name)  // name: string → Promise<boolean>
 | `with` | `Record<string, unknown>` | no | Storage parameters (e.g. `{ m: 16, ef_construction: 64 }`) |
 | `where` | `string` | no | Partial index predicate (raw SQL — see Gotchas) |
 | `unique` | `boolean` | no | Unique index |
+| `nullsNotDistinct` | `boolean` | no | PG15+ `NULLS NOT DISTINCT`; valid only on unique indexes and fails loudly on non-unique indexes |
 | `ifNotExists` | `boolean` | no | Skip if already exists |
 | `concurrently` | `boolean` | no | Non-blocking CREATE INDEX CONCURRENTLY |
 
@@ -255,4 +256,3 @@ console.log(`embeddings table: ${(size / 1024 / 1024).toFixed(1)} MB`)
 - **`storageSize()` uses `pg_total_relation_size`** — this includes the table heap, indexes, and TOAST storage. For heap-only size use `pg_relation_size`.
 - **Core generates zero SQL** — all DDL SQL is delegated to the adapter. If you use `createPgsqlCompileOnlyAdapter()`, DDL methods that require a live connection (truncate, vacuum, storageSize) will throw.
 - **`alterColumn` with `setNotNull: true`** triggers a full table scan in PostgreSQL to validate the constraint. On large tables, prefer adding a CHECK constraint first and then promoting it.
-

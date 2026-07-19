@@ -58,6 +58,20 @@ function makeDDLAdapter(overrides: Record<string, unknown> = {}) {
 	return ddlAdapter;
 }
 
+function firstDDLStatement(executeDDL: { mock: { calls: unknown[][] } }): string {
+	const call = executeDDL.mock.calls[0];
+	if (!call) throw new Error('Expected executeDDL to be called');
+	return call[0] as string;
+}
+
+function firstCteRecord(intent: { ctes: readonly unknown[] }) {
+	const cte = intent.ctes[0];
+	if (cte === null || typeof cte !== 'object') {
+		throw new Error('Expected first CTE intent');
+	}
+	return cte as Record<string, unknown>;
+}
+
 // ---------------------------------------------------------------------------
 // 1. orm-instance.ts — buildTableDDL edge cases
 // ---------------------------------------------------------------------------
@@ -174,7 +188,7 @@ describe('generateTruncateSQL — option branches', () => {
 		).truncate({
 			restartIdentity: true,
 		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('TRUNCATE "users" RESTART IDENTITY');
 	});
 
@@ -188,7 +202,7 @@ describe('generateTruncateSQL — option branches', () => {
 		await (
 			orm.tables.users as unknown as { truncate(o: object): Promise<void> }
 		).truncate({ cascade: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('TRUNCATE "users" CASCADE');
 	});
 
@@ -205,7 +219,7 @@ describe('generateTruncateSQL — option branches', () => {
 			restartIdentity: true,
 			cascade: true,
 		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('TRUNCATE "users" RESTART IDENTITY CASCADE');
 	});
 
@@ -219,7 +233,7 @@ describe('generateTruncateSQL — option branches', () => {
 		await (
 			orm.tables.users as unknown as { truncate(): Promise<void> }
 		).truncate();
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('TRUNCATE "myschema"."users"');
 	});
 });
@@ -237,7 +251,7 @@ describe('generateVacuumSQL — option branches', () => {
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
 		await (orm.tables.users as unknown as { vacuum(): Promise<void> }).vacuum();
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('VACUUM "users"');
 	});
 
@@ -251,7 +265,7 @@ describe('generateVacuumSQL — option branches', () => {
 		await (
 			orm.tables.users as unknown as { vacuum(o: object): Promise<void> }
 		).vacuum({ full: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('VACUUM (FULL) "users"');
 	});
 
@@ -265,7 +279,7 @@ describe('generateVacuumSQL — option branches', () => {
 		await (
 			orm.tables.users as unknown as { vacuum(o: object): Promise<void> }
 		).vacuum({ analyze: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('VACUUM (ANALYZE) "users"');
 	});
 
@@ -282,7 +296,7 @@ describe('generateVacuumSQL — option branches', () => {
 			full: true,
 			analyze: true,
 		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('VACUUM (FULL, ANALYZE) "users"');
 	});
 });
@@ -320,7 +334,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 				alterColumn(col: string, opts: object): Promise<void>;
 			}
 		).alterColumn('name', { type: 'integer', using: 'name::integer' });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe(
 			'ALTER TABLE "users" ALTER COLUMN "name" TYPE integer USING name::integer',
 		);
@@ -338,7 +352,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 				alterColumn(col: string, opts: object): Promise<void>;
 			}
 		).alterColumn('name', { setNotNull: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" SET NOT NULL');
 	});
 
@@ -354,7 +368,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 				alterColumn(col: string, opts: object): Promise<void>;
 			}
 		).alterColumn('name', { setNotNull: false });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" DROP NOT NULL');
 	});
 
@@ -370,7 +384,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 				alterColumn(col: string, opts: object): Promise<void>;
 			}
 		).alterColumn('name', { dropDefault: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('ALTER TABLE "users" ALTER COLUMN "name" DROP DEFAULT');
 	});
 
@@ -386,7 +400,7 @@ describe('generateAlterColumnSQL — option branches', () => {
 				alterColumn(col: string, opts: object): Promise<void>;
 			}
 		).alterColumn('name', { setDefault: "'unknown'" });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe(
 			'ALTER TABLE "users" ALTER COLUMN "name" SET DEFAULT \'unknown\'',
 		);
@@ -394,13 +408,14 @@ describe('generateAlterColumnSQL — option branches', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 5. orm-instance.ts — generateCreateIndexSQL branches
+// 5. orm-instance.ts — required adapter CREATE INDEX delegation
 // ---------------------------------------------------------------------------
 
-describe('generateCreateIndexSQL — option branches', () => {
-	it('should include UNIQUE keyword when unique option is true', async () => {
+describe('required generateCreateIndex delegation', () => {
+	it('should delegate CREATE INDEX SQL generation to the adapter', async () => {
 		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
+		const generateCreateIndex = vi.fn().mockReturnValue('CUSTOM CREATE INDEX');
+		const ddlAdapter = makeDDLAdapter({ executeDDL, generateCreateIndex });
 		const orm = createOrm({
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
@@ -409,41 +424,21 @@ describe('generateCreateIndexSQL — option branches', () => {
 			orm.tables.users as unknown as {
 				indexes: { create(opts: object): Promise<void> };
 			}
-		).indexes.create({
-			name: 'idx_users_name',
-			columns: ['name'],
-			unique: true,
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE UNIQUE INDEX "idx_users_name" ON "users" ("name")',
+		).indexes.create({ name: 'idx', columns: ['name'] });
+		expect(generateCreateIndex).toHaveBeenCalledWith(
+			'users',
+			{ name: 'idx', columns: ['name'] },
+			undefined,
 		);
+		expect(executeDDL).toHaveBeenCalledWith('CUSTOM CREATE INDEX');
 	});
 
-	it('should include CONCURRENTLY keyword when concurrently option is true', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
+	it('should reject CREATE INDEX CONCURRENTLY before adapter generation in a transaction', async () => {
+		const generateCreateIndex = vi.fn().mockReturnValue('CUSTOM CREATE INDEX');
+		const ddlAdapter = makeDDLAdapter({
+			generateCreateIndex,
+			inTransaction: true,
 		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_users_name',
-			columns: ['name'],
-			concurrently: true,
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX CONCURRENTLY "idx_users_name" ON "users" ("name")',
-		);
-	});
-
-	it('should throw InvalidOperationError when CONCURRENTLY is used inside a transaction', async () => {
-		const ddlAdapter = makeDDLAdapter({ inTransaction: true });
 		const orm = createOrm({
 			schema: testSchema,
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
@@ -455,200 +450,7 @@ describe('generateCreateIndexSQL — option branches', () => {
 				}
 			).indexes.create({ name: 'idx', columns: ['name'], concurrently: true }),
 		).rejects.toThrow(InvalidOperationError);
-	});
-
-	it('should include IF NOT EXISTS when ifNotExists option is true', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_users_name',
-			columns: ['name'],
-			ifNotExists: true,
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX IF NOT EXISTS "idx_users_name" ON "users" ("name")',
-		);
-	});
-
-	it('should include USING clause when method option is set', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_users_name',
-			columns: ['name'],
-			method: 'gin',
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX "idx_users_name" ON "users" USING gin ("name")',
-		);
-	});
-
-	it('should include expression column when column is an expression object', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_lower',
-			columns: [{ expression: 'lower(name)' }],
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe('CREATE INDEX "idx_lower" ON "users" ((lower(name)))');
-	});
-
-	it('should include opclass in column expression when opclass is set on object column', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_expr_op',
-			columns: [{ expression: 'lower(name)', opclass: 'text_ops' }],
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX "idx_expr_op" ON "users" ((lower(name)) text_ops)',
-		);
-	});
-
-	it('should include opclass in string column when opclass map contains column name', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_name_op',
-			columns: ['name'],
-			opclass: { name: 'text_ops' },
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe('CREATE INDEX "idx_name_op" ON "users" ("name" text_ops)');
-	});
-
-	it('should include INCLUDE clause when include option has columns', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_include',
-			columns: ['name'],
-			include: ['id'],
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX "idx_include" ON "users" ("name") INCLUDE ("id")',
-		);
-	});
-
-	it('should place INCLUDE before NULLS NOT DISTINCT when both options are set', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_include_nulls',
-			columns: ['name'],
-			unique: true,
-			nullsNotDistinct: true,
-			include: ['id'],
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE UNIQUE INDEX "idx_include_nulls" ON "users" ("name") INCLUDE ("id") NULLS NOT DISTINCT',
-		);
-	});
-
-	it('should include WITH clause when with option has storage parameters', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_with',
-			columns: ['name'],
-			with: { fillfactor: 80 },
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX "idx_with" ON "users" ("name") WITH (fillfactor = 80)',
-		);
-	});
-
-	it('should include WHERE predicate when where option is set', async () => {
-		const executeDDL = vi.fn().mockResolvedValue(undefined);
-		const ddlAdapter = makeDDLAdapter({ executeDDL });
-		const orm = createOrm({
-			schema: testSchema,
-			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
-		});
-		await (
-			orm.tables.users as unknown as {
-				indexes: { create(opts: object): Promise<void> };
-			}
-		).indexes.create({
-			name: 'idx_partial',
-			columns: ['name'],
-			where: 'name IS NOT NULL',
-		});
-		const sql: string = executeDDL.mock.calls[0][0] as string;
-		expect(sql).toBe(
-			'CREATE INDEX "idx_partial" ON "users" ("name") WHERE name IS NOT NULL',
-		);
+		expect(generateCreateIndex).not.toHaveBeenCalled();
 	});
 });
 
@@ -669,7 +471,7 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string): Promise<void> };
 			}
 		).indexes.drop('my_index');
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX "my_index"');
 	});
 
@@ -685,7 +487,7 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string, opts: object): Promise<void> };
 			}
 		).indexes.drop('my_index', { concurrently: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX CONCURRENTLY "my_index"');
 	});
 
@@ -716,7 +518,7 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string, opts: object): Promise<void> };
 			}
 		).indexes.drop('my_index', { ifExists: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX IF EXISTS "my_index"');
 	});
 
@@ -732,7 +534,7 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string, opts: object): Promise<void> };
 			}
 		).indexes.drop('my_index', { schema: 'myns' });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX "myns"."my_index"');
 	});
 
@@ -748,7 +550,7 @@ describe('generateDropIndexSQL — option branches', () => {
 				indexes: { drop(name: string, opts: object): Promise<void> };
 			}
 		).indexes.drop('my_index', { cascade: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX "my_index" CASCADE');
 	});
 
@@ -866,17 +668,17 @@ describe('createOrmInstance — transaction and raw error branches', () => {
 		);
 	});
 
-	it('should throw when listAncestors is called on a table with no self-referential relation', async () => {
-		await expect(() =>
-			ormWithMock.listAncestors('users', 1, {}),
-		).rejects.toThrow(InvalidOperationError);
-	});
+		it('should throw when listAncestors is called on a table with no self-referential relation', async () => {
+			await expect(() =>
+				ormWithMock.listAncestors('users', 1, { parentId: 'parent_id' }),
+			).rejects.toThrow(InvalidOperationError);
+		});
 
-	it('should throw when listDescendants is called on a table with no self-referential relation', async () => {
-		await expect(() =>
-			ormWithMock.listDescendants('users', 1, {}),
-		).rejects.toThrow(InvalidOperationError);
-	});
+		it('should throw when listDescendants is called on a table with no self-referential relation', async () => {
+			await expect(() =>
+				ormWithMock.listDescendants('users', 1, { parentId: 'parent_id' }),
+			).rejects.toThrow(InvalidOperationError);
+		});
 });
 
 // ---------------------------------------------------------------------------
@@ -921,7 +723,7 @@ describe('createOrmInstance — ddl.dropIndex branches', () => {
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		}).withSchema('myschema');
 		await (orm as typeof ormWithMock).ddl.dropIndex('my_idx');
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX "myschema"."my_idx"');
 	});
 
@@ -933,7 +735,7 @@ describe('createOrmInstance — ddl.dropIndex branches', () => {
 			adapter: ddlAdapter as ReturnType<typeof createMockAdapter>,
 		});
 		await orm.ddl.dropIndex('my_idx', { concurrently: true });
-		const sql: string = executeDDL.mock.calls[0][0] as string;
+		const sql = firstDDLStatement(executeDDL);
 		expect(sql).toBe('DROP INDEX CONCURRENTLY "my_idx"');
 	});
 
@@ -1121,7 +923,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 			adapter,
 		);
 		const intent = builder.buildIntent();
-		expect((intent.ctes[0] as Record<string, unknown>).maxDepth).toBe(5);
+		expect(firstCteRecord(intent).maxDepth).toBe(5);
 	});
 
 	it('should omit maxDepth from CTE intent when maxDepth option is not specified', () => {
@@ -1129,7 +931,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 		const builder = createRawCteBuilder('tree', { base, step }, adapter);
 		const intent = builder.buildIntent();
 		expect(
-			(intent.ctes[0] as Record<string, unknown>).maxDepth,
+			firstCteRecord(intent).maxDepth,
 		).toBeUndefined();
 	});
 
@@ -1141,7 +943,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 			adapter,
 		);
 		const intent = builder.buildIntent();
-		expect((intent.ctes[0] as Record<string, unknown>).depthColumn).toBe('lvl');
+		expect(firstCteRecord(intent).depthColumn).toBe('lvl');
 	});
 
 	it('should omit depthColumn from CTE intent when depthColumn option is not specified', () => {
@@ -1149,7 +951,7 @@ describe('createRawCteBuilder — intent building branches', () => {
 		const builder = createRawCteBuilder('tree', { base, step }, adapter);
 		const intent = builder.buildIntent();
 		expect(
-			(intent.ctes[0] as Record<string, unknown>).depthColumn,
+			firstCteRecord(intent).depthColumn,
 		).toBeUndefined();
 	});
 
@@ -1172,9 +974,8 @@ describe('createRawCteBuilder — intent building branches', () => {
 
 	it('should include outer where in intent when .where() is called', () => {
 		const { adapter, base, step } = makeBaseStep();
-		const whereIntent = { kind: 'eq', field: 'id', value: 1 } as Parameters<
-			ReturnType<typeof createRawCteBuilder>['where']
-		>[0];
+		const whereIntent = { kind: 'eq', field: 'id', value: 1 } as unknown as
+			Parameters<ReturnType<typeof createRawCteBuilder>['where']>[0];
 		const builder = createRawCteBuilder('tree', { base, step }, adapter).where(
 			whereIntent,
 		);
@@ -1311,7 +1112,7 @@ describe('CteBuilder — error branches', () => {
 			.withIndex('idx');
 		const cteQueryBuilder = builder.query(orm.select('users'));
 		const intent = cteQueryBuilder.buildIntent();
-		expect((intent.ctes[0] as Record<string, unknown>).indexColumn).toBe('idx');
+		expect(firstCteRecord(intent).indexColumn).toBe('idx');
 	});
 
 	it('should omit indexColumn from CTE intent when withIndex is not called', () => {
@@ -1321,7 +1122,7 @@ describe('CteBuilder — error branches', () => {
 		const cteQueryBuilder = builder.query(orm.select('users'));
 		const intent = cteQueryBuilder.buildIntent();
 		expect(
-			(intent.ctes[0] as Record<string, unknown>).indexColumn,
+			firstCteRecord(intent).indexColumn,
 		).toBeUndefined();
 	});
 
@@ -1331,7 +1132,7 @@ describe('CteBuilder — error branches', () => {
 		const builder = new CteBuilder('batch_data').fromUnnest({ id: [1] });
 		const cteQueryBuilder = builder.query(orm.select('users'));
 		const intent = cteQueryBuilder.buildIntent();
-		expect((intent.ctes[0] as Record<string, unknown>).name).toBe('batch_data');
+		expect(firstCteRecord(intent).name).toBe('batch_data');
 	});
 
 	it('should include column data in the CTE intent after fromUnnest', () => {
@@ -1341,6 +1142,6 @@ describe('CteBuilder — error branches', () => {
 		const builder = new CteBuilder('my_cte').fromUnnest(data);
 		const cteQueryBuilder = builder.query(orm.select('users'));
 		const intent = cteQueryBuilder.buildIntent();
-		expect((intent.ctes[0] as Record<string, unknown>).columns).toEqual(data);
+		expect(firstCteRecord(intent).columns).toEqual(data);
 	});
 });

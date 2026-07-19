@@ -17,11 +17,17 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { identityNaming, type NamingPlugin } from '../naming-plugin.js';
+import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
-	formatStorageParameterValue,
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
+import {
+	assertCreateIndexesSupported,
+	renderCreateIndex,
+	type IndexCapabilityContext,
+	type IndexRenderSpec,
+} from './index-render.js';
 import { generateCommentsPhase } from './phases/comments.js';
 import { generateConstraintsPhase } from './phases/constraints.js';
 import { generateDropStatementsPhase } from './phases/drop-statements.js';
@@ -36,7 +42,6 @@ import {
 	formatSqlDefault,
 	quoteCollation,
 	quoteRoleName,
-	validateIndexMethod,
 } from './phases/utils.js';
 import {
 	assertSchemaName,
@@ -66,7 +71,7 @@ export interface GenerateDDLOptions {
 	readonly fkAutoIndex?: boolean;
 	/** Naming plugin for identifier transformation */
 	readonly naming?: NamingPlugin;
-	/** Dialect capabilities — DDL passes for unsupported features will be skipped */
+	/** Dialect capabilities — unsupported index features throw during DDL generation */
 	readonly dialectCapabilities?: DialectCapabilities;
 }
 
@@ -145,6 +150,10 @@ export function generateDDL(
 		fkAutoIndex,
 		includeDropStatements,
 	};
+	assertCreateIndexesSupported(
+		collectGeneratedCreateIndexSpecs(tables, schemaName, naming, fkAutoIndex),
+		indexContextFromCaps(caps),
+	);
 
 	return [
 		...generateExtensionsPhase(ctx), // PASS -1: CREATE EXTENSION
@@ -157,6 +166,84 @@ export function generateDDL(
 		...generateRlsPhase(ctx), // PASS 3.5: RLS + policies
 		...generateCommentsPhase(ctx), // PASS 4: COMMENT ON
 	];
+}
+
+function buildIndexRenderSpec(
+	tableName: string,
+	idx: IndexIR,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
+): IndexRenderSpec {
+	return {
+		name: idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
+		table: naming.toDatabase(tableName),
+		schema: schemaName,
+		unique: idx.unique === true,
+		method: idx.method,
+		keys: [
+			...(idx.expressions ?? []).map((expression) => ({ expression })),
+			...idx.columns.map((col) => ({
+				column: naming.toDatabase(col),
+				opclass: idx.opclass?.[col],
+			})),
+		],
+		include: idx.include?.map((col) => naming.toDatabase(col)),
+		nullsNotDistinct: idx.nullsNotDistinct,
+		with: idx.with,
+		where: idx.where,
+	};
+}
+
+function collectGeneratedCreateIndexSpecs(
+	tables: readonly TableIR[],
+	schemaName: string | undefined,
+	naming: NamingPlugin,
+	fkAutoIndex: boolean,
+): IndexRenderSpec[] {
+	const specs: IndexRenderSpec[] = [];
+	for (const table of tables) {
+		const explicitIndexColumns = new Set(
+			table.indexes.flatMap((idx) =>
+				idx.columns.length === 1 ? idx.columns : [],
+			),
+		);
+		for (const idx of table.indexes) {
+			specs.push(buildIndexRenderSpec(table.name, idx, schemaName, naming));
+		}
+		if (!fkAutoIndex) continue;
+		for (const fk of table.foreignKeys) {
+			const fkCol = fk.columns[0];
+			if (
+				fk.columns.length === 1 &&
+				fkCol &&
+				!explicitIndexColumns.has(fkCol)
+			) {
+				const dbTableName = naming.toDatabase(table.name);
+				const dbFkCol = naming.toDatabase(fkCol);
+				specs.push(
+					buildIndexRenderSpec(
+						table.name,
+						{
+							name: `idx_${dbTableName}_${dbFkCol}`,
+							columns: [fkCol],
+							unique: false,
+						},
+						schemaName,
+						naming,
+					),
+				);
+			}
+		}
+	}
+	return specs;
+}
+
+function indexContextFromCaps(
+	caps: DialectCapabilities | undefined,
+): IndexCapabilityContext | undefined {
+	return caps
+		? { caps, targetVersion: getPostgresqlCapabilitiesTargetVersion(caps) }
+		: undefined;
 }
 
 // ============================================================================
@@ -376,61 +463,12 @@ export function generateCreateIndex(
 	idx: IndexIR,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
+	context?: IndexCapabilityContext,
 ): string {
-	const indexName = quoteIdentifier(
-		idx.name ?? `idx_${tableName}_${idx.columns.join('_')}`,
-	);
-	const qualifiedTable = qualifyTable(tableName, schemaName, naming);
-	const unique = idx.unique ? 'UNIQUE ' : '';
-	// S-2: validate index method against allowlist before interpolation into unquoted USING clause
-	const indexMethod = idx.method;
-	if (indexMethod) validateIndexMethod(indexMethod, 'index method');
-	const method = indexMethod ? ` USING ${indexMethod}` : '';
-
-	// Build column list: expressions first (validated), then named columns with optional opclass
-	// S-1: validate each expression and opclass before interpolation
-	const colParts: string[] = [];
-	if (idx.expressions && idx.expressions.length > 0) {
-		for (const expr of idx.expressions) {
-			validateSqlExpression(expr, 'index expression');
-			colParts.push(expr);
-		}
-	}
-	for (const col of idx.columns) {
-		const opclass = idx.opclass?.[col] ?? '';
-		if (opclass) validateIdentifier(opclass, 'alias');
-		colParts.push(
-			`${quoteIdentifier(naming.toDatabase(col))}${opclass ? ` ${opclass}` : ''}`,
-		);
-	}
-	const cols = colParts.join(', ');
-
-	const include =
-		idx.include && idx.include.length > 0
-			? ` INCLUDE (${idx.include.map((c) => quoteIdentifier(naming.toDatabase(c))).join(', ')})`
-			: '';
-
-	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
-	const nullsNotDistinct =
-		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
-
-	// Validate WITH storage parameter keys and format values before interpolation.
-	const withParams =
-		idx.with && Object.keys(idx.with).length > 0
-			? ` WITH (${Object.entries(idx.with)
-					.map(([k, v]) => {
-						validateIdentifier(k, 'alias');
-						return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
-					})
-					.join(', ')})`
-			: '';
-
-	// S-1: validate WHERE predicate expression before interpolation
-	const whereExpr = idx.where;
-	if (whereExpr) validateSqlExpression(whereExpr, 'index WHERE predicate');
-	const where = whereExpr ? ` WHERE ${whereExpr}` : '';
-
-	return `CREATE ${unique}INDEX ${indexName} ON ${qualifiedTable}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
+	return `${renderCreateIndex(
+		buildIndexRenderSpec(tableName, idx, schemaName, naming),
+		context,
+	)};`;
 }
 
 /**

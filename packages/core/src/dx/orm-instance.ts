@@ -178,52 +178,6 @@ function generateAlterColumnSQL(
 	return `ALTER TABLE ${tbl} ${clauses.join(', ')}`;
 }
 
-function generateCreateIndexSQL(
-	tableName: string,
-	schemaName: string | undefined,
-	opts: CreateIndexOptions,
-): string {
-	const tbl = buildQualifiedTable(tableName, schemaName);
-	const parts: string[] = ['CREATE'];
-	if (opts.unique) parts.push('UNIQUE');
-	parts.push('INDEX');
-	if (opts.concurrently) parts.push('CONCURRENTLY');
-	if (opts.ifNotExists) parts.push('IF NOT EXISTS');
-	parts.push(quoteIdent(opts.name));
-	parts.push('ON');
-	parts.push(tbl);
-	if (opts.method) parts.push(`USING ${opts.method}`);
-
-	const colDefs = opts.columns.map((col) => {
-		if (typeof col === 'string') {
-			const quotedCol = quoteIdent(col);
-			const op = opts.opclass?.[col] != null ? ` ${opts.opclass[col]}` : '';
-			return `${quotedCol}${op}`;
-		}
-		const op = col.opclass != null ? ` ${col.opclass}` : '';
-		return `(${col.expression})${op}`;
-	});
-	parts.push(`(${colDefs.join(', ')})`);
-
-	if (opts.include && opts.include.length > 0) {
-		parts.push(
-			`INCLUDE (${opts.include.map((c) => quoteIdent(c)).join(', ')})`,
-		);
-	}
-	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
-	if (opts.unique && opts.nullsNotDistinct) {
-		parts.push('NULLS NOT DISTINCT');
-	}
-	if (opts.with && Object.keys(opts.with).length > 0) {
-		const withClauses = Object.entries(opts.with)
-			.map(([k, v]) => `${k} = ${v}`)
-			.join(', ');
-		parts.push(`WITH (${withClauses})`);
-	}
-	if (opts.where) parts.push(`WHERE ${opts.where}`);
-	return parts.join(' ');
-}
-
 function generateDropIndexSQL(
 	name: string,
 	schemaName: string | undefined,
@@ -252,9 +206,7 @@ function buildIndexAPI(
 			if (opts.concurrently) {
 				assertOutsideTransaction(a, 'createIndex', 'CREATE INDEX CONCURRENTLY');
 			}
-			const sql = a.generateCreateIndex
-				? a.generateCreateIndex(tableName, opts, schemaName)
-				: generateCreateIndexSQL(tableName, schemaName, opts);
+			const sql = a.generateCreateIndex(tableName, opts, schemaName);
 			await a.executeDDL?.(sql);
 		},
 

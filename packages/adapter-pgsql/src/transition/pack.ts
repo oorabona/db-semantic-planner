@@ -1,4 +1,5 @@
 import type {
+	CapabilityDescriptor,
 	ExecutionCoordinator,
 	TransitionConnectionPool,
 	TransitionExecutionClient,
@@ -7,14 +8,17 @@ import type { DbCasing } from '@dbsp/types';
 import type { NamingPlugin } from '../naming-plugin.js';
 import { getNamingPluginForDbCasing } from '../naming-plugin.js';
 import {
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY_DESCRIPTOR,
+	INDEX_INCLUDE_CAPABILITY,
+	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+} from './index-feature-capabilities.js';
+import {
 	ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
 	ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
 	ALTER_TABLE_ADD_CHECK_CAPABILITY,
 	ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM,
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
-	CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
-	CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
 	ENUM_LABEL_VISIBLE_OBSERVATION,
 } from './constants.js';
 import { createPgEquivalenceCapability } from './equivalence.js';
@@ -144,6 +148,32 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		getNamingPluginForDbCasing(options.dbCasing ?? 'preserve');
 	const equivalence = createPgEquivalenceCapability();
 	const executionCoordinator = createPgExecutionCoordinator();
+	const capabilityDescriptors: readonly CapabilityDescriptor[] = [
+		{
+			id: ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
+			predicate: {
+				kind: 'minServerVersionNum',
+				minServerVersionNum: ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
+			},
+		},
+		{
+			id: ALTER_TABLE_ADD_CHECK_CAPABILITY,
+			predicate: {
+				kind: 'minServerVersionNum',
+				minServerVersionNum: ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM,
+			},
+		},
+		{
+			id: ALTER_TYPE_ADD_VALUE_CAPABILITY,
+			predicate: {
+				kind: 'minServerVersionNum',
+				minServerVersionNum: ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
+			},
+		},
+		CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY_DESCRIPTOR,
+		INDEX_INCLUDE_CAPABILITY,
+		INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+	];
 	return {
 		rules: [
 			createLogicalIdentityAdoptionRule({
@@ -172,37 +202,7 @@ export function createPgTransitionPack(options: PgTransitionPackOptions = {}) {
 		executionCoordinator,
 		transactionDomain: executionCoordinator.transactionDomain,
 		equivalence,
-		capabilityDescriptors: [
-			{
-				id: ALTER_COLUMN_SET_NOT_NULL_CAPABILITY,
-				predicate: {
-					kind: 'minServerVersionNum',
-					minServerVersionNum: ALTER_COLUMN_SET_NOT_NULL_MIN_SERVER_VERSION_NUM,
-				},
-			},
-			{
-				id: ALTER_TABLE_ADD_CHECK_CAPABILITY,
-				predicate: {
-					kind: 'minServerVersionNum',
-					minServerVersionNum: ALTER_TABLE_ADD_CHECK_MIN_SERVER_VERSION_NUM,
-				},
-			},
-			{
-				id: ALTER_TYPE_ADD_VALUE_CAPABILITY,
-				predicate: {
-					kind: 'minServerVersionNum',
-					minServerVersionNum: ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
-				},
-			},
-			{
-				id: CREATE_UNIQUE_INDEX_CONCURRENTLY_CAPABILITY,
-				predicate: {
-					kind: 'minServerVersionNum',
-					minServerVersionNum:
-						CREATE_UNIQUE_INDEX_CONCURRENTLY_MIN_SERVER_VERSION_NUM,
-				},
-			},
-		],
+		capabilityDescriptors,
 		comparatorNameNormalizer: {
 			normalizeCurrentIdentifier: (identifier: string) =>
 				naming.toModel(identifier),

@@ -364,6 +364,7 @@ export {
 	resourceScopeCovers,
 	selectorMatchesResource,
 	semanticArtifactId,
+	serverVersionNum,
 	validateTransitionRelationalInvariants,
 } from './transition/index.js';
 

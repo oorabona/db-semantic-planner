@@ -11,6 +11,14 @@ export {
 	generateDDL,
 } from './ddl-generator.js';
 export {
+	assertCreateIndexesSupported,
+	assertCreateIndexSupported,
+	IndexFeatureUnsupportedError,
+	renderCreateIndex,
+	type IndexCapabilityContext,
+	type IndexRenderSpec,
+} from './index-render.js';
+export {
 	type AddedEnumValue,
 	assertNoRepeatedExpressionSurfaceDrift,
 	CheckConstraintNewEnumValueError,

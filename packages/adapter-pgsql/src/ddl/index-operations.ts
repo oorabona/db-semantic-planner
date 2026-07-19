@@ -10,30 +10,23 @@
 import type {
 	CreateIndexOptions,
 	DropIndexOptions,
-	IndexColumnDef,
 } from '@dbsp/core';
 import {
-	formatStorageParameterValue,
-	validateIdentifier,
-	validateSqlExpression,
-} from '../validate.js';
-import { quoteIdent, validateIndexMethod } from './phases/utils.js';
+	renderCreateIndex,
+	type IndexCapabilityContext,
+	type IndexRenderSpec,
+} from './index-render.js';
+import { quoteIdent } from './phases/utils.js';
 
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
 
 // S-2: Use quoteIdent from phases/utils (validates + double-quotes) instead of the former
-// local quoteIdentifier (which had no validation). qualifyTable wraps quoteIdent for schema-qualifying.
+// local quoteIdentifier (which had no validation).
 
 function quoteIdentifier(name: string): string {
 	return quoteIdent(name, 'alias');
-}
-
-function qualifyTable(table: string, schema?: string): string {
-	return schema
-		? `${quoteIdent(schema, 'schema')}.${quoteIdent(table, 'table')}`
-		: quoteIdent(table, 'table');
 }
 
 // ---------------------------------------------------------------------------
@@ -73,92 +66,32 @@ export function generateCreateIndexSQL(
 	table: string,
 	options: CreateIndexOptions,
 	schema?: string,
+	context?: IndexCapabilityContext,
 ): string {
-	// Validate method if provided
-	const indexMethod = options.method;
-	if (indexMethod !== undefined) {
-		validateIndexMethod(indexMethod, 'index method');
-	}
+	const keys: IndexRenderSpec['keys'] = options.columns.map((col) => {
+		if (typeof col === 'string') {
+			return { column: col, opclass: options.opclass?.[col] };
+		}
+		return { expression: col.expression, opclass: col.opclass };
+	});
 
-	const parts: string[] = ['CREATE'];
-
-	if (options.unique) parts.push('UNIQUE');
-	parts.push('INDEX');
-	if (options.concurrently) parts.push('CONCURRENTLY');
-	if (options.ifNotExists) parts.push('IF NOT EXISTS');
-
-	parts.push(quoteIdentifier(options.name));
-	parts.push(`ON ${qualifyTable(table, schema)}`);
-
-	if (indexMethod) {
-		parts.push(`USING ${indexMethod}`);
-	}
-
-	// Build column list
-	const colParts: string[] = [];
-	for (const col of options.columns) {
-		colParts.push(buildColumnPart(col, options.opclass));
-	}
-	parts.push(`(${colParts.join(', ')})`);
-
-	// INCLUDE clause
-	if (options.include && options.include.length > 0) {
-		const includeCols = options.include
-			.map((c) => quoteIdentifier(c))
-			.join(', ');
-		parts.push(`INCLUDE (${includeCols})`);
-	}
-
-	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
-	if (options.unique && options.nullsNotDistinct) {
-		parts.push('NULLS NOT DISTINCT');
-	}
-
-	// WITH storage parameters: validate keys and format values before interpolation.
-	if (options.with && Object.keys(options.with).length > 0) {
-		const withParams = Object.entries(options.with)
-			.map(([k, v]) => {
-				validateIdentifier(k, 'alias');
-				return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
-			})
-			.join(', ');
-		parts.push(`WITH (${withParams})`);
-	}
-
-	// WHERE partial index predicate — S-1: validate before interpolation
-	const whereExpr = options.where;
-	if (whereExpr) {
-		validateSqlExpression(whereExpr, 'index WHERE predicate');
-		parts.push(`WHERE ${whereExpr}`);
-	}
-
-	return parts.join(' ');
-}
-
-/**
- * Build a single column part in the index column list.
- * Handles both string columns (with optional opclass from the opclass map)
- * and expression column defs ({ expression, opclass? }).
- */
-function buildColumnPart(
-	col: IndexColumnDef,
-	opclassMap?: Record<string, string>,
-): string {
-	if (typeof col === 'string') {
-		// Named column — quote it, then append opclass from the map if present
-		const quoted = quoteIdentifier(col);
-		const opclass = opclassMap?.[col];
-		// S-1: validate opclass name before interpolation
-		if (opclass) validateIdentifier(opclass, 'alias');
-		return opclass ? `${quoted} ${opclass}` : quoted;
-	}
-	// Expression column — validate expression before interpolation (S-1)
-	const expression = col.expression;
-	validateSqlExpression(expression, 'index expression');
-	const opclass = col.opclass;
-	// S-1: validate expression opclass name before interpolation
-	if (opclass) validateIdentifier(opclass, 'alias');
-	return opclass ? `${expression} ${opclass}` : expression;
+	return renderCreateIndex(
+		{
+			name: options.name,
+			table,
+			schema,
+			unique: options.unique === true,
+			method: options.method,
+			keys,
+			include: options.include,
+			nullsNotDistinct: options.nullsNotDistinct,
+			with: options.with,
+			where: options.where,
+			concurrently: options.concurrently,
+			ifNotExists: options.ifNotExists,
+		},
+		context,
+	);
 }
 
 // ---------------------------------------------------------------------------

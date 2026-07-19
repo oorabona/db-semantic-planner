@@ -219,7 +219,7 @@ function sameArtifact(
 	return left.id === right.id && left.version === right.version;
 }
 
-function serverVersionNum(engineVersion: string): number | undefined {
+export function serverVersionNum(engineVersion: string): number | undefined {
 	const trimmed = engineVersion.trim();
 	if (trimmed.length === 0 || trimmed === 'unknown') {
 		return undefined;

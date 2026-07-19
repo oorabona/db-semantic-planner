@@ -121,6 +121,7 @@ import {
 	getNamingPluginForDbCasing,
 	type NamingPlugin,
 } from './naming-plugin.js';
+import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
 	compileSetOperation as compileSetOperationImpl,
@@ -3953,6 +3954,8 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			...(this.schemaName ? { schemaName: this.schemaName } : {}),
 			naming: this.naming,
 			...overrideOptions,
+			dialectCapabilities:
+				overrideOptions?.dialectCapabilities ?? this.dialectCapabilities,
 		};
 		return generateDDLStatements(schema, options);
 	}
@@ -4500,7 +4503,12 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		options: CreateIndexOptions,
 		schema?: string,
 	): string {
-		return generateCreateIndexSQL(table, options, schema ?? this.schemaName);
+		return generateCreateIndexSQL(table, options, schema ?? this.schemaName, {
+			caps: this.dialectCapabilities,
+			targetVersion: getPostgresqlCapabilitiesTargetVersion(
+				this.dialectCapabilities,
+			),
+		});
 	}
 
 	/**
