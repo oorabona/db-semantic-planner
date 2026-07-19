@@ -93,11 +93,11 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('enum');
-			expect(result.warnings[0].adapter).toBe('test-adapter');
-			expect(result.warnings[0].element).toBe('status');
-			expect(result.warnings[0].message).toContain('"enum"');
-			expect(result.warnings[0].message).toContain('"test-adapter"');
+			expect(result.warnings[0]!.feature).toBe('enum');
+			expect(result.warnings[0]!.adapter).toBe('test-adapter');
+			expect(result.warnings[0]!.element).toBe('status');
+			expect(result.warnings[0]!.message).toContain('"enum"');
+			expect(result.warnings[0]!.message).toContain('"test-adapter"');
 		});
 
 		it('should default to warning behavior when behavior param is omitted', () => {
@@ -112,7 +112,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('extension');
+			expect(result.warnings[0]!.feature).toBe('extension');
 		});
 	});
 
@@ -264,7 +264,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert — only extension warning (enum ignored)
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('extension');
+			expect(result.warnings[0]!.feature).toBe('extension');
 		});
 
 		it('should warn for all features when override has no match for the feature', () => {
@@ -310,8 +310,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('identity');
-			expect(result.warnings[0].element).toBe('users.id');
+			expect(result.warnings[0]!.feature).toBe('identity');
+			expect(result.warnings[0]!.element).toBe('users.id');
 		});
 
 		it('should detect column collation when unsupported', () => {
@@ -337,8 +337,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('collation');
-			expect(result.warnings[0].element).toBe('users.name');
+			expect(result.warnings[0]!.feature).toBe('collation');
+			expect(result.warnings[0]!.element).toBe('users.name');
 		});
 
 		it('should detect column comments when unsupported', () => {
@@ -364,12 +364,12 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('comment');
-			expect(result.warnings[0].element).toContain('users.id');
+			expect(result.warnings[0]!.feature).toBe('comment');
+			expect(result.warnings[0]!.element).toContain('users.id');
 		});
 	});
 
-	describe('table-level: indexes (method, opclass, include, partial, expression)', () => {
+	describe('table-level: indexes (method, opclass, include, partial, expression, nulls not distinct)', () => {
 		it('should detect non-btree index method when unsupported', () => {
 			// Arrange
 			const table: TableIR = {
@@ -386,7 +386,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('indexMethod');
+			expect(result.warnings[0]!.feature).toBe('indexMethod');
 		});
 
 		it('should NOT warn for btree method (always supported)', () => {
@@ -423,7 +423,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('partialIndex');
+			expect(result.warnings[0]!.feature).toBe('partialIndex');
 		});
 
 		it('should detect expression index when unsupported', () => {
@@ -442,7 +442,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('expressionIndex');
+			expect(result.warnings[0]!.feature).toBe('expressionIndex');
 		});
 
 		it('should detect index INCLUDE columns when unsupported', () => {
@@ -461,7 +461,44 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('indexInclude');
+			expect(result.warnings[0]!.feature).toBe('indexInclude');
+		});
+
+		it('should reject NULLS NOT DISTINCT when unsupported and pass when supported', () => {
+			// Arrange
+			const table: TableIR = {
+				name: 'users',
+				columns: [{ name: 'email', type: 'string', nullable: true }],
+				foreignKeys: [],
+				indexes: [
+					{
+						name: 'uk_users_email_nulls',
+						columns: ['email'],
+						unique: true,
+						nullsNotDistinct: true,
+					},
+				],
+			};
+			const model = makeModel(new Map([['users', table]]));
+			const unsupportedCaps: DialectCapabilities = {
+				...POSTGRESQL_CAPABILITIES,
+				supportsDDLIndexNullsNotDistinct: false,
+			};
+			const supportedCaps: DialectCapabilities = {
+				...unsupportedCaps,
+				supportsDDLIndexNullsNotDistinct: true,
+			};
+
+			// Act + Assert
+			expect(() => negotiateFeatures(model, unsupportedCaps, 'error')).toThrow(
+				expect.objectContaining({
+					feature: 'indexNullsNotDistinct',
+					element: 'uk_users_email_nulls',
+				}),
+			);
+			expect(() =>
+				negotiateFeatures(model, supportedCaps, 'error'),
+			).not.toThrow();
 		});
 
 		it('should detect opclass when unsupported', () => {
@@ -480,7 +517,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('indexOpclass');
+			expect(result.warnings[0]!.feature).toBe('indexOpclass');
 		});
 
 		it('should detect multiple index warnings in one pass', () => {
@@ -538,8 +575,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('checkConstraint');
-			expect(result.warnings[0].element).toBe('orders.chk_positive_amount');
+			expect(result.warnings[0]!.feature).toBe('checkConstraint');
+			expect(result.warnings[0]!.element).toBe('orders.chk_positive_amount');
 		});
 	});
 
@@ -577,8 +614,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('onUpdateFK');
-			expect(result.warnings[0].element).toContain('posts FK → users');
+			expect(result.warnings[0]!.feature).toBe('onUpdateFK');
+			expect(result.warnings[0]!.element).toContain('posts FK → users');
 		});
 
 		it('should NOT warn for onUpdate=NO ACTION (always safe)', () => {
@@ -649,7 +686,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('deferredFK');
+			expect(result.warnings[0]!.feature).toBe('deferredFK');
 		});
 	});
 
@@ -671,8 +708,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('comment');
-			expect(result.warnings[0].element).toBe('users (table)');
+			expect(result.warnings[0]!.feature).toBe('comment');
+			expect(result.warnings[0]!.element).toBe('users (table)');
 		});
 	});
 
@@ -694,8 +731,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('rowLevelSecurity');
-			expect(result.warnings[0].element).toBe('users');
+			expect(result.warnings[0]!.feature).toBe('rowLevelSecurity');
+			expect(result.warnings[0]!.element).toBe('users');
 		});
 
 		it('should detect policies array when unsupported', () => {
@@ -720,8 +757,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].feature).toBe('rowLevelSecurity');
-			expect(result.warnings[0].element).toBe('posts');
+			expect(result.warnings[0]!.feature).toBe('rowLevelSecurity');
+			expect(result.warnings[0]!.element).toBe('posts');
 		});
 
 		it('should produce no warnings when supportsDDLRowLevelSecurity is true', () => {
@@ -828,7 +865,7 @@ describe('negotiateFeatures (CAPS-003)', () => {
 
 			// Assert
 			expect(result.warnings).toHaveLength(1);
-			expect(result.warnings[0].element).toBe('restricted table');
+			expect(result.warnings[0]!.element).toBe('restricted table');
 		});
 
 		it('should produce zero warnings if custom checker finds no usages', () => {
@@ -882,8 +919,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			expect(result.warnings).toHaveLength(0);
 		});
 
-		it('DEFAULT_FEATURE_CHECKERS should have exactly 16 entries (one per DDLFeature)', () => {
-			expect(DEFAULT_FEATURE_CHECKERS).toHaveLength(16);
+		it('DEFAULT_FEATURE_CHECKERS should have exactly 17 entries (one per model-detectable DDLFeature)', () => {
+			expect(DEFAULT_FEATURE_CHECKERS).toHaveLength(17);
 		});
 
 		it('every DEFAULT_FEATURE_CHECKER entry should have unique capability + feature pair', () => {
@@ -893,8 +930,8 @@ describe('negotiateFeatures (CAPS-003)', () => {
 			const featureSet = new Set(
 				DEFAULT_FEATURE_CHECKERS.map((c) => c.feature),
 			);
-			expect(capabilitySet.size).toBe(16);
-			expect(featureSet.size).toBe(16);
+			expect(capabilitySet.size).toBe(17);
+			expect(featureSet.size).toBe(17);
 		});
 	});
 });

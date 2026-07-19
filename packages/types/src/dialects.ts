@@ -222,6 +222,8 @@ export interface DialectCapabilities {
 	readonly supportsDDLIndexOpclass?: boolean;
 	/** INCLUDE non-key columns (PG11+, Oracle 18c+, MSSQL) */
 	readonly supportsDDLIndexInclude?: boolean;
+	/** NULLS NOT DISTINCT on unique indexes (PG15+) */
+	readonly supportsDDLIndexNullsNotDistinct?: boolean;
 	/** Partial indexes (WHERE clause) */
 	readonly supportsDDLPartialIndexes?: boolean;
 	/** Expression/functional indexes */

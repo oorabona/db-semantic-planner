@@ -97,6 +97,7 @@ export function createMockAdapter(options?: MockAdapterOptions): Adapter {
 		introspect: notImplemented,
 		executeRaw: notImplemented,
 		generateDDL: notImplemented,
+		generateCreateIndex: notImplemented,
 		compileSelectExpression: notImplemented,
 		validateIdentifier: () => {},
 	};

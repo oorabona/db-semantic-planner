@@ -172,6 +172,7 @@ export {
 	type TransitionExecutionClient,
 	type TransitionPack,
 	type TransitionQueryClient,
+	serverVersionNum,
 } from './registry.js';
 export {
 	assumptionAccepted,

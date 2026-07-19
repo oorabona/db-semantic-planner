@@ -666,7 +666,7 @@ export type CreateIndexOptions = {
 	readonly with?: Readonly<Record<string, unknown>>;
 	readonly where?: string;
 	readonly unique?: boolean;
-	/** PG15+ — for UNIQUE indexes, emit NULLS NOT DISTINCT. Ignored for non-unique indexes. */
+	/** PG15+ — valid only on UNIQUE indexes; declaring it on a non-unique index is a fail-loud error. */
 	readonly nullsNotDistinct?: boolean;
 	readonly ifNotExists?: boolean;
 	readonly concurrently?: boolean;
@@ -714,7 +714,7 @@ export type IndexInfo = {
 // ============================================================================
 
 /**
- * Optional mixin for adapters that can generate table-scoped DDL SQL strings.
+ * Mixin for adapters that can generate table-scoped DDL SQL strings.
  * When present on an adapter, buildTableDDL in core delegates SQL generation
  * to these methods instead of generating SQL inline.
  */
@@ -750,7 +750,7 @@ export interface TableDDLGeneratorAdapter {
 	/**
 	 * Generate SQL for CREATE INDEX.
 	 */
-	generateCreateIndex?(
+	generateCreateIndex(
 		table: string,
 		options: CreateIndexOptions,
 		schema?: string,
@@ -812,7 +812,8 @@ export interface DDLGeneratingAdapter extends BaseAdapter {
  * misuse (e.g. calling execute() on a compile-only instance) at compile time.
  */
 export type CompileOnlyAdapter = CompilingAdapter &
-	DDLGeneratingAdapter & {
+	DDLGeneratingAdapter &
+	TableDDLGeneratorAdapter & {
 		/** Naming convention used by this adapter. */
 		readonly dbCasing: DbCasing;
 
@@ -890,6 +891,7 @@ export type DDLFeature =
 	| 'indexInclude'
 	| 'partialIndex'
 	| 'expressionIndex'
+	| 'indexNullsNotDistinct'
 	| 'rowLevelSecurity';
 
 /** Version range for a DDL feature — resolved at createDialectCapabilities() time */
@@ -937,6 +939,7 @@ export interface DDLFeatureElementMap {
 	indexInclude: IndexIR;
 	partialIndex: IndexIR;
 	expressionIndex: IndexIR;
+	indexNullsNotDistinct: IndexIR;
 	/** Table with rlsEnabled and/or policies (ENABLE ROW LEVEL SECURITY + CREATE POLICY) */
 	rowLevelSecurity: TableIR;
 }

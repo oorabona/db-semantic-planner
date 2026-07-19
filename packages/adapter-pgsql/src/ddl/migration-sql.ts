@@ -19,10 +19,10 @@ import type {
 	TableIR,
 } from '@dbsp/types';
 import { renderCheckConstraintClause } from '../check-expression.js';
+import { getPostgresqlCapabilitiesTargetVersion } from '../postgresql-capabilities.js';
 import {
 	assertNumericLiteral,
 	assertString,
-	formatStorageParameterValue,
 	sanitizeCommentText,
 	validateCheckExpression,
 	validateDbTypeName,
@@ -31,13 +31,18 @@ import {
 } from '../validate.js';
 import { assertPartitionStrategy } from './ddl-generator.js';
 import {
+	assertCreateIndexesSupported,
+	renderCreateIndex,
+	type IndexCapabilityContext,
+	type IndexRenderSpec,
+} from './index-render.js';
+import {
 	formatSqlDefault,
 	quoteCollation,
 	quoteExtensionName,
 	quoteIdent,
 	quoteRoleName,
 	validateEnumLabel,
-	validateIndexMethod,
 } from './phases/utils.js';
 import {
 	getAutoFkIndexName,
@@ -281,7 +286,7 @@ export interface MigrationSQLOptions {
 	readonly includeDestructive?: boolean;
 	/** Automatically create indexes on FK columns for new tables (default: true) */
 	readonly fkAutoIndex?: boolean;
-	/** Dialect capabilities — migration SQL for unsupported features will be filtered */
+	/** Dialect capabilities — unsupported index features throw during migration SQL generation */
 	readonly dialectCapabilities?: DialectCapabilities;
 }
 
@@ -380,6 +385,116 @@ function changesAppliedByUp(
 		: filteredChanges;
 }
 
+function indexContextFromOptions(
+	options: MigrationSQLOptions | undefined,
+): IndexCapabilityContext | undefined {
+	return options?.dialectCapabilities
+		? {
+				caps: options.dialectCapabilities,
+				targetVersion: getPostgresqlCapabilitiesTargetVersion(
+					options.dialectCapabilities,
+				),
+			}
+		: undefined;
+}
+
+function buildCreateIndexSpec(
+	change: SchemaChange,
+	schemaName: string | undefined,
+): IndexRenderSpec | undefined {
+	const idx = change.meta?.index as IndexIR | undefined;
+	if (!idx) return undefined;
+	return {
+		name: idxName(change.table, idx.columns, idx.name),
+		table: change.table,
+		schema: schemaName,
+		unique: idx.unique === true,
+		method: idx.method,
+		keys: [
+			...(idx.expressions ?? []).map((expression) => ({ expression })),
+			...idx.columns.map((col) => ({
+				column: col,
+				opclass: idx.opclass?.[col],
+			})),
+		],
+		include: idx.include,
+		nullsNotDistinct: idx.nullsNotDistinct,
+		with: idx.with,
+		where: idx.where,
+		ifNotExists: true,
+	};
+}
+
+function buildFkAutoIndexSpec(
+	table: TableIR,
+	fkCol: string,
+	schemaName: string | undefined,
+): IndexRenderSpec {
+	return {
+		name: getAutoFkIndexName(table.name, fkCol),
+		table: table.name,
+		schema: schemaName,
+		unique: false,
+		keys: [{ column: fkCol }],
+		ifNotExists: true,
+	};
+}
+
+function collectFkAutoIndexSpecs(
+	changes: readonly SchemaChange[],
+	schemaName: string | undefined,
+): IndexRenderSpec[] {
+	const specs: IndexRenderSpec[] = [];
+	for (const change of changes) {
+		if (change.kind !== 'create_table') continue;
+		const table = change.meta?.table as TableIR | undefined;
+		if (!table) continue;
+		const explicitIndexColumns = new Set(
+			table.indexes.flatMap((idx) =>
+				idx.columns.length === 1 ? idx.columns : [],
+			),
+		);
+		for (const fk of table.foreignKeys) {
+			const fkCol = fk.columns[0];
+			if (
+				fk.columns.length === 1 &&
+				fkCol &&
+				!explicitIndexColumns.has(fkCol)
+			) {
+				specs.push(buildFkAutoIndexSpec(table, fkCol, schemaName));
+			}
+		}
+	}
+	return specs;
+}
+
+function collectUpCreateIndexSpecs(
+	changes: readonly SchemaChange[],
+	schemaName: string | undefined,
+	fkAutoIndex: boolean,
+): IndexRenderSpec[] {
+	const specs = changes.flatMap((change) =>
+		change.kind === 'create_index'
+			? (buildCreateIndexSpec(change, schemaName) ?? [])
+			: [],
+	);
+	if (fkAutoIndex) {
+		specs.push(...collectFkAutoIndexSpecs(changes, schemaName));
+	}
+	return specs;
+}
+
+function collectDownCreateIndexSpecs(
+	changes: readonly SchemaChange[],
+	schemaName: string | undefined,
+): IndexRenderSpec[] {
+	return changes.flatMap((change) =>
+		change.kind === 'drop_index'
+			? (buildCreateIndexSpec(change, schemaName) ?? [])
+			: [],
+	);
+}
+
 // ============================================================================
 // SQL Generation
 // ============================================================================
@@ -411,6 +526,15 @@ export function generateMigrationSQL(
 ): readonly string[] {
 	const schemaName = options?.schemaName;
 	const changes = changesAppliedByUp(diff, options);
+	const indexContext = indexContextFromOptions(options);
+	assertCreateIndexesSupported(
+		collectUpCreateIndexSpecs(
+			changes,
+			schemaName,
+			options?.fkAutoIndex !== false,
+		),
+		indexContext,
+	);
 
 	// Group changes by phase for topological ordering
 	const phases: SchemaChange[][] = [
@@ -445,7 +569,7 @@ export function generateMigrationSQL(
 	const scope = createSchemaScopeAccumulator();
 	for (const phase of phases) {
 		for (const change of phase) {
-			const sql = changeToUpSQL(change, schemaName);
+			const sql = changeToUpSQL(change, schemaName, indexContext);
 			if (sql) {
 				statements.push(sql);
 				collectChangeScopeEvidence(change, scope);
@@ -472,16 +596,11 @@ export function generateMigrationSQL(
 						fkCol &&
 						!explicitIndexColumns.has(fkCol)
 					) {
-						// Migration diffs are normalized to database identifiers before SQL
-						// generation, matching the DDL path's naming.toDatabase inputs.
-						const dbTableName = table.name;
-						const dbFkCol = fkCol;
-						const indexName = quoteIdent(
-							getAutoFkIndexName(dbTableName, dbFkCol),
-							'alias',
-						);
 						statements.push(
-							`CREATE INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(table.name, schemaName)} (${quoteIdent(fkCol, 'alias')});`,
+							`${renderCreateIndex(
+								buildFkAutoIndexSpec(table, fkCol, schemaName),
+								indexContext,
+							)};`,
 						);
 					}
 				}
@@ -686,60 +805,10 @@ function upAlterForeignKey(
 function upCreateIndex(
 	change: SchemaChange,
 	schemaName?: string,
+	context?: IndexCapabilityContext,
 ): string | undefined {
-	const idx = change.meta?.index as IndexIR;
-	if (!idx) return undefined;
-	const indexName = quoteIdent(
-		idxName(change.table, idx.columns, idx.name),
-		'alias',
-	);
-	const unique = idx.unique ? 'UNIQUE ' : '';
-	// S-1: validate index method against allowlist before interpolation into unquoted USING clause
-	const indexMethod = idx.method;
-	if (indexMethod) validateIndexMethod(indexMethod, 'index method');
-	const method = indexMethod ? ` USING ${indexMethod}` : '';
-
-	// Build column list: expressions first (validated), then named columns with optional opclass
-	// S-1: validate each expression and opclass before interpolation
-	const colParts: string[] = [
-		...(idx.expressions ?? []).map((expr) => {
-			validateSqlExpression(expr, 'index expression');
-			return expr;
-		}),
-		...idx.columns.map((col) => {
-			const opclass = idx.opclass?.[col] ?? '';
-			if (opclass) validateIdentifier(opclass, 'alias');
-			return `${quoteIdent(col, 'alias')}${opclass ? ` ${opclass}` : ''}`;
-		}),
-	];
-	const cols = colParts.join(', ');
-
-	const include =
-		idx.include && idx.include.length > 0
-			? ` INCLUDE (${idx.include.map((n) => quoteIdent(n, 'alias')).join(', ')})`
-			: '';
-
-	// Emitted unconditionally, matching INCLUDE; full PG-version gating is tracked in #245.
-	const nullsNotDistinct =
-		idx.unique && idx.nullsNotDistinct ? ' NULLS NOT DISTINCT' : '';
-
-	// Validate WITH storage parameter keys and format values before interpolation.
-	const withParams =
-		idx.with && Object.keys(idx.with).length > 0
-			? ` WITH (${Object.entries(idx.with)
-					.map(([k, v]) => {
-						validateIdentifier(k, 'alias');
-						return `${k} = ${formatStorageParameterValue(v, `index WITH parameter "${k}"`)}`;
-					})
-					.join(', ')})`
-			: '';
-
-	// S-1: validate WHERE predicate expression before interpolation
-	const whereExpr = idx.where;
-	if (whereExpr) validateSqlExpression(whereExpr, 'index WHERE predicate');
-	const where = whereExpr ? ` WHERE ${whereExpr}` : '';
-
-	return `CREATE ${unique}INDEX IF NOT EXISTS ${indexName} ON ${qualifyTable(change.table, schemaName)}${method} (${cols})${include}${nullsNotDistinct}${withParams}${where};`;
+	const spec = buildCreateIndexSpec(change, schemaName);
+	return spec ? `${renderCreateIndex(spec, context)};` : undefined;
 }
 
 function upDropIndex(
@@ -917,6 +986,7 @@ function upSequenceName(
 function changeToUpSQL(
 	change: SchemaChange,
 	schemaName?: string,
+	indexContext?: IndexCapabilityContext,
 ): string | undefined {
 	switch (change.kind) {
 		case 'create_table': {
@@ -950,7 +1020,7 @@ function changeToUpSQL(
 		case 'alter_foreign_key':
 			return upAlterForeignKey(change, schemaName);
 		case 'create_index':
-			return upCreateIndex(change, schemaName);
+			return upCreateIndex(change, schemaName, indexContext);
 		case 'drop_index':
 			return upDropIndex(change, schemaName);
 		case 'add_check_constraint':
@@ -1045,6 +1115,7 @@ function changeToUpSQL(
 function changeToDownSQL(
 	change: SchemaChange,
 	schemaName?: string,
+	indexContext?: IndexCapabilityContext,
 ): DownChangeSQL {
 	// Fail-safe allowlist: DOWN is destructive unless this switch explicitly
 	// proves it only re-adds/restores recorded prior state. Any DROP, DISABLE,
@@ -1257,7 +1328,7 @@ function changeToDownSQL(
 				};
 			}
 			return {
-				sql: upCreateIndex(change, schemaName),
+				sql: upCreateIndex(change, schemaName, indexContext),
 				// Allowlisted: re-creates the dropped index from metadata.
 				destructive: false,
 			};
@@ -1628,6 +1699,11 @@ export function generateDownMigrationSQL(
 	// forward migration actually applied. It still applies its own rollback-side
 	// destructiveness filter below.
 	const changes = changesAppliedByUp(diff, options);
+	const indexContext = indexContextFromOptions(options);
+	assertCreateIndexesSupported(
+		collectDownCreateIndexSpecs(changes, schemaName),
+		indexContext,
+	);
 
 	for (const change of changes) {
 		const phase = getPhase(change.kind);
@@ -1649,7 +1725,7 @@ export function generateDownMigrationSQL(
 		const phaseChanges =
 			i === policyPhase ? [...phases[i]!].reverse() : phases[i]!;
 		for (const change of phaseChanges) {
-			const down = changeToDownSQL(change, schemaName);
+			const down = changeToDownSQL(change, schemaName, indexContext);
 			if (!includeDestructive && down.destructive) continue;
 			destructive = down.destructive || destructive;
 			if (down.sql) {

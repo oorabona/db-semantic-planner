@@ -59,11 +59,17 @@ export {
 	NonConvergentSchemaDiffError,
 	type ParsedMigrationFile,
 	parseMigrationFile,
+	IndexFeatureUnsupportedError,
 	recordMigration,
 	removeMigrationRecord,
 	type SchemaChange,
 	type SchemaDiff,
 	withMigrationLock,
+	assertCreateIndexesSupported,
+	assertCreateIndexSupported,
+	renderCreateIndex,
+	type IndexCapabilityContext,
+	type IndexRenderSpec,
 } from './ddl/index.js';
 // EXPLAIN support
 export {
@@ -168,6 +174,7 @@ export {
 	PgsqlTransactionAbortedCommitError,
 	PgsqlTransactionAbortedError,
 } from './pgsql-adapter.js';
+export { derivePostgresqlCapabilitiesForVersion } from './postgresql-capabilities.js';
 // Redaction (params logging safety)
 export {
 	DEFAULT_REDACTION_PATTERNS,

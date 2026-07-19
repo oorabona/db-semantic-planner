@@ -35,6 +35,10 @@ export {
 	TABLE_INDEXES_OBSERVATION,
 } from './constants.js';
 export {
+	INDEX_INCLUDE_CAPABILITY,
+	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+} from './index-feature-capabilities.js';
+export {
 	appendCompletionJournal,
 	appendIntentJournal,
 	appendObservedJournal,

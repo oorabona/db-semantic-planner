@@ -23,7 +23,8 @@ import type { PhaseContext } from './types.js';
  * @returns Array of DDL statements
  */
 export function generateIndexesPhase(ctx: PhaseContext): string[] {
-	const { tables, schemaName, naming, fkAutoIndex } = ctx;
+	const { tables, schemaName, naming, fkAutoIndex, caps } = ctx;
+	const indexContext = caps ? { caps } : undefined;
 	const statements: string[] = [];
 
 	for (const table of tables) {
@@ -36,7 +37,9 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 
 		// Explicit indexes
 		for (const idx of table.indexes) {
-			statements.push(generateCreateIndex(table.name, idx, schemaName, naming));
+			statements.push(
+				generateCreateIndex(table.name, idx, schemaName, naming, indexContext),
+			);
 		}
 
 		// Auto-generate indexes for single-column FK columns without an explicit index
@@ -59,7 +62,13 @@ export function generateIndexesPhase(ctx: PhaseContext): string[] {
 						unique: false,
 					};
 					statements.push(
-						generateCreateIndex(table.name, autoIdx, schemaName, naming),
+						generateCreateIndex(
+							table.name,
+							autoIdx,
+							schemaName,
+							naming,
+							indexContext,
+						),
 					);
 				}
 			}

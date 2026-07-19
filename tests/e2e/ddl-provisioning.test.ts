@@ -14,12 +14,13 @@ import { join } from 'node:path';
 import {
 	camelCaseNaming,
 	compareSchemata,
+	derivePostgresqlCapabilitiesForVersion,
 	generateDDL,
 	generateMigrationSQL,
 	introspect,
 } from '@dbsp/adapter-pgsql';
 import { ModelIRImpl, ref, schema } from '@dbsp/core';
-import type { SequenceIR, TableIR } from '@dbsp/types';
+import type { IndexIR, TableIR } from '@dbsp/core';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { pushCommand } from '../../packages/cli/src/commands/push.js';
 import { executeDdl } from '../../packages/cli/src/ddl-executor.js';
@@ -114,6 +115,21 @@ async function getTableOid(
 	return result.rows[0]?.oid;
 }
 
+function modelWithIndex(index: IndexIR): ModelIRImpl {
+	const table: TableIR = {
+		name: 'index_cap_users',
+		columns: [
+			{ name: 'id', type: 'integer', nullable: false },
+			{ name: 'email', type: 'string', nullable: false },
+			{ name: 'name', type: 'string', nullable: false },
+		],
+		primaryKey: 'id',
+		foreignKeys: [],
+		indexes: [index],
+	};
+	return new ModelIRImpl(new Map([[table.name, table]]), new Map());
+}
+
 // ============================================================================
 // Test Suite
 // ============================================================================
@@ -151,6 +167,85 @@ describe('DDL Provisioning E2E', () => {
 			const result = await executeDdl(pool, statements);
 			expect(result.statementsExecuted).toBeGreaterThan(0);
 			expect(result.dryRun).toBe(false);
+		});
+
+		it('emits byte-identical default and latest-capability index DDL and provisions it', async () => {
+			const tenantSchema = 'ddl_index_caps_default';
+			const model = modelWithIndex({
+				name: 'uk_index_cap_users_email_nnd',
+				columns: ['email'],
+				unique: true,
+				include: ['name'],
+				nullsNotDistinct: true,
+			});
+
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				const defaultStatements = generateDDL(model, {
+					schemaName: tenantSchema,
+				});
+				const latestStatements = generateDDL(model, {
+					schemaName: tenantSchema,
+					dialectCapabilities: derivePostgresqlCapabilitiesForVersion('15'),
+				});
+
+				expect(latestStatements).toEqual(defaultStatements);
+				expect(defaultStatements).toContain(
+					`CREATE UNIQUE INDEX "uk_index_cap_users_email_nnd" ON "${tenantSchema}"."index_cap_users" ("email") INCLUDE ("name") NULLS NOT DISTINCT;`,
+				);
+
+				const result = await executeDdl(pool, defaultStatements);
+				expect(result.statementsExecuted).toBe(defaultStatements.length);
+
+				const index = await pool.query<{
+					indexdef: string;
+					indnullsnotdistinct: boolean;
+				}>(
+					`SELECT pg_get_indexdef(i.indexrelid) AS indexdef, i.indnullsnotdistinct
+					 FROM pg_index i
+					 JOIN pg_class c ON c.oid = i.indexrelid
+					 JOIN pg_namespace n ON n.oid = c.relnamespace
+					 WHERE n.nspname = $1 AND c.relname = $2`,
+					[tenantSchema, 'uk_index_cap_users_email_nnd'],
+				);
+				expect(index.rows[0]?.indexdef).toContain('INCLUDE (name)');
+				expect(index.rows[0]?.indexdef).toContain('NULLS NOT DISTINCT');
+				expect(index.rows[0]?.indnullsnotdistinct).toBe(true);
+			} finally {
+				await dropSchema(tenantSchema);
+			}
+		});
+
+		it('rejects version-derived unsupported index DDL before executing statements', async () => {
+			const tenantSchema = 'ddl_index_caps_gate';
+			const model = modelWithIndex({
+				name: 'uk_index_cap_users_email_nnd',
+				columns: ['email'],
+				unique: true,
+				nullsNotDistinct: true,
+			});
+
+			await dropSchema(tenantSchema);
+			await createSchema(tenantSchema);
+			try {
+				expect(() =>
+					generateDDL(model, {
+						schemaName: tenantSchema,
+						dialectCapabilities:
+							derivePostgresqlCapabilitiesForVersion('14'),
+					}),
+				).toThrow('NULLS NOT DISTINCT requires PostgreSQL >= 15');
+
+				const table = await getTableOid(
+					pool,
+					tenantSchema,
+					'index_cap_users',
+				);
+				expect(table).toBeUndefined();
+			} finally {
+				await dropSchema(tenantSchema);
+			}
 		});
 
 		it('applies generated DDL with a verbatim mixed-case schemaName under a naming plugin', async () => {
@@ -213,7 +308,7 @@ describe('DDL Provisioning E2E', () => {
 					],
 				]),
 				undefined,
-				new Map([['job_id_seq', { name: 'job_id_seq' } satisfies SequenceIR]]),
+				new Map([['job_id_seq', { name: 'job_id_seq' }]]),
 			);
 
 			await dropSchema(tenantSchema);

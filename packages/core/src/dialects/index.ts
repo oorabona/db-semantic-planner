@@ -69,6 +69,7 @@ export const POSTGRESQL_CAPABILITIES: DialectCapabilities = {
 	supportsDDLIndexMethods: true,
 	supportsDDLIndexOpclass: true,
 	supportsDDLIndexInclude: true,
+	supportsDDLIndexNullsNotDistinct: true,
 	supportsDDLPartialIndexes: true,
 	supportsDDLExpressionIndexes: true,
 	supportsDDLRowLevelSecurity: true,
@@ -244,6 +245,7 @@ const FEATURE_TO_FLAG: Record<DDLFeature, string> = {
 	indexInclude: 'supportsDDLIndexInclude',
 	partialIndex: 'supportsDDLPartialIndexes',
 	expressionIndex: 'supportsDDLExpressionIndexes',
+	indexNullsNotDistinct: 'supportsDDLIndexNullsNotDistinct',
 	rowLevelSecurity: 'supportsDDLRowLevelSecurity',
 };
 
