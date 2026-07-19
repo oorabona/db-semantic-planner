@@ -19,7 +19,6 @@ import type {
 	TransitionConnectionPool,
 	TransitionJournalEvent,
 	TransitionRunJournal,
-	TrustRoot,
 } from '@dbsp/types';
 import {
 	matchLiveObservationContext,
@@ -32,6 +31,7 @@ import {
 	type OperationRuntime,
 	type PackRegistry,
 } from './registry.js';
+import { assumptionAccepted } from './resource-scope.js';
 import { stableJson } from './stable-json.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
 
@@ -69,72 +69,6 @@ type GroupEventsResult =
 			readonly grouped: ReadonlyMap<string, StepEvents>;
 	  }
 	| { readonly ok: false; readonly detail: string };
-
-function sameTrustRoot(left: TrustRoot, right: TrustRoot): boolean {
-	return stableJson(left) === stableJson(right);
-}
-
-function resourceIsWithin(
-	resource: Assumption['scope'][number],
-	parent: Assumption['scope'][number],
-): boolean {
-	if (stableJson(resource) === stableJson(parent)) {
-		return true;
-	}
-	return (
-		resource.engine === parent.engine &&
-		resource.database === parent.database &&
-		resource.schema === parent.schema &&
-		(resource.qualifiedBy?.includes(parent.name) ?? false)
-	);
-}
-
-function selectorMatchesResource(
-	selector: NonNullable<ApplyPolicy['accepts'][number]['withinScope']>[number],
-	resource: Assumption['scope'][number],
-): boolean {
-	if (selector.within && !resourceIsWithin(resource, selector.within)) {
-		return false;
-	}
-	if (selector.kind && selector.kind !== resource.kind) {
-		return false;
-	}
-	if (selector.schema && selector.schema !== resource.schema) {
-		return false;
-	}
-	if (selector.name && selector.name !== resource.name) {
-		return false;
-	}
-	return true;
-}
-
-function assumptionAccepted(
-	assumption: Assumption,
-	policy: ApplyPolicy,
-): boolean {
-	return policy.accepts.some((acceptance) => {
-		if (acceptance.class !== assumption.class) {
-			return false;
-		}
-		if (
-			acceptance.fromTrustRoot &&
-			!sameTrustRoot(acceptance.fromTrustRoot, assumption.asserter)
-		) {
-			return false;
-		}
-		if (assumption.scope.length === 0) {
-			return !acceptance.withinScope || acceptance.withinScope.length === 0;
-		}
-		if (!acceptance.withinScope || acceptance.withinScope.length === 0) {
-			return true;
-		}
-		return assumption.scope.every((resource) =>
-			acceptance.withinScope?.some((selector) =>
-				selectorMatchesResource(selector, resource),
-			),
-		);
-	});
-}
 
 function digest(value: unknown): string {
 	return createHash('sha256').update(stableJson(value)).digest('hex');

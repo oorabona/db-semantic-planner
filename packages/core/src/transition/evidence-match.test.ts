@@ -39,6 +39,17 @@ function table(schema?: string): ResourceAddress {
 	};
 }
 
+function checkConstraint(schema?: string): ResourceAddress {
+	return {
+		engine: 'postgresql',
+		database: 'evidence-db',
+		...(schema === undefined ? {} : { schema }),
+		kind: 'check-constraint',
+		name: 'users_age_check',
+		qualifiedBy: ['users'],
+	};
+}
+
 function request(
 	scope: ResourceAddress,
 	detail?: ObservationRequest['detail'],
@@ -183,5 +194,50 @@ describe('evidence discharge matching', () => {
 		});
 
 		expect(result.conclusion).toBe('established');
+	});
+
+	it('discharges a derived proposition from evidence matching dischargeableBy', () => {
+		const detail = {
+			schema: 'tenant',
+			table: 'users',
+			constraint: 'users_age_check',
+		};
+		const catalogRequest: ObservationRequest = {
+			kind: 'mock.table.checks',
+			scope: [table('tenant')],
+			detail,
+		};
+		const derivedScope = [checkConstraint('tenant')];
+		const result = concludeEvidenceForObligation({
+			obligation: {
+				proposition: {
+					kind: 'mock.check.absent',
+					scope: derivedScope,
+					detail,
+				},
+				scope: derivedScope,
+				dischargeableBy: [catalogRequest],
+			},
+			evidence: [
+				evidence(catalogRequest, {
+					result: {
+						value: {
+							claims: [
+								{
+									kind: 'mock.check.absent',
+									holds: true,
+									scope: derivedScope,
+									detail,
+								},
+							],
+						},
+					},
+				}),
+			],
+			expectedContext: context,
+		});
+
+		expect(result.conclusion).toBe('established');
+		expect(result.supportedBy).toHaveLength(1);
 	});
 });

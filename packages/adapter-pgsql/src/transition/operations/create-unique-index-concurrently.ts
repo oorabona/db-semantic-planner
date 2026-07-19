@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import type { NonRollbackableExecutionTracker } from '@dbsp/core';
 import type {
 	ApplyGuard,
 	Assumption,
@@ -38,6 +39,7 @@ import {
 	normalizePgIndexCatalogRow,
 	readPgObservationContext,
 } from '../observation-issuer.js';
+import { isPgGuardTimeout } from '../pg-guard-timeout.js';
 import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
 
@@ -707,6 +709,23 @@ function boundedLockTimeout(maxWaitMs: number): number {
 	return Math.max(1, Math.min(Math.trunc(maxWaitMs), 600_000));
 }
 
+function quoteLiteral(value: string): string {
+	return `'${value.replaceAll("'", "''")}'`;
+}
+
+async function readCurrentLockTimeout(executor: Queryable): Promise<string> {
+	const result = await executor.query('SHOW lock_timeout');
+	const value = result.rows[0]?.lock_timeout;
+	if (typeof value !== 'string') {
+		throw new Error('SHOW lock_timeout did not return a string value');
+	}
+	return value;
+}
+
+function setLockTimeoutSql(value: string): string {
+	return `SET lock_timeout = ${quoteLiteral(value)}`;
+}
+
 function guardTargetsPayload(
 	guard: ApplyGuard,
 	payload: CreateUniqueIndexConcurrentlyPayload,
@@ -1126,14 +1145,19 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			operation: PhysicalOperation,
 			context: ObservationContext,
 			duringGuards: readonly ApplyGuard[] = [],
+			executionTracker?: NonRollbackableExecutionTracker,
 		) {
 			const payload = payloadOf(operation);
 			const guard = engineGuardFor(payload, duringGuards, context);
 			const executor = clientQuery(client);
+			const previousLockTimeout = await readCurrentLockTimeout(executor);
+			let lockTimeoutChanged = false;
 			await executor.query(
 				`SET lock_timeout = '${boundedLockTimeout(DEFAULT_LOCK_TIMEOUT_MS)}ms'`,
 			);
+			lockTimeoutChanged = true;
 			try {
+				executionTracker?.markNonRollbackableOperationExecuted();
 				await executor.query(renderCreateUniqueIndexConcurrentlySql(payload));
 				return { kind: 'completed' };
 			} catch (error) {
@@ -1155,9 +1179,9 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 					nonRollbackableFootprint: 'none',
 				};
 			} finally {
-				await executor
-					.query('SET lock_timeout = DEFAULT')
-					.catch(() => undefined);
+				if (lockTimeoutChanged) {
+					await executor.query(setLockTimeoutSql(previousLockTimeout));
+				}
 			}
 		},
 		async writeCompletionJournal(
@@ -1184,7 +1208,7 @@ export function createCreateUniqueIndexConcurrentlyOperationRuntime() {
 			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
-			return isRecord(error) && error.code === '55P03';
+			return isPgGuardTimeout(error);
 		},
 	};
 }

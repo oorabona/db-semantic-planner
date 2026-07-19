@@ -127,16 +127,14 @@ export {
 	enumAddDelta,
 	resolveEnumSchemaForComparison,
 } from './enum-delta.js';
+export { createEvidenceView } from './evidence-access.js';
 export {
 	claimEntailsProposition,
-	concludeEvidenceForObligation,
 	type EvidenceConclusion,
 	type EvidenceEntailmentResult,
 	evidenceBooleanClaims,
-	normalizeObservationRequestForContext,
 	normalizePropositionForContext,
 	observationRequestForProposition,
-	observationRequestMatchesInContext,
 	sameObservationRequest,
 	sameObservationRequestInContext,
 } from './evidence-match.js';
@@ -161,6 +159,7 @@ export {
 	type ExecutionCoordinator,
 	type GuardExecutionResult,
 	isOperationRuntime,
+	type NonRollbackableExecutionTracker,
 	type OperationFingerprints,
 	type OperationObservation,
 	type OperationResolution,
@@ -174,6 +173,14 @@ export {
 	type TransitionPack,
 	type TransitionQueryClient,
 } from './registry.js';
+export {
+	assumptionAccepted,
+	resourceIsWithin,
+	resourceScopeCovers,
+	sameResource,
+	sameTrustRoot,
+	selectorMatchesResource,
+} from './resource-scope.js';
 export {
 	type ResumeTransitionInput,
 	resumeTransitionRun,

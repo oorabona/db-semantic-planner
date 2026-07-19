@@ -2,9 +2,10 @@ import { checkDelta } from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
 	Assumption,
-	EvidenceObservation,
+	EvidenceView,
 	JsonValue,
 	ModelIR,
+	ObservationContext,
 	ObservationRequest,
 	PhysicalOperation,
 	ProofClaimDraft,
@@ -22,6 +23,7 @@ import type {
 import type { NamingPlugin } from '../../naming-plugin.js';
 import { identityNaming } from '../../naming-plugin.js';
 import { validateIdentifier } from '../../validate.js';
+import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {
 	ADD_CHECK_RULE_ID,
 	ALTER_AUTHORITY_OBSERVATION,
@@ -31,15 +33,13 @@ import {
 	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
 	CHECK_ROWS_SATISFY_GUARD,
 	ENGINE_VERSION_OBSERVATION,
-	ENUM_LABEL_VISIBLE_OBSERVATION,
 	EXPRESSION_DEPARSE_OBSERVATION,
-	PG_DEPARSE_ARTIFACT,
 	PG_RULE_PACK_ARTIFACT,
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from '../constants.js';
+import { tableCheckDeparseEvidenceFor } from '../deparse-evidence.js';
 import { assumptionId } from '../ids.js';
 import type { CheckSet } from '../operations/alter-table-add-check.js';
-import { stableJson } from '../stable-json.js';
 
 export interface AddCheckMatch {
 	readonly schema?: string;
@@ -71,139 +71,6 @@ const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameRequest(
-	left: ObservationRequest,
-	right: ObservationRequest,
-): boolean {
-	return (
-		left.kind === right.kind &&
-		stableJson(left.scope) === stableJson(right.scope) &&
-		stableJson(left.detail) === stableJson(right.detail)
-	);
-}
-
-function sameLogicalDatabase(
-	requested: string,
-	issued: string,
-	liveDatabase: string,
-): boolean {
-	return (
-		requested === issued || (requested === 'model' && issued === liveDatabase)
-	);
-}
-
-function sameLogicalSchema(requested: unknown, issued: unknown): boolean {
-	return requested == null || requested === issued;
-}
-
-function sameLogicalScopeResource(
-	requested: ResourceAddress,
-	issued: ResourceAddress,
-	requestedSchema: unknown,
-	liveDatabase: string,
-): boolean {
-	return (
-		requested.engine === issued.engine &&
-		requested.kind === issued.kind &&
-		requested.name === issued.name &&
-		stableJson(requested.qualifiedBy) === stableJson(issued.qualifiedBy) &&
-		sameLogicalDatabase(requested.database, issued.database, liveDatabase) &&
-		sameLogicalSchema(requestedSchema, issued.schema)
-	);
-}
-
-function sameLogicalScope(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-	requestedSchema: unknown,
-	liveDatabase: string,
-): boolean {
-	return (
-		requested.scope.length === issued.scope.length &&
-		requested.scope.every((resource, index) => {
-			const issuedResource = issued.scope[index];
-			return (
-				issuedResource !== undefined &&
-				sameLogicalScopeResource(
-					resource,
-					issuedResource,
-					requestedSchema,
-					liveDatabase,
-				)
-			);
-		})
-	);
-}
-
-function sameTableCheckDeparseDetail(
-	requestedDetail: unknown,
-	issuedDetail: unknown,
-): boolean {
-	if (!isRecord(requestedDetail) || !isRecord(issuedDetail)) {
-		return false;
-	}
-	return (
-		requestedDetail.surface === 'table-check' &&
-		issuedDetail.surface === requestedDetail.surface &&
-		requestedDetail.category === 'predicate' &&
-		issuedDetail.category === requestedDetail.category &&
-		requestedDetail.table === issuedDetail.table &&
-		requestedDetail.constraint === issuedDetail.constraint &&
-		requestedDetail.expression === issuedDetail.expression &&
-		sameLogicalSchema(requestedDetail.schema, issuedDetail.schema)
-	);
-}
-
-function sameTableCheckDeparseRequest(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-	liveDatabase: string,
-): boolean {
-	if (
-		requested.kind !== EXPRESSION_DEPARSE_OBSERVATION ||
-		issued.kind !== requested.kind ||
-		!sameTableCheckDeparseDetail(requested.detail, issued.detail) ||
-		!isRecord(requested.detail)
-	) {
-		return false;
-	}
-	return sameLogicalScope(
-		requested,
-		issued,
-		requested.detail.schema,
-		liveDatabase,
-	);
-}
-
-function sameLogicalDetail(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-): boolean {
-	if (requested.kind !== issued.kind) {
-		return false;
-	}
-	if (requested.kind === EXPRESSION_DEPARSE_OBSERVATION) {
-		return sameTableCheckDeparseDetail(requested.detail, issued.detail);
-	}
-	if (!isRecord(requested.detail) || !isRecord(issued.detail)) {
-		return stableJson(requested.detail) === stableJson(issued.detail);
-	}
-	if (
-		'minServerVersionNum' in requested.detail ||
-		'minServerVersionNum' in issued.detail
-	) {
-		return (
-			requested.detail.minServerVersionNum === issued.detail.minServerVersionNum
-		);
-	}
-	return (
-		requested.detail.table === issued.detail.table &&
-		requested.detail.constraint === issued.detail.constraint &&
-		(requested.detail.schema == null ||
-			requested.detail.schema === issued.detail.schema)
-	);
 }
 
 function resourceForMatch(
@@ -332,14 +199,10 @@ function absentObligation(
 
 function evaluationObligations(
 	match: AddCheckMatch,
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 ): readonly ProofObligation[] {
 	const requests = requiredObservationsFor(match).map((request) => {
-		const normalized =
-			evidence.find((observation) =>
-				sameLogicalDetail(request, observation.request),
-			)?.request ?? request;
-		return normalized;
+		return evidence.normalizeRequest(request);
 	});
 	const tableRequest =
 		requests.find(
@@ -352,38 +215,21 @@ function evaluationObligations(
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
-	request: ObservationRequest,
-	claimKind = request.kind,
+	evidence: EvidenceView,
+	target: ObservationRequest | ProofObligation,
 ): boolean | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
-		const value = observation.result.value;
-		if (!isRecord(value) || !Array.isArray(value.claims)) {
-			continue;
-		}
-		for (const claim of value.claims) {
-			if (!isRecord(claim)) {
-				continue;
-			}
-			if (claim.kind === claimKind && typeof claim.holds === 'boolean') {
-				return claim.holds;
-			}
-		}
+	const result = evidence.claimHolds(target);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function relkind(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): string | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
+	for (const observation of evidence.observationsFor(request)) {
 		const value = observation.result.value;
 		if (isRecord(value) && typeof value.relkind === 'string') {
 			return value.relkind;
@@ -393,13 +239,10 @@ function relkind(
 }
 
 function checksFromEvidence(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): readonly CheckSet[] | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
+	for (const observation of evidence.observationsFor(request)) {
 		const value = observation.result.value;
 		if (!isRecord(value) || !Array.isArray(value.checks)) {
 			continue;
@@ -444,69 +287,6 @@ function checksFromEvidence(
 	return undefined;
 }
 
-function vendorExpression(
-	value: unknown,
-): VendorValidatedExpression | undefined {
-	if (
-		!isRecord(value) ||
-		value.kind !== 'vendor-validated' ||
-		value.category !== 'predicate' ||
-		!isRecord(value.validatedBy) ||
-		value.validatedBy.id !== PG_DEPARSE_ARTIFACT.id ||
-		value.validatedBy.version !== PG_DEPARSE_ARTIFACT.version ||
-		typeof value.text !== 'string'
-	) {
-		return undefined;
-	}
-	return {
-		kind: 'vendor-validated',
-		category: 'predicate',
-		validatedBy: PG_DEPARSE_ARTIFACT,
-		text: value.text,
-	};
-}
-
-type DeparseEvidenceValue = {
-	readonly expression: VendorValidatedExpression;
-	readonly predicate: VendorValidatedExpression;
-	readonly equivalentToCatalog?: boolean;
-};
-
-function deparseEvidenceFor(
-	evidence: readonly EvidenceObservation[],
-	request: ObservationRequest,
-): DeparseEvidenceValue | undefined {
-	for (const observation of evidence) {
-		if (
-			observation.source !== 'vendor-deparser' ||
-			!sameTableCheckDeparseRequest(
-				request,
-				observation.request,
-				observation.context.databaseId,
-			)
-		) {
-			continue;
-		}
-		const value = observation.result.value;
-		if (!isRecord(value) || value.ok !== true) {
-			continue;
-		}
-		const expression = vendorExpression(value.expression);
-		const predicate = vendorExpression(value.predicate);
-		if (!expression || !predicate) {
-			continue;
-		}
-		return {
-			expression,
-			predicate,
-			...(typeof value.equivalentToCatalog === 'boolean'
-				? { equivalentToCatalog: value.equivalentToCatalog }
-				: {}),
-		};
-	}
-	return undefined;
-}
-
 function operationRef(match: AddCheckMatch): string {
 	return `postgresql:add-check:${JSON.stringify([
 		match.schema ?? null,
@@ -519,32 +299,28 @@ function enumLabelCompositionFact(
 	match: AddCheckMatch,
 	required: RequiredEnumLabelIR,
 	naming: NamingPlugin,
+	context?: ObservationContext,
 	database = match.database ?? 'model',
 ) {
-	const schema = required.schema ?? match.schema;
+	const schema = required.schema ?? match.schema ?? context?.targetSchema;
+	if (!schema) {
+		throw new Error(
+			'add-check enum-label composition requires an explicit enum schema',
+		);
+	}
 	const type = naming.toDatabase(required.type);
-	const resource: ResourceAddress = {
-		engine: 'postgresql',
+	return pgEnumLabelVisibleFact({
 		database,
-		kind: 'type',
-		name: type,
-		qualifiedBy: ['enum'],
-		...(schema ? { schema } : {}),
-	};
-	return {
-		kind: ENUM_LABEL_VISIBLE_OBSERVATION,
-		resource,
-		detail: {
-			schema: schema ?? null,
-			type,
-			label: required.label,
-		} as JsonValue,
-	};
+		schema,
+		type,
+		label: required.label,
+	});
 }
 
 function compositionForRequiredEnumLabels(
 	match: AddCheckMatch,
 	naming: NamingPlugin,
+	context?: ObservationContext,
 ): TransitionFragmentComposition | undefined {
 	if (!match.requiresEnumLabels || match.requiresEnumLabels.length === 0) {
 		return undefined;
@@ -553,7 +329,7 @@ function compositionForRequiredEnumLabels(
 	return {
 		requires: match.requiresEnumLabels.map((required) => ({
 			opRef,
-			fact: enumLabelCompositionFact(match, required, naming),
+			fact: enumLabelCompositionFact(match, required, naming, context),
 			needs: 'producer-after-commit',
 		})),
 	};
@@ -767,14 +543,19 @@ export function createAddCheckRule(
 						: {}),
 				};
 				const request = deparseRequest(match);
-				const observed = deparseEvidenceFor(context?.evidence ?? [], request);
-				if (!observed) {
+				const observed = context?.evidence
+					? tableCheckDeparseEvidenceFor({
+							evidence: context.evidence,
+							request,
+						})
+					: { kind: 'missing' as const };
+				if (observed.kind !== 'found') {
 					return {
 						recognized: 'unknown',
 						obligations: [obligationFor(request, 'table-check')],
 					};
 				}
-				if (observed.equivalentToCatalog === true) {
+				if (observed.evidence.equivalentToCatalog === true) {
 					return { recognized: 'no-drift', claimDraft: noDriftClaim(match) };
 				}
 				return unsupportedRecognition(
@@ -787,41 +568,37 @@ export function createAddCheckRule(
 		requiredObservations: requiredObservationsFor,
 		declareComposition(
 			match: AddCheckMatch,
+			context: ObservationContext,
 		): TransitionFragmentComposition | undefined {
-			return compositionForRequiredEnumLabels(match, naming);
+			return compositionForRequiredEnumLabels(match, naming, context);
 		},
-		evaluate(
-			match: AddCheckMatch,
-			evidence: readonly EvidenceObservation[],
-		): RuleEvaluation {
+		evaluate(match: AddCheckMatch, evidence: EvidenceView): RuleEvaluation {
 			const obligations = evaluationObligations(match, evidence);
 			const requests = obligations.flatMap((obligation) => [
 				...(obligation.dischargeableBy ?? []),
 			]);
 			const requestFor = (kind: string) =>
 				requests.find((request) => request.kind === kind);
+			const obligationForKind = (kind: string) =>
+				obligations.find((obligation) => obligation.proposition.kind === kind);
 			const tableRequest = requestFor(TABLE_CHECK_CONSTRAINTS_OBSERVATION);
 			const authorityRequest = requestFor(ALTER_AUTHORITY_OBSERVATION);
 			const versionRequest = requestFor(ENGINE_VERSION_OBSERVATION);
-			const deparse = requestFor(EXPRESSION_DEPARSE_OBSERVATION)
-				? deparseEvidenceFor(
+			const deparseRequest = requestFor(EXPRESSION_DEPARSE_OBSERVATION);
+			const absentConstraintObligation = obligationForKind(
+				CHECK_CONSTRAINT_ABSENT_OBSERVATION,
+			);
+			const deparse = deparseRequest
+				? tableCheckDeparseEvidenceFor({
 						evidence,
-						requestFor(EXPRESSION_DEPARSE_OBSERVATION)!,
-					)
-				: undefined;
+						request: deparseRequest,
+					})
+				: { kind: 'missing' as const };
 			const tableExists = tableRequest
-				? claimHolds(
-						evidence,
-						tableRequest,
-						TABLE_CHECK_CONSTRAINTS_OBSERVATION,
-					)
+				? claimHolds(evidence, tableRequest)
 				: undefined;
-			const targetAbsent = tableRequest
-				? claimHolds(
-						evidence,
-						tableRequest,
-						CHECK_CONSTRAINT_ABSENT_OBSERVATION,
-					)
+			const targetAbsent = absentConstraintObligation
+				? claimHolds(evidence, absentConstraintObligation)
 				: undefined;
 			const hasAlterAuthority = authorityRequest
 				? claimHolds(evidence, authorityRequest)
@@ -837,7 +614,7 @@ export function createAddCheckRule(
 				targetAbsent === undefined ||
 				hasAlterAuthority === undefined ||
 				versionSupported === undefined ||
-				!deparse ||
+				deparse.kind !== 'found' ||
 				!checks
 			) {
 				return { outcome: 'blocked', obligations, assumptions: [] };
@@ -876,8 +653,8 @@ export function createAddCheckRule(
 				obligations,
 				assumptions: match.assumptions ?? [],
 				catalogChecks: checks,
-				expression: deparse.expression,
-				predicate: deparse.predicate,
+				expression: deparse.evidence.expression,
+				predicate: deparse.evidence.predicate,
 			};
 			return applicable;
 		},

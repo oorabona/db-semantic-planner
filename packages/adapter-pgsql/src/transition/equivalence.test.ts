@@ -1,3 +1,4 @@
+import { createEvidenceView } from '@dbsp/core';
 import type {
 	Assumption,
 	CollationRef,
@@ -177,6 +178,14 @@ function deparseEvidence(
 		source: 'vendor-deparser',
 		validity: { invalidatedBy: ['external-ddl'] },
 	};
+}
+
+function evidenceView(
+	items: readonly EvidenceObservation[],
+	ctx: ObservationContext = proofObservationContext,
+	requests: readonly ObservationRequest[] = items.map((item) => item.request),
+) {
+	return createEvidenceView({ evidence: items, context: ctx, requests });
 }
 
 function columnDeparseRequest(
@@ -371,13 +380,18 @@ describe('PostgreSQL transition equivalence', () => {
 		const equivalence = createPgEquivalenceCapability();
 		const left = portable('active');
 		const right = sqlExpression("'active'::text");
+		const request = columnDeparseRequest(left, right);
 
 		const result = equivalence.compareExpression(
 			left,
 			right,
 			'scalar',
-			proofEquivalenceContext,
-			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+			{ ...proofEquivalenceContext, deparseRequest: request },
+			evidenceView([
+				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+					request,
+				}),
+			]),
 		);
 
 		expect(result.kind).toBe('equivalent');
@@ -387,6 +401,7 @@ describe('PostgreSQL transition equivalence', () => {
 		const equivalence = createPgEquivalenceCapability();
 		const left = portable('active');
 		const right = sqlExpression("'active'::text");
+		const request = columnDeparseRequest(left, right);
 
 		const result = equivalence.compareExpression(
 			left,
@@ -397,8 +412,13 @@ describe('PostgreSQL transition equivalence', () => {
 				databaseId: proofEquivalenceContext.databaseId,
 				targetSchema: proofEquivalenceContext.targetSchema,
 				searchPath: proofEquivalenceContext.searchPath,
+				deparseRequest: request,
 			},
-			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+			evidenceView([
+				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+					request,
+				}),
+			]),
 		);
 
 		expect(result.kind).toBe('unknown');
@@ -449,6 +469,7 @@ describe('PostgreSQL transition equivalence', () => {
 		const left = portable('active');
 		const right = sqlExpression("'active'::text");
 		const mismatchedProofContext = mutate(proofObservationContext);
+		const request = columnDeparseRequest(left, right);
 
 		const result = equivalence.compareExpression(
 			left,
@@ -457,8 +478,13 @@ describe('PostgreSQL transition equivalence', () => {
 			{
 				...proofEquivalenceContext,
 				proofObservationContext: mismatchedProofContext,
+				deparseRequest: request,
 			},
-			[deparseEvidence(left, right, "'active'::text", "'active'::text")],
+			evidenceView([
+				deparseEvidence(left, right, "'active'::text", "'active'::text", {
+					request,
+				}),
+			]),
 		);
 
 		expect(result.kind).toBe('unknown');
@@ -485,14 +511,14 @@ describe('PostgreSQL transition equivalence', () => {
 			right,
 			'scalar',
 			boundContext,
-			[
+			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request: siblingRequest,
 					context: {
 						...proofObservationContext,
 					},
 				}),
-			],
+			]),
 		);
 
 		expect(result.kind).toBe('unknown');
@@ -513,7 +539,7 @@ describe('PostgreSQL transition equivalence', () => {
 			right,
 			'scalar',
 			boundContext,
-			[
+			evidenceView([
 				deparseEvidence(left, right, "'active'::text", "'active'::text", {
 					request,
 					context: {
@@ -526,7 +552,7 @@ describe('PostgreSQL transition equivalence', () => {
 						...proofObservationContext,
 					},
 				}),
-			],
+			]),
 		);
 
 		expect(result.kind).toBe('unknown');
@@ -548,7 +574,7 @@ describe('PostgreSQL transition equivalence', () => {
 			right,
 			'scalar',
 			context,
-			[deparseEvidence(left, right, '10', '10')],
+			evidenceView([deparseEvidence(left, right, '10', '10')]),
 		);
 
 		expect(result).toMatchObject({
@@ -567,13 +593,18 @@ describe('PostgreSQL transition equivalence', () => {
 		const equivalence = createPgEquivalenceCapability();
 		const left = portable('active');
 		const right = sqlExpression("'pending'::text");
+		const request = columnDeparseRequest(left, right);
 
 		const result = equivalence.compareExpression(
 			left,
 			right,
 			'scalar',
-			proofEquivalenceContext,
-			[deparseEvidence(left, right, "'active'::text", "'pending'::text")],
+			{ ...proofEquivalenceContext, deparseRequest: request },
+			evidenceView([
+				deparseEvidence(left, right, "'active'::text", "'pending'::text", {
+					request,
+				}),
+			]),
 		);
 
 		expect(result.kind).toBe('different');

@@ -37,6 +37,7 @@ import {
 	appendObservedJournal,
 } from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
+import { isPgGuardTimeout, pgGuardTimeoutError } from '../pg-guard-timeout.js';
 import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
 
@@ -1018,7 +1019,7 @@ export function createAlterTableAddCheckOperationRuntime() {
 					.query('SET LOCAL statement_timeout = DEFAULT')
 					.catch(() => undefined);
 				if (isRecord(error) && error.code === '57014') {
-					throw { code: 'DBSP_GUARD_TIMEOUT', cause: error };
+					throw pgGuardTimeoutError(error);
 				}
 				throw error;
 			}
@@ -1066,10 +1067,7 @@ export function createAlterTableAddCheckOperationRuntime() {
 			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
-			return (
-				isRecord(error) &&
-				(error.code === '55P03' || error.code === 'DBSP_GUARD_TIMEOUT')
-			);
+			return isPgGuardTimeout(error);
 		},
 	};
 }

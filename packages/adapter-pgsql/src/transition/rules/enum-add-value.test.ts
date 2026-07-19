@@ -1,6 +1,7 @@
 import {
 	createApplier,
 	createComparator,
+	createEvidenceView,
 	createPackRegistry,
 	createProver,
 } from '@dbsp/core';
@@ -108,6 +109,13 @@ function evidence(
 		source: 'system-catalog',
 		validity: { invalidatedBy: ['external-ddl'] },
 	};
+}
+
+function evidenceView(
+	items: readonly EvidenceObservation[],
+	requests: readonly ObservationRequest[] = items.map((item) => item.request),
+) {
+	return createEvidenceView({ evidence: items, context, requests });
 }
 
 class FakeEnumPool {
@@ -519,7 +527,7 @@ describe('postgresql.enum.add-value rule', () => {
 		const requests = rule.requiredObservations(currentMatch);
 		const evaluation = rule.evaluate(
 			currentMatch,
-			requests.map((request) => evidence(request)),
+			evidenceView(requests.map((request) => evidence(request))),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -579,8 +587,10 @@ describe('postgresql.enum.add-value rule', () => {
 		const requests = rule.requiredObservations(currentMatch);
 		const evaluation = rule.evaluate(
 			currentMatch,
-			requests.map((request) =>
-				evidence(request, request.kind !== ALTER_TYPE_AUTHORITY_OBSERVATION),
+			evidenceView(
+				requests.map((request) =>
+					evidence(request, request.kind !== ALTER_TYPE_AUTHORITY_OBSERVATION),
+				),
 			),
 			[],
 		);

@@ -4,6 +4,7 @@ import type {
 	EquivalenceCapability,
 	EquivalenceContext,
 } from './equivalence.js';
+import type { EvidenceView } from './evidence-access.js';
 import type {
 	RuleRef,
 	RuleSelectionRationale,
@@ -13,7 +14,6 @@ import type {
 } from './fragment.js';
 import type {
 	AdvisoryObservation,
-	EvidenceObservation,
 	IssuedObservation,
 	ObservationContext,
 	ObservationPrivilegeMergeResult,
@@ -81,7 +81,7 @@ export interface ObservationIssuer {
 export interface RecognitionContext {
 	readonly equivalence?: EquivalenceCapability;
 	readonly context: EquivalenceContext;
-	readonly evidence?: readonly EvidenceObservation[];
+	readonly evidence?: EvidenceView;
 }
 
 export type RecognitionResult<TMatch> =
@@ -162,6 +162,12 @@ export interface TransitionRule<TMatch = unknown> {
 	readonly id: string;
 	readonly artifact: SemanticArtifactRef;
 	readonly support: RuleSupport;
+	/**
+	 * Column fields consumed by this rule when the comparator recognizes the rule
+	 * against a focused one-column model. Hidden-diff subtraction only reverts
+	 * these fields; undeclared fields remain real drift.
+	 */
+	readonly consumesColumnFields?: readonly string[];
 	recognize(
 		desired: ModelIR,
 		current: ModelIR,
@@ -170,7 +176,7 @@ export interface TransitionRule<TMatch = unknown> {
 	requiredObservations(match: TMatch): readonly ObservationRequest[];
 	evaluate(
 		match: TMatch,
-		evidence: readonly EvidenceObservation[],
+		evidence: EvidenceView,
 		advisory: readonly AdvisoryObservation[],
 	): RuleEvaluation;
 	declareComposition?(

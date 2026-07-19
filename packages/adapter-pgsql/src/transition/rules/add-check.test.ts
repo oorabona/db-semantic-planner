@@ -1,4 +1,9 @@
-import { createComparator, createPackRegistry, createProver } from '@dbsp/core';
+import {
+	createComparator,
+	createEvidenceView,
+	createPackRegistry,
+	createProver,
+} from '@dbsp/core';
 import type {
 	CheckConstraintIR,
 	EvidenceObservation,
@@ -142,6 +147,13 @@ function evidence(
 		source,
 		validity: { invalidatedBy: ['external-ddl'] },
 	};
+}
+
+function evidenceView(
+	items: readonly EvidenceObservation[],
+	requests: readonly ObservationRequest[] = items.map((item) => item.request),
+) {
+	return createEvidenceView({ evidence: items, context, requests });
 }
 
 function tableChecksEvidence(
@@ -314,12 +326,12 @@ describe('postgresql.table.add-check rule', () => {
 		]);
 		const evaluation = rule.evaluate(
 			recognition.match,
-			[
+			evidenceView([
 				tableChecksEvidence(requests[0]!),
 				authorityEvidence(requests[1]!),
 				versionEvidence(requests[2]!),
 				deparseEvidence(requests[3]!),
-			],
+			]),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -412,14 +424,14 @@ describe('postgresql.table.add-check rule', () => {
 		const requests = rule.requiredObservations(recognition.match);
 		const evaluation = rule.evaluate(
 			recognition.match,
-			[
+			evidenceView([
 				tableChecksEvidence(requests[0]!, {
 					constraintName: 'users_status_check',
 				}),
 				authorityEvidence(requests[1]!),
 				versionEvidence(requests[2]!),
 				deparseEvidence(requests[3]!),
-			],
+			]),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -465,12 +477,12 @@ describe('postgresql.table.add-check rule', () => {
 		const requests = rule.requiredObservations(recognition.match);
 		const evaluation = rule.evaluate(
 			recognition.match,
-			[
+			evidenceView([
 				tableChecksEvidence(requests[0]!),
 				authorityEvidence(requests[1]!),
 				versionEvidence(requests[2]!),
 				deparseEvidence(requests[3]!),
-			],
+			]),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -500,27 +512,30 @@ describe('postgresql.table.add-check rule', () => {
 
 		const mismatched = rule.evaluate(
 			recognition.match,
-			[
+			evidenceView([
 				...baseEvidence,
 				deparseEvidence(requests[3]!, { requestConstraint: 'other_check' }),
-			],
+			]),
 			[],
 		);
 		expect(mismatched.outcome).toBe('blocked');
 
 		const mismatchedExpression = rule.evaluate(
 			recognition.match,
-			[
+			evidenceView([
 				...baseEvidence,
 				deparseEvidence(requests[3]!, { requestExpression: 'age > 1' }),
-			],
+			]),
 			[],
 		);
 		expect(mismatchedExpression.outcome).toBe('blocked');
 
 		const failed = rule.evaluate(
 			recognition.match,
-			[...baseEvidence, deparseEvidence(requests[3]!, { ok: false })],
+			evidenceView([
+				...baseEvidence,
+				deparseEvidence(requests[3]!, { ok: false }),
+			]),
 			[],
 		);
 		expect(failed.outcome).toBe('blocked');
@@ -546,14 +561,20 @@ describe('postgresql.table.add-check rule', () => {
 		expect(
 			rule.evaluate(
 				recognition.match,
-				[tableChecksEvidence(requests[0]!, { relkind: 'p' }), ...common],
+				evidenceView([
+					tableChecksEvidence(requests[0]!, { relkind: 'p' }),
+					...common,
+				]),
 				[],
 			).outcome,
 		).toBe('inapplicable');
 		expect(
 			rule.evaluate(
 				recognition.match,
-				[tableChecksEvidence(requests[0]!, { absent: false }), ...common],
+				evidenceView([
+					tableChecksEvidence(requests[0]!, { absent: false }),
+					...common,
+				]),
 				[],
 			).outcome,
 		).toBe('inapplicable');
@@ -579,23 +600,23 @@ describe('postgresql.table.add-check rule', () => {
 
 		const equal = rule.recognize(desired, current, {
 			context: { engine: 'postgresql', targetSchema: 'public' },
-			evidence: [
+			evidence: evidenceView([
 				deparseEvidence(request!, {
 					equivalentToCatalog: true,
 					exactRequest: true,
 				}),
-			],
+			]),
 		});
 		expect(equal.recognized).toBe('no-drift');
 
 		const different = rule.recognize(desired, current, {
 			context: { engine: 'postgresql', targetSchema: 'public' },
-			evidence: [
+			evidence: evidenceView([
 				deparseEvidence(request!, {
 					equivalentToCatalog: false,
 					exactRequest: true,
 				}),
-			],
+			]),
 		});
 		expect(different.recognized).toBe('unsupported');
 	});
@@ -624,32 +645,32 @@ describe('postgresql.table.add-check rule', () => {
 
 		const equal = rule.recognize(desired, current, {
 			context: { engine: 'postgresql', databaseId: context.databaseId },
-			evidence: [
+			evidence: evidenceView([
 				deparseEvidence(request!, {
 					equivalentToCatalog: true,
 				}),
-			],
+			]),
 		});
 		expect(equal.recognized).toBe('no-drift');
 
 		const different = rule.recognize(desired, current, {
 			context: { engine: 'postgresql', databaseId: context.databaseId },
-			evidence: [
+			evidence: evidenceView([
 				deparseEvidence(request!, {
 					equivalentToCatalog: false,
 				}),
-			],
+			]),
 		});
 		expect(different.recognized).toBe('unsupported');
 
 		const mismatchedExpression = rule.recognize(desired, current, {
 			context: { engine: 'postgresql', databaseId: context.databaseId },
-			evidence: [
+			evidence: evidenceView([
 				deparseEvidence(request!, {
 					equivalentToCatalog: true,
 					requestExpression: 'CHECK ((age > 1))',
 				}),
-			],
+			]),
 		});
 		expect(mismatchedExpression.recognized).toBe('unknown');
 	});

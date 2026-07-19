@@ -39,6 +39,7 @@ import {
 	unmanagedLogicalIdentityCarrierTableError,
 } from '../logical-identity-carrier-shape.js';
 import { readPgObservationContext } from '../observation-issuer.js';
+import { isPgGuardTimeout } from '../pg-guard-timeout.js';
 import { stableJson } from '../stable-json.js';
 
 export type AttachLogicalIdentityPayload = {
@@ -857,7 +858,7 @@ export function createAttachLogicalIdentityOperationRuntime() {
 			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
-			return isRecord(error) && error.code === '55P03';
+			return isPgGuardTimeout(error);
 		},
 	};
 }

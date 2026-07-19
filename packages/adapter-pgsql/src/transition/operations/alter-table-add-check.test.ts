@@ -19,6 +19,7 @@ import {
 	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
 } from '../constants.js';
 import { evidenceId } from '../ids.js';
+import { createPgTransitionPack } from '../pack.js';
 import {
 	type AlterTableAddCheckPayload,
 	type CheckSet,
@@ -416,6 +417,38 @@ describe('AlterTableAddCheck operation runtime', () => {
 			'SELECT 1 FROM "tenant"."users" WHERE ((age > 0)) IS FALSE LIMIT 1',
 		);
 		expect(queries.some((sql) => sql.startsWith('ALTER TABLE'))).toBe(false);
+	});
+
+	it('classifies only wrapped guard statement cancellations as guard timeouts', async () => {
+		const runtime = createAlterTableAddCheckOperationRuntime();
+		await expect(
+			runtime.checkGuard(
+				{
+					opaqueClient: {
+						query: async (sql: string) => {
+							if (sql.startsWith('SELECT 1 FROM')) {
+								throw { code: '57014' };
+							}
+							return { rows: [] };
+						},
+					},
+				},
+				operation,
+				guard(),
+				context,
+			),
+		).rejects.toMatchObject({ code: 'DBSP_GUARD_TIMEOUT' });
+
+		expect(runtime.isLockTimeout({ code: 'DBSP_GUARD_TIMEOUT' })).toBe(true);
+		expect(runtime.isLockTimeout({ code: '57014' })).toBe(false);
+		expect(
+			runtime.isLockTimeout({ code: '57014', dbspGuardTimeout: true }),
+		).toBe(true);
+		expect(
+			createPgTransitionPack().executionCoordinator.isLockTimeout({
+				code: 'DBSP_GUARD_TIMEOUT',
+			}),
+		).toBe(true);
 	});
 
 	it('writes durable journal metadata outside the tenant target', async () => {

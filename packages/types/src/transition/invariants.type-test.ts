@@ -12,6 +12,7 @@ import type {
 	CompareOutcome,
 	EvidenceId,
 	EvidenceObservation,
+	EvidenceView,
 	GuardedPlan,
 	GuardedPlanStep,
 	GuardPredicate,
@@ -62,6 +63,7 @@ declare const currentModel: ModelIR;
 declare const desiredModel: ModelIR;
 declare const evidenceId: EvidenceId;
 declare const evidenceObservation: EvidenceObservation;
+declare const evidenceView: EvidenceView;
 declare const guardedPlan: GuardedPlan;
 declare const guardedPlanStep: GuardedPlanStep;
 declare const issuedObservation: IssuedObservation;
@@ -233,14 +235,10 @@ acceptsRuleEvaluation({
 	assumptions: [assumption],
 });
 
-// @ts-expect-error Rule evaluation only sees durable evidence.
-transitionRule.evaluate(undefined, [advisoryObservation], []);
+// @ts-expect-error Rule evaluation only sees the scoped evidence view.
+transitionRule.evaluate(undefined, [evidenceObservation], []);
 
-transitionRule.evaluate(
-	undefined,
-	[evidenceObservation],
-	[advisoryObservation],
-);
+transitionRule.evaluate(undefined, evidenceView, [advisoryObservation]);
 transitionRule.recognize(desiredModel, currentModel);
 
 type TypedMatch = { readonly operationRef: string };
@@ -249,7 +247,7 @@ declare const typedRule: TransitionRule<TypedMatch>;
 const typedRecognition = typedRule.recognize(desiredModel, currentModel);
 if (typedRecognition.recognized === true) {
 	typedRule.requiredObservations(typedRecognition.match);
-	typedRule.evaluate(typedRecognition.match, [evidenceObservation], []);
+	typedRule.evaluate(typedRecognition.match, evidenceView, []);
 	typedRule.generateCandidate(typedRecognition.match, {
 		outcome: 'applicable',
 		obligations: [],

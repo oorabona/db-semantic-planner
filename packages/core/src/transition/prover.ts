@@ -40,6 +40,7 @@ import {
 	transitionCompositionFactKey,
 } from './composer.js';
 import { matchLiveObservationContext } from './context-match.js';
+import { createEvidenceView } from './evidence-access.js';
 import {
 	concludeEvidenceForObligation,
 	observationRequestForProposition,
@@ -1580,9 +1581,14 @@ async function proveTransitions(
 						proofContext,
 					)
 				: issued.evidence;
+			const evidenceView = createEvidenceView({
+				evidence: proofEvidence,
+				context: proofContext,
+				requests: candidate.requiredObservations,
+			});
 			const evaluation = rule.evaluate(
 				candidate.match,
-				issued.evidence,
+				evidenceView,
 				issued.advisory,
 			);
 			if (evaluation.outcome === 'blocked') {
@@ -1598,7 +1604,7 @@ async function proveTransitions(
 				const claims = evaluation.obligations.map((obligation, index) =>
 					proofClaimForObligation(
 						obligation,
-						issued.evidence,
+						proofEvidence,
 						index,
 						issuer?.artifact ?? PROVER_ARTIFACT,
 						proofContext,
@@ -2116,6 +2122,11 @@ async function retryUnknownRecognition(
 				issuedRequestKeys,
 			);
 			const equivalence = registry.resolveEquivalence(rule.artifact);
+			const evidenceView = createEvidenceView({
+				evidence: issued.evidence,
+				context: proofContext,
+				requests: recognitionRequests,
+			});
 			const retried = recognitionResultWithEvidenceSupport(
 				rule.recognize(
 					recognition.desired,
@@ -2124,11 +2135,11 @@ async function retryUnknownRecognition(
 						? {
 								equivalence,
 								context: equivalenceContextFromObservation(proofContext),
-								evidence: issued.evidence,
+								evidence: evidenceView,
 							}
 						: {
 								context: equivalenceContextFromObservation(proofContext),
-								evidence: issued.evidence,
+								evidence: evidenceView,
 							},
 				),
 				issued.evidence,

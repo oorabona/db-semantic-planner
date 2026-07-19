@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { resourceScopeCovers } from '@dbsp/core';
 import type {
 	Assumption,
 	DurableIntentRecord,
@@ -27,6 +28,7 @@ import {
 	appendObservedJournal,
 } from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
+import { isPgGuardTimeout } from '../pg-guard-timeout.js';
 import { stableJson } from '../stable-json.js';
 
 export type ManualSqlPayload = {
@@ -625,7 +627,10 @@ function assertUnsafeStatement(value: unknown): UnsafeNativeFragment {
 	};
 }
 
-function payloadOf(operation: PhysicalOperation): ManualSqlPayload {
+function payloadOf(
+	operation: PhysicalOperation,
+	context: ObservationContext,
+): ManualSqlPayload {
 	if (
 		operation.operationKind.artifact.id !== PG_OPERATION_PACK_ARTIFACT.id ||
 		operation.operationKind.artifact.version !==
@@ -647,18 +652,21 @@ function payloadOf(operation: PhysicalOperation): ManualSqlPayload {
 			'ManualSql requires declared preconditions and postconditions',
 		);
 	}
-	return {
-		statement: assertUnsafeStatement(statement),
-		blastRadius: blastRadius.map((resource, index) =>
-			assertResource(resource, `blastRadius[${index}]`),
-		),
-		preconditions: preconditions.map((assertion, index) =>
-			assertAssertion(assertion, `preconditions[${index}]`),
-		),
-		postconditions: postconditions.map((assertion, index) =>
-			assertAssertion(assertion, `postconditions[${index}]`),
-		),
-	};
+	return normalizedValidatedPayload(
+		{
+			statement: assertUnsafeStatement(statement),
+			blastRadius: blastRadius.map((resource, index) =>
+				assertResource(resource, `blastRadius[${index}]`),
+			),
+			preconditions: preconditions.map((assertion, index) =>
+				assertAssertion(assertion, `preconditions[${index}]`),
+			),
+			postconditions: postconditions.map((assertion, index) =>
+				assertAssertion(assertion, `postconditions[${index}]`),
+			),
+		},
+		context,
+	);
 }
 
 function userBlastRadiusAssumption(
@@ -681,7 +689,18 @@ function userBlastRadiusAssumption(
 	};
 }
 
-export function normalizeManualSqlPayload(
+function assertUserBlastRadiusCoversPayload(
+	assumption: Assumption,
+	blastRadius: readonly ResourceAddress[],
+): void {
+	if (!resourceScopeCovers(assumption.scope, blastRadius)) {
+		throw new Error(
+			'ManualSql user-blast-radius attestation scope must cover the declared blastRadius',
+		);
+	}
+}
+
+function normalizedValidatedPayload(
 	payload: ManualSqlPayload,
 	context: ObservationContext,
 ): ManualSqlPayload {
@@ -696,15 +715,24 @@ export function normalizeManualSqlPayload(
 		assertAssertion(assertion, `postconditions[${index}]`),
 	);
 	const validated = { statement, blastRadius, preconditions, postconditions };
+	const attestation = userBlastRadiusAssumption(validated, context);
+	assertUserBlastRadiusCoversPayload(attestation, blastRadius);
 	return {
 		statement: {
 			...statement,
-			attestation: userBlastRadiusAssumption(validated, context),
+			attestation,
 		},
 		blastRadius,
 		preconditions,
 		postconditions,
 	};
+}
+
+export function normalizeManualSqlPayload(
+	payload: ManualSqlPayload,
+	context: ObservationContext,
+): ManualSqlPayload {
+	return normalizedValidatedPayload(payload, context);
 }
 
 function fingerprintFor(
@@ -747,7 +775,7 @@ function beforeAfterFingerprints(
 	_evidence: readonly EvidenceObservation[],
 	context: ObservationContext,
 ) {
-	const payload = payloadOf(operation);
+	const payload = payloadOf(operation, context);
 	return {
 		expectedBefore: fingerprintFor(payload, context, 'before'),
 		expectedAfter: fingerprintFor(payload, context, 'after'),
@@ -770,7 +798,7 @@ export function createManualSqlOperationRuntime() {
 			operation: PhysicalOperation,
 			context: ObservationContext,
 		): OperationEffectAssessment {
-			const payload = payloadOf(operation);
+			const payload = payloadOf(operation, context);
 			const selectors = payload.blastRadius.map(resourceSelector);
 			return {
 				effects: {
@@ -845,7 +873,11 @@ export function createManualSqlOperationRuntime() {
 		) {
 			return {
 				observations: [],
-				fingerprint: fingerprintFor(payloadOf(operation), context, phase),
+				fingerprint: fingerprintFor(
+					payloadOf(operation, context),
+					context,
+					phase,
+				),
 			};
 		},
 		async checkGuard() {
@@ -854,8 +886,11 @@ export function createManualSqlOperationRuntime() {
 		async executeOperation(
 			client: TransitionExecutionClient,
 			operation: PhysicalOperation,
+			context: ObservationContext,
 		) {
-			await clientQuery(client).query(payloadOf(operation).statement.text);
+			await clientQuery(client).query(
+				payloadOf(operation, context).statement.text,
+			);
 			return { kind: 'completed' as const };
 		},
 		async writeCompletionJournal(
@@ -878,7 +913,7 @@ export function createManualSqlOperationRuntime() {
 			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
-			return isRecord(error) && error.code === '55P03';
+			return isPgGuardTimeout(error);
 		},
 	};
 }

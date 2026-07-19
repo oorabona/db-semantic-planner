@@ -1,6 +1,7 @@
 import type { SemanticArtifactRef } from './artifact.js';
+import type { EvidenceView } from './evidence-access.js';
 import type { ExpressionValue } from './expression.js';
-import type { EvidenceObservation, ObservationContext } from './observation.js';
+import type { ObservationContext } from './observation.js';
 import type { Assumption, ProofClaimDraft, ProofObligation } from './proof.js';
 
 export type EquivalenceResult =
@@ -65,19 +66,19 @@ export interface EquivalenceCapability {
 		a: TypeRef,
 		b: TypeRef,
 		context: EquivalenceContext,
-		evidence?: readonly EvidenceObservation[],
+		evidence?: EvidenceView,
 	): EquivalenceResult;
 	compareExpression(
 		a: ExpressionValue,
 		b: ExpressionValue,
 		category: ExpressionEquivalenceCategory,
 		context: EquivalenceContext,
-		evidence?: readonly EvidenceObservation[],
+		evidence?: EvidenceView,
 	): EquivalenceResult;
 	compareCollation(
 		a: CollationRef,
 		b: CollationRef,
 		context: EquivalenceContext,
-		evidence?: readonly EvidenceObservation[],
+		evidence?: EvidenceView,
 	): EquivalenceResult;
 }

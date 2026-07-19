@@ -46,6 +46,14 @@ const tableResource: ResourceAddress = {
 	name: 'users',
 };
 
+const schemaResource: ResourceAddress = {
+	engine: 'postgresql',
+	database: 'manual-db',
+	schema: 'tenant',
+	kind: 'schema',
+	name: 'tenant',
+};
+
 const databaseResource: ResourceAddress = {
 	engine: 'postgresql',
 	database: 'manual-db',
@@ -542,6 +550,20 @@ describe('ManualSql operation runtime', () => {
 		);
 		expect(normalized.postconditions[0]).toEqual(
 			validManualPayload().postconditions[0],
+		);
+	});
+
+	it('rejects user blast-radius attestations that do not cover the declared blastRadius', () => {
+		expectPayloadRejected(
+			{
+				...validManualPayload(),
+				statement: {
+					...validManualPayload().statement,
+					attestation: userBlastAssumption([tableResource]),
+				},
+				blastRadius: [schemaResource],
+			},
+			/attestation scope must cover the declared blastRadius/,
 		);
 	});
 

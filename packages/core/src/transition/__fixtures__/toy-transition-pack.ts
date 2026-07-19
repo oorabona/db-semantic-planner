@@ -12,6 +12,7 @@ import type {
 	ColumnIR,
 	EvidenceId,
 	EvidenceObservation,
+	EvidenceView,
 	FingerprintManifest,
 	IssuedObservation,
 	JsonValue,
@@ -380,7 +381,8 @@ function setRequiredMatch(
 	);
 	if (
 		defaultValue !== undefined &&
-		!visibleChoiceValue(currentEntry.column, defaultValue)
+		!visibleChoiceValue(currentEntry.column, defaultValue) &&
+		addedChoiceValue(currentEntry.column, desiredEntry.column) !== defaultValue
 	) {
 		return undefined;
 	}
@@ -388,6 +390,10 @@ function setRequiredMatch(
 		...currentEntry.column,
 		nullable: false,
 		...(defaultValue !== undefined ? { default: defaultValue } : {}),
+		...(defaultValue !== undefined &&
+		addedChoiceValue(currentEntry.column, desiredEntry.column) === defaultValue
+			? { originalDbType: desiredEntry.column.originalDbType }
+			: {}),
 	};
 	if (stableJson(expected) !== stableJson(desiredEntry.column)) {
 		return undefined;
@@ -538,34 +544,14 @@ function obligationFor(
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): boolean | undefined {
-	for (const observation of evidence) {
-		if (
-			observation.request.kind !== request.kind ||
-			stableJson(observation.request.scope) !== stableJson(request.scope) ||
-			stableJson(observation.request.detail) !== stableJson(request.detail)
-		) {
-			continue;
-		}
-		const claims = isRecord(observation.result.value)
-			? observation.result.value.claims
-			: undefined;
-		if (!Array.isArray(claims)) {
-			return undefined;
-		}
-		for (const claim of claims) {
-			if (
-				isRecord(claim) &&
-				claim.kind === request.kind &&
-				typeof claim.holds === 'boolean'
-			) {
-				return claim.holds;
-			}
-		}
+	const result = evidence.claimHolds(request);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function operationAssumption(
@@ -782,9 +768,12 @@ function requiredChoiceAddObservations(
 
 function evaluateRequests(
 	requests: readonly ObservationRequest[],
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 ): RuleEvaluation {
-	const obligations = requests.map((request) => obligationFor(request));
+	const normalized = requests.map((request) =>
+		evidence.normalizeRequest(request),
+	);
+	const obligations = normalized.map((request) => obligationFor(request));
 	const missing = requests.some(
 		(request) => claimHolds(evidence, request) === undefined,
 	);
@@ -817,6 +806,7 @@ function createSetRequiredRule(): TransitionRule<ToyColumnMatch> {
 			versions: [{ min: '1' }],
 			requiredCapabilities: [TOY_SET_REQUIRED_CAPABILITY],
 		},
+		consumesColumnFields: ['nullable', 'default'],
 		recognize(desired, current): RecognitionResult<ToyColumnMatch> {
 			const match = setRequiredMatch(desired, current);
 			return match ? { recognized: true, match } : { recognized: false };
@@ -878,6 +868,7 @@ function createChoiceAddValueRule(): TransitionRule<ToyChoiceAddValueMatch> {
 			versions: [{ min: '1' }],
 			requiredCapabilities: [TOY_CHOICE_ADD_VALUE_CAPABILITY],
 		},
+		consumesColumnFields: ['originalDbType'],
 		recognize(desired, current): RecognitionResult<ToyChoiceAddValueMatch> {
 			const match = choiceAddValueMatch(desired, current);
 			return match ? { recognized: true, match } : { recognized: false };

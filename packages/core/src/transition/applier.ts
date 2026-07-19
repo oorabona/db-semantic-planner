@@ -17,12 +17,10 @@ import type {
 	PlanAssessment,
 	ProvenPlanStep,
 	RecoveryArtefact,
-	ResourceAddress,
 	StepJournal,
 	TransactionalCompletionRecord,
 	TransitionConnectionPool,
 	TransitionRunMetadata,
-	TrustRoot,
 } from '@dbsp/types';
 import { matchLiveObservationContext } from './context-match.js';
 import { claimId, semanticArtifactId } from './ids.js';
@@ -34,6 +32,7 @@ import {
 	type OperationRuntime,
 	type PackRegistry,
 } from './registry.js';
+import { assumptionAccepted } from './resource-scope.js';
 import { resumeTransitionRun } from './resume.js';
 import { stableJson } from './stable-json.js';
 import { validateTransitionRelationalInvariants } from './validation.js';
@@ -45,76 +44,6 @@ const APPLIER_ARTIFACT = {
 
 const UNMINTED_PLAN_DETAIL =
 	'plan was not minted by prove() in this process; applying a serialized plan is a separate, not-yet-available API (roadmap: identity & adoption)';
-
-function sameTrustRoot(left: TrustRoot, right: TrustRoot): boolean {
-	return stableJson(left) === stableJson(right);
-}
-
-function selectorMatchesResource(
-	selector: NonNullable<ApplyPolicy['accepts'][number]['withinScope']>[number],
-	resource: ResourceAddress,
-): boolean {
-	if (selector.within && !resourceIsWithin(resource, selector.within)) {
-		return false;
-	}
-	if (selector.kind && selector.kind !== resource.kind) {
-		return false;
-	}
-	if (selector.schema && selector.schema !== resource.schema) {
-		return false;
-	}
-	if (selector.name && selector.name !== resource.name) {
-		return false;
-	}
-	return true;
-}
-
-function sameResource(left: ResourceAddress, right: ResourceAddress): boolean {
-	return stableJson(left) === stableJson(right);
-}
-
-function resourceIsWithin(
-	resource: ResourceAddress,
-	parent: ResourceAddress,
-): boolean {
-	if (sameResource(resource, parent)) {
-		return true;
-	}
-	return (
-		resource.engine === parent.engine &&
-		resource.database === parent.database &&
-		resource.schema === parent.schema &&
-		(resource.qualifiedBy?.includes(parent.name) ?? false)
-	);
-}
-
-function assumptionAccepted(
-	assumption: Assumption,
-	policy: ApplyPolicy,
-): boolean {
-	return policy.accepts.some((acceptance) => {
-		if (acceptance.class !== assumption.class) {
-			return false;
-		}
-		if (
-			acceptance.fromTrustRoot &&
-			!sameTrustRoot(acceptance.fromTrustRoot, assumption.asserter)
-		) {
-			return false;
-		}
-		if (assumption.scope.length === 0) {
-			return !acceptance.withinScope || acceptance.withinScope.length === 0;
-		}
-		if (!acceptance.withinScope || acceptance.withinScope.length === 0) {
-			return true;
-		}
-		return assumption.scope.every((resource) =>
-			acceptance.withinScope?.some((selector) =>
-				selectorMatchesResource(selector, resource),
-			),
-		);
-	});
-}
 
 function assessment(
 	reason: OutcomeReason,
@@ -688,6 +617,30 @@ export function createApplier(registry: PackRegistry): Applier {
 					journals: [...journals, ...result.journals],
 				});
 			};
+			const resultWithObservedJournal = async (params: {
+				readonly semantics: OperationRuntime;
+				readonly client:
+					| Awaited<ReturnType<OperationRuntime['checkout']>>
+					| undefined;
+				readonly journal: StepJournal;
+				readonly result: ApplyResult;
+				readonly outcomeDurable: boolean;
+			}): Promise<ApplyResult> => {
+				if (!params.client) {
+					return resultWithJournalWriteWarnings(params.result);
+				}
+				const journalWriteFailure = await writeObservedJournalOrResult({
+					semantics: params.semantics,
+					client: params.client,
+					journal: params.journal,
+					result: params.result,
+					outcomeDurable: params.outcomeDurable,
+					onDurableWriteWarning: recordJournalWriteWarning,
+				});
+				return resultWithJournalWriteWarnings(
+					journalWriteFailure ?? params.result,
+				);
+			};
 			let runtimeContext = proofContext;
 
 			const stepById = new Map(plan.steps.map((step) => [step.stepId, step]));
@@ -913,17 +866,20 @@ export function createApplier(registry: PackRegistry): Applier {
 								await segmentCoordinator.rollback(executionClient);
 							}
 							const journal = contextMismatchJournal(entry.intent, []);
-							await entry.semantics.writeObservedJournal(
-								executionClient,
-								journal,
-							);
-							return resultWithJournalWriteWarnings({
+							const result = {
 								assessment: stoppedAssessment(
 									contextMismatchReason(entry.step, liveContextMatch.detail),
 									journals.length > 0,
 								),
 								journals: [...journals, journal],
 								observations,
+							};
+							return resultWithObservedJournal({
+								semantics: entry.semantics,
+								client: executionClient,
+								journal,
+								result,
+								outcomeDurable: journals.length > 0,
 							});
 						}
 
@@ -949,11 +905,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								await segmentCoordinator.rollback(executionClient);
 							}
 							const journal = unknownJournal(entry.intent);
-							await entry.semantics.writeObservedJournal(
-								executionClient,
-								journal,
-							);
-							return resultWithJournalWriteWarnings({
+							const result = {
 								assessment: stoppedAssessment(
 									contextMismatchReason(
 										entry.step,
@@ -963,6 +915,13 @@ export function createApplier(registry: PackRegistry): Applier {
 								),
 								journals: [...journals, journal],
 								observations,
+							};
+							return resultWithObservedJournal({
+								semantics: entry.semantics,
+								client: executionClient,
+								journal,
+								result,
+								outcomeDurable: journals.length > 0,
 							});
 						}
 						if (
@@ -978,17 +937,20 @@ export function createApplier(registry: PackRegistry): Applier {
 								entry.intent,
 								observations,
 							);
-							await entry.semantics.writeObservedJournal(
-								executionClient,
-								journal,
-							);
-							return resultWithJournalWriteWarnings({
+							const result = {
 								assessment: stoppedAssessment(
 									contextMismatchReason(entry.step, 'expectedBefore mismatch'),
 									journals.length > 0,
 								),
 								journals: [...journals, journal],
 								observations,
+							};
+							return resultWithObservedJournal({
+								semantics: entry.semantics,
+								client: executionClient,
+								journal,
+								result,
+								outcomeDurable: journals.length > 0,
 							});
 						}
 
@@ -1057,9 +1019,11 @@ export function createApplier(registry: PackRegistry): Applier {
 						}
 
 						activeOperationAttempted = true;
-						if (!transactional) {
-							activeNonRollbackableOperationExecuted = true;
-						}
+						const nonRollbackableExecutionTracker = {
+							markNonRollbackableOperationExecuted: () => {
+								activeNonRollbackableOperationExecuted = true;
+							},
+						};
 						const executionOutcome = await entry.semantics.executeOperation(
 							executionClient,
 							entry.step.operation,
@@ -1067,6 +1031,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							entry.step.guards.filter(
 								(guard) => guard.phase === 'during-operation',
 							),
+							nonRollbackableExecutionTracker,
 						);
 						if (executionOutcome.kind === 'guard-failed') {
 							if (transactionStarted && !committed) {
@@ -1127,17 +1092,20 @@ export function createApplier(registry: PackRegistry): Applier {
 									[],
 									executionOutcome.recovery,
 								);
-								await entry.semantics.writeObservedJournal(
-									executionClient,
-									journal,
-								);
-								return resultWithJournalWriteWarnings({
+								const result = {
 									assessment: stoppedAssessment(
 										operationFailedNotAppliedReason(entry.step, detail),
 										journals.length > 0,
 									),
 									journals: [...journals, journal],
 									observations,
+								};
+								return resultWithObservedJournal({
+									semantics: entry.semantics,
+									client: executionClient,
+									journal,
+									result,
+									outcomeDurable: journals.length > 0,
 								});
 							}
 							const journal = journalWithObserved(
@@ -1174,7 +1142,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						}
 						const afterGuardFailure = await runGuardPhase(
 							'after-operation',
-							!transactional,
+							activeNonRollbackableOperationExecuted,
 						);
 						if (afterGuardFailure) {
 							return resultWithJournalWriteWarnings(afterGuardFailure);
@@ -1378,10 +1346,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								);
 							} catch (error) {
 								const unknown = unknownJournal(entry.intent);
-								await entry.semantics
-									.writeObservedJournal(executionClient, unknown)
-									.catch(() => undefined);
-								return resultWithJournalWriteWarnings({
+								const result = {
 									assessment: assessment(
 										{
 											code: 'unknown-step-result',
@@ -1396,6 +1361,13 @@ export function createApplier(registry: PackRegistry): Applier {
 									),
 									journals: [...journals, unknown],
 									observations,
+								};
+								return resultWithObservedJournal({
+									semantics: entry.semantics,
+									client: executionClient,
+									journal: unknown,
+									result,
+									outcomeDurable: true,
 								});
 							}
 							observations.push(...after.observations);
@@ -1461,12 +1433,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							await segmentCoordinator.rollback(client).catch(() => undefined);
 						}
 						const journal = unknownJournal(active.intent);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
@@ -1481,6 +1448,13 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: true,
 						});
 					}
 					let rollbackAttempted = false;
@@ -1500,12 +1474,7 @@ export function createApplier(registry: PackRegistry): Applier {
 						activeOperationAttempted
 					) {
 						const journal = unknownJournal(active.intent);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
@@ -1523,6 +1492,13 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: true,
 						});
 					}
 					if (segmentCoordinator.isLockTimeout(error)) {
@@ -1535,12 +1511,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								: 'guard-timeout',
 							[],
 						);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: stoppedAssessment(
 								{
 									code: 'guard-timeout',
@@ -1558,6 +1529,13 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: hasAppliedWork,
 						});
 					}
 					if (!activeOperationAttempted) {
@@ -1570,18 +1548,20 @@ export function createApplier(registry: PackRegistry): Applier {
 							'operation-failed-not-applied',
 							[],
 						);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: stoppedAssessment(
 								operationFailedNotAppliedReason(active.step, detail),
 								journals.length > 0,
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: journals.length > 0,
 						});
 					}
 					if (
@@ -1599,18 +1579,46 @@ export function createApplier(registry: PackRegistry): Applier {
 							'operation-failed-not-applied',
 							[],
 						);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: stoppedAssessment(
 								operationFailedNotAppliedReason(active.step, detail),
 								journals.length > 0,
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: journals.length > 0,
+						});
+					}
+					if (!committed && !activeNonRollbackableOperationExecuted) {
+						const detail =
+							error instanceof Error
+								? error.message
+								: 'operation failed before non-rollbackable DDL was reached';
+						const journal = journalWithObserved(
+							active.intent,
+							'operation-failed-not-applied',
+							[],
+						);
+						const result = {
+							assessment: stoppedAssessment(
+								operationFailedNotAppliedReason(active.step, detail),
+								journals.length > 0,
+							),
+							journals: [...journals, journal],
+							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: journals.length > 0,
 						});
 					}
 					if (committed || activeNonRollbackableOperationExecuted) {
@@ -1619,12 +1627,7 @@ export function createApplier(registry: PackRegistry): Applier {
 							'partially-applied',
 							[],
 						);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: assessment(
 								partiallyAppliedReason(
 									active.step,
@@ -1637,6 +1640,13 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: true,
 						});
 					}
 					if (journals.length > 0) {
@@ -1645,12 +1655,7 @@ export function createApplier(registry: PackRegistry): Applier {
 								? error.message
 								: 'segment failed after an earlier commit without a confirmed rollback';
 						const journal = unknownJournal(active.intent);
-						if (client) {
-							await active.semantics
-								.writeObservedJournal(client, journal)
-								.catch(() => undefined);
-						}
-						return resultWithJournalWriteWarnings({
+						const result = {
 							assessment: assessment(
 								{
 									code: 'unknown-step-result',
@@ -1665,15 +1670,17 @@ export function createApplier(registry: PackRegistry): Applier {
 							),
 							journals: [...journals, journal],
 							observations,
+						};
+						return resultWithObservedJournal({
+							semantics: active.semantics,
+							client,
+							journal,
+							result,
+							outcomeDurable: true,
 						});
 					}
 					const journal = unknownJournal(active.intent);
-					if (client) {
-						await active.semantics
-							.writeObservedJournal(client, journal)
-							.catch(() => undefined);
-					}
-					return resultWithJournalWriteWarnings({
+					const result = {
 						assessment: assessment(
 							{
 								code: 'unknown-step-result',
@@ -1691,6 +1698,13 @@ export function createApplier(registry: PackRegistry): Applier {
 						),
 						journals: [...journals, journal],
 						observations,
+					};
+					return resultWithObservedJournal({
+						semantics: active.semantics,
+						client,
+						journal,
+						result,
+						outcomeDurable: true,
 					});
 				} finally {
 					if (client) {

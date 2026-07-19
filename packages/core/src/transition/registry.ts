@@ -82,6 +82,10 @@ export interface TransitionExecutionClient {
 	readonly opaqueClient: unknown;
 }
 
+export interface NonRollbackableExecutionTracker {
+	markNonRollbackableOperationExecuted(): void;
+}
+
 export interface ExecutionCoordinator {
 	readonly transactionDomain: string;
 	checkout(
@@ -152,6 +156,7 @@ export interface OperationRuntime extends RegisteredOperationSemantics {
 		operation: PhysicalOperation,
 		context: ObservationContext,
 		duringGuards?: readonly ApplyGuard[],
+		executionTracker?: NonRollbackableExecutionTracker,
 	): Promise<OperationExecutionOutcome>;
 	writeCompletionJournal(
 		client: TransitionExecutionClient,

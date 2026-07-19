@@ -8,6 +8,7 @@ import type {
 	EquivalenceCapability,
 	EquivalenceContext,
 	EvidenceObservation,
+	EvidenceView,
 	ExpressionValue,
 	JsonValue,
 	ModelIR,
@@ -547,6 +548,7 @@ function rule(options: RuleOptions = {}): TransitionRule<{
 			versions: [{ min: '18' }],
 			requiredCapabilities: ['mock'],
 		},
+		consumesColumnFields: ['nullable'],
 		recognize(desired, current) {
 			const desiredColumn = desired.getTable('users')?.columns[0];
 			const currentColumn = current.getTable('users')?.columns[0];
@@ -608,6 +610,7 @@ function enumRule(): TransitionRule<{
 			versions: [{ min: '18' }],
 			requiredCapabilities: ['mock'],
 		},
+		consumesColumnFields: ['nullable'],
 		recognize(desired, current) {
 			const desiredEnum = desired.enums?.get('status');
 			const currentEnum = current.enums?.get('status');
@@ -688,6 +691,7 @@ function checkRule(): TransitionRule<{
 			versions: [{ min: '18' }],
 			requiredCapabilities: ['mock'],
 		},
+		consumesColumnFields: ['nullable'],
 		recognize(desired, current) {
 			const desiredTable = desired.getTable('users');
 			const currentTable = current.getTable('users');
@@ -743,36 +747,17 @@ function checkDeparseRequest(
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView | undefined,
 	request: ObservationRequest,
 ): boolean | undefined {
-	const observation = evidence.find(
-		(item) =>
-			item.request.kind === request.kind &&
-			JSON.stringify(item.request.scope) === JSON.stringify(request.scope) &&
-			JSON.stringify(item.request.detail) === JSON.stringify(request.detail),
-	);
-	const value = observation?.result.value;
-	if (!value || typeof value !== 'object' || Array.isArray(value)) {
+	if (!evidence) {
 		return undefined;
 	}
-	const claims = (value as { readonly claims?: unknown }).claims;
-	if (!Array.isArray(claims)) {
-		return undefined;
+	const result = evidence.claimHolds(request);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	for (const claim of claims) {
-		if (!claim || typeof claim !== 'object' || Array.isArray(claim)) {
-			continue;
-		}
-		const entry = claim as {
-			readonly kind?: unknown;
-			readonly holds?: unknown;
-		};
-		if (entry.kind === request.kind && typeof entry.holds === 'boolean') {
-			return entry.holds;
-		}
-	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function checkEquivalenceRule(): TransitionRule<{
@@ -796,7 +781,7 @@ function checkEquivalenceRule(): TransitionRule<{
 				return { recognized: false };
 			}
 			const request = checkDeparseRequest(desiredCheck.name);
-			const holds = claimHolds(recognitionContext?.evidence ?? [], request);
+			const holds = claimHolds(recognitionContext?.evidence, request);
 			if (holds === true) {
 				return {
 					recognized: 'no-drift',
@@ -1052,6 +1037,7 @@ function compositionRule(
 			versions: [{ min: '18' }],
 			requiredCapabilities: ['mock'],
 		},
+		consumesColumnFields: ['nullable'],
 		recognize: (desired, current) => {
 			if (!recognizedColumn) {
 				return { recognized: false };
@@ -1247,16 +1233,7 @@ function versionedCompositionRule(
 			const requests = [
 				compositionRequest(opRef),
 				minServerVersionRequest(opRef, minServerVersionNum),
-			].map((request) => {
-				const observed = evidenceItems.find(
-					(item) =>
-						item.request.kind === request.kind &&
-						(item.request.kind !== 'mock.engine.version-supported' ||
-							(item.request.detail as { minServerVersionNum?: unknown })
-								.minServerVersionNum === minServerVersionNum),
-				);
-				return observed?.request ?? request;
-			});
+			].map((request) => evidenceItems.normalizeRequest(request));
 			return {
 				outcome: 'applicable',
 				obligations: requests.map((request) => ({
@@ -2250,7 +2227,7 @@ describe('createComparator', () => {
 					equivalenceContext as ProofBoundEquivalenceContext;
 				seenContexts.push(proofBoundContext);
 				if (
-					(evidence?.length ?? 0) > 0 &&
+					(evidence?.observationsFor(request).length ?? 0) > 0 &&
 					proofBoundContext.proofObservationContext
 				) {
 					return {
@@ -2755,7 +2732,11 @@ describe('createComparator', () => {
 				) {
 					return { recognized: false };
 				}
-				if ((recognitionContext?.evidence ?? []).length > 0) {
+				if (
+					(recognitionContext?.evidence?.observationsFor(
+						heightRecognitionRequest,
+					).length ?? 0) > 0
+				) {
 					return {
 						recognized: true,
 						match: { table: 'users', column: desiredColumn.name },
@@ -4187,15 +4168,18 @@ describe('createProver', () => {
 					requiredObservations: () => requests,
 					evaluate: (_match, evidenceItems) => ({
 						outcome: 'applicable',
-						obligations: evidenceItems.map((item) => ({
-							proposition: {
-								kind: item.request.kind,
-								scope: item.request.scope,
-								detail: item.request.detail,
-							},
-							scope: item.request.scope,
-							dischargeableBy: [item.request],
-						})),
+						obligations: requests.map((request) => {
+							const normalized = evidenceItems.normalizeRequest(request);
+							return {
+								proposition: {
+									kind: normalized.kind,
+									scope: normalized.scope,
+									detail: normalized.detail,
+								},
+								scope: normalized.scope,
+								dischargeableBy: [normalized],
+							};
+						}),
 						assumptions: [],
 					}),
 				}),

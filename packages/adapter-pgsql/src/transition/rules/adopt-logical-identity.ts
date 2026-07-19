@@ -2,7 +2,7 @@ import type {
 	ApplicableEvaluation,
 	Assumption,
 	ColumnIR,
-	EvidenceObservation,
+	EvidenceView,
 	JsonValue,
 	LogicalIdentity,
 	ModelIR,
@@ -192,63 +192,24 @@ function obligationFor(request: ObservationRequest): ProofObligation {
 	};
 }
 
-function sameLogicalCarrierRequest(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-): boolean {
-	if (requested.kind !== issued.kind) {
-		return false;
-	}
-	if (!isRecord(requested.detail) || !isRecord(issued.detail)) {
-		return stableJson(requested.detail) === stableJson(issued.detail);
-	}
-	return (
-		requested.detail.table === issued.detail.table &&
-		(requested.detail.column ?? null) === (issued.detail.column ?? null) &&
-		requested.detail.logicalId === issued.detail.logicalId &&
-		requested.detail.carrierKind === issued.detail.carrierKind &&
-		requested.detail.authenticated === issued.detail.authenticated &&
-		requested.detail.expected === issued.detail.expected &&
-		(requested.detail.schema == null ||
-			requested.detail.schema === issued.detail.schema)
-	);
-}
-
 function evaluationObligations(
 	match: LogicalIdentityAdoptionMatch,
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 ): readonly ProofObligation[] {
 	return requiredObservationsFor(match).map((request) => {
-		const normalized =
-			evidence.find((observation) =>
-				sameLogicalCarrierRequest(request, observation.request),
-			)?.request ?? request;
-		return obligationFor(normalized);
+		return obligationFor(evidence.normalizeRequest(request));
 	});
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): boolean | undefined {
-	for (const observation of evidence) {
-		if (!sameLogicalCarrierRequest(request, observation.request)) {
-			continue;
-		}
-		const value = observation.result.value;
-		if (!isRecord(value) || !Array.isArray(value.claims)) {
-			continue;
-		}
-		for (const claim of value.claims) {
-			if (!isRecord(claim)) {
-				continue;
-			}
-			if (claim.kind === request.kind && typeof claim.holds === 'boolean') {
-				return claim.holds;
-			}
-		}
+	const result = evidence.claimHolds(request);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function schemaFromEvaluation(
@@ -460,6 +421,7 @@ export function createLogicalIdentityAdoptionRule(
 			versions: [],
 			requiredCapabilities: [],
 		},
+		consumesColumnFields: ['logicalIdentity'],
 		recognize(
 			desired: ModelIR,
 			current: ModelIR,
@@ -504,7 +466,7 @@ export function createLogicalIdentityAdoptionRule(
 		requiredObservations: requiredObservationsFor,
 		evaluate(
 			match: LogicalIdentityAdoptionMatch,
-			evidence: readonly EvidenceObservation[],
+			evidence: EvidenceView,
 		): RuleEvaluation {
 			const obligations = evaluationObligations(match, evidence);
 			const request = obligations.flatMap((obligation) => [

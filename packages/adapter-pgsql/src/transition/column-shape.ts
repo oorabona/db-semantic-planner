@@ -6,7 +6,7 @@ import type {
 	EquivalenceCapability,
 	EquivalenceContext,
 	EquivalenceResult,
-	EvidenceObservation,
+	EvidenceView,
 	ExpressionValue,
 	JsonValue,
 	LogicalIdentity,
@@ -811,7 +811,7 @@ export function compareSetNotNullColumnShape(
 	observed: SetNotNullObservedColumnShape,
 	equivalence: EquivalenceCapability,
 	context: EquivalenceContext,
-	evidence?: readonly EvidenceObservation[],
+	evidence?: EvidenceView,
 ): SetNotNullColumnShapeComparison {
 	let claimDrafts: readonly ProofClaimDraft[] = [];
 	let assumptions: readonly Assumption[] = [];

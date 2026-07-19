@@ -76,10 +76,12 @@ function columnChanged(
 		return true;
 	}
 	return (
-		stableJson(columnForComparison(desired)) !==
-		stableJson(columnForComparison(current))
+		stableJson(columnForComparison(desired, desired)) !==
+		stableJson(columnForComparison(current, desired))
 	);
 }
+
+type ColumnFieldName = string;
 
 type NormalizeIdentifier = (identifier: string) => string;
 
@@ -328,10 +330,20 @@ function logicalIdentityForComparison(identity: LogicalIdentity | undefined):
 	};
 }
 
-function columnForComparison(column: ColumnIR): unknown {
-	const { logicalIdentity: _logicalIdentity, ...rest } = column;
+function columnForComparison(
+	column: ColumnIR,
+	desiredIntent: ColumnIR = column,
+): unknown {
+	const {
+		logicalIdentity: _logicalIdentity,
+		uniqueConstraintName: _uniqueConstraintName,
+		...rest
+	} = column;
 	const logicalIdentity = logicalIdentityForComparison(column.logicalIdentity);
-	return logicalIdentity ? { ...rest, logicalIdentity } : rest;
+	const base = logicalIdentity ? { ...rest, logicalIdentity } : rest;
+	return Object.hasOwn(desiredIntent, 'uniqueConstraintName')
+		? { ...base, uniqueConstraintName: column.uniqueConstraintName }
+		: base;
 }
 
 function logicalIdentityChanged(
@@ -450,12 +462,20 @@ function normalizeCurrentModelForComparison(
 function tableForComparison(
 	table: TableIR,
 	perspective: 'desired' | 'current' = 'desired',
+	desiredIntentTable: TableIR = table,
 ): unknown {
 	const logicalIdentity = logicalIdentityForComparison(table.logicalIdentity);
 	return {
 		name: table.name,
 		...(logicalIdentity ? { logicalIdentity } : {}),
-		columns: table.columns.map(columnForComparison),
+		columns: table.columns.map((column) =>
+			columnForComparison(
+				column,
+				desiredIntentTable.columns.find(
+					(desiredColumn) => desiredColumn.name === column.name,
+				) ?? column,
+			),
+		),
 		primaryKey: table.primaryKey,
 		foreignKeys: table.foreignKeys,
 		indexes: table.indexes.map((index) =>
@@ -634,12 +654,20 @@ function modelForComparison(
 	externalTables: ReadonlySet<string>,
 	managedCollections: ManagedModelCollections,
 	perspective: 'desired' | 'current' = 'desired',
+	desiredIntent: ModelIR = model,
 ): unknown {
 	return {
 		tables: [...model.tables.entries()]
 			.filter(([name]) => !externalTables.has(name))
 			.sort(([left], [right]) => left.localeCompare(right))
-			.map(([name, table]) => [name, tableForComparison(table, perspective)]),
+			.map(([name, table]) => [
+				name,
+				tableForComparison(
+					table,
+					perspective,
+					desiredIntent.getTable(name) ?? table,
+				),
+			]),
 		...modelLevelCollectionsForComparison(
 			model,
 			externalTables,
@@ -648,10 +676,86 @@ function modelForComparison(
 	};
 }
 
+function columnWithRevertedFields(
+	desired: ColumnIR,
+	current: ColumnIR,
+	fields: ReadonlySet<ColumnFieldName>,
+): ColumnIR {
+	const reverted: Record<string, unknown> = { ...desired };
+	const currentRecord = current as unknown as Record<string, unknown>;
+	for (const field of fields) {
+		if (Object.hasOwn(current, field)) {
+			reverted[field] = currentRecord[field];
+		} else {
+			delete reverted[field];
+		}
+	}
+	return reverted as unknown as ColumnIR;
+}
+
+function columnChangeKey(table: string, column: string): string {
+	return JSON.stringify([table, column]);
+}
+
+function declaredColumnFieldsFor(
+	rule: TransitionRule,
+): readonly ColumnFieldName[] {
+	return rule.consumesColumnFields ?? [];
+}
+
+function addColumnFieldCoverage(
+	coverage: Map<string, Set<ColumnFieldName>>,
+	key: string,
+	fields: readonly ColumnFieldName[],
+): void {
+	if (fields.length === 0) {
+		return;
+	}
+	const existing = coverage.get(key) ?? new Set<ColumnFieldName>();
+	for (const field of fields) {
+		existing.add(field);
+	}
+	coverage.set(key, existing);
+}
+
+function mergeColumnFieldCoverage(
+	...maps: readonly ReadonlyMap<string, ReadonlySet<ColumnFieldName>>[]
+): ReadonlyMap<string, ReadonlySet<ColumnFieldName>> {
+	const merged = new Map<string, Set<ColumnFieldName>>();
+	for (const map of maps) {
+		for (const [key, fields] of map) {
+			addColumnFieldCoverage(merged, key, [...fields]);
+		}
+	}
+	return merged;
+}
+
+function recognizedColumnFieldsAreDisjoint(
+	recognized: readonly RecognizedRuleEntry[],
+): boolean {
+	if (recognized.length < 2) {
+		return false;
+	}
+	const claimed = new Set<ColumnFieldName>();
+	for (const entry of recognized) {
+		const fields = declaredColumnFieldsFor(entry.rule);
+		if (fields.length === 0) {
+			return false;
+		}
+		for (const field of fields) {
+			if (claimed.has(field)) {
+				return false;
+			}
+			claimed.add(field);
+		}
+	}
+	return true;
+}
+
 function revertRecognizedColumnChanges(
 	desired: ModelIR,
 	current: ModelIR,
-	recognizedColumnKeys: ReadonlySet<string>,
+	recognizedColumnFields: ReadonlyMap<string, ReadonlySet<ColumnFieldName>>,
 	externalTables: ReadonlySet<string>,
 	managedCollections: ManagedModelCollections,
 	recognizedTableKeys: ReadonlySet<string> = new Set(),
@@ -693,8 +797,9 @@ function revertRecognizedColumnChanges(
 						const currentColumn = currentTable?.columns.find(
 							(candidate) => candidate.name === column.name,
 						);
-						return recognizedColumnKeys.has(key) && currentColumn
-							? currentColumn
+						const fields = recognizedColumnFields.get(key);
+						return fields && currentColumn
+							? columnWithRevertedFields(column, currentColumn, fields)
 							: column;
 					}),
 				};
@@ -1143,6 +1248,7 @@ type ArbitrationResult =
 	| {
 			readonly kind: 'candidate';
 			readonly candidate: TransitionCandidate;
+			readonly candidateRule: TransitionRule;
 	  }
 	| {
 			readonly kind: 'ambiguous';
@@ -1161,6 +1267,7 @@ function arbitrateRecognizedRules(
 		}
 		return {
 			kind: 'candidate',
+			candidateRule: entry.rule,
 			candidate: candidateFromRule(
 				entry.rule,
 				entry.result,
@@ -1188,6 +1295,7 @@ function arbitrateRecognizedRules(
 	}
 	return {
 		kind: 'candidate',
+		candidateRule: chosenEntry.rule,
 		candidate: candidateFromRule(
 			chosenEntry.rule,
 			chosenEntry.result,
@@ -1258,6 +1366,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 				ignoredExternalTables,
 				managedCollections,
 				'current',
+				desired,
 			);
 			if (stableJson(desiredComparison) === stableJson(currentComparison)) {
 				return { kind: 'no-drift', claimedInvariant: noDriftProposition() };
@@ -1266,8 +1375,8 @@ export function createComparator(registry: PackRegistry): Comparator {
 			const candidates: TransitionCandidate[] = [];
 			const unknownRecognitions: UnknownTransitionRecognition[] = [];
 			const unsupported: ResourceAddress[] = [];
-			const recognizedColumnKeys = new Set<string>();
-			const pendingColumnKeys = new Set<string>();
+			const recognizedColumnFields = new Map<string, Set<ColumnFieldName>>();
+			const pendingColumnFields = new Map<string, Set<ColumnFieldName>>();
 			const recognizedTableKeys = new Set<string>();
 			const pendingTableKeys = new Set<string>();
 			const recognizedEnumKeys = new Set<string>();
@@ -1376,6 +1485,7 @@ export function createComparator(registry: PackRegistry): Comparator {
 						unsupported.push(resourceForColumn(engine, tableName, columnName));
 						continue;
 					}
+					const columnKey = columnChangeKey(tableName, columnName);
 
 					const focusedDesired = makeFocusedModel(desiredTable, desiredColumn);
 					const focusedCurrent = makeFocusedModel(currentTable, currentColumn);
@@ -1419,11 +1529,39 @@ export function createComparator(registry: PackRegistry): Comparator {
 									current: focusedCurrent,
 									obligations: entry.result.obligations,
 								});
+								addColumnFieldCoverage(
+									pendingColumnFields,
+									columnKey,
+									declaredColumnFieldsFor(entry.rule),
+								);
 							}
-							pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
 							continue;
 						}
 						unsupported.push(resourceForColumn(engine, tableName, columnName));
+						continue;
+					}
+
+					if (recognizedColumnFieldsAreDisjoint(recognized)) {
+						for (const entry of recognized) {
+							candidates.push(
+								candidateFromRule(
+									entry.rule,
+									entry.result,
+									[entry.rule],
+									'recognized transition rule with disjoint column field coverage',
+								),
+							);
+							addColumnFieldCoverage(
+								recognizedColumnFields,
+								columnKey,
+								declaredColumnFieldsFor(entry.rule),
+							);
+							addColumnFieldCoverage(
+								pendingColumnFields,
+								columnKey,
+								declaredColumnFieldsFor(entry.rule),
+							);
+						}
 						continue;
 					}
 
@@ -1435,8 +1573,16 @@ export function createComparator(registry: PackRegistry): Comparator {
 						};
 					}
 					candidates.push(arbitration.candidate);
-					recognizedColumnKeys.add(JSON.stringify([tableName, columnName]));
-					pendingColumnKeys.add(JSON.stringify([tableName, columnName]));
+					addColumnFieldCoverage(
+						recognizedColumnFields,
+						columnKey,
+						declaredColumnFieldsFor(arbitration.candidateRule),
+					);
+					addColumnFieldCoverage(
+						pendingColumnFields,
+						columnKey,
+						declaredColumnFieldsFor(arbitration.candidateRule),
+					);
 				}
 
 				const tableCheckDelta = checkDelta(
@@ -1712,7 +1858,10 @@ export function createComparator(registry: PackRegistry): Comparator {
 					revertRecognizedColumnChanges(
 						desired,
 						currentForComparison,
-						new Set([...recognizedColumnKeys, ...pendingColumnKeys]),
+						mergeColumnFieldCoverage(
+							recognizedColumnFields,
+							pendingColumnFields,
+						),
 						ignoredExternalTables,
 						managedCollections,
 						new Set([...recognizedTableKeys, ...pendingTableKeys]),

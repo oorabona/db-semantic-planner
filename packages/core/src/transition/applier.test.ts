@@ -578,9 +578,22 @@ function nonTransactionalRuntime(
 	writeObservedJournal: (journal: StepJournal) => void,
 	options: Parameters<typeof runtime>[1] = {},
 ): OperationRuntime {
+	const base = runtime(writeObservedJournal, options);
 	return {
-		...runtime(writeObservedJournal, options),
+		...base,
 		effectsOf: nonTransactionalEffects,
+		executeOperation: vi.fn(
+			async (client, candidate, contextValue, guards, tracker) => {
+				tracker?.markNonRollbackableOperationExecuted();
+				return base.executeOperation(
+					client,
+					candidate,
+					contextValue,
+					guards,
+					tracker,
+				);
+			},
+		),
 	};
 }
 
@@ -696,13 +709,22 @@ function multiSegmentRuntime(
 			observations: [],
 			recovery: [],
 		})),
-		executeOperation: vi.fn(async (client, candidate) => {
-			record(`execute:${candidate.ref}:${clientId(client)}`);
-			if (options.failB && candidate.ref === 'op:b') {
-				throw new Error('forced op:b failure');
-			}
-			return { kind: 'completed' };
-		}),
+		executeOperation: vi.fn(
+			async (client, candidate, _context, _guards, tracker) => {
+				record(`execute:${candidate.ref}:${clientId(client)}`);
+				if (
+					(options.transactionMode === 'forbid-a' &&
+						candidate.ref === 'op:a') ||
+					(options.transactionMode === 'forbid-b' && candidate.ref === 'op:b')
+				) {
+					tracker?.markNonRollbackableOperationExecuted();
+				}
+				if (options.failB && candidate.ref === 'op:b') {
+					throw new Error('forced op:b failure');
+				}
+				return { kind: 'completed' };
+			},
+		),
 		writeCompletionJournal: vi.fn(async (client, _operation, recordValue) => {
 			record(`completion:${recordValue.stepId}:${clientId(client)}`);
 		}),
@@ -2906,6 +2928,89 @@ describe('createApplier', () => {
 		});
 		expect(result.journals[0]?.outcome).toBe('guard-failed');
 		expect(observed[0]?.outcome).toBe('guard-failed');
+	});
+
+	it('reports a nontransactional setup failure before tracker mark as not applied', async () => {
+		const observed: StepJournal[] = [];
+		const baseRuntime = runtime(
+			(journal) => {
+				observed.push(journal);
+			},
+			{
+				executeOperation: vi.fn(async () => {
+					throw new Error('setup failed before DDL');
+				}),
+			},
+		);
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: nonTransactionalEffects,
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.decision).toBe('blocked');
+		expect(result.assessment.lifecycle).toBe('planned');
+		expect(result.assessment.reasons[0]).toMatchObject({
+			code: 'operation-failed-not-applied',
+			operationRef: operation.ref,
+		});
+		expect(result.journals[0]?.outcome).toBe('operation-failed-not-applied');
+		expect(observed[0]?.outcome).toBe('operation-failed-not-applied');
+	});
+
+	it('warns when a catch-path partial observed journal write fails', async () => {
+		const baseRuntime = runtime(() => undefined, {
+			executeOperation: vi.fn(
+				async (_client, _operation, _context, _guards, tracker) => {
+					tracker?.markNonRollbackableOperationExecuted();
+					throw new Error('restore failed after DDL');
+				},
+			),
+		});
+		const rt: OperationRuntime = {
+			...baseRuntime,
+			effectsOf: nonTransactionalEffects,
+			writeObservedJournal: vi.fn(async () => {
+				throw new Error('observed journal unavailable');
+			}),
+		};
+		const registry = createPackRegistry([
+			{
+				rules: [],
+				operationSemantics: [rt],
+				issuer: {
+					artifact: operationArtifact,
+					execute: async () => evidence(),
+				},
+			},
+		]);
+
+		const result = await createApplier(registry).apply(
+			{ plan: nonTransactionalPlanWithStep(), assessment: assessment() },
+			acceptsOperationPolicy(),
+			executionTarget(),
+		);
+
+		expect(result.assessment.lifecycle).toBe('partially-applied');
+		expect(result.assessment.reasons[0]?.detail).toContain(
+			'observed journal write failed after outcome was decided',
+		);
+		expect(result.journals[0]?.outcome).toBe('partially-applied');
 	});
 
 	it('reports a nontransactional runtime guard failure after execute as partial work', async () => {

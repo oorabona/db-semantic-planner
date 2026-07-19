@@ -2,7 +2,7 @@ import { enumAddDelta, resolveEnumSchemaForComparison } from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
 	Assumption,
-	EvidenceObservation,
+	EvidenceView,
 	JsonValue,
 	ModelIR,
 	ObservationContext,
@@ -20,6 +20,7 @@ import type {
 } from '@dbsp/types';
 import type { NamingPlugin } from '../../naming-plugin.js';
 import { identityNaming } from '../../naming-plugin.js';
+import { pgEnumLabelVisibleFact } from '../composition-facts.js';
 import {
 	ALTER_TYPE_ADD_VALUE_CAPABILITY,
 	ALTER_TYPE_ADD_VALUE_MIN_SERVER_VERSION_NUM,
@@ -33,7 +34,6 @@ import {
 } from '../constants.js';
 import { assumptionId } from '../ids.js';
 import { validatePgEnumLabel } from '../operations/alter-type-add-value.js';
-import { stableJson } from '../stable-json.js';
 
 export interface EnumAddValueMatch {
 	readonly schema?: string;
@@ -57,44 +57,6 @@ export interface EnumAddValueRuleOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameRequest(
-	left: ObservationRequest,
-	right: ObservationRequest,
-): boolean {
-	return (
-		left.kind === right.kind &&
-		stableJson(left.scope) === stableJson(right.scope) &&
-		stableJson(left.detail) === stableJson(right.detail)
-	);
-}
-
-function sameLogicalDetail(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-): boolean {
-	if (requested.kind !== issued.kind) {
-		return false;
-	}
-	if (!isRecord(requested.detail) || !isRecord(issued.detail)) {
-		return stableJson(requested.detail) === stableJson(issued.detail);
-	}
-	if (
-		'minServerVersionNum' in requested.detail ||
-		'minServerVersionNum' in issued.detail
-	) {
-		return (
-			requested.detail.minServerVersionNum === issued.detail.minServerVersionNum
-		);
-	}
-	return (
-		requested.detail.type === issued.detail.type &&
-		(requested.detail.label === undefined ||
-			requested.detail.label === issued.detail.label) &&
-		(requested.detail.schema == null ||
-			requested.detail.schema === issued.detail.schema)
-	);
 }
 
 function resourceForMatch(
@@ -186,39 +148,22 @@ function obligationFor(
 
 function evaluationObligations(
 	match: EnumAddValueMatch,
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 ): readonly ProofObligation[] {
 	return requiredObservationsFor(match).map((request) => {
-		const normalized =
-			evidence.find((observation) =>
-				sameLogicalDetail(request, observation.request),
-			)?.request ?? request;
-		return obligationFor(normalized);
+		return obligationFor(evidence.normalizeRequest(request));
 	});
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): boolean | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
-		const value = observation.result.value;
-		if (!isRecord(value) || !Array.isArray(value.claims)) {
-			continue;
-		}
-		for (const claim of value.claims) {
-			if (!isRecord(claim)) {
-				continue;
-			}
-			if (claim.kind === request.kind && typeof claim.holds === 'boolean') {
-				return claim.holds;
-			}
-		}
+	const result = evidence.claimHolds(request);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function operationRef(match: EnumAddValueMatch): string {
@@ -344,28 +289,39 @@ function matchForOperation(
 	return { ...match, schema, database };
 }
 
-function compositionFact(
-	match: Pick<EnumAddValueMatch, 'schema' | 'database' | 'type' | 'label'>,
-) {
-	return {
-		kind: ENUM_LABEL_VISIBLE_OBSERVATION,
-		resource: resourceForMatch(match, match.database ?? 'model'),
-		detail: {
-			schema: match.schema ?? null,
-			type: match.type,
-			label: match.label,
-		} as JsonValue,
-	};
+function compositionFact(params: {
+	readonly match: Pick<
+		EnumAddValueMatch,
+		'schema' | 'database' | 'type' | 'label'
+	>;
+	readonly context?: ObservationContext;
+}) {
+	const schema = params.match.schema ?? params.context?.targetSchema;
+	if (!schema) {
+		throw new Error(
+			'enum-add-value composition requires an explicit enum schema',
+		);
+	}
+	return pgEnumLabelVisibleFact({
+		database: params.match.database ?? 'model',
+		schema,
+		type: params.match.type,
+		label: params.match.label,
+	});
 }
 
 function compositionForMatch(
 	match: EnumAddValueMatch,
+	context?: ObservationContext,
 ): TransitionFragmentComposition {
 	return {
 		produces: [
 			{
 				opRef: operationRef(match),
-				fact: compositionFact(match),
+				fact: compositionFact({
+					match,
+					...(context ? { context } : {}),
+				}),
 				available: 'after-commit',
 			},
 		],
@@ -381,11 +337,6 @@ function stringDetail(
 	}
 	const value = detail[key];
 	return typeof value === 'string' ? value : undefined;
-}
-
-function schemaDetail(fact: TransitionCompositionFact): string | undefined {
-	const schema = stringDetail(fact.detail, 'schema');
-	return schema ?? fact.resource.schema;
 }
 
 export function satisfiesPgEnumLabelVisibleCompositionFact(
@@ -404,15 +355,19 @@ export function satisfiesPgEnumLabelVisibleCompositionFact(
 	}
 	const label = stringDetail(fact.detail, 'label');
 	const type = stringDetail(fact.detail, 'type') ?? fact.resource.name;
-	if (!label || !type) {
+	const detailSchema = stringDetail(fact.detail, 'schema');
+	const resourceSchema = fact.resource.schema;
+	if (!label || !type || !detailSchema || !resourceSchema) {
 		return false;
 	}
-	const schema = schemaDetail(fact);
+	if (detailSchema !== resourceSchema) {
+		return false;
+	}
 	for (const [key, enumDef] of current.enums ?? new Map()) {
 		if (key !== type && enumDef.name !== type) {
 			continue;
 		}
-		if (schema && enumDef.schema !== schema) {
+		if (enumDef.schema !== detailSchema) {
 			continue;
 		}
 		if (enumDef.values.includes(label)) {
@@ -480,13 +435,11 @@ export function createEnumAddValueRule(
 		requiredObservations: requiredObservationsFor,
 		declareComposition(
 			match: EnumAddValueMatch,
+			context: ObservationContext,
 		): TransitionFragmentComposition {
-			return compositionForMatch(match);
+			return compositionForMatch(match, context);
 		},
-		evaluate(
-			match: EnumAddValueMatch,
-			evidence: readonly EvidenceObservation[],
-		): RuleEvaluation {
+		evaluate(match: EnumAddValueMatch, evidence: EvidenceView): RuleEvaluation {
 			const obligations = evaluationObligations(match, evidence);
 			const requests = obligations.flatMap((obligation) => [
 				...(obligation.dischargeableBy ?? []),

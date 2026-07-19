@@ -1,4 +1,9 @@
-import { createComparator, createPackRegistry, createProver } from '@dbsp/core';
+import {
+	createComparator,
+	createEvidenceView,
+	createPackRegistry,
+	createProver,
+} from '@dbsp/core';
 import type {
 	ColumnIR,
 	EvidenceObservation,
@@ -42,6 +47,10 @@ const context: ObservationContext = {
 	privileges: [],
 	sessionConfiguration: {},
 	extensions: {},
+};
+const publicContext: ObservationContext = {
+	...context,
+	targetSchema: 'public',
 };
 
 function column(
@@ -215,6 +224,14 @@ function evidence(
 	};
 }
 
+function evidenceView(
+	items: readonly EvidenceObservation[],
+	ctx: ObservationContext = publicContext,
+	requests: readonly ObservationRequest[] = items.map((item) => item.request),
+) {
+	return createEvidenceView({ evidence: items, context: ctx, requests });
+}
+
 function catalogEvidence(
 	request: ObservationRequest,
 	overrides: Record<string, unknown> = {},
@@ -336,6 +353,7 @@ function registryWithColumnObservation(
 			...pack,
 			issuer: {
 				artifact: PG_INTROSPECTION_ARTIFACT,
+				readContext: async () => publicContext,
 				execute: async (
 					request: ObservationRequest,
 					_target: unknown,
@@ -396,7 +414,11 @@ describe('postgresql.column.set-not-null rule', () => {
 		});
 		const evaluation = rule.evaluate(
 			result.match,
-			requests.map((request) => normalizedEvidence(request)),
+			evidenceView(
+				requests.map((request) =>
+					normalizedEvidence(request, true, 'public', publicContext),
+				),
+			),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -623,6 +645,31 @@ describe('postgresql.column.set-not-null rule', () => {
 		expect(included.has('column.unique')).toBe(true);
 		expect(included.has('column.uniqueConstraintName')).toBe(false);
 		expect(excluded.has('column.uniqueConstraintName')).toBe(true);
+	});
+
+	it('blocks an explicit unique constraint name change instead of hiding it behind SET NOT NULL', () => {
+		const compare = createComparator(
+			createPackRegistry([createPgTransitionPack()]),
+		).compare(
+			model(false, {
+				unique: true,
+				uniqueConstraintName: 'users_age_authored_uq',
+			}),
+			model(true, {
+				unique: true,
+				uniqueConstraintName: 'users_age_key',
+			}),
+		);
+
+		expect(compare.kind).toBe('unsupported');
+		if (compare.kind === 'unsupported') {
+			expect(compare.changes).toContainEqual(
+				expect.objectContaining({
+					kind: 'schema',
+					name: 'model',
+				}),
+			);
+		}
 	});
 
 	it('recognizes pure nullability with matching bare SQL default text', () => {
@@ -1595,7 +1642,11 @@ describe('postgresql.column.set-not-null rule', () => {
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,
-			requests.map((request) => evidence(request, true)),
+			evidenceView(
+				requests.map((request) =>
+					normalizedEvidence(request, true, 'public', publicContext),
+				),
+			),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');
@@ -1607,8 +1658,15 @@ describe('postgresql.column.set-not-null rule', () => {
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,
-			requests.map((request) =>
-				evidence(request, request.kind !== ALTER_AUTHORITY_OBSERVATION),
+			evidenceView(
+				requests.map((request) =>
+					normalizedEvidence(
+						request,
+						request.kind !== ALTER_AUTHORITY_OBSERVATION,
+						'public',
+						publicContext,
+					),
+				),
 			),
 			[],
 		);
@@ -1619,7 +1677,13 @@ describe('postgresql.column.set-not-null rule', () => {
 		const rule = createSetNotNullRule();
 		const match = setNotNullMatch();
 		const requests = rule.requiredObservations(match);
-		const evaluation = rule.evaluate(match, [evidence(requests[0]!, true)], []);
+		const evaluation = rule.evaluate(
+			match,
+			evidenceView([
+				normalizedEvidence(requests[0]!, true, 'public', publicContext),
+			]),
+			[],
+		);
 		expect(evaluation.outcome).toBe('blocked');
 	});
 
@@ -1636,6 +1700,7 @@ describe('postgresql.column.set-not-null rule', () => {
 				operationSemantics: [{ ...runtime, effectsOf }],
 				issuer: {
 					artifact: PG_INTROSPECTION_ARTIFACT,
+					readContext: async () => publicContext,
 					execute: async (
 						request: ObservationRequest,
 						_target: unknown,
@@ -1795,7 +1860,11 @@ describe('postgresql.column.set-not-null rule', () => {
 		const requests = rule.requiredObservations(match);
 		const evaluation = rule.evaluate(
 			match,
-			requests.map((request) => normalizedEvidence(request)),
+			evidenceView(
+				requests.map((request) =>
+					normalizedEvidence(request, true, 'public', publicContext),
+				),
+			),
 			[],
 		);
 		expect(evaluation.outcome).toBe('applicable');

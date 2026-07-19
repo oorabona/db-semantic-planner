@@ -25,6 +25,7 @@ import { createAlterTypeAddValueOperationRuntime } from './operations/alter-type
 import { createAttachLogicalIdentityOperationRuntime } from './operations/attach-logical-identity.js';
 import { createCreateUniqueIndexConcurrentlyOperationRuntime } from './operations/create-unique-index-concurrently.js';
 import { createManualSqlOperationRuntime } from './operations/manual-sql.js';
+import { isPgGuardTimeout } from './pg-guard-timeout.js';
 import { createAddCheckRule } from './rules/add-check.js';
 import {
 	createLogicalIdentityAdoptionRule,
@@ -132,7 +133,7 @@ function createPgExecutionCoordinator(): ExecutionCoordinator {
 			await clientQuery(client).query('ROLLBACK');
 		},
 		isLockTimeout(error: unknown) {
-			return isRecord(error) && error.code === '55P03';
+			return isPgGuardTimeout(error);
 		},
 	};
 }

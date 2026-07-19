@@ -711,7 +711,7 @@ function requestMatchesObligation(
 	);
 }
 
-function evidenceContextMatches(
+export function evidenceContextMatches(
 	evidence: EvidenceObservation,
 	expectedContext?: ObservationContext,
 ): boolean {

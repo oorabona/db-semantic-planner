@@ -149,7 +149,6 @@ describe('toy transition pack', () => {
 			target: target(),
 			policy,
 		});
-
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(result.assessment.continuation).toBe('none');
 		expect(currentStatus(db).nullable).toBe(false);
@@ -262,7 +261,6 @@ describe('toy transition pack', () => {
 			target: target(),
 			policy,
 		});
-
 		expect(result.assessment.lifecycle).toBe('completed');
 		expect(result.assessment.continuation).toBe('none');
 		expect(result.journals.map((journal) => journal.outcome)).toEqual([

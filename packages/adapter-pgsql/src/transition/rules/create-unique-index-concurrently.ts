@@ -2,7 +2,7 @@ import { defaultIndexName, indexDelta } from '@dbsp/core';
 import type {
 	ApplicableEvaluation,
 	Assumption,
-	EvidenceObservation,
+	EvidenceView,
 	JsonValue,
 	ModelIR,
 	ObservationRequest,
@@ -66,46 +66,6 @@ const PARTITIONED_TABLE_UNSUPPORTED_DETAIL =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value != null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function sameRequest(
-	left: ObservationRequest,
-	right: ObservationRequest,
-): boolean {
-	return (
-		left.kind === right.kind &&
-		stableJson(left.scope) === stableJson(right.scope) &&
-		stableJson(left.detail) === stableJson(right.detail)
-	);
-}
-
-function sameLogicalDetail(
-	requested: ObservationRequest,
-	issued: ObservationRequest,
-): boolean {
-	if (requested.kind !== issued.kind) {
-		return false;
-	}
-	if (!isRecord(requested.detail) || !isRecord(issued.detail)) {
-		return stableJson(requested.detail) === stableJson(issued.detail);
-	}
-	if (
-		'minServerVersionNum' in requested.detail ||
-		'minServerVersionNum' in issued.detail
-	) {
-		return (
-			requested.detail.minServerVersionNum === issued.detail.minServerVersionNum
-		);
-	}
-	return (
-		requested.detail.table === issued.detail.table &&
-		(requested.detail.column === undefined ||
-			requested.detail.column === issued.detail.column) &&
-		(requested.detail.index === undefined ||
-			requested.detail.index === issued.detail.index) &&
-		(requested.detail.schema == null ||
-			requested.detail.schema === issued.detail.schema)
-	);
 }
 
 function resourceForMatch(
@@ -254,14 +214,10 @@ function absentObligation(
 
 function evaluationObligations(
 	match: CreateUniqueIndexConcurrentlyMatch,
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 ): readonly ProofObligation[] {
 	const requests = requiredObservationsFor(match).map((request) => {
-		const normalized =
-			evidence.find((observation) =>
-				sameLogicalDetail(request, observation.request),
-			)?.request ?? request;
-		return normalized;
+		return evidence.normalizeRequest(request);
 	});
 	const indexRequest =
 		requests.find((request) => request.kind === TABLE_INDEXES_OBSERVATION) ??
@@ -273,39 +229,21 @@ function evaluationObligations(
 }
 
 function claimHolds(
-	evidence: readonly EvidenceObservation[],
-	request: ObservationRequest,
-	claimKind = request.kind,
+	evidence: EvidenceView,
+	target: ObservationRequest | ProofObligation,
 ): boolean | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
-		const value = observation.result.value;
-		if (!isRecord(value) || !Array.isArray(value.claims)) {
-			continue;
-		}
-		for (const claim of value.claims) {
-			if (
-				isRecord(claim) &&
-				claim.kind === claimKind &&
-				typeof claim.holds === 'boolean'
-			) {
-				return claim.holds;
-			}
-		}
+	const result = evidence.claimHolds(target);
+	if (result.conclusion === 'established') {
+		return true;
 	}
-	return undefined;
+	return result.conclusion === 'refuted' ? false : undefined;
 }
 
 function relkind(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): string | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
+	for (const observation of evidence.observationsFor(request)) {
 		const value = observation.result.value;
 		if (isRecord(value) && typeof value.relkind === 'string') {
 			return value.relkind;
@@ -370,13 +308,10 @@ function indexSetEntry(value: unknown): IndexSet | undefined {
 }
 
 function indexesFromEvidence(
-	evidence: readonly EvidenceObservation[],
+	evidence: EvidenceView,
 	request: ObservationRequest,
 ): readonly IndexSet[] | undefined {
-	for (const observation of evidence) {
-		if (!sameRequest(observation.request, request)) {
-			continue;
-		}
+	for (const observation of evidence.observationsFor(request)) {
 		const value = observation.result.value;
 		if (!isRecord(value) || !Array.isArray(value.indexes)) {
 			continue;
@@ -638,7 +573,7 @@ export function createCreateUniqueIndexConcurrentlyRule(
 		requiredObservations: requiredObservationsFor,
 		evaluate(
 			match: CreateUniqueIndexConcurrentlyMatch,
-			evidence: readonly EvidenceObservation[],
+			evidence: EvidenceView,
 		): RuleEvaluation {
 			const obligations = evaluationObligations(match, evidence);
 			const requests = obligations.flatMap((obligation) => [
@@ -646,15 +581,18 @@ export function createCreateUniqueIndexConcurrentlyRule(
 			]);
 			const requestsForKind = (kind: string) =>
 				requests.filter((request) => request.kind === kind);
+			const obligationForKind = (kind: string) =>
+				obligations.find((obligation) => obligation.proposition.kind === kind);
 			const indexRequest = requestsForKind(TABLE_INDEXES_OBSERVATION)[0];
 			const authorityRequest = requestsForKind(ALTER_AUTHORITY_OBSERVATION)[0];
 			const versionRequest = requestsForKind(ENGINE_VERSION_OBSERVATION)[0];
 			const columnRequests = requestsForKind('postgresql.column.exists');
+			const absentIndexObligation = obligationForKind(INDEX_ABSENT_OBSERVATION);
 			const tableExists = indexRequest
-				? claimHolds(evidence, indexRequest, TABLE_INDEXES_OBSERVATION)
+				? claimHolds(evidence, indexRequest)
 				: undefined;
-			const targetAbsent = indexRequest
-				? claimHolds(evidence, indexRequest, INDEX_ABSENT_OBSERVATION)
+			const targetAbsent = absentIndexObligation
+				? claimHolds(evidence, absentIndexObligation)
 				: undefined;
 			const hasAlterAuthority = authorityRequest
 				? claimHolds(evidence, authorityRequest)

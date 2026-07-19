@@ -343,6 +343,9 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 			opaqueClient: {
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
+					if (sql === 'SHOW lock_timeout') {
+						return { rows: [{ lock_timeout: '7s' }] };
+					}
 					if (sql.startsWith('CREATE UNIQUE INDEX')) {
 						throw { code: '23505', message: 'could not create unique index' };
 					}
@@ -359,10 +362,19 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 				}),
 			},
 		};
+		let marked = false;
 
-		const result = await runtime.executeOperation(client, operation, context, [
-			guard(),
-		]);
+		const result = await runtime.executeOperation(
+			client,
+			operation,
+			context,
+			[guard()],
+			{
+				markNonRollbackableOperationExecuted: () => {
+					marked = true;
+				},
+			},
+		);
 
 		expect(result).toEqual({
 			kind: 'guard-failed',
@@ -373,8 +385,10 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		expect(queries).toContain(
 			'DROP INDEX CONCURRENTLY IF EXISTS "tenant"."idx_users_email"',
 		);
-		expect(queries[0]).toBe("SET lock_timeout = '5000ms'");
-		expect(queries.at(-1)).toBe('SET lock_timeout = DEFAULT');
+		expect(queries[0]).toBe('SHOW lock_timeout');
+		expect(queries[1]).toBe("SET lock_timeout = '5000ms'");
+		expect(queries.at(-1)).toBe("SET lock_timeout = '7s'");
+		expect(marked).toBe(true);
 	});
 
 	it('reports partially-applied when invalid-index cleanup cannot be verified', async () => {
@@ -383,6 +397,9 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		const client = {
 			opaqueClient: {
 				query: vi.fn(async (sql: string) => {
+					if (sql === 'SHOW lock_timeout') {
+						return { rows: [{ lock_timeout: '7s' }] };
+					}
 					if (sql.startsWith('CREATE UNIQUE INDEX')) {
 						throw { code: '23505', message: 'could not create unique index' };
 					}
@@ -427,6 +444,9 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 			opaqueClient: {
 				query: vi.fn(async (sql: string) => {
 					queries.push(sql);
+					if (sql === 'SHOW lock_timeout') {
+						return { rows: [{ lock_timeout: '7s' }] };
+					}
 					if (sql.startsWith('CREATE UNIQUE INDEX')) {
 						throw Object.assign(
 							new Error('canceling statement due to lock timeout'),
@@ -456,6 +476,78 @@ describe('CreateUniqueIndexConcurrently operation runtime', () => {
 		expect(queries).toContain(
 			'DROP INDEX CONCURRENTLY IF EXISTS "tenant"."idx_users_email"',
 		);
-		expect(queries.at(-1)).toBe('SET lock_timeout = DEFAULT');
+		expect(queries.at(-1)).toBe("SET lock_timeout = '7s'");
+	});
+
+	it('does not mark non-rollbackable DDL when lock-timeout setup fails before CREATE INDEX', async () => {
+		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
+		const queries: string[] = [];
+		const client = {
+			opaqueClient: {
+				query: vi.fn(async (sql: string) => {
+					queries.push(sql);
+					if (sql === 'SHOW lock_timeout') {
+						return { rows: [{ lock_timeout: '7s' }] };
+					}
+					if (sql.startsWith('SET lock_timeout')) {
+						throw new Error('setup failed');
+					}
+					throw new Error(`unexpected query: ${sql}`);
+				}),
+			},
+		};
+		let marked = false;
+
+		await expect(
+			runtime.executeOperation(client, operation, context, [guard()], {
+				markNonRollbackableOperationExecuted: () => {
+					marked = true;
+				},
+			}),
+		).rejects.toThrow(/setup failed/);
+
+		expect(queries).toEqual([
+			'SHOW lock_timeout',
+			"SET lock_timeout = '5000ms'",
+		]);
+		expect(marked).toBe(false);
+	});
+
+	it('surfaces lock-timeout restore failure after CREATE INDEX and leaves the tracker marked', async () => {
+		const runtime = createCreateUniqueIndexConcurrentlyOperationRuntime();
+		const queries: string[] = [];
+		const client = {
+			opaqueClient: {
+				query: vi.fn(async (sql: string) => {
+					queries.push(sql);
+					if (sql === 'SHOW lock_timeout') {
+						return { rows: [{ lock_timeout: '7s' }] };
+					}
+					if (sql === "SET lock_timeout = '7s'") {
+						throw new Error('restore failed');
+					}
+					return { rows: [] };
+				}),
+			},
+		};
+		let marked = false;
+
+		await expect(
+			runtime.executeOperation(client, operation, context, [guard()], {
+				markNonRollbackableOperationExecuted: () => {
+					marked = true;
+				},
+			}),
+		).rejects.toThrow(/restore failed/);
+
+		expect(queries).toContain(
+			renderCreateUniqueIndexConcurrentlySql({
+				schema: 'tenant',
+				table: 'users',
+				index: 'idx_users_email',
+				columns: ['email'],
+			}),
+		);
+		expect(marked).toBe(true);
 	});
 });

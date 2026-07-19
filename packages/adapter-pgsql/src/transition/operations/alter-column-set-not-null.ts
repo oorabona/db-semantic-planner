@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createEvidenceView } from '@dbsp/core';
 import type {
 	AdvisoryObservation,
 	ApplyGuard,
@@ -46,6 +47,7 @@ import {
 	appendObservedJournal,
 } from '../journal.js';
 import { readPgObservationContext } from '../observation-issuer.js';
+import { isPgGuardTimeout, pgGuardTimeoutError } from '../pg-guard-timeout.js';
 import { pgPrivilegeValue } from '../privileges.js';
 import { stableJson } from '../stable-json.js';
 
@@ -408,6 +410,13 @@ function setNotNullShapeGuardFailures(
 	evidence: readonly EvidenceObservation[],
 ): readonly ColumnShapeGuardFailure[] {
 	const failures: ColumnShapeGuardFailure[] = [];
+	const evidenceView = context.proofObservationContext
+		? createEvidenceView({
+				evidence,
+				context: context.proofObservationContext,
+				requests: context.deparseRequest ? [context.deparseRequest] : [],
+			})
+		: undefined;
 	if (expected.name !== observed.name) {
 		failures.push(structuralFailure('name', 'column name changed'));
 	}
@@ -450,7 +459,12 @@ function setNotNullShapeGuardFailures(
 	const equivalence = createPgEquivalenceCapability();
 	const typeFailure = equivalenceFailure(
 		'type',
-		equivalence.compareType(expected.type, observed.type, context, evidence),
+		equivalence.compareType(
+			expected.type,
+			observed.type,
+			context,
+			evidenceView,
+		),
 	);
 	if (typeFailure) {
 		failures.push(typeFailure);
@@ -470,7 +484,7 @@ function setNotNullShapeGuardFailures(
 			observed.default,
 			'scalar',
 			context,
-			evidence,
+			evidenceView,
 		);
 		if (defaultResult.kind === 'unknown') {
 			// DEFAULT value is the only deliberately relaxed field in this stale-shape
@@ -494,7 +508,7 @@ function setNotNullShapeGuardFailures(
 			expected.collation,
 			observed.collation,
 			context,
-			evidence,
+			evidenceView,
 		),
 	);
 	if (collationFailure) {
@@ -1135,7 +1149,7 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 					.query('SET LOCAL statement_timeout = DEFAULT')
 					.catch(() => undefined);
 				if (isRecord(error) && error.code === '57014') {
-					throw { code: 'DBSP_GUARD_TIMEOUT', cause: error };
+					throw pgGuardTimeoutError(error);
 				}
 				throw error;
 			}
@@ -1183,10 +1197,7 @@ export function createAlterColumnSetNotNullOperationRuntime() {
 			await appendObservedJournal(clientQuery(client), journal);
 		},
 		isLockTimeout(error: unknown) {
-			return (
-				isRecord(error) &&
-				(error.code === '55P03' || error.code === 'DBSP_GUARD_TIMEOUT')
-			);
+			return isPgGuardTimeout(error);
 		},
 	};
 }
