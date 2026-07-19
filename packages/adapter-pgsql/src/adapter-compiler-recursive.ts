@@ -29,6 +29,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
+import { metadataForModelColumns } from './column-metadata.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -41,33 +42,6 @@ import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
-
-function metadataForModelColumns(
-	tableName: string,
-	columns: readonly string[],
-	model: ModelIR,
-	deps: AdapterCompilerDeps,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
-	if (typeof (model as { getTable?: unknown }).getTable !== 'function') {
-		return undefined;
-	}
-	const table = model.getTable(tableName);
-	if (!table) return undefined;
-	const metadata = new Map<string, CompiledColumnMetadata>();
-	for (const columnName of columns) {
-		const column = table.columns.find(
-			(candidate) => candidate.name === columnName,
-		);
-		if (!column || column.type !== 'bigint' || column.js === undefined)
-			continue;
-		metadata.set(deps.naming.toDatabase(column.name), {
-			table: tableName,
-			column: column.name,
-			js: column.js,
-		});
-	}
-	return metadata.size > 0 ? metadata : undefined;
-}
 
 function projectCteMetadata(
 	query: QueryIntent,
@@ -298,7 +272,7 @@ export function compileRecursive(
 		config.table,
 		config.selectColumns,
 		model,
-		deps,
+		deps.naming,
 	);
 
 	return {

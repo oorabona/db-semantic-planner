@@ -1,5 +1,6 @@
 import type {
 	ColumnIR,
+	ColumnJsReadType,
 	CompiledColumnMetadata,
 	ModelIR,
 	TableIR,
@@ -13,8 +14,19 @@ type ProjectionSource = {
 };
 
 type ProjectionCandidate = {
-	readonly metadata?: CompiledColumnMetadata;
+	readonly projection: ColumnMetadataProjection;
 };
+
+export type ColumnMetadataProjection =
+	| {
+			readonly kind: 'modelColumn';
+			readonly table: string;
+			readonly column: string;
+			readonly js?: ColumnJsReadType;
+	  }
+	| { readonly kind: 'expression'; readonly reason: string }
+	| { readonly kind: 'ambiguous'; readonly reason: string }
+	| { readonly kind: 'unresolved'; readonly reason: string };
 
 type AliasContext = {
 	readonly aliases: ReadonlyMap<string, string>;
@@ -277,25 +289,26 @@ function resolveUnqualifiedColumn(
 	return undefined;
 }
 
-function metadataForSource(
+function projectionForSource(
 	source: ProjectionSource,
-): CompiledColumnMetadata | undefined {
-	if (source.column.js === undefined) return undefined;
-	if (source.column.type !== 'bigint') return undefined;
+): ColumnMetadataProjection {
+	const js: ColumnJsReadType | undefined =
+		source.column.type === 'bigint' ? source.column.js : undefined;
 	return {
+		kind: 'modelColumn',
 		table: source.table,
 		column: source.column.name,
-		js: source.column.js,
+		...(js !== undefined ? { js } : {}),
 	};
 }
 
 function addCandidate(
 	candidates: Map<string, ProjectionCandidate[]>,
 	outputKey: string,
-	metadata?: CompiledColumnMetadata,
+	projection: ColumnMetadataProjection,
 ): void {
 	const entries = candidates.get(outputKey) ?? [];
-	entries.push(metadata ? { metadata } : {});
+	entries.push({ projection });
 	candidates.set(outputKey, entries);
 }
 
@@ -304,11 +317,21 @@ function addColumnCandidate(
 	outputKey: string,
 	source: ProjectionSource | 'ambiguous' | undefined,
 ): void {
-	if (source === 'ambiguous' || source === undefined) {
-		addCandidate(candidates, outputKey);
+	if (source === 'ambiguous') {
+		addCandidate(candidates, outputKey, {
+			kind: 'ambiguous',
+			reason: 'projection column resolved to multiple visible model columns',
+		});
 		return;
 	}
-	addCandidate(candidates, outputKey, metadataForSource(source));
+	if (source === undefined) {
+		addCandidate(candidates, outputKey, {
+			kind: 'unresolved',
+			reason: 'projection column could not be resolved to a model column',
+		});
+		return;
+	}
+	addCandidate(candidates, outputKey, projectionForSource(source));
 }
 
 function expandStar(
@@ -328,7 +351,7 @@ function expandStar(
 			addCandidate(
 				candidates,
 				naming.toDatabase(column.name),
-				metadataForSource({ table: tableName, column }),
+				projectionForSource({ table: tableName, column }),
 			);
 		}
 	}
@@ -349,7 +372,12 @@ function addTargetCandidates(
 		typeof resTarget?.name === 'string' ? resTarget.name : undefined;
 	const fields = columnRefFields(value);
 	if (!fields) {
-		if (outputAlias) addCandidate(candidates, outputAlias);
+		if (outputAlias) {
+			addCandidate(candidates, outputAlias, {
+				kind: 'expression',
+				reason: 'projection expression has no model column provenance',
+			});
+		}
 		return;
 	}
 
@@ -358,7 +386,10 @@ function addTargetCandidates(
 		const qualifier =
 			fields.length >= 2 ? stringField(fields[fields.length - 2]) : undefined;
 		if (outputAlias) {
-			addCandidate(candidates, outputAlias);
+			addCandidate(candidates, outputAlias, {
+				kind: 'expression',
+				reason: 'aliased star projection has no single model column provenance',
+			});
 			return;
 		}
 		expandStar(candidates, qualifier, ctx, model, naming);
@@ -367,7 +398,12 @@ function addTargetCandidates(
 
 	const dbColumn = stringField(last);
 	if (!dbColumn) {
-		if (outputAlias) addCandidate(candidates, outputAlias);
+		if (outputAlias) {
+			addCandidate(candidates, outputAlias, {
+				kind: 'unresolved',
+				reason: 'projection column reference could not be read',
+			});
+		}
 		return;
 	}
 	const qualifier =
@@ -378,14 +414,45 @@ function addTargetCandidates(
 	addColumnCandidate(candidates, outputAlias ?? dbColumn, source);
 }
 
-function finalizeMetadata(
+function finalizeProjections(
 	candidates: ReadonlyMap<string, readonly ProjectionCandidate[]>,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
-	const metadata = new Map<string, CompiledColumnMetadata>();
+): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
+	const projections = new Map<string, ColumnMetadataProjection>();
 	for (const [outputKey, entries] of candidates) {
-		if (entries.length !== 1) continue;
+		if (entries.length !== 1) {
+			projections.set(outputKey, {
+				kind: 'ambiguous',
+				reason: 'projection output key matched multiple sources',
+			});
+			continue;
+		}
 		const entry = entries[0];
-		if (entry?.metadata) metadata.set(outputKey, entry.metadata);
+		if (entry) projections.set(outputKey, entry.projection);
+	}
+	return projections.size > 0 ? projections : undefined;
+}
+
+function metadataForProjection(
+	projection: ColumnMetadataProjection,
+): CompiledColumnMetadata | undefined {
+	if (projection.kind !== 'modelColumn' || projection.js === undefined) {
+		return undefined;
+	}
+	return {
+		table: projection.table,
+		column: projection.column,
+		js: projection.js,
+	};
+}
+
+function metadataForProjections(
+	projections: ReadonlyMap<string, ColumnMetadataProjection> | undefined,
+): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+	if (!projections || projections.size === 0) return undefined;
+	const metadata = new Map<string, CompiledColumnMetadata>();
+	for (const [outputKey, projection] of projections) {
+		const entry = metadataForProjection(projection);
+		if (entry) metadata.set(outputKey, entry);
 	}
 	return metadata.size > 0 ? metadata : undefined;
 }
@@ -405,12 +472,12 @@ function targetListForAst(ast: Node): readonly unknown[] | undefined {
 	return Array.isArray(targetList) ? targetList : undefined;
 }
 
-export function buildCompiledColumnMetadata(
+export function buildCompiledColumnProjections(
 	ast: Node,
 	rootTable: string,
 	model: ModelIR | undefined,
 	naming: NamingPlugin,
-): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
 	if (!model || !hasTableMap(model)) return undefined;
 	const targets = targetListForAst(ast);
 	if (!targets || targets.length === 0) return undefined;
@@ -419,5 +486,52 @@ export function buildCompiledColumnMetadata(
 	for (const target of targets) {
 		addTargetCandidates(target, candidates, ctx, model, naming);
 	}
-	return finalizeMetadata(candidates);
+	return finalizeProjections(candidates);
+}
+
+export function buildModelColumnProjections(
+	tableName: string,
+	columns: readonly string[],
+	model: ModelIR,
+	naming: NamingPlugin,
+): ReadonlyMap<string, ColumnMetadataProjection> | undefined {
+	if (typeof (model as { getTable?: unknown }).getTable !== 'function') {
+		return undefined;
+	}
+	const table = model.getTable(tableName);
+	if (!table) return undefined;
+	const projections = new Map<string, ColumnMetadataProjection>();
+	for (const columnName of columns) {
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column) continue;
+		projections.set(
+			naming.toDatabase(column.name),
+			projectionForSource({ table: tableName, column }),
+		);
+	}
+	return projections.size > 0 ? projections : undefined;
+}
+
+export function buildCompiledColumnMetadata(
+	ast: Node,
+	rootTable: string,
+	model: ModelIR | undefined,
+	naming: NamingPlugin,
+): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+	return metadataForProjections(
+		buildCompiledColumnProjections(ast, rootTable, model, naming),
+	);
+}
+
+export function metadataForModelColumns(
+	tableName: string,
+	columns: readonly string[],
+	model: ModelIR,
+	naming: NamingPlugin,
+): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+	return metadataForProjections(
+		buildModelColumnProjections(tableName, columns, model, naming),
+	);
 }
