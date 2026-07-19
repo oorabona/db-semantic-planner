@@ -6,7 +6,7 @@
  */
 
 import type { PoolClient } from 'pg';
-import { introspect } from '../introspection.js';
+import { type IntrospectionOptions, introspect } from '../introspection.js';
 
 function assertIntrospectRejectsABorrowedClient(client: PoolClient): void {
 	// @ts-expect-error a checked-out PoolClient may be sitting inside a transaction
@@ -17,4 +17,18 @@ function assertIntrospectRejectsABorrowedClient(client: PoolClient): void {
 	void introspect({ query: async () => ({ rows: [], rowCount: 0 }) });
 }
 
+function assertIntrospectionOptionsRejectsManagedTables(): void {
+	const scoped: IntrospectionOptions = {
+		include: ['users'],
+		exclude: ['_prisma*'],
+	};
+
+	// @ts-expect-error managedTables is not an introspection option; use include/exclude for table scoping.
+	const orphaned: IntrospectionOptions = { managedTables: ['users'] };
+
+	void scoped;
+	void orphaned;
+}
+
 void assertIntrospectRejectsABorrowedClient;
+void assertIntrospectionOptionsRejectsManagedTables;

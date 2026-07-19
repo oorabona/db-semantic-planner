@@ -20,6 +20,7 @@ import type {
 	ForeignKeyIR,
 	HierarchyIR,
 	IndexIR,
+	LogicalIdentity,
 	ModelIR,
 	OnDeleteAction,
 	PartitionIR,
@@ -34,6 +35,11 @@ import type { Pool, QueryResult, QueryResultRow } from 'pg';
 import { DEFAULT_PK_COLUMN } from './assert-field.js';
 import { stripNotValidSuffix } from './check-expression.js';
 import { quoteTypeIdentifier, stripDbTypeSchema } from './db-type.js';
+import { DBSP_META_SCHEMA } from './transition/constants.js';
+import {
+	logicalIdentityCarrierTableStatus,
+	qualifiedLogicalIdentitySideTable,
+} from './transition/logical-identity-carrier-shape.js';
 
 // ============================================================================
 // Types
@@ -96,6 +102,14 @@ interface RawFormattedColumnType {
 	type_schema: string;
 }
 
+interface RawLogicalIdentity {
+	logical_id: string;
+	schema_name: string;
+	table_name: string;
+	column_name: string | null;
+	carrier_kind: string;
+}
+
 interface FormattedColumnType {
 	dbType: string;
 	typeSchema: string;
@@ -128,6 +142,8 @@ interface RawIndex {
 	opclass_names: string[] | null;
 	opclass_cols: string[] | null;
 	is_unique: boolean;
+	is_valid?: boolean;
+	is_ready?: boolean;
 	nulls_not_distinct?: boolean | null;
 	method: string;
 	predicate: string | null;
@@ -386,6 +402,8 @@ async function queryAllCatalogs(
 			     FILTER (WHERE k.n <= ix.indnkeyatts AND k.attnum != 0
 			             AND NOT oc.opcdefault) AS opclass_cols,
 			   ix.indisunique AS is_unique,
+			   ix.indisvalid AS is_valid,
+			   ix.indisready AS is_ready,
 			   bool_or(COALESCE((to_jsonb(ix) ->> 'indnullsnotdistinct')::boolean, false)) AS nulls_not_distinct,
 			   am.amname AS method,
 			   pg_get_expr(ix.indpred, ix.indrelid, false) AS predicate,
@@ -414,7 +432,8 @@ async function queryAllCatalogs(
 			     WHERE c.conindid = i.oid
 			       AND c.contype = 'u'
 			   )
-			 GROUP BY i.relname, t.relname, ix.indisunique, am.amname,
+			 GROUP BY i.relname, t.relname, ix.indisunique, ix.indisvalid,
+			          ix.indisready, am.amname,
 			          ix.indpred, ix.indrelid, ix.indexprs, i.reloptions
 			 ORDER BY t.relname, i.relname`,
 				[schema],
@@ -758,6 +777,8 @@ function buildIndexMap(rows: RawIndex[]): Map<string, IndexIR[]> {
 			name: idx.index_name,
 			columns,
 			...(idx.is_unique ? { unique: true } : {}),
+			valid: idx.is_valid === true,
+			ready: idx.is_ready === true,
 			...(idx.is_unique && idx.nulls_not_distinct
 				? { nullsNotDistinct: true }
 				: {}),
@@ -981,6 +1002,38 @@ function columnTypeMapKey(tableName: string, columnName: string): string {
 	return `${tableName}\0${columnName}`;
 }
 
+function logicalIdentityCarrier(): NonNullable<LogicalIdentity['carrier']> {
+	return {
+		kind: 'postgresql-side-table',
+		authenticated: false,
+	};
+}
+
+function logicalIdentityFor(id: string): LogicalIdentity {
+	return {
+		id,
+		carrier: logicalIdentityCarrier(),
+	};
+}
+
+async function queryLogicalIdentityCatalog(
+	pool: CatalogQueryExecutor,
+	schema: string,
+): Promise<readonly RawLogicalIdentity[]> {
+	if ((await logicalIdentityCarrierTableStatus(pool)) !== 'managed') {
+		return [];
+	}
+	const qualifiedSideTable = qualifiedLogicalIdentitySideTable();
+	const result = await pool.query<RawLogicalIdentity>(
+		`SELECT logical_id, schema_name, table_name, column_name, carrier_kind ` +
+			`FROM ${qualifiedSideTable} ` +
+			`WHERE schema_name = $1 ` +
+			`ORDER BY table_name, column_name NULLS FIRST, logical_id`,
+		[schema],
+	);
+	return result.rows;
+}
+
 /** Build a Map<tableName+columnName, bare format_type result + type schema>. */
 function buildFormattedColumnTypeMap(
 	rows: RawFormattedColumnType[],
@@ -993,6 +1046,59 @@ function buildFormattedColumnTypeMap(
 		});
 	}
 	return result;
+}
+
+function buildLogicalIdentityMaps(rows: readonly RawLogicalIdentity[]): {
+	tableLogicalIdentities: Map<string, LogicalIdentity>;
+	columnLogicalIdentities: Map<string, Map<string, LogicalIdentity>>;
+} {
+	const tableLogicalIdentities = new Map<string, LogicalIdentity>();
+	const columnLogicalIdentities = new Map<
+		string,
+		Map<string, LogicalIdentity>
+	>();
+	const ids = new Map<string, string>();
+	const objects = new Set<string>();
+
+	for (const row of rows) {
+		if (row.carrier_kind !== 'postgresql-side-table') {
+			continue;
+		}
+		const objectKey = JSON.stringify([
+			row.schema_name,
+			row.table_name,
+			row.column_name,
+		]);
+		const owner =
+			row.column_name == null
+				? `table "${row.schema_name}.${row.table_name}"`
+				: `column "${row.schema_name}.${row.table_name}.${row.column_name}"`;
+		const priorOwner = ids.get(row.logical_id);
+		if (priorOwner && priorOwner !== owner) {
+			throw new Error(
+				`Logical identity carrier has duplicate logical id "${row.logical_id}" on ${priorOwner} and ${owner}`,
+			);
+		}
+		if (objects.has(objectKey)) {
+			throw new Error(
+				`Logical identity carrier has multiple rows for ${owner}`,
+			);
+		}
+		ids.set(row.logical_id, owner);
+		objects.add(objectKey);
+		const identity = logicalIdentityFor(row.logical_id);
+		if (row.column_name == null) {
+			tableLogicalIdentities.set(row.table_name, identity);
+			continue;
+		}
+		const columns =
+			columnLogicalIdentities.get(row.table_name) ??
+			new Map<string, LogicalIdentity>();
+		columns.set(row.column_name, identity);
+		columnLogicalIdentities.set(row.table_name, columns);
+	}
+
+	return { tableLogicalIdentities, columnLogicalIdentities };
 }
 
 /** Context bag passed to buildTableIR. */
@@ -1009,6 +1115,8 @@ interface TableIRContext {
 	tablePartitions: Map<string, PartitionIR>;
 	tableRlsEnabled: Map<string, boolean>;
 	tablePolicies: Map<string, PolicyIR[]>;
+	tableLogicalIdentities: Map<string, LogicalIdentity>;
+	columnLogicalIdentities: Map<string, Map<string, LogicalIdentity>>;
 	tableNames: string[];
 	schema: string;
 	warnings: string[];
@@ -1037,6 +1145,9 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 
 		const colComment =
 			ctx.columnComments.get(`${tableName}.${col.column_name}`) ?? undefined;
+		const logicalIdentity = ctx.columnLogicalIdentities
+			.get(tableName)
+			?.get(col.column_name);
 		const uniqueConstraintName = uniqueColumns?.get(col.column_name);
 		const formattedType = ctx.formattedColumnTypes.get(
 			columnTypeMapKey(tableName, col.column_name),
@@ -1075,6 +1186,7 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 				: {}),
 			...(collation ? { collation } : {}),
 			...(identity ? { identity } : {}),
+			...(logicalIdentity ? { logicalIdentity } : {}),
 			...(colComment ? { comment: colComment } : {}),
 		};
 	});
@@ -1112,9 +1224,11 @@ function buildTableIR(tableName: string, ctx: TableIRContext): TableIR {
 	const partitionConfig = ctx.tablePartitions.get(tableName);
 	const rlsEnabled = ctx.tableRlsEnabled.get(tableName) ?? false;
 	const policies = ctx.tablePolicies.get(tableName);
+	const tableLogicalIdentity = ctx.tableLogicalIdentities.get(tableName);
 
 	return {
 		name: tableName,
+		...(tableLogicalIdentity ? { logicalIdentity: tableLogicalIdentity } : {}),
 		columns,
 		...(pkCols
 			? { primaryKey: pkCols.length === 1 ? pkCols[0]! : pkCols }
@@ -1226,6 +1340,7 @@ export async function introspectWithExecutor(
 	const warnings: string[] = [];
 
 	const raw = await queryAllCatalogs(pool, schema);
+	const logicalIdentities = await queryLogicalIdentityCatalog(pool, schema);
 
 	const tablePartitions = buildPartitionMap(raw.partitions);
 	const tableChecks = buildCheckMap(raw.checks);
@@ -1243,9 +1358,13 @@ export async function introspectWithExecutor(
 		raw.rls,
 		raw.policies,
 	);
+	const { tableLogicalIdentities, columnLogicalIdentities } =
+		buildLogicalIdentityMaps(logicalIdentities);
 
-	// Apply include/exclude filters
-	let tableNames = Array.from(tableColumns.keys());
+	// dbsp-owned metadata lives in a shared schema and is never surfaced as
+	// managed user tables for a target introspection.
+	let tableNames =
+		schema === DBSP_META_SCHEMA ? [] : Array.from(tableColumns.keys());
 	tableNames = filterTables(tableNames, options);
 
 	// Build TableIR map
@@ -1264,6 +1383,8 @@ export async function introspectWithExecutor(
 			tablePartitions,
 			tableRlsEnabled,
 			tablePolicies,
+			tableLogicalIdentities,
+			columnLogicalIdentities,
 			tableNames,
 			schema,
 			warnings,

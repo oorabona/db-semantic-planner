@@ -1,0 +1,121 @@
+export {
+	ADD_CHECK_RULE_ID,
+	ALTER_AUTHORITY_OBSERVATION,
+	ALTER_COLUMN_SET_NOT_NULL_OPERATION_KIND,
+	ALTER_TABLE_ADD_CHECK_OPERATION_KIND,
+	ALTER_TYPE_ADD_VALUE_OPERATION_KIND,
+	ALTER_TYPE_AUTHORITY_OBSERVATION,
+	ATTACH_LOGICAL_IDENTITY_OPERATION_KIND,
+	CHECK_CONSTRAINT_ABSENT_OBSERVATION,
+	CHECK_ROWS_SATISFY_GUARD,
+	COLUMN_EXISTS_OBSERVATION,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_OPERATION_KIND,
+	CREATE_UNIQUE_INDEX_CONCURRENTLY_RULE_ID,
+	DBSP_LOGICAL_IDENTITY_TABLE,
+	DBSP_META_SCHEMA,
+	DBSP_TRANSITION_JOURNAL_TABLE,
+	DBSP_TRANSITION_RUN_TABLE,
+	ENGINE_VERSION_OBSERVATION,
+	ENUM_ADD_VALUE_RULE_ID,
+	ENUM_LABEL_VISIBLE_OBSERVATION,
+	ENUM_TYPE_EXISTS_OBSERVATION,
+	INDEX_ABSENT_OBSERVATION,
+	LOGICAL_IDENTITY_ADOPTION_RULE_ID,
+	LOGICAL_IDENTITY_CARRIER_OBSERVATION,
+	MANUAL_SQL_OPERATION_KIND,
+	NO_DUPLICATES_FOR_UNIQUE_INDEX_BUILD_GUARD,
+	NO_NULLS_GUARD,
+	PG_DEPARSE_ARTIFACT,
+	PG_INTROSPECTION_ARTIFACT,
+	PG_OPERATION_PACK_ARTIFACT,
+	PG_RULE_PACK_ARTIFACT,
+	SET_NOT_NULL_RELATION_KIND_SUPPORTED_OBSERVATION,
+	SET_NOT_NULL_RULE_ID,
+	TABLE_CHECK_CONSTRAINTS_OBSERVATION,
+	TABLE_INDEXES_OBSERVATION,
+} from './constants.js';
+export {
+	appendCompletionJournal,
+	appendIntentJournal,
+	appendObservedJournal,
+	ensureTransitionJournal,
+	readTransitionJournal,
+	renderCreateDbspMetaSchemaSql,
+	renderCreateTransitionJournalTableSql,
+	renderCreateTransitionRunTableSql,
+	type TransitionJournalQueryable,
+} from './journal.js';
+export {
+	createPgObservationIssuer,
+	readPgObservationContext,
+} from './observation-issuer.js';
+export {
+	type AlterColumnSetNotNullPayload,
+	createAlterColumnSetNotNullOperationRuntime,
+	renderAlterColumnSetNotNullSql,
+	renderNoNullsCheckSql,
+	renderSetNotNullLockSql,
+} from './operations/alter-column-set-not-null.js';
+export {
+	type AlterTableAddCheckPayload,
+	type CheckSet,
+	createAlterTableAddCheckOperationRuntime,
+	renderAddCheckLockSql,
+	renderAlterTableAddCheckSql,
+	renderCheckRowsSatisfySql,
+} from './operations/alter-table-add-check.js';
+export {
+	type AlterTypeAddValuePayload,
+	createAlterTypeAddValueOperationRuntime,
+	renderAlterTypeAddValueSql,
+} from './operations/alter-type-add-value.js';
+export {
+	type AttachLogicalIdentityPayload,
+	createAttachLogicalIdentityOperationRuntime,
+	renderAttachLogicalIdentityLockSql,
+	renderCreateLogicalIdentityIndexesSql,
+	renderCreateLogicalIdentitySideTableSql,
+	renderInsertLogicalIdentitySql,
+} from './operations/attach-logical-identity.js';
+export {
+	type CreateUniqueIndexConcurrentlyPayload,
+	createCreateUniqueIndexConcurrentlyOperationRuntime,
+	type IndexSet,
+	renderCreateUniqueIndexConcurrentlySql,
+	renderDropIndexConcurrentlySql,
+} from './operations/create-unique-index-concurrently.js';
+export {
+	createManualSqlOperationRuntime,
+	type ManualSqlPayload,
+	normalizeManualSqlPayload,
+} from './operations/manual-sql.js';
+export {
+	createPgTransitionPack,
+	type PgTransitionPackOptions,
+} from './pack.js';
+export {
+	type AddCheckMatch,
+	type AddCheckRuleOptions,
+	createAddCheckRule,
+} from './rules/add-check.js';
+export {
+	createLogicalIdentityAdoptionRule,
+	type IdentityAdoptionAsserter,
+	type LogicalIdentityAdoptionMatch,
+	type LogicalIdentityAdoptionRuleOptions,
+} from './rules/adopt-logical-identity.js';
+export {
+	type CreateUniqueIndexConcurrentlyMatch,
+	type CreateUniqueIndexConcurrentlyRuleOptions,
+	createCreateUniqueIndexConcurrentlyRule,
+} from './rules/create-unique-index-concurrently.js';
+export {
+	createEnumAddValueRule,
+	type EnumAddValueMatch,
+	type EnumAddValueRuleOptions,
+} from './rules/enum-add-value.js';
+export {
+	createSetNotNullRule,
+	type SetNotNullMatch,
+	type SetNotNullRuleOptions,
+} from './rules/set-not-null.js';

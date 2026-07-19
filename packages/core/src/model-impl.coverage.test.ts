@@ -278,6 +278,109 @@ describe('ModelIRImpl validation — foreign keys', () => {
 	});
 });
 
+describe('ModelIRImpl validation — logical identity', () => {
+	const logicalIdentityCarrier = {
+		kind: 'postgresql-side-table',
+		authenticated: false,
+	} as const;
+
+	it('preserves optional table and column logical identities', () => {
+		const users = makeTable('users', {
+			logicalIdentity: {
+				id: 'logical.table.users',
+				carrier: logicalIdentityCarrier,
+			},
+			columns: [
+				{
+					name: 'id',
+					type: 'integer',
+					nullable: false,
+					logicalIdentity: {
+						id: 'logical.column.users.id',
+						carrier: logicalIdentityCarrier,
+					},
+				},
+			],
+		});
+
+		const model = buildModel([users], []);
+
+		expect(model.getTable('users')?.logicalIdentity?.id).toBe(
+			'logical.table.users',
+		);
+		expect(model.getTable('users')?.columns[0]?.logicalIdentity?.id).toBe(
+			'logical.column.users.id',
+		);
+	});
+
+	it('rejects duplicate logical ids across table and column objects', () => {
+		expect(() =>
+			buildModel(
+				[
+					makeTable('users', {
+						logicalIdentity: {
+							id: 'logical.duplicate',
+							carrier: logicalIdentityCarrier,
+						},
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: {
+									id: 'logical.duplicate',
+									carrier: logicalIdentityCarrier,
+								},
+							},
+						],
+					}),
+				],
+				[],
+			),
+		).toThrow(
+			/Logical identity "logical\.duplicate" is attached to multiple objects/,
+		);
+	});
+
+	it('rejects duplicate logical ids across columns in different tables', () => {
+		expect(() =>
+			buildModel(
+				[
+					makeTable('users', {
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: {
+									id: 'logical.column.shared',
+									carrier: logicalIdentityCarrier,
+								},
+							},
+						],
+					}),
+					makeTable('posts', {
+						columns: [
+							{
+								name: 'id',
+								type: 'integer',
+								nullable: false,
+								logicalIdentity: {
+									id: 'logical.column.shared',
+									carrier: logicalIdentityCarrier,
+								},
+							},
+						],
+					}),
+				],
+				[],
+			),
+		).toThrow(
+			/Logical identity "logical\.column\.shared" is attached to multiple objects/,
+		);
+	});
+});
+
 // ---------------------------------------------------------------------------
 // Validation: Relation source / target / through non-existent
 // ---------------------------------------------------------------------------

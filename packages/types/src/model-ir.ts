@@ -7,6 +7,8 @@
  * remain in @dbsp/core.
  */
 
+import type { TrustRoot } from './transition/artifact.js';
+
 // ============================================================================
 // Column Types
 // ============================================================================
@@ -159,9 +161,27 @@ export type FilterStrategy = 'exists' | 'join' | 'auto';
 /** Default join type when joining */
 export type JoinDefault = 'left' | 'inner' | 'auto';
 
+export type AuthorAttester = Exclude<TrustRoot, { readonly kind: 'pack' }>;
+
+export interface AuthorAttestedNativeDefault {
+	readonly sql: string;
+	readonly attestedBy: AuthorAttester;
+	readonly statement?: string;
+}
+
 // ============================================================================
 // Core Interfaces
 // ============================================================================
+
+export interface LogicalIdentityCarrier {
+	readonly kind: 'postgresql-side-table' | (string & {});
+	readonly authenticated: false;
+}
+
+export interface LogicalIdentity {
+	readonly id: string;
+	readonly carrier: LogicalIdentityCarrier;
+}
 
 /**
  * Column definition
@@ -169,6 +189,9 @@ export type JoinDefault = 'left' | 'inner' | 'auto';
 export interface ColumnIR {
 	/** Column name in database */
 	readonly name: string;
+
+	/** Stable logical identity, when attached by an engine-neutral carrier. */
+	readonly logicalIdentity?: LogicalIdentity;
 
 	/** Data type for TypeScript inference */
 	readonly type: ColumnType;
@@ -303,6 +326,13 @@ export interface EnumIR {
 	/** Schema name (if not in default schema) */
 	readonly schema?: string;
 }
+
+export interface RequiredEnumLabelIR {
+	readonly schema?: string;
+	readonly type: string;
+	readonly label: string;
+}
+
 export interface CheckConstraintIR {
 	/** Constraint name in database */
 	readonly name: string;
@@ -312,6 +342,9 @@ export interface CheckConstraintIR {
 
 	/** If true, add the constraint WITHOUT scanning existing rows (NOT VALID). Use validate_constraint to validate later. */
 	readonly notValid?: boolean;
+
+	/** Authored transition metadata: enum labels this CHECK references and requires visible before proof/apply. */
+	readonly requiresEnumLabels?: readonly RequiredEnumLabelIR[];
 }
 
 /**
@@ -372,6 +405,12 @@ export interface IndexIR {
 	/** Whether this is a unique index */
 	readonly unique?: boolean;
 
+	/** PostgreSQL catalog validity (indisvalid); false marks an unusable leftover index */
+	readonly valid?: boolean;
+
+	/** PostgreSQL catalog readiness (indisready); false marks an incomplete index build */
+	readonly ready?: boolean;
+
 	/** PG15+ — for UNIQUE indexes only; schema authoring rejects true on non-unique indexes */
 	readonly nullsNotDistinct?: boolean;
 
@@ -400,6 +439,9 @@ export interface IndexIR {
 export interface TableIR {
 	/** Table name in database */
 	readonly name: string;
+
+	/** Stable logical identity, when attached by an engine-neutral carrier. */
+	readonly logicalIdentity?: LogicalIdentity;
 
 	/** Column definitions */
 	readonly columns: readonly ColumnIR[];

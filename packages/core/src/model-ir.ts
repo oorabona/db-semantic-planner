@@ -20,6 +20,8 @@ export type {
 	IncludeStrategy,
 	IndexIR,
 	JoinDefault,
+	LogicalIdentity,
+	LogicalIdentityCarrier,
 	ModelIR,
 	OnDeleteAction,
 	Optionality,
@@ -29,6 +31,7 @@ export type {
 	RelationIR,
 	RelationKind,
 	RelationType,
+	RequiredEnumLabelIR,
 	SequenceIR,
 	TableIR,
 } from '@dbsp/types';

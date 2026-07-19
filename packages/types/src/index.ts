@@ -28,3 +28,5 @@ export * from './planner.js';
 export * from './relation-key-fields.js';
 // Shared utility types
 export type { RangeValue, SortDirection } from './shared/utils.js';
+// ADR-0003 transition planner data contracts
+export * from './transition/index.js';

@@ -116,6 +116,175 @@ describe('introspect', () => {
 		expect(users!.columns[0]!.type).toBe('integer');
 	});
 
+	it('treats target-schema dbsp_transition_journal as an ordinary table', async () => {
+		const journalTableName = 'dbsp_transition_journal';
+		const columns = [
+			{
+				table_name: 'users',
+				column_name: 'id',
+				data_type: 'integer',
+				udt_name: 'int4',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			...[
+				['id', 'bigint', 'int8'],
+				['step_id', 'text', 'text'],
+				['event', 'text', 'text'],
+				['operation_ref', 'text', 'text'],
+				['operation_kind', 'text', 'text'],
+				['recorded_at', 'timestamp with time zone', 'timestamptz'],
+				['record', 'jsonb', 'jsonb'],
+			].map(([column_name, data_type, udt_name]) => ({
+				table_name: journalTableName,
+				column_name,
+				data_type,
+				udt_name,
+				is_nullable: 'NO',
+				column_default: null,
+			})),
+		];
+		const pks = [{ table_name: 'users', column_name: 'id' }];
+		const pool = createMockPool([columns, pks, []]);
+
+		const result = await introspect(pool);
+
+		expect(result.tables.has('users')).toBe(true);
+		expect(result.tables.has(journalTableName)).toBe(true);
+		expect(result.externalTables.has(journalTableName)).toBe(false);
+	});
+
+	it('excludes dbsp_meta metadata tables from managed introspection', async () => {
+		const columns = [
+			{
+				table_name: 'dbsp_transition_journal',
+				column_name: 'run_id',
+				data_type: 'text',
+				udt_name: 'text',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+			{
+				table_name: 'dbsp_logical_identity',
+				column_name: 'logical_id',
+				data_type: 'text',
+				udt_name: 'text',
+				is_nullable: 'NO',
+				column_default: null,
+			},
+		];
+		const pool = createMockPool([columns, [], []]);
+
+		const result = await introspect(pool, { schema: 'dbsp_meta' });
+
+		expect(result.tables.size).toBe(0);
+		expect(result.externalTables.size).toBe(0);
+	});
+
+	it('recovers logical identities only from a managed carrier shape', async () => {
+		const carrierShape = {
+			table_exists: true,
+			columns: {
+				logical_id: { type: 'text', notNull: true },
+				schema_name: { type: 'text', notNull: true },
+				table_name: { type: 'text', notNull: true },
+				column_name: { type: 'text', notNull: false },
+				carrier_kind: { type: 'text', notNull: true },
+				dbsp_managed_by: { type: 'text', notNull: true },
+				attached_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['logical_id'],
+		};
+		const pool = createMockPool([
+			[usersPostsColumns[0]!],
+			[{ table_name: 'users', column_name: 'id' }],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[{ exists: true }],
+			[carrierShape],
+			[{ invalid_marker_rows: '0' }],
+			[
+				{
+					logical_id: 'logical.column.users.id',
+					schema_name: 'public',
+					table_name: 'users',
+					column_name: 'id',
+					carrier_kind: 'postgresql-side-table',
+				},
+			],
+		]);
+
+		const result = await introspect(pool);
+
+		expect(result.getTable('users')?.columns[0]?.logicalIdentity).toMatchObject(
+			{
+				id: 'logical.column.users.id',
+				carrier: {
+					kind: 'postgresql-side-table',
+					authenticated: false,
+				},
+			},
+		);
+	});
+
+	it('does not recover logical identities from an unvalidated carrier table', async () => {
+		const staleCarrierShape = {
+			table_exists: true,
+			columns: {
+				logical_id: { type: 'text', notNull: true },
+				schema_name: { type: 'text', notNull: true },
+				table_name: { type: 'text', notNull: true },
+				column_name: { type: 'text', notNull: false },
+				carrier_kind: { type: 'text', notNull: true },
+				attached_at: { type: 'timestamp with time zone', notNull: true },
+			},
+			primary_key: ['logical_id'],
+		};
+		const pool = createMockPool([
+			[usersPostsColumns[0]!],
+			[{ table_name: 'users', column_name: 'id' }],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[],
+			[{ exists: true }],
+			[staleCarrierShape],
+			[
+				{
+					logical_id: 'logical.column.users.id',
+					schema_name: 'public',
+					table_name: 'users',
+					column_name: 'id',
+					carrier_kind: 'postgresql-side-table',
+				},
+			],
+		]);
+
+		const result = await introspect(pool);
+
+		expect(
+			result.getTable('users')?.columns[0]?.logicalIdentity,
+		).toBeUndefined();
+	});
+
 	it('should map column types correctly', async () => {
 		const columns = [
 			{
@@ -740,6 +909,22 @@ describe('introspect', () => {
 		expect(result.tables.has('users')).toBe(true);
 	});
 
+	it('should apply include before exclude filters', async () => {
+		const pool = createMockPool([
+			usersPostsColumns,
+			usersPostsPKs,
+			usersPostsFKs,
+		]);
+		const result = await introspect(pool, {
+			include: ['*s'],
+			exclude: ['posts'],
+		});
+
+		expect(result.tables.size).toBe(1);
+		expect(result.tables.has('users')).toBe(true);
+		expect(result.tables.has('posts')).toBe(false);
+	});
+
 	it('should apply glob pattern in exclude', async () => {
 		const pool = createMockPool([
 			usersPostsColumns,
@@ -774,15 +959,20 @@ describe('introspect', () => {
 		await introspect(pool, { schema: 'tenant_1' });
 
 		const mockQuery = pool.query as ReturnType<typeof vi.fn>;
-		// 14 queries total: columns, PKs, FKs, indexes, unique columns, enums,
+		// 15 queries total: columns, PKs, FKs, indexes, unique columns, enums,
 		// comments, checks, partitions, extensions, sequences, rls state, policies,
-		// formatted column types
+		// formatted column types, logical-identity carrier probe
 		// Note: extensions query has no schema param (queries all extensions globally)
-		expect(mockQuery).toHaveBeenCalledTimes(14);
+		expect(mockQuery).toHaveBeenCalledTimes(15);
 		// All parameterized queries (those with a second arg) should pass 'tenant_1'
 		for (const call of mockQuery.mock.calls) {
 			if (call[1] !== undefined) {
-				expect(call[1]).toEqual(['tenant_1']);
+				const sql = String(call[0]);
+				if (sql.includes('to_regclass')) {
+					expect(call[1]).toEqual(['"dbsp_meta"."dbsp_logical_identity"']);
+				} else {
+					expect(call[1]).toEqual(['tenant_1']);
+				}
 			}
 		}
 		const uniqueConstraintQuery = mockQuery.mock.calls.find((call) =>

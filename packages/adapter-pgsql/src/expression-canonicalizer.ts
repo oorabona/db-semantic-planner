@@ -78,6 +78,18 @@ interface CheckCanonicalizationNameScope {
 	readonly tempPrefix: string;
 }
 
+const TEMP_TABLE_UNAVAILABLE_SQLSTATE_CODES = new Set([
+	'42501', // insufficient_privilege
+	'0A000', // feature_not_supported, e.g. temporary tables during recovery
+]);
+
+const TRANSACTION_INTEGRITY_OR_CLEANUP_SQLSTATE_CODES = new Set([
+	'25P01', // no_active_sql_transaction
+	'25P02', // in_failed_sql_transaction
+	'3B001', // invalid_savepoint_specification
+	'25006', // read_only_sql_transaction
+]);
+
 export class CheckConstraintCanonicalizationError extends Error {
 	constructor(
 		readonly table: string,
@@ -91,6 +103,40 @@ export class CheckConstraintCanonicalizationError extends Error {
 		);
 		this.name = 'CheckConstraintCanonicalizationError';
 	}
+}
+
+/**
+ * Returns true for the PostgreSQL failure class where CHECK canonicalisation
+ * could not create or use its scratch temp table. These failures are expected in
+ * restricted roles and should degrade to raw CHECK comparison in non-strict
+ * live diffs.
+ */
+export function isCheckCanonicalizationTempTableUnavailableError(
+	error: unknown,
+): boolean {
+	const chain = errorChain(error);
+	// Fail closed: if the error chain also carries a genuine cleanup/rollback or
+	// transaction-integrity failure, the caller transaction state is unknown —
+	// raw-CHECK fallback is NOT a valid recovery, even when a temp-table denial is
+	// also present. Surface it instead of masking it.
+	if (chain.some(isTransactionIntegrityOrCleanupFailureItem)) return false;
+	return chain.some(isTempTableUnavailableErrorItem);
+}
+
+export function fallbackToRawCheckConstraintComparison(
+	desired: ModelIR,
+	dbModel: ModelIR,
+	cause: unknown,
+	options?: CanonicalizeCheckConstraintsOptions,
+): ModelIR {
+	const targets = collectCheckConstraintTargets(desired, dbModel, options);
+	if (targets.length === 0) {
+		return desired;
+	}
+	for (const target of targets) {
+		reportCanonicalizationFailure(target, cause, options);
+	}
+	return cloneModelWithCanonicalChecks(desired, new Map());
 }
 
 /**
@@ -455,6 +501,105 @@ function reportConstraintCanonicalizationFailure(
 
 function errorMessage(error: unknown): string {
 	return error instanceof Error ? error.message : String(error);
+}
+
+function isTempTableUnavailableErrorItem(error: unknown): boolean {
+	const code = pgErrorCode(error);
+	const message = errorMessage(error).toLowerCase();
+	if (TEMP_TABLE_UNAVAILABLE_SQLSTATE_CODES.has(code ?? '')) {
+		return mentionsTemporaryTable(message);
+	}
+	if (code === '42P07') {
+		return (
+			message.includes('_dbsp_check_canon_') &&
+			message.includes('already exists')
+		);
+	}
+	return (
+		message.includes('permission denied to create temporary tables') ||
+		message.includes('permission denied to create temp tables') ||
+		message.includes('cannot create temporary table') ||
+		message.includes('cannot create temporary tables') ||
+		message.includes('cannot create temp table') ||
+		message.includes('cannot create temp tables') ||
+		message.includes('temporary tables cannot be created') ||
+		message.includes('temp tables cannot be created')
+	);
+}
+
+function mentionsTemporaryTable(message: string): boolean {
+	return (
+		(message.includes('temporary') || message.includes('temp')) &&
+		message.includes('table')
+	);
+}
+
+function isTransactionIntegrityOrCleanupFailureItem(error: unknown): boolean {
+	if (
+		TRANSACTION_INTEGRITY_OR_CLEANUP_SQLSTATE_CODES.has(
+			pgErrorCode(error) ?? '',
+		)
+	) {
+		return true;
+	}
+	if (typeof error !== 'object' || error === null) return false;
+	if (Object.hasOwn(error, 'cleanupError')) return true;
+	return (
+		hasTrueProperty(error, 'dbspTransactionAborted') ||
+		hasTrueProperty(error, 'dbspTransactionAbortedCommit') ||
+		hasTrueProperty(error, 'dbspRawSqlTransactionControl')
+	);
+}
+
+function hasTrueProperty(error: object, property: string): boolean {
+	return (
+		Object.hasOwn(error, property) &&
+		(error as Record<string, unknown>)[property] === true
+	);
+}
+
+function pgErrorCode(error: unknown): string | undefined {
+	if (typeof error !== 'object' || error === null || !('code' in error)) {
+		return undefined;
+	}
+	const code = (error as { readonly code?: unknown }).code;
+	return typeof code === 'string' ? code : undefined;
+}
+
+function errorChain(error: unknown): unknown[] {
+	const items: unknown[] = [];
+	const seen = new Set<unknown>();
+	const pending: unknown[] = [error];
+	while (pending.length > 0) {
+		const item = pending.shift();
+		if (item === undefined || seen.has(item)) continue;
+		seen.add(item);
+		items.push(item);
+		for (const nested of nestedErrors(item)) {
+			pending.push(nested);
+		}
+	}
+	return items;
+}
+
+function nestedErrors(error: unknown): unknown[] {
+	if (typeof error !== 'object' || error === null) {
+		return [];
+	}
+	const nested: unknown[] = [];
+	const withCause = error as {
+		readonly cause?: unknown;
+		readonly cleanupError?: unknown;
+		readonly originalError?: unknown;
+	};
+	if (withCause.cause !== undefined) nested.push(withCause.cause);
+	if (withCause.originalError !== undefined)
+		nested.push(withCause.originalError);
+	if (withCause.cleanupError !== undefined) nested.push(withCause.cleanupError);
+	if (error instanceof AggregateError) {
+		nested.push(...error.errors);
+	}
+	return nested;
 }
 
 function cloneModelWithCanonicalChecks(
