@@ -22,7 +22,6 @@ import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, rangeVar } from './ast-helpers.js';
 import { schemaForFromName } from './binding-registry.js';
-import { buildCompiledColumnMetadata } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -43,6 +42,7 @@ import {
 	extractAllIncludeDecisions,
 	synthesizeMissingJoinDecisions,
 } from './plan-decision-extractor.js';
+import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
 
 // ============================================================================
 // Compile-time type-name safety guard (covers forged BatchValuesRef vector)
@@ -86,10 +86,6 @@ function assertSafeTypeName(typeName: string, colIndex: number): void {
 type BatchValuesRangeFnResult = {
 	rangeFunction: Node;
 	params: unknown[];
-};
-
-type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
-	readonly hydrationPlan?: PlanReport;
 };
 
 /**
@@ -974,20 +970,16 @@ export function compileSelect<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
-	const columnMetadata = buildCompiledColumnMetadata(
-		result.ast,
-		plan.rootTable,
-		resolvedModelForCompiler,
-		deps.naming,
-	);
-
-	const compiled: CompiledQueryWithHydrationPlan<T> = {
+	const env = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
-		...(columnMetadata ? { columnMetadata } : {}),
+		ast: result.ast,
+		rootTable: plan.rootTable,
+		model: resolvedModelForCompiler,
+		naming: deps.naming,
 		...(hydrationPlan ? { hydrationPlan } : {}),
-	};
-	return compiled;
+	});
+	return finalizeEnvelope(env);
 }
 
 export function compileWithIncludes<T = unknown>(

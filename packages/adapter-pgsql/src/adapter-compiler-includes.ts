@@ -15,29 +15,28 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
-import { buildCompiledColumnMetadata } from './column-metadata.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
+import { finalizeEnvelope, fromAstProjection } from './projection-envelope.js';
 
-function compileIncludeSelectResult(
+function compileIncludeSelectEnvelope(
 	selectAst: Node,
 	targetTable: string,
 	parameters: readonly unknown[],
 	deps: AdapterCompilerDeps,
+	sql = deparseQuoted(selectAst),
 ): CompiledQuery {
-	const sql = deparseQuoted(selectAst);
-	const columnMetadata = buildCompiledColumnMetadata(
-		selectAst,
-		targetTable,
-		deps.model,
-		deps.naming,
+	return finalizeEnvelope(
+		fromAstProjection({
+			sql,
+			parameters,
+			ast: selectAst,
+			rootTable: targetTable,
+			model: deps.model,
+			naming: deps.naming,
+		}),
 	);
-	return {
-		sql,
-		parameters,
-		...(columnMetadata ? { columnMetadata } : {}),
-	};
 }
 
 // ============================================================================
@@ -83,21 +82,17 @@ export function compileSubqueryInclude(
 				fromClause,
 			},
 		};
-		const columnMetadata = buildCompiledColumnMetadata(
-			selectAst,
-			info.targetTable,
-			deps.model,
-			deps.naming,
-		);
 		const tableName = schemaName
 			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
 			: quoteIdent(dbTargetTable, 'table');
 
-		return {
-			sql: `SELECT * FROM ${tableName} WHERE FALSE`,
-			parameters: [],
-			...(columnMetadata ? { columnMetadata } : {}),
-		};
+		return compileIncludeSelectEnvelope(
+			selectAst,
+			info.targetTable,
+			[],
+			deps,
+			`SELECT * FROM ${tableName} WHERE FALSE`,
+		);
 	}
 
 	// Determine FK column(s)
@@ -210,7 +205,7 @@ export function compileSubqueryInclude(
 		},
 	};
 
-	return compileIncludeSelectResult(
+	return compileIncludeSelectEnvelope(
 		selectAst,
 		info.targetTable,
 		state.parameters,
@@ -341,7 +336,7 @@ function compileSubqueryIncludeManyToMany(
 		},
 	};
 
-	return compileIncludeSelectResult(
+	return compileIncludeSelectEnvelope(
 		selectAst,
 		info.targetTable,
 		state.parameters,
