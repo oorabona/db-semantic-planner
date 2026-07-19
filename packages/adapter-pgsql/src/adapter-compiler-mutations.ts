@@ -33,7 +33,6 @@ import {
 	hasBindingName,
 	withBindingName,
 } from './binding-registry.js';
-import { buildCompiledColumnMetadata } from './column-metadata.js';
 import {
 	buildSubqueryFromIntent,
 	compileWhereIntent,
@@ -75,6 +74,12 @@ import {
 	type UpsertFromConfig,
 } from './mutations/index.js';
 import type { NamingPlugin } from './naming-plugin.js';
+import {
+	finalizeEnvelope,
+	fromAstProjection,
+	type ProjectionEnvelope,
+	preserveOneToOne,
+} from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 
 // ============================================================================
@@ -113,7 +118,29 @@ function compileSourceQueryCte(
 	const sourcePlan = planFn(sourceQuery, model, {
 		dialectCapabilities: deps.dialectCapabilities ?? POSTGRESQL_CAPABILITIES,
 	});
-	return compileSelect(sourcePlan, options, deps);
+	const source = compileSelect(sourcePlan, options, deps);
+	return {
+		sql: source.sql,
+		parameters: source.parameters,
+	};
+}
+
+function compileMutationEnvelope(
+	ast: Node,
+	rootTable: string,
+	state: ReturnType<typeof createCompilerState>,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): ProjectionEnvelope {
+	const sql = deparseQuoted(ast);
+	return fromAstProjection({
+		sql,
+		parameters: state.parameters,
+		ast,
+		rootTable,
+		model: options?.model ?? deps.model,
+		naming: deps.naming,
+	});
 }
 
 function compileMutationQuery(
@@ -123,36 +150,28 @@ function compileMutationQuery(
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
-	const sql = deparseQuoted(ast);
-	const columnMetadata = buildCompiledColumnMetadata(
-		ast,
-		rootTable,
-		options?.model ?? deps.model,
-		deps.naming,
+	return finalizeEnvelope(
+		compileMutationEnvelope(ast, rootTable, state, options, deps),
 	);
-	return {
-		sql,
-		parameters: state.parameters,
-		...(columnMetadata ? { columnMetadata } : {}),
-	};
 }
 
 function prependSourceCte(
-	query: CompiledQuery,
+	query: ProjectionEnvelope,
 	sourceName: string,
 	sourceCte: CompiledQuery | undefined,
 	naming: NamingPlugin,
 ): CompiledQuery {
 	if (sourceCte === undefined) {
-		return query;
+		return finalizeEnvelope(query);
 	}
 	const cteParamCount = sourceCte.parameters.length;
 	const sourceCteName = emittedBindName(sourceName, naming);
-	return {
-		sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
-		parameters: [...sourceCte.parameters, ...query.parameters],
-		...(query.columnMetadata ? { columnMetadata: query.columnMetadata } : {}),
-	};
+	return finalizeEnvelope(
+		preserveOneToOne(query, {
+			sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
+			parameters: [...sourceCte.parameters, ...query.parameters],
+		}),
+	);
 }
 
 function resolveMutationExistsForeignKey(
@@ -497,7 +516,7 @@ export function compileInsertFrom(
 	const ast = compileInsertFromMutation(config, ctx, state);
 
 	return prependSourceCte(
-		compileMutationQuery(ast, intent.table, state, options, deps),
+		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
 		deps.naming,
@@ -949,7 +968,7 @@ export function compileUpsertFrom(
 	const ast = compileUpsertFromMutation(config, ctx, state);
 
 	return prependSourceCte(
-		compileMutationQuery(ast, intent.table, state, options, deps),
+		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
 		deps.naming,
