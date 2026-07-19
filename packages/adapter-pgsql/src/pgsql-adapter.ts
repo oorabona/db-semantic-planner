@@ -52,6 +52,7 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
+import { convertBigintJsReadValue } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
@@ -672,6 +673,18 @@ function guardCompiledQuery<T>(
 	}
 
 	return query;
+}
+
+function carriedCompiledQueryFields<T>(query: CompiledQuery<T>): {
+	columnMetadata?: NonNullable<CompiledQuery<T>['columnMetadata']>;
+	hydrationPlan?: PlanReport;
+} {
+	const hydrationPlan = (query as { readonly hydrationPlan?: PlanReport })
+		.hydrationPlan;
+	return {
+		...(query.columnMetadata ? { columnMetadata: query.columnMetadata } : {}),
+		...(hydrationPlan ? { hydrationPlan } : {}),
+	};
 }
 
 function guardCompileResultWithIncludes<T>(
@@ -1738,6 +1751,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			{
 				sql: `WITH ${ctes.join(', ')} ${renumberSqlParams(compiled.sql, parameters.length)}`,
 				parameters: [...parameters, ...compiled.parameters],
+				...carriedCompiledQueryFields(compiled),
 			},
 			'NQL bundle',
 		);
@@ -2103,7 +2117,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		const result = await this.executeQueryProtectingOpenTransaction<
 			Record<string, unknown>
 		>(query.sql, query.parameters);
-		return this.transformResultRows(result.rows) as T[];
+		return this.transformResultRows(result.rows, query) as T[];
 	}
 
 	/**
@@ -2112,13 +2126,23 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 	 */
 	private transformResultRows(
 		rows: Record<string, unknown>[],
+		query: CompiledQuery,
 	): Record<string, unknown>[] {
 		return rows.map((row) => {
 			const transformed: Record<string, unknown> = {};
 			for (const [key, value] of Object.entries(row)) {
+				const metadata = query.columnMetadata?.get(key);
+				const converted =
+					metadata !== undefined
+						? convertBigintJsReadValue(value, metadata.js, {
+								table: metadata.table,
+								column: metadata.column,
+								outputKey: key,
+							})
+						: value;
 				// Use toModel to convert database column name to model column name
 				const modelKey = this.naming.toModel(key);
-				transformed[modelKey] = value;
+				transformed[modelKey] = converted;
 			}
 			return transformed;
 		});
@@ -2341,7 +2365,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 					break;
 				}
 
-				for (const row of result.rows) {
+				const transformedRows = this.transformResultRows(
+					result.rows as Record<string, unknown>[],
+					query,
+				);
+				for (const row of transformedRows) {
 					yield row as T;
 				}
 

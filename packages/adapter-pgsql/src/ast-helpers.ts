@@ -939,6 +939,8 @@ export function jsonAggSubquery(
 		limit?: number;
 		/** Column projection — if specified, use jsonb_build_object instead of to_jsonb(__t__) */
 		columns?: readonly string[];
+		/** Per-column expression overrides for jsonb_build_object projection values. */
+		columnValueOverrides?: ReadonlyMap<string, Node>;
 		/** Aggregate ORDER BY columns for deterministic json_agg array order */
 		orderBy?: readonly JsonAggOrderByEntry[];
 		/** True for the no-PK deterministic fallback order key. */
@@ -958,7 +960,10 @@ export function jsonAggSubquery(
 		const projArgs: Node[] = [];
 		for (const col of cols) {
 			projArgs.push({ A_Const: { sval: { sval: naming.toDatabase(col) } } });
-			projArgs.push(columnRef(col, targetAlias, undefined, naming));
+			projArgs.push(
+				options?.columnValueOverrides?.get(col) ??
+					columnRef(col, targetAlias, undefined, naming),
+			);
 		}
 		toJsonbCall = {
 			FuncCall: {

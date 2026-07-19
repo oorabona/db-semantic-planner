@@ -27,6 +27,7 @@ import type {
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	ColumnJsReadType,
 	ColumnType,
 	EnumIR,
 	ForeignKeyIR,
@@ -77,6 +78,12 @@ export interface AdapterCapabilities {
 // Compiled Query
 // ============================================================================
 
+export interface CompiledColumnMetadata {
+	readonly table: string;
+	readonly column: string;
+	readonly js: ColumnJsReadType;
+}
+
 /**
  * A compiled query ready for execution.
  *
@@ -85,6 +92,7 @@ export interface AdapterCapabilities {
 export interface CompiledQuery<T = unknown> {
 	readonly sql: string;
 	readonly parameters: readonly unknown[];
+	readonly columnMetadata?: ReadonlyMap<string, CompiledColumnMetadata>;
 	/** Phantom type for result inference - not used at runtime */
 	readonly __resultType?: T;
 }

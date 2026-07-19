@@ -29,6 +29,7 @@ export interface SetOperationResult {
 export type LeafCompileFn = (query: QueryIntent) => {
 	sql: string;
 	parameters: readonly unknown[];
+	columnMetadata?: ReadonlyMap<string, unknown>;
 };
 
 /**
@@ -100,6 +101,11 @@ function compileLeafOrBranch(
 		return compileSetOperation(intent as SetOperationIntent, compileFn);
 	}
 	const result = compileFn(intent as QueryIntent);
+	if (result.columnMetadata && result.columnMetadata.size > 0) {
+		throw new Error(
+			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+		);
+	}
 	return { sql: result.sql, parameters: result.parameters };
 }
 
@@ -118,7 +124,11 @@ export function createLeafCompileFn(
 		compile(
 			plan: PlanReport,
 			options: CompileOptions & { model: ModelIR },
-		): { sql: string; parameters: readonly unknown[] };
+		): {
+			sql: string;
+			parameters: readonly unknown[];
+			columnMetadata?: ReadonlyMap<string, unknown>;
+		};
 		dialectCapabilities: DialectCapabilities;
 	},
 	model: ModelIR,

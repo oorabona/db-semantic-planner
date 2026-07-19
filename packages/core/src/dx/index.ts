@@ -290,6 +290,7 @@ export {
 // ARCH-005: Unified Schema API
 export {
 	type ColumnDef,
+	type ColumnJsReadType,
 	// E17: Default filters (soft delete)
 	type DefaultFilters,
 	type GetSchemaFromDbOptions,
@@ -297,6 +298,7 @@ export {
 	getSchemaFromDb,
 	// Type inference helpers (ARCH-006)
 	type InferColumn,
+	type InferColumnNonNull,
 	type InferColumnType,
 	type InferDB,
 	type InferRefColumn,

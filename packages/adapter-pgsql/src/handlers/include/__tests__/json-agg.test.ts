@@ -71,7 +71,7 @@ function makeModel(
 			...(table.primaryKey !== undefined && { primaryKey: table.primaryKey }),
 			foreignKeys: [],
 			indexes: [],
-		} as TableIR);
+		} as unknown as TableIR);
 	}
 	return {
 		tables: tableMap,

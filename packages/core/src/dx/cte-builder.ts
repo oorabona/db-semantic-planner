@@ -18,6 +18,7 @@ import type {
 	Adapter,
 	CompiledQuery,
 	CteQueryIntent,
+	ModelIR,
 	UnnestCteIntent,
 } from '@dbsp/types';
 import { requireAdapter as requireAdapterUtil } from './builder-utils.js';
@@ -38,13 +39,20 @@ export class CteBuilder {
 	private readonly cteName: string;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
+	private readonly model: ModelIR | undefined;
 	private unnestColumns: Record<string, readonly unknown[]> | undefined;
 	private indexColumnName: string | undefined;
 
-	constructor(name: string, adapter?: Adapter, schemaName?: string) {
+	constructor(
+		name: string,
+		adapter?: Adapter,
+		schemaName?: string,
+		model?: ModelIR,
+	) {
 		this.cteName = name;
 		this.adapter = adapter;
 		this.schemaName = schemaName;
+		this.model = model;
 	}
 
 	/**
@@ -104,6 +112,7 @@ export class CteBuilder {
 			selectBuilder as QueryBuilderImpl<TResult>,
 			this.adapter,
 			this.schemaName,
+			this.model,
 		);
 	}
 }
@@ -131,17 +140,20 @@ export class CteQueryBuilder<TResult = unknown> {
 	private readonly outerBuilder: QueryBuilderImpl<TResult>;
 	private readonly adapter: Adapter | undefined;
 	private readonly schemaName: string | undefined;
+	private readonly model: ModelIR | undefined;
 
 	constructor(
 		cteIntent: UnnestCteIntent,
 		outerBuilder: QueryBuilderImpl<TResult>,
 		adapter?: Adapter,
 		schemaName?: string,
+		model?: ModelIR,
 	) {
 		this.cteIntent = cteIntent;
 		this.outerBuilder = outerBuilder;
 		this.adapter = adapter;
 		this.schemaName = schemaName;
+		this.model = model;
 	}
 
 	/**
@@ -160,15 +172,25 @@ export class CteQueryBuilder<TResult = unknown> {
 		return requireAdapterUtil(this.adapter, 'withCte');
 	}
 
+	private compileOptions():
+		| { readonly schemaName?: string; readonly model?: ModelIR }
+		| undefined {
+		if (this.schemaName === undefined && this.model === undefined) {
+			return undefined;
+		}
+		return {
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+			...(this.model !== undefined && { model: this.model }),
+		};
+	}
+
 	/**
 	 * Compile to SQL and return an observability dump.
 	 */
 	dump(): CteDump {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
+		const compileOptions = this.compileOptions();
 
 		const compiled: CompiledQuery = adapter.compileCteQuery(
 			intent,
@@ -188,9 +210,7 @@ export class CteQueryBuilder<TResult = unknown> {
 	async all(): Promise<TResult[]> {
 		const adapter = this.requireAdapter();
 		const intent = this.buildIntent();
-		const compileOptions = this.schemaName
-			? { schemaName: this.schemaName }
-			: undefined;
+		const compileOptions = this.compileOptions();
 
 		const compiled = adapter.compileCteQuery(
 			intent,

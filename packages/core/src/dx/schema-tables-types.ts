@@ -40,6 +40,9 @@ type SchemaColumnType =
 	| 'int8range'
 	| 'numrange';
 
+/** JavaScript read-side representation for PostgreSQL bigint/int8 values. */
+type ColumnJsReadType = 'bigint' | 'number' | 'string';
+
 /**
  * Column definition - short form or long form.
  */
@@ -47,6 +50,8 @@ type ColumnDef =
 	| SchemaColumnType
 	| {
 			type: SchemaColumnType;
+			dbType?: string;
+			js?: ColumnJsReadType;
 			nullable?: boolean;
 			unique?: boolean;
 			primaryKey?: boolean;
@@ -74,6 +79,7 @@ interface RefOptionsShape {
 	inverse?: string;
 	nullable?: boolean;
 	unique?: boolean;
+	js?: ColumnJsReadType;
 	onDelete?: string;
 	onUpdate?: string;
 	roles?: unknown;
@@ -103,14 +109,14 @@ type IsRef<T> = T extends { __brand: 'ref' } ? true : false;
  */
 type ExtractColumnType<C> = C extends SchemaColumnType
 	? C
-	: C extends { type: infer T extends SchemaColumnType }
+	: C extends { readonly type: infer T extends SchemaColumnType }
 		? T
 		: never;
 
 /**
  * Check if a column is nullable.
  */
-type IsNullable<C> = C extends { nullable: true } ? true : false;
+type IsNullable<C> = C extends { readonly nullable: true } ? true : false;
 
 /**
  * Map schema column types to TypeScript types.
@@ -147,22 +153,50 @@ type MapColumnTypeToTS<T extends SchemaColumnType> =
 									unknown;
 
 /**
- * Infer the TypeScript type for a column definition.
+ * Infer the non-null TypeScript type for a column definition.
  */
-type InferColumnTSType<C> =
-	IsRef<C> extends true
-		? never
-		: C extends ColumnDef
-			? IsNullable<C> extends true
-				? MapColumnTypeToTS<ExtractColumnType<C>> | null
-				: MapColumnTypeToTS<ExtractColumnType<C>>
-			: never;
+type InferColumnNonNullTSType<C extends ColumnDef> =
+	ExtractColumnType<C> extends 'bigint'
+		? C extends { readonly js: 'number' }
+			? number
+			: C extends { readonly js: 'bigint' }
+				? bigint
+				: C extends { readonly js: 'string' }
+					? string
+					: MapColumnTypeToTS<ExtractColumnType<C>>
+		: MapColumnTypeToTS<ExtractColumnType<C>>;
 
 /**
- * Extract only column definitions (not refs) from a TableDef.
+ * Infer the non-null TypeScript type for a ref-backed FK column.
+ */
+type InferRefColumnNonNullTSType<R extends RefDefinition> = R extends {
+	readonly options: { readonly js: 'number' };
+}
+	? number
+	: R extends { readonly options: { readonly js: 'bigint' } }
+		? bigint
+		: R extends { readonly options: { readonly js: 'string' } }
+			? string
+			: number | string;
+
+/**
+ * Infer the TypeScript type for a column or ref-backed FK definition.
+ */
+type InferColumnTSType<C> = C extends RefDefinition
+	? C extends { readonly options: { readonly nullable: true } }
+		? InferRefColumnNonNullTSType<C> | null
+		: InferRefColumnNonNullTSType<C>
+	: C extends ColumnDef
+		? IsNullable<C> extends true
+			? InferColumnNonNullTSType<C> | null
+			: InferColumnNonNullTSType<C>
+		: never;
+
+/**
+ * Extract user-visible column definitions, including ref-backed FK columns.
  */
 type ExtractColumns<T extends TableDef> = {
-	[K in keyof T as IsRef<T[K]> extends true ? never : K]: T[K];
+	[K in keyof T as T[K] extends ColumnDef | RefDefinition ? K : never]: T[K];
 };
 
 /**

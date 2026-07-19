@@ -7,6 +7,7 @@
  */
 
 import type {
+	CompiledColumnMetadata,
 	CompiledQuery,
 	CompileOptions,
 	CteQueryIntent,
@@ -41,6 +42,56 @@ import {
 	type RecursiveCteConfig,
 } from './recursive/index.js';
 
+function metadataForModelColumns(
+	tableName: string,
+	columns: readonly string[],
+	model: ModelIR,
+	deps: AdapterCompilerDeps,
+): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+	if (typeof (model as { getTable?: unknown }).getTable !== 'function') {
+		return undefined;
+	}
+	const table = model.getTable(tableName);
+	if (!table) return undefined;
+	const metadata = new Map<string, CompiledColumnMetadata>();
+	for (const columnName of columns) {
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column || column.type !== 'bigint' || column.js === undefined)
+			continue;
+		metadata.set(deps.naming.toDatabase(column.name), {
+			table: tableName,
+			column: column.name,
+			js: column.js,
+		});
+	}
+	return metadata.size > 0 ? metadata : undefined;
+}
+
+function projectCteMetadata(
+	query: QueryIntent,
+	cteMetadata: ReadonlyMap<string, CompiledColumnMetadata> | undefined,
+	deps: AdapterCompilerDeps,
+): ReadonlyMap<string, CompiledColumnMetadata> | undefined {
+	if (!cteMetadata || cteMetadata.size === 0) return undefined;
+	const select = query.select;
+	if (!select || select.type === 'all') return cteMetadata;
+	if (select.type !== 'fields') return undefined;
+
+	const metadata = new Map<string, CompiledColumnMetadata>();
+	for (const field of select.fields) {
+		const outputKey = deps.naming.toDatabase(field);
+		const entry = cteMetadata.get(outputKey) ?? cteMetadata.get(field);
+		if (entry) metadata.set(outputKey, entry);
+	}
+	return metadata.size > 0 ? metadata : undefined;
+}
+
+function compiledHydrationPlan(query: CompiledQuery): PlanReport | undefined {
+	return (query as { readonly hydrationPlan?: PlanReport }).hydrationPlan;
+}
+
 // ============================================================================
 // compileRecursive
 // ============================================================================
@@ -52,7 +103,7 @@ import {
  */
 export function compileRecursive(
 	report: RecursivePlanReport,
-	_model: ModelIR,
+	model: ModelIR,
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
@@ -243,10 +294,17 @@ export function compileRecursive(
 
 	// Deparse AST to SQL
 	const sql = deparseQuoted({ SelectStmt: selectStmt });
+	const columnMetadata = metadataForModelColumns(
+		config.table,
+		config.selectColumns,
+		model,
+		deps,
+	);
 
 	return {
 		sql,
 		parameters: state.parameters,
+		...(columnMetadata ? { columnMetadata } : {}),
 	};
 }
 
@@ -276,6 +334,10 @@ export function compileCteQuery(
 
 	// 1. Build CTE SQL fragments, accumulating parameters
 	const cteSqlFragments: string[] = [];
+	const cteMetadataByName = new Map<
+		string,
+		ReadonlyMap<string, CompiledColumnMetadata>
+	>();
 	let isRecursive = false;
 
 	for (const cte of intent.ctes) {
@@ -287,13 +349,12 @@ export function compileCteQuery(
 		} else if (cte.kind === 'rawCte') {
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
-			const { sql: cteSql, params: cteParams } = buildRawCte(
-				cte,
-				deps,
-				options,
-			);
-			allCteParams.push(...cteParams);
-			cteSqlFragments.push(cteSql);
+			const rawCte = buildRawCte(cte, deps, options);
+			allCteParams.push(...rawCte.params);
+			cteSqlFragments.push(rawCte.sql);
+			if (rawCte.columnMetadata) {
+				cteMetadataByName.set(cte.name, rawCte.columnMetadata);
+			}
 		} else if (cte.kind === 'simpleCte') {
 			// Simple named subquery CTE: compile inner query, wrap in ctename AS (...)
 			const innerCte = cte as SimpleCteIntent;
@@ -322,6 +383,9 @@ export function compileCteQuery(
 					: innerCompiled.sql;
 			allCteParams.push(...innerCompiled.parameters);
 			cteSqlFragments.push(`"${innerCte.name}" AS (${renumberedInnerSql})`);
+			if (innerCompiled.columnMetadata) {
+				cteMetadataByName.set(innerCte.name, innerCompiled.columnMetadata);
+			}
 		} else {
 			const kind = (cte as { kind: string }).kind;
 			throw new Error(
@@ -365,10 +429,20 @@ export function compileCteQuery(
 		withClause.length > 0
 			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
 			: renumberedOuterSql;
+	const sourceCteMetadata = cteMetadataByName.get(intent.query.from);
+	const outerSourceIsCte = intent.ctes.some(
+		(cte) => cte.name === intent.query.from,
+	);
+	const columnMetadata = outerSourceIsCte
+		? projectCteMetadata(intent.query, sourceCteMetadata, deps)
+		: outerCompiled.columnMetadata;
+	const hydrationPlan = compiledHydrationPlan(outerCompiled);
 
 	return {
 		sql,
 		parameters: [...allCteParams, ...outerCompiled.parameters],
+		...(columnMetadata ? { columnMetadata } : {}),
+		...(hydrationPlan ? { hydrationPlan } : {}),
 	};
 }
 
@@ -464,7 +538,11 @@ function buildRawCte(
 	cte: RawCteIntent,
 	deps: AdapterCompilerDeps,
 	options: CompileOptions | undefined,
-): { sql: string; params: readonly unknown[] } {
+): {
+	sql: string;
+	params: readonly unknown[];
+	columnMetadata?: ReadonlyMap<string, CompiledColumnMetadata>;
+} {
 	// Compile base (anchor) query
 	const basePlanReport: PlanReport = {
 		rootTable: cte.base.from,
@@ -486,6 +564,14 @@ function buildRawCte(
 		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
 	};
 	const stepCompiled = compileSelect(stepPlanReport, options, deps);
+	if (
+		(baseCompiled.columnMetadata && baseCompiled.columnMetadata.size > 0) ||
+		(stepCompiled.columnMetadata && stepCompiled.columnMetadata.size > 0)
+	) {
+		throw new Error(
+			'`js` read type is not yet supported through raw recursive CTEs (positional base∪step); use a plain select (tracking: #352)',
+		);
+	}
 
 	// Renumber step params to follow base params.
 	// Safety: the deparser always emits user values as $N parameters, never as inline string

@@ -11,6 +11,7 @@ import type {
 	CompileOptions,
 	CompileResultWithIncludes,
 	JoinIntent,
+	ModelIR,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
@@ -21,6 +22,7 @@ import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
 import { funcCall, rangeVar } from './ast-helpers.js';
 import { schemaForFromName } from './binding-registry.js';
+import { buildCompiledColumnMetadata } from './column-metadata.js';
 import { compileWhereIntent, type WhereCompilerCtx } from './compile-where.js';
 import {
 	type CompilerOptions,
@@ -84,6 +86,10 @@ function assertSafeTypeName(typeName: string, colIndex: number): void {
 type BatchValuesRangeFnResult = {
 	rangeFunction: Node;
 	params: unknown[];
+};
+
+type CompiledQueryWithHydrationPlan<T> = CompiledQuery<T> & {
+	readonly hydrationPlan?: PlanReport;
 };
 
 /**
@@ -586,6 +592,118 @@ function enrichRangeDecisions(
 	}
 }
 
+function jsonAggProjectedColumns(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): readonly string[] | undefined {
+	const requested = decision.columns;
+	const hasExplicitProjection =
+		requested &&
+		requested.length > 0 &&
+		!(requested.length === 1 && requested[0] === '*');
+	if (hasExplicitProjection) return requested;
+
+	const table = model?.getTable(targetTable);
+	return table ? table.columns.map((column) => column.name) : requested;
+}
+
+function buildJsonAggColumnKeyMap(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): Record<string, string> | undefined {
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+	const table = model?.getTable(targetTable);
+	const map: Record<string, string> = {};
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const modelColumn =
+			table?.columns.find((column) => column.name === columnName)?.name ??
+			columnName;
+		map[naming.toDatabase(modelColumn)] = modelColumn;
+	}
+	return Object.keys(map).length > 0 ? map : undefined;
+}
+
+function findJsonAggPlanDecision(
+	plan: PlanReport,
+	decision: PlanDecision,
+): PlanReport['decisions'][number] | undefined {
+	if (decision.intentPath) {
+		const byIntentPath = plan.decisions.find(
+			(candidate) =>
+				candidate.type === 'include-strategy' &&
+				candidate.choice === 'json_agg' &&
+				candidate.context.intentPath === decision.intentPath,
+		);
+		if (byIntentPath) return byIntentPath;
+	}
+	return plan.decisions.find((candidate) => {
+		if (candidate.type !== 'include-strategy') return false;
+		if (candidate.choice !== 'json_agg') return false;
+		const relationName =
+			candidate.context.relation ?? candidate.context.includeAlias;
+		return (
+			relationName === decision.relationName &&
+			candidate.context.target === decision.targetTable
+		);
+	});
+}
+
+function annotateJsonAggColumnKeyMaps(
+	plan: PlanReport,
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): boolean {
+	let annotated = false;
+	for (const decision of decisions) {
+		if (decision.type === 'includeStrategy' && decision.choice === 'json_agg') {
+			const targetTable = decision.targetTable;
+			const planDecision = targetTable
+				? findJsonAggPlanDecision(plan, decision)
+				: undefined;
+			const keyMap =
+				targetTable && planDecision
+					? buildJsonAggColumnKeyMap(decision, targetTable, model, naming)
+					: undefined;
+			if (keyMap && planDecision) {
+				(
+					planDecision.context as Mutable<
+						PlanReport['decisions'][number]['context']
+					> & {
+						jsonAggColumnKeyMap?: Record<string, string>;
+					}
+				).jsonAggColumnKeyMap = keyMap;
+				annotated = true;
+			}
+		}
+		if (decision.children && decision.children.length > 0) {
+			annotated =
+				annotateJsonAggColumnKeyMaps(plan, decision.children, model, naming) ||
+				annotated;
+		}
+	}
+	return annotated;
+}
+
+function clonePlanReportForHydration(plan: PlanReport): PlanReport {
+	return {
+		...plan,
+		decisions: plan.decisions.map((decision) => {
+			const context = (decision as { context?: unknown }).context;
+			if (context === null || typeof context !== 'object') return decision;
+			return {
+				...decision,
+				context: { ...(context as Record<string, unknown>) },
+			};
+		}) as PlanReport['decisions'],
+	};
+}
+
 /**
  * Assemble the SimplifiedPlanReport from the compiled decisions and plan metadata.
  * Handles BatchValues FROM source construction and optional fields (existsWrap, lock, schema).
@@ -666,6 +784,7 @@ export function compileSelect<T = unknown>(
 	// (observable via dump()). All SQL-generation paths below use execIntent so that
 	// compiled SQL matches plan.decisions (which were built from the optimized WHERE).
 	const execIntent = plan.executableIntent ?? plan.intent;
+	let hydrationPlan: PlanReport | undefined;
 	// planForCompilation: a view of the plan where .intent is the executable intent.
 	// Passed to extractor helpers (extractExistsDecisions, synthesizeMissingJoinDecisions,
 	// extractAllIncludeDecisions) so they read the correct WHERE for SQL generation.
@@ -824,6 +943,16 @@ export function compileSelect<T = unknown>(
 		// Use deps.model as fallback so ORM queries through deps also get enriched.
 		const rangeModel = options?.model ?? deps.model;
 		enrichRangeDecisions(allDecisions, rangeModel, plan.rootTable);
+		const candidateHydrationPlan = clonePlanReportForHydration(plan);
+		const hasJsonAggColumnKeyMaps = annotateJsonAggColumnKeyMaps(
+			candidateHydrationPlan,
+			allDecisions,
+			resolvedModelForCompiler,
+			deps.naming,
+		);
+		if (hasJsonAggColumnKeyMaps) {
+			hydrationPlan = candidateHydrationPlan;
+		}
 
 		// planForCompilation carries executableIntent as .intent, so
 		// buildSimplifiedPlanReport reads batchValuesSource / existsWrap / lock
@@ -845,11 +974,20 @@ export function compileSelect<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
+	const columnMetadata = buildCompiledColumnMetadata(
+		result.ast,
+		plan.rootTable,
+		resolvedModelForCompiler,
+		deps.naming,
+	);
 
-	return {
+	const compiled: CompiledQueryWithHydrationPlan<T> = {
 		sql: result.sql,
 		parameters: result.parameters,
+		...(columnMetadata ? { columnMetadata } : {}),
+		...(hydrationPlan ? { hydrationPlan } : {}),
 	};
+	return compiled;
 }
 
 export function compileWithIncludes<T = unknown>(

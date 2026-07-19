@@ -11,8 +11,9 @@ export type {
 	// ModelIR
 	AmbiguityCheckResult,
 	Cardinality,
-	// Core interfaces
 	ColumnIR,
+	// Core interfaces
+	ColumnJsReadType,
 	// Column types
 	ColumnType,
 	FilterStrategy,
@@ -209,7 +210,16 @@ export {
 	type GetSchemaFromDbOptions,
 	// ARCH-006: Database introspection → Schema
 	getSchemaFromDb,
+	type InferColumn,
+	type InferColumnNonNull,
+	type InferColumnType,
+	type InferDB,
+	type InferRefColumn,
+	type InferRow,
+	type InferredRangeValue,
+	type InferSchemaDB,
 	isRef,
+	type JsonValue,
 	type RefDefinition,
 	type RefOptions,
 	ref,

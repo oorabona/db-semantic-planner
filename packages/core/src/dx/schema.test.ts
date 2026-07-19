@@ -73,6 +73,50 @@ describe('ref()', () => {
 	});
 });
 
+describe('bigint js schema validation', () => {
+	it('throws when js is used on a non-bigint column', () => {
+		expect(() =>
+			schema({
+				events: {
+					id: 'uuid',
+					externalId: { type: 'uuid', js: 'bigint' },
+				},
+			}),
+		).toThrow(
+			"column 'externalId': `js` read type is only valid on `type: 'bigint'` columns (got type 'uuid')",
+		);
+	});
+
+	it('throws when ref js is inferred from a non-bigint target column', () => {
+		expect(() =>
+			schema({
+				users: {
+					id: 'uuid',
+				},
+				events: {
+					id: 'uuid',
+					userId: ref('users', { as: 'user', js: 'bigint' }),
+				},
+			}),
+		).toThrow(
+			"column 'userId': `js` read type is only valid on `type: 'bigint'` columns (got type 'uuid')",
+		);
+	});
+
+	it('throws for invalid js values', () => {
+		expect(() =>
+			schema({
+				events: {
+					id: 'uuid',
+					sequence: { type: 'bigint', js: 'bad' } as never,
+				},
+			}),
+		).toThrow(
+			"column 'sequence': invalid `js` value 'bad'; expected 'bigint' | 'number' | 'string'",
+		);
+	});
+});
+
 describe('isRef()', () => {
 	it('should return true for RefDefinition', () => {
 		// Arrange

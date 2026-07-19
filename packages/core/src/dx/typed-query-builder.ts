@@ -329,7 +329,10 @@ class FromBuilderImpl<
 		}
 
 		const planReport = this.plan();
-		const compiled = this.adapter.compile(planReport);
+		const compiled = this.adapter.compile(planReport, {
+			model: this.model,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		});
 		const dumpMeta: DumpMetaInput = {
 			...(meta?.queryName !== undefined && { queryName: meta.queryName }),
 			...(meta?.correlationId !== undefined && {
@@ -347,7 +350,10 @@ class FromBuilderImpl<
 		}
 
 		const planReport = this.plan();
-		const compiled = this.adapter.compile<TResult>(planReport);
+		const compiled = this.adapter.compile<TResult>(planReport, {
+			model: this.model,
+			...(this.schemaName !== undefined && { schemaName: this.schemaName }),
+		});
 		return this.adapter.execute(compiled);
 	}
 

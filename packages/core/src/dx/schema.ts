@@ -22,6 +22,7 @@ import { ModelIRImpl } from '../model-impl.js';
 import type {
 	CheckConstraintIR,
 	ColumnIR,
+	ColumnJsReadType,
 	ColumnType,
 	ForeignKeyIR,
 	IndexIR,
@@ -35,6 +36,8 @@ import type {
 import { createPseudoColumnMetadata } from '../model-ir.js';
 import type { InferTables } from './schema-tables-types.js';
 import { createTablesProxy } from './table-ref-factory.js';
+
+export type { ColumnJsReadType } from '../model-ir.js';
 
 // ============================================================================
 // Public Types
@@ -53,6 +56,7 @@ export type ColumnDef =
 	| SchemaColumnType
 	| {
 			type: SchemaColumnType;
+			js?: ColumnJsReadType;
 			dbType?: string;
 			nullable?: boolean;
 			unique?: boolean;
@@ -89,6 +93,8 @@ export interface RefOptions {
 	nullable?: boolean;
 	/** Is this FK unique? → 1:1 instead of 1:N */
 	unique?: boolean;
+	/** Optional read-side JavaScript representation for bigint/int8 FK columns */
+	js?: ColumnJsReadType;
 
 	// FK behavior
 	/** ON DELETE action */
@@ -429,16 +435,31 @@ export type InferColumnType<T extends SchemaColumnType> =
  */
 type ExtractColumnType<C extends ColumnDef> = C extends SchemaColumnType
 	? C
-	: C extends { type: infer T extends SchemaColumnType }
+	: C extends { readonly type: infer T extends SchemaColumnType }
 		? T
 		: never;
 
 /**
  * Checks if a ColumnDef is nullable.
  */
-type IsNullable<C extends ColumnDef> = C extends { nullable: true }
+type IsNullable<C extends ColumnDef> = C extends { readonly nullable: true }
 	? true
 	: false;
+
+/**
+ * Infers the non-null TypeScript type for a single column definition.
+ * Bigint keeps its existing default type unless an explicit read-side js type is set.
+ */
+export type InferColumnNonNull<C extends ColumnDef> =
+	ExtractColumnType<C> extends 'bigint'
+		? C extends { readonly js: 'number' }
+			? number
+			: C extends { readonly js: 'bigint' }
+				? bigint
+				: C extends { readonly js: 'string' }
+					? string
+					: InferColumnType<ExtractColumnType<C>>
+		: InferColumnType<ExtractColumnType<C>>;
 
 /**
  * Infers the TypeScript type for a single column definition.
@@ -446,8 +467,8 @@ type IsNullable<C extends ColumnDef> = C extends { nullable: true }
  */
 export type InferColumn<C extends ColumnDef> =
 	IsNullable<C> extends true
-		? InferColumnType<ExtractColumnType<C>> | null
-		: InferColumnType<ExtractColumnType<C>>;
+		? InferColumnNonNull<C> | null
+		: InferColumnNonNull<C>;
 
 /**
  * Infers the FK column type from a RefDefinition.
@@ -470,11 +491,21 @@ export type InferColumn<C extends ColumnDef> =
  * authorId: ref('users')                        // Type: number | string
  * editorId: ref('users', { nullable: true })    // Type: number | string | null
  */
-export type InferRefColumn<R extends RefDefinition> = R extends {
-	options: { nullable: true };
+type InferRefColumnNonNull<R extends RefDefinition> = R extends {
+	readonly options: { readonly js: 'number' };
 }
-	? number | string | null
-	: number | string;
+	? number
+	: R extends { readonly options: { readonly js: 'bigint' } }
+		? bigint
+		: R extends { readonly options: { readonly js: 'string' } }
+			? string
+			: number | string;
+
+export type InferRefColumn<R extends RefDefinition> = R extends {
+	readonly options: { readonly nullable: true };
+}
+	? InferRefColumnNonNull<R> | null
+	: InferRefColumnNonNull<R>;
 
 /**
  * Infers the row type for a single table definition.
@@ -570,8 +601,8 @@ function normalizeRefOptions<TOptions extends RefOptions>(
  * ```
  */
 export function ref<
-	TTarget extends string,
-	TOptions extends RefOptions = Record<string, never>,
+	const TTarget extends string,
+	const TOptions extends RefOptions = Record<string, never>,
 >(target: TTarget, options?: TOptions): RefDefinition<TTarget, TOptions> {
 	return {
 		__brand: 'ref',
@@ -618,7 +649,7 @@ export function isRef(
  * const orm = createOrm({ model: db.model, adapter });
  * ```
  */
-export function schema<T extends SchemaDefinition>(
+export function schema<const T extends SchemaDefinition>(
 	definition: T,
 	constraints?: SchemaConstraints,
 	options?: SchemaOptions,
@@ -1248,6 +1279,10 @@ function buildRefColumn(
 		type: inferredType,
 		nullable: columnDef.options.nullable ?? false,
 	};
+	if (columnDef.options.js !== undefined) {
+		validateColumnJsReadType(columnName, inferredType, columnDef.options.js);
+		col.js = columnDef.options.js;
+	}
 	if (columnDef.options.unique) col.unique = true;
 
 	if (
@@ -1285,6 +1320,10 @@ function buildRegularColumn(
 		type: def.type,
 		nullable: def.nullable ?? false,
 	};
+	if (def.js !== undefined) {
+		validateColumnJsReadType(columnName, def.type, def.js);
+		col.js = def.js;
+	}
 	if (def.dbType?.trim()) col.originalDbType = def.dbType.trim();
 	if (def.unique) col.unique = def.unique;
 	if (def.autoIncrement) col.autoIncrement = def.autoIncrement;
@@ -1459,6 +1498,12 @@ function buildTableConstraints(
 
 	if (tableConstraints.foreignKeys) {
 		for (const fkRef of tableConstraints.foreignKeys) {
+			if (fkRef.options.js !== undefined) {
+				throw new SchemaValidationError(
+					`Table-level foreignKeys cannot use 'js'; declare js on a column-level ref() instead.`,
+					tableName,
+				);
+			}
 			if (!fkRef.options.columns?.length) {
 				throw new SchemaValidationError(
 					`Composite FK on "${tableName}" → "${fkRef.target}" requires 'columns' option`,
@@ -1532,6 +1577,7 @@ function buildTables(
  */
 function normalizeColumnDef(def: ColumnDef): {
 	type: SchemaColumnType;
+	js?: ColumnJsReadType;
 	dbType?: string;
 	nullable?: boolean;
 	unique?: boolean;
@@ -1544,6 +1590,31 @@ function normalizeColumnDef(def: ColumnDef): {
 		return { type: def };
 	}
 	return def;
+}
+
+function formatJsReadType(js: unknown): string {
+	return typeof js === 'string' ? js : String(js);
+}
+
+function validateColumnJsReadType(
+	columnName: string,
+	columnType: ColumnType,
+	js: unknown,
+): asserts js is ColumnJsReadType {
+	if (js !== 'bigint' && js !== 'number' && js !== 'string') {
+		throw new SchemaValidationError(
+			`column '${columnName}': invalid \`js\` value '${formatJsReadType(js)}'; expected 'bigint' | 'number' | 'string'`,
+			undefined,
+			columnName,
+		);
+	}
+	if (columnType !== 'bigint') {
+		throw new SchemaValidationError(
+			`column '${columnName}': \`js\` read type is only valid on \`type: 'bigint'\` columns (got type '${columnType}')`,
+			undefined,
+			columnName,
+		);
+	}
 }
 
 // ============================================================================

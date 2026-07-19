@@ -13,6 +13,7 @@ export type {
 	Cardinality,
 	CheckConstraintIR,
 	ColumnIR,
+	ColumnJsReadType,
 	ColumnType,
 	EnumIR,
 	FilterStrategy,

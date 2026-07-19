@@ -116,6 +116,34 @@ describe('introspect', () => {
 		expect(users!.columns[0]!.type).toBe('integer');
 	});
 
+	it('does not synthesize bigint js read type metadata', async () => {
+		const pool = createMockPool([
+			[
+				{
+					table_name: 'events',
+					column_name: 'sequence',
+					data_type: 'bigint',
+					udt_name: 'int8',
+					is_nullable: 'NO',
+					column_default: null,
+				},
+			],
+			[],
+			[],
+		]);
+
+		const result = await introspect(pool);
+		const column = result.tables.get('events')?.columns[0];
+
+		expect(column).toMatchObject({
+			name: 'sequence',
+			type: 'bigint',
+			nullable: false,
+			originalDbType: 'int8',
+		});
+		expect(column).not.toHaveProperty('js');
+	});
+
 	it('treats target-schema dbsp_transition_journal as an ordinary table', async () => {
 		const journalTableName = 'dbsp_transition_journal';
 		const columns = [

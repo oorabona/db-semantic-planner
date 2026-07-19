@@ -57,7 +57,10 @@ import type { PlanDecision, PlanReport } from '../planner.js';
 import { plan as executePlan } from '../planner.js';
 import { ExecutionError } from './errors.js';
 import type { HookErrorHandler, HookStore } from './hooks.js';
-import { hydrateJsonAggIncludes } from './hydration-utils.js';
+import {
+	hydrateJsonAggIncludes,
+	planForJsonAggHydration,
+} from './hydration-utils.js';
 import {
 	type MutationDump,
 	runMutationWithHooks,
@@ -1813,7 +1816,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 						planReport !== undefined &&
 						bindingFinalPlanHasJsonAggIncludes(planReport)
 					) {
-						hydrateJsonAggIncludes(finalRows as T[], planReport);
+						hydrateJsonAggIncludes(
+							finalRows as T[],
+							planForJsonAggHydration(planReport, compiled),
+							this.model,
+						);
 					}
 				}
 
@@ -2041,7 +2048,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 			);
 			const rows = await adapter.execute(compiled);
 			if (bindingFinalPlanHasJsonAggIncludes(planReport)) {
-				hydrateJsonAggIncludes(rows, planReport);
+				hydrateJsonAggIncludes(
+					rows,
+					planForJsonAggHydration(planReport, compiled),
+					this.model,
+				);
 			}
 			return rows;
 		}

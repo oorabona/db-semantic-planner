@@ -15,9 +15,30 @@ import { toColumnList } from '@dbsp/types';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { innerJoin, rangeVar } from './ast-helpers.js';
+import { buildCompiledColumnMetadata } from './column-metadata.js';
 import { quoteIdent } from './ddl/phases/utils.js';
 import { deparseQuoted } from './deparse.js';
 import { createCompilerState } from './handlers/index.js';
+
+function compileIncludeSelectResult(
+	selectAst: Node,
+	targetTable: string,
+	parameters: readonly unknown[],
+	deps: AdapterCompilerDeps,
+): CompiledQuery {
+	const sql = deparseQuoted(selectAst);
+	const columnMetadata = buildCompiledColumnMetadata(
+		selectAst,
+		targetTable,
+		deps.model,
+		deps.naming,
+	);
+	return {
+		sql,
+		parameters,
+		...(columnMetadata ? { columnMetadata } : {}),
+	};
+}
 
 // ============================================================================
 // compileSubqueryInclude
@@ -41,6 +62,33 @@ export function compileSubqueryInclude(
 	// Handle empty parent IDs - return query that returns no results
 	if (parentIds.length === 0) {
 		const dbTargetTable = deps.naming.toDatabase(info.targetTable);
+		const targetList = [
+			{ ResTarget: { val: { ColumnRef: { fields: [{ A_Star: {} }] } } } },
+		];
+		const fromClause = [
+			{
+				RangeVar: {
+					relname: dbTargetTable,
+					inh: true,
+					relpersistence: 'p',
+					...(schemaName && {
+						schemaname: schemaName,
+					}),
+				},
+			},
+		];
+		const selectAst: Node = {
+			SelectStmt: {
+				targetList,
+				fromClause,
+			},
+		};
+		const columnMetadata = buildCompiledColumnMetadata(
+			selectAst,
+			info.targetTable,
+			deps.model,
+			deps.naming,
+		);
 		const tableName = schemaName
 			? `${quoteIdent(schemaName, 'schema')}.${quoteIdent(dbTargetTable, 'table')}`
 			: quoteIdent(dbTargetTable, 'table');
@@ -48,6 +96,7 @@ export function compileSubqueryInclude(
 		return {
 			sql: `SELECT * FROM ${tableName} WHERE FALSE`,
 			parameters: [],
+			...(columnMetadata ? { columnMetadata } : {}),
 		};
 	}
 
@@ -161,12 +210,12 @@ export function compileSubqueryInclude(
 		},
 	};
 
-	const sql = deparseQuoted(selectAst);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileIncludeSelectResult(
+		selectAst,
+		info.targetTable,
+		state.parameters,
+		deps,
+	);
 }
 
 // ============================================================================
@@ -292,10 +341,10 @@ function compileSubqueryIncludeManyToMany(
 		},
 	};
 
-	const sql = deparseQuoted(selectAst);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileIncludeSelectResult(
+		selectAst,
+		info.targetTable,
+		state.parameters,
+		deps,
+	);
 }

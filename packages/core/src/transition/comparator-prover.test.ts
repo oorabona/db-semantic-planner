@@ -1416,6 +1416,19 @@ describe('createComparator', () => {
 		expect(compare.kind).toBe('no-drift');
 	});
 
+	it('ignores bigint js read type metadata during transition comparison', () => {
+		const desired = modelFromTable(
+			table(false, [{ ...column(false), type: 'bigint', js: 'bigint' }]),
+		);
+		const current = modelFromTable(
+			table(false, [{ ...column(false), type: 'bigint' }]),
+		);
+
+		const compare = createComparator(registry()).compare(desired, current);
+
+		expect(compare.kind).toBe('no-drift');
+	});
+
 	it('does not treat a current index with omitted catalog validity as no-drift', () => {
 		const index = {
 			name: 'idx_users_age',

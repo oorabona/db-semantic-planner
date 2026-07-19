@@ -9,6 +9,8 @@
 
 // Adapter types (interfaces, options, dump)
 export * from './adapter.js';
+// Bigint read-side conversion helper
+export * from './bigint-js-read.js';
 // Shared relation-key helpers
 export * from './column-list.js';
 // Dialect types (capabilities, column type unions)
