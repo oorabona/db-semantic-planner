@@ -58,6 +58,7 @@ const conversionSchema = schema({
 	},
 	events: {
 		id: 'uuid',
+		label: 'string',
 		sequence: { type: 'bigint', js: 'bigint' },
 	},
 	metrics: {
@@ -429,6 +430,67 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		const rows = await adapter.execute(compiled);
 
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
+	it('casts mixed declared runtime binding scalars while converting only js bigint outputs', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ sequence: '9007199254740993', label: 'release' }]),
+			{ model: conversionSchema.model },
+		);
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'e',
+				select: { type: 'fields', fields: ['sequence', 'label'] },
+			},
+			runtimeBindings: new Map([
+				[
+					'e',
+					{
+						columns: ['sequence', 'label'],
+						rows: [{ sequence: '9007199254740993', label: 'release' }],
+						declaredOutputs: [
+							{
+								outputKey: 'sequence',
+								source: {
+									kind: 'modelColumn',
+									table: 'events',
+									column: 'sequence',
+									js: 'bigint',
+								},
+								shape: { kind: 'scalar', cardinality: 'one' },
+							},
+							{
+								outputKey: 'label',
+								source: {
+									kind: 'modelColumn',
+									table: 'events',
+									column: 'label',
+								},
+								shape: { kind: 'scalar', cardinality: 'one' },
+							},
+						],
+					},
+				],
+			]),
+		};
+
+		const compiled = adapter.compile(bundle, { model: conversionSchema.model });
+
+		expect(compiled.sql).toContain(
+			'WITH "e" ("sequence", "label") as (SELECT CAST(NULL AS bigint) AS "sequence", CAST(NULL AS text) AS "label" WHERE false UNION ALL VALUES ($1::bigint, $2::text))',
+		);
+		expect(compiled.sql).not.toContain('FROM "events"');
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.has('label') ?? false).toBe(false);
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ sequence: 9007199254740993n, label: 'release' }]);
 	});
 
 	it('keeps unproven runtime NQL binding outputs metadata-free', async () => {

@@ -1,5 +1,11 @@
 import { schema } from '@dbsp/core';
-import type { CompiledNqlQuery, QueryIntent, UpdateIntent } from '@dbsp/types';
+import type {
+	ColumnJsReadType,
+	CompiledNqlQuery,
+	OutputDescriptor,
+	QueryIntent,
+	UpdateIntent,
+} from '@dbsp/types';
 import { describe, expect, it } from 'vitest';
 import { compile } from '../../../nql/src/index.js';
 import {
@@ -162,6 +168,35 @@ function withoutOriginalDbType<T>(
 			mutableColumn.originalDbType = previousOriginalDbType;
 		}
 	}
+}
+
+function scalarModelOutput(
+	outputKey: string,
+	table: string,
+	column: string,
+	js?: ColumnJsReadType,
+): OutputDescriptor {
+	return {
+		outputKey,
+		source: {
+			kind: 'modelColumn',
+			table,
+			column,
+			...(js !== undefined ? { js } : {}),
+		},
+		shape: { kind: 'scalar', cardinality: 'one' },
+	};
+}
+
+function aggregateOutput(outputKey: string): OutputDescriptor {
+	return {
+		outputKey,
+		source: {
+			kind: 'expression',
+			reason: `aggregate output '${outputKey}' has no scalar model column source`,
+		},
+		shape: { kind: 'aggregate-scalar', aggregate: 'count' },
+	};
 }
 
 describe('NQL bind CTE identifier injection defense', () => {
@@ -626,6 +661,73 @@ describe('NQL bind CTE identifier injection defense', () => {
 		);
 		expect(sql).not.toContain('VALUES');
 		expect(params).toEqual([]);
+	});
+
+	it('casts non-js scalar declared outputs without source-table fallback', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'names',
+				select: {
+					type: 'fields',
+					fields: ['label'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'names',
+					{
+						columns: ['label'],
+						rows: [{ label: 'ok' }],
+						declaredOutputs: [scalarModelOutput('label', 'items', 'name')],
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "names" ("label") as (SELECT CAST(NULL AS text) AS "label" WHERE false UNION ALL VALUES ($1::text))',
+		);
+		expect(sql).not.toContain('FROM "items"');
+		expect(params).toEqual(['ok']);
+	});
+
+	it('leaves non-model declared outputs uncast without disabling scalar sibling casts', () => {
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'rollups',
+				select: {
+					type: 'fields',
+					fields: ['label', 'total'],
+				},
+			},
+			runtimeBindings: new Map([
+				[
+					'rollups',
+					{
+						columns: ['label', 'total'],
+						rows: [{ label: 'ok', total: 3 }],
+						declaredOutputs: [
+							scalarModelOutput('label', 'items', 'name'),
+							aggregateOutput('total'),
+						],
+					},
+				],
+			]),
+		};
+
+		const { error, params, sql } = tryCompileNqlBundle(bundle);
+
+		expect(error).toBeUndefined();
+		expect(sql).toContain(
+			'WITH "rollups" ("label", "total") as (SELECT CAST(NULL AS text) AS "label", NULL AS "total" WHERE false UNION ALL VALUES ($1::text, $2))',
+		);
+		expect(sql).not.toContain('FROM "items"');
+		expect(params).toEqual(['ok', 3]);
 	});
 
 	it('maps a count-aggregate columnType to bigint', () => {

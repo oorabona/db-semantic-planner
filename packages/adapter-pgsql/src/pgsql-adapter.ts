@@ -54,10 +54,7 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
-import {
-	convertBigintJsReadValue,
-	resolveOutputReadHandling,
-} from '@dbsp/types';
+import { convertBigintJsReadValue } from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
@@ -971,13 +968,13 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 	model: ModelIR | undefined,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
-): readonly string[] | undefined {
+): readonly (string | undefined)[] | undefined {
 	if (binding.declaredOutputs === undefined) return undefined;
 	const descriptorsByColumn = runtimeBindingDeclaredOutputsByColumn(
 		binding.declaredOutputs,
 		naming,
 	);
-	const pgTypes: string[] = [];
+	const pgTypes: (string | undefined)[] = [];
 	for (const column of binding.columns) {
 		const entries = descriptorsByColumn.get(naming.toDatabase(column)) ?? [];
 		if (entries.length === 0) return undefined;
@@ -988,8 +985,13 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 		}
 		const [descriptor] = entries;
 		if (descriptor === undefined) return undefined;
-		const handling = resolveOutputReadHandling(descriptor);
-		if (handling.kind !== 'scalarConvert') return undefined;
+		if (
+			descriptor.source.kind !== 'modelColumn' ||
+			descriptor.shape.kind !== 'scalar'
+		) {
+			pgTypes.push(undefined);
+			continue;
+		}
 		if (model === undefined) {
 			throw new Error(
 				`NQL runtime binding '${name}' cannot materialize declared output rows because no model is available for column type resolution.`,
@@ -997,19 +999,19 @@ function resolveRuntimeBindingDeclaredOutputColumnTypes(
 		}
 		const sourceTable = findRuntimeBindingSourceTable(
 			model,
-			handling.table,
+			descriptor.source.table,
 			naming,
 		);
 		if (sourceTable === undefined) {
 			throw new Error(
-				`NQL runtime binding '${name}' cannot resolve declared output table '${handling.table}' in the model.`,
+				`NQL runtime binding '${name}' cannot resolve declared output table '${descriptor.source.table}' in the model.`,
 			);
 		}
 		pgTypes.push(
 			resolveRuntimeBindingColumnType(
 				name,
 				sourceTable,
-				handling.column,
+				descriptor.source.column,
 				schemaName,
 				naming,
 			),
@@ -1168,13 +1170,16 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 	parameterOffset: number,
 	cteName: string,
 	columnSql: string,
-	pgTypes: readonly string[],
+	pgTypes: readonly (string | undefined)[],
 ): { cte: string; parameters: readonly unknown[] } {
 	const anchorColumns = binding.columns
-		.map(
-			(column, columnIndex) =>
-				`CAST(NULL AS ${pgTypes[columnIndex]}) AS ${quoteIdent(naming.toDatabase(column), 'column')}`,
-		)
+		.map((column, columnIndex) => {
+			const columnAlias = quoteIdent(naming.toDatabase(column), 'column');
+			const pgType = pgTypes[columnIndex];
+			return pgType === undefined
+				? `NULL AS ${columnAlias}`
+				: `CAST(NULL AS ${pgType}) AS ${columnAlias}`;
+		})
 		.join(', ');
 	const sourceAnchorSql = `SELECT ${anchorColumns} WHERE false`;
 	if (binding.rows.length === 0) {
@@ -1190,7 +1195,9 @@ function compileNqlRuntimeBindingCteWithPgTypes(
 		.map((row) => {
 			const placeholders = binding.columns.map((column, columnIndex) => {
 				parameters.push(row[column]);
-				return `$${nextParam++}::${pgTypes[columnIndex]}`;
+				const paramRef = `$${nextParam++}`;
+				const pgType = pgTypes[columnIndex];
+				return pgType === undefined ? paramRef : `${paramRef}::${pgType}`;
 			});
 			return `(${placeholders.join(', ')})`;
 		})
