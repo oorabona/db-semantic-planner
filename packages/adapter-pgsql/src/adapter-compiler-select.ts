@@ -7,6 +7,7 @@
 
 import { countDistinctRelationPathsByName } from '@dbsp/core';
 import type {
+	ColumnListInput,
 	CompiledQuery,
 	CompileOptions,
 	CompileResultWithIncludes,
@@ -14,11 +15,19 @@ import type {
 	ModelIR,
 	NestedOutputReadHandling,
 	OutputDescriptor,
+	OutputValueShape,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
-import type { Mutable } from '@dbsp/types/internal';
+import type {
+	Mutable,
+	NqlTrustedRelationFilterFields,
+} from '@dbsp/types/internal';
+import {
+	getTrustedNqlRelationFilterFields,
+	markNqlTrustedRelationFilter,
+} from '@dbsp/types/internal';
 import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { defaultFkDerivation } from './assert-field.js';
@@ -463,6 +472,199 @@ function buildRelationColumnsMap(
 	return map;
 }
 
+function rootRelationName(relation: string): string {
+	return relation.split('.')[0] ?? relation;
+}
+
+function includeChoiceByRootRelation(
+	decisions: readonly PlanDecision[],
+): ReadonlyMap<string, string | undefined> {
+	const choices = new Map<string, string | undefined>();
+	for (const decision of decisions) {
+		if (
+			decision.type !== 'includeStrategy' ||
+			decision.relationName === undefined
+		) {
+			continue;
+		}
+		const rootRelation = rootRelationName(decision.relationName);
+		const existing = choices.get(rootRelation);
+		if (existing === undefined || existing === 'join') {
+			choices.set(rootRelation, decision.choice);
+		}
+	}
+	return choices;
+}
+
+function shouldKeepTrustedRelationColumnProjection(
+	decision: PlanDecision,
+	includeChoices: ReadonlyMap<string, string | undefined>,
+): boolean {
+	if (decision.type !== 'selectRelationColumn' || !decision.relation) {
+		return false;
+	}
+	const trusted = getTrustedNqlRelationFilterFields(decision);
+	if (trusted?.selectedColumn === undefined) return false;
+	const coveringChoice = includeChoices.get(
+		rootRelationName(decision.relation),
+	);
+	return coveringChoice !== 'join';
+}
+
+type ResolvedRelationKeys = {
+	readonly sourceColumn: readonly string[];
+	readonly targetColumn: readonly string[];
+	readonly through?: string;
+	readonly throughSourceColumn?: string;
+	readonly throughTargetColumn?: string;
+};
+
+function nonEmptyColumnList(
+	columns: ColumnListInput | undefined,
+	fallback: readonly string[],
+): readonly string[] {
+	const resolved = toColumnList(columns);
+	return resolved.length > 0 ? resolved : fallback;
+}
+
+function resolveRelationKeys(
+	relation: NonNullable<ReturnType<ModelIR['getRelation']>>,
+	defaultPk: string,
+	deriveFk: AdapterCompilerDeps['deriveFk'],
+): ResolvedRelationKeys {
+	const sourceKey = nonEmptyColumnList(relation.sourceKey, [defaultPk]);
+	const targetKey = nonEmptyColumnList(relation.targetKey, [defaultPk]);
+	const foreignKey = toColumnList(relation.foreignKey);
+	if (relation.type === 'belongsTo') {
+		return {
+			sourceColumn:
+				foreignKey.length > 0
+					? foreignKey
+					: [deriveFk(relation.target, defaultPk)],
+			targetColumn: targetKey,
+		};
+	}
+	if (relation.type === 'belongsToMany') {
+		const throughSourceColumn =
+			foreignKey[0] ?? deriveFk(relation.source, defaultPk);
+		const throughTargetColumn =
+			relation.otherKey ?? deriveFk(relation.target, defaultPk);
+		return {
+			sourceColumn: sourceKey,
+			targetColumn: targetKey,
+			...(relation.through !== undefined && { through: relation.through }),
+			throughSourceColumn,
+			throughTargetColumn,
+		};
+	}
+	return {
+		sourceColumn: sourceKey,
+		targetColumn:
+			foreignKey.length > 0
+				? foreignKey
+				: [deriveFk(relation.source, defaultPk)],
+	};
+}
+
+function resolveAdapterTrustedRelationColumnFields(
+	decision: PlanDecision,
+	rootTable: string,
+	model: ModelIR | undefined,
+	defaultPk: string,
+	deriveFk: AdapterCompilerDeps['deriveFk'],
+): NqlTrustedRelationFilterFields | undefined {
+	if (
+		model === undefined ||
+		decision.type !== 'selectRelationColumn' ||
+		decision.relation === undefined ||
+		decision.column === undefined ||
+		decision.column === '*'
+	) {
+		return undefined;
+	}
+	const segments = decision.relation.split('.').filter(Boolean);
+	if (segments.length === 0) return undefined;
+
+	let currentSource = rootTable;
+	let firstRelation:
+		| NonNullable<ReturnType<ModelIR['getRelation']>>
+		| undefined;
+	let firstKeys: ResolvedRelationKeys | undefined;
+	const hops: Array<NqlTrustedRelationFilterFields['hops'][number]> = [];
+	let finalRelation:
+		| NonNullable<ReturnType<ModelIR['getRelation']>>
+		| undefined;
+	for (let index = 0; index < segments.length; index++) {
+		const segment = segments[index];
+		if (segment === undefined) return undefined;
+		const relation = model.getRelation(`${currentSource}.${segment}`);
+		if (relation === undefined) return undefined;
+		const keys = resolveRelationKeys(relation, defaultPk, deriveFk);
+		if (index === 0) {
+			firstRelation = relation;
+			firstKeys = keys;
+		} else {
+			hops.push({
+				target: relation.target,
+				fkColumn: keys.sourceColumn,
+				joinColumn: keys.targetColumn,
+			});
+		}
+		finalRelation = relation;
+		currentSource = relation.target;
+	}
+
+	if (
+		firstRelation === undefined ||
+		firstKeys === undefined ||
+		finalRelation === undefined
+	) {
+		return undefined;
+	}
+
+	return {
+		relation: decision.relation,
+		targetTable: firstRelation.target,
+		sourceColumn: firstKeys.sourceColumn,
+		targetColumn: firstKeys.targetColumn,
+		hops,
+		...(firstKeys.through !== undefined && { through: firstKeys.through }),
+		...(firstKeys.throughSourceColumn !== undefined && {
+			throughSourceColumn: firstKeys.throughSourceColumn,
+		}),
+		...(firstKeys.throughTargetColumn !== undefined && {
+			throughTargetColumn: firstKeys.throughTargetColumn,
+		}),
+		selectedColumn: decision.column,
+		cardinality: finalRelation.cardinality,
+		relationType: finalRelation.type,
+	};
+}
+
+function enrichAdapterTrustedRelationColumnDecisions(
+	decisions: readonly PlanDecision[],
+	rootTable: string,
+	model: ModelIR | undefined,
+	defaultPk: string,
+	deriveFk: AdapterCompilerDeps['deriveFk'],
+): void {
+	for (const decision of decisions) {
+		if (getTrustedNqlRelationFilterFields(decision) !== undefined) {
+			continue;
+		}
+		const fields = resolveAdapterTrustedRelationColumnFields(
+			decision,
+			rootTable,
+			model,
+			defaultPk,
+			deriveFk,
+		);
+		if (fields !== undefined) {
+			markNqlTrustedRelationFilter(decision, fields);
+		}
+	}
+}
+
 /**
  * Inject user-specified columns from relationColumnsMap into matching
  * includeStrategy decisions, then validate them against the model schema.
@@ -712,6 +914,68 @@ function buildJsonAggOutputDescriptors(
 	return descriptors;
 }
 
+function trustedRelationColumnShape(
+	cardinality: 'one' | 'many' | undefined,
+): OutputValueShape | undefined {
+	if (cardinality === 'one') {
+		return { kind: 'scalar', cardinality: 'one' };
+	}
+	if (cardinality === 'many') {
+		return { kind: 'array', cardinality: 'many', aggregate: 'json_agg' };
+	}
+	return undefined;
+}
+
+function buildTrustedRelationColumnOutputDescriptor(
+	decision: PlanDecision,
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): OutputDescriptor | undefined {
+	if (decision.type !== 'selectRelationColumn') return undefined;
+	const trusted = getTrustedNqlRelationFilterFields(decision);
+	if (trusted?.selectedColumn === undefined) return undefined;
+	const shape = trustedRelationColumnShape(trusted.cardinality);
+	if (shape === undefined) return undefined;
+	const sourceTable = trusted.hops.at(-1)?.target ?? trusted.targetTable;
+	const table = model?.getTable(sourceTable);
+	const column = table?.columns.find(
+		(candidate) =>
+			candidate.name === trusted.selectedColumn ||
+			naming.toDatabase(candidate.name) === trusted.selectedColumn,
+	);
+	if (table === undefined || column === undefined) return undefined;
+	const outputColumn =
+		decision.alias ?? decision.column ?? trusted.selectedColumn;
+	const js = column.type === 'bigint' ? column.js : undefined;
+	return {
+		outputKey: naming.toDatabase(outputColumn),
+		source: {
+			kind: 'modelColumn',
+			table: table.name,
+			column: column.name,
+			...(js !== undefined ? { js } : {}),
+		},
+		shape,
+	};
+}
+
+function buildTrustedRelationColumnOutputDescriptors(
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+	naming: AdapterCompilerDeps['naming'],
+): readonly OutputDescriptor[] {
+	const descriptors: OutputDescriptor[] = [];
+	for (const decision of decisions) {
+		const descriptor = buildTrustedRelationColumnOutputDescriptor(
+			decision,
+			model,
+			naming,
+		);
+		if (descriptor) descriptors.push(descriptor);
+	}
+	return descriptors;
+}
+
 function findJsonAggPlanDecision(
 	plan: PlanReport,
 	decision: PlanDecision,
@@ -888,10 +1152,17 @@ export function compileSelectEnvelope<T = unknown>(
 	if (execIntent) {
 		// Real usage: convert intent to decisions
 		let decisions = intentToDecisions(execIntent, plan.rootTable);
+		const resolvedModel = options?.model ?? deps.model;
+		enrichAdapterTrustedRelationColumnDecisions(
+			decisions,
+			plan.rootTable,
+			resolvedModel,
+			deps.defaultPk,
+			deps.deriveFk,
+		);
 
 		// Convert dotted-field comparisons (e.g., "parent.name") to EXISTS subqueries
 		// NQL compiles relation-path filters as plain comparisons with dotted field names
-		const resolvedModel = options?.model ?? deps.model;
 		if (resolvedModel) {
 			decisions = convertDottedFieldsToExists(
 				decisions,
@@ -975,6 +1246,9 @@ export function compileSelectEnvelope<T = unknown>(
 				.map((d) => d.relationName as string)
 				.filter(Boolean),
 		);
+		const includeChoices = includeChoiceByRootRelation(
+			enrichedUnifiedDecisions,
+		);
 
 		if (includedRelations.size > 0) {
 			// Collect specific columns from selectRelationColumn decisions and inject
@@ -997,8 +1271,13 @@ export function compileSelectEnvelope<T = unknown>(
 							// relation may be a dotted path (e.g. "userRoles.role.permissions")
 							// — check if the root segment is covered by an include
 							const rel = d.relation as string;
-							const rootRelation = rel.split('.')[0] ?? rel;
+							const rootRelation = rootRelationName(rel);
 							if (includedRelations.has(rootRelation)) {
+								if (
+									shouldKeepTrustedRelationColumnProjection(d, includeChoices)
+								) {
+									return true;
+								}
 								return false; // covered by include strategy
 							}
 						}
@@ -1073,13 +1352,17 @@ export function compileSelectEnvelope<T = unknown>(
 		naming: deps.naming,
 		...(hydrationPlan ? { hydrationPlan } : {}),
 	});
-	return supplementOutputDescriptors(
-		baseEnv,
-		buildJsonAggOutputDescriptors(
+	return supplementOutputDescriptors(baseEnv, [
+		...buildJsonAggOutputDescriptors(
 			simplifiedPlan.decisions,
 			resolvedModelForCompiler,
 		),
-	);
+		...buildTrustedRelationColumnOutputDescriptors(
+			simplifiedPlan.decisions,
+			resolvedModelForCompiler,
+			deps.naming,
+		),
+	]);
 }
 
 export function compileSelect<T = unknown>(

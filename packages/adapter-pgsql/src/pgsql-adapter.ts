@@ -135,7 +135,6 @@ import {
 	type ProjectNamedFieldsSelection,
 	preserveOneToOne,
 	projectNamedFields,
-	supplementOutputProvenance,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
@@ -2125,18 +2124,7 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				`${cteName} as (${renumberSqlParams(compiled.sql, parameters.length)})`,
 			);
 			parameters.push(...compiled.parameters);
-			const outputSchema = bundle.bindingOutputSchemas?.get(name);
-			bindingProjections.set(
-				emittedBindName(name, naming),
-				outputSchema?.outputProvenance !== undefined
-					? supplementOutputProvenance(compiled, {
-							columns: outputSchema.columns,
-							outputProvenance: outputSchema.outputProvenance,
-							model: deps.model,
-							naming,
-						})
-					: compiled,
-			);
+			bindingProjections.set(emittedBindName(name, naming), compiled);
 		}
 
 		const leafBundle: CompiledNqlQuery = {
