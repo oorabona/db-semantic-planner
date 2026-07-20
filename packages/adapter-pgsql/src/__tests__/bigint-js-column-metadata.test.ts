@@ -763,14 +763,23 @@ describe('bigint js column metadata provenance', () => {
 		expect(compiled.columnMetadata?.has('nodePath') ?? false).toBe(false);
 	});
 
-	it('carries NQL binding provenance through a final passthrough select', () => {
+	it('carries NQL binding declared outputs through a final passthrough select', () => {
 		const { bundle, compiled } = compileNqlToPg(`events
 			| select sequence
 			| bind e
 e | select sequence`);
 
-		expect(bundle.bindingOutputSchemas?.get('e')?.outputProvenance).toEqual([
-			{ outputColumn: 'sequence', table: 'events', column: 'sequence' },
+		expect(bundle.bindingOutputSchemas?.get('e')?.declaredOutputs).toEqual([
+			{
+				outputKey: 'sequence',
+				source: {
+					kind: 'modelColumn',
+					table: 'events',
+					column: 'sequence',
+					js: 'bigint',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
 		]);
 		expect(compiled.columnMetadata?.get('sequence')).toEqual({
 			table: 'events',
@@ -939,11 +948,16 @@ e | select sequence + 1 as nextSequence`);
 					{
 						columns: ['sequence'],
 						rows: [],
-						outputProvenance: [
+						declaredOutputs: [
 							{
-								outputColumn: 'sequence',
-								table: 'events',
-								column: 'sequence',
+								outputKey: 'sequence',
+								source: {
+									kind: 'modelColumn',
+									table: 'events',
+									column: 'sequence',
+									js: 'bigint',
+								},
+								shape: { kind: 'scalar', cardinality: 'one' },
 							},
 						],
 						columnTypes: {

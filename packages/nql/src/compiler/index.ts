@@ -54,9 +54,9 @@ export type {
 import type {
 	MutationIntent,
 	MutationReturningItem,
-	NqlBindingOutputProvenance,
 	NqlBindingOutputSchema,
 	NqlProgramSequenceStep,
+	OutputDescriptor,
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
@@ -928,7 +928,7 @@ export class NqlCompiler {
 			if (columns !== undefined) {
 				return {
 					columns,
-					outputProvenance: this.buildMutationReturningOutputProvenance(
+					declaredOutputs: this.buildMutationReturningDeclaredOutputs(
 						mutation.table,
 						columns,
 					),
@@ -960,7 +960,7 @@ export class NqlCompiler {
 			});
 			return {
 				columns,
-				outputProvenance: this.buildMutationReturningOutputProvenance(
+				declaredOutputs: this.buildMutationReturningDeclaredOutputs(
 					mutation.table,
 					columns,
 				),
@@ -969,7 +969,7 @@ export class NqlCompiler {
 		}
 		return {
 			columns,
-			outputProvenance: this.buildMutationReturningOutputProvenance(
+			declaredOutputs: this.buildMutationReturningDeclaredOutputs(
 				mutation.table,
 				columns,
 			),
@@ -977,10 +977,10 @@ export class NqlCompiler {
 		};
 	}
 
-	private buildMutationReturningOutputProvenance(
+	private buildMutationReturningDeclaredOutputs(
 		table: string,
 		columns: readonly string[],
-	): readonly NqlBindingOutputProvenance[] {
+	): readonly OutputDescriptor[] {
 		const items = this.ctx.lastMutationReturningItems;
 		return columns.map((column, index) => {
 			const item =
@@ -990,10 +990,19 @@ export class NqlCompiler {
 					? (this.ctx.validator?.resolveColumnName(table, item.source) ??
 						item.source)
 					: column;
-			return {
-				outputColumn: column,
+			const js = this.ctx.validator?.getTableColumnJsReadType(
 				table,
-				column: sourceColumn,
+				sourceColumn,
+			);
+			return {
+				outputKey: column,
+				source: {
+					kind: 'modelColumn',
+					table,
+					column: sourceColumn,
+					...(js !== undefined && { js }),
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			};
 		});
 	}

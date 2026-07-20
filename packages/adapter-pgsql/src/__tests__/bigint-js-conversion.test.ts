@@ -385,7 +385,7 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
 	});
 
-	it('converts runtime NQL binding-final rows from neutral provenance', async () => {
+	it('converts runtime NQL binding-final rows from declared outputs', async () => {
 		const adapter = createPgsqlAdapter(
 			makePool([{ sequence: '9007199254740993' }]),
 			{ model: conversionSchema.model },
@@ -402,16 +402,18 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 					{
 						columns: ['sequence'],
 						rows: [{ sequence: '9007199254740993' }],
-						outputProvenance: [
+						declaredOutputs: [
 							{
-								outputColumn: 'sequence',
-								table: 'events',
-								column: 'sequence',
+								outputKey: 'sequence',
+								source: {
+									kind: 'modelColumn',
+									table: 'events',
+									column: 'sequence',
+									js: 'bigint',
+								},
+								shape: { kind: 'scalar', cardinality: 'one' },
 							},
 						],
-						columnTypes: {
-							sequence: { kind: 'column', type: 'bigint' },
-						},
 					},
 				],
 			]),
@@ -427,6 +429,54 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		const rows = await adapter.execute(compiled);
 
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
+	});
+
+	it('keeps unproven runtime NQL binding outputs metadata-free', async () => {
+		const adapter = createPgsqlAdapter(
+			makePool([{ sequence: '9007199254740993' }]),
+			{ model: conversionSchema.model },
+		);
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'e',
+				select: { type: 'fields', fields: ['sequence'] },
+			},
+			runtimeBindings: new Map([
+				[
+					'e',
+					{
+						columns: ['sequence'],
+						rows: [{ sequence: '9007199254740993' }],
+						declaredOutputs: [
+							{
+								outputKey: 'sequence',
+								source: {
+									kind: 'unresolved',
+									reason:
+										"binding output 'sequence' has no proven scalar model column source",
+								},
+								shape: {
+									kind: 'unknown',
+									reason:
+										"binding output 'sequence' has no proven scalar model column source",
+								},
+							},
+						],
+						columnTypes: {
+							sequence: { kind: 'column', type: 'bigint' },
+						},
+					},
+				],
+			]),
+		};
+
+		const compiled = adapter.compile(bundle, { model: conversionSchema.model });
+		expect(compiled.columnMetadata?.has('sequence') ?? false).toBe(false);
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([{ sequence: '9007199254740993' }]);
 	});
 
 	it('converts NQL binding outputs projected from single-hop physical relation provenance', async () => {
@@ -451,21 +501,36 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 			{ model: relationConversionSchema.model },
 		);
 
-		expect(outputSchema.outputProvenance).toEqual([
+		expect(outputSchema.declaredOutputs).toEqual([
 			{
-				outputColumn: 'accountNumber',
-				table: 'users',
-				column: 'accountNumber',
+				outputKey: 'accountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'users',
+					column: 'accountNumber',
+					js: 'bigint',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 			{
-				outputColumn: 'safeAccountNumber',
-				table: 'users',
-				column: 'safeAccountNumber',
+				outputKey: 'safeAccountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'users',
+					column: 'safeAccountNumber',
+					js: 'number',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 			{
-				outputColumn: 'stringAccountNumber',
-				table: 'users',
-				column: 'stringAccountNumber',
+				outputKey: 'stringAccountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'users',
+					column: 'stringAccountNumber',
+					js: 'string',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 		]);
 		const compiled = adapter.compile(bundle, {
@@ -537,8 +602,8 @@ post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNum
 								stringAccountNumber: '9007199254740994',
 							},
 						],
-						...(outputSchema.outputProvenance !== undefined && {
-							outputProvenance: outputSchema.outputProvenance,
+						...(outputSchema.declaredOutputs !== undefined && {
+							declaredOutputs: outputSchema.declaredOutputs,
 						}),
 						...(outputSchema.columnTypes !== undefined && {
 							columnTypes: outputSchema.columnTypes,
@@ -600,22 +665,37 @@ profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profil
 		);
 
 		expect(
-			bundle.bindingOutputSchemas?.get('profile_accounts')?.outputProvenance,
+			bundle.bindingOutputSchemas?.get('profile_accounts')?.declaredOutputs,
 		).toEqual([
 			{
-				outputColumn: 'profileAccountNumber',
-				table: 'profiles',
-				column: 'accountNumber',
+				outputKey: 'profileAccountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'profiles',
+					column: 'accountNumber',
+					js: 'bigint',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 			{
-				outputColumn: 'profileSafeAccountNumber',
-				table: 'profiles',
-				column: 'safeAccountNumber',
+				outputKey: 'profileSafeAccountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'profiles',
+					column: 'safeAccountNumber',
+					js: 'number',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 			{
-				outputColumn: 'profileStringAccountNumber',
-				table: 'profiles',
-				column: 'stringAccountNumber',
+				outputKey: 'profileStringAccountNumber',
+				source: {
+					kind: 'modelColumn',
+					table: 'profiles',
+					column: 'stringAccountNumber',
+					js: 'string',
+				},
+				shape: { kind: 'scalar', cardinality: 'one' },
 			},
 		]);
 		const compiled = adapter.compile(bundle, {
@@ -665,11 +745,47 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		);
 
 		expect(
-			bundle.bindingOutputSchemas?.get('user_post_counts')?.outputProvenance,
+			bundle.bindingOutputSchemas?.get('user_post_counts')?.declaredOutputs,
 		).toEqual([
-			{ outputColumn: 'postViewCount' },
-			{ outputColumn: 'postSafeViewCount' },
-			{ outputColumn: 'postStringViewCount' },
+			{
+				outputKey: 'postViewCount',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'postViewCount' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'postViewCount' has no proven scalar model column source",
+				},
+			},
+			{
+				outputKey: 'postSafeViewCount',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'postSafeViewCount' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'postSafeViewCount' has no proven scalar model column source",
+				},
+			},
+			{
+				outputKey: 'postStringViewCount',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'postStringViewCount' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'postStringViewCount' has no proven scalar model column source",
+				},
+			},
 		]);
 		const compiled = adapter.compile(bundle, {
 			model: relationConversionSchema.model,
@@ -735,7 +851,21 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 					'post_tag_scores',
 					{
 						columns: ['tagScores'],
-						outputProvenance: [{ outputColumn: 'tagScores' }],
+						declaredOutputs: [
+							{
+								outputKey: 'tagScores',
+								source: {
+									kind: 'unresolved',
+									reason:
+										"relation output 'tagScores' has no proven scalar model column source",
+								},
+								shape: {
+									kind: 'unknown',
+									reason:
+										"relation output 'tagScores' has no proven scalar model column source",
+								},
+							},
+						],
 						columnTypesUnavailable: {
 							column: 'tagScores',
 							reason: 'relation-column',
@@ -755,8 +885,22 @@ user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`
 		);
 
 		expect(
-			bundle.bindingOutputSchemas?.get('post_tag_scores')?.outputProvenance,
-		).toEqual([{ outputColumn: 'tagScores' }]);
+			bundle.bindingOutputSchemas?.get('post_tag_scores')?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'tagScores',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'tagScores' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'tagScores' has no proven scalar model column source",
+				},
+			},
+		]);
 		const compiled = adapter.compile(bundle, {
 			model: relationConversionSchema.model,
 		});

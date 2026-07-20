@@ -4,6 +4,7 @@
  */
 
 import type {
+	ColumnJsReadType,
 	ColumnType,
 	CompiledNqlQuery,
 	NqlBindingRelationFilterMetadata,
@@ -48,6 +49,7 @@ export interface ColumnValidatorPseudoColumn {
 export interface ColumnValidatorTableColumn {
 	readonly name: string;
 	readonly type?: ColumnType;
+	readonly js?: ColumnJsReadType;
 	readonly originalDbType?: string;
 	readonly originalDbTypeSchema?: string;
 	readonly originalDbTypeSchemaScope?: 'target' | 'absolute';

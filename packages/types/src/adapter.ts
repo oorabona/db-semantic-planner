@@ -39,6 +39,7 @@ import type {
 	SequenceIR,
 	TableIR,
 } from './model-ir.js';
+import type { OutputDescriptor } from './output-provenance.js';
 import type { PlanReport, RecursivePlanReport } from './planner.js';
 
 // ============================================================================
@@ -216,10 +217,12 @@ export type NqlBindingColumnUntypeableReason =
 export interface NqlBindingOutputSchema {
 	readonly columns: readonly string[];
 	/**
-	 * Neutral output-column provenance. Entries with `table` + `column` name a
-	 * proven model column; output-only entries are intentionally metadata-free.
+	 * Neutral output descriptors declared by the compiler for runtime/materialized
+	 * binding rows. Only scalar model-column descriptors are eligible for scalar
+	 * read conversion; unresolved/non-scalar descriptors are intentionally
+	 * metadata-free.
 	 */
-	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
+	readonly declaredOutputs?: readonly OutputDescriptor[];
 	readonly relationFilters?: NqlBindingRelationFilterMetadata;
 	/**
 	 * Present when EVERY projected column's type is statically resolvable
@@ -241,7 +244,7 @@ export interface NqlBindingOutputSchema {
 export interface NqlRuntimeBinding {
 	readonly columns: readonly string[];
 	readonly rows: readonly Readonly<Record<string, unknown>>[];
-	readonly outputProvenance?: readonly NqlBindingOutputProvenance[];
+	readonly declaredOutputs?: readonly OutputDescriptor[];
 	/** Per-column type info carried from the binding's output schema (absent → fall back to model-walk anchor resolution). */
 	readonly columnTypes?: Readonly<Record<string, NqlBindingColumnTypeInfo>>;
 }

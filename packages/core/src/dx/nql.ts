@@ -960,13 +960,13 @@ function createRuntimeBinding(
 	const columns = requireMutationBindingColumns(bundle, bindName);
 	const outputSchema = bundle.bindingOutputSchemas?.get(bindName);
 	const columnTypes = outputSchema?.columnTypes;
-	const outputProvenance = outputSchema?.outputProvenance;
+	const declaredOutputs = outputSchema?.declaredOutputs;
 	return {
 		columns,
 		rows: rows.map((row) =>
 			toRuntimeBindingRow(bindName, row, columns, dbCasing),
 		),
-		...(outputProvenance !== undefined && { outputProvenance }),
+		...(declaredOutputs !== undefined && { declaredOutputs }),
 		...(columnTypes !== undefined && { columnTypes }),
 	};
 }
@@ -1853,11 +1853,11 @@ class NqlBuilderImpl<T> implements NqlBuilder<T> {
 		const dumpRuntimeBindingPreview = (bindName: string): NqlRuntimeBinding => {
 			const outputSchema = sourceBundle.bindingOutputSchemas?.get(bindName);
 			const columnTypes = outputSchema?.columnTypes;
-			const outputProvenance = outputSchema?.outputProvenance;
+			const declaredOutputs = outputSchema?.declaredOutputs;
 			return {
 				columns: requireMutationBindingColumns(sourceBundle, bindName),
 				rows: [],
-				...(outputProvenance !== undefined && { outputProvenance }),
+				...(declaredOutputs !== undefined && { declaredOutputs }),
 				...(columnTypes !== undefined && { columnTypes }),
 			};
 		};

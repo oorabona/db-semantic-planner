@@ -4,6 +4,7 @@
  */
 
 import type {
+	ColumnJsReadType,
 	NqlBindingColumnTypeInfo,
 	NqlBindingRelationFilterMetadata,
 	NqlBindingVirtualRelation,
@@ -118,6 +119,18 @@ export class ColumnValidator {
 				originalDbTypeSchemaScope: columnInfo.originalDbTypeSchemaScope,
 			}),
 		};
+	}
+
+	getTableColumnJsReadType(
+		table: string,
+		column: string,
+	): ColumnJsReadType | undefined {
+		const resolvedName = this.resolvePhysicalColumnName(table, column);
+		if (resolvedName === undefined) return undefined;
+		const columnInfo = this.schema
+			.getTable(table)
+			?.columns.find((candidate) => candidate.name === resolvedName);
+		return columnInfo?.type === 'bigint' ? columnInfo.js : undefined;
 	}
 
 	getPseudoColumns(name: string): readonly ColumnValidatorPseudoColumn[] {

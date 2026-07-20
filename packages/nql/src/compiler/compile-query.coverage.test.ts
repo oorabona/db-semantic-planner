@@ -2469,7 +2469,7 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 		);
 	});
 
-	it('carries binding output provenance through aliases and binding chains', () => {
+	it('carries declared binding outputs through aliases and binding chains', () => {
 		const result = compile(
 			'posts | select authorId as aid | bind projected_posts\nprojected_posts | select aid as author | bind projected_authors\nprojected_authors | select author',
 			schema,
@@ -2477,16 +2477,27 @@ projected_posts | where some(author).email = 'alice@example.com' | select id`,
 
 		expect(result.success).toBe(true);
 		expect(
-			result.ast?.bindingOutputSchemas?.get('projected_posts')
-				?.outputProvenance,
-		).toEqual([{ outputColumn: 'aid', table: 'posts', column: 'authorId' }]);
+			result.ast?.bindingOutputSchemas?.get('projected_posts')?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'aid',
+				source: { kind: 'modelColumn', table: 'posts', column: 'authorId' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+		]);
 		expect(
 			result.ast?.bindingOutputSchemas?.get('projected_authors')
-				?.outputProvenance,
-		).toEqual([{ outputColumn: 'author', table: 'posts', column: 'authorId' }]);
+				?.declaredOutputs,
+		).toEqual([
+			{
+				outputKey: 'author',
+				source: { kind: 'modelColumn', table: 'posts', column: 'authorId' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+		]);
 	});
 
-	it('records scalar relation-column provenance and leaves hasMany aggregate outputs unresolved', () => {
+	it('records scalar relation-column descriptors and declares hasMany outputs non-scalar', () => {
 		const result = compile(
 			`posts | select id, authorId | bind projected_posts
 projected_posts | select author.name as authorName, author.profile.bio as authorBio, comments.body as commentBodies | bind related_post_columns
@@ -2497,15 +2508,27 @@ related_post_columns | select authorName, authorBio, commentBodies`,
 		expect(result.success).toBe(true);
 		expect(
 			result.ast?.bindingOutputSchemas?.get('related_post_columns')
-				?.outputProvenance,
+				?.declaredOutputs,
 		).toEqual([
-			{ outputColumn: 'authorName', table: 'users', column: 'name' },
-			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
-			{ outputColumn: 'commentBodies' },
+			{
+				outputKey: 'authorName',
+				source: { kind: 'modelColumn', table: 'users', column: 'name' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'authorBio',
+				source: { kind: 'modelColumn', table: 'profiles', column: 'bio' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'commentBodies',
+				source: { kind: 'modelColumn', table: 'comments', column: 'body' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
 		]);
 	});
 
-	it('leaves binding-projected recursive aggregate relation columns unresolved', () => {
+	it('declares binding-projected recursive relation columns non-scalar', () => {
 		const result = compile(
 			`categories | select id, parentId | bind c
 c | select ascendant.name as ancestorName, descendant.name as descendantName | bind related_categories
@@ -2516,14 +2539,22 @@ related_categories | select ancestorName, descendantName`,
 		expect(result.success).toBe(true);
 		expect(
 			result.ast?.bindingOutputSchemas?.get('related_categories')
-				?.outputProvenance,
+				?.declaredOutputs,
 		).toEqual([
-			{ outputColumn: 'ancestorName' },
-			{ outputColumn: 'descendantName' },
+			{
+				outputKey: 'ancestorName',
+				source: { kind: 'modelColumn', table: 'categories', column: 'name' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
+			{
+				outputKey: 'descendantName',
+				source: { kind: 'modelColumn', table: 'categories', column: 'name' },
+				shape: { kind: 'array', cardinality: 'many' },
+			},
 		]);
 	});
 
-	it('records scalar physical relation-column provenance and leaves hasMany aggregate outputs unresolved without a trusted binding proof', () => {
+	it('records scalar physical relation-column descriptors and leaves hasMany outputs unresolved without a trusted binding proof', () => {
 		const outputSchema = getQueryOutputSchema(
 			{
 				type: 'select',
@@ -2556,10 +2587,30 @@ related_categories | select ancestorName, descendantName`,
 			'physical_relation_projection',
 		);
 
-		expect(outputSchema.outputProvenance).toEqual([
-			{ outputColumn: 'authorName', table: 'users', column: 'name' },
-			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
-			{ outputColumn: 'commentBody' },
+		expect(outputSchema.declaredOutputs).toEqual([
+			{
+				outputKey: 'authorName',
+				source: { kind: 'modelColumn', table: 'users', column: 'name' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'authorBio',
+				source: { kind: 'modelColumn', table: 'profiles', column: 'bio' },
+				shape: { kind: 'scalar', cardinality: 'one' },
+			},
+			{
+				outputKey: 'commentBody',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'commentBody' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'commentBody' has no proven scalar model column source",
+				},
+			},
 		]);
 		expect(outputSchema.columnTypes).toBeUndefined();
 		expect(outputSchema.columnTypesUnavailable).toEqual({
@@ -2568,7 +2619,7 @@ related_categories | select ancestorName, descendantName`,
 		});
 	});
 
-	it('keeps relation-column binding provenance unresolved without a validated target', () => {
+	it('keeps relation-column binding descriptors unresolved without a validated target', () => {
 		const outputSchema = getQueryOutputSchema(
 			{
 				type: 'select',
@@ -2589,8 +2640,20 @@ related_categories | select ancestorName, descendantName`,
 			'unresolvable_physical_relation_projection',
 		);
 
-		expect(outputSchema.outputProvenance).toEqual([
-			{ outputColumn: 'missingName' },
+		expect(outputSchema.declaredOutputs).toEqual([
+			{
+				outputKey: 'missingName',
+				source: {
+					kind: 'unresolved',
+					reason:
+						"relation output 'missingName' has no proven scalar model column source",
+				},
+				shape: {
+					kind: 'unknown',
+					reason:
+						"relation output 'missingName' has no proven scalar model column source",
+				},
+			},
 		]);
 		expect(outputSchema.columnTypes).toBeUndefined();
 		expect(outputSchema.columnTypesUnavailable).toEqual({

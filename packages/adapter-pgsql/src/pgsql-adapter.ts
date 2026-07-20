@@ -41,8 +41,8 @@ import type {
 	ModelIR,
 	MutationReturningItem,
 	NqlBindingColumnTypeInfo,
-	NqlBindingOutputProvenance,
 	NqlRuntimeBinding,
+	OutputDescriptor,
 	PlanReport,
 	QueryIntent,
 	RecursivePlanReport,
@@ -54,7 +54,10 @@ import type {
 	UpsertFromIntent,
 	UpsertIntent,
 } from '@dbsp/types';
-import { convertBigintJsReadValue } from '@dbsp/types';
+import {
+	convertBigintJsReadValue,
+	resolveOutputReadHandling,
+} from '@dbsp/types';
 import { getNqlBindingRefName, isNqlBindingRef } from '@dbsp/types/internal';
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
@@ -129,7 +132,7 @@ import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilitie
 import {
 	finalizeEnvelope,
 	fromCompiledQuery,
-	fromOutputProvenance,
+	fromOutputDescriptors,
 	type ProjectionEnvelope,
 	type ProjectNamedFieldsExpression,
 	type ProjectNamedFieldsSelection,
@@ -948,13 +951,13 @@ function resolveRuntimeBindingColumnTypes(
 	);
 }
 
-function runtimeBindingOutputProvenanceByColumn(
-	provenance: readonly NqlBindingOutputProvenance[],
+function runtimeBindingDeclaredOutputsByColumn(
+	declaredOutputs: readonly OutputDescriptor[],
 	naming: NamingPlugin,
-): ReadonlyMap<string, NqlBindingOutputProvenance[]> {
-	const byColumn = new Map<string, NqlBindingOutputProvenance[]>();
-	for (const entry of provenance) {
-		const outputKey = naming.toDatabase(entry.outputColumn);
+): ReadonlyMap<string, OutputDescriptor[]> {
+	const byColumn = new Map<string, OutputDescriptor[]>();
+	for (const entry of declaredOutputs) {
+		const outputKey = naming.toDatabase(entry.outputKey);
 		const entries = byColumn.get(outputKey) ?? [];
 		entries.push(entry);
 		byColumn.set(outputKey, entries);
@@ -962,51 +965,51 @@ function runtimeBindingOutputProvenanceByColumn(
 	return byColumn;
 }
 
-function resolveRuntimeBindingOutputProvenanceColumnTypes(
+function resolveRuntimeBindingDeclaredOutputColumnTypes(
 	name: string,
 	binding: NqlRuntimeBinding,
 	model: ModelIR | undefined,
 	schemaName: string | undefined,
 	naming: NamingPlugin,
 ): readonly string[] | undefined {
-	if (binding.outputProvenance === undefined) return undefined;
-	if (model === undefined) {
-		throw new Error(
-			`NQL runtime binding '${name}' cannot materialize output-provenance rows because no model is available for column type resolution.`,
-		);
-	}
-	const provenanceByColumn = runtimeBindingOutputProvenanceByColumn(
-		binding.outputProvenance,
+	if (binding.declaredOutputs === undefined) return undefined;
+	const descriptorsByColumn = runtimeBindingDeclaredOutputsByColumn(
+		binding.declaredOutputs,
 		naming,
 	);
 	const pgTypes: string[] = [];
 	for (const column of binding.columns) {
-		const entries = provenanceByColumn.get(naming.toDatabase(column)) ?? [];
+		const entries = descriptorsByColumn.get(naming.toDatabase(column)) ?? [];
 		if (entries.length === 0) return undefined;
 		if (entries.length > 1) {
 			throw new Error(
-				`NQL runtime binding '${name}' cannot materialize output column '${column}' because its output provenance is ambiguous.`,
+				`NQL runtime binding '${name}' cannot materialize output column '${column}' because its declared outputs are ambiguous.`,
 			);
 		}
-		const [provenance] = entries;
-		if (provenance?.table === undefined || provenance.column === undefined) {
-			return undefined;
+		const [descriptor] = entries;
+		if (descriptor === undefined) return undefined;
+		const handling = resolveOutputReadHandling(descriptor);
+		if (handling.kind !== 'scalarConvert') return undefined;
+		if (model === undefined) {
+			throw new Error(
+				`NQL runtime binding '${name}' cannot materialize declared output rows because no model is available for column type resolution.`,
+			);
 		}
 		const sourceTable = findRuntimeBindingSourceTable(
 			model,
-			provenance.table,
+			handling.table,
 			naming,
 		);
 		if (sourceTable === undefined) {
 			throw new Error(
-				`NQL runtime binding '${name}' cannot resolve provenance table '${provenance.table}' in the model.`,
+				`NQL runtime binding '${name}' cannot resolve declared output table '${handling.table}' in the model.`,
 			);
 		}
 		pgTypes.push(
 			resolveRuntimeBindingColumnType(
 				name,
 				sourceTable,
-				provenance.column,
+				handling.column,
 				schemaName,
 				naming,
 			),
@@ -1258,14 +1261,14 @@ function compileNqlRuntimeBindingCte(
 			schemaName,
 		);
 	}
-	const provenancePgTypes = resolveRuntimeBindingOutputProvenanceColumnTypes(
+	const declaredOutputPgTypes = resolveRuntimeBindingDeclaredOutputColumnTypes(
 		name,
 		binding,
 		model,
 		schemaName,
 		naming,
 	);
-	if (provenancePgTypes !== undefined) {
+	if (declaredOutputPgTypes !== undefined) {
 		return compileNqlRuntimeBindingCteWithPgTypes(
 			name,
 			binding,
@@ -1273,7 +1276,7 @@ function compileNqlRuntimeBindingCte(
 			parameterOffset,
 			cteName,
 			columnSql,
-			provenancePgTypes,
+			declaredOutputPgTypes,
 		);
 	}
 
@@ -2075,9 +2078,17 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 		for (const name of bindingNamesInOrder) {
 			const runtimeBinding = bundle.runtimeBindings?.get(name);
 			if (runtimeBinding !== undefined) {
+				const declaredOutputs =
+					runtimeBinding.declaredOutputs ??
+					bundle.bindingOutputSchemas?.get(name)?.declaredOutputs;
+				const materializedRuntimeBinding =
+					declaredOutputs !== undefined &&
+					runtimeBinding.declaredOutputs === undefined
+						? { ...runtimeBinding, declaredOutputs }
+						: runtimeBinding;
 				const compiledRuntimeBinding = compileNqlRuntimeBindingCte(
 					name,
-					runtimeBinding,
+					materializedRuntimeBinding,
 					naming,
 					parameters.length,
 					runtimeBindingSourceTable(bundle, name),
@@ -2087,17 +2098,13 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 				);
 				ctes.push(compiledRuntimeBinding.cte);
 				parameters.push(...compiledRuntimeBinding.parameters);
-				const outputProvenance =
-					runtimeBinding.outputProvenance ??
-					bundle.bindingOutputSchemas?.get(name)?.outputProvenance;
 				bindingProjections.set(
 					emittedBindName(name, naming),
-					fromOutputProvenance({
+					fromOutputDescriptors({
 						sql: '',
 						parameters: [],
 						columns: runtimeBinding.columns,
-						...(outputProvenance !== undefined && { outputProvenance }),
-						model: deps.model,
+						...(declaredOutputs !== undefined && { declaredOutputs }),
 						naming,
 					}),
 				);

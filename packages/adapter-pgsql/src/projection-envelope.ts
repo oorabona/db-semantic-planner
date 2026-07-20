@@ -85,6 +85,15 @@ export type FromOutputProvenanceOptions = {
 	readonly hydrationPlan?: PlanReport;
 };
 
+export type FromOutputDescriptorsOptions = {
+	readonly sql: string;
+	readonly parameters: readonly unknown[];
+	readonly columns: readonly string[];
+	readonly declaredOutputs?: readonly OutputDescriptor[];
+	readonly naming: NamingPlugin;
+	readonly hydrationPlan?: PlanReport;
+};
+
 export type SupplementOutputProvenanceOptions = Omit<
 	FromOutputProvenanceOptions,
 	'sql' | 'parameters' | 'hydrationPlan'
@@ -464,6 +473,80 @@ export function fromOutputProvenance<T = unknown>(
 							reason: 'binding output provenance could not be read',
 						},
 			),
+		);
+	}
+
+	return makeEnvelope<T>({
+		sql: options.sql,
+		parameters: options.parameters,
+		projection: { kind: 'known', outputs },
+		...(options.hydrationPlan !== undefined
+			? { hydrationPlan: options.hydrationPlan }
+			: {}),
+	});
+}
+
+function outputDescriptorWithEmittedKey(
+	output: OutputDescriptor,
+	naming: NamingPlugin,
+): OutputProjection {
+	return descriptor(
+		naming.toDatabase(output.outputKey),
+		output.source,
+		output.shape,
+	);
+}
+
+export function fromOutputDescriptors<T = unknown>(
+	options: FromOutputDescriptorsOptions,
+): ProjectionEnvelope<T> {
+	const descriptorsByOutput = new Map<string, OutputDescriptor[]>();
+	for (const output of options.declaredOutputs ?? []) {
+		const outputKey = options.naming.toDatabase(output.outputKey);
+		const entries = descriptorsByOutput.get(outputKey) ?? [];
+		entries.push(output);
+		descriptorsByOutput.set(outputKey, entries);
+	}
+
+	const outputs = new Map<string, OutputProjection>();
+	for (const column of options.columns) {
+		const outputKey = options.naming.toDatabase(column);
+		const entries = descriptorsByOutput.get(outputKey) ?? [];
+		if (entries.length === 0) {
+			outputs.set(
+				outputKey,
+				descriptorForSource(outputKey, {
+					kind: 'unresolved',
+					reason: 'binding output descriptor was not provided',
+				}),
+			);
+			continue;
+		}
+		if (entries.length > 1) {
+			outputs.set(
+				outputKey,
+				descriptor(
+					outputKey,
+					{
+						kind: 'ambiguous',
+						reason: `binding output '${outputKey}' had multiple declared descriptors`,
+					},
+					unknownShape(
+						`binding output '${outputKey}' had multiple declared descriptors`,
+					),
+				),
+			);
+			continue;
+		}
+		const [output] = entries;
+		outputs.set(
+			outputKey,
+			output !== undefined
+				? outputDescriptorWithEmittedKey(output, options.naming)
+				: descriptorForSource(outputKey, {
+						kind: 'unresolved',
+						reason: 'binding output descriptor could not be read',
+					}),
 		);
 	}
 
