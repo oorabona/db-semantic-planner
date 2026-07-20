@@ -1,6 +1,9 @@
 import { createOrm, type PlanReport, ref, schema } from '@dbsp/core';
 import { describe, expect, it } from 'vitest';
+import { compileCteQuery } from '../adapter-compiler-recursive.js';
+import { identityNaming } from '../naming-plugin.js';
 import { createPgsqlCompileOnlyAdapter } from '../pgsql-adapter.js';
+import type { ProjectionEnvelope } from '../projection-envelope.js';
 
 const includeSchema = schema({
 	parents: {
@@ -176,5 +179,136 @@ describe('bigint js json_agg SQL projection', () => {
 				js: 'bigint',
 			},
 		]);
+	});
+
+	it('preserves resolver nested transforms when a CTE wraps a json_agg include', () => {
+		const jsonAggNestedReadTransforms = [
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'observedAt',
+				js: 'bigint',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'safeCount',
+				js: 'number',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'stringCount',
+				js: 'string',
+			},
+			{
+				kind: 'nestedTransform',
+				table: 'readings',
+				column: 'parseJSON',
+				js: 'bigint',
+			},
+		] as const;
+		const hydrationPlan: PlanReport = {
+			rootTable: 'parents',
+			decisions: [
+				{
+					id: 'json-agg-readings',
+					type: 'include-strategy',
+					choice: 'json_agg',
+					reasoning: 'unit test json_agg include',
+					alternatives: [],
+					context: {
+						sourceTable: 'parents',
+						target: 'readings',
+						relation: 'readings',
+						relationType: 'hasMany',
+						jsonAggNestedReadTransforms,
+					},
+				},
+			],
+			warnings: [],
+			ctes: [],
+			intent: {
+				type: 'select',
+				from: 'parents',
+				select: { type: 'fields', fields: ['readings_json'] },
+			},
+			metadata: {
+				planningTimeMs: 0,
+				relationsAnalyzed: 1,
+				isAmbiguous: false,
+			},
+		};
+		const includeSource = {
+			sql: 'SELECT readings_json FROM include_source',
+			parameters: [],
+			hydrationPlan,
+			projection: {
+				kind: 'known',
+				outputs: new Map([
+					[
+						'readings_json',
+						{
+							outputKey: 'readings_json',
+							source: {
+								kind: 'modelColumn',
+								table: 'readings',
+								column: 'observedAt',
+								js: 'bigint',
+							},
+							shape: {
+								kind: 'array',
+								cardinality: 'many',
+								aggregate: 'json_agg',
+							},
+						},
+					],
+				]),
+			},
+		} as ProjectionEnvelope;
+
+		const compiled = compileCteQuery(
+			{
+				kind: 'cteQuery',
+				ctes: [
+					{
+						kind: 'simpleCte',
+						name: 'parent_readings',
+						query: {
+							type: 'select',
+							from: 'include_source',
+							select: { type: 'fields', fields: ['readings_json'] },
+						},
+					},
+				],
+				query: {
+					type: 'select',
+					from: 'parent_readings',
+					select: { type: 'fields', fields: ['readings_json'] },
+				},
+			},
+			{ model: includeSchema.model },
+			{
+				naming: identityNaming,
+				model: includeSchema.model,
+				defaultPk: 'id',
+				deriveFk: (relation: string) => `${relation}Id`,
+			},
+			new Map([['include_source', includeSource]]),
+		);
+
+		expect(compiled.sql).toMatch(/^WITH /);
+		expect(compiled.sql).toContain('readings_json');
+		expect(compiled.columnMetadata?.has('readings_json') ?? false).toBe(false);
+		const compiledHydrationPlan = (compiled as { hydrationPlan?: PlanReport })
+			.hydrationPlan;
+		const hydrationDecision = compiledHydrationPlan?.decisions.find(
+			(candidate) =>
+				candidate.type === 'include-strategy' &&
+				candidate.context.relation === 'readings',
+		);
+		expect(hydrationDecision?.context.jsonAggNestedReadTransforms).toEqual(
+			jsonAggNestedReadTransforms,
+		);
 	});
 });

@@ -192,6 +192,55 @@ describe('projection envelope', () => {
 		expect(compiled.columnMetadata?.has('legacySeq') ?? false).toBe(false);
 	});
 
+	it('projectNamedFields preserves json_agg container shape through CTE-style passthrough', () => {
+		const source = {
+			sql: 'SELECT events_json FROM event_cte',
+			parameters: [],
+			projection: {
+				kind: 'known',
+				outputs: new Map([
+					[
+						'events_json',
+						{
+							outputKey: 'events_json',
+							source: {
+								kind: 'modelColumn',
+								table: 'events',
+								column: 'sequence',
+								js: 'bigint',
+							},
+							shape: {
+								kind: 'array',
+								cardinality: 'many',
+								aggregate: 'json_agg',
+							},
+						},
+					],
+				]),
+			},
+		} as ProjectionEnvelope;
+
+		const projected = projectNamedFields(source, {
+			sql: 'SELECT events_json FROM event_cte',
+			parameters: [],
+			selections: [{ inputKey: 'events_json', outputKey: 'events_json' }],
+		});
+		expect(projected.projection.kind).toBe('known');
+		if (projected.projection.kind !== 'known') return;
+
+		expect(
+			resolveOutputReadHandling(
+				projected.projection.outputs.get('events_json')!,
+			),
+		).toEqual({
+			kind: 'nestedTransform',
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(finalizeEnvelope(projected).columnMetadata).toBeUndefined();
+	});
+
 	it('dropPositionalUnion throws for convertible branches and finalizes metadata-free without one', () => {
 		const convertible = fromModelColumns({
 			sql: 'SELECT sequence FROM events',

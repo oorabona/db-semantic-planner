@@ -234,6 +234,63 @@ function buildCteProjectionShape(
 	return { selections, expressions, preserveOneToOne: false };
 }
 
+function isRootJsonAggHydrationDecision(
+	decision: PlanReport['decisions'][number],
+): boolean {
+	const intentPath = decision.context.intentPath;
+	return (
+		decision.type === 'include-strategy' &&
+		decision.choice === 'json_agg' &&
+		(typeof intentPath !== 'string' || !intentPath.includes('.include['))
+	);
+}
+
+function addJsonAggOutputKeyCandidates(
+	keys: Set<string>,
+	baseName: string | undefined,
+	deps: AdapterCompilerDeps,
+): void {
+	if (baseName === undefined) return;
+	const rawJsonKey = `${baseName}_json`;
+	keys.add(rawJsonKey);
+	keys.add(deps.naming.toDatabase(rawJsonKey));
+}
+
+function jsonAggHydrationOutputKeys(
+	plan: PlanReport | undefined,
+	deps: AdapterCompilerDeps,
+): ReadonlySet<string> {
+	const keys = new Set<string>();
+	for (const decision of plan?.decisions ?? []) {
+		if (!isRootJsonAggHydrationDecision(decision)) continue;
+		addJsonAggOutputKeyCandidates(keys, decision.context.relation, deps);
+		addJsonAggOutputKeyCandidates(keys, decision.context.includeAlias, deps);
+	}
+	return keys;
+}
+
+function sourceHydrationPlanForCteProjection(
+	source: ProjectionEnvelope,
+	shape: {
+		readonly selections: readonly ProjectNamedFieldsSelection[];
+		readonly preserveOneToOne: boolean;
+	},
+	deps: AdapterCompilerDeps,
+): PlanReport | undefined {
+	if (source.hydrationPlan === undefined) return undefined;
+	if (shape.preserveOneToOne) return source.hydrationPlan;
+
+	const jsonOutputKeys = jsonAggHydrationOutputKeys(source.hydrationPlan, deps);
+	if (jsonOutputKeys.size === 0) return undefined;
+	return shape.selections.some(
+		(selection) =>
+			jsonOutputKeys.has(selection.inputKey) &&
+			jsonOutputKeys.has(selection.outputKey),
+	)
+		? source.hydrationPlan
+		: undefined;
+}
+
 function projectCteQueryEnvelope(
 	source: ProjectionEnvelope,
 	query: QueryIntent,
@@ -243,11 +300,15 @@ function projectCteQueryEnvelope(
 	hydrationPlan: PlanReport | undefined,
 ): ProjectionEnvelope {
 	const shape = buildCteProjectionShape(source, query.select, deps);
+	const projectedHydrationPlan =
+		hydrationPlan ?? sourceHydrationPlanForCteProjection(source, shape, deps);
 	if (shape.preserveOneToOne) {
 		return preserveOneToOne(source, {
 			sql,
 			parameters,
-			...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+			...(projectedHydrationPlan !== undefined
+				? { hydrationPlan: projectedHydrationPlan }
+				: {}),
 			preserveHydrationPlan: false,
 		});
 	}
@@ -256,7 +317,9 @@ function projectCteQueryEnvelope(
 		parameters,
 		selections: shape.selections,
 		expressions: shape.expressions,
-		...(hydrationPlan !== undefined ? { hydrationPlan } : {}),
+		...(projectedHydrationPlan !== undefined
+			? { hydrationPlan: projectedHydrationPlan }
+			: {}),
 		preserveHydrationPlan: false,
 	});
 }
@@ -636,7 +699,6 @@ export function compileCteQuery(
 				preserveOneToOne(innerCompiled, {
 					sql: renumberedInnerSql,
 					parameters: innerCompiled.parameters,
-					preserveHydrationPlan: false,
 				}),
 			);
 		} else {

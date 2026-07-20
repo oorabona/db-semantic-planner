@@ -13,6 +13,7 @@ import type {
 	JoinIntent,
 	ModelIR,
 	NestedOutputReadHandling,
+	OutputDescriptor,
 	PlanReport,
 	SubqueryIncludeInfo,
 } from '@dbsp/types';
@@ -36,6 +37,7 @@ import { validateDbType } from './db-type.js';
 import { createCompilerState } from './handlers/types.js';
 import { intentToDecisions } from './intent-to-decisions.js';
 import {
+	jsonAggColumnDescriptor,
 	jsonAggContainerShape,
 	resolveJsonAggColumnReadHandling,
 } from './json-agg-read-handling.js';
@@ -51,6 +53,7 @@ import {
 	finalizeEnvelope,
 	fromAstProjection,
 	type ProjectionEnvelope,
+	supplementOutputDescriptors,
 } from './projection-envelope.js';
 
 // ============================================================================
@@ -660,6 +663,55 @@ function buildJsonAggNestedReadTransforms(
 	return transforms.length > 0 ? transforms : undefined;
 }
 
+function buildJsonAggOutputDescriptor(
+	decision: PlanDecision,
+	targetTable: string,
+	model: ModelIR | undefined,
+): OutputDescriptor | undefined {
+	const relation = decision.relation ?? decision.relationName;
+	if (!relation) return undefined;
+	const table = model?.getTable(targetTable);
+	if (!table) return undefined;
+
+	const shape = jsonAggContainerShape(decision.relationType);
+	const columns = jsonAggProjectedColumns(decision, targetTable, model);
+	if (!columns || columns.length === 0) return undefined;
+
+	for (const columnName of columns) {
+		if (columnName === '*') continue;
+		const column = table.columns.find(
+			(candidate) => candidate.name === columnName,
+		);
+		if (!column) continue;
+		const descriptor = jsonAggColumnDescriptor(targetTable, column, shape);
+		if (resolveJsonAggColumnReadHandling(targetTable, column, shape)) {
+			return {
+				...descriptor,
+				outputKey: `${relation}_json`,
+			};
+		}
+	}
+	return undefined;
+}
+
+function buildJsonAggOutputDescriptors(
+	decisions: readonly PlanDecision[],
+	model: ModelIR | undefined,
+): readonly OutputDescriptor[] {
+	const descriptors: OutputDescriptor[] = [];
+	for (const decision of decisions) {
+		if (decision.type !== 'includeStrategy' || decision.choice !== 'json_agg') {
+			continue;
+		}
+		const targetTable = decision.targetTable;
+		const descriptor = targetTable
+			? buildJsonAggOutputDescriptor(decision, targetTable, model)
+			: undefined;
+		if (descriptor) descriptors.push(descriptor);
+	}
+	return descriptors;
+}
+
 function findJsonAggPlanDecision(
 	plan: PlanReport,
 	decision: PlanDecision,
@@ -1012,7 +1064,7 @@ export function compileSelectEnvelope<T = unknown>(
 	}
 
 	const result = compilePlan(simplifiedPlan, compilerOptions);
-	const env = fromAstProjection<T>({
+	const baseEnv = fromAstProjection<T>({
 		sql: result.sql,
 		parameters: result.parameters,
 		ast: result.ast,
@@ -1021,7 +1073,13 @@ export function compileSelectEnvelope<T = unknown>(
 		naming: deps.naming,
 		...(hydrationPlan ? { hydrationPlan } : {}),
 	});
-	return env;
+	return supplementOutputDescriptors(
+		baseEnv,
+		buildJsonAggOutputDescriptors(
+			simplifiedPlan.decisions,
+			resolvedModelForCompiler,
+		),
+	);
 }
 
 export function compileSelect<T = unknown>(

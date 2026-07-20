@@ -518,6 +518,30 @@ export function supplementOutputProvenance<T = unknown>(
 	});
 }
 
+export function supplementOutputDescriptors<T = unknown>(
+	source: ProjectionEnvelope<T>,
+	descriptors: readonly OutputDescriptor[],
+): ProjectionEnvelope<T> {
+	if (source.projection.kind === 'dropped' || descriptors.length === 0) {
+		return source;
+	}
+
+	const outputs = new Map(source.projection.outputs);
+	for (const output of descriptors) {
+		outputs.set(output.outputKey, output);
+	}
+
+	return makeEnvelope<T>({
+		sql: source.sql,
+		parameters: source.parameters,
+		...(source.ast !== undefined ? { ast: source.ast } : {}),
+		projection: { kind: 'known', outputs },
+		...(source.hydrationPlan !== undefined
+			? { hydrationPlan: source.hydrationPlan }
+			: {}),
+	});
+}
+
 export function projectNamedFields<T = unknown>(
 	source: ProjectionEnvelope<T>,
 	options: ProjectNamedFieldsOptions,
