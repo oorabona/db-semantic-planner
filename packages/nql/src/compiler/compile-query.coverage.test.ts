@@ -2523,7 +2523,7 @@ related_categories | select ancestorName, descendantName`,
 		]);
 	});
 
-	it('keeps relation-column binding provenance unresolved without a trusted target', () => {
+	it('records resolved provenance for physical-source single-hop, multihop, and hasMany relation columns without a trusted binding proof', () => {
 		const outputSchema = getQueryOutputSchema(
 			{
 				type: 'select',
@@ -2537,6 +2537,18 @@ related_categories | select ancestorName, descendantName`,
 							column: 'name',
 							as: 'authorName',
 						},
+						{
+							kind: 'relationColumn',
+							relation: 'author.profile',
+							column: 'bio',
+							as: 'authorBio',
+						},
+						{
+							kind: 'relationColumn',
+							relation: 'comments',
+							column: 'body',
+							as: 'commentBody',
+						},
 					],
 				},
 			},
@@ -2545,8 +2557,46 @@ related_categories | select ancestorName, descendantName`,
 		);
 
 		expect(outputSchema.outputProvenance).toEqual([
-			{ outputColumn: 'authorName' },
+			{ outputColumn: 'authorName', table: 'users', column: 'name' },
+			{ outputColumn: 'authorBio', table: 'profiles', column: 'bio' },
+			{ outputColumn: 'commentBody', table: 'comments', column: 'body' },
 		]);
+		expect(outputSchema.columnTypes).toBeUndefined();
+		expect(outputSchema.columnTypesUnavailable).toEqual({
+			column: 'authorName',
+			reason: 'relation-column',
+		});
+	});
+
+	it('keeps relation-column binding provenance unresolved without a validated target', () => {
+		const outputSchema = getQueryOutputSchema(
+			{
+				type: 'select',
+				from: 'posts',
+				select: {
+					type: 'expressions',
+					columns: [
+						{
+							kind: 'relationColumn',
+							relation: 'missing',
+							column: 'name',
+							as: 'missingName',
+						},
+					],
+				},
+			},
+			compilerContextForValidator(new ColumnValidator(schema)),
+			'unresolvable_physical_relation_projection',
+		);
+
+		expect(outputSchema.outputProvenance).toEqual([
+			{ outputColumn: 'missingName' },
+		]);
+		expect(outputSchema.columnTypes).toBeUndefined();
+		expect(outputSchema.columnTypesUnavailable).toEqual({
+			column: 'missingName',
+			reason: 'relation-column',
+		});
 	});
 
 	it('detects unresolved SELECT * output-schema errors by typed discriminant', () => {

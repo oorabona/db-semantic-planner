@@ -86,6 +86,11 @@ export type FromOutputProvenanceOptions = {
 	readonly hydrationPlan?: PlanReport;
 };
 
+export type SupplementOutputProvenanceOptions = Omit<
+	FromOutputProvenanceOptions,
+	'sql' | 'parameters' | 'hydrationPlan'
+>;
+
 export type ProjectNamedFieldsSelection = {
 	readonly inputKey: string;
 	readonly outputKey: string;
@@ -403,6 +408,47 @@ export function fromOutputProvenance<T = unknown>(
 		projection: { kind: 'known', outputs },
 		...(options.hydrationPlan !== undefined
 			? { hydrationPlan: options.hydrationPlan }
+			: {}),
+	});
+}
+
+export function supplementOutputProvenance<T = unknown>(
+	source: ProjectionEnvelope<T>,
+	options: SupplementOutputProvenanceOptions,
+): ProjectionEnvelope<T> {
+	if (source.projection.kind === 'dropped') return source;
+	const supplemental = fromOutputProvenance({
+		sql: source.sql,
+		parameters: source.parameters,
+		columns: options.columns,
+		...(options.outputProvenance !== undefined && {
+			outputProvenance: options.outputProvenance,
+		}),
+		model: options.model,
+		naming: options.naming,
+	});
+	if (supplemental.projection.kind === 'dropped') return source;
+
+	const outputs = new Map(source.projection.outputs);
+	for (const [outputKey, supplementalOutput] of supplemental.projection
+		.outputs) {
+		const sourceOutput = outputs.get(outputKey);
+		if (
+			sourceOutput === undefined ||
+			(sourceOutput.kind !== 'modelColumn' &&
+				supplementalOutput.kind === 'modelColumn')
+		) {
+			outputs.set(outputKey, supplementalOutput);
+		}
+	}
+
+	return makeEnvelope<T>({
+		sql: source.sql,
+		parameters: source.parameters,
+		...(source.ast !== undefined ? { ast: source.ast } : {}),
+		projection: { kind: 'known', outputs },
+		...(source.hydrationPlan !== undefined
+			? { hydrationPlan: source.hydrationPlan }
 			: {}),
 	});
 }

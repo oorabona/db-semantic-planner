@@ -70,6 +70,8 @@ const relationConversionSchema = schema({
 	users: {
 		id: 'uuid',
 		accountNumber: { type: 'bigint', js: 'bigint' },
+		safeAccountNumber: { type: 'bigint', js: 'number' },
+		stringAccountNumber: { type: 'bigint', js: 'string' },
 	},
 	profiles: {
 		id: 'uuid',
@@ -80,6 +82,8 @@ const relationConversionSchema = schema({
 			unique: true,
 		}),
 		accountNumber: { type: 'bigint', js: 'bigint' },
+		safeAccountNumber: { type: 'bigint', js: 'number' },
+		stringAccountNumber: { type: 'bigint', js: 'string' },
 	},
 	events: {
 		id: 'uuid',
@@ -88,6 +92,17 @@ const relationConversionSchema = schema({
 			inverse: 'events',
 			references: ['id'],
 		}),
+	},
+	posts: {
+		id: 'uuid',
+		authorId: ref('users', {
+			as: 'author',
+			inverse: 'posts',
+			references: ['id'],
+		}),
+		viewCount: { type: 'bigint', js: 'bigint' },
+		safeViewCount: { type: 'bigint', js: 'number' },
+		stringViewCount: { type: 'bigint', js: 'string' },
 	},
 });
 
@@ -367,26 +382,43 @@ describe('PgsqlAdapter bigint js result conversion', () => {
 		expect(rows).toEqual([{ sequence: 9007199254740993n }]);
 	});
 
-	it('converts NQL binding outputs projected from scalar relation bigint provenance', async () => {
-		const bundle = compileRelationConversionNql(`events
-			| select id, userId
-			| bind projected_events
-projected_events
-			| select user.accountNumber as accountNumber
-			| bind event_accounts
-event_accounts | select accountNumber`);
+	it('converts NQL binding outputs projected from single-hop physical relation provenance', async () => {
+		const bundle = compileRelationConversionNql(`posts
+			| select author.accountNumber as accountNumber, author.safeAccountNumber as safeAccountNumber, author.stringAccountNumber as stringAccountNumber
+			| bind post_author_accounts
+post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNumber`);
+		const outputSchema = bundle.bindingOutputSchemas?.get(
+			'post_author_accounts',
+		);
+		if (outputSchema === undefined) {
+			throw new Error('missing post_author_accounts output schema');
+		}
 		const adapter = createPgsqlAdapter(
-			makePool([{ accountNumber: '9007199254740993' }]),
+			makePool([
+				{
+					accountNumber: '9007199254740993',
+					safeAccountNumber: '42',
+					stringAccountNumber: '9007199254740994',
+				},
+			]),
 			{ model: relationConversionSchema.model },
 		);
 
-		expect(
-			bundle.bindingOutputSchemas?.get('event_accounts')?.outputProvenance,
-		).toEqual([
+		expect(outputSchema.outputProvenance).toEqual([
 			{
 				outputColumn: 'accountNumber',
 				table: 'users',
 				column: 'accountNumber',
+			},
+			{
+				outputColumn: 'safeAccountNumber',
+				table: 'users',
+				column: 'safeAccountNumber',
+			},
+			{
+				outputColumn: 'stringAccountNumber',
+				table: 'users',
+				column: 'stringAccountNumber',
 			},
 		]);
 		const compiled = adapter.compile(bundle, {
@@ -397,22 +429,126 @@ event_accounts | select accountNumber`);
 			column: 'accountNumber',
 			js: 'bigint',
 		});
+		expect(compiled.columnMetadata?.get('safeAccountNumber')).toEqual({
+			table: 'users',
+			column: 'safeAccountNumber',
+			js: 'number',
+		});
+		expect(compiled.columnMetadata?.get('stringAccountNumber')).toEqual({
+			table: 'users',
+			column: 'stringAccountNumber',
+			js: 'string',
+		});
 
 		const rows = await adapter.execute(compiled);
 
-		expect(rows).toEqual([{ accountNumber: 9007199254740993n }]);
+		expect(rows).toEqual([
+			{
+				accountNumber: 9007199254740993n,
+				safeAccountNumber: 42,
+				stringAccountNumber: '9007199254740994',
+			},
+		]);
 	});
 
-	it('converts NQL binding outputs projected from multihop relation bigint provenance', async () => {
-		const bundle = compileRelationConversionNql(`events
-			| select id, userId
-			| bind projected_events
-projected_events
-			| select user.profile.accountNumber as profileAccountNumber
-			| bind profile_accounts
-profile_accounts | select profileAccountNumber`);
+	it('converts runtime NQL bindings from compiler physical relation provenance', async () => {
+		const compiledSource = compileRelationConversionNql(`posts
+			| select author.accountNumber as accountNumber, author.safeAccountNumber as safeAccountNumber, author.stringAccountNumber as stringAccountNumber
+			| bind post_author_accounts
+post_author_accounts | select accountNumber, safeAccountNumber, stringAccountNumber`);
+		const outputSchema = compiledSource.bindingOutputSchemas?.get(
+			'post_author_accounts',
+		);
+		if (outputSchema === undefined) {
+			throw new Error('missing post_author_accounts output schema');
+		}
 		const adapter = createPgsqlAdapter(
-			makePool([{ profileAccountNumber: '9007199254740995' }]),
+			makePool([
+				{
+					accountNumber: '9007199254740993',
+					safeAccountNumber: '43',
+					stringAccountNumber: '9007199254740994',
+				},
+			]),
+			{ model: relationConversionSchema.model },
+		);
+		const bundle: CompiledNqlQuery = {
+			query: {
+				type: 'select',
+				from: 'post_author_accounts',
+				select: { type: 'fields', fields: [...outputSchema.columns] },
+			},
+			runtimeBindings: new Map([
+				[
+					'post_author_accounts',
+					{
+						columns: outputSchema.columns,
+						rows: [
+							{
+								accountNumber: '9007199254740993',
+								safeAccountNumber: '43',
+								stringAccountNumber: '9007199254740994',
+							},
+						],
+						...(outputSchema.outputProvenance !== undefined && {
+							outputProvenance: outputSchema.outputProvenance,
+						}),
+						...(outputSchema.columnTypes !== undefined && {
+							columnTypes: outputSchema.columnTypes,
+						}),
+					},
+				],
+			]),
+		};
+
+		expect(outputSchema.columnTypes).toBeUndefined();
+		expect(outputSchema.columnTypesUnavailable).toEqual({
+			column: 'accountNumber',
+			reason: 'relation-column',
+		});
+		const compiled = adapter.compile(bundle, {
+			model: relationConversionSchema.model,
+		});
+		expect(compiled.columnMetadata?.get('accountNumber')).toEqual({
+			table: 'users',
+			column: 'accountNumber',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.get('safeAccountNumber')).toEqual({
+			table: 'users',
+			column: 'safeAccountNumber',
+			js: 'number',
+		});
+		expect(compiled.columnMetadata?.get('stringAccountNumber')).toEqual({
+			table: 'users',
+			column: 'stringAccountNumber',
+			js: 'string',
+		});
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([
+			{
+				accountNumber: 9007199254740993n,
+				safeAccountNumber: 43,
+				stringAccountNumber: '9007199254740994',
+			},
+		]);
+	});
+
+	it('converts NQL binding outputs projected from multihop physical relation provenance', async () => {
+		const bundle = compileRelationConversionNql(`posts
+			| select author.profile.accountNumber as profileAccountNumber, author.profile.safeAccountNumber as profileSafeAccountNumber, author.profile.stringAccountNumber as profileStringAccountNumber
+			| bind profile_accounts
+profile_accounts | select profileAccountNumber, profileSafeAccountNumber, profileStringAccountNumber`);
+		const adapter = createPgsqlAdapter(
+			makePool([
+				{
+					profileAccountNumber: '9007199254740995',
+					profileSafeAccountNumber: '44',
+					profileStringAccountNumber: '9007199254740996',
+				},
+			]),
 			{ model: relationConversionSchema.model },
 		);
 
@@ -424,6 +560,16 @@ profile_accounts | select profileAccountNumber`);
 				table: 'profiles',
 				column: 'accountNumber',
 			},
+			{
+				outputColumn: 'profileSafeAccountNumber',
+				table: 'profiles',
+				column: 'safeAccountNumber',
+			},
+			{
+				outputColumn: 'profileStringAccountNumber',
+				table: 'profiles',
+				column: 'stringAccountNumber',
+			},
 		]);
 		const compiled = adapter.compile(bundle, {
 			model: relationConversionSchema.model,
@@ -433,10 +579,91 @@ profile_accounts | select profileAccountNumber`);
 			column: 'accountNumber',
 			js: 'bigint',
 		});
+		expect(compiled.columnMetadata?.get('profileSafeAccountNumber')).toEqual({
+			table: 'profiles',
+			column: 'safeAccountNumber',
+			js: 'number',
+		});
+		expect(compiled.columnMetadata?.get('profileStringAccountNumber')).toEqual({
+			table: 'profiles',
+			column: 'stringAccountNumber',
+			js: 'string',
+		});
 
 		const rows = await adapter.execute(compiled);
 
-		expect(rows).toEqual([{ profileAccountNumber: 9007199254740995n }]);
+		expect(rows).toEqual([
+			{
+				profileAccountNumber: 9007199254740995n,
+				profileSafeAccountNumber: 44,
+				profileStringAccountNumber: '9007199254740996',
+			},
+		]);
+	});
+
+	it('converts NQL binding outputs projected from hasMany physical relation provenance', async () => {
+		const bundle = compileRelationConversionNql(`users
+			| select posts.viewCount as postViewCount, posts.safeViewCount as postSafeViewCount, posts.stringViewCount as postStringViewCount
+			| bind user_post_counts
+user_post_counts | select postViewCount, postSafeViewCount, postStringViewCount`);
+		const adapter = createPgsqlAdapter(
+			makePool([
+				{
+					postViewCount: '9007199254740997',
+					postSafeViewCount: '45',
+					postStringViewCount: '9007199254740998',
+				},
+			]),
+			{ model: relationConversionSchema.model },
+		);
+
+		expect(
+			bundle.bindingOutputSchemas?.get('user_post_counts')?.outputProvenance,
+		).toEqual([
+			{
+				outputColumn: 'postViewCount',
+				table: 'posts',
+				column: 'viewCount',
+			},
+			{
+				outputColumn: 'postSafeViewCount',
+				table: 'posts',
+				column: 'safeViewCount',
+			},
+			{
+				outputColumn: 'postStringViewCount',
+				table: 'posts',
+				column: 'stringViewCount',
+			},
+		]);
+		const compiled = adapter.compile(bundle, {
+			model: relationConversionSchema.model,
+		});
+		expect(compiled.columnMetadata?.get('postViewCount')).toEqual({
+			table: 'posts',
+			column: 'viewCount',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.get('postSafeViewCount')).toEqual({
+			table: 'posts',
+			column: 'safeViewCount',
+			js: 'number',
+		});
+		expect(compiled.columnMetadata?.get('postStringViewCount')).toEqual({
+			table: 'posts',
+			column: 'stringViewCount',
+			js: 'string',
+		});
+
+		const rows = await adapter.execute(compiled);
+
+		expect(rows).toEqual([
+			{
+				postViewCount: 9007199254740997n,
+				postSafeViewCount: 45,
+				postStringViewCount: '9007199254740998',
+			},
+		]);
 	});
 
 	it('converts rows from a WITH body that reads an NQL binding', async () => {

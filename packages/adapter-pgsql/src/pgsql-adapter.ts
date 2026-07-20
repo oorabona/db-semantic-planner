@@ -41,6 +41,7 @@ import type {
 	ModelIR,
 	MutationReturningItem,
 	NqlBindingColumnTypeInfo,
+	NqlBindingOutputProvenance,
 	NqlRuntimeBinding,
 	PlanReport,
 	QueryIntent,
@@ -134,6 +135,7 @@ import {
 	type ProjectNamedFieldsSelection,
 	preserveOneToOne,
 	projectNamedFields,
+	supplementOutputProvenance,
 } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
@@ -832,10 +834,15 @@ function mapRuntimeBindingColumnType(type: ColumnType): string | undefined {
 function findRuntimeBindingSourceTable(
 	model: ModelIR,
 	sourceTable: string,
+	naming?: NamingPlugin,
 ): TableIR | undefined {
 	return (
 		model.getTable(sourceTable) ??
-		[...model.tables.values()].find((table) => table.name === sourceTable)
+		[...model.tables.values()].find(
+			(table) =>
+				table.name === sourceTable ||
+				(naming !== undefined && naming.toDatabase(table.name) === sourceTable),
+		)
 	);
 }
 
@@ -854,7 +861,9 @@ function resolveRuntimeBindingColumnType(
 	naming: NamingPlugin,
 ): string {
 	const column = sourceTable.columns.find(
-		(candidate) => candidate.name === columnName,
+		(candidate) =>
+			candidate.name === columnName ||
+			naming.toDatabase(candidate.name) === columnName,
 	);
 	if (column === undefined) {
 		throw new Error(
@@ -896,7 +905,11 @@ function resolveRuntimeBindingColumnTypes(
 			`NQL runtime binding '${name}' cannot materialize non-empty rows because no model is available for source-table column type resolution.`,
 		);
 	}
-	const sourceTable = findRuntimeBindingSourceTable(model, sourceTableName);
+	const sourceTable = findRuntimeBindingSourceTable(
+		model,
+		sourceTableName,
+		naming,
+	);
 	if (sourceTable === undefined) {
 		throw new Error(
 			`NQL runtime binding '${name}' cannot resolve source table '${sourceTableName}' in the model.`,
@@ -911,6 +924,73 @@ function resolveRuntimeBindingColumnTypes(
 			naming,
 		),
 	);
+}
+
+function runtimeBindingOutputProvenanceByColumn(
+	provenance: readonly NqlBindingOutputProvenance[],
+	naming: NamingPlugin,
+): ReadonlyMap<string, NqlBindingOutputProvenance[]> {
+	const byColumn = new Map<string, NqlBindingOutputProvenance[]>();
+	for (const entry of provenance) {
+		const outputKey = naming.toDatabase(entry.outputColumn);
+		const entries = byColumn.get(outputKey) ?? [];
+		entries.push(entry);
+		byColumn.set(outputKey, entries);
+	}
+	return byColumn;
+}
+
+function resolveRuntimeBindingOutputProvenanceColumnTypes(
+	name: string,
+	binding: NqlRuntimeBinding,
+	model: ModelIR | undefined,
+	schemaName: string | undefined,
+	naming: NamingPlugin,
+): readonly string[] | undefined {
+	if (binding.outputProvenance === undefined) return undefined;
+	if (model === undefined) {
+		throw new Error(
+			`NQL runtime binding '${name}' cannot materialize output-provenance rows because no model is available for column type resolution.`,
+		);
+	}
+	const provenanceByColumn = runtimeBindingOutputProvenanceByColumn(
+		binding.outputProvenance,
+		naming,
+	);
+	const pgTypes: string[] = [];
+	for (const column of binding.columns) {
+		const entries = provenanceByColumn.get(naming.toDatabase(column)) ?? [];
+		if (entries.length === 0) return undefined;
+		if (entries.length > 1) {
+			throw new Error(
+				`NQL runtime binding '${name}' cannot materialize output column '${column}' because its output provenance is ambiguous.`,
+			);
+		}
+		const [provenance] = entries;
+		if (provenance?.table === undefined || provenance.column === undefined) {
+			return undefined;
+		}
+		const sourceTable = findRuntimeBindingSourceTable(
+			model,
+			provenance.table,
+			naming,
+		);
+		if (sourceTable === undefined) {
+			throw new Error(
+				`NQL runtime binding '${name}' cannot resolve provenance table '${provenance.table}' in the model.`,
+			);
+		}
+		pgTypes.push(
+			resolveRuntimeBindingColumnType(
+				name,
+				sourceTable,
+				provenance.column,
+				schemaName,
+				naming,
+			),
+		);
+	}
+	return pgTypes;
 }
 
 function assertRuntimeBindingValuesParameterCount(
@@ -1045,6 +1125,26 @@ function compileTypedNqlRuntimeBindingCte(
 		targetSchema,
 		naming,
 	);
+	return compileNqlRuntimeBindingCteWithPgTypes(
+		name,
+		binding,
+		naming,
+		parameterOffset,
+		cteName,
+		columnSql,
+		pgTypes,
+	);
+}
+
+function compileNqlRuntimeBindingCteWithPgTypes(
+	name: string,
+	binding: NqlRuntimeBinding,
+	naming: NamingPlugin,
+	parameterOffset: number,
+	cteName: string,
+	columnSql: string,
+	pgTypes: readonly string[],
+): { cte: string; parameters: readonly unknown[] } {
 	const anchorColumns = binding.columns
 		.map(
 			(column, columnIndex) =>
@@ -1134,6 +1234,24 @@ function compileNqlRuntimeBindingCte(
 			cteName,
 			columnSql,
 			schemaName,
+		);
+	}
+	const provenancePgTypes = resolveRuntimeBindingOutputProvenanceColumnTypes(
+		name,
+		binding,
+		model,
+		schemaName,
+		naming,
+	);
+	if (provenancePgTypes !== undefined) {
+		return compileNqlRuntimeBindingCteWithPgTypes(
+			name,
+			binding,
+			naming,
+			parameterOffset,
+			cteName,
+			columnSql,
+			provenancePgTypes,
 		);
 	}
 
@@ -1984,16 +2102,11 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 			bindingProjections.set(
 				emittedBindName(name, naming),
 				outputSchema?.outputProvenance !== undefined
-					? fromOutputProvenance({
-							sql: compiled.sql,
-							parameters: compiled.parameters,
+					? supplementOutputProvenance(compiled, {
 							columns: outputSchema.columns,
 							outputProvenance: outputSchema.outputProvenance,
 							model: deps.model,
 							naming,
-							...(compiled.hydrationPlan !== undefined && {
-								hydrationPlan: compiled.hydrationPlan,
-							}),
 						})
 					: compiled,
 			);

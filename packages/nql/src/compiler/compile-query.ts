@@ -1446,6 +1446,32 @@ export function getQueryOutputSchema(
 		}
 		return unresolvedProvenance(outputColumn);
 	};
+	const resolvePhysicalRelationColumnProvenance = (
+		outputColumn: string,
+		expr: Extract<ExpressionIntent, { readonly kind: 'relationColumn' }>,
+	): NqlBindingOutputProvenance | undefined => {
+		if (!sourceIsPhysicalTable || !ctx.validator) return undefined;
+		const relationPath = expr.relation.split('.');
+		if (relationPath.length === 0 || relationPath.some((part) => part === '')) {
+			return undefined;
+		}
+		let targetTable = intent.from;
+		for (const relationName of relationPath) {
+			const relation = ctx.validator.getRelation(targetTable, relationName);
+			if (relation === undefined) return undefined;
+			targetTable = relation.target;
+		}
+		const resolvedColumn = ctx.validator.resolvePhysicalColumnName(
+			targetTable,
+			expr.column,
+		);
+		if (resolvedColumn === undefined) return undefined;
+		return {
+			outputColumn,
+			table: targetTable,
+			column: resolvedColumn,
+		};
+	};
 	const addDirectProjection = (outputColumn: string, sourceColumn: string) => {
 		const resolvedSourceColumn = resolveSourceColumn(sourceColumn);
 		// Record the type-resolution attempt BEFORE the dedup check below so a
@@ -1496,15 +1522,19 @@ export function getQueryOutputSchema(
 	const addRelationColumn = (outputColumn: string, expr: ExpressionIntent) => {
 		const trusted = getTrustedNqlRelationFilterFields(expr);
 		const targetTable = trusted?.hops.at(-1)?.target ?? trusted?.targetTable;
-		addProvenanceCandidate(
-			outputColumn,
+		const provenance =
 			targetTable !== undefined && trusted?.selectedColumn !== undefined
 				? {
 						outputColumn,
 						table: targetTable,
 						column: trusted.selectedColumn,
 					}
-				: unresolvedProvenance(outputColumn),
+				: expr.kind === 'relationColumn'
+					? resolvePhysicalRelationColumnProvenance(outputColumn, expr)
+					: undefined;
+		addProvenanceCandidate(
+			outputColumn,
+			provenance ?? unresolvedProvenance(outputColumn),
 		);
 		typeCandidates.push({
 			column: outputColumn,

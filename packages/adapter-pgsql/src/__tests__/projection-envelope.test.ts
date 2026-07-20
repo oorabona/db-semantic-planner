@@ -10,6 +10,7 @@ import {
 	fromModelColumns,
 	preserveOneToOne,
 	projectNamedFields,
+	supplementOutputProvenance,
 } from '../projection-envelope.js';
 
 const testSchema = schema({
@@ -209,6 +210,43 @@ describe('projection envelope', () => {
 			table: 'events',
 			column: 'sequence',
 			js: 'bigint',
+		});
+	});
+
+	it('supplements unresolved outputs without downgrading resolved model columns', () => {
+		const source = fromModelColumns({
+			sql: 'SELECT sequence FROM events',
+			parameters: [],
+			table: 'events',
+			columns: ['sequence'],
+			model: testSchema.model,
+			naming: identityNaming,
+		});
+
+		const supplemented = supplementOutputProvenance(source, {
+			columns: ['sequence', 'safeSequence'],
+			outputProvenance: [
+				{ outputColumn: 'sequence' },
+				{
+					outputColumn: 'safeSequence',
+					table: 'events',
+					column: 'safeSequence',
+				},
+			],
+			model: testSchema.model,
+			naming: identityNaming,
+		});
+		const compiled = finalizeEnvelope(supplemented);
+
+		expect(compiled.columnMetadata?.get('sequence')).toEqual({
+			table: 'events',
+			column: 'sequence',
+			js: 'bigint',
+		});
+		expect(compiled.columnMetadata?.get('safeSequence')).toEqual({
+			table: 'events',
+			column: 'safeSequence',
+			js: 'number',
 		});
 	});
 });
