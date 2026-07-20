@@ -25,6 +25,7 @@ import type {
 	WhereIntent,
 } from '@dbsp/types';
 import { toColumnList } from '@dbsp/types';
+import type { Node } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
 import { compileSelect } from './adapter-compiler-select.js';
 import {
@@ -73,6 +74,12 @@ import {
 	type UpsertFromConfig,
 } from './mutations/index.js';
 import type { NamingPlugin } from './naming-plugin.js';
+import {
+	finalizeEnvelope,
+	fromAstProjection,
+	type ProjectionEnvelope,
+	preserveOneToOne,
+} from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 
 // ============================================================================
@@ -111,25 +118,60 @@ function compileSourceQueryCte(
 	const sourcePlan = planFn(sourceQuery, model, {
 		dialectCapabilities: deps.dialectCapabilities ?? POSTGRESQL_CAPABILITIES,
 	});
-	return compileSelect(sourcePlan, options, deps);
+	const source = compileSelect(sourcePlan, options, deps);
+	return {
+		sql: source.sql,
+		parameters: source.parameters,
+	};
+}
+
+function compileMutationEnvelope(
+	ast: Node,
+	rootTable: string,
+	state: ReturnType<typeof createCompilerState>,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): ProjectionEnvelope {
+	const sql = deparseQuoted(ast);
+	return fromAstProjection({
+		sql,
+		parameters: state.parameters,
+		ast,
+		rootTable,
+		model: options?.model ?? deps.model,
+		naming: deps.naming,
+	});
+}
+
+function compileMutationQuery(
+	ast: Node,
+	rootTable: string,
+	state: ReturnType<typeof createCompilerState>,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+): CompiledQuery {
+	return finalizeEnvelope(
+		compileMutationEnvelope(ast, rootTable, state, options, deps),
+	);
 }
 
 function prependSourceCte(
-	sql: string,
-	parameters: readonly unknown[],
+	query: ProjectionEnvelope,
 	sourceName: string,
 	sourceCte: CompiledQuery | undefined,
 	naming: NamingPlugin,
 ): CompiledQuery {
 	if (sourceCte === undefined) {
-		return { sql, parameters };
+		return finalizeEnvelope(query);
 	}
 	const cteParamCount = sourceCte.parameters.length;
 	const sourceCteName = emittedBindName(sourceName, naming);
-	return {
-		sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(sql, cteParamCount)}`,
-		parameters: [...sourceCte.parameters, ...parameters],
-	};
+	return finalizeEnvelope(
+		preserveOneToOne(query, {
+			sql: `WITH ${quoteIdent(sourceCteName, 'alias')} as (${sourceCte.sql}) ${renumberSqlParams(query.sql, cteParamCount)}`,
+			parameters: [...sourceCte.parameters, ...query.parameters],
+		}),
+	);
 }
 
 function resolveMutationExistsForeignKey(
@@ -410,12 +452,7 @@ export function compileInsert(
 	const ast = useUnnest
 		? compileUnnestInsertMutation(config, ctx, state)
 		: compileInsertMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
 // ============================================================================
@@ -477,11 +514,9 @@ export function compileInsertFrom(
 	};
 
 	const ast = compileInsertFromMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
 
 	return prependSourceCte(
-		sql,
-		state.parameters,
+		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
 		deps.naming,
@@ -538,12 +573,7 @@ export function compileUpdate(
 	};
 
 	const ast = compileUpdateMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
 // ============================================================================
@@ -666,12 +696,7 @@ export function compileBatchUpdate(
 	};
 
 	const ast = compileUnnestUpdateMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileMutationQuery(ast, intent.table, state, _options, deps);
 }
 
 // ============================================================================
@@ -719,12 +744,7 @@ export function compileDelete(
 	};
 
 	const ast = compileDeleteMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
 // ============================================================================
@@ -872,12 +892,7 @@ export function compileUpsert(
 	const ast = useUnnest
 		? compileUnnestUpsertMutation(config, ctx, state)
 		: compileUpsertMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
-
-	return {
-		sql,
-		parameters: state.parameters,
-	};
+	return compileMutationQuery(ast, intent.table, state, options, deps);
 }
 
 // ============================================================================
@@ -951,11 +966,9 @@ export function compileUpsertFrom(
 	};
 
 	const ast = compileUpsertFromMutation(config, ctx, state);
-	const sql = deparseQuoted(ast);
 
 	return prependSourceCte(
-		sql,
-		state.parameters,
+		compileMutationEnvelope(ast, intent.table, state, options, deps),
 		intent.source,
 		sourceCte,
 		deps.naming,

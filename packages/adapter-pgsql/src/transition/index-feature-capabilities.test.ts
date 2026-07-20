@@ -14,8 +14,7 @@ function descriptorAvailable(
 ): boolean {
 	const actual = serverVersionNum(version);
 	return (
-		actual !== undefined &&
-		actual >= descriptor.predicate.minServerVersionNum
+		actual !== undefined && actual >= descriptor.predicate.minServerVersionNum
 	);
 }
 
@@ -39,7 +38,8 @@ describe('PostgreSQL index feature capability descriptors', () => {
 	});
 
 	it('derives NULLS NOT DISTINCT availability from the descriptor min server version', () => {
-		const min = INDEX_NULLS_NOT_DISTINCT_CAPABILITY.predicate.minServerVersionNum;
+		const min =
+			INDEX_NULLS_NOT_DISTINCT_CAPABILITY.predicate.minServerVersionNum;
 
 		expect(min).toBe(serverVersionNum('15'));
 		expect(serverVersionNum('14')).toBeLessThan(min);

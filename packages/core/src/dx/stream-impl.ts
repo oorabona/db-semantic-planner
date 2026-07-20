@@ -8,7 +8,11 @@
  * @internal
  */
 
-import { type Dump, supportsStreaming } from '../adapter.js';
+import {
+	type CompiledQuery,
+	type Dump,
+	supportsStreaming,
+} from '../adapter.js';
 import type { ModelIR } from '../model-ir.js';
 import type { PlanOptions } from '../planner.js';
 import { ExecutionError } from './errors.js';
@@ -68,8 +72,7 @@ export function stream<TResult>(
 	// beforeQuery hooks run, because hooks can modify the intent (e.g. inject
 	// a tenant WHERE clause).  Moving compilation inside the lazy iterator's
 	// first-next guard ensures hook changes are reflected in the executed SQL.
-	let compiledQuery: { sql: string; parameters: readonly unknown[] } | null =
-		null;
+	let compiledQuery: CompiledQuery<TResult> | null = null;
 	let capturedDump: Dump | null = null;
 	let adapterIterator: AsyncIterableIterator<TResult> | null = null;
 	let onStartCalled = false;
@@ -143,7 +146,7 @@ export function stream<TResult>(
 					if (schemaName !== undefined) {
 						compileOptions.schemaName = schemaName;
 					}
-					const compiled = adapter.compile(planReport, compileOptions);
+					const compiled = adapter.compile<TResult>(planReport, compileOptions);
 					compiledQuery = compiled;
 					capturedDump = adapter.createDump(planReport, compiled);
 					if (
@@ -156,13 +159,25 @@ export function stream<TResult>(
 						};
 					}
 				} else {
-					// No hooks: compute dump eagerly (same as original fast path)
-					const dumpResult = builder.dump();
-					compiledQuery = {
-						sql: dumpResult.sql,
-						parameters: dumpResult.params as readonly unknown[],
+					const planReport = builder.plan();
+					const compileOptions: { schemaName?: string; model: ModelIR } = {
+						model: builder.ctx.model,
 					};
-					capturedDump = dumpResult;
+					if (schemaName !== undefined) {
+						compileOptions.schemaName = schemaName;
+					}
+					const compiled = adapter.compile<TResult>(planReport, compileOptions);
+					compiledQuery = compiled;
+					capturedDump = adapter.createDump(planReport, compiled);
+					if (
+						capturedDump.meta?.schema === undefined &&
+						schemaName !== undefined
+					) {
+						capturedDump = {
+							...capturedDump,
+							meta: { ...capturedDump.meta, schema: schemaName },
+						};
+					}
 				}
 			}
 

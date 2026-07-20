@@ -361,6 +361,37 @@ departments | select name | union (employee_names | select name | except (depart
 				/^\(select .+ from .+\) union \(select .+ from .+\)$/,
 			);
 			expect(result.parameters).toEqual([]);
+			expect(result.columnMetadata).toBeUndefined();
+		});
+
+		it('fails loud through envelope finalization when a branch carries js metadata', () => {
+			const jsSchema = schema({
+				events: {
+					id: { type: 'integer', primaryKey: true },
+					sequence: { type: 'bigint', js: 'bigint' },
+				},
+			});
+			const adapter = createPgsqlCompileOnlyAdapter();
+			const compileFn = createLeafCompileFn(adapter, jsSchema.model, plan);
+			const setOp: SetOperationIntent = {
+				kind: 'setOperation',
+				op: 'union',
+				all: false,
+				left: {
+					type: 'select',
+					from: 'events',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+				right: {
+					type: 'select',
+					from: 'events',
+					select: { type: 'fields', fields: ['sequence'] },
+				},
+			};
+
+			expect(() => compileSetOperation(setOp, compileFn)).toThrow(
+				'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
+			);
 		});
 
 		it('works with nested set operations built manually', () => {

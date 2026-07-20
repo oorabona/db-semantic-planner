@@ -7,7 +7,7 @@
  */
 
 import { eq, ref, schema } from '@dbsp/core';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createRecursiveBuilder } from './recursive-query-builder.js';
 import { createMockAdapter } from './test-utils.js';
 
@@ -123,6 +123,39 @@ describe('RecursiveQueryBuilder', () => {
 				.traverseVia('roleEdges', { from: 'from_role_id', to: 'to_role_id' });
 
 			expect(() => builder.buildIntent()).toThrow('maxDepth() must be called');
+		});
+	});
+
+	describe('execution', () => {
+		it('preserves compiled column metadata when rebuilding for execute', async () => {
+			const columnMetadata = new Map([
+				['id', { table: 'categories', column: 'id', js: 'bigint' as const }],
+			]);
+			const adapter = {
+				...createMockAdapter(),
+				compileRecursive: vi.fn().mockReturnValue({
+					sql: 'WITH RECURSIVE category_tree AS (...) SELECT id FROM category_tree',
+					parameters: [],
+					columnMetadata,
+				}),
+				execute: vi.fn().mockResolvedValue([]),
+			};
+			const builder = createRecursiveBuilder(
+				categoryModel,
+				adapter,
+				'category_tree',
+			);
+
+			await builder
+				.from('categories')
+				.nodeId('id')
+				.traverseVia('categories', { parentId: 'parent_id' })
+				.maxDepth(5)
+				.execute();
+
+			expect(adapter.execute).toHaveBeenCalledWith(
+				expect.objectContaining({ columnMetadata }),
+			);
 		});
 	});
 

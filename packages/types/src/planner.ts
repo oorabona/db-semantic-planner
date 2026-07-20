@@ -9,6 +9,7 @@ import type { ColumnListInput } from './column-list.js';
 import type { DialectCapabilities } from './dialects.js';
 import type { QueryIntent, RecursiveIntent } from './intent-ast.js';
 import type { IncludeStrategy, RelationType } from './model-ir.js';
+import type { NestedOutputReadHandling } from './output-provenance.js';
 
 // ============================================================================
 // Decision Types
@@ -72,6 +73,10 @@ export interface PlanDecision {
 		readonly targetOrderKey?: readonly JsonAggOrderByEntry[];
 		/** True when the target order key is the no-PK deterministic fallback. */
 		readonly orderByFallback?: boolean;
+		/** Adapter-emitted JSON key → model column map for json_agg hydration. */
+		readonly jsonAggColumnKeyMap?: Readonly<Record<string, string>>;
+		/** Resolver-emitted nested read transforms for json_agg payload columns. */
+		readonly jsonAggNestedReadTransforms?: readonly NestedOutputReadHandling[];
 		/** Whether the relation is self-referential (source === target) */
 		readonly isSelfRef?: boolean;
 	};

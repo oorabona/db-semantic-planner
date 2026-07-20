@@ -10,17 +10,19 @@ import type {
 	CompiledQuery,
 	CompileOptions,
 	CteQueryIntent,
+	ExpressionIntent,
 	ModelIR,
 	PlanReport,
 	QueryIntent,
 	RawCteIntent,
 	RecursivePlanReport,
+	SelectIntent,
 	SimpleCteIntent,
 	UnnestCteIntent,
 } from '@dbsp/types';
 import type { Node, SelectStmt } from '@pgsql/types';
 import type { AdapterCompilerDeps } from './adapter-compiler-deps.js';
-import { compileSelect } from './adapter-compiler-select.js';
+import { compileSelectEnvelope } from './adapter-compiler-select.js';
 import {
 	binaryExpr,
 	columnRef,
@@ -28,6 +30,7 @@ import {
 	integerNode,
 	stringNode,
 } from './ast-helpers.js';
+import { emittedBindName } from './binding-registry.js';
 import { buildCustomFnFilter } from './compiler.js';
 import { inferPgArrayType, stripArraySuffix } from './compiler-utils.js';
 import { deparseQuoted } from './deparse.js';
@@ -37,9 +40,332 @@ import { compileValue } from './handlers/where/utils.js';
 import { createTypeCastParamRef } from './param-ref.js';
 import { mapComparisonOperator } from './plan-decision-extractor.js';
 import {
+	dropPositionalUnion,
+	finalizeEnvelope,
+	fromAstProjection,
+	fromModelColumns,
+	type ProjectionEnvelope,
+	type ProjectNamedFieldsExpression,
+	type ProjectNamedFieldsSelection,
+	preserveOneToOne,
+	projectNamedFields,
+} from './projection-envelope.js';
+import {
 	buildRecursiveCte,
 	type RecursiveCteConfig,
 } from './recursive/index.js';
+
+type CteProjectionRegistry = ReadonlyMap<string, ProjectionEnvelope>;
+
+function getRegisteredProjection(
+	registry: CteProjectionRegistry,
+	name: string,
+	deps: AdapterCompilerDeps,
+): ProjectionEnvelope | undefined {
+	if (registry.size === 0) return undefined;
+	const exact = registry.get(name);
+	if (exact !== undefined) return exact;
+	const naming = deps.naming;
+	if (naming === undefined) return undefined;
+	return registry.get(emittedBindName(name, naming));
+}
+
+function createPlanReportForQuery(query: QueryIntent): PlanReport {
+	return {
+		rootTable: query.from,
+		decisions: [],
+		warnings: [],
+		ctes: [],
+		intent: query,
+		metadata: {
+			planningTimeMs: 0,
+			relationsAnalyzed: 0,
+			isAmbiguous: false,
+		},
+	};
+}
+
+function dbOutputKey(name: string, deps: AdapterCompilerDeps): string {
+	return deps.naming.toDatabase(name);
+}
+
+function addSelection(
+	selections: ProjectNamedFieldsSelection[],
+	inputKey: string,
+	outputKey: string,
+): void {
+	selections.push({ inputKey, outputKey });
+}
+
+function addExpression(
+	expressions: ProjectNamedFieldsExpression[],
+	outputKey: string | undefined,
+	reason: string,
+): void {
+	if (outputKey === undefined) return;
+	expressions.push({ outputKey, reason });
+}
+
+function addStarSelections(
+	source: ProjectionEnvelope,
+	selections: ProjectNamedFieldsSelection[],
+): void {
+	if (source.projection.kind === 'dropped') return;
+	for (const outputKey of source.projection.outputs.keys()) {
+		addSelection(selections, outputKey, outputKey);
+	}
+}
+
+function aliasOutputKey(
+	value: unknown,
+	deps: AdapterCompilerDeps,
+): string | undefined {
+	return typeof value === 'string' ? dbOutputKey(value, deps) : undefined;
+}
+
+function expressionOutputKey(
+	expr: ExpressionIntent,
+	deps: AdapterCompilerDeps,
+): string | undefined {
+	const record = expr as unknown as Record<string, unknown>;
+	return aliasOutputKey(record.as ?? record.alias, deps);
+}
+
+function buildCteProjectionShape(
+	source: ProjectionEnvelope,
+	select: SelectIntent | undefined,
+	deps: AdapterCompilerDeps,
+): {
+	selections: ProjectNamedFieldsSelection[];
+	expressions: ProjectNamedFieldsExpression[];
+	preserveOneToOne: boolean;
+} {
+	if (
+		!select ||
+		typeof select !== 'object' ||
+		!('type' in select) ||
+		select.type === 'all'
+	) {
+		return { selections: [], expressions: [], preserveOneToOne: true };
+	}
+
+	const selections: ProjectNamedFieldsSelection[] = [];
+	const expressions: ProjectNamedFieldsExpression[] = [];
+
+	if (select.type === 'fields') {
+		for (const field of select.fields) {
+			if (field === '*') {
+				addStarSelections(source, selections);
+				continue;
+			}
+			const outputKey = dbOutputKey(field, deps);
+			addSelection(selections, outputKey, outputKey);
+		}
+		return { selections, expressions, preserveOneToOne: false };
+	}
+
+	if (select.type === 'aggregate') {
+		for (const field of select.fields ?? []) {
+			const outputKey = dbOutputKey(field, deps);
+			addSelection(selections, outputKey, outputKey);
+		}
+		for (const aggregate of select.aggregates) {
+			addExpression(
+				expressions,
+				aliasOutputKey(aggregate.as, deps),
+				'aggregate projection has no raw column provenance',
+			);
+		}
+		return { selections, expressions, preserveOneToOne: false };
+	}
+
+	for (const expr of select.columns) {
+		const record = expr as unknown as Record<string, unknown>;
+		switch (expr.kind) {
+			case 'column': {
+				const column = record.column;
+				if (column === '*') {
+					addStarSelections(source, selections);
+					break;
+				}
+				if (typeof column !== 'string') {
+					addExpression(
+						expressions,
+						expressionOutputKey(expr, deps),
+						'column projection could not be resolved',
+					);
+					break;
+				}
+				addSelection(
+					selections,
+					dbOutputKey(column, deps),
+					aliasOutputKey(record.as, deps) ?? dbOutputKey(column, deps),
+				);
+				break;
+			}
+			case 'columnAlias': {
+				const column = record.column;
+				const alias = record.alias;
+				if (typeof column !== 'string' || typeof alias !== 'string') {
+					addExpression(
+						expressions,
+						expressionOutputKey(expr, deps),
+						'column alias projection could not be resolved',
+					);
+					break;
+				}
+				addSelection(
+					selections,
+					dbOutputKey(column, deps),
+					dbOutputKey(alias, deps),
+				);
+				break;
+			}
+			default:
+				addExpression(
+					expressions,
+					expressionOutputKey(expr, deps),
+					'expression projection has no raw column provenance',
+				);
+				break;
+		}
+	}
+
+	return { selections, expressions, preserveOneToOne: false };
+}
+
+function isRootJsonAggHydrationDecision(
+	decision: PlanReport['decisions'][number],
+): boolean {
+	const intentPath = decision.context.intentPath;
+	return (
+		decision.type === 'include-strategy' &&
+		decision.choice === 'json_agg' &&
+		(typeof intentPath !== 'string' || !intentPath.includes('.include['))
+	);
+}
+
+function addJsonAggOutputKeyCandidates(
+	keys: Set<string>,
+	baseName: string | undefined,
+	deps: AdapterCompilerDeps,
+): void {
+	if (baseName === undefined) return;
+	const rawJsonKey = `${baseName}_json`;
+	keys.add(rawJsonKey);
+	keys.add(deps.naming.toDatabase(rawJsonKey));
+}
+
+function jsonAggHydrationOutputKeys(
+	plan: PlanReport | undefined,
+	deps: AdapterCompilerDeps,
+): ReadonlySet<string> {
+	const keys = new Set<string>();
+	for (const decision of plan?.decisions ?? []) {
+		if (!isRootJsonAggHydrationDecision(decision)) continue;
+		addJsonAggOutputKeyCandidates(keys, decision.context.relation, deps);
+		addJsonAggOutputKeyCandidates(keys, decision.context.includeAlias, deps);
+	}
+	return keys;
+}
+
+function sourceHydrationPlanForCteProjection(
+	source: ProjectionEnvelope,
+	shape: {
+		readonly selections: readonly ProjectNamedFieldsSelection[];
+		readonly preserveOneToOne: boolean;
+	},
+	deps: AdapterCompilerDeps,
+): PlanReport | undefined {
+	if (source.hydrationPlan === undefined) return undefined;
+	if (shape.preserveOneToOne) return source.hydrationPlan;
+
+	const jsonOutputKeys = jsonAggHydrationOutputKeys(source.hydrationPlan, deps);
+	if (jsonOutputKeys.size === 0) return undefined;
+	return shape.selections.some(
+		(selection) =>
+			jsonOutputKeys.has(selection.inputKey) &&
+			jsonOutputKeys.has(selection.outputKey),
+	)
+		? source.hydrationPlan
+		: undefined;
+}
+
+function projectCteQueryEnvelope(
+	source: ProjectionEnvelope,
+	query: QueryIntent,
+	sql: string,
+	parameters: readonly unknown[],
+	deps: AdapterCompilerDeps,
+	hydrationPlan: PlanReport | undefined,
+): ProjectionEnvelope {
+	const shape = buildCteProjectionShape(source, query.select, deps);
+	const projectedHydrationPlan =
+		hydrationPlan ?? sourceHydrationPlanForCteProjection(source, shape, deps);
+	if (shape.preserveOneToOne) {
+		return preserveOneToOne(source, {
+			sql,
+			parameters,
+			...(projectedHydrationPlan !== undefined
+				? { hydrationPlan: projectedHydrationPlan }
+				: {}),
+			preserveHydrationPlan: false,
+		});
+	}
+	return projectNamedFields(source, {
+		sql,
+		parameters,
+		selections: shape.selections,
+		expressions: shape.expressions,
+		...(projectedHydrationPlan !== undefined
+			? { hydrationPlan: projectedHydrationPlan }
+			: {}),
+		preserveHydrationPlan: false,
+	});
+}
+
+function compileQueryEnvelope(
+	query: QueryIntent,
+	options: CompileOptions | undefined,
+	deps: AdapterCompilerDeps,
+	registry: CteProjectionRegistry,
+): ProjectionEnvelope {
+	const compiled = compileSelectEnvelope(
+		createPlanReportForQuery(query),
+		options,
+		deps,
+	);
+	const registeredSource = getRegisteredProjection(registry, query.from, deps);
+	if (registeredSource) {
+		return projectCteQueryEnvelope(
+			registeredSource,
+			query,
+			compiled.sql,
+			compiled.parameters,
+			deps,
+			compiled.hydrationPlan,
+		);
+	}
+	return compiled;
+}
+
+function rehomeQueryEnvelope(
+	source: ProjectionEnvelope,
+	query: QueryIntent,
+	compiled: ProjectionEnvelope,
+	sql: string,
+	parameters: readonly unknown[],
+	deps: AdapterCompilerDeps,
+): ProjectionEnvelope {
+	return projectCteQueryEnvelope(
+		source,
+		query,
+		sql,
+		parameters,
+		deps,
+		compiled.hydrationPlan,
+	);
+}
 
 // ============================================================================
 // compileRecursive
@@ -52,7 +378,7 @@ import {
  */
 export function compileRecursive(
 	report: RecursivePlanReport,
-	_model: ModelIR,
+	model: ModelIR,
 	_options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
 ): CompiledQuery {
@@ -168,22 +494,29 @@ export function compileRecursive(
 	const { cte, extraCtes } = buildRecursiveCte(config);
 
 	// Build final target list (include __depth and __path when tracked)
-	const finalTargets: Node[] = config.selectColumns.map((col: string) => ({
-		ResTarget: {
-			val: {
-				ColumnRef: {
-					fields: [
-						{ String: { sval: config.cteAlias } },
-						{ String: { sval: deps.naming.toDatabase(col) } },
-					],
+	const finalSelections: ProjectNamedFieldsSelection[] = [];
+	const finalExpressions: ProjectNamedFieldsExpression[] = [];
+	const finalTargets: Node[] = config.selectColumns.map((col: string) => {
+		const outputKey = deps.naming.toDatabase(col);
+		addSelection(finalSelections, outputKey, outputKey);
+		return {
+			ResTarget: {
+				val: {
+					ColumnRef: {
+						fields: [
+							{ String: { sval: config.cteAlias } },
+							{ String: { sval: outputKey } },
+						],
+					},
 				},
+				name: outputKey,
 			},
-			name: deps.naming.toDatabase(col),
-		},
-	}));
+		};
+	});
 
 	if (trackDepth) {
 		const depthAlias = intent.track?.depth?.as ?? '__depth';
+		addExpression(finalExpressions, depthAlias, 'recursive depth tracker');
 		finalTargets.push({
 			ResTarget: {
 				val: {
@@ -201,6 +534,7 @@ export function compileRecursive(
 
 	if (trackPath) {
 		const pathAlias = intent.track?.path?.as ?? '__path';
+		addExpression(finalExpressions, pathAlias, 'recursive path tracker');
 		finalTargets.push({
 			ResTarget: {
 				val: {
@@ -243,11 +577,22 @@ export function compileRecursive(
 
 	// Deparse AST to SQL
 	const sql = deparseQuoted({ SelectStmt: selectStmt });
-
-	return {
+	const sourceEnv = fromModelColumns({
 		sql,
 		parameters: state.parameters,
-	};
+		table: config.table,
+		columns: config.selectColumns,
+		model,
+		naming: deps.naming,
+	});
+	const env = projectNamedFields(sourceEnv, {
+		sql,
+		parameters: state.parameters,
+		selections: finalSelections,
+		...(finalExpressions.length > 0 ? { expressions: finalExpressions } : {}),
+	});
+
+	return finalizeEnvelope(env);
 }
 
 // ============================================================================
@@ -267,6 +612,7 @@ export function compileCteQuery(
 	intent: CteQueryIntent,
 	options: CompileOptions | undefined,
 	deps: AdapterCompilerDeps,
+	initialProjectionByName?: CteProjectionRegistry,
 ): CompiledQuery {
 	// schemaName precedence (options > adapter ctor) is resolved in PgsqlAdapter.buildCompileDeps; deps.schemaName is authoritative here
 	const state = createCompilerState();
@@ -276,40 +622,66 @@ export function compileCteQuery(
 
 	// 1. Build CTE SQL fragments, accumulating parameters
 	const cteSqlFragments: string[] = [];
+	const cteProjectionByName = new Map<string, ProjectionEnvelope>(
+		initialProjectionByName,
+	);
 	let isRecursive = false;
 
 	for (const cte of intent.ctes) {
 		if (cte.kind === 'unnestCte') {
 			// Unnest-backed CTE: builds an AST node, deparses it
+			const beforeUnnestParamCount = state.parameters.length;
+			state.paramIndex = allCteParams.length;
 			const node = buildUnnestCte(cte, state, deps);
-			allCteParams.push(...state.parameters.slice(allCteParams.length));
-			cteSqlFragments.push(deparseQuoted(node));
+			const cteParams = state.parameters.slice(beforeUnnestParamCount);
+			allCteParams.push(...cteParams);
+			const cteSql = deparseQuoted(node);
+			cteSqlFragments.push(cteSql);
+			const cteQueryAst = (node as { CommonTableExpr?: { ctequery?: Node } })
+				.CommonTableExpr?.ctequery;
+			cteProjectionByName.set(
+				cte.name,
+				fromAstProjection({
+					sql: cteSql,
+					parameters: cteParams,
+					ast: cteQueryAst ?? node,
+					rootTable: cte.name,
+					model: undefined,
+					naming: deps.naming,
+				}),
+			);
 		} else if (cte.kind === 'rawCte') {
 			// Raw WITH RECURSIVE CTE: compile base + step independently
 			isRecursive = true;
-			const { sql: cteSql, params: cteParams } = buildRawCte(
-				cte,
-				deps,
-				options,
+			const currentParamOffset = allCteParams.length;
+			const rawCte = buildRawCte(cte, deps, options, cteProjectionByName);
+			const renumberedRawCteSql =
+				currentParamOffset > 0
+					? rawCte.sql.replace(
+							/\$([0-9]+)/g,
+							(_: string, n: string) =>
+								`$${parseInt(n, 10) + currentParamOffset}`,
+						)
+					: rawCte.sql;
+			allCteParams.push(...rawCte.params);
+			cteSqlFragments.push(renumberedRawCteSql);
+			cteProjectionByName.set(
+				cte.name,
+				preserveOneToOne(rawCte.projection, {
+					sql: renumberedRawCteSql,
+					parameters: rawCte.params,
+					preserveHydrationPlan: false,
+				}),
 			);
-			allCteParams.push(...cteParams);
-			cteSqlFragments.push(cteSql);
 		} else if (cte.kind === 'simpleCte') {
 			// Simple named subquery CTE: compile inner query, wrap in ctename AS (...)
 			const innerCte = cte as SimpleCteIntent;
-			const innerPlanReport: PlanReport = {
-				rootTable: innerCte.query.from,
-				decisions: [],
-				warnings: [],
-				ctes: [],
-				intent: innerCte.query,
-				metadata: {
-					planningTimeMs: 0,
-					relationsAnalyzed: 0,
-					isAmbiguous: false,
-				},
-			};
-			const innerCompiled = compileSelect(innerPlanReport, options, deps);
+			const innerCompiled = compileQueryEnvelope(
+				innerCte.query,
+				options,
+				deps,
+				cteProjectionByName,
+			);
 			// Renumber inner params to follow all previously accumulated CTE params
 			const currentParamOffset = allCteParams.length;
 			const renumberedInnerSql =
@@ -322,6 +694,13 @@ export function compileCteQuery(
 					: innerCompiled.sql;
 			allCteParams.push(...innerCompiled.parameters);
 			cteSqlFragments.push(`"${innerCte.name}" AS (${renumberedInnerSql})`);
+			cteProjectionByName.set(
+				innerCte.name,
+				preserveOneToOne(innerCompiled, {
+					sql: renumberedInnerSql,
+					parameters: innerCompiled.parameters,
+				}),
+			);
 		} else {
 			const kind = (cte as { kind: string }).kind;
 			throw new Error(
@@ -331,19 +710,11 @@ export function compileCteQuery(
 	}
 
 	// 2. Compile outer query independently ($1, $2, ... relative to outer)
-	const outerPlanReport: PlanReport = {
-		rootTable: intent.query.from,
-		decisions: [],
-		warnings: [],
-		ctes: [],
-		intent: intent.query,
-		metadata: {
-			planningTimeMs: 0,
-			relationsAnalyzed: 0,
-			isAmbiguous: false,
-		},
-	};
-	const outerCompiled = compileSelect(outerPlanReport, options, deps);
+	const outerCompiled = compileSelectEnvelope(
+		createPlanReportForQuery(intent.query),
+		options,
+		deps,
+	);
 
 	// 3. Renumber outer SQL parameters to follow all CTE parameters.
 	// Safety: the deparser always emits user values as $N parameters, never as inline string
@@ -365,11 +736,24 @@ export function compileCteQuery(
 		withClause.length > 0
 			? `${withKeyword} ${withClause} ${renumberedOuterSql}`
 			: renumberedOuterSql;
+	const parameters = [...allCteParams, ...outerCompiled.parameters];
+	const registeredSource = getRegisteredProjection(
+		cteProjectionByName,
+		intent.query.from,
+		deps,
+	);
+	const env = registeredSource
+		? projectCteQueryEnvelope(
+				registeredSource,
+				intent.query,
+				sql,
+				parameters,
+				deps,
+				outerCompiled.hydrationPlan,
+			)
+		: preserveOneToOne(outerCompiled, { sql, parameters });
 
-	return {
-		sql,
-		parameters: [...allCteParams, ...outerCompiled.parameters],
-	};
+	return finalizeEnvelope(env);
 }
 
 // ============================================================================
@@ -464,28 +848,23 @@ function buildRawCte(
 	cte: RawCteIntent,
 	deps: AdapterCompilerDeps,
 	options: CompileOptions | undefined,
-): { sql: string; params: readonly unknown[] } {
+	registry: CteProjectionRegistry,
+): {
+	sql: string;
+	params: readonly unknown[];
+	projection: ProjectionEnvelope;
+} {
 	// Compile base (anchor) query
-	const basePlanReport: PlanReport = {
-		rootTable: cte.base.from,
-		decisions: [],
-		warnings: [],
-		ctes: [],
-		intent: cte.base as QueryIntent,
-		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-	};
-	const baseCompiled = compileSelect(basePlanReport, options, deps);
+	const baseQuery = cte.base as QueryIntent;
+	const baseCompiled = compileQueryEnvelope(baseQuery, options, deps, registry);
 
 	// Compile step (recursive) query
-	const stepPlanReport: PlanReport = {
-		rootTable: cte.step.from,
-		decisions: [],
-		warnings: [],
-		ctes: [],
-		intent: cte.step as QueryIntent,
-		metadata: { planningTimeMs: 0, relationsAnalyzed: 0, isAmbiguous: false },
-	};
-	const stepCompiled = compileSelect(stepPlanReport, options, deps);
+	const stepQuery = cte.step as QueryIntent;
+	const rawStepCompiled = compileSelectEnvelope(
+		createPlanReportForQuery(stepQuery),
+		options,
+		deps,
+	);
 
 	// Renumber step params to follow base params.
 	// Safety: the deparser always emits user values as $N parameters, never as inline string
@@ -495,16 +874,16 @@ function buildRawCte(
 	const baseParamCount = baseCompiled.parameters.length;
 	const renumberedStepSql =
 		baseParamCount > 0
-			? stepCompiled.sql.replace(
+			? rawStepCompiled.sql.replace(
 					/\$([0-9]+)/g,
 					(_: string, n: string) => `$${parseInt(n, 10) + baseParamCount}`,
 				)
-			: stepCompiled.sql;
+			: rawStepCompiled.sql;
 
 	// Inject depth guard: WHERE "depthColumn" < $N (or AND-ed with existing WHERE)
 	const allParams: unknown[] = [
 		...baseCompiled.parameters,
-		...stepCompiled.parameters,
+		...rawStepCompiled.parameters,
 	];
 	let finalStepSql = renumberedStepSql;
 	if (cte.maxDepth !== undefined) {
@@ -517,6 +896,23 @@ function buildRawCte(
 			? `${finalStepSql} AND ${depthCol} < $${depthParamIndex}`
 			: `${finalStepSql} WHERE ${depthCol} < $${depthParamIndex}`;
 	}
+	const stepRegisteredSource =
+		stepQuery.from === cte.name
+			? baseCompiled
+			: getRegisteredProjection(registry, stepQuery.from, deps);
+	const stepCompiled = stepRegisteredSource
+		? rehomeQueryEnvelope(
+				stepRegisteredSource,
+				stepQuery,
+				rawStepCompiled,
+				finalStepSql,
+				allParams,
+				deps,
+			)
+		: preserveOneToOne(rawStepCompiled, {
+				sql: finalStepSql,
+				parameters: allParams,
+			});
 
 	const setOp = cte.unionAll ? 'UNION ALL' : 'UNION';
 	const cteName = `"${cte.name.replace(/"/g, '""')}"`;
@@ -525,6 +921,11 @@ function buildRawCte(
 	return {
 		sql: cteSql,
 		params: allParams,
+		projection: dropPositionalUnion([baseCompiled, stepCompiled], {
+			sql: cteSql,
+			parameters: allParams,
+			reason: 'raw-recursive-cte-positional-merge',
+		}),
 	};
 }
 

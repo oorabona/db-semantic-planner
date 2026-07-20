@@ -1,14 +1,14 @@
 import { POSTGRESQL_CAPABILITIES } from '@dbsp/core';
 import type { DialectCapabilities } from '@dbsp/types';
 import {
+	INDEX_INCLUDE_CAPABILITY,
+	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
+} from '../transition/index-feature-capabilities.js';
+import {
 	formatStorageParameterValue,
 	validateIdentifier,
 	validateSqlExpression,
 } from '../validate.js';
-import {
-	INDEX_INCLUDE_CAPABILITY,
-	INDEX_NULLS_NOT_DISTINCT_CAPABILITY,
-} from '../transition/index-feature-capabilities.js';
 import { quoteIdent, validateIndexMethod } from './phases/utils.js';
 
 export type IndexRenderKey = {
@@ -57,8 +57,7 @@ const INDEX_FEATURE_DECLARATIONS: readonly FeatureDeclaration[] = [
 		feature: 'INCLUDE',
 		capability: 'supportsDDLIndexInclude',
 		present: (spec) => (spec.include?.length ?? 0) > 0,
-		minServerVersionNum:
-			INDEX_INCLUDE_CAPABILITY.predicate.minServerVersionNum,
+		minServerVersionNum: INDEX_INCLUDE_CAPABILITY.predicate.minServerVersionNum,
 	},
 	{
 		feature: 'PARTIAL INDEX',
@@ -135,7 +134,9 @@ export function assertCreateIndexSupported(
 	ctx: IndexCapabilityContext = { caps: POSTGRESQL_CAPABILITIES },
 ): void {
 	if (spec.keys.length === 0) {
-		throw new Error(`index \`${spec.name}\`: CREATE INDEX requires at least one key`);
+		throw new Error(
+			`index \`${spec.name}\`: CREATE INDEX requires at least one key`,
+		);
 	}
 	for (const [index, key] of spec.keys.entries()) {
 		const hasColumn = hasNonEmptyColumn(key);
@@ -167,7 +168,9 @@ export function assertCreateIndexSupported(
 	throw new IndexFeatureUnsupportedError(
 		spec.name,
 		unsupported.map((feature) => feature.feature),
-		unsupported.map((feature) => unsupportedMessage(spec, feature, ctx)).join('; '),
+		unsupported
+			.map((feature) => unsupportedMessage(spec, feature, ctx))
+			.join('; '),
 	);
 }
 

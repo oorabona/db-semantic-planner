@@ -37,6 +37,9 @@ export type ColumnType =
 	| 'int8range'
 	| 'numrange';
 
+/** JavaScript read-side representation for PostgreSQL bigint/int8 values. */
+export type ColumnJsReadType = 'bigint' | 'number' | 'string';
+
 // ============================================================================
 // Foreign Key Types
 // ============================================================================
@@ -195,6 +198,9 @@ export interface ColumnIR {
 
 	/** Data type for TypeScript inference */
 	readonly type: ColumnType;
+
+	/** Optional read-side JavaScript representation for bigint/int8 values. */
+	readonly js?: ColumnJsReadType;
 
 	/** Whether NULL is allowed */
 	readonly nullable: boolean;
