@@ -181,6 +181,28 @@ function overlayCompiledMetadata(
 	return merged;
 }
 
+export function fromCompiledQuery<T = unknown>(
+	compiled: CompiledQueryWithHydrationPlan<T>,
+): ProjectionEnvelope<T> {
+	const outputs = new Map<string, OutputProjection>();
+	for (const [outputKey, entry] of compiled.columnMetadata ?? []) {
+		outputs.set(outputKey, {
+			kind: 'modelColumn',
+			table: entry.table,
+			column: entry.column,
+			js: entry.js,
+		});
+	}
+	return makeEnvelope<T>({
+		sql: compiled.sql,
+		parameters: compiled.parameters,
+		projection: { kind: 'known', outputs },
+		...(compiled.hydrationPlan !== undefined
+			? { hydrationPlan: compiled.hydrationPlan }
+			: {}),
+	});
+}
+
 function hasConvertibleModelColumn(projection: ProjectionState): boolean {
 	if (projection.kind === 'dropped') return projection.hadConvertibleSource;
 	for (const output of projection.outputs.values()) {

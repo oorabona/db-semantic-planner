@@ -72,6 +72,7 @@ import {
 } from './adapter-compiler-recursive.js';
 import {
 	compileSelect,
+	compileSelectEnvelope,
 	compileWithIncludes as compileWithIncludesImpl,
 } from './adapter-compiler-select.js';
 import {
@@ -123,9 +124,10 @@ import {
 	type NamingPlugin,
 } from './naming-plugin.js';
 import { getPostgresqlCapabilitiesTargetVersion } from './postgresql-capabilities.js';
+import { finalizeEnvelope } from './projection-envelope.js';
 import { MAX_DEPTH_LIMIT } from './recursive/cte-compiler.js';
 import {
-	compileSetOperation as compileSetOperationImpl,
+	compileSetOperationEnvelope as compileSetOperationEnvelopeImpl,
 	type LeafCompileFn,
 } from './set-operation.js';
 import { generateCursorName } from './streaming/cursor.js';
@@ -2077,16 +2079,10 @@ export class PgsqlAdapter<DB = unknown> implements Adapter<DB> {
 						dialectCapabilities:
 							options?.dialectCapabilities ?? this.dialectCapabilities,
 					});
-			return compileSelect(planReport, leafOptions, deps);
+			return compileSelectEnvelope(planReport, leafOptions, deps);
 		};
-		const result = compileSetOperationImpl(intent, compileFn);
-		return guardCompiledQuery(
-			{
-				sql: result.sql,
-				parameters: result.parameters,
-			},
-			'set operation',
-		);
+		const envelope = compileSetOperationEnvelopeImpl(intent, compileFn);
+		return guardCompiledQuery(finalizeEnvelope(envelope), 'set operation');
 	}
 
 	/**

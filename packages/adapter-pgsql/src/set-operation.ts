@@ -7,30 +7,42 @@
 
 import type { ModelIR } from '@dbsp/core';
 import type {
+	CompiledQuery,
 	CompileOptions,
 	DialectCapabilities,
 	PlanReport,
 	QueryIntent,
 	SetOperationIntent,
 } from '@dbsp/types';
+import {
+	dropPositionalUnion,
+	finalizeEnvelope,
+	fromCompiledQuery,
+	type ProjectionEnvelope,
+} from './projection-envelope.js';
 
 /**
- * Compiled SQL with positional parameters.
+ * Compiled set-operation SQL with positional parameters.
  */
-export interface SetOperationResult {
-	readonly sql: string;
-	readonly parameters: readonly unknown[];
-}
+export type SetOperationResult<T = unknown> = CompiledQuery<T>;
 
 /**
- * Function that compiles a single QueryIntent leaf to SQL + parameters.
+ * Function that compiles a single QueryIntent leaf to a projection envelope, or
+ * a compiled query that can be bridged into one.
  * Provided by the caller to decouple from adapter internals.
  */
-export type LeafCompileFn = (query: QueryIntent) => {
-	sql: string;
-	parameters: readonly unknown[];
-	columnMetadata?: ReadonlyMap<string, unknown>;
-};
+type LeafCompileResult = ProjectionEnvelope | CompiledQuery;
+export type LeafCompileFn = (query: QueryIntent) => LeafCompileResult;
+
+function isProjectionEnvelope(
+	result: LeafCompileResult,
+): result is ProjectionEnvelope {
+	return 'projection' in result;
+}
+
+function toProjectionEnvelope(result: LeafCompileResult): ProjectionEnvelope {
+	return isProjectionEnvelope(result) ? result : fromCompiledQuery(result);
+}
 
 /**
  * Re-number positional parameter placeholders ($1, $2, ...) in a SQL string
@@ -50,20 +62,20 @@ function renumberParams(sql: string, offset: number): string {
 /**
  * Recursively compile a SetOperationIntent to SQL with merged parameters.
  *
- * Each leaf QueryIntent is compiled via `compileFn`. When merging left and
- * right branches, the right side's `$N` placeholders are renumbered so they
- * don't collide with the left side's parameters.
+ * Each leaf QueryIntent is compiled via `compileFn` to a projection envelope.
+ * When merging left and right branches, the right side's `$N` placeholders are
+ * renumbered so they don't collide with the left side's parameters. The final
+ * set operation drops positional projection provenance through the envelope so
+ * `finalizeEnvelope` owns the set-operation `js` fail-loud behavior.
  *
  * @param intent - The set operation intent (recursive tree)
- * @param compileFn - Compiles a single QueryIntent to SQL + params
+ * @param compileFn - Compiles a single QueryIntent to an envelope-compatible result
  * @returns Combined SQL string and merged parameter array
  *
  * @example
  * ```typescript
- * const result = compileSetOperation(setOpIntent, (query) => {
- *   const planReport = plan(query, model, { dialectCapabilities });
- *   return adapter.compile(planReport, { model });
- * });
+ * const compileFn = createLeafCompileFn(adapter, model, plan);
+ * const result = compileSetOperation(setOpIntent, compileFn);
  * console.log(result.sql);        // (SELECT ...) UNION (SELECT ...)
  * console.log(result.parameters);  // [...leftParams, ...rightParams]
  * ```
@@ -72,6 +84,13 @@ export function compileSetOperation(
 	intent: SetOperationIntent,
 	compileFn: LeafCompileFn,
 ): SetOperationResult {
+	return finalizeEnvelope(compileSetOperationEnvelope(intent, compileFn));
+}
+
+export function compileSetOperationEnvelope(
+	intent: SetOperationIntent,
+	compileFn: LeafCompileFn,
+): ProjectionEnvelope {
 	// Compile left side (always a QueryIntent)
 	const left = compileLeafOrBranch(intent.left, compileFn);
 
@@ -84,10 +103,14 @@ export function compileSetOperation(
 	// Build the set operation keyword
 	const opKeyword = intent.op.toUpperCase() + (intent.all ? ' ALL' : '');
 
-	return {
-		sql: `(${left.sql}) ${opKeyword} (${rightSQL})`,
-		parameters: [...left.parameters, ...right.parameters],
-	};
+	const sql = `(${left.sql}) ${opKeyword} (${rightSQL})`;
+	const parameters = [...left.parameters, ...right.parameters];
+
+	return dropPositionalUnion([left, right], {
+		sql,
+		parameters,
+		reason: 'set-operation-positional-merge',
+	});
 }
 
 /**
@@ -96,17 +119,11 @@ export function compileSetOperation(
 function compileLeafOrBranch(
 	intent: QueryIntent | SetOperationIntent,
 	compileFn: LeafCompileFn,
-): SetOperationResult {
+): ProjectionEnvelope {
 	if ('kind' in intent && intent.kind === 'setOperation') {
-		return compileSetOperation(intent as SetOperationIntent, compileFn);
+		return compileSetOperationEnvelope(intent as SetOperationIntent, compileFn);
 	}
-	const result = compileFn(intent as QueryIntent);
-	if (result.columnMetadata && result.columnMetadata.size > 0) {
-		throw new Error(
-			'`js` read type is not yet supported through set operations; use a plain select (tracking: #352)',
-		);
-	}
-	return { sql: result.sql, parameters: result.parameters };
+	return toProjectionEnvelope(compileFn(intent as QueryIntent));
 }
 
 /**
@@ -124,11 +141,7 @@ export function createLeafCompileFn(
 		compile(
 			plan: PlanReport,
 			options: CompileOptions & { model: ModelIR },
-		): {
-			sql: string;
-			parameters: readonly unknown[];
-			columnMetadata?: ReadonlyMap<string, unknown>;
-		};
+		): CompiledQuery;
 		dialectCapabilities: DialectCapabilities;
 	},
 	model: ModelIR,
@@ -143,6 +156,8 @@ export function createLeafCompileFn(
 		const planReport = planFn(query, model, {
 			dialectCapabilities: adapter.dialectCapabilities,
 		});
-		return adapter.compile(planReport, { ...options, model });
+		return fromCompiledQuery(
+			adapter.compile(planReport, { ...options, model }),
+		);
 	};
 }
